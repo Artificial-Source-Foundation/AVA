@@ -40,6 +40,20 @@ export {
   type RoutingDecision,
 } from './router.js'
 
+// Support agents
+export {
+  scoutAgent,
+  scoutConfig,
+  SCOUT_PROFILE,
+  supportAgents,
+  supportProfiles,
+  supportConfigs,
+  getSupportAgent,
+  listSupportAgents,
+  isSupportAgentAvailable,
+  type SupportAgentName,
+} from './support/index.js'
+
 // Council agents - The Delta Team
 export {
   // Individual Oracle agents

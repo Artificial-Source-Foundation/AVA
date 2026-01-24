@@ -13,6 +13,21 @@ import { conveneCouncil, quickConsult, shouldConveneCouncil } from '../council/i
 const s = tool.schema
 
 // =============================================================================
+// Helper Functions
+// =============================================================================
+
+/**
+ * Get human-readable confidence label
+ */
+function getConfidenceLabel(confidence: number): string {
+  if (confidence >= 0.9) return 'Very High'
+  if (confidence >= 0.7) return 'High'
+  if (confidence >= 0.5) return 'Moderate'
+  if (confidence >= 0.3) return 'Low'
+  return 'Very Low'
+}
+
+// =============================================================================
 // Tool Definitions
 // =============================================================================
 
@@ -154,36 +169,106 @@ Modes:
   })
 
   /**
-   * Get council configuration summary
+   * Get council configuration, status, and last deliberation results
    */
   const council_status = tool({
-    description: 'Get the current council configuration and status.',
+    description: `Get the current council configuration and deliberation status.
+Shows:
+- Council configuration (enabled oracles, modes)
+- Last deliberation results (if any)
+- Individual oracle opinions with confidence
+- Consensus points and conflicts`,
 
-    args: {},
+    args: {
+      includeFullOpinions: s
+        .boolean()
+        .optional()
+        .describe('Include full recommendation text (default: false, shows summary only)'),
+    },
 
-    async execute(_args, _ctx) {
+    async execute(args, _ctx) {
       const { loadConfig, getEnabledOracles } = await import('../lib/config.js')
+      const { oracleProfiles } = await import('../agents/council/index.js')
       const config = loadConfig(cwd)
       const enabledOracles = getEnabledOracles(cwd)
+      const mission = state.getMission()
+      const councilSummary = mission?.councilSummary
+
+      // Build oracle details with Delta Team profiles
+      const oracleDetails = enabledOracles.map((o) => {
+        const profile = oracleProfiles[o.name as keyof typeof oracleProfiles]
+        return {
+          codename: o.name,
+          role: profile?.role || 'Oracle',
+          model: o.model,
+          specialty: o.specialty,
+          temperature: o.temperature ?? profile?.temperature,
+          traits: profile?.traits?.slice(0, 2) || [],
+        }
+      })
+
+      // Build last deliberation info
+      let lastDeliberation = null
+      if (councilSummary) {
+        const opinions = councilSummary.opinions || []
+
+        // Detect conflicts (significantly different confidence or opposing caveats)
+        const conflicts: string[] = []
+        if (opinions.length > 1) {
+          const confidences = opinions.map(o => o.confidence)
+          const maxConf = Math.max(...confidences)
+          const minConf = Math.min(...confidences)
+          if (maxConf - minConf > 0.3) {
+            conflicts.push(`Confidence spread: ${(minConf * 100).toFixed(0)}%-${(maxConf * 100).toFixed(0)}%`)
+          }
+
+          // Check for opposing views in caveats
+          const allCaveats = opinions.flatMap(o => o.caveats || [])
+          if (allCaveats.length > 3) {
+            conflicts.push(`${allCaveats.length} caveats raised across oracles`)
+          }
+        }
+
+        lastDeliberation = {
+          mode: councilSummary.mode,
+          oracleCount: opinions.length,
+          confidenceAvg: councilSummary.confidenceAvg,
+          consensus: councilSummary.consensus,
+          disagreementsResolved: councilSummary.disagreementsResolved,
+          conflicts: conflicts.length > 0 ? conflicts : undefined,
+          opinions: opinions.map((o) => ({
+            oracle: o.oracle,
+            confidence: o.confidence,
+            confidenceLabel: getConfidenceLabel(o.confidence),
+            recommendation: args.includeFullOpinions
+              ? o.recommendation
+              : o.recommendation.substring(0, 200) + (o.recommendation.length > 200 ? '...' : ''),
+            caveats: o.caveats,
+            suggestedTasks: o.suggestedTasks,
+          })),
+        }
+      }
 
       return JSON.stringify({
         success: true,
-        enabled: config.council.enabled,
-        defaultMode: config.council.defaultMode,
-        autoDetectComplexity: config.council.autoDetectComplexity,
-        parallel: config.council.parallel,
-        requireConsensus: config.council.requireConsensus,
-        minResponses: config.council.minResponses,
-        timeoutSeconds: config.council.timeoutSeconds,
-        oracles: {
+        config: {
+          enabled: config.council.enabled,
+          defaultMode: config.council.defaultMode,
+          autoDetectComplexity: config.council.autoDetectComplexity,
+          parallel: config.council.parallel,
+          requireConsensus: config.council.requireConsensus,
+          minResponses: config.council.minResponses,
+          timeoutSeconds: config.council.timeoutSeconds,
+        },
+        deltaTeam: {
           total: config.council.members.length,
           enabled: enabledOracles.length,
-          list: enabledOracles.map((o) => ({
-            name: o.name,
-            model: o.model,
-            specialty: o.specialty,
-          })),
+          members: oracleDetails,
         },
+        lastDeliberation,
+        message: lastDeliberation
+          ? `Council active. Last deliberation: ${lastDeliberation.oracleCount} oracles, ${(lastDeliberation.confidenceAvg * 100).toFixed(0)}% avg confidence`
+          : 'Council configured. No deliberation in current mission.',
       })
     },
   })

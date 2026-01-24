@@ -9,13 +9,13 @@
 | Phase | Name | Progress | Status |
 |-------|------|----------|--------|
 | 1 | Foundation | 95% | Nearly Complete |
-| 2 | Council System | 88% | Sprint 1 Complete |
-| 3 | Intelligence Layer | 0% | Not Started |
+| 2 | Council System | 100% | Complete ✅ |
+| 3 | Intelligence Layer | 43% | Sprint 2 Complete |
 | 4 | Robustness | 0% | Not Started |
 | 5 | Polish & Support | 0% | Not Started |
 | 6 | Launch | 0% | Not Started |
 
-**Overall Progress:** ~32% (Sprint 1 complete, Sprint 2 ready)
+**Overall Progress:** ~40% (Sprint 2 complete, Sprint 3 ready)
 
 **Last Updated:** 2026-01-24
 
@@ -99,7 +99,7 @@ Each Oracle has a distinct personality, temperature, and specialty. Users config
 | C-5 | Council orchestrator | ✅ Done | Parallel Oracle execution, timeout handling, fallback to available models |
 | C-6 | Council modes | ✅ Done | NONE (Commander only), QUICK (1 Oracle), STANDARD (all), XHIGH (all + recon) |
 | C-7 | Opinion synthesis | ✅ Done | Confidence weighting, consensus detection, conflict resolution |
-| C-8 | Council status tool | ⬜ Pending | `council_status` shows Oracle responses, confidences, conflicts |
+| C-8 | Council status tool | ✅ Done | `council_status` shows Oracle responses, confidences, conflicts, Delta Team profiles |
 
 ### Files Created
 
@@ -133,7 +133,7 @@ See [spec.md#council-layer](spec.md) for Oracle specifications and council modes
 
 | ID | Task | Status | Acceptance Criteria |
 |----|------|--------|---------------------|
-| I-1 | Scout agent | ⬜ Pending | Haiku, fast codebase search (grep, file discovery), returns file list + snippets |
+| I-1 | Scout agent | ✅ Done | Haiku, fast codebase search (grep, file discovery), returns file list + snippets |
 | I-2 | Intel agent | ⬜ Pending | GLM 4.7, documentation lookup, GitHub search, example finding |
 | I-3 | Strategist agent | ⬜ Pending | GPT 5.2, mid-execution advice when Operator hits wall |
 
@@ -142,23 +142,26 @@ See [spec.md#council-layer](spec.md) for Oracle specifications and council modes
 | ID | Task | Status | Acceptance Criteria |
 |----|------|--------|---------------------|
 | I-4 | XHIGH mode | ⬜ Pending | Each Oracle gets Scout/Intel access before giving opinion |
-| I-5 | Complexity detection | ⬜ Pending | Auto-determine council mode based on task analysis |
-| I-6 | Smart task routing | ⬜ Pending | Route to specialist (UI-Ops, QA, etc.) by task type |
+| I-5 | Complexity detection | ✅ Done | Auto-determine council mode based on task analysis (keywords, scope, risk) |
+| I-6 | Smart task routing | ✅ Done | Route to specialist (UI-Ops, QA, etc.) by task type via `recommend_agent` tool |
 | I-7 | Codebase knowledge | ⬜ Pending | Persist learned patterns, file structure, common issues |
 
-### Files to Create
+### Files Created
 
 ```
 src/agents/support/
-├── scout.ts
-├── intel.ts
-├── strategist.ts
-└── index.ts
+├── scout.ts           ✅ SCOUT - Fast codebase search
+├── intel.ts           ⬜ Pending
+├── strategist.ts      ⬜ Pending
+└── index.ts           ✅ Support agent registry
 
 src/routing/
-├── task-router.ts (update)
-├── complexity.ts
-└── knowledge.ts
+├── complexity.ts      ✅ Complexity detection
+├── index.ts           ✅ Routing exports
+└── knowledge.ts       ⬜ Pending
+
+src/tools/
+└── routing.ts         ✅ analyze_complexity, recommend_agent tools
 ```
 
 ### Reference
@@ -270,32 +273,25 @@ Recommended sprint structure (each sprint ~2-3 days of work):
 - ✅ C-6: Council modes (NONE, QUICK, STANDARD, XHIGH)
 - ✅ C-7: Opinion synthesis (consensus extraction, confidence weighting)
 
-### Sprint 2: Advanced Council
-**Goal:** Complete council system with synthesis
+### Sprint 2: Council Completion + Intelligence Start (COMPLETE ✅)
+**Goal:** Finish council system, begin intelligence layer
 
-- C-6: Council modes (STANDARD, XHIGH)
-- C-7: Opinion synthesis
-- C-8: Council status tool
+- ✅ C-8: Council status tool (show oracle responses, conflicts, Delta Team profiles)
+- ✅ I-5: Complexity detection (auto-detect council mode, keyword analysis, scope/risk)
+- ✅ I-1: Scout agent (fast codebase search with Haiku)
 
 ### Sprint 3: Intelligence Foundation
-**Goal:** Support agents for reconnaissance
+**Goal:** Complete support agents for reconnaissance
 
-- I-1: Scout agent
-- I-2: Intel agent
-- I-5: Complexity detection
+- I-2: Intel agent (docs lookup, research)
+- I-4: XHIGH mode (oracles get recon access)
+- I-7: Codebase knowledge (persist learned patterns)
 
-### Sprint 4: Advanced Council
-**Goal:** Complete council system
-
-- C-6: STANDARD + XHIGH modes
-- I-4: XHIGH mode implementation
-- C-8: Council status tool
-
-### Sprint 5: Smart Routing
+### Sprint 4: Smart Routing
 **Goal:** Intelligent task dispatch
 
-- I-3: Strategist agent
-- I-6: Smart task routing
+- I-3: Strategist agent (mid-execution advice)
+- I-6: Smart task routing (route to specialists)
 - F-1: Complete task router
 
 ### Sprint 6: Robustness

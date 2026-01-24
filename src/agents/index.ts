@@ -40,18 +40,53 @@ export {
   type RoutingDecision,
 } from './router.js'
 
-// Support agents
+// Support agents - Delta Team
 export {
-  scoutAgent,
-  scoutConfig,
-  SCOUT_PROFILE,
-  supportAgents,
+  // RECON (reconnaissance)
+  createReconAgent,
+  reconConfig,
+  RECON_PROFILE,
+  // SIGINT (intelligence research)
+  createSigintAgent,
+  sigintConfig,
+  SIGINT_PROFILE,
+  // TACCOM (tactical command)
+  createTaccomAgent,
+  taccomConfig,
+  TACCOM_PROFILE,
+  // SURGEON (surgical fixes)
+  createSurgeonAgent,
+  surgeonConfig,
+  SURGEON_PROFILE,
+  // SENTINEL (quality assurance)
+  createSentinelAgent,
+  sentinelConfig,
+  SENTINEL_PROFILE,
+  // SCRIBE (documentation)
+  createScribeAgent,
+  scribeConfig,
+  SCRIBE_PROFILE,
+  // FACADE (frontend operations)
+  createFacadeAgent,
+  facadeConfig,
+  FACADE_PROFILE,
+  // SPECTRE (visual intelligence)
+  createSpectreAgent,
+  spectreConfig,
+  SPECTRE_PROFILE,
+  // Registry
+  supportAgentFactories,
   supportProfiles,
   supportConfigs,
-  getSupportAgent,
+  codenameToConfigKey,
+  configKeyToCodename,
+  createSupportAgent,
+  createSupportAgentByConfigKey,
   listSupportAgents,
   isSupportAgentAvailable,
+  getSupportAgentProfile,
   type SupportAgentName,
+  type SupportAgentConfigKey,
 } from './support/index.js'
 
 // Council agents - The Delta Team

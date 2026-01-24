@@ -17,6 +17,10 @@ import {
   type OraclePromptContext,
   type OracleInvocationResult,
 } from './oracle.js'
+import {
+  performXhighRecon,
+  type XhighReconResult,
+} from './xhigh-recon.js'
 
 // =============================================================================
 // Re-exports
@@ -33,6 +37,13 @@ export {
   type OracleInvocationResult,
 } from './oracle.js'
 
+export {
+  performXhighRecon,
+  formatReconContext,
+  type XhighReconResult,
+  type XhighReconOptions,
+} from './xhigh-recon.js'
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -44,6 +55,8 @@ export interface ConveneCouncilInput {
   mode: CouncilMode
   /** Additional context */
   context?: string
+  /** OpenCode client for XHIGH recon */
+  client?: unknown
 }
 
 export interface CouncilResult {
@@ -55,6 +68,8 @@ export interface CouncilResult {
   totalTokens: number
   /** Total duration in ms */
   totalDurationMs: number
+  /** XHIGH reconnaissance result (only for xhigh mode) */
+  recon?: XhighReconResult
 }
 
 // =============================================================================
@@ -102,12 +117,47 @@ export async function conveneCouncil(
     })
   }
 
+  // XHIGH Mode: Run reconnaissance first
+  let reconContext = ''
+  let reconResult: XhighReconResult | undefined
+
+  if (input.mode === 'xhigh') {
+    reconResult = await performXhighRecon(
+      input.question,
+      mission?.description || 'No active mission',
+      {
+        client: input.client as import('../lib/background-manager.js').OpenCodeClient | undefined,
+        cwd,
+        runRecon: true,
+        runSigint: true,
+      }
+    )
+    reconContext = reconResult.formattedContext
+
+    // Log recon completion
+    if (mission) {
+      appendHistory(cwd, {
+        type: 'xhigh_recon_completed',
+        timestamp: new Date().toISOString(),
+        missionId: mission.id,
+        data: {
+          reconFound: reconResult.recon?.found ?? false,
+          reconFiles: reconResult.recon?.files?.length ?? 0,
+          sigintConfidence: reconResult.sigint?.confidence ?? 'N/A',
+          durationMs: reconResult.durationMs,
+        },
+      })
+    }
+  }
+
   // Build context for oracles
   const context: OraclePromptContext = {
     question: input.question,
     missionDescription: mission?.description || 'No active mission',
     objectivesSummary: buildObjectivesSummary(state),
-    additionalContext: input.context,
+    additionalContext: reconContext
+      ? `${reconContext}\n\n${input.context || ''}`
+      : input.context,
   }
 
   // Invoke oracles
@@ -152,6 +202,7 @@ export async function conveneCouncil(
     results,
     totalTokens,
     totalDurationMs,
+    recon: reconResult,
   }
 }
 

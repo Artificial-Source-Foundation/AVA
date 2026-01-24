@@ -1,0 +1,876 @@
+# Delta9 - OpenCode Plugin Specification
+
+> **Tagline**: "Strategic AI Coordination for Mission-Critical Development"
+
+## Overview
+
+Delta9 is an OpenCode plugin that implements a hierarchical, multi-agent system with strategic planning capabilities. Unlike traditional single-agent approaches, Delta9 uses a **Commander + Council + Operators** architecture that separates planning from execution, maintains mission state across compactions, and verifies all work against acceptance criteria.
+
+---
+
+## Core Philosophy
+
+### Problems We Solve
+
+| Problem | Current Tools | Delta9 Solution |
+|---------|---------------|-----------------|
+| Context pollution kills planning | Plan and execute in same context | Commander context protected, Operators disposable |
+| Plans lost after compaction | In-context plans disappear | mission.json persists externally |
+| No verification step | Trust self-reports | Dedicated Validator agent |
+| Single model blind spots | One model's perspective | Council of heterogeneous models |
+| Goal drift over time | Agents forget original mission | Mission state anchors all work |
+| Token waste on research | Main agent scans codebase | Cheap Scout agents do recon |
+
+### Design Principles
+
+1. **Separation of Concerns**: Planning, execution, and verification are distinct phases with dedicated agents
+2. **Protected Context**: Commander never accumulates implementation details
+3. **Heterogeneous Intelligence**: Different models for different strengths
+4. **Verified Completion**: Nothing marked done without Validator approval
+5. **Graceful Degradation**: Works with any model combination user has access to
+6. **Seamless Integration**: Replaces default agents, no commands required for normal use
+
+---
+
+## Architecture
+
+### High-Level Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         USER INPUT                                       │
+│                  "Build authentication system"                           │
+└─────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      PLANNING PHASE                                      │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                       COMMANDER                                  │   │
+│  │                   (Lead Planner)                                 │   │
+│  │                                                                  │   │
+│  │  1. Analyze request complexity                                   │   │
+│  │  2. Dispatch Scout for codebase recon                           │   │
+│  │  3. Dispatch Intel for research                                  │   │
+│  │  4. Convene Council (if complex)                                │   │
+│  │  5. Synthesize into mission.json                                │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                           │                                             │
+│           ┌───────────────┴───────────────┐                            │
+│           ▼                               ▼                             │
+│  ┌─────────────────┐           ┌─────────────────┐                     │
+│  │     SCOUT       │           │     INTEL       │                     │
+│  │ (Codebase Scan) │           │   (Research)    │                     │
+│  │     Haiku       │           │    GLM 4.7      │                     │
+│  └────────┬────────┘           └────────┬────────┘                     │
+│           │                             │                               │
+│           └─────────────┬───────────────┘                              │
+│                         ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                      THE COUNCIL                                 │   │
+│  │              (XHIGH mode: each has recon access)                 │   │
+│  │                                                                  │   │
+│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │   │
+│  │  │  Oracle  │  │  Oracle  │  │  Oracle  │  │  Oracle  │        │   │
+│  │  │  Claude  │  │   GPT    │  │  Gemini  │  │DeepSeek  │        │   │
+│  │  │ Opus 4.5 │  │GPT 5.2   │  │  3 Pro   │  │   v3     │        │   │
+│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘        │   │
+│  │                                                                  │   │
+│  │  Each provides: recommendation, confidence, caveats              │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                         │                                               │
+│                         ▼                                               │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │              COMMANDER SYNTHESIZES                               │   │
+│  │                                                                  │   │
+│  │  • Weighs confidence scores                                      │   │
+│  │  • Identifies consensus vs conflicts                             │   │
+│  │  • Resolves disagreements                                        │   │
+│  │  • Produces mission.json                                         │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                         │                                               │
+│                         ▼                                               │
+│                 ┌──────────────┐                                        │
+│                 │    USER      │                                        │
+│                 │   APPROVAL   │                                        │
+│                 └──────────────┘                                        │
+└─────────────────────────────────────────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      EXECUTION PHASE                                     │
+│                                                                         │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                       COMMANDER                                  │   │
+│  │                  (Mission Controller)                            │   │
+│  │                                                                  │   │
+│  │  • Reads mission.json                                           │   │
+│  │  • Dispatches tasks to Operators                                │   │
+│  │  • Routes to specialists (UI-Ops, QA, etc.)                     │   │
+│  │  • Receives completion reports                                   │   │
+│  │  • Updates mission state                                        │   │
+│  │  • NEVER writes code                                            │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                           │                                             │
+│       ┌───────────────────┼───────────────────┐                        │
+│       ▼                   ▼                   ▼                         │
+│  ┌──────────┐       ┌──────────┐       ┌──────────┐                    │
+│  │ OPERATOR │       │ OPERATOR │       │ OPERATOR │                    │
+│  │    #1    │       │    #2    │       │    #N    │                    │
+│  │ Sonnet 4 │       │ Sonnet 4 │       │ Sonnet 4 │                    │
+│  │          │       │          │       │          │                    │
+│  │ Task A   │       │ Task B   │       │ Task N   │                    │
+│  └────┬─────┘       └────┬─────┘       └────┬─────┘                    │
+│       │                  │                  │                           │
+│       └──────────────────┼──────────────────┘                          │
+│                          ▼                                              │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                      VALIDATOR                                   │   │
+│  │                   (Haiku 4.5)                                    │   │
+│  │                                                                  │   │
+│  │  Input: task description, acceptance criteria, git diff          │   │
+│  │  Output: PASS / FIXABLE (with feedback) / FAIL (with reason)    │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│                          │                                              │
+│          ┌───────────────┼───────────────┐                             │
+│          ▼               ▼               ▼                              │
+│       PASS           FIXABLE          FAIL                              │
+│          │               │               │                              │
+│          ▼               ▼               ▼                              │
+│    Mark done      Same Operator     Commander                           │
+│    Next task      + feedback        re-evaluates                        │
+│                   (max 2 retries)   (replan/skip)                       │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Agent Roster
+
+### Command Layer
+
+| Agent | Role | Default Model | Description |
+|-------|------|---------------|-------------|
+| **Commander** | Lead planner & orchestrator | User's choice (Opus 4.5 recommended) | Convenes Council, synthesizes plans, manages mission state. Never writes code. |
+
+### Council Layer (Planning Phase)
+
+| Agent | Specialty | Default Model | What They Catch |
+|-------|-----------|---------------|-----------------|
+| **Oracle-Claude** | Architecture, edge cases | Opus 4.5 | Deep reasoning, subtle bugs, complex patterns |
+| **Oracle-GPT** | Logic, code patterns | GPT 5.2 Codex | Known issues, best practices, library gotchas |
+| **Oracle-Gemini** | UI/UX, creativity | Gemini 3 Pro | Design implications, user flow, aesthetics |
+| **Oracle-DeepSeek** | Performance, algorithms | DeepSeek v3 | Optimization, complexity analysis, efficiency |
+
+User configures which Oracles based on available subscriptions.
+
+### Execution Layer
+
+| Agent | Role | Default Model | Description |
+|-------|------|---------------|-------------|
+| **Operator** | Primary worker/executor | Sonnet 4 | Does actual implementation. Can invoke support agents. |
+| **Validator** | Verification/QA | Haiku 4.5 | Reviews work against acceptance criteria. No code writing. |
+| **Patcher** | Quick fixes | Haiku 4.5 | Small targeted fixes when Validator returns FIXABLE. |
+
+### Support Layer (Invokable by Any Agent)
+
+| Agent | Role | Default Model | When Used |
+|-------|------|---------------|-----------|
+| **Scout** | Fast codebase search | Haiku / Grok | Grep, file discovery, pattern matching |
+| **Intel** | Research & documentation | GLM 4.7 / Sonnet | Docs lookup, GitHub search, examples |
+| **Strategist** | Mid-execution advice | GPT 5.2 | When Operator hits wall, needs guidance |
+| **UI-Ops** | Frontend specialist | Gemini Pro | UI components, styling, accessibility |
+| **Scribe** | Documentation writer | Gemini Flash | READMEs, API docs, comments |
+| **Optics** | Vision/multimodal | Gemini Flash | Image analysis, PDF reading, diagrams |
+| **QA** | Test writer | Sonnet 4 | Unit tests, integration tests |
+
+---
+
+## Council Modes
+
+| Mode | Triggered By | Council Composition | Use Case |
+|------|--------------|---------------------|----------|
+| **NONE** | `--council=none`, simple tasks | Commander only | Typo fixes, tiny changes |
+| **QUICK** | `--council=quick`, moderate tasks | Commander + 1 Oracle | Add a page, small feature |
+| **STANDARD** | Default for complex tasks | Commander + all configured Oracles | New systems, integrations |
+| **XHIGH** | `--council=xhigh`, critical tasks | Commander + Oracles with recon access | Core refactors, architecture changes |
+
+### XHIGH Mode Detail
+
+In XHIGH mode, each Oracle can invoke Scout and Intel independently:
+
+```
+Commander: "Council, investigate this mission. You have recon access."
+
+Oracle-Claude: "Scout, show me authentication-related files"
+  → Scout returns file list and snippets
+  → Oracle-Claude forms opinion with actual code context
+
+Oracle-GPT: "Intel, find OAuth best practices for Node.js 2025"
+  → Intel searches docs and GitHub
+  → Oracle-GPT forms opinion with current standards
+
+Oracle-Gemini: "Scout, show me existing UI components"
+  → Scout returns component inventory
+  → Oracle-Gemini forms opinion with UI context
+```
+
+---
+
+## Mission State Management
+
+### File Structure
+
+```
+.delta9/
+├── mission.json          # Current mission state (source of truth)
+├── mission.md            # Auto-generated human-readable view
+├── history.jsonl         # Append-only log of all actions
+├── memory.json           # Cross-session learning (optional)
+└── checkpoints/          # Git-based rollback points
+    ├── obj-1-complete/
+    └── obj-2-complete/
+```
+
+### mission.json Schema
+
+```json
+{
+  "$schema": "https://delta9.dev/mission.schema.json",
+  "id": "mission_abc123",
+  "created_at": "2025-01-23T10:30:00Z",
+  "updated_at": "2025-01-23T11:45:00Z",
+  
+  "mission": "Build REST API for user authentication with OAuth",
+  "status": "in_progress",
+  
+  "council_mode": "standard",
+  "council_summary": {
+    "consensus": ["Use NextAuth.js v5", "Database sessions over JWT"],
+    "disagreements_resolved": ["Task count: 6 (merged from 5 and 7)"],
+    "confidence_avg": 0.87
+  },
+  
+  "objectives": [
+    {
+      "id": "obj_1",
+      "description": "Set up project structure",
+      "status": "completed",
+      "checkpoint": "obj-1-complete",
+      "tasks": [
+        {
+          "id": "task_1_1",
+          "description": "Initialize Next.js 14 project with TypeScript",
+          "status": "completed",
+          "assigned_to": "operator",
+          "worker_session": "session_xyz123",
+          "attempts": 1,
+          "acceptance_criteria": [
+            "package.json exists with Next.js 14",
+            "tsconfig.json properly configured",
+            "src/app directory structure created"
+          ],
+          "validation": {
+            "status": "passed",
+            "validated_at": "2025-01-23T10:45:00Z",
+            "summary": "All criteria met"
+          },
+          "files_changed": ["package.json", "tsconfig.json", "src/app/layout.tsx"],
+          "tokens_used": 12450,
+          "cost": 0.037
+        }
+      ]
+    },
+    {
+      "id": "obj_2",
+      "description": "Implement authentication endpoints",
+      "status": "in_progress",
+      "tasks": [
+        {
+          "id": "task_2_1",
+          "description": "Create POST /auth/register endpoint",
+          "status": "in_progress",
+          "assigned_to": "operator",
+          "routed_to": null,
+          "acceptance_criteria": [
+            "Endpoint accepts email and password",
+            "Validates input with Zod",
+            "Hashes password with bcrypt",
+            "Creates user in database",
+            "Returns JWT token"
+          ]
+        }
+      ]
+    }
+  ],
+  
+  "budget": {
+    "limit": 5.00,
+    "spent": 1.24,
+    "breakdown": {
+      "council": 0.67,
+      "operators": 0.42,
+      "validators": 0.08,
+      "support": 0.07
+    }
+  },
+  
+  "dependencies": {
+    "task_2_1": ["task_1_1", "task_1_2"],
+    "task_3_1": ["task_2_1", "task_2_2", "task_2_3"]
+  }
+}
+```
+
+### mission.md (Auto-generated)
+
+```markdown
+# Mission: Build REST API for user authentication with OAuth
+
+**Status**: In Progress | **Budget**: $1.24 / $5.00 (25%)
+
+## Council Summary
+- **Mode**: Standard (3 Oracles)
+- **Consensus**: NextAuth.js v5, database sessions
+- **Confidence**: 87%
+
+---
+
+## Progress: 4/9 tasks (44%)
+
+### ✅ Objective 1: Set up project structure
+- [x] Initialize Next.js 14 project with TypeScript
+- [x] Configure ESLint and Prettier
+- [x] Set up folder structure
+
+### 🔄 Objective 2: Implement authentication endpoints
+- [x] Create POST /auth/register
+- [ ] Create POST /auth/login ← **IN PROGRESS**
+- [ ] Create POST /auth/refresh-token
+
+### ⏳ Objective 3: Add middleware and validation
+- [ ] JWT validation middleware
+- [ ] Input validation with Zod
+```
+
+---
+
+## Smart Task Routing
+
+Commander analyzes each task and routes to optimal agent:
+
+| Task Pattern | Detected Signals | Routed To |
+|--------------|------------------|-----------|
+| UI/Frontend | "component", "form", "button", "style", "CSS" | UI-Ops |
+| Testing | "test", "spec", "coverage", "mock" | QA |
+| Documentation | "README", "docs", "comment", "JSDoc" | Scribe |
+| Performance | "optimize", "cache", "performance", "speed" | Operator + Strategist |
+| Complex logic | "algorithm", "complex", "architecture" | Operator (Opus if critical) |
+| Simple changes | "typo", "rename", "fix", "small" | Patcher |
+
+---
+
+## Configuration
+
+### File Locations
+
+```
+~/.config/opencode/delta9.json     # User global config
+.delta9/config.json                 # Project-specific overrides
+```
+
+### Full Configuration Schema
+
+```json
+{
+  "$schema": "https://delta9.dev/config.schema.json",
+  
+  "commander": {
+    "model": "anthropic/claude-opus-4-5",
+    "temperature": 0.3,
+    "planning_model": "anthropic/claude-opus-4-5",
+    "dispatch_model": "anthropic/claude-sonnet-4"
+  },
+  
+  "council": {
+    "enabled": true,
+    "default_mode": "standard",
+    "auto_detect_complexity": true,
+    "members": [
+      {
+        "name": "Oracle-Claude",
+        "model": "anthropic/claude-opus-4-5",
+        "enabled": true,
+        "specialty": "architecture"
+      },
+      {
+        "name": "Oracle-GPT",
+        "model": "openai/gpt-5.2-codex-xhigh",
+        "enabled": true,
+        "specialty": "logic"
+      },
+      {
+        "name": "Oracle-Gemini",
+        "model": "google/gemini-3-pro",
+        "enabled": true,
+        "specialty": "ui"
+      },
+      {
+        "name": "Oracle-DeepSeek",
+        "model": "deepseek/deepseek-v3",
+        "enabled": false,
+        "specialty": "performance"
+      }
+    ],
+    "parallel": true,
+    "require_consensus": false,
+    "min_responses": 2,
+    "timeout_seconds": 120
+  },
+  
+  "operators": {
+    "default_model": "anthropic/claude-sonnet-4",
+    "complex_model": "anthropic/claude-opus-4-5",
+    "max_parallel": 3,
+    "retry_limit": 2,
+    "can_invoke_support": true
+  },
+  
+  "validator": {
+    "model": "anthropic/claude-haiku-4-5",
+    "strict_mode": false,
+    "run_tests": true,
+    "check_linting": true
+  },
+  
+  "patcher": {
+    "model": "anthropic/claude-haiku-4-5",
+    "max_lines": 50
+  },
+  
+  "support": {
+    "scout": {
+      "model": "anthropic/claude-haiku-4-5",
+      "timeout_seconds": 30
+    },
+    "intel": {
+      "model": "zai/glm-4.7",
+      "sources": ["docs", "github", "web"]
+    },
+    "strategist": {
+      "model": "openai/gpt-5.2",
+      "invoke_threshold": "complex"
+    },
+    "ui_ops": {
+      "model": "google/gemini-3-pro",
+      "style_system": "tailwind"
+    },
+    "scribe": {
+      "model": "google/gemini-3-flash",
+      "format": "markdown"
+    },
+    "optics": {
+      "model": "google/gemini-3-flash"
+    },
+    "qa": {
+      "model": "anthropic/claude-sonnet-4",
+      "framework_detect": true
+    }
+  },
+  
+  "mission": {
+    "auto_checkpoint": true,
+    "checkpoint_on": "objective_complete",
+    "state_dir": ".delta9",
+    "history_enabled": true
+  },
+  
+  "memory": {
+    "enabled": true,
+    "learn_from_failures": true,
+    "learn_from_successes": true,
+    "max_entries": 1000
+  },
+  
+  "budget": {
+    "enabled": true,
+    "default_limit": 10.00,
+    "warn_at": 0.7,
+    "pause_at": 0.9,
+    "track_by_agent": true
+  },
+  
+  "notifications": {
+    "enabled": false,
+    "discord_webhook": null,
+    "slack_webhook": null,
+    "on_events": ["mission_complete", "validation_failed", "budget_warning", "needs_input"]
+  },
+  
+  "ui": {
+    "show_progress": true,
+    "show_cost": true,
+    "verbose_logs": false
+  },
+  
+  "seamless": {
+    "replace_build": true,
+    "replace_plan": true,
+    "keyword_detection": true,
+    "keywords": {
+      "council_xhigh": ["thorough", "careful", "critical", "important"],
+      "council_none": ["quick", "just", "simple", "fast"],
+      "force_plan": ["plan", "design", "architect", "strategy"]
+    }
+  }
+}
+```
+
+---
+
+## Seamless Integration
+
+Delta9 replaces OpenCode's default agents for frictionless operation:
+
+### Agent Replacement
+
+```javascript
+// Plugin registers these replacements
+{
+  agents: {
+    // Replace default "build" with Commander in execution mode
+    "build": commanderExecutionAgent,
+    
+    // Replace default "plan" with Commander in planning mode
+    "plan": commanderPlanningAgent,
+    
+    // Keep originals available if needed
+    "opencode-build": originalBuildAgent,
+    "opencode-plan": originalPlanAgent
+  }
+}
+```
+
+### Automatic Complexity Detection
+
+```
+User: "fix the typo in the footer"
+→ Complexity: LOW
+→ Council: NONE
+→ Direct execution by Patcher
+
+User: "add a user profile page"
+→ Complexity: MEDIUM
+→ Council: QUICK (1 Oracle)
+→ Standard execution
+
+User: "refactor the entire auth system to use Clerk"
+→ Complexity: HIGH
+→ Council: STANDARD (all Oracles)
+→ Full mission planning
+
+User: "redesign the database schema for multi-tenancy"
+→ Complexity: CRITICAL
+→ Council: XHIGH (Oracles with recon)
+→ Full mission + checkpoints
+```
+
+### Keyword Detection
+
+```
+"just fix the button" → council=none
+"carefully plan the migration" → council=xhigh
+"design the architecture for..." → force planning phase
+```
+
+---
+
+## Commands (Power Users)
+
+While normal use is seamless, power users can use commands:
+
+| Command | Description |
+|---------|-------------|
+| `/delta9 mission "description"` | Start new mission with explicit planning |
+| `/delta9 mission --council=xhigh` | Force XHIGH council mode |
+| `/delta9 mission --dry-run` | Preview plan without execution |
+| `/delta9 deploy` | Begin/resume execution |
+| `/delta9 sitrep` | Show current mission status |
+| `/delta9 pause` | Pause current mission |
+| `/delta9 abort` | Cancel mission |
+| `/delta9 rollback [checkpoint]` | Rollback to checkpoint |
+| `/delta9 council` | Show council configuration |
+| `/delta9 council add Oracle-X` | Add oracle to council |
+| `/delta9 budget` | Show budget status |
+| `/delta9 history` | Show mission history |
+| `/delta9 memory` | Show learned patterns |
+| `/delta9 template list` | List available templates |
+| `/delta9 template use [name]` | Start mission from template |
+
+---
+
+## Plugin Structure
+
+```
+delta9/
+├── src/
+│   ├── index.ts                    # Main plugin export
+│   │
+│   ├── agents/
+│   │   ├── commander.ts            # Commander agent definition
+│   │   ├── council/
+│   │   │   ├── index.ts            # Council orchestration
+│   │   │   ├── oracle-claude.ts
+│   │   │   ├── oracle-gpt.ts
+│   │   │   ├── oracle-gemini.ts
+│   │   │   └── oracle-deepseek.ts
+│   │   ├── execution/
+│   │   │   ├── operator.ts
+│   │   │   ├── validator.ts
+│   │   │   └── patcher.ts
+│   │   └── support/
+│   │       ├── scout.ts
+│   │       ├── intel.ts
+│   │       ├── strategist.ts
+│   │       ├── ui-ops.ts
+│   │       ├── scribe.ts
+│   │       ├── optics.ts
+│   │       └── qa.ts
+│   │
+│   ├── mission/
+│   │   ├── state.ts                # Mission state manager
+│   │   ├── schema.ts               # JSON schemas
+│   │   ├── checkpoints.ts          # Git checkpoint logic
+│   │   └── markdown.ts             # MD generation
+│   │
+│   ├── council/
+│   │   ├── modes.ts                # Council mode logic
+│   │   ├── synthesis.ts            # Opinion aggregation
+│   │   └── confidence.ts           # Confidence scoring
+│   │
+│   ├── routing/
+│   │   ├── task-router.ts          # Smart task routing
+│   │   ├── complexity.ts           # Complexity detection
+│   │   └── keywords.ts             # Keyword detection
+│   │
+│   ├── hooks/
+│   │   ├── session-idle.ts         # When agent goes idle
+│   │   ├── tool-execute.ts         # Before/after tool execution
+│   │   ├── message-updated.ts      # Message handling
+│   │   └── compaction.ts           # Context compaction handling
+│   │
+│   ├── tools/
+│   │   ├── mission-tools.ts        # Mission management tools
+│   │   ├── council-tools.ts        # Council invocation tools
+│   │   └── support-tools.ts        # Support agent tools
+│   │
+│   ├── memory/
+│   │   ├── store.ts                # Memory persistence
+│   │   └── learning.ts             # Pattern learning
+│   │
+│   ├── budget/
+│   │   ├── tracker.ts              # Cost tracking
+│   │   └── limits.ts               # Budget enforcement
+│   │
+│   ├── notifications/
+│   │   ├── discord.ts
+│   │   ├── slack.ts
+│   │   └── system.ts               # OS notifications
+│   │
+│   ├── commands/
+│   │   ├── mission.ts              # /delta9 mission
+│   │   ├── sitrep.ts               # /delta9 sitrep
+│   │   ├── council.ts              # /delta9 council
+│   │   └── ... (other commands)
+│   │
+│   ├── templates/
+│   │   ├── auth-nextjs.json
+│   │   ├── crud-api.json
+│   │   └── ... (other templates)
+│   │
+│   ├── lib/
+│   │   ├── config.ts               # Configuration loading
+│   │   ├── logger.ts               # Structured logging
+│   │   ├── git.ts                  # Git operations
+│   │   └── utils.ts                # Utilities
+│   │
+│   └── types/
+│       ├── mission.ts              # Mission types
+│       ├── agents.ts               # Agent types
+│       ├── config.ts               # Config types
+│       └── events.ts               # Event types
+│
+├── assets/
+│   ├── delta9.schema.json          # Config schema
+│   ├── mission.schema.json         # Mission schema
+│   └── logo.png
+│
+├── docs/
+│   ├── README.md
+│   ├── CONFIGURATION.md
+│   ├── AGENTS.md
+│   └── COUNCIL.md
+│
+├── package.json
+├── tsconfig.json
+├── .gitignore
+└── LICENSE
+```
+
+---
+
+## Development Roadmap
+
+### Phase 1: Foundation (Week 1-2)
+- [ ] Plugin scaffold and config system
+- [ ] Mission state manager (mission.json CRUD)
+- [ ] Commander agent (basic planning, no council)
+- [ ] Single Operator execution
+- [ ] Validator agent
+
+### Phase 2: Council (Week 3-4)
+- [ ] Council orchestration system
+- [ ] Oracle agent definitions
+- [ ] Council modes (none/quick/standard)
+- [ ] Opinion synthesis
+- [ ] Confidence scoring
+
+### Phase 3: Intelligence (Week 5-6)
+- [ ] XHIGH council mode (oracles with recon)
+- [ ] Support agents (Scout, Intel, Strategist)
+- [ ] Smart task routing
+- [ ] Complexity detection
+- [ ] Keyword detection
+
+### Phase 4: Robustness (Week 7-8)
+- [ ] Checkpoints and rollback
+- [ ] Budget tracking
+- [ ] Memory and learning
+- [ ] Seamless agent replacement
+- [ ] Error recovery
+
+### Phase 5: Polish (Week 9-10)
+- [ ] All support agents (UI-Ops, Scribe, Optics, QA)
+- [ ] Mission templates
+- [ ] Notifications (Discord, Slack)
+- [ ] Documentation
+- [ ] Testing
+
+### Phase 6: Launch
+- [ ] npm publish
+- [ ] Marketing (ProductHunt, X, Discord)
+- [ ] Community feedback integration
+
+---
+
+## Comparison with Alternatives
+
+| Feature | Claude Code | Oh-My-OpenCode | Delta9 |
+|---------|-------------|----------------|--------|
+| Multi-model | ❌ | ✅ | ✅ |
+| Specialized agents | ❌ | ✅ | ✅ |
+| Protected planning context | ❌ | ❌ | ✅ |
+| Council deliberation | ❌ | ❌ | ✅ |
+| Heterogeneous planning | ❌ | ❌ | ✅ |
+| Verification gate | ❌ | ❌ | ✅ |
+| Mission persistence | ❌ | Partial | ✅ |
+| Checkpoints/rollback | ❌ | ❌ | ✅ |
+| Budget tracking | ❌ | ❌ | ✅ |
+| Cross-session memory | ❌ | ❌ | ✅ |
+| Token efficiency | ⚠️ | ⚠️ | ✅ |
+| Seamless integration | N/A | ✅ | ✅ |
+
+---
+
+## Technical Requirements
+
+### OpenCode Version
+- Minimum: 1.0.150+
+- Recommended: Latest
+
+### Runtime
+- Bun (for npm plugin loading)
+- Node.js 18+ (fallback)
+
+### Dependencies
+```json
+{
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.0.0",
+    "zod": "^3.22.0",
+    "date-fns": "^3.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "@types/node": "^20.0.0",
+    "vitest": "^1.0.0"
+  }
+}
+```
+
+---
+
+## Getting Started (For Users)
+
+### Installation
+
+```bash
+# Add to opencode.json
+{
+  "plugin": ["delta9"]
+}
+
+# Or install globally
+npm install -g delta9
+```
+
+### Quick Start
+
+```bash
+# Just start typing - Delta9 takes over automatically
+opencode
+
+> "Build a user authentication system with Google OAuth"
+
+# Delta9 automatically:
+# 1. Detects complexity (HIGH)
+# 2. Convenes Council
+# 3. Creates mission plan
+# 4. Asks for approval
+# 5. Executes with verification
+```
+
+### Manual Control
+
+```bash
+# Force specific council mode
+> /delta9 mission "Refactor auth" --council=xhigh
+
+# Check status
+> /delta9 sitrep
+
+# Rollback if needed
+> /delta9 rollback obj-2-complete
+```
+
+---
+
+## Contributing
+
+See CONTRIBUTING.md for development setup and guidelines.
+
+---
+
+## License
+
+MIT License - see LICENSE file.
+
+---
+
+## Links
+
+- GitHub: https://github.com/[your-username]/delta9
+- npm: https://npmjs.com/package/delta9
+- Documentation: https://delta9.dev
+- Discord: https://discord.gg/delta9

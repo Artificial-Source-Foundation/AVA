@@ -67,13 +67,13 @@ Delta9 is an OpenCode plugin that implements a hierarchical, multi-agent system 
 │           └─────────────┬───────────────┘                              │
 │                         ▼                                               │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                      THE COUNCIL                                 │   │
+│  │                 THE COUNCIL - THE DELTA TEAM                    │   │
 │  │              (XHIGH mode: each has recon access)                 │   │
 │  │                                                                  │   │
 │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐        │   │
-│  │  │  Oracle  │  │  Oracle  │  │  Oracle  │  │  Oracle  │        │   │
-│  │  │  Claude  │  │   GPT    │  │  Gemini  │  │DeepSeek  │        │   │
-│  │  │ Opus 4.5 │  │GPT 5.2   │  │  3 Pro   │  │   v3     │        │   │
+│  │  │  CIPHER  │  │  VECTOR  │  │  PRISM   │  │   APEX   │        │   │
+│  │  │Strategist│  │ Analyst  │  │ Creative │  │ Optimizer│        │   │
+│  │  │ Temp 0.2 │  │ Temp 0.4 │  │ Temp 0.6 │  │ Temp 0.3 │        │   │
 │  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘        │   │
 │  │                                                                  │   │
 │  │  Each provides: recommendation, confidence, caveats              │   │
@@ -154,16 +154,18 @@ Delta9 is an OpenCode plugin that implements a hierarchical, multi-agent system 
 |-------|------|---------------|-------------|
 | **Commander** | Lead planner & orchestrator | User's choice (Opus 4.5 recommended) | Convenes Council, synthesizes plans, manages mission state. Never writes code. |
 
-### Council Layer (Planning Phase)
+### Council Layer (Planning Phase) - The Delta Team
 
-| Agent | Specialty | Default Model | What They Catch |
-|-------|-----------|---------------|-----------------|
-| **Oracle-Claude** | Architecture, edge cases | Opus 4.5 | Deep reasoning, subtle bugs, complex patterns |
-| **Oracle-GPT** | Logic, code patterns | GPT 5.2 Codex | Known issues, best practices, library gotchas |
-| **Oracle-Gemini** | UI/UX, creativity | Gemini 3 Pro | Design implications, user flow, aesthetics |
-| **Oracle-DeepSeek** | Performance, algorithms | DeepSeek v3 | Optimization, complexity analysis, efficiency |
+Each Oracle has a distinct personality, temperature, and specialty. Users configure which AI model powers each personality in `delta9.json`.
 
-User configures which Oracles based on available subscriptions.
+| Codename | Role | Specialty | Temp | Default Model | What They Catch |
+|----------|------|-----------|------|---------------|-----------------|
+| **CIPHER** | The Strategist | Architecture | 0.2 | Opus 4.5 | Deep reasoning, system design, long-term implications |
+| **VECTOR** | The Analyst | Logic | 0.4 | GPT-4o | Edge cases, correctness, error handling, patterns |
+| **PRISM** | The Creative | UI/UX | 0.6 | Gemini 2.0 Flash | User experience, alternatives, accessibility, elegance |
+| **APEX** | The Optimizer | Performance | 0.3 | DeepSeek Chat | Time/space complexity, memory, bottlenecks, scalability |
+
+**Key Design**: Codenames are stable, models are user-configurable. Each Oracle's personality and specialty remain constant regardless of which model powers them.
 
 ### Execution Layer
 
@@ -203,17 +205,21 @@ In XHIGH mode, each Oracle can invoke Scout and Intel independently:
 ```
 Commander: "Council, investigate this mission. You have recon access."
 
-Oracle-Claude: "Scout, show me authentication-related files"
+CIPHER (The Strategist): "Scout, show me authentication-related files"
   → Scout returns file list and snippets
-  → Oracle-Claude forms opinion with actual code context
+  → CIPHER forms architectural opinion with actual code context
 
-Oracle-GPT: "Intel, find OAuth best practices for Node.js 2025"
+VECTOR (The Analyst): "Intel, find OAuth best practices for Node.js 2025"
   → Intel searches docs and GitHub
-  → Oracle-GPT forms opinion with current standards
+  → VECTOR forms opinion validating correctness against standards
 
-Oracle-Gemini: "Scout, show me existing UI components"
+PRISM (The Creative): "Scout, show me existing UI components"
   → Scout returns component inventory
-  → Oracle-Gemini forms opinion with UI context
+  → PRISM forms opinion on user experience and alternatives
+
+APEX (The Optimizer): "Scout, show me database query patterns"
+  → Scout returns query code
+  → APEX identifies performance bottlenecks and optimization opportunities
 ```
 
 ---
@@ -720,14 +726,103 @@ delta9/
 
 ---
 
+## Implementation Status
+
+> **Last Updated**: 2026-01-24
+
+### Completed Features
+
+#### Core Infrastructure
+- [x] Plugin scaffold (`src/index.ts`)
+- [x] Configuration system (`src/lib/config.ts`)
+- [x] Mission state manager (`src/mission/state.ts`)
+- [x] Zod schemas for all types (`src/schemas/`)
+- [x] TypeScript strict mode throughout
+
+#### SDK Integration
+- [x] OpenCode SDK client integration
+- [x] Background agent spawning via `client.session.run()`
+- [x] Real agent execution (not simulation)
+- [x] Abort controller for task cancellation
+
+#### Background Task System
+- [x] Background manager with task pool (`src/lib/background-manager.ts`)
+- [x] Concurrency limiting (3 parallel tasks)
+- [x] Task queueing with FIFO ordering
+- [x] Task state tracking (pending/running/completed/failed/cancelled)
+- [x] Process cleanup and shutdown handling
+- [x] Stale task detection (30min TTL)
+- [x] Abort signal propagation
+
+#### Robustness
+- [x] Graceful shutdown with cleanup
+- [x] Process signal handling (SIGINT, SIGTERM, SIGQUIT, exit)
+- [x] Stale task pruning on access
+- [x] Error recovery and retry support
+
+#### Developer Experience (10/10 DX)
+- [x] Structured logging with named component loggers (`src/lib/logger.ts`)
+- [x] Rich error handling with recovery suggestions (`src/lib/errors.ts`)
+- [x] Context-aware hints system (`src/lib/hints.ts`)
+- [x] Health diagnostic tool (`delta9_health`)
+- [x] Emoji status indicators in tool outputs
+- [x] Duration formatting (human-readable)
+- [x] Detailed tool descriptions with examples
+
+#### Tools Implemented (33 total)
+| Category | Tools |
+|----------|-------|
+| Mission | `mission_create`, `mission_status`, `mission_add_objective`, `mission_add_task`, `mission_complete_task`, `mission_fail_task`, `mission_abort`, `mission_clear` |
+| Delegation | `delegate_task`, `retry_task` |
+| Background | `background_output`, `background_cancel`, `background_list`, `background_cleanup` |
+| Council | `council_convene`, `council_status`, `quick_consult` |
+| Memory | `memory_get`, `memory_set`, `memory_delete`, `memory_list`, `memory_clear` |
+| Validation | `request_validation`, `approve_validation`, `reject_validation`, `validation_status` |
+| Checkpoint | `checkpoint_create`, `checkpoint_list`, `checkpoint_restore`, `checkpoint_delete` |
+| Diagnostics | `delta9_health` |
+
+### In Progress
+
+#### Council System
+- [ ] Oracle agent definitions
+- [ ] Council modes (none/quick/standard/xhigh)
+- [ ] Opinion synthesis
+- [ ] Confidence scoring
+
+#### Support Agents
+- [ ] Scout (codebase search)
+- [ ] Intel (research)
+- [ ] Strategist (mid-execution advice)
+
+### Planned
+
+#### Phase 3: Intelligence
+- [ ] XHIGH council mode
+- [ ] Smart task routing
+- [ ] Complexity detection
+- [ ] Keyword detection
+
+#### Phase 4: Robustness
+- [ ] Checkpoints and rollback
+- [ ] Budget tracking
+- [ ] Memory and learning
+- [ ] Seamless agent replacement
+
+#### Phase 5: Polish
+- [ ] All support agents (UI-Ops, Scribe, Optics, QA)
+- [ ] Mission templates
+- [ ] Notifications (Discord, Slack)
+
+---
+
 ## Development Roadmap
 
-### Phase 1: Foundation (Week 1-2)
-- [ ] Plugin scaffold and config system
-- [ ] Mission state manager (mission.json CRUD)
-- [ ] Commander agent (basic planning, no council)
-- [ ] Single Operator execution
-- [ ] Validator agent
+### Phase 1: Foundation (Week 1-2) ✅ COMPLETE
+- [x] Plugin scaffold and config system
+- [x] Mission state manager (mission.json CRUD)
+- [x] Commander agent (basic planning, no council)
+- [x] Single Operator execution
+- [x] Validator agent
 
 ### Phase 2: Council (Week 3-4)
 - [ ] Council orchestration system

@@ -37,6 +37,7 @@ export const oracleConfigSchema = z.object({
   model: modelSchema,
   enabled: z.boolean().default(true),
   specialty: oracleSpecialtySchema.default('general'),
+  temperature: z.number().min(0).max(2).optional(), // Oracle personality temperature
 })
 
 export const councilConfigSchema = z.object({

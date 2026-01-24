@@ -27,14 +27,16 @@ export interface CommanderConfig {
 export type CouncilMode = 'none' | 'quick' | 'standard' | 'xhigh'
 
 export interface OracleConfig {
-  /** Oracle display name */
+  /** Oracle display name (codename for Delta Team: Cipher, Vector, Prism, Apex) */
   name: string
-  /** Model to use */
+  /** Model to use (user configurable - any model provider) */
   model: string
   /** Whether this oracle is enabled */
   enabled: boolean
   /** Specialty area */
   specialty: 'architecture' | 'logic' | 'ui' | 'performance' | 'general'
+  /** Temperature setting (0-1, defines personality decisiveness) */
+  temperature?: number
 }
 
 export interface CouncilConfig {
@@ -274,30 +276,35 @@ export const DEFAULT_CONFIG: Delta9Config = {
     enabled: true,
     defaultMode: 'standard',
     autoDetectComplexity: true,
+    // The Delta Team - personality-based Oracles with configurable models
     members: [
       {
-        name: 'Oracle-Claude',
+        name: 'Cipher',
         model: 'anthropic/claude-opus-4-5',
         enabled: true,
         specialty: 'architecture',
+        temperature: 0.2, // Decisive, low variance
       },
       {
-        name: 'Oracle-GPT',
+        name: 'Vector',
         model: 'openai/gpt-4o',
-        enabled: false,
+        enabled: true,
         specialty: 'logic',
+        temperature: 0.4, // Methodical, balanced
       },
       {
-        name: 'Oracle-Gemini',
+        name: 'Prism',
         model: 'google/gemini-2.0-flash',
-        enabled: false,
+        enabled: true,
         specialty: 'ui',
+        temperature: 0.6, // Creative, higher variance
       },
       {
-        name: 'Oracle-DeepSeek',
+        name: 'Apex',
         model: 'deepseek/deepseek-chat',
-        enabled: false,
+        enabled: true,
         specialty: 'performance',
+        temperature: 0.3, // Precise, analytical
       },
     ],
     parallel: true,

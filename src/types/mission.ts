@@ -207,6 +207,7 @@ export type HistoryEventType =
   | 'task_started'
   | 'task_completed'
   | 'task_failed'
+  | 'task_retried'
   | 'validation_passed'
   | 'validation_fixable'
   | 'validation_failed'
@@ -214,6 +215,15 @@ export type HistoryEventType =
   | 'rollback_executed'
   | 'budget_warning'
   | 'budget_exceeded'
+  | 'context_compacted'
+  | 'council_convened'
+  | 'council_completed'
+  | 'xhigh_recon_completed'
+  | 'background_task_started'
+  | 'background_task_completed'
+  | 'background_task_failed'
+  | 'replan_triggered'
+  | 'recovery_attempted'
 
 export interface HistoryEvent {
   /** Event type */

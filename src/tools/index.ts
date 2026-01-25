@@ -16,6 +16,11 @@ import { createCouncilTools, type CouncilTools } from './council.js'
 import { createMemoryTools, type MemoryTools } from './memory.js'
 import { createDiagnosticsTools, type DiagnosticsTools, setPluginStartTime } from './diagnostics.js'
 import { createRoutingTools, type RoutingTools } from './routing.js'
+import { createKnowledgeTools } from './knowledge.js'
+import { createCheckpointTools, type CheckpointTools } from './checkpoint.js'
+import { createBudgetTools, type BudgetTools } from './budget.js'
+import { createSkillTools } from './skills.js'
+import { createLockTools } from './locks.js'
 
 export type { OpenCodeClient } from '../lib/background-manager.js'
 
@@ -32,6 +37,42 @@ export { createCouncilTools, type CouncilTools } from './council.js'
 export { createMemoryTools, type MemoryTools } from './memory.js'
 export { createDiagnosticsTools, type DiagnosticsTools, setPluginStartTime } from './diagnostics.js'
 export { createRoutingTools, type RoutingTools } from './routing.js'
+export { createKnowledgeTools } from './knowledge.js'
+export { createCheckpointTools, type CheckpointTools } from './checkpoint.js'
+export { createBudgetTools, type BudgetTools } from './budget.js'
+export { createSkillTools } from './skills.js'
+export type { SkillToolsConfig } from './skills.js'
+export { createLockTools } from './locks.js'
+export type { LockToolsConfig } from './locks.js'
+
+// =============================================================================
+// Knowledge Tools Type
+// =============================================================================
+
+export type KnowledgeTools = {
+  knowledge_list: unknown
+  knowledge_get: unknown
+  knowledge_set: unknown
+  knowledge_append: unknown
+  knowledge_replace: unknown
+}
+
+export type SkillTools = {
+  list_skills: unknown
+  use_skill: unknown
+  read_skill_file: unknown
+  run_skill_script: unknown
+  get_skill: unknown
+}
+
+export type LockTools = {
+  lock_file: unknown
+  unlock_file: unknown
+  check_lock: unknown
+  list_locks: unknown
+  lock_files: unknown
+  unlock_all: unknown
+}
 
 // =============================================================================
 // Combined Tools
@@ -45,7 +86,12 @@ export type Delta9Tools = MissionTools &
   CouncilTools &
   MemoryTools &
   DiagnosticsTools &
-  RoutingTools
+  RoutingTools &
+  KnowledgeTools &
+  CheckpointTools &
+  BudgetTools &
+  SkillTools &
+  LockTools
 
 /**
  * Create all Delta9 tools
@@ -75,6 +121,11 @@ export function createDelta9Tools(
     ...createMemoryTools(projectCwd),
     ...createDiagnosticsTools(state, projectCwd, client),
     ...createRoutingTools(),
+    ...createKnowledgeTools(),
+    ...createCheckpointTools(projectCwd),
+    ...createBudgetTools(projectCwd),
+    ...createSkillTools({ cwd: projectCwd }),
+    ...createLockTools(),
   }
 }
 
@@ -136,6 +187,46 @@ export const ROUTING_TOOL_NAMES = [
   'recommend_agent',
 ] as const
 
+export const KNOWLEDGE_TOOL_NAMES = [
+  'knowledge_list',
+  'knowledge_get',
+  'knowledge_set',
+  'knowledge_append',
+  'knowledge_replace',
+] as const
+
+export const CHECKPOINT_TOOL_NAMES = [
+  'checkpoint_create',
+  'checkpoint_list',
+  'checkpoint_restore',
+  'checkpoint_delete',
+  'checkpoint_get',
+] as const
+
+export const BUDGET_TOOL_NAMES = [
+  'budget_status',
+  'budget_set_limit',
+  'budget_check',
+  'budget_breakdown',
+] as const
+
+export const SKILL_TOOL_NAMES = [
+  'list_skills',
+  'use_skill',
+  'read_skill_file',
+  'run_skill_script',
+  'get_skill',
+] as const
+
+export const LOCK_TOOL_NAMES = [
+  'lock_file',
+  'unlock_file',
+  'check_lock',
+  'list_locks',
+  'lock_files',
+  'unlock_all',
+] as const
+
 export const ALL_TOOL_NAMES = [
   ...MISSION_TOOL_NAMES,
   ...DISPATCH_TOOL_NAMES,
@@ -146,6 +237,11 @@ export const ALL_TOOL_NAMES = [
   ...MEMORY_TOOL_NAMES,
   ...DIAGNOSTICS_TOOL_NAMES,
   ...ROUTING_TOOL_NAMES,
+  ...KNOWLEDGE_TOOL_NAMES,
+  ...CHECKPOINT_TOOL_NAMES,
+  ...BUDGET_TOOL_NAMES,
+  ...SKILL_TOOL_NAMES,
+  ...LOCK_TOOL_NAMES,
 ] as const
 
 export type Delta9ToolName = (typeof ALL_TOOL_NAMES)[number]

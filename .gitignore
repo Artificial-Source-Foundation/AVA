@@ -33,3 +33,6 @@ coverage/
 
 # Delta9 state (for development testing)
 .delta9/
+
+# Documentation (generated, not distributed)
+docs/

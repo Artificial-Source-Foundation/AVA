@@ -5,9 +5,12 @@
  * These tools are used by Commander to create and update missions.
  */
 
-import { z } from 'zod'
+import { tool, type ToolDefinition } from '@opencode-ai/plugin'
 import type { MissionState } from '../mission/state.js'
 import type { CouncilMode, Complexity } from '../types/index.js'
+
+// Use the tool's built-in schema (Zod 4 compatible)
+const s = tool.schema
 
 // =============================================================================
 // Tool Definitions
@@ -16,50 +19,39 @@ import type { CouncilMode, Complexity } from '../types/index.js'
 /**
  * Create mission management tools
  */
-export function createMissionTools(state: MissionState) {
-  return {
-    /**
-     * Create a new mission
-     */
-    mission_create: {
-      description: 'Create a new mission with objectives and tasks. Use this to start planning a new request.',
-      parameters: z.object({
-        description: z.string().describe('Mission description - what needs to be accomplished'),
-        complexity: z.enum(['low', 'medium', 'high', 'critical']).optional().describe('Detected complexity level'),
-        councilMode: z.enum(['none', 'quick', 'standard', 'xhigh']).optional().describe('Council mode to use'),
-        objectives: z.array(z.object({
-          description: z.string().describe('Objective description'),
-          tasks: z.array(z.object({
-            description: z.string().describe('Task description'),
-            acceptanceCriteria: z.array(z.string()).describe('List of acceptance criteria'),
-            routing: z.string().optional().describe('Suggested agent routing'),
-            dependencies: z.array(z.string()).optional().describe('Task IDs this depends on'),
-          })).describe('Tasks within this objective'),
-        })).optional().describe('Mission objectives'),
-      }),
+export function createMissionTools(state: MissionState): Record<string, ToolDefinition> {
+  /**
+   * Create a new mission
+   */
+  const mission_create = tool({
+    description: 'Create a new mission with objectives and tasks. Use this to start planning a new request.',
+    args: {
+      description: s.string().describe('Mission description - what needs to be accomplished'),
+      complexity: s.enum(['low', 'medium', 'high', 'critical']).optional().describe('Detected complexity level'),
+      councilMode: s.enum(['none', 'quick', 'standard', 'xhigh']).optional().describe('Council mode to use'),
+      objectives: s.string().optional().describe('JSON array of objectives with tasks'),
+    },
 
-      execute: async (args: {
-        description: string
-        complexity?: Complexity
-        councilMode?: CouncilMode
-        objectives?: Array<{
-          description: string
-          tasks: Array<{
+    async execute(args, _ctx) {
+      const mission = state.create(args.description, {
+        complexity: args.complexity as Complexity | undefined,
+        councilMode: args.councilMode as CouncilMode | undefined,
+      })
+
+      // Add objectives and tasks if provided
+      if (args.objectives) {
+        try {
+          const objectives = JSON.parse(args.objectives) as Array<{
             description: string
-            acceptanceCriteria: string[]
-            routing?: string
-            dependencies?: string[]
+            tasks: Array<{
+              description: string
+              acceptanceCriteria: string[]
+              routing?: string
+              dependencies?: string[]
+            }>
           }>
-        }>
-      }) => {
-        const mission = state.create(args.description, {
-          complexity: args.complexity,
-          councilMode: args.councilMode,
-        })
 
-        // Add objectives and tasks if provided
-        if (args.objectives) {
-          for (const objData of args.objectives) {
+          for (const objData of objectives) {
             const objective = state.addObjective({
               description: objData.description,
             })
@@ -73,141 +65,139 @@ export function createMissionTools(state: MissionState) {
               })
             }
           }
+        } catch {
+          // Ignore JSON parse errors
         }
+      }
 
-        return {
-          success: true,
-          missionId: mission.id,
-          status: mission.status,
-          message: `Mission created: ${mission.id}`,
-        }
-      },
+      return JSON.stringify({
+        success: true,
+        missionId: mission.id,
+        status: mission.status,
+        message: `Mission created: ${mission.id}`,
+      })
     },
+  })
 
-    /**
-     * Get mission status
-     */
-    mission_status: {
-      description: 'Get the current mission status, progress, and next available task.',
-      parameters: z.object({}),
+  /**
+   * Get mission status
+   */
+  const mission_status = tool({
+    description: 'Get the current mission status, progress, and next available task.',
+    args: {},
 
-      execute: async () => {
-        const mission = state.getMission()
+    async execute(_args, _ctx) {
+      const mission = state.getMission()
 
-        if (!mission) {
-          return {
-            success: false,
-            hasMission: false,
-            message: 'No active mission',
-          }
-        }
-
-        const progress = state.getProgress()
-        const nextTask = state.getNextTask()
-        const budget = state.getBudgetStatus()
-
-        return {
-          success: true,
-          hasMission: true,
-          mission: {
-            id: mission.id,
-            description: mission.description,
-            status: mission.status,
-            complexity: mission.complexity,
-            councilMode: mission.councilMode,
-          },
-          progress: {
-            ...progress,
-            currentObjective: mission.currentObjective,
-            totalObjectives: mission.objectives.length,
-          },
-          budget,
-          nextTask: nextTask ? {
-            id: nextTask.id,
-            description: nextTask.description,
-            acceptanceCriteria: nextTask.acceptanceCriteria,
-            attempts: nextTask.attempts,
-          } : null,
-        }
-      },
-    },
-
-    /**
-     * Update mission state
-     */
-    mission_update: {
-      description: 'Update mission state - approve, pause, resume, or abort the mission.',
-      parameters: z.object({
-        action: z.enum(['approve', 'start', 'pause', 'resume', 'abort']).describe('Action to take'),
-      }),
-
-      execute: async (args: { action: 'approve' | 'start' | 'pause' | 'resume' | 'abort' }) => {
-        const mission = state.getMission()
-
-        if (!mission) {
-          return {
-            success: false,
-            message: 'No active mission',
-          }
-        }
-
-        switch (args.action) {
-          case 'approve':
-            state.approveMission()
-            break
-          case 'start':
-            state.startMission()
-            break
-          case 'pause':
-            state.pauseMission()
-            break
-          case 'resume':
-            state.startMission()
-            break
-          case 'abort':
-            state.abortMission()
-            break
-        }
-
-        return {
-          success: true,
-          action: args.action,
-          newStatus: state.getMission()?.status,
-          message: `Mission ${args.action}ed`,
-        }
-      },
-    },
-
-    /**
-     * Add an objective to the mission
-     */
-    mission_add_objective: {
-      description: 'Add a new objective to the current mission.',
-      parameters: z.object({
-        description: z.string().describe('Objective description'),
-        tasks: z.array(z.object({
-          description: z.string().describe('Task description'),
-          acceptanceCriteria: z.array(z.string()).describe('Acceptance criteria'),
-          routing: z.string().optional().describe('Agent routing'),
-          dependencies: z.array(z.string()).optional().describe('Dependencies'),
-        })).optional().describe('Tasks for this objective'),
-      }),
-
-      execute: async (args: {
-        description: string
-        tasks?: Array<{
-          description: string
-          acceptanceCriteria: string[]
-          routing?: string
-          dependencies?: string[]
-        }>
-      }) => {
-        const objective = state.addObjective({
-          description: args.description,
+      if (!mission) {
+        return JSON.stringify({
+          success: false,
+          hasMission: false,
+          message: 'No active mission',
         })
+      }
 
-        if (args.tasks) {
-          for (const taskData of args.tasks) {
+      const progress = state.getProgress()
+      const nextTask = state.getNextTask()
+      const budget = state.getBudgetStatus()
+
+      return JSON.stringify({
+        success: true,
+        hasMission: true,
+        mission: {
+          id: mission.id,
+          description: mission.description,
+          status: mission.status,
+          complexity: mission.complexity,
+          councilMode: mission.councilMode,
+        },
+        progress: {
+          ...progress,
+          currentObjective: mission.currentObjective,
+          totalObjectives: mission.objectives.length,
+        },
+        budget,
+        nextTask: nextTask ? {
+          id: nextTask.id,
+          description: nextTask.description,
+          acceptanceCriteria: nextTask.acceptanceCriteria,
+          attempts: nextTask.attempts,
+        } : null,
+      })
+    },
+  })
+
+  /**
+   * Update mission state
+   */
+  const mission_update = tool({
+    description: 'Update mission state - approve, pause, resume, or abort the mission.',
+    args: {
+      action: s.enum(['approve', 'start', 'pause', 'resume', 'abort']).describe('Action to take'),
+    },
+
+    async execute(args, _ctx) {
+      const mission = state.getMission()
+
+      if (!mission) {
+        return JSON.stringify({
+          success: false,
+          message: 'No active mission',
+        })
+      }
+
+      switch (args.action) {
+        case 'approve':
+          state.approveMission()
+          break
+        case 'start':
+          state.startMission()
+          break
+        case 'pause':
+          state.pauseMission()
+          break
+        case 'resume':
+          state.startMission()
+          break
+        case 'abort':
+          state.abortMission()
+          break
+      }
+
+      return JSON.stringify({
+        success: true,
+        action: args.action,
+        newStatus: state.getMission()?.status,
+        message: `Mission ${args.action}ed`,
+      })
+    },
+  })
+
+  /**
+   * Add an objective to the mission
+   */
+  const mission_add_objective = tool({
+    description: 'Add a new objective to the current mission.',
+    args: {
+      description: s.string().describe('Objective description'),
+      tasks: s.string().optional().describe('JSON array of tasks for this objective'),
+    },
+
+    async execute(args, _ctx) {
+      const objective = state.addObjective({
+        description: args.description,
+      })
+
+      if (args.tasks) {
+        try {
+          const tasks = JSON.parse(args.tasks) as Array<{
+            description: string
+            acceptanceCriteria: string[]
+            routing?: string
+            dependencies?: string[]
+          }>
+
+          for (const taskData of tasks) {
             state.addTask(objective.id, {
               description: taskData.description,
               acceptanceCriteria: taskData.acceptanceCriteria,
@@ -215,50 +205,71 @@ export function createMissionTools(state: MissionState) {
               dependencies: taskData.dependencies,
             })
           }
+        } catch {
+          // Ignore JSON parse errors
         }
+      }
 
-        return {
-          success: true,
-          objectiveId: objective.id,
-          message: `Objective added: ${objective.id}`,
-        }
-      },
+      return JSON.stringify({
+        success: true,
+        objectiveId: objective.id,
+        message: `Objective added: ${objective.id}`,
+      })
+    },
+  })
+
+  /**
+   * Add a task to an objective
+   */
+  const mission_add_task = tool({
+    description: 'Add a new task to an existing objective.',
+    args: {
+      objectiveId: s.string().describe('ID of the objective to add task to'),
+      description: s.string().describe('Task description'),
+      acceptanceCriteria: s.string().describe('JSON array of acceptance criteria strings'),
+      routing: s.string().optional().describe('Agent routing'),
+      dependencies: s.string().optional().describe('JSON array of task dependency IDs'),
     },
 
-    /**
-     * Add a task to an objective
-     */
-    mission_add_task: {
-      description: 'Add a new task to an existing objective.',
-      parameters: z.object({
-        objectiveId: z.string().describe('ID of the objective to add task to'),
-        description: z.string().describe('Task description'),
-        acceptanceCriteria: z.array(z.string()).describe('Acceptance criteria'),
-        routing: z.string().optional().describe('Agent routing'),
-        dependencies: z.array(z.string()).optional().describe('Task dependencies'),
-      }),
+    async execute(args, _ctx) {
+      let criteria: string[] = []
+      let deps: string[] | undefined
 
-      execute: async (args: {
-        objectiveId: string
-        description: string
-        acceptanceCriteria: string[]
-        routing?: string
-        dependencies?: string[]
-      }) => {
-        const task = state.addTask(args.objectiveId, {
-          description: args.description,
-          acceptanceCriteria: args.acceptanceCriteria,
-          routedTo: args.routing,
-          dependencies: args.dependencies,
-        })
+      try {
+        criteria = JSON.parse(args.acceptanceCriteria)
+      } catch {
+        criteria = [args.acceptanceCriteria]
+      }
 
-        return {
-          success: true,
-          taskId: task.id,
-          message: `Task added: ${task.id}`,
+      if (args.dependencies) {
+        try {
+          deps = JSON.parse(args.dependencies)
+        } catch {
+          deps = [args.dependencies]
         }
-      },
+      }
+
+      const task = state.addTask(args.objectiveId, {
+        description: args.description,
+        acceptanceCriteria: criteria,
+        routedTo: args.routing,
+        dependencies: deps,
+      })
+
+      return JSON.stringify({
+        success: true,
+        taskId: task.id,
+        message: `Task added: ${task.id}`,
+      })
     },
+  })
+
+  return {
+    mission_create,
+    mission_status,
+    mission_update,
+    mission_add_objective,
+    mission_add_task,
   }
 }
 

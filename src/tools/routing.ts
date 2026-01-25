@@ -6,6 +6,15 @@
 
 import { tool, type ToolDefinition } from '@opencode-ai/plugin'
 import { analyzeComplexity, describeComplexity } from '../routing/complexity.js'
+import { routeTask, describeRouteDecision } from '../routing/task-router.js'
+import {
+  routeToCategory,
+  describeCategoryRoute,
+  getAllCategories,
+  getCategoryConfig,
+  isValidCategory,
+  type TaskCategory,
+} from '../routing/categories.js'
 
 // Use the tool's built-in schema
 const s = tool.schema
@@ -119,9 +128,184 @@ Task types and recommended agents:
     },
   })
 
+  /**
+   * Route a task to the most appropriate agent
+   */
+  const route_task = tool({
+    description: `Route a task to the most appropriate agent based on keywords, complexity, and context.
+
+This is a more sophisticated routing system than recommend_agent:
+- Analyzes task description for keyword patterns
+- Considers complexity analysis
+- Accounts for context (previous failures, budget constraints)
+- Provides confidence score and fallback recommendations
+
+Returns:
+- agent: recommended agent (operator, scout, intel, strategist, etc.)
+- model: default model for that agent
+- confidence: 0-1 confidence in routing
+- reason: explanation for the routing
+- fallbackAgent: alternative if primary unavailable`,
+
+    args: {
+      taskDescription: s.string().describe('Full description of the task to route'),
+      taskType: s.string().optional().describe('Explicit task type hint'),
+      previousFailures: s.number().optional().describe('Number of previous failed attempts'),
+      budgetConstrained: s.boolean().optional().describe('Whether to prefer cheaper agents'),
+    },
+
+    async execute(args, _ctx) {
+      const decision = routeTask({
+        taskDescription: args.taskDescription,
+        taskType: args.taskType,
+        context: {
+          previousFailures: args.previousFailures,
+          budgetConstrained: args.budgetConstrained,
+        },
+      })
+
+      return JSON.stringify({
+        success: true,
+        ...decision,
+        humanReadable: describeRouteDecision(decision),
+      })
+    },
+  })
+
+  /**
+   * Route task to category and get settings
+   */
+  const route_to_category = tool({
+    description: `Route a task to a category and get the configured temperature, model, and agent.
+
+Categories:
+- planning: Strategic planning and architecture (temp 0.7, Opus)
+- coding: General implementation (temp 0.3, Sonnet)
+- testing: Test writing and QA (temp 0.2, Sonnet)
+- documentation: Docs, comments, README (temp 0.5, Gemini)
+- research: Information lookup (temp 0.4, Sonnet)
+- ui: Frontend and UI work (temp 0.4, Gemini)
+- refactoring: Code refactoring (temp 0.2, Opus)
+- bugfix: Bug fixing (temp 0.2, Sonnet)
+
+Returns category match with model, temperature, and recommended agent.`,
+
+    args: {
+      taskDescription: s.string().describe('Task description to categorize'),
+      forceCategory: s.string().optional().describe('Force a specific category (planning, coding, testing, etc.)'),
+      forceModel: s.string().optional().describe('Override the model for this task'),
+      forceTemperature: s.number().optional().describe('Override the temperature (0-1)'),
+    },
+
+    async execute(args, _ctx) {
+      // Validate forceCategory if provided
+      if (args.forceCategory && !isValidCategory(args.forceCategory)) {
+        return JSON.stringify({
+          success: false,
+          error: `Invalid category: ${args.forceCategory}`,
+          validCategories: getAllCategories(),
+        })
+      }
+
+      const result = routeToCategory(
+        args.taskDescription,
+        undefined, // Use default configs
+        {
+          forceCategory: args.forceCategory as TaskCategory | undefined,
+          forceModel: args.forceModel,
+          forceTemperature: args.forceTemperature,
+        }
+      )
+
+      return JSON.stringify({
+        success: true,
+        category: result.primary.category,
+        categoryName: result.primary.config.name,
+        confidence: result.primary.confidence,
+        reason: result.primary.reason,
+        matchedKeywords: result.primary.matchedKeywords,
+        effectiveModel: result.effectiveModel,
+        effectiveTemperature: result.effectiveTemperature,
+        recommendedAgent: result.recommendedAgent,
+        secondaryCategories: result.secondary.map((m) => ({
+          category: m.category,
+          confidence: m.confidence,
+        })),
+        humanReadable: describeCategoryRoute(result),
+      })
+    },
+  })
+
+  /**
+   * List all categories and their configurations
+   */
+  const list_categories = tool({
+    description: `List all task categories with their configured models and temperatures.
+
+Shows each category's:
+- Model
+- Temperature
+- Preferred agent
+- Budget priority
+- Keywords`,
+
+    args: {
+      category: s.string().optional().describe('Specific category to show details for'),
+    },
+
+    async execute(args, _ctx) {
+      if (args.category) {
+        if (!isValidCategory(args.category)) {
+          return JSON.stringify({
+            success: false,
+            error: `Invalid category: ${args.category}`,
+            validCategories: getAllCategories(),
+          })
+        }
+
+        const config = getCategoryConfig(args.category as TaskCategory)
+        return JSON.stringify({
+          success: true,
+          category: args.category,
+          config: {
+            name: config.name,
+            description: config.description,
+            model: config.model,
+            temperature: config.temperature,
+            preferredAgent: config.preferredAgent,
+            fallbackAgents: config.fallbackAgents,
+            budgetPriority: config.budgetPriority,
+            keywords: config.keywords.slice(0, 10), // Limit to first 10 keywords
+          },
+        })
+      }
+
+      // List all categories
+      const categories = getAllCategories().map((cat) => {
+        const config = getCategoryConfig(cat)
+        return {
+          category: cat,
+          name: config.name,
+          model: config.model,
+          temperature: config.temperature,
+          preferredAgent: config.preferredAgent,
+          budgetPriority: config.budgetPriority,
+        }
+      })
+
+      return JSON.stringify({
+        success: true,
+        categories,
+      })
+    },
+  })
+
   return {
     analyze_complexity,
     recommend_agent,
+    route_task,
+    route_to_category,
+    list_categories,
   }
 }
 

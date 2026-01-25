@@ -7,7 +7,7 @@
 import { tool, type ToolDefinition } from '@opencode-ai/plugin'
 import type { MissionState } from '../mission/state.js'
 import type { CouncilMode } from '../types/config.js'
-import { conveneCouncil, quickConsult, shouldConveneCouncil } from '../council/index.js'
+import { conveneCouncil, quickConsult, shouldConveneCouncil } from '../orchestration/index.js'
 
 // Use the tool's built-in schema (Zod 4 compatible)
 const s = tool.schema

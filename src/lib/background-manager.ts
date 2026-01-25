@@ -13,6 +13,7 @@ import { nanoid } from 'nanoid'
 import type { MissionState } from '../mission/state.js'
 import { appendHistory } from '../mission/history.js'
 import { getConfig } from './config.js'
+import { taskNotifications } from './notifications.js'
 
 // =============================================================================
 // SDK Types (from OpenCode plugin system)
@@ -537,6 +538,10 @@ export class BackgroundManager {
 
       task.status = 'cancelled'
       task.completedAt = new Date().toISOString()
+
+      // Notify task cancelled
+      taskNotifications.cancelled(task.id, task.prompt.substring(0, 50))
+
       return true
     }
 
@@ -625,6 +630,9 @@ export class BackgroundManager {
       task.status = 'running'
       task.startedAt = new Date().toISOString()
 
+      // Notify task started
+      taskNotifications.started(task.id, task.agent, task.prompt.substring(0, 50))
+
       // Use SDK execution if client is available, otherwise fall back to simulation
       if (this.client) {
         console.log(`[delta9] [background] Executing task ${task.id} with SDK`)
@@ -639,6 +647,9 @@ export class BackgroundManager {
       task.completedAt = new Date().toISOString()
 
       console.error(`[delta9] [background] Task ${task.id} failed:`, task.error)
+
+      // Notify task failed
+      taskNotifications.failed(task.id, task.agent, task.prompt.substring(0, 50), task.error)
 
       // Log failure
       const mission = this.missionState.getMission()
@@ -859,6 +870,9 @@ export class BackgroundManager {
 
     console.log(`[delta9] [background] Task ${task.id} completed via SDK`)
 
+    // Notify task completed
+    taskNotifications.completed(task.id, task.agent, task.prompt.substring(0, 50))
+
     // Log completion
     const mission = this.missionState.getMission()
     if (mission) {
@@ -889,6 +903,9 @@ export class BackgroundManager {
 
     task.status = 'completed'
     task.completedAt = new Date().toISOString()
+
+    // Notify task completed
+    taskNotifications.completed(task.id, task.agent, task.prompt.substring(0, 50))
 
     // Log completion
     const mission = this.missionState.getMission()

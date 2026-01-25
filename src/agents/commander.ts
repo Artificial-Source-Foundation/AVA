@@ -6,13 +6,13 @@
  * Commander NEVER writes code - only plans and delegates.
  */
 
-import type { AgentDefinition } from '../types/agents.js'
+import type { AgentConfig } from '@opencode-ai/sdk'
 
 // =============================================================================
 // Commander System Prompt
 // =============================================================================
 
-const COMMANDER_SYSTEM_PROMPT = `You are Commander, the strategic planning and orchestration agent for Delta9.
+const COMMANDER_PROMPT = `You are Commander, the strategic planning and orchestration agent for Delta9.
 
 ## Your Role
 
@@ -118,20 +118,12 @@ You are the continuity that survives context compaction.`
 // Commander Agent Definition
 // =============================================================================
 
-export const commanderAgent: AgentDefinition = {
-  name: 'commander',
-  role: 'commander',
+export const commanderAgent: AgentConfig = {
+  description: 'Strategic planning and orchestration agent. Analyzes requests, creates mission plans, and coordinates execution.',
+  mode: 'primary',
   model: 'anthropic/claude-sonnet-4',
   temperature: 0.7,
-  systemPrompt: COMMANDER_SYSTEM_PROMPT,
-  tools: [
-    'mission_create',
-    'mission_update',
-    'mission_status',
-    'dispatch_task',
-    'request_validation',
-  ],
-  description: 'Strategic planning and orchestration agent. Analyzes requests, creates mission plans, and coordinates execution.',
+  prompt: COMMANDER_PROMPT,
   maxTokens: 4096,
 }
 
@@ -139,39 +131,25 @@ export const commanderAgent: AgentDefinition = {
 // Planning Mode Agent (Higher Reasoning)
 // =============================================================================
 
-export const commanderPlanningAgent: AgentDefinition = {
-  name: 'commander-planning',
-  role: 'commander',
+export const commanderPlanningAgent: AgentConfig = {
+  description: 'Commander in planning mode with enhanced reasoning for complex mission planning.',
+  mode: 'primary',
   model: 'anthropic/claude-opus-4-5',
   temperature: 0.7,
-  systemPrompt: COMMANDER_SYSTEM_PROMPT,
-  tools: [
-    'mission_create',
-    'mission_update',
-    'mission_status',
-    'scout_codebase',
-    'intel_research',
-  ],
-  description: 'Commander in planning mode with enhanced reasoning for complex mission planning.',
+  prompt: COMMANDER_PROMPT,
   maxTokens: 8192,
+  thinking: { type: 'enabled', budgetTokens: 32000 },
 }
 
 // =============================================================================
 // Execution Mode Agent (Faster Dispatch)
 // =============================================================================
 
-export const commanderExecutionAgent: AgentDefinition = {
-  name: 'commander-execution',
-  role: 'commander',
+export const commanderExecutionAgent: AgentConfig = {
+  description: 'Commander in execution mode for task dispatch and monitoring.',
+  mode: 'subagent',
   model: 'anthropic/claude-sonnet-4',
   temperature: 0.3,
-  systemPrompt: COMMANDER_SYSTEM_PROMPT,
-  tools: [
-    'mission_status',
-    'dispatch_task',
-    'request_validation',
-    'mission_update',
-  ],
-  description: 'Commander in execution mode for task dispatch and monitoring.',
+  prompt: COMMANDER_PROMPT,
   maxTokens: 2048,
 }

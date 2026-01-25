@@ -3,218 +3,95 @@
  *
  * Strategic AI Coordination for Mission-Critical Development
  *
- * This plugin implements a hierarchical multi-agent system with:
- * - Commander: Strategic planning and orchestration
- * - Operators: Task execution
- * - Validator: Quality verification
- * - Persistent mission state via mission.json
+ * Implements Commander + Council + Operators architecture:
+ * - Commander: Lead planner & orchestrator (never writes code)
+ * - Council: Multiple oracles for strategic decisions
+ * - Operators: Task executors
+ * - Validator: QA gate for all completed work
  */
 
-import { loadConfig, getSeamlessConfig } from './lib/config.js'
-import { createLogger, setDefaultLogger, type Logger } from './lib/logger.js'
+import type { Plugin, Hooks } from '@opencode-ai/plugin'
 import { MissionState } from './mission/state.js'
-import { missionExists } from './lib/paths.js'
-import {
-  commanderAgent,
-  commanderPlanningAgent,
-  commanderExecutionAgent,
-  operatorAgent,
-  operatorComplexAgent,
-  validatorAgent,
-  validatorStrictAgent,
-} from './agents/index.js'
-import { createDelta9Tools } from './tools/index.js'
+import { createDelta9Tools, type OpenCodeClient } from './tools/index.js'
+import { createDelta9Hooks } from './hooks/index.js'
+import { initLogger, getNamedLogger } from './lib/logger.js'
 
-// =============================================================================
-// Plugin Types
-// =============================================================================
+const Delta9: Plugin = async (ctx) => {
+  const cwd = ctx.worktree || ctx.directory
 
-/**
- * OpenCode plugin context
- */
-export interface PluginContext {
-  /** Project information */
-  project: {
-    path: string
-    name?: string
-  }
-  /** OpenCode client */
-  client: {
-    app: {
-      log: (message: string) => void
-    }
-  }
-  /** Shell execution */
-  $: (command: string) => Promise<{ stdout: string; stderr: string; exitCode: number }>
-  /** Current working directory */
-  directory: string
-}
+  // Extract OpenCode client from context (for SDK integration)
+  // The client enables real agent execution in background tasks
+  // We cast through unknown since the PluginInput type has more specific return types
+  const client = (ctx as unknown as { client?: OpenCodeClient }).client
 
-/**
- * Plugin return type
- */
-export interface PluginExport {
-  name: string
-  agents?: Record<string, unknown>
-  tools?: Record<string, unknown>
-  hooks?: Record<string, (...args: unknown[]) => Promise<void>>
-}
+  // Initialize structured logger with OpenCode client if available
+  initLogger(client)
+  const log = getNamedLogger('core')
 
-// =============================================================================
-// Plugin State
-// =============================================================================
-
-let missionState: MissionState | null = null
-let logger: Logger | null = null
-
-// =============================================================================
-// Plugin Initialization
-// =============================================================================
-
-/**
- * Initialize Delta9 plugin
- */
-async function initializeDelta9(ctx: PluginContext): Promise<{
-  state: MissionState
-  logger: Logger
-}> {
-  const cwd = ctx.project.path || ctx.directory
-
-  // Create logger
-  logger = createLogger(ctx.client, { plugin: 'delta9' }, 'info')
-  setDefaultLogger(logger)
-
-  // Load configuration (validates and caches)
-  loadConfig(cwd)
+  log.info('Plugin loading...', { cwd })
 
   // Initialize mission state
-  missionState = new MissionState(cwd)
+  const missionState = new MissionState(cwd)
 
-  // Load existing mission if present
-  if (missionExists(cwd)) {
-    const mission = missionState.load()
-    if (mission) {
-      logger.info('Loaded existing mission', { missionId: mission.id, status: mission.status })
+  // Create logger function for hooks (wrapper for backward compatibility)
+  const hookLog = (level: string, message: string, data?: Record<string, unknown>) => {
+    const hookLogger = getNamedLogger('hooks')
+    switch (level) {
+      case 'debug':
+        hookLogger.debug(message, data)
+        break
+      case 'warn':
+        hookLogger.warn(message, data)
+        break
+      case 'error':
+        hookLogger.error(message, data)
+        break
+      default:
+        hookLogger.info(message, data)
     }
   }
 
-  logger.info('Delta9 initialized', { cwd })
+  // Create all tools (mission, dispatch, validation, delegation, background, council, memory, diagnostics)
+  // Pass client for SDK integration in delegation and background tools
+  const tools = createDelta9Tools(missionState, cwd, client)
 
-  return { state: missionState, logger }
-}
+  // Create all hooks (session lifecycle, tool output, recovery)
+  const hooks = createDelta9Hooks({
+    state: missionState,
+    cwd,
+    log: hookLog,
+  })
 
-// =============================================================================
-// Plugin Export
-// =============================================================================
-
-/**
- * Delta9 OpenCode Plugin
- */
-export async function delta9(ctx: PluginContext): Promise<PluginExport> {
-  const { state, logger } = await initializeDelta9(ctx)
-  const cwd = ctx.project.path || ctx.directory
-  const seamless = getSeamlessConfig(cwd)
-
-  // Create tools
-  const tools = createDelta9Tools(state)
-
-  // Build agent registry
-  const agents: Record<string, unknown> = {
-    // Core agents always available
-    commander: commanderAgent,
-    'commander-planning': commanderPlanningAgent,
-    'commander-execution': commanderExecutionAgent,
-    operator: operatorAgent,
-    'operator-complex': operatorComplexAgent,
-    validator: validatorAgent,
-    'validator-strict': validatorStrictAgent,
-  }
-
-  // Seamless integration: replace default agents if configured
-  if (seamless.replaceBuild) {
-    agents.build = commanderExecutionAgent
-    logger.debug('Replaced default build agent with Commander')
-  }
-
-  if (seamless.replacePlan) {
-    agents.plan = commanderPlanningAgent
-    logger.debug('Replaced default plan agent with Commander (planning mode)')
-  }
+  log.info('Plugin loaded', {
+    tools: Object.keys(tools).length,
+    sdk: client ? 'available' : 'simulation',
+  })
 
   return {
-    name: 'delta9',
+    // All Delta9 tools
+    tool: tools,
 
-    agents,
+    // Session lifecycle events (created, compacted, deleted, idle, error)
+    event: hooks.event,
 
-    tools: tools as unknown as Record<string, unknown>,
+    // Tool hooks for context injection and recovery
+    'tool.execute.before': hooks['tool.execute.before'],
+    'tool.execute.after': hooks['tool.execute.after'],
 
-    hooks: {
-      /**
-       * Session created - load mission state
-       */
-      'session.created': async () => {
-        if (missionExists(cwd)) {
-          const mission = state.load()
-          if (mission) {
-            logger.info('Session started with active mission', {
-              missionId: mission.id,
-              status: mission.status,
-              progress: state.getProgress(),
-            })
-          }
-        }
-      },
+    // Config handler to hide built-in agents
+    async config(config) {
+      const existingAgents = (config.agent as Record<string, Record<string, unknown>>) ?? {}
+      const existingBuild = existingAgents.build ?? {}
+      const existingPlan = existingAgents.plan ?? {}
 
-      /**
-       * Session idle - check for pending tasks
-       */
-      'session.idle': async () => {
-        const mission = state.getMission()
-        if (!mission) return
-
-        if (mission.status === 'in_progress') {
-          const nextTask = state.getNextTask()
-          if (nextTask) {
-            logger.info('Pending task available', {
-              taskId: nextTask.id,
-              description: nextTask.description.substring(0, 50),
-            })
-          }
-        }
-      },
-
-      /**
-       * Tool execution - before hook
-       */
-      'tool.execute.before': async (_input: unknown) => {
-        // Could be used for logging or cost tracking
-      },
-
-      /**
-       * Tool execution - after hook
-       */
-      'tool.execute.after': async (_input: unknown, _output: unknown) => {
-        // Could be used for logging or cost tracking
-      },
+      // Reassign config.agent with build and plan hidden/demoted
+      config.agent = {
+        ...existingAgents,
+        build: { ...existingBuild, mode: 'subagent', hidden: true },
+        plan: { ...existingPlan, mode: 'subagent', hidden: true },
+      }
     },
-  }
+  } satisfies Hooks
 }
 
-// =============================================================================
-// Exports
-// =============================================================================
-
-// Default export for OpenCode plugin loading
-export default delta9
-
-// Named exports for programmatic use
-export { MissionState } from './mission/index.js'
-export { loadConfig, getConfig } from './lib/config.js'
-export { createLogger, type Logger } from './lib/logger.js'
-export {
-  commanderAgent,
-  operatorAgent,
-  validatorAgent,
-} from './agents/index.js'
-export { createDelta9Tools } from './tools/index.js'
-export * from './types/index.js'
+export default Delta9

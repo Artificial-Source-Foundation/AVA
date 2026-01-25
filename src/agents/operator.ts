@@ -6,13 +6,13 @@
  * Operators have full access to code editing tools.
  */
 
-import type { AgentDefinition } from '../types/agents.js'
+import type { AgentConfig } from '@opencode-ai/sdk'
 
 // =============================================================================
 // Operator System Prompt
 // =============================================================================
 
-const OPERATOR_SYSTEM_PROMPT = `You are Operator, the execution agent for Delta9.
+const OPERATOR_PROMPT = `You are Operator, the execution agent for Delta9.
 
 ## Your Role
 
@@ -94,23 +94,12 @@ Trust the acceptance criteria - they are your contract.`
 // Operator Agent Definition
 // =============================================================================
 
-export const operatorAgent: AgentDefinition = {
-  name: 'operator',
-  role: 'operator',
+export const operatorAgent: AgentConfig = {
+  description: 'Primary execution agent. Implements tasks with full code editing capabilities.',
+  mode: 'subagent',
   model: 'anthropic/claude-sonnet-4',
   temperature: 0.3,
-  systemPrompt: OPERATOR_SYSTEM_PROMPT,
-  tools: [
-    'read',
-    'write',
-    'edit',
-    'bash',
-    'glob',
-    'grep',
-    'task_complete',
-  ],
-  specialty: 'general',
-  description: 'Primary execution agent. Implements tasks with full code editing capabilities.',
+  prompt: OPERATOR_PROMPT,
   maxTokens: 8192,
 }
 
@@ -118,23 +107,12 @@ export const operatorAgent: AgentDefinition = {
 // Complex Task Operator (Higher Capability)
 // =============================================================================
 
-export const operatorComplexAgent: AgentDefinition = {
-  name: 'operator-complex',
-  role: 'operator',
+export const operatorComplexAgent: AgentConfig = {
+  description: 'Enhanced operator for complex tasks requiring deeper reasoning.',
+  mode: 'subagent',
   model: 'anthropic/claude-opus-4-5',
   temperature: 0.3,
-  systemPrompt: OPERATOR_SYSTEM_PROMPT,
-  tools: [
-    'read',
-    'write',
-    'edit',
-    'bash',
-    'glob',
-    'grep',
-    'task_complete',
-    'request_strategist',
-  ],
-  specialty: 'general',
-  description: 'Enhanced operator for complex tasks requiring deeper reasoning.',
+  prompt: OPERATOR_PROMPT,
   maxTokens: 16384,
+  thinking: { type: 'enabled', budgetTokens: 24000 },
 }

@@ -1,9 +1,12 @@
 /**
- * Delta9 Logger
+ * Delta9 Structured Logger
  *
- * Structured logging utility for Delta9.
- * In production, this wraps OpenCode's client.app.log().
- * In development, it falls back to console.
+ * Provides consistent logging across all Delta9 components with:
+ * - Level-based logging (debug, info, warn, error)
+ * - Named component loggers (e.g., 'background', 'delegation', 'mission')
+ * - Context injection (task IDs, session IDs, agent names)
+ * - Integration with OpenCode's app.log when available
+ * - Graceful fallback to console with formatting
  */
 
 // =============================================================================
@@ -41,18 +44,29 @@ function formatMessage(
   context: Record<string, unknown>,
   data?: Record<string, unknown>
 ): string {
-  const timestamp = new Date().toISOString()
-  const prefix = `[${timestamp}] [Delta9] [${level.toUpperCase()}]`
+  // Compact timestamp: HH:MM:SS.mmm
+  const timestamp = new Date().toISOString().slice(11, 23)
 
-  const contextStr = Object.keys(context).length > 0
-    ? ` ${JSON.stringify(context)}`
-    : ''
+  // Extract component name from context for cleaner display
+  const { component, ...restContext } = context
+  const componentStr = component ? `:${component}` : ''
+  const prefix = `${timestamp} [delta9${componentStr}] [${level.toUpperCase()}]`
 
-  const dataStr = data && Object.keys(data).length > 0
-    ? ` ${JSON.stringify(data)}`
-    : ''
+  // Format remaining context as key=value pairs (more readable than JSON)
+  const contextPairs = Object.entries(restContext)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
 
-  return `${prefix}${contextStr} ${message}${dataStr}`
+  const dataPairs = data
+    ? Object.entries(data)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
+    : []
+
+  const allPairs = [...contextPairs, ...dataPairs]
+  const pairsStr = allPairs.length > 0 ? ` | ${allPairs.join(' ')}` : ''
+
+  return `${prefix} ${message}${pairsStr}`
 }
 
 function createConsoleLogger(
@@ -98,11 +112,9 @@ function createConsoleLogger(
 // OpenCode Logger Wrapper
 // =============================================================================
 
-export interface OpenCodeClient {
-  app: {
-    log: (message: string) => void
-  }
-}
+// Re-export OpenCodeClient from background-manager for type compatibility
+export type { OpenCodeClient } from './background-manager.js'
+import type { OpenCodeClient } from './background-manager.js'
 
 function createOpenCodeLogger(
   client: OpenCodeClient,
@@ -113,22 +125,29 @@ function createOpenCodeLogger(
     return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[minLevel]
   }
 
+  // Check if app.log is available
+  const hasAppLog = client.app && typeof client.app.log === 'function'
+
   const log = (level: LogLevel, message: string, data?: Record<string, unknown>): void => {
     if (!shouldLog(level)) return
 
     const formatted = formatMessage(level, message, context, data)
 
-    // Use OpenCode's log function
-    client.app.log(formatted)
-
-    // Also log to console in development
-    if (process.env.NODE_ENV === 'development') {
-      const consoleFn = level === 'error' ? console.error
-        : level === 'warn' ? console.warn
-        : level === 'debug' ? console.debug
-        : console.info
-      consoleFn(formatted)
+    // Use OpenCode's log function if available
+    if (hasAppLog && client.app) {
+      client.app.log(formatted)
     }
+
+    // Also log to console (always, since app.log may not be available)
+    const consoleFn =
+      level === 'error'
+        ? console.error
+        : level === 'warn'
+          ? console.warn
+          : level === 'debug'
+            ? console.debug
+            : console.info
+    consoleFn(formatted)
   }
 
   return {
@@ -196,6 +215,38 @@ export function getLogger(): Logger {
   return defaultLogger
 }
 
+/**
+ * Get a named logger for a specific component.
+ * The component name will appear in log output: [delta9:component]
+ *
+ * @example
+ * const log = getNamedLogger('background')
+ * log.info('Task started', { taskId: 'bg_123' })
+ * // Output: 12:34:56.789 [delta9:background] [INFO] Task started | taskId=bg_123
+ */
+export function getNamedLogger(component: string): Logger {
+  return defaultLogger.child({ component })
+}
+
+// =============================================================================
+// Initialization
+// =============================================================================
+
+/**
+ * Initialize the default logger with an OpenCode client.
+ * Call this once during plugin initialization.
+ *
+ * @example
+ * const Delta9: Plugin = async (ctx) => {
+ *   const client = (ctx as unknown as { client?: OpenCodeClient }).client
+ *   initLogger(client)
+ *   // ... rest of plugin setup
+ * }
+ */
+export function initLogger(client?: OpenCodeClient, minLevel: LogLevel = 'info'): void {
+  defaultLogger = createLogger(client, { component: 'core' }, minLevel)
+}
+
 // =============================================================================
 // Convenience Functions
 // =============================================================================
@@ -214,4 +265,20 @@ export function warn(message: string, data?: Record<string, unknown>): void {
 
 export function error(message: string, data?: Record<string, unknown>): void {
   defaultLogger.error(message, data)
+}
+
+// =============================================================================
+// Common Context Types
+// =============================================================================
+
+/**
+ * Common log context fields for Delta9
+ */
+export interface Delta9LogContext {
+  taskId?: string
+  sessionId?: string
+  agent?: string
+  missionId?: string
+  component?: string
+  [key: string]: unknown
 }

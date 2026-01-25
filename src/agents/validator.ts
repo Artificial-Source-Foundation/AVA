@@ -6,13 +6,13 @@
  * Validator does NOT write code - only evaluates.
  */
 
-import type { AgentDefinition } from '../types/agents.js'
+import type { AgentConfig } from '@opencode-ai/sdk'
 
 // =============================================================================
 // Validator System Prompt
 // =============================================================================
 
-const VALIDATOR_SYSTEM_PROMPT = `You are Validator, the quality assurance agent for Delta9.
+const VALIDATOR_PROMPT = `You are Validator, the quality assurance agent for Delta9.
 
 ## Your Role
 
@@ -124,37 +124,7 @@ Letting bad work through creates technical debt.
 But being too strict blocks progress.
 Find the balance: catch real issues, let the good work through.`
 
-// =============================================================================
-// Validator Agent Definition
-// =============================================================================
-
-export const validatorAgent: AgentDefinition = {
-  name: 'validator',
-  role: 'validator',
-  model: 'anthropic/claude-haiku-4',
-  temperature: 0.1,
-  systemPrompt: VALIDATOR_SYSTEM_PROMPT,
-  tools: [
-    'read',
-    'glob',
-    'grep',
-    'bash',
-    'validation_result',
-  ],
-  description: 'Quality verification agent. Reviews completed work against acceptance criteria.',
-  maxTokens: 4096,
-}
-
-// =============================================================================
-// Strict Validator (For Critical Tasks)
-// =============================================================================
-
-export const validatorStrictAgent: AgentDefinition = {
-  name: 'validator-strict',
-  role: 'validator',
-  model: 'anthropic/claude-sonnet-4',
-  temperature: 0.0,
-  systemPrompt: VALIDATOR_SYSTEM_PROMPT + `
+const VALIDATOR_STRICT_ADDON = `
 
 ## Strict Mode Active
 
@@ -164,14 +134,30 @@ You are in strict mode. Apply higher standards:
 - Verify no console.logs or debug code left
 - Check for security issues
 - Verify error handling
-- Check edge cases mentioned in criteria`,
-  tools: [
-    'read',
-    'glob',
-    'grep',
-    'bash',
-    'validation_result',
-  ],
+- Check edge cases mentioned in criteria`
+
+// =============================================================================
+// Validator Agent Definition
+// =============================================================================
+
+export const validatorAgent: AgentConfig = {
+  description: 'Quality verification agent. Reviews completed work against acceptance criteria.',
+  mode: 'subagent',
+  model: 'anthropic/claude-haiku-4',
+  temperature: 0.1,
+  prompt: VALIDATOR_PROMPT,
+  maxTokens: 4096,
+}
+
+// =============================================================================
+// Strict Validator (For Critical Tasks)
+// =============================================================================
+
+export const validatorStrictAgent: AgentConfig = {
   description: 'Strict validator for critical tasks with enhanced checking.',
+  mode: 'subagent',
+  model: 'anthropic/claude-sonnet-4',
+  temperature: 0.0,
+  prompt: VALIDATOR_PROMPT + VALIDATOR_STRICT_ADDON,
   maxTokens: 4096,
 }

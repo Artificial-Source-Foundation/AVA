@@ -58,11 +58,86 @@ export {
   type LogLevel,
   type Logger,
   type OpenCodeClient,
+  type Delta9LogContext,
   createLogger,
   setDefaultLogger,
   getLogger,
+  getNamedLogger,
+  initLogger,
   debug,
   info,
   warn,
   error,
 } from './logger.js'
+
+// Errors
+export {
+  Delta9Error,
+  type Delta9ErrorOptions,
+  errors,
+  isDelta9Error,
+  formatErrorResponse,
+} from './errors.js'
+
+// Hints
+export {
+  hints,
+  type HintContext,
+  getHint,
+  getBackgroundListHint,
+  getMissionStatusHint,
+  getCouncilStatusHint,
+} from './hints.js'
+
+// Background Manager
+export {
+  BackgroundManager,
+  getBackgroundManager,
+  clearBackgroundManager,
+  type BackgroundTask,
+  type BackgroundTaskStatus,
+  type BackgroundManagerConfig,
+  type LaunchInput,
+  type ExecuteSyncInput,
+} from './background-manager.js'
+
+// Model Resolution
+export {
+  getModelForRole,
+  getEnabledOracleConfigs,
+  getSupportAgentModel,
+  parseModelId,
+  buildModelId,
+  getFallbackChain,
+  resolveModelWithFallback,
+  getCouncilModels,
+  autoDetectCouncilMode,
+  type ModelRole,
+  type SupportAgentType,
+  type TaskComplexity,
+} from './models.js'
+
+// Budget
+export {
+  BudgetManager,
+  createBudgetManager,
+  formatBudget,
+  describeBudgetStatus,
+  MODEL_COSTS,
+  type BudgetConfig,
+  type BudgetStatus,
+  type BudgetCheckResult,
+  type AgentCategory,
+} from './budget.js'
+
+// Rate Limiter
+export {
+  RateLimiter,
+  createRateLimiter,
+  getBestFallback,
+  describeRetryResult,
+  FALLBACK_MODELS,
+  type RateLimitConfig,
+  type RateLimitError,
+  type RetryResult,
+} from './rate-limiter.js'

@@ -102,12 +102,19 @@ export interface BackgroundTask {
   error?: string
   /** Priority (higher = more important) */
   priority: number
+  /** Per-task timeout in ms (overrides global TTL) */
+  timeout?: number
+  /** Timeout handle for auto-cancel */
+  timeoutId?: ReturnType<typeof setTimeout>
   /** Progress tracking for stale detection */
   progress?: {
     lastUpdate: number // timestamp of last activity
     messageCount: number
   }
 }
+
+/** Default task timeout: 15 minutes */
+export const DEFAULT_TASK_TIMEOUT_MS = 15 * 60 * 1000
 
 export interface LaunchInput {
   /** Task prompt */
@@ -124,6 +131,8 @@ export interface LaunchInput {
   missionTaskId?: string
   /** Priority (default: 0) */
   priority?: number
+  /** Per-task timeout in ms (default: 15 minutes) */
+  timeout?: number
 }
 
 export interface ExecuteSyncInput {
@@ -323,8 +332,14 @@ export class BackgroundManager {
       this.pollingInterval = undefined
     }
 
-    // Abort running sessions
+    // Abort running sessions and clear timeouts
     for (const task of this.tasks.values()) {
+      // Clear timeout timer
+      if (task.timeoutId) {
+        clearTimeout(task.timeoutId)
+        task.timeoutId = undefined
+      }
+
       if (task.status === 'running' && task.sessionId && this.client) {
         this.client.session.abort({ path: { id: task.sessionId } }).catch(() => {
           // Swallow errors - session may already be gone
@@ -453,6 +468,7 @@ export class BackgroundManager {
       missionTaskId: input.missionTaskId,
       queuedAt: now,
       priority: input.priority ?? 0,
+      timeout: input.timeout ?? DEFAULT_TASK_TIMEOUT_MS,
     }
 
     this.tasks.set(taskId, task)
@@ -533,6 +549,12 @@ export class BackgroundManager {
     if (!task) return false
 
     if (task.status === 'pending' || task.status === 'running') {
+      // Clear timeout timer
+      if (task.timeoutId) {
+        clearTimeout(task.timeoutId)
+        task.timeoutId = undefined
+      }
+
       // Abort the session if running
       if (task.status === 'running' && task.sessionId && this.client) {
         this.client.session.abort({ path: { id: task.sessionId } }).catch(() => {
@@ -634,12 +656,20 @@ export class BackgroundManager {
       task.status = 'running'
       task.startedAt = new Date().toISOString()
 
+      // Start timeout timer for auto-cancel
+      const timeoutMs = task.timeout ?? DEFAULT_TASK_TIMEOUT_MS
+      task.timeoutId = setTimeout(() => {
+        this.cancelTaskWithTimeout(task.id, timeoutMs)
+      }, timeoutMs)
+
       // Notify task started
       taskNotifications.started(task.id, task.agent, task.prompt.substring(0, 50))
 
       // Use SDK execution if client is available, otherwise fall back to simulation
       if (this.client) {
-        console.log(`[delta9] [background] Executing task ${task.id} with SDK`)
+        console.log(
+          `[delta9] [background] Executing task ${task.id} with SDK (timeout: ${Math.round(timeoutMs / 60000)}min)`
+        )
         await this.executeWithSDK(task)
       } else {
         console.log(
@@ -669,7 +699,54 @@ export class BackgroundManager {
         })
       }
     } finally {
+      // Clear timeout timer
+      if (task.timeoutId) {
+        clearTimeout(task.timeoutId)
+        task.timeoutId = undefined
+      }
       this.concurrency.release()
+    }
+  }
+
+  /**
+   * Cancel a task due to timeout
+   */
+  private cancelTaskWithTimeout(taskId: string, timeoutMs: number): void {
+    const task = this.tasks.get(taskId)
+    if (!task) return
+
+    // Only cancel if still running
+    if (task.status !== 'running') return
+
+    const timeoutMins = Math.round(timeoutMs / 60000)
+    console.log(
+      `[delta9] [background] Task ${taskId} auto-cancelled after ${timeoutMins} minute timeout`
+    )
+
+    // Abort the session if available
+    if (task.sessionId && this.client) {
+      this.client.session.abort({ path: { id: task.sessionId } }).catch(() => {
+        // Swallow errors - session may already be gone
+      })
+    }
+
+    task.status = 'failed'
+    task.error = `Task exceeded timeout (${timeoutMins} minutes)`
+    task.completedAt = new Date().toISOString()
+
+    // Notify task timeout
+    taskNotifications.failed(task.id, task.agent, task.prompt.substring(0, 50), task.error)
+
+    // Log timeout
+    const mission = this.missionState.getMission()
+    if (mission) {
+      appendHistory(this.cwd, {
+        type: 'background_task_failed',
+        timestamp: task.completedAt,
+        missionId: mission.id,
+        taskId: task.missionTaskId,
+        data: { backgroundTaskId: task.id, error: task.error, reason: 'timeout' },
+      })
     }
   }
 

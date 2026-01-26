@@ -84,6 +84,71 @@ export interface QueryOptions {
   format?: 'table' | 'json'
   /** Custom project directory */
   cwd?: string
+  /** Query preset: errors, decisions, budget, agents, timeline */
+  preset?: 'errors' | 'decisions' | 'budget' | 'agents' | 'timeline'
+}
+
+export interface ReplayOptions {
+  /** Mission ID to replay */
+  missionId?: string
+  /** Playback speed: 0.5x, 1x, 2x, instant */
+  speed?: '0.5x' | '1x' | '2x' | 'instant'
+  /** Filter by event type */
+  type?: string
+  /** Filter by category */
+  category?: string
+  /** Start from this event number */
+  start?: number
+  /** End at this event number */
+  end?: number
+  /** Output format */
+  format?: 'timeline' | 'json'
+  /** Custom project directory */
+  cwd?: string
+}
+
+export interface ExportOptions {
+  /** Output format */
+  format?: 'json' | 'csv' | 'jsonl'
+  /** Output file path */
+  output?: string
+  /** Filter events since time */
+  since?: string
+  /** Filter events until time */
+  until?: string
+  /** Filter by event type */
+  type?: string
+  /** Filter by category */
+  category?: string
+  /** Custom project directory */
+  cwd?: string
+}
+
+export interface ReplayResult {
+  missionId?: string
+  events: Array<{
+    index: number
+    type: string
+    timestamp: string
+    elapsed: number
+    summary: string
+    data?: Record<string, unknown>
+  }>
+  stats: {
+    total: number
+    duration: number
+    categories: Record<string, number>
+  }
+  timestamp: string
+}
+
+export interface ExportResult {
+  success: boolean
+  outputPath?: string
+  format: string
+  eventsExported: number
+  error?: string
+  timestamp: string
 }
 
 export interface StatsOptions {

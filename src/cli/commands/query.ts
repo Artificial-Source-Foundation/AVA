@@ -15,6 +15,38 @@ import { colorize, colors, symbols } from '../types.js'
 import { EVENT_CATEGORIES } from '../../events/types.js'
 
 // =============================================================================
+// Query Presets
+// =============================================================================
+
+const QUERY_PRESETS: Record<string, Partial<QueryOptions>> = {
+  /** Recent errors and failures */
+  errors: {
+    search: 'failed|error|failure',
+    limit: 25,
+  },
+  /** Decision traces from council */
+  decisions: {
+    category: 'trace',
+    limit: 20,
+  },
+  /** Budget and cost events */
+  budget: {
+    category: 'budget',
+    limit: 50,
+  },
+  /** Agent activity */
+  agents: {
+    category: 'agent',
+    limit: 30,
+  },
+  /** Full timeline (recent activity) */
+  timeline: {
+    since: '1h',
+    limit: 100,
+  },
+}
+
+// =============================================================================
 // Query Command
 // =============================================================================
 
@@ -22,7 +54,15 @@ export async function queryCommand(options: QueryOptions): Promise<void> {
   const cwd = options.cwd || process.cwd()
   const format = options.format || 'table'
 
-  const result = executeQuery(cwd, options)
+  // Apply preset if specified
+  let effectiveOptions = { ...options }
+  if (options.preset && QUERY_PRESETS[options.preset]) {
+    effectiveOptions = { ...QUERY_PRESETS[options.preset], ...options }
+    // Keep the preset name for display
+    effectiveOptions.preset = options.preset
+  }
+
+  const result = executeQuery(cwd, effectiveOptions)
 
   switch (format) {
     case 'json':
@@ -30,7 +70,7 @@ export async function queryCommand(options: QueryOptions): Promise<void> {
       break
     case 'table':
     default:
-      printTableFormat(result, options)
+      printTableFormat(result, effectiveOptions)
       break
   }
 }
@@ -218,12 +258,16 @@ function printTableFormat(result: QueryResult, options: QueryOptions): void {
 
   console.log()
   console.log(colorize('═'.repeat(width), 'cyan'))
-  console.log(colorize('  EVENT QUERY RESULTS', 'bold'))
+  const title = options.preset
+    ? `  EVENT QUERY: ${options.preset.toUpperCase()}`
+    : '  EVENT QUERY RESULTS'
+  console.log(colorize(title, 'bold'))
   console.log(colorize('═'.repeat(width), 'cyan'))
   console.log()
 
   // Query summary
   console.log(`${colorize(symbols.bullet, 'cyan')} ${colorize('Query:', 'bold')}`)
+  if (options.preset) console.log(`  Preset: ${colorize(options.preset, 'cyan')}`)
   if (result.query.type) console.log(`  Type: ${result.query.type}`)
   if (result.query.category) console.log(`  Category: ${result.query.category}`)
   if (result.query.since) console.log(`  Since: ${result.query.since}`)

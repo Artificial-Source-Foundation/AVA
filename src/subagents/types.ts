@@ -2,12 +2,25 @@
  * Delta9 Subagent Types
  *
  * Lightweight abstraction over background tasks with:
- * - Human-readable aliases
- * - State tracking
+ * - Human-readable aliases (auto-generated like "swift-amber-falcon")
+ * - State tracking with spawn depth limits
  * - Output piping
  */
 
 import { z } from 'zod'
+
+// =============================================================================
+// Configuration
+// =============================================================================
+
+export interface SubagentConfig {
+  /** Maximum spawn depth to prevent runaway cascades (default: 3) */
+  maxDepth: number
+}
+
+export const DEFAULT_SUBAGENT_CONFIG: SubagentConfig = {
+  maxDepth: 3,
+}
 
 // =============================================================================
 // Schemas
@@ -17,7 +30,7 @@ export const SubagentStateSchema = z.enum(['spawning', 'active', 'idle', 'comple
 export type SubagentState = z.infer<typeof SubagentStateSchema>
 
 export const SubagentSchema = z.object({
-  /** Human-readable alias (e.g., "code_searcher", "doc_writer") */
+  /** Human-readable alias (e.g., "swift-amber-falcon") */
   alias: z.string(),
 
   /** Background task ID (e.g., "bg_abc123") */
@@ -37,6 +50,12 @@ export const SubagentSchema = z.object({
 
   /** Parent session ID (caller that spawned this subagent) */
   parentSessionId: z.string().optional(),
+
+  /** Parent subagent ID (for depth tracking) */
+  parentSubagentId: z.string().optional(),
+
+  /** Spawn depth (0 = root level, 1 = first child, etc.) */
+  depth: z.number().default(0),
 
   /** When subagent was spawned */
   spawnedAt: z.string(),
@@ -61,8 +80,8 @@ export type Subagent = z.infer<typeof SubagentSchema>
 // =============================================================================
 
 export interface SpawnSubagentInput {
-  /** Human-readable alias for this subagent */
-  alias: string
+  /** Human-readable alias for this subagent (auto-generated if not provided) */
+  alias?: string
 
   /** Task prompt */
   prompt: string
@@ -78,6 +97,9 @@ export interface SpawnSubagentInput {
 
   /** Parent session ID for output piping */
   parentSessionId?: string
+
+  /** Parent subagent ID (for depth tracking - prevents runaway cascades) */
+  parentSubagentId?: string
 }
 
 export interface SubagentOutput {
@@ -107,5 +129,7 @@ export interface SubagentQuery {
 export interface SubagentStats {
   total: number
   byState: Record<SubagentState, number>
+  byDepth: Record<number, number>
   pendingDelivery: number
+  maxDepthReached: number
 }

@@ -2,11 +2,13 @@
  * Delta9 Subagent Manager
  *
  * Thin layer over BackgroundManager that adds:
- * - Human-readable aliases for subagents
+ * - Human-readable aliases (auto-generated like "swift-amber-falcon")
+ * - Spawn depth tracking and limits
  * - State tracking
  * - Output piping back to parent sessions
  */
 
+import { uniqueNamesGenerator, adjectives, colors, animals } from 'unique-names-generator'
 import type { MissionState } from '../mission/state.js'
 import { getBackgroundManager, type OpenCodeClient } from '../lib/background-manager.js'
 import type {
@@ -16,7 +18,9 @@ import type {
   SubagentOutput,
   SubagentQuery,
   SubagentStats,
+  SubagentConfig,
 } from './types.js'
+import { DEFAULT_SUBAGENT_CONFIG } from './types.js'
 
 // =============================================================================
 // Constants
@@ -36,11 +40,47 @@ export class SubagentManager {
   private readonly missionState: MissionState
   private readonly cwd: string
   private readonly client: OpenCodeClient | undefined
+  private readonly config: SubagentConfig
 
-  constructor(missionState: MissionState, cwd: string, client?: OpenCodeClient) {
+  constructor(
+    missionState: MissionState,
+    cwd: string,
+    client?: OpenCodeClient,
+    config?: Partial<SubagentConfig>
+  ) {
     this.missionState = missionState
     this.cwd = cwd
     this.client = client
+    this.config = { ...DEFAULT_SUBAGENT_CONFIG, ...config }
+  }
+
+  // ===========================================================================
+  // Alias Generation
+  // ===========================================================================
+
+  /**
+   * Generate a unique human-readable alias like "swift-amber-falcon"
+   */
+  private generateAlias(): string {
+    let alias: string
+    let attempts = 0
+    const maxAttempts = 10
+
+    do {
+      alias = uniqueNamesGenerator({
+        dictionaries: [adjectives, colors, animals],
+        separator: '-',
+        length: 3,
+      })
+      attempts++
+    } while (this.aliasToId.has(alias) && attempts < maxAttempts)
+
+    if (attempts >= maxAttempts) {
+      // Fallback: append timestamp
+      alias = `${alias}-${Date.now()}`
+    }
+
+    return alias
   }
 
   // ===========================================================================
@@ -49,11 +89,35 @@ export class SubagentManager {
 
   /**
    * Spawn a new subagent with a human-readable alias
+   *
+   * Features:
+   * - Auto-generates alias like "swift-amber-falcon" if not provided
+   * - Enforces spawn depth limits to prevent runaway cascades
+   * - Tracks parent subagent for depth calculation
    */
   async spawn(input: SpawnSubagentInput): Promise<Subagent> {
-    // Validate alias uniqueness
-    if (this.aliasToId.has(input.alias)) {
-      throw new Error(`Subagent alias already in use: ${input.alias}`)
+    // Generate or validate alias
+    const alias = input.alias || this.generateAlias()
+
+    if (this.aliasToId.has(alias)) {
+      throw new Error(`Subagent alias already in use: ${alias}`)
+    }
+
+    // Calculate and validate spawn depth
+    let depth = 0
+    if (input.parentSubagentId) {
+      const parent = this.subagents.get(input.parentSubagentId)
+      if (parent) {
+        depth = (parent.depth ?? 0) + 1
+      }
+    }
+
+    if (depth >= this.config.maxDepth) {
+      throw new Error(
+        `Maximum spawn depth (${this.config.maxDepth}) exceeded. ` +
+          `Cannot spawn subagent at depth ${depth}. ` +
+          `This limit prevents runaway cascades.`
+      )
     }
 
     const manager = getBackgroundManager(this.missionState, this.cwd, this.client)
@@ -76,25 +140,28 @@ export class SubagentManager {
     const sessionId = task?.sessionId
 
     const subagent: Subagent = {
-      alias: input.alias,
+      alias,
       taskId,
       sessionId,
       agentType: input.agentType || 'operator',
       prompt: input.prompt,
       state: 'spawning',
       parentSessionId: input.parentSessionId,
+      parentSubagentId: input.parentSubagentId,
+      depth,
       spawnedAt: new Date().toISOString(),
       outputDelivered: false,
     }
 
     this.subagents.set(taskId, subagent)
-    this.aliasToId.set(input.alias, taskId)
+    this.aliasToId.set(alias, taskId)
 
     // Emit event
     this.emitEvent('subagent.spawned', {
       alias: subagent.alias,
       taskId: subagent.taskId,
       agentType: subagent.agentType,
+      depth: subagent.depth,
     })
 
     // Start polling for completion
@@ -183,10 +250,17 @@ export class SubagentManager {
       failed: 0,
     }
 
+    const byDepth: Record<number, number> = {}
     let pendingDelivery = 0
+    let maxDepthReached = 0
 
     for (const subagent of this.subagents.values()) {
       byState[subagent.state]++
+
+      const depth = subagent.depth ?? 0
+      byDepth[depth] = (byDepth[depth] || 0) + 1
+      maxDepthReached = Math.max(maxDepthReached, depth)
+
       if (subagent.state === 'completed' && !subagent.outputDelivered && subagent.output) {
         pendingDelivery++
       }
@@ -195,7 +269,9 @@ export class SubagentManager {
     return {
       total: this.subagents.size,
       byState,
+      byDepth,
       pendingDelivery,
+      maxDepthReached,
     }
   }
 
@@ -386,10 +462,11 @@ let globalSubagentManager: SubagentManager | null = null
 export function getSubagentManager(
   missionState: MissionState,
   cwd: string,
-  client?: OpenCodeClient
+  client?: OpenCodeClient,
+  config?: Partial<SubagentConfig>
 ): SubagentManager {
   if (!globalSubagentManager) {
-    globalSubagentManager = new SubagentManager(missionState, cwd, client)
+    globalSubagentManager = new SubagentManager(missionState, cwd, client, config)
   }
   return globalSubagentManager
 }

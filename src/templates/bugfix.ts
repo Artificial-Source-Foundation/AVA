@@ -165,18 +165,12 @@ export const quickBugfixTemplate: MissionTemplate = {
       tasks: [
         {
           description: 'Identify and fix the bug',
-          acceptanceCriteria: [
-            'Bug is fixed',
-            'No regression introduced',
-          ],
+          acceptanceCriteria: ['Bug is fixed', 'No regression introduced'],
           routeTo: 'SURGEON',
         },
         {
           description: 'Verify fix and run tests',
-          acceptanceCriteria: [
-            'Fix verified',
-            'Tests pass',
-          ],
+          acceptanceCriteria: ['Fix verified', 'Tests pass'],
           dependsOn: [0],
         },
       ],

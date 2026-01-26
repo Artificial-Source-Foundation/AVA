@@ -182,7 +182,7 @@ export class RateLimiter {
    * Sleep for specified duration
    */
   private async sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms))
+    return new Promise((resolve) => setTimeout(resolve, ms))
   }
 
   /**
@@ -316,7 +316,10 @@ export function createRateLimiter(config?: Partial<RateLimitConfig>): RateLimite
 /**
  * Get best available fallback model
  */
-export function getBestFallback(model: string, unavailable: Set<string> = new Set()): string | null {
+export function getBestFallback(
+  model: string,
+  unavailable: Set<string> = new Set()
+): string | null {
   const fallbacks = FALLBACK_MODELS[model] || []
 
   for (const fallback of fallbacks) {

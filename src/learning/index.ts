@@ -52,11 +52,7 @@ export {
 } from './types.js'
 
 // Engine
-export {
-  LearningEngine,
-  getLearningEngine,
-  resetLearningEngine,
-} from './engine.js'
+export { LearningEngine, getLearningEngine, resetLearningEngine } from './engine.js'
 
 // Insights
 export {

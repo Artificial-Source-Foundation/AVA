@@ -68,7 +68,10 @@ export class LockStore {
         this.releaseLockInternal(normalizedPath, existingLock, 'expired')
       } else if (existingLock.owner.id === options.owner.id) {
         // Same owner - extend the lock (CAS check)
-        if (options.expectedVersion !== undefined && existingLock.version !== options.expectedVersion) {
+        if (
+          options.expectedVersion !== undefined &&
+          existingLock.version !== options.expectedVersion
+        ) {
           return {
             success: false,
             error: `Version mismatch: expected ${options.expectedVersion}, got ${existingLock.version}`,
@@ -85,7 +88,12 @@ export class LockStore {
           reason: options.reason ?? existingLock.reason,
         }
         this.locks.set(normalizedPath, extendedLock)
-        this.emit({ type: 'extended', filePath: normalizedPath, owner: options.owner, timestamp: now })
+        this.emit({
+          type: 'extended',
+          filePath: normalizedPath,
+          owner: options.owner,
+          timestamp: now,
+        })
 
         return { success: true, lock: extendedLock }
       } else {
@@ -127,7 +135,13 @@ export class LockStore {
     }
 
     this.locks.set(normalizedPath, lock)
-    this.emit({ type: 'acquired', filePath: normalizedPath, owner: options.owner, timestamp: now, reason: options.reason })
+    this.emit({
+      type: 'acquired',
+      filePath: normalizedPath,
+      owner: options.owner,
+      timestamp: now,
+      reason: options.reason,
+    })
 
     return { success: true, lock }
   }
@@ -365,7 +379,11 @@ export class LockStore {
     return count
   }
 
-  private releaseLockInternal(filePath: string, lock: FileLock, reason: 'released' | 'expired'): void {
+  private releaseLockInternal(
+    filePath: string,
+    lock: FileLock,
+    reason: 'released' | 'expired'
+  ): void {
     this.locks.delete(filePath)
     this.emit({ type: reason, filePath, owner: lock.owner, timestamp: new Date() })
   }

@@ -180,11 +180,7 @@ export function normalizeVector(v: EmbeddingVector): EmbeddingVector {
 /**
  * Split text into overlapping chunks
  */
-export function chunkText(
-  text: string,
-  maxChunkSize: number,
-  overlap: number
-): string[] {
+export function chunkText(text: string, maxChunkSize: number, overlap: number): string[] {
   if (text.length <= maxChunkSize) {
     return [text]
   }
@@ -253,11 +249,7 @@ export class SemanticIndex {
     }
 
     // Chunk the content
-    const chunks = chunkText(
-      block.value,
-      this.config.maxChunkSize,
-      this.config.chunkOverlap
-    )
+    const chunks = chunkText(block.value, this.config.maxChunkSize, this.config.chunkOverlap)
 
     // Generate embeddings
     const embeddings = this.config.provider.embedBatch
@@ -288,11 +280,15 @@ export class SemanticIndex {
     this.lastIndexedAt = new Date()
 
     if (this.config.log) {
-      this.config.log('debug', `Indexed ${chunks.length} chunks from ${block.scope}:${block.label}`, {
-        label: block.label,
-        scope: block.scope,
-        chunks: chunks.length,
-      })
+      this.config.log(
+        'debug',
+        `Indexed ${chunks.length} chunks from ${block.scope}:${block.label}`,
+        {
+          label: block.label,
+          scope: block.scope,
+          chunks: chunks.length,
+        }
+      )
     }
 
     return chunks.length
@@ -400,13 +396,15 @@ export class SemanticIndex {
       category?: string
       maxResults?: number
     }
-  ): Promise<Array<{
-    scope: KnowledgeScope
-    label: string
-    category: string
-    bestScore: number
-    matchedChunks: number
-  }>> {
+  ): Promise<
+    Array<{
+      scope: KnowledgeScope
+      label: string
+      category: string
+      bestScore: number
+      matchedChunks: number
+    }>
+  > {
     // Search with higher limit to account for chunks
     const searchResults = await this.search(query, {
       ...options,
@@ -414,13 +412,16 @@ export class SemanticIndex {
     })
 
     // Group by source
-    const grouped = new Map<string, {
-      scope: KnowledgeScope
-      label: string
-      category: string
-      bestScore: number
-      matchedChunks: number
-    }>()
+    const grouped = new Map<
+      string,
+      {
+        scope: KnowledgeScope
+        label: string
+        category: string
+        bestScore: number
+        matchedChunks: number
+      }
+    >()
 
     for (const result of searchResults) {
       const key = `${result.document.source.scope}:${result.document.source.label}`
@@ -524,7 +525,9 @@ let defaultIndex: SemanticIndex | null = null
 /**
  * Get the default semantic index
  */
-export function getSemanticIndex(config?: Partial<SemanticIndexConfig> & { provider: EmbeddingProvider }): SemanticIndex {
+export function getSemanticIndex(
+  config?: Partial<SemanticIndexConfig> & { provider: EmbeddingProvider }
+): SemanticIndex {
   if (!defaultIndex) {
     // Use mock provider if none specified (for development/testing)
     const provider = config?.provider ?? createMockEmbeddingProvider()
@@ -543,7 +546,9 @@ export function resetSemanticIndex(): void {
 /**
  * Create a new semantic index with the specified provider
  */
-export function createSemanticIndex(config: Partial<SemanticIndexConfig> & { provider: EmbeddingProvider }): SemanticIndex {
+export function createSemanticIndex(
+  config: Partial<SemanticIndexConfig> & { provider: EmbeddingProvider }
+): SemanticIndex {
   return new SemanticIndex(config)
 }
 
@@ -567,9 +572,7 @@ export function describeSearchResults(results: SemanticSearchResult[]): string {
       ? ` (chunk ${(document.chunkIndex ?? 0) + 1}/${document.totalChunks})`
       : ''
 
-    lines.push(
-      `${rank}. [${document.source.scope}:${document.source.label}]${chunkInfo}`
-    )
+    lines.push(`${rank}. [${document.source.scope}:${document.source.label}]${chunkInfo}`)
     lines.push(`   Score: ${(score * 100).toFixed(1)}%`)
     lines.push(`   Preview: ${document.text.slice(0, 100).replace(/\n/g, ' ')}...`)
     lines.push('')

@@ -111,7 +111,9 @@ export function createDelegationTools(
       loadSkills: s
         .array(s.string())
         .optional()
-        .describe('Skill names to inject into agent context (e.g., ["typescript-patterns", "testing-patterns"])'),
+        .describe(
+          'Skill names to inject into agent context (e.g., ["typescript-patterns", "testing-patterns"])'
+        ),
     },
 
     async execute(args, ctx) {

@@ -57,10 +57,7 @@ export interface RecoveryAttempt {
 /**
  * Analyze a task failure and determine the appropriate response
  */
-export function analyzeFailure(
-  state: MissionState,
-  context: FailureContext
-): FailureResponse {
+export function analyzeFailure(state: MissionState, context: FailureContext): FailureResponse {
   const task = state.getTask(context.taskId)
   const mission = state.getMission()
 

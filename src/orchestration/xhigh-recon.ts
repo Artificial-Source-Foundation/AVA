@@ -128,7 +128,8 @@ export async function performXhighRecon(
   ])
 
   const durationMs = Date.now() - startTime
-  const success = (runRecon ? reconResult !== null : true) && (runSigint ? sigintResult !== null : true)
+  const success =
+    (runRecon ? reconResult !== null : true) && (runSigint ? sigintResult !== null : true)
 
   // Format context for oracle prompts
   const formattedContext = formatReconContext(reconResult, sigintResult)
@@ -403,10 +404,7 @@ function createEmptySigintResult(answer: string): SigintResult {
 /**
  * Format reconnaissance results for oracle prompts
  */
-export function formatReconContext(
-  recon: ReconResult | null,
-  sigint: SigintResult | null
-): string {
+export function formatReconContext(recon: ReconResult | null, sigint: SigintResult | null): string {
   const sections: string[] = []
 
   // RECON section
@@ -415,14 +413,26 @@ export function formatReconContext(
 
 ${recon.summary}
 
-${recon.files.length > 0 ? `**Relevant Files:**
-${recon.files.map(f => `- \`${f}\``).join('\n')}` : ''}
+${
+  recon.files.length > 0
+    ? `**Relevant Files:**
+${recon.files.map((f) => `- \`${f}\``).join('\n')}`
+    : ''
+}
 
-${recon.snippets.length > 0 ? `**Code Snippets:**
-${recon.snippets.map(s => `\`${s.file}:${s.line}\`
+${
+  recon.snippets.length > 0
+    ? `**Code Snippets:**
+${recon.snippets
+  .map(
+    (s) => `\`${s.file}:${s.line}\`
 \`\`\`
 ${s.content}
-\`\`\``).join('\n\n')}` : ''}`)
+\`\`\``
+  )
+  .join('\n\n')}`
+    : ''
+}`)
   }
 
   // SIGINT section
@@ -433,10 +443,18 @@ ${s.content}
 
 ${sigint.answer}
 
-${sigint.evidence.length > 0 ? `**Evidence:**
-${sigint.evidence.map(e => `- **${e.source}**${e.url ? ` ([link](${e.url}))` : ''}
+${
+  sigint.evidence.length > 0
+    ? `**Evidence:**
+${sigint.evidence
+  .map(
+    (e) => `- **${e.source}**${e.url ? ` ([link](${e.url}))` : ''}
   > ${e.quote}
-  _Relevance: ${e.relevance}_`).join('\n\n')}` : ''}`)
+  _Relevance: ${e.relevance}_`
+  )
+  .join('\n\n')}`
+    : ''
+}`)
   }
 
   if (sections.length === 0) {
@@ -475,13 +493,13 @@ async function waitForAgentResponse(
       })
 
       const messages = messagesResult.data || []
-      const assistantMessages = messages.filter(m => m.info?.role === 'assistant')
+      const assistantMessages = messages.filter((m) => m.info?.role === 'assistant')
 
       if (assistantMessages.length > 0) {
         const lastMessage = assistantMessages[assistantMessages.length - 1]
-        const textParts = lastMessage.parts?.filter(p => p.type === 'text')
+        const textParts = lastMessage.parts?.filter((p) => p.type === 'text')
         if (textParts && textParts.length > 0) {
-          const text = textParts.map(p => p.text || '').join('\n')
+          const text = textParts.map((p) => p.text || '').join('\n')
           if (text.includes('{') && text.includes('}')) {
             return text
           }
@@ -506,5 +524,5 @@ function timeoutPromise(ms: number, agentName: string): Promise<never> {
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }

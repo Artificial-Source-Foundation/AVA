@@ -13,10 +13,7 @@ import {
 } from '../mission/failure-handler.js'
 import { appendHistory } from '../mission/history.js'
 import { info, warn, error as logError } from '../lib/logger.js'
-import type {
-  ToolExecuteAfterInput,
-  ToolExecuteAfterOutput,
-} from './tool-output.js'
+import type { ToolExecuteAfterInput, ToolExecuteAfterOutput } from './tool-output.js'
 
 // =============================================================================
 // Types
@@ -164,11 +161,7 @@ export function createRecoveryHooks(input: RecoveryHooksInput): RecoveryHooks {
       }
 
       // Detect failure
-      const failure = detectFailure(
-        toolInput.tool,
-        toolOutput.output,
-        toolOutput.error
-      )
+      const failure = detectFailure(toolInput.tool, toolOutput.output, toolOutput.error)
 
       if (!failure || !failure.isFailed) {
         return
@@ -188,7 +181,9 @@ export function createRecoveryHooks(input: RecoveryHooksInput): RecoveryHooks {
         .filter(([, timestamp]) => Date.now() - timestamp < FAILURE_WINDOW_MS).length
 
       if (taskFailureCount >= MAX_FAILURES_PER_TASK) {
-        logError(`Recovery hook: Task ${taskId} has failed ${taskFailureCount} times recently, skipping auto-recovery`)
+        logError(
+          `Recovery hook: Task ${taskId} has failed ${taskFailureCount} times recently, skipping auto-recovery`
+        )
         return
       }
 

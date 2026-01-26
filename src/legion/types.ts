@@ -46,7 +46,9 @@ export const legionTaskSchema = z.object({
   priority: z.number().int().min(1).max(10).default(5),
   estimatedComplexity: z.enum(['low', 'medium', 'high']).default('medium'),
   assignedOperator: z.string().optional(),
-  status: z.enum(['pending', 'assigned', 'running', 'completed', 'failed', 'conflict']).default('pending'),
+  status: z
+    .enum(['pending', 'assigned', 'running', 'completed', 'failed', 'conflict'])
+    .default('pending'),
   result: z.unknown().optional(),
   error: z.string().optional(),
   startedAt: z.string().optional(),
@@ -83,16 +85,23 @@ export const conflictSchema = z.object({
   id: z.string(),
   strikeId: z.string(),
   taskIds: z.array(z.string()),
-  conflictType: z.enum(['file_collision', 'dependency_cycle', 'resource_contention', 'merge_conflict']),
+  conflictType: z.enum([
+    'file_collision',
+    'dependency_cycle',
+    'resource_contention',
+    'merge_conflict',
+  ]),
   files: z.array(z.string()),
   description: z.string(),
   suggestedResolution: z.string().optional(),
   status: z.enum(['detected', 'analyzing', 'resolved', 'escalated']).default('detected'),
-  resolution: z.object({
-    strategy: z.enum(['merge', 'prefer_first', 'prefer_last', 'manual', 'retry_sequential']),
-    appliedAt: z.string(),
-    appliedBy: z.string(),
-  }).optional(),
+  resolution: z
+    .object({
+      strategy: z.enum(['merge', 'prefer_first', 'prefer_last', 'manual', 'retry_sequential']),
+      appliedAt: z.string(),
+      appliedBy: z.string(),
+    })
+    .optional(),
 })
 
 export type Conflict = z.infer<typeof conflictSchema>
@@ -110,14 +119,16 @@ export const legionStrikeSchema = z.object({
   startedAt: z.string(),
   completedAt: z.string().optional(),
   conflicts: z.array(conflictSchema).default([]),
-  metrics: z.object({
-    totalTasks: z.number().int(),
-    completedTasks: z.number().int(),
-    failedTasks: z.number().int(),
-    parallelism: z.number(),
-    totalTime: z.number(),
-    averageTaskTime: z.number(),
-  }).optional(),
+  metrics: z
+    .object({
+      totalTasks: z.number().int(),
+      completedTasks: z.number().int(),
+      failedTasks: z.number().int(),
+      parallelism: z.number(),
+      totalTime: z.number(),
+      averageTaskTime: z.number(),
+    })
+    .optional(),
 })
 
 export type LegionStrike = z.infer<typeof legionStrikeSchema>
@@ -127,9 +138,9 @@ export type LegionStrike = z.infer<typeof legionStrikeSchema>
 // =============================================================================
 
 export type DistributionStrategy =
-  | 'round_robin'      // Simple rotation
-  | 'load_balanced'    // Based on operator load
-  | 'specialty_match'  // Match task to operator specialty
+  | 'round_robin' // Simple rotation
+  | 'load_balanced' // Based on operator load
+  | 'specialty_match' // Match task to operator specialty
   | 'complexity_aware' // Complex tasks to stronger models
   | 'dependency_aware' // Respect task dependencies
 

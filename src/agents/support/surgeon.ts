@@ -20,12 +20,7 @@ export const SURGEON_PROFILE = {
   role: 'Surgical Precision Fixer',
   temperature: 0.1, // Very low - precise, deterministic fixes
   specialty: 'quick-fixes' as const,
-  traits: [
-    'Surgical precision',
-    'Minimal changes',
-    'Fast execution',
-    'Lint-friendly',
-  ],
+  traits: ['Surgical precision', 'Minimal changes', 'Fast execution', 'Lint-friendly'],
 }
 
 // =============================================================================
@@ -114,7 +109,8 @@ You are SURGEON. Be fast, be precise, be minimal. Fix exactly what's asked and n
  */
 export function createSurgeonAgent(cwd: string): AgentConfig {
   return {
-    description: 'SURGEON - Quick targeted fixes. Typos, lint errors, simple bugs. Minimal changes.',
+    description:
+      'SURGEON - Quick targeted fixes. Typos, lint errors, simple bugs. Minimal changes.',
     mode: 'subagent',
     model: getModelForRole(cwd, 'patcher'),
     temperature: SURGEON_PROFILE.temperature,

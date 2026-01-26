@@ -201,11 +201,7 @@ export const FALLBACK_CHAINS: Record<string, string[]> = {
     'openai/gpt-4o',
     'google/gemini-2.0-pro',
   ],
-  'openai/o1': [
-    'anthropic/claude-opus-4-5',
-    'anthropic/claude-sonnet-4-5',
-    'openai/gpt-4o',
-  ],
+  'openai/o1': ['anthropic/claude-opus-4-5', 'anthropic/claude-sonnet-4-5', 'openai/gpt-4o'],
 
   // Standard tier chains
   'anthropic/claude-sonnet-4-5': [
@@ -467,8 +463,8 @@ export class FallbackChainManager {
 
         // Check required capabilities
         if (this.config.requiredCapabilities) {
-          const hasAllCapabilities = this.config.requiredCapabilities.every(
-            (cap) => model.capabilities.includes(cap)
+          const hasAllCapabilities = this.config.requiredCapabilities.every((cap) =>
+            model.capabilities.includes(cap)
           )
           if (!hasAllCapabilities) {
             skipped.push({ model: modelId, reason: 'Missing required capabilities' })

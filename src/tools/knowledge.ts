@@ -56,7 +56,9 @@ Categories:
 - decisions: Important decisions and rationale
 - custom: User-defined blocks`,
     args: {
-      scope: s.enum(['all', 'project', 'global']).optional()
+      scope: s
+        .enum(['all', 'project', 'global'])
+        .optional()
         .describe('Scope to list (default: all)'),
     },
     async execute(args) {
@@ -89,10 +91,8 @@ Categories:
 Use this to retrieve stored patterns, conventions, or gotchas.
 The content is returned as markdown.`,
     args: {
-      label: s.string()
-        .describe('Block label (e.g., "patterns", "conventions", "gotchas")'),
-      scope: s.enum(['project', 'global']).optional()
-        .describe('Block scope (default: project)'),
+      label: s.string().describe('Block label (e.g., "patterns", "conventions", "gotchas")'),
+      scope: s.enum(['project', 'global']).optional().describe('Block scope (default: project)'),
     },
     async execute(args) {
       const store = getStore()
@@ -132,15 +132,13 @@ The content should be markdown format.
 
 IMPORTANT: This overwrites the entire block. Use knowledge_append to add to existing content.`,
     args: {
-      label: s.string()
-        .describe('Block label (lowercase letters, numbers, dashes, underscores)'),
-      value: s.string()
-        .describe('Block content (markdown)'),
-      scope: s.enum(['project', 'global']).optional()
-        .describe('Block scope (default: project)'),
-      description: s.string().optional()
-        .describe('Block description'),
-      category: s.enum(['patterns', 'conventions', 'gotchas', 'decisions', 'custom']).optional()
+      label: s.string().describe('Block label (lowercase letters, numbers, dashes, underscores)'),
+      value: s.string().describe('Block content (markdown)'),
+      scope: s.enum(['project', 'global']).optional().describe('Block scope (default: project)'),
+      description: s.string().optional().describe('Block description'),
+      category: s
+        .enum(['patterns', 'conventions', 'gotchas', 'decisions', 'custom'])
+        .optional()
         .describe('Block category (default: custom)'),
     },
     async execute(args) {
@@ -167,13 +165,12 @@ Content is added with a separator (default: two newlines).
 
 This is preferred over knowledge_set when adding to existing knowledge.`,
     args: {
-      label: s.string()
-        .describe('Block label'),
-      content: s.string()
-        .describe('Content to append (markdown)'),
-      scope: s.enum(['project', 'global']).optional()
-        .describe('Block scope (default: project)'),
-      separator: s.string().optional()
+      label: s.string().describe('Block label'),
+      content: s.string().describe('Content to append (markdown)'),
+      scope: s.enum(['project', 'global']).optional().describe('Block scope (default: project)'),
+      separator: s
+        .string()
+        .optional()
         .describe('Separator between existing and new content (default: "\\n\\n")'),
     },
     async execute(args) {
@@ -198,14 +195,10 @@ This is preferred over knowledge_set when adding to existing knowledge.`,
 Use this for targeted updates without overwriting the entire block.
 The old text must exist in the block.`,
     args: {
-      label: s.string()
-        .describe('Block label'),
-      oldText: s.string()
-        .describe('Text to replace'),
-      newText: s.string()
-        .describe('Replacement text'),
-      scope: s.enum(['project', 'global']).optional()
-        .describe('Block scope (default: project)'),
+      label: s.string().describe('Block label'),
+      oldText: s.string().describe('Text to replace'),
+      newText: s.string().describe('Replacement text'),
+      scope: s.enum(['project', 'global']).optional().describe('Block scope (default: project)'),
     },
     async execute(args) {
       const store = getStore()

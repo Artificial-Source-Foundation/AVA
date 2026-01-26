@@ -357,6 +357,135 @@ export const FileChangedEventSchema = BaseEventSchema.extend({
 })
 
 // =============================================================================
+// Messaging Events
+// =============================================================================
+
+export const MessageSentEventSchema = BaseEventSchema.extend({
+  type: z.literal('messaging.sent'),
+  data: z.object({
+    messageId: z.string(),
+    from: z.string(),
+    to: z.string(),
+    type: z.enum(['request', 'response', 'status', 'coordination', 'alert', 'ack']),
+    subject: z.string(),
+    priority: z.enum(['low', 'normal', 'high', 'critical']),
+    taskId: z.string().optional(),
+    recipients: z.array(z.string()).optional(),
+  }),
+})
+
+export const MessageReadEventSchema = BaseEventSchema.extend({
+  type: z.literal('messaging.read'),
+  data: z.object({
+    messageId: z.string(),
+    from: z.string(),
+    to: z.string(),
+    readBy: z.string(),
+  }),
+})
+
+export const MessageExpiredEventSchema = BaseEventSchema.extend({
+  type: z.literal('messaging.expired'),
+  data: z.object({
+    messageId: z.string(),
+    from: z.string(),
+    to: z.string(),
+    subject: z.string(),
+  }),
+})
+
+export const MessageBroadcastEventSchema = BaseEventSchema.extend({
+  type: z.literal('messaging.broadcast'),
+  data: z.object({
+    messageId: z.string(),
+    from: z.string(),
+    group: z.enum(['broadcast', 'council', 'operators', 'support']),
+    subject: z.string(),
+    recipientCount: z.number(),
+  }),
+})
+
+// =============================================================================
+// Decomposition Events
+// =============================================================================
+
+export const DecompositionCreatedEventSchema = BaseEventSchema.extend({
+  type: z.literal('decomposition.created'),
+  data: z.object({
+    decompositionId: z.string(),
+    parentTaskId: z.string(),
+    strategy: z.enum(['file_based', 'feature_based', 'layer_based', 'test_first', 'incremental']),
+    subtaskCount: z.number(),
+    totalComplexity: z.enum(['low', 'medium', 'high', 'critical']),
+    qualityScore: z.number().min(0).max(1).optional(),
+  }),
+})
+
+export const DecompositionValidatedEventSchema = BaseEventSchema.extend({
+  type: z.literal('decomposition.validated'),
+  data: z.object({
+    decompositionId: z.string(),
+    parentTaskId: z.string(),
+    qualityScore: z.number().min(0).max(1),
+    passed: z.boolean(),
+    issueCount: z.number(),
+    suggestionCount: z.number(),
+  }),
+})
+
+export const DecompositionOutcomeEventSchema = BaseEventSchema.extend({
+  type: z.literal('decomposition.outcome_recorded'),
+  data: z.object({
+    decompositionId: z.string(),
+    parentTaskId: z.string(),
+    strategy: z.enum(['file_based', 'feature_based', 'layer_based', 'test_first', 'incremental']),
+    success: z.boolean(),
+    duration: z.number().optional(),
+  }),
+})
+
+// =============================================================================
+// Epic Events
+// =============================================================================
+
+export const EpicCreatedEventSchema = BaseEventSchema.extend({
+  type: z.literal('epic.created'),
+  data: z.object({
+    epicId: z.string(),
+    title: z.string(),
+    priority: z.enum(['low', 'normal', 'high', 'critical']),
+  }),
+})
+
+export const EpicTaskLinkedEventSchema = BaseEventSchema.extend({
+  type: z.literal('epic.task_linked'),
+  data: z.object({
+    epicId: z.string(),
+    taskId: z.string(),
+    objectiveId: z.string().optional(),
+  }),
+})
+
+export const EpicStatusChangedEventSchema = BaseEventSchema.extend({
+  type: z.literal('epic.status_changed'),
+  data: z.object({
+    epicId: z.string(),
+    previousStatus: z.enum(['planning', 'in_progress', 'completed', 'blocked', 'archived']),
+    newStatus: z.enum(['planning', 'in_progress', 'completed', 'blocked', 'archived']),
+  }),
+})
+
+export const EpicCompletedEventSchema = BaseEventSchema.extend({
+  type: z.literal('epic.completed'),
+  data: z.object({
+    epicId: z.string(),
+    title: z.string(),
+    taskCount: z.number(),
+    duration: z.number().optional(),
+  }),
+})
+
+// =============================================================================
 // System Events
 // =============================================================================
 
@@ -473,6 +602,20 @@ export const Delta9EventSchema = z.discriminatedUnion('type', [
   FileReleasedEventSchema,
   FileConflictEventSchema,
   FileChangedEventSchema,
+  // Messaging
+  MessageSentEventSchema,
+  MessageReadEventSchema,
+  MessageExpiredEventSchema,
+  MessageBroadcastEventSchema,
+  // Decomposition
+  DecompositionCreatedEventSchema,
+  DecompositionValidatedEventSchema,
+  DecompositionOutcomeEventSchema,
+  // Epic
+  EpicCreatedEventSchema,
+  EpicTaskLinkedEventSchema,
+  EpicStatusChangedEventSchema,
+  EpicCompletedEventSchema,
   // System
   SessionStartedEventSchema,
   SessionEndedEventSchema,
@@ -530,6 +673,20 @@ export const EVENT_TYPES = {
   FILE_RELEASED: 'file.released',
   FILE_CONFLICT: 'file.conflict',
   FILE_CHANGED: 'file.changed',
+  // Messaging
+  MESSAGE_SENT: 'messaging.sent',
+  MESSAGE_READ: 'messaging.read',
+  MESSAGE_EXPIRED: 'messaging.expired',
+  MESSAGE_BROADCAST: 'messaging.broadcast',
+  // Decomposition
+  DECOMPOSITION_CREATED: 'decomposition.created',
+  DECOMPOSITION_VALIDATED: 'decomposition.validated',
+  DECOMPOSITION_OUTCOME_RECORDED: 'decomposition.outcome_recorded',
+  // Epic
+  EPIC_CREATED: 'epic.created',
+  EPIC_TASK_LINKED: 'epic.task_linked',
+  EPIC_STATUS_CHANGED: 'epic.status_changed',
+  EPIC_COMPLETED: 'epic.completed',
   // System
   SESSION_STARTED: 'system.session_started',
   SESSION_ENDED: 'system.session_ended',
@@ -562,12 +719,7 @@ export const EVENT_CATEGORIES = {
     'task.retried',
     'task.skipped',
   ],
-  council: [
-    'council.convened',
-    'council.oracle_responded',
-    'council.consensus',
-    'council.timeout',
-  ],
+  council: ['council.convened', 'council.oracle_responded', 'council.consensus', 'council.timeout'],
   agent: ['agent.dispatched', 'agent.completed', 'agent.error'],
   validation: ['validation.started', 'validation.check', 'validation.completed'],
   learning: [
@@ -577,6 +729,13 @@ export const EVENT_CATEGORIES = {
     'memory.stored',
   ],
   file: ['file.reserved', 'file.released', 'file.conflict', 'file.changed'],
+  messaging: ['messaging.sent', 'messaging.read', 'messaging.expired', 'messaging.broadcast'],
+  decomposition: [
+    'decomposition.created',
+    'decomposition.validated',
+    'decomposition.outcome_recorded',
+  ],
+  epic: ['epic.created', 'epic.task_linked', 'epic.status_changed', 'epic.completed'],
   system: [
     'system.session_started',
     'system.session_ended',

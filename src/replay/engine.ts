@@ -46,8 +46,9 @@ export class ReplayEngine {
    * List all snapshots
    */
   listSnapshots(): MissionSnapshot[] {
-    return Array.from(this.snapshots.values())
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    return Array.from(this.snapshots.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    )
   }
 
   /**
@@ -66,7 +67,10 @@ export class ReplayEngine {
    */
   async startReplay(
     config: ReplayConfig,
-    executor: (task: unknown, modifications: Record<string, unknown>) => Promise<{
+    executor: (
+      task: unknown,
+      modifications: Record<string, unknown>
+    ) => Promise<{
       success: boolean
       result?: unknown
       error?: string
@@ -149,7 +153,10 @@ export class ReplayEngine {
     result: ReplayResult,
     snapshot: MissionSnapshot,
     config: ReplayConfig,
-    executor: (task: unknown, modifications: Record<string, unknown>) => Promise<{
+    executor: (
+      task: unknown,
+      modifications: Record<string, unknown>
+    ) => Promise<{
       success: boolean
       result?: unknown
       error?: string
@@ -192,7 +199,10 @@ export class ReplayEngine {
     result: ReplayResult,
     snapshot: MissionSnapshot,
     config: ReplayConfig,
-    executor: (task: unknown, modifications: Record<string, unknown>) => Promise<{
+    executor: (
+      task: unknown,
+      modifications: Record<string, unknown>
+    ) => Promise<{
       success: boolean
       result?: unknown
       error?: string
@@ -201,8 +211,8 @@ export class ReplayEngine {
     }>
   ): Promise<void> {
     // Find objective by ID (sourceId should be objective ID)
-    const objective = snapshot.objectives.find(o =>
-      o.id === config.sourceId || o.tasks.some(t => t.id.startsWith(config.sourceId))
+    const objective = snapshot.objectives.find(
+      (o) => o.id === config.sourceId || o.tasks.some((t) => t.id.startsWith(config.sourceId))
     )
 
     if (!objective) {
@@ -233,7 +243,10 @@ export class ReplayEngine {
     result: ReplayResult,
     snapshot: MissionSnapshot,
     config: ReplayConfig,
-    executor: (task: unknown, modifications: Record<string, unknown>) => Promise<{
+    executor: (
+      task: unknown,
+      modifications: Record<string, unknown>
+    ) => Promise<{
       success: boolean
       result?: unknown
       error?: string
@@ -277,7 +290,10 @@ export class ReplayEngine {
     result: ReplayResult,
     snapshot: MissionSnapshot,
     config: ReplayConfig,
-    executor: (task: unknown, modifications: Record<string, unknown>) => Promise<{
+    executor: (
+      task: unknown,
+      modifications: Record<string, unknown>
+    ) => Promise<{
       success: boolean
       result?: unknown
       error?: string
@@ -321,10 +337,14 @@ export class ReplayEngine {
     const original = snapshot.metrics || {
       totalCost: 0,
       totalTime: 0,
-      tasksCompleted: snapshot.objectives.reduce((sum, o) =>
-        sum + o.tasks.filter(t => t.status === 'completed').length, 0),
-      tasksFailed: snapshot.objectives.reduce((sum, o) =>
-        sum + o.tasks.filter(t => t.status === 'failed').length, 0),
+      tasksCompleted: snapshot.objectives.reduce(
+        (sum, o) => sum + o.tasks.filter((t) => t.status === 'completed').length,
+        0
+      ),
+      tasksFailed: snapshot.objectives.reduce(
+        (sum, o) => sum + o.tasks.filter((t) => t.status === 'failed').length,
+        0
+      ),
       councilConsensus: 0,
     }
 
@@ -342,7 +362,7 @@ export class ReplayEngine {
       tasksFailed: result.metrics.tasksFailed,
     }
 
-    const improvements = config.comparison.metrics.map(metric => {
+    const improvements = config.comparison.metrics.map((metric) => {
       const origValue = originalMetrics[metric] || 0
       const replayValue = replayMetrics[metric] || 0
 
@@ -360,13 +380,14 @@ export class ReplayEngine {
       }
     })
 
-    const improvedCount = improvements.filter(i => i.improved).length
+    const improvedCount = improvements.filter((i) => i.improved).length
     const totalMetrics = improvements.length
-    const summary = improvedCount > totalMetrics / 2
-      ? `Replay improved ${improvedCount}/${totalMetrics} metrics`
-      : improvedCount === totalMetrics / 2
-        ? `Replay tied with original`
-        : `Original performed better on ${totalMetrics - improvedCount}/${totalMetrics} metrics`
+    const summary =
+      improvedCount > totalMetrics / 2
+        ? `Replay improved ${improvedCount}/${totalMetrics} metrics`
+        : improvedCount === totalMetrics / 2
+          ? `Replay tied with original`
+          : `Original performed better on ${totalMetrics - improvedCount}/${totalMetrics} metrics`
 
     return {
       original: originalMetrics,
@@ -418,16 +439,18 @@ export class ReplayEngine {
 
     for (const metric of Object.keys(replay.comparison.original)) {
       delta[metric] = replay.comparison.replay[metric] - replay.comparison.original[metric]
-      percentChange[metric] = replay.comparison.original[metric] > 0
-        ? (delta[metric] / replay.comparison.original[metric]) * 100
-        : 0
+      percentChange[metric] =
+        replay.comparison.original[metric] > 0
+          ? (delta[metric] / replay.comparison.original[metric]) * 100
+          : 0
     }
 
-    const winner = improvements.length > regressions.length
-      ? 'replay'
-      : improvements.length < regressions.length
-        ? 'original'
-        : 'tie'
+    const winner =
+      improvements.length > regressions.length
+        ? 'replay'
+        : improvements.length < regressions.length
+          ? 'original'
+          : 'tie'
 
     return {
       replayId,
@@ -444,7 +467,9 @@ export class ReplayEngine {
       regressions,
       recommendations,
       winner,
-      confidence: Math.abs(improvements.length - regressions.length) / Math.max(1, improvements.length + regressions.length),
+      confidence:
+        Math.abs(improvements.length - regressions.length) /
+        Math.max(1, improvements.length + regressions.length),
     }
   }
 
@@ -490,13 +515,14 @@ export class ReplayEngine {
   }
 
   listReplays(): ReplayResult[] {
-    return Array.from(this.replays.values())
-      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())
+    return Array.from(this.replays.values()).sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
+    )
   }
 
   getEvents(replayId?: string): ReplayEvent[] {
     if (replayId) {
-      return this.events.filter(e => e.replayId === replayId)
+      return this.events.filter((e) => e.replayId === replayId)
     }
     return [...this.events]
   }

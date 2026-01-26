@@ -196,7 +196,8 @@ export function checkResponseForCode(
         return {
           allowed: false,
           violation,
-          suggestion: 'Commander should describe what code is needed, not write it. Use delegate_task.',
+          suggestion:
+            'Commander should describe what code is needed, not write it. Use delegate_task.',
         }
       }
 
@@ -291,7 +292,9 @@ let defaultEnforcer: CommanderDisciplineEnforcer | null = null
 /**
  * Get the default discipline enforcer
  */
-export function getDisciplineEnforcer(config?: Partial<CommanderDisciplineConfig>): CommanderDisciplineEnforcer {
+export function getDisciplineEnforcer(
+  config?: Partial<CommanderDisciplineConfig>
+): CommanderDisciplineEnforcer {
   if (!defaultEnforcer) {
     defaultEnforcer = new CommanderDisciplineEnforcer(config)
   }

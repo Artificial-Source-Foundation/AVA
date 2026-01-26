@@ -41,11 +41,7 @@ export interface GuardViolationContext {
  * @returns Formatted multi-line violation message
  */
 export function formatGuardViolation(ctx: GuardViolationContext): string {
-  const parts: string[] = [
-    `[${ctx.guardType} GUARD VIOLATION]`,
-    '',
-    `Reason: ${ctx.reason}`,
-  ]
+  const parts: string[] = [`[${ctx.guardType} GUARD VIOLATION]`, '', `Reason: ${ctx.reason}`]
 
   if (ctx.suggestion) {
     parts.push('', `Suggestion: ${ctx.suggestion}`)

@@ -25,7 +25,12 @@ export type {
   LockEventListener,
 } from './types.js'
 
-export { LockOwnerSchema, AcquireLockOptionsSchema, ReleaseLockOptionsSchema, DEFAULT_LOCK_CONFIG } from './types.js'
+export {
+  LockOwnerSchema,
+  AcquireLockOptionsSchema,
+  ReleaseLockOptionsSchema,
+  DEFAULT_LOCK_CONFIG,
+} from './types.js'
 
 // Store
 export { LockStore, getLockStore, resetLockStore } from './store.js'

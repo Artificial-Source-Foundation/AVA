@@ -32,10 +32,7 @@ let cachedCwd: string | null = null
 /**
  * Deep merge two objects. Source values override target values.
  */
-function deepMerge(
-  target: Delta9Config,
-  source: Partial<Delta9Config>
-): Delta9Config {
+function deepMerge(target: Delta9Config, source: Partial<Delta9Config>): Delta9Config {
   const result = { ...target } as Record<string, unknown>
 
   for (const key of Object.keys(source) as (keyof Delta9Config)[]) {
@@ -236,7 +233,7 @@ export function isCouncilEnabled(cwd: string): boolean {
  * Get enabled oracle members
  */
 export function getEnabledOracles(cwd: string): Delta9Config['council']['members'] {
-  return loadConfig(cwd).council.members.filter(m => m.enabled)
+  return loadConfig(cwd).council.members.filter((m) => m.enabled)
 }
 
 /**

@@ -17,12 +17,12 @@ import type { Task } from '../types/mission.js'
 // =============================================================================
 
 export type RecoveryStrategy =
-  | 'retry_same'      // Retry with same agent
+  | 'retry_same' // Retry with same agent
   | 'retry_different' // Retry with different model
-  | 'escalate'        // Escalate to Strategist for advice
-  | 'checkpoint'      // Rollback to last checkpoint
-  | 'skip'            // Skip task (mark blocked)
-  | 'abort'           // Abort mission
+  | 'escalate' // Escalate to Strategist for advice
+  | 'checkpoint' // Rollback to last checkpoint
+  | 'skip' // Skip task (mark blocked)
+  | 'abort' // Abort mission
 
 export interface RecoveryConfig {
   /** Maximum retry attempts before escalation */
@@ -51,15 +51,15 @@ export interface FailureAnalysis {
 }
 
 export type FailureType =
-  | 'rate_limit'      // API rate limit hit
-  | 'timeout'         // Operation timed out
-  | 'validation'      // Validation failed
-  | 'dependency'      // Missing dependency
-  | 'permission'      // Permission denied
-  | 'not_found'       // Resource not found
-  | 'conflict'        // Conflict with existing code
-  | 'logic_error'     // Logic/implementation error
-  | 'unknown'         // Unknown error
+  | 'rate_limit' // API rate limit hit
+  | 'timeout' // Operation timed out
+  | 'validation' // Validation failed
+  | 'dependency' // Missing dependency
+  | 'permission' // Permission denied
+  | 'not_found' // Resource not found
+  | 'conflict' // Conflict with existing code
+  | 'logic_error' // Logic/implementation error
+  | 'unknown' // Unknown error
 
 export interface RecoveryExecutionAttempt {
   /** Task being recovered */

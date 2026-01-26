@@ -13,25 +13,25 @@ import type { Mission, Objective, Task } from '../types/mission.js'
 
 const STATUS_ICONS = {
   mission: {
-    planning: '\u{1F4DD}',      // Memo
-    approved: '\u{2705}',       // Check mark
-    in_progress: '\u{1F504}',   // Arrows
-    paused: '\u{23F8}',         // Pause
-    completed: '\u{1F389}',     // Party
-    aborted: '\u{274C}',        // X
+    planning: '\u{1F4DD}', // Memo
+    approved: '\u{2705}', // Check mark
+    in_progress: '\u{1F504}', // Arrows
+    paused: '\u{23F8}', // Pause
+    completed: '\u{1F389}', // Party
+    aborted: '\u{274C}', // X
   },
   objective: {
-    pending: '\u{23F3}',        // Hourglass
-    in_progress: '\u{1F504}',   // Arrows
-    completed: '\u{2705}',      // Check
-    failed: '\u{274C}',         // X
+    pending: '\u{23F3}', // Hourglass
+    in_progress: '\u{1F504}', // Arrows
+    completed: '\u{2705}', // Check
+    failed: '\u{274C}', // X
   },
   task: {
     pending: '[ ]',
-    blocked: '[\u{1F512}]',     // Lock
+    blocked: '[\u{1F512}]', // Lock
     in_progress: '[\u{1F504}]', // Arrows
     completed: '[x]',
-    failed: '[\u{274C}]',       // X
+    failed: '[\u{274C}]', // X
   },
 }
 
@@ -106,24 +106,28 @@ function generateCouncilSummary(mission: Mission): string {
 **Confidence**: ${Math.round(confidenceAvg * 100)}%
 
 ### Consensus
-${consensus.map(c => `- ${c}`).join('\n')}
+${consensus.map((c) => `- ${c}`).join('\n')}
 `
 
   if (disagreementsResolved && disagreementsResolved.length > 0) {
     section += `
 ### Resolved Disagreements
-${disagreementsResolved.map(d => `- ${d}`).join('\n')}
+${disagreementsResolved.map((d) => `- ${d}`).join('\n')}
 `
   }
 
   if (opinions && opinions.length > 0) {
     section += `
 ### Oracle Opinions
-${opinions.map(o => `
+${opinions
+  .map(
+    (o) => `
 #### ${o.oracle} (${Math.round(o.confidence * 100)}%)
 ${o.recommendation}
 ${o.caveats ? `\n*Caveats*: ${o.caveats.join(', ')}` : ''}
-`).join('\n')}
+`
+  )
+  .join('\n')}
 `
   }
 
@@ -172,7 +176,7 @@ function generateTask(task: Task): string {
 function generateObjective(objective: Objective, index: number): string {
   const icon = STATUS_ICONS.objective[objective.status]
 
-  const completedTasks = objective.tasks.filter(t => t.status === 'completed').length
+  const completedTasks = objective.tasks.filter((t) => t.status === 'completed').length
   const totalTasks = objective.tasks.length
   const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0
 
@@ -180,7 +184,7 @@ function generateObjective(objective: Objective, index: number): string {
 
 *Progress: ${completedTasks}/${totalTasks} (${progress}%)*
 
-${objective.tasks.map(t => generateTask(t)).join('\n')}
+${objective.tasks.map((t) => generateTask(t)).join('\n')}
 `
 
   if (objective.checkpoint) {
@@ -238,5 +242,5 @@ export function generateMissionMarkdown(mission: Mission): string {
     generateFooter(mission),
   ]
 
-  return sections.filter(s => s.length > 0).join('\n')
+  return sections.filter((s) => s.length > 0).join('\n')
 }

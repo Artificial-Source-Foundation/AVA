@@ -26,23 +26,13 @@ export type AgentRole =
 // Operator Specialties
 // =============================================================================
 
-export type OperatorSpecialty =
-  | 'general'
-  | 'ui-ops'
-  | 'qa'
-  | 'scribe'
-  | 'patcher'
+export type OperatorSpecialty = 'general' | 'ui-ops' | 'qa' | 'scribe' | 'patcher'
 
 // =============================================================================
 // Oracle Specialties
 // =============================================================================
 
-export type OracleSpecialty =
-  | 'architecture'
-  | 'logic'
-  | 'ui'
-  | 'performance'
-  | 'general'
+export type OracleSpecialty = 'architecture' | 'logic' | 'ui' | 'performance' | 'general'
 
 // =============================================================================
 // Agent Definition

@@ -88,71 +88,158 @@ export interface TaskRouterInput {
 /** Keywords mapped to agents */
 const AGENT_KEYWORDS: Record<RoutableAgent, string[]> = {
   'ui-ops': [
-    'ui', 'frontend', 'component', 'style', 'css', 'tailwind',
-    'react', 'vue', 'svelte', 'button', 'form', 'modal', 'dialog',
-    'layout', 'responsive', 'accessibility', 'a11y', 'aria',
+    'ui',
+    'frontend',
+    'component',
+    'style',
+    'css',
+    'tailwind',
+    'react',
+    'vue',
+    'svelte',
+    'button',
+    'form',
+    'modal',
+    'dialog',
+    'layout',
+    'responsive',
+    'accessibility',
+    'a11y',
+    'aria',
   ],
-  'qa': [
-    'test', 'spec', 'coverage', 'jest', 'vitest', 'playwright',
-    'cypress', 'e2e', 'unit test', 'integration test', 'mock',
-    'fixture', 'assertion', 'expect', 'describe', 'it(',
+  qa: [
+    'test',
+    'spec',
+    'coverage',
+    'jest',
+    'vitest',
+    'playwright',
+    'cypress',
+    'e2e',
+    'unit test',
+    'integration test',
+    'mock',
+    'fixture',
+    'assertion',
+    'expect',
+    'describe',
+    'it(',
   ],
-  'scribe': [
-    'doc', 'readme', 'documentation', 'comment', 'jsdoc', 'tsdoc',
-    'api doc', 'changelog', 'guide', 'tutorial', 'example',
+  scribe: [
+    'doc',
+    'readme',
+    'documentation',
+    'comment',
+    'jsdoc',
+    'tsdoc',
+    'api doc',
+    'changelog',
+    'guide',
+    'tutorial',
+    'example',
   ],
-  'scout': [
-    'search', 'find', 'grep', 'locate', 'where', 'which file',
-    'look for', 'pattern', 'usage', 'reference', 'import',
+  scout: [
+    'search',
+    'find',
+    'grep',
+    'locate',
+    'where',
+    'which file',
+    'look for',
+    'pattern',
+    'usage',
+    'reference',
+    'import',
   ],
-  'intel': [
-    'research', 'lookup', 'library', 'package', 'npm', 'how to',
-    'best practice', 'documentation', 'official docs', 'example from',
+  intel: [
+    'research',
+    'lookup',
+    'library',
+    'package',
+    'npm',
+    'how to',
+    'best practice',
+    'documentation',
+    'official docs',
+    'example from',
   ],
-  'strategist': [
-    'stuck', 'blocked', 'help', 'advice', 'guidance', 'not working',
-    'tried everything', 'don\'t know', 'confused', 'approach',
-    'alternative', 'second opinion', 'getting complex',
+  strategist: [
+    'stuck',
+    'blocked',
+    'help',
+    'advice',
+    'guidance',
+    'not working',
+    'tried everything',
+    "don't know",
+    'confused',
+    'approach',
+    'alternative',
+    'second opinion',
+    'getting complex',
   ],
-  'optics': [
-    'image', 'screenshot', 'diagram', 'visual', 'picture', 'photo',
-    'pdf', 'analyze image', 'look at', 'what does this show',
+  optics: [
+    'image',
+    'screenshot',
+    'diagram',
+    'visual',
+    'picture',
+    'photo',
+    'pdf',
+    'analyze image',
+    'look at',
+    'what does this show',
   ],
-  'patcher': [
-    'typo', 'fix typo', 'rename', 'simple fix', 'quick fix',
-    'small change', 'one line', 'minor', 'trivial', 'lint',
+  patcher: [
+    'typo',
+    'fix typo',
+    'rename',
+    'simple fix',
+    'quick fix',
+    'small change',
+    'one line',
+    'minor',
+    'trivial',
+    'lint',
   ],
   'operator-complex': [
-    'refactor', 'rewrite', 'migrate', 'architecture', 'redesign',
-    'complex', 'multiple files', 'system', 'comprehensive',
+    'refactor',
+    'rewrite',
+    'migrate',
+    'architecture',
+    'redesign',
+    'complex',
+    'multiple files',
+    'system',
+    'comprehensive',
   ],
-  'operator': [], // Default - no specific keywords
+  operator: [], // Default - no specific keywords
 }
 
 /** Agent default models */
 const AGENT_MODELS: Record<RoutableAgent, string> = {
-  'operator': 'anthropic/claude-sonnet-4-5',
+  operator: 'anthropic/claude-sonnet-4-5',
   'operator-complex': 'anthropic/claude-sonnet-4-5',
-  'patcher': 'anthropic/claude-haiku-4',
-  'scout': 'anthropic/claude-haiku-4',
-  'intel': 'anthropic/claude-sonnet-4-5',
-  'strategist': 'openai/gpt-4o',
+  patcher: 'anthropic/claude-haiku-4',
+  scout: 'anthropic/claude-haiku-4',
+  intel: 'anthropic/claude-sonnet-4-5',
+  strategist: 'openai/gpt-4o',
   'ui-ops': 'google/gemini-2.0-flash',
-  'scribe': 'google/gemini-2.0-flash',
-  'optics': 'google/gemini-2.0-flash',
-  'qa': 'anthropic/claude-sonnet-4-5',
+  scribe: 'google/gemini-2.0-flash',
+  optics: 'google/gemini-2.0-flash',
+  qa: 'anthropic/claude-sonnet-4-5',
 }
 
 /** Agent fallbacks */
 const AGENT_FALLBACKS: Partial<Record<RoutableAgent, RoutableAgent>> = {
   'ui-ops': 'operator',
-  'qa': 'operator',
-  'scribe': 'operator',
-  'optics': 'intel',
-  'patcher': 'operator',
+  qa: 'operator',
+  scribe: 'operator',
+  optics: 'intel',
+  patcher: 'operator',
   'operator-complex': 'operator',
-  'strategist': 'intel',
-  'intel': 'scout',
+  strategist: 'intel',
+  intel: 'scout',
 }
 
 // =============================================================================
@@ -228,9 +315,8 @@ export function routeTask(input: TaskRouterInput): RouteDecision {
 
   // Calculate confidence
   const totalKeywords = matchedKeywords.length
-  const confidence = bestScore > 0
-    ? Math.min(0.95, 0.5 + (bestScore * 0.1) + (totalKeywords * 0.05))
-    : 0.4 // Low confidence for default routing
+  const confidence =
+    bestScore > 0 ? Math.min(0.95, 0.5 + bestScore * 0.1 + totalKeywords * 0.05) : 0.4 // Low confidence for default routing
 
   // Generate reason
   const reason = generateReason(bestAgent, matchedKeywords, complexity, context)
@@ -350,7 +436,12 @@ function getAgentCapabilities(agent: RoutableAgent): string[] {
  */
 export function canAgentModifyFiles(agent: RoutableAgent): boolean {
   const modifyAgents: RoutableAgent[] = [
-    'operator', 'operator-complex', 'patcher', 'ui-ops', 'scribe', 'qa',
+    'operator',
+    'operator-complex',
+    'patcher',
+    'ui-ops',
+    'scribe',
+    'qa',
   ]
   return modifyAgents.includes(agent)
 }
@@ -359,9 +450,7 @@ export function canAgentModifyFiles(agent: RoutableAgent): boolean {
  * Check if an agent is a support agent (not execution)
  */
 export function isSupportAgent(agent: RoutableAgent): boolean {
-  const supportAgents: RoutableAgent[] = [
-    'scout', 'intel', 'strategist', 'optics',
-  ]
+  const supportAgents: RoutableAgent[] = ['scout', 'intel', 'strategist', 'optics']
   return supportAgents.includes(agent)
 }
 

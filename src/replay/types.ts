@@ -31,18 +31,16 @@ export const replayConfigSchema = z.object({
     forceDecisions: z.record(z.string()).optional(),
   }),
   /** Comparison options */
-  comparison: z.object({
-    /** Compare with original */
-    compareWithOriginal: z.boolean().default(true),
-    /** Metrics to compare */
-    metrics: z.array(z.enum([
-      'cost',
-      'time',
-      'quality',
-      'success_rate',
-      'council_consensus',
-    ])).default(['cost', 'time', 'quality']),
-  }).default({}),
+  comparison: z
+    .object({
+      /** Compare with original */
+      compareWithOriginal: z.boolean().default(true),
+      /** Metrics to compare */
+      metrics: z
+        .array(z.enum(['cost', 'time', 'quality', 'success_rate', 'council_consensus']))
+        .default(['cost', 'time', 'quality']),
+    })
+    .default({}),
 })
 
 export type ReplayConfig = z.infer<typeof replayConfigSchema>
@@ -57,35 +55,45 @@ export const missionSnapshotSchema = z.object({
   createdAt: z.string(),
   completedAt: z.string().optional(),
   status: z.enum(['pending', 'in_progress', 'paused', 'completed', 'failed', 'aborted']),
-  objectives: z.array(z.object({
-    id: z.string(),
-    title: z.string(),
-    status: z.string(),
-    tasks: z.array(z.object({
+  objectives: z.array(
+    z.object({
       id: z.string(),
-      description: z.string(),
+      title: z.string(),
       status: z.string(),
-      agent: z.string().optional(),
-      result: z.unknown().optional(),
-      error: z.string().optional(),
-      startedAt: z.string().optional(),
-      completedAt: z.string().optional(),
-    })),
-  })),
+      tasks: z.array(
+        z.object({
+          id: z.string(),
+          description: z.string(),
+          status: z.string(),
+          agent: z.string().optional(),
+          result: z.unknown().optional(),
+          error: z.string().optional(),
+          startedAt: z.string().optional(),
+          completedAt: z.string().optional(),
+        })
+      ),
+    })
+  ),
   councilMode: z.string().optional(),
-  councilResponses: z.array(z.object({
-    oracleId: z.string(),
-    recommendation: z.string(),
-    confidence: z.number(),
-    responseTime: z.number(),
-  })).optional(),
-  metrics: z.object({
-    totalCost: z.number().optional(),
-    totalTime: z.number().optional(),
-    tasksCompleted: z.number(),
-    tasksFailed: z.number(),
-    councilConsensus: z.number().optional(),
-  }).optional(),
+  councilResponses: z
+    .array(
+      z.object({
+        oracleId: z.string(),
+        recommendation: z.string(),
+        confidence: z.number(),
+        responseTime: z.number(),
+      })
+    )
+    .optional(),
+  metrics: z
+    .object({
+      totalCost: z.number().optional(),
+      totalTime: z.number().optional(),
+      tasksCompleted: z.number(),
+      tasksFailed: z.number(),
+      councilConsensus: z.number().optional(),
+    })
+    .optional(),
   config: z.record(z.unknown()).optional(),
 })
 
@@ -114,18 +122,22 @@ export const replayResultSchema = z.object({
     tasksCompleted: z.number(),
     tasksFailed: z.number(),
   }),
-  comparison: z.object({
-    original: z.record(z.number()),
-    replay: z.record(z.number()),
-    improvements: z.array(z.object({
-      metric: z.string(),
-      originalValue: z.number(),
-      replayValue: z.number(),
-      change: z.number(), // percentage
-      improved: z.boolean(),
-    })),
-    summary: z.string(),
-  }).optional(),
+  comparison: z
+    .object({
+      original: z.record(z.number()),
+      replay: z.record(z.number()),
+      improvements: z.array(
+        z.object({
+          metric: z.string(),
+          originalValue: z.number(),
+          replayValue: z.number(),
+          change: z.number(), // percentage
+          improved: z.boolean(),
+        })
+      ),
+      summary: z.string(),
+    })
+    .optional(),
 })
 
 export type ReplayResult = z.infer<typeof replayResultSchema>

@@ -15,13 +15,13 @@
  * Types of edit errors that can be detected
  */
 export type EditErrorType =
-  | 'no_change'      // oldString and newString are the same
-  | 'not_found'      // oldString not found in file
-  | 'ambiguous'      // oldString found multiple times
-  | 'file_missing'   // File does not exist
-  | 'permission'     // Permission denied
-  | 'syntax'         // Syntax error in edit
-  | 'unknown'        // Unknown error
+  | 'no_change' // oldString and newString are the same
+  | 'not_found' // oldString not found in file
+  | 'ambiguous' // oldString found multiple times
+  | 'file_missing' // File does not exist
+  | 'permission' // Permission denied
+  | 'syntax' // Syntax error in edit
+  | 'unknown' // Unknown error
 
 /**
  * Edit error detection result
@@ -291,22 +291,13 @@ export function detectEditError(output: string, error?: Error): EditErrorResult 
 export function generateRecoveryMessage(result: EditErrorResult): string {
   const instructions = RECOVERY_INSTRUCTIONS[result.errorType]
 
-  const parts = [
-    instructions,
-    '',
-    '---',
-    '',
-    `Error Details: ${result.originalMessage}`,
-  ]
+  const parts = [instructions, '', '---', '', `Error Details: ${result.originalMessage}`]
 
   if (result.context) {
     parts.push(`Context: ${result.context}`)
   }
 
-  parts.push(
-    '',
-    'DO NOT retry blindly. READ the file first to understand its actual state.'
-  )
+  parts.push('', 'DO NOT retry blindly. READ the file first to understand its actual state.')
 
   return parts.join('\n')
 }
@@ -318,15 +309,7 @@ export function generateRecoveryMessage(result: EditErrorResult): string {
  * @returns True if this is an edit tool
  */
 export function isEditTool(toolName: string): boolean {
-  const editTools = [
-    'Edit',
-    'edit',
-    'Write',
-    'write',
-    'MultiEdit',
-    'file_edit',
-    'file_write',
-  ]
+  const editTools = ['Edit', 'edit', 'Write', 'write', 'MultiEdit', 'file_edit', 'file_write']
   return editTools.includes(toolName)
 }
 

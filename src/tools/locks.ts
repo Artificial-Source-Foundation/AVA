@@ -38,13 +38,17 @@ export function createLockTools(config: LockToolsConfig = {}): Record<string, To
    * Acquire a lock on one or more files
    */
   const lock_file = tool({
-    description: 'Acquire an exclusive lock on a file to prevent concurrent edits. The lock expires after TTL (default 5 minutes).',
+    description:
+      'Acquire an exclusive lock on a file to prevent concurrent edits. The lock expires after TTL (default 5 minutes).',
     args: {
       filePath: s.string().describe('File path to lock'),
       ownerId: s.string().optional().describe('Lock owner ID (defaults to session ID)'),
       ownerName: s.string().optional().describe('Lock owner name'),
       taskId: s.string().optional().describe('Task ID associated with this lock'),
-      ttlMs: s.number().optional().describe('Lock TTL in milliseconds (default: 300000 = 5 minutes)'),
+      ttlMs: s
+        .number()
+        .optional()
+        .describe('Lock TTL in milliseconds (default: 300000 = 5 minutes)'),
       reason: s.string().optional().describe('Reason for the lock'),
     },
 
@@ -96,7 +100,8 @@ export function createLockTools(config: LockToolsConfig = {}): Record<string, To
    * Release a lock on a file
    */
   const unlock_file = tool({
-    description: 'Release an exclusive lock on a file. You must own the lock to release it (unless force is true).',
+    description:
+      'Release an exclusive lock on a file. You must own the lock to release it (unless force is true).',
     args: {
       filePath: s.string().describe('File path to unlock'),
       ownerId: s.string().optional().describe('Lock owner ID (must match the lock owner)'),
@@ -197,7 +202,8 @@ export function createLockTools(config: LockToolsConfig = {}): Record<string, To
    * Lock multiple files atomically
    */
   const lock_files = tool({
-    description: 'Acquire exclusive locks on multiple files atomically. Either all locks succeed or none do.',
+    description:
+      'Acquire exclusive locks on multiple files atomically. Either all locks succeed or none do.',
     args: {
       filePaths: s.string().describe('Comma-separated list of file paths to lock'),
       ownerId: s.string().optional().describe('Lock owner ID'),
@@ -252,7 +258,10 @@ export function createLockTools(config: LockToolsConfig = {}): Record<string, To
   const unlock_all = tool({
     description: 'Release all locks held by a specific owner.',
     args: {
-      ownerId: s.string().optional().describe('Owner ID to release locks for (defaults to current session)'),
+      ownerId: s
+        .string()
+        .optional()
+        .describe('Owner ID to release locks for (defaults to current session)'),
     },
 
     async execute(args, ctx) {

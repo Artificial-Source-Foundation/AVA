@@ -19,12 +19,7 @@ export const FACADE_PROFILE = {
   role: 'Frontend Operations Specialist',
   temperature: 0.4, // Slightly creative for UI work
   specialty: 'frontend' as const,
-  traits: [
-    'Component expert',
-    'Styling master',
-    'Accessibility advocate',
-    'UX-focused',
-  ],
+  traits: ['Component expert', 'Styling master', 'Accessibility advocate', 'UX-focused'],
 }
 
 // =============================================================================
@@ -191,7 +186,8 @@ You are FACADE. Build interfaces that delight users and pass accessibility audit
  */
 export function createFacadeAgent(cwd: string): AgentConfig {
   return {
-    description: 'FACADE - Frontend Operations Specialist. React/Vue/Svelte components, CSS/Tailwind, accessibility, responsive design.',
+    description:
+      'FACADE - Frontend Operations Specialist. React/Vue/Svelte components, CSS/Tailwind, accessibility, responsive design.',
     mode: 'subagent',
     model: getSupportAgentModel(cwd, 'uiOps'),
     temperature: FACADE_PROFILE.temperature,

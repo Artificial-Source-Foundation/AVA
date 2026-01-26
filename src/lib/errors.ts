@@ -152,10 +152,7 @@ export const errors = {
     new Delta9Error({
       code: 'MISSION_TASK_NOT_FOUND',
       message: `Mission task '${taskId}' not found`,
-      suggestions: [
-        'Use mission_status to see all tasks',
-        'Check if task ID is correct',
-      ],
+      suggestions: ['Use mission_status to see all tasks', 'Check if task ID is correct'],
       context: { taskId },
     }),
 

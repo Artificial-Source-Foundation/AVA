@@ -122,10 +122,13 @@ export class AutoScalingController {
     }, intervalMs)
 
     // Reset hourly counter
-    this.hourlyResetTimeout = setTimeout(() => {
-      this.scalingOperationsThisHour = 0
-      this.scheduleHourlyReset()
-    }, 3600000 - (Date.now() % 3600000))
+    this.hourlyResetTimeout = setTimeout(
+      () => {
+        this.scalingOperationsThisHour = 0
+        this.scheduleHourlyReset()
+      },
+      3600000 - (Date.now() % 3600000)
+    )
 
     // Run initial evaluation
     this.evaluate()
@@ -260,7 +263,11 @@ export class AutoScalingController {
   /**
    * Evaluate a scaling policy
    */
-  private evaluatePolicy(policy: ScalingPolicy, metrics: ScalingMetrics, state: ScalingState): ScalingDecision {
+  private evaluatePolicy(
+    policy: ScalingPolicy,
+    metrics: ScalingMetrics,
+    state: ScalingState
+  ): ScalingDecision {
     switch (policy.type) {
       case 'target_tracking':
         return this.evaluateTargetTracking(policy, metrics, state)
@@ -332,7 +339,11 @@ export class AutoScalingController {
   /**
    * Step scaling policy
    */
-  private evaluateStepScaling(policy: ScalingPolicy, metrics: ScalingMetrics, state: ScalingState): ScalingDecision {
+  private evaluateStepScaling(
+    policy: ScalingPolicy,
+    metrics: ScalingMetrics,
+    state: ScalingState
+  ): ScalingDecision {
     const { config, target, steps } = policy
     if (!steps || steps.length === 0) {
       return this.noAction(target, metrics, state)
@@ -397,7 +408,11 @@ export class AutoScalingController {
   private evaluateScheduled(policy: ScalingPolicy, state: ScalingState): ScalingDecision {
     const { config, target, schedule } = policy
     if (!schedule || schedule.length === 0) {
-      return this.noAction(target, { ...this.createEmptyMetrics(), currentInstances: state.currentInstances }, state)
+      return this.noAction(
+        target,
+        { ...this.createEmptyMetrics(), currentInstances: state.currentInstances },
+        state
+      )
     }
 
     const now = new Date()
@@ -414,7 +429,10 @@ export class AutoScalingController {
                 target,
                 action: scheduled.desiredCount > state.currentInstances ? 'scale_up' : 'scale_down',
                 currentCount: state.currentInstances,
-                desiredCount: Math.max(config.minInstances, Math.min(config.maxInstances, scheduled.desiredCount)),
+                desiredCount: Math.max(
+                  config.minInstances,
+                  Math.min(config.maxInstances, scheduled.desiredCount)
+                ),
                 reason: `Scheduled scaling at ${scheduled.at}`,
                 metrics: { ...this.createEmptyMetrics(), currentInstances: state.currentInstances },
                 timestamp: new Date().toISOString(),
@@ -427,13 +445,21 @@ export class AutoScalingController {
       // Cron support would require a cron parser library
     }
 
-    return this.noAction(target, { ...this.createEmptyMetrics(), currentInstances: state.currentInstances }, state)
+    return this.noAction(
+      target,
+      { ...this.createEmptyMetrics(), currentInstances: state.currentInstances },
+      state
+    )
   }
 
   /**
    * Predictive scaling policy
    */
-  private evaluatePredictive(policy: ScalingPolicy, metrics: ScalingMetrics, state: ScalingState): ScalingDecision {
+  private evaluatePredictive(
+    policy: ScalingPolicy,
+    metrics: ScalingMetrics,
+    state: ScalingState
+  ): ScalingDecision {
     const { config, target, prediction } = policy
     if (!prediction) {
       return this.noAction(target, metrics, state)
@@ -448,7 +474,8 @@ export class AutoScalingController {
 
     // Simple prediction: use weighted average of recent trends
     const recentMetrics = history.slice(-10)
-    const avgUtilization = recentMetrics.reduce((sum, m) => sum + m.currentUtilization, 0) / recentMetrics.length
+    const avgUtilization =
+      recentMetrics.reduce((sum, m) => sum + m.currentUtilization, 0) / recentMetrics.length
 
     // Calculate trend
     const firstHalf = recentMetrics.slice(0, 5)
@@ -483,7 +510,11 @@ export class AutoScalingController {
     return this.noAction(target, metrics, state)
   }
 
-  private noAction(target: ScalingTarget, metrics: ScalingMetrics, state: ScalingState): ScalingDecision {
+  private noAction(
+    target: ScalingTarget,
+    metrics: ScalingMetrics,
+    state: ScalingState
+  ): ScalingDecision {
     return {
       target,
       action: 'no_action',
@@ -515,7 +546,11 @@ export class AutoScalingController {
   /**
    * Execute a scaling decision
    */
-  private async executeDecision(decision: ScalingDecision, state: ScalingState, config: ScalingConfig): Promise<void> {
+  private async executeDecision(
+    decision: ScalingDecision,
+    state: ScalingState,
+    config: ScalingConfig
+  ): Promise<void> {
     // Check limits
     if (this.scalingOperationsThisHour >= this.limits.maxScalingOperationsPerHour) {
       this.emitEvent('scaling.failed', decision.target, {
@@ -649,7 +684,10 @@ export class AutoScalingController {
   /**
    * Update instance metrics
    */
-  updateInstanceMetrics(instanceId: string, metrics: Partial<Pick<ScalableInstance, 'load' | 'tasksProcessed' | 'errors'>>): void {
+  updateInstanceMetrics(
+    instanceId: string,
+    metrics: Partial<Pick<ScalableInstance, 'load' | 'tasksProcessed' | 'errors'>>
+  ): void {
     const instance = this.instances.get(instanceId)
     if (instance) {
       Object.assign(instance, metrics)
@@ -681,8 +719,8 @@ export class AutoScalingController {
 
     // Calculate recommended capacity
     const targetUtilization = policies[0]?.config.targetUtilization || 0.7
-    const recommendedForPeak = Math.ceil(currentCapacity * peakUtilization / targetUtilization)
-    const recommendedForAvg = Math.ceil(currentCapacity * avgUtilization / targetUtilization)
+    const recommendedForPeak = Math.ceil((currentCapacity * peakUtilization) / targetUtilization)
+    const recommendedForAvg = Math.ceil((currentCapacity * avgUtilization) / targetUtilization)
 
     // Use a blend of peak and average
     const recommendedCapacity = Math.ceil(recommendedForAvg * 0.7 + recommendedForPeak * 0.3)
@@ -712,7 +750,11 @@ export class AutoScalingController {
   // Event System
   // ===========================================================================
 
-  private emitEvent(type: ScalingEventType, target: ScalingTarget, data: Record<string, unknown>): void {
+  private emitEvent(
+    type: ScalingEventType,
+    target: ScalingTarget,
+    data: Record<string, unknown>
+  ): void {
     const event: ScalingEvent = {
       type,
       timestamp: new Date().toISOString(),
@@ -789,7 +831,8 @@ export class AutoScalingController {
     }
 
     return {
-      totalInstances: Array.from(this.instances.values()).filter((i) => i.status === 'running').length,
+      totalInstances: Array.from(this.instances.values()).filter((i) => i.status === 'running')
+        .length,
       instancesByTarget,
       policiesCount: this.policies.size,
       scalingOperationsThisHour: this.scalingOperationsThisHour,

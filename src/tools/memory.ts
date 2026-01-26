@@ -221,7 +221,10 @@ export function createMemoryTools(cwd: string): Record<string, ToolDefinition> {
     args: {
       label: s.string().describe('Label of the memory block to append to'),
       content: s.string().describe('Content to append'),
-      separator: s.string().optional().describe('Separator between existing and new content (default: newlines)'),
+      separator: s
+        .string()
+        .optional()
+        .describe('Separator between existing and new content (default: newlines)'),
     },
 
     async execute(args, _ctx) {
@@ -264,7 +267,10 @@ export function createMemoryTools(cwd: string): Record<string, ToolDefinition> {
     description: 'Delete a memory block. Use with caution - this cannot be undone.',
     args: {
       label: s.string().describe('Label of the memory block to delete'),
-      scope: s.enum(['global', 'project']).optional().describe('Scope to delete from (if block exists in both)'),
+      scope: s
+        .enum(['global', 'project'])
+        .optional()
+        .describe('Scope to delete from (if block exists in both)'),
     },
 
     async execute(args, _ctx) {

@@ -368,13 +368,10 @@ function metricsReducer(state: MetricsProjection, event: Delta9Event): MetricsPr
       return {
         ...state,
         totalTasks: state.totalTasks + 1,
-        successfulTasks: event.data.success
-          ? state.successfulTasks + 1
-          : state.successfulTasks,
+        successfulTasks: event.data.success ? state.successfulTasks + 1 : state.successfulTasks,
         failedTasks: event.data.success ? state.failedTasks : state.failedTasks + 1,
         totalDuration: state.totalDuration + event.data.duration,
-        avgTaskDuration:
-          (state.totalDuration + event.data.duration) / (state.totalTasks + 1),
+        avgTaskDuration: (state.totalDuration + event.data.duration) / (state.totalTasks + 1),
         totalTokens: state.totalTokens + (event.data.tokensUsed || 0),
       }
 
@@ -486,10 +483,7 @@ export class ProjectionBuilder {
       }
     }
 
-    const totalApplications = [...patternMap.values()].reduce(
-      (sum, p) => sum + p.applications,
-      0
-    )
+    const totalApplications = [...patternMap.values()].reduce((sum, p) => sum + p.applications, 0)
     const totalSuccesses = [...patternMap.values()].reduce((sum, p) => sum + p.successes, 0)
 
     return {

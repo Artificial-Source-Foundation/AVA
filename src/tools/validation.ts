@@ -138,9 +138,7 @@ function parseTestOutput(output: string): TestParseResult {
   }
 
   // Jest summary pattern
-  const jestMatch = output.match(
-    /Tests:\s+(\d+)\s+passed,\s*(\d+)\s+failed,\s*(\d+)\s+total/i
-  )
+  const jestMatch = output.match(/Tests:\s+(\d+)\s+passed,\s*(\d+)\s+failed,\s*(\d+)\s+total/i)
   if (jestMatch) {
     result.passed = parseInt(jestMatch[1], 10)
     result.failed = parseInt(jestMatch[2], 10)
@@ -181,9 +179,7 @@ function parseLintOutput(output: string): LintParseResult {
   }
 
   // ESLint pattern
-  const eslintMatch = output.match(
-    /(\d+)\s+problems?\s+\((\d+)\s+errors?,\s*(\d+)\s+warnings?\)/i
-  )
+  const eslintMatch = output.match(/(\d+)\s+problems?\s+\((\d+)\s+errors?,\s*(\d+)\s+warnings?\)/i)
   if (eslintMatch) {
     result.errors = parseInt(eslintMatch[2], 10)
     result.warnings = parseInt(eslintMatch[3], 10)
@@ -257,10 +253,7 @@ export function createValidationTools(
         .string()
         .optional()
         .describe('JSON array of suggestions for fixing (for fixable)'),
-      criteriaResults: s
-        .string()
-        .optional()
-        .describe('JSON array of individual criteria results'),
+      criteriaResults: s.string().optional().describe('JSON array of individual criteria results'),
     },
 
     async execute(args, _ctx) {

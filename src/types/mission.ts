@@ -11,7 +11,13 @@ import type { CouncilMode } from './config.js'
 // Status Types
 // =============================================================================
 
-export type MissionStatus = 'planning' | 'approved' | 'in_progress' | 'paused' | 'completed' | 'aborted'
+export type MissionStatus =
+  | 'planning'
+  | 'approved'
+  | 'in_progress'
+  | 'paused'
+  | 'completed'
+  | 'aborted'
 export type ObjectiveStatus = 'pending' | 'in_progress' | 'completed' | 'failed'
 export type TaskStatus = 'pending' | 'blocked' | 'in_progress' | 'completed' | 'failed'
 export type ValidationStatus = 'pass' | 'fixable' | 'fail'

@@ -84,31 +84,59 @@ Task types and recommended agents:
       let model: string
       let reason: string
 
-      if (['ui', 'frontend', 'component', 'style', 'css', 'react', 'vue'].some(k => type.includes(k) || desc.includes(k))) {
+      if (
+        ['ui', 'frontend', 'component', 'style', 'css', 'react', 'vue'].some(
+          (k) => type.includes(k) || desc.includes(k)
+        )
+      ) {
         agent = 'ui-ops'
         model = 'google/gemini-2.0-flash'
         reason = 'Frontend/UI task - UI-Ops specializes in components, styling, and accessibility'
-      } else if (['test', 'spec', 'coverage', 'jest', 'vitest', 'playwright'].some(k => type.includes(k) || desc.includes(k))) {
+      } else if (
+        ['test', 'spec', 'coverage', 'jest', 'vitest', 'playwright'].some(
+          (k) => type.includes(k) || desc.includes(k)
+        )
+      ) {
         agent = 'qa'
         model = 'anthropic/claude-sonnet-4-5'
         reason = 'Testing task - QA agent writes comprehensive tests'
-      } else if (['doc', 'readme', 'api doc', 'comment', 'jsdoc'].some(k => type.includes(k) || desc.includes(k))) {
+      } else if (
+        ['doc', 'readme', 'api doc', 'comment', 'jsdoc'].some(
+          (k) => type.includes(k) || desc.includes(k)
+        )
+      ) {
         agent = 'scribe'
         model = 'google/gemini-2.0-flash'
         reason = 'Documentation task - Scribe writes clear, comprehensive docs'
-      } else if (['search', 'find', 'grep', 'locate', 'where'].some(k => type.includes(k) || desc.includes(k))) {
+      } else if (
+        ['search', 'find', 'grep', 'locate', 'where'].some(
+          (k) => type.includes(k) || desc.includes(k)
+        )
+      ) {
         agent = 'scout'
         model = 'anthropic/claude-haiku-4'
         reason = 'Search task - Scout performs fast codebase searches'
-      } else if (['research', 'lookup', 'example', 'library', 'package'].some(k => type.includes(k) || desc.includes(k))) {
+      } else if (
+        ['research', 'lookup', 'example', 'library', 'package'].some(
+          (k) => type.includes(k) || desc.includes(k)
+        )
+      ) {
         agent = 'intel'
         model = 'anthropic/claude-sonnet-4-5'
         reason = 'Research task - Intel searches docs, GitHub, and web'
-      } else if (['stuck', 'blocked', 'help', 'advice', 'guidance'].some(k => type.includes(k) || desc.includes(k))) {
+      } else if (
+        ['stuck', 'blocked', 'help', 'advice', 'guidance'].some(
+          (k) => type.includes(k) || desc.includes(k)
+        )
+      ) {
         agent = 'strategist'
         model = 'openai/gpt-4o'
         reason = 'Guidance task - Strategist provides mid-execution advice'
-      } else if (['image', 'screenshot', 'diagram', 'visual'].some(k => type.includes(k) || desc.includes(k))) {
+      } else if (
+        ['image', 'screenshot', 'diagram', 'visual'].some(
+          (k) => type.includes(k) || desc.includes(k)
+        )
+      ) {
         agent = 'optics'
         model = 'google/gemini-2.0-flash'
         reason = 'Visual task - Optics handles images and diagrams'
@@ -192,7 +220,10 @@ Returns category match with model, temperature, and recommended agent.`,
 
     args: {
       taskDescription: s.string().describe('Task description to categorize'),
-      forceCategory: s.string().optional().describe('Force a specific category (planning, coding, testing, etc.)'),
+      forceCategory: s
+        .string()
+        .optional()
+        .describe('Force a specific category (planning, coding, testing, etc.)'),
       forceModel: s.string().optional().describe('Override the model for this task'),
       forceTemperature: s.number().optional().describe('Override the temperature (0-1)'),
     },

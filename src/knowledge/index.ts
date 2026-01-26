@@ -5,9 +5,7 @@
  * Agents can store patterns, conventions, gotchas, and decisions.
  */
 
-export {
-  createKnowledgeStore,
-} from './store.js'
+export { createKnowledgeStore } from './store.js'
 
 export {
   type KnowledgeScope,

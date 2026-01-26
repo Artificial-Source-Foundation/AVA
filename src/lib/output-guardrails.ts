@@ -33,16 +33,7 @@ const SKIP_TOOLS = [
 ]
 
 /** Tools that get higher limits (code-focused) */
-const CODE_TOOLS = [
-  'Read',
-  'read',
-  'Grep',
-  'grep',
-  'Glob',
-  'glob',
-  'file_read',
-  'search',
-]
+const CODE_TOOLS = ['Read', 'read', 'Grep', 'grep', 'Glob', 'glob', 'file_read', 'search']
 
 // =============================================================================
 // Types

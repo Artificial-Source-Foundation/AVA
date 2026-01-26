@@ -136,9 +136,7 @@ export class BudgetManager {
    * Calculate status from budget tracking
    */
   getStatus(budget: BudgetTracking): BudgetStatus {
-    const percentage = budget.limit > 0
-      ? (budget.spent / budget.limit) * 100
-      : 0
+    const percentage = budget.limit > 0 ? (budget.spent / budget.limit) * 100 : 0
 
     return {
       enabled: this.config.enabled,
@@ -156,10 +154,7 @@ export class BudgetManager {
   /**
    * Check if an operation is within budget
    */
-  checkBudget(
-    budget: BudgetTracking,
-    estimatedCost: number
-  ): BudgetCheckResult {
+  checkBudget(budget: BudgetTracking, estimatedCost: number): BudgetCheckResult {
     if (!this.config.enabled) {
       return {
         allowed: true,
@@ -215,11 +210,7 @@ export class BudgetManager {
   /**
    * Estimate cost for a model call
    */
-  estimateCost(
-    model: string,
-    inputTokens: number,
-    outputTokens: number
-  ): number {
+  estimateCost(model: string, inputTokens: number, outputTokens: number): number {
     const costs = MODEL_COSTS[model]
 
     if (!costs) {
@@ -237,7 +228,7 @@ export class BudgetManager {
     const name = agentName.toLowerCase()
 
     // Council agents (CIPHER, VECTOR, PRISM, APEX)
-    if (['cipher', 'vector', 'prism', 'apex', 'oracle'].some(o => name.includes(o))) {
+    if (['cipher', 'vector', 'prism', 'apex', 'oracle'].some((o) => name.includes(o))) {
       return 'council'
     }
 
@@ -247,7 +238,7 @@ export class BudgetManager {
     }
 
     // Support agents (Scout, Intel, Strategist, Scribe, Optics)
-    if (['scout', 'intel', 'strategist', 'scribe', 'optics'].some(s => name.includes(s))) {
+    if (['scout', 'intel', 'strategist', 'scribe', 'optics'].some((s) => name.includes(s))) {
       return 'support'
     }
 
@@ -271,9 +262,7 @@ export function createBudgetManager(cwd: string): BudgetManager {
  * Format budget for display
  */
 export function formatBudget(budget: BudgetTracking): string {
-  const percentage = budget.limit > 0
-    ? Math.round((budget.spent / budget.limit) * 100)
-    : 0
+  const percentage = budget.limit > 0 ? Math.round((budget.spent / budget.limit) * 100) : 0
 
   const lines: string[] = []
 

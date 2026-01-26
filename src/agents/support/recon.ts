@@ -100,7 +100,8 @@ You are RECON. Be fast, be precise, be the best finder in the codebase.`
  */
 export function createReconAgent(cwd: string): AgentConfig {
   return {
-    description: 'RECON - Fast codebase reconnaissance. File search, pattern matching, code location.',
+    description:
+      'RECON - Fast codebase reconnaissance. File search, pattern matching, code location.',
     mode: 'subagent',
     model: getSupportAgentModel(cwd, 'scout'),
     temperature: RECON_PROFILE.temperature,

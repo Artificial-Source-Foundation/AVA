@@ -118,10 +118,7 @@ async function executeCommand(
 /**
  * Run test check
  */
-async function runTestCheck(
-  command: string = 'npm test',
-  files?: string[]
-): Promise<CheckResult> {
+async function runTestCheck(command: string = 'npm test', files?: string[]): Promise<CheckResult> {
   let fullCommand = command
 
   if (files && files.length > 0) {

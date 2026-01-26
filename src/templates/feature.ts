@@ -219,10 +219,7 @@ export const simpleFeatureTemplate: MissionTemplate = {
         },
         {
           description: 'Add basic tests',
-          acceptanceCriteria: [
-            'Core functionality tested',
-            'Tests pass',
-          ],
+          acceptanceCriteria: ['Core functionality tested', 'Tests pass'],
           routeTo: 'SENTINEL',
           dependsOn: [0],
         },

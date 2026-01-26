@@ -172,11 +172,7 @@ const INTENT_PATTERNS: Record<IntentType, IntentPattern> = {
     ],
     planningFocus: 'INVESTIGATION: Gather information before acting. Define exit criteria.',
     suggestedTools: ['explorer', 'scout', 'intel'],
-    riskFactors: [
-      'Define clear exit criteria',
-      'Time-box exploration',
-      'Document findings',
-    ],
+    riskFactors: ['Define clear exit criteria', 'Time-box exploration', 'Document findings'],
   },
 }
 

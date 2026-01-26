@@ -91,7 +91,11 @@ const messageCountMap = new Map<string, { user: number; assistant: number; total
 /**
  * Get message stats for a session
  */
-export function getMessageStats(sessionId: string): { user: number; assistant: number; total: number } {
+export function getMessageStats(sessionId: string): {
+  user: number
+  assistant: number
+  total: number
+} {
   return messageCountMap.get(sessionId) ?? { user: 0, assistant: 0, total: 0 }
 }
 
@@ -140,7 +144,9 @@ export function createMessageHooks(input: MessageHooksInput): MessageHooks {
         for (const part of parts) {
           if (part.type === 'text' && part.text) {
             // Extract file paths mentioned in text
-            const fileMatches = part.text.match(/[a-zA-Z0-9_\-./]+\.(ts|tsx|js|jsx|json|md|css|html)/g)
+            const fileMatches = part.text.match(
+              /[a-zA-Z0-9_\-./]+\.(ts|tsx|js|jsx|json|md|css|html)/g
+            )
             if (fileMatches) {
               filesInContext.push(...fileMatches)
             }

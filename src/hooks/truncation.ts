@@ -209,7 +209,8 @@ function simpleTruncate(output: string, limit: number, headTailBalance: number):
 function smartTruncate(output: string, limit: number, headTailBalance: number): string {
   // Try to detect structure
   const isJSON = output.trim().startsWith('{') || output.trim().startsWith('[')
-  const isCode = output.includes('function ') || output.includes('const ') || output.includes('class ')
+  const isCode =
+    output.includes('function ') || output.includes('const ') || output.includes('class ')
   const hasLineStructure = output.includes('\n')
 
   if (isJSON) {

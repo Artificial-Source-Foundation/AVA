@@ -25,10 +25,12 @@ export const webhookConfigSchema = z.object({
   /** Enable/disable */
   enabled: z.boolean().default(true),
   /** Retry configuration */
-  retry: z.object({
-    maxRetries: z.number().int().min(0).max(5).default(3),
-    backoffMs: z.number().int().min(100).max(30000).default(1000),
-  }).default({}),
+  retry: z
+    .object({
+      maxRetries: z.number().int().min(0).max(5).default(3),
+      backoffMs: z.number().int().min(100).max(30000).default(1000),
+    })
+    .default({}),
   /** Timeout in ms */
   timeout: z.number().int().min(1000).max(30000).default(5000),
   /** Payload format */
@@ -51,11 +53,13 @@ export const webhookDeliverySchema = z.object({
   status: z.enum(['pending', 'sending', 'delivered', 'failed', 'retrying']),
   attempts: z.number().int().default(0),
   lastAttemptAt: z.string().optional(),
-  response: z.object({
-    statusCode: z.number(),
-    body: z.string().optional(),
-    headers: z.record(z.string()).optional(),
-  }).optional(),
+  response: z
+    .object({
+      statusCode: z.number(),
+      body: z.string().optional(),
+      headers: z.record(z.string()).optional(),
+    })
+    .optional(),
   error: z.string().optional(),
   createdAt: z.string(),
   deliveredAt: z.string().optional(),

@@ -65,6 +65,38 @@ export interface ResumeOptions {
   cwd?: string
 }
 
+export interface QueryOptions {
+  /** Filter by event type */
+  type?: string
+  /** Filter by category (mission, task, council, etc.) */
+  category?: string
+  /** Filter events since time (e.g., '1h', '30m', '2d', ISO date) */
+  since?: string
+  /** Filter events until time */
+  until?: string
+  /** Full-text search */
+  search?: string
+  /** Maximum events to return */
+  limit?: number
+  /** Show verbose event data */
+  verbose?: boolean
+  /** Output format */
+  format?: 'table' | 'json'
+  /** Custom project directory */
+  cwd?: string
+}
+
+export interface StatsOptions {
+  /** Time period: 1h, 24h, 7d, 30d, all */
+  period?: string
+  /** Show verbose breakdowns */
+  verbose?: boolean
+  /** Output format */
+  format?: 'summary' | 'json'
+  /** Custom project directory */
+  cwd?: string
+}
+
 // =============================================================================
 // Output Formatting
 // =============================================================================
@@ -162,6 +194,79 @@ export interface ResumeResult {
     completed: number
   }
   availableCheckpoints?: string[]
+  timestamp: string
+}
+
+export interface QueryResult {
+  query: {
+    type?: string
+    category?: string
+    since?: string
+    until?: string
+    search?: string
+    limit: number
+  }
+  events: Array<{
+    id: string
+    type: string
+    timestamp: string
+    category: string
+    summary: string
+    data?: Record<string, unknown>
+  }>
+  stats: {
+    total: number
+    matched: number
+    categories: Record<string, number>
+  }
+  timestamp: string
+}
+
+export interface StatsReport {
+  period: string
+  missions: {
+    total: number
+    completed: number
+    failed: number
+    aborted: number
+    successRate: number
+  }
+  tasks: {
+    total: number
+    completed: number
+    failed: number
+    avgAttempts: number
+    avgDuration: number
+  }
+  agents: Record<
+    string,
+    {
+      tasksCompleted: number
+      tasksFailed: number
+      tokensUsed: number
+      avgDuration: number
+    }
+  >
+  budget: {
+    totalSpent: number
+    byCategory: {
+      council: number
+      operators: number
+      validators: number
+      support: number
+    }
+  }
+  decompositions: {
+    total: number
+    byStrategy: Record<string, number>
+    avgSubtaskCount: number
+    successRate: number
+  }
+  epics: {
+    total: number
+    completed: number
+    inProgress: number
+  }
   timestamp: string
 }
 

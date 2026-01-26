@@ -56,7 +56,10 @@ export function createSkillTools(config: SkillToolsConfig): Record<string, ToolD
     description:
       'List all available skills. Skills are reusable prompt templates that provide specialized instructions.',
     args: {
-      showActive: s.boolean().optional().describe('If true, only show skills currently active in the session'),
+      showActive: s
+        .boolean()
+        .optional()
+        .describe('If true, only show skills currently active in the session'),
     },
 
     async execute(args, _ctx) {
@@ -104,7 +107,9 @@ export function createSkillTools(config: SkillToolsConfig): Record<string, ToolD
     description:
       'Load a skill into the current context. The skill instructions will be injected and available for the rest of the session.',
     args: {
-      skill: s.string().describe('Name of the skill to load (e.g., "my-skill" or "project:my-skill")'),
+      skill: s
+        .string()
+        .describe('Name of the skill to load (e.g., "my-skill" or "project:my-skill")'),
     },
 
     async execute(args, _ctx) {
@@ -177,7 +182,10 @@ export function createSkillTools(config: SkillToolsConfig): Record<string, ToolD
     args: {
       skill: s.string().describe('Name of the skill'),
       script: s.string().describe('Relative path to the script within the skill directory'),
-      scriptArgs: s.string().optional().describe('Arguments to pass to the script (space-separated)'),
+      scriptArgs: s
+        .string()
+        .optional()
+        .describe('Arguments to pass to the script (space-separated)'),
       timeout: s.number().optional().describe('Timeout in milliseconds (default: 30000)'),
     },
 
@@ -230,7 +238,8 @@ export function createSkillTools(config: SkillToolsConfig): Record<string, ToolD
    * Get skill details
    */
   const get_skill = tool({
-    description: 'Get detailed information about a skill including its scripts, resources, and MCP configuration.',
+    description:
+      'Get detailed information about a skill including its scripts, resources, and MCP configuration.',
     args: {
       skill: s.string().describe('Name of the skill to get details for'),
     },

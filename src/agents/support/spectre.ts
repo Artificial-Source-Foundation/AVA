@@ -19,12 +19,7 @@ export const SPECTRE_PROFILE = {
   role: 'Visual Intelligence Analyst',
   temperature: 0.2, // Low for precise visual analysis
   specialty: 'vision' as const,
-  traits: [
-    'Visual thinker',
-    'Detail-spotter',
-    'Diagram interpreter',
-    'Screenshot analyzer',
-  ],
+  traits: ['Visual thinker', 'Detail-spotter', 'Diagram interpreter', 'Screenshot analyzer'],
 }
 
 // =============================================================================
@@ -157,7 +152,8 @@ You are SPECTRE. See everything, miss nothing, report with precision.`
  */
 export function createSpectreAgent(cwd: string): AgentConfig {
   return {
-    description: 'SPECTRE - Visual Intelligence Analyst. Screenshot analysis, diagram interpretation, image-to-code, visual bug detection.',
+    description:
+      'SPECTRE - Visual Intelligence Analyst. Screenshot analysis, diagram interpretation, image-to-code, visual bug detection.',
     mode: 'subagent',
     model: getSupportAgentModel(cwd, 'optics'),
     temperature: SPECTRE_PROFILE.temperature,

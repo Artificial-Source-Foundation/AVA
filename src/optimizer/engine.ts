@@ -105,11 +105,13 @@ export class CostOptimizer {
 
     // Project total based on recent spending rate
     const recentHistory = this.usageHistory.slice(-20)
-    const avgCostPerTask = recentHistory.length > 0
-      ? recentHistory.reduce((sum, h) => sum + h.cost, 0) / recentHistory.length
-      : 0.05
+    const avgCostPerTask =
+      recentHistory.length > 0
+        ? recentHistory.reduce((sum, h) => sum + h.cost, 0) / recentHistory.length
+        : 0.05
 
-    const shouldDowngrade = this.config.autoDowngrade && percentUsed >= this.config.downgradeThreshold
+    const shouldDowngrade =
+      this.config.autoDowngrade && percentUsed >= this.config.downgradeThreshold
 
     // Recommend tier based on remaining budget
     let recommendedTier: BudgetStatus['recommendedTier']
@@ -128,7 +130,7 @@ export class CostOptimizer {
       spent: this.spent,
       remaining,
       percentUsed,
-      projectedTotal: this.spent + (avgCostPerTask * 10), // Project next 10 tasks
+      projectedTotal: this.spent + avgCostPerTask * 10, // Project next 10 tasks
       isOverBudget: this.spent >= this.budget,
       shouldDowngrade,
       recommendedTier,
@@ -186,7 +188,7 @@ export class CostOptimizer {
     }
 
     // Score and rank candidates
-    const scored = candidates.map(model => ({
+    const scored = candidates.map((model) => ({
       model,
       score: this.scoreModel(model, requirements, budgetStatus),
       cost: this.estimateCost(model, requirements),
@@ -195,7 +197,7 @@ export class CostOptimizer {
     scored.sort((a, b) => b.score - a.score)
 
     const selected = scored[0]
-    const alternatives = scored.slice(1, 4).map(s => ({
+    const alternatives = scored.slice(1, 4).map((s) => ({
       model: s.model.modelId,
       cost: s.cost,
       quality: s.model.qualityScore,
@@ -205,7 +207,8 @@ export class CostOptimizer {
     const warnings: string[] = []
 
     // Check for downgrade
-    const isDowngraded = budgetStatus.shouldDowngrade &&
+    const isDowngraded =
+      budgetStatus.shouldDowngrade &&
       selected.model.tier !== 'flagship' &&
       requirements.complexity === 'critical'
 
@@ -217,7 +220,9 @@ export class CostOptimizer {
       warnings.push('Budget nearly exhausted')
     }
 
-    if (selected.model.qualityScore < (requirements.minQuality || this.config.minQualityThreshold)) {
+    if (
+      selected.model.qualityScore < (requirements.minQuality || this.config.minQualityThreshold)
+    ) {
       warnings.push('Selected model below quality threshold')
     }
 
@@ -253,8 +258,8 @@ export class CostOptimizer {
 
       // Check capabilities
       if (requirements.requiredCapabilities.length > 0) {
-        const hasAllCapabilities = requirements.requiredCapabilities.every(
-          cap => model.capabilities.includes(cap)
+        const hasAllCapabilities = requirements.requiredCapabilities.every((cap) =>
+          model.capabilities.includes(cap)
         )
         if (!hasAllCapabilities) continue
       }
@@ -296,7 +301,8 @@ export class CostOptimizer {
     // Base scores (0-100)
     const qualityScore = model.qualityScore
     const costScore = 100 - Math.min(100, (cost / budgetStatus.remaining) * 100)
-    const latencyScore = 100 - Math.min(100, (model.averageLatency / this.config.maxLatencyThreshold) * 100)
+    const latencyScore =
+      100 - Math.min(100, (model.averageLatency / this.config.maxLatencyThreshold) * 100)
 
     // Weights based on requirements
     let qualityWeight = 0.4
@@ -406,9 +412,7 @@ export class CostOptimizer {
   /**
    * Optimize model selection for multiple tasks
    */
-  optimizeBatch(
-    tasks: TaskRequirements[]
-  ): Array<OptimizationResult & { taskIndex: number }> {
+  optimizeBatch(tasks: TaskRequirements[]): Array<OptimizationResult & { taskIndex: number }> {
     const results: Array<OptimizationResult & { taskIndex: number }> = []
 
     // Sort tasks by priority (critical first)

@@ -10,10 +10,7 @@ import { existsSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'no
 import { join } from 'node:path'
 import { execSync } from 'node:child_process'
 import { nanoid } from 'nanoid'
-import {
-  getCheckpointsDir,
-  ensureCheckpointsDir,
-} from '../lib/paths.js'
+import { getCheckpointsDir, ensureCheckpointsDir } from '../lib/paths.js'
 import { appendHistory } from './history.js'
 
 // =============================================================================
@@ -131,11 +128,11 @@ export class CheckpointManager {
 
       const files = new Set<string>()
 
-      if (staged) staged.split('\n').forEach(f => files.add(f))
-      if (modified) modified.split('\n').forEach(f => files.add(f))
-      if (untracked) untracked.split('\n').forEach(f => files.add(f))
+      if (staged) staged.split('\n').forEach((f) => files.add(f))
+      if (modified) modified.split('\n').forEach((f) => files.add(f))
+      if (untracked) untracked.split('\n').forEach((f) => files.add(f))
 
-      return Array.from(files).filter(f => f.length > 0)
+      return Array.from(files).filter((f) => f.length > 0)
     } catch {
       return []
     }
@@ -148,7 +145,7 @@ export class CheckpointManager {
     try {
       // Stage all changed files
       if (files.length > 0) {
-        execSync(`git add ${files.map(f => `"${f}"`).join(' ')}`, {
+        execSync(`git add ${files.map((f) => `"${f}"`).join(' ')}`, {
           cwd: this.cwd,
           stdio: 'pipe',
         })
@@ -269,7 +266,7 @@ export class CheckpointManager {
       return []
     }
 
-    const files = readdirSync(checkpointsDir).filter(f => f.endsWith('.json'))
+    const files = readdirSync(checkpointsDir).filter((f) => f.endsWith('.json'))
     const checkpoints: Checkpoint[] = []
 
     for (const file of files) {
@@ -286,8 +283,8 @@ export class CheckpointManager {
     }
 
     // Sort by creation time (newest first)
-    return checkpoints.sort((a, b) =>
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    return checkpoints.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     )
   }
 
@@ -314,7 +311,7 @@ export class CheckpointManager {
    */
   getByName(name: string): Checkpoint | null {
     const checkpoints = this.list()
-    return checkpoints.find(c => c.name === name) || null
+    return checkpoints.find((c) => c.name === name) || null
   }
 
   /**

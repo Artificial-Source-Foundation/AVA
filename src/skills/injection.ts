@@ -7,7 +7,13 @@
  * - Active skill tracking per session
  */
 
-import type { Skill, SkillSummary, RenderFormat, SkillInjectionOptions, SkillInjectionResult } from './types.js'
+import type {
+  Skill,
+  SkillSummary,
+  RenderFormat,
+  SkillInjectionOptions,
+  SkillInjectionResult,
+} from './types.js'
 
 // =============================================================================
 // State
@@ -37,9 +43,9 @@ const MODEL_FORMATS: Record<string, RenderFormat> = {
   'claude-haiku': 'xml',
   'gpt-4': 'json',
   'gpt-4o': 'json',
-  'o1': 'json',
-  'gemini': 'md',
-  'deepseek': 'json',
+  o1: 'json',
+  gemini: 'md',
+  deepseek: 'json',
 }
 
 /**
@@ -71,7 +77,11 @@ export function getFormatForModel(providerId?: string, modelId?: string): Render
 /**
  * Render skill content in the specified format
  */
-export function renderSkill(skill: Skill, format: RenderFormat, options?: SkillInjectionOptions): string {
+export function renderSkill(
+  skill: Skill,
+  format: RenderFormat,
+  options?: SkillInjectionOptions
+): string {
   const includeScripts = options?.includeScripts ?? skill.scripts.length > 0
   const includeResources = options?.includeResources ?? skill.resources.length > 0
 
@@ -119,7 +129,9 @@ function renderSkillXML(skill: Skill, includeScripts: boolean, includeResources:
   if (includeResources && skill.resources.length > 0) {
     parts.push(`  <resources>`)
     for (const resource of skill.resources) {
-      parts.push(`    <resource path="${escapeXML(resource.relativePath)}" type="${resource.type}" />`)
+      parts.push(
+        `    <resource path="${escapeXML(resource.relativePath)}" type="${resource.type}" />`
+      )
     }
     parts.push(`  </resources>`)
   }
@@ -166,7 +178,11 @@ function renderSkillJSON(skill: Skill, includeScripts: boolean, includeResources
 /**
  * Render skill in Markdown format (default/fallback)
  */
-function renderSkillMarkdown(skill: Skill, includeScripts: boolean, includeResources: boolean): string {
+function renderSkillMarkdown(
+  skill: Skill,
+  includeScripts: boolean,
+  includeResources: boolean
+): string {
   const parts: string[] = []
 
   parts.push(`## Skill: ${skill.name}`)
@@ -244,7 +260,9 @@ function renderSkillsListXML(skills: SkillSummary[]): string {
 
   parts.push(`<available-skills>`)
   parts.push(`  <instructions>`)
-  parts.push(`    Use the use_skill, read_skill_file, run_skill_script, and list_skills tools to work with skills.`)
+  parts.push(
+    `    Use the use_skill, read_skill_file, run_skill_script, and list_skills tools to work with skills.`
+  )
   parts.push(`  </instructions>`)
   parts.push(`  <skills>`)
 
@@ -288,7 +306,9 @@ function renderSkillsListMarkdown(skills: SkillSummary[]): string {
 
   parts.push(`## Available Skills`)
   parts.push('')
-  parts.push(`Use the \`use_skill\`, \`read_skill_file\`, \`run_skill_script\`, and \`list_skills\` tools to work with skills.`)
+  parts.push(
+    `Use the \`use_skill\`, \`read_skill_file\`, \`run_skill_script\`, and \`list_skills\` tools to work with skills.`
+  )
   parts.push('')
 
   for (const skill of skills) {

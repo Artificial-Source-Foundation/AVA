@@ -35,15 +35,18 @@ export function createDispatchTools(
       'Dispatch a task to an agent for execution. Auto-routes to appropriate support agent if not specified. Checks for file conflicts before dispatch.',
     args: {
       taskId: s.string().describe('ID of the task to dispatch'),
-      agent: s
-        .string()
-        .optional()
-        .describe('Specific agent to use (auto-routed if not specified)'),
+      agent: s.string().optional().describe('Specific agent to use (auto-routed if not specified)'),
       context: s.string().optional().describe('Additional context for the agent'),
       autoRoute: s.boolean().optional().describe('Use auto-routing (default: true)'),
-      files: s.string().optional().describe('JSON array of files this task will modify (exclusive ownership)'),
+      files: s
+        .string()
+        .optional()
+        .describe('JSON array of files this task will modify (exclusive ownership)'),
       filesReadonly: s.string().optional().describe('JSON array of files this task can read only'),
-      mustNot: s.string().optional().describe('JSON array of explicit constraints - things NOT to do'),
+      mustNot: s
+        .string()
+        .optional()
+        .describe('JSON array of explicit constraints - things NOT to do'),
     },
 
     async execute(args, _ctx) {
@@ -254,7 +257,8 @@ export function createDispatchTools(
    * Request validation for a completed task
    */
   const request_validation = tool({
-    description: 'Request validation of a completed task. Validator will check against acceptance criteria.',
+    description:
+      'Request validation of a completed task. Validator will check against acceptance criteria.',
     args: {
       taskId: s.string().describe('ID of the task to validate'),
       completionSummary: s.string().describe('Summary of what was done'),

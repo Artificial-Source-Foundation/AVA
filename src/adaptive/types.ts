@@ -136,7 +136,17 @@ export const DEFAULT_ADAPTIVE_CONFIG: AdaptiveConfig = {
 export const CATEGORY_KEYWORDS: Record<TaskCategory, string[]> = {
   architecture: ['architecture', 'design', 'structure', 'pattern', 'system', 'module', 'component'],
   algorithm: ['algorithm', 'sort', 'search', 'optimization', 'complexity', 'data structure'],
-  ui_frontend: ['ui', 'frontend', 'component', 'react', 'vue', 'css', 'style', 'layout', 'responsive'],
+  ui_frontend: [
+    'ui',
+    'frontend',
+    'component',
+    'react',
+    'vue',
+    'css',
+    'style',
+    'layout',
+    'responsive',
+  ],
   api_backend: ['api', 'endpoint', 'route', 'controller', 'service', 'backend', 'rest', 'graphql'],
   database: ['database', 'query', 'migration', 'schema', 'sql', 'nosql', 'orm', 'prisma'],
   testing: ['test', 'spec', 'mock', 'stub', 'coverage', 'unit', 'integration', 'e2e'],

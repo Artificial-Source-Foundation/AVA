@@ -23,12 +23,7 @@ import { validatorAgent } from './agents/validator.js'
 // Support agents - Delta Team (registry for dynamic creation)
 import { supportAgentFactories, codenameToConfigKey } from './agents/support/index.js'
 // Council agents - Oracles
-import {
-  cipherAgent,
-  vectorAgent,
-  prismAgent,
-  apexAgent,
-} from './agents/council/index.js'
+import { cipherAgent, vectorAgent, prismAgent, apexAgent } from './agents/council/index.js'
 
 const Delta9: Plugin = async (ctx) => {
   const cwd = ctx.worktree || ctx.directory

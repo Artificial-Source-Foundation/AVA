@@ -112,7 +112,7 @@ export class LegionCoordinator {
     strategy: DistributionStrategy = 'dependency_aware'
   ): DistributionPlan {
     const { tasks, operators } = strike
-    const availableOperators = operators.filter(op => op.status !== 'offline')
+    const availableOperators = operators.filter((op) => op.status !== 'offline')
 
     // Build dependency graph
     const dependencyGraph = this.buildDependencyGraph(tasks)
@@ -183,7 +183,7 @@ export class LegionCoordinator {
 
         // Check if all dependencies are completed
         const deps = graph.get(task.id) || []
-        const depsComplete = deps.every(d => completed.has(d))
+        const depsComplete = deps.every((d) => completed.has(d))
 
         if (depsComplete) {
           wave.push(task)
@@ -192,7 +192,7 @@ export class LegionCoordinator {
 
       if (wave.length === 0 && completed.size < tasks.length) {
         // Circular dependency - break it
-        const remaining = tasks.filter(t => !completed.has(t.id))
+        const remaining = tasks.filter((t) => !completed.has(t.id))
         wave.push(remaining[0])
       }
 
@@ -223,9 +223,11 @@ export class LegionCoordinator {
 
       case 'load_balanced': {
         // Select operator with least current load
-        const sorted = [...operators].sort((a, b) =>
-          (a.tasksCompleted + (a.currentTask ? 1 : 0)) -
-          (b.tasksCompleted + (b.currentTask ? 1 : 0))
+        const sorted = [...operators].sort(
+          (a, b) =>
+            a.tasksCompleted +
+            (a.currentTask ? 1 : 0) -
+            (b.tasksCompleted + (b.currentTask ? 1 : 0))
         )
         return sorted[0]
       }
@@ -233,8 +235,8 @@ export class LegionCoordinator {
       case 'specialty_match': {
         // Find operator with matching specialty
         const taskKeywords = task.description.toLowerCase()
-        const matched = operators.find(op =>
-          op.specialties.some(s => taskKeywords.includes(s.toLowerCase()))
+        const matched = operators.find((op) =>
+          op.specialties.some((s) => taskKeywords.includes(s.toLowerCase()))
         )
         return matched || operators[index % operators.length]
       }
@@ -305,7 +307,10 @@ export class LegionCoordinator {
    */
   async executeStrike(
     strikeId: string,
-    executor: (task: LegionTask, operator: LegionOperator) => Promise<{
+    executor: (
+      task: LegionTask,
+      operator: LegionOperator
+    ) => Promise<{
       success: boolean
       result?: unknown
       error?: string
@@ -322,12 +327,12 @@ export class LegionCoordinator {
 
     // Execute wave by wave
     for (let waveIndex = 0; waveIndex < plan.waves; waveIndex++) {
-      const waveAssignments = plan.assignments.filter(a => a.wave === waveIndex)
+      const waveAssignments = plan.assignments.filter((a) => a.wave === waveIndex)
 
       // Execute tasks in parallel within each wave
-      const wavePromises = waveAssignments.map(async assignment => {
-        const task = strike.tasks.find(t => t.id === assignment.taskId)!
-        const operator = strike.operators.find(o => o.id === assignment.operatorId)!
+      const wavePromises = waveAssignments.map(async (assignment) => {
+        const task = strike.tasks.find((t) => t.id === assignment.taskId)!
+        const operator = strike.operators.find((o) => o.id === assignment.operatorId)!
 
         return this.executeTask(strike, task, operator, executor)
       })
@@ -372,7 +377,10 @@ export class LegionCoordinator {
     strike: LegionStrike,
     task: LegionTask,
     operator: LegionOperator,
-    executor: (task: LegionTask, operator: LegionOperator) => Promise<{
+    executor: (
+      task: LegionTask,
+      operator: LegionOperator
+    ) => Promise<{
       success: boolean
       result?: unknown
       error?: string
@@ -428,8 +436,10 @@ export class LegionCoordinator {
       // Update average task time
       if (task.startedAt && task.completedAt) {
         const taskTime = new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime()
-        const totalTime = operator.averageTaskTime * (operator.tasksCompleted + operator.tasksFailed - 1)
-        operator.averageTaskTime = (totalTime + taskTime) / (operator.tasksCompleted + operator.tasksFailed)
+        const totalTime =
+          operator.averageTaskTime * (operator.tasksCompleted + operator.tasksFailed - 1)
+        operator.averageTaskTime =
+          (totalTime + taskTime) / (operator.tasksCompleted + operator.tasksFailed)
       }
     }
   }
@@ -443,7 +453,7 @@ export class LegionCoordinator {
    */
   detectConflicts(strike: LegionStrike): Conflict[] {
     const conflicts: Conflict[] = []
-    const completedTasks = strike.tasks.filter(t => t.status === 'completed')
+    const completedTasks = strike.tasks.filter((t) => t.status === 'completed')
 
     // Check for file collisions
     const fileModifications = new Map<string, string[]>()
@@ -529,8 +539,8 @@ export class LegionCoordinator {
    * Calculate final strike status
    */
   private calculateStrikeStatus(strike: LegionStrike): 'completed' | 'failed' {
-    const failedTasks = strike.tasks.filter(t => t.status === 'failed')
-    const unresolvedConflicts = strike.conflicts.filter(c => c.status !== 'resolved')
+    const failedTasks = strike.tasks.filter((t) => t.status === 'failed')
+    const unresolvedConflicts = strike.conflicts.filter((c) => c.status !== 'resolved')
 
     if (failedTasks.length === 0 && unresolvedConflicts.length === 0) {
       return 'completed'
@@ -543,8 +553,8 @@ export class LegionCoordinator {
    * Calculate strike metrics
    */
   private calculateMetrics(strike: LegionStrike): LegionStrike['metrics'] {
-    const completedTasks = strike.tasks.filter(t => t.status === 'completed')
-    const failedTasks = strike.tasks.filter(t => t.status === 'failed')
+    const completedTasks = strike.tasks.filter((t) => t.status === 'completed')
+    const failedTasks = strike.tasks.filter((t) => t.status === 'failed')
 
     const startTime = new Date(strike.startedAt).getTime()
     const endTime = strike.completedAt ? new Date(strike.completedAt).getTime() : Date.now()
@@ -629,7 +639,7 @@ export class LegionCoordinator {
 
   getEvents(strikeId?: string): LegionEvent[] {
     if (strikeId) {
-      return this.events.filter(e => e.strikeId === strikeId)
+      return this.events.filter((e) => e.strikeId === strikeId)
     }
     return [...this.events]
   }

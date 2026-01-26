@@ -172,7 +172,8 @@ function readBlock(filePath: string, scope: 'global' | 'project'): MemoryBlock |
     const rawContent = readFileSync(filePath, 'utf-8')
     const { meta, body } = parseFrontmatter(rawContent)
 
-    const label = (meta.label as string) || filePath.split('/').pop()?.replace('.md', '') || 'unknown'
+    const label =
+      (meta.label as string) || filePath.split('/').pop()?.replace('.md', '') || 'unknown'
     const content = body.trim()
 
     return {
@@ -201,9 +202,7 @@ function writeBlock(block: MemoryBlock): boolean {
 
   // Enforce limit
   const content =
-    block.content.length > block.limit
-      ? block.content.substring(0, block.limit)
-      : block.content
+    block.content.length > block.limit ? block.content.substring(0, block.limit) : block.content
 
   try {
     const serialized = serializeFrontmatter(
@@ -346,9 +345,7 @@ export class MemoryManager {
     }
 
     const existingContent = block?.content || ''
-    const newContent = existingContent
-      ? existingContent + separator + content
-      : content
+    const newContent = existingContent ? existingContent + separator + content : content
 
     return this.set(label, newContent, { scope: block?.scope || 'project' })
   }

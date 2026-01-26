@@ -197,7 +197,11 @@ export function createDiagnosticsTools(
       const health: Record<string, unknown> = {
         status: healthStatus,
         statusEmoji:
-          healthStatus === 'healthy' ? '\\u2705' : healthStatus === 'degraded' ? '\\u26A0\\uFE0F' : '\\u274C',
+          healthStatus === 'healthy'
+            ? '\\u2705'
+            : healthStatus === 'degraded'
+              ? '\\u26A0\\uFE0F'
+              : '\\u274C',
         timestamp: new Date().toISOString(),
         uptime: formatDuration(Date.now() - pluginStartTime),
 

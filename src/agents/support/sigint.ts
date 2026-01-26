@@ -166,7 +166,8 @@ You are SIGINT. Find the truth, cite your sources, synthesize with clarity.`
  */
 export function createSigintAgent(cwd: string): AgentConfig {
   return {
-    description: 'SIGINT - Research and documentation lookup. Finds official docs, library references, examples with citations. MUST BE USED for "how does X work", library questions, best practices.',
+    description:
+      'SIGINT - Research and documentation lookup. Finds official docs, library references, examples with citations. MUST BE USED for "how does X work", library questions, best practices.',
     mode: 'subagent',
     model: getSupportAgentModel(cwd, 'intel'),
     temperature: SIGINT_PROFILE.temperature,

@@ -17,10 +17,7 @@ import {
   type OraclePromptContext,
   type OracleInvocationResult,
 } from './oracle.js'
-import {
-  performXhighRecon,
-  type XhighReconResult,
-} from './xhigh-recon.js'
+import { performXhighRecon, type XhighReconResult } from './xhigh-recon.js'
 
 // =============================================================================
 // Re-exports
@@ -155,9 +152,7 @@ export async function conveneCouncil(
     question: input.question,
     missionDescription: mission?.description || 'No active mission',
     objectivesSummary: buildObjectivesSummary(state),
-    additionalContext: reconContext
-      ? `${reconContext}\n\n${input.context || ''}`
-      : input.context,
+    additionalContext: reconContext ? `${reconContext}\n\n${input.context || ''}` : input.context,
   }
 
   // Invoke oracles
@@ -237,17 +232,13 @@ function aggregateOpinions(
 
   // Calculate average confidence
   const confidenceAvg =
-    opinions.length > 0
-      ? opinions.reduce((sum, o) => sum + o.confidence, 0) / opinions.length
-      : 0
+    opinions.length > 0 ? opinions.reduce((sum, o) => sum + o.confidence, 0) / opinions.length : 0
 
   // Extract consensus points
   const consensus = extractConsensus(opinions)
 
   // Find disagreements that were resolved
-  const disagreementsResolved = requireConsensus
-    ? findResolvedDisagreements(opinions)
-    : undefined
+  const disagreementsResolved = requireConsensus ? findResolvedDisagreements(opinions) : undefined
 
   return {
     mode,

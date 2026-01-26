@@ -103,7 +103,10 @@ program
         cwd: options.cwd,
       })
     } catch (error) {
-      console.error(colorize('Error:', 'red'), error instanceof Error ? error.message : String(error))
+      console.error(
+        colorize('Error:', 'red'),
+        error instanceof Error ? error.message : String(error)
+      )
       process.exit(1)
     }
   })
@@ -117,7 +120,10 @@ program
   .description('View event log with filtering')
   .option('-n, --limit <number>', 'Number of events to show', '20')
   .option('-t, --type <type>', 'Filter by event type prefix (e.g., mission, task)')
-  .option('-c, --category <category>', 'Filter by category (mission, task, council, agent, validation, learning, file, system)')
+  .option(
+    '-c, --category <category>',
+    'Filter by category (mission, task, council, agent, validation, learning, file, system)'
+  )
   .option('-s, --session <id>', 'Filter by session ID')
   .option('--format <format>', 'Output format: timeline, json, table', 'timeline')
   .option('--cwd <path>', 'Project directory (default: current)')
@@ -132,7 +138,10 @@ program
         cwd: options.cwd,
       })
     } catch (error) {
-      console.error(colorize('Error:', 'red'), error instanceof Error ? error.message : String(error))
+      console.error(
+        colorize('Error:', 'red'),
+        error instanceof Error ? error.message : String(error)
+      )
       process.exit(1)
     }
   })
@@ -156,7 +165,10 @@ program
         cwd: options.cwd,
       })
     } catch (error) {
-      console.error(colorize('Error:', 'red'), error instanceof Error ? error.message : String(error))
+      console.error(
+        colorize('Error:', 'red'),
+        error instanceof Error ? error.message : String(error)
+      )
       process.exit(1)
     }
   })
@@ -183,7 +195,10 @@ program
         cwd: options.cwd,
       })
     } catch (error) {
-      console.error(colorize('Error:', 'red'), error instanceof Error ? error.message : String(error))
+      console.error(
+        colorize('Error:', 'red'),
+        error instanceof Error ? error.message : String(error)
+      )
       process.exit(1)
     }
   })
@@ -208,7 +223,10 @@ program
         cwd: options.cwd,
       })
     } catch (error) {
-      console.error(colorize('Error:', 'red'), error instanceof Error ? error.message : String(error))
+      console.error(
+        colorize('Error:', 'red'),
+        error instanceof Error ? error.message : String(error)
+      )
       process.exit(1)
     }
   })

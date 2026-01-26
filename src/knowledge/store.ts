@@ -105,14 +105,8 @@ function parseFrontmatter(frontmatterText: string | undefined): KnowledgeFrontma
 /**
  * Read a knowledge block file
  */
-async function readBlockFile(
-  scope: KnowledgeScope,
-  filePath: string
-): Promise<KnowledgeBlock> {
-  const [raw, stats] = await Promise.all([
-    fs.readFile(filePath, 'utf-8'),
-    fs.stat(filePath),
-  ])
+async function readBlockFile(scope: KnowledgeScope, filePath: string): Promise<KnowledgeBlock> {
+  const [raw, stats] = await Promise.all([fs.readFile(filePath, 'utf-8'), fs.stat(filePath)])
 
   const { frontmatterText, body } = splitFrontmatter(raw)
   const fm = parseFrontmatter(frontmatterText)
@@ -272,7 +266,7 @@ export function createKnowledgeStore(projectDirectory: string): KnowledgeStore {
           const filePath = path.join(dir, entry.name)
           try {
             blocks.push(await readBlockFile(s, filePath))
-          } catch (err) {
+          } catch (_err) {
             // Skip invalid files
             console.warn(`Skipping invalid knowledge block: ${filePath}`)
           }
@@ -300,15 +294,14 @@ export function createKnowledgeStore(projectDirectory: string): KnowledgeStore {
       await fs.mkdir(dir, { recursive: true })
 
       const filePath = path.join(dir, `${safeLabel}.md`)
-      const existing = (await exists(filePath))
-        ? await readBlockFile(scope, filePath)
-        : undefined
+      const existing = (await exists(filePath)) ? await readBlockFile(scope, filePath) : undefined
 
       if (existing?.readOnly) {
         throw new Error(`Knowledge block is read-only: ${scope}:${safeLabel}`)
       }
 
-      const description = opts?.description ?? existing?.description ?? `Knowledge block: ${safeLabel}`
+      const description =
+        opts?.description ?? existing?.description ?? `Knowledge block: ${safeLabel}`
       const limit = Math.min(opts?.limit ?? existing?.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
       const category = opts?.category ?? existing?.category ?? 'custom'
 

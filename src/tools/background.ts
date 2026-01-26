@@ -10,7 +10,11 @@
 
 import { tool, type ToolDefinition } from '@opencode-ai/plugin'
 import type { MissionState } from '../mission/state.js'
-import { getBackgroundManager, type BackgroundTaskStatus, type OpenCodeClient } from '../lib/background-manager.js'
+import {
+  getBackgroundManager,
+  type BackgroundTaskStatus,
+  type OpenCodeClient,
+} from '../lib/background-manager.js'
 import { errors } from '../lib/errors.js'
 import { getBackgroundListHint } from '../lib/hints.js'
 
@@ -22,10 +26,10 @@ const s = tool.schema
 // =============================================================================
 
 const STATUS_EMOJI: Record<BackgroundTaskStatus, string> = {
-  pending: '\u23F3',    // hourglass
+  pending: '\u23F3', // hourglass
   running: '\uD83D\uDD04', // arrows counterclockwise
-  completed: '\u2705',  // check mark
-  failed: '\u274C',     // cross mark
+  completed: '\u2705', // check mark
+  failed: '\u274C', // cross mark
   cancelled: '\uD83D\uDEAB', // prohibited
 }
 
@@ -82,10 +86,7 @@ export function createBackgroundTools(
 
     args: {
       taskId: s.string().describe('Background task ID (format: bg_xxxxx)'),
-      wait: s
-        .boolean()
-        .optional()
-        .describe('Wait for completion if still running (default: true)'),
+      wait: s.boolean().optional().describe('Wait for completion if still running (default: true)'),
     },
 
     async execute(args, _ctx) {
@@ -212,7 +213,7 @@ export function createBackgroundTools(
     async execute(args, _ctx) {
       const statusFilter =
         args.status && args.status !== 'all'
-          ? ({ status: args.status as BackgroundTaskStatus })
+          ? { status: args.status as BackgroundTaskStatus }
           : undefined
 
       let tasks = manager.listTasks(statusFilter)
@@ -255,7 +256,9 @@ export function createBackgroundTools(
         summary: summary || 'No tasks',
         tasks: tasks.map((t) => {
           const now = Date.now()
-          const startTime = t.startedAt ? new Date(t.startedAt).getTime() : new Date(t.queuedAt).getTime()
+          const startTime = t.startedAt
+            ? new Date(t.startedAt).getTime()
+            : new Date(t.queuedAt).getTime()
           const endTime = t.completedAt
             ? new Date(t.completedAt).getTime()
             : t.status === 'running'
@@ -320,9 +323,10 @@ export function createBackgroundTools(
       return JSON.stringify({
         success: true,
         cleaned,
-        message: cleaned > 0
-          ? `${STATUS_EMOJI.completed} Cleaned up ${cleaned} old task(s)`
-          : 'No tasks to clean up',
+        message:
+          cleaned > 0
+            ? `${STATUS_EMOJI.completed} Cleaned up ${cleaned} old task(s)`
+            : 'No tasks to clean up',
       })
     },
   })

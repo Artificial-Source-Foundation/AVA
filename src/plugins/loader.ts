@@ -179,7 +179,14 @@ export class PluginLoader {
   /**
    * Register a hook
    */
-  private registerHook(pluginId: string, hook: { event: PluginHookEvent; priority?: number; handler: (context: HookContext) => Promise<void | HookResult> }): void {
+  private registerHook(
+    pluginId: string,
+    hook: {
+      event: PluginHookEvent
+      priority?: number
+      handler: (context: HookContext) => Promise<void | HookResult>
+    }
+  ): void {
     const existing = this.registry.hooksByEvent.get(hook.event) || []
     existing.push({ pluginId, hook })
 
@@ -362,7 +369,10 @@ export class PluginLoader {
   /**
    * Execute hooks for an event
    */
-  async executeHooks(event: PluginHookEvent, context: Omit<HookContext, 'event' | 'services'>): Promise<HookResult> {
+  async executeHooks(
+    event: PluginHookEvent,
+    context: Omit<HookContext, 'event' | 'services'>
+  ): Promise<HookResult> {
     const hooks = this.registry.hooksByEvent.get(event) || []
     let combinedData = { ...context.data }
 

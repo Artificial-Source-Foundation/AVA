@@ -25,7 +25,14 @@ export type ModelRole =
   | 'optics'
   | 'qa'
 
-export type SupportAgentType = 'scout' | 'intel' | 'strategist' | 'uiOps' | 'scribe' | 'optics' | 'qa'
+export type SupportAgentType =
+  | 'scout'
+  | 'intel'
+  | 'strategist'
+  | 'uiOps'
+  | 'scribe'
+  | 'optics'
+  | 'qa'
 
 export type TaskComplexity = 'simple' | 'standard' | 'complex'
 
@@ -164,30 +171,15 @@ const DEFAULT_FALLBACKS: Record<string, string[]> = {
     'openai/gpt-4o-mini',
     'google/gemini-2.0-flash',
   ],
-  'anthropic/claude-haiku-4': [
-    'google/gemini-2.0-flash',
-    'openai/gpt-4o-mini',
-  ],
+  'anthropic/claude-haiku-4': ['google/gemini-2.0-flash', 'openai/gpt-4o-mini'],
 
   // OpenAI models
-  'openai/gpt-4o': [
-    'anthropic/claude-sonnet-4-5',
-    'google/gemini-2.0-pro',
-  ],
-  'openai/gpt-4o-mini': [
-    'anthropic/claude-haiku-4',
-    'google/gemini-2.0-flash',
-  ],
+  'openai/gpt-4o': ['anthropic/claude-sonnet-4-5', 'google/gemini-2.0-pro'],
+  'openai/gpt-4o-mini': ['anthropic/claude-haiku-4', 'google/gemini-2.0-flash'],
 
   // Google models
-  'google/gemini-2.0-pro': [
-    'anthropic/claude-sonnet-4-5',
-    'openai/gpt-4o',
-  ],
-  'google/gemini-2.0-flash': [
-    'anthropic/claude-haiku-4',
-    'openai/gpt-4o-mini',
-  ],
+  'google/gemini-2.0-pro': ['anthropic/claude-sonnet-4-5', 'openai/gpt-4o'],
+  'google/gemini-2.0-flash': ['anthropic/claude-haiku-4', 'openai/gpt-4o-mini'],
 }
 
 /**

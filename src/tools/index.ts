@@ -21,6 +21,9 @@ import { createCheckpointTools, type CheckpointTools } from './checkpoint.js'
 import { createBudgetTools, type BudgetTools } from './budget.js'
 import { createSkillTools } from './skills.js'
 import { createLockTools } from './locks.js'
+import { createMessagingTools } from './messaging.js'
+import { createDecompositionTools } from './decomposition.js'
+import { createEpicTools } from './epic.js'
 
 export type { OpenCodeClient } from '../lib/background-manager.js'
 
@@ -44,6 +47,12 @@ export { createSkillTools } from './skills.js'
 export type { SkillToolsConfig } from './skills.js'
 export { createLockTools } from './locks.js'
 export type { LockToolsConfig } from './locks.js'
+export { createMessagingTools } from './messaging.js'
+export type { MessagingToolsConfig } from './messaging.js'
+export { createDecompositionTools } from './decomposition.js'
+export type { DecompositionToolsConfig } from './decomposition.js'
+export { createEpicTools } from './epic.js'
+export type { EpicToolsConfig } from './epic.js'
 
 // =============================================================================
 // Knowledge Tools Type
@@ -74,6 +83,34 @@ export type LockTools = {
   unlock_all: unknown
 }
 
+export type MessagingTools = {
+  send_message: unknown
+  check_inbox: unknown
+  read_message: unknown
+  reply_message: unknown
+  get_thread: unknown
+  message_stats: unknown
+}
+
+export type DecompositionTools = {
+  decompose_task: unknown
+  validate_decomposition: unknown
+  search_similar_tasks: unknown
+  redecompose: unknown
+  list_strategies: unknown
+  record_decomposition_outcome: unknown
+}
+
+export type EpicTools = {
+  create_epic: unknown
+  link_tasks_to_epic: unknown
+  epic_status: unknown
+  epic_breakdown: unknown
+  sync_to_git: unknown
+  list_epics: unknown
+  update_epic: unknown
+}
+
 // =============================================================================
 // Combined Tools
 // =============================================================================
@@ -91,7 +128,10 @@ export type Delta9Tools = MissionTools &
   CheckpointTools &
   BudgetTools &
   SkillTools &
-  LockTools
+  LockTools &
+  MessagingTools &
+  DecompositionTools &
+  EpicTools
 
 /**
  * Create all Delta9 tools
@@ -126,6 +166,9 @@ export function createDelta9Tools(
     ...createBudgetTools(projectCwd),
     ...createSkillTools({ cwd: projectCwd }),
     ...createLockTools(),
+    ...createMessagingTools(),
+    ...createDecompositionTools(),
+    ...createEpicTools(state, { cwd: projectCwd }),
   }
 }
 
@@ -182,10 +225,7 @@ export const MEMORY_TOOL_NAMES = [
 
 export const DIAGNOSTICS_TOOL_NAMES = ['delta9_health'] as const
 
-export const ROUTING_TOOL_NAMES = [
-  'analyze_complexity',
-  'recommend_agent',
-] as const
+export const ROUTING_TOOL_NAMES = ['analyze_complexity', 'recommend_agent'] as const
 
 export const KNOWLEDGE_TOOL_NAMES = [
   'knowledge_list',
@@ -227,6 +267,34 @@ export const LOCK_TOOL_NAMES = [
   'unlock_all',
 ] as const
 
+export const MESSAGING_TOOL_NAMES = [
+  'send_message',
+  'check_inbox',
+  'read_message',
+  'reply_message',
+  'get_thread',
+  'message_stats',
+] as const
+
+export const DECOMPOSITION_TOOL_NAMES = [
+  'decompose_task',
+  'validate_decomposition',
+  'search_similar_tasks',
+  'redecompose',
+  'list_strategies',
+  'record_decomposition_outcome',
+] as const
+
+export const EPIC_TOOL_NAMES = [
+  'create_epic',
+  'link_tasks_to_epic',
+  'epic_status',
+  'epic_breakdown',
+  'sync_to_git',
+  'list_epics',
+  'update_epic',
+] as const
+
 export const ALL_TOOL_NAMES = [
   ...MISSION_TOOL_NAMES,
   ...DISPATCH_TOOL_NAMES,
@@ -242,6 +310,9 @@ export const ALL_TOOL_NAMES = [
   ...BUDGET_TOOL_NAMES,
   ...SKILL_TOOL_NAMES,
   ...LOCK_TOOL_NAMES,
+  ...MESSAGING_TOOL_NAMES,
+  ...DECOMPOSITION_TOOL_NAMES,
+  ...EPIC_TOOL_NAMES,
 ] as const
 
 export type Delta9ToolName = (typeof ALL_TOOL_NAMES)[number]

@@ -17,11 +17,7 @@ import {
   formatOperatorViolation,
 } from '../guards/index.js'
 import { guardrailOutput } from '../lib/output-guardrails.js'
-import {
-  detectEditError,
-  generateRecoveryMessage,
-  isEditTool,
-} from './edit-error-recovery.js'
+import { detectEditError, generateRecoveryMessage, isEditTool } from './edit-error-recovery.js'
 
 // =============================================================================
 // Types
@@ -326,15 +322,7 @@ function isDelta9Tool(toolName: string): boolean {
  * Check if tool modifies files
  */
 function isFileModifyingTool(toolName: string): boolean {
-  const fileTools = [
-    'Write',
-    'Edit',
-    'MultiEdit',
-    'write',
-    'edit',
-    'file_write',
-    'file_edit',
-  ]
+  const fileTools = ['Write', 'Edit', 'MultiEdit', 'write', 'edit', 'file_write', 'file_edit']
   return fileTools.includes(toolName)
 }
 

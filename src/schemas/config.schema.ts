@@ -30,7 +30,13 @@ export const commanderConfigSchema = z.object({
 
 export const councilModeSchema = z.enum(['none', 'quick', 'standard', 'xhigh'])
 
-export const oracleSpecialtySchema = z.enum(['architecture', 'logic', 'ui', 'performance', 'general'])
+export const oracleSpecialtySchema = z.enum([
+  'architecture',
+  'logic',
+  'ui',
+  'performance',
+  'general',
+])
 
 export const oracleConfigSchema = z.object({
   name: z.string().min(1),
@@ -89,7 +95,12 @@ export const patcherConfigSchema = z.object({
 
 export const scoutConfigSchema = z.object({
   model: modelSchema.default(DEFAULT_CONFIG.support.scout.model),
-  timeoutSeconds: z.number().int().min(5).max(120).default(DEFAULT_CONFIG.support.scout.timeoutSeconds),
+  timeoutSeconds: z
+    .number()
+    .int()
+    .min(5)
+    .max(120)
+    .default(DEFAULT_CONFIG.support.scout.timeoutSeconds),
 })
 
 export const intelSourceSchema = z.enum(['docs', 'github', 'web'])
@@ -253,7 +264,9 @@ export function validateConfig(config: unknown): ConfigSchema {
   return delta9ConfigSchema.parse(config)
 }
 
-export function validateConfigSafe(config: unknown): { success: true; data: ConfigSchema } | { success: false; error: z.ZodError } {
+export function validateConfigSafe(
+  config: unknown
+): { success: true; data: ConfigSchema } | { success: false; error: z.ZodError } {
   const result = delta9ConfigSchema.safeParse(config)
   return result
 }

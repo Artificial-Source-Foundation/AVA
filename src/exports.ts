@@ -19,11 +19,7 @@ export { DEFAULT_CONFIG } from './types/config.js'
 export { createLogger, type Logger } from './lib/logger.js'
 
 // Agents
-export {
-  commanderAgent,
-  operatorAgent,
-  validatorAgent,
-} from './agents/index.js'
+export { commanderAgent, operatorAgent, validatorAgent } from './agents/index.js'
 
 // Tools
 export { createDelta9Tools } from './tools/index.js'

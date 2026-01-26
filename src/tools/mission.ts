@@ -24,11 +24,18 @@ export function createMissionTools(state: MissionState): Record<string, ToolDefi
    * Create a new mission
    */
   const mission_create = tool({
-    description: 'Create a new mission with objectives and tasks. Use this to start planning a new request.',
+    description:
+      'Create a new mission with objectives and tasks. Use this to start planning a new request.',
     args: {
       description: s.string().describe('Mission description - what needs to be accomplished'),
-      complexity: s.enum(['low', 'medium', 'high', 'critical']).optional().describe('Detected complexity level'),
-      councilMode: s.enum(['none', 'quick', 'standard', 'xhigh']).optional().describe('Council mode to use'),
+      complexity: s
+        .enum(['low', 'medium', 'high', 'critical'])
+        .optional()
+        .describe('Detected complexity level'),
+      councilMode: s
+        .enum(['none', 'quick', 'standard', 'xhigh'])
+        .optional()
+        .describe('Council mode to use'),
       objectives: s.string().optional().describe('JSON array of objectives with tasks'),
     },
 
@@ -117,12 +124,14 @@ export function createMissionTools(state: MissionState): Record<string, ToolDefi
           totalObjectives: mission.objectives.length,
         },
         budget,
-        nextTask: nextTask ? {
-          id: nextTask.id,
-          description: nextTask.description,
-          acceptanceCriteria: nextTask.acceptanceCriteria,
-          attempts: nextTask.attempts,
-        } : null,
+        nextTask: nextTask
+          ? {
+              id: nextTask.id,
+              description: nextTask.description,
+              acceptanceCriteria: nextTask.acceptanceCriteria,
+              attempts: nextTask.attempts,
+            }
+          : null,
       })
     },
   })

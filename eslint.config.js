@@ -1,6 +1,6 @@
 import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
-import prettier from 'eslint-config-prettier/flat'
+import eslintConfigPrettier from 'eslint-config-prettier'
 import eslintPluginPrettier from 'eslint-plugin-prettier'
 
 export default tseslint.config(
@@ -23,6 +23,16 @@ export default tseslint.config(
         Buffer: 'readonly',
         __dirname: 'readonly',
         __filename: 'readonly',
+        require: 'readonly',
+        setTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearTimeout: 'readonly',
+        clearInterval: 'readonly',
+        fetch: 'readonly',
+        AbortController: 'readonly',
+        URLSearchParams: 'readonly',
+        performance: 'readonly',
+        NodeJS: 'readonly',
       },
     },
     plugins: {
@@ -32,7 +42,7 @@ export default tseslint.config(
     rules: {
       ...js.configs.recommended.rules,
       ...tseslint.configs.recommended.rules,
-      ...prettier.rules,
+      ...eslintConfigPrettier.rules,
       'prettier/prettier': 'error',
       '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/no-explicit-any': 'error',
@@ -42,6 +52,7 @@ export default tseslint.config(
         {
           argsIgnorePattern: '^_',
           varsIgnorePattern: '^_',
+          caughtErrorsIgnorePattern: '^_',
         },
       ],
       'no-console': 'off', // Allow console in plugins

@@ -163,10 +163,7 @@ const ROUTING_PATTERNS: RoutingPattern[] = [
 /**
  * Calculate match score for a task against a routing pattern
  */
-function calculatePatternScore(
-  description: string,
-  pattern: RoutingPattern
-): number {
+function calculatePatternScore(description: string, pattern: RoutingPattern): number {
   let matchCount = 0
 
   for (const regex of pattern.patterns) {
@@ -293,10 +290,7 @@ function detectComplexity(task: Task, cwd?: string): boolean {
 /**
  * Get the model for a routed agent
  */
-export function getAgentModel(
-  agent: AgentType,
-  config: Delta9Config
-): string {
+export function getAgentModel(agent: AgentType, config: Delta9Config): string {
   switch (agent) {
     case 'operator':
       return config.operators.defaultModel
@@ -340,15 +334,7 @@ export function getAgentModel(
  * Check if an agent type is a support agent
  */
 export function isSupportAgent(agent: AgentType): boolean {
-  return [
-    'scout',
-    'intel',
-    'strategist',
-    'ui-ops',
-    'scribe',
-    'optics',
-    'qa',
-  ].includes(agent)
+  return ['scout', 'intel', 'strategist', 'ui-ops', 'scribe', 'optics', 'qa'].includes(agent)
 }
 
 /**

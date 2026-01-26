@@ -83,10 +83,14 @@ export class LearningEngine {
       )
       existing.lastUpdatedAt = now
       if (options.relatedFiles) {
-        existing.relatedFiles = [...new Set([...(existing.relatedFiles || []), ...options.relatedFiles])]
+        existing.relatedFiles = [
+          ...new Set([...(existing.relatedFiles || []), ...options.relatedFiles]),
+        ]
       }
       if (options.relatedAgents) {
-        existing.relatedAgents = [...new Set([...(existing.relatedAgents || []), ...options.relatedAgents])]
+        existing.relatedAgents = [
+          ...new Set([...(existing.relatedAgents || []), ...options.relatedAgents]),
+        ]
       }
       if (options.tags) {
         existing.tags = [...new Set([...(existing.tags || []), ...options.tags])]
@@ -201,9 +205,7 @@ export class LearningEngine {
     // Apply decay to all patterns
     this.applyDecay()
 
-    return patterns
-      .sort((a, b) => b.currentConfidence - a.currentConfidence)
-      .slice(0, limit)
+    return patterns.sort((a, b) => b.currentConfidence - a.currentConfidence).slice(0, limit)
   }
 
   // ===========================================================================
@@ -463,9 +465,15 @@ export class LearningEngine {
       this.checkAntiPattern(existing)
     } else {
       // Create new strategy pattern and count this as first application
-      const pattern = this.learnPattern(strategy, 'strategy', `Decomposition strategy: ${strategy}`, 'inferred', {
-        confidence: success ? 0.6 : 0.4,
-      })
+      const pattern = this.learnPattern(
+        strategy,
+        'strategy',
+        `Decomposition strategy: ${strategy}`,
+        'inferred',
+        {
+          confidence: success ? 0.6 : 0.4,
+        }
+      )
       pattern.applications = 1
       if (success) {
         pattern.successes = 1
@@ -503,7 +511,11 @@ export class LearningEngine {
   /**
    * Get strategy success rates
    */
-  getStrategySuccessRates(): Array<{ strategy: string; successRate: number; applications: number }> {
+  getStrategySuccessRates(): Array<{
+    strategy: string
+    successRate: number
+    applications: number
+  }> {
     const strategyPatterns = this.store.patterns.filter((p) => p.category === 'strategy')
 
     return strategyPatterns

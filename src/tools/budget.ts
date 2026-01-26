@@ -6,11 +6,7 @@
 
 import { tool, type ToolDefinition } from '@opencode-ai/plugin'
 import { MissionState } from '../mission/state.js'
-import {
-  BudgetManager,
-  formatBudget,
-  describeBudgetStatus,
-} from '../lib/budget.js'
+import { BudgetManager, formatBudget, describeBudgetStatus } from '../lib/budget.js'
 
 // Use the tool's built-in schema
 const s = tool.schema

@@ -92,7 +92,9 @@ function loadEvents(
 
     // Apply filters
     if (filters.type) {
-      events = events.filter((e) => e.type === filters.type || e.type.startsWith(filters.type + '.'))
+      events = events.filter(
+        (e) => e.type === filters.type || e.type.startsWith(filters.type + '.')
+      )
     }
 
     if (filters.category) {
@@ -128,7 +130,11 @@ function loadEvents(
   }
 }
 
-function calculateStats(cwd: string): { total: number; byCategory: Record<string, number>; sessions: number } {
+function calculateStats(cwd: string): {
+  total: number
+  byCategory: Record<string, number>
+  sessions: number
+} {
   const eventsFile = join(cwd, '.delta9', 'events.jsonl')
 
   const stats = {
@@ -177,7 +183,10 @@ function calculateStats(cwd: string): { total: number; byCategory: Record<string
 // Output Formatting
 // =============================================================================
 
-function printTimelineFormat(events: EventRecord[], stats: { total: number; byCategory: Record<string, number>; sessions: number }): void {
+function printTimelineFormat(
+  events: EventRecord[],
+  stats: { total: number; byCategory: Record<string, number>; sessions: number }
+): void {
   const width = 70
 
   console.log()
@@ -229,7 +238,10 @@ function printTimelineFormat(events: EventRecord[], stats: { total: number; byCa
   console.log()
 }
 
-function printTableFormat(events: EventRecord[], stats: { total: number; byCategory: Record<string, number>; sessions: number }): void {
+function printTableFormat(
+  events: EventRecord[],
+  stats: { total: number; byCategory: Record<string, number>; sessions: number }
+): void {
   console.log()
   console.log(colorize('DELTA9 EVENT HISTORY', 'bold'))
   console.log()

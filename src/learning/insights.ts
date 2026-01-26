@@ -170,9 +170,7 @@ export class InsightGenerator {
       relevant = antiPatterns.filter(
         (p) =>
           !p.relatedFiles ||
-          p.relatedFiles.some((f) =>
-            files.some((file) => file.includes(f) || f.includes(file))
-          )
+          p.relatedFiles.some((f) => files.some((file) => file.includes(f) || f.includes(file)))
       )
     }
 

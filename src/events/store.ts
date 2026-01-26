@@ -288,9 +288,7 @@ export class EventStore {
 
     const sessionEvents = this.query({ sessionId: this.currentSessionId })
     const firstEvent = sessionEvents[0]
-    const duration = firstEvent
-      ? Date.now() - new Date(firstEvent.timestamp).getTime()
-      : 0
+    const duration = firstEvent ? Date.now() - new Date(firstEvent.timestamp).getTime() : 0
 
     this.append('system.session_ended', {
       reason,
@@ -314,11 +312,7 @@ export class EventStore {
   /**
    * Replay events through a reducer to build state
    */
-  replay<T>(
-    reducer: (state: T, event: Delta9Event) => T,
-    initialState: T,
-    query?: EventQuery
-  ): T {
+  replay<T>(reducer: (state: T, event: Delta9Event) => T, initialState: T, query?: EventQuery): T {
     const events = this.query({ ...query, order: 'asc' })
     return events.reduce(reducer, initialState)
   }
@@ -401,10 +395,7 @@ export class EventStore {
 
     // Rewrite file
     if (removedCount > 0) {
-      writeFileSync(
-        this.eventsFile,
-        this.events.map((e) => JSON.stringify(e)).join('\n') + '\n'
-      )
+      writeFileSync(this.eventsFile, this.events.map((e) => JSON.stringify(e)).join('\n') + '\n')
     }
 
     return removedCount

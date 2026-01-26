@@ -155,13 +155,7 @@ export function formatConflicts(result: ConflictCheckResult): string {
     return 'No file conflicts detected.'
   }
 
-  const lines = [
-    '[FILE CONFLICT DETECTED]',
-    '',
-    result.summary,
-    '',
-    'Conflicts:',
-  ]
+  const lines = ['[FILE CONFLICT DETECTED]', '', result.summary, '', 'Conflicts:']
 
   for (const conflict of result.conflicts) {
     lines.push(`  - ${conflict.description}`)

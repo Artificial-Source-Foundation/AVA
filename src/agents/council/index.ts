@@ -16,29 +16,13 @@
 // Agent Definitions
 // =============================================================================
 
-export {
-  cipherAgent,
-  cipherConfig,
-  CIPHER_PROFILE,
-} from './oracle-cipher.js'
+export { cipherAgent, cipherConfig, CIPHER_PROFILE } from './oracle-cipher.js'
 
-export {
-  vectorAgent,
-  vectorConfig,
-  VECTOR_PROFILE,
-} from './oracle-vector.js'
+export { vectorAgent, vectorConfig, VECTOR_PROFILE } from './oracle-vector.js'
 
-export {
-  prismAgent,
-  prismConfig,
-  PRISM_PROFILE,
-} from './oracle-prism.js'
+export { prismAgent, prismConfig, PRISM_PROFILE } from './oracle-prism.js'
 
-export {
-  apexAgent,
-  apexConfig,
-  APEX_PROFILE,
-} from './oracle-apex.js'
+export { apexAgent, apexConfig, APEX_PROFILE } from './oracle-apex.js'
 
 // =============================================================================
 // Agent Registry

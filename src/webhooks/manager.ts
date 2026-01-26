@@ -106,7 +106,7 @@ export class WebhookManager {
   private eventMatchesWebhook(event: WebhookEvent, webhook: WebhookConfig): boolean {
     // Check if event type is in webhook's event list
     // Support wildcards like "mission.*" or "task.*"
-    return webhook.events.some(pattern => {
+    return webhook.events.some((pattern) => {
       if (pattern === '*') return true
       if (pattern === event.type) return true
       if (pattern.endsWith('.*')) {
@@ -281,7 +281,7 @@ export class WebhookManager {
   private getEventTitle(eventType: string): string {
     return eventType
       .split('.')
-      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(' ')
   }
 
@@ -292,7 +292,7 @@ export class WebhookManager {
     return key
       .replace(/_/g, ' ')
       .replace(/([A-Z])/g, ' $1')
-      .replace(/^./, s => s.toUpperCase())
+      .replace(/^./, (s) => s.toUpperCase())
       .trim()
   }
 
@@ -334,27 +334,22 @@ export class WebhookManager {
 
     try {
       const headers: Record<string, string> = {
-        'Content-Type': webhook.format === 'form'
-          ? 'application/x-www-form-urlencoded'
-          : 'application/json',
+        'Content-Type':
+          webhook.format === 'form' ? 'application/x-www-form-urlencoded' : 'application/json',
         'User-Agent': 'Delta9-Webhook/1.0',
         ...webhook.headers,
       }
 
       // Add signature if secret is configured
       if (webhook.secret) {
-        const payload = typeof delivery.payload === 'string'
-          ? delivery.payload
-          : JSON.stringify(delivery.payload)
-        const signature = createHmac('sha256', webhook.secret)
-          .update(payload)
-          .digest('hex')
+        const payload =
+          typeof delivery.payload === 'string' ? delivery.payload : JSON.stringify(delivery.payload)
+        const signature = createHmac('sha256', webhook.secret).update(payload).digest('hex')
         headers['X-Delta9-Signature'] = `sha256=${signature}`
       }
 
-      const body = webhook.format === 'form'
-        ? delivery.payload as string
-        : JSON.stringify(delivery.payload)
+      const body =
+        webhook.format === 'form' ? (delivery.payload as string) : JSON.stringify(delivery.payload)
 
       // Use native fetch
       const controller = new AbortController()
@@ -434,7 +429,7 @@ export class WebhookManager {
     let deliveries = Array.from(this.deliveries.values())
 
     if (webhookId) {
-      deliveries = deliveries.filter(d => d.webhookId === webhookId)
+      deliveries = deliveries.filter((d) => d.webhookId === webhookId)
     }
 
     return deliveries
@@ -455,13 +450,15 @@ export class WebhookManager {
     let deliveries = Array.from(this.deliveries.values())
 
     if (webhookId) {
-      deliveries = deliveries.filter(d => d.webhookId === webhookId)
+      deliveries = deliveries.filter((d) => d.webhookId === webhookId)
     }
 
     const total = deliveries.length
-    const delivered = deliveries.filter(d => d.status === 'delivered').length
-    const failed = deliveries.filter(d => d.status === 'failed').length
-    const pending = deliveries.filter(d => ['pending', 'sending', 'retrying'].includes(d.status)).length
+    const delivered = deliveries.filter((d) => d.status === 'delivered').length
+    const failed = deliveries.filter((d) => d.status === 'failed').length
+    const pending = deliveries.filter((d) =>
+      ['pending', 'sending', 'retrying'].includes(d.status)
+    ).length
 
     return {
       total,

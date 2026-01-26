@@ -46,7 +46,17 @@ export const DEFAULT_DISCOVERY_PATHS: DiscoveryPath[] = [
 ]
 
 /** Directories to skip during discovery */
-const SKIP_DIRS = new Set(['node_modules', '__pycache__', '.git', '.venv', 'venv', '.tox', '.nox', 'dist', 'build'])
+const SKIP_DIRS = new Set([
+  'node_modules',
+  '__pycache__',
+  '.git',
+  '.venv',
+  'venv',
+  '.tox',
+  '.nox',
+  'dist',
+  'build',
+])
 
 // =============================================================================
 // Utilities
@@ -261,7 +271,10 @@ async function parseSkillFile(
     const skillDirPath = path.dirname(skillPath)
 
     // Discover scripts and resources
-    const [scripts, resources] = await Promise.all([findScripts(skillDirPath), findResources(skillDirPath)])
+    const [scripts, resources] = await Promise.all([
+      findScripts(skillDirPath),
+      findResources(skillDirPath),
+    ])
 
     return {
       name: frontmatter.name,
@@ -387,7 +400,10 @@ export async function getSkillSummaries(
 /**
  * Read a resource file from a skill
  */
-export async function readSkillResource(skill: Skill, relativePath: string): Promise<string | null> {
+export async function readSkillResource(
+  skill: Skill,
+  relativePath: string
+): Promise<string | null> {
   const resource = skill.resources.find((r) => r.relativePath === relativePath)
   if (!resource) return null
 

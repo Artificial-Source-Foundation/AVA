@@ -132,20 +132,8 @@ const SCOPE_PATTERNS = {
     'client and server',
     'ui and api',
   ],
-  multiFile: [
-    'few files',
-    'couple of',
-    'and tests',
-    'with tests',
-    'component and',
-  ],
-  singleFile: [
-    'this file',
-    'single file',
-    'one file',
-    'in file',
-    'the file',
-  ],
+  multiFile: ['few files', 'couple of', 'and tests', 'with tests', 'component and'],
+  singleFile: ['this file', 'single file', 'one file', 'in file', 'the file'],
 }
 
 /** Risk indicators */
@@ -162,23 +150,8 @@ const RISK_PATTERNS = {
     'credentials',
     'encryption',
   ],
-  medium: [
-    'api',
-    'endpoint',
-    'state',
-    'cache',
-    'session',
-    'config',
-    'environment',
-  ],
-  low: [
-    'ui',
-    'style',
-    'formatting',
-    'comment',
-    'documentation',
-    'test',
-  ],
+  medium: ['api', 'endpoint', 'state', 'cache', 'session', 'config', 'environment'],
+  low: ['ui', 'style', 'formatting', 'comment', 'documentation', 'test'],
 }
 
 // =============================================================================
@@ -282,13 +255,9 @@ export function analyzeComplexity(description: string): ComplexityAnalysis {
 
   // Add scope and risk modifiers
   const scopeModifier =
-    scope === 'system-wide' ? 5 :
-    scope === 'multi-component' ? 3 :
-    scope === 'multi-file' ? 1 : 0
+    scope === 'system-wide' ? 5 : scope === 'multi-component' ? 3 : scope === 'multi-file' ? 1 : 0
 
-  const riskModifier =
-    risk === 'high' ? 4 :
-    risk === 'medium' ? 2 : 0
+  const riskModifier = risk === 'high' ? 4 : risk === 'medium' ? 2 : 0
 
   const finalScore = totalScore + scopeModifier + riskModifier
 
@@ -324,7 +293,7 @@ export function analyzeComplexity(description: string): ComplexityAnalysis {
 
   // Calculate confidence based on keyword matches
   const totalMatches = foundKeywords.length
-  const confidence = Math.min(0.95, 0.5 + (totalMatches * 0.1))
+  const confidence = Math.min(0.95, 0.5 + totalMatches * 0.1)
 
   return {
     complexity,

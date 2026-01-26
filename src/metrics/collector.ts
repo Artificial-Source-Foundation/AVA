@@ -32,7 +32,10 @@ const DURATION_BUCKETS = [0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600]
 export class MetricsCollector {
   private counters: Map<string, Map<string, number>> = new Map()
   private gauges: Map<string, Map<string, number>> = new Map()
-  private histograms: Map<string, Map<string, { sum: number; count: number; buckets: Map<number, number> }>> = new Map()
+  private histograms: Map<
+    string,
+    Map<string, { sum: number; count: number; buckets: Map<number, number> }>
+  > = new Map()
   private timers: Map<string, Map<string, number[]>> = new Map()
 
   private timeSeries: Map<string, TimeSeriesPoint[]> = new Map()
@@ -117,7 +120,12 @@ export class MetricsCollector {
   /**
    * Observe a histogram value
    */
-  observe(name: string, value: number, labels: Record<string, string> = {}, buckets = DEFAULT_BUCKETS): void {
+  observe(
+    name: string,
+    value: number,
+    labels: Record<string, string> = {},
+    buckets = DEFAULT_BUCKETS
+  ): void {
     const key = this.labelsToKey(labels)
     const metric = this.histograms.get(name) || new Map()
 
@@ -298,7 +306,10 @@ export class MetricsCollector {
     if (points.length === 0) return []
 
     const bucketMs = this.resolutionToMs(resolution)
-    const buckets = new Map<number, { sum: number; count: number; labels?: Record<string, string> }>()
+    const buckets = new Map<
+      number,
+      { sum: number; count: number; labels?: Record<string, string> }
+    >()
 
     for (const point of points) {
       const ts = new Date(point.timestamp).getTime()
@@ -476,7 +487,9 @@ export class MetricsCollector {
    * Get active alerts
    */
   getActiveAlerts(): Alert[] {
-    return Array.from(this.alerts.values()).filter((a) => a.state === 'firing' || a.state === 'pending')
+    return Array.from(this.alerts.values()).filter(
+      (a) => a.state === 'firing' || a.state === 'pending'
+    )
   }
 
   /**

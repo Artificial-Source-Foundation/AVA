@@ -99,15 +99,12 @@ export class AdaptiveCouncilEngine {
   /**
    * Select oracles based on learned performance
    */
-  selectOracles(
-    category: TaskCategory,
-    requestedCount: number = 4
-  ): OracleSelectionResult {
+  selectOracles(category: TaskCategory, requestedCount: number = 4): OracleSelectionResult {
     if (!this.config.enabled || !this.config.dynamicSelection) {
       // Return all oracles with equal weights
       return {
         selectedOracles: this.oracleIds.slice(0, requestedCount),
-        weights: Object.fromEntries(this.oracleIds.map(id => [id, 1 / this.oracleIds.length])),
+        weights: Object.fromEntries(this.oracleIds.map((id) => [id, 1 / this.oracleIds.length])),
         reason: 'Adaptive selection disabled - using equal weights',
         isExploration: false,
         categoryScores: {},
@@ -119,7 +116,7 @@ export class AdaptiveCouncilEngine {
     if (totalSamples < this.config.minSamplesForAdaptation) {
       return {
         selectedOracles: this.oracleIds.slice(0, requestedCount),
-        weights: Object.fromEntries(this.oracleIds.map(id => [id, 1 / this.oracleIds.length])),
+        weights: Object.fromEntries(this.oracleIds.map((id) => [id, 1 / this.oracleIds.length])),
         reason: `Insufficient samples (${totalSamples}/${this.config.minSamplesForAdaptation}) - using equal weights`,
         isExploration: true,
         categoryScores: {},
@@ -153,7 +150,8 @@ export class AdaptiveCouncilEngine {
     const totalScore = selectedOracles.reduce((sum, id) => sum + scores[id], 0)
     const weights: Record<string, number> = {}
     for (const oracleId of selectedOracles) {
-      weights[oracleId] = totalScore > 0 ? scores[oracleId] / totalScore : 1 / selectedOracles.length
+      weights[oracleId] =
+        totalScore > 0 ? scores[oracleId] / totalScore : 1 / selectedOracles.length
     }
 
     return {
@@ -226,7 +224,7 @@ export class AdaptiveCouncilEngine {
     taskOutcome: 'success' | 'failure' | 'partial' | 'unknown',
     matchedConsensus: boolean
   ): void {
-    const record = this.consultations.find(c => c.id === consultationId)
+    const record = this.consultations.find((c) => c.id === consultationId)
     if (!record) return
 
     record.wasAccepted = wasAccepted
@@ -287,12 +285,8 @@ export class AdaptiveCouncilEngine {
     const speedScore = Math.max(0, 1 - perf.averageResponseTime / 60000) // Penalty for slow responses
 
     // Weighted combination
-    perf.performanceScore = (
-      successRate * 40 +
-      confidenceScore * 25 +
-      consensusScore * 20 +
-      speedScore * 15
-    )
+    perf.performanceScore =
+      successRate * 40 + confidenceScore * 25 + consensusScore * 20 + speedScore * 15
 
     perf.lastUpdated = new Date().toISOString()
   }

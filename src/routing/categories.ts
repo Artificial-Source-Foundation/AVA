@@ -95,9 +95,18 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<TaskCategory, CategoryConfig> = {
     fallbackAgents: ['operator', 'strategist'],
     budgetPriority: 9,
     keywords: [
-      'plan', 'design', 'architect', 'strategy', 'approach',
-      'system design', 'blueprint', 'roadmap', 'structure',
-      'how should', 'what approach', 'best way to',
+      'plan',
+      'design',
+      'architect',
+      'strategy',
+      'approach',
+      'system design',
+      'blueprint',
+      'roadmap',
+      'structure',
+      'how should',
+      'what approach',
+      'best way to',
     ],
   },
   coding: {
@@ -109,9 +118,20 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<TaskCategory, CategoryConfig> = {
     fallbackAgents: ['operator-complex', 'patcher'],
     budgetPriority: 7,
     keywords: [
-      'implement', 'create', 'build', 'add', 'write code',
-      'function', 'class', 'method', 'module', 'feature',
-      'endpoint', 'api', 'service', 'logic',
+      'implement',
+      'create',
+      'build',
+      'add',
+      'write code',
+      'function',
+      'class',
+      'method',
+      'module',
+      'feature',
+      'endpoint',
+      'api',
+      'service',
+      'logic',
     ],
   },
   testing: {
@@ -123,9 +143,22 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<TaskCategory, CategoryConfig> = {
     fallbackAgents: ['operator'],
     budgetPriority: 6,
     keywords: [
-      'test', 'spec', 'coverage', 'jest', 'vitest', 'playwright',
-      'e2e', 'unit test', 'integration', 'mock', 'fixture',
-      'assert', 'expect', 'describe', 'it(', 'should',
+      'test',
+      'spec',
+      'coverage',
+      'jest',
+      'vitest',
+      'playwright',
+      'e2e',
+      'unit test',
+      'integration',
+      'mock',
+      'fixture',
+      'assert',
+      'expect',
+      'describe',
+      'it(',
+      'should',
     ],
   },
   documentation: {
@@ -137,9 +170,19 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<TaskCategory, CategoryConfig> = {
     fallbackAgents: ['operator'],
     budgetPriority: 4,
     keywords: [
-      'document', 'readme', 'comment', 'jsdoc', 'tsdoc',
-      'api doc', 'changelog', 'guide', 'tutorial', 'example',
-      'explain', 'describe', 'write docs',
+      'document',
+      'readme',
+      'comment',
+      'jsdoc',
+      'tsdoc',
+      'api doc',
+      'changelog',
+      'guide',
+      'tutorial',
+      'example',
+      'explain',
+      'describe',
+      'write docs',
     ],
   },
   research: {
@@ -151,9 +194,18 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<TaskCategory, CategoryConfig> = {
     fallbackAgents: ['scout', 'strategist'],
     budgetPriority: 5,
     keywords: [
-      'research', 'find', 'search', 'lookup', 'investigate',
-      'how does', 'what is', 'learn about', 'understand',
-      'best practice', 'documentation', 'example of',
+      'research',
+      'find',
+      'search',
+      'lookup',
+      'investigate',
+      'how does',
+      'what is',
+      'learn about',
+      'understand',
+      'best practice',
+      'documentation',
+      'example of',
     ],
   },
   ui: {
@@ -165,9 +217,23 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<TaskCategory, CategoryConfig> = {
     fallbackAgents: ['operator', 'operator-complex'],
     budgetPriority: 6,
     keywords: [
-      'ui', 'frontend', 'component', 'style', 'css', 'tailwind',
-      'react', 'vue', 'svelte', 'button', 'form', 'modal',
-      'layout', 'responsive', 'accessibility', 'a11y', 'design',
+      'ui',
+      'frontend',
+      'component',
+      'style',
+      'css',
+      'tailwind',
+      'react',
+      'vue',
+      'svelte',
+      'button',
+      'form',
+      'modal',
+      'layout',
+      'responsive',
+      'accessibility',
+      'a11y',
+      'design',
     ],
   },
   refactoring: {
@@ -179,9 +245,20 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<TaskCategory, CategoryConfig> = {
     fallbackAgents: ['operator'],
     budgetPriority: 8,
     keywords: [
-      'refactor', 'restructure', 'reorganize', 'clean up',
-      'optimize', 'improve', 'simplify', 'extract', 'inline',
-      'rename', 'move', 'split', 'merge', 'consolidate',
+      'refactor',
+      'restructure',
+      'reorganize',
+      'clean up',
+      'optimize',
+      'improve',
+      'simplify',
+      'extract',
+      'inline',
+      'rename',
+      'move',
+      'split',
+      'merge',
+      'consolidate',
     ],
   },
   bugfix: {
@@ -193,9 +270,21 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<TaskCategory, CategoryConfig> = {
     fallbackAgents: ['patcher', 'operator-complex'],
     budgetPriority: 8,
     keywords: [
-      'fix', 'bug', 'error', 'issue', 'broken', 'not working',
-      'crash', 'exception', 'fail', 'debug', 'troubleshoot',
-      'resolve', 'correct', 'repair', 'patch',
+      'fix',
+      'bug',
+      'error',
+      'issue',
+      'broken',
+      'not working',
+      'crash',
+      'exception',
+      'fail',
+      'debug',
+      'troubleshoot',
+      'resolve',
+      'correct',
+      'repair',
+      'patch',
     ],
   },
 }
@@ -226,13 +315,13 @@ export function detectCategory(
       if (text.includes(keyword.toLowerCase())) {
         matchedKeywords.push(keyword)
         // Weight longer keywords higher
-        score += 1 + (keyword.length / 10)
+        score += 1 + keyword.length / 10
       }
     }
 
     if (score > 0) {
       // Calculate confidence (max CONFIDENCE.MAX)
-      const confidence = Math.min(CONFIDENCE.MAX, CONFIDENCE.LOW + (score * 0.1))
+      const confidence = Math.min(CONFIDENCE.MAX, CONFIDENCE.LOW + score * 0.1)
 
       matches.push({
         category: category as TaskCategory,
@@ -447,7 +536,11 @@ export function getCategoryBudgetAllowance(category: TaskCategory): number {
 /**
  * Get temperature range recommendation for category
  */
-export function getCategoryTemperatureRange(category: TaskCategory): { min: number; max: number; recommended: number } {
+export function getCategoryTemperatureRange(category: TaskCategory): {
+  min: number
+  max: number
+  recommended: number
+} {
   const config = DEFAULT_CATEGORY_CONFIGS[category]
 
   // Different categories have different acceptable ranges

@@ -166,21 +166,28 @@ function printSummaryFormat(report: StatusReport, verbose?: boolean): void {
   // Mission Status
   if (report.mission.active) {
     const statusColor = getStatusColor(report.mission.status)
-    console.log(`${colorize(symbols.bullet, 'cyan')} ${colorize('Mission:', 'bold')} ${report.mission.title || report.mission.id}`)
+    console.log(
+      `${colorize(symbols.bullet, 'cyan')} ${colorize('Mission:', 'bold')} ${report.mission.title || report.mission.id}`
+    )
     console.log(`  Status: ${colorize(report.mission.status || 'unknown', statusColor)}`)
     console.log(`  Progress: ${renderProgressBar(report.mission.progress.percentage, 30)}`)
     if (report.mission.objective) {
-      console.log(`  Objective: ${report.mission.objective.slice(0, 50)}${report.mission.objective.length > 50 ? '...' : ''}`)
+      console.log(
+        `  Objective: ${report.mission.objective.slice(0, 50)}${report.mission.objective.length > 50 ? '...' : ''}`
+      )
     }
   } else {
-    console.log(`${colorize(symbols.bullet, 'gray')} ${colorize('Mission:', 'bold')} ${colorize('No active mission', 'dim')}`)
+    console.log(
+      `${colorize(symbols.bullet, 'gray')} ${colorize('Mission:', 'bold')} ${colorize('No active mission', 'dim')}`
+    )
     console.log(`  Use ${colorize('mission_create', 'cyan')} to start a new mission`)
   }
   console.log()
 
   // Task Summary
   console.log(`${colorize(symbols.bullet, 'cyan')} ${colorize('Tasks:', 'bold')}`)
-  const taskTotal = report.tasks.pending + report.tasks.inProgress + report.tasks.completed + report.tasks.failed
+  const taskTotal =
+    report.tasks.pending + report.tasks.inProgress + report.tasks.completed + report.tasks.failed
   if (taskTotal === 0) {
     console.log(`  ${colorize('No tasks', 'dim')}`)
   } else {
@@ -195,7 +202,9 @@ function printSummaryFormat(report: StatusReport, verbose?: boolean): void {
 
   // Background Tasks
   console.log(`${colorize(symbols.bullet, 'cyan')} ${colorize('Background:', 'bold')}`)
-  console.log(`  Active: ${report.background.active}/${report.background.capacity} (${report.background.utilization})`)
+  console.log(
+    `  Active: ${report.background.active}/${report.background.capacity} (${report.background.utilization})`
+  )
   if (report.background.pending > 0) {
     console.log(`  Queued: ${report.background.pending}`)
   }

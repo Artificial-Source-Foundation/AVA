@@ -21,53 +21,21 @@
 // Agent Exports
 // =============================================================================
 
-export {
-  createReconAgent,
-  reconConfig,
-  RECON_PROFILE,
-} from './recon.js'
+export { createReconAgent, reconConfig, RECON_PROFILE } from './recon.js'
 
-export {
-  createSigintAgent,
-  sigintConfig,
-  SIGINT_PROFILE,
-} from './sigint.js'
+export { createSigintAgent, sigintConfig, SIGINT_PROFILE } from './sigint.js'
 
-export {
-  createTaccomAgent,
-  taccomConfig,
-  TACCOM_PROFILE,
-} from './taccom.js'
+export { createTaccomAgent, taccomConfig, TACCOM_PROFILE } from './taccom.js'
 
-export {
-  createSurgeonAgent,
-  surgeonConfig,
-  SURGEON_PROFILE,
-} from './surgeon.js'
+export { createSurgeonAgent, surgeonConfig, SURGEON_PROFILE } from './surgeon.js'
 
-export {
-  createSentinelAgent,
-  sentinelConfig,
-  SENTINEL_PROFILE,
-} from './sentinel.js'
+export { createSentinelAgent, sentinelConfig, SENTINEL_PROFILE } from './sentinel.js'
 
-export {
-  createScribeAgent,
-  scribeConfig,
-  SCRIBE_PROFILE,
-} from './scribe.js'
+export { createScribeAgent, scribeConfig, SCRIBE_PROFILE } from './scribe.js'
 
-export {
-  createFacadeAgent,
-  facadeConfig,
-  FACADE_PROFILE,
-} from './facade.js'
+export { createFacadeAgent, facadeConfig, FACADE_PROFILE } from './facade.js'
 
-export {
-  createSpectreAgent,
-  spectreConfig,
-  SPECTRE_PROFILE,
-} from './spectre.js'
+export { createSpectreAgent, spectreConfig, SPECTRE_PROFILE } from './spectre.js'
 
 // =============================================================================
 // Types
@@ -191,7 +159,10 @@ export function createSupportAgent(name: SupportAgentName, cwd: string): AgentCo
 /**
  * Create support agent by config key
  */
-export function createSupportAgentByConfigKey(configKey: SupportAgentConfigKey, cwd: string): AgentConfig {
+export function createSupportAgentByConfigKey(
+  configKey: SupportAgentConfigKey,
+  cwd: string
+): AgentConfig {
   const codename = configKeyToCodename[configKey]
   return createSupportAgent(codename, cwd)
 }

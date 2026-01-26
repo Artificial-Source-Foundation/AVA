@@ -173,11 +173,7 @@ export {
 } from './guard-formatting.js'
 
 // Version
-export {
-  getVersion,
-  resetVersionCache,
-  getVersionWithPrefix,
-} from './version.js'
+export { getVersion, resetVersionCache, getVersionWithPrefix } from './version.js'
 
 // Tool Response
 export {

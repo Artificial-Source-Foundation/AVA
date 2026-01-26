@@ -20,20 +20,9 @@ export const missionStatusSchema = z.enum([
   'aborted',
 ])
 
-export const objectiveStatusSchema = z.enum([
-  'pending',
-  'in_progress',
-  'completed',
-  'failed',
-])
+export const objectiveStatusSchema = z.enum(['pending', 'in_progress', 'completed', 'failed'])
 
-export const taskStatusSchema = z.enum([
-  'pending',
-  'blocked',
-  'in_progress',
-  'completed',
-  'failed',
-])
+export const taskStatusSchema = z.enum(['pending', 'blocked', 'in_progress', 'completed', 'failed'])
 
 export const validationStatusSchema = z.enum(['pass', 'fixable', 'fail'])
 
@@ -233,7 +222,9 @@ export function validateMission(mission: unknown): MissionSchema {
   return missionSchema.parse(mission)
 }
 
-export function validateMissionSafe(mission: unknown): { success: true; data: MissionSchema } | { success: false; error: z.ZodError } {
+export function validateMissionSafe(
+  mission: unknown
+): { success: true; data: MissionSchema } | { success: false; error: z.ZodError } {
   return missionSchema.safeParse(mission)
 }
 

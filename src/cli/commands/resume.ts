@@ -52,10 +52,7 @@ interface ResumeExecutionOptions {
   resetFailed?: boolean
 }
 
-async function executeResume(
-  cwd: string,
-  options: ResumeExecutionOptions
-): Promise<ResumeResult> {
+async function executeResume(cwd: string, options: ResumeExecutionOptions): Promise<ResumeResult> {
   const missionFile = join(cwd, '.delta9', 'mission.json')
   const checkpointsDir = join(cwd, '.delta9', 'checkpoints')
 
@@ -136,7 +133,9 @@ async function resumeFromCheckpoint(
     const resetTasks: string[] = []
 
     if (options.resetFailed) {
-      for (const objective of (mission.objectives as Array<{ tasks: Array<{ id: string; status: string; error?: string }> }>) || []) {
+      for (const objective of (mission.objectives as Array<{
+        tasks: Array<{ id: string; status: string; error?: string }>
+      }>) || []) {
         for (const task of objective.tasks || []) {
           if (task.status === 'failed') {
             task.status = 'pending'
@@ -290,7 +289,8 @@ function countTasks(mission: Record<string, unknown>): {
   let inProgress = 0
   let completed = 0
 
-  for (const objective of (mission.objectives as Array<{ tasks: Array<{ status: string }> }>) || []) {
+  for (const objective of (mission.objectives as Array<{ tasks: Array<{ status: string }> }>) ||
+    []) {
     for (const task of objective.tasks || []) {
       switch (task.status) {
         case 'pending':
@@ -368,7 +368,9 @@ function printResumeResult(result: ResumeResult): void {
         console.log(`    - ${cp}`)
       }
       console.log('')
-      console.log(`  ${colorize('Tip:', 'dim')} Use "delta9 resume <checkpoint-id>" to resume from a checkpoint`)
+      console.log(
+        `  ${colorize('Tip:', 'dim')} Use "delta9 resume <checkpoint-id>" to resume from a checkpoint`
+      )
     }
 
     console.log('')
@@ -383,7 +385,9 @@ function printResumeResult(result: ResumeResult): void {
   console.log(`  ${colorize('Mission:', 'bold')} ${result.missionTitle || result.missionId}`)
 
   if (result.checkpointId) {
-    console.log(`  ${colorize('Checkpoint:', 'cyan')} ${result.checkpointId} (${result.checkpointType})`)
+    console.log(
+      `  ${colorize('Checkpoint:', 'cyan')} ${result.checkpointId} (${result.checkpointType})`
+    )
   }
 
   console.log(`  ${colorize('Previous Status:', 'dim')} ${result.previousStatus}`)
@@ -393,9 +397,15 @@ function printResumeResult(result: ResumeResult): void {
   // Task summary
   if (result.taskSummary) {
     console.log(`  ${colorize('Tasks:', 'bold')}`)
-    console.log(`    ${symbols.pending} Pending: ${colorize(String(result.taskSummary.pending), 'yellow')}`)
-    console.log(`    ${symbols.inProgress} In Progress: ${colorize(String(result.taskSummary.inProgress), 'blue')}`)
-    console.log(`    ${symbols.success} Completed: ${colorize(String(result.taskSummary.completed), 'green')}`)
+    console.log(
+      `    ${symbols.pending} Pending: ${colorize(String(result.taskSummary.pending), 'yellow')}`
+    )
+    console.log(
+      `    ${symbols.inProgress} In Progress: ${colorize(String(result.taskSummary.inProgress), 'blue')}`
+    )
+    console.log(
+      `    ${symbols.success} Completed: ${colorize(String(result.taskSummary.completed), 'green')}`
+    )
   }
 
   // Reset tasks
@@ -411,6 +421,8 @@ function printResumeResult(result: ResumeResult): void {
   }
 
   console.log('')
-  console.log(`  ${colorize('Tip:', 'dim')} The mission is now ready to be resumed by the Commander`)
+  console.log(
+    `  ${colorize('Tip:', 'dim')} The mission is now ready to be resumed by the Commander`
+  )
   console.log('')
 }

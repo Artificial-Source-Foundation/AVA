@@ -167,7 +167,10 @@ export function createDelta9Hooks(input: CreateHooksInput): Delta9Hooks {
   ): Promise<void> => {
     // Run truncation first (modifies output), then others in parallel
     await truncationAfterHook(hookInput, hookOutput)
-    await Promise.all([originalAfterHook(hookInput, hookOutput), recoveryAfterHook(hookInput, hookOutput)])
+    await Promise.all([
+      originalAfterHook(hookInput, hookOutput),
+      recoveryAfterHook(hookInput, hookOutput),
+    ])
   }
 
   // Merge message.before handlers

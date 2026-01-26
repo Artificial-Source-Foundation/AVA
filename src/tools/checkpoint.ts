@@ -5,10 +5,7 @@
  */
 
 import { tool, type ToolDefinition } from '@opencode-ai/plugin'
-import {
-  CheckpointManager,
-  describeCheckpoint,
-} from '../mission/checkpoints.js'
+import { CheckpointManager, describeCheckpoint } from '../mission/checkpoints.js'
 import { MissionState } from '../mission/state.js'
 
 // Use the tool's built-in schema
@@ -39,9 +36,17 @@ Checkpoints allow you to:
 The checkpoint includes a git commit of all changed files.`,
 
     args: {
-      name: s.string().describe('Human-readable checkpoint name (e.g., "auth-complete", "before-refactor")'),
-      description: s.string().optional().describe('Optional description of what this checkpoint captures'),
-      files: s.array(s.string()).optional().describe('Specific files to include (default: all changed files)'),
+      name: s
+        .string()
+        .describe('Human-readable checkpoint name (e.g., "auth-complete", "before-refactor")'),
+      description: s
+        .string()
+        .optional()
+        .describe('Optional description of what this checkpoint captures'),
+      files: s
+        .array(s.string())
+        .optional()
+        .describe('Specific files to include (default: all changed files)'),
     },
 
     async execute(args, _ctx) {
@@ -104,7 +109,10 @@ Shows:
 - Number of files captured`,
 
     args: {
-      all: s.boolean().optional().describe('Show checkpoints from all missions (default: current mission only)'),
+      all: s
+        .boolean()
+        .optional()
+        .describe('Show checkpoints from all missions (default: current mission only)'),
     },
 
     async execute(args, _ctx) {
@@ -121,7 +129,7 @@ Shows:
         })
       }
 
-      const formatted = checkpoints.map(c => ({
+      const formatted = checkpoints.map((c) => ({
         id: c.id,
         name: c.name,
         gitCommit: c.gitCommit.slice(0, 8),

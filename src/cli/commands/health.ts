@@ -526,7 +526,9 @@ function printSummaryFormat(checks: HealthCheck[], report: HealthReport): void {
 
   console.log()
   console.log(colorize('┌' + '─'.repeat(width - 2) + '┐', 'cyan'))
-  console.log(colorize('│', 'cyan') + '  Delta9 Health Check'.padEnd(width - 3) + colorize('│', 'cyan'))
+  console.log(
+    colorize('│', 'cyan') + '  Delta9 Health Check'.padEnd(width - 3) + colorize('│', 'cyan')
+  )
   console.log(colorize('└' + '─'.repeat(width - 2) + '┘', 'cyan'))
   console.log()
 
@@ -547,9 +549,12 @@ function printSummaryFormat(checks: HealthCheck[], report: HealthReport): void {
     console.log(colorize(categoryNames[category] || category, 'bold'))
 
     for (const check of categoryChecks) {
-      const icon = check.status === 'pass' ? colorize(symbols.check, 'green')
-        : check.status === 'warn' ? colorize(symbols.warning, 'yellow')
-        : colorize(symbols.cross, 'red')
+      const icon =
+        check.status === 'pass'
+          ? colorize(symbols.check, 'green')
+          : check.status === 'warn'
+            ? colorize(symbols.warning, 'yellow')
+            : colorize(symbols.cross, 'red')
 
       console.log(`  ${icon} ${check.name}: ${check.message}`)
 
@@ -566,12 +571,17 @@ function printSummaryFormat(checks: HealthCheck[], report: HealthReport): void {
   const warned = checks.filter((c) => c.status === 'warn').length
   const failed = checks.filter((c) => c.status === 'fail').length
 
-  const statusIcon = report.status === 'healthy' ? colorize(symbols.check, 'green')
-    : report.status === 'degraded' ? colorize(symbols.warning, 'yellow')
-    : colorize(symbols.cross, 'red')
+  const statusIcon =
+    report.status === 'healthy'
+      ? colorize(symbols.check, 'green')
+      : report.status === 'degraded'
+        ? colorize(symbols.warning, 'yellow')
+        : colorize(symbols.cross, 'red')
 
   console.log(colorize('─'.repeat(width), 'gray'))
-  console.log(`${statusIcon} Summary: ${colorize(String(passed), 'green')} passed, ${colorize(String(warned), 'yellow')} warnings, ${colorize(String(failed), 'red')} failed`)
+  console.log(
+    `${statusIcon} Summary: ${colorize(String(passed), 'green')} passed, ${colorize(String(warned), 'yellow')} warnings, ${colorize(String(failed), 'red')} failed`
+  )
   console.log()
 }
 

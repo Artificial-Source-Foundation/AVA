@@ -20,12 +20,7 @@ export const SCRIBE_PROFILE = {
   role: 'Documentation Writer',
   temperature: 0.3, // Slightly creative for good prose
   specialty: 'documentation' as const,
-  traits: [
-    'Clear communicator',
-    'Detail-oriented',
-    'Example-driven',
-    'User-focused',
-  ],
+  traits: ['Clear communicator', 'Detail-oriented', 'Example-driven', 'User-focused'],
 }
 
 // =============================================================================

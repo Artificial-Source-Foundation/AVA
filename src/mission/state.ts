@@ -18,12 +18,7 @@ import type {
 } from '../types/mission.js'
 import type { CouncilMode } from '../types/config.js'
 import { validateMission } from '../schemas/mission.schema.js'
-import {
-  getMissionPath,
-  getMissionMdPath,
-  ensureDelta9Dir,
-  missionExists,
-} from '../lib/paths.js'
+import { getMissionPath, getMissionMdPath, ensureDelta9Dir, missionExists } from '../lib/paths.js'
 import { getBudgetLimit } from '../lib/config.js'
 import { generateMissionMarkdown } from './markdown.js'
 import { appendHistory } from './history.js'
@@ -134,11 +129,7 @@ export class MissionState {
     this.mission.updatedAt = new Date().toISOString()
 
     // Save mission.json
-    writeFileSync(
-      getMissionPath(this.cwd),
-      JSON.stringify(this.mission, null, 2),
-      'utf-8'
-    )
+    writeFileSync(getMissionPath(this.cwd), JSON.stringify(this.mission, null, 2), 'utf-8')
 
     // Generate and save mission.md
     const markdown = generateMissionMarkdown(this.mission)
@@ -174,7 +165,7 @@ export class MissionState {
    * Get an objective by ID
    */
   getObjective(id: string): Objective | null {
-    return this.mission?.objectives.find(o => o.id === id) ?? null
+    return this.mission?.objectives.find((o) => o.id === id) ?? null
   }
 
   /**
@@ -194,7 +185,7 @@ export class MissionState {
     if (!this.mission) return null
 
     for (const objective of this.mission.objectives) {
-      const task = objective.tasks.find(t => t.id === taskId)
+      const task = objective.tasks.find((t) => t.id === taskId)
       if (task) return task
     }
     return null
@@ -609,7 +600,7 @@ export class MissionState {
     const objective = this.getCurrentObjective()
     if (!objective) return
 
-    const allComplete = objective.tasks.every(t => t.status === 'completed')
+    const allComplete = objective.tasks.every((t) => t.status === 'completed')
 
     if (allComplete) {
       objective.status = 'completed'
@@ -633,7 +624,7 @@ export class MissionState {
   private checkMissionCompletion(): void {
     if (!this.mission) return
 
-    const allComplete = this.mission.objectives.every(o => o.status === 'completed')
+    const allComplete = this.mission.objectives.every((o) => o.status === 'completed')
 
     if (allComplete) {
       this.mission.status = 'completed'
@@ -654,10 +645,7 @@ export class MissionState {
   /**
    * Add cost to budget
    */
-  addCost(
-    amount: number,
-    category: keyof BudgetTracking['breakdown']
-  ): void {
+  addCost(amount: number, category: keyof BudgetTracking['breakdown']): void {
     if (!this.mission) return
 
     this.mission.budget.spent += amount

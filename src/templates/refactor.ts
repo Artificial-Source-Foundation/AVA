@@ -146,11 +146,7 @@ export const refactorTemplate: MissionTemplate = {
       tasks: [
         {
           description: 'Run full test suite and verify behavior',
-          acceptanceCriteria: [
-            'All tests pass',
-            'No regressions detected',
-            'Edge cases verified',
-          ],
+          acceptanceCriteria: ['All tests pass', 'No regressions detected', 'Edge cases verified'],
           routeTo: 'SENTINEL',
         },
         {
@@ -220,18 +216,11 @@ export const quickRefactorTemplate: MissionTemplate = {
       tasks: [
         {
           description: 'Analyze and refactor code',
-          acceptanceCriteria: [
-            'Code improved',
-            'Tests still pass',
-            'No breaking changes',
-          ],
+          acceptanceCriteria: ['Code improved', 'Tests still pass', 'No breaking changes'],
         },
         {
           description: 'Verify changes',
-          acceptanceCriteria: [
-            'All tests pass',
-            'Build succeeds',
-          ],
+          acceptanceCriteria: ['All tests pass', 'Build succeeds'],
           dependsOn: [0],
         },
       ],

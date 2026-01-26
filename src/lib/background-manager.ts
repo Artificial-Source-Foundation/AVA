@@ -42,9 +42,7 @@ export interface OpenCodeClient {
         noReply?: boolean
       }
     }) => Promise<unknown> // Returns complex response, but we fire-and-forget
-    messages: (opts: {
-      path: { id: string }
-    }) => Promise<{
+    messages: (opts: { path: { id: string } }) => Promise<{
       data?: Array<{
         info?: { role?: string; time?: { created?: number } }
         parts?: Array<{ type?: string; text?: string }>
@@ -359,11 +357,15 @@ export class BackgroundManager {
 
     for (const [taskId, task] of this.tasks) {
       // Check task age (TTL)
-      const taskStart = task.startedAt ? new Date(task.startedAt).getTime() : new Date(task.queuedAt).getTime()
+      const taskStart = task.startedAt
+        ? new Date(task.startedAt).getTime()
+        : new Date(task.queuedAt).getTime()
       const taskAge = now - taskStart
 
       if (taskAge > TASK_TTL_MS) {
-        console.log(`[delta9] [background] Pruning expired task ${taskId} (age: ${Math.round(taskAge / 1000)}s)`)
+        console.log(
+          `[delta9] [background] Pruning expired task ${taskId} (age: ${Math.round(taskAge / 1000)}s)`
+        )
 
         if (task.status === 'running' && task.sessionId && this.client) {
           // Abort the session
@@ -382,7 +384,9 @@ export class BackgroundManager {
         const staleTime = now - lastActivity
 
         if (staleTime > STALE_TIMEOUT_MS) {
-          console.log(`[delta9] [background] Task ${taskId} stale (no activity for ${Math.round(staleTime / 1000)}s)`)
+          console.log(
+            `[delta9] [background] Task ${taskId} stale (no activity for ${Math.round(staleTime / 1000)}s)`
+          )
 
           if (task.sessionId && this.client) {
             // Abort the session
@@ -638,7 +642,9 @@ export class BackgroundManager {
         console.log(`[delta9] [background] Executing task ${task.id} with SDK`)
         await this.executeWithSDK(task)
       } else {
-        console.log(`[delta9] [background] Executing task ${task.id} with simulation (no SDK client)`)
+        console.log(
+          `[delta9] [background] Executing task ${task.id} with simulation (no SDK client)`
+        )
         await this.simulateExecution(task)
       }
     } catch (error) {
@@ -780,7 +786,10 @@ export class BackgroundManager {
         })
 
         if (messagesResult.error) {
-          console.error(`[delta9] [background] Messages error for task ${task.id}:`, messagesResult.error)
+          console.error(
+            `[delta9] [background] Messages error for task ${task.id}:`,
+            messagesResult.error
+          )
           continue
         }
 
@@ -854,8 +863,12 @@ export class BackgroundManager {
       })
     } else {
       // Extract text from text and reasoning parts
-      const textParts = lastMessage.parts?.filter((p) => p.type === 'text' || p.type === 'reasoning') ?? []
-      const textContent = textParts.map((p) => p.text ?? '').filter(Boolean).join('\n')
+      const textParts =
+        lastMessage.parts?.filter((p) => p.type === 'text' || p.type === 'reasoning') ?? []
+      const textContent = textParts
+        .map((p) => p.text ?? '')
+        .filter(Boolean)
+        .join('\n')
 
       task.output = JSON.stringify({
         success: true,

@@ -67,15 +67,20 @@ export function readHistory(cwd: string): HistoryEvent[] {
 
   try {
     const content = readFileSync(historyPath, 'utf-8')
-    const lines = content.trim().split('\n').filter(line => line.length > 0)
+    const lines = content
+      .trim()
+      .split('\n')
+      .filter((line) => line.length > 0)
 
-    return lines.map(line => {
-      try {
-        return validateHistoryEvent(JSON.parse(line))
-      } catch {
-        return null
-      }
-    }).filter((e): e is HistoryEvent => e !== null)
+    return lines
+      .map((line) => {
+        try {
+          return validateHistoryEvent(JSON.parse(line))
+        } catch {
+          return null
+        }
+      })
+      .filter((e): e is HistoryEvent => e !== null)
   } catch (error) {
     console.error('Failed to read history:', error)
     return []
@@ -86,14 +91,14 @@ export function readHistory(cwd: string): HistoryEvent[] {
  * Read history events for a specific mission
  */
 export function readMissionHistory(cwd: string, missionId: string): HistoryEvent[] {
-  return readHistory(cwd).filter(e => e.missionId === missionId)
+  return readHistory(cwd).filter((e) => e.missionId === missionId)
 }
 
 /**
  * Read history events of a specific type
  */
 export function readHistoryByType(cwd: string, type: HistoryEventType): HistoryEvent[] {
-  return readHistory(cwd).filter(e => e.type === type)
+  return readHistory(cwd).filter((e) => e.type === type)
 }
 
 /**
@@ -159,27 +164,27 @@ export function searchHistory(
   let events = readHistory(cwd)
 
   if (query.type) {
-    events = events.filter(e => e.type === query.type)
+    events = events.filter((e) => e.type === query.type)
   }
 
   if (query.missionId) {
-    events = events.filter(e => e.missionId === query.missionId)
+    events = events.filter((e) => e.missionId === query.missionId)
   }
 
   if (query.objectiveId) {
-    events = events.filter(e => e.objectiveId === query.objectiveId)
+    events = events.filter((e) => e.objectiveId === query.objectiveId)
   }
 
   if (query.taskId) {
-    events = events.filter(e => e.taskId === query.taskId)
+    events = events.filter((e) => e.taskId === query.taskId)
   }
 
   if (query.after) {
-    events = events.filter(e => e.timestamp > query.after!)
+    events = events.filter((e) => e.timestamp > query.after!)
   }
 
   if (query.before) {
-    events = events.filter(e => e.timestamp < query.before!)
+    events = events.filter((e) => e.timestamp < query.before!)
   }
 
   return events

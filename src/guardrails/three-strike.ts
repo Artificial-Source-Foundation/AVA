@@ -92,11 +92,15 @@ export class StrikeManager {
     // Log the strike
     if (this.config.log) {
       const level = activeStrikes.length >= this.config.maxStrikes ? 'error' : 'warn'
-      this.config.log(level, `Strike ${activeStrikes.length}/${this.config.maxStrikes} for ${options.agentId}`, {
-        reason: options.reason,
-        message: options.message,
-        strikeId: strike.id,
-      })
+      this.config.log(
+        level,
+        `Strike ${activeStrikes.length}/${this.config.maxStrikes} for ${options.agentId}`,
+        {
+          reason: options.reason,
+          message: options.message,
+          strikeId: strike.id,
+        }
+      )
     }
 
     return this.getStatus(options.agentId)

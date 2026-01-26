@@ -54,10 +54,7 @@ interface AbortExecutionOptions {
   createCheckpoint?: boolean
 }
 
-async function executeAbort(
-  cwd: string,
-  options: AbortExecutionOptions
-): Promise<AbortResult> {
+async function executeAbort(cwd: string, options: AbortExecutionOptions): Promise<AbortResult> {
   const missionFile = join(cwd, '.delta9', 'mission.json')
 
   // Check if mission exists
@@ -101,7 +98,11 @@ async function executeAbort(
       for (const task of objective.tasks || []) {
         if (task.status === 'completed') {
           tasksCompleted++
-        } else if (task.status === 'pending' || task.status === 'in_progress' || task.status === 'blocked') {
+        } else if (
+          task.status === 'pending' ||
+          task.status === 'in_progress' ||
+          task.status === 'blocked'
+        ) {
           tasksAborted++
           cancelledTasks.push(task.id)
           task.status = 'failed'
@@ -244,10 +245,16 @@ function printAbortResult(result: AbortResult): void {
 
   // Task summary
   console.log(`  ${colorize('Tasks Summary:', 'bold')}`)
-  console.log(`    ${symbols.success} Completed: ${colorize(String(result.tasksCompleted), 'green')}`)
+  console.log(
+    `    ${symbols.success} Completed: ${colorize(String(result.tasksCompleted), 'green')}`
+  )
   console.log(`    ${symbols.error} Aborted: ${colorize(String(result.tasksAborted), 'red')}`)
 
-  if (result.cancelledTasks && result.cancelledTasks.length > 0 && result.cancelledTasks.length <= 5) {
+  if (
+    result.cancelledTasks &&
+    result.cancelledTasks.length > 0 &&
+    result.cancelledTasks.length <= 5
+  ) {
     console.log('')
     console.log(`  ${colorize('Cancelled Tasks:', 'dim')}`)
     for (const taskId of result.cancelledTasks) {

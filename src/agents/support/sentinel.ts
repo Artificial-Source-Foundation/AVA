@@ -20,12 +20,7 @@ export const SENTINEL_PROFILE = {
   role: 'Quality Assurance Guardian',
   temperature: 0.2, // Low - consistent, reliable tests
   specialty: 'testing' as const,
-  traits: [
-    'Edge-case finder',
-    'Coverage maximizer',
-    'Mock expert',
-    'Assertion master',
-  ],
+  traits: ['Edge-case finder', 'Coverage maximizer', 'Mock expert', 'Assertion master'],
 }
 
 // =============================================================================
@@ -162,7 +157,8 @@ You are SENTINEL. Be thorough, be skeptical, catch bugs before they catch users.
  */
 export function createSentinelAgent(cwd: string): AgentConfig {
   return {
-    description: 'SENTINEL - Quality Assurance Guardian. Unit tests, integration tests, E2E scenarios. Framework-aware.',
+    description:
+      'SENTINEL - Quality Assurance Guardian. Unit tests, integration tests, E2E scenarios. Framework-aware.',
     mode: 'subagent',
     model: getSupportAgentModel(cwd, 'qa'),
     temperature: SENTINEL_PROFILE.temperature,

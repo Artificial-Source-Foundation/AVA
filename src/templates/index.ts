@@ -25,11 +25,7 @@ export type {
 } from './types.js'
 
 // Feature templates
-export {
-  featureTemplate,
-  simpleFeatureTemplate,
-  complexFeatureTemplate,
-} from './feature.js'
+export { featureTemplate, simpleFeatureTemplate, complexFeatureTemplate } from './feature.js'
 
 // Bugfix templates
 export {
@@ -53,24 +49,35 @@ export {
 // =============================================================================
 
 import { featureTemplate, simpleFeatureTemplate, complexFeatureTemplate } from './feature.js'
-import { bugfixTemplate, quickBugfixTemplate, criticalBugfixTemplate, securityBugfixTemplate } from './bugfix.js'
-import { refactorTemplate, quickRefactorTemplate, largeRefactorTemplate, performanceRefactorTemplate, typeSafetyRefactorTemplate } from './refactor.js'
+import {
+  bugfixTemplate,
+  quickBugfixTemplate,
+  criticalBugfixTemplate,
+  securityBugfixTemplate,
+} from './bugfix.js'
+import {
+  refactorTemplate,
+  quickRefactorTemplate,
+  largeRefactorTemplate,
+  performanceRefactorTemplate,
+  typeSafetyRefactorTemplate,
+} from './refactor.js'
 
 /** All available templates indexed by ID */
 export const templateRegistry: Record<string, MissionTemplate> = {
   // Feature templates
-  'feature': featureTemplate,
+  feature: featureTemplate,
   'feature:simple': simpleFeatureTemplate,
   'feature:complex': complexFeatureTemplate,
 
   // Bugfix templates
-  'bugfix': bugfixTemplate,
+  bugfix: bugfixTemplate,
   'bugfix:quick': quickBugfixTemplate,
   'bugfix:critical': criticalBugfixTemplate,
   'bugfix:security': securityBugfixTemplate,
 
   // Refactor templates
-  'refactor': refactorTemplate,
+  refactor: refactorTemplate,
   'refactor:quick': quickRefactorTemplate,
   'refactor:large': largeRefactorTemplate,
   'refactor:performance': performanceRefactorTemplate,
@@ -140,36 +147,79 @@ export function suggestTemplate(description: string): {
     let score = 0
 
     // Check template type keywords
-    if (template.type === 'bugfix' && (lowerDesc.includes('bug') || lowerDesc.includes('fix') || lowerDesc.includes('issue') || lowerDesc.includes('error'))) {
+    if (
+      template.type === 'bugfix' &&
+      (lowerDesc.includes('bug') ||
+        lowerDesc.includes('fix') ||
+        lowerDesc.includes('issue') ||
+        lowerDesc.includes('error'))
+    ) {
       score += 30
     }
-    if (template.type === 'feature' && (lowerDesc.includes('feature') || lowerDesc.includes('add') || lowerDesc.includes('implement') || lowerDesc.includes('create') || lowerDesc.includes('new'))) {
+    if (
+      template.type === 'feature' &&
+      (lowerDesc.includes('feature') ||
+        lowerDesc.includes('add') ||
+        lowerDesc.includes('implement') ||
+        lowerDesc.includes('create') ||
+        lowerDesc.includes('new'))
+    ) {
       score += 30
     }
-    if (template.type === 'refactor' && (lowerDesc.includes('refactor') || lowerDesc.includes('clean') || lowerDesc.includes('improve') || lowerDesc.includes('reorganize'))) {
+    if (
+      template.type === 'refactor' &&
+      (lowerDesc.includes('refactor') ||
+        lowerDesc.includes('clean') ||
+        lowerDesc.includes('improve') ||
+        lowerDesc.includes('reorganize'))
+    ) {
       score += 30
     }
 
     // Check for complexity indicators
     if (id.includes('quick') || id.includes('simple')) {
-      if (lowerDesc.includes('quick') || lowerDesc.includes('simple') || lowerDesc.includes('small') || lowerDesc.length < 50) {
+      if (
+        lowerDesc.includes('quick') ||
+        lowerDesc.includes('simple') ||
+        lowerDesc.includes('small') ||
+        lowerDesc.length < 50
+      ) {
         score += 20
       }
     }
     if (id.includes('complex') || id.includes('large') || id.includes('critical')) {
-      if (lowerDesc.includes('complex') || lowerDesc.includes('large') || lowerDesc.includes('critical') || lowerDesc.includes('major')) {
+      if (
+        lowerDesc.includes('complex') ||
+        lowerDesc.includes('large') ||
+        lowerDesc.includes('critical') ||
+        lowerDesc.includes('major')
+      ) {
         score += 20
       }
     }
 
     // Check specific keywords
-    if (id.includes('security') && (lowerDesc.includes('security') || lowerDesc.includes('vulnerability') || lowerDesc.includes('cve'))) {
+    if (
+      id.includes('security') &&
+      (lowerDesc.includes('security') ||
+        lowerDesc.includes('vulnerability') ||
+        lowerDesc.includes('cve'))
+    ) {
       score += 25
     }
-    if (id.includes('performance') && (lowerDesc.includes('performance') || lowerDesc.includes('slow') || lowerDesc.includes('optimize') || lowerDesc.includes('speed'))) {
+    if (
+      id.includes('performance') &&
+      (lowerDesc.includes('performance') ||
+        lowerDesc.includes('slow') ||
+        lowerDesc.includes('optimize') ||
+        lowerDesc.includes('speed'))
+    ) {
       score += 25
     }
-    if (id.includes('types') && (lowerDesc.includes('type') || lowerDesc.includes('typescript') || lowerDesc.includes('any'))) {
+    if (
+      id.includes('types') &&
+      (lowerDesc.includes('type') || lowerDesc.includes('typescript') || lowerDesc.includes('any'))
+    ) {
       score += 25
     }
 
@@ -258,18 +308,20 @@ export function instantiateTemplate(
     // Create tasks for this objective
     const tasks: Task[] = templateObj.tasks.map((templateTask, taskIndex) => {
       // Build acceptance criteria
-      let criteria = templateTask.acceptanceCriteria.map((c) =>
-        replaceVariables(c, variables)
-      )
+      let criteria = templateTask.acceptanceCriteria.map((c) => replaceVariables(c, variables))
 
       // Add additional criteria if this is the last task
-      if (additionalCriteria && objIndex === template.objectives.length - 1 && taskIndex === templateObj.tasks.length - 1) {
+      if (
+        additionalCriteria &&
+        objIndex === template.objectives.length - 1 &&
+        taskIndex === templateObj.tasks.length - 1
+      ) {
         criteria = [...criteria, ...additionalCriteria]
       }
 
       // Build dependencies (convert relative to absolute IDs)
-      const dependencies = templateTask.dependsOn?.map((depIndex) =>
-        `task_${objIndex + 1}_${depIndex + 1}_${Date.now()}`
+      const dependencies = templateTask.dependsOn?.map(
+        (depIndex) => `task_${objIndex + 1}_${depIndex + 1}_${Date.now()}`
       )
 
       return {
@@ -295,7 +347,9 @@ export function instantiateTemplate(
   const descriptionParts = [
     template.name,
     ...Object.entries(variables)
-      .filter(([key]) => key.includes('NAME') || key.includes('DESCRIPTION') || key.includes('TARGET'))
+      .filter(
+        ([key]) => key.includes('NAME') || key.includes('DESCRIPTION') || key.includes('TARGET')
+      )
       .map(([_, value]) => value),
   ]
 

@@ -201,15 +201,17 @@ Shows:
         // Detect conflicts (significantly different confidence or opposing caveats)
         const conflicts: string[] = []
         if (opinions.length > 1) {
-          const confidences = opinions.map(o => o.confidence)
+          const confidences = opinions.map((o) => o.confidence)
           const maxConf = Math.max(...confidences)
           const minConf = Math.min(...confidences)
           if (maxConf - minConf > 0.3) {
-            conflicts.push(`Confidence spread: ${(minConf * 100).toFixed(0)}%-${(maxConf * 100).toFixed(0)}%`)
+            conflicts.push(
+              `Confidence spread: ${(minConf * 100).toFixed(0)}%-${(maxConf * 100).toFixed(0)}%`
+            )
           }
 
           // Check for opposing views in caveats
-          const allCaveats = opinions.flatMap(o => o.caveats || [])
+          const allCaveats = opinions.flatMap((o) => o.caveats || [])
           if (allCaveats.length > 3) {
             conflicts.push(`${allCaveats.length} caveats raised across oracles`)
           }

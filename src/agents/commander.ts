@@ -149,7 +149,8 @@ You are the continuity that survives context compaction.`
 // =============================================================================
 
 export const commanderAgent: AgentConfig = {
-  description: 'Strategic planning and orchestration agent. Analyzes requests, creates mission plans, and coordinates execution. NEVER writes code.',
+  description:
+    'Strategic planning and orchestration agent. Analyzes requests, creates mission plans, and coordinates execution. NEVER writes code.',
   mode: 'primary',
   // No model specified - inherits from user's OpenCode config
   temperature: 0.7,

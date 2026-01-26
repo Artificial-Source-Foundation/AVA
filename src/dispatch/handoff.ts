@@ -139,9 +139,7 @@ function buildRoleDescription(task: Task): string {
 }
 
 function buildPriorWorkSummary(allTasks: Task[], currentTaskId: string): string {
-  const completedTasks = allTasks.filter(
-    (t) => t.status === 'completed' && t.id !== currentTaskId
-  )
+  const completedTasks = allTasks.filter((t) => t.status === 'completed' && t.id !== currentTaskId)
 
   if (completedTasks.length === 0) {
     return 'This is the first task. No prior work completed yet.'
@@ -165,15 +163,16 @@ function buildNextStepsSummary(
   currentTaskId: string,
   additionalContext?: string
 ): string {
-  const pendingTasks = allTasks.filter(
-    (t) => t.status === 'pending' && t.id !== currentTaskId
-  )
+  const pendingTasks = allTasks.filter((t) => t.status === 'pending' && t.id !== currentTaskId)
 
   const parts: string[] = []
 
   if (pendingTasks.length > 0) {
     parts.push(
-      `After this task, ${pendingTasks.length} more task(s) remain: ${pendingTasks.slice(0, 2).map((t) => t.description).join(', ')}${pendingTasks.length > 2 ? '...' : ''}`
+      `After this task, ${pendingTasks.length} more task(s) remain: ${pendingTasks
+        .slice(0, 2)
+        .map((t) => t.description)
+        .join(', ')}${pendingTasks.length > 2 ? '...' : ''}`
     )
   } else {
     parts.push('This is the final task for the current objective.')

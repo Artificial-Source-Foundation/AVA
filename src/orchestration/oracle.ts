@@ -188,10 +188,7 @@ Respond with JSON only. No additional text.`
 /**
  * Parse oracle response into OracleOpinion
  */
-export function parseOracleResponse(
-  oracle: OracleConfig,
-  response: string
-): OracleOpinion {
+export function parseOracleResponse(oracle: OracleConfig, response: string): OracleOpinion {
   try {
     // Try to extract JSON from response
     const jsonMatch = response.match(/\{[\s\S]*\}/)
@@ -366,9 +363,7 @@ async function waitForOracleResponse(
       const messages = messagesResult.data || []
 
       // Find the last assistant message
-      const assistantMessages = messages.filter(
-        (m) => m.info?.role === 'assistant'
-      )
+      const assistantMessages = messages.filter((m) => m.info?.role === 'assistant')
 
       if (assistantMessages.length > 0) {
         const lastMessage = assistantMessages[assistantMessages.length - 1]
@@ -423,10 +418,7 @@ From ${oracle.specialty} perspective:
 
 Key recommendation: Proceed with careful consideration of the ${oracle.specialty} aspects.`,
     confidence: 0.6,
-    caveats: [
-      'Simulation mode - real model not invoked',
-      `Would use ${model} via ${provider}`,
-    ],
+    caveats: ['Simulation mode - real model not invoked', `Would use ${model} via ${provider}`],
     suggestedTasks: [
       'Ensure OpenCode SDK is available for real oracle invocation',
       `Review ${oracle.specialty} considerations manually`,
@@ -473,9 +465,7 @@ export async function invokeOraclesParallel(
   context: OraclePromptContext,
   options: OracleInvocationOptions = {}
 ): Promise<OracleInvocationResult[]> {
-  const results = await Promise.all(
-    oracles.map((oracle) => invokeOracle(oracle, context, options))
-  )
+  const results = await Promise.all(oracles.map((oracle) => invokeOracle(oracle, context, options)))
   return results
 }
 

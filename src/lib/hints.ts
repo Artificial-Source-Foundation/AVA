@@ -17,14 +17,11 @@ export const hints = {
   // Background Task Hints
   // -------------------------------------------------------------------------
 
-  noTasks:
-    'No background tasks. Use delegate_task with run_in_background=true to spawn an agent.',
+  noTasks: 'No background tasks. Use delegate_task with run_in_background=true to spawn an agent.',
 
-  noRunningTasks:
-    'No running tasks. All tasks have completed or been cancelled.',
+  noRunningTasks: 'No running tasks. All tasks have completed or been cancelled.',
 
-  tasksAllComplete:
-    'All tasks completed successfully. Use background_cleanup to remove old tasks.',
+  tasksAllComplete: 'All tasks completed successfully. Use background_cleanup to remove old tasks.',
 
   taskFailed: (agent: string) =>
     `${agent} task failed. Use background_output for details or retry_task to try again.`,
@@ -36,20 +33,15 @@ export const hints = {
   // Mission Hints
   // -------------------------------------------------------------------------
 
-  noMission:
-    'No active mission. Create one with mission_create to track objectives and tasks.',
+  noMission: 'No active mission. Create one with mission_create to track objectives and tasks.',
 
-  missionComplete:
-    'Mission complete! Use mission_status to review or create a new mission.',
+  missionComplete: 'Mission complete! Use mission_status to review or create a new mission.',
 
-  missionBlocked:
-    'Mission is blocked. Check task dependencies with mission_status.',
+  missionBlocked: 'Mission is blocked. Check task dependencies with mission_status.',
 
-  noObjectives:
-    'Mission has no objectives. Add objectives with mission_add_objective.',
+  noObjectives: 'Mission has no objectives. Add objectives with mission_add_objective.',
 
-  missionNoTasks:
-    'Mission has no tasks. Add tasks with mission_add_task or use dispatch_task.',
+  missionNoTasks: 'Mission has no tasks. Add tasks with mission_add_task or use dispatch_task.',
 
   tasksNeedValidation:
     'Tasks awaiting validation. Use request_validation to verify completed work.',
@@ -64,15 +56,13 @@ export const hints = {
   councilPartial: (count: number, total: number) =>
     `Only ${count}/${total} oracles responded. Results may be incomplete.`,
 
-  quickConsultAvailable:
-    'For faster responses, use quick_consult with a single oracle.',
+  quickConsultAvailable: 'For faster responses, use quick_consult with a single oracle.',
 
   // -------------------------------------------------------------------------
   // Delegation Hints
   // -------------------------------------------------------------------------
 
-  simulationMode:
-    'Running in simulation mode (SDK not available). Tasks will be simulated.',
+  simulationMode: 'Running in simulation mode (SDK not available). Tasks will be simulated.',
 
   agentRecommendation: (complexity: string) =>
     complexity === 'complex'
@@ -86,34 +76,27 @@ export const hints = {
   // Validation Hints
   // -------------------------------------------------------------------------
 
-  validationPending:
-    'Tasks pending validation. Use request_validation to verify completed work.',
+  validationPending: 'Tasks pending validation. Use request_validation to verify completed work.',
 
-  allTasksValidated:
-    'All tasks have been validated. Mission may be ready to complete.',
+  allTasksValidated: 'All tasks have been validated. Mission may be ready to complete.',
 
-  validationFailed:
-    'Some validations failed. Review failures and use retry_task to fix.',
+  validationFailed: 'Some validations failed. Review failures and use retry_task to fix.',
 
   // -------------------------------------------------------------------------
   // Memory Hints
   // -------------------------------------------------------------------------
 
-  memoryEmpty:
-    'Memory is empty. Use memory_set to store key-value pairs across sessions.',
+  memoryEmpty: 'Memory is empty. Use memory_set to store key-value pairs across sessions.',
 
-  memoryAvailable: (count: number) =>
-    `${count} keys in memory. Use memory_list to see all keys.`,
+  memoryAvailable: (count: number) => `${count} keys in memory. Use memory_list to see all keys.`,
 
   // -------------------------------------------------------------------------
   // Config Hints
   // -------------------------------------------------------------------------
 
-  usingDefaults:
-    'Using default configuration. Create delta9.json to customize behavior.',
+  usingDefaults: 'Using default configuration. Create delta9.json to customize behavior.',
 
-  configLoaded:
-    'Configuration loaded from delta9.json.',
+  configLoaded: 'Configuration loaded from delta9.json.',
 }
 
 // =============================================================================

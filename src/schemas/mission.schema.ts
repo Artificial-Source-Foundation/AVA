@@ -79,7 +79,7 @@ export const objectiveSchema = z.object({
   id: z.string().min(1),
   description: z.string().min(1),
   status: objectiveStatusSchema,
-  tasks: z.array(taskSchema).min(1),
+  tasks: z.array(taskSchema), // Allow empty - tasks can be added later
   checkpoint: z.string().optional(),
   startedAt: z.string().datetime().optional(),
   completedAt: z.string().datetime().optional(),

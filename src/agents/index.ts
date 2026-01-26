@@ -13,21 +13,11 @@ import type { AgentConfig } from '@opencode-ai/sdk'
 // Legacy Agent Exports (for backward compatibility)
 // =============================================================================
 
-export {
-  commanderAgent,
-  commanderPlanningAgent,
-  commanderExecutionAgent,
-} from './commander.js'
+export { commanderAgent } from './commander.js'
 
-export {
-  operatorAgent,
-  operatorComplexAgent,
-} from './operator.js'
+export { operatorAgent } from './operator.js'
 
-export {
-  validatorAgent,
-  validatorStrictAgent,
-} from './validator.js'
+export { validatorAgent } from './validator.js'
 
 // Agent router
 export {
@@ -246,12 +236,13 @@ You verify that completed tasks meet their acceptance criteria. You:
 /**
  * Get agent configurations for OpenCode registration.
  * These agents will appear in the agent selector (Tab menu).
+ * Note: Models are applied from Delta9 config at runtime in index.ts
  */
 export function getAgentConfigs(): Record<string, AgentConfig> {
   return {
     // Primary agent - appears in agent list
     commander: {
-      model: 'anthropic/claude-sonnet-4',
+      // Model applied from Delta9 config at runtime
       temperature: 0.7,
       prompt: COMMANDER_PROMPT,
       mode: 'primary',
@@ -260,7 +251,7 @@ export function getAgentConfigs(): Record<string, AgentConfig> {
 
     // Subagents - invoked via delegate_task
     operator: {
-      model: 'anthropic/claude-sonnet-4',
+      // Model applied from Delta9 config at runtime
       temperature: 0.3,
       prompt: OPERATOR_PROMPT,
       mode: 'subagent',
@@ -268,7 +259,7 @@ export function getAgentConfigs(): Record<string, AgentConfig> {
     },
 
     validator: {
-      model: 'anthropic/claude-haiku-4',
+      // Model applied from Delta9 config at runtime
       temperature: 0.1,
       prompt: VALIDATOR_PROMPT,
       mode: 'subagent',

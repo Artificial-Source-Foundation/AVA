@@ -162,11 +162,20 @@ function formatTodosForContinuation(todos: TodoItem[]): string {
 }
 
 // =============================================================================
-// Critical Context
+// Critical Context - 5-Section Template (oh-my-opencode pattern)
 // =============================================================================
 
 /**
- * Build critical context to preserve across compaction
+ * Build critical context using 5-section structured template.
+ *
+ * Sections:
+ * 1. USER REQUESTS - What the user originally asked for
+ * 2. FINAL GOAL - Mission description (ultimate objective)
+ * 3. WORK COMPLETED - Tasks done with files changed
+ * 4. REMAINING TASKS - Pending/in-progress with planned files
+ * 5. MUST NOT DO - Constraints, guardrails, failed approaches
+ *
+ * Based on oh-my-opencode's SUMMARIZE_CONTEXT_PROMPT pattern.
  */
 function buildCriticalContext(state: MissionState): string {
   const mission = state.getMission()
@@ -174,51 +183,181 @@ function buildCriticalContext(state: MissionState): string {
 
   const sections: string[] = []
 
-  // Mission overview
-  sections.push('## Mission Summary')
-  sections.push(`**Goal:** ${mission.description}`)
-  sections.push(`**Status:** ${mission.status}`)
-  sections.push(`**Progress:** ${state.getProgress()}%`)
+  // Header
+  sections.push('# Delta9 Session Restored')
   sections.push('')
 
-  // Current objective
-  const currentObjective = mission.objectives.find(
-    (o) => o.status === 'in_progress' || o.status === 'pending'
-  )
-  if (currentObjective) {
-    sections.push('## Current Objective')
-    sections.push(currentObjective.description)
-    sections.push('')
-  }
+  // Section 1: USER REQUESTS (Original intent)
+  sections.push('## 1. USER REQUESTS')
+  sections.push(mission.description)
+  sections.push('')
 
-  // In-progress task details
-  const inProgressTask = findInProgressTask(state)
-  if (inProgressTask) {
-    sections.push('## Current Task (Resume Here)')
-    sections.push(`**Task:** ${inProgressTask.description}`)
-    if (inProgressTask.acceptanceCriteria?.length) {
-      sections.push('**Criteria:**')
-      for (const criterion of inProgressTask.acceptanceCriteria) {
-        sections.push(`- ${criterion}`)
-      }
-    }
-    if (inProgressTask.filesChanged?.length) {
-      sections.push(`**Files Changed:** ${inProgressTask.filesChanged.join(', ')}`)
-    }
-    sections.push('')
-  }
+  // Section 2: FINAL GOAL
+  sections.push('## 2. FINAL GOAL')
+  sections.push(`Mission: ${mission.description}`)
+  sections.push(`Status: ${mission.status}`)
+  sections.push(`Progress: ${state.getProgress()}%`)
+  sections.push('')
 
-  // Recent errors (if any)
-  const recentErrors = getRecentErrors(state)
-  if (recentErrors.length > 0) {
-    sections.push('## Recent Errors (Avoid)')
-    for (const error of recentErrors.slice(0, 3)) {
-      sections.push(`- ${error}`)
+  // Section 3: WORK COMPLETED
+  sections.push('## 3. WORK COMPLETED')
+  const completedTasks = getCompletedTasks(state)
+  if (completedTasks.length > 0) {
+    for (const task of completedTasks) {
+      const files = task.filesChanged?.join(', ') || 'no files'
+      sections.push(`- [${task.id}] ${task.description} (${files})`)
     }
-    sections.push('')
+  } else {
+    sections.push('- No tasks completed yet')
   }
+  sections.push('')
+
+  // Section 4: REMAINING TASKS
+  sections.push('## 4. REMAINING TASKS')
+  const remainingTasks = getRemainingTasks(state)
+  if (remainingTasks.length > 0) {
+    for (const task of remainingTasks) {
+      const status = task.status === 'in_progress' ? '[IN PROGRESS]' : '[PENDING]'
+      const files = task.files?.join(', ') || 'unspecified files'
+      sections.push(`- ${status} [${task.id}] ${task.description} (files: ${files})`)
+    }
+  } else {
+    sections.push('- All tasks completed')
+  }
+  sections.push('')
+
+  // Section 5: MUST NOT DO
+  sections.push('## 5. MUST NOT DO')
+  const constraints = collectConstraints(state)
+  if (constraints.length > 0) {
+    for (const constraint of constraints) {
+      sections.push(`- ${constraint}`)
+    }
+  } else {
+    sections.push('- None specified')
+  }
+  sections.push('')
+
+  // Immediate actions
+  sections.push('## IMMEDIATE ACTIONS')
+  sections.push('1. Run `mission_status()` to see current state')
+  sections.push('2. Find next ready task or resume in-progress task')
+  sections.push('3. Dispatch to operator with `dispatch_task()`')
+  sections.push('')
+  sections.push('DO NOT re-read files already analyzed. Trust completed work.')
 
   return sections.join('\n')
+}
+
+/**
+ * Get completed tasks with file information
+ */
+function getCompletedTasks(state: MissionState): Array<{
+  id: string
+  description: string
+  filesChanged?: string[]
+}> {
+  const mission = state.getMission()
+  if (!mission) return []
+
+  const completed: Array<{
+    id: string
+    description: string
+    filesChanged?: string[]
+  }> = []
+
+  for (const objective of mission.objectives) {
+    for (const task of objective.tasks) {
+      if (task.status === 'completed') {
+        completed.push({
+          id: task.id,
+          description: task.description,
+          filesChanged: task.filesChanged,
+        })
+      }
+    }
+  }
+
+  return completed
+}
+
+/**
+ * Get remaining (pending/in-progress) tasks with planned files
+ */
+function getRemainingTasks(state: MissionState): Array<{
+  id: string
+  description: string
+  status: string
+  files?: string[]
+}> {
+  const mission = state.getMission()
+  if (!mission) return []
+
+  const remaining: Array<{
+    id: string
+    description: string
+    status: string
+    files?: string[]
+  }> = []
+
+  for (const objective of mission.objectives) {
+    for (const task of objective.tasks) {
+      if (task.status === 'pending' || task.status === 'in_progress') {
+        remaining.push({
+          id: task.id,
+          description: task.description,
+          status: task.status,
+          files: task.files,
+        })
+      }
+    }
+  }
+
+  // Sort: in_progress first
+  return remaining.sort((a, b) => {
+    if (a.status === 'in_progress' && b.status !== 'in_progress') return -1
+    if (b.status === 'in_progress' && a.status !== 'in_progress') return 1
+    return 0
+  })
+}
+
+/**
+ * Collect all constraints: guardrails + task mustNot + failed approaches
+ */
+function collectConstraints(state: MissionState): string[] {
+  const mission = state.getMission()
+  if (!mission) return []
+
+  const constraints: string[] = []
+
+  // Mission guardrails (if they exist in mission - we'll check)
+  // Note: Mission type may need extending for guardrails
+
+  // Collect task-level mustNot constraints
+  for (const objective of mission.objectives) {
+    for (const task of objective.tasks) {
+      if (task.mustNot && task.mustNot.length > 0) {
+        for (const c of task.mustNot) {
+          if (!constraints.includes(c)) {
+            constraints.push(c)
+          }
+        }
+      }
+    }
+  }
+
+  // Add failed approaches (tasks that failed)
+  const failedTasks = []
+  for (const objective of mission.objectives) {
+    for (const task of objective.tasks) {
+      if (task.status === 'failed' && task.error) {
+        failedTasks.push(`Avoid: ${task.description} (failed: ${task.error})`)
+      }
+    }
+  }
+  constraints.push(...failedTasks.slice(0, 3)) // Limit to 3
+
+  return constraints
 }
 
 /**
@@ -229,6 +368,7 @@ function findInProgressTask(state: MissionState): {
   description: string
   acceptanceCriteria?: string[]
   filesChanged?: string[]
+  files?: string[]
 } | null {
   const mission = state.getMission()
   if (!mission) return null
@@ -241,31 +381,12 @@ function findInProgressTask(state: MissionState): {
           description: task.description,
           acceptanceCriteria: task.acceptanceCriteria,
           filesChanged: task.filesChanged,
+          files: task.files,
         }
       }
     }
   }
   return null
-}
-
-/**
- * Get recent errors from mission history
- */
-function getRecentErrors(state: MissionState): string[] {
-  const mission = state.getMission()
-  if (!mission) return []
-
-  const errors: string[] = []
-
-  for (const objective of mission.objectives) {
-    for (const task of objective.tasks) {
-      if (task.error) {
-        errors.push(`${task.description}: ${task.error}`)
-      }
-    }
-  }
-
-  return errors.slice(-5) // Last 5 errors
 }
 
 // =============================================================================

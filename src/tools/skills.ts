@@ -298,3 +298,51 @@ export function createSkillTools(config: SkillToolsConfig): Record<string, ToolD
     get_skill,
   }
 }
+
+// =============================================================================
+// Skill Loading for Delegation
+// =============================================================================
+
+/**
+ * Load multiple skills for injection into delegated agent prompts.
+ * Used by delegate_task to inject skills at spawn time.
+ *
+ * @param cwd - Project root directory
+ * @param skillNames - Array of skill names to load
+ * @param providerId - Optional provider ID for format selection
+ * @param modelId - Optional model ID for format selection
+ * @returns Array of skill content strings ready for injection
+ */
+export async function loadSkillsForAgent(
+  cwd: string,
+  skillNames: string[],
+  providerId?: string,
+  modelId?: string
+): Promise<string[]> {
+  if (!skillNames || skillNames.length === 0) {
+    return []
+  }
+
+  const skills = await discoverSkills(cwd)
+  const contents: string[] = []
+
+  for (const skillName of skillNames) {
+    const skill = resolveSkill(skillName, skills)
+
+    if (!skill) {
+      // Log warning but continue with other skills
+      console.warn(`[Delta9] Skill "${skillName}" not found, skipping`)
+      continue
+    }
+
+    const result = injectSkill(skill, providerId, modelId)
+
+    if (result.success && result.content) {
+      contents.push(result.content)
+    } else {
+      console.warn(`[Delta9] Failed to load skill "${skillName}": ${result.error}`)
+    }
+  }
+
+  return contents
+}

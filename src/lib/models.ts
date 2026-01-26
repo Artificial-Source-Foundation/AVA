@@ -123,7 +123,7 @@ export function getSupportAgentModel(cwd: string, agentType: SupportAgentType): 
 /**
  * Parse model ID into provider and model
  *
- * Format: "provider/model" (e.g., "anthropic/claude-sonnet-4")
+ * Format: "provider/model" (e.g., "anthropic/claude-sonnet-4-5")
  */
 export function parseModelId(modelId: string): { provider: string; model: string } {
   const parts = modelId.split('/')
@@ -155,11 +155,11 @@ export function buildModelId(provider: string, model: string): string {
 const DEFAULT_FALLBACKS: Record<string, string[]> = {
   // Claude models
   'anthropic/claude-opus-4-5': [
-    'anthropic/claude-sonnet-4',
+    'anthropic/claude-sonnet-4-5',
     'openai/gpt-4o',
     'google/gemini-2.0-pro',
   ],
-  'anthropic/claude-sonnet-4': [
+  'anthropic/claude-sonnet-4-5': [
     'anthropic/claude-haiku-4',
     'openai/gpt-4o-mini',
     'google/gemini-2.0-flash',
@@ -171,7 +171,7 @@ const DEFAULT_FALLBACKS: Record<string, string[]> = {
 
   // OpenAI models
   'openai/gpt-4o': [
-    'anthropic/claude-sonnet-4',
+    'anthropic/claude-sonnet-4-5',
     'google/gemini-2.0-pro',
   ],
   'openai/gpt-4o-mini': [
@@ -181,7 +181,7 @@ const DEFAULT_FALLBACKS: Record<string, string[]> = {
 
   // Google models
   'google/gemini-2.0-pro': [
-    'anthropic/claude-sonnet-4',
+    'anthropic/claude-sonnet-4-5',
     'openai/gpt-4o',
   ],
   'google/gemini-2.0-flash': [

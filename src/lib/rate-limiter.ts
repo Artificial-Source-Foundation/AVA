@@ -65,16 +65,16 @@ const DEFAULT_CONFIG: RateLimitConfig = {
 /** Fallback models by provider */
 export const FALLBACK_MODELS: Record<string, string[]> = {
   // Anthropic fallbacks
-  'anthropic/claude-opus-4': ['anthropic/claude-sonnet-4', 'openai/gpt-4o'],
-  'anthropic/claude-sonnet-4': ['anthropic/claude-haiku-4', 'openai/gpt-4o-mini'],
+  'anthropic/claude-opus-4': ['anthropic/claude-sonnet-4-5', 'openai/gpt-4o'],
+  'anthropic/claude-sonnet-4-5': ['anthropic/claude-haiku-4', 'openai/gpt-4o-mini'],
   'anthropic/claude-haiku-4': ['openai/gpt-4o-mini', 'google/gemini-2.0-flash'],
 
   // OpenAI fallbacks
-  'openai/gpt-4o': ['anthropic/claude-sonnet-4', 'google/gemini-2.0-pro'],
+  'openai/gpt-4o': ['anthropic/claude-sonnet-4-5', 'google/gemini-2.0-pro'],
   'openai/gpt-4o-mini': ['anthropic/claude-haiku-4', 'google/gemini-2.0-flash'],
 
   // Google fallbacks
-  'google/gemini-2.0-pro': ['openai/gpt-4o', 'anthropic/claude-sonnet-4'],
+  'google/gemini-2.0-pro': ['openai/gpt-4o', 'anthropic/claude-sonnet-4-5'],
   'google/gemini-2.0-flash': ['openai/gpt-4o-mini', 'anthropic/claude-haiku-4'],
 
   // DeepSeek fallbacks

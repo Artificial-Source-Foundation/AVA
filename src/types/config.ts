@@ -268,15 +268,15 @@ export interface Delta9Config {
 
 export const DEFAULT_CONFIG: Delta9Config = {
   commander: {
-    model: 'anthropic/claude-sonnet-4',
+    model: 'anthropic/claude-opus-4-5',
     temperature: 0.7,
-    dispatchModel: 'anthropic/claude-sonnet-4',
+    dispatchModel: 'anthropic/claude-sonnet-4-5',
   },
   council: {
     enabled: true,
     defaultMode: 'standard',
     autoDetectComplexity: true,
-    // The Delta Team - personality-based Oracles with configurable models
+    // The Delta Team - personality-based Oracles with diverse providers
     members: [
       {
         name: 'Cipher',
@@ -287,21 +287,21 @@ export const DEFAULT_CONFIG: Delta9Config = {
       },
       {
         name: 'Vector',
-        model: 'openai/gpt-4o',
+        model: 'openai/gpt-5.2-codex',
         enabled: true,
         specialty: 'logic',
         temperature: 0.4, // Methodical, balanced
       },
       {
         name: 'Prism',
-        model: 'google/gemini-2.0-flash',
+        model: 'google/gemini-3-flash-preview',
         enabled: true,
         specialty: 'ui',
         temperature: 0.6, // Creative, higher variance
       },
       {
         name: 'Apex',
-        model: 'deepseek/deepseek-chat',
+        model: 'openrouter/deepseek/deepseek-v3.2',
         enabled: true,
         specialty: 'performance',
         temperature: 0.3, // Precise, analytical
@@ -313,48 +313,48 @@ export const DEFAULT_CONFIG: Delta9Config = {
     timeoutSeconds: 120,
   },
   operators: {
-    defaultModel: 'anthropic/claude-sonnet-4',
+    defaultModel: 'anthropic/claude-sonnet-4-5',
     complexModel: 'anthropic/claude-opus-4-5',
     maxParallel: 3,
     retryLimit: 2,
     canInvokeSupport: true,
   },
   validator: {
-    model: 'anthropic/claude-haiku-4',
+    model: 'anthropic/claude-haiku-4-5',
     strictMode: false,
     runTests: true,
     checkLinting: true,
   },
   patcher: {
-    model: 'anthropic/claude-haiku-4',
+    model: 'anthropic/claude-haiku-4-5',
     maxLines: 50,
   },
   support: {
     scout: {
-      model: 'anthropic/claude-haiku-4',
+      model: 'openrouter/z-ai/glm-4.6',
       timeoutSeconds: 30,
     },
     intel: {
-      model: 'anthropic/claude-sonnet-4',
+      model: 'google/gemini-3-pro-preview',
       sources: ['docs', 'github', 'web'],
     },
     strategist: {
-      model: 'openai/gpt-4o',
+      model: 'openai/gpt-5.2-codex',
       invokeThreshold: 'complex',
     },
     uiOps: {
-      model: 'google/gemini-2.0-flash',
+      model: 'google/gemini-3-flash-preview',
       styleSystem: 'tailwind',
     },
     scribe: {
-      model: 'google/gemini-2.0-flash',
+      model: 'google/gemini-3-flash-preview',
       format: 'markdown',
     },
     optics: {
-      model: 'google/gemini-2.0-flash',
+      model: 'google/gemini-3-flash-preview',
     },
     qa: {
-      model: 'anthropic/claude-sonnet-4',
+      model: 'anthropic/claude-sonnet-4-5',
       frameworkDetect: true,
     },
   },

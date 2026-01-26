@@ -90,7 +90,7 @@ Task types and recommended agents:
         reason = 'Frontend/UI task - UI-Ops specializes in components, styling, and accessibility'
       } else if (['test', 'spec', 'coverage', 'jest', 'vitest', 'playwright'].some(k => type.includes(k) || desc.includes(k))) {
         agent = 'qa'
-        model = 'anthropic/claude-sonnet-4'
+        model = 'anthropic/claude-sonnet-4-5'
         reason = 'Testing task - QA agent writes comprehensive tests'
       } else if (['doc', 'readme', 'api doc', 'comment', 'jsdoc'].some(k => type.includes(k) || desc.includes(k))) {
         agent = 'scribe'
@@ -102,7 +102,7 @@ Task types and recommended agents:
         reason = 'Search task - Scout performs fast codebase searches'
       } else if (['research', 'lookup', 'example', 'library', 'package'].some(k => type.includes(k) || desc.includes(k))) {
         agent = 'intel'
-        model = 'anthropic/claude-sonnet-4'
+        model = 'anthropic/claude-sonnet-4-5'
         reason = 'Research task - Intel searches docs, GitHub, and web'
       } else if (['stuck', 'blocked', 'help', 'advice', 'guidance'].some(k => type.includes(k) || desc.includes(k))) {
         agent = 'strategist'
@@ -114,7 +114,7 @@ Task types and recommended agents:
         reason = 'Visual task - Optics handles images and diagrams'
       } else {
         agent = 'operator'
-        model = 'anthropic/claude-sonnet-4'
+        model = 'anthropic/claude-sonnet-4-5'
         reason = 'General coding task - Operator handles implementation'
       }
 

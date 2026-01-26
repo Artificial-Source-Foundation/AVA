@@ -2,6 +2,7 @@
  * Delta9 Tool Output Hooks
  *
  * Intercepts tool outputs to:
+ * - Enforce Commander guard (runtime tool blocking)
  * - Track file changes
  * - Log tool usage
  * - Monitor Delta9 tool activity
@@ -9,6 +10,18 @@
 
 import type { MissionState } from '../mission/state.js'
 import { appendHistory } from '../mission/history.js'
+import {
+  checkCommanderGuard,
+  formatGuardViolation,
+  checkOperatorGuard,
+  formatOperatorViolation,
+} from '../guards/index.js'
+import { guardrailOutput } from '../lib/output-guardrails.js'
+import {
+  detectEditError,
+  generateRecoveryMessage,
+  isEditTool,
+} from './edit-error-recovery.js'
 
 // =============================================================================
 // Types
@@ -28,11 +41,17 @@ export interface ToolExecuteBeforeInput {
   tool: string
   sessionID: string
   callID: string
+  /** Agent making the tool call (if available) */
+  agent?: string
 }
 
 /** Tool execute before hook output (mutable) */
 export interface ToolExecuteBeforeOutput {
   args: Record<string, unknown>
+  /** Set to true to abort the tool call */
+  abort?: boolean
+  /** Reason for aborting (shown to agent) */
+  abortReason?: string
 }
 
 /** Tool execute after hook input (from OpenCode) */
@@ -98,15 +117,62 @@ export function createToolOutputHooks(input: ToolOutputHooksInput): ToolOutputHo
     /**
      * Before Tool Execution
      *
+     * - Enforce Commander guard (block file modifications)
      * - Log tool invocation for debugging
      * - Track Delta9 tool usage
      */
     'tool.execute.before': async (toolInput, output) => {
-      const { tool: toolName, sessionID } = toolInput
+      const { tool: toolName, sessionID, agent } = toolInput
       const args = output.args
 
+      // =================================================================
+      // Commander Guard - Block restricted tools for Commander
+      // =================================================================
+      if (agent) {
+        const guardResult = checkCommanderGuard({
+          agent,
+          toolName,
+          toolArgs: args,
+        })
+
+        if (guardResult.blocked) {
+          log('warn', 'Commander guard violation', {
+            agent,
+            tool: toolName,
+            reason: guardResult.reason,
+          })
+
+          output.abort = true
+          output.abortReason = formatGuardViolation(guardResult)
+          return
+        }
+      }
+
+      // =================================================================
+      // Operator Guard - Block orchestration tools for Operators
+      // =================================================================
+      if (agent) {
+        const operatorGuardResult = checkOperatorGuard({
+          agent,
+          toolName,
+          toolArgs: args,
+        })
+
+        if (operatorGuardResult.blocked) {
+          log('warn', 'Operator guard violation', {
+            agent,
+            tool: toolName,
+            reason: operatorGuardResult.reason,
+          })
+
+          output.abort = true
+          output.abortReason = formatOperatorViolation(operatorGuardResult)
+          return
+        }
+      }
+
       // Log tool invocation at debug level
-      log('debug', `Tool invoked: ${toolName}`, { args, sessionID })
+      log('debug', `Tool invoked: ${toolName}`, { args, sessionID, agent })
 
       // Check if this is a Delta9 tool (for tracking)
       if (isDelta9Tool(toolName)) {
@@ -123,12 +189,48 @@ export function createToolOutputHooks(input: ToolOutputHooksInput): ToolOutputHo
     /**
      * After Tool Execution
      *
+     * - Apply output guardrails (prevent context blowout)
      * - Track file changes from edit/write tools
      * - Log validation results
      */
     'tool.execute.after': async (toolInput, output) => {
       const { tool: toolName } = toolInput
-      const { output: result, metadata } = output
+
+      // =================================================================
+      // Output Guardrails - Prevent large outputs from consuming context
+      // =================================================================
+      if (typeof output.output === 'string') {
+        const guardrailed = guardrailOutput(toolName, output.output)
+        if (guardrailed.wasTruncated) {
+          log('debug', 'Output truncated by guardrails', {
+            tool: toolName,
+            originalLength: guardrailed.originalLength,
+            truncatedLength: guardrailed.truncatedLength,
+            saved: guardrailed.originalLength - guardrailed.truncatedLength,
+          })
+          output.output = guardrailed.output
+        }
+      }
+
+      const { output: result, metadata, error } = output
+
+      // =================================================================
+      // Edit Error Recovery - Detect failures and inject recovery guidance
+      // =================================================================
+      if (isEditTool(toolName)) {
+        const editError = detectEditError(result, error)
+        if (editError) {
+          log('warn', 'Edit error detected', {
+            tool: toolName,
+            errorType: editError.errorType,
+            context: editError.context,
+          })
+
+          // Append recovery instructions to output
+          const recoveryMessage = generateRecoveryMessage(editError)
+          output.output = `${result}\n\n${recoveryMessage}`
+        }
+      }
 
       // Track file changes from edit/write operations
       if (isFileModifyingTool(toolName)) {

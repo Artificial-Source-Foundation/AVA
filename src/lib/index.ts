@@ -141,3 +141,54 @@ export {
   type RateLimitError,
   type RetryResult,
 } from './rate-limiter.js'
+
+// Confidence Levels
+export {
+  CONFIDENCE,
+  getConfidenceLabel,
+  isHighConfidence,
+  meetsMinimumConfidence,
+  clampConfidence,
+  type ConfidenceLevel,
+} from './confidence-levels.js'
+
+// Task Statuses
+export {
+  BACKGROUND_STATUS,
+  ALL_BACKGROUND_STATUSES,
+  isTerminalStatus,
+  isActiveStatus,
+  isSuccessStatus,
+  isFailureStatus,
+  type BackgroundStatus,
+} from './task-statuses.js'
+
+// Guard Formatting
+export {
+  formatGuardViolation as formatGuardViolationShared,
+  createCommanderViolation,
+  createOperatorViolation,
+  type GuardType,
+  type GuardViolationContext,
+} from './guard-formatting.js'
+
+// Version
+export {
+  getVersion,
+  resetVersionCache,
+  getVersionWithPrefix,
+} from './version.js'
+
+// Tool Response
+export {
+  success as toolSuccess,
+  error as toolError,
+  fromDelta9Error,
+  isSuccessResponse,
+  isErrorResponse,
+  parseResponse,
+  type ToolSuccessResponse,
+  type ToolErrorResponse,
+  type ToolResponse,
+  type ErrorResponseOptions,
+} from './tool-response.js'

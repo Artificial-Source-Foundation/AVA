@@ -16,6 +16,7 @@
  */
 
 import type { RoutableAgent } from './task-router.js'
+import { CONFIDENCE } from '../lib/confidence-levels.js'
 
 // =============================================================================
 // Types
@@ -102,7 +103,7 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<TaskCategory, CategoryConfig> = {
   coding: {
     name: 'Coding',
     description: 'General code implementation and development',
-    model: 'anthropic/claude-sonnet-4',
+    model: 'anthropic/claude-sonnet-4-5',
     temperature: 0.3,
     preferredAgent: 'operator',
     fallbackAgents: ['operator-complex', 'patcher'],
@@ -116,7 +117,7 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<TaskCategory, CategoryConfig> = {
   testing: {
     name: 'Testing',
     description: 'Test writing, QA, and verification',
-    model: 'anthropic/claude-sonnet-4',
+    model: 'anthropic/claude-sonnet-4-5',
     temperature: 0.2,
     preferredAgent: 'qa',
     fallbackAgents: ['operator'],
@@ -144,7 +145,7 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<TaskCategory, CategoryConfig> = {
   research: {
     name: 'Research',
     description: 'Information gathering, lookup, and investigation',
-    model: 'anthropic/claude-sonnet-4',
+    model: 'anthropic/claude-sonnet-4-5',
     temperature: 0.4,
     preferredAgent: 'intel',
     fallbackAgents: ['scout', 'strategist'],
@@ -186,7 +187,7 @@ export const DEFAULT_CATEGORY_CONFIGS: Record<TaskCategory, CategoryConfig> = {
   bugfix: {
     name: 'Bug Fix',
     description: 'Bug fixing, debugging, and error resolution',
-    model: 'anthropic/claude-sonnet-4',
+    model: 'anthropic/claude-sonnet-4-5',
     temperature: 0.2,
     preferredAgent: 'operator',
     fallbackAgents: ['patcher', 'operator-complex'],
@@ -230,8 +231,8 @@ export function detectCategory(
     }
 
     if (score > 0) {
-      // Calculate confidence (max 0.95)
-      const confidence = Math.min(0.95, 0.3 + (score * 0.1))
+      // Calculate confidence (max CONFIDENCE.MAX)
+      const confidence = Math.min(CONFIDENCE.MAX, CONFIDENCE.LOW + (score * 0.1))
 
       matches.push({
         category: category as TaskCategory,
@@ -316,7 +317,7 @@ export function routeToCategory(
 
     const primary: CategoryMatch = {
       category: 'coding',
-      confidence: 0.4,
+      confidence: CONFIDENCE.SECONDARY_THRESHOLD,
       reason: 'Default category (no specific keywords matched)',
       matchedKeywords: [],
       config: defaultConfig,
@@ -332,12 +333,12 @@ export function routeToCategory(
   }
 
   const primary = matches[0]
-  const secondary = matches.slice(1).filter((m) => m.confidence > 0.4)
+  const secondary = matches.slice(1).filter((m) => m.confidence > CONFIDENCE.SECONDARY_THRESHOLD)
 
   // Calculate effective settings
   // If multiple categories, blend temperature slightly
   let effectiveTemperature = primary.config.temperature
-  if (secondary.length > 0 && secondary[0].confidence > 0.6) {
+  if (secondary.length > 0 && secondary[0].confidence > CONFIDENCE.BLEND_THRESHOLD) {
     // Blend with secondary category
     const blend = 0.8 * primary.config.temperature + 0.2 * secondary[0].config.temperature
     effectiveTemperature = Math.round(blend * 100) / 100

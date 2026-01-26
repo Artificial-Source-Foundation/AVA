@@ -1,0 +1,8 @@
+dist
+node_modules
+coverage
+*.md
+*.json
+bun.lock
+package-lock.json
+docs/reference-code

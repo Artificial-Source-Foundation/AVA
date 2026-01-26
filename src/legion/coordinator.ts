@@ -86,7 +86,7 @@ export class LegionCoordinator {
     for (let i = 0; i < this.config.maxOperators; i++) {
       const operator: LegionOperator = {
         id: `operator_${i}`,
-        model: 'anthropic/claude-sonnet-4', // Default model
+        model: 'anthropic/claude-sonnet-4-5', // Default model
         status: 'idle',
         tasksCompleted: 0,
         tasksFailed: 0,

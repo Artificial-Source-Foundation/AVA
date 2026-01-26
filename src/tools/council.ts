@@ -8,24 +8,10 @@ import { tool, type ToolDefinition } from '@opencode-ai/plugin'
 import type { MissionState } from '../mission/state.js'
 import type { CouncilMode } from '../types/config.js'
 import { conveneCouncil, quickConsult, shouldConveneCouncil } from '../orchestration/index.js'
+import { getConfidenceLabel } from '../lib/confidence-levels.js'
 
 // Use the tool's built-in schema (Zod 4 compatible)
 const s = tool.schema
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-/**
- * Get human-readable confidence label
- */
-function getConfidenceLabel(confidence: number): string {
-  if (confidence >= 0.9) return 'Very High'
-  if (confidence >= 0.7) return 'High'
-  if (confidence >= 0.5) return 'Moderate'
-  if (confidence >= 0.3) return 'Low'
-  return 'Very Low'
-}
 
 // =============================================================================
 // Tool Definitions

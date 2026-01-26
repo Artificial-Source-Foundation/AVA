@@ -315,7 +315,7 @@ export async function invokeOracle(
     return {
       oracle,
       opinion,
-      tokensUsed: 0, // TODO: Track from SDK response
+      tokensUsed: 0, // Token tracking not available via session polling (SDK limitation)
       durationMs,
       sessionId,
     }

@@ -75,7 +75,7 @@ const DEFAULT_CONFIG: BudgetConfig = {
 export const MODEL_COSTS: Record<string, { input: number; output: number }> = {
   // Anthropic
   'anthropic/claude-opus-4': { input: 0.015, output: 0.075 },
-  'anthropic/claude-sonnet-4': { input: 0.003, output: 0.015 },
+  'anthropic/claude-sonnet-4-5': { input: 0.003, output: 0.015 },
   'anthropic/claude-haiku-4': { input: 0.00025, output: 0.00125 },
   // OpenAI
   'openai/gpt-4o': { input: 0.005, output: 0.015 },

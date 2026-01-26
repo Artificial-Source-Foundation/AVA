@@ -9,6 +9,7 @@ import { tool, type ToolDefinition } from '@opencode-ai/plugin'
 import type { MissionState } from '../mission/state.js'
 import { routeTask, suggestSupportAgents, type AgentType } from '../agents/router.js'
 import { appendHistory } from '../mission/history.js'
+import { checkTaskConflicts, formatConflicts } from '../mission/conflict-detector.js'
 
 // Use the tool's built-in schema (Zod 4 compatible)
 const s = tool.schema
@@ -31,7 +32,7 @@ export function createDispatchTools(
    */
   const dispatch_task = tool({
     description:
-      'Dispatch a task to an agent for execution. Auto-routes to appropriate support agent if not specified.',
+      'Dispatch a task to an agent for execution. Auto-routes to appropriate support agent if not specified. Checks for file conflicts before dispatch.',
     args: {
       taskId: s.string().describe('ID of the task to dispatch'),
       agent: s
@@ -40,6 +41,9 @@ export function createDispatchTools(
         .describe('Specific agent to use (auto-routed if not specified)'),
       context: s.string().optional().describe('Additional context for the agent'),
       autoRoute: s.boolean().optional().describe('Use auto-routing (default: true)'),
+      files: s.string().optional().describe('JSON array of files this task will modify (exclusive ownership)'),
+      filesReadonly: s.string().optional().describe('JSON array of files this task can read only'),
+      mustNot: s.string().optional().describe('JSON array of explicit constraints - things NOT to do'),
     },
 
     async execute(args, _ctx) {
@@ -59,7 +63,65 @@ export function createDispatchTools(
         })
       }
 
+      // Parse file lists if provided
+      let files: string[] | undefined
+      let filesReadonly: string[] | undefined
+      let mustNot: string[] | undefined
+
+      if (args.files) {
+        try {
+          files = JSON.parse(args.files)
+        } catch {
+          files = [args.files]
+        }
+      }
+
+      if (args.filesReadonly) {
+        try {
+          filesReadonly = JSON.parse(args.filesReadonly)
+        } catch {
+          filesReadonly = [args.filesReadonly]
+        }
+      }
+
+      if (args.mustNot) {
+        try {
+          mustNot = JSON.parse(args.mustNot)
+        } catch {
+          mustNot = [args.mustNot]
+        }
+      }
+
+      // Update task with file assignments if provided
+      if (files || filesReadonly || mustNot) {
+        state.updateTask(args.taskId, {
+          files,
+          filesReadonly,
+          mustNot,
+        })
+      }
+
+      // Check for file conflicts with other active tasks
       const mission = state.getMission()
+      if (mission) {
+        const allTasks = mission.objectives.flatMap((o) => o.tasks)
+        const taskWithFiles = {
+          id: args.taskId,
+          files: files ?? task.files,
+          filesReadonly: filesReadonly ?? task.filesReadonly,
+        }
+
+        const conflictResult = checkTaskConflicts(taskWithFiles, allTasks)
+        if (conflictResult.hasConflicts) {
+          return JSON.stringify({
+            success: false,
+            message: 'File conflicts detected',
+            conflicts: conflictResult.conflicts,
+            formatted: formatConflicts(conflictResult),
+          })
+        }
+      }
+
       const currentObj = state.getCurrentObjective()
 
       // Determine agent to use

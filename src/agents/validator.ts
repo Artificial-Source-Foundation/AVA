@@ -124,18 +124,6 @@ Letting bad work through creates technical debt.
 But being too strict blocks progress.
 Find the balance: catch real issues, let the good work through.`
 
-const VALIDATOR_STRICT_ADDON = `
-
-## Strict Mode Active
-
-You are in strict mode. Apply higher standards:
-- Run ALL tests, not just affected ones
-- Check linting and formatting
-- Verify no console.logs or debug code left
-- Check for security issues
-- Verify error handling
-- Check edge cases mentioned in criteria`
-
 // =============================================================================
 // Validator Agent Definition
 // =============================================================================
@@ -143,21 +131,8 @@ You are in strict mode. Apply higher standards:
 export const validatorAgent: AgentConfig = {
   description: 'Quality verification agent. Reviews completed work against acceptance criteria.',
   mode: 'subagent',
-  model: 'anthropic/claude-haiku-4',
+  // No model specified - inherits from user's OpenCode config
   temperature: 0.1,
   prompt: VALIDATOR_PROMPT,
-  maxTokens: 4096,
-}
-
-// =============================================================================
-// Strict Validator (For Critical Tasks)
-// =============================================================================
-
-export const validatorStrictAgent: AgentConfig = {
-  description: 'Strict validator for critical tasks with enhanced checking.',
-  mode: 'subagent',
-  model: 'anthropic/claude-sonnet-4',
-  temperature: 0.0,
-  prompt: VALIDATOR_PROMPT + VALIDATOR_STRICT_ADDON,
   maxTokens: 4096,
 }

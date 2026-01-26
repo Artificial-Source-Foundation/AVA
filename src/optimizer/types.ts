@@ -123,7 +123,7 @@ export const DEFAULT_MODEL_PROFILES: ModelCostProfile[] = [
     tier: 'flagship',
   },
   {
-    modelId: 'anthropic/claude-sonnet-4',
+    modelId: 'anthropic/claude-sonnet-4-5',
     provider: 'anthropic',
     inputCostPer1k: 0.003,
     outputCostPer1k: 0.015,

@@ -8,14 +8,14 @@
 
 | Phase | Name | Progress | Status |
 |-------|------|----------|--------|
-| 1 | Foundation | 95% | Nearly Complete |
+| 1 | Foundation | 100% | Complete ✅ |
 | 2 | Council System | 100% | Complete ✅ |
-| 3 | Intelligence Layer | 43% | Sprint 2 Complete |
-| 4 | Robustness | 0% | Not Started |
-| 5 | Polish & Support | 0% | Not Started |
-| 6 | Launch | 0% | Not Started |
+| 3 | Intelligence Layer | 100% | Complete ✅ |
+| 4 | Robustness | 100% | Complete ✅ |
+| 5 | Polish & Support | 100% | Complete ✅ |
+| 6 | Launch | 33% | In Progress |
 
-**Overall Progress:** ~40% (Sprint 2 complete, Sprint 3 ready)
+**Overall Progress:** ~96% (69/72 tasks complete)
 
 **Last Updated:** 2026-01-24
 
@@ -71,9 +71,9 @@
 
 ### Remaining
 
-- [ ] **F-1: Complete task router** - `src/routing/task-router.ts` is placeholder
-  - Acceptance: Routes tasks to correct agent based on complexity/type
-  - Priority: Medium (needed for Phase 3)
+- [x] **F-1: Complete task router** - `src/routing/task-router.ts` ✅
+  - Routes tasks to correct agent based on keywords, complexity, context
+  - Includes `route_task` tool with confidence scoring and fallbacks
 
 ---
 
@@ -113,10 +113,11 @@ src/agents/council/
 
 src/council/
 ├── oracle.ts          ✅ Oracle invocation with SDK integration
-├── orchestrator.ts    ⬜ Pending
-├── modes.ts           ⬜ Pending
-├── synthesis.ts       ⬜ Pending
-└── types.ts           ⬜ Pending
+├── xhigh-recon.ts     ✅ XHIGH reconnaissance (Scout+Intel)
+└── index.ts           ✅ Council orchestration (modes, synthesis integrated)
+
+src/tools/
+└── council.ts         ✅ council_status tool
 ```
 
 ### Reference
@@ -134,34 +135,45 @@ See [spec.md#council-layer](spec.md) for Oracle specifications and council modes
 | ID | Task | Status | Acceptance Criteria |
 |----|------|--------|---------------------|
 | I-1 | Scout agent | ✅ Done | Haiku, fast codebase search (grep, file discovery), returns file list + snippets |
-| I-2 | Intel agent | ⬜ Pending | GLM 4.7, documentation lookup, GitHub search, example finding |
-| I-3 | Strategist agent | ⬜ Pending | GPT 5.2, mid-execution advice when Operator hits wall |
+| I-2 | Intel agent | ✅ Done | Sonnet 4, documentation lookup, research with Librarian-style 4-phase pattern |
+| I-3 | Strategist agent | ✅ Done | GPT-4o, mid-execution advice with Metis-style phases, read-only advisor |
 
 ### Epic: Smart Features
 
 | ID | Task | Status | Acceptance Criteria |
 |----|------|--------|---------------------|
-| I-4 | XHIGH mode | ⬜ Pending | Each Oracle gets Scout/Intel access before giving opinion |
+| I-4 | XHIGH mode | ✅ Done | Scout+Intel run parallel before oracles, results formatted as context |
 | I-5 | Complexity detection | ✅ Done | Auto-determine council mode based on task analysis (keywords, scope, risk) |
 | I-6 | Smart task routing | ✅ Done | Route to specialist (UI-Ops, QA, etc.) by task type via `recommend_agent` tool |
-| I-7 | Codebase knowledge | ⬜ Pending | Persist learned patterns, file structure, common issues |
+| I-7 | Codebase knowledge | ✅ Done | Letta-style memory blocks, YAML frontmatter, scoped (project/global), 5 tools |
 
 ### Files Created
 
 ```
 src/agents/support/
 ├── scout.ts           ✅ SCOUT - Fast codebase search
-├── intel.ts           ⬜ Pending
-├── strategist.ts      ⬜ Pending
+├── intel.ts           ✅ INTEL - Research & documentation lookup
+├── strategist.ts      ✅ STRATEGIST - Mid-execution advisor
 └── index.ts           ✅ Support agent registry
 
 src/routing/
 ├── complexity.ts      ✅ Complexity detection
-├── index.ts           ✅ Routing exports
-└── knowledge.ts       ⬜ Pending
+├── task-router.ts     ✅ Task routing with keywords, complexity, context
+└── index.ts           ✅ Routing exports
+
+src/knowledge/
+├── types.ts           ✅ Knowledge type definitions
+├── store.ts           ✅ Letta-style memory store
+└── index.ts           ✅ Knowledge module exports
+
+src/council/
+├── oracle.ts          ✅ Oracle invocation
+├── xhigh-recon.ts     ✅ XHIGH reconnaissance orchestration
+└── index.ts           ✅ Council exports with recon integration
 
 src/tools/
-└── routing.ts         ✅ analyze_complexity, recommend_agent tools
+├── routing.ts         ✅ analyze_complexity, recommend_agent, route_task tools
+└── knowledge.ts       ✅ knowledge_list/get/set/append/replace tools
 ```
 
 ### Reference
@@ -178,23 +190,27 @@ See [spec.md#support-layer](spec.md) for support agent specifications.
 
 | ID | Task | Status | Acceptance Criteria |
 |----|------|--------|---------------------|
-| R-1 | Mission checkpoints | ⬜ Pending | Save/restore points, resume after crash |
-| R-2 | Budget tracking | ⬜ Pending | Token usage per agent category, budget warnings |
-| R-3 | Rate limit handling | ⬜ Pending | Graceful degradation, queue requests, fallback models |
+| R-1 | Mission checkpoints | ✅ Done | Git-based checkpoints, save/restore points, 5 tools |
+| R-2 | Budget tracking | ✅ Done | Budget enforcement, warn/pause thresholds, 4 tools |
+| R-3 | Rate limit handling | ✅ Done | Exponential backoff, fallback models, request queuing |
 | R-4 | Memory/learning | ⬜ Pending | Learn from past missions, avoid repeated mistakes |
-| R-5 | Recovery strategies | ⬜ Pending | Auto-recover from agent failures, retry logic |
+| R-5 | Recovery strategies | ✅ Done | Failure analysis, auto-recovery, strategy recommendation |
 
-### Files to Create/Update
+### Files Created
 
 ```
 src/mission/
-├── checkpoints.ts
-└── recovery.ts
+├── checkpoints.ts     ✅ Checkpoint manager
+└── recovery.ts        ✅ Recovery strategies
 
 src/lib/
-├── budget.ts
-├── rate-limiter.ts
-└── learning.ts
+├── budget.ts          ✅ Budget enforcement
+├── rate-limiter.ts    ✅ Rate limit handling
+└── learning.ts        (future - R-4)
+
+src/tools/
+├── checkpoint.ts      ✅ 5 checkpoint tools
+└── budget.ts          ✅ 4 budget tools
 ```
 
 ---
@@ -207,39 +223,63 @@ src/lib/
 
 | ID | Task | Status | Acceptance Criteria |
 |----|------|--------|---------------------|
-| S-1 | UI-Ops agent | ⬜ Pending | Gemini Pro, frontend specialist (components, styling, a11y) |
-| S-2 | Scribe agent | ⬜ Pending | Gemini Flash, documentation writer (READMEs, API docs) |
-| S-3 | Optics agent | ⬜ Pending | Gemini Flash, vision/multimodal (image analysis, diagrams) |
-| S-4 | QA agent | ⬜ Pending | Sonnet 4, dedicated test writer |
-| S-5 | Patcher agent | ⬜ Pending | Haiku, quick targeted fixes for FIXABLE validation |
+| S-1 | UI-Ops agent (FACADE) | ✅ Done | Frontend specialist (components, styling, a11y) |
+| S-2 | Scribe agent (SCRIBE) | ✅ Done | Documentation writer (READMEs, API docs) |
+| S-3 | Optics agent (SPECTRE) | ✅ Done | Vision/multimodal (image analysis, diagrams) |
+| S-4 | QA agent (SENTINEL) | ✅ Done | Dedicated test writer and quality guardian |
+| S-5 | Patcher agent (SURGEON) | ✅ Done | Quick targeted fixes for FIXABLE validation |
 
 ### Epic: User Experience
 
 | ID | Task | Status | Acceptance Criteria |
 |----|------|--------|---------------------|
-| S-6 | Mission templates | ⬜ Pending | Pre-built structures for common tasks (feature, bugfix, refactor) |
-| S-7 | Progress notifications | ⬜ Pending | Real-time updates via OpenCode toasts |
-| S-8 | CLI commands | ⬜ Pending | `delta9 status`, `delta9 abort`, `delta9 resume` |
+| S-6 | Mission templates | ✅ Done | Pre-built structures for common tasks (feature, bugfix, refactor) |
+| S-7 | Progress notifications | ✅ Done | Real-time updates via notification system |
+| S-8 | CLI commands | ✅ Done | `delta9 status` ✅, `delta9 history` ✅, `delta9 health` ✅, `delta9 abort` ✅, `delta9 resume` ✅ |
 
-### Files to Create
+### Files Created
 
 ```
-src/agents/support/
-├── ui-ops.ts
-├── scribe.ts
-├── optics.ts
-├── qa.ts
-└── patcher.ts
+src/agents/support/         ✅ All specialist agents implemented
+├── facade.ts              ✅ FACADE - UI-Ops (S-1)
+├── scribe.ts              ✅ SCRIBE - Documentation (S-2)
+├── spectre.ts             ✅ SPECTRE - Optics (S-3)
+├── sentinel.ts            ✅ SENTINEL - QA (S-4)
+├── surgeon.ts             ✅ SURGEON - Patcher (S-5)
+└── index.ts               ✅ Registry & exports
 
-src/templates/
-├── feature.ts
-├── bugfix.ts
-├── refactor.ts
-└── index.ts
+src/lib/
+└── notifications.ts       ✅ Notification system (S-7)
 
-src/cli/
-├── commands.ts
-└── index.ts
+src/cli/                   ✅ CLI framework (complete)
+├── index.ts               ✅ Main CLI entry
+├── types.ts               ✅ Types & utilities
+└── commands/
+    ├── status.ts          ✅ Mission dashboard
+    ├── history.ts         ✅ Event log viewer
+    ├── health.ts          ✅ Environment diagnostics
+    ├── abort.ts           ✅ Abort current mission
+    ├── resume.ts          ✅ Resume from checkpoint
+    └── index.ts           ✅ Command exports
+
+tests/
+├── agents/support.test.ts ✅ 81 tests for support agents
+├── cli/commands.test.ts   ✅ 24 tests for CLI
+└── lib/notifications.test.ts ✅ 29 tests for notifications
+```
+
+### Files Created (Mission Templates)
+
+```
+src/templates/             ✅ Mission templates (S-6)
+├── types.ts               ✅ Template type definitions
+├── feature.ts             ✅ Feature templates (new, simple, complex)
+├── bugfix.ts              ✅ Bugfix templates (standard, quick, critical, security)
+├── refactor.ts            ✅ Refactor templates (standard, quick, large, performance, types)
+└── index.ts               ✅ Registry, instantiation, suggestion
+
+tests/templates/
+└── templates.test.ts      ✅ 91 tests for templates
 ```
 
 ---
@@ -253,7 +293,7 @@ src/cli/
 | ID | Task | Status | Acceptance Criteria |
 |----|------|--------|---------------------|
 | L-1 | npm publish | ⬜ Pending | Package published to npm as `delta9` |
-| L-2 | Documentation | ⬜ Pending | User guide, configuration docs, examples |
+| L-2 | Documentation | ✅ Done | User guide, configuration docs, examples |
 | L-3 | Marketing | ⬜ Pending | GitHub README, social media, OpenCode plugin directory |
 
 ---
@@ -280,27 +320,27 @@ Recommended sprint structure (each sprint ~2-3 days of work):
 - ✅ I-5: Complexity detection (auto-detect council mode, keyword analysis, scope/risk)
 - ✅ I-1: Scout agent (fast codebase search with Haiku)
 
-### Sprint 3: Intelligence Foundation
+### Sprint 3: Intelligence Foundation (COMPLETE ✅)
 **Goal:** Complete support agents for reconnaissance
 
-- I-2: Intel agent (docs lookup, research)
-- I-4: XHIGH mode (oracles get recon access)
-- I-7: Codebase knowledge (persist learned patterns)
+- ✅ I-2: Intel agent (docs lookup, research with Librarian-style pattern)
+- ✅ I-4: XHIGH mode (Scout+Intel recon before oracle deliberation)
+- ✅ I-7: Codebase knowledge (Letta-style memory blocks with 5 tools)
 
-### Sprint 4: Smart Routing
+### Sprint 4: Smart Routing (COMPLETE ✅)
 **Goal:** Intelligent task dispatch
 
-- I-3: Strategist agent (mid-execution advice)
-- I-6: Smart task routing (route to specialists)
-- F-1: Complete task router
+- ✅ I-3: Strategist agent (mid-execution advice with Metis-style phases)
+- ✅ I-6: Smart task routing (route to specialists)
+- ✅ F-1: Complete task router (keywords, complexity, context-aware routing)
 
-### Sprint 6: Robustness
+### Sprint 5: Robustness (COMPLETE ✅)
 **Goal:** Production reliability
 
-- R-1: Mission checkpoints
-- R-2: Budget tracking
-- R-3: Rate limit handling
-- R-5: Recovery strategies
+- ✅ R-1: Mission checkpoints
+- ✅ R-2: Budget tracking
+- ✅ R-3: Rate limit handling
+- ✅ R-5: Recovery strategies
 
 ### Sprint 7: Support Agents
 **Goal:** Specialist workforce
@@ -331,13 +371,242 @@ Recommended sprint structure (each sprint ~2-3 days of work):
 
 | Category | Pending | In Progress | Complete |
 |----------|---------|-------------|----------|
-| Phase 1 | 1 | 0 | 12 |
-| Phase 2 (Council) | 1 | 0 | 7 |
-| Phase 3 (Intelligence) | 7 | 0 | 0 |
-| Phase 4 (Robustness) | 5 | 0 | 0 |
-| Phase 5 (Polish) | 8 | 0 | 0 |
-| Phase 6 (Launch) | 3 | 0 | 0 |
-| **Total** | **25** | **0** | **19** |
+| Phase 1 | 0 | 0 | 13 |
+| Phase 2 (Council) | 0 | 0 | 8 |
+| Phase 3 (Intelligence) | 0 | 0 | 7 |
+| Phase 4 (Robustness) | 1 | 0 | 4 |
+| Phase 5 (Polish) | 0 | 0 | 8 |
+| Phase 6 (Launch) | 2 | 0 | 1 |
+| Phase 7 (Advanced) | 0 | 0 | 28 |
+| **Total** | **3** | **0** | **69** |
+
+---
+
+## Phase 7: Advanced Features (NEW)
+
+> Enterprise-grade features inspired by swarm-plugin and oh-my-opencode
+
+### Epic: Event Sourcing
+
+| ID | Task | Status | Acceptance Criteria |
+|----|------|--------|---------------------|
+| A-1 | Event types | ✅ Done | 35+ event types across 8 categories (mission, task, council, agent, validation, learning, file, system) |
+| A-2 | Event store | ✅ Done | Append-only log in `.delta9/events.jsonl`, persistence, querying, replay |
+| A-3 | Projections | ✅ Done | State reconstruction from events (mission, tasks, council, learning, metrics) |
+
+### Epic: Learning System
+
+| ID | Task | Status | Acceptance Criteria |
+|----|------|--------|---------------------|
+| A-4 | Outcome tracking | ✅ Done | Track task success/failure with reasons, update patterns |
+| A-5 | Confidence decay | ✅ Done | 90-day half-life on pattern confidence scores |
+| A-6 | Anti-pattern detection | ✅ Done | Auto-detect at 60% failure rate, inject warnings |
+| A-7 | Insights injection | ✅ Done | Inject strategy/file insights into agent prompts |
+
+### Files Created (Learning System)
+
+```
+src/learning/
+├── types.ts      ✅ Pattern, Outcome, Insight Zod schemas
+├── engine.ts     ✅ Core learning engine (outcome tracking, decay, anti-patterns)
+├── insights.ts   ✅ Insight generation for prompt injection
+└── index.ts      ✅ Module exports
+
+tests/learning/
+├── engine.test.ts   ✅ 25 tests for LearningEngine
+└── insights.test.ts ✅ 16 tests for InsightGenerator
+```
+
+### Epic: Background & Concurrency
+
+| ID | Task | Status | Acceptance Criteria |
+|----|------|--------|---------------------|
+| A-8 | Concurrency controls | ✅ Done | Max 2 concurrent tasks, per-parent batching |
+| A-9 | Stability detection | ✅ Done | 10s min runtime, 3 consecutive polls |
+| A-10 | Task cleanup | ✅ Done | 30 min TTL, 3 min stale timeout |
+| A-10b | Toast notifications | ✅ Done | Task/mission/council notifications with subscriptions |
+
+### Files Created (Background & Notifications)
+
+```
+src/lib/
+├── background-manager.ts  ✅ Enhanced with notifications (already existed)
+└── notifications.ts       ✅ Toast-style notification system
+
+tests/lib/
+└── notifications.test.ts  ✅ 29 tests for NotificationStore
+```
+
+### Epic: Lifecycle Hooks
+
+| ID | Task | Status | Acceptance Criteria |
+|----|------|--------|---------------------|
+| A-11 | Message hooks | ✅ Done | Pre/post message interception, context injection, stats tracking |
+| A-12 | Output truncation | ✅ Done | Per-tool limits (32K default), smart truncation (JSON, lines, code) |
+| A-13 | Context compaction | ✅ Done | State preservation, critical context building, compaction history |
+| A-14 | Todo continuation | ✅ Done | Resume incomplete tasks after compaction, sorted by status |
+
+### Files Created (Lifecycle Hooks)
+
+```
+src/hooks/
+├── message.ts       ✅ Pre/post message hooks, context injection
+├── truncation.ts    ✅ Per-tool output truncation, smart truncation
+├── compaction.ts    ✅ Context compaction, state preservation
+└── index.ts         ✅ Hook composition and exports
+
+tests/hooks/
+├── message.test.ts    ✅ 10 tests for message hooks
+├── truncation.test.ts ✅ 16 tests for truncation hooks
+└── compaction.test.ts ✅ 15 tests for compaction hooks
+```
+
+### Epic: Skills System
+
+| ID | Task | Status | Acceptance Criteria |
+|----|------|--------|---------------------|
+| A-15 | Skill loading | ✅ Done | Load from project/user/global paths, YAML frontmatter, Zod validation |
+| A-16 | Skill injection | ✅ Done | Model-aware rendering (XML/JSON/MD), session tracking, 5 tools |
+| A-17 | Skill-MCP coupling | ✅ Done | Skills can embed MCP configs in frontmatter |
+
+### Files Created (Skills System)
+
+```
+src/skills/
+├── types.ts       ✅ Type definitions, Zod schemas
+├── loader.ts      ✅ Discovery, parsing, resolution
+├── injection.ts   ✅ Model-aware rendering, session tracking
+└── index.ts       ✅ Module exports
+
+src/tools/
+└── skills.ts      ✅ list_skills, use_skill, read_skill_file, run_skill_script, get_skill tools
+
+tests/skills/
+├── loader.test.ts    ✅ 19 tests for skill discovery & loading
+└── injection.test.ts ✅ 32 tests for rendering & injection
+```
+
+### Epic: File Reservation
+
+| ID | Task | Status | Acceptance Criteria |
+|----|------|--------|---------------------|
+| A-18 | File locks | ✅ Done | CAS-based exclusive file locks with TTL expiration |
+| A-19 | Conflict detection | ✅ Done | Block/warn on concurrent file access, 6 lock tools |
+
+### Files Created (File Reservation)
+
+```
+src/locks/
+├── types.ts       ✅ FileLock, LockOwner, LockResult types & Zod schemas
+├── store.ts       ✅ LockStore with CAS operations, TTL expiration, events
+└── index.ts       ✅ Module exports
+
+src/tools/
+└── locks.ts       ✅ lock_file, unlock_file, check_lock, list_locks, lock_files, unlock_all tools
+
+tests/locks/
+└── store.test.ts  ✅ 36 tests for LockStore
+```
+
+### Epic: Guardrails
+
+| ID | Task | Status | Acceptance Criteria |
+|----|------|--------|---------------------|
+| A-20 | Output guardrails | ✅ Done | 32K default truncation, per-tool limits |
+| A-21 | Commander discipline | ✅ Done | Enforce no-code rule for Commander |
+| A-22 | Three-strike system | ✅ Done | Escalate after 3 consecutive errors |
+
+### Files Created (Guardrails)
+
+```
+src/guardrails/
+├── types.ts              ✅ Strike, CommanderViolation, config types & Zod schemas
+├── commander-discipline.ts ✅ No-code rule enforcement, tool blocking, response checking
+├── three-strike.ts       ✅ Error escalation, strike decay, retry guidance
+└── index.ts              ✅ Module exports
+
+tests/guardrails/
+├── commander-discipline.test.ts  ✅ 30 tests for Commander discipline
+└── three-strike.test.ts          ✅ 28 tests for three-strike system
+
+Note: Output truncation (A-20) was already implemented in src/hooks/truncation.ts
+```
+
+### Epic: Configuration
+
+| ID | Task | Status | Acceptance Criteria |
+|----|------|--------|---------------------|
+| A-23 | Category routing | ✅ Done | Temperature + model per category |
+| A-24 | Model fallbacks | ✅ Done | Intelligent fallback chains with backoff |
+
+### Files Created (Model Fallback)
+
+```
+src/lib/
+├── model-fallback.ts   ✅ FallbackChainManager, provider health, circuit breaker
+└── rate-limiter.ts     ✅ Already existed, basic fallback support
+
+tests/lib/
+└── model-fallback.test.ts ✅ 43 tests for fallback chains
+```
+
+### Files Created (Category Routing)
+
+```
+src/routing/
+├── categories.ts      ✅ 8 categories with model/temp/agent configs, detection, routing
+└── index.ts           ✅ Updated with category exports
+
+src/tools/
+└── routing.ts         ✅ Added route_to_category, list_categories tools
+
+tests/routing/
+└── categories.test.ts ✅ 41 tests for category-based routing
+```
+
+### Epic: CLI Tools
+
+| ID | Task | Status | Acceptance Criteria |
+|----|------|--------|---------------------|
+| A-25 | delta9 status | ✅ Done | Mission overview dashboard with summary/json/table formats |
+| A-26 | delta9 history | ✅ Done | Event log viewer with filtering by type/category/session |
+| A-27 | delta9 health | ✅ Done | Doctor-style diagnostics (like oh-my-opencode) |
+
+### Files Created (CLI Tools)
+
+```
+src/cli/
+├── types.ts               ✅ CLI types, colors, symbols
+├── index.ts               ✅ Commander.js entry point
+└── commands/
+    ├── status.ts          ✅ Mission dashboard command
+    ├── history.ts         ✅ Event history command
+    ├── health.ts          ✅ Health check command (doctor-style)
+    └── index.ts           ✅ Command exports
+
+tests/cli/
+└── commands.test.ts       ✅ 24 tests for CLI commands
+
+package.json:
+└── bin: { "delta9": "./dist/cli/index.js" }  ✅ CLI binary entry
+```
+
+### Epic: Memory Enhancement
+
+| ID | Task | Status | Acceptance Criteria |
+|----|------|--------|---------------------|
+| A-28 | Semantic search | ✅ Done | Vector similarity for knowledge retrieval |
+
+### Files Created (Memory Enhancement)
+
+```
+src/knowledge/
+├── semantic.ts   ✅ SemanticIndex class, vector operations, text chunking
+└── index.ts      ✅ Updated exports for semantic search
+
+tests/knowledge/
+└── semantic.test.ts  ✅ 47 tests for semantic search
+```
 
 ---
 

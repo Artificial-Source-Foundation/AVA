@@ -120,8 +120,8 @@ export const MODEL_REGISTRY: Record<string, ModelDefinition> = {
     contextWindow: 200000,
     capabilities: ['coding', 'reasoning', 'vision', 'function_calling'],
   },
-  'anthropic/claude-sonnet-4': {
-    id: 'anthropic/claude-sonnet-4',
+  'anthropic/claude-sonnet-4-5': {
+    id: 'anthropic/claude-sonnet-4-5',
     provider: 'anthropic',
     tier: 'standard',
     costPer1M: 3.0,
@@ -197,31 +197,31 @@ export const FALLBACK_CHAINS: Record<string, string[]> = {
   // Premium tier chains
   'anthropic/claude-opus-4-5': [
     'openai/o1',
-    'anthropic/claude-sonnet-4',
+    'anthropic/claude-sonnet-4-5',
     'openai/gpt-4o',
     'google/gemini-2.0-pro',
   ],
   'openai/o1': [
     'anthropic/claude-opus-4-5',
-    'anthropic/claude-sonnet-4',
+    'anthropic/claude-sonnet-4-5',
     'openai/gpt-4o',
   ],
 
   // Standard tier chains
-  'anthropic/claude-sonnet-4': [
+  'anthropic/claude-sonnet-4-5': [
     'openai/gpt-4o',
     'google/gemini-2.0-pro',
     'anthropic/claude-haiku-4',
     'deepseek/deepseek-chat',
   ],
   'openai/gpt-4o': [
-    'anthropic/claude-sonnet-4',
+    'anthropic/claude-sonnet-4-5',
     'google/gemini-2.0-pro',
     'openai/gpt-4o-mini',
     'anthropic/claude-haiku-4',
   ],
   'google/gemini-2.0-pro': [
-    'anthropic/claude-sonnet-4',
+    'anthropic/claude-sonnet-4-5',
     'openai/gpt-4o',
     'google/gemini-2.0-flash',
     'anthropic/claude-haiku-4',

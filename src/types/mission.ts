@@ -62,8 +62,14 @@ export interface Task {
   acceptanceCriteria: string[]
   /** Validation result */
   validation?: ValidationResult
-  /** Files changed by this task */
+  /** Files changed by this task (tracked during execution) */
   filesChanged?: string[]
+  /** Files this task will modify - exclusive ownership (set during planning) */
+  files?: string[]
+  /** Files this task can read only - no write access (set during planning) */
+  filesReadonly?: string[]
+  /** Explicit constraints - things this task must NOT do */
+  mustNot?: string[]
   /** Tokens used */
   tokensUsed?: number
   /** Cost in dollars */

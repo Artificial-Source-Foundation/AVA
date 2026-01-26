@@ -192,12 +192,16 @@ describe('CompactionHooks', () => {
 
       await hooks['compact.before'](input, output)
 
-      expect(output.criticalContext).toContain('Mission Summary')
+      // New 5-section format
+      expect(output.criticalContext).toContain('Delta9 Session Restored')
+      expect(output.criticalContext).toContain('1. USER REQUESTS')
       expect(output.criticalContext).toContain('Build authentication')
-      expect(output.criticalContext).toContain('Current Objective')
-      expect(output.criticalContext).toContain('Implement login')
-      expect(output.criticalContext).toContain('Current Task')
+      expect(output.criticalContext).toContain('2. FINAL GOAL')
+      expect(output.criticalContext).toContain('3. WORK COMPLETED')
+      expect(output.criticalContext).toContain('4. REMAINING TASKS')
       expect(output.criticalContext).toContain('Create login form')
+      expect(output.criticalContext).toContain('5. MUST NOT DO')
+      expect(output.criticalContext).toContain('IMMEDIATE ACTIONS')
     })
 
     it('should handle no mission gracefully', async () => {

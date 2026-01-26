@@ -153,7 +153,7 @@ export class CostOptimizer {
   selectModel(requirements: TaskRequirements): OptimizationResult {
     if (!this.config.enabled) {
       // Return default model
-      const defaultModel = 'anthropic/claude-sonnet-4'
+      const defaultModel = 'anthropic/claude-sonnet-4-5'
       const profile = this.models.get(defaultModel)
       return {
         selectedModel: defaultModel,

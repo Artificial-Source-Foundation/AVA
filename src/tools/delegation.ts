@@ -11,6 +11,8 @@ import { getBackgroundManager, type OpenCodeClient } from '../lib/background-man
 import { trackBackgroundTask } from '../hooks/session.js'
 import { formatErrorResponse } from '../lib/errors.js'
 import { hints } from '../lib/hints.js'
+import { buildOperatorHandoff, formatHandoffForPrompt } from '../dispatch/handoff.js'
+import { loadSkillsForAgent } from './skills.js'
 
 // Use the tool's built-in schema (Zod 4 compatible)
 const s = tool.schema
@@ -78,6 +80,7 @@ export function createDelegationTools(
 - Sync implementation: delegate_task(prompt="Add error handling to login", agent="operator")
 - With mission link: delegate_task(prompt="Implement feature", taskId="task_123")
 - With context: delegate_task(prompt="Fix bug", context="User reported login fails on Safari")
+- With skills: delegate_task(prompt="Build UI component", agent="ui_ops", loadSkills=["typescript-patterns", "frontend-ui-ux"])
 
 **Related:** background_output, background_list, background_cancel, mission_status`,
 
@@ -105,6 +108,10 @@ export function createDelegationTools(
       resume: s.string().optional().describe('Resume a previous session by ID'),
       taskId: s.string().optional().describe('Link to Delta9 mission task for context'),
       context: s.string().optional().describe('Additional context to prepend to prompt'),
+      loadSkills: s
+        .array(s.string())
+        .optional()
+        .describe('Skill names to inject into agent context (e.g., ["typescript-patterns", "testing-patterns"])'),
     },
 
     async execute(args, ctx) {
@@ -117,16 +124,35 @@ export function createDelegationTools(
         fullPrompt = `Context:\n${args.context}\n\nTask:\n${args.prompt}`
       }
 
-      // Add mission context if available
+      // Load and inject skills if specified
+      if (args.loadSkills && args.loadSkills.length > 0) {
+        const skillContents = await loadSkillsForAgent(cwd, args.loadSkills)
+        if (skillContents.length > 0) {
+          const skillsBlock = skillContents
+            .map((content, i) => `<skill name="${args.loadSkills![i]}">\n${content}\n</skill>`)
+            .join('\n\n')
+          fullPrompt = `<skills>\n${skillsBlock}\n</skills>\n\n${fullPrompt}`
+        }
+      }
+
+      // Add handoff contract if mission task is linked
       if (mission && args.taskId) {
         const task = state.getTask(args.taskId)
         if (task) {
-          fullPrompt = `Mission: ${mission.description}
-Task: ${task.description}
-Acceptance Criteria:
-${task.acceptanceCriteria.map((c) => `- ${c}`).join('\n')}
+          // Get all tasks for handoff context
+          const allTasks = mission.objectives.flatMap((o) => o.tasks)
 
-${fullPrompt}`
+          // Build structured handoff contract
+          const handoff = buildOperatorHandoff({
+            task,
+            mission,
+            allTasks,
+            additionalContext: args.context,
+          })
+
+          // Format and prepend to prompt
+          const handoffPrompt = formatHandoffForPrompt(handoff)
+          fullPrompt = `${handoffPrompt}\n\n---\n\nADDITIONAL INSTRUCTIONS:\n${args.prompt}`
         }
       }
 

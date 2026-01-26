@@ -131,16 +131,16 @@ const AGENT_KEYWORDS: Record<RoutableAgent, string[]> = {
 
 /** Agent default models */
 const AGENT_MODELS: Record<RoutableAgent, string> = {
-  'operator': 'anthropic/claude-sonnet-4',
-  'operator-complex': 'anthropic/claude-sonnet-4',
+  'operator': 'anthropic/claude-sonnet-4-5',
+  'operator-complex': 'anthropic/claude-sonnet-4-5',
   'patcher': 'anthropic/claude-haiku-4',
   'scout': 'anthropic/claude-haiku-4',
-  'intel': 'anthropic/claude-sonnet-4',
+  'intel': 'anthropic/claude-sonnet-4-5',
   'strategist': 'openai/gpt-4o',
   'ui-ops': 'google/gemini-2.0-flash',
   'scribe': 'google/gemini-2.0-flash',
   'optics': 'google/gemini-2.0-flash',
-  'qa': 'anthropic/claude-sonnet-4',
+  'qa': 'anthropic/claude-sonnet-4-5',
 }
 
 /** Agent fallbacks */

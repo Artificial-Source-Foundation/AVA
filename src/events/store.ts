@@ -22,6 +22,7 @@ import {
   EventCategory,
   EVENT_CATEGORIES,
 } from './types.js'
+import { getVersion } from '../lib/version.js'
 
 // =============================================================================
 // Types
@@ -273,7 +274,7 @@ export class EventStore {
     this.currentSessionId = sessionId || nanoid(12)
 
     this.append('system.session_started', {
-      version: '0.1.0', // TODO: Get from package.json
+      version: getVersion(),
     })
 
     return this.currentSessionId

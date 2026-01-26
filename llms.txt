@@ -1,0 +1,40 @@
+# Delta9
+
+> OpenCode plugin for strategic AI coordination with Commander + Council + Operators architecture.
+
+## Quick Start
+
+1. Read `docs/spec.md` (source of truth)
+2. See `docs/README.md` for navigation
+3. See `docs/plugin-guide/` for building plugins
+
+## Documentation
+
+- [docs/README.md](docs/README.md): Navigation hub
+- [docs/spec.md](docs/spec.md): Full specification (876 lines)
+- [CLAUDE.md](CLAUDE.md): Project overview
+- [PLAN.md](PLAN.md): Implementation roadmap
+
+## Plugin Development
+
+- [docs/plugin-guide/](docs/plugin-guide/): 14 modular files covering all patterns
+- [docs/opencode/](docs/opencode/): OpenCode platform reference (10 files)
+- [docs/patterns/](docs/patterns/): Best practices & examples
+
+## Delta9 Architecture
+
+- [docs/delta9/architecture.md](docs/delta9/architecture.md): System design
+- [docs/delta9/agents.md](docs/delta9/agents.md): Commander, Council, Operators
+- [docs/delta9/api.md](docs/delta9/api.md): Internal API
+
+## Key Concepts
+
+- **Commander**: Lead planner, never writes code
+- **Council**: 1-4 heterogeneous Oracles
+- **Operators**: Task executors (Sonnet 4)
+- **Validator**: QA gate (Haiku)
+- **Mission State**: `.delta9/mission.json`
+
+## Source
+
+- GitHub: https://github.com/[username]/delta9

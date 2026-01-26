@@ -1,0 +1,64 @@
+# Delta9 Development Rules
+
+## Project Context
+
+Delta9 is an OpenCode plugin implementing Commander + Council + Operators architecture.
+Read `docs/spec.md` for full specification. Read `CLAUDE.md` for quick context.
+
+## Code Style
+
+- TypeScript strict mode required
+- Zod for all runtime validation
+- No `any` type - use `unknown` with type guards
+- Functional patterns preferred over classes (except MissionState)
+- Export types from `src/types/`
+
+## File Organization
+
+- One component/function per file when possible
+- Index files for re-exports
+- Max 300 lines per file
+- kebab-case for filenames
+
+## Naming Conventions
+
+- `camelCase` for functions and variables
+- `PascalCase` for types, interfaces, classes
+- `SCREAMING_SNAKE` for constants
+- `kebab-case` for files
+
+## OpenCode Plugin Patterns
+
+- Use `@opencode-ai/plugin` types
+- Define agents with proper mode (primary/subagent)
+- Use `tool()` helper for custom tools
+- Register hooks in plugin entry point
+
+## Mission State
+
+- Never mutate `mission.json` directly
+- Use `MissionState` class methods
+- Validate all state changes with Zod
+- Mission state is source of truth
+
+## Agent Boundaries
+
+- Commander: Plans only, never writes code
+- Operators: Execute tasks, focused scope
+- Validator: Verify against acceptance criteria
+- Support agents: Invoked as needed
+
+## Testing
+
+- Framework: Vitest
+- New features require tests
+- Use `client.app.log()` for debugging
+
+## Don'ts
+
+- Don't use `any` type
+- Don't mutate state directly
+- Don't skip the Validator gate
+- Don't hardcode model names
+- Don't let Commander write code
+- Don't add features not in spec.md

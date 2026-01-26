@@ -95,24 +95,10 @@ Trust the acceptance criteria - they are your contract.`
 // =============================================================================
 
 export const operatorAgent: AgentConfig = {
-  description: 'Primary execution agent. Implements tasks with full code editing capabilities.',
+  description: 'Execution agent. Implements tasks with full code editing capabilities.',
   mode: 'subagent',
-  model: 'anthropic/claude-sonnet-4',
+  // No model specified - inherits from user's OpenCode config
   temperature: 0.3,
   prompt: OPERATOR_PROMPT,
   maxTokens: 8192,
-}
-
-// =============================================================================
-// Complex Task Operator (Higher Capability)
-// =============================================================================
-
-export const operatorComplexAgent: AgentConfig = {
-  description: 'Enhanced operator for complex tasks requiring deeper reasoning.',
-  mode: 'subagent',
-  model: 'anthropic/claude-opus-4-5',
-  temperature: 0.3,
-  prompt: OPERATOR_PROMPT,
-  maxTokens: 16384,
-  thinking: { type: 'enabled', budgetTokens: 24000 },
 }

@@ -32,30 +32,30 @@ opencode
 
 ## Architecture
 
-### Agent Layers
+### Agent Layers (19 Agents)
 
-**Command Layer**
+**Command Layer (1)**
 - Commander (Opus 4.5): Lead planner, never writes code
 
-**Council Layer**
-- Oracle-Claude (Opus 4.5): Architecture specialist
-- Oracle-GPT (GPT 5.2): Code patterns
-- Oracle-Gemini (Gemini 3 Pro): UI/UX specialist
-- Oracle-DeepSeek (DeepSeek v3): Performance
+**Council Layer (4 Oracles)**
+- Cipher (Opus 4.5): Architecture specialist
+- Vector (GPT 5.2): Code patterns
+- Prism (Gemini 3 Pro): UI/UX specialist
+- Apex (DeepSeek v3): Performance
 
-**Execution Layer**
+**Execution Layer (2)**
 - Operator (Sonnet 4): Task executor
 - Validator (Haiku 4.5): QA verification
-- Patcher (Haiku 4.5): Quick fixes
 
-**Support Layer**
-- Scout (Haiku): Codebase search
-- Intel (GLM 4.7): Research
-- Strategist (GPT 5.2): Mid-execution advice
-- UI-Ops (Gemini Pro): Frontend specialist
-- Scribe (Gemini Flash): Documentation
-- Optics (Gemini Flash): Vision/multimodal
-- QA (Sonnet 4): Test writing
+**Delta Team (8 Support Agents)**
+- RECON (Haiku): Codebase reconnaissance
+- SIGINT (Sonnet 4.5): Intelligence research
+- TACCOM (GPT 4o): Tactical command advisor
+- SURGEON (Haiku): Surgical precision fixer
+- SENTINEL (Sonnet 4.5): Quality assurance guardian
+- SCRIBE (Gemini Flash): Documentation writer
+- FACADE (Gemini Flash): Frontend operations
+- SPECTRE (Gemini Flash): Visual intelligence
 
 ### Council Modes
 
@@ -82,32 +82,47 @@ Files in `.delta9/`:
 delta9/
 ├── src/
 │   ├── index.ts              # Plugin entry
-│   ├── agents/               # Agent definitions
-│   │   ├── commander.ts
-│   │   ├── council/
-│   │   ├── execution/
-│   │   └── support/
+│   ├── agents/               # 19 agent definitions
+│   │   ├── commander.ts      # Lead planner
+│   │   ├── operator.ts       # Task executor
+│   │   ├── validator.ts      # QA verification
+│   │   ├── council/          # 4 Oracles (Cipher, Vector, Prism, Apex)
+│   │   └── support/          # 8 Delta Team agents
 │   ├── mission/              # State management
 │   │   ├── state.ts
 │   │   ├── schema.ts
 │   │   └── markdown.ts
-│   ├── council/              # Council orchestration
+│   ├── orchestration/        # Council orchestration
 │   ├── routing/              # Task routing
 │   ├── hooks/                # Event handlers
-│   ├── tools/                # Custom tools
+│   ├── tools/                # 56 custom tools
 │   ├── lib/                  # Utilities
 │   └── types/                # TypeScript types
 ├── docs/
 │   ├── spec.md               # Full specification
-│   ├── ARCHITECTURE.md
-│   ├── AGENTS.md
-│   ├── API.md
-│   ├── DEVELOPMENT.md
-│   ├── OPENCODE_REFERENCE/   # OpenCode docs
-│   ├── PATTERNS/             # Best practices
-│   └── REFERENCE_CODE/       # Plugin source code
+│   ├── README.md             # Navigation hub
+│   ├── delta9/               # Architecture docs
+│   ├── opencode/             # OpenCode reference
+│   ├── plugin-guide/         # 14-file development guide
+│   ├── patterns/             # Best practices
+│   └── reference-code/       # 41 plugin examples (gitignored)
 └── package.json
 ```
+
+---
+
+## Delta Team Config Keys
+
+| Codename | Config Key | Role |
+|----------|------------|------|
+| RECON | `scout` | Codebase reconnaissance |
+| SIGINT | `intel` | Intelligence research |
+| TACCOM | `strategist` | Tactical advisor |
+| SURGEON | `patcher` | Precision fixes |
+| SENTINEL | `qa` | Quality assurance |
+| SCRIBE | `scribe` | Documentation |
+| FACADE | `uiOps` | Frontend ops |
+| SPECTRE | `optics` | Visual analysis |
 
 ---
 
@@ -158,12 +173,24 @@ Works with any model combination user has access to.
     "enabled": true,
     "defaultMode": "standard",
     "members": [
-      { "name": "Oracle-Claude", "model": "anthropic/claude-opus-4-5", "enabled": true },
-      { "name": "Oracle-GPT", "model": "openai/gpt-5.2-codex", "enabled": true }
+      { "name": "Cipher", "model": "anthropic/claude-opus-4-5", "enabled": true },
+      { "name": "Vector", "model": "openai/gpt-5.2-codex", "enabled": true },
+      { "name": "Prism", "model": "google/gemini-3-pro", "enabled": true },
+      { "name": "Apex", "model": "deepseek/v3", "enabled": true }
     ]
   },
   "operators": {
     "default_model": "anthropic/claude-sonnet-4-5-20250929"
+  },
+  "support": {
+    "scout": { "enabled": true, "timeoutSeconds": 30 },
+    "intel": { "enabled": true, "timeoutSeconds": 60 },
+    "strategist": { "enabled": true, "timeoutSeconds": 45 },
+    "patcher": { "enabled": true, "timeoutSeconds": 30 },
+    "qa": { "enabled": true, "timeoutSeconds": 90 },
+    "scribe": { "enabled": true, "timeoutSeconds": 60 },
+    "uiOps": { "enabled": true, "timeoutSeconds": 60 },
+    "optics": { "enabled": true, "timeoutSeconds": 45 }
   },
   "budget": {
     "limit": 10.0,
@@ -186,9 +213,10 @@ ln -s $(pwd) ~/.config/opencode/plugins/delta9
 ### Commands
 ```bash
 npm run build      # Build TypeScript
-npm run test       # Run tests
+npm run test       # Run 651 tests
 npm run lint       # Check code style
 npm run dev        # Watch mode
+npm run typecheck  # TypeScript strict check
 ```
 
 ### Code Style
@@ -223,7 +251,7 @@ npm run dev        # Watch mode
 
 ## OpenCode Reference Documentation
 
-Complete OpenCode plugin development guide at `docs/OPENCODE_REFERENCE/`:
+Complete OpenCode plugin development guide at `docs/opencode/`:
 
 | File | Content |
 |------|---------|
@@ -242,7 +270,7 @@ Complete OpenCode plugin development guide at `docs/OPENCODE_REFERENCE/`:
 
 ## Advanced Patterns (21 Patterns)
 
-Production-tested patterns at `docs/PATTERNS/ADVANCED_PATTERNS.md`:
+Production-tested patterns at `docs/patterns/`:
 
 **Core Orchestration (1-6):**
 1. Background Agent System - Concurrent task execution
@@ -272,77 +300,6 @@ Production-tested patterns at `docs/PATTERNS/ADVANCED_PATTERNS.md`:
 19. Inspector Plugin - Debugging web UI
 20. Skills with MCP - Dynamic MCP integration
 21. Streamlined Orchestrator - Token-efficient design
-
----
-
-## Reference Source Code (41 Plugins)
-
-Real plugin implementations at `docs/REFERENCE_CODE/`:
-
-### Orchestration (6)
-| Plugin | Description | Key Patterns |
-|--------|-------------|--------------|
-| oh-my-opencode | Gold standard (22.7K stars) | Sisyphus, BackgroundManager |
-| oh-my-opencode-slim | Token-efficient fork | Streamlined orchestrator, LSP |
-| background-agents | Claude Code-style | Async delegation |
-| pocket-universe | Closed-loop subagents | Reliable async |
-| subtask2 | Orchestration framework | Flow control |
-| swarm-plugin | Swarm coordination | Agent clustering |
-
-### Memory & Context (5)
-| Plugin | Description |
-|--------|-------------|
-| agent-memory | Letta-inspired blocks |
-| opencode-mem | Vector database |
-| simple-memory | Git-based persistence |
-| context-analysis | Token monitoring |
-| context-pruning | Token optimization |
-
-### Skills & Tools (7)
-| Plugin | Description |
-|--------|-------------|
-| opencode-skillful | Skills system |
-| opencode-skills | Skills implementation |
-| agent-skills | Agent-specific skills |
-| openskills | Community skills |
-| morph-fast-apply | Fast code editing |
-| snippets | Text expansion |
-| beads | Issue tracker |
-
-### Safety & Quality (4)
-| Plugin | Description |
-|--------|-------------|
-| safety-net | Command guard |
-| envsitter-guard | .env protection |
-| opencode-ignore | File filtering |
-| ralph-wiggum | Self-correcting loops |
-
-### Workflow (5)
-| Plugin | Description |
-|--------|-------------|
-| pilot | GitHub/Linear automation |
-| worktree | Git worktree |
-| froggy | Hooks + gitingest |
-| handoff | Session continuation |
-| micode | Brainstorm-Plan-Implement |
-
-### Utilities (14)
-| Plugin | Description |
-|--------|-------------|
-| opencode-plugins | Compose, notification, inspector |
-| opencode-plugin-template | Starter template |
-| antigravity-auth | OAuth integration |
-| canvas | Terminal canvases |
-| plannotator | Plan review |
-| smart-title | Session naming |
-| opencode-notify | Desktop notifications |
-| tokenscope | Token analysis |
-| devcontainers | Container isolation |
-| direnv | Environment loading |
-| shell-strategy | Non-interactive shell |
-| workspace | Multi-component bundle |
-| model-announcer | Model info display |
-| wakatime | Activity tracking |
 
 ---
 

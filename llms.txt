@@ -13,7 +13,7 @@
 - [docs/README.md](docs/README.md): Navigation hub
 - [docs/spec.md](docs/spec.md): Full specification (876 lines)
 - [CLAUDE.md](CLAUDE.md): Project overview
-- [PLAN.md](PLAN.md): Implementation roadmap
+- [docs/BACKLOG.md](docs/BACKLOG.md): Task tracking
 
 ## Plugin Development
 
@@ -24,13 +24,14 @@
 ## Delta9 Architecture
 
 - [docs/delta9/architecture.md](docs/delta9/architecture.md): System design
-- [docs/delta9/agents.md](docs/delta9/agents.md): Commander, Council, Operators
+- [docs/delta9/agents.md](docs/delta9/agents.md): 19 agents (Commander, Council, Delta Team)
 - [docs/delta9/api.md](docs/delta9/api.md): Internal API
 
 ## Key Concepts
 
 - **Commander**: Lead planner, never writes code
-- **Council**: 1-4 heterogeneous Oracles
+- **Council**: 4 Oracles (Cipher, Vector, Prism, Apex)
+- **Delta Team**: 8 support agents (RECON, SIGINT, TACCOM, SURGEON, SENTINEL, SCRIBE, FACADE, SPECTRE)
 - **Operators**: Task executors (Sonnet 4)
 - **Validator**: QA gate (Haiku)
 - **Mission State**: `.delta9/mission.json`

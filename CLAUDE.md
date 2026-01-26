@@ -36,16 +36,17 @@ npm run typecheck  # TypeScript strict check
 delta9/
 ├── src/
 │   ├── index.ts              # Plugin entry point
-│   ├── agents/               # Agent definitions
+│   ├── agents/               # Agent definitions (19 agents)
 │   │   ├── commander.ts      # Lead planner & orchestrator
-│   │   ├── council/          # Oracle agents
-│   │   ├── execution/        # Operator, Validator, Patcher
-│   │   └── support/          # Scout, Intel, Strategist
+│   │   ├── operator.ts       # Task executor
+│   │   ├── validator.ts      # QA verification
+│   │   ├── council/          # 4 Oracle agents (Cipher, Vector, Prism, Apex)
+│   │   └── support/          # 8 Delta Team agents (RECON, SIGINT, etc.)
 │   ├── mission/              # Mission state management
 │   ├── orchestration/        # Council orchestration
 │   ├── routing/              # Task routing
 │   ├── hooks/                # OpenCode event hooks
-│   ├── tools/                # Custom tools
+│   ├── tools/                # Custom tools (56 tools)
 │   ├── lib/                  # Utilities
 │   └── types/                # TypeScript types
 ├── docs/
@@ -66,7 +67,8 @@ delta9/
 | Concept | Description |
 |---------|-------------|
 | **Commander** | Lead planner. NEVER writes code. |
-| **Council** | 1-4 Oracles (Claude, GPT, Gemini, DeepSeek) |
+| **Council** | 4 Oracles: Cipher, Vector, Prism, Apex |
+| **Delta Team** | 8 support agents: RECON, SIGINT, TACCOM, SURGEON, SENTINEL, SCRIBE, FACADE, SPECTRE |
 | **Operators** | Task executors (Sonnet 4) |
 | **Validator** | QA gate (Haiku) |
 | **Mission State** | Persisted in `.delta9/mission.json` |
@@ -123,9 +125,9 @@ delta9/
 
 ## Current Status
 
-- **Phase**: Phase 1 Foundation complete (95%)
-- **Tests**: 290+ unit tests passing
-- **Built**: Plugin scaffold, config system, Commander, Operators, Validator, 30+ tools, 8 support agents
-- **Next**: Phase 2 - Council System (Oracle agents, council orchestration)
+- **Phase**: Phase 2 Council System (in progress)
+- **Tests**: 651 unit tests passing
+- **Built**: Plugin scaffold, config system, Commander, Operators, Validator, 56 tools, 19 agents (including Delta Team + Council)
+- **Next**: Phase 3 - Mission Orchestration
 
 See `docs/BACKLOG.md` for detailed task tracking.

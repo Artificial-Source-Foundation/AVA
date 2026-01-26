@@ -33,7 +33,8 @@ export async function replayCommand(options: ReplayOptions): Promise<void> {
   const format = options.format || 'timeline'
   const speed = options.speed || '1x'
 
-  const result = await executeReplay(cwd, options, speed)
+  // Pass format to executeReplay so it knows whether to print during replay
+  const result = await executeReplay(cwd, options, speed, format)
 
   switch (format) {
     case 'json':
@@ -54,7 +55,8 @@ export async function replayCommand(options: ReplayOptions): Promise<void> {
 async function executeReplay(
   cwd: string,
   options: ReplayOptions,
-  speed: string
+  speed: string,
+  format: string
 ): Promise<ReplayResult> {
   const eventsFile = join(cwd, '.delta9', 'events.jsonl')
   const result: ReplayResult = {
@@ -68,8 +70,12 @@ async function executeReplay(
     timestamp: new Date().toISOString(),
   }
 
+  const isTimelineFormat = format === 'timeline'
+
   if (!existsSync(eventsFile)) {
-    console.log(colorize('No events file found', 'yellow'))
+    if (isTimelineFormat) {
+      console.log(colorize('No events file found', 'yellow'))
+    }
     return result
   }
 
@@ -119,20 +125,24 @@ async function executeReplay(
     }
 
     if (allEvents.length === 0) {
-      console.log(colorize('No events matched the filters', 'yellow'))
+      if (isTimelineFormat) {
+        console.log(colorize('No events matched the filters', 'yellow'))
+      }
       return result
     }
 
-    // Print header
-    const width = 80
-    console.log()
-    console.log(colorize('═'.repeat(width), 'cyan'))
-    console.log(
-      colorize(`  REPLAYING EVENTS (${speed})`, 'bold') +
-        (options.missionId ? colorize(` - Mission: ${options.missionId}`, 'dim') : '')
-    )
-    console.log(colorize('═'.repeat(width), 'cyan'))
-    console.log()
+    // Print header (only in timeline format)
+    if (isTimelineFormat) {
+      const width = 80
+      console.log()
+      console.log(colorize('═'.repeat(width), 'cyan'))
+      console.log(
+        colorize(`  REPLAYING EVENTS (${speed})`, 'bold') +
+          (options.missionId ? colorize(` - Mission: ${options.missionId}`, 'dim') : '')
+      )
+      console.log(colorize('═'.repeat(width), 'cyan'))
+      console.log()
+    }
 
     // Calculate first timestamp for elapsed time
     const firstTimestamp = new Date(allEvents[0].timestamp).getTime()
@@ -162,13 +172,13 @@ async function executeReplay(
       })
 
       // Wait based on gap and speed (only in timeline format)
-      if (options.format !== 'json' && speedMultiplier > 0 && gap > 0) {
+      if (isTimelineFormat && speedMultiplier > 0 && gap > 0) {
         const waitTime = Math.min(gap * speedMultiplier, 2000) // Cap at 2 seconds
         await sleep(waitTime)
       }
 
       // Print event (only in timeline format)
-      if (options.format !== 'json') {
+      if (isTimelineFormat) {
         printReplayEvent(event, elapsed, category)
       }
 

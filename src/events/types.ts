@@ -486,6 +486,32 @@ export const EpicCompletedEventSchema = BaseEventSchema.extend({
 })
 
 // =============================================================================
+// Decision Trace Events
+// =============================================================================
+
+export const DecisionTracedEventSchema = BaseEventSchema.extend({
+  type: z.literal('decision.traced'),
+  data: z.object({
+    traceId: z.string(),
+    decisionType: z.enum([
+      'decomposition_strategy',
+      'agent_assignment',
+      'council_consensus',
+      'validation_override',
+      'conflict_resolution',
+      'model_selection',
+      'retry_strategy',
+      'priority_change',
+      'task_skip',
+      'budget_decision',
+    ]),
+    decision: z.string(),
+    confidence: z.number().min(0).max(1),
+    hasPrecedents: z.boolean(),
+  }),
+})
+
+// =============================================================================
 // System Events
 // =============================================================================
 
@@ -616,6 +642,8 @@ export const Delta9EventSchema = z.discriminatedUnion('type', [
   EpicTaskLinkedEventSchema,
   EpicStatusChangedEventSchema,
   EpicCompletedEventSchema,
+  // Decision Traces
+  DecisionTracedEventSchema,
   // System
   SessionStartedEventSchema,
   SessionEndedEventSchema,
@@ -736,6 +764,7 @@ export const EVENT_CATEGORIES = {
     'decomposition.outcome_recorded',
   ],
   epic: ['epic.created', 'epic.task_linked', 'epic.status_changed', 'epic.completed'],
+  decision: ['decision.traced'],
   system: [
     'system.session_started',
     'system.session_ended',

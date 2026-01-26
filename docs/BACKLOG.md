@@ -15,9 +15,9 @@
 | 5 | Polish & Support | 100% | Complete ✅ |
 | 6 | Launch | 33% | In Progress |
 
-**Overall Progress:** ~96% (69/72 tasks complete)
+**Overall Progress:** ~97% (73/76 tasks complete)
 
-**Last Updated:** 2026-01-24
+**Last Updated:** 2026-01-26
 
 ---
 
@@ -195,6 +195,10 @@ See [spec.md#support-layer](spec.md) for support agent specifications.
 | R-3 | Rate limit handling | ✅ Done | Exponential backoff, fallback models, request queuing |
 | R-4 | Memory/learning | ⬜ Pending | Learn from past missions, avoid repeated mistakes |
 | R-5 | Recovery strategies | ✅ Done | Failure analysis, auto-recovery, strategy recommendation |
+| R-6 | Decision traces | ✅ Done | Record WHY decisions were made, precedent chains, 5 tools |
+| R-7 | Async subagents | ✅ Done | Fire-and-forget parallel agents, aliases, 5 tools |
+| R-8 | Session resumption | ✅ Done | Auto-wake agents on messages, 6 tools |
+| R-9 | Dashboard TUI | ✅ Done | Real-time dashboard with agents, budget, traces panels |
 
 ### Files Created
 
@@ -342,26 +346,60 @@ Recommended sprint structure (each sprint ~2-3 days of work):
 - ✅ R-3: Rate limit handling
 - ✅ R-5: Recovery strategies
 
-### Sprint 7: Support Agents
+### Sprint 6: Robustness Enhancements (COMPLETE ✅)
+**Goal:** Decision traces, async agents, session resumption, dashboard
+
+Implemented by comparing Delta9 with swarm-plugin, oh-my-opencode, pocket-universe to identify gaps.
+
+- ✅ R-6: Decision traces - Record WHY decisions were made with precedent tracking
+- ✅ R-7: Async subagent system - Fire-and-forget parallel agents with aliases
+- ✅ R-8: Session resumption - Auto-wake agents when messages arrive
+- ✅ R-9: Enhanced dashboard - Real-time TUI with agents, budget, traces panels
+
+**Files Created:**
+```
+src/traces/
+├── types.ts      ✅ DecisionTrace schemas (10 decision types)
+├── store.ts      ✅ JSONL persistence, precedent chains
+└── index.ts      ✅ Module exports
+
+src/subagents/
+├── types.ts      ✅ SubagentState, SubagentOutput schemas
+├── manager.ts    ✅ SubagentManager class (wraps BackgroundManager)
+└── index.ts      ✅ Module exports
+
+src/messaging/
+└── session-state.ts  ✅ SessionStateManager (auto-resume on messages)
+
+src/tools/
+├── traces.ts         ✅ 5 trace tools (trace_decision, query_traces, etc.)
+├── subagents.ts      ✅ 5 subagent tools (spawn_subagent, wait_for_subagent, etc.)
+└── session-state.ts  ✅ 6 session tools (register_session, trigger_resume, etc.)
+
+src/cli/commands/
+└── dashboard.ts  ✅ Real-time TUI dashboard
+```
+
+### Sprint 7: Support Agents (COMPLETE ✅)
 **Goal:** Specialist workforce
 
-- S-1: UI-Ops agent
-- S-2: Scribe agent
-- S-4: QA agent
-- S-5: Patcher agent
+- ✅ S-1: UI-Ops agent (FACADE)
+- ✅ S-2: Scribe agent (SCRIBE)
+- ✅ S-4: QA agent (SENTINEL)
+- ✅ S-5: Patcher agent (SURGEON)
 
-### Sprint 8: Polish
+### Sprint 8: Polish (COMPLETE ✅)
 **Goal:** User experience
 
-- S-3: Optics agent
-- S-6: Mission templates
-- S-7: Progress notifications
+- ✅ S-3: Optics agent (SPECTRE)
+- ✅ S-6: Mission templates
+- ✅ S-7: Progress notifications
 
-### Sprint 9: Launch
+### Sprint 9: Launch (IN PROGRESS)
 **Goal:** Public release
 
-- L-1: npm publish
-- L-2: Documentation
+- ⬜ L-1: npm publish
+- ✅ L-2: Documentation
 - S-8: CLI commands
 - L-3: Marketing
 
@@ -374,11 +412,11 @@ Recommended sprint structure (each sprint ~2-3 days of work):
 | Phase 1 | 0 | 0 | 13 |
 | Phase 2 (Council) | 0 | 0 | 8 |
 | Phase 3 (Intelligence) | 0 | 0 | 7 |
-| Phase 4 (Robustness) | 1 | 0 | 4 |
+| Phase 4 (Robustness) | 1 | 0 | 8 |
 | Phase 5 (Polish) | 0 | 0 | 8 |
 | Phase 6 (Launch) | 2 | 0 | 1 |
 | Phase 7 (Advanced) | 0 | 0 | 28 |
-| **Total** | **3** | **0** | **69** |
+| **Total** | **3** | **0** | **73** |
 
 ---
 

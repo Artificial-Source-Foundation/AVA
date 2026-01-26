@@ -97,6 +97,15 @@ export interface StatsOptions {
   cwd?: string
 }
 
+export interface DashboardOptions {
+  /** Enable watch mode (auto-refresh) */
+  watch?: boolean
+  /** Refresh interval in milliseconds (default: 2000) */
+  interval?: number
+  /** Custom project directory */
+  cwd?: string
+}
+
 // =============================================================================
 // Output Formatting
 // =============================================================================
@@ -298,6 +307,7 @@ export function colorize(text: string, color: keyof typeof colors): string {
 
 export const symbols = {
   check: '✓',
+  checkmark: '✓',
   cross: '✗',
   warning: '⚠',
   bullet: '•',

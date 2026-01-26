@@ -24,6 +24,9 @@ import { createLockTools } from './locks.js'
 import { createMessagingTools } from './messaging.js'
 import { createDecompositionTools } from './decomposition.js'
 import { createEpicTools } from './epic.js'
+import { createTraceTools, TRACE_TOOL_NAMES } from './traces.js'
+import { createSubagentTools, SUBAGENT_TOOL_NAMES } from './subagents.js'
+import { createSessionStateTools, SESSION_STATE_TOOL_NAMES } from './session-state.js'
 
 export type { OpenCodeClient } from '../lib/background-manager.js'
 
@@ -53,6 +56,8 @@ export { createDecompositionTools } from './decomposition.js'
 export type { DecompositionToolsConfig } from './decomposition.js'
 export { createEpicTools } from './epic.js'
 export type { EpicToolsConfig } from './epic.js'
+export { createSubagentTools, SUBAGENT_TOOL_NAMES } from './subagents.js'
+export { createSessionStateTools, SESSION_STATE_TOOL_NAMES } from './session-state.js'
 
 // =============================================================================
 // Knowledge Tools Type
@@ -111,6 +116,31 @@ export type EpicTools = {
   update_epic: unknown
 }
 
+export type TraceTools = {
+  trace_decision: unknown
+  query_traces: unknown
+  get_trace: unknown
+  find_similar_decisions: unknown
+  trace_stats: unknown
+}
+
+export type SubagentTools = {
+  spawn_subagent: unknown
+  subagent_status: unknown
+  get_subagent_output: unknown
+  wait_for_subagent: unknown
+  list_pending_outputs: unknown
+}
+
+export type SessionStateTools = {
+  register_session: unknown
+  set_session_state: unknown
+  get_session_state: unknown
+  list_sessions: unknown
+  trigger_resume: unknown
+  check_pending_resumes: unknown
+}
+
 // =============================================================================
 // Combined Tools
 // =============================================================================
@@ -131,7 +161,10 @@ export type Delta9Tools = MissionTools &
   LockTools &
   MessagingTools &
   DecompositionTools &
-  EpicTools
+  EpicTools &
+  TraceTools &
+  SubagentTools &
+  SessionStateTools
 
 /**
  * Create all Delta9 tools
@@ -169,6 +202,9 @@ export function createDelta9Tools(
     ...createMessagingTools(),
     ...createDecompositionTools(),
     ...createEpicTools(state, { cwd: projectCwd }),
+    ...createTraceTools(),
+    ...createSubagentTools(state, projectCwd, client),
+    ...createSessionStateTools(),
   }
 }
 
@@ -313,6 +349,9 @@ export const ALL_TOOL_NAMES = [
   ...MESSAGING_TOOL_NAMES,
   ...DECOMPOSITION_TOOL_NAMES,
   ...EPIC_TOOL_NAMES,
+  ...TRACE_TOOL_NAMES,
+  ...SUBAGENT_TOOL_NAMES,
+  ...SESSION_STATE_TOOL_NAMES,
 ] as const
 
 export type Delta9ToolName = (typeof ALL_TOOL_NAMES)[number]

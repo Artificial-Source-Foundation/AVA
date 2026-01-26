@@ -769,49 +769,73 @@ delta9/
 - [x] Duration formatting (human-readable)
 - [x] Detailed tool descriptions with examples
 
-#### Tools Implemented (33 total)
+#### Tools Implemented (70+ total)
 | Category | Tools |
 |----------|-------|
 | Mission | `mission_create`, `mission_status`, `mission_add_objective`, `mission_add_task`, `mission_complete_task`, `mission_fail_task`, `mission_abort`, `mission_clear` |
 | Delegation | `delegate_task`, `retry_task` |
 | Background | `background_output`, `background_cancel`, `background_list`, `background_cleanup` |
-| Council | `council_convene`, `council_status`, `quick_consult` |
-| Memory | `memory_get`, `memory_set`, `memory_delete`, `memory_list`, `memory_clear` |
-| Validation | `request_validation`, `approve_validation`, `reject_validation`, `validation_status` |
-| Checkpoint | `checkpoint_create`, `checkpoint_list`, `checkpoint_restore`, `checkpoint_delete` |
+| Council | `consult_council`, `quick_consult`, `should_consult_council`, `council_status` |
+| Memory | `memory_get`, `memory_set`, `memory_delete`, `memory_list`, `memory_replace`, `memory_append` |
+| Knowledge | `knowledge_list`, `knowledge_get`, `knowledge_set`, `knowledge_append`, `knowledge_replace` |
+| Validation | `validation_result`, `run_tests`, `check_lint`, `check_types` |
+| Checkpoint | `checkpoint_create`, `checkpoint_list`, `checkpoint_restore`, `checkpoint_delete`, `checkpoint_get` |
+| Budget | `budget_status`, `budget_set_limit`, `budget_check`, `budget_breakdown` |
+| Skills | `list_skills`, `use_skill`, `read_skill_file`, `run_skill_script`, `get_skill` |
+| Locks | `lock_file`, `unlock_file`, `check_lock`, `list_locks`, `lock_files`, `unlock_all` |
+| Messaging | `send_message`, `check_inbox`, `read_message`, `reply_message`, `get_thread`, `message_stats` |
+| Decomposition | `decompose_task`, `validate_decomposition`, `search_similar_tasks`, `redecompose`, `list_strategies`, `record_decomposition_outcome` |
+| Epics | `create_epic`, `link_tasks_to_epic`, `epic_status`, `epic_breakdown`, `sync_to_git`, `list_epics`, `update_epic` |
+| Traces | `trace_decision`, `query_traces`, `get_trace`, `find_similar_decisions`, `trace_stats` |
+| Subagents | `spawn_subagent`, `subagent_status`, `get_subagent_output`, `wait_for_subagent`, `list_pending_outputs` |
+| Session State | `register_session`, `set_session_state`, `get_session_state`, `list_sessions`, `trigger_resume`, `check_pending_resumes` |
+| Routing | `analyze_complexity`, `recommend_agent` |
 | Diagnostics | `delta9_health` |
+
+### Completed Features
+
+#### Council System ✅
+- [x] Oracle agent definitions (CIPHER, VECTOR, PRISM, APEX)
+- [x] Council modes (NONE/QUICK/STANDARD/XHIGH)
+- [x] Opinion synthesis with confidence weighting
+- [x] Conflict resolution
+
+#### Support Agents ✅
+- [x] SCOUT (fast codebase search with Haiku)
+- [x] INTEL (research with Librarian-style 4-phase pattern)
+- [x] STRATEGIST (mid-execution advice with Metis-style phases)
+- [x] FACADE (UI-Ops), SCRIBE (docs), SPECTRE (vision), SENTINEL (QA), SURGEON (patcher)
+
+#### Intelligence Layer ✅
+- [x] XHIGH council mode (Scout+Intel recon before oracles)
+- [x] Smart task routing to specialists
+- [x] Complexity detection (keywords, scope, risk)
+- [x] Category-based routing
+
+#### Robustness ✅
+- [x] Checkpoints and rollback
+- [x] Budget tracking with warn/pause thresholds
+- [x] Rate limit handling with exponential backoff
+- [x] Model fallback chains with circuit breaker
+- [x] Decision traces with precedent chains
+- [x] Async subagent system with aliases
+- [x] Session resumption on message arrival
+
+#### Advanced Features ✅
+- [x] Event sourcing (48 event types, projections)
+- [x] Learning system (outcome tracking, confidence decay, anti-patterns)
+- [x] Skills system (YAML frontmatter, model-aware rendering)
+- [x] File reservation (CAS locks with TTL)
+- [x] Guardrails (Commander discipline, three-strike escalation)
+- [x] Agent messaging (inbox/outbox, threading, groups)
+- [x] Task decomposition (6 strategies, validation, embedding-based search)
+- [x] Epic management (Git sync, task linking)
 
 ### In Progress
 
-#### Council System
-- [ ] Oracle agent definitions
-- [ ] Council modes (none/quick/standard/xhigh)
-- [ ] Opinion synthesis
-- [ ] Confidence scoring
-
-#### Support Agents
-- [ ] Scout (codebase search)
-- [ ] Intel (research)
-- [ ] Strategist (mid-execution advice)
-
-### Planned
-
-#### Phase 3: Intelligence
-- [ ] XHIGH council mode
-- [ ] Smart task routing
-- [ ] Complexity detection
-- [ ] Keyword detection
-
-#### Phase 4: Robustness
-- [ ] Checkpoints and rollback
-- [ ] Budget tracking
-- [ ] Memory and learning
-- [ ] Seamless agent replacement
-
-#### Phase 5: Polish
-- [ ] All support agents (UI-Ops, Scribe, Optics, QA)
-- [ ] Mission templates
-- [ ] Notifications (Discord, Slack)
+#### Launch
+- [ ] npm publish
+- [ ] Marketing (GitHub README, social media)
 
 ---
 

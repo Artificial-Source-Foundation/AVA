@@ -54,3 +54,15 @@ export {
 
 // Store
 export { MessageStore, getMessageStore, resetMessageStore } from './store.js'
+
+// Session State
+export {
+  SessionStateManager,
+  getSessionStateManager,
+  resetSessionStateManager,
+  type SessionState,
+  type SessionInfo,
+  type ResumeCallback,
+  type ResumeReason,
+  type SessionStateConfig,
+} from './session-state.js'

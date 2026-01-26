@@ -46,7 +46,7 @@ delta9/
 │   ├── orchestration/        # Council orchestration
 │   ├── routing/              # Task routing
 │   ├── hooks/                # OpenCode event hooks
-│   ├── tools/                # Custom tools (56 tools)
+│   ├── tools/                # Custom tools (70+ tools)
 │   ├── lib/                  # Utilities
 │   └── types/                # TypeScript types
 ├── docs/
@@ -67,11 +67,14 @@ delta9/
 | Concept | Description |
 |---------|-------------|
 | **Commander** | Lead planner. NEVER writes code. |
-| **Council** | 4 Oracles: Cipher, Vector, Prism, Apex |
-| **Delta Team** | 8 support agents: RECON, SIGINT, TACCOM, SURGEON, SENTINEL, SCRIBE, FACADE, SPECTRE |
+| **Council** | 4 Oracles: CIPHER (strategy), VECTOR (logic), PRISM (creative), APEX (performance) |
+| **Support Agents** | SCOUT, INTEL, STRATEGIST, FACADE, SCRIBE, SPECTRE, SENTINEL, SURGEON |
 | **Operators** | Task executors (Sonnet 4) |
 | **Validator** | QA gate (Haiku) |
 | **Mission State** | Persisted in `.delta9/mission.json` |
+| **Decision Traces** | Record WHY decisions were made with precedent chains |
+| **Subagents** | Fire-and-forget parallel workers with aliases |
+| **Session State** | Auto-resume agents when messages arrive |
 
 ---
 
@@ -125,9 +128,20 @@ delta9/
 
 ## Current Status
 
-- **Phase**: Phase 2 Council System (in progress)
-- **Tests**: 651 unit tests passing
-- **Built**: Plugin scaffold, config system, Commander, Operators, Validator, 56 tools, 19 agents (including Delta Team + Council)
-- **Next**: Phase 3 - Mission Orchestration
+- **Phase**: Phase 6 Launch (in progress)
+- **Tests**: 777 unit tests passing
+- **Tools**: 70+ tools across 19 categories
+- **Agents**: 15+ agents (Commander, 4 Oracles, 8 Support Agents, Operators, Validator)
+- **Built**: Complete multi-agent system with:
+  - Mission state persistence & recovery
+  - Council orchestration (4 modes: NONE, QUICK, STANDARD, XHIGH)
+  - Event sourcing (48 event types)
+  - Learning system with anti-pattern detection
+  - Agent messaging with auto-resume
+  - Task decomposition (6 strategies)
+  - Decision traces with precedent chains
+  - Async subagent system
+  - Real-time TUI dashboard
+- **Next**: npm publish
 
 See `docs/BACKLOG.md` for detailed task tracking.

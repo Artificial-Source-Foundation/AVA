@@ -207,8 +207,10 @@ export interface DecompositionEngineConfig {
 }
 
 /** Default configuration */
+// Note: baseDir uses empty string as default; constructor will fall back to process.cwd()
+// This avoids issues when module is loaded before process.cwd() is available
 export const DEFAULT_DECOMPOSITION_CONFIG: Required<DecompositionEngineConfig> = {
-  baseDir: process.cwd(),
+  baseDir: '',
   minQualityScore: 0.7,
   maxSubtasks: 10,
   minAcceptanceCriteria: 1,

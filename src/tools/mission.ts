@@ -45,6 +45,13 @@ export function createMissionTools(state: MissionState): Record<string, ToolDefi
         councilMode: args.councilMode as CouncilMode | undefined,
       })
 
+      // Track created objectives and tasks for return
+      const createdObjectives: Array<{
+        id: string
+        description: string
+        tasks: Array<{ id: string; description: string }>
+      }> = []
+
       // Add objectives and tasks if provided
       if (args.objectives) {
         try {
@@ -63,14 +70,22 @@ export function createMissionTools(state: MissionState): Record<string, ToolDefi
               description: objData.description,
             })
 
+            const createdTasks: Array<{ id: string; description: string }> = []
             for (const taskData of objData.tasks) {
-              state.addTask(objective.id, {
+              const task = state.addTask(objective.id, {
                 description: taskData.description,
                 acceptanceCriteria: taskData.acceptanceCriteria,
                 routedTo: taskData.routing,
                 dependencies: taskData.dependencies,
               })
+              createdTasks.push({ id: task.id, description: task.description })
             }
+
+            createdObjectives.push({
+              id: objective.id,
+              description: objective.description,
+              tasks: createdTasks,
+            })
           }
         } catch {
           // Ignore JSON parse errors
@@ -81,7 +96,9 @@ export function createMissionTools(state: MissionState): Record<string, ToolDefi
         success: true,
         missionId: mission.id,
         status: mission.status,
+        objectives: createdObjectives,
         message: `Mission created: ${mission.id}`,
+        hint: 'Use the objective IDs above when adding tasks with mission_add_task',
       })
     },
   })
@@ -256,6 +273,20 @@ export function createMissionTools(state: MissionState): Record<string, ToolDefi
         } catch {
           deps = [args.dependencies]
         }
+      }
+
+      // Check if objective exists, provide helpful error if not
+      const mission = state.getMission()
+      const objective = state.getObjective(args.objectiveId)
+      if (!objective) {
+        const availableObjectives =
+          mission?.objectives.map((o) => ({ id: o.id, description: o.description })) ?? []
+        return JSON.stringify({
+          success: false,
+          error: `Objective ${args.objectiveId} not found`,
+          availableObjectives,
+          hint: 'Use one of the objective IDs listed above, or create a new objective with mission_add_objective',
+        })
       }
 
       const task = state.addTask(args.objectiveId, {

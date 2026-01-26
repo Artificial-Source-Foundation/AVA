@@ -43,7 +43,14 @@ export class DecompositionEngine {
   private eventListeners: Set<DecompositionEventListener> = new Set()
 
   constructor(config?: DecompositionEngineConfig) {
-    this.config = { ...DEFAULT_DECOMPOSITION_CONFIG, ...config }
+    // Merge config with defaults, ensuring baseDir is always defined
+    // (process.cwd() may be undefined at module load time in some environments)
+    const baseDir = config?.baseDir || process.cwd() || '.'
+    this.config = {
+      ...DEFAULT_DECOMPOSITION_CONFIG,
+      ...config,
+      baseDir,
+    }
     this.validator = new DecompositionValidator(this.config)
     this.storagePath = join(this.config.baseDir, this.config.storagePath)
 

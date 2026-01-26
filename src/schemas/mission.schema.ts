@@ -44,6 +44,14 @@ export const validationResultSchema = z.object({
 // Task Schema
 // =============================================================================
 
+// Helper: coerce string to array (some models return string instead of array)
+const stringOrArrayToArray = z.preprocess((val) => {
+  if (typeof val === 'string') {
+    return [val]
+  }
+  return val
+}, z.array(z.string().min(1)).min(1))
+
 export const taskSchema = z.object({
   id: z.string().min(1),
   description: z.string().min(1),
@@ -52,7 +60,7 @@ export const taskSchema = z.object({
   routedTo: z.string().optional(),
   workerSession: z.string().optional(),
   attempts: z.number().int().min(0).default(0),
-  acceptanceCriteria: z.array(z.string().min(1)).min(1),
+  acceptanceCriteria: stringOrArrayToArray,
   validation: validationResultSchema.optional(),
   filesChanged: z.array(z.string()).optional(),
   tokensUsed: z.number().int().min(0).optional(),

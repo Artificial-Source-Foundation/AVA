@@ -77,28 +77,33 @@ function createConsoleLogger(
     return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[minLevel]
   }
 
+  // Console logger is a no-op when running in TUI mode
+  // All logs are suppressed to avoid corrupting the UI
+  // Set DELTA9_DEBUG=1 to enable console logging for debugging outside TUI
+  const debugEnabled = process.env.DELTA9_DEBUG === '1'
+
   return {
     debug(message: string, data?: Record<string, unknown>): void {
-      if (shouldLog('debug')) {
-        console.debug(formatMessage('debug', message, context, data))
+      if (debugEnabled && shouldLog('debug')) {
+        process.stderr.write(formatMessage('debug', message, context, data) + '\n')
       }
     },
 
     info(message: string, data?: Record<string, unknown>): void {
-      if (shouldLog('info')) {
-        console.info(formatMessage('info', message, context, data))
+      if (debugEnabled && shouldLog('info')) {
+        process.stderr.write(formatMessage('info', message, context, data) + '\n')
       }
     },
 
     warn(message: string, data?: Record<string, unknown>): void {
-      if (shouldLog('warn')) {
-        console.warn(formatMessage('warn', message, context, data))
+      if (debugEnabled && shouldLog('warn')) {
+        process.stderr.write(formatMessage('warn', message, context, data) + '\n')
       }
     },
 
     error(message: string, data?: Record<string, unknown>): void {
-      if (shouldLog('error')) {
-        console.error(formatMessage('error', message, context, data))
+      if (debugEnabled && shouldLog('error')) {
+        process.stderr.write(formatMessage('error', message, context, data) + '\n')
       }
     },
 
@@ -128,6 +133,8 @@ function createOpenCodeLogger(
   // Check if app.log is available
   const hasAppLog = client.app && typeof client.app.log === 'function'
 
+  const debugEnabled = process.env.DELTA9_DEBUG === '1'
+
   const log = (level: LogLevel, message: string, data?: Record<string, unknown>): void => {
     if (!shouldLog(level)) return
 
@@ -136,18 +143,15 @@ function createOpenCodeLogger(
     // Use OpenCode's log function if available
     if (hasAppLog && client.app) {
       client.app.log(formatted)
+      // DON'T also log to console - it corrupts the TUI
+      return
     }
 
-    // Also log to console (always, since app.log may not be available)
-    const consoleFn =
-      level === 'error'
-        ? console.error
-        : level === 'warn'
-          ? console.warn
-          : level === 'debug'
-            ? console.debug
-            : console.info
-    consoleFn(formatted)
+    // Fallback: completely silent unless DELTA9_DEBUG=1
+    // This prevents corrupting OpenCode's TUI
+    if (debugEnabled) {
+      process.stderr.write(formatted + '\n')
+    }
   }
 
   return {

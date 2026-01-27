@@ -142,6 +142,43 @@ export {
   type RetryResult,
 } from './rate-limiter.js'
 
+// Concurrency Manager
+export {
+  ProviderConcurrencyManager,
+  getConcurrencyManager,
+  clearConcurrencyManager,
+  withConcurrencySlot,
+  describeConcurrencyStatus,
+  type ConcurrencyConfig,
+  type ConcurrencySlot,
+  type ConcurrencyStatus,
+} from './concurrency-manager.js'
+
+// Process Cleanup
+export {
+  ProcessCleanupManager,
+  getCleanupManager,
+  registerCleanup,
+  unregisterCleanup,
+  shutdown,
+  CleanupPriority,
+  type CleanupHandler,
+  type CleanupConfig,
+} from './process-cleanup.js'
+
+// Event Store
+export {
+  EventStore,
+  getEventStore,
+  clearEventStore,
+  historyToVersionedEvent,
+  importHistoryEvents,
+  type VersionedEvent,
+  type Snapshot,
+  type EventFilter,
+  type EventStoreConfig,
+} from './event-store.js'
+
 // Confidence Levels
 export {
   CONFIDENCE,
@@ -188,3 +225,117 @@ export {
   type ToolResponse,
   type ErrorResponseOptions,
 } from './tool-response.js'
+
+// Session Isolation
+export {
+  SessionIsolationManager,
+  getSessionIsolationManager,
+  clearSessionIsolationManager,
+  registerSession,
+  getRootSession,
+  areSessionsRelated,
+  cleanupSessionTree,
+  type SessionInfo,
+  type SessionStats,
+} from './session-isolation.js'
+
+// Injection Tracker
+export {
+  InjectionTracker,
+  getInjectionTracker,
+  clearInjectionTracker,
+  hasInjected,
+  tryInject,
+  clearSessionInjections,
+  CONTEXT_TYPES,
+  type InjectionRecord,
+  type InjectionStats,
+  type ContextType,
+} from './injection-tracker.js'
+
+// Storage Adapter
+export {
+  FileStorageAdapter,
+  MemoryStorageAdapter,
+  getStorageAdapter,
+  setStorageAdapter,
+  clearStorageAdapter,
+  createFileStorage,
+  createMemoryStorage,
+  type StorageAdapter,
+  type StorageOptions,
+  type ReadOptions,
+  type WriteOptions,
+} from './storage-adapter.js'
+
+// Semantic Search
+export {
+  semanticSearch,
+  searchMemoryBlocks,
+  rerankResults,
+  filterByScore,
+  topResults,
+  parseQuery,
+  normalizeText,
+  tokenize,
+  extractTags,
+  DEFAULT_SEARCH_CONFIG,
+  type SemanticSearchConfig,
+  type SearchableItem,
+  type SearchResult,
+  type ParsedQuery,
+} from './semantic-search.js'
+
+// Multi-Mode Tool
+export {
+  MultiModeDispatcher,
+  createMultiModeDispatcher,
+  defineMode,
+  executeMode,
+  createModeRouter,
+  validateMode,
+  getModeEnum,
+  type ModeDefinition,
+  type MultiModeToolConfig,
+  type ModeDispatchResult,
+} from './multi-mode-tool.js'
+
+// Idle Maintenance
+export {
+  IdleMaintenanceManager,
+  getIdleMaintenanceManager,
+  clearIdleMaintenanceManager,
+  registerCommonTasks,
+  MAINTENANCE_PRIORITY,
+  type MaintenanceTask,
+  type IdleMaintenanceConfig,
+  type MaintenanceResult,
+} from './idle-maintenance.js'
+
+// Compliance Hooks
+export {
+  checkCompliance,
+  getComplianceReminder,
+  checkAndTrack,
+  registerRule,
+  unregisterRule,
+  enableRule,
+  disableRule,
+  getRules,
+  clearRules,
+  registerDefaultRules,
+  trackToolExecution,
+  getRecentTools,
+  clearToolHistory,
+  clearAllToolHistory,
+  createComplianceContext,
+  isCodeReadTool,
+  isCodeModifyTool,
+  isDelegationTool,
+  isValidationTool,
+  isTaskCompletionTool,
+  type AgentRole,
+  type ToolContext,
+  type ComplianceCheckResult,
+  type ComplianceRule,
+} from './compliance-hooks.js'

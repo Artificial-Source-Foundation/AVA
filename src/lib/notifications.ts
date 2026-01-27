@@ -480,6 +480,372 @@ export const squadronNotifications = {
 }
 
 // =============================================================================
+// Batch Notification Manager
+// =============================================================================
+
+/**
+ * Task info for batch tracking
+ */
+export interface BatchTaskInfo {
+  /** Task ID */
+  taskId: string
+  /** Task name/title */
+  name: string
+  /** Current status */
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  /** Agent handling the task */
+  agent?: string
+  /** Start time */
+  startedAt?: number
+  /** Completion time */
+  completedAt?: number
+  /** Error message if failed */
+  error?: string
+}
+
+/**
+ * Batch state for a parent session
+ */
+export interface BatchState {
+  /** All tasks in this batch */
+  tasks: BatchTaskInfo[]
+  /** When batch started */
+  startedAt: number
+  /** Has the completion notification been sent? */
+  notificationSent: boolean
+  /** Batch description */
+  description?: string
+}
+
+/**
+ * Batch Notification Manager
+ *
+ * Consolidates notifications for parallel tasks by parent session.
+ * Only sends ONE notification when ALL tasks complete instead of
+ * individual notifications for each task.
+ *
+ * Pattern from: oh-my-opencode pendingByParent
+ */
+class BatchNotificationManager {
+  private pendingByParent: Map<string, BatchState> = new Map()
+  private listeners: Set<(parentId: string, state: BatchState) => void> = new Set()
+
+  /**
+   * Start a batch of tasks for a parent session
+   */
+  startBatch(
+    parentSessionId: string,
+    tasks: Array<{ taskId: string; name: string; agent?: string }>,
+    description?: string
+  ): void {
+    const batchTasks: BatchTaskInfo[] = tasks.map((t) => ({
+      taskId: t.taskId,
+      name: t.name,
+      status: 'pending',
+      agent: t.agent,
+    }))
+
+    this.pendingByParent.set(parentSessionId, {
+      tasks: batchTasks,
+      startedAt: Date.now(),
+      notificationSent: false,
+      description,
+    })
+
+    log.debug(`[batch] Started batch for ${parentSessionId} with ${tasks.length} tasks`)
+  }
+
+  /**
+   * Mark a task as started
+   */
+  taskStarted(parentSessionId: string, taskId: string): void {
+    const state = this.pendingByParent.get(parentSessionId)
+    if (!state) return
+
+    const task = state.tasks.find((t) => t.taskId === taskId)
+    if (task) {
+      task.status = 'running'
+      task.startedAt = Date.now()
+    }
+
+    this.notifyListeners(parentSessionId, state)
+  }
+
+  /**
+   * Mark a task as completed
+   */
+  taskCompleted(parentSessionId: string, taskId: string): void {
+    const state = this.pendingByParent.get(parentSessionId)
+    if (!state) return
+
+    const task = state.tasks.find((t) => t.taskId === taskId)
+    if (task) {
+      task.status = 'completed'
+      task.completedAt = Date.now()
+    }
+
+    this.notifyListeners(parentSessionId, state)
+    this.checkBatchCompletion(parentSessionId, state)
+  }
+
+  /**
+   * Mark a task as failed
+   */
+  taskFailed(parentSessionId: string, taskId: string, error: string): void {
+    const state = this.pendingByParent.get(parentSessionId)
+    if (!state) return
+
+    const task = state.tasks.find((t) => t.taskId === taskId)
+    if (task) {
+      task.status = 'failed'
+      task.completedAt = Date.now()
+      task.error = error
+    }
+
+    this.notifyListeners(parentSessionId, state)
+    this.checkBatchCompletion(parentSessionId, state)
+  }
+
+  /**
+   * Update a task's status with custom data
+   */
+  updateTask(
+    parentSessionId: string,
+    taskId: string,
+    update: Partial<Pick<BatchTaskInfo, 'status' | 'error'>>
+  ): void {
+    const state = this.pendingByParent.get(parentSessionId)
+    if (!state) return
+
+    const task = state.tasks.find((t) => t.taskId === taskId)
+    if (task) {
+      Object.assign(task, update)
+      if (update.status === 'completed' || update.status === 'failed') {
+        task.completedAt = Date.now()
+      }
+    }
+
+    this.notifyListeners(parentSessionId, state)
+    this.checkBatchCompletion(parentSessionId, state)
+  }
+
+  /**
+   * Check if all tasks in batch are complete
+   */
+  private checkBatchCompletion(parentSessionId: string, state: BatchState): void {
+    const allDone = state.tasks.every((t) => t.status === 'completed' || t.status === 'failed')
+
+    if (allDone && !state.notificationSent) {
+      state.notificationSent = true
+      this.sendBatchNotification(parentSessionId, state)
+    }
+  }
+
+  /**
+   * Send consolidated batch notification
+   */
+  private sendBatchNotification(parentSessionId: string, state: BatchState): void {
+    const completed = state.tasks.filter((t) => t.status === 'completed').length
+    const failed = state.tasks.filter((t) => t.status === 'failed').length
+    const total = state.tasks.length
+    const duration = Date.now() - state.startedAt
+
+    if (failed === 0) {
+      // All succeeded
+      store.success(`Batch Complete: ${completed}/${total} tasks`, {
+        taskId: parentSessionId,
+        message: state.description
+          ? `${state.description} completed in ${this.formatDuration(duration)}`
+          : `All ${total} tasks completed in ${this.formatDuration(duration)}`,
+      })
+    } else if (completed === 0) {
+      // All failed
+      store.error(`Batch Failed: 0/${total} tasks`, {
+        taskId: parentSessionId,
+        message: state.tasks
+          .filter((t) => t.error)
+          .map((t) => `${t.name}: ${t.error}`)
+          .join('; '),
+      })
+    } else {
+      // Partial success
+      store.warning(`Batch Partial: ${completed}/${total} tasks`, {
+        taskId: parentSessionId,
+        message: `${completed} succeeded, ${failed} failed in ${this.formatDuration(duration)}`,
+      })
+    }
+
+    log.info(`[batch] Completed batch for ${parentSessionId}: ${completed}/${total} succeeded`)
+  }
+
+  /**
+   * Format duration in human-readable form
+   */
+  private formatDuration(ms: number): string {
+    if (ms < 1000) return `${ms}ms`
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+    return `${(ms / 60000).toFixed(1)}m`
+  }
+
+  /**
+   * Force complete a batch (for cleanup)
+   */
+  completeBatch(parentSessionId: string): void {
+    const state = this.pendingByParent.get(parentSessionId)
+    if (!state) return
+
+    // Mark any pending tasks as completed
+    for (const task of state.tasks) {
+      if (task.status === 'pending' || task.status === 'running') {
+        task.status = 'completed'
+        task.completedAt = Date.now()
+      }
+    }
+
+    this.checkBatchCompletion(parentSessionId, state)
+  }
+
+  /**
+   * Cancel a batch
+   */
+  cancelBatch(parentSessionId: string): void {
+    const state = this.pendingByParent.get(parentSessionId)
+    if (!state) return
+
+    store.warning('Batch Cancelled', {
+      taskId: parentSessionId,
+      message: `Cancelled with ${state.tasks.filter((t) => t.status === 'completed').length}/${state.tasks.length} tasks complete`,
+    })
+
+    this.pendingByParent.delete(parentSessionId)
+    log.debug(`[batch] Cancelled batch for ${parentSessionId}`)
+  }
+
+  /**
+   * Get batch state for a parent session
+   */
+  getBatchState(parentSessionId: string): BatchState | null {
+    return this.pendingByParent.get(parentSessionId) ?? null
+  }
+
+  /**
+   * Get progress summary for a batch
+   */
+  getBatchProgress(parentSessionId: string): {
+    total: number
+    completed: number
+    failed: number
+    running: number
+    pending: number
+    progress: number
+  } | null {
+    const state = this.pendingByParent.get(parentSessionId)
+    if (!state) return null
+
+    const completed = state.tasks.filter((t) => t.status === 'completed').length
+    const failed = state.tasks.filter((t) => t.status === 'failed').length
+    const running = state.tasks.filter((t) => t.status === 'running').length
+    const pending = state.tasks.filter((t) => t.status === 'pending').length
+    const total = state.tasks.length
+
+    return {
+      total,
+      completed,
+      failed,
+      running,
+      pending,
+      progress: total > 0 ? ((completed + failed) / total) * 100 : 0,
+    }
+  }
+
+  /**
+   * Check if a batch exists
+   */
+  hasBatch(parentSessionId: string): boolean {
+    return this.pendingByParent.has(parentSessionId)
+  }
+
+  /**
+   * Subscribe to batch state changes
+   */
+  subscribe(listener: (parentId: string, state: BatchState) => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  /**
+   * Notify listeners of state change
+   */
+  private notifyListeners(parentSessionId: string, state: BatchState): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(parentSessionId, state)
+      } catch (error) {
+        log.error('[batch] Listener error', { error: String(error) })
+      }
+    }
+  }
+
+  /**
+   * Clear all batch state
+   */
+  clear(): void {
+    this.pendingByParent.clear()
+    this.listeners.clear()
+  }
+
+  /**
+   * Get all active batch parent IDs
+   */
+  getActiveBatches(): string[] {
+    return Array.from(this.pendingByParent.keys())
+  }
+}
+
+// Singleton batch manager
+const batchManager = new BatchNotificationManager()
+
+/**
+ * Get the batch notification manager
+ */
+export function getBatchNotificationManager(): BatchNotificationManager {
+  return batchManager
+}
+
+/**
+ * Start a batch of tasks for consolidated notification
+ */
+export function startNotificationBatch(
+  parentSessionId: string,
+  tasks: Array<{ taskId: string; name: string; agent?: string }>,
+  description?: string
+): void {
+  batchManager.startBatch(parentSessionId, tasks, description)
+}
+
+/**
+ * Update task status in a batch
+ */
+export function updateBatchTask(
+  parentSessionId: string,
+  taskId: string,
+  status: 'started' | 'completed' | 'failed',
+  error?: string
+): void {
+  switch (status) {
+    case 'started':
+      batchManager.taskStarted(parentSessionId, taskId)
+      break
+    case 'completed':
+      batchManager.taskCompleted(parentSessionId, taskId)
+      break
+    case 'failed':
+      batchManager.taskFailed(parentSessionId, taskId, error || 'Unknown error')
+      break
+  }
+}
+
+// =============================================================================
 // SDK Toast Integration
 // =============================================================================
 

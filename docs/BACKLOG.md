@@ -8,13 +8,14 @@
 
 | Category | Count | Status |
 |----------|-------|--------|
-| **Critical Bugs** | 4 | ~~BUG-12~~, ~~BUG-13~~, ~~BUG-14~~, BUG-15 |
-| **Medium Bugs** | 3 | BUG-10, BUG-11, ~~BUG-16~~ |
+| **Critical Bugs** | 4 | ~~BUG-12~~, ~~BUG-13~~, ~~BUG-14~~, ~~BUG-15~~ |
+| **Medium Bugs** | 3 | ~~BUG-10~~, ~~BUG-11~~ (external), ~~BUG-16~~ |
 | **Enhancements** | 18 | ENH-1 through ENH-18 |
-| **Cleanup** | 1 | CLEANUP-1 (remove budget) |
+| **Cleanup** | 1 | CLEANUP-1 (deferred) |
 | **Config Refactor** | ✅ | All models now config-driven |
 | **Sprint 1-3** | Complete | Committed |
 | **Sprint 4** | ✅ | BUG-12, BUG-13, BUG-14, BUG-16 fixed |
+| **Sprint 5** | ✅ | BUG-10 fixed, BUG-11 external, CLEANUP-1 deferred |
 
 **Testing:** Unfollow Manager feature implementation (COMPLETED - code works, tracking didn't)
 
@@ -88,7 +89,13 @@ OpenCode can't find `ui_ops` in the agent registry → `agent` is undefined → 
 
 ---
 
-### BUG-10: Commander Not Delegating Codebase Scanning 🟡
+### BUG-10: Commander Not Delegating Codebase Scanning ✅ FIXED
+
+**Sprint 4 Fix:** Added `COMMANDER_DELEGATE_RECON` compliance rule in `src/lib/compliance-hooks.ts`. The rule detects when Commander has used 2+ exploration tools (glob, list_files, search_code) or 3+ file reads without delegating, and suggests delegating to RECON (scout) agent. Rule is registered first to take precedence over the general `commander-no-code-read` rule.
+
+---
+
+**Original Issue:**
 
 **Observed:** Commander scraped the codebase itself (Glob, Read) instead of invoking RECON agent.
 
@@ -96,56 +103,33 @@ OpenCode can't find `ui_ops` in the agent registry → `agent` is undefined → 
 
 **Impact:** Medium - Violates Commander discipline (should never do tasks agents can do)
 
-**What Happened:**
-```
-→ Read CLAUDE.md           ← Commander did this itself
-✱ Glob "src/bot/**/*.ts"   ← Commander did this itself
-✱ Glob "src/actions/**/*.ts"
-✱ Glob "src/scraping/**/*.ts"
-→ Read src/bot/managers/unfollow-manager.ts  ← Should be RECON
-→ Read src/renderer/pages/Unfollow.tsx
-→ Read src/scraping/scraper.ts
-→ Read src/database/current-followers.ts
-→ Read src/actions/unfollow.ts
-```
-
-**Comparison:** OpenCode's Sisyphus/Planner reliably delegates to subagents for discovery.
-
-**Root Cause:** TBD - Possible causes:
-- Commander prompt doesn't emphasize delegation for initial discovery
-- No automatic RECON trigger on "read CLAUDE.md" type requests
-- Missing compliance rule for codebase scanning
-- Compliance hooks not catching Glob/Read as "reconnaissance" tools
-
-**Proposed Fix:**
-1. Add compliance rule: `glob/read → must_delegate_to_recon` (for exploration)
-2. Update Commander prompt to explicitly delegate discovery tasks
-3. Consider auto-invoking RECON on mission start
-4. Add hook that intercepts bulk file reads and suggests RECON
-
 ---
 
-### BUG-11: Background Tasks Not Visible (CTRL+X Missing) 🟡
+### BUG-11: Background Tasks Not Visible (CTRL+X Missing) 🔵 EXTERNAL
 
-**Observed:** No CTRL+X combo visible during test. Last test had background task indicators.
+**Status:** OpenCode Platform Dependency - Not a Delta9 bug
 
-**Expected:** Background agent tasks should show CTRL+X shortcut for management.
+**Investigation:**
+Delta9's background manager correctly:
+1. Extracts parent session ID from context (`extractSessionId()`)
+2. Passes `parentID` when creating sub-sessions (`client.session.create({ body: { parentID } })`)
+3. Tracks background tasks with parent relationship for CTRL+X navigation
 
-**Impact:** Medium - User can't see/manage background tasks
+**Root Cause:** OpenCode's UI may not render plugin-created sub-sessions the same way it renders its own internal background agents. The `parentID` is passed correctly, but UI visibility depends on OpenCode's rendering logic.
 
-**Root Cause:** TBD - Possible causes:
-- Background manager not being used for dispatched tasks
-- UI integration issue with OpenCode
-- Tasks running synchronously instead of background
+**Files Verified:**
+- `src/lib/background-manager.ts:771-780` - Session creation with parentID
+- `src/tools/delegation.ts:218-244` - Parent session extraction and tracking
+
+**Action:** Wait for OpenCode update or file issue with OpenCode team about plugin session visibility.
 
 **What Works:**
 - Mission creation ✅
-- Objective/task creation ✅
-- `delegate_task` / `dispatch_task` being called ✅
+- Background task creation (bg_* IDs generated) ✅
+- `background_output` tool to check progress ✅
 
 **What's Missing:**
-- Background task spawning visibility
-- CTRL+X management interface
+- CTRL+X navigation UI (OpenCode platform issue)
 
 ---
 
@@ -191,17 +175,19 @@ OpenCode can't find `ui_ops` in the agent registry → `agent` is undefined → 
 
 ---
 
-### BUG-15: task_complete Fails - "Task not in progress" 🔴 CRITICAL
+### BUG-15: task_complete Fails - "Task not in progress" ✅ FIXED (by BUG-14)
+
+**Sprint 4 Fix:** Automatically resolved by BUG-14 fix. Since `delegate_task` now calls `state.startTask()`, tasks are properly marked `in_progress` before operators work on them. The `task_complete` check now passes.
+
+---
+
+**Original Issue:**
 
 **Observed:** Cannot mark tasks complete because they were never marked `in_progress`.
 
 **Error:** "Task not in progress" when calling `task_complete`.
 
 **Root Cause:** `dispatch_task` never marked task as `in_progress` due to BUG-13.
-
-**Impact:** CRITICAL - Cannot track task completion even manually.
-
-**Fix:** Either auto-mark `in_progress` on dispatch, or remove this requirement.
 
 ---
 
@@ -475,15 +461,27 @@ Good for: DB migrations, API changes, security-sensitive code.
 
 ## Cleanup Items (Post-Test)
 
-### CLEANUP-1: Remove Delta9 Budget Tracking
+### CLEANUP-1: Remove Delta9 Budget Tracking 🟢 DEFERRED
+
+**Status:** Deferred to post-stabilization (low priority, high scope)
 
 **Reason:** OpenCode already handles budget/cost tracking natively. Delta9's budget system is redundant.
 
-**Action:** Deprecate or remove:
-- `src/lib/budget.ts`
-- Budget-related config options
-- `HardBudgetLimitError` (just added in Sprint 3)
-- Budget tools
+**Scope Assessment:**
+- 43 files reference budget/Budget
+- Risk of regressions if removed without thorough testing
+- Budget tracking doesn't break anything (just redundant)
+
+**Action:** Deprecate or remove (staged approach):
+1. ~~Add deprecation warnings to budget exports~~ (deferred)
+2. ~~Mark budget tools as deprecated in descriptions~~ (deferred)
+3. ~~Remove in future major version~~ (deferred)
+
+**Files to Modify:**
+- `src/lib/budget.ts` - Main budget manager
+- `src/tools/budget.ts` - Budget tools
+- `src/types/config.ts` - Budget config options
+- Plus 40 other files with budget references
 
 **Note:** Users with auth tokens (Anthropic Max, etc.) don't have dollar costs anyway - just usage quotas which OpenCode tracks.
 

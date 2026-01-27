@@ -510,8 +510,8 @@ describe('default rules', () => {
     clearAllToolHistory()
   })
 
-  it('registers 4 default rules', () => {
-    expect(getRules()).toHaveLength(4)
+  it('registers 5 default rules', () => {
+    expect(getRules()).toHaveLength(5)
   })
 
   describe('commander-no-code-read', () => {
@@ -646,6 +646,69 @@ describe('default rules', () => {
 
       // Should only trigger commander-no-code-read, not this rule
       expect(result.rule).toBe('commander-no-code-read')
+    })
+  })
+
+  describe('commander-delegate-recon (BUG-10)', () => {
+    it('triggers when commander uses multiple exploration tools', () => {
+      const result = checkCompliance({
+        sessionId: 'test',
+        toolName: 'glob',
+        role: 'commander',
+        recentTools: ['glob', 'list_files'],
+      })
+
+      expect(result.hasViolation).toBe(true)
+      expect(result.rule).toBe('commander-delegate-recon')
+      expect(result.reminder).toContain('RECON')
+      expect(result.suggestion).toContain('scout')
+    })
+
+    it('triggers when commander reads many files', () => {
+      const result = checkCompliance({
+        sessionId: 'test',
+        toolName: 'read_file',
+        role: 'commander',
+        recentTools: ['read_file', 'read_file', 'read_file'],
+      })
+
+      expect(result.hasViolation).toBe(true)
+      expect(result.rule).toBe('commander-delegate-recon')
+    })
+
+    it('does not trigger with delegation present', () => {
+      const result = checkCompliance({
+        sessionId: 'test',
+        toolName: 'glob',
+        role: 'commander',
+        recentTools: ['glob', 'delegate_task', 'list_files'],
+      })
+
+      // Should not trigger recon rule when delegation is present
+      expect(result.rule).not.toBe('commander-delegate-recon')
+    })
+
+    it('does not trigger for operators', () => {
+      const result = checkCompliance({
+        sessionId: 'test',
+        toolName: 'glob',
+        role: 'operator',
+        recentTools: ['glob', 'list_files'],
+      })
+
+      expect(result.rule).not.toBe('commander-delegate-recon')
+    })
+
+    it('does not trigger with insufficient exploration', () => {
+      const result = checkCompliance({
+        sessionId: 'test',
+        toolName: 'glob',
+        role: 'commander',
+        recentTools: ['glob'],
+      })
+
+      // Only 1 exploration tool, needs 2+
+      expect(result.rule).not.toBe('commander-delegate-recon')
     })
   })
 })

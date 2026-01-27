@@ -383,11 +383,64 @@ const COMMANDER_DELEGATE_AFTER_READ: ComplianceRule = {
 }
 
 /**
+ * Exploration tools (should be delegated to RECON/scout)
+ */
+const EXPLORATION_TOOLS = ['glob', 'list_files', 'search_code']
+
+/**
+ * Check if tool is an exploration tool
+ */
+function isExplorationTool(toolName: string): boolean {
+  return EXPLORATION_TOOLS.includes(toolName.toLowerCase())
+}
+
+/**
+ * Rule: Commander should delegate bulk exploration to RECON (BUG-10 fix)
+ *
+ * Triggers when Commander uses multiple Glob/Read calls instead of
+ * delegating reconnaissance to the RECON/scout agent.
+ */
+const COMMANDER_DELEGATE_RECON: ComplianceRule = {
+  name: 'commander-delegate-recon',
+  description: 'Commander should delegate codebase exploration to RECON agent',
+  roles: ['commander'],
+  severity: 'warning',
+  enabled: true,
+  check: (context) => {
+    // Check for exploration patterns
+    if (context.recentTools && context.recentTools.length >= 2) {
+      const explorationCount = context.recentTools.filter(isExplorationTool).length
+      const readCount = context.recentTools.filter((t) => t.toLowerCase() === 'read_file').length
+
+      // If Commander has done 2+ exploration tools OR 3+ file reads, suggest RECON
+      if (explorationCount >= 2 || readCount >= 3) {
+        const hasDelegation = context.recentTools.some(isDelegationTool)
+
+        if (!hasDelegation && (isExplorationTool(context.toolName) || isCodeReadTool(context.toolName))) {
+          return {
+            hasViolation: true,
+            severity: 'warning',
+            reminder:
+              '🔍 Commander is doing reconnaissance. Delegate exploration to RECON (scout) agent for efficient codebase scanning.',
+            rule: 'commander-delegate-recon',
+            suggestion: 'Use delegate_task(agent="scout", prompt="Explore...") for codebase reconnaissance',
+          }
+        }
+      }
+    }
+    return null
+  },
+}
+
+/**
  * Register all default rules
  */
 export function registerDefaultRules(): void {
-  registerRule(COMMANDER_NO_CODE_READ)
-  registerRule(COMMANDER_NO_CODE_MODIFY)
+  // Order matters! More specific rules first, general rules last.
+  // Pattern-based rules (detect multi-tool patterns) take precedence over single-tool rules.
+  registerRule(COMMANDER_DELEGATE_RECON) // BUG-10: Pattern detection (2+ exploration or 3+ reads)
+  registerRule(COMMANDER_NO_CODE_READ) // General: Any single code read
+  registerRule(COMMANDER_NO_CODE_MODIFY) // Critical: Never modify code
   registerRule(OPERATOR_VALIDATE_AFTER_COMPLETE)
   registerRule(COMMANDER_DELEGATE_AFTER_READ)
   log.info('Registered default compliance rules')

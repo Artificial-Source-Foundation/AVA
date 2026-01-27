@@ -14,8 +14,10 @@
 | 4 | Robustness | 100% | Complete ✅ |
 | 5 | Polish & Support | 100% | Complete ✅ |
 | 6 | Launch | 33% | In Progress |
+| - | **Bug Fixes** | 0% | **7 issues found** 🐛 |
 
 **Overall Progress:** ~97% (73/76 tasks complete)
+**Known Issues:** 7 bugs found during live testing (see below)
 
 **Last Updated:** 2026-01-26
 
@@ -644,6 +646,76 @@ src/knowledge/
 
 tests/knowledge/
 └── semantic.test.ts  ✅ 47 tests for semantic search
+```
+
+---
+
+## Known Issues (Found in Testing)
+
+> Bugs and improvements discovered during live testing on 2026-01-26
+
+### Critical: Provider Failures
+
+| ID | Issue | Severity | Root Cause | Solution |
+|----|-------|----------|------------|----------|
+| BUG-1 | **Council fails when GPT limit exceeded** | High | VECTOR Oracle uses GPT, no fallback when rate limited | Add fallback models to all Oracles |
+| BUG-2 | **No fallback models for Council** | High | Council dies if ANY provider fails | Implement per-Oracle fallback chains |
+| BUG-3 | **No fallback models for Delta Team** | Medium | Support agents (TACCOM=GPT, etc.) fail without fallback | Add fallback to all agent configs |
+
+### Medium: Timeout Issues
+
+| ID | Issue | Severity | Root Cause | Solution |
+|----|-------|----------|------------|----------|
+| BUG-4 | **Subagent timeouts too short** | Medium | Fixed 120s timeout, complex tasks need more | Adaptive timeout based on agent type + task complexity |
+| BUG-5 | **No timeout estimation** | Medium | AI guesses timeout, often wrong | Add `estimateTimeout(agentType, prompt)` utility |
+
+### Low: UX Issues
+
+| ID | Issue | Severity | Root Cause | Solution |
+|----|-------|----------|------------|----------|
+| BUG-6 | **Council shows "simulation mode"** | Low | SDK not fully connected or config missing | Better error messaging, check council config |
+| BUG-7 | **Squadron status unclear on timeout** | Low | No clear indication which agents timed out | Add per-agent timeout status in squadron_status |
+
+### Proposed Fixes
+
+**BUG-1, BUG-2, BUG-3: Fallback Models**
+
+```typescript
+// Each Oracle should have fallback chain
+const ORACLE_FALLBACKS = {
+  CIPHER: ['claude-sonnet-4', 'gpt-4o', 'gemini-2.0-flash'],
+  VECTOR: ['gpt-4o', 'claude-sonnet-4', 'gemini-2.0-flash'],
+  PRISM: ['gemini-2.0-flash', 'claude-sonnet-4', 'gpt-4o'],
+  APEX: ['deepseek-chat', 'claude-sonnet-4', 'gpt-4o'],
+}
+
+// Delta Team fallbacks
+const AGENT_FALLBACKS = {
+  RECON: ['claude-haiku', 'gpt-4o-mini', 'gemini-flash'],
+  SIGINT: ['claude-sonnet-4', 'gpt-4o', 'gemini-2.0-flash'],
+  TACCOM: ['gpt-4o', 'claude-sonnet-4', 'gemini-2.0-flash'],
+  // ... etc
+}
+```
+
+**BUG-4, BUG-5: Adaptive Timeouts**
+
+```typescript
+// Timeout estimation based on agent + task
+function estimateTimeout(agentType: string, prompt: string): number {
+  const baseTimeouts = {
+    scout: 60_000,      // 1 min - fast scan
+    intel: 180_000,     // 3 min - research
+    operator: 300_000,  // 5 min - implementation
+    validator: 120_000, // 2 min - verification
+  }
+
+  // Adjust based on prompt complexity
+  const words = prompt.split(' ').length
+  const multiplier = words > 200 ? 2 : words > 100 ? 1.5 : 1
+
+  return Math.min(baseTimeouts[agentType] * multiplier, 600_000) // Max 10 min
+}
 ```
 
 ---

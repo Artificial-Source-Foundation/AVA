@@ -51,11 +51,10 @@
 
 ### To Be Triaged ⬜
 
-*(Add new issues here as testing continues)*
-
 | ID | Issue | Notes |
 |----|-------|-------|
-| | | |
+| BUG-8 | **Operator stuck in "spawning" state** | Race condition in squadron Wave 2 |
+| BUG-9 | **Council SDK in simulation mode** | No live Oracle deliberation, needs config investigation |
 
 ---
 
@@ -105,7 +104,7 @@ function estimateTimeout(agentType: string, prompt: string): number {
 
 ---
 
-## Test Results Summary
+## Test Results Summary (2026-01-26)
 
 ### Working ✅
 
@@ -117,18 +116,26 @@ function estimateTimeout(agentType: string, prompt: string): number {
 - Background task management
 - Graceful degradation on timeout
 - Operator execution
-- Validator gate
+- Validator gate (SENTINEL)
+- **Squadron wave execution** (3 waves: RECON → Operators → Validator)
+- **Compliance hooks** (3/3 violations caught)
+- **Specialist agents** (SURGEON, SENTINEL, SCRIBE)
+- **Real code changes** (~11 lines across 3 files)
+
+### Partial ⚠️
+
+- Council deliberation (simulation mode, manual synthesis worked)
+- Squadron completion (2/3 operators completed, 1 stuck in spawning)
 
 ### Not Working ❌
 
-- Council deliberation (fails silently)
-- Squadron completion (timeouts)
+- Council SDK live deliberation (BUG-9)
+- Operator spawning race condition (BUG-8)
 
 ### Untested ⬜
 
 - Process cleanup (Ctrl+C)
 - Session isolation
-- Compliance violation hooks
 - Context compaction recovery
 
 ---

@@ -22,6 +22,7 @@
 
 import { analyzeComplexity, type ComplexityAnalysis } from './complexity.js'
 import type { Complexity } from '../types/mission.js'
+import { loadConfig } from '../lib/config.js'
 
 // =============================================================================
 // Types
@@ -68,6 +69,8 @@ export interface TaskRouterInput {
   taskType?: string
   /** Pre-computed complexity analysis (optional) */
   complexity?: ComplexityAnalysis
+  /** Working directory for config loading */
+  cwd?: string
   /** Additional context */
   context?: {
     /** Previous task failures */
@@ -216,18 +219,55 @@ const AGENT_KEYWORDS: Record<RoutableAgent, string[]> = {
   operator: [], // Default - no specific keywords
 }
 
-/** Agent default models */
-const AGENT_MODELS: Record<RoutableAgent, string> = {
-  operator: 'anthropic/claude-sonnet-4-5',
-  'operator-complex': 'anthropic/claude-sonnet-4-5',
-  patcher: 'anthropic/claude-haiku-4',
-  scout: 'anthropic/claude-haiku-4',
-  intel: 'anthropic/claude-sonnet-4-5',
-  strategist: 'openai/gpt-4o',
-  'ui-ops': 'google/gemini-2.0-flash',
-  scribe: 'google/gemini-2.0-flash',
-  optics: 'google/gemini-2.0-flash',
-  qa: 'anthropic/claude-sonnet-4-5',
+/**
+ * Get agent model from config
+ *
+ * Models are loaded from config, with hardcoded fallbacks only if config fails.
+ */
+function getAgentModel(agent: RoutableAgent, cwd?: string): string {
+  try {
+    const config = loadConfig(cwd || process.cwd())
+
+    switch (agent) {
+      case 'operator':
+        return config.operators.defaultModel
+      case 'operator-complex':
+        return config.operators.complexModel
+      case 'patcher':
+        return config.patcher.model
+      case 'scout':
+        return config.support.scout.model
+      case 'intel':
+        return config.support.intel.model
+      case 'strategist':
+        return config.support.strategist.model
+      case 'ui-ops':
+        return config.support.uiOps.model
+      case 'scribe':
+        return config.support.scribe.model
+      case 'optics':
+        return config.support.optics.model
+      case 'qa':
+        return config.support.qa.model
+      default:
+        return config.operators.defaultModel
+    }
+  } catch {
+    // Fallback defaults if config loading fails
+    const FALLBACK_MODELS: Record<RoutableAgent, string> = {
+      operator: 'anthropic/claude-sonnet-4-5',
+      'operator-complex': 'anthropic/claude-sonnet-4-5',
+      patcher: 'anthropic/claude-haiku-4',
+      scout: 'anthropic/claude-haiku-4',
+      intel: 'anthropic/claude-sonnet-4-5',
+      strategist: 'openai/gpt-4o',
+      'ui-ops': 'google/gemini-2.5-flash',
+      scribe: 'google/gemini-2.5-flash',
+      optics: 'google/gemini-2.5-flash',
+      qa: 'anthropic/claude-sonnet-4-5',
+    }
+    return FALLBACK_MODELS[agent]
+  }
 }
 
 /** Agent fallbacks */
@@ -323,7 +363,7 @@ export function routeTask(input: TaskRouterInput): RouteDecision {
 
   return {
     agent: bestAgent,
-    model: AGENT_MODELS[bestAgent],
+    model: getAgentModel(bestAgent, input.cwd),
     reason,
     confidence,
     fallbackAgent: AGENT_FALLBACKS[bestAgent],

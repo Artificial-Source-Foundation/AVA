@@ -83,6 +83,7 @@ export const oracleConfigs: Record<OracleCodename, OracleConfig> = {
   Cipher: {
     name: cipherConfig.name,
     model: cipherConfig.defaultModel,
+    fallbacks: cipherConfig.fallbacks,
     specialty: cipherConfig.specialty,
     enabled: cipherConfig.enabled,
     temperature: cipherConfig.temperature,
@@ -90,6 +91,7 @@ export const oracleConfigs: Record<OracleCodename, OracleConfig> = {
   Vector: {
     name: vectorConfig.name,
     model: vectorConfig.defaultModel,
+    fallbacks: vectorConfig.fallbacks,
     specialty: vectorConfig.specialty,
     enabled: vectorConfig.enabled,
     temperature: vectorConfig.temperature,
@@ -97,6 +99,7 @@ export const oracleConfigs: Record<OracleCodename, OracleConfig> = {
   Prism: {
     name: prismConfig.name,
     model: prismConfig.defaultModel,
+    fallbacks: prismConfig.fallbacks,
     specialty: prismConfig.specialty,
     enabled: prismConfig.enabled,
     temperature: prismConfig.temperature,
@@ -104,6 +107,7 @@ export const oracleConfigs: Record<OracleCodename, OracleConfig> = {
   Apex: {
     name: apexConfig.name,
     model: apexConfig.defaultModel,
+    fallbacks: apexConfig.fallbacks,
     specialty: apexConfig.specialty,
     enabled: apexConfig.enabled,
     temperature: apexConfig.temperature,

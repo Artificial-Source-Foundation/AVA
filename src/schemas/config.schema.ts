@@ -12,6 +12,7 @@ import { DEFAULT_CONFIG } from '../types/config.js'
 // =============================================================================
 
 const modelSchema = z.string().min(1, 'Model name required')
+const fallbacksSchema = z.array(z.string()).default([])
 const temperatureSchema = z.number().min(0).max(2).default(0.7)
 
 // =============================================================================
@@ -20,6 +21,7 @@ const temperatureSchema = z.number().min(0).max(2).default(0.7)
 
 export const commanderConfigSchema = z.object({
   model: modelSchema.default(DEFAULT_CONFIG.commander.model),
+  fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.commander.fallbacks),
   temperature: temperatureSchema.default(DEFAULT_CONFIG.commander.temperature),
   dispatchModel: modelSchema.default(DEFAULT_CONFIG.commander.dispatchModel),
 })
@@ -41,6 +43,7 @@ export const oracleSpecialtySchema = z.enum([
 export const oracleConfigSchema = z.object({
   name: z.string().min(1),
   model: modelSchema,
+  fallbacks: fallbacksSchema.default([]),
   enabled: z.boolean().default(true),
   specialty: oracleSpecialtySchema.default('general'),
   temperature: z.number().min(0).max(2).optional(), // Oracle personality temperature
@@ -63,7 +66,9 @@ export const councilConfigSchema = z.object({
 
 export const operatorConfigSchema = z.object({
   defaultModel: modelSchema.default(DEFAULT_CONFIG.operators.defaultModel),
+  defaultFallbacks: fallbacksSchema.default(DEFAULT_CONFIG.operators.defaultFallbacks),
   complexModel: modelSchema.default(DEFAULT_CONFIG.operators.complexModel),
+  complexFallbacks: fallbacksSchema.default(DEFAULT_CONFIG.operators.complexFallbacks),
   maxParallel: z.number().int().min(1).max(10).default(DEFAULT_CONFIG.operators.maxParallel),
   retryLimit: z.number().int().min(0).max(5).default(DEFAULT_CONFIG.operators.retryLimit),
   canInvokeSupport: z.boolean().default(DEFAULT_CONFIG.operators.canInvokeSupport),
@@ -75,6 +80,7 @@ export const operatorConfigSchema = z.object({
 
 export const validatorConfigSchema = z.object({
   model: modelSchema.default(DEFAULT_CONFIG.validator.model),
+  fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.validator.fallbacks),
   strictMode: z.boolean().default(DEFAULT_CONFIG.validator.strictMode),
   runTests: z.boolean().default(DEFAULT_CONFIG.validator.runTests),
   checkLinting: z.boolean().default(DEFAULT_CONFIG.validator.checkLinting),
@@ -86,6 +92,7 @@ export const validatorConfigSchema = z.object({
 
 export const patcherConfigSchema = z.object({
   model: modelSchema.default(DEFAULT_CONFIG.patcher.model),
+  fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.patcher.fallbacks),
   maxLines: z.number().int().min(1).max(500).default(DEFAULT_CONFIG.patcher.maxLines),
 })
 
@@ -95,6 +102,7 @@ export const patcherConfigSchema = z.object({
 
 export const scoutConfigSchema = z.object({
   model: modelSchema.default(DEFAULT_CONFIG.support.scout.model),
+  fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.support.scout.fallbacks),
   timeoutSeconds: z
     .number()
     .int()
@@ -107,6 +115,7 @@ export const intelSourceSchema = z.enum(['docs', 'github', 'web'])
 
 export const intelConfigSchema = z.object({
   model: modelSchema.default(DEFAULT_CONFIG.support.intel.model),
+  fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.support.intel.fallbacks),
   sources: z.array(intelSourceSchema).default(DEFAULT_CONFIG.support.intel.sources),
 })
 
@@ -114,6 +123,7 @@ export const invokeThresholdSchema = z.enum(['simple', 'moderate', 'complex'])
 
 export const strategistConfigSchema = z.object({
   model: modelSchema.default(DEFAULT_CONFIG.support.strategist.model),
+  fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.support.strategist.fallbacks),
   invokeThreshold: invokeThresholdSchema.default(DEFAULT_CONFIG.support.strategist.invokeThreshold),
 })
 
@@ -121,6 +131,7 @@ export const styleSystemSchema = z.enum(['tailwind', 'css', 'scss', 'styled-comp
 
 export const uiOpsConfigSchema = z.object({
   model: modelSchema.default(DEFAULT_CONFIG.support.uiOps.model),
+  fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.support.uiOps.fallbacks),
   styleSystem: styleSystemSchema.default(DEFAULT_CONFIG.support.uiOps.styleSystem),
 })
 
@@ -128,15 +139,18 @@ export const docFormatSchema = z.enum(['markdown', 'jsdoc', 'tsdoc'])
 
 export const scribeConfigSchema = z.object({
   model: modelSchema.default(DEFAULT_CONFIG.support.scribe.model),
+  fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.support.scribe.fallbacks),
   format: docFormatSchema.default(DEFAULT_CONFIG.support.scribe.format),
 })
 
 export const opticsConfigSchema = z.object({
   model: modelSchema.default(DEFAULT_CONFIG.support.optics.model),
+  fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.support.optics.fallbacks),
 })
 
 export const qaConfigSchema = z.object({
   model: modelSchema.default(DEFAULT_CONFIG.support.qa.model),
+  fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.support.qa.fallbacks),
   frameworkDetect: z.boolean().default(DEFAULT_CONFIG.support.qa.frameworkDetect),
 })
 

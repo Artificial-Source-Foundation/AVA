@@ -110,6 +110,7 @@ export const apexConfig = {
   name: APEX_PROFILE.codename,
   role: APEX_PROFILE.role,
   defaultModel: 'deepseek/deepseek-chat',
+  fallbacks: ['anthropic/claude-sonnet-4-5', 'google/gemini-3-flash-preview'],
   temperature: APEX_PROFILE.temperature,
   specialty: APEX_PROFILE.specialty,
   enabled: true,

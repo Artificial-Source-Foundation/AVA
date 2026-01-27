@@ -17,6 +17,7 @@
 
 import type { RoutableAgent } from './task-router.js'
 import { CONFIDENCE } from '../lib/confidence-levels.js'
+import { loadConfig } from '../lib/config.js'
 
 // =============================================================================
 // Types
@@ -82,212 +83,239 @@ export interface CategoryRouteResult {
 }
 
 // =============================================================================
-// Default Category Configurations
+// Category Configuration Builder
 // =============================================================================
 
-export const DEFAULT_CATEGORY_CONFIGS: Record<TaskCategory, CategoryConfig> = {
-  planning: {
-    name: 'Planning',
-    description: 'Strategic planning, architecture decisions, and design',
-    model: 'anthropic/claude-opus-4-5',
-    temperature: 0.7,
-    preferredAgent: 'operator-complex',
-    fallbackAgents: ['operator', 'strategist'],
-    budgetPriority: 9,
-    keywords: [
-      'plan',
-      'design',
-      'architect',
-      'strategy',
-      'approach',
-      'system design',
-      'blueprint',
-      'roadmap',
-      'structure',
-      'how should',
-      'what approach',
-      'best way to',
-    ],
-  },
-  coding: {
-    name: 'Coding',
-    description: 'General code implementation and development',
-    model: 'anthropic/claude-sonnet-4-5',
-    temperature: 0.3,
-    preferredAgent: 'operator',
-    fallbackAgents: ['operator-complex', 'patcher'],
-    budgetPriority: 7,
-    keywords: [
-      'implement',
-      'create',
-      'build',
-      'add',
-      'write code',
-      'function',
-      'class',
-      'method',
-      'module',
-      'feature',
-      'endpoint',
-      'api',
-      'service',
-      'logic',
-    ],
-  },
-  testing: {
-    name: 'Testing',
-    description: 'Test writing, QA, and verification',
-    model: 'anthropic/claude-sonnet-4-5',
-    temperature: 0.2,
-    preferredAgent: 'qa',
-    fallbackAgents: ['operator'],
-    budgetPriority: 6,
-    keywords: [
-      'test',
-      'spec',
-      'coverage',
-      'jest',
-      'vitest',
-      'playwright',
-      'e2e',
-      'unit test',
-      'integration',
-      'mock',
-      'fixture',
-      'assert',
-      'expect',
-      'describe',
-      'it(',
-      'should',
-    ],
-  },
-  documentation: {
-    name: 'Documentation',
-    description: 'Documentation, comments, and README files',
-    model: 'google/gemini-2.0-flash',
-    temperature: 0.5,
-    preferredAgent: 'scribe',
-    fallbackAgents: ['operator'],
-    budgetPriority: 4,
-    keywords: [
-      'document',
-      'readme',
-      'comment',
-      'jsdoc',
-      'tsdoc',
-      'api doc',
-      'changelog',
-      'guide',
-      'tutorial',
-      'example',
-      'explain',
-      'describe',
-      'write docs',
-    ],
-  },
-  research: {
-    name: 'Research',
-    description: 'Information gathering, lookup, and investigation',
-    model: 'anthropic/claude-sonnet-4-5',
-    temperature: 0.4,
-    preferredAgent: 'intel',
-    fallbackAgents: ['scout', 'strategist'],
-    budgetPriority: 5,
-    keywords: [
-      'research',
-      'find',
-      'search',
-      'lookup',
-      'investigate',
-      'how does',
-      'what is',
-      'learn about',
-      'understand',
-      'best practice',
-      'documentation',
-      'example of',
-    ],
-  },
-  ui: {
-    name: 'UI/Frontend',
-    description: 'User interface and frontend development',
-    model: 'google/gemini-2.0-flash',
-    temperature: 0.4,
-    preferredAgent: 'ui-ops',
-    fallbackAgents: ['operator', 'operator-complex'],
-    budgetPriority: 6,
-    keywords: [
-      'ui',
-      'frontend',
-      'component',
-      'style',
-      'css',
-      'tailwind',
-      'react',
-      'vue',
-      'svelte',
-      'button',
-      'form',
-      'modal',
-      'layout',
-      'responsive',
-      'accessibility',
-      'a11y',
-      'design',
-    ],
-  },
-  refactoring: {
-    name: 'Refactoring',
-    description: 'Code refactoring, cleanup, and optimization',
-    model: 'anthropic/claude-opus-4-5',
-    temperature: 0.2,
-    preferredAgent: 'operator-complex',
-    fallbackAgents: ['operator'],
-    budgetPriority: 8,
-    keywords: [
-      'refactor',
-      'restructure',
-      'reorganize',
-      'clean up',
-      'optimize',
-      'improve',
-      'simplify',
-      'extract',
-      'inline',
-      'rename',
-      'move',
-      'split',
-      'merge',
-      'consolidate',
-    ],
-  },
-  bugfix: {
-    name: 'Bug Fix',
-    description: 'Bug fixing, debugging, and error resolution',
-    model: 'anthropic/claude-sonnet-4-5',
-    temperature: 0.2,
-    preferredAgent: 'operator',
-    fallbackAgents: ['patcher', 'operator-complex'],
-    budgetPriority: 8,
-    keywords: [
-      'fix',
-      'bug',
-      'error',
-      'issue',
-      'broken',
-      'not working',
-      'crash',
-      'exception',
-      'fail',
-      'debug',
-      'troubleshoot',
-      'resolve',
-      'correct',
-      'repair',
-      'patch',
-    ],
-  },
+/** Category keywords (static, don't depend on config) */
+const CATEGORY_KEYWORDS: Record<TaskCategory, string[]> = {
+  planning: [
+    'plan',
+    'design',
+    'architect',
+    'strategy',
+    'approach',
+    'system design',
+    'blueprint',
+    'roadmap',
+    'structure',
+    'how should',
+    'what approach',
+    'best way to',
+  ],
+  coding: [
+    'implement',
+    'create',
+    'build',
+    'add',
+    'write code',
+    'function',
+    'class',
+    'method',
+    'module',
+    'feature',
+    'endpoint',
+    'api',
+    'service',
+    'logic',
+  ],
+  testing: [
+    'test',
+    'spec',
+    'coverage',
+    'jest',
+    'vitest',
+    'playwright',
+    'e2e',
+    'unit test',
+    'integration',
+    'mock',
+    'fixture',
+    'assert',
+    'expect',
+    'describe',
+    'it(',
+    'should',
+  ],
+  documentation: [
+    'document',
+    'readme',
+    'comment',
+    'jsdoc',
+    'tsdoc',
+    'api doc',
+    'changelog',
+    'guide',
+    'tutorial',
+    'example',
+    'explain',
+    'describe',
+    'write docs',
+  ],
+  research: [
+    'research',
+    'find',
+    'search',
+    'lookup',
+    'investigate',
+    'how does',
+    'what is',
+    'learn about',
+    'understand',
+    'best practice',
+    'documentation',
+    'example of',
+  ],
+  ui: [
+    'ui',
+    'frontend',
+    'component',
+    'style',
+    'css',
+    'tailwind',
+    'react',
+    'vue',
+    'svelte',
+    'button',
+    'form',
+    'modal',
+    'layout',
+    'responsive',
+    'accessibility',
+    'a11y',
+    'design',
+  ],
+  refactoring: [
+    'refactor',
+    'restructure',
+    'reorganize',
+    'clean up',
+    'optimize',
+    'improve',
+    'simplify',
+    'extract',
+    'inline',
+    'rename',
+    'move',
+    'split',
+    'merge',
+    'consolidate',
+  ],
+  bugfix: [
+    'fix',
+    'bug',
+    'error',
+    'issue',
+    'broken',
+    'not working',
+    'crash',
+    'exception',
+    'fail',
+    'debug',
+    'troubleshoot',
+    'resolve',
+    'correct',
+    'repair',
+    'patch',
+  ],
 }
+
+/**
+ * Build category configs from loaded configuration.
+ * Models are pulled from config, allowing runtime customization.
+ */
+export function getCategoryConfigs(cwd?: string): Record<TaskCategory, CategoryConfig> {
+  const config = loadConfig(cwd || process.cwd())
+
+  return {
+    planning: {
+      name: 'Planning',
+      description: 'Strategic planning, architecture decisions, and design',
+      model: config.commander.model,
+      temperature: 0.7,
+      preferredAgent: 'operator-complex',
+      fallbackAgents: ['operator', 'strategist'],
+      budgetPriority: 9,
+      keywords: CATEGORY_KEYWORDS.planning,
+    },
+    coding: {
+      name: 'Coding',
+      description: 'General code implementation and development',
+      model: config.operators.defaultModel,
+      temperature: 0.3,
+      preferredAgent: 'operator',
+      fallbackAgents: ['operator-complex', 'patcher'],
+      budgetPriority: 7,
+      keywords: CATEGORY_KEYWORDS.coding,
+    },
+    testing: {
+      name: 'Testing',
+      description: 'Test writing, QA, and verification',
+      model: config.support.qa.model,
+      temperature: 0.2,
+      preferredAgent: 'qa',
+      fallbackAgents: ['operator'],
+      budgetPriority: 6,
+      keywords: CATEGORY_KEYWORDS.testing,
+    },
+    documentation: {
+      name: 'Documentation',
+      description: 'Documentation, comments, and README files',
+      model: config.support.scribe.model,
+      temperature: 0.5,
+      preferredAgent: 'scribe',
+      fallbackAgents: ['operator'],
+      budgetPriority: 4,
+      keywords: CATEGORY_KEYWORDS.documentation,
+    },
+    research: {
+      name: 'Research',
+      description: 'Information gathering, lookup, and investigation',
+      model: config.support.intel.model,
+      temperature: 0.4,
+      preferredAgent: 'intel',
+      fallbackAgents: ['scout', 'strategist'],
+      budgetPriority: 5,
+      keywords: CATEGORY_KEYWORDS.research,
+    },
+    ui: {
+      name: 'UI/Frontend',
+      description: 'User interface and frontend development',
+      model: config.support.uiOps.model,
+      temperature: 0.4,
+      preferredAgent: 'ui-ops',
+      fallbackAgents: ['operator', 'operator-complex'],
+      budgetPriority: 6,
+      keywords: CATEGORY_KEYWORDS.ui,
+    },
+    refactoring: {
+      name: 'Refactoring',
+      description: 'Code refactoring, cleanup, and optimization',
+      model: config.operators.complexModel,
+      temperature: 0.2,
+      preferredAgent: 'operator-complex',
+      fallbackAgents: ['operator'],
+      budgetPriority: 8,
+      keywords: CATEGORY_KEYWORDS.refactoring,
+    },
+    bugfix: {
+      name: 'Bug Fix',
+      description: 'Bug fixing, debugging, and error resolution',
+      model: config.operators.defaultModel,
+      temperature: 0.2,
+      preferredAgent: 'operator',
+      fallbackAgents: ['patcher', 'operator-complex'],
+      budgetPriority: 8,
+      keywords: CATEGORY_KEYWORDS.bugfix,
+    },
+  }
+}
+
+/**
+ * Default category configs (for backwards compatibility).
+ * Uses process.cwd() to load config.
+ * @deprecated Use getCategoryConfigs(cwd) for explicit path control
+ */
+export const DEFAULT_CATEGORY_CONFIGS: Record<TaskCategory, CategoryConfig> = getCategoryConfigs()
 
 // =============================================================================
 // Category Detection
@@ -450,9 +478,11 @@ export function routeToCategory(
  * Merge custom configs with defaults
  */
 function mergeConfigs(
-  customConfigs?: Partial<Record<TaskCategory, Partial<CategoryConfig>>>
+  customConfigs?: Partial<Record<TaskCategory, Partial<CategoryConfig>>>,
+  cwd?: string
 ): Record<TaskCategory, CategoryConfig> {
-  const result = { ...DEFAULT_CATEGORY_CONFIGS }
+  const baseConfigs = cwd ? getCategoryConfigs(cwd) : DEFAULT_CATEGORY_CONFIGS
+  const result = { ...baseConfigs }
 
   if (customConfigs) {
     for (const [category, customConfig] of Object.entries(customConfigs)) {
@@ -477,9 +507,10 @@ function mergeConfigs(
  */
 export function getCategoryConfig(
   category: TaskCategory,
-  customConfigs?: Partial<Record<TaskCategory, Partial<CategoryConfig>>>
+  customConfigs?: Partial<Record<TaskCategory, Partial<CategoryConfig>>>,
+  cwd?: string
 ): CategoryConfig {
-  const configs = mergeConfigs(customConfigs)
+  const configs = mergeConfigs(customConfigs, cwd)
   return configs[category]
 }
 
@@ -487,14 +518,14 @@ export function getCategoryConfig(
  * Get all categories
  */
 export function getAllCategories(): TaskCategory[] {
-  return Object.keys(DEFAULT_CATEGORY_CONFIGS) as TaskCategory[]
+  return Object.keys(CATEGORY_KEYWORDS) as TaskCategory[]
 }
 
 /**
  * Check if a string is a valid category
  */
 export function isValidCategory(value: string): value is TaskCategory {
-  return value in DEFAULT_CATEGORY_CONFIGS
+  return value in CATEGORY_KEYWORDS
 }
 
 // =============================================================================
@@ -528,20 +559,25 @@ export function describeCategoryRoute(result: CategoryRouteResult): string {
 /**
  * Get budget allowance for category (0-1 scale based on priority)
  */
-export function getCategoryBudgetAllowance(category: TaskCategory): number {
-  const config = DEFAULT_CATEGORY_CONFIGS[category]
+export function getCategoryBudgetAllowance(category: TaskCategory, cwd?: string): number {
+  const configs = cwd ? getCategoryConfigs(cwd) : DEFAULT_CATEGORY_CONFIGS
+  const config = configs[category]
   return config.budgetPriority / 10
 }
 
 /**
  * Get temperature range recommendation for category
  */
-export function getCategoryTemperatureRange(category: TaskCategory): {
+export function getCategoryTemperatureRange(
+  category: TaskCategory,
+  cwd?: string
+): {
   min: number
   max: number
   recommended: number
 } {
-  const config = DEFAULT_CATEGORY_CONFIGS[category]
+  const configs = cwd ? getCategoryConfigs(cwd) : DEFAULT_CATEGORY_CONFIGS
+  const config = configs[category]
 
   // Different categories have different acceptable ranges
   const ranges: Record<TaskCategory, { min: number; max: number }> = {

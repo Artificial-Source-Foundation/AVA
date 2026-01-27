@@ -9,6 +9,8 @@
  * - Automatic recovery
  */
 
+import { loadConfig } from './config.js'
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -250,134 +252,65 @@ export const FALLBACK_CHAINS: Record<string, string[]> = {
 // Oracle & Agent Fallback Chains
 // =============================================================================
 
-/**
- * Oracle-specific fallback chains
- *
- * Each oracle has a custom fallback chain based on their specialty:
- * - CIPHER (Architecture) - Claude primary, needs reasoning
- * - VECTOR (Logic) - GPT primary, needs code analysis
- * - PRISM (UI/UX) - Gemini primary, multimodal for UI
- * - APEX (Performance) - DeepSeek primary, efficiency focus
- */
-export const ORACLE_FALLBACKS: Record<string, string[]> = {
-  // CIPHER (Architecture) - prefers Claude for strategic reasoning
-  CIPHER: [
-    'anthropic/claude-sonnet-4-5',
-    'openai/gpt-4o',
-    'google/gemini-2.0-pro',
-  ],
-
-  // VECTOR (Logic) - prefers GPT for code pattern analysis
-  VECTOR: [
-    'anthropic/claude-sonnet-4-5',
-    'google/gemini-2.0-pro',
-    'deepseek/deepseek-chat',
-  ],
-
-  // PRISM (UI/UX) - prefers Gemini for multimodal/visual
-  PRISM: [
-    'anthropic/claude-sonnet-4-5',
-    'openai/gpt-4o',
-    'anthropic/claude-haiku-4',
-  ],
-
-  // APEX (Performance) - prefers DeepSeek for efficiency
-  APEX: [
-    'anthropic/claude-sonnet-4-5',
-    'google/gemini-2.0-flash',
-    'openai/gpt-4o-mini',
-  ],
-}
-
-/**
- * Delta Team agent fallback chains
- *
- * Each agent has a custom fallback chain based on their role:
- * - RECON: Fast reconnaissance (Haiku tier)
- * - SIGINT: Deep research (Sonnet tier)
- * - TACCOM: Tactical advice (GPT primary)
- * - SURGEON: Precision fixes (Haiku tier)
- * - SENTINEL: QA verification (Sonnet tier)
- * - SCRIBE: Documentation (Flash tier)
- * - FACADE: UI operations (Flash tier)
- * - SPECTRE: Vision analysis (multimodal required)
- */
-export const AGENT_FALLBACKS: Record<string, string[]> = {
-  // Fast reconnaissance agents - prefer Haiku/Flash tier
-  RECON: [
-    'anthropic/claude-haiku-4',
-    'google/gemini-2.0-flash',
-    'openai/gpt-4o-mini',
-  ],
-
-  // Research agents - need capability, prefer Sonnet tier
-  SIGINT: [
-    'anthropic/claude-sonnet-4-5',
-    'openai/gpt-4o',
-    'google/gemini-2.0-pro',
-  ],
-
-  // Tactical command - GPT primary for balanced analysis
-  TACCOM: [
-    'openai/gpt-4o',
-    'anthropic/claude-sonnet-4-5',
-    'google/gemini-2.0-pro',
-  ],
-
-  // Surgical precision - fast tier for targeted fixes
-  SURGEON: [
-    'anthropic/claude-haiku-4',
-    'openai/gpt-4o-mini',
-    'google/gemini-2.0-flash',
-  ],
-
-  // QA guardian - needs accuracy, Sonnet tier
-  SENTINEL: [
-    'anthropic/claude-sonnet-4-5',
-    'openai/gpt-4o',
-    'google/gemini-2.0-pro',
-  ],
-
-  // Documentation writer - fast tier for content generation
-  SCRIBE: [
-    'google/gemini-2.0-flash',
-    'anthropic/claude-haiku-4',
-    'openai/gpt-4o-mini',
-  ],
-
-  // UI operations - fast tier with vision capability
-  FACADE: [
-    'google/gemini-2.0-flash',
-    'anthropic/claude-sonnet-4-5',
-    'openai/gpt-4o',
-  ],
-
-  // Vision analysis - multimodal required
-  SPECTRE: [
-    'google/gemini-2.0-flash',
-    'openai/gpt-4o',
-    'anthropic/claude-sonnet-4-5',
-  ],
-}
+// Oracle and Agent fallbacks are loaded dynamically from config
+// See getOracleFallbackChain() and getAgentFallbackChain() below
 
 /**
  * Get fallback chain for an Oracle
  *
+ * Loads fallback configuration from the project config file.
+ *
  * @param oracleName - Oracle codename (CIPHER, VECTOR, PRISM, APEX)
- * @returns Fallback model chain or empty array if unknown
+ * @param cwd - Working directory to load config from (defaults to process.cwd())
+ * @returns Fallback model chain or empty array if unknown/not configured
  */
-export function getOracleFallbackChain(oracleName: string): string[] {
-  return ORACLE_FALLBACKS[oracleName.toUpperCase()] || []
+export function getOracleFallbackChain(oracleName: string, cwd?: string): string[] {
+  try {
+    const config = loadConfig(cwd || process.cwd())
+    const oracle = config.council.members.find(
+      (m) => m.name.toUpperCase() === oracleName.toUpperCase()
+    )
+    return oracle?.fallbacks || []
+  } catch {
+    return []
+  }
 }
 
 /**
  * Get fallback chain for a Delta Team agent
  *
+ * Loads fallback configuration from the project config file.
+ * Maps agent codenames to their config locations:
+ * - RECON -> support.scout
+ * - SIGINT -> support.intel
+ * - TACCOM -> support.strategist
+ * - SURGEON -> patcher
+ * - SENTINEL -> support.qa
+ * - SCRIBE -> support.scribe
+ * - FACADE -> support.uiOps
+ * - SPECTRE -> support.optics
+ *
  * @param agentName - Agent codename (RECON, SIGINT, TACCOM, etc.)
- * @returns Fallback model chain or empty array if unknown
+ * @param cwd - Working directory to load config from (defaults to process.cwd())
+ * @returns Fallback model chain or empty array if unknown/not configured
  */
-export function getAgentFallbackChain(agentName: string): string[] {
-  return AGENT_FALLBACKS[agentName.toUpperCase()] || []
+export function getAgentFallbackChain(agentName: string, cwd?: string): string[] {
+  try {
+    const config = loadConfig(cwd || process.cwd())
+    const agentMap: Record<string, string[] | undefined> = {
+      RECON: (config.support.scout as { fallbacks?: string[] }).fallbacks,
+      SIGINT: (config.support.intel as { fallbacks?: string[] }).fallbacks,
+      TACCOM: (config.support.strategist as { fallbacks?: string[] }).fallbacks,
+      SURGEON: (config.patcher as { fallbacks?: string[] }).fallbacks,
+      SENTINEL: (config.support.qa as { fallbacks?: string[] }).fallbacks,
+      SCRIBE: (config.support.scribe as { fallbacks?: string[] }).fallbacks,
+      FACADE: (config.support.uiOps as { fallbacks?: string[] }).fallbacks,
+      SPECTRE: (config.support.optics as { fallbacks?: string[] }).fallbacks,
+    }
+    return agentMap[agentName.toUpperCase()] || []
+  } catch {
+    return []
+  }
 }
 
 // =============================================================================

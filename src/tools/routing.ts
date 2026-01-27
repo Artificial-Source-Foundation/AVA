@@ -15,6 +15,7 @@ import {
   isValidCategory,
   type TaskCategory,
 } from '../routing/categories.js'
+import { loadConfig } from '../lib/config.js'
 
 // Use the tool's built-in schema
 const s = tool.schema
@@ -79,6 +80,9 @@ Task types and recommended agents:
       const type = args.taskType.toLowerCase()
       const desc = (args.taskDescription || '').toLowerCase()
 
+      // Load config for model lookups
+      const config = loadConfig(process.cwd())
+
       // Routing logic based on task type
       let agent: string
       let model: string
@@ -90,7 +94,7 @@ Task types and recommended agents:
         )
       ) {
         agent = 'ui-ops'
-        model = 'google/gemini-2.0-flash'
+        model = config.support.uiOps.model
         reason = 'Frontend/UI task - UI-Ops specializes in components, styling, and accessibility'
       } else if (
         ['test', 'spec', 'coverage', 'jest', 'vitest', 'playwright'].some(
@@ -98,7 +102,7 @@ Task types and recommended agents:
         )
       ) {
         agent = 'qa'
-        model = 'anthropic/claude-sonnet-4-5'
+        model = config.support.qa.model
         reason = 'Testing task - QA agent writes comprehensive tests'
       } else if (
         ['doc', 'readme', 'api doc', 'comment', 'jsdoc'].some(
@@ -106,7 +110,7 @@ Task types and recommended agents:
         )
       ) {
         agent = 'scribe'
-        model = 'google/gemini-2.0-flash'
+        model = config.support.scribe.model
         reason = 'Documentation task - Scribe writes clear, comprehensive docs'
       } else if (
         ['search', 'find', 'grep', 'locate', 'where'].some(
@@ -114,7 +118,7 @@ Task types and recommended agents:
         )
       ) {
         agent = 'scout'
-        model = 'anthropic/claude-haiku-4'
+        model = config.support.scout.model
         reason = 'Search task - Scout performs fast codebase searches'
       } else if (
         ['research', 'lookup', 'example', 'library', 'package'].some(
@@ -122,7 +126,7 @@ Task types and recommended agents:
         )
       ) {
         agent = 'intel'
-        model = 'anthropic/claude-sonnet-4-5'
+        model = config.support.intel.model
         reason = 'Research task - Intel searches docs, GitHub, and web'
       } else if (
         ['stuck', 'blocked', 'help', 'advice', 'guidance'].some(
@@ -130,7 +134,7 @@ Task types and recommended agents:
         )
       ) {
         agent = 'strategist'
-        model = 'openai/gpt-4o'
+        model = config.support.strategist.model
         reason = 'Guidance task - Strategist provides mid-execution advice'
       } else if (
         ['image', 'screenshot', 'diagram', 'visual'].some(
@@ -138,11 +142,11 @@ Task types and recommended agents:
         )
       ) {
         agent = 'optics'
-        model = 'google/gemini-2.0-flash'
+        model = config.support.optics.model
         reason = 'Visual task - Optics handles images and diagrams'
       } else {
         agent = 'operator'
-        model = 'anthropic/claude-sonnet-4-5'
+        model = config.operators.defaultModel
         reason = 'General coding task - Operator handles implementation'
       }
 

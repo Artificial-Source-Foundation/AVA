@@ -103,6 +103,7 @@ export const prismConfig = {
   name: PRISM_PROFILE.codename,
   role: PRISM_PROFILE.role,
   defaultModel: 'google/gemini-2.0-flash',
+  fallbacks: ['anthropic/claude-sonnet-4-5', 'openai/gpt-5.2-codex'],
   temperature: PRISM_PROFILE.temperature,
   specialty: PRISM_PROFILE.specialty,
   enabled: true,

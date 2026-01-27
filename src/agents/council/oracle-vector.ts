@@ -103,6 +103,7 @@ export const vectorConfig = {
   name: VECTOR_PROFILE.codename,
   role: VECTOR_PROFILE.role,
   defaultModel: 'openai/gpt-4o',
+  fallbacks: ['anthropic/claude-opus-4-5', 'google/gemini-3-pro-preview'],
   temperature: VECTOR_PROFILE.temperature,
   specialty: VECTOR_PROFILE.specialty,
   enabled: true,

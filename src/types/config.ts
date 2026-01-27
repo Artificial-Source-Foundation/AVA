@@ -14,6 +14,8 @@
 export interface CommanderConfig {
   /** Model for planning phase */
   model: string
+  /** Fallback models if primary fails */
+  fallbacks: string[]
   /** Temperature for planning (0-1) */
   temperature: number
   /** Model for dispatch/execution coordination */
@@ -31,6 +33,8 @@ export interface OracleConfig {
   name: string
   /** Model to use (user configurable - any model provider) */
   model: string
+  /** Fallback models if primary fails */
+  fallbacks: string[]
   /** Whether this oracle is enabled */
   enabled: boolean
   /** Specialty area */
@@ -65,8 +69,12 @@ export interface CouncilConfig {
 export interface OperatorConfig {
   /** Default model for operators */
   defaultModel: string
+  /** Fallback models for default model */
+  defaultFallbacks: string[]
   /** Model for complex tasks */
   complexModel: string
+  /** Fallback models for complex model */
+  complexFallbacks: string[]
   /** Maximum parallel operators */
   maxParallel: number
   /** Maximum retry attempts */
@@ -82,6 +90,8 @@ export interface OperatorConfig {
 export interface ValidatorConfig {
   /** Model for validation */
   model: string
+  /** Fallback models if primary fails */
+  fallbacks: string[]
   /** Strict mode - more thorough checking */
   strictMode: boolean
   /** Run tests as part of validation */
@@ -97,6 +107,8 @@ export interface ValidatorConfig {
 export interface PatcherConfig {
   /** Model for quick patches */
   model: string
+  /** Fallback models if primary fails */
+  fallbacks: string[]
   /** Maximum lines patcher can change */
   maxLines: number
 }
@@ -107,35 +119,42 @@ export interface PatcherConfig {
 
 export interface ScoutConfig {
   model: string
+  fallbacks: string[]
   timeoutSeconds: number
 }
 
 export interface IntelConfig {
   model: string
+  fallbacks: string[]
   sources: ('docs' | 'github' | 'web')[]
 }
 
 export interface StrategistConfig {
   model: string
+  fallbacks: string[]
   invokeThreshold: 'simple' | 'moderate' | 'complex'
 }
 
 export interface UiOpsConfig {
   model: string
+  fallbacks: string[]
   styleSystem: 'tailwind' | 'css' | 'scss' | 'styled-components'
 }
 
 export interface ScribeConfig {
   model: string
+  fallbacks: string[]
   format: 'markdown' | 'jsdoc' | 'tsdoc'
 }
 
 export interface OpticsConfig {
   model: string
+  fallbacks: string[]
 }
 
 export interface QaConfig {
   model: string
+  fallbacks: string[]
   frameworkDetect: boolean
 }
 
@@ -271,6 +290,7 @@ export interface Delta9Config {
 export const DEFAULT_CONFIG: Delta9Config = {
   commander: {
     model: 'anthropic/claude-opus-4-5',
+    fallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-pro-preview'],
     temperature: 0.7,
     dispatchModel: 'anthropic/claude-sonnet-4-5',
   },
@@ -283,6 +303,7 @@ export const DEFAULT_CONFIG: Delta9Config = {
       {
         name: 'Cipher',
         model: 'anthropic/claude-opus-4-5',
+        fallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-pro-preview'],
         enabled: true,
         specialty: 'architecture',
         temperature: 0.2, // Decisive, low variance
@@ -290,6 +311,7 @@ export const DEFAULT_CONFIG: Delta9Config = {
       {
         name: 'Vector',
         model: 'openai/gpt-5.2-codex',
+        fallbacks: ['anthropic/claude-opus-4-5', 'google/gemini-3-pro-preview'],
         enabled: true,
         specialty: 'logic',
         temperature: 0.4, // Methodical, balanced
@@ -297,6 +319,7 @@ export const DEFAULT_CONFIG: Delta9Config = {
       {
         name: 'Prism',
         model: 'google/gemini-3-flash-preview',
+        fallbacks: ['anthropic/claude-sonnet-4-5', 'openai/gpt-5.2-codex'],
         enabled: true,
         specialty: 'ui',
         temperature: 0.6, // Creative, higher variance
@@ -304,6 +327,7 @@ export const DEFAULT_CONFIG: Delta9Config = {
       {
         name: 'Apex',
         model: 'openrouter/deepseek/deepseek-v3.2',
+        fallbacks: ['anthropic/claude-sonnet-4-5', 'google/gemini-3-flash-preview'],
         enabled: true,
         specialty: 'performance',
         temperature: 0.3, // Precise, analytical
@@ -316,47 +340,58 @@ export const DEFAULT_CONFIG: Delta9Config = {
   },
   operators: {
     defaultModel: 'anthropic/claude-sonnet-4-5',
+    defaultFallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-flash-preview'],
     complexModel: 'anthropic/claude-opus-4-5',
+    complexFallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-pro-preview'],
     maxParallel: 3,
     retryLimit: 2,
     canInvokeSupport: true,
   },
   validator: {
     model: 'anthropic/claude-haiku-4-5',
+    fallbacks: ['openai/gpt-4o-mini', 'google/gemini-3-flash-preview'],
     strictMode: false,
     runTests: true,
     checkLinting: true,
   },
   patcher: {
     model: 'anthropic/claude-haiku-4-5',
+    fallbacks: ['openai/gpt-4o-mini', 'google/gemini-3-flash-preview'],
     maxLines: 50,
   },
   support: {
     scout: {
       model: 'openrouter/z-ai/glm-4.6',
+      fallbacks: ['anthropic/claude-haiku-4-5', 'google/gemini-3-flash-preview'],
       timeoutSeconds: 30,
     },
     intel: {
       model: 'google/gemini-3-pro-preview',
+      fallbacks: ['anthropic/claude-sonnet-4-5', 'openai/gpt-5.2-codex'],
       sources: ['docs', 'github', 'web'],
     },
     strategist: {
       model: 'openai/gpt-5.2-codex',
+      fallbacks: ['anthropic/claude-opus-4-5', 'google/gemini-3-pro-preview'],
       invokeThreshold: 'complex',
     },
     uiOps: {
       model: 'google/gemini-3-flash-preview',
+      fallbacks: ['anthropic/claude-sonnet-4-5', 'openai/gpt-5.2-codex'],
       styleSystem: 'tailwind',
     },
     scribe: {
       model: 'google/gemini-3-flash-preview',
+      fallbacks: ['anthropic/claude-haiku-4-5', 'openai/gpt-4o-mini'],
       format: 'markdown',
     },
     optics: {
       model: 'google/gemini-3-flash-preview',
+      fallbacks: ['anthropic/claude-haiku-4-5', 'openai/gpt-4o-mini'],
     },
     qa: {
       model: 'anthropic/claude-sonnet-4-5',
+      fallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-flash-preview'],
       frameworkDetect: true,
     },
   },

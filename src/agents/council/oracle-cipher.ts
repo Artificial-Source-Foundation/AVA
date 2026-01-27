@@ -100,6 +100,7 @@ export const cipherConfig = {
   name: CIPHER_PROFILE.codename,
   role: CIPHER_PROFILE.role,
   defaultModel: 'anthropic/claude-opus-4-5',
+  fallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-pro-preview'],
   temperature: CIPHER_PROFILE.temperature,
   specialty: CIPHER_PROFILE.specialty,
   enabled: true,

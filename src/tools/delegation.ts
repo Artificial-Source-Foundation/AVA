@@ -21,17 +21,56 @@ const s = tool.schema
 // Types
 // =============================================================================
 
+/**
+ * Agent types accepted by delegate_task.
+ * Includes both registered names and common aliases.
+ */
 export type AgentType =
+  // Core agents (registered)
   | 'operator'
-  | 'operator_complex'
   | 'validator'
-  | 'validator_strict'
-  | 'explorer'
+  // Support agents - registered names (config keys)
   | 'scout'
   | 'intel'
-  | 'ui_ops'
-  | 'scribe'
+  | 'strategist'
+  | 'patcher'
   | 'qa'
+  | 'scribe'
+  | 'uiOps'
+  | 'optics'
+  // Council agents
+  | 'cipher'
+  | 'vector'
+  | 'prism'
+  | 'apex'
+  // Aliases (resolved to registered names)
+  | 'operator_complex'   // → operator
+  | 'validator_strict'   // → validator
+  | 'explorer'           // → scout
+  | 'ui_ops'             // → uiOps
+
+/**
+ * Map aliases to registered agent names (BUG-12 fix)
+ *
+ * Allows Commander to use intuitive names while ensuring
+ * delegate_task routes to properly registered agents.
+ */
+const AGENT_ALIASES: Record<string, string> = {
+  // Snake_case to camelCase
+  'ui_ops': 'uiOps',
+  'operator_complex': 'operator',    // Complex tasks go to operator (model selection handles complexity)
+  'validator_strict': 'validator',   // Strict mode handled by validator config
+  // Semantic aliases
+  'explorer': 'scout',               // Explorer is really scout/RECON
+}
+
+/**
+ * Resolve agent type to registered name.
+ * Returns original if no alias exists.
+ */
+export function resolveAgentType(agentType: string): string {
+  return AGENT_ALIASES[agentType] || agentType
+}
 
 // =============================================================================
 // Tool Definitions
@@ -88,19 +127,31 @@ export function createDelegationTools(
       prompt: s.string().describe('Task prompt describing what the agent should do'),
       agent: s
         .enum([
+          // Core agents
           'operator',
-          'operator_complex',
           'validator',
-          'validator_strict',
-          'explorer',
+          // Support agents (registered names)
           'scout',
           'intel',
-          'ui_ops',
-          'scribe',
+          'strategist',
+          'patcher',
           'qa',
+          'scribe',
+          'uiOps',
+          'optics',
+          // Council agents
+          'cipher',
+          'vector',
+          'prism',
+          'apex',
+          // Aliases (resolved to registered names)
+          'operator_complex',
+          'validator_strict',
+          'explorer',
+          'ui_ops',
         ])
         .optional()
-        .describe('Agent type (default: operator)'),
+        .describe('Agent type (default: operator). Aliases: ui_ops→uiOps, explorer→scout, operator_complex→operator'),
       run_in_background: s
         .boolean()
         .optional()
@@ -117,7 +168,9 @@ export function createDelegationTools(
     },
 
     async execute(args, ctx) {
-      const agentType = args.agent || 'operator'
+      // Resolve agent aliases to registered names (BUG-12 fix)
+      const requestedAgent = args.agent || 'operator'
+      const agentType = resolveAgentType(requestedAgent)
       const mission = state.getMission()
 
       // Build prompt with context
@@ -166,6 +219,11 @@ export function createDelegationTools(
         // Extract session ID for Ctrl+X navigation
         const parentSessionId = extractSessionId(ctx)
 
+        // Mark mission task as in_progress (BUG-14 fix)
+        if (args.taskId && mission) {
+          state.startTask(args.taskId, agentType)
+        }
+
         const bgTaskId = await manager.launch({
           prompt: fullPrompt,
           agent: agentType,
@@ -209,6 +267,11 @@ export function createDelegationTools(
 
       // Synchronous execution
       try {
+        // Mark mission task as in_progress (BUG-14 fix)
+        if (args.taskId && mission) {
+          state.startTask(args.taskId, agentType)
+        }
+
         const result = await manager.executeSync({
           prompt: fullPrompt,
           agent: agentType,

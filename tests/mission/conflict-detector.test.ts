@@ -155,6 +155,48 @@ describe('checkTaskConflicts', () => {
     const result = checkTaskConflicts(newTask, existingTasks)
     expect(result.hasConflicts).toBe(false)
   })
+
+  it('should not detect self-conflict when re-dispatching same task (BUG-13)', () => {
+    // BUG-13: dispatch_task was detecting conflicts with itself
+    // when the task was already in existingTasks
+    const taskId = 'task_123'
+    const files = ['src/index.ts', 'src/utils.ts']
+
+    const existingTasks = [
+      createTask(taskId, files, undefined, 'pending'),
+    ]
+
+    const result = checkTaskConflicts(
+      { id: taskId, files },
+      existingTasks
+    )
+
+    // Should NOT detect conflict with itself
+    expect(result.hasConflicts).toBe(false)
+    expect(result.conflicts).toHaveLength(0)
+  })
+
+  it('should still detect conflicts with other tasks when re-dispatching (BUG-13)', () => {
+    // Ensure fix doesn't break legitimate conflict detection
+    const taskId = 'task_123'
+    const files = ['src/shared.ts']
+
+    const existingTasks = [
+      createTask(taskId, files, undefined, 'pending'),
+      createTask('other_task', files, undefined, 'in_progress'),
+    ]
+
+    const result = checkTaskConflicts(
+      { id: taskId, files },
+      existingTasks
+    )
+
+    // Should detect conflict with other_task, but NOT with itself
+    expect(result.hasConflicts).toBe(true)
+    expect(result.conflicts).toHaveLength(1)
+    expect(result.conflicts[0].tasks).toContain('other_task')
+    expect(result.conflicts[0].tasks).toContain(taskId)
+  })
 })
 
 describe('formatConflicts', () => {

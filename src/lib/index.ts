@@ -349,8 +349,6 @@ export {
 export {
   MODEL_REGISTRY,
   FALLBACK_CHAINS,
-  ORACLE_FALLBACKS,
-  AGENT_FALLBACKS,
   FallbackChainManager,
   getFallbackManager,
   resetFallbackManager,
@@ -517,3 +515,13 @@ export {
   type SanitizeResult,
   type SanitizerConfig,
 } from './input-sanitizer.js'
+
+// Agent Fallback Manager (BUG-16)
+export {
+  AgentFallbackManager,
+  getAgentFallbackManager,
+  resetAgentFallbackManager,
+  type CircuitState,
+  type AgentHealth,
+  type FallbackResult,
+} from './agent-fallback.js'

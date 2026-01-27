@@ -139,9 +139,10 @@ export function checkTaskConflicts(
     filesReadonly: newTask.filesReadonly,
   }
 
-  // Only check against active existing tasks
+  // Only check against active existing tasks, excluding the task being checked
+  // This prevents false self-conflict detection when re-dispatching a task (BUG-13 fix)
   const activeTasks = existingTasks.filter(
-    (t) => t.status === 'in_progress' || t.status === 'pending'
+    (t) => (t.status === 'in_progress' || t.status === 'pending') && t.id !== newTask.id
   )
 
   return detectFileConflicts([syntheticTask, ...activeTasks])

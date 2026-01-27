@@ -54,7 +54,23 @@
 | ID | Issue | Notes |
 |----|-------|-------|
 | BUG-8 | **Operator stuck in "spawning" state** | Race condition in squadron Wave 2 |
-| BUG-9 | **Council SDK in simulation mode** | No live Oracle deliberation, needs config investigation |
+| BUG-9 | **Council SDK in simulation mode** | **ROOT CAUSE FOUND** - see below |
+
+### BUG-9 Root Cause (Council Simulation Mode)
+
+**Problem:** Oracle invocation functions never receive the OpenCodeClient.
+
+**Chain of failure:**
+```
+src/tools/council.ts:56     → conveneCouncil(state, cwd, {...})  ❌ No client
+src/orchestration/index.ts:162 → invokeOraclesParallel(oracles, context)  ❌ No client
+src/orchestration/oracle.ts:261 → if (!client) return simulation  ❌ Falls back
+```
+
+**Fix locations:**
+1. `src/tools/council.ts` - `createCouncilTools(state, cwd, client)` accept client
+2. `src/orchestration/index.ts` - Pass client to `invokeOraclesParallel/Sequential`
+3. `src/index.ts` - Wire up client when creating council tools
 
 ---
 

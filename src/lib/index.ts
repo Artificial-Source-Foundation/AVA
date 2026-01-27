@@ -117,20 +117,6 @@ export {
   type TaskComplexity,
 } from './models.js'
 
-// Budget
-export {
-  BudgetManager,
-  createBudgetManager,
-  formatBudget,
-  describeBudgetStatus,
-  HardBudgetLimitError,
-  MODEL_COSTS,
-  type BudgetConfig,
-  type BudgetStatus,
-  type BudgetCheckResult,
-  type AgentCategory,
-} from './budget.js'
-
 // Rate Limiter
 export {
   RateLimiter,

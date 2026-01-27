@@ -18,7 +18,6 @@ import { createDiagnosticsTools, type DiagnosticsTools, setPluginStartTime } fro
 import { createRoutingTools, type RoutingTools } from './routing.js'
 import { createKnowledgeTools } from './knowledge.js'
 import { createCheckpointTools, type CheckpointTools } from './checkpoint.js'
-import { createBudgetTools, type BudgetTools } from './budget.js'
 import { createSkillTools } from './skills.js'
 import { createLockTools } from './locks.js'
 import { createMessagingTools } from './messaging.js'
@@ -46,7 +45,6 @@ export { createDiagnosticsTools, type DiagnosticsTools, setPluginStartTime } fro
 export { createRoutingTools, type RoutingTools } from './routing.js'
 export { createKnowledgeTools } from './knowledge.js'
 export { createCheckpointTools, type CheckpointTools } from './checkpoint.js'
-export { createBudgetTools, type BudgetTools } from './budget.js'
 export { createSkillTools } from './skills.js'
 export type { SkillToolsConfig } from './skills.js'
 export { createLockTools } from './locks.js'
@@ -167,7 +165,6 @@ export type Delta9Tools = MissionTools &
   RoutingTools &
   KnowledgeTools &
   CheckpointTools &
-  BudgetTools &
   SkillTools &
   LockTools &
   MessagingTools &
@@ -208,7 +205,6 @@ export function createDelta9Tools(
     ...createRoutingTools(),
     ...createKnowledgeTools(),
     ...createCheckpointTools(projectCwd),
-    ...createBudgetTools(projectCwd),
     ...createSkillTools({ cwd: projectCwd }),
     ...createLockTools(),
     ...createMessagingTools(),
@@ -292,13 +288,6 @@ export const CHECKPOINT_TOOL_NAMES = [
   'checkpoint_get',
 ] as const
 
-export const BUDGET_TOOL_NAMES = [
-  'budget_status',
-  'budget_set_limit',
-  'budget_check',
-  'budget_breakdown',
-] as const
-
 export const SKILL_TOOL_NAMES = [
   'list_skills',
   'use_skill',
@@ -364,7 +353,6 @@ export const ALL_TOOL_NAMES = [
   ...ROUTING_TOOL_NAMES,
   ...KNOWLEDGE_TOOL_NAMES,
   ...CHECKPOINT_TOOL_NAMES,
-  ...BUDGET_TOOL_NAMES,
   ...SKILL_TOOL_NAMES,
   ...LOCK_TOOL_NAMES,
   ...MESSAGING_TOOL_NAMES,

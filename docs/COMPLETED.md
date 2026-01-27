@@ -165,11 +165,38 @@ Implemented from reference plugins (oh-my-opencode, swarm-plugin, etc.):
 
 ---
 
+## Sprint 4-5: Test 2 Bug Fixes ✅
+
+> Live testing revealed task delegation worked, but tracking broke down
+
+### Critical Bugs Fixed (Sprint 4)
+- [x] **BUG-12**: Agent name mismatch - Added `AGENT_ALIASES` map (`ui_ops` → `uiOps`)
+- [x] **BUG-13**: Self-conflict detection - Excluded task from its own conflict check
+- [x] **BUG-14**: Mission sync - Added `state.startTask()` in delegate_task
+- [x] **BUG-15**: task_complete fails - Auto-fixed by BUG-14
+- [x] **BUG-16**: Agent failures - Added circuit breaker pattern (`agent-fallback.ts`)
+
+### Medium Bugs Fixed (Sprint 5)
+- [x] **BUG-10**: Commander recon - Added `COMMANDER_DELEGATE_RECON` compliance rule
+- [x] **BUG-11**: Background visibility - Marked EXTERNAL (OpenCode platform issue)
+
+### Cleanup Completed
+- [x] **CLEANUP-1**: Removed budget tracking (611 lines deleted)
+  - Deleted `src/lib/budget.ts` (380 lines)
+  - Deleted `src/tools/budget.ts` (231 lines)
+  - Removed 4 tools: `budget_status`, `budget_set_limit`, `budget_check`, `budget_breakdown`
+
+### Config Refactor
+- [x] All models now config-driven (removed hardcoded fallbacks)
+- [x] `getOracleFallbackChain()` and `getAgentFallbackChain()` read from config
+
+---
+
 ## Stats
 
-- **Tests**: 1165+ passing
+- **Tests**: 1266 passing
 - **Exports**: 183 from lib
-- **Tools**: 70+
+- **Tools**: 66+ (removed 4 budget tools)
 - **Agents**: 19
 
 ---

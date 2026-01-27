@@ -12,6 +12,10 @@
 import { tool, type ToolDefinition } from '@opencode-ai/plugin'
 import { exec } from 'node:child_process'
 import { promisify } from 'node:util'
+import { getNamedLogger } from '../lib/logger.js'
+
+const log = getNamedLogger('skills')
+
 import {
   discoverSkills,
   resolveSkill,
@@ -340,7 +344,7 @@ export async function loadSkillsForAgent(
 
     if (!skill) {
       // Log warning but continue with other skills
-      console.warn(`[Delta9] Skill "${skillName}" not found, skipping`)
+      log.warn(`Skill "${skillName}" not found, skipping`)
       continue
     }
 
@@ -349,7 +353,7 @@ export async function loadSkillsForAgent(
     if (result.success && result.content) {
       contents.push(result.content)
     } else {
-      console.warn(`[Delta9] Failed to load skill "${skillName}": ${result.error}`)
+      log.warn(`Failed to load skill "${skillName}": ${result.error}`)
     }
   }
 

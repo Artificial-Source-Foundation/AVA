@@ -7,6 +7,9 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { nanoid } from 'nanoid'
+import { getNamedLogger } from '../lib/logger.js'
+
+const log = getNamedLogger('mission')
 import type {
   Mission,
   Objective,
@@ -109,7 +112,7 @@ export class MissionState {
       this.mission = validateMission(data)
       return this.mission
     } catch (error) {
-      console.error('Failed to load mission:', error)
+      log.error(`Failed to load mission: ${error instanceof Error ? error.message : String(error)}`)
       this.mission = null
       return null
     }

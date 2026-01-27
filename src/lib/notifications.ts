@@ -13,6 +13,10 @@
  */
 
 import { getEventStore } from '../events/store.js'
+import { getNamedLogger } from './logger.js'
+
+// Logger for notifications (silent in TUI mode)
+const log = getNamedLogger('notifications')
 
 // =============================================================================
 // Types
@@ -135,7 +139,7 @@ class NotificationStore {
       try {
         listener(notification)
       } catch (error) {
-        console.error('[delta9] [notifications] Listener error:', error)
+        log.error('[notifications] Listener error', { error: String(error) })
       }
     }
 
@@ -187,7 +191,7 @@ class NotificationStore {
       try {
         listener(notification)
       } catch (error) {
-        console.error('[delta9] [notifications] Listener error:', error)
+        log.error('[notifications] Listener error', { error: String(error) })
       }
     }
 
@@ -422,4 +426,145 @@ export const councilNotifications = {
       message: 'Oracles disagree - Commander will resolve',
     })
   },
+}
+
+// =============================================================================
+// Squadron Notifications
+// =============================================================================
+
+/**
+ * Squadron-specific notification helpers
+ */
+export const squadronNotifications = {
+  started(squadronAlias: string, waveCount: number, agentCount: number): Notification {
+    return store.info(`Squadron "${squadronAlias}" Launched`, {
+      message: `${waveCount} waves, ${agentCount} agents`,
+    })
+  },
+
+  waveStarted(squadronAlias: string, waveNumber: number, agentCount: number): Notification {
+    return store.info(`Wave ${waveNumber} Started`, {
+      message: `${agentCount} agents executing`,
+      agent: squadronAlias,
+    })
+  },
+
+  waveCompleted(squadronAlias: string, waveNumber: number): Notification {
+    return store.success(`Wave ${waveNumber} Complete`, {
+      agent: squadronAlias,
+    })
+  },
+
+  waveFailed(squadronAlias: string, waveNumber: number, reason: string): Notification {
+    return store.error(`Wave ${waveNumber} Failed`, {
+      message: reason,
+      agent: squadronAlias,
+    })
+  },
+
+  completed(squadronAlias: string): Notification {
+    return store.success(`Squadron "${squadronAlias}" Complete`, {
+      message: 'All waves completed successfully',
+    })
+  },
+
+  failed(squadronAlias: string, reason: string): Notification {
+    return store.error(`Squadron "${squadronAlias}" Failed`, {
+      message: reason,
+    })
+  },
+
+  cancelled(squadronAlias: string): Notification {
+    return store.warning(`Squadron "${squadronAlias}" Cancelled`, {})
+  },
+}
+
+// =============================================================================
+// SDK Toast Integration
+// =============================================================================
+
+/**
+ * OpenCode SDK client type for toast display
+ */
+export interface ToastClient {
+  tui?: {
+    showToast: (opts: {
+      body: {
+        title: string
+        message: string
+        variant?: 'info' | 'success' | 'warning' | 'error'
+        duration?: number
+      }
+    }) => Promise<void>
+  }
+}
+
+/**
+ * Show a toast notification via the OpenCode SDK
+ *
+ * Falls back to internal notification if SDK not available.
+ */
+export async function showToast(
+  client: ToastClient | undefined,
+  options: {
+    title: string
+    message: string
+    variant?: 'info' | 'success' | 'warning' | 'error'
+    duration?: number
+  }
+): Promise<void> {
+  // Try SDK toast first
+  if (client?.tui?.showToast) {
+    try {
+      await client.tui.showToast({
+        body: {
+          title: options.title,
+          message: options.message,
+          variant: options.variant || 'info',
+          duration: options.duration || 5000,
+        },
+      })
+      return
+    } catch (error) {
+      log.debug('[notifications] SDK toast failed, falling back to internal', {
+        error: String(error),
+      })
+    }
+  }
+
+  // Fallback to internal notification
+  const type: NotificationType =
+    options.variant === 'success'
+      ? 'success'
+      : options.variant === 'warning'
+        ? 'warning'
+        : options.variant === 'error'
+          ? 'error'
+          : 'info'
+
+  store.notify(type, options.title, { message: options.message, duration: options.duration })
+}
+
+/**
+ * Show squadron status toast
+ */
+export async function showSquadronToast(
+  client: ToastClient | undefined,
+  options: {
+    squadronAlias: string
+    title: string
+    agents: Array<{ name: string; status: string; duration?: string }>
+    variant?: 'info' | 'success' | 'warning' | 'error'
+  }
+): Promise<void> {
+  const message = options.agents
+    .map((a) => `${a.name}: ${a.status}${a.duration ? ` (${a.duration})` : ''}`)
+    .join('\n')
+
+  await showToast(client, {
+    title: options.title,
+    message,
+    variant: options.variant || 'info',
+    duration: 5000,
+  })
 }

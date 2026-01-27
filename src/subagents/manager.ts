@@ -128,11 +128,12 @@ export class SubagentManager {
       prompt = `Context:\n${input.context}\n\nTask:\n${input.prompt}`
     }
 
-    // Launch via BackgroundManager
+    // Launch via BackgroundManager with parent session for Ctrl+X navigation
     const taskId = await manager.launch({
       prompt,
       agent: input.agentType || 'operator',
       priority: 0, // Normal priority for subagents
+      parentSessionId: input.parentSessionId,
     })
 
     // Get session ID if available

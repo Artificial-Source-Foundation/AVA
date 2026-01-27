@@ -22,6 +22,9 @@ import type {
   PluginCommand,
 } from './types.js'
 import { pluginMetadataSchema } from './types.js'
+import { getNamedLogger } from '../lib/logger.js'
+
+const log = getNamedLogger('plugins')
 
 // =============================================================================
 // Plugin Loader
@@ -407,7 +410,9 @@ export class PluginLoader {
         }
       } catch (error) {
         // Log but continue
-        console.error(`Hook error in plugin ${pluginId}:`, error)
+        log.error(
+          `Hook error in plugin ${pluginId}: ${error instanceof Error ? error.message : String(error)}`
+        )
       }
     }
 
@@ -472,7 +477,9 @@ export class PluginLoader {
   private createServices(pluginId: string): PluginServices {
     return {
       log: (level, message, data) => {
-        console.log(`[${pluginId}] [${level.toUpperCase()}] ${message}`, data || '')
+        // Use the logger based on level
+        const logFn = level === 'error' ? log.error : level === 'warn' ? log.warn : log.info
+        logFn(`[${pluginId}] ${message}${data ? ' ' + JSON.stringify(data) : ''}`)
       },
 
       getConfig: <T>(key: string) => {

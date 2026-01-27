@@ -648,6 +648,64 @@ tests/knowledge/
 
 ---
 
+## Future Enhancements
+
+> Ideas for post-launch improvements
+
+### Squadron Pattern (Batch Agent Execution)
+
+Intelligent wave-based agent dispatch:
+
+| Wave | Agents | Purpose |
+|------|--------|---------|
+| 1 | Scout + Intel | Parallel reconnaissance (search + research) |
+| 2 | Operators | Parallel implementation based on recon findings |
+| 3 | Validator | Verify all work meets acceptance criteria |
+
+**Benefits:**
+- Commander waits for wave completion before dispatching next
+- Reduces context bloat (only inject relevant recon findings)
+- Allows parallel execution within waves
+
+**Implementation:**
+```typescript
+interface Squadron {
+  id: string
+  wave: number
+  agents: string[]
+  status: 'pending' | 'running' | 'complete'
+  results: Map<string, SubagentOutput>
+}
+
+// Commander orchestrates squadrons
+async function executeSquadrons(squadrons: Squadron[]) {
+  for (const squadron of squadrons) {
+    // Dispatch all agents in wave in parallel
+    const promises = squadron.agents.map(a => spawnSubagent(a, context))
+    // Wait for all to complete
+    await Promise.all(promises)
+    // Inject results into next wave's context
+  }
+}
+```
+
+### Agent Status Overlay
+
+A TUI overlay to view running background agents (inspired by oh-my-opencode's Ctrl+X):
+
+**Potential approaches:**
+1. `delta9 agents` CLI command (works today)
+2. Enhanced dashboard auto-refresh
+3. OpenCode platform keybinding support (requires upstream)
+
+### Observability CLI Enhancements
+
+- `delta9 query --preset=errors` - Query recent errors
+- `delta9 replay <mission-id>` - Replay events with timing
+- `delta9 export --format csv` - Export events for analysis
+
+---
+
 ## Notes
 
 ### Dependencies

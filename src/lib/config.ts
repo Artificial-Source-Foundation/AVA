@@ -17,6 +17,9 @@ import {
   globalConfigExists,
   projectConfigExists,
 } from './paths.js'
+import { getNamedLogger } from './logger.js'
+
+const log = getNamedLogger('config')
 
 // =============================================================================
 // Configuration Cache
@@ -75,7 +78,9 @@ function loadJsonFile<T>(path: string): T | null {
     const content = readFileSync(path, 'utf-8')
     return JSON.parse(content) as T
   } catch (error) {
-    console.error(`Failed to load config from ${path}:`, error)
+    log.error(
+      `Failed to load config from ${path}: ${error instanceof Error ? error.message : String(error)}`
+    )
     return null
   }
 }
@@ -125,7 +130,7 @@ export function loadConfig(
   if (validate) {
     const result = delta9ConfigSchema.safeParse(config)
     if (!result.success) {
-      console.error('Configuration validation failed:', result.error.format())
+      log.error(`Configuration validation failed: ${JSON.stringify(result.error.format())}`)
       // Return defaults on validation failure
       config = { ...DEFAULT_CONFIG }
     } else {

@@ -12,6 +12,9 @@ import { execSync } from 'node:child_process'
 import { nanoid } from 'nanoid'
 import { getCheckpointsDir, ensureCheckpointsDir } from '../lib/paths.js'
 import { appendHistory } from './history.js'
+import { getNamedLogger } from '../lib/logger.js'
+
+const log = getNamedLogger('checkpoints')
 
 // =============================================================================
 // Types
@@ -177,7 +180,9 @@ export class CheckpointManager {
 
       return this.getCurrentCommit()
     } catch (error) {
-      console.error('Failed to create git commit:', error)
+      log.error(
+        `Failed to create git commit: ${error instanceof Error ? error.message : String(error)}`
+      )
       return null
     }
   }
@@ -194,7 +199,9 @@ export class CheckpointManager {
       })
       return true
     } catch (error) {
-      console.error('Failed to restore to commit:', error)
+      log.error(
+        `Failed to restore to commit: ${error instanceof Error ? error.message : String(error)}`
+      )
       return false
     }
   }
@@ -208,7 +215,7 @@ export class CheckpointManager {
    */
   create(name: string, options: CheckpointOptions): Checkpoint | null {
     if (!this.isGitInitialized()) {
-      console.error('Git is not initialized in this project')
+      log.error('Git is not initialized in this project')
       return null
     }
 
@@ -218,7 +225,7 @@ export class CheckpointManager {
     const gitCommit = this.createGitCommit(name, files)
 
     if (!gitCommit) {
-      console.error('Failed to create git commit for checkpoint')
+      log.error('Failed to create git commit for checkpoint')
       return null
     }
 

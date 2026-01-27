@@ -12,6 +12,10 @@
  */
 
 import type { MessageEvent, MessageEventListener } from './types.js'
+import { getNamedLogger } from '../lib/logger.js'
+
+// Logger for session state (silent in TUI mode)
+const log = getNamedLogger('session')
 
 // =============================================================================
 // Types
@@ -177,7 +181,7 @@ export class SessionStateManager {
 
     // Emit state change for debugging
     if (previousState !== state) {
-      console.log(`[delta9] [session] Session ${sessionId} state: ${previousState} -> ${state}`)
+      log.info(`[session] Session ${sessionId} state: ${previousState} -> ${state}`)
     }
   }
 
@@ -286,7 +290,7 @@ export class SessionStateManager {
       try {
         await callback.onResume(sessionId, resumeReason)
       } catch (error) {
-        console.error(`[delta9] [session] Resume callback error for ${sessionId}:`, error)
+        log.error(`[session] Resume callback error for ${sessionId}`, { error: String(error) })
       }
     }
 

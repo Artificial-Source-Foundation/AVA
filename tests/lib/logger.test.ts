@@ -1,5 +1,8 @@
 /**
  * Tests for Delta9 Structured Logger
+ *
+ * Note: The logger uses process.stderr.write() and requires DELTA9_DEBUG=1
+ * to enable output (to avoid corrupting the TUI in production).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -8,7 +11,6 @@ import {
   initLogger,
   getLogger,
   getNamedLogger,
-  setDefaultLogger,
   debug,
   info,
   warn,
@@ -16,15 +18,24 @@ import {
 } from '../../src/lib/logger.js'
 
 describe('Logger', () => {
+  let stderrSpy: ReturnType<typeof vi.spyOn>
+  const originalDebugEnv = process.env.DELTA9_DEBUG
+
   beforeEach(() => {
-    vi.spyOn(console, 'debug').mockImplementation(() => {})
-    vi.spyOn(console, 'info').mockImplementation(() => {})
-    vi.spyOn(console, 'warn').mockImplementation(() => {})
-    vi.spyOn(console, 'error').mockImplementation(() => {})
+    // Enable debug mode for tests
+    process.env.DELTA9_DEBUG = '1'
+    // Spy on process.stderr.write (the logger uses this, not console)
+    stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
   })
 
   afterEach(() => {
     vi.restoreAllMocks()
+    // Restore original env
+    if (originalDebugEnv !== undefined) {
+      process.env.DELTA9_DEBUG = originalDebugEnv
+    } else {
+      delete process.env.DELTA9_DEBUG
+    }
   })
 
   describe('createLogger', () => {
@@ -46,10 +57,8 @@ describe('Logger', () => {
       logger.warn('warn message')
       logger.error('error message')
 
-      expect(console.debug).toHaveBeenCalledTimes(1)
-      expect(console.info).toHaveBeenCalledTimes(1)
-      expect(console.warn).toHaveBeenCalledTimes(1)
-      expect(console.error).toHaveBeenCalledTimes(1)
+      // Each log level writes to stderr
+      expect(stderrSpy).toHaveBeenCalledTimes(4)
     })
 
     it('respects minimum log level', () => {
@@ -60,10 +69,8 @@ describe('Logger', () => {
       logger.warn('warn')
       logger.error('error')
 
-      expect(console.debug).not.toHaveBeenCalled()
-      expect(console.info).not.toHaveBeenCalled()
-      expect(console.warn).toHaveBeenCalledTimes(1)
-      expect(console.error).toHaveBeenCalledTimes(1)
+      // Only warn and error should be logged
+      expect(stderrSpy).toHaveBeenCalledTimes(2)
     })
 
     it('includes context in log output', () => {
@@ -71,9 +78,7 @@ describe('Logger', () => {
 
       logger.info('test message')
 
-      expect(console.info).toHaveBeenCalledWith(
-        expect.stringContaining('[delta9:test]')
-      )
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('[delta9:test]'))
     })
 
     it('includes data in log output', () => {
@@ -81,12 +86,17 @@ describe('Logger', () => {
 
       logger.info('test message', { foo: 'bar', num: 42 })
 
-      expect(console.info).toHaveBeenCalledWith(
-        expect.stringContaining('foo=bar')
-      )
-      expect(console.info).toHaveBeenCalledWith(
-        expect.stringContaining('num=42')
-      )
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('foo=bar'))
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('num=42'))
+    })
+
+    it('does not log when DELTA9_DEBUG is not set', () => {
+      delete process.env.DELTA9_DEBUG
+
+      const logger = createLogger(undefined, {}, 'debug')
+      logger.info('should not appear')
+
+      expect(stderrSpy).not.toHaveBeenCalled()
     })
   })
 
@@ -97,12 +107,8 @@ describe('Logger', () => {
 
       child.info('child message')
 
-      expect(console.info).toHaveBeenCalledWith(
-        expect.stringContaining('[delta9:parent]')
-      )
-      expect(console.info).toHaveBeenCalledWith(
-        expect.stringContaining('taskId=task_123')
-      )
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('[delta9:parent]'))
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('taskId=task_123'))
     })
 
     it('child context overrides parent context', () => {
@@ -111,9 +117,7 @@ describe('Logger', () => {
 
       child.info('child message')
 
-      expect(console.info).toHaveBeenCalledWith(
-        expect.stringContaining('[delta9:child]')
-      )
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('[delta9:child]'))
     })
   })
 
@@ -124,7 +128,7 @@ describe('Logger', () => {
 
       logger.info('test')
 
-      expect(console.info).toHaveBeenCalled()
+      expect(stderrSpy).toHaveBeenCalled()
     })
   })
 
@@ -135,9 +139,7 @@ describe('Logger', () => {
 
       logger.info('test message')
 
-      expect(console.info).toHaveBeenCalledWith(
-        expect.stringContaining('[delta9:background]')
-      )
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('[delta9:background]'))
     })
   })
 
@@ -146,24 +148,24 @@ describe('Logger', () => {
       initLogger(undefined, 'debug')
     })
 
-    it('debug logs to console.debug', () => {
+    it('debug logs to stderr', () => {
       debug('debug message')
-      expect(console.debug).toHaveBeenCalled()
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('[DEBUG]'))
     })
 
-    it('info logs to console.info', () => {
+    it('info logs to stderr', () => {
       info('info message')
-      expect(console.info).toHaveBeenCalled()
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('[INFO]'))
     })
 
-    it('warn logs to console.warn', () => {
+    it('warn logs to stderr', () => {
       warn('warn message')
-      expect(console.warn).toHaveBeenCalled()
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('[WARN]'))
     })
 
-    it('error logs to console.error', () => {
+    it('error logs to stderr', () => {
       error('error message')
-      expect(console.error).toHaveBeenCalled()
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('[ERROR]'))
     })
   })
 
@@ -174,9 +176,7 @@ describe('Logger', () => {
       logger.info('test')
 
       // Check for timestamp pattern
-      expect(console.info).toHaveBeenCalledWith(
-        expect.stringMatching(/\d{2}:\d{2}:\d{2}\.\d{3}/)
-      )
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringMatching(/\d{2}:\d{2}:\d{2}\.\d{3}/))
     })
 
     it('includes log level in uppercase', () => {
@@ -184,9 +184,7 @@ describe('Logger', () => {
 
       logger.info('test')
 
-      expect(console.info).toHaveBeenCalledWith(
-        expect.stringContaining('[INFO]')
-      )
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('[INFO]'))
     })
 
     it('handles object data serialization', () => {
@@ -194,9 +192,7 @@ describe('Logger', () => {
 
       logger.info('test', { nested: { key: 'value' } })
 
-      expect(console.info).toHaveBeenCalledWith(
-        expect.stringContaining('nested={"key":"value"}')
-      )
+      expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('nested={"key":"value"}'))
     })
   })
 })

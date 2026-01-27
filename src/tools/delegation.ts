@@ -163,10 +163,14 @@ export function createDelegationTools(
 
       // Background execution
       if (args.run_in_background) {
+        // Extract session ID for Ctrl+X navigation
+        const parentSessionId = extractSessionId(ctx)
+
         const bgTaskId = await manager.launch({
           prompt: fullPrompt,
           agent: agentType,
           missionTaskId: args.taskId,
+          parentSessionId: parentSessionId ?? undefined,
           missionContext: mission
             ? {
                 id: mission.id,
@@ -177,9 +181,8 @@ export function createDelegationTools(
         })
 
         // Track in session state
-        const sessionId = extractSessionId(ctx)
-        if (sessionId) {
-          trackBackgroundTask(sessionId, bgTaskId)
+        if (parentSessionId) {
+          trackBackgroundTask(parentSessionId, bgTaskId)
         }
 
         return JSON.stringify({

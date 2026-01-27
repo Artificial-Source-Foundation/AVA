@@ -14,6 +14,10 @@ import type { MissionState } from '../mission/state.js'
 import { appendHistory } from '../mission/history.js'
 import { getConfig } from './config.js'
 import { taskNotifications } from './notifications.js'
+import { getNamedLogger } from './logger.js'
+
+// Logger for background operations (silent in TUI mode)
+const log = getNamedLogger('background')
 
 // =============================================================================
 // SDK Types (from OpenCode plugin system)
@@ -90,6 +94,8 @@ export interface BackgroundTask {
   missionTaskId?: string
   /** Session ID for this task */
   sessionId?: string
+  /** Parent session ID (for Ctrl+X navigation) */
+  parentSessionId?: string
   /** When task was queued */
   queuedAt: string
   /** When task started running */
@@ -133,6 +139,8 @@ export interface LaunchInput {
   priority?: number
   /** Per-task timeout in ms (default: 15 minutes) */
   timeout?: number
+  /** Parent session ID (for Ctrl+X navigation) */
+  parentSessionId?: string
 }
 
 export interface ExecuteSyncInput {
@@ -274,7 +282,7 @@ export class BackgroundManager {
         try {
           manager.shutdown()
         } catch (error) {
-          console.error('[delta9] [background] Error during shutdown cleanup:', error)
+          log.error('[background] Error during shutdown cleanup', { error: String(error) })
         }
       }
     }
@@ -299,7 +307,7 @@ export class BackgroundManager {
     registerSignal('beforeExit', false)
     registerSignal('exit', false)
 
-    console.log('[delta9] [background] Process cleanup handlers registered')
+    log.info('[background] Process cleanup handlers registered')
   }
 
   /**
@@ -324,7 +332,7 @@ export class BackgroundManager {
     if (this.shutdownTriggered) return
     this.shutdownTriggered = true
 
-    console.log('[delta9] [background] Shutting down BackgroundManager')
+    log.info('[background] Shutting down BackgroundManager')
 
     // Stop polling immediately
     if (this.pollingInterval) {
@@ -356,7 +364,7 @@ export class BackgroundManager {
     // Unregister handlers
     this.unregisterProcessCleanup()
 
-    console.log('[delta9] [background] Shutdown complete')
+    log.info('[background] Shutdown complete')
   }
 
   // ===========================================================================
@@ -378,8 +386,8 @@ export class BackgroundManager {
       const taskAge = now - taskStart
 
       if (taskAge > TASK_TTL_MS) {
-        console.log(
-          `[delta9] [background] Pruning expired task ${taskId} (age: ${Math.round(taskAge / 1000)}s)`
+        log.info(
+          `[background] Pruning expired task ${taskId} (age: ${Math.round(taskAge / 1000)}s)`
         )
 
         if (task.status === 'running' && task.sessionId && this.client) {
@@ -399,8 +407,8 @@ export class BackgroundManager {
         const staleTime = now - lastActivity
 
         if (staleTime > STALE_TIMEOUT_MS) {
-          console.log(
-            `[delta9] [background] Task ${taskId} stale (no activity for ${Math.round(staleTime / 1000)}s)`
+          log.info(
+            `[background] Task ${taskId} stale (no activity for ${Math.round(staleTime / 1000)}s)`
           )
 
           if (task.sessionId && this.client) {
@@ -466,6 +474,7 @@ export class BackgroundManager {
       agent: input.agent,
       status: 'pending',
       missionTaskId: input.missionTaskId,
+      parentSessionId: input.parentSessionId,
       queuedAt: now,
       priority: input.priority ?? 0,
       timeout: input.timeout ?? DEFAULT_TASK_TIMEOUT_MS,
@@ -667,14 +676,12 @@ export class BackgroundManager {
 
       // Use SDK execution if client is available, otherwise fall back to simulation
       if (this.client) {
-        console.log(
-          `[delta9] [background] Executing task ${task.id} with SDK (timeout: ${Math.round(timeoutMs / 60000)}min)`
+        log.info(
+          `[background] Executing task ${task.id} with SDK (timeout: ${Math.round(timeoutMs / 60000)}min)`
         )
         await this.executeWithSDK(task)
       } else {
-        console.log(
-          `[delta9] [background] Executing task ${task.id} with simulation (no SDK client)`
-        )
+        log.info(`[background] Executing task ${task.id} with simulation (no SDK client)`)
         await this.simulateExecution(task)
       }
     } catch (error) {
@@ -682,7 +689,7 @@ export class BackgroundManager {
       task.error = error instanceof Error ? error.message : String(error)
       task.completedAt = new Date().toISOString()
 
-      console.error(`[delta9] [background] Task ${task.id} failed:`, task.error)
+      log.error(`[background] Task ${task.id} failed: ${task.error}`)
 
       // Notify task failed
       taskNotifications.failed(task.id, task.agent, task.prompt.substring(0, 50), task.error)
@@ -719,9 +726,7 @@ export class BackgroundManager {
     if (task.status !== 'running') return
 
     const timeoutMins = Math.round(timeoutMs / 60000)
-    console.log(
-      `[delta9] [background] Task ${taskId} auto-cancelled after ${timeoutMins} minute timeout`
-    )
+    log.info(`[background] Task ${taskId} auto-cancelled after ${timeoutMins} minute timeout`)
 
     // Abort the session if available
     if (task.sessionId && this.client) {
@@ -763,10 +768,11 @@ export class BackgroundManager {
       throw new Error('SDK client not available')
     }
 
-    // Create a sub-session
+    // Create a sub-session with parent link for Ctrl+X navigation
     const createResult = await this.client.session.create({
       body: {
         title: `Delta9 Task: ${task.id}`,
+        parentID: task.parentSessionId,
       },
       query: {
         directory: this.cwd,
@@ -780,7 +786,7 @@ export class BackgroundManager {
     const sessionId = createResult.data.id
     task.sessionId = sessionId
 
-    console.log(`[delta9] [background] Task ${task.id} session created: ${sessionId}`)
+    log.info(`[background] Task ${task.id} session created: ${sessionId}`)
 
     // Initialize progress tracking
     task.progress = {
@@ -806,7 +812,9 @@ export class BackgroundManager {
         },
       })
       .catch((error) => {
-        console.error(`[delta9] [background] Prompt error for task ${task.id}:`, error)
+        log.error(
+          `[background] Prompt error for task ${task.id}: ${error instanceof Error ? error.message : String(error)}`
+        )
         task.status = 'failed'
         task.error = error instanceof Error ? error.message : String(error)
         task.completedAt = new Date().toISOString()
@@ -863,9 +871,8 @@ export class BackgroundManager {
         })
 
         if (messagesResult.error) {
-          console.error(
-            `[delta9] [background] Messages error for task ${task.id}:`,
-            messagesResult.error
+          log.error(
+            `[background] Messages error for task ${task.id}: ${String(messagesResult.error)}`
           )
           continue
         }
@@ -891,7 +898,9 @@ export class BackgroundManager {
           lastMsgCount = currentMsgCount
         }
       } catch (error) {
-        console.error(`[delta9] [background] Poll error for task ${task.id}:`, error)
+        log.error(
+          `[background] Poll error for task ${task.id}: ${error instanceof Error ? error.message : String(error)}`
+        )
         // Continue polling despite errors
       }
     }
@@ -958,7 +967,7 @@ export class BackgroundManager {
     task.status = 'completed'
     task.completedAt = new Date().toISOString()
 
-    console.log(`[delta9] [background] Task ${task.id} completed via SDK`)
+    log.info(`[background] Task ${task.id} completed via SDK`)
 
     // Notify task completed
     taskNotifications.completed(task.id, task.agent, task.prompt.substring(0, 50))
@@ -1081,7 +1090,7 @@ export function getBackgroundManager(
       },
       client
     )
-    console.log(`[delta9] [background] Manager created with${client ? '' : 'out'} SDK client`)
+    log.info(`[background] Manager created with${client ? '' : 'out'} SDK client`)
   }
   return managerInstance
 }

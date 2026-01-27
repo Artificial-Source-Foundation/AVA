@@ -28,6 +28,9 @@ import {
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { getNamedLogger } from '../lib/logger.js'
+
+const log = getNamedLogger('memory')
 
 // =============================================================================
 // Types
@@ -187,7 +190,9 @@ function readBlock(filePath: string, scope: 'global' | 'project'): MemoryBlock |
       size: content.length,
     }
   } catch (error) {
-    console.error(`Failed to read memory block ${filePath}:`, error)
+    log.error(
+      `Failed to read memory block ${filePath}: ${error instanceof Error ? error.message : String(error)}`
+    )
     return null
   }
 }
@@ -219,7 +224,9 @@ function writeBlock(block: MemoryBlock): boolean {
     writeFileSync(block.path, serialized, 'utf-8')
     return true
   } catch (error) {
-    console.error(`Failed to write memory block ${block.path}:`, error)
+    log.error(
+      `Failed to write memory block ${block.path}: ${error instanceof Error ? error.message : String(error)}`
+    )
     return false
   }
 }

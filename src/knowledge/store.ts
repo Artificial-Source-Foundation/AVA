@@ -11,6 +11,9 @@ import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import yaml from 'js-yaml'
+import { getNamedLogger } from '../lib/logger.js'
+
+const log = getNamedLogger('knowledge')
 
 import {
   type KnowledgeBlock,
@@ -95,7 +98,7 @@ function parseFrontmatter(frontmatterText: string | undefined): KnowledgeFrontma
   const parsed = knowledgeFrontmatterSchema.safeParse(loaded)
   if (!parsed.success) {
     // Log warning but don't fail - return defaults
-    console.warn(`Invalid frontmatter: ${parsed.error.message}`)
+    log.warn(`Invalid frontmatter: ${parsed.error.message}`)
     return {}
   }
 
@@ -268,7 +271,7 @@ export function createKnowledgeStore(projectDirectory: string): KnowledgeStore {
             blocks.push(await readBlockFile(s, filePath))
           } catch (_err) {
             // Skip invalid files
-            console.warn(`Skipping invalid knowledge block: ${filePath}`)
+            log.warn(`Skipping invalid knowledge block: ${filePath}`)
           }
         }
       }

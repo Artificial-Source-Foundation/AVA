@@ -27,6 +27,7 @@ import { createEpicTools } from './epic.js'
 import { createTraceTools, TRACE_TOOL_NAMES } from './traces.js'
 import { createSubagentTools, SUBAGENT_TOOL_NAMES } from './subagents.js'
 import { createSessionStateTools, SESSION_STATE_TOOL_NAMES } from './session-state.js'
+import { createSquadronTools } from './squadrons.js'
 
 export type { OpenCodeClient } from '../lib/background-manager.js'
 
@@ -58,6 +59,8 @@ export { createEpicTools } from './epic.js'
 export type { EpicToolsConfig } from './epic.js'
 export { createSubagentTools, SUBAGENT_TOOL_NAMES } from './subagents.js'
 export { createSessionStateTools, SESSION_STATE_TOOL_NAMES } from './session-state.js'
+export { createSquadronTools } from './squadrons.js'
+export type { SquadronTools } from './squadrons.js'
 
 // =============================================================================
 // Knowledge Tools Type
@@ -141,6 +144,14 @@ export type SessionStateTools = {
   check_pending_resumes: unknown
 }
 
+export type SquadronToolsType = {
+  spawn_squadron: unknown
+  squadron_status: unknown
+  wait_for_squadron: unknown
+  list_squadrons: unknown
+  cancel_squadron: unknown
+}
+
 // =============================================================================
 // Combined Tools
 // =============================================================================
@@ -164,7 +175,8 @@ export type Delta9Tools = MissionTools &
   EpicTools &
   TraceTools &
   SubagentTools &
-  SessionStateTools
+  SessionStateTools &
+  SquadronToolsType
 
 /**
  * Create all Delta9 tools
@@ -205,6 +217,7 @@ export function createDelta9Tools(
     ...createTraceTools(),
     ...createSubagentTools(state, projectCwd, client),
     ...createSessionStateTools(),
+    ...createSquadronTools(state, projectCwd, client),
   }
 }
 
@@ -331,6 +344,14 @@ export const EPIC_TOOL_NAMES = [
   'update_epic',
 ] as const
 
+export const SQUADRON_TOOL_NAMES = [
+  'spawn_squadron',
+  'squadron_status',
+  'wait_for_squadron',
+  'list_squadrons',
+  'cancel_squadron',
+] as const
+
 export const ALL_TOOL_NAMES = [
   ...MISSION_TOOL_NAMES,
   ...DISPATCH_TOOL_NAMES,
@@ -352,6 +373,7 @@ export const ALL_TOOL_NAMES = [
   ...TRACE_TOOL_NAMES,
   ...SUBAGENT_TOOL_NAMES,
   ...SESSION_STATE_TOOL_NAMES,
+  ...SQUADRON_TOOL_NAMES,
 ] as const
 
 export type Delta9ToolName = (typeof ALL_TOOL_NAMES)[number]

@@ -9,6 +9,9 @@ import { appendFileSync, readFileSync, existsSync } from 'node:fs'
 import type { HistoryEvent, HistoryEventType } from '../types/mission.js'
 import { validateHistoryEvent } from '../schemas/mission.schema.js'
 import { getHistoryPath, ensureDelta9Dir } from '../lib/paths.js'
+import { getNamedLogger } from '../lib/logger.js'
+
+const log = getNamedLogger('history')
 
 // =============================================================================
 // Append History
@@ -26,7 +29,7 @@ export function appendHistory(cwd: string, event: HistoryEvent): void {
 
     appendFileSync(getHistoryPath(cwd), line, 'utf-8')
   } catch (error) {
-    console.error('Failed to append history:', error)
+    log.error(`Failed to append history: ${error instanceof Error ? error.message : String(error)}`)
   }
 }
 
@@ -82,7 +85,7 @@ export function readHistory(cwd: string): HistoryEvent[] {
       })
       .filter((e): e is HistoryEvent => e !== null)
   } catch (error) {
-    console.error('Failed to read history:', error)
+    log.error(`Failed to read history: ${error instanceof Error ? error.message : String(error)}`)
     return []
   }
 }

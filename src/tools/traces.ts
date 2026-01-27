@@ -11,6 +11,8 @@ import {
   type CreateTraceInput,
   type TraceQuery,
 } from '../traces/index.js'
+import { getReasoningTracer } from '../lib/reasoning-traces.js'
+import { readHistory } from '../mission/history.js'
 
 // Use the tool's built-in schema (Zod 4 compatible)
 const s = tool.schema
@@ -22,7 +24,7 @@ const DECISION_TYPES = DecisionTypeSchema.options
 // Tool Factory
 // =============================================================================
 
-export function createTraceTools(): Record<string, ToolDefinition> {
+export function createTraceTools(cwd?: string): Record<string, ToolDefinition> {
   /**
    * Record a decision with reasoning
    */
@@ -275,12 +277,286 @@ Use BEFORE making important decisions to:
     },
   })
 
+  /**
+   * View and export agent reasoning traces
+   */
+  const delta9_reasoning = tool({
+    description: `View agent reasoning traces showing step-by-step thought process.
+
+**Purpose:** Debug agent decisions and understand reasoning chains.
+
+**Operations:**
+- list: Show all reasoning sessions
+- view: View specific trace steps
+- export: Export trace as markdown/JSON
+- stats: Get reasoning statistics
+
+**Example:**
+delta9_reasoning({ op: "list" })
+delta9_reasoning({ op: "view", sessionId: "sess-123" })
+delta9_reasoning({ op: "export", sessionId: "sess-123", format: "markdown" })
+delta9_reasoning({ op: "stats" })
+
+**Use when:**
+- Debugging why an agent made a specific decision
+- Understanding reasoning flow
+- Extracting lessons from tasks`,
+
+    args: {
+      op: s
+        .enum(['list', 'view', 'export', 'stats'])
+        .describe('Operation to perform'),
+      sessionId: s
+        .string()
+        .optional()
+        .describe('Session ID for view/export operations'),
+      format: s
+        .enum(['json', 'markdown'])
+        .optional()
+        .describe('Export format (default: json)'),
+      limit: s
+        .number()
+        .optional()
+        .describe('Limit number of results'),
+    },
+
+    async execute(args) {
+      const tracer = getReasoningTracer()
+      const { op, sessionId, format = 'json', limit = 20 } = args
+
+      switch (op) {
+        case 'list': {
+          const traces = tracer.getTraces().slice(0, limit)
+          const summaries = traces.map((trace) => ({
+            traceId: trace.id,
+            sessionId: trace.sessionId,
+            agent: trace.primaryAgent,
+            description: trace.description,
+            stepCount: trace.steps.length,
+            startedAt: new Date(trace.startedAt).toISOString(),
+            completed: trace.completedAt !== undefined,
+          }))
+
+          return JSON.stringify({
+            success: true,
+            traces: summaries,
+            total: tracer.getTraces().length,
+          }, null, 2)
+        }
+
+        case 'view': {
+          if (!sessionId) {
+            return JSON.stringify({ success: false, error: 'sessionId (or traceId) required' })
+          }
+
+          // Try to find by traceId first, then by sessionId
+          let trace = tracer.getTrace(sessionId)
+          if (!trace) {
+            const traces = tracer.getTraces({ sessionId })
+            trace = traces[0]
+          }
+
+          if (!trace) {
+            return JSON.stringify({ success: false, error: `Trace not found: ${sessionId}` })
+          }
+
+          return JSON.stringify({
+            success: true,
+            trace: {
+              id: trace.id,
+              sessionId: trace.sessionId,
+              agent: trace.primaryAgent,
+              description: trace.description,
+              startedAt: new Date(trace.startedAt).toISOString(),
+              completedAt: trace.completedAt ? new Date(trace.completedAt).toISOString() : undefined,
+              outcome: trace.outcome,
+              steps: trace.steps.map((step, i) => ({
+                index: i + 1,
+                type: step.type,
+                title: step.title,
+                reasoning: step.reasoning,
+                confidence: step.confidence,
+                alternatives: step.alternatives,
+              })),
+            },
+          }, null, 2)
+        }
+
+        case 'export': {
+          if (!sessionId) {
+            return JSON.stringify({ success: false, error: 'sessionId (or traceId) required' })
+          }
+
+          let trace = tracer.getTrace(sessionId)
+          if (!trace) {
+            const traces = tracer.getTraces({ sessionId })
+            trace = traces[0]
+          }
+
+          if (!trace) {
+            return JSON.stringify({ success: false, error: `Trace not found: ${sessionId}` })
+          }
+
+          if (format === 'markdown') {
+            const markdown = tracer.exportTraceMarkdown(trace.id)
+            return JSON.stringify({ success: true, format: 'markdown', content: markdown }, null, 2)
+          }
+
+          return JSON.stringify({ success: true, format: 'json', content: trace }, null, 2)
+        }
+
+        case 'stats': {
+          const stats = tracer.getStats()
+          return JSON.stringify({ success: true, statistics: stats }, null, 2)
+        }
+
+        default:
+          return JSON.stringify({ success: false, error: `Unknown operation: ${op}` })
+      }
+    },
+  })
+
+  /**
+   * Decision audit log for compliance and debugging
+   */
+  const delta9_audit = tool({
+    description: `View decision audit log for compliance and debugging.
+
+**Purpose:** Track and review all significant decisions made by agents.
+
+**Features:**
+- Chronological decision log from history + traces
+- Filter by agent, time period, or decision type
+- Compliance checking (Commander delegation, Validator gates)
+- Decision pattern analysis
+
+**Example:**
+delta9_audit()                        # Recent decisions
+delta9_audit({ agent: "commander" })  # Commander decisions only
+delta9_audit({ period: "1h" })        # Last hour
+delta9_audit({ type: "delegation" })  # Delegation decisions
+
+**Use when:**
+- Auditing agent decision compliance
+- Reviewing delegation patterns
+- Debugging unexpected behaviors`,
+
+    args: {
+      agent: s.string().optional().describe('Filter by agent name'),
+      period: s
+        .enum(['1h', '24h', '7d', 'all'])
+        .optional()
+        .describe('Time period filter (default: 24h)'),
+      type: s
+        .enum(['all', 'delegation', 'execution', 'validation', 'council', 'recovery'])
+        .optional()
+        .describe('Decision type filter'),
+      limit: s.number().optional().describe('Maximum entries (default: 50)'),
+    },
+
+    async execute(args) {
+      const { agent, type = 'all', limit = 50 } = args
+      const period = args.period ?? '24h'
+
+      // Calculate time boundary
+      let sinceTimestamp: number | undefined
+      if (period !== 'all') {
+        const periodMs: Record<string, number> = {
+          '1h': 60 * 60 * 1000,
+          '24h': 24 * 60 * 60 * 1000,
+          '7d': 7 * 24 * 60 * 60 * 1000,
+        }
+        sinceTimestamp = Date.now() - periodMs[period]
+      }
+
+      // Collect audit entries
+      const auditEntries: AuditEntry[] = []
+
+      // 1. From mission history
+      if (cwd) {
+        try {
+          const history = readHistory(cwd)
+          for (const entry of history) {
+            const entryTime = new Date(entry.timestamp).getTime()
+            if (sinceTimestamp && entryTime < sinceTimestamp) continue
+
+            const auditEntry = mapHistoryToAudit(entry)
+            if (!auditEntry) continue
+            if (agent && auditEntry.agent !== agent) continue
+            if (type !== 'all' && !auditEntry.action.includes(type)) continue
+
+            auditEntries.push(auditEntry)
+          }
+        } catch {
+          // History may not exist
+        }
+      }
+
+      // 2. From reasoning traces
+      const tracer = getReasoningTracer()
+      const traces = tracer.getTraces()
+      for (const trace of traces) {
+        if (sinceTimestamp && trace.startedAt < sinceTimestamp) continue
+
+        for (const step of trace.steps) {
+          if (step.type !== 'decision') continue
+
+          const auditEntry: AuditEntry = {
+            timestamp: new Date(step.timestamp).toISOString(),
+            sessionId: trace.sessionId,
+            agent: trace.primaryAgent,
+            action: step.title,
+            decision: step.reasoning,
+            alternatives: step.alternatives?.map((a) => `${a.option}: ${a.reason}`),
+            confidence: step.confidence,
+          }
+
+          if (agent && auditEntry.agent !== agent) continue
+          if (type !== 'all' && !categorizeDecision(step.title).includes(type)) continue
+
+          auditEntries.push(auditEntry)
+        }
+      }
+
+      // Sort by timestamp (newest first)
+      auditEntries.sort((a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      )
+
+      // Apply limit
+      const limited = auditEntries.slice(0, limit)
+
+      // Build summary
+      const agentCounts: Record<string, number> = {}
+      const typeCounts: Record<string, number> = {}
+      for (const entry of auditEntries) {
+        agentCounts[entry.agent] = (agentCounts[entry.agent] || 0) + 1
+        const decisionType = categorizeDecision(entry.action)
+        typeCounts[decisionType] = (typeCounts[decisionType] || 0) + 1
+      }
+
+      return JSON.stringify({
+        success: true,
+        entries: limited,
+        summary: {
+          total: auditEntries.length,
+          returned: limited.length,
+          byAgent: agentCounts,
+          byType: typeCounts,
+        },
+        filters: { agent, type, period },
+      }, null, 2)
+    },
+  })
+
   return {
     trace_decision,
     query_traces,
     get_trace,
     find_similar_decisions,
     trace_stats,
+    delta9_reasoning,
+    delta9_audit,
   }
 }
 
@@ -290,4 +566,116 @@ export const TRACE_TOOL_NAMES = [
   'get_trace',
   'find_similar_decisions',
   'trace_stats',
+  'delta9_reasoning',
+  'delta9_audit',
 ] as const
+
+// =============================================================================
+// Audit Types and Helpers
+// =============================================================================
+
+interface AuditEntry {
+  timestamp: string
+  sessionId?: string
+  agent: string
+  action: string
+  decision: string
+  alternatives?: string[]
+  confidence?: number
+}
+
+interface HistoryEntry {
+  timestamp: string
+  type: string
+  missionId?: string
+  data?: Record<string, unknown>
+}
+
+/**
+ * Map history entry to audit entry
+ */
+function mapHistoryToAudit(entry: HistoryEntry): AuditEntry | null {
+  const data = entry.data || {}
+
+  switch (entry.type) {
+    case 'council_convened':
+      return {
+        timestamp: entry.timestamp,
+        agent: 'commander',
+        action: 'council_delegation',
+        decision: `Convened council in ${data.mode} mode with ${data.oracleCount} oracles`,
+      }
+
+    case 'council_completed':
+      return {
+        timestamp: entry.timestamp,
+        agent: 'council',
+        action: 'council_decision',
+        decision: `Council reached consensus with ${data.confidenceAvg} confidence`,
+        confidence: data.confidenceAvg as number,
+      }
+
+    case 'task_delegated':
+      return {
+        timestamp: entry.timestamp,
+        agent: (data.delegatedBy as string) || 'commander',
+        action: 'task_delegation',
+        decision: `Delegated task ${data.taskId} to ${data.agent}`,
+      }
+
+    case 'task_completed':
+      return {
+        timestamp: entry.timestamp,
+        agent: (data.agent as string) || 'operator',
+        action: 'task_execution',
+        decision: `Completed task ${data.taskId}`,
+      }
+
+    case 'task_failed':
+      return {
+        timestamp: entry.timestamp,
+        agent: (data.agent as string) || 'operator',
+        action: 'task_execution',
+        decision: `Failed task ${data.taskId}: ${data.error}`,
+      }
+
+    case 'validation_passed':
+      return {
+        timestamp: entry.timestamp,
+        agent: 'validator',
+        action: 'validation_decision',
+        decision: `Validated task ${data.taskId}`,
+      }
+
+    case 'validation_failed':
+      return {
+        timestamp: entry.timestamp,
+        agent: 'validator',
+        action: 'validation_decision',
+        decision: `Rejected task ${data.taskId}: ${data.reason}`,
+      }
+
+    case 'recovery_attempted':
+      return {
+        timestamp: entry.timestamp,
+        agent: (data.agent as string) || 'system',
+        action: 'recovery_decision',
+        decision: `Attempted recovery strategy: ${data.strategy}`,
+      }
+
+    default:
+      return null
+  }
+}
+
+/**
+ * Categorize decision action into type
+ */
+function categorizeDecision(action: string): string {
+  if (action.includes('delegation') || action.includes('delegate')) return 'delegation'
+  if (action.includes('execution') || action.includes('execute')) return 'execution'
+  if (action.includes('validation') || action.includes('validate')) return 'validation'
+  if (action.includes('council')) return 'council'
+  if (action.includes('recovery')) return 'recovery'
+  return 'other'
+}

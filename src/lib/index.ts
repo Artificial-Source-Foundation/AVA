@@ -123,6 +123,7 @@ export {
   createBudgetManager,
   formatBudget,
   describeBudgetStatus,
+  HardBudgetLimitError,
   MODEL_COSTS,
   type BudgetConfig,
   type BudgetStatus,
@@ -136,10 +137,14 @@ export {
   createRateLimiter,
   getBestFallback,
   describeRetryResult,
+  getDefaultRateLimiter,
+  resetDefaultRateLimiter,
+  getRateLimiterHealth,
   FALLBACK_MODELS,
   type RateLimitConfig,
   type RateLimitError,
   type RetryResult,
+  type RateLimiterHealthStatus,
 } from './rate-limiter.js'
 
 // Concurrency Manager
@@ -339,3 +344,176 @@ export {
   type ComplianceCheckResult,
   type ComplianceRule,
 } from './compliance-hooks.js'
+
+// Model Fallback
+export {
+  MODEL_REGISTRY,
+  FALLBACK_CHAINS,
+  ORACLE_FALLBACKS,
+  AGENT_FALLBACKS,
+  FallbackChainManager,
+  getFallbackManager,
+  resetFallbackManager,
+  getModelTier,
+  getModelsByTier,
+  getModelsByProvider,
+  getOracleFallbackChain,
+  getAgentFallbackChain,
+  describeFallbackResult,
+  recordFallbackActivity,
+  getRecentFallbackActivity,
+  getFallbackActivitySummary,
+  clearFallbackActivityHistory,
+  type QualityTier,
+  type ProviderStatus,
+  type ModelDefinition,
+  type ProviderHealth,
+  type FallbackChainConfig,
+  type FallbackSelection,
+  type FallbackExecutionResult,
+  type FallbackActivity,
+} from './model-fallback.js'
+
+// Timeout Estimator
+export {
+  estimateTimeout,
+  quickEstimate,
+  getTimeoutCategory,
+  getBaseTimeout,
+  formatTimeout,
+  parseTimeoutString,
+  getAllCategories,
+  BASE_TIMEOUTS,
+  DEFAULT_MIN_TIMEOUT,
+  DEFAULT_MAX_TIMEOUT,
+  COMPLEXITY_THRESHOLDS,
+  COMPLEXITY_MULTIPLIERS,
+  type AgentTimeoutCategory,
+  type TimeoutEstimate,
+  type TimeoutEstimationOptions,
+} from './timeout-estimator.js'
+
+// Rollback Triggers (A-1)
+export {
+  RollbackTriggerManager,
+  getRollbackTriggerManager,
+  resetRollbackTriggerManager,
+  createRollbackTriggerManager,
+  describeTrigger,
+  describeRollbackResult,
+  DEFAULT_TRIGGERS,
+  type TriggerCondition,
+  type TriggerAction,
+  type RollbackTrigger,
+  type TriggerEvent,
+  type TriggerCheckResult,
+  type RollbackResult,
+  type RollbackTriggerConfig,
+} from './rollback-triggers.js'
+
+// Timeout Escalation (A-3)
+export {
+  TimeoutEscalationManager,
+  getTimeoutEscalationManager,
+  resetTimeoutEscalationManager,
+  createTimeoutEscalationManager,
+  selectChain,
+  describeEscalationDecision,
+  describeEscalationMetrics,
+  DEFAULT_ESCALATION_CHAIN,
+  AGGRESSIVE_ESCALATION_CHAIN,
+  PATIENT_ESCALATION_CHAIN,
+  ESCALATION_CHAINS,
+  type EscalationLevel,
+  type EscalationAction,
+  type EscalationStep,
+  type EscalationChain,
+  type EscalationState,
+  type EscalationDecision,
+  type EscalationMetrics,
+  type EscalationConfig,
+} from './timeout-escalation.js'
+
+// Failure Strategies (A-4)
+export {
+  FailureStrategyManager,
+  getFailureStrategyManager,
+  resetFailureStrategyManager,
+  createFailureStrategyManager,
+  createFailureContext,
+  describeRecommendation,
+  isTerminalStrategy,
+  requiresHumanIntervention,
+  DEFAULT_STRATEGY_RULES,
+  type FailureStrategy,
+  type FailureCategory,
+  type FailureSeverity,
+  type FailureContext,
+  type StrategyRecommendation,
+  type StrategyParams,
+  type StrategyExecutionResult,
+  type StrategyRule,
+  type FailureStrategyConfig,
+  type StrategyHandler,
+} from './failure-strategies.js'
+
+// Dead Letter Queue (A-5)
+export {
+  DeadLetterQueueManager,
+  getDeadLetterQueueManager,
+  resetDeadLetterQueueManager,
+  createDeadLetterQueueManager,
+  formatDeadLetterEntry,
+  formatDeadLetterStats,
+  type DeadLetterEntry,
+  type DeadLetterQueueConfig,
+  type DeadLetterFilter,
+  type DeadLetterStats,
+} from './dead-letter-queue.js'
+
+// Reasoning Traces (C-1)
+export {
+  ReasoningTracer,
+  getReasoningTracer,
+  resetReasoningTracer,
+  createReasoningTracer,
+  formatStepForLog,
+  formatTraceMarkdown,
+  getTraceSummary,
+  type ReasoningStepType,
+  type ReasoningStep,
+  type ReasoningTrace,
+  type ReasoningTracerConfig,
+} from './reasoning-traces.js'
+
+// Write Protection (D-2)
+export {
+  WriteProtectionManager,
+  getWriteProtectionManager,
+  resetWriteProtectionManager,
+  createWriteProtectionManager,
+  protectedWrite,
+  registerFileVersion,
+  wouldConflict,
+  type WriteRequest,
+  type WriteResult,
+  type FileState,
+  type WriteProtectionConfig,
+} from './write-protection.js'
+
+// Input Sanitizer (D-5)
+export {
+  InputSanitizer,
+  getInputSanitizer,
+  resetInputSanitizer,
+  createInputSanitizer,
+  sanitizeString,
+  sanitizePath,
+  sanitizeShellArg,
+  sanitizeNumber,
+  isStringSafe,
+  isPathSafe,
+  isShellArgSafe,
+  type SanitizeResult,
+  type SanitizerConfig,
+} from './input-sanitizer.js'

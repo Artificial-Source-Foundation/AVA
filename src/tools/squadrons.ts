@@ -15,6 +15,7 @@ import type { MissionState } from '../mission/state.js'
 import type { OpenCodeClient } from '../lib/background-manager.js'
 import { getSquadronManager } from '../squadrons/index.js'
 import { formatErrorResponse } from '../lib/errors.js'
+import { quickEstimate, formatTimeout } from '../lib/timeout-estimator.js'
 
 // Use the tool's built-in schema (Zod 4 compatible)
 const s = tool.schema
@@ -172,7 +173,7 @@ squadron_status({ alias: "brave-yoda" })
           })
         }
 
-        // Build status summary
+        // Build status summary with timeout tracking
         const waveSummaries = squadron.waves.map((wave) => {
           const completed = wave.agents.filter((a) => a.state === 'completed').length
           const failed = wave.agents.filter((a) => a.state === 'failed').length
@@ -191,13 +192,33 @@ squadron_status({ alias: "brave-yoda" })
               running,
               pending,
             },
-            agentDetails: wave.agents.map((a) => ({
-              type: a.agentType,
-              alias: a.alias,
-              state: a.state,
-              hasOutput: !!a.output,
-              error: a.error,
-            })),
+            agentDetails: wave.agents.map((a) => {
+              // Calculate timeout info for active agents
+              const estimatedTimeoutMs = quickEstimate(a.agentType, a.prompt)
+              const spawnedAt = a.spawnedAt ? new Date(a.spawnedAt).getTime() : null
+              const elapsedMs = spawnedAt ? Date.now() - spawnedAt : 0
+              const isActive = a.state === 'active' || a.state === 'spawning'
+
+              return {
+                type: a.agentType,
+                alias: a.alias,
+                state: a.state,
+                hasOutput: !!a.output,
+                error: a.error,
+                // Timeout info (only for active/pending agents)
+                timeout: isActive || a.state === 'pending' ? {
+                  estimated: formatTimeout(estimatedTimeoutMs),
+                  estimatedMs: estimatedTimeoutMs,
+                  ...(isActive && spawnedAt ? {
+                    elapsed: formatTimeout(elapsedMs),
+                    elapsedMs,
+                    remaining: formatTimeout(Math.max(0, estimatedTimeoutMs - elapsedMs)),
+                    remainingMs: Math.max(0, estimatedTimeoutMs - elapsedMs),
+                    percentComplete: Math.min(100, Math.round((elapsedMs / estimatedTimeoutMs) * 100)),
+                  } : {}),
+                } : undefined,
+              }
+            }),
           }
         })
 

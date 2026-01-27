@@ -79,6 +79,22 @@ export {
   type PostCompactOutput,
 } from './compaction.js'
 
+export {
+  FailureNotificationManager,
+  getFailureNotificationManager,
+  resetFailureNotificationManager,
+  createFailureNotificationManager,
+  formatFailureNotification,
+  createFailureNotificationHooks,
+  DEFAULT_AGGREGATION_RULES,
+  type FailureSeverity,
+  type FailureNotificationType,
+  type FailureNotification,
+  type NotificationHandler,
+  type AggregationRule,
+  type FailureNotificationConfig,
+} from './failure-notification.js'
+
 // =============================================================================
 // Combined Hook Factory
 // =============================================================================

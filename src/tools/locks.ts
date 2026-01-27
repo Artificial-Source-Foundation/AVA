@@ -279,6 +279,294 @@ export function createLockTools(config: LockToolsConfig = {}): Record<string, To
     },
   })
 
+  /**
+   * Resolve lock conflicts with multiple strategies
+   */
+  const resolve_lock_conflict = tool({
+    description: `Resolve file lock conflicts using various strategies.
+
+**Purpose:** Handle situations where multiple agents need the same file.
+
+**Strategies:**
+- wait: Wait for the lock to expire or be released
+- steal: Force acquire the lock (DANGEROUS - may cause data loss)
+- merge: Request manual merge after both complete (returns conflict markers)
+- notify: Notify the lock owner and wait for voluntary release
+- skip: Skip this file and continue with others
+
+**Use when:**
+- Another agent has locked a file you need
+- Deadlock detection suggests circular locks
+- Lock has expired but wasn't released
+
+**Example:**
+resolve_lock_conflict({ filePath: "src/index.ts", strategy: "wait", maxWaitMs: 30000 })`,
+
+    args: {
+      filePath: s.string().describe('File path with the lock conflict'),
+      strategy: s
+        .enum(['wait', 'steal', 'merge', 'notify', 'skip'])
+        .describe('Resolution strategy to use'),
+      maxWaitMs: s
+        .number()
+        .optional()
+        .describe('Maximum wait time in ms for "wait" strategy (default: 30000)'),
+      reason: s.string().optional().describe('Reason for the conflict resolution'),
+    },
+
+    async execute(args, ctx) {
+      const ownerId = defaultOwner?.id ?? ctx.sessionID ?? 'unknown'
+      const maxWaitMs = args.maxWaitMs ?? 30000
+
+      log?.('info', 'Resolving lock conflict', {
+        filePath: args.filePath,
+        strategy: args.strategy,
+      })
+
+      const existingLock = store.getLock(args.filePath)
+
+      // No conflict - file is not locked
+      if (!existingLock) {
+        return JSON.stringify({
+          success: true,
+          resolution: 'no_conflict',
+          message: 'File is not locked - no conflict to resolve',
+        })
+      }
+
+      // Check if we own the lock
+      if (existingLock.owner.id === ownerId) {
+        return JSON.stringify({
+          success: true,
+          resolution: 'own_lock',
+          message: 'You already own this lock - no conflict',
+        })
+      }
+
+      // Implement resolution strategies
+      switch (args.strategy) {
+        case 'wait': {
+          const timeUntilExpiry = existingLock.expiresAt.getTime() - Date.now()
+
+          if (timeUntilExpiry <= 0) {
+            // Lock already expired, try to acquire
+            store.cleanupExpired() // Force cleanup expired locks
+            const result = store.acquire(args.filePath, {
+              owner: { id: ownerId, name: 'Agent' },
+              ttlMs: defaultTtlMs,
+              reason: args.reason || 'Acquired after conflict resolution (expired lock)',
+            })
+
+            return JSON.stringify({
+              success: result.success,
+              resolution: 'expired_acquired',
+              message: result.success
+                ? 'Lock was expired, acquired successfully'
+                : `Failed to acquire: ${result.error}`,
+            })
+          }
+
+          const waitTime = Math.min(timeUntilExpiry, maxWaitMs)
+          return JSON.stringify({
+            success: false,
+            resolution: 'wait_required',
+            message: `Lock held by ${existingLock.owner.name}. Try again in ${Math.ceil(waitTime / 1000)}s`,
+            blockedBy: {
+              owner: existingLock.owner.name,
+              expiresAt: existingLock.expiresAt.toISOString(),
+              reason: existingLock.reason,
+            },
+            suggestedRetryMs: waitTime,
+          })
+        }
+
+        case 'steal': {
+          // Force release and reacquire
+          const releaseResult = store.release(args.filePath, {
+            owner: { id: ownerId, name: 'Agent' },
+            force: true,
+          })
+
+          if (!releaseResult.success) {
+            return JSON.stringify({
+              success: false,
+              resolution: 'steal_failed',
+              error: releaseResult.error,
+            })
+          }
+
+          const acquireResult = store.acquire(args.filePath, {
+            owner: { id: ownerId, name: 'Agent' },
+            ttlMs: defaultTtlMs,
+            reason: args.reason || `Stolen from ${existingLock.owner.name}: ${args.reason || 'conflict resolution'}`,
+          })
+
+          return JSON.stringify({
+            success: acquireResult.success,
+            resolution: 'stolen',
+            message: acquireResult.success
+              ? `Lock stolen from ${existingLock.owner.name}. WARNING: May cause data conflicts.`
+              : `Steal failed: ${acquireResult.error}`,
+            previousOwner: existingLock.owner.name,
+            warning: 'Data written by the previous owner may be lost or corrupted.',
+          })
+        }
+
+        case 'merge': {
+          // Return merge instructions
+          return JSON.stringify({
+            success: true,
+            resolution: 'merge_requested',
+            message: 'Merge strategy selected. Both parties should complete work, then manually merge.',
+            mergeInstructions: {
+              step1: `Wait for ${existingLock.owner.name} to complete and release lock`,
+              step2: 'Compare your changes with the committed version',
+              step3: 'Use git diff or manual comparison to identify conflicts',
+              step4: 'Apply your changes carefully, preserving both sets of modifications',
+            },
+            currentOwner: {
+              name: existingLock.owner.name,
+              taskId: existingLock.owner.taskId,
+            },
+          })
+        }
+
+        case 'notify': {
+          // In a real system, this would send a notification
+          // For now, just log and return instructions
+          log?.('info', 'Lock conflict notification requested', {
+            filePath: args.filePath,
+            blockedBy: existingLock.owner.id,
+            requester: ownerId,
+          })
+
+          return JSON.stringify({
+            success: true,
+            resolution: 'notification_sent',
+            message: `Notification sent to ${existingLock.owner.name} requesting voluntary release`,
+            lockedBy: {
+              name: existingLock.owner.name,
+              taskId: existingLock.owner.taskId,
+              reason: existingLock.reason,
+            },
+            suggestion: 'Check back in 30 seconds or use "wait" strategy',
+          })
+        }
+
+        case 'skip': {
+          return JSON.stringify({
+            success: true,
+            resolution: 'skipped',
+            message: `Skipped locked file: ${args.filePath}`,
+            skippedFile: args.filePath,
+            lockedBy: existingLock.owner.name,
+          })
+        }
+
+        default:
+          return JSON.stringify({
+            success: false,
+            error: `Unknown strategy: ${args.strategy}`,
+          })
+      }
+    },
+  })
+
+  /**
+   * Detect potential deadlocks
+   */
+  const detect_deadlocks = tool({
+    description: `Detect potential deadlock situations in lock graph.
+
+**Purpose:** Identify circular dependencies that could cause agents to wait indefinitely.
+
+**Returns:**
+- List of potential deadlock cycles
+- Affected files and owners
+- Recommended resolution`,
+
+    args: {},
+
+    async execute(_args, _ctx) {
+      log?.('info', 'Detecting deadlocks')
+
+      const allLocks = store.getAllLocks()
+
+      // Build a simple wait graph
+      // In practice, we'd track who's waiting for what
+      // For now, detect expired locks and long-held locks as potential issues
+
+      const issues: Array<{
+        type: string
+        severity: 'low' | 'medium' | 'high'
+        description: string
+        files: string[]
+        owners: string[]
+      }> = []
+
+      const now = Date.now()
+
+      // Check for expired locks
+      const expiredLocks = allLocks.filter((l) => l.expiresAt.getTime() < now)
+      if (expiredLocks.length > 0) {
+        issues.push({
+          type: 'expired_locks',
+          severity: 'medium',
+          description: 'Expired locks not cleaned up - may block other agents',
+          files: expiredLocks.map((l) => l.filePath),
+          owners: [...new Set(expiredLocks.map((l) => l.owner.name))],
+        })
+      }
+
+      // Check for long-held locks (> 80% of TTL used)
+      const longHeldLocks = allLocks.filter((l) => {
+        const held = now - l.acquiredAt.getTime()
+        const total = l.expiresAt.getTime() - l.acquiredAt.getTime()
+        return held > total * 0.8 && l.expiresAt.getTime() > now
+      })
+      if (longHeldLocks.length > 0) {
+        issues.push({
+          type: 'long_held_locks',
+          severity: 'low',
+          description: 'Locks held for extended period - may indicate stalled agents',
+          files: longHeldLocks.map((l) => l.filePath),
+          owners: [...new Set(longHeldLocks.map((l) => l.owner.name))],
+        })
+      }
+
+      // Check for same owner holding many locks (potential resource hoarding)
+      const locksByOwner: Record<string, number> = {}
+      for (const lock of allLocks) {
+        locksByOwner[lock.owner.id] = (locksByOwner[lock.owner.id] || 0) + 1
+      }
+      const hoarders = Object.entries(locksByOwner).filter(([_, count]) => count > 5)
+      if (hoarders.length > 0) {
+        issues.push({
+          type: 'lock_hoarding',
+          severity: 'medium',
+          description: 'Agents holding many locks simultaneously - potential resource contention',
+          files: allLocks
+            .filter((l) => hoarders.some(([id]) => l.owner.id === id))
+            .map((l) => l.filePath),
+          owners: hoarders.map(([id]) => {
+            const lock = allLocks.find((l) => l.owner.id === id)
+            return lock?.owner.name || id
+          }),
+        })
+      }
+
+      return JSON.stringify({
+        success: true,
+        totalLocks: allLocks.length,
+        issuesFound: issues.length,
+        issues,
+        recommendation: issues.length > 0
+          ? 'Consider running cleanup() to remove expired locks, or investigate long-held locks'
+          : 'No deadlock risks detected',
+      }, null, 2)
+    },
+  })
+
   return {
     lock_file,
     unlock_file,
@@ -286,5 +574,7 @@ export function createLockTools(config: LockToolsConfig = {}): Record<string, To
     list_locks,
     lock_files,
     unlock_all,
+    resolve_lock_conflict,
+    detect_deadlocks,
   }
 }

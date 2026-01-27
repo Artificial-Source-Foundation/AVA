@@ -11,6 +11,16 @@ import { z } from 'zod'
 // Legion Configuration
 // =============================================================================
 
+/**
+ * Wave advancement policy
+ * - strict: All tasks must complete successfully (100%)
+ * - majority: More than 50% must succeed
+ * - any: At least one task must succeed
+ * - threshold: Custom success rate threshold (use minWaveSuccessRate)
+ */
+export const wavePolicySchema = z.enum(['strict', 'majority', 'any', 'threshold'])
+export type WavePolicy = z.infer<typeof wavePolicySchema>
+
 export const legionConfigSchema = z.object({
   /** Enable LEGION mode */
   enabled: z.boolean().default(true),
@@ -28,6 +38,21 @@ export const legionConfigSchema = z.object({
   retryFailed: z.boolean().default(true),
   /** Max retries per task */
   maxRetries: z.number().int().min(0).max(3).default(2),
+  /**
+   * Wave advancement policy (A-2)
+   * Controls how to handle partial wave completion:
+   * - strict: All tasks must succeed (blocks on any failure)
+   * - majority: >50% must succeed
+   * - any: At least 1 task must succeed
+   * - threshold: Use minWaveSuccessRate
+   */
+  wavePolicy: wavePolicySchema.default('majority'),
+  /** Continue to next wave even if current wave has failures */
+  continueOnPartialWave: z.boolean().default(true),
+  /** Minimum success rate to advance (0-1), used with wavePolicy='threshold' */
+  minWaveSuccessRate: z.number().min(0).max(1).default(0.5),
+  /** Abort entire strike if wave fails policy check */
+  abortOnWaveFailure: z.boolean().default(false),
 })
 
 export type LegionConfig = z.infer<typeof legionConfigSchema>
@@ -107,6 +132,31 @@ export const conflictSchema = z.object({
 export type Conflict = z.infer<typeof conflictSchema>
 
 // =============================================================================
+// Wave Result (Partial Success Tracking)
+// =============================================================================
+
+export const waveResultSchema = z.object({
+  /** Wave index (0-based) */
+  waveIndex: z.number().int(),
+  /** Total tasks in this wave */
+  totalTasks: z.number().int(),
+  /** Successfully completed tasks */
+  completedTasks: z.number().int(),
+  /** Failed tasks */
+  failedTasks: z.number().int(),
+  /** Success rate (0-1) */
+  successRate: z.number(),
+  /** Wave status */
+  status: z.enum(['complete', 'partial', 'failed']),
+  /** Wave duration in ms */
+  durationMs: z.number().int(),
+  /** Task IDs in this wave */
+  taskIds: z.array(z.string()),
+})
+
+export type WaveResult = z.infer<typeof waveResultSchema>
+
+// =============================================================================
 // Legion Strike (Execution Unit)
 // =============================================================================
 
@@ -127,6 +177,8 @@ export const legionStrikeSchema = z.object({
       parallelism: z.number(),
       totalTime: z.number(),
       averageTaskTime: z.number(),
+      /** Per-wave results for partial success tracking */
+      waveResults: z.array(waveResultSchema).optional(),
     })
     .optional(),
 })
@@ -164,10 +216,15 @@ export type LegionEventType =
   | 'legion.strike.started'
   | 'legion.strike.completed'
   | 'legion.strike.failed'
+  | 'legion.strike.aborted'
+  | 'legion.wave.started'
+  | 'legion.wave.completed'
+  | 'legion.wave.policy_failed'
   | 'legion.task.assigned'
   | 'legion.task.started'
   | 'legion.task.completed'
   | 'legion.task.failed'
+  | 'legion.task.dependency_failed'
   | 'legion.conflict.detected'
   | 'legion.conflict.resolved'
   | 'legion.operator.joined'
@@ -195,4 +252,9 @@ export const DEFAULT_LEGION_CONFIG: LegionConfig = {
   mergeStrategy: 'smart',
   retryFailed: true,
   maxRetries: 2,
+  // Wave advancement policies (A-2)
+  wavePolicy: 'majority',
+  continueOnPartialWave: true,
+  minWaveSuccessRate: 0.5,
+  abortOnWaveFailure: false,
 }

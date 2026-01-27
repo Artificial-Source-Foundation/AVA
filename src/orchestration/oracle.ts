@@ -41,6 +41,12 @@ export interface OracleInvocationResult {
   durationMs: number
   /** Session ID if using SDK */
   sessionId?: string
+  /** Whether the oracle invocation failed (A-7: Graceful Degradation) */
+  failed?: boolean
+  /** Failure reason if failed */
+  failureReason?: 'timeout' | 'rate_limit' | 'auth' | 'simulation' | 'error'
+  /** Whether this was a degraded/fallback response */
+  degraded?: boolean
 }
 
 export interface OracleInvocationOptions {
@@ -317,21 +323,62 @@ export async function invokeOracle(
       sessionId,
     }
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const isTimeout = errorMessage.includes('timeout')
+    const isRateLimit = errorMessage.includes('rate') || errorMessage.includes('429')
+    const isAuth = errorMessage.includes('auth') || errorMessage.includes('401') || errorMessage.includes('403')
+
     logger.error(`Oracle ${oracle.name} invocation failed`, {
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage,
+      errorType: isTimeout ? 'timeout' : isRateLimit ? 'rate_limit' : isAuth ? 'auth' : 'unknown',
+      model: oracle.model,
+      specialty: oracle.specialty,
     })
 
-    // Fall back to error opinion
+    // Build actionable error context
+    const troubleshooting: string[] = []
+    if (isTimeout) {
+      troubleshooting.push('Consider using quick mode for simpler queries')
+      troubleshooting.push('Try reducing the complexity of the question')
+      troubleshooting.push(`Current timeout: ${timeoutMs}ms - may need increase for complex queries`)
+    } else if (isRateLimit) {
+      troubleshooting.push('Rate limit hit - the model provider is throttling requests')
+      troubleshooting.push('Consider using a fallback model from a different provider')
+      troubleshooting.push('Wait and retry, or use sequential council mode to reduce concurrency')
+    } else if (isAuth) {
+      troubleshooting.push('Authentication failed - check API keys for the provider')
+      troubleshooting.push(`Model: ${oracle.model} - verify provider credentials`)
+    } else {
+      troubleshooting.push('Check network connectivity and provider status')
+      troubleshooting.push('Verify the model is available and correctly configured')
+    }
+
+    // A-7: Graceful degradation - fall back to error opinion with actionable information
+    const failureReason = isTimeout ? 'timeout' : isRateLimit ? 'rate_limit' : isAuth ? 'auth' : 'error'
+
     return {
       oracle,
       opinion: {
         oracle: oracle.name,
-        recommendation: `Oracle invocation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        recommendation: `Oracle ${oracle.name} (${oracle.specialty}) invocation failed: ${errorMessage}
+
+**What happened:** The oracle could not be consulted due to ${isTimeout ? 'a timeout' : isRateLimit ? 'rate limiting' : isAuth ? 'authentication failure' : 'an error'}.
+
+**Troubleshooting:**
+${troubleshooting.map(t => `- ${t}`).join('\n')}
+
+**Fallback:** Proceeding without this oracle's input. Consider re-running the council after addressing the issue.`,
         confidence: 0,
-        caveats: ['Oracle invocation failed - using fallback'],
+        caveats: [
+          `Oracle invocation failed: ${failureReason}`,
+          ...troubleshooting,
+        ],
       },
       tokensUsed: 0,
       durationMs: Date.now() - startTime,
+      failed: true,
+      failureReason: failureReason as 'timeout' | 'rate_limit' | 'auth' | 'error',
+      degraded: true,
     }
   }
 }
@@ -398,6 +445,9 @@ async function waitForOracleResponse(
 
 /**
  * Simulation mode for when SDK is not available
+ *
+ * Returns a placeholder response with clear indication that real
+ * invocation was not possible and guidance on how to enable it.
  */
 function invokeOracleSimulation(
   oracle: OracleConfig,
@@ -406,32 +456,56 @@ function invokeOracleSimulation(
 ): OracleInvocationResult {
   const { provider, model } = parseModelId(oracle.model)
 
+  logger.warn(`Oracle ${oracle.name} using simulation mode`, {
+    reason: 'No OpenCode client provided',
+    model: oracle.model,
+    hint: 'Pass client to conveneCouncil for real oracle invocation',
+  })
+
   const placeholderResponse = JSON.stringify({
-    recommendation: `[${oracle.name}] Analysis from ${oracle.specialty} perspective for: ${context.question.substring(0, 100)}...
+    recommendation: `**⚠️ SIMULATION MODE - ${oracle.name} (${oracle.specialty})**
 
-This is a simulated response. Real invocation requires OpenCode SDK.
+This is a simulated response. The oracle was not actually invoked because no OpenCode client was provided.
 
-From ${oracle.specialty} perspective:
-- Consider the architectural implications
-- Evaluate trade-offs carefully
-- Follow established patterns
+**Question received:** ${context.question.substring(0, 150)}${context.question.length > 150 ? '...' : ''}
 
-Key recommendation: Proceed with careful consideration of the ${oracle.specialty} aspects.`,
-    confidence: 0.6,
-    caveats: ['Simulation mode - real model not invoked', `Would use ${model} via ${provider}`],
+**What would happen with real invocation:**
+- Oracle ${oracle.name} would analyze this from a ${oracle.specialty} perspective
+- Model: ${model} via ${provider}
+- Response would include detailed recommendations and confidence score
+
+**To enable real oracle invocation:**
+1. Ensure the \`client\` parameter is passed through the tool chain
+2. Verify: createCouncilTools(state, cwd, client) → conveneCouncil → invokeOracle
+3. Check that OpenCode is running and accessible
+
+**Generic ${oracle.specialty} guidance (placeholder):**
+- Consider the ${oracle.specialty} implications of the proposed approach
+- Evaluate trade-offs between complexity and maintainability
+- Follow established patterns and best practices`,
+    confidence: 0.3, // Lower confidence since this is simulated
+    caveats: [
+      '⚠️ SIMULATION MODE - real oracle not invoked',
+      `Model ${model} via ${provider} was NOT called`,
+      'Pass OpenCode client to enable real oracle consultation',
+    ],
     suggestedTasks: [
-      'Ensure OpenCode SDK is available for real oracle invocation',
-      `Review ${oracle.specialty} considerations manually`,
+      'Verify OpenCode client is passed to council tools',
+      `Manually review ${oracle.specialty} considerations until real invocation is fixed`,
     ],
   })
 
   const opinion = parseOracleResponse(oracle, placeholderResponse)
 
+  // A-7: Mark simulation mode as degraded
   return {
     oracle,
     opinion,
     tokensUsed: 0,
     durationMs: Date.now() - startTime,
+    failed: false, // Not a failure, just degraded
+    failureReason: 'simulation',
+    degraded: true,
   }
 }
 
@@ -492,8 +566,77 @@ export async function invokeOraclesSequential(
       options
     )
     results.push(result)
-    opinions.push(result.opinion)
+    // Only include non-failed opinions for consensus building
+    if (!result.failed) {
+      opinions.push(result.opinion)
+    }
   }
 
   return results
+}
+
+// =============================================================================
+// Graceful Degradation Helpers (A-7)
+// =============================================================================
+
+/**
+ * Filter oracle results to only include successful invocations
+ */
+export function filterSuccessfulResults(results: OracleInvocationResult[]): OracleInvocationResult[] {
+  return results.filter((r) => !r.failed)
+}
+
+/**
+ * Filter oracle results to only include degraded/failed invocations
+ */
+export function filterFailedResults(results: OracleInvocationResult[]): OracleInvocationResult[] {
+  return results.filter((r) => r.failed || r.degraded)
+}
+
+/**
+ * Get degradation summary for council results
+ */
+export function getDegradationSummary(results: OracleInvocationResult[]): {
+  total: number
+  successful: number
+  degraded: number
+  failed: number
+  failureReasons: Record<string, number>
+} {
+  const summary = {
+    total: results.length,
+    successful: 0,
+    degraded: 0,
+    failed: 0,
+    failureReasons: {} as Record<string, number>,
+  }
+
+  for (const result of results) {
+    if (result.failed) {
+      summary.failed++
+      if (result.failureReason) {
+        summary.failureReasons[result.failureReason] = (summary.failureReasons[result.failureReason] || 0) + 1
+      }
+    } else if (result.degraded) {
+      summary.degraded++
+      if (result.failureReason) {
+        summary.failureReasons[result.failureReason] = (summary.failureReasons[result.failureReason] || 0) + 1
+      }
+    } else {
+      summary.successful++
+    }
+  }
+
+  return summary
+}
+
+/**
+ * Check if enough oracles responded successfully for meaningful consensus
+ */
+export function hasMinimumQuorum(
+  results: OracleInvocationResult[],
+  minQuorum: number = 1
+): boolean {
+  const successful = filterSuccessfulResults(results)
+  return successful.length >= minQuorum
 }

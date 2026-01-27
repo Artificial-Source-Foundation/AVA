@@ -18,6 +18,8 @@ import type {
   DistributionPlan,
   DistributionStrategy,
   LegionEvent,
+  WaveResult,
+  WavePolicy,
 } from './types.js'
 import { DEFAULT_LEGION_CONFIG } from './types.js'
 
@@ -325,9 +327,19 @@ export class LegionCoordinator {
     strike.status = 'executing'
     const plan = this.createDistributionPlan(strike)
 
+    // Track wave results for partial success tracking
+    const waveResults: WaveResult[] = []
+
     // Execute wave by wave
     for (let waveIndex = 0; waveIndex < plan.waves; waveIndex++) {
+      const waveStartTime = Date.now()
       const waveAssignments = plan.assignments.filter((a) => a.wave === waveIndex)
+      const waveTaskIds = waveAssignments.map((a) => a.taskId)
+
+      this.emitEvent('legion.wave.started', strikeId, {
+        waveIndex,
+        taskCount: waveAssignments.length,
+      })
 
       // Execute tasks in parallel within each wave
       const wavePromises = waveAssignments.map(async (assignment) => {
@@ -338,6 +350,54 @@ export class LegionCoordinator {
       })
 
       await Promise.all(wavePromises)
+
+      // Calculate wave result
+      const waveTasks = strike.tasks.filter((t) => waveTaskIds.includes(t.id))
+      const waveCompleted = waveTasks.filter((t) => t.status === 'completed').length
+      const waveFailed = waveTasks.filter((t) => t.status === 'failed').length
+      const waveDuration = Date.now() - waveStartTime
+      const waveSuccessRate = waveTasks.length > 0 ? waveCompleted / waveTasks.length : 0
+
+      const waveResult: WaveResult = {
+        waveIndex,
+        totalTasks: waveTasks.length,
+        completedTasks: waveCompleted,
+        failedTasks: waveFailed,
+        successRate: Math.round(waveSuccessRate * 100) / 100,
+        status: waveSuccessRate === 1 ? 'complete' : waveSuccessRate > 0 ? 'partial' : 'failed',
+        durationMs: waveDuration,
+        taskIds: waveTaskIds,
+      }
+      waveResults.push(waveResult)
+
+      this.emitEvent('legion.wave.completed', strikeId, waveResult)
+
+      // Check wave policy (A-2: Wave Advancement Policies)
+      const policyResult = this.checkWavePolicy(waveResult)
+      if (!policyResult.canAdvance) {
+        this.emitEvent('legion.wave.policy_failed', strikeId, {
+          waveIndex,
+          policy: this.config.wavePolicy,
+          successRate: waveResult.successRate,
+          reason: policyResult.reason,
+        })
+
+        if (this.config.abortOnWaveFailure) {
+          strike.status = 'failed'
+          strike.completedAt = new Date().toISOString()
+          strike.metrics = this.calculateMetrics(strike, waveResults)
+          this.emitEvent('legion.strike.aborted', strikeId, {
+            reason: `Wave ${waveIndex} failed policy check: ${policyResult.reason}`,
+            metrics: strike.metrics,
+          })
+          return strike
+        }
+
+        if (!this.config.continueOnPartialWave) {
+          // Stop processing further waves but don't abort
+          break
+        }
+      }
 
       // Check for conflicts after each wave
       const conflicts = this.detectConflicts(strike)
@@ -359,7 +419,7 @@ export class LegionCoordinator {
     // Finalize
     strike.status = this.calculateStrikeStatus(strike)
     strike.completedAt = new Date().toISOString()
-    strike.metrics = this.calculateMetrics(strike)
+    strike.metrics = this.calculateMetrics(strike, waveResults)
 
     this.emitEvent(
       strike.status === 'completed' ? 'legion.strike.completed' : 'legion.strike.failed',
@@ -426,6 +486,9 @@ export class LegionCoordinator {
         task.retryCount++
         task.status = 'pending'
         // Will be picked up in next wave or retry cycle
+      } else {
+        // A-6: Propagate failure to dependent tasks
+        this.propagateDependencyFailure(strike, task)
       }
     } finally {
       task.completedAt = new Date().toISOString()
@@ -442,6 +505,183 @@ export class LegionCoordinator {
           (totalTime + taskTime) / (operator.tasksCompleted + operator.tasksFailed)
       }
     }
+  }
+
+  // ===========================================================================
+  // Wave Policy Check (A-2)
+  // ===========================================================================
+
+  /**
+   * Check if wave result meets the configured policy for advancement
+   */
+  private checkWavePolicy(waveResult: WaveResult): { canAdvance: boolean; reason: string } {
+    const { successRate, totalTasks, completedTasks, failedTasks } = waveResult
+    const policy = this.config.wavePolicy
+
+    switch (policy) {
+      case 'strict':
+        // All tasks must succeed
+        if (successRate === 1) {
+          return { canAdvance: true, reason: 'All tasks completed successfully' }
+        }
+        return {
+          canAdvance: false,
+          reason: `Strict policy requires 100% success, got ${(successRate * 100).toFixed(0)}% (${failedTasks} failed)`,
+        }
+
+      case 'majority':
+        // More than 50% must succeed
+        if (successRate > 0.5) {
+          return {
+            canAdvance: true,
+            reason: `Majority succeeded: ${(successRate * 100).toFixed(0)}%`,
+          }
+        }
+        return {
+          canAdvance: false,
+          reason: `Majority policy requires >50% success, got ${(successRate * 100).toFixed(0)}%`,
+        }
+
+      case 'any':
+        // At least one task must succeed
+        if (completedTasks >= 1) {
+          return {
+            canAdvance: true,
+            reason: `At least one task succeeded (${completedTasks}/${totalTasks})`,
+          }
+        }
+        return {
+          canAdvance: false,
+          reason: `Any policy requires at least 1 success, all ${totalTasks} tasks failed`,
+        }
+
+      case 'threshold':
+        // Custom threshold
+        const threshold = this.config.minWaveSuccessRate
+        if (successRate >= threshold) {
+          return {
+            canAdvance: true,
+            reason: `Success rate ${(successRate * 100).toFixed(0)}% meets threshold ${(threshold * 100).toFixed(0)}%`,
+          }
+        }
+        return {
+          canAdvance: false,
+          reason: `Success rate ${(successRate * 100).toFixed(0)}% below threshold ${(threshold * 100).toFixed(0)}%`,
+        }
+
+      default:
+        // Default to majority
+        return {
+          canAdvance: successRate > 0.5,
+          reason: `Default policy: ${successRate > 0.5 ? 'passed' : 'failed'}`,
+        }
+    }
+  }
+
+  // ===========================================================================
+  // Dependency Failure Propagation (A-6)
+  // ===========================================================================
+
+  /**
+   * Propagate failure to all tasks that depend on a failed task.
+   * This prevents dependent tasks from executing and marks them appropriately.
+   */
+  private propagateDependencyFailure(strike: LegionStrike, failedTask: LegionTask): void {
+    const affectedTasks = this.findDependentTasks(strike, failedTask.id)
+
+    if (affectedTasks.length === 0) return
+
+    this.emitEvent('legion.task.dependency_failed', strike.id, {
+      failedTaskId: failedTask.id,
+      affectedTaskIds: affectedTasks.map((t) => t.id),
+      affectedCount: affectedTasks.length,
+    })
+
+    for (const task of affectedTasks) {
+      if (task.status === 'pending' || task.status === 'assigned') {
+        task.status = 'failed'
+        task.error = `Dependency failed: task ${failedTask.id} (${failedTask.description.slice(0, 50)})`
+        task.completedAt = new Date().toISOString()
+
+        this.emitEvent('legion.task.failed', strike.id, {
+          taskId: task.id,
+          error: task.error,
+          reason: 'dependency_failure',
+          dependsOn: failedTask.id,
+        })
+      }
+    }
+  }
+
+  /**
+   * Find all tasks that transitively depend on a given task
+   */
+  private findDependentTasks(strike: LegionStrike, taskId: string): LegionTask[] {
+    const dependents: LegionTask[] = []
+    const visited = new Set<string>()
+
+    const findRecursive = (targetId: string): void => {
+      for (const task of strike.tasks) {
+        if (visited.has(task.id)) continue
+        if (task.dependencies.includes(targetId)) {
+          visited.add(task.id)
+          dependents.push(task)
+          // Recursively find tasks that depend on this one
+          findRecursive(task.id)
+        }
+      }
+    }
+
+    findRecursive(taskId)
+    return dependents
+  }
+
+  /**
+   * Check if a task can execute (all dependencies satisfied)
+   */
+  canExecuteTask(strike: LegionStrike, task: LegionTask): { canExecute: boolean; reason: string } {
+    for (const depId of task.dependencies) {
+      const depTask = strike.tasks.find((t) => t.id === depId)
+      if (!depTask) {
+        return { canExecute: false, reason: `Dependency ${depId} not found` }
+      }
+      if (depTask.status === 'failed') {
+        return {
+          canExecute: false,
+          reason: `Dependency ${depId} failed: ${depTask.error || 'unknown error'}`,
+        }
+      }
+      if (depTask.status !== 'completed') {
+        return { canExecute: false, reason: `Dependency ${depId} not yet completed` }
+      }
+    }
+    return { canExecute: true, reason: 'All dependencies satisfied' }
+  }
+
+  /**
+   * Get recommended policy based on task characteristics
+   */
+  getRecommendedPolicy(tasks: LegionTask[]): WavePolicy {
+    // If tasks have many dependencies, use strict (failures cascade)
+    const avgDeps = tasks.reduce((sum, t) => sum + t.dependencies.length, 0) / tasks.length
+    if (avgDeps > 2) {
+      return 'strict'
+    }
+
+    // If tasks are high priority, use strict
+    const avgPriority = tasks.reduce((sum, t) => sum + t.priority, 0) / tasks.length
+    if (avgPriority >= 8) {
+      return 'strict'
+    }
+
+    // If tasks are complex, be more lenient
+    const complexTasks = tasks.filter((t) => t.estimatedComplexity === 'high').length
+    if (complexTasks > tasks.length / 2) {
+      return 'any'
+    }
+
+    // Default to majority
+    return 'majority'
   }
 
   // ===========================================================================
@@ -552,7 +792,10 @@ export class LegionCoordinator {
   /**
    * Calculate strike metrics
    */
-  private calculateMetrics(strike: LegionStrike): LegionStrike['metrics'] {
+  private calculateMetrics(
+    strike: LegionStrike,
+    waveResults: WaveResult[] = []
+  ): LegionStrike['metrics'] {
     const completedTasks = strike.tasks.filter((t) => t.status === 'completed')
     const failedTasks = strike.tasks.filter((t) => t.status === 'failed')
 
@@ -579,6 +822,7 @@ export class LegionCoordinator {
       parallelism: Math.round(parallelism * 100) / 100,
       totalTime,
       averageTaskTime: completedTasks.length > 0 ? totalTaskTime / completedTasks.length : 0,
+      waveResults: waveResults.length > 0 ? waveResults : undefined,
     }
   }
 

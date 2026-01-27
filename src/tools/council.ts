@@ -7,6 +7,7 @@
 import { tool, type ToolDefinition } from '@opencode-ai/plugin'
 import type { MissionState } from '../mission/state.js'
 import type { CouncilMode } from '../types/config.js'
+import type { OpenCodeClient } from '../lib/background-manager.js'
 import { conveneCouncil, quickConsult, shouldConveneCouncil } from '../orchestration/index.js'
 import { getConfidenceLabel } from '../lib/confidence-levels.js'
 
@@ -19,10 +20,15 @@ const s = tool.schema
 
 /**
  * Create council tools
+ *
+ * @param state - MissionState instance
+ * @param cwd - Project root directory
+ * @param client - OpenCode SDK client for real oracle invocation (without this, oracles run in simulation mode)
  */
 export function createCouncilTools(
   state: MissionState,
-  cwd: string
+  cwd: string,
+  client?: OpenCodeClient
 ): Record<string, ToolDefinition> {
   /**
    * Consult the council of oracles for strategic decisions
@@ -57,6 +63,7 @@ Modes:
           question: args.question,
           mode,
           context: args.context,
+          client, // Pass client for real oracle invocation
         })
 
         return JSON.stringify({
@@ -261,11 +268,181 @@ Shows:
     },
   })
 
+  /**
+   * Detailed council deliberation transparency
+   */
+  const council_deliberation = tool({
+    description: `Get detailed transparency into council deliberation process.
+
+**Purpose:** Understand how the council reached its decisions.
+
+**Shows:**
+- Individual oracle reasoning and vote
+- Consensus building process
+- Conflict detection and resolution
+- Confidence distribution
+- Alternative perspectives considered
+
+**Use when:**
+- Debugging unexpected council outcomes
+- Auditing decision-making process
+- Understanding oracle disagreements
+- Reviewing consensus quality`,
+
+    args: {
+      verbose: s
+        .boolean()
+        .optional()
+        .describe('Include full reasoning text (default: false)'),
+    },
+
+    async execute(args) {
+      const mission = state.getMission()
+      const councilSummary = mission?.councilSummary
+
+      if (!councilSummary) {
+        return JSON.stringify({
+          success: false,
+          error: 'No council deliberation in current mission',
+          message: 'Use consult_council first to initiate deliberation',
+        })
+      }
+
+      const opinions = councilSummary.opinions || []
+
+      // Analyze confidence distribution
+      const confidences = opinions.map((o) => o.confidence)
+      const avgConfidence = confidences.length > 0
+        ? confidences.reduce((a, b) => a + b, 0) / confidences.length
+        : 0
+      const stdDev = confidences.length > 1
+        ? Math.sqrt(
+            confidences.reduce((sum, c) => sum + Math.pow(c - avgConfidence, 2), 0) /
+            (confidences.length - 1)
+          )
+        : 0
+
+      // Categorize opinions by confidence level
+      const highConfidence = opinions.filter((o) => o.confidence >= 0.8)
+      const mediumConfidence = opinions.filter((o) => o.confidence >= 0.5 && o.confidence < 0.8)
+      const lowConfidence = opinions.filter((o) => o.confidence < 0.5)
+
+      // Extract all caveats and concerns
+      const allCaveats: Array<{ oracle: string; caveat: string }> = []
+      for (const opinion of opinions) {
+        for (const caveat of opinion.caveats || []) {
+          allCaveats.push({ oracle: opinion.oracle, caveat })
+        }
+      }
+
+      // Extract all suggested tasks
+      const allSuggestedTasks: Array<{ oracle: string; task: string }> = []
+      for (const opinion of opinions) {
+        for (const task of opinion.suggestedTasks || []) {
+          allSuggestedTasks.push({ oracle: opinion.oracle, task })
+        }
+      }
+
+      // Detect disagreements and conflicts
+      const conflicts: Array<{
+        type: string
+        description: string
+        oracles: string[]
+      }> = []
+
+      // Check for confidence spread
+      if (confidences.length > 1 && stdDev > 0.15) {
+        const lowOracles = lowConfidence.map((o) => o.oracle)
+        const highOracles = highConfidence.map((o) => o.oracle)
+        if (lowOracles.length > 0 && highOracles.length > 0) {
+          conflicts.push({
+            type: 'confidence_divergence',
+            description: `Significant confidence spread (stdDev: ${(stdDev * 100).toFixed(1)}%)`,
+            oracles: [...lowOracles, ...highOracles],
+          })
+        }
+      }
+
+      // Check for recommendation length variance (may indicate different approaches)
+      const recLengths = opinions.map((o) => o.recommendation.length)
+      const avgLength = recLengths.reduce((a, b) => a + b, 0) / recLengths.length
+      const shortRecs = opinions.filter((o) => o.recommendation.length < avgLength * 0.5)
+      if (shortRecs.length > 0 && opinions.length > 2) {
+        conflicts.push({
+          type: 'approach_variance',
+          description: 'Some oracles provided significantly shorter responses',
+          oracles: shortRecs.map((o) => o.oracle),
+        })
+      }
+
+      // Build detailed opinion breakdown
+      const opinionDetails = opinions.map((o) => ({
+        oracle: o.oracle,
+        confidence: o.confidence,
+        confidenceLabel: getConfidenceLabel(o.confidence),
+        recommendationLength: o.recommendation.length,
+        recommendation: args.verbose
+          ? o.recommendation
+          : o.recommendation.substring(0, 300) + (o.recommendation.length > 300 ? '...' : ''),
+        caveatsCount: o.caveats?.length || 0,
+        caveats: o.caveats,
+        suggestedTasksCount: o.suggestedTasks?.length || 0,
+        suggestedTasks: o.suggestedTasks,
+      }))
+
+      // Build consensus analysis
+      const consensusAnalysis = {
+        points: councilSummary.consensus,
+        strength: avgConfidence >= 0.7 && stdDev < 0.15 ? 'strong' :
+                  avgConfidence >= 0.5 ? 'moderate' : 'weak',
+        disagreementsResolved: councilSummary.disagreementsResolved || [],
+        unanimity: stdDev < 0.1 && avgConfidence > 0.6,
+      }
+
+      return JSON.stringify({
+        success: true,
+        deliberation: {
+          mode: councilSummary.mode,
+          oracleCount: opinions.length,
+          timestamp: new Date().toISOString(),
+        },
+        confidenceAnalysis: {
+          average: avgConfidence,
+          standardDeviation: stdDev,
+          distribution: {
+            high: highConfidence.length,
+            medium: mediumConfidence.length,
+            low: lowConfidence.length,
+          },
+          label: getConfidenceLabel(avgConfidence),
+        },
+        consensusAnalysis,
+        opinions: opinionDetails,
+        caveatsRaised: {
+          total: allCaveats.length,
+          items: allCaveats,
+        },
+        suggestedTasks: {
+          total: allSuggestedTasks.length,
+          items: allSuggestedTasks,
+        },
+        conflicts: conflicts.length > 0 ? conflicts : undefined,
+        transparency: {
+          allOraclesResponded: opinions.length > 0,
+          consensusReached: consensusAnalysis.strength !== 'weak',
+          conflictsDetected: conflicts.length,
+          caveatsAddressed: (councilSummary.disagreementsResolved || []).length,
+        },
+      }, null, 2)
+    },
+  })
+
   return {
     consult_council,
     quick_consult,
     should_consult_council,
     council_status,
+    council_deliberation,
   }
 }
 

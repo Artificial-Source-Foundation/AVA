@@ -183,6 +183,7 @@ export const budgetConfigSchema = z.object({
   defaultLimit: z.number().min(0.01).max(1000).default(DEFAULT_CONFIG.budget.defaultLimit),
   warnAt: z.number().min(0).max(1).default(DEFAULT_CONFIG.budget.warnAt),
   pauseAt: z.number().min(0).max(1).default(DEFAULT_CONFIG.budget.pauseAt),
+  hardLimitAt: z.number().min(0).max(2).default(DEFAULT_CONFIG.budget.hardLimitAt),
   trackByAgent: z.boolean().default(DEFAULT_CONFIG.budget.trackByAgent),
 })
 

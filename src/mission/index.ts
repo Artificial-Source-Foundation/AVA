@@ -3,7 +3,12 @@
  */
 
 // State manager
-export { MissionState } from './state.js'
+export {
+  MissionState,
+  type StateValidationCode,
+  type StateValidationIssue,
+  type StateValidationResult,
+} from './state.js'
 
 // Markdown generator
 export { generateMissionMarkdown } from './markdown.js'
@@ -38,9 +43,17 @@ export {
   createCheckpointManager,
   generateObjectiveCheckpointName,
   describeCheckpoint,
+  AutoCheckpointManager,
+  createAutoCheckpointManager,
+  CheckpointRecoveryManager,
+  createCheckpointRecoveryManager,
   type Checkpoint,
   type CheckpointOptions,
   type RestoreResult,
+  type AutoCheckpointConfig,
+  type AutoCheckpointTrigger,
+  type AutoRecoveryConfig,
+  type RecoveryResult as CheckpointRecoveryResult,
 } from './checkpoints.js'
 
 // Recovery

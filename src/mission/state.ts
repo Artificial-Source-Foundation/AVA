@@ -690,4 +690,422 @@ export class MissionState {
 
     return { spent, limit, percentage, remaining }
   }
+
+  // ===========================================================================
+  // Validation (H-8)
+  // ===========================================================================
+
+  /**
+   * Validate mission state integrity
+   *
+   * Checks:
+   * - Unique IDs across objectives and tasks
+   * - Valid status transitions
+   * - Budget consistency (breakdown totals match spent)
+   * - Task dependency validity (referenced tasks exist)
+   * - Current objective index validity
+   * - Timestamp consistency
+   *
+   * @returns Validation result with errors and warnings
+   */
+  validate(): StateValidationResult {
+    const errors: StateValidationIssue[] = []
+    const warnings: StateValidationIssue[] = []
+
+    if (!this.mission) {
+      return {
+        isValid: false,
+        errors: [{ code: 'NO_MISSION', message: 'No mission loaded', path: 'mission' }],
+        warnings: [],
+        summary: 'No mission loaded',
+      }
+    }
+
+    // Track all IDs for uniqueness check
+    const seenIds = new Set<string>()
+
+    // Check mission-level fields
+    if (!this.mission.id) {
+      errors.push({ code: 'MISSING_ID', message: 'Mission ID is missing', path: 'mission.id' })
+    } else {
+      seenIds.add(this.mission.id)
+    }
+
+    // Validate currentObjective index
+    if (this.mission.currentObjective < 0) {
+      errors.push({
+        code: 'INVALID_INDEX',
+        message: `currentObjective cannot be negative: ${this.mission.currentObjective}`,
+        path: 'mission.currentObjective',
+      })
+    } else if (
+      this.mission.objectives.length > 0 &&
+      this.mission.currentObjective >= this.mission.objectives.length
+    ) {
+      errors.push({
+        code: 'INVALID_INDEX',
+        message: `currentObjective (${this.mission.currentObjective}) exceeds objectives array length (${this.mission.objectives.length})`,
+        path: 'mission.currentObjective',
+      })
+    }
+
+    // Validate budget consistency
+    const budgetErrors = this.validateBudget()
+    errors.push(...budgetErrors.errors)
+    warnings.push(...budgetErrors.warnings)
+
+    // Validate timestamps
+    const timestampErrors = this.validateTimestamps()
+    errors.push(...timestampErrors.errors)
+    warnings.push(...timestampErrors.warnings)
+
+    // Collect all task IDs for dependency validation
+    const allTaskIds = new Set<string>()
+    for (const objective of this.mission.objectives) {
+      for (const task of objective.tasks) {
+        allTaskIds.add(task.id)
+      }
+    }
+
+    // Validate objectives and tasks
+    for (let objIndex = 0; objIndex < this.mission.objectives.length; objIndex++) {
+      const objective = this.mission.objectives[objIndex]
+      const objPath = `mission.objectives[${objIndex}]`
+
+      // Check objective ID uniqueness
+      if (!objective.id) {
+        errors.push({ code: 'MISSING_ID', message: 'Objective ID is missing', path: `${objPath}.id` })
+      } else if (seenIds.has(objective.id)) {
+        errors.push({
+          code: 'DUPLICATE_ID',
+          message: `Duplicate ID: ${objective.id}`,
+          path: `${objPath}.id`,
+        })
+      } else {
+        seenIds.add(objective.id)
+      }
+
+      // Check objective has tasks
+      if (objective.tasks.length === 0 && objective.status !== 'completed') {
+        warnings.push({
+          code: 'EMPTY_OBJECTIVE',
+          message: `Objective "${objective.id}" has no tasks`,
+          path: `${objPath}.tasks`,
+        })
+      }
+
+      // Validate tasks within objective
+      for (let taskIndex = 0; taskIndex < objective.tasks.length; taskIndex++) {
+        const task = objective.tasks[taskIndex]
+        const taskPath = `${objPath}.tasks[${taskIndex}]`
+
+        // Check task ID uniqueness
+        if (!task.id) {
+          errors.push({ code: 'MISSING_ID', message: 'Task ID is missing', path: `${taskPath}.id` })
+        } else if (seenIds.has(task.id)) {
+          errors.push({
+            code: 'DUPLICATE_ID',
+            message: `Duplicate ID: ${task.id}`,
+            path: `${taskPath}.id`,
+          })
+        } else {
+          seenIds.add(task.id)
+        }
+
+        // Check task has acceptance criteria
+        if (!task.acceptanceCriteria || task.acceptanceCriteria.length === 0) {
+          warnings.push({
+            code: 'MISSING_CRITERIA',
+            message: `Task "${task.id}" has no acceptance criteria`,
+            path: `${taskPath}.acceptanceCriteria`,
+          })
+        }
+
+        // Validate task dependencies
+        if (task.dependencies && task.dependencies.length > 0) {
+          for (const depId of task.dependencies) {
+            if (!allTaskIds.has(depId)) {
+              errors.push({
+                code: 'INVALID_DEPENDENCY',
+                message: `Task "${task.id}" references non-existent dependency: ${depId}`,
+                path: `${taskPath}.dependencies`,
+              })
+            }
+
+            // Check for self-dependency
+            if (depId === task.id) {
+              errors.push({
+                code: 'SELF_DEPENDENCY',
+                message: `Task "${task.id}" has self-dependency`,
+                path: `${taskPath}.dependencies`,
+              })
+            }
+          }
+        }
+
+        // Check for circular dependencies
+        const circularDep = this.detectCircularDependency(task.id, allTaskIds)
+        if (circularDep) {
+          errors.push({
+            code: 'CIRCULAR_DEPENDENCY',
+            message: `Circular dependency detected: ${circularDep.join(' -> ')}`,
+            path: `${taskPath}.dependencies`,
+          })
+        }
+
+        // Validate status consistency
+        if (task.status === 'completed' && !task.completedAt) {
+          warnings.push({
+            code: 'MISSING_TIMESTAMP',
+            message: `Task "${task.id}" is completed but has no completedAt timestamp`,
+            path: `${taskPath}.completedAt`,
+          })
+        }
+
+        if (task.status === 'in_progress' && !task.startedAt) {
+          warnings.push({
+            code: 'MISSING_TIMESTAMP',
+            message: `Task "${task.id}" is in_progress but has no startedAt timestamp`,
+            path: `${taskPath}.startedAt`,
+          })
+        }
+
+        // Check attempts consistency
+        if (task.attempts < 0) {
+          errors.push({
+            code: 'INVALID_VALUE',
+            message: `Task "${task.id}" has negative attempts: ${task.attempts}`,
+            path: `${taskPath}.attempts`,
+          })
+        }
+      }
+    }
+
+    const isValid = errors.length === 0
+    const summary = this.generateValidationSummary(errors, warnings)
+
+    return { isValid, errors, warnings, summary }
+  }
+
+  /**
+   * Validate budget consistency
+   */
+  private validateBudget(): { errors: StateValidationIssue[]; warnings: StateValidationIssue[] } {
+    const errors: StateValidationIssue[] = []
+    const warnings: StateValidationIssue[] = []
+
+    if (!this.mission) return { errors, warnings }
+
+    const { budget } = this.mission
+    const { spent, limit, breakdown } = budget
+
+    // Check breakdown totals match spent
+    const breakdownTotal =
+      breakdown.council + breakdown.operators + breakdown.validators + breakdown.support
+
+    // Allow small floating point differences
+    if (Math.abs(breakdownTotal - spent) > 0.001) {
+      errors.push({
+        code: 'BUDGET_MISMATCH',
+        message: `Budget breakdown total ($${breakdownTotal.toFixed(4)}) does not match spent ($${spent.toFixed(4)})`,
+        path: 'mission.budget',
+      })
+    }
+
+    // Check for negative values
+    if (spent < 0) {
+      errors.push({
+        code: 'INVALID_VALUE',
+        message: `Budget spent cannot be negative: $${spent}`,
+        path: 'mission.budget.spent',
+      })
+    }
+
+    if (limit < 0) {
+      errors.push({
+        code: 'INVALID_VALUE',
+        message: `Budget limit cannot be negative: $${limit}`,
+        path: 'mission.budget.limit',
+      })
+    }
+
+    // Check individual breakdown values
+    for (const [category, value] of Object.entries(breakdown)) {
+      if (value < 0) {
+        errors.push({
+          code: 'INVALID_VALUE',
+          message: `Budget breakdown.${category} cannot be negative: $${value}`,
+          path: `mission.budget.breakdown.${category}`,
+        })
+      }
+    }
+
+    // Warning if over budget
+    if (spent > limit) {
+      warnings.push({
+        code: 'OVER_BUDGET',
+        message: `Mission is over budget: spent $${spent.toFixed(2)} of $${limit.toFixed(2)} limit`,
+        path: 'mission.budget',
+      })
+    }
+
+    return { errors, warnings }
+  }
+
+  /**
+   * Validate timestamp consistency
+   */
+  private validateTimestamps(): { errors: StateValidationIssue[]; warnings: StateValidationIssue[] } {
+    const errors: StateValidationIssue[] = []
+    const warnings: StateValidationIssue[] = []
+
+    if (!this.mission) return { errors, warnings }
+
+    // Check required timestamps exist
+    if (!this.mission.createdAt) {
+      errors.push({
+        code: 'MISSING_TIMESTAMP',
+        message: 'Mission createdAt timestamp is missing',
+        path: 'mission.createdAt',
+      })
+    }
+
+    // Validate timestamp order
+    const created = this.mission.createdAt ? new Date(this.mission.createdAt).getTime() : 0
+    const updated = this.mission.updatedAt ? new Date(this.mission.updatedAt).getTime() : 0
+    const approved = this.mission.approvedAt ? new Date(this.mission.approvedAt).getTime() : 0
+    const completed = this.mission.completedAt ? new Date(this.mission.completedAt).getTime() : 0
+
+    if (created > 0 && updated > 0 && updated < created) {
+      warnings.push({
+        code: 'TIMESTAMP_ORDER',
+        message: 'updatedAt is before createdAt',
+        path: 'mission.updatedAt',
+      })
+    }
+
+    if (created > 0 && approved > 0 && approved < created) {
+      warnings.push({
+        code: 'TIMESTAMP_ORDER',
+        message: 'approvedAt is before createdAt',
+        path: 'mission.approvedAt',
+      })
+    }
+
+    if (approved > 0 && completed > 0 && completed < approved) {
+      warnings.push({
+        code: 'TIMESTAMP_ORDER',
+        message: 'completedAt is before approvedAt',
+        path: 'mission.completedAt',
+      })
+    }
+
+    return { errors, warnings }
+  }
+
+  /**
+   * Detect circular dependencies in task graph
+   */
+  private detectCircularDependency(
+    startTaskId: string,
+    allTaskIds: Set<string>,
+    visited: Set<string> = new Set(),
+    path: string[] = []
+  ): string[] | null {
+    if (visited.has(startTaskId)) {
+      // Found cycle - return the path from the repeated node
+      const cycleStart = path.indexOf(startTaskId)
+      return [...path.slice(cycleStart), startTaskId]
+    }
+
+    const task = this.getTask(startTaskId)
+    if (!task || !task.dependencies || task.dependencies.length === 0) {
+      return null
+    }
+
+    visited.add(startTaskId)
+    path.push(startTaskId)
+
+    for (const depId of task.dependencies) {
+      if (!allTaskIds.has(depId)) continue // Skip invalid deps (handled elsewhere)
+
+      const cycle = this.detectCircularDependency(depId, allTaskIds, new Set(visited), [...path])
+      if (cycle) return cycle
+    }
+
+    return null
+  }
+
+  /**
+   * Generate human-readable validation summary
+   */
+  private generateValidationSummary(
+    errors: StateValidationIssue[],
+    warnings: StateValidationIssue[]
+  ): string {
+    if (errors.length === 0 && warnings.length === 0) {
+      return 'Mission state is valid'
+    }
+
+    const parts: string[] = []
+
+    if (errors.length > 0) {
+      parts.push(`${errors.length} error(s)`)
+    }
+
+    if (warnings.length > 0) {
+      parts.push(`${warnings.length} warning(s)`)
+    }
+
+    return `Validation found ${parts.join(' and ')}`
+  }
+}
+
+// =============================================================================
+// Validation Types
+// =============================================================================
+
+/**
+ * Issue codes for state validation
+ */
+export type StateValidationCode =
+  | 'NO_MISSION'
+  | 'MISSING_ID'
+  | 'DUPLICATE_ID'
+  | 'INVALID_INDEX'
+  | 'INVALID_VALUE'
+  | 'INVALID_DEPENDENCY'
+  | 'SELF_DEPENDENCY'
+  | 'CIRCULAR_DEPENDENCY'
+  | 'MISSING_CRITERIA'
+  | 'EMPTY_OBJECTIVE'
+  | 'BUDGET_MISMATCH'
+  | 'OVER_BUDGET'
+  | 'MISSING_TIMESTAMP'
+  | 'TIMESTAMP_ORDER'
+
+/**
+ * Individual validation issue
+ */
+export interface StateValidationIssue {
+  /** Issue code for programmatic handling */
+  code: StateValidationCode
+  /** Human-readable message */
+  message: string
+  /** JSON path to the problematic field */
+  path: string
+}
+
+/**
+ * Result of state validation
+ */
+export interface StateValidationResult {
+  /** Whether the mission state is valid (no errors) */
+  isValid: boolean
+  /** Critical errors that must be fixed */
+  errors: StateValidationIssue[]
+  /** Non-critical warnings */
+  warnings: StateValidationIssue[]
+  /** Human-readable summary */
+  summary: string
 }

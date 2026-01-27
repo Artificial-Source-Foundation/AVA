@@ -247,6 +247,140 @@ export const FALLBACK_CHAINS: Record<string, string[]> = {
 }
 
 // =============================================================================
+// Oracle & Agent Fallback Chains
+// =============================================================================
+
+/**
+ * Oracle-specific fallback chains
+ *
+ * Each oracle has a custom fallback chain based on their specialty:
+ * - CIPHER (Architecture) - Claude primary, needs reasoning
+ * - VECTOR (Logic) - GPT primary, needs code analysis
+ * - PRISM (UI/UX) - Gemini primary, multimodal for UI
+ * - APEX (Performance) - DeepSeek primary, efficiency focus
+ */
+export const ORACLE_FALLBACKS: Record<string, string[]> = {
+  // CIPHER (Architecture) - prefers Claude for strategic reasoning
+  CIPHER: [
+    'anthropic/claude-sonnet-4-5',
+    'openai/gpt-4o',
+    'google/gemini-2.0-pro',
+  ],
+
+  // VECTOR (Logic) - prefers GPT for code pattern analysis
+  VECTOR: [
+    'anthropic/claude-sonnet-4-5',
+    'google/gemini-2.0-pro',
+    'deepseek/deepseek-chat',
+  ],
+
+  // PRISM (UI/UX) - prefers Gemini for multimodal/visual
+  PRISM: [
+    'anthropic/claude-sonnet-4-5',
+    'openai/gpt-4o',
+    'anthropic/claude-haiku-4',
+  ],
+
+  // APEX (Performance) - prefers DeepSeek for efficiency
+  APEX: [
+    'anthropic/claude-sonnet-4-5',
+    'google/gemini-2.0-flash',
+    'openai/gpt-4o-mini',
+  ],
+}
+
+/**
+ * Delta Team agent fallback chains
+ *
+ * Each agent has a custom fallback chain based on their role:
+ * - RECON: Fast reconnaissance (Haiku tier)
+ * - SIGINT: Deep research (Sonnet tier)
+ * - TACCOM: Tactical advice (GPT primary)
+ * - SURGEON: Precision fixes (Haiku tier)
+ * - SENTINEL: QA verification (Sonnet tier)
+ * - SCRIBE: Documentation (Flash tier)
+ * - FACADE: UI operations (Flash tier)
+ * - SPECTRE: Vision analysis (multimodal required)
+ */
+export const AGENT_FALLBACKS: Record<string, string[]> = {
+  // Fast reconnaissance agents - prefer Haiku/Flash tier
+  RECON: [
+    'anthropic/claude-haiku-4',
+    'google/gemini-2.0-flash',
+    'openai/gpt-4o-mini',
+  ],
+
+  // Research agents - need capability, prefer Sonnet tier
+  SIGINT: [
+    'anthropic/claude-sonnet-4-5',
+    'openai/gpt-4o',
+    'google/gemini-2.0-pro',
+  ],
+
+  // Tactical command - GPT primary for balanced analysis
+  TACCOM: [
+    'openai/gpt-4o',
+    'anthropic/claude-sonnet-4-5',
+    'google/gemini-2.0-pro',
+  ],
+
+  // Surgical precision - fast tier for targeted fixes
+  SURGEON: [
+    'anthropic/claude-haiku-4',
+    'openai/gpt-4o-mini',
+    'google/gemini-2.0-flash',
+  ],
+
+  // QA guardian - needs accuracy, Sonnet tier
+  SENTINEL: [
+    'anthropic/claude-sonnet-4-5',
+    'openai/gpt-4o',
+    'google/gemini-2.0-pro',
+  ],
+
+  // Documentation writer - fast tier for content generation
+  SCRIBE: [
+    'google/gemini-2.0-flash',
+    'anthropic/claude-haiku-4',
+    'openai/gpt-4o-mini',
+  ],
+
+  // UI operations - fast tier with vision capability
+  FACADE: [
+    'google/gemini-2.0-flash',
+    'anthropic/claude-sonnet-4-5',
+    'openai/gpt-4o',
+  ],
+
+  // Vision analysis - multimodal required
+  SPECTRE: [
+    'google/gemini-2.0-flash',
+    'openai/gpt-4o',
+    'anthropic/claude-sonnet-4-5',
+  ],
+}
+
+/**
+ * Get fallback chain for an Oracle
+ *
+ * @param oracleName - Oracle codename (CIPHER, VECTOR, PRISM, APEX)
+ * @returns Fallback model chain or empty array if unknown
+ */
+export function getOracleFallbackChain(oracleName: string): string[] {
+  return ORACLE_FALLBACKS[oracleName.toUpperCase()] || []
+}
+
+/**
+ * Get fallback chain for a Delta Team agent
+ *
+ * @param agentName - Agent codename (RECON, SIGINT, TACCOM, etc.)
+ * @returns Fallback model chain or empty array if unknown
+ */
+export function getAgentFallbackChain(agentName: string): string[] {
+  return AGENT_FALLBACKS[agentName.toUpperCase()] || []
+}
+
+// =============================================================================
 // Fallback Chain Manager
 // =============================================================================
 
@@ -704,4 +838,126 @@ export function describeFallbackResult<T>(result: FallbackExecutionResult<T>): s
   }
 
   return lines.join('\n')
+}
+
+// =============================================================================
+// Fallback Chain Activity Logging
+// =============================================================================
+
+/** Fallback chain activity record */
+export interface FallbackActivity {
+  timestamp: string
+  primaryModel: string
+  usedModel: string
+  attemptedModels: string[]
+  success: boolean
+  errorMessage?: string
+  durationMs: number
+}
+
+/** Activity history buffer */
+const fallbackActivityHistory: FallbackActivity[] = []
+const MAX_ACTIVITY_HISTORY = 100
+
+/**
+ * Record fallback chain activity
+ *
+ * Call this after executeWithFallback to track fallback patterns.
+ */
+export function recordFallbackActivity<T>(
+  primaryModel: string,
+  result: FallbackExecutionResult<T>,
+  durationMs: number
+): void {
+  const activity: FallbackActivity = {
+    timestamp: new Date().toISOString(),
+    primaryModel,
+    usedModel: result.usedModel || 'none',
+    attemptedModels: result.attemptedModels,
+    success: result.success,
+    errorMessage: result.error?.message,
+    durationMs,
+  }
+
+  fallbackActivityHistory.push(activity)
+
+  // Keep history bounded
+  if (fallbackActivityHistory.length > MAX_ACTIVITY_HISTORY) {
+    fallbackActivityHistory.shift()
+  }
+}
+
+/**
+ * Get recent fallback activity
+ */
+export function getRecentFallbackActivity(limit = 10): FallbackActivity[] {
+  return fallbackActivityHistory.slice(-limit)
+}
+
+/**
+ * Get fallback activity summary
+ *
+ * Returns statistics about recent fallback behavior.
+ */
+export function getFallbackActivitySummary(): {
+  total: number
+  successRate: number
+  avgAttempts: number
+  fallbackRate: number
+  mostUsedFallbacks: Array<{ model: string; count: number }>
+  failuresByPrimary: Array<{ model: string; failures: number }>
+} {
+  if (fallbackActivityHistory.length === 0) {
+    return {
+      total: 0,
+      successRate: 0,
+      avgAttempts: 0,
+      fallbackRate: 0,
+      mostUsedFallbacks: [],
+      failuresByPrimary: [],
+    }
+  }
+
+  const total = fallbackActivityHistory.length
+  const successes = fallbackActivityHistory.filter(a => a.success).length
+  const fallbacks = fallbackActivityHistory.filter(a => a.attemptedModels.length > 1).length
+  const totalAttempts = fallbackActivityHistory.reduce((sum, a) => sum + a.attemptedModels.length, 0)
+
+  // Count fallback model usage
+  const fallbackUsage = new Map<string, number>()
+  for (const activity of fallbackActivityHistory) {
+    if (activity.attemptedModels.length > 1 && activity.usedModel !== activity.primaryModel) {
+      fallbackUsage.set(activity.usedModel, (fallbackUsage.get(activity.usedModel) || 0) + 1)
+    }
+  }
+
+  // Count failures by primary model
+  const failuresByPrimaryMap = new Map<string, number>()
+  for (const activity of fallbackActivityHistory) {
+    if (!activity.success) {
+      failuresByPrimaryMap.set(activity.primaryModel, (failuresByPrimaryMap.get(activity.primaryModel) || 0) + 1)
+    }
+  }
+
+  return {
+    total,
+    successRate: Math.round((successes / total) * 100) / 100,
+    avgAttempts: Math.round((totalAttempts / total) * 100) / 100,
+    fallbackRate: Math.round((fallbacks / total) * 100) / 100,
+    mostUsedFallbacks: Array.from(fallbackUsage.entries())
+      .map(([model, count]) => ({ model, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5),
+    failuresByPrimary: Array.from(failuresByPrimaryMap.entries())
+      .map(([model, failures]) => ({ model, failures }))
+      .sort((a, b) => b.failures - a.failures)
+      .slice(0, 5),
+  }
+}
+
+/**
+ * Clear fallback activity history (for testing)
+ */
+export function clearFallbackActivityHistory(): void {
+  fallbackActivityHistory.length = 0
 }

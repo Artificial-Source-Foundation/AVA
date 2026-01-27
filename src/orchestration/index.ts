@@ -30,6 +30,10 @@ export {
   invokeOracle,
   invokeOraclesParallel,
   invokeOraclesSequential,
+  filterSuccessfulResults,
+  filterFailedResults,
+  getDegradationSummary,
+  hasMinimumQuorum,
   type OraclePromptContext,
   type OracleInvocationResult,
 } from './oracle.js'
@@ -159,10 +163,16 @@ export async function conveneCouncil(
   const startTime = Date.now()
   let results: OracleInvocationResult[]
 
+  // Pass client through options for real oracle invocation (not simulation mode)
+  const invocationOptions = {
+    client: input.client as import('../lib/background-manager.js').OpenCodeClient | undefined,
+    cwd,
+  }
+
   if (config.council.parallel) {
-    results = await invokeOraclesParallel(oracles, context)
+    results = await invokeOraclesParallel(oracles, context, invocationOptions)
   } else {
-    results = await invokeOraclesSequential(oracles, context)
+    results = await invokeOraclesSequential(oracles, context, invocationOptions)
   }
 
   const totalDurationMs = Date.now() - startTime

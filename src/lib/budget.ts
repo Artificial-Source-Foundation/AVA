@@ -20,8 +20,12 @@ export interface BudgetConfig {
   warnAt: number
   /** Pause threshold (0-1, e.g., 0.9 = 90%) */
   pauseAt: number
+  /** Hard limit threshold (0-1, e.g., 1.0 = 100%) - triggers abort */
+  hardLimitAt: number
   /** Track by agent category */
   trackByAgent: boolean
+  /** Callback when hard limit is exceeded */
+  onHardLimitExceeded?: (budget: BudgetTracking, operation?: string) => void
 }
 
 export interface BudgetStatus {
@@ -41,6 +45,8 @@ export interface BudgetStatus {
   shouldPause: boolean
   /** Whether budget is exceeded */
   isExceeded: boolean
+  /** Whether hard limit is exceeded (triggers abort) */
+  isHardLimitExceeded: boolean
   /** Breakdown by category */
   breakdown: BudgetBreakdown
 }
@@ -58,6 +64,18 @@ export interface BudgetCheckResult {
 
 export type AgentCategory = keyof BudgetBreakdown
 
+/** Error thrown when hard budget limit is exceeded */
+export class HardBudgetLimitError extends Error {
+  constructor(
+    message: string,
+    public readonly budget: BudgetTracking,
+    public readonly operation?: string
+  ) {
+    super(message)
+    this.name = 'HardBudgetLimitError'
+  }
+}
+
 // =============================================================================
 // Constants
 // =============================================================================
@@ -68,6 +86,7 @@ const DEFAULT_CONFIG: BudgetConfig = {
   defaultLimit: 10.0,
   warnAt: 0.7,
   pauseAt: 0.9,
+  hardLimitAt: 1.0,
   trackByAgent: true,
 }
 
@@ -111,11 +130,19 @@ export class BudgetManager {
         defaultLimit: config.budget?.defaultLimit ?? DEFAULT_CONFIG.defaultLimit,
         warnAt: config.budget?.warnAt ?? DEFAULT_CONFIG.warnAt,
         pauseAt: config.budget?.pauseAt ?? DEFAULT_CONFIG.pauseAt,
+        hardLimitAt: config.budget?.hardLimitAt ?? DEFAULT_CONFIG.hardLimitAt,
         trackByAgent: config.budget?.trackByAgent ?? DEFAULT_CONFIG.trackByAgent,
       }
     } catch {
       return DEFAULT_CONFIG
     }
+  }
+
+  /**
+   * Set callback for hard limit exceeded
+   */
+  setHardLimitCallback(callback: (budget: BudgetTracking, operation?: string) => void): void {
+    this.config.onHardLimitExceeded = callback
   }
 
   /**
@@ -147,6 +174,7 @@ export class BudgetManager {
       isWarning: percentage >= this.config.warnAt * 100,
       shouldPause: percentage >= this.config.pauseAt * 100,
       isExceeded: budget.spent >= budget.limit,
+      isHardLimitExceeded: percentage >= this.config.hardLimitAt * 100,
       breakdown: budget.breakdown,
     }
   }
@@ -154,7 +182,7 @@ export class BudgetManager {
   /**
    * Check if an operation is within budget
    */
-  checkBudget(budget: BudgetTracking, estimatedCost: number): BudgetCheckResult {
+  checkBudget(budget: BudgetTracking, estimatedCost: number, operation?: string): BudgetCheckResult {
     if (!this.config.enabled) {
       return {
         allowed: true,
@@ -165,11 +193,33 @@ export class BudgetManager {
     const status = this.getStatus(budget)
     const remainingAfter = status.remaining - estimatedCost
 
+    // Check hard limit first - this triggers abort
+    if (status.isHardLimitExceeded) {
+      // Trigger callback for hard limit
+      this.config.onHardLimitExceeded?.(budget, operation)
+
+      return {
+        allowed: false,
+        reason: `HARD BUDGET LIMIT EXCEEDED (${this.config.hardLimitAt * 100}%): $${budget.spent.toFixed(2)} / $${budget.limit.toFixed(2)} - MISSION ABORTED`,
+        remainingAfter,
+      }
+    }
+
     // Check if exceeded
     if (status.isExceeded) {
       return {
         allowed: false,
         reason: `Budget exceeded: $${budget.spent.toFixed(2)} / $${budget.limit.toFixed(2)}`,
+        remainingAfter,
+      }
+    }
+
+    // Check if this operation would exceed hard limit
+    const percentageAfter = budget.limit > 0 ? ((budget.spent + estimatedCost) / budget.limit) * 100 : 0
+    if (percentageAfter >= this.config.hardLimitAt * 100) {
+      return {
+        allowed: false,
+        reason: `Operation would exceed hard budget limit: estimated $${estimatedCost.toFixed(4)} would bring total to ${percentageAfter.toFixed(1)}%`,
         remainingAfter,
       }
     }
@@ -204,6 +254,22 @@ export class BudgetManager {
     return {
       allowed: true,
       remainingAfter,
+    }
+  }
+
+  /**
+   * Enforce hard budget limit - throws if exceeded
+   */
+  enforceHardLimit(budget: BudgetTracking, operation?: string): void {
+    const status = this.getStatus(budget)
+
+    if (status.isHardLimitExceeded) {
+      this.config.onHardLimitExceeded?.(budget, operation)
+      throw new HardBudgetLimitError(
+        `Hard budget limit exceeded: $${budget.spent.toFixed(2)} / $${budget.limit.toFixed(2)} (${status.percentage}%)`,
+        budget,
+        operation
+      )
     }
   }
 
@@ -297,7 +363,9 @@ export function describeBudgetStatus(status: BudgetStatus): string {
   lines.push(`Spent: $${status.spent.toFixed(2)} / $${status.limit.toFixed(2)}`)
   lines.push(`Remaining: $${status.remaining.toFixed(2)} (${100 - status.percentage}%)`)
 
-  if (status.isExceeded) {
+  if (status.isHardLimitExceeded) {
+    lines.push('🛑 HARD BUDGET LIMIT EXCEEDED - MISSION ABORTED')
+  } else if (status.isExceeded) {
     lines.push('⛔ BUDGET EXCEEDED')
   } else if (status.shouldPause) {
     lines.push('⚠️ PAUSE THRESHOLD REACHED')

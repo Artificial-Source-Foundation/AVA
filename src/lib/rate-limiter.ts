@@ -358,3 +358,118 @@ export function describeRetryResult<T>(result: RetryResult<T>): string {
 
   return lines.join('\n')
 }
+
+// =============================================================================
+// Rate Limiter Health Check
+// =============================================================================
+
+/** Health status for rate limiter */
+export interface RateLimiterHealthStatus {
+  /** Overall health status */
+  status: 'healthy' | 'degraded' | 'critical'
+  /** Providers currently in cooldown */
+  providersInCooldown: Array<{
+    provider: string
+    remainingMs: number
+    remainingFormatted: string
+  }>
+  /** Available providers (not in cooldown) */
+  availableProviders: string[]
+  /** Total providers known */
+  totalProviders: number
+  /** Providers in cooldown count */
+  cooldownCount: number
+  /** Summary message */
+  summary: string
+}
+
+/** Singleton rate limiter for health checks */
+let defaultRateLimiter: RateLimiter | null = null
+
+/**
+ * Get or create the default rate limiter
+ */
+export function getDefaultRateLimiter(config?: Partial<RateLimitConfig>): RateLimiter {
+  if (!defaultRateLimiter) {
+    defaultRateLimiter = new RateLimiter(config)
+  }
+  return defaultRateLimiter
+}
+
+/**
+ * Reset the default rate limiter (for testing)
+ */
+export function resetDefaultRateLimiter(): void {
+  defaultRateLimiter = null
+}
+
+/**
+ * Get rate limiter health status
+ *
+ * Checks cooldown status across all known providers and returns
+ * a comprehensive health report.
+ */
+export function getRateLimiterHealth(limiter?: RateLimiter): RateLimiterHealthStatus {
+  const rateLimiter = limiter || getDefaultRateLimiter()
+
+  // Get all unique providers from fallback models
+  const allProviders = new Set<string>()
+  for (const model of Object.keys(FALLBACK_MODELS)) {
+    allProviders.add(model.split('/')[0])
+  }
+  for (const fallbacks of Object.values(FALLBACK_MODELS)) {
+    for (const model of fallbacks) {
+      allProviders.add(model.split('/')[0])
+    }
+  }
+
+  const providersInCooldown: RateLimiterHealthStatus['providersInCooldown'] = []
+  const availableProviders: string[] = []
+
+  for (const provider of allProviders) {
+    const remaining = rateLimiter.getCooldownRemaining(provider)
+    if (remaining > 0) {
+      providersInCooldown.push({
+        provider,
+        remainingMs: remaining,
+        remainingFormatted: formatCooldown(remaining),
+      })
+    } else {
+      availableProviders.push(provider)
+    }
+  }
+
+  // Determine health status
+  const cooldownRatio = providersInCooldown.length / allProviders.size
+  let status: 'healthy' | 'degraded' | 'critical'
+  let summary: string
+
+  if (cooldownRatio === 0) {
+    status = 'healthy'
+    summary = 'All providers available'
+  } else if (cooldownRatio < 0.5) {
+    status = 'degraded'
+    summary = `${providersInCooldown.length} provider(s) in cooldown, ${availableProviders.length} available`
+  } else {
+    status = 'critical'
+    summary = `Most providers in cooldown (${providersInCooldown.length}/${allProviders.size})`
+  }
+
+  return {
+    status,
+    providersInCooldown,
+    availableProviders,
+    totalProviders: allProviders.size,
+    cooldownCount: providersInCooldown.length,
+    summary,
+  }
+}
+
+/**
+ * Format cooldown duration for display
+ */
+function formatCooldown(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
+  return `${(ms / 60000).toFixed(1)}m`
+}

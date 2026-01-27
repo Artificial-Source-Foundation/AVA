@@ -202,7 +202,7 @@ export function createDelta9Tools(
     ...createValidationTools(state, projectCwd),
     ...createDelegationTools(state, projectCwd, client),
     ...createBackgroundTools(state, projectCwd, client),
-    ...createCouncilTools(state, projectCwd),
+    ...createCouncilTools(state, projectCwd, client),
     ...createMemoryTools(projectCwd),
     ...createDiagnosticsTools(state, projectCwd, client),
     ...createRoutingTools(),

@@ -192,6 +192,8 @@ export interface BudgetConfig {
   warnAt: number
   /** Pause at this percentage (0-1) */
   pauseAt: number
+  /** Hard limit at this percentage (0-1) - triggers abort */
+  hardLimitAt: number
   /** Track costs by agent type */
   trackByAgent: boolean
 }
@@ -375,6 +377,7 @@ export const DEFAULT_CONFIG: Delta9Config = {
     defaultLimit: 10.0,
     warnAt: 0.7,
     pauseAt: 0.9,
+    hardLimitAt: 1.0,
     trackByAgent: true,
   },
   notifications: {

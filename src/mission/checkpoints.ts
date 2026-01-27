@@ -464,3 +464,602 @@ export function describeCheckpoint(checkpoint: Checkpoint): string {
 
   return lines.join('\n')
 }
+
+// =============================================================================
+// Auto Checkpoint Manager (A-10)
+// =============================================================================
+
+/** Configuration for auto checkpoint creation */
+export interface AutoCheckpointConfig {
+  /** Enable auto checkpoint creation */
+  enabled?: boolean
+  /** Create checkpoint after N successful tasks */
+  afterSuccessfulTasks?: number
+  /** Create checkpoint every N milliseconds (0 = disabled) */
+  intervalMs?: number
+  /** Maximum checkpoints to keep (0 = unlimited) */
+  maxCheckpoints?: number
+  /** Minimum time between checkpoints (ms) */
+  minIntervalMs?: number
+  /** Create checkpoint before risky operations */
+  beforeRiskyOps?: boolean
+  /** Risky operation patterns (tool names or patterns) */
+  riskyOps?: string[]
+  /** Callback when checkpoint is created */
+  onCheckpointCreated?: (checkpoint: Checkpoint) => void | Promise<void>
+}
+
+/** Trigger types for auto checkpoints */
+export type AutoCheckpointTrigger =
+  | 'interval'
+  | 'task_success'
+  | 'before_risky_op'
+  | 'objective_complete'
+  | 'phase_change'
+  | 'manual'
+
+/** Auto checkpoint manager for recovery */
+export class AutoCheckpointManager {
+  private manager: CheckpointManager
+  private config: Required<AutoCheckpointConfig>
+  private successfulTaskCount = 0
+  private lastCheckpointTime = 0
+  private checkpointCount = 0
+  private intervalTimer?: ReturnType<typeof setInterval>
+  private missionId = ''
+
+  constructor(cwd: string, config: AutoCheckpointConfig = {}) {
+    this.manager = new CheckpointManager(cwd)
+    this.config = {
+      enabled: config.enabled ?? true,
+      afterSuccessfulTasks: config.afterSuccessfulTasks ?? 5,
+      intervalMs: config.intervalMs ?? 0, // Disabled by default
+      maxCheckpoints: config.maxCheckpoints ?? 20,
+      minIntervalMs: config.minIntervalMs ?? 60000, // 1 minute minimum
+      beforeRiskyOps: config.beforeRiskyOps ?? true,
+      riskyOps: config.riskyOps ?? [
+        'edit_file',
+        'write_file',
+        'delete_file',
+        'execute_command',
+        'bash',
+        'shell',
+      ],
+      onCheckpointCreated: config.onCheckpointCreated ?? (() => {}),
+    }
+  }
+
+  /**
+   * Set the current mission ID
+   */
+  setMissionId(missionId: string): void {
+    this.missionId = missionId
+  }
+
+  /**
+   * Start interval-based checkpoints
+   */
+  startInterval(): void {
+    if (this.config.intervalMs <= 0 || this.intervalTimer) return
+
+    this.intervalTimer = setInterval(() => {
+      if (this.config.enabled && this.missionId) {
+        this.createCheckpoint('interval')
+      }
+    }, this.config.intervalMs)
+
+    // Don't prevent process exit
+    if (this.intervalTimer.unref) {
+      this.intervalTimer.unref()
+    }
+
+    log.debug(`Started auto checkpoint interval: ${this.config.intervalMs}ms`)
+  }
+
+  /**
+   * Stop interval-based checkpoints
+   */
+  stopInterval(): void {
+    if (this.intervalTimer) {
+      clearInterval(this.intervalTimer)
+      this.intervalTimer = undefined
+      log.debug('Stopped auto checkpoint interval')
+    }
+  }
+
+  /**
+   * Record a successful task completion
+   * Returns true if a checkpoint was created
+   */
+  async recordTaskSuccess(taskId: string): Promise<boolean> {
+    if (!this.config.enabled || !this.missionId) return false
+
+    this.successfulTaskCount++
+
+    if (this.successfulTaskCount >= this.config.afterSuccessfulTasks) {
+      const created = await this.createCheckpoint('task_success', {
+        description: `After ${this.successfulTaskCount} successful tasks (last: ${taskId})`,
+      })
+      if (created) {
+        this.successfulTaskCount = 0
+        return true
+      }
+    }
+
+    return false
+  }
+
+  /**
+   * Check if tool is risky and create checkpoint before execution
+   * Returns the checkpoint if created, null otherwise
+   */
+  async beforeRiskyOperation(toolName: string): Promise<Checkpoint | null> {
+    if (!this.config.enabled || !this.config.beforeRiskyOps || !this.missionId) {
+      return null
+    }
+
+    const isRisky = this.config.riskyOps.some((pattern) => {
+      if (pattern.includes('*')) {
+        const regex = new RegExp(pattern.replace(/\*/g, '.*'))
+        return regex.test(toolName)
+      }
+      return toolName.toLowerCase().includes(pattern.toLowerCase())
+    })
+
+    if (!isRisky) return null
+
+    return this.createCheckpoint('before_risky_op', {
+      description: `Before risky operation: ${toolName}`,
+    })
+  }
+
+  /**
+   * Create checkpoint on objective completion
+   */
+  async onObjectiveComplete(objectiveId: string, index: number): Promise<Checkpoint | null> {
+    if (!this.config.enabled || !this.missionId) return null
+
+    return this.createCheckpoint('objective_complete', {
+      name: generateObjectiveCheckpointName(objectiveId, index),
+      objectiveId,
+      description: `Objective ${index + 1} completed`,
+    })
+  }
+
+  /**
+   * Create checkpoint on phase change
+   */
+  async onPhaseChange(phaseName: string): Promise<Checkpoint | null> {
+    if (!this.config.enabled || !this.missionId) return null
+
+    return this.createCheckpoint('phase_change', {
+      description: `Phase change: ${phaseName}`,
+    })
+  }
+
+  /**
+   * Force create a checkpoint
+   */
+  async forceCheckpoint(description?: string): Promise<Checkpoint | null> {
+    return this.createCheckpoint('manual', {
+      description: description ?? 'Manual checkpoint',
+    })
+  }
+
+  /**
+   * Internal: Create a checkpoint if conditions allow
+   */
+  private async createCheckpoint(
+    trigger: AutoCheckpointTrigger,
+    options: {
+      name?: string
+      objectiveId?: string
+      description?: string
+    } = {}
+  ): Promise<Checkpoint | null> {
+    const now = Date.now()
+
+    // Check minimum interval (except for manual/objective triggers)
+    if (
+      trigger !== 'manual' &&
+      trigger !== 'objective_complete' &&
+      now - this.lastCheckpointTime < this.config.minIntervalMs
+    ) {
+      log.debug(`Skipping checkpoint (${trigger}): too soon since last checkpoint`)
+      return null
+    }
+
+    // Generate name
+    const name =
+      options.name ?? `auto-${trigger}-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`
+
+    // Create checkpoint
+    const checkpoint = this.manager.create(name, {
+      missionId: this.missionId,
+      objectiveId: options.objectiveId,
+      description: options.description ?? `Auto checkpoint (${trigger})`,
+      auto: true,
+    })
+
+    if (checkpoint) {
+      this.lastCheckpointTime = now
+      this.checkpointCount++
+
+      log.info(`Auto checkpoint created: ${checkpoint.name} (trigger: ${trigger})`)
+
+      // Cleanup old checkpoints if needed
+      await this.cleanupOldCheckpoints()
+
+      // Call callback
+      if (this.config.onCheckpointCreated) {
+        await this.config.onCheckpointCreated(checkpoint)
+      }
+    }
+
+    return checkpoint
+  }
+
+  /**
+   * Cleanup old auto checkpoints to stay within limit
+   */
+  private async cleanupOldCheckpoints(): Promise<void> {
+    if (this.config.maxCheckpoints <= 0) return
+
+    const checkpoints = this.manager.list(this.missionId)
+    const autoCheckpoints = checkpoints.filter((c) => c.auto)
+
+    // Sort by creation time (oldest first)
+    autoCheckpoints.sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    )
+
+    // Delete oldest until within limit
+    while (autoCheckpoints.length > this.config.maxCheckpoints) {
+      const oldest = autoCheckpoints.shift()
+      if (oldest) {
+        this.manager.delete(oldest.id)
+        log.debug(`Deleted old auto checkpoint: ${oldest.name}`)
+      }
+    }
+  }
+
+  /**
+   * Get underlying checkpoint manager
+   */
+  getManager(): CheckpointManager {
+    return this.manager
+  }
+
+  /**
+   * Get auto checkpoint stats
+   */
+  getStats(): {
+    enabled: boolean
+    successfulTaskCount: number
+    checkpointCount: number
+    lastCheckpointTime: number
+    config: AutoCheckpointConfig
+  } {
+    return {
+      enabled: this.config.enabled,
+      successfulTaskCount: this.successfulTaskCount,
+      checkpointCount: this.checkpointCount,
+      lastCheckpointTime: this.lastCheckpointTime,
+      config: this.config,
+    }
+  }
+
+  /**
+   * Reset state (for testing)
+   */
+  reset(): void {
+    this.successfulTaskCount = 0
+    this.lastCheckpointTime = 0
+    this.checkpointCount = 0
+    this.stopInterval()
+  }
+}
+
+/**
+ * Create an auto checkpoint manager
+ */
+export function createAutoCheckpointManager(
+  cwd: string,
+  config?: AutoCheckpointConfig
+): AutoCheckpointManager {
+  return new AutoCheckpointManager(cwd, config)
+}
+
+// =============================================================================
+// Checkpoint Auto-Recovery Manager (D-4)
+// =============================================================================
+
+/** Configuration for auto-recovery */
+export interface AutoRecoveryConfig {
+  /** Enable auto-recovery */
+  enabled?: boolean
+  /** Number of consecutive failures before auto-recovery */
+  failureThreshold?: number
+  /** Types of failures that trigger recovery */
+  recoveryTriggers?: Array<'task_failure' | 'validation_failure' | 'budget_exceeded' | 'error'>
+  /** Whether to auto-restore on trigger */
+  autoRestore?: boolean
+  /** Callback before recovery attempt */
+  onBeforeRecovery?: (checkpoint: Checkpoint, reason: string) => boolean | Promise<boolean>
+  /** Callback after recovery */
+  onAfterRecovery?: (result: RecoveryResult) => void | Promise<void>
+  /** Maximum recovery attempts per mission */
+  maxRecoveryAttempts?: number
+  /** Cooldown between recovery attempts (ms) */
+  recoveryCooldownMs?: number
+}
+
+/** Result of auto-recovery attempt */
+export interface RecoveryResult {
+  /** Whether recovery was attempted */
+  attempted: boolean
+  /** Whether recovery succeeded */
+  success: boolean
+  /** Checkpoint restored to (if any) */
+  checkpoint?: Checkpoint
+  /** Error message if failed */
+  error?: string
+  /** Reason for recovery */
+  reason: string
+  /** Files affected */
+  filesRestored: string[]
+}
+
+/** Auto-recovery manager for mission checkpoints */
+export class CheckpointRecoveryManager {
+  private manager: CheckpointManager
+  private config: Required<AutoRecoveryConfig>
+  private consecutiveFailures = 0
+  private recoveryAttempts = 0
+  private lastRecoveryTime = 0
+  private missionId = ''
+
+  constructor(cwd: string, config: AutoRecoveryConfig = {}) {
+    this.manager = new CheckpointManager(cwd)
+    this.config = {
+      enabled: config.enabled ?? true,
+      failureThreshold: config.failureThreshold ?? 3,
+      recoveryTriggers: config.recoveryTriggers ?? ['task_failure', 'validation_failure'],
+      autoRestore: config.autoRestore ?? true,
+      onBeforeRecovery: config.onBeforeRecovery ?? (() => true),
+      onAfterRecovery: config.onAfterRecovery ?? (() => {}),
+      maxRecoveryAttempts: config.maxRecoveryAttempts ?? 3,
+      recoveryCooldownMs: config.recoveryCooldownMs ?? 30000, // 30 seconds
+    }
+  }
+
+  /**
+   * Set the current mission ID
+   */
+  setMissionId(missionId: string): void {
+    this.missionId = missionId
+    this.consecutiveFailures = 0
+    this.recoveryAttempts = 0
+  }
+
+  /**
+   * Record a successful task (resets failure counter)
+   */
+  recordSuccess(): void {
+    this.consecutiveFailures = 0
+  }
+
+  /**
+   * Record a failure and potentially trigger recovery
+   */
+  async recordFailure(
+    type: 'task_failure' | 'validation_failure' | 'budget_exceeded' | 'error',
+    details?: string
+  ): Promise<RecoveryResult> {
+    if (!this.config.enabled || !this.missionId) {
+      return {
+        attempted: false,
+        success: false,
+        reason: 'Recovery disabled or no mission',
+        filesRestored: [],
+      }
+    }
+
+    // Check if this type triggers recovery
+    if (!this.config.recoveryTriggers.includes(type)) {
+      return {
+        attempted: false,
+        success: false,
+        reason: `Failure type '${type}' does not trigger recovery`,
+        filesRestored: [],
+      }
+    }
+
+    this.consecutiveFailures++
+
+    log.info(`Recorded failure: ${type} (consecutive: ${this.consecutiveFailures}/${this.config.failureThreshold})`)
+
+    // Check if threshold reached
+    if (this.consecutiveFailures < this.config.failureThreshold) {
+      return {
+        attempted: false,
+        success: false,
+        reason: `Threshold not reached (${this.consecutiveFailures}/${this.config.failureThreshold})`,
+        filesRestored: [],
+      }
+    }
+
+    // Attempt recovery
+    return this.attemptRecovery(`${type}: ${details || 'No details'}`)
+  }
+
+  /**
+   * Force a recovery attempt
+   */
+  async forceRecovery(reason: string): Promise<RecoveryResult> {
+    if (!this.config.enabled || !this.missionId) {
+      return {
+        attempted: false,
+        success: false,
+        reason: 'Recovery disabled or no mission',
+        filesRestored: [],
+      }
+    }
+
+    return this.attemptRecovery(reason)
+  }
+
+  /**
+   * Internal: Attempt recovery
+   */
+  private async attemptRecovery(reason: string): Promise<RecoveryResult> {
+    const now = Date.now()
+
+    // Check recovery limits
+    if (this.recoveryAttempts >= this.config.maxRecoveryAttempts) {
+      log.warn(`Max recovery attempts reached (${this.config.maxRecoveryAttempts})`)
+      return {
+        attempted: false,
+        success: false,
+        reason: `Max recovery attempts reached (${this.config.maxRecoveryAttempts})`,
+        filesRestored: [],
+      }
+    }
+
+    // Check cooldown
+    if (now - this.lastRecoveryTime < this.config.recoveryCooldownMs) {
+      const waitTime = Math.ceil((this.config.recoveryCooldownMs - (now - this.lastRecoveryTime)) / 1000)
+      log.debug(`Recovery cooldown active, wait ${waitTime}s`)
+      return {
+        attempted: false,
+        success: false,
+        reason: `Recovery cooldown active (${waitTime}s remaining)`,
+        filesRestored: [],
+      }
+    }
+
+    // Find latest checkpoint
+    const checkpoint = this.manager.getLatest(this.missionId)
+    if (!checkpoint) {
+      log.warn('No checkpoint available for recovery')
+      return {
+        attempted: true,
+        success: false,
+        error: 'No checkpoint available',
+        reason,
+        filesRestored: [],
+      }
+    }
+
+    // Call before callback
+    const shouldProceed = await this.config.onBeforeRecovery(checkpoint, reason)
+    if (!shouldProceed) {
+      log.info('Recovery cancelled by onBeforeRecovery callback')
+      return {
+        attempted: false,
+        success: false,
+        reason: 'Cancelled by callback',
+        checkpoint,
+        filesRestored: [],
+      }
+    }
+
+    // Perform recovery if autoRestore is enabled
+    if (!this.config.autoRestore) {
+      log.info('Auto-restore disabled, recovery not performed')
+      return {
+        attempted: true,
+        success: false,
+        reason: 'Auto-restore disabled',
+        checkpoint,
+        filesRestored: [],
+      }
+    }
+
+    // Restore checkpoint
+    log.info(`Attempting auto-recovery to checkpoint: ${checkpoint.name}`)
+    const restoreResult = this.manager.restore(checkpoint.id)
+
+    this.recoveryAttempts++
+    this.lastRecoveryTime = now
+    this.consecutiveFailures = 0 // Reset on recovery attempt
+
+    const result: RecoveryResult = {
+      attempted: true,
+      success: restoreResult.success,
+      checkpoint,
+      error: restoreResult.error,
+      reason,
+      filesRestored: restoreResult.filesRestored,
+    }
+
+    // Call after callback
+    await this.config.onAfterRecovery(result)
+
+    if (restoreResult.success) {
+      log.info(`Auto-recovery successful: restored to ${checkpoint.name}`)
+    } else {
+      log.error(`Auto-recovery failed: ${restoreResult.error}`)
+    }
+
+    return result
+  }
+
+  /**
+   * Check if recovery is needed based on current state
+   */
+  shouldRecover(): boolean {
+    return (
+      this.config.enabled &&
+      this.consecutiveFailures >= this.config.failureThreshold &&
+      this.recoveryAttempts < this.config.maxRecoveryAttempts
+    )
+  }
+
+  /**
+   * Get recovery stats
+   */
+  getStats(): {
+    enabled: boolean
+    consecutiveFailures: number
+    recoveryAttempts: number
+    maxRecoveryAttempts: number
+    lastRecoveryTime: number
+    shouldRecover: boolean
+  } {
+    return {
+      enabled: this.config.enabled,
+      consecutiveFailures: this.consecutiveFailures,
+      recoveryAttempts: this.recoveryAttempts,
+      maxRecoveryAttempts: this.config.maxRecoveryAttempts,
+      lastRecoveryTime: this.lastRecoveryTime,
+      shouldRecover: this.shouldRecover(),
+    }
+  }
+
+  /**
+   * Reset state (for testing)
+   */
+  reset(): void {
+    this.consecutiveFailures = 0
+    this.recoveryAttempts = 0
+    this.lastRecoveryTime = 0
+  }
+
+  /**
+   * Get underlying checkpoint manager
+   */
+  getManager(): CheckpointManager {
+    return this.manager
+  }
+}
+
+/**
+ * Create a checkpoint recovery manager
+ */
+export function createCheckpointRecoveryManager(
+  cwd: string,
+  config?: AutoRecoveryConfig
+): CheckpointRecoveryManager {
+  return new CheckpointRecoveryManager(cwd, config)
+}

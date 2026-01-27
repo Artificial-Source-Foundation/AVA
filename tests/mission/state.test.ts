@@ -478,4 +478,203 @@ describe('MissionState', () => {
       expect(state.getMission()?.status).toBe('aborted')
     })
   })
+
+  describe('validate', () => {
+    it('returns error when no mission loaded', () => {
+      const result = state.validate()
+
+      expect(result.isValid).toBe(false)
+      expect(result.errors).toHaveLength(1)
+      expect(result.errors[0].code).toBe('NO_MISSION')
+    })
+
+    it('validates a valid mission', () => {
+      state.create('Test mission')
+      const objective = state.addObjective({ description: 'Test objective' })
+      state.addTask(objective.id, {
+        description: 'Test task',
+        acceptanceCriteria: ['Works correctly'],
+      })
+
+      const result = state.validate()
+
+      expect(result.isValid).toBe(true)
+      expect(result.errors).toHaveLength(0)
+      expect(result.summary).toBe('Mission state is valid')
+    })
+
+    it('detects duplicate IDs', () => {
+      state.create('Test mission')
+      const objective = state.addObjective({ description: 'Test objective' })
+      const task1 = state.addTask(objective.id, {
+        description: 'Task 1',
+        acceptanceCriteria: ['Done'],
+      })
+
+      // Manually create duplicate ID (normally prevented by nanoid)
+      const mission = state.getMission()!
+      mission.objectives[0].tasks.push({
+        id: task1.id, // Duplicate!
+        description: 'Task 2',
+        status: 'pending',
+        attempts: 0,
+        acceptanceCriteria: ['Done'],
+      })
+
+      const result = state.validate()
+
+      expect(result.isValid).toBe(false)
+      expect(result.errors.some((e) => e.code === 'DUPLICATE_ID')).toBe(true)
+    })
+
+    it('detects invalid task dependencies', () => {
+      state.create('Test mission')
+      const objective = state.addObjective({ description: 'Test objective' })
+
+      // Add task with non-existent dependency
+      const mission = state.getMission()!
+      mission.objectives[0].tasks.push({
+        id: 'task_test',
+        description: 'Test task',
+        status: 'pending',
+        attempts: 0,
+        acceptanceCriteria: ['Done'],
+        dependencies: ['non_existent_task'],
+      })
+
+      const result = state.validate()
+
+      expect(result.isValid).toBe(false)
+      expect(result.errors.some((e) => e.code === 'INVALID_DEPENDENCY')).toBe(true)
+    })
+
+    it('detects self-dependency', () => {
+      state.create('Test mission')
+      const objective = state.addObjective({ description: 'Test objective' })
+
+      // Add task with self-dependency
+      const mission = state.getMission()!
+      mission.objectives[0].tasks.push({
+        id: 'task_self',
+        description: 'Test task',
+        status: 'pending',
+        attempts: 0,
+        acceptanceCriteria: ['Done'],
+        dependencies: ['task_self'],
+      })
+
+      const result = state.validate()
+
+      expect(result.isValid).toBe(false)
+      expect(result.errors.some((e) => e.code === 'SELF_DEPENDENCY')).toBe(true)
+    })
+
+    it('detects budget mismatch', () => {
+      state.create('Test mission')
+
+      // Manually create budget mismatch
+      const mission = state.getMission()!
+      mission.budget.spent = 5.0
+      mission.budget.breakdown = {
+        council: 1.0,
+        operators: 1.0, // Sum is 4.0, not 5.0
+        validators: 1.0,
+        support: 1.0,
+      }
+
+      const result = state.validate()
+
+      expect(result.isValid).toBe(false)
+      expect(result.errors.some((e) => e.code === 'BUDGET_MISMATCH')).toBe(true)
+    })
+
+    it('warns about over budget', () => {
+      state.create('Test mission', { budgetLimit: 5.0 })
+
+      // Go over budget
+      state.addCost(6.0, 'operators')
+
+      const result = state.validate()
+
+      // Over budget is a warning, not an error
+      expect(result.warnings.some((w) => w.code === 'OVER_BUDGET')).toBe(true)
+    })
+
+    it('detects invalid currentObjective index', () => {
+      state.create('Test mission')
+      state.addObjective({ description: 'Objective 1' })
+
+      // Set invalid index
+      const mission = state.getMission()!
+      mission.currentObjective = 5
+
+      const result = state.validate()
+
+      expect(result.isValid).toBe(false)
+      expect(result.errors.some((e) => e.code === 'INVALID_INDEX')).toBe(true)
+    })
+
+    it('warns about empty objectives', () => {
+      state.create('Test mission')
+      state.addObjective({ description: 'Empty objective' })
+
+      const result = state.validate()
+
+      // Empty objective is a warning
+      expect(result.warnings.some((w) => w.code === 'EMPTY_OBJECTIVE')).toBe(true)
+    })
+
+    it('warns about missing acceptance criteria', () => {
+      state.create('Test mission')
+      const objective = state.addObjective({ description: 'Test objective' })
+
+      // Add task without acceptance criteria
+      const mission = state.getMission()!
+      mission.objectives[0].tasks.push({
+        id: 'task_no_criteria',
+        description: 'Test task',
+        status: 'pending',
+        attempts: 0,
+        acceptanceCriteria: [],
+      })
+
+      const result = state.validate()
+
+      expect(result.warnings.some((w) => w.code === 'MISSING_CRITERIA')).toBe(true)
+    })
+
+    it('warns about completed task without completedAt', () => {
+      state.create('Test mission')
+      const objective = state.addObjective({ description: 'Test objective' })
+
+      // Add completed task without completedAt
+      const mission = state.getMission()!
+      mission.objectives[0].tasks.push({
+        id: 'task_completed',
+        description: 'Test task',
+        status: 'completed',
+        attempts: 1,
+        acceptanceCriteria: ['Done'],
+        // Missing completedAt
+      })
+
+      const result = state.validate()
+
+      expect(result.warnings.some((w) => w.code === 'MISSING_TIMESTAMP')).toBe(true)
+    })
+
+    it('generates correct summary', () => {
+      state.create('Test mission')
+
+      // Create multiple issues
+      const mission = state.getMission()!
+      mission.currentObjective = 99
+      mission.budget.spent = -1
+
+      const result = state.validate()
+
+      expect(result.isValid).toBe(false)
+      expect(result.summary).toContain('error')
+    })
+  })
 })

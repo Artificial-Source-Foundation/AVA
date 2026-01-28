@@ -70,20 +70,22 @@ const SHELL_METACHARACTERS = /[;&|`$(){}[\]<>!\\]/g
 const PATH_TRAVERSAL = /\.\.[/\\]/g
 
 /** Null byte injection */
+// eslint-disable-next-line no-control-regex
 const NULL_BYTE = /\x00/g
 
 /** Control characters (except newline and tab) */
+// eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g
 
 /** Common injection patterns */
 const INJECTION_PATTERNS = [
-  /;\s*rm\s+-rf/i,           // rm -rf
-  /;\s*wget\s+/i,            // wget
-  /;\s*curl\s+/i,            // curl
-  /'\s*OR\s+'1'\s*=\s*'1/i,  // SQL injection
-  /<script[^>]*>/i,          // XSS script tags
-  /javascript:/i,            // JavaScript protocol
-  /data:text\/html/i,        // Data URI injection
+  /;\s*rm\s+-rf/i, // rm -rf
+  /;\s*wget\s+/i, // wget
+  /;\s*curl\s+/i, // curl
+  /'\s*OR\s+'1'\s*=\s*'1/i, // SQL injection
+  /<script[^>]*>/i, // XSS script tags
+  /javascript:/i, // JavaScript protocol
+  /data:text\/html/i, // Data URI injection
 ]
 
 // =============================================================================
@@ -167,7 +169,8 @@ export class InputSanitizer {
     }
 
     return {
-      valid: issues.filter((i) => !i.startsWith('Potential') && !i.startsWith('Blocked')).length === 0,
+      valid:
+        issues.filter((i) => !i.startsWith('Potential') && !i.startsWith('Blocked')).length === 0,
       value,
       original: input,
       issues,

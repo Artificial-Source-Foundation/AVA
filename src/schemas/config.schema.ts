@@ -37,8 +37,21 @@ export const oracleSpecialtySchema = z.enum([
   'logic',
   'ui',
   'performance',
+  'security',
+  'simplification',
+  'innovation',
   'general',
 ])
+
+// Thinking/reasoning configuration (ARCH-5)
+export const thinkingConfigSchema = z
+  .object({
+    reasoningMode: z.enum(['standard', 'high', 'xhigh']).optional(),
+    thinkingBudget: z.number().int().min(1000).max(128000).optional(),
+    deepThink: z.boolean().optional(),
+    triggerThinking: z.boolean().optional(),
+  })
+  .optional()
 
 export const oracleConfigSchema = z.object({
   name: z.string().min(1),
@@ -46,7 +59,8 @@ export const oracleConfigSchema = z.object({
   fallbacks: fallbacksSchema.default([]),
   enabled: z.boolean().default(true),
   specialty: oracleSpecialtySchema.default('general'),
-  temperature: z.number().min(0).max(2).optional(), // Oracle personality temperature
+  temperature: z.number().min(0).max(2).optional(),
+  thinking: thinkingConfigSchema,
 })
 
 export const councilConfigSchema = z.object({
@@ -61,14 +75,25 @@ export const councilConfigSchema = z.object({
 })
 
 // =============================================================================
-// Operator Schema
+// Operator Schema (3-Tier Marine System)
 // =============================================================================
 
 export const operatorConfigSchema = z.object({
-  defaultModel: modelSchema.default(DEFAULT_CONFIG.operators.defaultModel),
-  defaultFallbacks: fallbacksSchema.default(DEFAULT_CONFIG.operators.defaultFallbacks),
-  complexModel: modelSchema.default(DEFAULT_CONFIG.operators.complexModel),
-  complexFallbacks: fallbacksSchema.default(DEFAULT_CONFIG.operators.complexFallbacks),
+  // Tier 1: Marine Private (simple tasks)
+  tier1Model: modelSchema.default(DEFAULT_CONFIG.operators.tier1Model),
+  tier1Fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.operators.tier1Fallbacks),
+  tier1Thinking: thinkingConfigSchema,
+
+  // Tier 2: Marine Sergeant (moderate tasks)
+  tier2Model: modelSchema.default(DEFAULT_CONFIG.operators.tier2Model),
+  tier2Fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.operators.tier2Fallbacks),
+  tier2Thinking: thinkingConfigSchema,
+
+  // Tier 3: Delta Force (critical tasks)
+  tier3Model: modelSchema.default(DEFAULT_CONFIG.operators.tier3Model),
+  tier3Fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.operators.tier3Fallbacks),
+  tier3Thinking: thinkingConfigSchema,
+
   maxParallel: z.number().int().min(1).max(10).default(DEFAULT_CONFIG.operators.maxParallel),
   retryLimit: z.number().int().min(0).max(5).default(DEFAULT_CONFIG.operators.retryLimit),
   canInvokeSupport: z.boolean().default(DEFAULT_CONFIG.operators.canInvokeSupport),
@@ -143,24 +168,19 @@ export const scribeConfigSchema = z.object({
   format: docFormatSchema.default(DEFAULT_CONFIG.support.scribe.format),
 })
 
-export const opticsConfigSchema = z.object({
-  model: modelSchema.default(DEFAULT_CONFIG.support.optics.model),
-  fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.support.optics.fallbacks),
-})
-
 export const qaConfigSchema = z.object({
   model: modelSchema.default(DEFAULT_CONFIG.support.qa.model),
   fallbacks: fallbacksSchema.default(DEFAULT_CONFIG.support.qa.fallbacks),
   frameworkDetect: z.boolean().default(DEFAULT_CONFIG.support.qa.frameworkDetect),
 })
 
+// Note: SPECTRE (optics) removed - redundant with FACADE
 export const supportConfigSchema = z.object({
   scout: scoutConfigSchema.default(DEFAULT_CONFIG.support.scout),
   intel: intelConfigSchema.default(DEFAULT_CONFIG.support.intel),
   strategist: strategistConfigSchema.default(DEFAULT_CONFIG.support.strategist),
   uiOps: uiOpsConfigSchema.default(DEFAULT_CONFIG.support.uiOps),
   scribe: scribeConfigSchema.default(DEFAULT_CONFIG.support.scribe),
-  optics: opticsConfigSchema.default(DEFAULT_CONFIG.support.optics),
   qa: qaConfigSchema.default(DEFAULT_CONFIG.support.qa),
 })
 

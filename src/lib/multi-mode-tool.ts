@@ -147,7 +147,7 @@ export class MultiModeDispatcher<TModes extends Record<string, ModeDefinition>> 
    * Get default mode
    */
   getDefaultMode(): string | null {
-    return this.config.defaultMode as string | null ?? null
+    return (this.config.defaultMode as string | null) ?? null
   }
 
   /**

@@ -4,6 +4,7 @@
  * Tests for:
  * - BUG-12: Agent alias resolution
  * - BUG-14: Mission sync on delegate_task
+ * - 3-tier Marine system aliases
  */
 
 import { describe, it, expect } from 'vitest'
@@ -19,8 +20,9 @@ describe('resolveAgentType', () => {
       expect(resolveAgentType('explorer')).toBe('scout')
     })
 
-    it('resolves operator_complex to operator', () => {
-      expect(resolveAgentType('operator_complex')).toBe('operator')
+    it('resolves operator_complex to operator_tier3', () => {
+      // Changed: Now maps to tier3 (Delta Force) instead of operator
+      expect(resolveAgentType('operator_complex')).toBe('operator_tier3')
     })
 
     it('resolves validator_strict to validator', () => {
@@ -28,11 +30,26 @@ describe('resolveAgentType', () => {
     })
   })
 
-  describe('registered names passthrough', () => {
-    it('passes through operator unchanged', () => {
-      expect(resolveAgentType('operator')).toBe('operator')
+  describe('3-tier Marine system aliases', () => {
+    it('resolves operator to operator_tier2', () => {
+      expect(resolveAgentType('operator')).toBe('operator_tier2')
     })
 
+    it('resolves marine aliases to tiers', () => {
+      expect(resolveAgentType('marine_private')).toBe('operator_tier1')
+      expect(resolveAgentType('marine_sergeant')).toBe('operator_tier2')
+      expect(resolveAgentType('delta_force')).toBe('operator_tier3')
+      expect(resolveAgentType('marine')).toBe('operator_tier2')
+    })
+
+    it('resolves hyphenated marine aliases', () => {
+      expect(resolveAgentType('marine-private')).toBe('operator_tier1')
+      expect(resolveAgentType('marine-sergeant')).toBe('operator_tier2')
+      expect(resolveAgentType('delta-force')).toBe('operator_tier3')
+    })
+  })
+
+  describe('registered names passthrough', () => {
     it('passes through validator unchanged', () => {
       expect(resolveAgentType('validator')).toBe('validator')
     })
@@ -52,8 +69,17 @@ describe('resolveAgentType', () => {
     it('passes through council agents unchanged', () => {
       expect(resolveAgentType('cipher')).toBe('cipher')
       expect(resolveAgentType('vector')).toBe('vector')
-      expect(resolveAgentType('prism')).toBe('prism')
       expect(resolveAgentType('apex')).toBe('apex')
+      // New strategic advisors
+      expect(resolveAgentType('aegis')).toBe('aegis')
+      expect(resolveAgentType('razor')).toBe('razor')
+      expect(resolveAgentType('oracle')).toBe('oracle')
+    })
+
+    it('passes through tier names unchanged', () => {
+      expect(resolveAgentType('operator_tier1')).toBe('operator_tier1')
+      expect(resolveAgentType('operator_tier2')).toBe('operator_tier2')
+      expect(resolveAgentType('operator_tier3')).toBe('operator_tier3')
     })
   })
 

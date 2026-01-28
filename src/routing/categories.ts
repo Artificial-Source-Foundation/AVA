@@ -240,7 +240,7 @@ export function getCategoryConfigs(cwd?: string): Record<TaskCategory, CategoryC
     coding: {
       name: 'Coding',
       description: 'General code implementation and development',
-      model: config.operators.defaultModel,
+      model: config.operators.tier2Model,
       temperature: 0.3,
       preferredAgent: 'operator',
       fallbackAgents: ['operator-complex', 'patcher'],
@@ -290,7 +290,7 @@ export function getCategoryConfigs(cwd?: string): Record<TaskCategory, CategoryC
     refactoring: {
       name: 'Refactoring',
       description: 'Code refactoring, cleanup, and optimization',
-      model: config.operators.complexModel,
+      model: config.operators.tier3Model, // Complex tasks use tier 3 (Delta Force)
       temperature: 0.2,
       preferredAgent: 'operator-complex',
       fallbackAgents: ['operator'],
@@ -300,7 +300,7 @@ export function getCategoryConfigs(cwd?: string): Record<TaskCategory, CategoryC
     bugfix: {
       name: 'Bug Fix',
       description: 'Bug fixing, debugging, and error resolution',
-      model: config.operators.defaultModel,
+      model: config.operators.tier2Model, // Standard bugs use tier 2 (Marine Sergeant)
       temperature: 0.2,
       preferredAgent: 'operator',
       fallbackAgents: ['patcher', 'operator-complex'],

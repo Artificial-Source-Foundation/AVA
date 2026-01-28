@@ -1,46 +1,56 @@
 /**
- * Delta9 Council Agents - The Delta Team
+ * Delta9 Strategic Advisors - The Council
  *
- * The Council consists of personality-based Oracles, each with unique traits,
+ * The Council consists of 6 Strategic Advisors, each with unique traits,
  * perspectives, and specialties. Users configure which AI model powers each
  * personality in their delta9.json config.
  *
- * The Delta Team:
+ * The Strategic Advisors:
  * - CIPHER (The Strategist) - Decisive, architectural, low temperature
  * - VECTOR (The Analyst) - Methodical, logical, catches edge cases
- * - PRISM (The Creative) - Innovative, user-focused, higher temperature
  * - APEX (The Optimizer) - Performance-obsessed, efficiency-focused
+ * - AEGIS (The Guardian) - Security-focused, risk-aware, thorough
+ * - RAZOR (The Simplifier) - KISS-focused, pragmatic, simplification
+ * - ORACLE (The Visionary) - Innovation-focused, future-proofing, creative
  */
 
-// =============================================================================
-// Agent Definitions
-// =============================================================================
-
-export { cipherAgent, cipherConfig, CIPHER_PROFILE } from './oracle-cipher.js'
-
-export { vectorAgent, vectorConfig, VECTOR_PROFILE } from './oracle-vector.js'
-
-export { prismAgent, prismConfig, PRISM_PROFILE } from './oracle-prism.js'
-
-export { apexAgent, apexConfig, APEX_PROFILE } from './oracle-apex.js'
-
-// =============================================================================
-// Agent Registry
-// =============================================================================
-
-import { cipherAgent, cipherConfig, CIPHER_PROFILE } from './oracle-cipher.js'
-import { vectorAgent, vectorConfig, VECTOR_PROFILE } from './oracle-vector.js'
-import { prismAgent, prismConfig, PRISM_PROFILE } from './oracle-prism.js'
-import { apexAgent, apexConfig, APEX_PROFILE } from './oracle-apex.js'
 import type { AgentConfig } from '@opencode-ai/sdk'
-import type { OracleConfig } from '../../types/config.js'
+import { loadConfig } from '../../lib/config.js'
+
+// =============================================================================
+// Agent Factory Exports (Config-Driven)
+// =============================================================================
+
+export { createCipherAgent, CIPHER_PROFILE, CIPHER_PROMPT } from './oracle-cipher.js'
+export { createVectorAgent, VECTOR_PROFILE, VECTOR_PROMPT } from './oracle-vector.js'
+export { createApexAgent, APEX_PROFILE, APEX_PROMPT } from './oracle-apex.js'
+export { createAegisAgent, AEGIS_PROFILE, AEGIS_PROMPT } from './oracle-aegis.js'
+export { createRazorAgent, RAZOR_PROFILE, RAZOR_PROMPT } from './oracle-razor.js'
+export { createOracleAdvisorAgent, ORACLE_PROFILE, ORACLE_PROMPT } from './oracle-oracle.js'
+
+// =============================================================================
+// Internal Imports for Registry
+// =============================================================================
+
+import { createCipherAgent, CIPHER_PROFILE } from './oracle-cipher.js'
+import { createVectorAgent, VECTOR_PROFILE } from './oracle-vector.js'
+import { createApexAgent, APEX_PROFILE } from './oracle-apex.js'
+import { createAegisAgent, AEGIS_PROFILE } from './oracle-aegis.js'
+import { createRazorAgent, RAZOR_PROFILE } from './oracle-razor.js'
+import { createOracleAdvisorAgent, ORACLE_PROFILE } from './oracle-oracle.js'
 
 // =============================================================================
 // Types
 // =============================================================================
 
-export type OracleCodename = 'Cipher' | 'Vector' | 'Prism' | 'Apex'
-export type OracleSpecialty = 'architecture' | 'logic' | 'ui' | 'performance'
+export type OracleCodename = 'Cipher' | 'Vector' | 'Apex' | 'Aegis' | 'Razor' | 'Oracle'
+export type OracleSpecialty =
+  | 'architecture'
+  | 'logic'
+  | 'performance'
+  | 'security'
+  | 'simplification'
+  | 'innovation'
 
 export interface OracleProfile {
   codename: OracleCodename
@@ -51,99 +61,74 @@ export interface OracleProfile {
 }
 
 // =============================================================================
-// Registry
+// Static Registry (Profiles only - models come from config)
 // =============================================================================
 
 /**
- * All Oracle profiles by codename
- * Cast to proper types since the source exports use `as const`
+ * All Strategic Advisor profiles by codename (static personality data)
  */
 export const oracleProfiles: Record<OracleCodename, OracleProfile> = {
   Cipher: CIPHER_PROFILE as OracleProfile,
   Vector: VECTOR_PROFILE as OracleProfile,
-  Prism: PRISM_PROFILE as OracleProfile,
   Apex: APEX_PROFILE as OracleProfile,
-}
-
-/**
- * All council agent definitions keyed by Oracle codename
- */
-export const councilAgents: Record<OracleCodename, AgentConfig> = {
-  Cipher: cipherAgent,
-  Vector: vectorAgent,
-  Prism: prismAgent,
-  Apex: apexAgent,
-}
-
-/**
- * All oracle configs keyed by Oracle codename
- * These are the default configs - users override models in delta9.json
- */
-export const oracleConfigs: Record<OracleCodename, OracleConfig> = {
-  Cipher: {
-    name: cipherConfig.name,
-    model: cipherConfig.defaultModel,
-    fallbacks: cipherConfig.fallbacks,
-    specialty: cipherConfig.specialty,
-    enabled: cipherConfig.enabled,
-    temperature: cipherConfig.temperature,
-  },
-  Vector: {
-    name: vectorConfig.name,
-    model: vectorConfig.defaultModel,
-    fallbacks: vectorConfig.fallbacks,
-    specialty: vectorConfig.specialty,
-    enabled: vectorConfig.enabled,
-    temperature: vectorConfig.temperature,
-  },
-  Prism: {
-    name: prismConfig.name,
-    model: prismConfig.defaultModel,
-    fallbacks: prismConfig.fallbacks,
-    specialty: prismConfig.specialty,
-    enabled: prismConfig.enabled,
-    temperature: prismConfig.temperature,
-  },
-  Apex: {
-    name: apexConfig.name,
-    model: apexConfig.defaultModel,
-    fallbacks: apexConfig.fallbacks,
-    specialty: apexConfig.specialty,
-    enabled: apexConfig.enabled,
-    temperature: apexConfig.temperature,
-  },
+  Aegis: AEGIS_PROFILE as OracleProfile,
+  Razor: RAZOR_PROFILE as OracleProfile,
+  Oracle: ORACLE_PROFILE as OracleProfile,
 }
 
 // =============================================================================
-// Helper Functions
+// Config-Driven Agent Creation
 // =============================================================================
 
 /**
- * Get agent config for an Oracle by codename
+ * Create all Strategic Advisor agents with models from config
  */
-export function getOracleAgent(codename: OracleCodename): AgentConfig {
-  return councilAgents[codename]
+export function createCouncilAgents(cwd: string): Record<OracleCodename, AgentConfig> {
+  return {
+    Cipher: createCipherAgent(cwd),
+    Vector: createVectorAgent(cwd),
+    Apex: createApexAgent(cwd),
+    Aegis: createAegisAgent(cwd),
+    Razor: createRazorAgent(cwd),
+    Oracle: createOracleAdvisorAgent(cwd),
+  }
 }
 
 /**
- * Get oracle config by codename
+ * Get agent config for a Strategic Advisor by codename (config-driven)
  */
-export function getOracleConfig(codename: OracleCodename): OracleConfig {
-  return oracleConfigs[codename]
+export function getOracleAgent(cwd: string, codename: OracleCodename): AgentConfig {
+  const factories: Record<OracleCodename, (cwd: string) => AgentConfig> = {
+    Cipher: createCipherAgent,
+    Vector: createVectorAgent,
+    Apex: createApexAgent,
+    Aegis: createAegisAgent,
+    Razor: createRazorAgent,
+    Oracle: createOracleAdvisorAgent,
+  }
+  return factories[codename](cwd)
 }
 
 /**
- * Get oracle profile by codename
+ * Get oracle config by codename from delta9.json config
+ */
+export function getOracleConfig(cwd: string, codename: OracleCodename) {
+  const config = loadConfig(cwd)
+  return config.council.members.find((m) => m.name === codename)
+}
+
+/**
+ * Get oracle profile by codename (static personality data)
  */
 export function getOracleProfile(codename: OracleCodename): OracleProfile {
   return oracleProfiles[codename]
 }
 
 /**
- * List all available Oracle codenames
+ * List all available Strategic Advisor codenames
  */
 export function listOracleCodenames(): OracleCodename[] {
-  return ['Cipher', 'Vector', 'Prism', 'Apex']
+  return ['Cipher', 'Vector', 'Apex', 'Aegis', 'Razor', 'Oracle']
 }
 
 /**
@@ -156,37 +141,7 @@ export function getOraclesBySpecialty(specialty: OracleSpecialty): OracleCodenam
 }
 
 /**
- * Default oracle configs (used when no custom config provided)
- * Returns all Oracles in strategic order:
- * 1. Cipher (architecture) - sees big picture first
- * 2. Vector (logic) - validates correctness
- * 3. Prism (ui) - considers user impact
- * 4. Apex (performance) - optimizes
- */
-export const defaultOracleConfigs: OracleConfig[] = [
-  oracleConfigs.Cipher,
-  oracleConfigs.Vector,
-  oracleConfigs.Prism,
-  oracleConfigs.Apex,
-]
-
-/**
- * Get recommended Oracles for QUICK mode (1 Oracle)
- * Returns Cipher by default as the strategic lead
- */
-export function getQuickModeOracles(): OracleConfig[] {
-  return [oracleConfigs.Cipher]
-}
-
-/**
- * Get recommended Oracles for STANDARD mode (all Oracles)
- */
-export function getStandardModeOracles(): OracleConfig[] {
-  return defaultOracleConfigs
-}
-
-/**
- * Get Oracle description for display
+ * Get Strategic Advisor description for display
  */
 export function getOracleDescription(codename: OracleCodename): string {
   const profile = oracleProfiles[codename]

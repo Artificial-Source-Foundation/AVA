@@ -12,6 +12,7 @@
 
 import { getNamedLogger } from './logger.js'
 import { quickEstimate } from './timeout-estimator.js'
+import { loadConfig } from './config.js'
 
 const log = getNamedLogger('timeout-escalation')
 
@@ -121,6 +122,8 @@ export interface EscalationConfig {
   globalMaxTimeMs?: number
   /** Callback on escalation */
   onEscalate?: (state: EscalationState, decision: EscalationDecision) => void
+  /** Working directory for config-driven model resolution */
+  cwd?: string
 }
 
 // =============================================================================
@@ -235,6 +238,32 @@ export const ESCALATION_CHAINS: Record<string, EscalationChain> = {
   patient: PATIENT_ESCALATION_CHAIN,
 }
 
+/**
+ * Create escalation chains with config-driven fallback models
+ *
+ * Uses the validator model from config as the fallback for escalations.
+ */
+export function createConfigDrivenChains(cwd: string): Record<string, EscalationChain> {
+  const config = loadConfig(cwd)
+  const fallbackModel = config.validator.model // Fast model for escalation fallback
+
+  return {
+    default: {
+      ...DEFAULT_ESCALATION_CHAIN,
+      steps: DEFAULT_ESCALATION_CHAIN.steps.map((step) =>
+        step.action === 'switch_model' ? { ...step, fallbackModel } : step
+      ),
+    },
+    aggressive: {
+      ...AGGRESSIVE_ESCALATION_CHAIN,
+      steps: AGGRESSIVE_ESCALATION_CHAIN.steps.map((step) =>
+        step.action === 'switch_model' ? { ...step, fallbackModel } : step
+      ),
+    },
+    patient: PATIENT_ESCALATION_CHAIN, // No switch_model in patient chain
+  }
+}
+
 // =============================================================================
 // Timeout Escalation Manager
 // =============================================================================
@@ -262,8 +291,10 @@ export class TimeoutEscalationManager {
   private onEscalate?: (state: EscalationState, decision: EscalationDecision) => void
 
   constructor(config: EscalationConfig = {}) {
-    // Load default chains
-    for (const [id, chain] of Object.entries(ESCALATION_CHAINS)) {
+    // Load default chains - use config-driven models if cwd is provided
+    const defaultChains = config.cwd ? createConfigDrivenChains(config.cwd) : ESCALATION_CHAINS
+
+    for (const [id, chain] of Object.entries(defaultChains)) {
       this.chains.set(id, chain)
     }
 
@@ -330,10 +361,7 @@ export class TimeoutEscalationManager {
   /**
    * Record a timeout and get escalation decision
    */
-  recordTimeout(
-    operationId: string,
-    chainId = 'default'
-  ): EscalationDecision {
+  recordTimeout(operationId: string, chainId = 'default'): EscalationDecision {
     const state = this.activeOperations.get(operationId)
     if (!state) {
       return {
@@ -550,7 +578,9 @@ export function resetTimeoutEscalationManager(): void {
 /**
  * Create a new timeout escalation manager
  */
-export function createTimeoutEscalationManager(config?: EscalationConfig): TimeoutEscalationManager {
+export function createTimeoutEscalationManager(
+  config?: EscalationConfig
+): TimeoutEscalationManager {
   return new TimeoutEscalationManager(config)
 }
 
@@ -590,10 +620,7 @@ export function selectChain(options: {
  * Describe an escalation decision
  */
 export function describeEscalationDecision(decision: EscalationDecision): string {
-  const lines: string[] = [
-    `Level ${decision.level}: ${decision.action}`,
-    `  ${decision.message}`,
-  ]
+  const lines: string[] = [`Level ${decision.level}: ${decision.action}`, `  ${decision.message}`]
 
   if (decision.newTimeoutMs) {
     lines.push(`  New timeout: ${(decision.newTimeoutMs / 1000).toFixed(1)}s`)

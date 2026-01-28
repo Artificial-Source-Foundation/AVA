@@ -5,10 +5,12 @@
  * Low temperature for consistent, structured analysis.
  * Focus: System design, architecture, long-term implications.
  *
- * Model is user-configurable in delta9.json
+ * Model is configured in delta9.json (council.members)
  */
 
 import type { AgentConfig } from '@opencode-ai/sdk'
+import { loadConfig } from '../../lib/config.js'
+import { DEFAULT_CONFIG } from '../../types/config.js'
 
 // =============================================================================
 // Cipher's Personality Profile
@@ -79,29 +81,30 @@ You MUST respond with valid JSON:
 You are CIPHER. Be the strategist the team needs - decisive, clear, architectural.`
 
 // =============================================================================
-// Cipher Agent Definition
+// Cipher Agent Factory (Config-Driven)
 // =============================================================================
 
-export const cipherAgent: AgentConfig = {
-  description: 'CIPHER - The Strategist. Decisive architectural analysis with systems thinking.',
-  mode: 'subagent',
-  model: 'anthropic/claude-opus-4-5', // Default - user can override in config
-  temperature: CIPHER_PROFILE.temperature,
-  prompt: CIPHER_PROMPT,
-  maxTokens: 4096,
-  thinking: { type: 'enabled', budgetTokens: 16000 },
+/**
+ * Create Cipher agent with model from config
+ */
+export function createCipherAgent(cwd: string): AgentConfig {
+  const config = loadConfig(cwd)
+  const memberConfig = config.council.members.find((m) => m.name === 'Cipher')
+  const defaultMember = DEFAULT_CONFIG.council.members.find((m) => m.name === 'Cipher')!
+
+  return {
+    description: 'CIPHER - The Strategist. Decisive architectural analysis with systems thinking.',
+    mode: 'subagent',
+    model: memberConfig?.model ?? defaultMember.model,
+    temperature: memberConfig?.temperature ?? defaultMember.temperature,
+    prompt: CIPHER_PROMPT,
+    maxTokens: 4096,
+    thinking: { type: 'enabled', budgetTokens: 16000 },
+  }
 }
 
 // =============================================================================
-// Export Profile for Config System
+// Export Prompt for External Use
 // =============================================================================
 
-export const cipherConfig = {
-  name: CIPHER_PROFILE.codename,
-  role: CIPHER_PROFILE.role,
-  defaultModel: 'anthropic/claude-opus-4-5',
-  fallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-pro-preview'],
-  temperature: CIPHER_PROFILE.temperature,
-  specialty: CIPHER_PROFILE.specialty,
-  enabled: true,
-}
+export { CIPHER_PROMPT }

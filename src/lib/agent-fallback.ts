@@ -73,7 +73,7 @@ export interface FallbackResult {
  * Loaded from config when available, otherwise uses these defaults.
  */
 const DEFAULT_FALLBACK_CHAINS: Record<string, string[]> = {
-  // Support agents
+  // Support agents (7 agents - SPECTRE/optics removed, merged into FACADE)
   uiOps: ['operator'],
   scout: ['operator'],
   intel: ['operator'],
@@ -81,15 +81,16 @@ const DEFAULT_FALLBACK_CHAINS: Record<string, string[]> = {
   patcher: ['operator'],
   qa: ['validator', 'operator'],
   scribe: ['operator'],
-  optics: ['operator'],
   // Core agents
   operator: [], // No fallback for operator
   validator: ['operator'],
-  // Council agents
+  // Council Strategic Advisors (6 advisors - Prism removed, AEGIS/RAZOR/ORACLE added)
   cipher: ['vector', 'operator'],
   vector: ['cipher', 'operator'],
-  prism: ['apex', 'operator'],
-  apex: ['prism', 'operator'],
+  apex: ['aegis', 'operator'],
+  aegis: ['apex', 'operator'],
+  razor: ['oracle', 'operator'],
+  oracle: ['razor', 'operator'],
 }
 
 // =============================================================================
@@ -324,19 +325,19 @@ export function getAgentFallbackManager(cwd?: string): AgentFallbackManager {
           chains.uiOps = config.support.uiOps?.fallbacks?.map(normalizeFallback) ?? ['operator']
           chains.scout = config.support.scout?.fallbacks?.map(normalizeFallback) ?? ['operator']
           chains.intel = config.support.intel?.fallbacks?.map(normalizeFallback) ?? ['operator']
-          chains.strategist =
-            config.support.strategist?.fallbacks?.map(normalizeFallback) ?? ['operator']
+          chains.strategist = config.support.strategist?.fallbacks?.map(normalizeFallback) ?? [
+            'operator',
+          ]
           chains.qa = config.support.qa?.fallbacks?.map(normalizeFallback) ?? [
             'validator',
             'operator',
           ]
           chains.scribe = config.support.scribe?.fallbacks?.map(normalizeFallback) ?? ['operator']
-          chains.optics = config.support.optics?.fallbacks?.map(normalizeFallback) ?? ['operator']
         }
 
-        // Core agents
+        // Core agents (3-tier system uses tier2 as default operator)
         if (config.operators) {
-          chains.operator = config.operators.defaultFallbacks?.map(normalizeFallback) ?? []
+          chains.operator = config.operators.tier2Fallbacks?.map(normalizeFallback) ?? []
         }
         if (config.validator) {
           chains.validator = config.validator.fallbacks?.map(normalizeFallback) ?? ['operator']

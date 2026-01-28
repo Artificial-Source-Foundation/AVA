@@ -18,16 +18,16 @@ const log = getNamedLogger('reasoning-traces')
 
 /** Types of reasoning steps */
 export type ReasoningStepType =
-  | 'observation'      // Something the agent noticed
-  | 'analysis'         // Agent's analysis of a situation
-  | 'hypothesis'       // A theory or assumption
-  | 'decision'         // A decision made
-  | 'action'           // An action taken
-  | 'verification'     // Verification of results
-  | 'reflection'       // Reflection on outcome
-  | 'escalation'       // Decision to escalate
-  | 'delegation'       // Decision to delegate
-  | 'error'            // Error encountered
+  | 'observation' // Something the agent noticed
+  | 'analysis' // Agent's analysis of a situation
+  | 'hypothesis' // A theory or assumption
+  | 'decision' // A decision made
+  | 'action' // An action taken
+  | 'verification' // Verification of results
+  | 'reflection' // Reflection on outcome
+  | 'escalation' // Decision to escalate
+  | 'delegation' // Decision to delegate
+  | 'error' // Error encountered
 
 /** A single reasoning step */
 export interface ReasoningStep {
@@ -165,7 +165,10 @@ export class ReasoningTracer {
     // Cleanup old traces if needed
     this.cleanupOldTraces()
 
-    log.debug(`Started trace: ${traceId}`, { agent: params.primaryAgent, description: params.description })
+    log.debug(`Started trace: ${traceId}`, {
+      agent: params.primaryAgent,
+      description: params.description,
+    })
 
     return trace
   }

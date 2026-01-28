@@ -22,6 +22,7 @@ import type {
   WavePolicy,
 } from './types.js'
 import { DEFAULT_LEGION_CONFIG } from './types.js'
+import { loadConfig } from '../lib/config.js'
 
 // =============================================================================
 // Legion Coordinator
@@ -29,13 +30,15 @@ import { DEFAULT_LEGION_CONFIG } from './types.js'
 
 export class LegionCoordinator {
   private config: LegionConfig
+  private cwd: string
   private operators: Map<string, LegionOperator> = new Map()
   private activeStrikes: Map<string, LegionStrike> = new Map()
   private events: LegionEvent[] = []
   private eventHandlers: Array<(event: LegionEvent) => void> = []
 
-  constructor(config: Partial<LegionConfig> = {}) {
+  constructor(config: Partial<LegionConfig> = {}, cwd: string = process.cwd()) {
     this.config = { ...DEFAULT_LEGION_CONFIG, ...config }
+    this.cwd = cwd
   }
 
   // ===========================================================================
@@ -84,11 +87,14 @@ export class LegionCoordinator {
    */
   private initializeOperators(): LegionOperator[] {
     const operators: LegionOperator[] = []
+    // Get operator model from config instead of hardcoding (tier 2 default)
+    const delta9Config = loadConfig(this.cwd)
+    const operatorModel = delta9Config.operators.tier2Model
 
     for (let i = 0; i < this.config.maxOperators; i++) {
       const operator: LegionOperator = {
         id: `operator_${i}`,
-        model: 'anthropic/claude-sonnet-4-5', // Default model
+        model: operatorModel,
         status: 'idle',
         tasksCompleted: 0,
         tasksFailed: 0,
@@ -555,7 +561,7 @@ export class LegionCoordinator {
           reason: `Any policy requires at least 1 success, all ${totalTasks} tasks failed`,
         }
 
-      case 'threshold':
+      case 'threshold': {
         // Custom threshold
         const threshold = this.config.minWaveSuccessRate
         if (successRate >= threshold) {
@@ -568,6 +574,7 @@ export class LegionCoordinator {
           canAdvance: false,
           reason: `Success rate ${(successRate * 100).toFixed(0)}% below threshold ${(threshold * 100).toFixed(0)}%`,
         }
+      }
 
       default:
         // Default to majority

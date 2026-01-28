@@ -82,12 +82,12 @@ export interface SearchResult<T = unknown> {
 // =============================================================================
 
 export const DEFAULT_SEARCH_CONFIG: SemanticSearchConfig = {
-  labelWeight: 0.4,      // 40% weight on label/description
-  contentWeight: 0.6,    // 60% weight on content
-  keywordBoost: 1.5,     // 1.5x for exact keyword match
-  minScore: 0.1,         // Minimum 10% relevance
-  maxResults: 10,        // Top 10 results
-  fuzzyMatch: true,      // Enable fuzzy matching
+  labelWeight: 0.4, // 40% weight on label/description
+  contentWeight: 0.6, // 60% weight on content
+  keywordBoost: 1.5, // 1.5x for exact keyword match
+  minScore: 0.1, // Minimum 10% relevance
+  maxResults: 10, // Top 10 results
+  fuzzyMatch: true, // Enable fuzzy matching
 }
 
 // =============================================================================
@@ -137,18 +137,28 @@ function scoreItem<T>(
   const labelText = normalizeText(
     [item.label, item.description, ...(item.tags || [])].filter(Boolean).join(' ')
   )
-  const labelScore = calculateTextSimilarity(labelText, normalizedQuery, queryTerms, config.fuzzyMatch)
+  const labelScore = calculateTextSimilarity(
+    labelText,
+    normalizedQuery,
+    queryTerms,
+    config.fuzzyMatch
+  )
 
   // Calculate content score
   const contentText = normalizeText(item.content)
-  const contentScore = calculateTextSimilarity(contentText, normalizedQuery, queryTerms, config.fuzzyMatch)
+  const contentScore = calculateTextSimilarity(
+    contentText,
+    normalizedQuery,
+    queryTerms,
+    config.fuzzyMatch
+  )
 
   // Check for exact keyword match (boost)
   const hasExactKeyword = hasExactMatch(item.content, queryTerms)
   const keywordBonus = hasExactKeyword ? config.keywordBoost : 1
 
   // Calculate weighted total
-  const totalRaw = (labelScore * config.labelWeight) + (contentScore * config.contentWeight)
+  const totalRaw = labelScore * config.labelWeight + contentScore * config.contentWeight
   const finalScore = Math.min(1, totalRaw * keywordBonus)
 
   // Find matched terms
@@ -182,8 +192,8 @@ function scoreItem<T>(
 function normalizeText(text: string): string {
   return text
     .toLowerCase()
-    .replace(/[^\w\s]/g, ' ')  // Remove punctuation
-    .replace(/\s+/g, ' ')       // Collapse whitespace
+    .replace(/[^\w\s]/g, ' ') // Remove punctuation
+    .replace(/\s+/g, ' ') // Collapse whitespace
     .trim()
 }
 
@@ -192,22 +202,66 @@ function normalizeText(text: string): string {
  */
 function tokenize(text: string): string[] {
   // Split on whitespace and filter short terms
-  return text
-    .split(/\s+/)
-    .filter((term) => term.length >= 2)
-    // Remove common stop words
-    .filter((term) => !STOP_WORDS.has(term))
+  return (
+    text
+      .split(/\s+/)
+      .filter((term) => term.length >= 2)
+      // Remove common stop words
+      .filter((term) => !STOP_WORDS.has(term))
+  )
 }
 
 /**
  * Common stop words to ignore
  */
 const STOP_WORDS = new Set([
-  'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-  'of', 'with', 'by', 'from', 'is', 'are', 'was', 'were', 'be', 'been',
-  'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
-  'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that',
-  'these', 'those', 'it', 'its', 'as', 'if', 'when', 'than', 'so',
+  'the',
+  'a',
+  'an',
+  'and',
+  'or',
+  'but',
+  'in',
+  'on',
+  'at',
+  'to',
+  'for',
+  'of',
+  'with',
+  'by',
+  'from',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'have',
+  'has',
+  'had',
+  'do',
+  'does',
+  'did',
+  'will',
+  'would',
+  'could',
+  'should',
+  'may',
+  'might',
+  'must',
+  'can',
+  'this',
+  'that',
+  'these',
+  'those',
+  'it',
+  'its',
+  'as',
+  'if',
+  'when',
+  'than',
+  'so',
 ])
 
 // =============================================================================
@@ -234,8 +288,8 @@ function calculateTextSimilarity(
   for (const queryTerm of queryTerms) {
     if (fuzzy) {
       // Fuzzy match: check if any text term contains query term or vice versa
-      const hasMatch = textTerms.some((textTerm) =>
-        textTerm.includes(queryTerm) || queryTerm.includes(textTerm)
+      const hasMatch = textTerms.some(
+        (textTerm) => textTerm.includes(queryTerm) || queryTerm.includes(textTerm)
       )
       if (hasMatch) matchCount++
     } else {
@@ -274,8 +328,8 @@ function findMatchedTerms(text: string, queryTerms: string[], fuzzy: boolean): s
 
   for (const queryTerm of queryTerms) {
     if (fuzzy) {
-      const hasMatch = textTerms.some((textTerm) =>
-        textTerm.includes(queryTerm) || queryTerm.includes(textTerm)
+      const hasMatch = textTerms.some(
+        (textTerm) => textTerm.includes(queryTerm) || queryTerm.includes(textTerm)
       )
       if (hasMatch) matched.push(queryTerm)
     } else {
@@ -302,11 +356,9 @@ function escapeRegex(str: string): string {
  *
  * Convenience function for searching MemoryBlock arrays.
  */
-export function searchMemoryBlocks<T extends { label: string; description: string; content: string }>(
-  blocks: T[],
-  query: string,
-  config: Partial<SemanticSearchConfig> = {}
-): SearchResult<T>[] {
+export function searchMemoryBlocks<
+  T extends { label: string; description: string; content: string },
+>(blocks: T[], query: string, config: Partial<SemanticSearchConfig> = {}): SearchResult<T>[] {
   const searchableItems: SearchableItem[] = blocks.map((block) => ({
     id: block.label,
     label: block.label,
@@ -341,7 +393,8 @@ function extractTags(content: string): string[] {
   if (boldMatches) {
     for (const match of boldMatches) {
       const bold = match.replace(/\*\*/g, '').trim()
-      if (bold.length <= 30) { // Reasonable tag length
+      if (bold.length <= 30) {
+        // Reasonable tag length
         tags.push(bold.toLowerCase())
       }
     }
@@ -372,20 +425,14 @@ export function rerankResults<T>(
 /**
  * Filter results by minimum score
  */
-export function filterByScore<T>(
-  results: SearchResult<T>[],
-  minScore: number
-): SearchResult<T>[] {
+export function filterByScore<T>(results: SearchResult<T>[], minScore: number): SearchResult<T>[] {
   return results.filter((r) => r.score >= minScore)
 }
 
 /**
  * Get top N results
  */
-export function topResults<T>(
-  results: SearchResult<T>[],
-  n: number
-): SearchResult<T>[] {
+export function topResults<T>(results: SearchResult<T>[], n: number): SearchResult<T>[] {
   return results.slice(0, n)
 }
 
@@ -438,9 +485,4 @@ export function parseQuery(input: string): ParsedQuery {
 // Exports
 // =============================================================================
 
-export {
-  normalizeText,
-  tokenize,
-  calculateTextSimilarity,
-  extractTags,
-}
+export { normalizeText, tokenize, calculateTextSimilarity, extractTags }

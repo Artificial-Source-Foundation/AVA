@@ -6,6 +6,7 @@
 
 // Configuration types
 export type {
+  ThinkingConfig,
   CommanderConfig,
   CouncilMode,
   OracleConfig,
@@ -18,7 +19,6 @@ export type {
   StrategistConfig,
   UiOpsConfig,
   ScribeConfig,
-  OpticsConfig,
   QaConfig,
   SupportConfig,
   MissionSettings,

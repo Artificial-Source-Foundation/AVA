@@ -198,6 +198,8 @@ export interface Mission {
   updatedAt: string
   /** When mission was approved by user */
   approvedAt?: string
+  /** When mission started execution (first task started) */
+  startedAt?: string
   /** When mission completed */
   completedAt?: string
 }
@@ -213,6 +215,7 @@ export type HistoryEventType =
   | 'mission_resumed'
   | 'mission_completed'
   | 'mission_aborted'
+  | 'mission_status_changed' // BUG-38: State machine transitions
   | 'objective_started'
   | 'objective_completed'
   | 'objective_failed'
@@ -220,6 +223,8 @@ export type HistoryEventType =
   | 'task_completed'
   | 'task_failed'
   | 'task_retried'
+  | 'task_unblocked' // BUG-25: Emergency unblock
+  | 'dependencies_fixed' // BUG-25: Bulk dependency repair
   | 'validation_passed'
   | 'validation_fixable'
   | 'validation_failed'

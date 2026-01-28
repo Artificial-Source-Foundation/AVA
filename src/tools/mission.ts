@@ -8,9 +8,64 @@
 import { tool, type ToolDefinition } from '@opencode-ai/plugin'
 import type { MissionState } from '../mission/state.js'
 import type { CouncilMode, Complexity } from '../types/index.js'
+import { appendHistory } from '../mission/history.js'
+import { getNamedLogger } from '../lib/logger.js'
 
 // Use the tool's built-in schema (Zod 4 compatible)
 const s = tool.schema
+const log = getNamedLogger('mission-tools')
+
+// =============================================================================
+// Dependency Resolution Helper (BUG-25 Fix)
+// =============================================================================
+
+/**
+ * Resolve symbolic dependency names ("task_1", "task_2") to actual task IDs.
+ *
+ * Commander often passes dependencies as symbolic names like "task_1", "task_2"
+ * referring to tasks by their order within an objective. This function resolves
+ * these symbolic names to actual task IDs like "task_XUUNsk".
+ *
+ * Resolution rules:
+ * 1. If dep is already a valid task ID (exists in state), use it directly
+ * 2. If dep matches "task_N" pattern, resolve to Nth task in the objective
+ * 3. If unresolvable, log warning and skip
+ */
+function resolveDependencyIds(
+  state: MissionState,
+  objectiveId: string,
+  rawDeps: string[]
+): string[] {
+  const objective = state.getObjective(objectiveId)
+  if (!objective) return rawDeps
+
+  const resolvedDeps: string[] = []
+
+  for (const dep of rawDeps) {
+    // If it's already a valid task ID that exists in state, use it
+    if (state.getTask(dep)) {
+      resolvedDeps.push(dep)
+      continue
+    }
+
+    // Try to resolve symbolic names like "task_1", "task_2"
+    const match = dep.match(/^task_(\d+)$/)
+    if (match) {
+      const index = parseInt(match[1], 10) - 1 // "task_1" → index 0
+      if (index >= 0 && index < objective.tasks.length) {
+        const resolvedId = objective.tasks[index].id
+        log.debug(`[mission] Resolved dependency "${dep}" → "${resolvedId}"`)
+        resolvedDeps.push(resolvedId)
+        continue
+      }
+    }
+
+    // Warn about unresolvable dependency
+    log.warn(`[mission] Unresolvable dependency: "${dep}" - skipping`)
+  }
+
+  return resolvedDeps
+}
 
 // =============================================================================
 // Tool Definitions
@@ -19,7 +74,11 @@ const s = tool.schema
 /**
  * Create mission management tools
  */
-export function createMissionTools(state: MissionState): Record<string, ToolDefinition> {
+export function createMissionTools(
+  state: MissionState,
+  cwd?: string
+): Record<string, ToolDefinition> {
+  const projectCwd = cwd ?? process.cwd()
   /**
    * Create a new mission
    */
@@ -72,11 +131,16 @@ export function createMissionTools(state: MissionState): Record<string, ToolDefi
 
             const createdTasks: Array<{ id: string; description: string }> = []
             for (const taskData of objData.tasks) {
+              // BUG-25 FIX: Resolve symbolic dependency names to actual task IDs
+              const resolvedDeps = taskData.dependencies
+                ? resolveDependencyIds(state, objective.id, taskData.dependencies)
+                : undefined
+
               const task = state.addTask(objective.id, {
                 description: taskData.description,
                 acceptanceCriteria: taskData.acceptanceCriteria,
                 routedTo: taskData.routing,
-                dependencies: taskData.dependencies,
+                dependencies: resolvedDeps,
               })
               createdTasks.push({ id: task.id, description: task.description })
             }
@@ -224,11 +288,16 @@ export function createMissionTools(state: MissionState): Record<string, ToolDefi
           }>
 
           for (const taskData of tasks) {
+            // BUG-25 FIX: Resolve symbolic dependency names to actual task IDs
+            const resolvedDeps = taskData.dependencies
+              ? resolveDependencyIds(state, objective.id, taskData.dependencies)
+              : undefined
+
             state.addTask(objective.id, {
               description: taskData.description,
               acceptanceCriteria: taskData.acceptanceCriteria,
               routedTo: taskData.routing,
-              dependencies: taskData.dependencies,
+              dependencies: resolvedDeps,
             })
           }
         } catch {
@@ -267,14 +336,6 @@ export function createMissionTools(state: MissionState): Record<string, ToolDefi
         criteria = [args.acceptanceCriteria]
       }
 
-      if (args.dependencies) {
-        try {
-          deps = JSON.parse(args.dependencies)
-        } catch {
-          deps = [args.dependencies]
-        }
-      }
-
       // Check if objective exists, provide helpful error if not
       const mission = state.getMission()
       const objective = state.getObjective(args.objectiveId)
@@ -287,6 +348,17 @@ export function createMissionTools(state: MissionState): Record<string, ToolDefi
           availableObjectives,
           hint: 'Use one of the objective IDs listed above, or create a new objective with mission_add_objective',
         })
+      }
+
+      // BUG-25 FIX: Parse and resolve dependencies to actual task IDs
+      if (args.dependencies) {
+        try {
+          const rawDeps = JSON.parse(args.dependencies) as string[]
+          deps = resolveDependencyIds(state, args.objectiveId, rawDeps)
+        } catch {
+          // Single dependency string
+          deps = resolveDependencyIds(state, args.objectiveId, [args.dependencies])
+        }
       }
 
       const task = state.addTask(args.objectiveId, {
@@ -304,12 +376,156 @@ export function createMissionTools(state: MissionState): Record<string, ToolDefi
     },
   })
 
+  // ===========================================================================
+  // Emergency Recovery Tools (BUG-25 Fix)
+  // ===========================================================================
+
+  /**
+   * Force unblock a task by clearing its dependencies
+   */
+  const mission_unblock_task = tool({
+    description:
+      'Force unblock a task by clearing its dependencies. Use when dependencies are broken or tasks are permanently blocked.',
+    args: {
+      taskId: s.string().describe('ID of the task to unblock'),
+      reason: s.string().optional().describe('Reason for unblocking'),
+    },
+
+    async execute(args, _ctx) {
+      const task = state.getTask(args.taskId)
+      if (!task) {
+        return JSON.stringify({
+          success: false,
+          error: `Task ${args.taskId} not found`,
+        })
+      }
+
+      const previousDeps = task.dependencies || []
+      const mission = state.getMission()
+
+      // Clear all dependencies
+      task.dependencies = []
+      state.save()
+
+      // Log to history (only if mission exists)
+      if (mission) {
+        appendHistory(projectCwd, {
+          type: 'task_unblocked',
+          timestamp: new Date().toISOString(),
+          missionId: mission.id,
+          taskId: args.taskId,
+          data: { previousDeps, reason: args.reason },
+        })
+      }
+
+      log.info(`[mission] Task ${args.taskId} unblocked (had ${previousDeps.length} dependencies)`)
+
+      return JSON.stringify({
+        success: true,
+        taskId: args.taskId,
+        previousDependencies: previousDeps,
+        message: `Task ${args.taskId} unblocked`,
+      })
+    },
+  })
+
+  /**
+   * Scan and fix orphan task dependencies across the mission
+   */
+  const mission_fix_dependencies = tool({
+    description:
+      'Scan all mission tasks and fix broken/orphan dependencies. Resolves symbolic names like "task_1" to actual IDs and removes unresolvable references.',
+    args: {},
+
+    async execute(_args, _ctx) {
+      const mission = state.getMission()
+      if (!mission) {
+        return JSON.stringify({
+          success: false,
+          error: 'No active mission',
+        })
+      }
+
+      let fixed = 0
+      const fixes: Array<{
+        taskId: string
+        removed: string[]
+        resolved: string[]
+      }> = []
+
+      for (const objective of mission.objectives) {
+        for (const task of objective.tasks) {
+          if (!task.dependencies || task.dependencies.length === 0) continue
+
+          const resolved: string[] = []
+          const removed: string[] = []
+
+          for (const dep of task.dependencies) {
+            // Already valid - task exists
+            if (state.getTask(dep)) {
+              resolved.push(dep)
+              continue
+            }
+
+            // Try symbolic resolution within objective (e.g., "task_1" → first task)
+            const match = dep.match(/^task_(\d+)$/)
+            if (match) {
+              const index = parseInt(match[1], 10) - 1
+              if (index >= 0 && index < objective.tasks.length) {
+                const resolvedId = objective.tasks[index].id
+                resolved.push(resolvedId)
+                log.debug(`[mission] Fixed dependency "${dep}" → "${resolvedId}"`)
+                continue
+              }
+            }
+
+            // Orphan - cannot resolve, remove it
+            removed.push(dep)
+          }
+
+          // Check if anything changed
+          if (removed.length > 0 || resolved.length !== task.dependencies.length) {
+            task.dependencies = resolved
+            fixes.push({ taskId: task.id, removed, resolved })
+            fixed++
+          }
+        }
+      }
+
+      if (fixed > 0) {
+        state.save()
+
+        // Log to history
+        appendHistory(projectCwd, {
+          type: 'dependencies_fixed',
+          timestamp: new Date().toISOString(),
+          missionId: mission.id,
+          data: { tasksFixed: fixed, fixes },
+        })
+
+        log.info(`[mission] Fixed dependencies for ${fixed} tasks`)
+      }
+
+      return JSON.stringify({
+        success: true,
+        tasksFixed: fixed,
+        fixes,
+        message:
+          fixed > 0
+            ? `Fixed ${fixed} tasks with broken dependencies`
+            : 'No broken dependencies found',
+      })
+    },
+  })
+
   return {
     mission_create,
     mission_status,
     mission_update,
     mission_add_objective,
     mission_add_task,
+    mission_unblock_task,
+    mission_fix_dependencies,
   }
 }
 

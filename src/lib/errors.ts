@@ -213,10 +213,10 @@ export const errors = {
   councilNotConfigured: () =>
     new Delta9Error({
       code: 'COUNCIL_NOT_CONFIGURED',
-      message: 'Council has no oracles configured',
+      message: 'Council has no Strategic Advisors configured',
       suggestions: [
-        'Add oracle models to delta9.json configuration',
-        'Example: {"council": {"oracles": [{"provider": "anthropic", "model": "claude-sonnet-4-20250514"}]}}',
+        'Add Strategic Advisor models to delta9.json configuration',
+        'Example: {"council": {"members": [{"name": "Cipher", "model": "openai/gpt-5.2-codex"}]}}',
         'Use consult_council with specific models to override',
       ],
     }),
@@ -226,8 +226,8 @@ export const errors = {
       code: 'COUNCIL_CONSULT_FAILED',
       message: `Council consultation failed: ${reason}`,
       suggestions: [
-        'Check oracle model availability',
-        'Try quick_consult for a single oracle',
+        'Check Strategic Advisor model availability',
+        'Try quick_consult for a single advisor',
         'Verify API credentials for all configured providers',
       ],
     }),

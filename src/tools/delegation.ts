@@ -26,8 +26,12 @@ const s = tool.schema
  * Includes both registered names and common aliases.
  */
 export type AgentType =
-  // Core agents (registered)
-  | 'operator'
+  // Core agents (3-tier Marine system)
+  | 'operator' // Alias for operator-tier2 (backward compat)
+  | 'operator_complex' // Alias for operator-tier3 (backward compat)
+  | 'operator_tier1' // Marine Private: Simple tasks
+  | 'operator_tier2' // Marine Sergeant: Moderate tasks
+  | 'operator_tier3' // Delta Force: Critical/complex tasks
   | 'validator'
   // Support agents - registered names (config keys)
   | 'scout'
@@ -37,39 +41,89 @@ export type AgentType =
   | 'qa'
   | 'scribe'
   | 'uiOps'
-  | 'optics'
-  // Council agents
+  // Strategic Advisors (6 members)
   | 'cipher'
   | 'vector'
-  | 'prism'
   | 'apex'
+  | 'aegis'
+  | 'razor'
+  | 'oracle'
   // Aliases (resolved to registered names)
-  | 'operator_complex'   // → operator
-  | 'validator_strict'   // → validator
-  | 'explorer'           // → scout
-  | 'ui_ops'             // → uiOps
+  | 'validator_strict' // → validator
+  | 'explorer' // → scout
+  | 'ui_ops' // → uiOps
+  | 'marine_private' // → operator_tier1
+  | 'marine_sergeant' // → operator_tier2
+  | 'delta_force' // → operator_tier3
+  | 'marine' // → operator_tier2 (default marine)
 
 /**
- * Map aliases to registered agent names (BUG-12 fix)
+ * Map aliases to registered agent names (BUG-12 fix, BUG-18 enhancement)
  *
  * Allows Commander to use intuitive names while ensuring
  * delegate_task routes to properly registered agents.
+ *
+ * Supports:
+ * - Snake_case variants (ui_ops -> uiOps)
+ * - Hyphen variants (ui-ops -> uiOps)
+ * - Config name mappings (frontend-ui-ux-engineer -> uiOps)
+ * - Semantic aliases (explorer -> scout, frontend -> uiOps)
+ * - Marine tier aliases (marine_private -> operator_tier1)
  */
 const AGENT_ALIASES: Record<string, string> = {
+  // 3-tier Marine system aliases
+  marine_private: 'operator_tier1', // Simple tasks
+  'marine-private': 'operator_tier1',
+  marine_sergeant: 'operator_tier2', // Moderate tasks
+  'marine-sergeant': 'operator_tier2',
+  delta_force: 'operator_tier3', // Critical/complex tasks
+  'delta-force': 'operator_tier3',
+  marine: 'operator_tier2', // Default marine = sergeant tier
+  // Backward compatibility
+  operator_complex: 'operator_tier3', // Complex → tier3 (Delta Force)
+  'operator-complex': 'operator_tier3',
+  operator: 'operator_tier2', // Default operator → tier2 (Marine Sergeant)
   // Snake_case to camelCase
-  'ui_ops': 'uiOps',
-  'operator_complex': 'operator',    // Complex tasks go to operator (model selection handles complexity)
-  'validator_strict': 'validator',   // Strict mode handled by validator config
+  ui_ops: 'uiOps',
+  validator_strict: 'validator', // Strict mode handled by validator config
+  // Hyphen variants (BUG-18)
+  'ui-ops': 'uiOps',
+  // Config name mappings (BUG-18)
+  'frontend-ui-ux-engineer': 'uiOps',
   // Semantic aliases
-  'explorer': 'scout',               // Explorer is really scout/RECON
+  explorer: 'scout', // Explorer is really scout/RECON
+  frontend: 'uiOps', // Frontend work goes to FACADE
+  research: 'intel', // Research goes to SIGINT
+  fix: 'patcher', // Quick fixes go to SURGEON
+  test: 'qa', // Testing goes to SENTINEL
+  docs: 'scribe', // Documentation goes to SCRIBE
+  visual: 'uiOps', // Visual tasks go to FACADE (SPECTRE removed)
 }
 
 /**
  * Resolve agent type to registered name.
- * Returns original if no alias exists.
+ * Uses case-insensitive matching with normalization.
+ *
+ * @param agentType - Agent type string (any case/format)
+ * @returns Resolved agent name or original if no alias exists
  */
 export function resolveAgentType(agentType: string): string {
-  return AGENT_ALIASES[agentType] || agentType
+  // Direct alias match (fast path)
+  if (AGENT_ALIASES[agentType]) {
+    return AGENT_ALIASES[agentType]
+  }
+
+  // Case-insensitive match with normalization (BUG-18)
+  // Normalize: lowercase and convert hyphens/underscores to consistent format
+  const normalized = agentType.toLowerCase().replace(/-/g, '_')
+  for (const [alias, target] of Object.entries(AGENT_ALIASES)) {
+    const normalizedAlias = alias.toLowerCase().replace(/-/g, '_')
+    if (normalizedAlias === normalized) {
+      return target
+    }
+  }
+
+  return agentType
 }
 
 // =============================================================================
@@ -98,28 +152,35 @@ export function createDelegationTools(
 
 **Purpose:** Offload work to background agents for parallel exploration or synchronous execution.
 
-**Agent Types:**
-- operator: General implementation tasks (default)
-- operator_complex: Multi-file changes, complex refactoring
+**Agent Types (3-Tier Marine System):**
+- operator_tier1 / marine_private: Simple tasks (typos, formatting, minor fixes)
+- operator_tier2 / marine_sergeant: Moderate tasks (features, components, general implementation) [DEFAULT]
+- operator_tier3 / delta_force: Critical/complex tasks (refactoring, architecture, migrations)
+- operator: Alias for operator_tier2 (backward compat)
+- operator_complex: Alias for operator_tier3 (backward compat)
 - validator: Verify work against acceptance criteria
-- validator_strict: Rigorous validation with strict checks
-- explorer: Deep codebase exploration and analysis
+
+**Support Agents:**
 - scout: Quick reconnaissance and file discovery
 - intel: Research and information gathering
-- ui_ops: UI/UX focused tasks
-- scribe: Documentation and writing tasks
+- strategist: Guidance and alternative approaches
+- patcher: Quick fixes and patches
 - qa: Quality assurance and testing
+- scribe: Documentation and writing tasks
+- ui_ops: UI/UX focused tasks
+
+**Strategic Advisors:**
+- cipher, vector, apex, aegis, razor, oracle
 
 **Execution Modes:**
 - Background (run_in_background=true): Returns immediately with task ID. Use background_output to check results.
 - Synchronous (default): Waits for agent to complete before returning.
 
 **Examples:**
-- Background exploration: delegate_task(prompt="Find all auth handlers", agent="explorer", run_in_background=true)
-- Sync implementation: delegate_task(prompt="Add error handling to login", agent="operator")
-- With mission link: delegate_task(prompt="Implement feature", taskId="task_123")
-- With context: delegate_task(prompt="Fix bug", context="User reported login fails on Safari")
-- With skills: delegate_task(prompt="Build UI component", agent="ui_ops", loadSkills=["typescript-patterns", "frontend-ui-ux"])
+- Simple fix: delegate_task(prompt="Fix typo in header", agent="operator_tier1")
+- Feature implementation: delegate_task(prompt="Add error handling to login", agent="operator_tier2")
+- Complex refactor: delegate_task(prompt="Refactor auth system", agent="operator_tier3")
+- Background exploration: delegate_task(prompt="Find all auth handlers", agent="scout", run_in_background=true)
 
 **Related:** background_output, background_list, background_cancel, mission_status`,
 
@@ -127,8 +188,13 @@ export function createDelegationTools(
       prompt: s.string().describe('Task prompt describing what the agent should do'),
       agent: s
         .enum([
-          // Core agents
-          'operator',
+          // 3-tier Marine system
+          'operator_tier1', // Marine Private: Simple tasks
+          'operator_tier2', // Marine Sergeant: Moderate tasks
+          'operator_tier3', // Delta Force: Critical/complex tasks
+          // Backward compat aliases
+          'operator', // → operator_tier2
+          'operator_complex', // → operator_tier3
           'validator',
           // Support agents (registered names)
           'scout',
@@ -138,24 +204,37 @@ export function createDelegationTools(
           'qa',
           'scribe',
           'uiOps',
-          'optics',
-          // Council agents
+          // Strategic Advisors (6 members)
           'cipher',
           'vector',
-          'prism',
           'apex',
-          // Aliases (resolved to registered names)
-          'operator_complex',
+          'aegis',
+          'razor',
+          'oracle',
+          // Marine aliases
+          'marine_private', // → operator_tier1
+          'marine_sergeant', // → operator_tier2
+          'delta_force', // → operator_tier3
+          'marine', // → operator_tier2 (default)
+          // Other aliases
           'validator_strict',
           'explorer',
           'ui_ops',
         ])
         .optional()
-        .describe('Agent type (default: operator). Aliases: ui_ops→uiOps, explorer→scout, operator_complex→operator'),
+        .describe(
+          'Agent type (default: operator_tier2). Marine tiers: tier1=simple, tier2=moderate, tier3=critical'
+        ),
       run_in_background: s
         .boolean()
         .optional()
         .describe('Run asynchronously in background (default: false)'),
+      wait: s
+        .boolean()
+        .optional()
+        .describe(
+          'BUG-35 FIX: Wait for completion when run_in_background=true (default: false). Returns result when done.'
+        ),
       resume: s.string().optional().describe('Resume a previous session by ID'),
       taskId: s.string().optional().describe('Link to Delta9 mission task for context'),
       context: s.string().optional().describe('Additional context to prepend to prompt'),
@@ -214,20 +293,34 @@ export function createDelegationTools(
       // Check if SDK is available
       const sdkAvailable = !!client
 
+      // BUG-28 FIX: Auto-create task when taskId not provided but mission exists
+      let missionTaskId = args.taskId
+      if (!missionTaskId && mission) {
+        const currentObjective = state.getCurrentObjective()
+        if (currentObjective) {
+          const autoTask = state.addTask(currentObjective.id, {
+            description: `[Delegated] ${args.prompt.substring(0, 100)}${args.prompt.length > 100 ? '...' : ''}`,
+            acceptanceCriteria: ['Task delegated to agent and completed'],
+            routedTo: agentType,
+          })
+          missionTaskId = autoTask.id
+        }
+      }
+
       // Background execution
       if (args.run_in_background) {
         // Extract session ID for Ctrl+X navigation
         const parentSessionId = extractSessionId(ctx)
 
         // Mark mission task as in_progress (BUG-14 fix)
-        if (args.taskId && mission) {
-          state.startTask(args.taskId, agentType)
+        if (missionTaskId && mission) {
+          state.startTask(missionTaskId, agentType)
         }
 
         const bgTaskId = await manager.launch({
           prompt: fullPrompt,
           agent: agentType,
-          missionTaskId: args.taskId,
+          missionTaskId: missionTaskId,
           parentSessionId: parentSessionId ?? undefined,
           missionContext: mission
             ? {
@@ -241,6 +334,31 @@ export function createDelegationTools(
         // Track in session state
         if (parentSessionId) {
           trackBackgroundTask(parentSessionId, bgTaskId)
+        }
+
+        // BUG-35 FIX: If wait=true, block until completion
+        if (args.wait) {
+          try {
+            const output = await manager.getOutput(bgTaskId) // Blocks until completion
+            return JSON.stringify({
+              success: true,
+              backgroundTaskId: bgTaskId,
+              agent: agentType,
+              status: '\u2705 completed',
+              mode: sdkAvailable ? 'live' : 'simulation',
+              output: output ? JSON.parse(output) : null,
+              message: `Task completed by ${agentType} agent`,
+            })
+          } catch (error) {
+            return JSON.stringify({
+              success: false,
+              backgroundTaskId: bgTaskId,
+              agent: agentType,
+              status: '\u274C failed',
+              error: error instanceof Error ? error.message : String(error),
+              message: 'Task execution failed while waiting',
+            })
+          }
         }
 
         return JSON.stringify({
@@ -268,14 +386,14 @@ export function createDelegationTools(
       // Synchronous execution
       try {
         // Mark mission task as in_progress (BUG-14 fix)
-        if (args.taskId && mission) {
-          state.startTask(args.taskId, agentType)
+        if (missionTaskId && mission) {
+          state.startTask(missionTaskId, agentType)
         }
 
         const result = await manager.executeSync({
           prompt: fullPrompt,
           agent: agentType,
-          missionTaskId: args.taskId,
+          missionTaskId: missionTaskId,
         })
 
         return JSON.stringify({
@@ -303,10 +421,24 @@ export function createDelegationTools(
 
 /**
  * Extract session ID from context
+ * BUG-29 FIX: Try multiple paths to find session ID
  */
 function extractSessionId(ctx: unknown): string | null {
-  const context = ctx as { sessionID?: string } | undefined
-  return context?.sessionID ?? null
+  if (typeof ctx !== 'object' || ctx === null) {
+    return null
+  }
+
+  const context = ctx as {
+    sessionID?: string
+    sessionId?: string
+    session?: { id?: string }
+    info?: { sessionId?: string }
+  }
+
+  // Try multiple paths
+  return (
+    context.sessionID ?? context.sessionId ?? context.session?.id ?? context.info?.sessionId ?? null
+  )
 }
 
 // =============================================================================

@@ -16,6 +16,7 @@ import type {
   BudgetStatus,
 } from './types.js'
 import { DEFAULT_OPTIMIZER_CONFIG, DEFAULT_MODEL_PROFILES } from './types.js'
+import { loadConfig } from '../lib/config.js'
 
 // =============================================================================
 // Cost Optimizer
@@ -23,6 +24,7 @@ import { DEFAULT_OPTIMIZER_CONFIG, DEFAULT_MODEL_PROFILES } from './types.js'
 
 export class CostOptimizer {
   private config: OptimizerConfig
+  private cwd: string
   private models: Map<string, ModelCostProfile> = new Map()
   private budget: number = 10.0
   private spent: number = 0
@@ -33,8 +35,9 @@ export class CostOptimizer {
     taskType: string
   }> = []
 
-  constructor(config: Partial<OptimizerConfig> = {}) {
+  constructor(config: Partial<OptimizerConfig> = {}, cwd: string = process.cwd()) {
     this.config = { ...DEFAULT_OPTIMIZER_CONFIG, ...config }
+    this.cwd = cwd
 
     // Load default model profiles
     for (const profile of DEFAULT_MODEL_PROFILES) {
@@ -154,12 +157,13 @@ export class CostOptimizer {
    */
   selectModel(requirements: TaskRequirements): OptimizationResult {
     if (!this.config.enabled) {
-      // Return default model
-      const defaultModel = 'anthropic/claude-sonnet-4-5'
+      // Return default model from config (tier 2 is default)
+      const delta9Config = loadConfig(this.cwd)
+      const defaultModel = delta9Config.operators.tier2Model
       const profile = this.models.get(defaultModel)
       return {
         selectedModel: defaultModel,
-        estimatedCost: this.estimateCost(profile!, requirements),
+        estimatedCost: profile ? this.estimateCost(profile, requirements) : 0.01,
         estimatedLatency: profile?.averageLatency || 3000,
         qualityScore: profile?.qualityScore || 90,
         reason: 'Cost optimization disabled - using default model',

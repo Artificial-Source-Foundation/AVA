@@ -303,21 +303,10 @@ delta9_reasoning({ op: "stats" })
 - Extracting lessons from tasks`,
 
     args: {
-      op: s
-        .enum(['list', 'view', 'export', 'stats'])
-        .describe('Operation to perform'),
-      sessionId: s
-        .string()
-        .optional()
-        .describe('Session ID for view/export operations'),
-      format: s
-        .enum(['json', 'markdown'])
-        .optional()
-        .describe('Export format (default: json)'),
-      limit: s
-        .number()
-        .optional()
-        .describe('Limit number of results'),
+      op: s.enum(['list', 'view', 'export', 'stats']).describe('Operation to perform'),
+      sessionId: s.string().optional().describe('Session ID for view/export operations'),
+      format: s.enum(['json', 'markdown']).optional().describe('Export format (default: json)'),
+      limit: s.number().optional().describe('Limit number of results'),
     },
 
     async execute(args) {
@@ -337,11 +326,15 @@ delta9_reasoning({ op: "stats" })
             completed: trace.completedAt !== undefined,
           }))
 
-          return JSON.stringify({
-            success: true,
-            traces: summaries,
-            total: tracer.getTraces().length,
-          }, null, 2)
+          return JSON.stringify(
+            {
+              success: true,
+              traces: summaries,
+              total: tracer.getTraces().length,
+            },
+            null,
+            2
+          )
         }
 
         case 'view': {
@@ -360,26 +353,32 @@ delta9_reasoning({ op: "stats" })
             return JSON.stringify({ success: false, error: `Trace not found: ${sessionId}` })
           }
 
-          return JSON.stringify({
-            success: true,
-            trace: {
-              id: trace.id,
-              sessionId: trace.sessionId,
-              agent: trace.primaryAgent,
-              description: trace.description,
-              startedAt: new Date(trace.startedAt).toISOString(),
-              completedAt: trace.completedAt ? new Date(trace.completedAt).toISOString() : undefined,
-              outcome: trace.outcome,
-              steps: trace.steps.map((step, i) => ({
-                index: i + 1,
-                type: step.type,
-                title: step.title,
-                reasoning: step.reasoning,
-                confidence: step.confidence,
-                alternatives: step.alternatives,
-              })),
+          return JSON.stringify(
+            {
+              success: true,
+              trace: {
+                id: trace.id,
+                sessionId: trace.sessionId,
+                agent: trace.primaryAgent,
+                description: trace.description,
+                startedAt: new Date(trace.startedAt).toISOString(),
+                completedAt: trace.completedAt
+                  ? new Date(trace.completedAt).toISOString()
+                  : undefined,
+                outcome: trace.outcome,
+                steps: trace.steps.map((step, i) => ({
+                  index: i + 1,
+                  type: step.type,
+                  title: step.title,
+                  reasoning: step.reasoning,
+                  confidence: step.confidence,
+                  alternatives: step.alternatives,
+                })),
+              },
             },
-          }, null, 2)
+            null,
+            2
+          )
         }
 
         case 'export': {
@@ -519,9 +518,7 @@ delta9_audit({ type: "delegation" })  # Delegation decisions
       }
 
       // Sort by timestamp (newest first)
-      auditEntries.sort((a, b) =>
-        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      )
+      auditEntries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
 
       // Apply limit
       const limited = auditEntries.slice(0, limit)
@@ -535,17 +532,21 @@ delta9_audit({ type: "delegation" })  # Delegation decisions
         typeCounts[decisionType] = (typeCounts[decisionType] || 0) + 1
       }
 
-      return JSON.stringify({
-        success: true,
-        entries: limited,
-        summary: {
-          total: auditEntries.length,
-          returned: limited.length,
-          byAgent: agentCounts,
-          byType: typeCounts,
+      return JSON.stringify(
+        {
+          success: true,
+          entries: limited,
+          summary: {
+            total: auditEntries.length,
+            returned: limited.length,
+            byAgent: agentCounts,
+            byType: typeCounts,
+          },
+          filters: { agent, type, period },
         },
-        filters: { agent, type, period },
-      }, null, 2)
+        null,
+        2
+      )
     },
   })
 

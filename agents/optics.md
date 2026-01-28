@@ -1,32 +1,10 @@
-/**
- * Delta9 Support Agent: SPECTRE
- *
- * Vision/multimodal analyst for image and visual content.
- * Screenshot analysis, diagram interpretation, image-to-code, visual bug detection.
- *
- * Model is user-configurable in delta9.json (support.optics.model)
- */
+---
+description: SPECTRE - Visual intelligence analyst for screenshots and diagrams (Delta9)
+mode: subagent
+temperature: 0.2
+---
 
-import type { AgentConfig } from '@opencode-ai/sdk'
-import { getSupportAgentModel } from '../../lib/models.js'
-
-// =============================================================================
-// SPECTRE's Profile
-// =============================================================================
-
-export const SPECTRE_PROFILE = {
-  codename: 'SPECTRE',
-  role: 'Visual Intelligence Analyst',
-  temperature: 0.2, // Low for precise visual analysis
-  specialty: 'vision' as const,
-  traits: ['Visual thinker', 'Detail-spotter', 'Diagram interpreter', 'Screenshot analyzer'],
-}
-
-// =============================================================================
-// SPECTRE System Prompt
-// =============================================================================
-
-const SPECTRE_PROMPT = `You are SPECTRE, the Visual Intelligence Analyst for Delta9.
+You are SPECTRE, the Visual Intelligence Analyst for Delta9.
 
 ## Your Identity
 
@@ -80,7 +58,7 @@ Provide structured analysis with actionable insights.
 
 You MUST respond with valid JSON:
 
-\`\`\`json
+```json
 {
   "analysis": {
     "type": "screenshot|diagram|mockup|pdf|other",
@@ -116,7 +94,7 @@ You MUST respond with valid JSON:
   "summary": "Brief summary of findings",
   "actionItems": ["Recommended next steps"]
 }
-\`\`\`
+```
 
 ## Analysis Principles
 
@@ -141,37 +119,4 @@ You can look at a screenshot and immediately identify 5 bugs that a developer wo
 
 ## Remember
 
-You are SPECTRE. See everything, miss nothing, report with precision.`
-
-// =============================================================================
-// SPECTRE Agent Factory
-// =============================================================================
-
-/**
- * Create SPECTRE agent with config-resolved model
- */
-export function createSpectreAgent(cwd: string): AgentConfig {
-  return {
-    description:
-      'SPECTRE - Visual Intelligence Analyst. Screenshot analysis, diagram interpretation, image-to-code, visual bug detection.',
-    mode: 'subagent',
-    model: getSupportAgentModel(cwd, 'optics'),
-    temperature: SPECTRE_PROFILE.temperature,
-    prompt: SPECTRE_PROMPT,
-    maxTokens: 4096, // Visual analysis can be detailed
-  }
-}
-
-// =============================================================================
-// Export Profile for Config System
-// =============================================================================
-
-export const spectreConfig = {
-  name: SPECTRE_PROFILE.codename,
-  role: SPECTRE_PROFILE.role,
-  configKey: 'optics' as const, // Maps to config.support.optics
-  temperature: SPECTRE_PROFILE.temperature,
-  specialty: SPECTRE_PROFILE.specialty,
-  enabled: true,
-  timeoutSeconds: 60,
-}
+You are SPECTRE. See everything, miss nothing, report with precision.

@@ -10,6 +10,9 @@ import type { MissionState } from '../mission/state.js'
 import { routeTask, suggestSupportAgents, type AgentType } from '../agents/router.js'
 import { appendHistory } from '../mission/history.js'
 import { checkTaskConflicts, formatConflicts } from '../mission/conflict-detector.js'
+import { getBackgroundManager, type OpenCodeClient } from '../lib/background-manager.js'
+import { trackBackgroundTask } from '../hooks/session.js'
+import { buildOperatorHandoff, formatHandoffForPrompt } from '../dispatch/handoff.js'
 
 // Use the tool's built-in schema (Zod 4 compatible)
 const s = tool.schema
@@ -20,24 +23,49 @@ const s = tool.schema
 
 /**
  * Create dispatch tools
+ *
+ * @param state - MissionState instance
+ * @param cwd - Project root directory
+ * @param client - Optional OpenCode SDK client for agent spawning (BUG-34 fix)
  */
 export function createDispatchTools(
   state: MissionState,
-  cwd?: string
+  cwd?: string,
+  client?: OpenCodeClient
 ): Record<string, ToolDefinition> {
   const projectCwd = cwd ?? process.cwd()
+  const manager = getBackgroundManager(state, projectCwd, client)
 
   /**
    * Dispatch a task to an operator
+   *
+   * BUG-34 FIX: Now actually spawns background agents instead of just recording intent.
+   * This unifies dispatch_task with delegate_task behavior.
    */
   const dispatch_task = tool({
-    description:
-      'Dispatch a task to an agent for execution. Auto-routes to appropriate support agent if not specified. Checks for file conflicts before dispatch.',
+    description: `Dispatch a mission task to an agent for execution.
+
+**Purpose:** Launch a background agent to execute a specific mission task.
+Auto-routes to appropriate support agent if not specified. Checks for file conflicts.
+
+**What it does:**
+1. Validates task exists and is pending
+2. Routes to best agent based on task type
+3. Spawns background agent (auto-delegates)
+4. Links execution to mission tracking
+
+**Use for:** Mission tasks. For ad-hoc work without mission context, use delegate_task.
+
+**Related:** delegate_task, background_output, background_list, mission_status`,
     args: {
-      taskId: s.string().describe('ID of the task to dispatch'),
+      taskId: s.string().describe('ID of the mission task to dispatch'),
       agent: s.string().optional().describe('Specific agent to use (auto-routed if not specified)'),
       context: s.string().optional().describe('Additional context for the agent'),
       autoRoute: s.boolean().optional().describe('Use auto-routing (default: true)'),
+      run_in_background: s
+        .boolean()
+        .optional()
+        .describe('Run in background (default: true). Set false for synchronous execution.'),
       files: s
         .string()
         .optional()
@@ -49,7 +77,7 @@ export function createDispatchTools(
         .describe('JSON array of explicit constraints - things NOT to do'),
     },
 
-    async execute(args, _ctx) {
+    async execute(args, ctx) {
       const task = state.getTask(args.taskId)
 
       if (!task) {
@@ -125,8 +153,6 @@ export function createDispatchTools(
         }
       }
 
-      const currentObj = state.getCurrentObjective()
-
       // Determine agent to use
       let selectedAgent: AgentType = 'operator'
       let routingDecision = null
@@ -155,6 +181,7 @@ export function createDispatchTools(
             autoRouted: !!routingDecision,
             routingConfidence: routingDecision?.confidence,
             routingReason: routingDecision?.reason,
+            taskDescription: task.description, // BUG-37 FIX: Include task description
           },
         })
       }
@@ -162,39 +189,119 @@ export function createDispatchTools(
       // Get suggested support agents
       const suggestedSupport = suggestSupportAgents(task)
 
-      // Build dispatch payload
-      const dispatchPayload = {
-        taskId: task.id,
-        description: task.description,
-        acceptanceCriteria: task.acceptanceCriteria,
-        missionContext: mission?.description || '',
-        objectiveContext: currentObj?.description || '',
-        additionalContext: args.context || '',
-        previousAttempts: task.attempts > 1 ? task.attempts - 1 : 0,
-        routing: {
-          agent: selectedAgent,
-          autoRouted: !!routingDecision,
-          confidence: routingDecision?.confidence,
-          reason: routingDecision?.reason,
-        },
-      }
-
-      return JSON.stringify({
-        success: true,
-        dispatched: true,
-        taskId: args.taskId,
-        agent: selectedAgent,
-        routing: routingDecision
-          ? {
-              autoRouted: true,
-              confidence: routingDecision.confidence,
-              reason: routingDecision.reason,
-            }
-          : { autoRouted: false, explicit: true },
-        suggestedSupport: suggestedSupport.length > 0 ? suggestedSupport : undefined,
-        payload: dispatchPayload,
-        message: `Task ${args.taskId} dispatched to ${selectedAgent}`,
+      // BUG-34 FIX: Build prompt and actually spawn agent
+      // Build structured handoff contract for the agent
+      const allTasks = mission?.objectives.flatMap((o) => o.tasks) || []
+      const handoff = buildOperatorHandoff({
+        task,
+        mission: mission!,
+        allTasks,
+        additionalContext: args.context,
       })
+      const handoffPrompt = formatHandoffForPrompt(handoff)
+      const fullPrompt = `${handoffPrompt}\n\n---\n\nEXECUTE THIS TASK:\n${task.description}`
+
+      // Check if SDK is available
+      const sdkAvailable = !!client
+
+      // Extract session ID for background task tracking
+      const extractSessionId = (c: unknown): string | null => {
+        if (typeof c !== 'object' || c === null) return null
+        const context = c as {
+          sessionID?: string
+          sessionId?: string
+          session?: { id?: string }
+          info?: { sessionId?: string }
+        }
+        return (
+          context.sessionID ??
+          context.sessionId ??
+          context.session?.id ??
+          context.info?.sessionId ??
+          null
+        )
+      }
+      const parentSessionId = extractSessionId(ctx)
+
+      // Spawn agent (background by default, sync if explicitly requested)
+      const runInBackground = args.run_in_background !== false
+
+      if (runInBackground) {
+        // Spawn background agent
+        const bgTaskId = await manager.launch({
+          prompt: fullPrompt,
+          agent: selectedAgent,
+          missionTaskId: args.taskId,
+          parentSessionId: parentSessionId ?? undefined,
+          missionContext: mission
+            ? {
+                id: mission.id,
+                description: mission.description,
+                status: mission.status,
+              }
+            : undefined,
+        })
+
+        // Track in session state
+        if (parentSessionId) {
+          trackBackgroundTask(parentSessionId, bgTaskId)
+        }
+
+        return JSON.stringify({
+          success: true,
+          dispatched: true,
+          taskId: args.taskId,
+          backgroundTaskId: bgTaskId,
+          agent: selectedAgent,
+          status: '\u23F3 spawned',
+          mode: sdkAvailable ? 'live' : 'simulation',
+          routing: routingDecision
+            ? {
+                autoRouted: true,
+                confidence: routingDecision.confidence,
+                reason: routingDecision.reason,
+              }
+            : { autoRouted: false, explicit: true },
+          suggestedSupport: suggestedSupport.length > 0 ? suggestedSupport : undefined,
+          message: `Task ${args.taskId} dispatched to ${selectedAgent}. Use background_output(taskId="${bgTaskId}") to check progress.`,
+        })
+      } else {
+        // Synchronous execution
+        try {
+          const result = await manager.executeSync({
+            prompt: fullPrompt,
+            agent: selectedAgent,
+            missionTaskId: args.taskId,
+          })
+
+          return JSON.stringify({
+            success: true,
+            dispatched: true,
+            taskId: args.taskId,
+            agent: selectedAgent,
+            status: '\u2705 completed',
+            mode: sdkAvailable ? 'live' : 'simulation',
+            result: JSON.parse(result),
+            routing: routingDecision
+              ? {
+                  autoRouted: true,
+                  confidence: routingDecision.confidence,
+                  reason: routingDecision.reason,
+                }
+              : { autoRouted: false, explicit: true },
+            suggestedSupport: suggestedSupport.length > 0 ? suggestedSupport : undefined,
+            message: `Task ${args.taskId} completed by ${selectedAgent}`,
+          })
+        } catch (error) {
+          return JSON.stringify({
+            success: false,
+            taskId: args.taskId,
+            agent: selectedAgent,
+            error: error instanceof Error ? error.message : String(error),
+            message: 'Task execution failed',
+          })
+        }
+      }
     },
   })
 

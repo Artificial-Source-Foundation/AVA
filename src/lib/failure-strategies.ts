@@ -294,8 +294,7 @@ export const DEFAULT_STRATEGY_RULES: StrategyRule[] = [
   {
     id: 'dependency_escalate',
     priority: 64,
-    condition: (ctx) =>
-      ctx.category === 'dependency_error' && (ctx.dependents?.length ?? 0) > 0,
+    condition: (ctx) => ctx.category === 'dependency_error' && (ctx.dependents?.length ?? 0) > 0,
     strategy: 'escalate',
     defaultParams: {
       escalationMessage: 'Critical dependency failure affecting downstream tasks',
@@ -664,7 +663,9 @@ export function resetFailureStrategyManager(): void {
 /**
  * Create a new failure strategy manager
  */
-export function createFailureStrategyManager(config?: FailureStrategyConfig): FailureStrategyManager {
+export function createFailureStrategyManager(
+  config?: FailureStrategyConfig
+): FailureStrategyManager {
   return new FailureStrategyManager(config)
 }
 

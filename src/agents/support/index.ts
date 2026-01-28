@@ -1,10 +1,10 @@
 /**
  * Delta9 Support Agents
  *
- * Support agents are invokable by any agent (Commander, Operators, Oracles)
+ * Support agents are invokable by any agent (Commander, Operators, Strategic Advisors)
  * for specialized tasks like search, research, documentation, etc.
  *
- * Delta Team Support Agents:
+ * Delta Team Support Agents (7 agents):
  * - RECON: Fast codebase reconnaissance (config: scout)
  * - SIGINT: Intelligence research & documentation (config: intel)
  * - TACCOM: Tactical command advisor (config: strategist)
@@ -12,7 +12,8 @@
  * - SENTINEL: Quality assurance guardian (config: qa)
  * - SCRIBE: Documentation writer (config: scribe)
  * - FACADE: Frontend operations specialist (config: uiOps)
- * - SPECTRE: Visual intelligence analyst (config: optics)
+ *
+ * Note: SPECTRE (optics) removed - visual tasks merged into FACADE
  *
  * All models are user-configurable in delta9.json
  */
@@ -35,8 +36,6 @@ export { createScribeAgent, scribeConfig, SCRIBE_PROFILE } from './scribe.js'
 
 export { createFacadeAgent, facadeConfig, FACADE_PROFILE } from './facade.js'
 
-export { createSpectreAgent, spectreConfig, SPECTRE_PROFILE } from './spectre.js'
-
 // =============================================================================
 // Types
 // =============================================================================
@@ -49,7 +48,6 @@ export type SupportAgentName =
   | 'SENTINEL'
   | 'SCRIBE'
   | 'FACADE'
-  | 'SPECTRE'
 
 export type SupportAgentConfigKey =
   | 'scout'
@@ -59,7 +57,6 @@ export type SupportAgentConfigKey =
   | 'qa'
   | 'scribe'
   | 'uiOps'
-  | 'optics'
 
 // =============================================================================
 // Registry
@@ -72,7 +69,6 @@ import { createSurgeonAgent, surgeonConfig, SURGEON_PROFILE } from './surgeon.js
 import { createSentinelAgent, sentinelConfig, SENTINEL_PROFILE } from './sentinel.js'
 import { createScribeAgent, scribeConfig, SCRIBE_PROFILE } from './scribe.js'
 import { createFacadeAgent, facadeConfig, FACADE_PROFILE } from './facade.js'
-import { createSpectreAgent, spectreConfig, SPECTRE_PROFILE } from './spectre.js'
 import type { AgentConfig } from '@opencode-ai/sdk'
 
 /**
@@ -86,7 +82,6 @@ export const supportAgentFactories: Record<SupportAgentName, (cwd: string) => Ag
   SENTINEL: createSentinelAgent,
   SCRIBE: createScribeAgent,
   FACADE: createFacadeAgent,
-  SPECTRE: createSpectreAgent,
 }
 
 /**
@@ -100,7 +95,6 @@ export const supportProfiles = {
   SENTINEL: SENTINEL_PROFILE,
   SCRIBE: SCRIBE_PROFILE,
   FACADE: FACADE_PROFILE,
-  SPECTRE: SPECTRE_PROFILE,
 }
 
 /**
@@ -114,7 +108,6 @@ export const supportConfigs = {
   SENTINEL: sentinelConfig,
   SCRIBE: scribeConfig,
   FACADE: facadeConfig,
-  SPECTRE: spectreConfig,
 }
 
 /**
@@ -128,7 +121,6 @@ export const codenameToConfigKey: Record<SupportAgentName, SupportAgentConfigKey
   SENTINEL: 'qa',
   SCRIBE: 'scribe',
   FACADE: 'uiOps',
-  SPECTRE: 'optics',
 }
 
 /**
@@ -142,7 +134,6 @@ export const configKeyToCodename: Record<SupportAgentConfigKey, SupportAgentName
   qa: 'SENTINEL',
   scribe: 'SCRIBE',
   uiOps: 'FACADE',
-  optics: 'SPECTRE',
 }
 
 /**

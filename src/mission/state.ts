@@ -62,7 +62,6 @@ export class MissionState {
     const now = new Date().toISOString()
 
     this.mission = {
-      $schema: 'https://delta9.dev/mission.schema.json',
       id: `mission_${nanoid(10)}`,
       description,
       status: 'planning',
@@ -241,7 +240,7 @@ export class MissionState {
   /**
    * Check if task dependencies are met
    */
-  private areTaskDependenciesMet(task: Task): boolean {
+  areTaskDependenciesMet(task: Task): boolean {
     if (!task.dependencies || task.dependencies.length === 0) {
       return true
     }
@@ -253,6 +252,54 @@ export class MissionState {
       }
     }
     return true
+  }
+
+  /**
+   * BUG-36 FIX: Re-evaluate blocked tasks after a task completes
+   * Transitions blocked → pending if all dependencies met
+   *
+   * @param completedTaskId - ID of the task that just completed
+   * @returns Array of task IDs that were unblocked
+   */
+  resolveDependenciesAfterCompletion(completedTaskId: string): string[] {
+    if (!this.mission) return []
+
+    const unblocked: string[] = []
+
+    for (const objective of this.mission.objectives) {
+      for (const task of objective.tasks) {
+        // Skip if not blocked or doesn't depend on completed task
+        if (task.status !== 'blocked' && task.status !== 'pending') continue
+        if (!task.dependencies?.includes(completedTaskId)) continue
+
+        // Check if ALL dependencies now met
+        if (this.areTaskDependenciesMet(task)) {
+          // Only update if it was blocked
+          if (task.status === 'blocked') {
+            task.status = 'pending'
+            unblocked.push(task.id)
+
+            appendHistory(this.cwd, {
+              type: 'task_unblocked',
+              timestamp: new Date().toISOString(),
+              missionId: this.mission.id,
+              taskId: task.id,
+              data: {
+                unblockedBy: completedTaskId,
+                taskDescription: task.description, // BUG-37 FIX
+              },
+            })
+          }
+        }
+      }
+    }
+
+    if (unblocked.length > 0) {
+      this.save()
+      log.info(`[mission] Task ${completedTaskId} completed, unblocked: ${unblocked.join(', ')}`)
+    }
+
+    return unblocked
   }
 
   /**
@@ -513,12 +560,19 @@ export class MissionState {
 
     this.save()
 
+    // BUG-38 FIX: Auto-transition mission status on first task start
+    this.autoTransitionMissionStatus()
+
     appendHistory(this.cwd, {
       type: 'task_started',
       timestamp: task.startedAt,
       missionId: this.mission!.id,
       taskId,
-      data: { assignee, attempt: task.attempts },
+      data: {
+        assignee,
+        attempt: task.attempts,
+        taskDescription: task.description, // BUG-37 FIX: Include task description
+      },
     })
   }
 
@@ -540,8 +594,14 @@ export class MissionState {
         timestamp: task.completedAt,
         missionId: this.mission!.id,
         taskId,
-        data: { attempts: task.attempts },
+        data: {
+          attempts: task.attempts,
+          taskDescription: task.description, // BUG-37 FIX: Include task description
+        },
       })
+
+      // BUG-36 FIX: Auto-resolve dependencies - unblock waiting tasks
+      this.resolveDependenciesAfterCompletion(taskId)
 
       // Check if objective is complete
       this.checkObjectiveCompletion()
@@ -590,8 +650,58 @@ export class MissionState {
       timestamp: task.completedAt,
       missionId: this.mission!.id,
       taskId,
-      data: { reason },
+      data: {
+        reason,
+        taskDescription: task.description, // BUG-37 FIX: Include task description
+      },
     })
+  }
+
+  /**
+   * BUG-38 FIX: Auto-transition mission status based on task progress
+   *
+   * State machine:
+   * - planning → in_progress (on first task start)
+   * - in_progress → completed (when 100% tasks done)
+   */
+  autoTransitionMissionStatus(): void {
+    if (!this.mission) return
+
+    const progress = this.getProgress()
+    const currentStatus = this.mission.status
+
+    // planning → in_progress (on first task start)
+    if (currentStatus === 'planning' && progress.inProgress > 0) {
+      this.mission.status = 'in_progress'
+      this.mission.startedAt = new Date().toISOString()
+      this.save()
+
+      appendHistory(this.cwd, {
+        type: 'mission_status_changed',
+        timestamp: this.mission.startedAt,
+        missionId: this.mission.id,
+        data: { from: 'planning', to: 'in_progress', trigger: 'first_task_started' },
+      })
+
+      log.info(`[mission] Status changed: planning → in_progress`)
+      return
+    }
+
+    // in_progress → completed (when 100% done)
+    if (currentStatus === 'in_progress' && progress.percentage === 100) {
+      this.mission.status = 'completed'
+      this.mission.completedAt = new Date().toISOString()
+      this.save()
+
+      appendHistory(this.cwd, {
+        type: 'mission_completed',
+        timestamp: this.mission.completedAt,
+        missionId: this.mission.id,
+        data: { from: 'in_progress', to: 'completed', trigger: 'all_tasks_done' },
+      })
+
+      log.info(`[mission] Status changed: in_progress → completed`)
+    }
   }
 
   /**
@@ -616,28 +726,8 @@ export class MissionState {
         objectiveId: objective.id,
       })
 
-      // Check if mission is complete
-      this.checkMissionCompletion()
-    }
-  }
-
-  /**
-   * Check if mission is complete
-   */
-  private checkMissionCompletion(): void {
-    if (!this.mission) return
-
-    const allComplete = this.mission.objectives.every((o) => o.status === 'completed')
-
-    if (allComplete) {
-      this.mission.status = 'completed'
-      this.mission.completedAt = new Date().toISOString()
-
-      appendHistory(this.cwd, {
-        type: 'mission_completed',
-        timestamp: this.mission.completedAt,
-        missionId: this.mission.id,
-      })
+      // Check if mission is complete via state machine
+      this.autoTransitionMissionStatus()
     }
   }
 
@@ -774,7 +864,11 @@ export class MissionState {
 
       // Check objective ID uniqueness
       if (!objective.id) {
-        errors.push({ code: 'MISSING_ID', message: 'Objective ID is missing', path: `${objPath}.id` })
+        errors.push({
+          code: 'MISSING_ID',
+          message: 'Objective ID is missing',
+          path: `${objPath}.id`,
+        })
       } else if (seenIds.has(objective.id)) {
         errors.push({
           code: 'DUPLICATE_ID',
@@ -955,7 +1049,10 @@ export class MissionState {
   /**
    * Validate timestamp consistency
    */
-  private validateTimestamps(): { errors: StateValidationIssue[]; warnings: StateValidationIssue[] } {
+  private validateTimestamps(): {
+    errors: StateValidationIssue[]
+    warnings: StateValidationIssue[]
+  } {
     const errors: StateValidationIssue[] = []
     const warnings: StateValidationIssue[] = []
 

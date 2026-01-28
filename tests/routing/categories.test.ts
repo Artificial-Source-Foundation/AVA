@@ -50,7 +50,8 @@ describe('routeToCategory', () => {
   it('should route to best matching category with correct settings', () => {
     const result = routeToCategory('Implement the login feature')
     expect(result.primary.category).toBe('coding')
-    expect(result.effectiveModel).toBe('anthropic/claude-sonnet-4-5')
+    // Uses tier2Model from config (GPT-5.2 Codex for Marine Sergeant tier)
+    expect(result.effectiveModel).toBe('openai/gpt-5.2-codex')
     expect(result.recommendedAgent).toBe('operator')
   })
 

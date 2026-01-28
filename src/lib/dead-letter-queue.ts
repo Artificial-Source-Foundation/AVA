@@ -393,7 +393,9 @@ export class DeadLetterQueueManager {
 
     for (const [id, entry] of this.entries) {
       if (
-        (entry.status === 'resolved' || entry.status === 'discarded' || entry.status === 'expired') &&
+        (entry.status === 'resolved' ||
+          entry.status === 'discarded' ||
+          entry.status === 'expired') &&
         entry.addedAt < cutoff
       ) {
         this.entries.delete(id)
@@ -467,8 +469,7 @@ export class DeadLetterQueueManager {
     }
 
     // Average retry count
-    const avgRetryCount =
-      total > 0 ? entries.reduce((sum, e) => sum + e.retryCount, 0) / total : 0
+    const avgRetryCount = total > 0 ? entries.reduce((sum, e) => sum + e.retryCount, 0) / total : 0
 
     // Timestamps
     const timestamps = entries.map((e) => e.addedAt)
@@ -598,7 +599,9 @@ export function resetDeadLetterQueueManager(): void {
 /**
  * Create a new dead letter queue manager
  */
-export function createDeadLetterQueueManager(config?: DeadLetterQueueConfig): DeadLetterQueueManager {
+export function createDeadLetterQueueManager(
+  config?: DeadLetterQueueConfig
+): DeadLetterQueueManager {
   return new DeadLetterQueueManager(config)
 }
 

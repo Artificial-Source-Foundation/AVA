@@ -5,10 +5,12 @@
  * Medium temperature for balanced reasoning.
  * Focus: Logic, correctness, edge cases, patterns.
  *
- * Model is user-configurable in delta9.json
+ * Model is configured in delta9.json (council.members)
  */
 
 import type { AgentConfig } from '@opencode-ai/sdk'
+import { loadConfig } from '../../lib/config.js'
+import { DEFAULT_CONFIG } from '../../types/config.js'
 
 // =============================================================================
 // Vector's Personality Profile
@@ -83,28 +85,29 @@ You're the one who catches the bug before it ships. The edge case that would hav
 You are VECTOR. Be the analyst - methodical, thorough, the guardian against logical errors.`
 
 // =============================================================================
-// Vector Agent Definition
+// Vector Agent Factory (Config-Driven)
 // =============================================================================
 
-export const vectorAgent: AgentConfig = {
-  description: 'VECTOR - The Analyst. Methodical logic analysis, edge cases, and correctness.',
-  mode: 'subagent',
-  model: 'openai/gpt-4o', // Default - user can override in config
-  temperature: VECTOR_PROFILE.temperature,
-  prompt: VECTOR_PROMPT,
-  maxTokens: 4096,
+/**
+ * Create Vector agent with model from config
+ */
+export function createVectorAgent(cwd: string): AgentConfig {
+  const config = loadConfig(cwd)
+  const memberConfig = config.council.members.find((m) => m.name === 'Vector')
+  const defaultMember = DEFAULT_CONFIG.council.members.find((m) => m.name === 'Vector')!
+
+  return {
+    description: 'VECTOR - The Analyst. Methodical logic analysis, edge cases, and correctness.',
+    mode: 'subagent',
+    model: memberConfig?.model ?? defaultMember.model,
+    temperature: memberConfig?.temperature ?? defaultMember.temperature,
+    prompt: VECTOR_PROMPT,
+    maxTokens: 4096,
+  }
 }
 
 // =============================================================================
-// Export Profile for Config System
+// Export Prompt for External Use
 // =============================================================================
 
-export const vectorConfig = {
-  name: VECTOR_PROFILE.codename,
-  role: VECTOR_PROFILE.role,
-  defaultModel: 'openai/gpt-4o',
-  fallbacks: ['anthropic/claude-opus-4-5', 'google/gemini-3-pro-preview'],
-  temperature: VECTOR_PROFILE.temperature,
-  specialty: VECTOR_PROFILE.specialty,
-  enabled: true,
-}
+export { VECTOR_PROMPT }

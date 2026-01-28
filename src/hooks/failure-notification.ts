@@ -66,9 +66,7 @@ export interface FailureNotification {
 }
 
 /** Notification handler function */
-export type NotificationHandler = (
-  notification: FailureNotification
-) => void | Promise<void>
+export type NotificationHandler = (notification: FailureNotification) => void | Promise<void>
 
 /** Aggregation rule for grouping similar failures */
 export interface AggregationRule {
@@ -427,10 +425,7 @@ export class FailureNotificationManager {
   /**
    * Get or create failure group
    */
-  private getOrCreateGroup(
-    notification: FailureNotification,
-    rule: AggregationRule
-  ): FailureGroup {
+  private getOrCreateGroup(notification: FailureNotification, rule: AggregationRule): FailureGroup {
     const key = `${rule.id}_${notification.type}_${notification.agent ?? 'any'}`
 
     let group = this.failureGroups.get(key)

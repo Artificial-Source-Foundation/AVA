@@ -14,14 +14,16 @@ import { loadConfig } from '../lib/config.js'
 // =============================================================================
 
 export type AgentType =
-  | 'operator' // Default task executor
-  | 'operator-complex' // Complex task executor
+  | 'operator' // Default task executor (Marine Sergeant - tier 2)
+  | 'operator-tier1' // Simple tasks (Marine Private)
+  | 'operator-tier2' // Moderate tasks (Marine Sergeant)
+  | 'operator-tier3' // Critical tasks (Delta Force)
+  | 'operator-complex' // Alias for tier 3 (backward compat)
   | 'scout' // File/codebase exploration
   | 'intel' // Documentation/web research
   | 'strategist' // Architecture/design decisions
   | 'ui-ops' // UI/frontend specialist
   | 'scribe' // Documentation writer
-  | 'optics' // Visual/accessibility review
   | 'qa' // Testing specialist
   | 'validator' // Task validation
   | 'patcher' // Quick fixes
@@ -120,9 +122,9 @@ const ROUTING_PATTERNS: RoutingPattern[] = [
     weight: 0.9,
   },
 
-  // Visual/Accessibility tasks
+  // Visual/Accessibility tasks (handled by FACADE since SPECTRE removed)
   {
-    agent: 'optics',
+    agent: 'ui-ops',
     patterns: [
       /\b(accessibility|a11y|wcag|aria)\b/i,
       /\b(visual|screenshot|appearance)\b/i,
@@ -288,15 +290,21 @@ function detectComplexity(task: Task, cwd?: string): boolean {
 }
 
 /**
- * Get the model for a routed agent
+ * Get the model for a routed agent (3-tier operator system)
  */
 export function getAgentModel(agent: AgentType, config: Delta9Config): string {
   switch (agent) {
+    // 3-tier operator system
     case 'operator':
-      return config.operators.defaultModel
+    case 'operator-tier2':
+      return config.operators.tier2Model
+
+    case 'operator-tier1':
+      return config.operators.tier1Model
 
     case 'operator-complex':
-      return config.operators.complexModel
+    case 'operator-tier3':
+      return config.operators.tier3Model
 
     case 'validator':
       return config.validator.model
@@ -319,14 +327,11 @@ export function getAgentModel(agent: AgentType, config: Delta9Config): string {
     case 'scribe':
       return config.support.scribe.model
 
-    case 'optics':
-      return config.support.optics.model
-
     case 'qa':
       return config.support.qa.model
 
     default:
-      return config.operators.defaultModel
+      return config.operators.tier2Model
   }
 }
 
@@ -334,14 +339,14 @@ export function getAgentModel(agent: AgentType, config: Delta9Config): string {
  * Check if an agent type is a support agent
  */
 export function isSupportAgent(agent: AgentType): boolean {
-  return ['scout', 'intel', 'strategist', 'ui-ops', 'scribe', 'optics', 'qa'].includes(agent)
+  return ['scout', 'intel', 'strategist', 'ui-ops', 'scribe', 'qa'].includes(agent)
 }
 
 /**
  * Get all available support agents
  */
 export function getSupportAgents(): AgentType[] {
-  return ['scout', 'intel', 'strategist', 'ui-ops', 'scribe', 'optics', 'qa']
+  return ['scout', 'intel', 'strategist', 'ui-ops', 'scribe', 'qa']
 }
 
 /**

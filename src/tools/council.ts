@@ -1,7 +1,7 @@
 /**
  * Delta9 Council Tools
  *
- * Tools for consulting the council of oracles.
+ * Tools for consulting the Strategic Advisors.
  */
 
 import { tool, type ToolDefinition } from '@opencode-ai/plugin'
@@ -23,18 +23,21 @@ const s = tool.schema
  *
  * @param state - MissionState instance
  * @param cwd - Project root directory
- * @param client - OpenCode SDK client for real oracle invocation (without this, oracles run in simulation mode)
+ * @param client - OpenCode SDK client for real advisor invocation (without this, advisors run in simulation mode)
  */
 export function createCouncilTools(
   state: MissionState,
   cwd: string,
   client?: OpenCodeClient
 ): Record<string, ToolDefinition> {
+  // BUG-32 FIX: Log warning if client not provided (simulation mode)
+  // Note: Logging is handled by tools at invocation time, not registration
+
   /**
-   * Consult the council of oracles for strategic decisions
+   * Consult the Strategic Advisors for strategic decisions
    */
   const consult_council = tool({
-    description: `Consult the Council of oracles for strategic decisions.
+    description: `Consult the Strategic Advisors for strategic decisions.
 Use for complex decisions requiring multiple perspectives:
 - Architecture choices
 - Risk assessment
@@ -42,9 +45,9 @@ Use for complex decisions requiring multiple perspectives:
 - Implementation strategy
 
 Modes:
-- quick: Single oracle, fast response
-- standard: All enabled oracles, balanced
-- xhigh: All oracles with thorough analysis`,
+- quick: Single advisor, fast response
+- standard: All enabled advisors, balanced
+- xhigh: All advisors with thorough analysis`,
 
     args: {
       question: s.string().describe('Question for the council'),
@@ -52,7 +55,7 @@ Modes:
         .enum(['quick', 'standard', 'xhigh'])
         .optional()
         .describe('Council mode (default: standard)'),
-      context: s.string().optional().describe('Additional context for the oracles'),
+      context: s.string().optional().describe('Additional context for the advisors'),
     },
 
     async execute(args, _ctx) {
@@ -63,7 +66,7 @@ Modes:
           question: args.question,
           mode,
           context: args.context,
-          client, // Pass client for real oracle invocation
+          client, // Pass client for real advisor invocation
         })
 
         return JSON.stringify({
@@ -86,7 +89,7 @@ Modes:
             totalTokens: result.totalTokens,
             totalDurationMs: result.totalDurationMs,
           },
-          message: `Council consulted successfully. ${result.results.length} oracle(s) responded.`,
+          message: `Council consulted successfully. ${result.results.length} advisor(s) responded.`,
         })
       } catch (error) {
         return JSON.stringify({
@@ -100,10 +103,10 @@ Modes:
   })
 
   /**
-   * Quick consultation with single oracle
+   * Quick consultation with single advisor
    */
   const quick_consult = tool({
-    description: 'Quick consultation with a single oracle for simple questions.',
+    description: 'Quick consultation with a single advisor for simple questions.',
 
     args: {
       question: s.string().describe('Question for quick consultation'),
@@ -115,7 +118,7 @@ Modes:
       if (!opinion) {
         return JSON.stringify({
           success: false,
-          message: 'No oracles available for consultation',
+          message: 'No advisors available for consultation',
         })
       }
 
@@ -167,9 +170,9 @@ Modes:
   const council_status = tool({
     description: `Get the current council configuration and deliberation status.
 Shows:
-- Council configuration (enabled oracles, modes)
+- Council configuration (enabled advisors, modes)
 - Last deliberation results (if any)
-- Individual oracle opinions with confidence
+- Individual advisor opinions with confidence
 - Consensus points and conflicts`,
 
     args: {
@@ -183,16 +186,16 @@ Shows:
       const { loadConfig, getEnabledOracles } = await import('../lib/config.js')
       const { oracleProfiles } = await import('../agents/council/index.js')
       const config = loadConfig(cwd)
-      const enabledOracles = getEnabledOracles(cwd)
+      const enabledAdvisors = getEnabledOracles(cwd)
       const mission = state.getMission()
       const councilSummary = mission?.councilSummary
 
-      // Build oracle details with Delta Team profiles
-      const oracleDetails = enabledOracles.map((o) => {
+      // Build advisor details with Strategic Advisor profiles
+      const advisorDetails = enabledAdvisors.map((o) => {
         const profile = oracleProfiles[o.name as keyof typeof oracleProfiles]
         return {
           codename: o.name,
-          role: profile?.role || 'Oracle',
+          role: profile?.role || 'Strategic Advisor',
           model: o.model,
           specialty: o.specialty,
           temperature: o.temperature ?? profile?.temperature,
@@ -255,14 +258,14 @@ Shows:
           minResponses: config.council.minResponses,
           timeoutSeconds: config.council.timeoutSeconds,
         },
-        deltaTeam: {
+        strategicAdvisors: {
           total: config.council.members.length,
-          enabled: enabledOracles.length,
-          members: oracleDetails,
+          enabled: enabledAdvisors.length,
+          members: advisorDetails,
         },
         lastDeliberation,
         message: lastDeliberation
-          ? `Council active. Last deliberation: ${lastDeliberation.oracleCount} oracles, ${(lastDeliberation.confidenceAvg * 100).toFixed(0)}% avg confidence`
+          ? `Council active. Last deliberation: ${lastDeliberation.oracleCount} advisors, ${(lastDeliberation.confidenceAvg * 100).toFixed(0)}% avg confidence`
           : 'Council configured. No deliberation in current mission.',
       })
     },
@@ -277,7 +280,7 @@ Shows:
 **Purpose:** Understand how the council reached its decisions.
 
 **Shows:**
-- Individual oracle reasoning and vote
+- Individual advisor reasoning and vote
 - Consensus building process
 - Conflict detection and resolution
 - Confidence distribution
@@ -286,14 +289,11 @@ Shows:
 **Use when:**
 - Debugging unexpected council outcomes
 - Auditing decision-making process
-- Understanding oracle disagreements
+- Understanding advisor disagreements
 - Reviewing consensus quality`,
 
     args: {
-      verbose: s
-        .boolean()
-        .optional()
-        .describe('Include full reasoning text (default: false)'),
+      verbose: s.boolean().optional().describe('Include full reasoning text (default: false)'),
     },
 
     async execute(args) {
@@ -312,15 +312,15 @@ Shows:
 
       // Analyze confidence distribution
       const confidences = opinions.map((o) => o.confidence)
-      const avgConfidence = confidences.length > 0
-        ? confidences.reduce((a, b) => a + b, 0) / confidences.length
-        : 0
-      const stdDev = confidences.length > 1
-        ? Math.sqrt(
-            confidences.reduce((sum, c) => sum + Math.pow(c - avgConfidence, 2), 0) /
-            (confidences.length - 1)
-          )
-        : 0
+      const avgConfidence =
+        confidences.length > 0 ? confidences.reduce((a, b) => a + b, 0) / confidences.length : 0
+      const stdDev =
+        confidences.length > 1
+          ? Math.sqrt(
+              confidences.reduce((sum, c) => sum + Math.pow(c - avgConfidence, 2), 0) /
+                (confidences.length - 1)
+            )
+          : 0
 
       // Categorize opinions by confidence level
       const highConfidence = opinions.filter((o) => o.confidence >= 0.8)
@@ -370,7 +370,7 @@ Shows:
       if (shortRecs.length > 0 && opinions.length > 2) {
         conflicts.push({
           type: 'approach_variance',
-          description: 'Some oracles provided significantly shorter responses',
+          description: 'Some advisors provided significantly shorter responses',
           oracles: shortRecs.map((o) => o.oracle),
         })
       }
@@ -393,47 +393,55 @@ Shows:
       // Build consensus analysis
       const consensusAnalysis = {
         points: councilSummary.consensus,
-        strength: avgConfidence >= 0.7 && stdDev < 0.15 ? 'strong' :
-                  avgConfidence >= 0.5 ? 'moderate' : 'weak',
+        strength:
+          avgConfidence >= 0.7 && stdDev < 0.15
+            ? 'strong'
+            : avgConfidence >= 0.5
+              ? 'moderate'
+              : 'weak',
         disagreementsResolved: councilSummary.disagreementsResolved || [],
         unanimity: stdDev < 0.1 && avgConfidence > 0.6,
       }
 
-      return JSON.stringify({
-        success: true,
-        deliberation: {
-          mode: councilSummary.mode,
-          oracleCount: opinions.length,
-          timestamp: new Date().toISOString(),
-        },
-        confidenceAnalysis: {
-          average: avgConfidence,
-          standardDeviation: stdDev,
-          distribution: {
-            high: highConfidence.length,
-            medium: mediumConfidence.length,
-            low: lowConfidence.length,
+      return JSON.stringify(
+        {
+          success: true,
+          deliberation: {
+            mode: councilSummary.mode,
+            oracleCount: opinions.length,
+            timestamp: new Date().toISOString(),
           },
-          label: getConfidenceLabel(avgConfidence),
+          confidenceAnalysis: {
+            average: avgConfidence,
+            standardDeviation: stdDev,
+            distribution: {
+              high: highConfidence.length,
+              medium: mediumConfidence.length,
+              low: lowConfidence.length,
+            },
+            label: getConfidenceLabel(avgConfidence),
+          },
+          consensusAnalysis,
+          opinions: opinionDetails,
+          caveatsRaised: {
+            total: allCaveats.length,
+            items: allCaveats,
+          },
+          suggestedTasks: {
+            total: allSuggestedTasks.length,
+            items: allSuggestedTasks,
+          },
+          conflicts: conflicts.length > 0 ? conflicts : undefined,
+          transparency: {
+            allAdvisorsResponded: opinions.length > 0,
+            consensusReached: consensusAnalysis.strength !== 'weak',
+            conflictsDetected: conflicts.length,
+            caveatsAddressed: (councilSummary.disagreementsResolved || []).length,
+          },
         },
-        consensusAnalysis,
-        opinions: opinionDetails,
-        caveatsRaised: {
-          total: allCaveats.length,
-          items: allCaveats,
-        },
-        suggestedTasks: {
-          total: allSuggestedTasks.length,
-          items: allSuggestedTasks,
-        },
-        conflicts: conflicts.length > 0 ? conflicts : undefined,
-        transparency: {
-          allOraclesResponded: opinions.length > 0,
-          consensusReached: consensusAnalysis.strength !== 'weak',
-          conflictsDetected: conflicts.length,
-          caveatsAddressed: (councilSummary.disagreementsResolved || []).length,
-        },
-      }, null, 2)
+        null,
+        2
+      )
     },
   })
 

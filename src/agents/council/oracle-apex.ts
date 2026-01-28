@@ -5,10 +5,12 @@
  * Low temperature for precise analysis.
  * Focus: Performance, efficiency, scalability, resources.
  *
- * Model is user-configurable in delta9.json
+ * Model is configured in delta9.json (council.members)
  */
 
 import type { AgentConfig } from '@opencode-ai/sdk'
+import { loadConfig } from '../../lib/config.js'
+import { DEFAULT_CONFIG } from '../../types/config.js'
 
 // =============================================================================
 // Apex's Personality Profile
@@ -90,28 +92,29 @@ You're the one who spots the N+1 query that would have killed production. The un
 You are APEX. Be the optimizer - precise, efficient, the guardian of performance.`
 
 // =============================================================================
-// Apex Agent Definition
+// Apex Agent Factory (Config-Driven)
 // =============================================================================
 
-export const apexAgent: AgentConfig = {
-  description: 'APEX - The Optimizer. Performance analysis, efficiency, and scalability.',
-  mode: 'subagent',
-  model: 'deepseek/deepseek-chat', // Default - user can override in config
-  temperature: APEX_PROFILE.temperature,
-  prompt: APEX_PROMPT,
-  maxTokens: 4096,
+/**
+ * Create Apex agent with model from config
+ */
+export function createApexAgent(cwd: string): AgentConfig {
+  const config = loadConfig(cwd)
+  const memberConfig = config.council.members.find((m) => m.name === 'Apex')
+  const defaultMember = DEFAULT_CONFIG.council.members.find((m) => m.name === 'Apex')!
+
+  return {
+    description: 'APEX - The Optimizer. Performance analysis, efficiency, and scalability.',
+    mode: 'subagent',
+    model: memberConfig?.model ?? defaultMember.model,
+    temperature: memberConfig?.temperature ?? defaultMember.temperature,
+    prompt: APEX_PROMPT,
+    maxTokens: 4096,
+  }
 }
 
 // =============================================================================
-// Export Profile for Config System
+// Export Prompt for External Use
 // =============================================================================
 
-export const apexConfig = {
-  name: APEX_PROFILE.codename,
-  role: APEX_PROFILE.role,
-  defaultModel: 'deepseek/deepseek-chat',
-  fallbacks: ['anthropic/claude-sonnet-4-5', 'google/gemini-3-flash-preview'],
-  temperature: APEX_PROFILE.temperature,
-  specialty: APEX_PROFILE.specialty,
-  enabled: true,
-}
+export { APEX_PROMPT }

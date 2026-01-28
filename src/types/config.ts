@@ -23,24 +23,52 @@ export interface CommanderConfig {
 }
 
 // =============================================================================
+// Thinking/Reasoning Configuration (ARCH-5)
+// =============================================================================
+
+export interface ThinkingConfig {
+  /** OpenAI reasoning mode: 'standard' | 'high' | 'xhigh' */
+  reasoningMode?: 'standard' | 'high' | 'xhigh'
+
+  /** Claude extended thinking budget (tokens) */
+  thinkingBudget?: number
+
+  /** Gemini deep think mode */
+  deepThink?: boolean
+
+  /** DeepSeek R1: trigger thinking with <think> prefix */
+  triggerThinking?: boolean
+}
+
+// =============================================================================
 // Council Configuration
 // =============================================================================
 
 export type CouncilMode = 'none' | 'quick' | 'standard' | 'xhigh'
 
 export interface OracleConfig {
-  /** Oracle display name (codename for Delta Team: Cipher, Vector, Prism, Apex) */
+  /** Strategic Advisor display name (Cipher, Vector, Apex, Aegis, Razor, Oracle) */
   name: string
   /** Model to use (user configurable - any model provider) */
   model: string
   /** Fallback models if primary fails */
   fallbacks: string[]
-  /** Whether this oracle is enabled */
+  /** Whether this advisor is enabled */
   enabled: boolean
   /** Specialty area */
-  specialty: 'architecture' | 'logic' | 'ui' | 'performance' | 'general'
+  specialty:
+    | 'architecture'
+    | 'logic'
+    | 'ui'
+    | 'performance'
+    | 'security'
+    | 'simplification'
+    | 'innovation'
+    | 'general'
   /** Temperature setting (0-1, defines personality decisiveness) */
   temperature?: number
+  /** Thinking/reasoning configuration (provider-specific) */
+  thinking?: ThinkingConfig
 }
 
 export interface CouncilConfig {
@@ -63,18 +91,31 @@ export interface CouncilConfig {
 }
 
 // =============================================================================
-// Operator Configuration
+// Operator Configuration (3-Tier Marine System)
 // =============================================================================
 
 export interface OperatorConfig {
-  /** Default model for operators */
-  defaultModel: string
-  /** Fallback models for default model */
-  defaultFallbacks: string[]
-  /** Model for complex tasks */
-  complexModel: string
-  /** Fallback models for complex model */
-  complexFallbacks: string[]
+  /** Tier 1: Marine Private - simple tasks (Sonnet) */
+  tier1Model: string
+  /** Fallback models for tier 1 */
+  tier1Fallbacks: string[]
+  /** Tier 1 thinking config (usually none - fast execution) */
+  tier1Thinking?: ThinkingConfig
+
+  /** Tier 2: Marine Sergeant - moderate tasks (GPT-5.2) */
+  tier2Model: string
+  /** Fallback models for tier 2 */
+  tier2Fallbacks: string[]
+  /** Tier 2 thinking config (high reasoning) */
+  tier2Thinking?: ThinkingConfig
+
+  /** Tier 3: Delta Force - critical tasks (Opus) */
+  tier3Model: string
+  /** Fallback models for tier 3 */
+  tier3Fallbacks: string[]
+  /** Tier 3 thinking config (extended thinking) */
+  tier3Thinking?: ThinkingConfig
+
   /** Maximum parallel operators */
   maxParallel: number
   /** Maximum retry attempts */
@@ -147,24 +188,32 @@ export interface ScribeConfig {
   format: 'markdown' | 'jsdoc' | 'tsdoc'
 }
 
-export interface OpticsConfig {
-  model: string
-  fallbacks: string[]
-}
-
 export interface QaConfig {
   model: string
   fallbacks: string[]
   frameworkDetect: boolean
 }
 
+/**
+ * Support Agent Configuration
+ *
+ * Delta Team Support Agents (7 agents):
+ * - RECON (scout): Fast codebase reconnaissance
+ * - SIGINT (intel): Intelligence research & documentation
+ * - TACCOM (strategist): Tactical command advisor
+ * - SURGEON (patcher): Quick surgical fixes
+ * - SENTINEL (qa): Quality assurance guardian
+ * - SCRIBE (scribe): Documentation writer
+ * - FACADE (uiOps): Frontend operations specialist
+ *
+ * Note: SPECTRE (optics) removed - redundant with FACADE
+ */
 export interface SupportConfig {
   scout: ScoutConfig
   intel: IntelConfig
   strategist: StrategistConfig
   uiOps: UiOpsConfig
   scribe: ScribeConfig
-  optics: OpticsConfig
   qa: QaConfig
 }
 
@@ -298,39 +347,71 @@ export const DEFAULT_CONFIG: Delta9Config = {
     enabled: true,
     defaultMode: 'standard',
     autoDetectComplexity: true,
-    // The Delta Team - personality-based Oracles with diverse providers
+    // Strategic Advisors (6 members) - diverse providers and specialties
     members: [
       {
         name: 'Cipher',
-        model: 'anthropic/claude-opus-4-5',
-        fallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-pro-preview'],
+        model: 'openai/gpt-5.2-codex', // Changed from Opus - architecture needs code understanding
+        fallbacks: ['anthropic/claude-opus-4-5', 'google/gemini-3-pro-preview'],
         enabled: true,
         specialty: 'architecture',
-        temperature: 0.2, // Decisive, low variance
+        temperature: 0.2, // Low for precision
+        thinking: {
+          reasoningMode: 'xhigh', // Architecture needs deep thinking
+        },
       },
       {
         name: 'Vector',
-        model: 'openai/gpt-5.2-codex',
-        fallbacks: ['anthropic/claude-opus-4-5', 'google/gemini-3-pro-preview'],
+        model: 'openrouter/deepseek/deepseek-r1', // DeepSeek R1 for logic
+        fallbacks: ['anthropic/claude-opus-4-5', 'openai/gpt-5.2-codex'],
         enabled: true,
         specialty: 'logic',
-        temperature: 0.4, // Methodical, balanced
-      },
-      {
-        name: 'Prism',
-        model: 'google/gemini-3-flash-preview',
-        fallbacks: ['anthropic/claude-sonnet-4-5', 'openai/gpt-5.2-codex'],
-        enabled: true,
-        specialty: 'ui',
-        temperature: 0.6, // Creative, higher variance
+        temperature: 0.6, // R1 requires 0.6
+        thinking: {
+          triggerThinking: true, // R1 thinking mode
+        },
       },
       {
         name: 'Apex',
-        model: 'openrouter/deepseek/deepseek-v3.2',
-        fallbacks: ['anthropic/claude-sonnet-4-5', 'google/gemini-3-flash-preview'],
+        model: 'anthropic/claude-opus-4-5', // Keep Opus for performance analysis
+        fallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-pro-preview'],
         enabled: true,
         specialty: 'performance',
-        temperature: 0.3, // Precise, analytical
+        temperature: 0.3,
+        thinking: {
+          thinkingBudget: 16000, // Extended thinking for performance analysis
+        },
+      },
+      {
+        name: 'Aegis', // NEW - Security & Risk Advisor
+        model: 'anthropic/claude-opus-4-5',
+        fallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-pro-preview'],
+        enabled: true,
+        specialty: 'security',
+        temperature: 0.3,
+        thinking: {
+          thinkingBudget: 32000, // Max thinking for security (critical)
+        },
+      },
+      {
+        name: 'Razor', // NEW - Simplification Advisor
+        model: 'google/gemini-3-pro-preview',
+        fallbacks: ['anthropic/claude-sonnet-4-5', 'openai/gpt-5.2-codex'],
+        enabled: true,
+        specialty: 'simplification',
+        temperature: 0.4,
+        thinking: {
+          deepThink: false, // KISS advisor shouldn't overthink
+        },
+      },
+      {
+        name: 'Oracle', // NEW - Innovation Advisor (replaces Prism)
+        model: 'moonshot/kimi-k2.5', // Kimi for creative/innovative thinking
+        fallbacks: ['anthropic/claude-opus-4-5', 'openai/gpt-5.2-codex'],
+        enabled: true,
+        specialty: 'innovation',
+        temperature: 0.7, // Creative, higher variance
+        // Kimi's Agent Swarm handles its own reasoning
       },
     ],
     parallel: true,
@@ -339,10 +420,25 @@ export const DEFAULT_CONFIG: Delta9Config = {
     timeoutSeconds: 120,
   },
   operators: {
-    defaultModel: 'anthropic/claude-sonnet-4-5',
-    defaultFallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-flash-preview'],
-    complexModel: 'anthropic/claude-opus-4-5',
-    complexFallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-pro-preview'],
+    // Tier 1: Marine Private (simple tasks)
+    tier1Model: 'anthropic/claude-sonnet-4-5',
+    tier1Fallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-flash-preview'],
+    // No thinking for fast execution
+
+    // Tier 2: Marine Sergeant (moderate tasks)
+    tier2Model: 'openai/gpt-5.2-codex',
+    tier2Fallbacks: ['anthropic/claude-sonnet-4-5', 'google/gemini-3-pro-preview'],
+    tier2Thinking: {
+      reasoningMode: 'high', // GPT-5.2 high mode
+    },
+
+    // Tier 3: Delta Force (critical tasks)
+    tier3Model: 'anthropic/claude-opus-4-5',
+    tier3Fallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-pro-preview'],
+    tier3Thinking: {
+      thinkingBudget: 32000, // Claude Opus extended thinking
+    },
+
     maxParallel: 3,
     retryLimit: 2,
     canInvokeSupport: true,
@@ -361,36 +457,33 @@ export const DEFAULT_CONFIG: Delta9Config = {
   },
   support: {
     scout: {
-      model: 'openrouter/z-ai/glm-4.6',
+      model: 'openrouter/z-ai/glm-4.7', // User's ZAI Max - fast reconnaissance
       fallbacks: ['anthropic/claude-haiku-4-5', 'google/gemini-3-flash-preview'],
       timeoutSeconds: 30,
     },
     intel: {
-      model: 'google/gemini-3-pro-preview',
+      model: 'google/gemini-3-pro-preview', // #1 Search Arena
       fallbacks: ['anthropic/claude-sonnet-4-5', 'openai/gpt-5.2-codex'],
       sources: ['docs', 'github', 'web'],
     },
     strategist: {
-      model: 'openai/gpt-5.2-codex',
+      model: 'openai/gpt-5.2-codex', // Strong reasoning
       fallbacks: ['anthropic/claude-opus-4-5', 'google/gemini-3-pro-preview'],
       invokeThreshold: 'complex',
     },
     uiOps: {
-      model: 'google/gemini-3-flash-preview',
+      model: 'google/gemini-3-pro-preview', // Changed from Flash - better for UI/UX
       fallbacks: ['anthropic/claude-sonnet-4-5', 'openai/gpt-5.2-codex'],
       styleSystem: 'tailwind',
     },
     scribe: {
-      model: 'google/gemini-3-flash-preview',
-      fallbacks: ['anthropic/claude-haiku-4-5', 'openai/gpt-4o-mini'],
+      model: 'openrouter/z-ai/glm-4.7', // Changed - user's ZAI Max for docs
+      fallbacks: ['anthropic/claude-haiku-4-5', 'google/gemini-3-flash-preview'],
       format: 'markdown',
     },
-    optics: {
-      model: 'google/gemini-3-flash-preview',
-      fallbacks: ['anthropic/claude-haiku-4-5', 'openai/gpt-4o-mini'],
-    },
+    // Note: SPECTRE (optics) removed - redundant with FACADE
     qa: {
-      model: 'anthropic/claude-sonnet-4-5',
+      model: 'anthropic/claude-sonnet-4-5', // Keep - good at finding issues
       fallbacks: ['openai/gpt-5.2-codex', 'google/gemini-3-flash-preview'],
       frameworkDetect: true,
     },

@@ -175,10 +175,7 @@ export class ProcessCleanupManager {
         await Promise.race([
           Promise.resolve(handler.handler()),
           new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new Error(`Handler timeout: ${handler.name}`)),
-              handler.timeout
-            )
+            setTimeout(() => reject(new Error(`Handler timeout: ${handler.name}`)), handler.timeout)
           ),
         ])
 

@@ -136,10 +136,10 @@ export class EventStore {
   /**
    * Append multiple events in a batch
    */
-  appendBatch<T>(events: Array<{ aggregateId: string; type: string; payload: T }>): VersionedEvent<T>[] {
-    return events.map(({ aggregateId, type, payload }) =>
-      this.append(aggregateId, type, payload)
-    )
+  appendBatch<T>(
+    events: Array<{ aggregateId: string; type: string; payload: T }>
+  ): VersionedEvent<T>[] {
+    return events.map(({ aggregateId, type, payload }) => this.append(aggregateId, type, payload))
   }
 
   /**
@@ -233,7 +233,9 @@ export class EventStore {
       this.snapshotCache.set(aggregateId, snapshot)
       return snapshot
     } catch (error) {
-      log.error(`Failed to load snapshot for ${aggregateId}: ${error instanceof Error ? error.message : String(error)}`)
+      log.error(
+        `Failed to load snapshot for ${aggregateId}: ${error instanceof Error ? error.message : String(error)}`
+      )
       return null
     }
   }
@@ -367,7 +369,10 @@ export class EventStore {
 
     try {
       const content = readFileSync(this.config.eventLogPath, 'utf-8')
-      const lines = content.trim().split('\n').filter((l) => l.length > 0)
+      const lines = content
+        .trim()
+        .split('\n')
+        .filter((l) => l.length > 0)
 
       return lines
         .map((line) => {
@@ -471,10 +476,7 @@ export function historyToVersionedEvent(
 /**
  * Import existing history events into the event store
  */
-export function importHistoryEvents(
-  store: EventStore,
-  events: HistoryEvent[]
-): number {
+export function importHistoryEvents(store: EventStore, events: HistoryEvent[]): number {
   let imported = 0
 
   for (const event of events) {

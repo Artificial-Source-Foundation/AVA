@@ -22,8 +22,8 @@ import { operatorAgent } from './agents/operator.js'
 import { validatorAgent } from './agents/validator.js'
 // Support agents - Delta Team (registry for dynamic creation)
 import { supportAgentFactories, codenameToConfigKey } from './agents/support/index.js'
-// Council agents - Oracles
-import { cipherAgent, vectorAgent, prismAgent, apexAgent } from './agents/council/index.js'
+// Council agents - Oracles (config-driven factory functions)
+import { createCouncilAgents } from './agents/council/index.js'
 
 const Delta9: Plugin = async (ctx) => {
   const cwd = ctx.worktree || ctx.directory
@@ -106,7 +106,7 @@ const Delta9: Plugin = async (ctx) => {
 
       const configuredOperator = {
         ...operatorAgent,
-        model: delta9Config.operators.defaultModel,
+        model: delta9Config.operators.tier2Model, // Default to tier 2 (Marine Sergeant)
       }
 
       const configuredValidator = {
@@ -125,25 +125,16 @@ const Delta9: Plugin = async (ctx) => {
         }
       }
 
-      // Configure council agents with models from config
+      // Configure Strategic Advisors using config-driven factory functions
+      // Factory functions read models from delta9.json automatically
+      const councilAgentConfigs = createCouncilAgents(cwd)
       const councilAgents: Record<string, AgentConfig> = {
-        cipher: { ...cipherAgent, mode: 'subagent' as const },
-        vector: { ...vectorAgent, mode: 'subagent' as const },
-        prism: { ...prismAgent, mode: 'subagent' as const },
-        apex: { ...apexAgent, mode: 'subagent' as const },
-      }
-
-      // Apply council member models from config if specified
-      const councilMembers = delta9Config.council?.members ?? []
-      for (const member of councilMembers) {
-        const agentKey = member.name.toLowerCase()
-        if (councilAgents[agentKey]) {
-          councilAgents[agentKey] = {
-            ...councilAgents[agentKey],
-            model: member.model,
-            temperature: member.temperature,
-          }
-        }
+        cipher: { ...councilAgentConfigs.Cipher, mode: 'subagent' as const },
+        vector: { ...councilAgentConfigs.Vector, mode: 'subagent' as const },
+        apex: { ...councilAgentConfigs.Apex, mode: 'subagent' as const },
+        aegis: { ...councilAgentConfigs.Aegis, mode: 'subagent' as const },
+        razor: { ...councilAgentConfigs.Razor, mode: 'subagent' as const },
+        oracle: { ...councilAgentConfigs.Oracle, mode: 'subagent' as const },
       }
 
       // Merge Delta9 agents into config, hiding built-in agents
@@ -157,7 +148,7 @@ const Delta9: Plugin = async (ctx) => {
         validator: configuredValidator,
         // Support agents (Delta Team)
         ...supportAgents,
-        // Council agents (Oracles)
+        // Strategic Advisors (The Council)
         ...councilAgents,
         // Hide built-in agents so Commander is the primary interface
         build: { ...existingBuild, mode: 'subagent', hidden: true },

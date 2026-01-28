@@ -305,7 +305,6 @@ export function getAgentFallbackChain(agentName: string, cwd?: string): string[]
       SENTINEL: (config.support.qa as { fallbacks?: string[] }).fallbacks,
       SCRIBE: (config.support.scribe as { fallbacks?: string[] }).fallbacks,
       FACADE: (config.support.uiOps as { fallbacks?: string[] }).fallbacks,
-      SPECTRE: (config.support.optics as { fallbacks?: string[] }).fallbacks,
     }
     return agentMap[agentName.toUpperCase()] || []
   } catch {
@@ -852,9 +851,12 @@ export function getFallbackActivitySummary(): {
   }
 
   const total = fallbackActivityHistory.length
-  const successes = fallbackActivityHistory.filter(a => a.success).length
-  const fallbacks = fallbackActivityHistory.filter(a => a.attemptedModels.length > 1).length
-  const totalAttempts = fallbackActivityHistory.reduce((sum, a) => sum + a.attemptedModels.length, 0)
+  const successes = fallbackActivityHistory.filter((a) => a.success).length
+  const fallbacks = fallbackActivityHistory.filter((a) => a.attemptedModels.length > 1).length
+  const totalAttempts = fallbackActivityHistory.reduce(
+    (sum, a) => sum + a.attemptedModels.length,
+    0
+  )
 
   // Count fallback model usage
   const fallbackUsage = new Map<string, number>()
@@ -868,7 +870,10 @@ export function getFallbackActivitySummary(): {
   const failuresByPrimaryMap = new Map<string, number>()
   for (const activity of fallbackActivityHistory) {
     if (!activity.success) {
-      failuresByPrimaryMap.set(activity.primaryModel, (failuresByPrimaryMap.get(activity.primaryModel) || 0) + 1)
+      failuresByPrimaryMap.set(
+        activity.primaryModel,
+        (failuresByPrimaryMap.get(activity.primaryModel) || 0) + 1
+      )
     }
   }
 

@@ -398,7 +398,9 @@ resolve_lock_conflict({ filePath: "src/index.ts", strategy: "wait", maxWaitMs: 3
           const acquireResult = store.acquire(args.filePath, {
             owner: { id: ownerId, name: 'Agent' },
             ttlMs: defaultTtlMs,
-            reason: args.reason || `Stolen from ${existingLock.owner.name}: ${args.reason || 'conflict resolution'}`,
+            reason:
+              args.reason ||
+              `Stolen from ${existingLock.owner.name}: ${args.reason || 'conflict resolution'}`,
           })
 
           return JSON.stringify({
@@ -417,7 +419,8 @@ resolve_lock_conflict({ filePath: "src/index.ts", strategy: "wait", maxWaitMs: 3
           return JSON.stringify({
             success: true,
             resolution: 'merge_requested',
-            message: 'Merge strategy selected. Both parties should complete work, then manually merge.',
+            message:
+              'Merge strategy selected. Both parties should complete work, then manually merge.',
             mergeInstructions: {
               step1: `Wait for ${existingLock.owner.name} to complete and release lock`,
               step2: 'Compare your changes with the committed version',
@@ -555,15 +558,20 @@ resolve_lock_conflict({ filePath: "src/index.ts", strategy: "wait", maxWaitMs: 3
         })
       }
 
-      return JSON.stringify({
-        success: true,
-        totalLocks: allLocks.length,
-        issuesFound: issues.length,
-        issues,
-        recommendation: issues.length > 0
-          ? 'Consider running cleanup() to remove expired locks, or investigate long-held locks'
-          : 'No deadlock risks detected',
-      }, null, 2)
+      return JSON.stringify(
+        {
+          success: true,
+          totalLocks: allLocks.length,
+          issuesFound: issues.length,
+          issues,
+          recommendation:
+            issues.length > 0
+              ? 'Consider running cleanup() to remove expired locks, or investigate long-held locks'
+              : 'No deadlock risks detected',
+        },
+        null,
+        2
+      )
     },
   })
 

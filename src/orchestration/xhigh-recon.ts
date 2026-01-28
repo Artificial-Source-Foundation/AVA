@@ -11,6 +11,7 @@
 import { getNamedLogger } from '../lib/logger.js'
 import type { OpenCodeClient } from '../lib/background-manager.js'
 import { createReconAgent, createSigintAgent } from '../agents/support/index.js'
+import { parseModelId } from '../lib/models.js'
 
 const logger = getNamedLogger('xhigh-recon')
 
@@ -196,13 +197,17 @@ Return JSON response as specified in your system prompt.`
     // Create RECON agent config with proper model
     const reconAgent = createReconAgent(cwd)
 
+    // Parse model from agent config (config-driven)
+    const reconModelId = reconAgent.model ?? 'anthropic/claude-haiku-4'
+    const reconModel = parseModelId(reconModelId)
+
     // Send prompt
     await client.session.prompt({
       path: { id: sessionId },
       body: {
         model: {
-          providerID: 'anthropic',
-          modelID: 'claude-haiku-4',
+          providerID: reconModel.provider,
+          modelID: reconModel.model,
         },
         system: reconAgent.prompt,
         parts: [{ type: 'text', text: prompt }],
@@ -271,13 +276,17 @@ Return JSON response as specified in your system prompt.`
     // Create SIGINT agent config with proper model
     const sigintAgent = createSigintAgent(cwd)
 
+    // Parse model from agent config (config-driven)
+    const sigintModelId = sigintAgent.model ?? 'anthropic/claude-sonnet-4-5'
+    const sigintModel = parseModelId(sigintModelId)
+
     // Send prompt
     await client.session.prompt({
       path: { id: sessionId },
       body: {
         model: {
-          providerID: 'anthropic',
-          modelID: 'claude-sonnet-4',
+          providerID: sigintModel.provider,
+          modelID: sigintModel.model,
         },
         system: sigintAgent.prompt,
         parts: [{ type: 'text', text: prompt }],

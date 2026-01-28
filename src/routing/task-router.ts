@@ -14,9 +14,9 @@
  * - patcher → SURGEON (surgical fixes)
  * - qa → SENTINEL (quality assurance)
  * - scribe → SCRIBE (documentation)
- * - ui-ops → FACADE (frontend operations)
- * - optics → SPECTRE (visual intelligence)
+ * - ui-ops → FACADE (frontend operations + visual tasks)
  *
+ * Note: SPECTRE (optics) removed - visual tasks merged into FACADE
  * Note: Actual models come from config, AGENT_MODELS are fallback defaults.
  */
 
@@ -30,15 +30,17 @@ import { loadConfig } from '../lib/config.js'
 
 /** Agent types that can be routed to */
 export type RoutableAgent =
-  | 'operator'
-  | 'operator-complex'
+  | 'operator' // Alias for operator-tier2 (backward compat)
+  | 'operator-complex' // Alias for operator-tier3 (backward compat)
+  | 'operator-tier1' // Marine Private: Simple tasks
+  | 'operator-tier2' // Marine Sergeant: Moderate tasks
+  | 'operator-tier3' // Delta Force: Critical/complex tasks
   | 'patcher'
   | 'scout'
   | 'intel'
   | 'strategist'
   | 'ui-ops'
   | 'scribe'
-  | 'optics'
   | 'qa'
 
 /** Routing decision */
@@ -109,6 +111,15 @@ const AGENT_KEYWORDS: Record<RoutableAgent, string[]> = {
     'accessibility',
     'a11y',
     'aria',
+    // Visual keywords (merged from optics/SPECTRE)
+    'image',
+    'screenshot',
+    'diagram',
+    'visual',
+    'picture',
+    'photo',
+    'pdf',
+    'mockup',
   ],
   qa: [
     'test',
@@ -181,18 +192,7 @@ const AGENT_KEYWORDS: Record<RoutableAgent, string[]> = {
     'second opinion',
     'getting complex',
   ],
-  optics: [
-    'image',
-    'screenshot',
-    'diagram',
-    'visual',
-    'picture',
-    'photo',
-    'pdf',
-    'analyze image',
-    'look at',
-    'what does this show',
-  ],
+  // Note: Visual keywords merged into ui-ops since SPECTRE was removed
   patcher: [
     'typo',
     'fix typo',
@@ -205,7 +205,48 @@ const AGENT_KEYWORDS: Record<RoutableAgent, string[]> = {
     'trivial',
     'lint',
   ],
+  // 3-Tier Operator System (Marine hierarchy)
+  'operator-tier1': [
+    // Marine Private: Simple tasks
+    'typo',
+    'fix',
+    'simple',
+    'quick',
+    'rename',
+    'style',
+    'format',
+    'minor',
+    'tweak',
+    'adjust',
+  ],
+  'operator-tier2': [
+    // Marine Sergeant: Moderate tasks (default operator)
+    'add',
+    'implement',
+    'update',
+    'create',
+    'extend',
+    'component',
+    'endpoint',
+    'feature',
+    'method',
+    'function',
+  ],
+  'operator-tier3': [
+    // Delta Force: Critical/complex tasks
+    'refactor',
+    'rewrite',
+    'migrate',
+    'architecture',
+    'redesign',
+    'complex',
+    'multiple files',
+    'system',
+    'comprehensive',
+    'overhaul',
+  ],
   'operator-complex': [
+    // Alias for operator-tier3 (backward compat)
     'refactor',
     'rewrite',
     'migrate',
@@ -216,7 +257,7 @@ const AGENT_KEYWORDS: Record<RoutableAgent, string[]> = {
     'system',
     'comprehensive',
   ],
-  operator: [], // Default - no specific keywords
+  operator: [], // Alias for operator-tier2 (default - no specific keywords)
 }
 
 /**
@@ -229,10 +270,15 @@ function getAgentModel(agent: RoutableAgent, cwd?: string): string {
     const config = loadConfig(cwd || process.cwd())
 
     switch (agent) {
+      // 3-tier operator system (Marine hierarchy)
+      case 'operator-tier1':
+        return config.operators.tier1Model // Marine Private (simple)
       case 'operator':
-        return config.operators.defaultModel
+      case 'operator-tier2':
+        return config.operators.tier2Model // Marine Sergeant (default)
       case 'operator-complex':
-        return config.operators.complexModel
+      case 'operator-tier3':
+        return config.operators.tier3Model // Delta Force (critical)
       case 'patcher':
         return config.patcher.model
       case 'scout':
@@ -245,39 +291,42 @@ function getAgentModel(agent: RoutableAgent, cwd?: string): string {
         return config.support.uiOps.model
       case 'scribe':
         return config.support.scribe.model
-      case 'optics':
-        return config.support.optics.model
       case 'qa':
         return config.support.qa.model
       default:
-        return config.operators.defaultModel
+        return config.operators.tier2Model
     }
   } catch {
     // Fallback defaults if config loading fails
     const FALLBACK_MODELS: Record<RoutableAgent, string> = {
       operator: 'anthropic/claude-sonnet-4-5',
-      'operator-complex': 'anthropic/claude-sonnet-4-5',
+      'operator-complex': 'anthropic/claude-opus-4-5',
+      'operator-tier1': 'anthropic/claude-sonnet-4-5', // Marine Private
+      'operator-tier2': 'openai/gpt-5.2-codex', // Marine Sergeant
+      'operator-tier3': 'anthropic/claude-opus-4-5', // Delta Force
       patcher: 'anthropic/claude-haiku-4',
       scout: 'anthropic/claude-haiku-4',
       intel: 'anthropic/claude-sonnet-4-5',
       strategist: 'openai/gpt-4o',
       'ui-ops': 'google/gemini-2.5-flash',
       scribe: 'google/gemini-2.5-flash',
-      optics: 'google/gemini-2.5-flash',
       qa: 'anthropic/claude-sonnet-4-5',
     }
     return FALLBACK_MODELS[agent]
   }
 }
 
-/** Agent fallbacks */
+/** Agent fallbacks (tier escalation/de-escalation) */
 const AGENT_FALLBACKS: Partial<Record<RoutableAgent, RoutableAgent>> = {
-  'ui-ops': 'operator',
-  qa: 'operator',
-  scribe: 'operator',
-  optics: 'intel',
-  patcher: 'operator',
-  'operator-complex': 'operator',
+  'ui-ops': 'operator-tier2',
+  qa: 'operator-tier2',
+  scribe: 'operator-tier2',
+  patcher: 'operator-tier1',
+  'operator-tier1': 'operator-tier2', // Escalate simple to moderate
+  'operator-tier2': 'operator-tier3', // Escalate moderate to critical
+  'operator-tier3': 'operator-tier2', // De-escalate if critical fails
+  operator: 'operator-tier2',
+  'operator-complex': 'operator-tier3',
   strategist: 'intel',
   intel: 'scout',
 }
@@ -406,17 +455,19 @@ function generateReason(
     case 'strategist':
       parts.push('Guidance/advice requested')
       break
-    case 'optics':
-      parts.push('Visual/image analysis needed')
-      break
     case 'patcher':
       parts.push('Simple/quick fix detected')
       break
-    case 'operator-complex':
-      parts.push('Complex multi-file task')
+    case 'operator-tier1':
+      parts.push('Simple task (Marine Private tier)')
       break
     case 'operator':
-      parts.push('General implementation task')
+    case 'operator-tier2':
+      parts.push('Moderate implementation task (Marine Sergeant tier)')
+      break
+    case 'operator-complex':
+    case 'operator-tier3':
+      parts.push('Complex/critical task (Delta Force tier)')
       break
   }
 
@@ -444,10 +495,14 @@ function generateReason(
  */
 function getAgentCapabilities(agent: RoutableAgent): string[] {
   switch (agent) {
+    case 'operator-tier1':
+      return ['code-modification', 'simple-fixes', 'formatting', 'renaming']
     case 'operator':
-      return ['code-modification', 'implementation', 'general-tasks']
+    case 'operator-tier2':
+      return ['code-modification', 'implementation', 'general-tasks', 'features']
     case 'operator-complex':
-      return ['code-modification', 'multi-file', 'refactoring', 'architecture']
+    case 'operator-tier3':
+      return ['code-modification', 'multi-file', 'refactoring', 'architecture', 'critical-changes']
     case 'patcher':
       return ['code-modification', 'quick-fixes', 'simple-changes']
     case 'scout':
@@ -457,11 +512,9 @@ function getAgentCapabilities(agent: RoutableAgent): string[] {
     case 'strategist':
       return ['advice', 'problem-solving', 'alternative-approaches']
     case 'ui-ops':
-      return ['code-modification', 'frontend', 'components', 'styling']
+      return ['code-modification', 'frontend', 'components', 'styling', 'image-analysis']
     case 'scribe':
       return ['documentation', 'code-modification', 'comments']
-    case 'optics':
-      return ['image-analysis', 'visual-understanding']
     case 'qa':
       return ['code-modification', 'testing', 'coverage']
   }
@@ -478,6 +531,9 @@ export function canAgentModifyFiles(agent: RoutableAgent): boolean {
   const modifyAgents: RoutableAgent[] = [
     'operator',
     'operator-complex',
+    'operator-tier1',
+    'operator-tier2',
+    'operator-tier3',
     'patcher',
     'ui-ops',
     'scribe',
@@ -490,7 +546,7 @@ export function canAgentModifyFiles(agent: RoutableAgent): boolean {
  * Check if an agent is a support agent (not execution)
  */
 export function isSupportAgent(agent: RoutableAgent): boolean {
-  const supportAgents: RoutableAgent[] = ['scout', 'intel', 'strategist', 'optics']
+  const supportAgents: RoutableAgent[] = ['scout', 'intel', 'strategist']
   return supportAgents.includes(agent)
 }
 

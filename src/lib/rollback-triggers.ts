@@ -662,9 +662,7 @@ let defaultManager: RollbackTriggerManager | null = null
 /**
  * Get or create the default rollback trigger manager
  */
-export function getRollbackTriggerManager(
-  config?: RollbackTriggerConfig
-): RollbackTriggerManager {
+export function getRollbackTriggerManager(config?: RollbackTriggerConfig): RollbackTriggerManager {
   if (!defaultManager) {
     defaultManager = new RollbackTriggerManager(config)
   }

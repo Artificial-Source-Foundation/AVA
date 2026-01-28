@@ -153,7 +153,7 @@ When to recommend other agents:
 | Need comprehensive tests | **SENTINEL** | "Write tests for [component]" |
 | Need UI/component work | **FACADE** | "Implement [component] following patterns" |
 | Need documentation | **SCRIBE** | "Document [feature/API]" |
-| Need image/visual analysis | **SPECTRE** | "Analyze [image/diagram]" |
+| Need visual/UI analysis | **FACADE** | "Analyze [screenshot/UI] for issues" |
 
 ---
 

@@ -15,6 +15,9 @@ import { loadConfig } from './config.js'
 export type ModelRole =
   | 'commander'
   | 'operator'
+  | 'operator-tier1'
+  | 'operator-tier2'
+  | 'operator-tier3'
   | 'validator'
   | 'patcher'
   | 'scout'
@@ -22,17 +25,9 @@ export type ModelRole =
   | 'strategist'
   | 'ui_ops'
   | 'scribe'
-  | 'optics'
   | 'qa'
 
-export type SupportAgentType =
-  | 'scout'
-  | 'intel'
-  | 'strategist'
-  | 'uiOps'
-  | 'scribe'
-  | 'optics'
-  | 'qa'
+export type SupportAgentType = 'scout' | 'intel' | 'strategist' | 'uiOps' | 'scribe' | 'qa'
 
 export type TaskComplexity = 'simple' | 'standard' | 'complex'
 
@@ -56,10 +51,21 @@ export function getModelForRole(
     case 'commander':
       return config.commander.model
 
+    // 3-tier operator system
     case 'operator':
-      return complexity === 'complex'
-        ? config.operators.complexModel
-        : config.operators.defaultModel
+      // Default operator uses complexity to select tier
+      if (complexity === 'complex') return config.operators.tier3Model
+      if (complexity === 'simple') return config.operators.tier1Model
+      return config.operators.tier2Model
+
+    case 'operator-tier1':
+      return config.operators.tier1Model
+
+    case 'operator-tier2':
+      return config.operators.tier2Model
+
+    case 'operator-tier3':
+      return config.operators.tier3Model
 
     case 'validator':
       return config.validator.model
@@ -82,14 +88,11 @@ export function getModelForRole(
     case 'scribe':
       return config.support.scribe.model
 
-    case 'optics':
-      return config.support.optics.model
-
     case 'qa':
       return config.support.qa.model
 
     default:
-      return config.operators.defaultModel
+      return config.operators.tier2Model
   }
 }
 
@@ -120,33 +123,58 @@ export function getSupportAgentModel(cwd: string, agentType: SupportAgentType): 
     strategist: config.support.strategist.model,
     uiOps: config.support.uiOps.model,
     scribe: config.support.scribe.model,
-    optics: config.support.optics.model,
     qa: config.support.qa.model,
   }
 
-  return modelMap[agentType] ?? config.operators.defaultModel
+  return modelMap[agentType] ?? config.operators.tier2Model
 }
 
 /**
  * Parse model ID into provider and model
  *
- * Format: "provider/model" (e.g., "anthropic/claude-sonnet-4-5")
+ * Supports multiple formats:
+ * - Standard: "provider/model" (e.g., "anthropic/claude-sonnet-4-5")
+ * - OpenRouter: "openrouter/vendor/model" (e.g., "openrouter/deepseek/deepseek-v3.2")
+ * - Generic 3+: "provider/path/model" (first segment is provider, rest is model path)
  */
 export function parseModelId(modelId: string): { provider: string; model: string } {
   const parts = modelId.split('/')
-  if (parts.length !== 2) {
-    throw new Error(`Invalid model ID format: ${modelId}. Expected "provider/model"`)
+
+  if (parts.length === 2) {
+    // Standard format: provider/model
+    return { provider: parts[0], model: parts[1] }
   }
-  return {
-    provider: parts[0],
-    model: parts[1],
+
+  if (parts.length >= 3 && parts[0] === 'openrouter') {
+    // OpenRouter format: openrouter/vendor/model
+    // Treat vendor path as part of provider, last part as model identifier
+    return {
+      provider: parts.slice(0, -1).join('/'), // "openrouter/deepseek"
+      model: parts[parts.length - 1], // "deepseek-v3.2"
+    }
   }
+
+  if (parts.length >= 3) {
+    // Generic 3+ segment format: first/rest
+    return {
+      provider: parts[0],
+      model: parts.slice(1).join('/'),
+    }
+  }
+
+  throw new Error(
+    `Invalid model ID format: ${modelId}. ` +
+      `Expected "provider/model" or "openrouter/vendor/model"`
+  )
 }
 
 /**
  * Build model ID from provider and model
+ *
+ * Handles cases where provider already contains slashes (e.g., "openrouter/deepseek")
  */
 export function buildModelId(provider: string, model: string): string {
+  // Provider may already contain slashes (openrouter/vendor), just concatenate
   return `${provider}/${model}`
 }
 

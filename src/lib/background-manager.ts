@@ -10,11 +10,15 @@
  */
 
 import { nanoid } from 'nanoid'
+import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import type { MissionState } from '../mission/state.js'
 import { appendHistory } from '../mission/history.js'
 import { getConfig } from './config.js'
 import { taskNotifications } from './notifications.js'
 import { getNamedLogger } from './logger.js'
+import { getAgentSystemPrompt } from '../agents/index.js'
+import { getAgentFallbackManager } from './agent-fallback.js'
 
 // Logger for background operations (silent in TUI mode)
 const log = getNamedLogger('background')
@@ -368,6 +372,60 @@ export class BackgroundManager {
   }
 
   // ===========================================================================
+  // Output Persistence (BUG-30 Fix)
+  // ===========================================================================
+
+  /**
+   * Get the directory for persisting background outputs
+   */
+  private getOutputsDir(): string {
+    const dir = join(this.cwd, '.delta9', 'background-outputs')
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true })
+    }
+    return dir
+  }
+
+  /**
+   * Persist task output to disk
+   * Survives context compaction and memory clearing
+   */
+  persistOutput(taskId: string, output: string): void {
+    try {
+      const filePath = join(this.getOutputsDir(), `${taskId}.json`)
+      writeFileSync(
+        filePath,
+        JSON.stringify({
+          taskId,
+          output,
+          persistedAt: new Date().toISOString(),
+        }),
+        'utf-8'
+      )
+      log.debug(`[background] Persisted output for task ${taskId}`)
+    } catch (error) {
+      log.warn(
+        `[background] Failed to persist output for task ${taskId}: ${error instanceof Error ? error.message : String(error)}`
+      )
+    }
+  }
+
+  /**
+   * Load task output from disk
+   * Returns null if not found or invalid
+   */
+  private loadOutput(taskId: string): string | null {
+    try {
+      const filePath = join(this.getOutputsDir(), `${taskId}.json`)
+      if (!existsSync(filePath)) return null
+      const data = JSON.parse(readFileSync(filePath, 'utf-8'))
+      return data.output ?? null
+    } catch {
+      return null
+    }
+  }
+
+  // ===========================================================================
   // Stale Detection & TTL Pruning
   // ===========================================================================
 
@@ -529,10 +587,20 @@ export class BackgroundManager {
    * Get output from a task
    *
    * Returns null if task doesn't exist or isn't complete.
+   * BUG-30 FIX: Checks disk if not in memory (survives context compaction)
    */
   async getOutput(taskId: string): Promise<string | null> {
     const task = this.tasks.get(taskId)
-    if (!task) return null
+
+    // BUG-30 FIX: If task not in memory, check disk
+    if (!task) {
+      const diskOutput = this.loadOutput(taskId)
+      if (diskOutput) {
+        log.debug(`[background] Loaded output for task ${taskId} from disk`)
+        return diskOutput
+      }
+      return null
+    }
 
     if (task.status === 'running') {
       // Poll for stability
@@ -540,7 +608,9 @@ export class BackgroundManager {
     }
 
     if (task.status === 'completed') {
-      return task.output ?? ''
+      // Return from memory or disk
+      if (task.output) return task.output
+      return this.loadOutput(taskId)
     }
 
     if (task.status === 'failed') {
@@ -769,9 +839,11 @@ export class BackgroundManager {
     }
 
     // Create a sub-session with parent link for Ctrl+X navigation
+    // Include agent name in title for visibility in UI (OpenCode SDK doesn't support agent param)
+    const agentDisplayName = task.agent.charAt(0).toUpperCase() + task.agent.slice(1)
     const createResult = await this.client.session.create({
       body: {
-        title: `Delta9 Task: ${task.id}`,
+        title: `[${agentDisplayName}] ${task.prompt.substring(0, 50)}...`,
         parentID: task.parentSessionId,
       },
       query: {
@@ -797,13 +869,42 @@ export class BackgroundManager {
     // Start global polling for stale detection
     this.startPolling()
 
+    // BUG-23: Check circuit breaker BEFORE spawning
+    const fallbackManager = getAgentFallbackManager()
+    if (!fallbackManager.isAgentAvailable(task.agent)) {
+      const preemptiveFallback = fallbackManager.getBestAgent(task.agent)
+      if (preemptiveFallback.isFallback) {
+        log.warn(
+          `[background] Circuit breaker OPEN for ${task.agent}, using ${preemptiveFallback.agent}`
+        )
+        task.agent = preemptiveFallback.agent
+      }
+    }
+
+    // Get system prompt for agent (BUG-17 fix)
+    // CRITICAL: We pass ONLY the system prompt, NOT the agent name.
+    // Background sessions don't have agents registered, so passing
+    // `agent: task.agent` causes OpenCode to crash on `agent.name` lookup.
+    const systemPrompt = getAgentSystemPrompt(task.agent)
+    if (systemPrompt) {
+      log.debug(`[background] Task ${task.id} using system prompt for agent ${task.agent}`)
+    } else {
+      log.warn(
+        `[background] No system prompt found for agent ${task.agent}, using generic operator`
+      )
+    }
+
     // Fire-and-forget prompt to agent
     // We don't await completion - we poll for stability instead
     this.client.session
       .prompt({
         path: { id: sessionId },
         body: {
+          // Pass agent name for OpenCode's status bar display
+          // Agents must be registered in opencode.json with mode: "subagent"
           agent: task.agent,
+          // Also pass system prompt for agent identity
+          system: systemPrompt || 'You are an operator agent. Execute the task given to you.',
           tools: {
             // Prevent recursive delegation
             delegate_task: false,
@@ -811,12 +912,44 @@ export class BackgroundManager {
           parts: [{ type: 'text', text: task.prompt }],
         },
       })
-      .catch((error) => {
-        log.error(
-          `[background] Prompt error for task ${task.id}: ${error instanceof Error ? error.message : String(error)}`
-        )
+      .catch(async (error) => {
+        const errorMsg = error instanceof Error ? error.message : String(error)
+        log.error(`[background] Prompt error for task ${task.id}: ${errorMsg}`)
+
+        // BUG-19: Try fallback agent before failing
+        const fallbackManager = getAgentFallbackManager()
+        fallbackManager.recordFailure(task.agent, errorMsg)
+
+        const fallbackResult = fallbackManager.getBestAgent(task.agent)
+
+        if (fallbackResult.isFallback && fallbackResult.agent !== task.agent) {
+          log.info(
+            `[background] Retrying task ${task.id} with fallback agent: ${fallbackResult.agent}`
+          )
+          const fallbackPrompt = getAgentSystemPrompt(fallbackResult.agent)
+
+          try {
+            await this.client!.session.prompt({
+              path: { id: sessionId },
+              body: {
+                // Pass fallback agent name for status bar display
+                agent: fallbackResult.agent,
+                system:
+                  fallbackPrompt || 'You are an operator agent. Execute the task given to you.',
+                tools: { delegate_task: false },
+                parts: [{ type: 'text', text: task.prompt }],
+              },
+            })
+            task.agent = fallbackResult.agent // Update task to show fallback was used
+            return // Let polling handle completion
+          } catch (_retryError) {
+            log.error(`[background] Fallback also failed for task ${task.id}`)
+          }
+        }
+
+        // Mark as failed only after fallback exhausted
         task.status = 'failed'
-        task.error = error instanceof Error ? error.message : String(error)
+        task.error = errorMsg
         task.completedAt = new Date().toISOString()
       })
 
@@ -964,6 +1097,11 @@ export class BackgroundManager {
       })
     }
 
+    // BUG-30 FIX: Persist output to disk for survival across context compaction
+    if (task.output) {
+      this.persistOutput(task.id, task.output)
+    }
+
     task.status = 'completed'
     task.completedAt = new Date().toISOString()
 
@@ -982,6 +1120,81 @@ export class BackgroundManager {
         taskId: task.missionTaskId,
         data: { backgroundTaskId: task.id, sessionId },
       })
+
+      // BUG-22 FIX: Update mission state when background task completes
+      if (task.missionTaskId) {
+        try {
+          this.missionState.completeTask(task.missionTaskId, {
+            status: 'pass',
+            validatedAt: task.completedAt ?? new Date().toISOString(),
+            summary: `Background task completed by ${task.agent} agent`,
+          })
+          log.info(`[background] Mission task ${task.missionTaskId} marked complete`)
+        } catch (stateError) {
+          log.warn(
+            `[background] Could not update mission task state: ${stateError instanceof Error ? stateError.message : String(stateError)}`
+          )
+        }
+      }
+    }
+
+    // ENH-20: Notify parent session when all background tasks complete
+    await this.notifyParentSession([task.id])
+  }
+
+  /**
+   * Notify parent session when all background tasks complete (ENH-20)
+   *
+   * Pattern from oh-my-opencode: Sends a system reminder to the parent session
+   * when all background tasks have completed, allowing the Commander to
+   * retrieve results and continue orchestration.
+   */
+  private async notifyParentSession(completedTaskIds: string[]): Promise<void> {
+    if (!this.client) return
+
+    const activeTasks = Array.from(this.tasks.values()).filter(
+      (t) => t.status === 'running' || t.status === 'pending'
+    )
+
+    // Only notify when ALL tasks are done
+    if (activeTasks.length > 0) return
+
+    const completedTasks = completedTaskIds
+      .map((id) => {
+        const task = this.tasks.get(id)
+        return task ? `- ${task.agent}: ${task.prompt.substring(0, 50)}... (${task.id})` : null
+      })
+      .filter(Boolean)
+      .join('\n')
+
+    const notification = `<system-reminder>
+[ALL BACKGROUND TASKS COMPLETE]
+
+**Completed:**
+${completedTasks}
+
+Use \`background_output(taskId="<id>")\` to retrieve each result.
+</system-reminder>`
+
+    // Get parent session ID from first completed task
+    const firstTask = this.tasks.get(completedTaskIds[0])
+    if (!firstTask?.parentSessionId) return
+
+    try {
+      await this.client.session.prompt({
+        path: { id: firstTask.parentSessionId },
+        body: {
+          noReply: true, // Don't expect a response, just inject the notification
+          parts: [{ type: 'text', text: notification }],
+        },
+      })
+      log.info(
+        `[background] Notified parent session ${firstTask.parentSessionId} of task completion`
+      )
+    } catch (error) {
+      log.warn(
+        `[background] Could not notify parent session: ${error instanceof Error ? error.message : String(error)}`
+      )
     }
   }
 
@@ -999,6 +1212,9 @@ export class BackgroundManager {
       message: `Task ${task.id} executed by ${task.agent} agent`,
       note: 'SDK client not available. Real execution requires OpenCode SDK integration.',
     })
+
+    // BUG-30 FIX: Persist output to disk
+    this.persistOutput(task.id, task.output)
 
     task.status = 'completed'
     task.completedAt = new Date().toISOString()

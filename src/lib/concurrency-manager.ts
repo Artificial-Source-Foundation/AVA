@@ -425,7 +425,9 @@ let instance: ProviderConcurrencyManager | null = null
 /**
  * Get the global concurrency manager instance
  */
-export function getConcurrencyManager(config?: Partial<ConcurrencyConfig>): ProviderConcurrencyManager {
+export function getConcurrencyManager(
+  config?: Partial<ConcurrencyConfig>
+): ProviderConcurrencyManager {
   if (!instance) {
     instance = new ProviderConcurrencyManager(config)
     log.info('Provider concurrency manager initialized')
@@ -481,7 +483,9 @@ export function describeConcurrencyStatus(status: ConcurrencyStatus[]): string {
 
   for (const s of status) {
     const utilization = s.limit > 0 ? Math.round((s.active / s.limit) * 100) : 0
-    lines.push(`  ${s.provider}: ${s.active}/${s.limit} (${utilization}% utilized, ${s.queued} queued)`)
+    lines.push(
+      `  ${s.provider}: ${s.active}/${s.limit} (${utilization}% utilized, ${s.queued} queued)`
+    )
   }
 
   return lines.join('\n')

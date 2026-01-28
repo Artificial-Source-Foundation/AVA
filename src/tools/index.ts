@@ -194,8 +194,8 @@ export function createDelta9Tools(
   setPluginStartTime(Date.now())
 
   return {
-    ...createMissionTools(state),
-    ...createDispatchTools(state, projectCwd),
+    ...createMissionTools(state, projectCwd),
+    ...createDispatchTools(state, projectCwd, client), // BUG-34: Pass client for agent spawning
     ...createValidationTools(state, projectCwd),
     ...createDelegationTools(state, projectCwd, client),
     ...createBackgroundTools(state, projectCwd, client),

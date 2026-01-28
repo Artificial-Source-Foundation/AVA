@@ -175,14 +175,7 @@ export function getComplianceReminder(context: ToolContext): string | null {
 /**
  * Tools that read code (Commander should delegate instead)
  */
-const CODE_READ_TOOLS = [
-  'read_file',
-  'grep',
-  'glob',
-  'list_files',
-  'search_code',
-  'view_file',
-]
+const CODE_READ_TOOLS = ['read_file', 'grep', 'glob', 'list_files', 'search_code', 'view_file']
 
 /**
  * Tools that modify code (Commander should delegate instead)
@@ -199,31 +192,17 @@ const CODE_MODIFY_TOOLS = [
 /**
  * Delegation tools
  */
-const DELEGATION_TOOLS = [
-  'dispatch_task',
-  'delegate_task',
-  'spawn_operator',
-  'launch_squadron',
-]
+const DELEGATION_TOOLS = ['dispatch_task', 'delegate_task', 'spawn_operator', 'launch_squadron']
 
 /**
  * Validation tools
  */
-const VALIDATION_TOOLS = [
-  'validation_result',
-  'report_validation',
-  'task_validate',
-]
+const VALIDATION_TOOLS = ['validation_result', 'report_validation', 'task_validate']
 
 /**
  * Task completion tools
  */
-const TASK_COMPLETION_TOOLS = [
-  'task_complete',
-  'complete_task',
-  'task_done',
-  'report_completion',
-]
+const TASK_COMPLETION_TOOLS = ['task_complete', 'complete_task', 'task_done', 'report_completion']
 
 // =============================================================================
 // Helper Functions
@@ -267,7 +246,10 @@ export function isTaskCompletionTool(toolName: string): boolean {
 /**
  * Check if recent tools include any from a category
  */
-function hasRecentTool(recentTools: string[] | undefined, checker: (tool: string) => boolean): boolean {
+function hasRecentTool(
+  recentTools: string[] | undefined,
+  checker: (tool: string) => boolean
+): boolean {
   if (!recentTools) return false
   return recentTools.some(checker)
 }
@@ -290,7 +272,8 @@ const COMMANDER_NO_CODE_READ: ComplianceRule = {
       return {
         hasViolation: true,
         severity: 'warning',
-        reminder: '⚠️ Commander reads but does not implement. Consider delegating code analysis to an Operator.',
+        reminder:
+          '⚠️ Commander reads but does not implement. Consider delegating code analysis to an Operator.',
         rule: 'commander-no-code-read',
         suggestion: 'Use dispatch_task to delegate code analysis',
       }
@@ -339,7 +322,8 @@ const OPERATOR_VALIDATE_AFTER_COMPLETE: ComplianceRule = {
         return {
           hasViolation: true,
           severity: 'info',
-          reminder: '💡 Task marked complete but not validated. Consider running validation_result.',
+          reminder:
+            '💡 Task marked complete but not validated. Consider running validation_result.',
           rule: 'operator-validate-after-complete',
           suggestion: 'Run validation_result before marking task complete',
         }
@@ -416,14 +400,18 @@ const COMMANDER_DELEGATE_RECON: ComplianceRule = {
       if (explorationCount >= 2 || readCount >= 3) {
         const hasDelegation = context.recentTools.some(isDelegationTool)
 
-        if (!hasDelegation && (isExplorationTool(context.toolName) || isCodeReadTool(context.toolName))) {
+        if (
+          !hasDelegation &&
+          (isExplorationTool(context.toolName) || isCodeReadTool(context.toolName))
+        ) {
           return {
             hasViolation: true,
             severity: 'warning',
             reminder:
               '🔍 Commander is doing reconnaissance. Delegate exploration to RECON (scout) agent for efficient codebase scanning.',
             rule: 'commander-delegate-recon',
-            suggestion: 'Use delegate_task(agent="scout", prompt="Explore...") for codebase reconnaissance',
+            suggestion:
+              'Use delegate_task(agent="scout", prompt="Explore...") for codebase reconnaissance',
           }
         }
       }

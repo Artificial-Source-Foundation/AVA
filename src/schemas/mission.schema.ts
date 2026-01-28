@@ -149,6 +149,7 @@ export const missionSchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   approvedAt: z.string().datetime().optional(),
+  startedAt: z.string().datetime().optional(), // BUG-38: When mission started execution
   completedAt: z.string().datetime().optional(),
 })
 
@@ -163,6 +164,7 @@ export const historyEventTypeSchema = z.enum([
   'mission_resumed',
   'mission_completed',
   'mission_aborted',
+  'mission_status_changed', // BUG-38: State machine transitions
   'objective_started',
   'objective_completed',
   'objective_failed',
@@ -170,6 +172,8 @@ export const historyEventTypeSchema = z.enum([
   'task_completed',
   'task_failed',
   'task_retried',
+  'task_unblocked',
+  'dependencies_fixed',
   'validation_passed',
   'validation_fixable',
   'validation_failed',

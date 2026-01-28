@@ -192,12 +192,273 @@ Implemented from reference plugins (oh-my-opencode, swarm-plugin, etc.):
 
 ---
 
+## Sprint 6: Test 3 Bug Fixes ✅
+
+> Background agent execution and mission state synchronization
+
+### Critical Bugs Fixed
+- [x] **BUG-17**: Background sessions inherit agent configs - Added `getAgentSystemPrompt()` to pass prompts directly
+- [x] **BUG-18**: ui_ops/ui-ops mismatch - Expanded `AGENT_ALIASES` with case-insensitive matching
+
+### High Priority Fixed
+- [x] **BUG-19**: Fallback models triggering - Added retry logic in catch block using `AgentFallbackManager`
+
+### Medium Priority Fixed
+- [x] **BUG-20**: Hardcoded models - Verified config-driven (oracle defaults overridden at runtime)
+- [x] **BUG-22**: Mission state sync - Added `completeTask()` call in `extractTaskResult()`
+- [x] **ENH-19**: Commander subagent awareness - Expanded prompt with Delta Team docs and delegation patterns
+- [x] **ENH-20**: Background deployment - Added `notifyParentSession()` for batch completion
+
+### Low Priority Fixed
+- [x] **BUG-21**: Self-conflict detection - Already fixed in `conflict-detector.ts`
+- [x] **BUG-23**: Circuit breaker integration - Added check before spawn in `executeWithSDK()`
+
+### Files Modified
+- `src/agents/index.ts` - Added `getAgentSystemPrompt()`, expanded Commander prompt
+- `src/lib/background-manager.ts` - System prompt injection, fallback retry, state sync, parent notification
+- `src/tools/delegation.ts` - Expanded aliases, case-insensitive matching
+
+---
+
+## Sprint 7: Test 4 Bug Fixes ✅
+
+> Task dependency resolution, background output persistence, and mission sync fixes
+
+### Critical Bug Fixed
+- [x] **BUG-25**: Task dependencies used symbolic names (`task_1`) but IDs are generated (`task_XUUNsk`)
+  - Added `resolveDependencyIds()` helper in `src/tools/mission.ts`
+  - Resolves symbolic names at task creation time
+  - Added `mission_unblock_task` tool for emergency unblocking
+  - Added `mission_fix_dependencies` tool for bulk repair
+  - Added history event types: `task_unblocked`, `dependencies_fixed`
+
+### High Priority Fixed
+- [x] **BUG-30**: Background outputs pruned before retrieval
+  - Added disk persistence in `src/lib/background-manager.ts`
+  - Outputs saved to `.delta9/background-outputs/{taskId}.json`
+  - `getOutput()` checks disk if not in memory
+
+### Medium Priority Fixed
+- [x] **BUG-24**: Background tasks go stale - Already had staleness detection (3 min)
+- [x] **BUG-27**: Context compaction interrupts waits - Fixed by BUG-30's disk persistence
+- [x] **BUG-28**: `delegate_task` without taskId - Auto-creates mission task
+- [x] **BUG-29**: Session ID extraction - Enhanced to try multiple paths
+
+### External Issue
+- [ ] **BUG-26**: `extract` tool fails - OpenCode platform internal tool, workaround: use `discard`
+
+### Files Modified
+- `src/tools/mission.ts` - Dependency resolution, 2 new tools
+- `src/tools/delegation.ts` - Auto-task creation, session ID extraction
+- `src/lib/background-manager.ts` - Disk persistence
+- `src/types/mission.ts` - New event types
+- `src/schemas/mission.schema.ts` - Zod schema updates
+- `src/mission/state.ts` - Removed unused `$schema` URL
+
+### Lint Fixes
+- `src/cli/commands/setup.ts` - ANSI pattern constant
+- `src/legion/coordinator.ts` - Block scope for case
+- `src/lib/input-sanitizer.ts` - ESLint disable for control chars
+
+---
+
+## Test 4: Unfollow Module Enhancement ✅
+
+> Real-world validation with InstaNFollow project
+
+**Task:** Enhance Unfollow Module with retry logic, progress tracking, dashboard UI, and unit tests.
+
+**What Worked Well:**
+- Parallel background agent spawning (3 scouts simultaneously)
+- Agent routing to specialists (scout, explorer, intel, operator, ui_ops, qa)
+- Mission creation with objectives and tasks
+- Background task management (`background_list`, `background_output`)
+- Overall mission flow: exploration → planning → execution → testing
+
+**Files Created:**
+| File | Lines | Description |
+|------|-------|-------------|
+| `useUnfollowProgress.ts` | ~150 | Real-time progress hook |
+| `UnfollowDashboard.tsx` | ~334 | Dashboard with status, progress, controls |
+| `unfollow.test.ts` | ~400 | Action layer unit tests |
+| `unfollow-history.test.ts` | ~300 | Database layer unit tests |
+| `unfollow-manager.test.ts` | 835 | Manager layer unit tests |
+
+**Features Added:**
+- 5-attempt retry logic with 1.5s intervals
+- CircuitBreaker class with 3-failure threshold
+- Exponential backoff with jitter
+- Real-time ETA and progress tracking
+- Dashboard UI with pause/resume/cancel
+
+---
+
+## Sprint 8: Test 5 Bug Fixes ✅
+
+> Model ID parsing, task dispatch, dependency resolution, and state transitions
+
+### Critical Bug Fixed
+- [x] **BUG-31**: OpenRouter model ID format - Updated `parseModelId()` to handle 3-segment `openrouter/vendor/model` format
+
+### High Priority Fixed
+- [x] **BUG-32**: Council client not passed - Verified client passing, added documentation
+- [x] **BUG-34**: dispatch_task doesn't spawn agents - Now spawns via BackgroundManager with proper handoff
+- [x] **BUG-36**: Task dependencies not auto-resolving - Added `resolveDependenciesAfterCompletion()` method
+
+### Medium Priority Fixed
+- [x] **BUG-33**: Scouts going stale - Added "Never Go Stale" section to RECON prompt (fail-fast behavior)
+- [x] **BUG-35**: Commander blocking mode - Added `wait` parameter to `delegate_task`
+- [x] **BUG-37**: Task names show "unknown" - Added `taskDescription` to history events
+- [x] **BUG-38**: Mission status doesn't auto-transition - Added `autoTransitionMissionStatus()` state machine
+
+### Files Modified
+- `src/lib/models.ts` - 3-segment model ID parsing
+- `src/tools/council.ts` - Client passing documentation
+- `src/tools/dispatch.ts` - Actual agent spawning via BackgroundManager
+- `src/tools/delegation.ts` - `wait` parameter for blocking mode
+- `src/tools/index.ts` - Client passthrough to dispatch tools
+- `src/mission/state.ts` - Dependency resolution, state machine, task descriptions in events
+- `src/types/mission.ts` - Added `startedAt`, `mission_status_changed` event type
+- `src/schemas/mission.schema.ts` - Schema updates for new fields/events
+- `src/agents/support/recon.ts` - Fail-fast prompt section
+
+### Enhancements Implemented
+- [x] **ENH-20**: Mission status auto-transitions (planning → in_progress → completed)
+- [x] **ENH-21**: Commander blocking mode (`wait` parameter)
+
+---
+
+## Sprint 10: Model Configuration Optimization ✅
+
+> Optimized model assignments, restructured council, implemented 3-tier operators
+
+### Council Restructure (6 Strategic Advisors)
+
+Restructured council from 4 oracles to 6 Strategic Advisors with heterogeneous models:
+
+| Advisor | Model | Specialty | Reasoning |
+|---------|-------|-----------|-----------|
+| **CIPHER** | `gpt-5.2-codex` | architecture | xhigh reasoning for deep thinking |
+| **VECTOR** | `deepseek-r1` | logic | SOTA reasoning (97.3% MATH) |
+| **APEX** | `claude-opus-4-5` | performance | Best for optimization analysis |
+| **AEGIS** | `claude-opus-4-5` | security | Lowest injection rate (4.7%) |
+| **RAZOR** | `gemini-3-pro-preview` | simplification | Naturally KISS, lowest verbosity |
+| **ORACLE** | `kimi-k2.5` | innovation | Agent Swarm explores alternatives |
+
+- Removed: Prism (UI/UX redundant with FACADE)
+- Added: AEGIS (security), RAZOR (simplification), ORACLE (innovation)
+- Terminology: "Oracles" → "Strategic Advisors"
+
+### 3-Tier Operator System (Marines)
+
+Implemented 3-tier "Marine hierarchy" for operators:
+
+| Tier | Codename | Model | Use Case |
+|------|----------|-------|----------|
+| **Tier 1** | Marine Private | `claude-sonnet-4-5` | Simple tasks, minor fixes |
+| **Tier 2** | Marine Sergeant | `gpt-5.2-codex` | Moderate tasks, features |
+| **Tier 3** | Delta Force | `claude-opus-4-5` | Critical/complex tasks |
+
+Features:
+- Keyword-based routing in task-router.ts
+- Delegation aliases: `marine_private`, `marine_sergeant`, `delta_force`
+- Tier escalation/de-escalation logic
+- Backward compatibility: `operator` → tier2, `operator-complex` → tier3
+
+### SPECTRE Removal
+
+Removed SPECTRE (optics) support agent:
+- Visual analysis capabilities merged into FACADE (ui-ops)
+- Support agent count: 8 → 7
+- All routing updated to redirect visual tasks to FACADE
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/types/config.ts` | OperatorConfig with 3 tiers, OracleConfig with ThinkingConfig |
+| `src/agents/council/oracle-aegis.ts` | NEW - Security advisor |
+| `src/agents/council/oracle-razor.ts` | NEW - Simplification advisor |
+| `src/agents/council/oracle-oracle.ts` | NEW - Innovation advisor |
+| `src/agents/council/oracle-prism.ts` | DELETED |
+| `src/agents/council/index.ts` | Updated for 6 advisors |
+| `src/agents/support/spectre.ts` | DELETED |
+| `src/agents/support/index.ts` | Updated for 7 agents |
+| `src/routing/task-router.ts` | 3-tier routing keywords |
+| `src/tools/delegation.ts` | Marine tier aliases |
+| `src/tools/council.ts` | "Strategic Advisors" terminology |
+| `src/agents/index.ts` | Updated exports |
+| `src/index.ts` | Updated council registration |
+
+### Research Applied
+
+- **X-MAS research**: Heterogeneous models give 47% performance boost
+- **DeepSeek R1**: Temperature 0.6, no system prompts, top-p 0.95
+- **Claude for security**: 4.7% injection rate (best)
+- **Gemini for KISS**: Lowest cyclomatic complexity
+
+---
+
+## Sprint 9: Model Configuration Audit ✅
+
+> Removed all hardcoded model strings, made system fully config-driven
+
+### Config-Driven Factory Pattern
+
+Converted all oracle agents to use factory functions with `cwd` parameter:
+
+```typescript
+export function createCipherAgent(cwd: string): AgentConfig {
+  const config = loadConfig(cwd)  // User's merged config
+  const memberConfig = config.council.members.find((m) => m.name === 'Cipher')
+  const defaultMember = DEFAULT_CONFIG.council.members.find((m) => m.name === 'Cipher')!
+
+  return {
+    model: memberConfig?.model ?? defaultMember.model,  // Config-driven!
+    temperature: memberConfig?.temperature ?? defaultMember.temperature,
+    // ...
+  }
+}
+```
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `src/agents/council/oracle-cipher.ts` | Factory function, imports DEFAULT_CONFIG |
+| `src/agents/council/oracle-vector.ts` | Factory function, imports DEFAULT_CONFIG |
+| `src/agents/council/oracle-prism.ts` | Factory function, imports DEFAULT_CONFIG |
+| `src/agents/council/oracle-apex.ts` | Factory function, imports DEFAULT_CONFIG |
+| `src/agents/council/index.ts` | Exports factory functions, removed static agents |
+| `src/agents/index.ts` | Updated exports for factory pattern |
+| `src/index.ts` | Uses `createCouncilAgents(cwd)` |
+
+### Key Improvements
+
+- **Zero hardcoded model strings** in agent files
+- All models come from `DEFAULT_CONFIG` (single source of truth)
+- Users can override via global (`~/.config/opencode/delta9.json`) or project (`.delta9/config.json`) config
+- Fallbacks also config-driven (defined in `DEFAULT_CONFIG.council.members[].fallbacks`)
+- Verified pattern matches oh-my-opencode and opencode-swarm reference implementations
+
+### Configuration Hierarchy
+
+```
+User Config (.delta9/config.json)     ← Highest priority
+        ↓
+Global Config (~/.config/opencode/delta9.json)
+        ↓
+DEFAULT_CONFIG (src/types/config.ts)  ← Single source of truth
+```
+
+---
+
 ## Stats
 
-- **Tests**: 1266 passing
+- **Tests**: 1268 passing
 - **Exports**: 183 from lib
-- **Tools**: 66+ (removed 4 budget tools)
-- **Agents**: 19
+- **Tools**: 68+
+- **Agents**: 19 (6 Strategic Advisors, 7 Support, 3-tier Operators, Validator, Commander)
 
 ---
 

@@ -2,7 +2,8 @@
  * Tests for Delta9 Support Agents (Delta Team)
  *
  * Consolidated tests using representative sampling.
- * Verifies key behaviors for 8 agents: RECON, SIGINT, TACCOM, SURGEON, SENTINEL, SCRIBE, FACADE, SPECTRE
+ * Verifies key behaviors for 7 agents: RECON, SIGINT, TACCOM, SURGEON, SENTINEL, SCRIBE, FACADE
+ * Note: SPECTRE was removed and its capabilities merged into FACADE
  */
 
 import { describe, it, expect, vi } from 'vitest'
@@ -15,7 +16,6 @@ import {
   SENTINEL_PROFILE,
   SCRIBE_PROFILE,
   FACADE_PROFILE,
-  SPECTRE_PROFILE,
   // Factories
   createReconAgent,
   createSigintAgent,
@@ -24,7 +24,6 @@ import {
   createSentinelAgent,
   createScribeAgent,
   createFacadeAgent,
-  createSpectreAgent,
   // Registry
   supportAgentFactories,
   supportProfiles,
@@ -51,7 +50,6 @@ vi.mock('../../src/lib/models.js', () => ({
       qa: 'anthropic/claude-sonnet-4-5',
       scribe: 'google/gemini-2.0-flash',
       uiOps: 'google/gemini-2.0-flash',
-      optics: 'google/gemini-2.0-flash',
     }
     return modelMap[agentType] ?? 'anthropic/claude-sonnet-4-5'
   }),
@@ -64,6 +62,7 @@ vi.mock('../../src/lib/models.js', () => ({
 describe('Delta Team Support Agents', () => {
   const testCwd = '/test/project'
 
+  // 7 support agents (SPECTRE removed, capabilities merged into FACADE)
   const allProfiles = [
     { profile: RECON_PROFILE, codename: 'RECON', role: 'Reconnaissance Agent' },
     { profile: SIGINT_PROFILE, codename: 'SIGINT', role: 'Intelligence Research Agent' },
@@ -72,7 +71,6 @@ describe('Delta Team Support Agents', () => {
     { profile: SENTINEL_PROFILE, codename: 'SENTINEL', role: 'Quality Assurance Guardian' },
     { profile: SCRIBE_PROFILE, codename: 'SCRIBE', role: 'Documentation Writer' },
     { profile: FACADE_PROFILE, codename: 'FACADE', role: 'Frontend Operations Specialist' },
-    { profile: SPECTRE_PROFILE, codename: 'SPECTRE', role: 'Visual Intelligence Analyst' },
   ]
 
   const allFactories = [
@@ -83,12 +81,11 @@ describe('Delta Team Support Agents', () => {
     { name: 'SENTINEL', factory: createSentinelAgent, profile: SENTINEL_PROFILE },
     { name: 'SCRIBE', factory: createScribeAgent, profile: SCRIBE_PROFILE },
     { name: 'FACADE', factory: createFacadeAgent, profile: FACADE_PROFILE },
-    { name: 'SPECTRE', factory: createSpectreAgent, profile: SPECTRE_PROFILE },
   ]
 
   describe('Agent Profiles', () => {
-    it('all 8 profiles have correct structure', () => {
-      expect(allProfiles).toHaveLength(8)
+    it('all 7 profiles have correct structure', () => {
+      expect(allProfiles).toHaveLength(7)
       for (const { profile, codename, role } of allProfiles) {
         expect(profile.codename).toBe(codename)
         expect(profile.role).toBe(role)
@@ -102,8 +99,8 @@ describe('Delta Team Support Agents', () => {
     it('all profiles have unique codenames and specialties', () => {
       const codenames = allProfiles.map((p) => p.profile.codename)
       const specialties = allProfiles.map((p) => p.profile.specialty)
-      expect([...new Set(codenames)]).toHaveLength(8)
-      expect([...new Set(specialties)]).toHaveLength(8)
+      expect([...new Set(codenames)]).toHaveLength(7)
+      expect([...new Set(specialties)]).toHaveLength(7)
     })
   })
 
@@ -145,30 +142,26 @@ describe('Delta Team Support Agents', () => {
       expect(agent.prompt).toContain('Vitest')
     })
 
-    it('FACADE covers frontend frameworks', () => {
+    it('FACADE covers frontend frameworks and UI capabilities', () => {
       const agent = createFacadeAgent(testCwd)
       expect(agent.prompt).toContain('React')
       expect(agent.prompt).toContain('Tailwind')
-    })
-
-    it('SPECTRE covers visual capabilities', () => {
-      const agent = createSpectreAgent(testCwd)
-      expect(agent.prompt).toContain('screenshot')
-      expect(agent.prompt).toContain('diagram')
+      // UI/UX capabilities (SPECTRE visual analysis was removed)
+      expect(agent.prompt).toContain('Accessible')
     })
   })
 
   describe('Registry', () => {
-    it('supportAgentFactories has all 8 agents', () => {
+    it('supportAgentFactories has all 7 agents', () => {
       const names = Object.keys(supportAgentFactories)
-      expect(names).toHaveLength(8)
+      expect(names).toHaveLength(7)
       expect(names).toContain('RECON')
-      expect(names).toContain('SPECTRE')
+      expect(names).toContain('FACADE')
     })
 
-    it('supportProfiles and supportConfigs have all 8 agents', () => {
-      expect(Object.keys(supportProfiles)).toHaveLength(8)
-      expect(Object.keys(supportConfigs)).toHaveLength(8)
+    it('supportProfiles and supportConfigs have all 7 agents', () => {
+      expect(Object.keys(supportProfiles)).toHaveLength(7)
+      expect(Object.keys(supportConfigs)).toHaveLength(7)
       for (const config of Object.values(supportConfigs)) {
         expect(config.enabled).toBe(true)
         expect(config.timeoutSeconds).toBeGreaterThan(0)
@@ -192,18 +185,19 @@ describe('Delta Team Support Agents', () => {
     })
 
     it('createSupportAgentByConfigKey maps all config keys', () => {
-      const configKeys: SupportAgentConfigKey[] = ['scout', 'intel', 'strategist', 'patcher', 'qa', 'scribe', 'uiOps', 'optics']
+      // 7 config keys (optics removed)
+      const configKeys: SupportAgentConfigKey[] = ['scout', 'intel', 'strategist', 'patcher', 'qa', 'scribe', 'uiOps']
       for (const key of configKeys) {
         const agent = createSupportAgentByConfigKey(key, testCwd)
         expect(agent.mode).toBe('subagent')
       }
     })
 
-    it('listSupportAgents returns all 8 codenames', () => {
+    it('listSupportAgents returns all 7 codenames', () => {
       const agents = listSupportAgents()
-      expect(agents).toHaveLength(8)
+      expect(agents).toHaveLength(7)
       expect(agents).toContain('RECON')
-      expect(agents).toContain('SPECTRE')
+      expect(agents).toContain('FACADE')
     })
 
     it('isSupportAgentAvailable validates correctly', () => {
@@ -213,7 +207,7 @@ describe('Delta Team Support Agents', () => {
 
     it('getSupportAgentProfile returns correct profile', () => {
       expect(getSupportAgentProfile('RECON')).toBe(RECON_PROFILE)
-      expect(getSupportAgentProfile('SPECTRE')).toBe(SPECTRE_PROFILE)
+      expect(getSupportAgentProfile('FACADE')).toBe(FACADE_PROFILE)
     })
   })
 

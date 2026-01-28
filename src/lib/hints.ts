@@ -51,12 +51,12 @@ export const hints = {
   // -------------------------------------------------------------------------
 
   councilEmpty:
-    'Council has no oracles configured. Add models to delta9.json to enable multi-perspective planning.',
+    'Council has no Strategic Advisors configured. Add models to delta9.json to enable multi-perspective planning.',
 
   councilPartial: (count: number, total: number) =>
-    `Only ${count}/${total} oracles responded. Results may be incomplete.`,
+    `Only ${count}/${total} Strategic Advisors responded. Results may be incomplete.`,
 
-  quickConsultAvailable: 'For faster responses, use quick_consult with a single oracle.',
+  quickConsultAvailable: 'For faster responses, use quick_consult with a single Strategic Advisor.',
 
   // -------------------------------------------------------------------------
   // Delegation Hints
@@ -256,7 +256,7 @@ export function getCouncilStatusHint(oracleCount: number): string | undefined {
   }
 
   if (oracleCount === 1) {
-    return 'Single oracle configured. Consider adding more for diverse perspectives.'
+    return 'Single Strategic Advisor configured. Consider adding more for diverse perspectives.'
   }
 
   return undefined

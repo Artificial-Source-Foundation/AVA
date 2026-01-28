@@ -223,7 +223,11 @@ export class AgentLoader {
       const { meta, body } = parseFrontmatter(content)
 
       // Extract name from frontmatter or filename
-      const filename = filePath.split('/').pop()?.replace(/\.(md|markdown)$/, '') ?? 'unknown'
+      const filename =
+        filePath
+          .split('/')
+          .pop()
+          ?.replace(/\.(md|markdown)$/, '') ?? 'unknown'
       const name = (meta.name as string) ?? filename
 
       const agent: DynamicAgentConfig = {
@@ -242,7 +246,9 @@ export class AgentLoader {
       log.debug(`Loaded agent: ${name} from ${filePath}`)
       return agent
     } catch (error) {
-      log.error(`Failed to load agent from ${filePath}: ${error instanceof Error ? error.message : String(error)}`)
+      log.error(
+        `Failed to load agent from ${filePath}: ${error instanceof Error ? error.message : String(error)}`
+      )
       return null
     }
   }

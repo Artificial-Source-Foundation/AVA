@@ -116,22 +116,23 @@ const AGENT_CATEGORY_MAP: Record<string, AgentTimeoutCategory> = {
   SIGINT: 'intel',
   INTEL: 'intel',
 
-  // Oracles
+  // Strategic Advisors (6 advisors)
   CIPHER: 'oracle',
   VECTOR: 'oracle',
-  PRISM: 'oracle',
   APEX: 'oracle',
+  AEGIS: 'oracle',
+  RAZOR: 'oracle',
+  ORACLE: 'oracle',
 
   // Validators
   SENTINEL: 'validator',
   VALIDATOR: 'validator',
 
-  // Operators and specialists
+  // Operators and specialists (7 support agents)
   OPERATOR: 'operator',
   SURGEON: 'operator',
   SCRIBE: 'operator',
   FACADE: 'operator',
-  SPECTRE: 'operator',
   TACCOM: 'intel', // Strategic advice, similar to intel
 }
 
@@ -284,7 +285,8 @@ function analyzePromptComplexity(prompt: string): { multiplier: number; factors:
   }
 
   // File path detection
-  const hasFilePaths = /(?:\/[\w.-]+)+\.[\w]+/g.test(prompt) || /[\w.-]+\.(?:ts|js|py|md|json)/g.test(prompt)
+  const hasFilePaths =
+    /(?:\/[\w.-]+)+\.[\w]+/g.test(prompt) || /[\w.-]+\.(?:ts|js|py|md|json)/g.test(prompt)
   if (hasFilePaths) {
     multiplier *= COMPLEXITY_MULTIPLIERS.hasFilePaths
     factors.push('file operations')
@@ -303,9 +305,7 @@ function analyzePromptComplexity(prompt: string): { multiplier: number; factors:
     'api',
     'authentication',
   ]
-  const foundKeywords = technicalKeywords.filter((kw) =>
-    prompt.toLowerCase().includes(kw)
-  )
+  const foundKeywords = technicalKeywords.filter((kw) => prompt.toLowerCase().includes(kw))
   if (foundKeywords.length >= 2) {
     multiplier *= COMPLEXITY_MULTIPLIERS.hasTechnicalKeywords
     factors.push(`technical scope (${foundKeywords.slice(0, 3).join(', ')})`)
@@ -405,7 +405,11 @@ export function parseTimeoutString(str: string): number | undefined {
 /**
  * Get all available agent categories with their base timeouts
  */
-export function getAllCategories(): Array<{ category: AgentTimeoutCategory; baseMs: number; formatted: string }> {
+export function getAllCategories(): Array<{
+  category: AgentTimeoutCategory
+  baseMs: number
+  formatted: string
+}> {
   return Object.entries(BASE_TIMEOUTS).map(([category, baseMs]) => ({
     category: category as AgentTimeoutCategory,
     baseMs,

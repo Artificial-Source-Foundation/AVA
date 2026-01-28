@@ -246,7 +246,9 @@ export class IdleMaintenanceManager {
       this.lastMaintenanceRun = Date.now()
 
       if (result.tasksRun > 0) {
-        log.debug(`Maintenance completed: ${result.succeeded}/${result.tasksRun} tasks in ${result.durationMs}ms`)
+        log.debug(
+          `Maintenance completed: ${result.succeeded}/${result.tasksRun} tasks in ${result.durationMs}ms`
+        )
       }
 
       return result
@@ -398,12 +400,15 @@ export const MAINTENANCE_PRIORITY = {
 /**
  * Register common maintenance tasks
  */
-export function registerCommonTasks(manager: IdleMaintenanceManager, handlers: {
-  autoSave?: () => Promise<void>
-  cleanupStaleTasks?: () => Promise<void>
-  compactMemory?: () => Promise<void>
-  updateMetrics?: () => Promise<void>
-}): void {
+export function registerCommonTasks(
+  manager: IdleMaintenanceManager,
+  handlers: {
+    autoSave?: () => Promise<void>
+    cleanupStaleTasks?: () => Promise<void>
+    compactMemory?: () => Promise<void>
+    updateMetrics?: () => Promise<void>
+  }
+): void {
   if (handlers.autoSave) {
     manager.registerTask({
       name: 'auto-save',

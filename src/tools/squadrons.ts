@@ -206,17 +206,25 @@ squadron_status({ alias: "brave-yoda" })
                 hasOutput: !!a.output,
                 error: a.error,
                 // Timeout info (only for active/pending agents)
-                timeout: isActive || a.state === 'pending' ? {
-                  estimated: formatTimeout(estimatedTimeoutMs),
-                  estimatedMs: estimatedTimeoutMs,
-                  ...(isActive && spawnedAt ? {
-                    elapsed: formatTimeout(elapsedMs),
-                    elapsedMs,
-                    remaining: formatTimeout(Math.max(0, estimatedTimeoutMs - elapsedMs)),
-                    remainingMs: Math.max(0, estimatedTimeoutMs - elapsedMs),
-                    percentComplete: Math.min(100, Math.round((elapsedMs / estimatedTimeoutMs) * 100)),
-                  } : {}),
-                } : undefined,
+                timeout:
+                  isActive || a.state === 'pending'
+                    ? {
+                        estimated: formatTimeout(estimatedTimeoutMs),
+                        estimatedMs: estimatedTimeoutMs,
+                        ...(isActive && spawnedAt
+                          ? {
+                              elapsed: formatTimeout(elapsedMs),
+                              elapsedMs,
+                              remaining: formatTimeout(Math.max(0, estimatedTimeoutMs - elapsedMs)),
+                              remainingMs: Math.max(0, estimatedTimeoutMs - elapsedMs),
+                              percentComplete: Math.min(
+                                100,
+                                Math.round((elapsedMs / estimatedTimeoutMs) * 100)
+                              ),
+                            }
+                          : {}),
+                      }
+                    : undefined,
               }
             }),
           }

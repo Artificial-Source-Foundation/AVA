@@ -13,7 +13,15 @@
  * - Text: Plain text storage (markdown files)
  */
 
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, unlinkSync, readdirSync } from 'node:fs'
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  appendFileSync,
+  mkdirSync,
+  unlinkSync,
+  readdirSync,
+} from 'node:fs'
 import { join, dirname } from 'node:path'
 import { getNamedLogger } from './logger.js'
 
@@ -156,7 +164,9 @@ export class FileStorageAdapter implements StorageAdapter {
         const content = readFileSync(jsonPath, 'utf-8')
         return JSON.parse(content) as T
       } catch (error) {
-        log.error(`Failed to read ${key}: ${error instanceof Error ? error.message : String(error)}`)
+        log.error(
+          `Failed to read ${key}: ${error instanceof Error ? error.message : String(error)}`
+        )
         return null
       }
     }
@@ -166,10 +176,15 @@ export class FileStorageAdapter implements StorageAdapter {
     if (existsSync(jsonlPath)) {
       try {
         const content = readFileSync(jsonlPath, 'utf-8')
-        const lines = content.trim().split('\n').filter((l) => l.length > 0)
+        const lines = content
+          .trim()
+          .split('\n')
+          .filter((l) => l.length > 0)
         return lines.map((line) => JSON.parse(line)) as T
       } catch (error) {
-        log.error(`Failed to read ${key}: ${error instanceof Error ? error.message : String(error)}`)
+        log.error(
+          `Failed to read ${key}: ${error instanceof Error ? error.message : String(error)}`
+        )
         return null
       }
     }
@@ -202,7 +217,9 @@ export class FileStorageAdapter implements StorageAdapter {
       appendFileSync(path, line, 'utf-8')
       log.debug(`Appended to ${key}`)
     } catch (error) {
-      log.error(`Failed to append to ${key}: ${error instanceof Error ? error.message : String(error)}`)
+      log.error(
+        `Failed to append to ${key}: ${error instanceof Error ? error.message : String(error)}`
+      )
       throw error
     }
   }
@@ -225,7 +242,10 @@ export class FileStorageAdapter implements StorageAdapter {
           // Recursively list subdirectories
           const subKeys = await this.list(join(prefix, file))
           keys.push(...subKeys)
-        } else if (file.endsWith(this.options.jsonExtension) || file.endsWith(this.options.jsonlExtension)) {
+        } else if (
+          file.endsWith(this.options.jsonExtension) ||
+          file.endsWith(this.options.jsonlExtension)
+        ) {
           // Remove extension to get key
           const key = join(prefix, file.replace(/\.(json|jsonl)$/, ''))
           keys.push(key)
@@ -234,7 +254,9 @@ export class FileStorageAdapter implements StorageAdapter {
 
       return keys
     } catch (error) {
-      log.error(`Failed to list ${prefix}: ${error instanceof Error ? error.message : String(error)}`)
+      log.error(
+        `Failed to list ${prefix}: ${error instanceof Error ? error.message : String(error)}`
+      )
       return []
     }
   }
@@ -248,7 +270,9 @@ export class FileStorageAdapter implements StorageAdapter {
         log.debug(`Deleted ${key}`)
         return true
       } catch (error) {
-        log.error(`Failed to delete ${key}: ${error instanceof Error ? error.message : String(error)}`)
+        log.error(
+          `Failed to delete ${key}: ${error instanceof Error ? error.message : String(error)}`
+        )
         return false
       }
     }
@@ -261,7 +285,9 @@ export class FileStorageAdapter implements StorageAdapter {
         log.debug(`Deleted ${key}`)
         return true
       } catch (error) {
-        log.error(`Failed to delete ${key}: ${error instanceof Error ? error.message : String(error)}`)
+        log.error(
+          `Failed to delete ${key}: ${error instanceof Error ? error.message : String(error)}`
+        )
         return false
       }
     }
@@ -307,10 +333,15 @@ export class FileStorageAdapter implements StorageAdapter {
 
     try {
       const content = readFileSync(path, 'utf-8')
-      const lines = content.trim().split('\n').filter((l) => l.length > 0)
+      const lines = content
+        .trim()
+        .split('\n')
+        .filter((l) => l.length > 0)
       return lines.map((line) => JSON.parse(line) as T)
     } catch (error) {
-      log.error(`Failed to read JSONL ${key}: ${error instanceof Error ? error.message : String(error)}`)
+      log.error(
+        `Failed to read JSONL ${key}: ${error instanceof Error ? error.message : String(error)}`
+      )
       return []
     }
   }

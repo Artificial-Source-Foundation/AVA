@@ -671,7 +671,8 @@ export class AutoCheckpointManager {
 
     // Generate name
     const name =
-      options.name ?? `auto-${trigger}-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`
+      options.name ??
+      `auto-${trigger}-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`
 
     // Create checkpoint
     const checkpoint = this.manager.create(name, {
@@ -877,7 +878,9 @@ export class CheckpointRecoveryManager {
 
     this.consecutiveFailures++
 
-    log.info(`Recorded failure: ${type} (consecutive: ${this.consecutiveFailures}/${this.config.failureThreshold})`)
+    log.info(
+      `Recorded failure: ${type} (consecutive: ${this.consecutiveFailures}/${this.config.failureThreshold})`
+    )
 
     // Check if threshold reached
     if (this.consecutiveFailures < this.config.failureThreshold) {
@@ -928,7 +931,9 @@ export class CheckpointRecoveryManager {
 
     // Check cooldown
     if (now - this.lastRecoveryTime < this.config.recoveryCooldownMs) {
-      const waitTime = Math.ceil((this.config.recoveryCooldownMs - (now - this.lastRecoveryTime)) / 1000)
+      const waitTime = Math.ceil(
+        (this.config.recoveryCooldownMs - (now - this.lastRecoveryTime)) / 1000
+      )
       log.debug(`Recovery cooldown active, wait ${waitTime}s`)
       return {
         attempted: false,

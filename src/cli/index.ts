@@ -26,6 +26,7 @@ import { historyCommand } from './commands/history.js'
 import { healthCommand } from './commands/health.js'
 import { abortCommand } from './commands/abort.js'
 import { resumeCommand } from './commands/resume.js'
+import { setupCommand } from './commands/setup.js'
 import { colorize } from './types.js'
 
 // =============================================================================
@@ -222,6 +223,39 @@ program
         format: options.format as 'summary' | 'json',
         cwd: options.cwd,
       })
+    } catch (error) {
+      console.error(
+        colorize('Error:', 'red'),
+        error instanceof Error ? error.message : String(error)
+      )
+      process.exit(1)
+    }
+  })
+
+// =============================================================================
+// Setup Command
+// =============================================================================
+
+program
+  .command('setup')
+  .description('Install Delta9 agents and configuration (interactive)')
+  .option('-f, --force', 'Overwrite existing files')
+  .option('--dry-run', 'Preview changes without making them')
+  .option('--no-tui', 'Non-interactive mode (for scripts/CI)')
+  .action(async (options) => {
+    try {
+      const result = await setupCommand({
+        force: options.force,
+        dryRun: options.dryRun,
+        noTui: options.tui === false,
+      })
+      // Only print message in non-TUI mode (TUI handles its own output)
+      if (options.tui === false) {
+        console.log(result.message)
+      }
+      if (!result.success) {
+        process.exit(1)
+      }
     } catch (error) {
       console.error(
         colorize('Error:', 'red'),

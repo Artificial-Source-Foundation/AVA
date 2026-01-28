@@ -326,7 +326,8 @@ export async function invokeOracle(
     const errorMessage = error instanceof Error ? error.message : String(error)
     const isTimeout = errorMessage.includes('timeout')
     const isRateLimit = errorMessage.includes('rate') || errorMessage.includes('429')
-    const isAuth = errorMessage.includes('auth') || errorMessage.includes('401') || errorMessage.includes('403')
+    const isAuth =
+      errorMessage.includes('auth') || errorMessage.includes('401') || errorMessage.includes('403')
 
     logger.error(`Oracle ${oracle.name} invocation failed`, {
       error: errorMessage,
@@ -340,7 +341,9 @@ export async function invokeOracle(
     if (isTimeout) {
       troubleshooting.push('Consider using quick mode for simpler queries')
       troubleshooting.push('Try reducing the complexity of the question')
-      troubleshooting.push(`Current timeout: ${timeoutMs}ms - may need increase for complex queries`)
+      troubleshooting.push(
+        `Current timeout: ${timeoutMs}ms - may need increase for complex queries`
+      )
     } else if (isRateLimit) {
       troubleshooting.push('Rate limit hit - the model provider is throttling requests')
       troubleshooting.push('Consider using a fallback model from a different provider')
@@ -354,7 +357,13 @@ export async function invokeOracle(
     }
 
     // A-7: Graceful degradation - fall back to error opinion with actionable information
-    const failureReason = isTimeout ? 'timeout' : isRateLimit ? 'rate_limit' : isAuth ? 'auth' : 'error'
+    const failureReason = isTimeout
+      ? 'timeout'
+      : isRateLimit
+        ? 'rate_limit'
+        : isAuth
+          ? 'auth'
+          : 'error'
 
     return {
       oracle,
@@ -365,14 +374,11 @@ export async function invokeOracle(
 **What happened:** The oracle could not be consulted due to ${isTimeout ? 'a timeout' : isRateLimit ? 'rate limiting' : isAuth ? 'authentication failure' : 'an error'}.
 
 **Troubleshooting:**
-${troubleshooting.map(t => `- ${t}`).join('\n')}
+${troubleshooting.map((t) => `- ${t}`).join('\n')}
 
 **Fallback:** Proceeding without this oracle's input. Consider re-running the council after addressing the issue.`,
         confidence: 0,
-        caveats: [
-          `Oracle invocation failed: ${failureReason}`,
-          ...troubleshooting,
-        ],
+        caveats: [`Oracle invocation failed: ${failureReason}`, ...troubleshooting],
       },
       tokensUsed: 0,
       durationMs: Date.now() - startTime,
@@ -582,7 +588,9 @@ export async function invokeOraclesSequential(
 /**
  * Filter oracle results to only include successful invocations
  */
-export function filterSuccessfulResults(results: OracleInvocationResult[]): OracleInvocationResult[] {
+export function filterSuccessfulResults(
+  results: OracleInvocationResult[]
+): OracleInvocationResult[] {
   return results.filter((r) => !r.failed)
 }
 
@@ -615,12 +623,14 @@ export function getDegradationSummary(results: OracleInvocationResult[]): {
     if (result.failed) {
       summary.failed++
       if (result.failureReason) {
-        summary.failureReasons[result.failureReason] = (summary.failureReasons[result.failureReason] || 0) + 1
+        summary.failureReasons[result.failureReason] =
+          (summary.failureReasons[result.failureReason] || 0) + 1
       }
     } else if (result.degraded) {
       summary.degraded++
       if (result.failureReason) {
-        summary.failureReasons[result.failureReason] = (summary.failureReasons[result.failureReason] || 0) + 1
+        summary.failureReasons[result.failureReason] =
+          (summary.failureReasons[result.failureReason] || 0) + 1
       }
     } else {
       summary.successful++

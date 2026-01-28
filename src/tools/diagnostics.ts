@@ -279,10 +279,7 @@ delta9_events({ since: "1h" })     # Events from last hour
         .enum(['all', 'mission', 'task', 'council', 'background', 'error'])
         .optional()
         .describe('Filter by event type'),
-      since: s
-        .string()
-        .optional()
-        .describe('Time filter: "1h", "30m", "1d" (default: all)'),
+      since: s.string().optional().describe('Time filter: "1h", "30m", "1d" (default: all)'),
     },
 
     async execute(args) {
@@ -361,13 +358,22 @@ delta9_events({ since: "1h" })     # Events from last hour
           const entryTime = new Date(task.completedAt).getTime()
           if (!sinceTimestamp || entryTime >= sinceTimestamp) {
             const isError = task.status === 'failed'
-            if (typeFilter === 'all' || typeFilter === 'background' || (isError && typeFilter === 'error')) {
+            if (
+              typeFilter === 'all' ||
+              typeFilter === 'background' ||
+              (isError && typeFilter === 'error')
+            ) {
               allEvents.push({
                 timestamp: task.completedAt,
                 source: 'background',
                 type: task.status === 'completed' ? 'task_completed' : 'task_failed',
                 summary: `Background task ${task.status}: ${task.agent}${task.error ? ` - ${task.error}` : ''}`,
-                details: { taskId: task.id, agent: task.agent, status: task.status, error: task.error },
+                details: {
+                  taskId: task.id,
+                  agent: task.agent,
+                  status: task.status,
+                  error: task.error,
+                },
               })
             }
           }
@@ -411,24 +417,31 @@ delta9_events({ since: "1h" })     # Events from last hour
         eventCounts[event.source] = (eventCounts[event.source] || 0) + 1
       }
 
-      return JSON.stringify({
-        success: true,
-        events: limitedEvents,
-        summary: {
-          total: allEvents.length,
-          returned: limitedEvents.length,
-          bySource: eventCounts,
-          timeRange: limitedEvents.length > 0 ? {
-            oldest: limitedEvents[limitedEvents.length - 1].timestamp,
-            newest: limitedEvents[0].timestamp,
-          } : null,
+      return JSON.stringify(
+        {
+          success: true,
+          events: limitedEvents,
+          summary: {
+            total: allEvents.length,
+            returned: limitedEvents.length,
+            bySource: eventCounts,
+            timeRange:
+              limitedEvents.length > 0
+                ? {
+                    oldest: limitedEvents[limitedEvents.length - 1].timestamp,
+                    newest: limitedEvents[0].timestamp,
+                  }
+                : null,
+          },
+          filters: {
+            type: typeFilter,
+            since: args.since || 'all',
+            limit,
+          },
         },
-        filters: {
-          type: typeFilter,
-          since: args.since || 'all',
-          limit,
-        },
-      }, null, 2)
+        null,
+        2
+      )
     },
   })
 
@@ -467,10 +480,7 @@ delta9_metrics({ focus: "latency" }) # Focus on latency metrics
         .enum(['1h', '24h', '7d', 'all'])
         .optional()
         .describe('Time period to analyze (default: all)'),
-      agent: s
-        .string()
-        .optional()
-        .describe('Filter metrics by specific agent name'),
+      agent: s.string().optional().describe('Filter metrics by specific agent name'),
       focus: s
         .enum(['overview', 'latency', 'agents', 'models', 'errors'])
         .optional()
@@ -504,13 +514,16 @@ delta9_metrics({ focus: "latency" }) # Focus on latency metrics
       })
 
       // Agent performance metrics
-      const agentMetrics: Record<string, {
-        taskCount: number
-        completed: number
-        failed: number
-        durations: number[]
-        errors: string[]
-      }> = {}
+      const agentMetrics: Record<
+        string,
+        {
+          taskCount: number
+          completed: number
+          failed: number
+          durations: number[]
+          errors: string[]
+        }
+      > = {}
 
       for (const task of filteredTasks) {
         const agent = task.agent || 'unknown'
@@ -529,7 +542,8 @@ delta9_metrics({ focus: "latency" }) # Focus on latency metrics
         if (task.status === 'completed') {
           agentMetrics[agent].completed++
           if (task.startedAt && task.completedAt) {
-            const duration = new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime()
+            const duration =
+              new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime()
             agentMetrics[agent].durations.push(duration)
           }
         } else if (task.status === 'failed') {
@@ -541,31 +555,35 @@ delta9_metrics({ focus: "latency" }) # Focus on latency metrics
       }
 
       // Calculate agent statistics
-      const agentStats = Object.entries(agentMetrics).map(([agent, metrics]) => {
-        const successRate = metrics.taskCount > 0
-          ? (metrics.completed / metrics.taskCount) * 100
-          : 0
-        const avgDuration = metrics.durations.length > 0
-          ? metrics.durations.reduce((a, b) => a + b, 0) / metrics.durations.length
-          : 0
-        const sortedDurations = [...metrics.durations].sort((a, b) => a - b)
-        const p50 = sortedDurations[Math.floor(sortedDurations.length * 0.5)] || 0
-        const p95 = sortedDurations[Math.floor(sortedDurations.length * 0.95)] || 0
+      const agentStats = Object.entries(agentMetrics)
+        .map(([agent, metrics]) => {
+          const successRate =
+            metrics.taskCount > 0 ? (metrics.completed / metrics.taskCount) * 100 : 0
+          const avgDuration =
+            metrics.durations.length > 0
+              ? metrics.durations.reduce((a, b) => a + b, 0) / metrics.durations.length
+              : 0
+          const sortedDurations = [...metrics.durations].sort((a, b) => a - b)
+          const p50 = sortedDurations[Math.floor(sortedDurations.length * 0.5)] || 0
+          const p95 = sortedDurations[Math.floor(sortedDurations.length * 0.95)] || 0
 
-        return {
-          agent,
-          taskCount: metrics.taskCount,
-          completed: metrics.completed,
-          failed: metrics.failed,
-          successRate: `${successRate.toFixed(1)}%`,
-          avgDuration: formatDuration(avgDuration),
-          p50Duration: formatDuration(p50),
-          p95Duration: formatDuration(p95),
-          minDuration: metrics.durations.length > 0 ? formatDuration(Math.min(...metrics.durations)) : '-',
-          maxDuration: metrics.durations.length > 0 ? formatDuration(Math.max(...metrics.durations)) : '-',
-          recentErrors: metrics.errors.slice(-3),
-        }
-      }).sort((a, b) => b.taskCount - a.taskCount)
+          return {
+            agent,
+            taskCount: metrics.taskCount,
+            completed: metrics.completed,
+            failed: metrics.failed,
+            successRate: `${successRate.toFixed(1)}%`,
+            avgDuration: formatDuration(avgDuration),
+            p50Duration: formatDuration(p50),
+            p95Duration: formatDuration(p95),
+            minDuration:
+              metrics.durations.length > 0 ? formatDuration(Math.min(...metrics.durations)) : '-',
+            maxDuration:
+              metrics.durations.length > 0 ? formatDuration(Math.max(...metrics.durations)) : '-',
+            recentErrors: metrics.errors.slice(-3),
+          }
+        })
+        .sort((a, b) => b.taskCount - a.taskCount)
 
       // Overall latency statistics
       const allDurations: number[] = []
@@ -578,9 +596,10 @@ delta9_metrics({ focus: "latency" }) # Focus on latency metrics
         sampleCount: allDurations.length,
         min: allDurations.length > 0 ? formatDuration(Math.min(...allDurations)) : '-',
         max: allDurations.length > 0 ? formatDuration(Math.max(...allDurations)) : '-',
-        avg: allDurations.length > 0
-          ? formatDuration(allDurations.reduce((a, b) => a + b, 0) / allDurations.length)
-          : '-',
+        avg:
+          allDurations.length > 0
+            ? formatDuration(allDurations.reduce((a, b) => a + b, 0) / allDurations.length)
+            : '-',
         p50: sortedAllDurations[Math.floor(sortedAllDurations.length * 0.5)]
           ? formatDuration(sortedAllDurations[Math.floor(sortedAllDurations.length * 0.5)])
           : '-',
@@ -601,9 +620,10 @@ delta9_metrics({ focus: "latency" }) # Focus on latency metrics
         completed: completedTasks.length,
         failed: failedTasks.length,
         inProgress: filteredTasks.filter((t) => t.status === 'running').length,
-        successRate: filteredTasks.length > 0
-          ? `${((completedTasks.length / filteredTasks.length) * 100).toFixed(1)}%`
-          : '-',
+        successRate:
+          filteredTasks.length > 0
+            ? `${((completedTasks.length / filteredTasks.length) * 100).toFixed(1)}%`
+            : '-',
         tasksPerHour: '-' as string | number,
       }
 
@@ -625,10 +645,13 @@ delta9_metrics({ focus: "latency" }) # Focus on latency metrics
           // Categorize errors
           let category = 'unknown'
           if (task.error.includes('timeout')) category = 'timeout'
-          else if (task.error.includes('rate limit') || task.error.includes('429')) category = 'rate_limit'
+          else if (task.error.includes('rate limit') || task.error.includes('429'))
+            category = 'rate_limit'
           else if (task.error.includes('auth') || task.error.includes('401')) category = 'auth'
-          else if (task.error.includes('parse') || task.error.includes('JSON')) category = 'parse_error'
-          else if (task.error.includes('network') || task.error.includes('ECONNREFUSED')) category = 'network'
+          else if (task.error.includes('parse') || task.error.includes('JSON'))
+            category = 'parse_error'
+          else if (task.error.includes('network') || task.error.includes('ECONNREFUSED'))
+            category = 'network'
           else category = 'other'
 
           errorCategories[category] = (errorCategories[category] || 0) + 1
@@ -636,13 +659,15 @@ delta9_metrics({ focus: "latency" }) # Focus on latency metrics
       }
 
       // Reasoning trace statistics
-      let reasoningStats: {
-        totalTraces: number
-        activeTraces: number
-        completedTraces: number
-        totalSteps: number
-        avgStepsPerTrace: number
-      } | undefined
+      let reasoningStats:
+        | {
+            totalTraces: number
+            activeTraces: number
+            completedTraces: number
+            totalSteps: number
+            avgStepsPerTrace: number
+          }
+        | undefined
 
       try {
         const tracer = getReasoningTracer()
@@ -695,7 +720,12 @@ delta9_metrics({ focus: "latency" }) # Focus on latency metrics
       }
 
       // Add summary recommendations
-      response.recommendations = generateRecommendations(agentStats, latencyStats, errorCategories, throughput)
+      response.recommendations = generateRecommendations(
+        agentStats,
+        latencyStats,
+        errorCategories,
+        throughput
+      )
 
       return JSON.stringify(response, null, 2)
     },
@@ -848,7 +878,8 @@ function generateRecommendations(
   // Check for high latency
   if (latencyStats.sampleCount >= 5) {
     const p95Ms = parseFloat(latencyStats.p95)
-    if (!isNaN(p95Ms) && p95Ms > 300000) {  // > 5 minutes
+    if (!isNaN(p95Ms) && p95Ms > 300000) {
+      // > 5 minutes
       recommendations.push(
         `P95 latency is high (${latencyStats.p95}). Consider parallel execution or task decomposition.`
       )

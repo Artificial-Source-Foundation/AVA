@@ -175,11 +175,7 @@ export class WriteProtectionManager {
   /**
    * Register a file's current state (call after reading)
    */
-  registerVersion(
-    filePath: string,
-    content: string,
-    modifiedBy?: string
-  ): string {
+  registerVersion(filePath: string, content: string, modifiedBy?: string): string {
     const version = this.computeHash(content)
 
     this.fileStates.set(filePath, {
@@ -412,9 +408,7 @@ let defaultManager: WriteProtectionManager | null = null
 /**
  * Get or create the default write protection manager
  */
-export function getWriteProtectionManager(
-  config?: WriteProtectionConfig
-): WriteProtectionManager {
+export function getWriteProtectionManager(config?: WriteProtectionConfig): WriteProtectionManager {
   if (!defaultManager) {
     defaultManager = new WriteProtectionManager(config)
   }
@@ -474,10 +468,7 @@ export function registerFileVersion(
 /**
  * Check if a file write would conflict
  */
-export function wouldConflict(
-  filePath: string,
-  expectedVersion: string
-): boolean {
+export function wouldConflict(filePath: string, expectedVersion: string): boolean {
   const manager = getWriteProtectionManager()
   return manager.checkConflict(filePath, expectedVersion).conflict
 }

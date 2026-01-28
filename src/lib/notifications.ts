@@ -406,10 +406,10 @@ export const missionNotifications = {
  * Council-specific notification helpers
  */
 export const councilNotifications = {
-  convened(taskId: string, mode: string, oracleCount: number): Notification {
+  convened(taskId: string, mode: string, advisorCount: number): Notification {
     return store.info(`Council Convened (${mode})`, {
       taskId,
-      message: `${oracleCount} oracles deliberating`,
+      message: `${advisorCount} Strategic Advisors deliberating`,
     })
   },
 
@@ -423,7 +423,7 @@ export const councilNotifications = {
   conflict(taskId: string): Notification {
     return store.warning('Council Conflict', {
       taskId,
-      message: 'Oracles disagree - Commander will resolve',
+      message: 'Strategic Advisors disagree - Commander will resolve',
     })
   },
 }

@@ -141,12 +141,13 @@ Task types and recommended agents:
           (k) => type.includes(k) || desc.includes(k)
         )
       ) {
-        agent = 'optics'
-        model = config.support.optics.model
-        reason = 'Visual task - Optics handles images and diagrams'
+        // Visual tasks go to UI ops (FACADE) since SPECTRE was removed
+        agent = 'ui-ops'
+        model = config.support.uiOps.model
+        reason = 'Visual task - FACADE handles UI and visual elements'
       } else {
         agent = 'operator'
-        model = config.operators.defaultModel
+        model = config.operators.tier2Model
         reason = 'General coding task - Operator handles implementation'
       }
 

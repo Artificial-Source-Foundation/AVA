@@ -1,44 +1,17 @@
-# Delta9
+# Estela
 
-> Strategic AI Coordination for Mission-Critical Development
+> Multi-Agent AI Coding Assistant
 
-Delta9 is an [OpenCode](https://opencode.ai) plugin that implements a hierarchical **Commander + Council + Operators** architecture for complex software engineering tasks.
+A Tauri 2.0 + SolidJS desktop application implementing a hierarchical **Commander + Operators + Validator** architecture for complex software engineering tasks.
 
 ## Features
 
-- **Commander Agent**: Lead planner and orchestrator that never writes code
-- **Council System**: 1-4 heterogeneous Oracles (Claude, GPT, Gemini, DeepSeek) provide diverse perspectives
-- **Operator Agents**: Task executors using Sonnet 4 for implementation
+- **Commander Agent**: Lead planner and orchestrator (never writes code)
+- **Parallel Operators**: Multiple task executors working on different files simultaneously
 - **Validator Gate**: QA checkpoint before task completion
-- **Mission State**: Persistent state that survives context compaction (`.delta9/mission.json`)
-- **Memory Blocks**: Cross-session learning with scoped memory
-
-## Installation
-
-```bash
-npm install delta9
-```
-
-Add to your OpenCode configuration:
-
-```json
-{
-  "plugins": ["delta9"]
-}
-```
-
-## Quick Start
-
-```bash
-# Start a mission
-> Let's build a user authentication system
-
-# Delta9 automatically:
-# 1. Commander analyzes the request
-# 2. Council provides strategic recommendations
-# 3. Operators execute tasks
-# 4. Validator verifies completion
-```
+- **Streaming UI**: Real-time LLM response rendering with SolidJS
+- **Local Database**: SQLite for session and message persistence
+- **LSP Integration**: Rust-based language server client for code intelligence
 
 ## Architecture
 
@@ -49,90 +22,70 @@ Add to your OpenCode configuration:
                            │
               ┌────────────┼────────────┐
               ▼            ▼            ▼
-        ┌─────────┐  ┌─────────┐  ┌─────────┐
-        │ Oracle  │  │ Oracle  │  │ Oracle  │  Council
-        │ (Claude)│  │ (GPT)   │  │ (Gemini)│
-        └────┬────┘  └────┬────┘  └────┬────┘
+        ┌──────────┐ ┌──────────┐ ┌──────────┐
+        │ Operator │ │ Operator │ │ Operator │  Parallel Execution
+        │ (file A) │ │ (file B) │ │ (file C) │
+        └────┬─────┘ └────┬─────┘ └────┬─────┘
               └────────────┼────────────┘
-                           ▼
-                    ┌─────────────┐
-                    │  Operators  │  Task Execution
-                    └──────┬──────┘
                            ▼
                     ┌─────────────┐
                     │  Validator  │  Quality Gate
                     └─────────────┘
 ```
 
-## Council Modes
+## Tech Stack
 
-| Mode | When Used | Oracles |
-|------|-----------|---------|
-| `NONE` | Simple tasks ("fix typo") | Commander only |
-| `QUICK` | Moderate tasks ("add page") | 1 Oracle |
-| `STANDARD` | Complex tasks ("new feature") | All configured |
-| `XHIGH` | Critical ("refactor auth") | All + recon access |
+| Layer | Technology | Why |
+|-------|------------|-----|
+| **Desktop** | Tauri 2.0 (Rust) | 3-10MB app size, 30-40MB RAM, sandboxed security |
+| **Frontend** | SolidJS + TypeScript | Fine-grained reactivity for streaming (~7KB runtime) |
+| **Styling** | Tailwind CSS | Rapid UI development |
+| **Database** | SQLite | Local persistence via tauri-plugin-sql |
+| **LSP** | Rust client | Multi-language code intelligence |
 
-## Configuration
+## Development
 
-Create `.delta9/config.json`:
+```bash
+# Prerequisites
+# - Node.js 20+
+# - Rust 1.70+
+# - Tauri CLI
 
-```json
-{
-  "council": {
-    "defaultMode": "STANDARD",
-    "oracles": ["claude", "gpt", "gemini"],
-    "timeout": 30000
-  },
-  "operators": {
-    "maxConcurrent": 3,
-    "defaultModel": "sonnet-4"
-  }
-}
+# Create the project
+npm create tauri-app@latest estela -- --template solid-ts
+
+# Install dependencies
+cd estela
+npm install
+
+# Run development server
+npm run tauri dev
+
+# Build for production
+npm run tauri build
 ```
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
-| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | Complete usage guide |
-| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Configuration reference |
-| [docs/EXAMPLES.md](docs/EXAMPLES.md) | Example missions and workflows |
-| [docs/spec.md](docs/spec.md) | Full specification (SOURCE OF TRUTH) |
-| [docs/README.md](docs/README.md) | Documentation navigation hub |
+| [docs/VISION.md](docs/VISION.md) | Project vision and roadmap |
+| [docs/BACKLOG.md](docs/BACKLOG.md) | Current development tasks |
+| [docs/architecture/](docs/architecture/) | System design |
+| [docs/agents/](docs/agents/) | Agent specifications |
 | [CLAUDE.md](CLAUDE.md) | AI assistant instructions |
-
-## Development
-
-```bash
-# Install dependencies
-npm install
-
-# Build
-npm run build
-
-# Run tests
-npm run test
-
-# Type check
-npm run typecheck
-
-# Lint
-npm run lint
-```
 
 ## Project Status
 
-- **Phase 1**: Foundation - Complete
-- **Phase 2**: Council System - Complete
-- **Phase 3**: Intelligence Layer - Complete
-- **Phase 4**: Robustness - Complete
-- **Phase 5**: Polish & Support - Complete
-- **Phase 6**: Launch - In Progress
-
-**Overall Progress:** 94% complete (68/72 tasks)
+- **Phase 0**: Planning - Complete
+- **Phase 1**: Foundation - Ready to start
+- **Phase 2-7**: Planned
 
 See [docs/BACKLOG.md](docs/BACKLOG.md) for detailed progress tracking.
+
+## Previous Work
+
+This project evolved from an OpenCode plugin called "Delta9" implementing a similar multi-agent architecture. The plugin-era documentation is preserved in `docs/archive/opencode-plugin-era/` for reference.
 
 ## License
 

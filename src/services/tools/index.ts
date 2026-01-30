@@ -3,6 +3,7 @@
  * LLM tool integration for file operations
  */
 
+export { bashTool } from './bash'
 export { createTool } from './create'
 export { deleteTool } from './delete'
 // Export errors
@@ -37,6 +38,7 @@ export type {
   ToolResultBlock,
   ToolUseBlock,
 } from './types'
+export type { TruncationResult } from './utils'
 // Export utilities
 export {
   formatLineNumber,
@@ -49,6 +51,7 @@ export {
   resolvePath,
   shouldSkipDirectory,
   truncate,
+  truncateOutput,
 } from './utils'
 export { writeTool } from './write'
 
@@ -56,6 +59,7 @@ export { writeTool } from './write'
 // Auto-register tools on import
 // ============================================================================
 
+import { bashTool } from './bash'
 import { createTool } from './create'
 import { deleteTool } from './delete'
 import { globTool } from './glob'
@@ -71,3 +75,4 @@ registerTool(grepTool)
 registerTool(createTool)
 registerTool(writeTool)
 registerTool(deleteTool)
+registerTool(bashTool)

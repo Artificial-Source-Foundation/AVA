@@ -6,6 +6,61 @@
 
 ## Session History
 
+### 2025-01-30 (Session 8)
+
+**Sprint 2.3: Bash Execution Tool** ✅ COMPLETE
+
+Implemented bash command execution to complete Epic 2 (File Tools).
+
+**Research Phase:**
+- Analyzed OpenCode (70k stars): 2 min timeout, 2000 lines / 50KB limits, workdir pattern
+- Analyzed Gemini CLI (50k stars): Shell execution patterns
+- Analyzed Claude Code: Bash tool specification
+- Used Tauri shell plugin spawn() API for proper process control
+
+**Phase 1: Tauri Permissions**
+- Updated `src-tauri/capabilities/default.json` with `shell:allow-execute`
+
+**Phase 2: Truncation Utility**
+- Added `truncateOutput()` function to `src/services/tools/utils.ts`
+- Dual-threshold truncation: whichever limit hit first (2000 lines OR 50KB)
+- Returns `TruncationResult` with content, truncated flag, removed counts
+
+**Phase 3: Bash Tool Implementation**
+- Created `src/services/tools/bash.ts` (~160 lines)
+- Uses Tauri `Command.spawn()` for kill() capability
+- Event-driven stdout/stderr collection
+- Timeout handling with Promise.race
+- Abort signal integration
+- Output formatting with exit codes
+
+**Phase 4: Registration**
+- Updated `src/services/tools/index.ts` with export and `registerTool(bashTool)`
+
+**Files Created (1):**
+- `src/services/tools/bash.ts` (~160 lines)
+
+**Files Modified (3):**
+- `src-tauri/capabilities/default.json` - Added `shell:allow-execute`
+- `src/services/tools/utils.ts` - Added `truncateOutput()` (~35 lines)
+- `src/services/tools/index.ts` - Added bash export + registration
+
+**Total:** ~160 new lines, ~40 modified lines
+
+**Safety Features:**
+- 2 minute default timeout (configurable)
+- Output truncation: 2000 lines OR 50KB
+- workdir parameter (avoid cd chaining)
+- Abort signal handling with child.kill()
+- Path resolution via resolvePath()
+
+**Epic 2 Status:** ✅ COMPLETE (7 tools total)
+- Sprint 2.1: glob, read_file, grep
+- Sprint 2.2: create_file, write_file, delete_file
+- Sprint 2.3: bash
+
+---
+
 ### 2025-01-30 (Session 7)
 
 **Sprint 2.2: File Writing Tools** ✅ COMPLETE
@@ -376,6 +431,8 @@ Built multi-provider streaming chat:
 | Dev Tooling complete | 2025-01-29 | SOTA tooling (Biome, Oxlint, Vitest, CI/CD) |
 | Sprint 2.1 complete | 2025-01-29 | File reading tools (glob, read_file, grep) |
 | Sprint 2.2 complete | 2025-01-30 | File writing tools (create_file, write_file, delete_file) |
+| Sprint 2.3 complete | 2025-01-30 | Bash execution tool |
+| **Epic 2 complete** | 2025-01-30 | File Tools (7 tools) |
 
 ---
 
@@ -406,17 +463,18 @@ Built multi-provider streaming chat:
 - ✅ AI-friendly documentation (llms.txt, AGENTS.md)
 - ✅ Full architecture documentation
 
-### File Tools (Sprint 2.1 + 2.2)
+### File Tools (Epic 2 Complete)
 - ✅ Glob tool for file pattern matching
 - ✅ Read_file tool with line numbers and pagination
 - ✅ Grep tool for content search with regex
 - ✅ Create_file tool (new file, fails if exists)
 - ✅ Write_file tool (create or overwrite)
 - ✅ Delete_file tool (remove files, fails on directories)
+- ✅ Bash tool for shell command execution
 - ✅ Anthropic tool_use streaming integration
 - ✅ Tool execution loop with result feedback
 - ✅ Binary file detection
-- ✅ Protected limits (2000 lines, 50KB, 10 calls/turn)
+- ✅ Protected limits (2000 lines, 50KB, 10 calls/turn, 2 min timeout)
 
 ### Development Tooling
 - ✅ Biome 2.x formatting and linting

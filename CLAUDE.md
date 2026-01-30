@@ -72,6 +72,19 @@ npm run analyze        # Bundle size analysis
 
 ---
 
+## Reference Code
+
+**IMPORTANT:** Compare implementations against SOTA projects in `docs/reference-code/`:
+
+| Project | Stars | Key Patterns |
+|---------|-------|--------------|
+| OpenCode | 70k+ | Tool registry, 2000 line limits, workdir pattern, timeout handling |
+| Gemini CLI | 50k+ | ToolBuilder separation, error types, shell execution |
+
+Use these references when implementing new features to ensure we follow best practices.
+
+---
+
 ## Code Style
 
 - TypeScript strict, no `any`

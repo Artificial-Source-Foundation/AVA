@@ -279,3 +279,55 @@ export function formatLineNumber(lineNum: number, totalLines: number): string {
   const width = Math.max(5, String(totalLines).length)
   return String(lineNum).padStart(width, '0')
 }
+
+// ============================================================================
+// Output Truncation
+// ============================================================================
+
+export interface TruncationResult {
+  content: string
+  truncated: boolean
+  removedLines?: number
+  removedBytes?: number
+}
+
+/**
+ * Truncate output to fit within limits
+ * Uses dual-threshold: whichever limit is hit first
+ */
+export function truncateOutput(
+  output: string,
+  maxLines = LIMITS.MAX_LINES,
+  maxBytes = LIMITS.MAX_BYTES
+): TruncationResult {
+  const lines = output.split('\n')
+  const totalBytes = new TextEncoder().encode(output).length
+
+  // Check if within limits
+  if (lines.length <= maxLines && totalBytes <= maxBytes) {
+    return { content: output, truncated: false }
+  }
+
+  // Truncate by lines first
+  const truncatedLines: string[] = []
+  let bytes = 0
+
+  for (let i = 0; i < lines.length && i < maxLines; i++) {
+    const lineBytes = new TextEncoder().encode(lines[i]).length + 1 // +1 for newline
+    if (bytes + lineBytes > maxBytes) {
+      break
+    }
+    truncatedLines.push(lines[i])
+    bytes += lineBytes
+  }
+
+  const removedLines = lines.length - truncatedLines.length
+  const removedBytes = totalBytes - bytes
+
+  return {
+    content: truncatedLines.join('\n'),
+    truncated: true,
+    removedLines,
+    removedBytes,
+  }
+}

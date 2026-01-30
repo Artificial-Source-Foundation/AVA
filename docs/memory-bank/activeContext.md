@@ -6,9 +6,9 @@
 
 ## Current Focus
 
-**Epic 2: File Tools** (IN PROGRESS)
+**Epic 2: File Tools** ✅ COMPLETE
 
-**Completed:** Sprint 2.1 - File Reading Tools ✅, Sprint 2.2 - File Writing Tools ✅
+All core file tools implemented: glob, read_file, grep, create_file, write_file, delete_file, bash
 
 ---
 
@@ -24,21 +24,21 @@
 | Dev Tooling | ✅ | Biome, Oxlint, Vitest, CI/CD |
 | Sprint 2.1: File Reading | ✅ | glob, read_file, grep tools with LLM integration |
 | Sprint 2.2: File Writing | ✅ | create_file, write_file, delete_file tools |
+| Sprint 2.3: Bash Execution | ✅ | Shell command execution with timeout and truncation |
 
 ---
 
-## Next Up: Sprint 2.3 - File Editing
+## Next Up: Epic 3 - Agentic Features
 
-**Goal:** Enable LLM to edit files with surgical precision.
+**Goal:** Multi-turn planning, task decomposition, parallel tool execution.
 
-See [`docs/development/epics/2-files.md`](../development/epics/2-files.md)
+See [`docs/development/epics/`](../development/epics/)
 
-### Remaining Sprints
+### Remaining in Epic 2
 
 | Sprint | Description |
 |--------|-------------|
-| 2.3 | File editing (diff, patch, search/replace) |
-| 2.4 | File UI (tree view, preview, diff viewer) |
+| 2.4 | File UI (tree view, preview, diff viewer) - Optional |
 
 ---
 
@@ -73,7 +73,7 @@ src/
 ├── services/
 │   ├── auth/        # credentials, oauth-codex
 │   ├── llm/         # client, providers/
-│   ├── tools/       # Tool system (glob, read, grep, create, write, delete, registry)
+│   ├── tools/       # Tool system (glob, read, grep, create, write, delete, bash, registry)
 │   ├── database.ts  # SQLite operations
 │   └── migrations.ts
 ├── stores/          # session

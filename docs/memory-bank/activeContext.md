@@ -6,9 +6,9 @@
 
 ## Current Focus
 
-**Epic 1: Single LLM Chat** ✅ COMPLETE
+**Epic 2: File Tools** (IN PROGRESS)
 
-**Next:** Epic 2: File Tools
+**Completed:** Sprint 2.1 - File Reading Tools ✅, Sprint 2.2 - File Writing Tools ✅
 
 ---
 
@@ -22,21 +22,21 @@
 | Sprint 1.3: Session Management | ✅ | Create, list, switch, rename, archive |
 | Sprint 1.3.5: Architecture | ✅ | Barrel exports, AI docs |
 | Dev Tooling | ✅ | Biome, Oxlint, Vitest, CI/CD |
+| Sprint 2.1: File Reading | ✅ | glob, read_file, grep tools with LLM integration |
+| Sprint 2.2: File Writing | ✅ | create_file, write_file, delete_file tools |
 
 ---
 
-## Next Up: Epic 2 - File Tools
+## Next Up: Sprint 2.3 - File Editing
 
-**Goal:** Enable LLM to read, write, and edit files in the codebase.
+**Goal:** Enable LLM to edit files with surgical precision.
 
 See [`docs/development/epics/2-files.md`](../development/epics/2-files.md)
 
-### Potential Sprints
+### Remaining Sprints
 
 | Sprint | Description |
 |--------|-------------|
-| 2.1 | File reading (glob, read contents) |
-| 2.2 | File writing (create, overwrite) |
 | 2.3 | File editing (diff, patch, search/replace) |
 | 2.4 | File UI (tree view, preview, diff viewer) |
 
@@ -73,6 +73,7 @@ src/
 ├── services/
 │   ├── auth/        # credentials, oauth-codex
 │   ├── llm/         # client, providers/
+│   ├── tools/       # Tool system (glob, read, grep, create, write, delete, registry)
 │   ├── database.ts  # SQLite operations
 │   └── migrations.ts
 ├── stores/          # session
@@ -84,4 +85,3 @@ src/
 ## Open Questions
 
 - Design mockups needed for file tree UI
-- Should file operations go through Rust (Tauri) or TypeScript?

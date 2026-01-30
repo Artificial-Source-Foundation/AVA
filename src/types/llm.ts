@@ -23,13 +23,44 @@ export interface ChatMessage {
   content: string
 }
 
-/** Content block for structured responses (future: tool use) */
-export interface ContentBlock {
-  type: 'text' | 'tool_use' | 'tool_result'
-  text?: string
-  id?: string
-  name?: string
-  input?: Record<string, unknown>
+// ============================================================================
+// Tool Types
+// ============================================================================
+
+/** Text content block */
+export interface TextBlock {
+  type: 'text'
+  text: string
+}
+
+/** Tool use block in assistant message */
+export interface ToolUseBlock {
+  type: 'tool_use'
+  id: string
+  name: string
+  input: Record<string, unknown>
+}
+
+/** Tool result block in user message */
+export interface ToolResultBlock {
+  type: 'tool_result'
+  tool_use_id: string
+  content: string
+  is_error?: boolean
+}
+
+/** Content block union for structured messages */
+export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock
+
+/** Tool definition for LLM */
+export interface ToolDefinition {
+  name: string
+  description: string
+  input_schema: {
+    type: 'object'
+    properties: Record<string, unknown>
+    required?: string[]
+  }
 }
 
 // ============================================================================
@@ -44,6 +75,7 @@ export interface ProviderConfig {
   maxTokens?: number
   temperature?: number
   systemPrompt?: string
+  tools?: ToolDefinition[]
 }
 
 /** Model definition with provider mapping */
@@ -85,6 +117,7 @@ export interface StreamDelta {
   done: boolean
   usage?: TokenUsage
   error?: StreamError
+  toolUse?: ToolUseBlock
 }
 
 /** Token usage information */
@@ -134,7 +167,17 @@ export type AnthropicStreamEvent =
       message: { id: string; model: string; usage: { input_tokens: number } }
     }
   | { type: 'content_block_start'; index: number; content_block: { type: 'text'; text: string } }
+  | {
+      type: 'content_block_start'
+      index: number
+      content_block: { type: 'tool_use'; id: string; name: string }
+    }
   | { type: 'content_block_delta'; index: number; delta: { type: 'text_delta'; text: string } }
+  | {
+      type: 'content_block_delta'
+      index: number
+      delta: { type: 'input_json_delta'; partial_json: string }
+    }
   | { type: 'content_block_stop'; index: number }
   | { type: 'message_delta'; delta: { stop_reason: string }; usage: { output_tokens: number } }
   | { type: 'message_stop' }

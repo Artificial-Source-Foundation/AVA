@@ -1,15 +1,21 @@
 /**
  * useChat Hook
- * Provider-agnostic chat hook with streaming support
+ * Provider-agnostic chat hook with streaming support and tool integration
  */
 
 import { createSignal } from 'solid-js'
 import { DEFAULTS } from '../config/constants'
 import { saveMessage, updateMessage } from '../services/database'
 import { createClient, resolveAuth } from '../services/llm/client'
+import {
+  executeTool,
+  getToolDefinitions,
+  resetToolCallCount,
+  type ToolContext,
+} from '../services/tools'
 import { useSession } from '../stores/session'
 import type { Message } from '../types'
-import type { LLMProvider, StreamError } from '../types/llm'
+import type { LLMProvider, StreamError, ToolUseBlock } from '../types/llm'
 
 // ============================================================================
 // Types
@@ -24,11 +30,19 @@ export interface ChatState {
 interface StreamOptions {
   sessionId: string
   model: string
-  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>
+  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }>
   onContent: (content: string) => void
   onComplete: (content: string, tokens?: number) => void
   onError: (error: StreamError) => void
   signal: AbortSignal
+  enableTools?: boolean
+}
+
+/** Get the working directory for tool execution */
+function getWorkingDirectory(): string {
+  // Default to current working directory
+  // In Tauri, this would be the app's data directory or user's home
+  return '/home/xn3/Projects/Personal/Delta9'
 }
 
 // ============================================================================
@@ -59,41 +73,113 @@ export function useChat() {
 
     setCurrentProvider(resolved.provider)
     const client = await createClient(resolved.provider)
+
+    // Reset tool call counter at the start of each message turn
+    resetToolCallCount()
+
+    // Build messages array (may include tool results)
+    const currentMessages = [...options.messages]
     let fullContent = ''
 
-    try {
-      for await (const delta of client.stream(
-        options.messages,
-        {
-          provider: resolved.provider,
-          model: options.model,
-          authMethod: resolved.credentials.type === 'oauth-token' ? 'oauth' : 'api-key',
-          maxTokens: DEFAULTS.MAX_TOKENS,
-        },
-        options.signal
-      )) {
-        if (delta.error) {
-          options.onError(delta.error)
-          return
-        }
+    // Tool execution context
+    const toolCtx: ToolContext = {
+      sessionId: options.sessionId,
+      workingDirectory: getWorkingDirectory(),
+      signal: options.signal,
+    }
 
-        if (delta.content) {
-          fullContent += delta.content
-          options.onContent(fullContent)
-        }
+    // Get tool definitions if tools are enabled
+    const tools = options.enableTools !== false ? getToolDefinitions() : undefined
 
-        if (delta.done) {
-          options.onComplete(fullContent, delta.usage?.totalTokens)
+    // Stream loop - may iterate multiple times if tools are used
+    let continueStreaming = true
+    while (continueStreaming) {
+      continueStreaming = false
+      const pendingToolUses: ToolUseBlock[] = []
+
+      try {
+        for await (const delta of client.stream(
+          currentMessages as Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+          {
+            provider: resolved.provider,
+            model: options.model,
+            authMethod: resolved.credentials.type === 'oauth-token' ? 'oauth' : 'api-key',
+            maxTokens: DEFAULTS.MAX_TOKENS,
+            tools,
+          },
+          options.signal
+        )) {
+          if (delta.error) {
+            options.onError(delta.error)
+            return
+          }
+
+          // Handle text content
+          if (delta.content) {
+            fullContent += delta.content
+            options.onContent(fullContent)
+          }
+
+          // Handle tool use
+          if (delta.toolUse) {
+            pendingToolUses.push(delta.toolUse)
+          }
+
+          if (delta.done) {
+            // If there are pending tool uses, execute them
+            if (pendingToolUses.length > 0) {
+              // Add assistant message with tool uses to conversation
+              const assistantContent = [
+                ...(fullContent ? [{ type: 'text' as const, text: fullContent }] : []),
+                ...pendingToolUses,
+              ]
+              currentMessages.push({
+                role: 'assistant',
+                content: assistantContent,
+              })
+
+              // Execute each tool and collect results
+              const toolResults: Array<{
+                type: 'tool_result'
+                tool_use_id: string
+                content: string
+                is_error?: boolean
+              }> = []
+
+              for (const toolUse of pendingToolUses) {
+                const result = await executeTool(toolUse.name, toolUse.input, toolCtx)
+                toolResults.push({
+                  type: 'tool_result',
+                  tool_use_id: toolUse.id,
+                  content: result.output,
+                  is_error: !result.success,
+                })
+              }
+
+              // Add tool results as user message
+              currentMessages.push({
+                role: 'user',
+                content: toolResults,
+              })
+
+              // Continue streaming to get assistant's response
+              continueStreaming = true
+            } else {
+              // No tools, we're done
+              options.onComplete(fullContent, delta.usage?.totalTokens)
+            }
+          }
         }
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          return // Silently handle abort
+        }
+        options.onError({
+          type: 'unknown',
+          message: err instanceof Error ? err.message : 'Unknown error',
+        })
+        return
       }
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') {
-        return // Silently handle abort
-      }
-      options.onError({
-        type: 'unknown',
-        message: err instanceof Error ? err.message : 'Unknown error',
-      })
     }
   }
 

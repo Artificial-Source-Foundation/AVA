@@ -6,6 +6,113 @@
 
 ## Session History
 
+### 2025-01-30 (Session 7)
+
+**Sprint 2.2: File Writing Tools** ✅ COMPLETE
+
+Implemented file writing tools (create_file, write_file, delete_file) with LLM tool_use integration.
+
+**Phase 1: Tauri Permissions**
+- Updated `src-tauri/capabilities/default.json` with:
+  - `fs:allow-write-text-file`
+  - `fs:allow-remove`
+  - `fs:allow-exists`
+  - `fs:allow-mkdir`
+
+**Phase 2: Error Types**
+- Added `FILE_ALREADY_EXISTS` and `CONTENT_TOO_LARGE` to ToolErrorType enum
+- Updated error message inference in `ToolError.from()`
+- Added user-friendly messages in `getToolErrorMessage()`
+
+**Phase 3: Tool Implementations**
+- Created `src/services/tools/create.ts` - Create new files (fails if exists) (~100 lines)
+- Created `src/services/tools/write.ts` - Write/overwrite files (~95 lines)
+- Created `src/services/tools/delete.ts` - Delete files (fails on directories) (~85 lines)
+
+**Phase 4: Registration**
+- Updated `src/services/tools/index.ts` with exports and registerTool() calls
+
+**Files Created (3):**
+- `src/services/tools/create.ts` (~100 lines)
+- `src/services/tools/write.ts` (~95 lines)
+- `src/services/tools/delete.ts` (~85 lines)
+
+**Files Modified (3):**
+- `src-tauri/capabilities/default.json` - Added 4 fs permissions
+- `src/services/tools/errors.ts` - Added 2 error types (~15 lines)
+- `src/services/tools/index.ts` - Added 3 exports + registrations (~10 lines)
+
+**Total:** ~280 new lines, ~25 modified lines
+
+**Safety Features:**
+- MAX_BYTES = 50KB content limit
+- Path resolution via resolvePath()
+- Existence checks (create fails if exists, delete fails if not exists)
+- Directory checks (delete fails on directories)
+- Abort signal handling
+- Auto-create parent directories
+
+---
+
+### 2025-01-29 (Session 6)
+
+**Sprint 2.1: File Reading Tools** ✅ COMPLETE
+
+Implemented file reading tools (glob, read_file, grep) with full LLM tool_use integration.
+
+**Research Phase:**
+- Analyzed OpenCode (70k stars): Tool registry pattern, 2000 line limits, ripgrep
+- Analyzed Aider (25k stars): Tree-sitter AST, binary detection, mtime sorting
+- Analyzed Gemini CLI (50k stars): ToolBuilder separation, error types
+- Adopted: Registry pattern, simple validation (no Zod), native TS glob matching
+
+**Phase 1: Tool Foundation**
+- Created `src/services/tools/types.ts` - Tool interfaces (ToolDefinition, ToolResult, Tool<T>, ToolContext)
+- Created `src/services/tools/errors.ts` - ToolError class and ToolErrorType enum
+- Created `src/services/tools/registry.ts` - Tool registration, lookup, and execution with MAX_TOOL_CALLS=10
+- Created `src/services/tools/utils.ts` - isBinaryFile, resolvePath, matchesGlob, shouldSkipDirectory, LIMITS
+
+**Phase 2: Tool Implementations**
+- Created `src/services/tools/glob.ts` - File pattern matching (*, **, {a,b}) with mtime sorting
+- Created `src/services/tools/read.ts` - File reading with line numbers, pagination, 2000 line limit
+- Created `src/services/tools/grep.ts` - Regex content search with file filtering
+- Created `src/services/tools/index.ts` - Barrel export with auto-registration
+
+**Phase 3: LLM Integration**
+- Extended `src/types/llm.ts` - Added ToolUseBlock, ToolResultBlock, TextBlock, ContentBlock types
+- Updated `src/services/llm/providers/anthropic.ts` - Added tools to request, parse tool_use streaming events
+- Updated `src/hooks/useChat.ts` - Tool execution loop with results sent back to LLM
+
+**Phase 4: Tauri Permissions**
+- Updated `src-tauri/capabilities/default.json` - fs:allow-read-text-file, fs:allow-read-dir, fs:allow-stat
+
+**Files Created (8):**
+- `src/services/tools/types.ts` (~90 lines)
+- `src/services/tools/errors.ts` (~70 lines)
+- `src/services/tools/registry.ts` (~165 lines)
+- `src/services/tools/utils.ts` (~240 lines)
+- `src/services/tools/glob.ts` (~110 lines)
+- `src/services/tools/read.ts` (~120 lines)
+- `src/services/tools/grep.ts` (~145 lines)
+- `src/services/tools/index.ts` (~75 lines)
+
+**Files Modified (4):**
+- `src/types/llm.ts` - Added tool types, extended StreamDelta, AnthropicStreamEvent
+- `src/services/llm/providers/anthropic.ts` - Tool_use streaming support
+- `src/hooks/useChat.ts` - Tool execution integration
+- `src-tauri/capabilities/default.json` - fs permissions
+
+**Total:** ~1015 new lines, ~200 modified
+
+**Tool Limits:**
+- MAX_RESULTS = 100 (glob)
+- MAX_LINES = 2000 (read)
+- MAX_LINE_LENGTH = 2000 chars
+- MAX_BYTES = 50KB
+- MAX_TOOL_CALLS = 10 per turn
+
+---
+
 ### 2025-01-29 (Session 5)
 
 **Development Tooling Setup** ✅ COMPLETE
@@ -267,6 +374,8 @@ Built multi-provider streaming chat:
 | Sprint 1.3 complete | 2025-01-29 | Session management + architecture |
 | Sprint 1.3.5 complete | 2025-01-29 | Architecture consolidation + AI docs |
 | Dev Tooling complete | 2025-01-29 | SOTA tooling (Biome, Oxlint, Vitest, CI/CD) |
+| Sprint 2.1 complete | 2025-01-29 | File reading tools (glob, read_file, grep) |
+| Sprint 2.2 complete | 2025-01-30 | File writing tools (create_file, write_file, delete_file) |
 
 ---
 
@@ -296,6 +405,18 @@ Built multi-provider streaming chat:
 - ✅ Barrel exports for clean imports
 - ✅ AI-friendly documentation (llms.txt, AGENTS.md)
 - ✅ Full architecture documentation
+
+### File Tools (Sprint 2.1 + 2.2)
+- ✅ Glob tool for file pattern matching
+- ✅ Read_file tool with line numbers and pagination
+- ✅ Grep tool for content search with regex
+- ✅ Create_file tool (new file, fails if exists)
+- ✅ Write_file tool (create or overwrite)
+- ✅ Delete_file tool (remove files, fails on directories)
+- ✅ Anthropic tool_use streaming integration
+- ✅ Tool execution loop with result feedback
+- ✅ Binary file detection
+- ✅ Protected limits (2000 lines, 50KB, 10 calls/turn)
 
 ### Development Tooling
 - ✅ Biome 2.x formatting and linting

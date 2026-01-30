@@ -10,6 +10,7 @@ import type {
   LLMProvider,
   ProviderConfig,
   StreamDelta,
+  ToolUseBlock,
 } from '../../../types/llm'
 import { getApiKeyWithFallback, getCredentials } from '../../auth/credentials'
 import { type LLMClient, registerClient } from '../client'
@@ -74,6 +75,11 @@ export class AnthropicClient implements LLMClient {
       body.temperature = config.temperature
     }
 
+    // Add tools if provided
+    if (config.tools && config.tools.length > 0) {
+      body.tools = config.tools
+    }
+
     // Make request
     let response: Response
     try {
@@ -136,6 +142,10 @@ export class AnthropicClient implements LLMClient {
     let inputTokens = 0
     let outputTokens = 0
 
+    // Track current tool_use block being accumulated
+    let currentToolUse: Partial<ToolUseBlock> | null = null
+    let toolInputBuffer = ''
+
     try {
       while (true) {
         const { done, value } = await reader.read()
@@ -162,9 +172,44 @@ export class AnthropicClient implements LLMClient {
                 inputTokens = event.message.usage.input_tokens
                 break
 
+              case 'content_block_start':
+                if (event.content_block.type === 'tool_use') {
+                  // Start accumulating a tool_use block
+                  currentToolUse = {
+                    type: 'tool_use',
+                    id: event.content_block.id,
+                    name: event.content_block.name,
+                  }
+                  toolInputBuffer = ''
+                }
+                break
+
               case 'content_block_delta':
                 if (event.delta.type === 'text_delta' && event.delta.text) {
                   yield { content: event.delta.text, done: false }
+                } else if (event.delta.type === 'input_json_delta' && event.delta.partial_json) {
+                  // Accumulate JSON input for tool
+                  toolInputBuffer += event.delta.partial_json
+                }
+                break
+
+              case 'content_block_stop':
+                // If we were accumulating a tool_use, finalize it
+                if (currentToolUse) {
+                  try {
+                    const input = toolInputBuffer ? JSON.parse(toolInputBuffer) : {}
+                    const toolUse: ToolUseBlock = {
+                      type: 'tool_use',
+                      id: currentToolUse.id!,
+                      name: currentToolUse.name!,
+                      input,
+                    }
+                    yield { content: '', done: false, toolUse }
+                  } catch {
+                    console.warn('Failed to parse tool input JSON:', toolInputBuffer)
+                  }
+                  currentToolUse = null
+                  toolInputBuffer = ''
                 }
                 break
 

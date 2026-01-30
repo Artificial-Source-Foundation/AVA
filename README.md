@@ -2,16 +2,36 @@
 
 > Multi-Agent AI Coding Assistant
 
-A Tauri 2.0 + SolidJS desktop application implementing a hierarchical **Commander + Operators + Validator** architecture for complex software engineering tasks.
+A Tauri 2.0 + SolidJS desktop application for AI-assisted software development. Currently implements streaming chat with tool use; working toward a hierarchical **Commander + Operators + Validator** architecture.
 
-## Features
+## Quick Start
 
-- **Commander Agent**: Lead planner and orchestrator (never writes code)
-- **Parallel Operators**: Multiple task executors working on different files simultaneously
-- **Validator Gate**: QA checkpoint before task completion
-- **Streaming UI**: Real-time LLM response rendering with SolidJS
-- **Local Database**: SQLite for session and message persistence
-- **LSP Integration**: Rust-based language server client for code intelligence
+```bash
+# Prerequisites: Node.js 20+, Rust 1.70+
+
+# Clone and install
+git clone https://github.com/g0dxn4/Estela.git
+cd Estela
+npm install
+
+# Set up environment (optional - can also configure in Settings UI)
+cp .env.example .env
+# Edit .env with your API keys
+
+# Run development
+npm run tauri dev
+```
+
+## Current Status
+
+| Epic | Goal | Status |
+|------|------|--------|
+| 1. Chat | Streaming chat with multi-provider LLM | ✅ Complete |
+| 2. File Tools | Read, write, edit, glob, grep, bash | ✅ Complete |
+| 3. Tool Use | LLM function calling loop | 🟡 In Progress |
+| 4+ | Single Agent → Commander → Parallel → Validator | ⬜ Planned |
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for full roadmap.
 
 ## Architecture
 
@@ -35,57 +55,76 @@ A Tauri 2.0 + SolidJS desktop application implementing a hierarchical **Commande
 
 ## Tech Stack
 
-| Layer | Technology | Why |
-|-------|------------|-----|
-| **Desktop** | Tauri 2.0 (Rust) | 3-10MB app size, 30-40MB RAM, sandboxed security |
-| **Frontend** | SolidJS + TypeScript | Fine-grained reactivity for streaming (~7KB runtime) |
-| **Styling** | Tailwind CSS | Rapid UI development |
-| **Database** | SQLite | Local persistence via tauri-plugin-sql |
-| **LSP** | Rust client | Multi-language code intelligence |
+| Layer | Technology |
+|-------|------------|
+| Desktop | Tauri 2.0 (Rust) - 3-10MB app, 30-40MB RAM |
+| Frontend | SolidJS + TypeScript (~7KB runtime) |
+| Styling | Tailwind CSS v4 |
+| Database | SQLite via tauri-plugin-sql |
+| Tools | File ops via tauri-plugin-fs, shell via tauri-plugin-shell |
 
-## Development
+## Development Commands
 
 ```bash
-# Prerequisites
-# - Node.js 20+
-# - Rust 1.70+
-# - Tauri CLI
-
-# Create the project
-npm create tauri-app@latest estela -- --template solid-ts
-
-# Install dependencies
-cd estela
-npm install
-
-# Run development server
+# Run app
 npm run tauri dev
 
-# Build for production
-npm run tauri build
+# Code quality
+npm run lint          # Oxlint + ESLint
+npm run lint:fix      # Auto-fix
+npm run format        # Biome format
+npm run typecheck     # TypeScript check
+
+# Testing
+npm run test          # Vitest watch
+npm run test:run      # Single run
+
+# Maintenance
+npm run knip          # Find dead code
+npm run knip:fix      # Remove dead code
+npm run analyze       # Bundle size
 ```
 
-## Documentation
+## Project Structure
 
-| Document | Description |
-|----------|-------------|
-| [docs/VISION.md](docs/VISION.md) | Project vision and roadmap |
-| [docs/BACKLOG.md](docs/BACKLOG.md) | Current development tasks |
-| [docs/architecture/](docs/architecture/) | System design |
-| [docs/agents/](docs/agents/) | Agent specifications |
-| [CLAUDE.md](CLAUDE.md) | AI assistant instructions |
+```
+src/
+├── components/       # UI components (chat, layout, sessions, settings)
+├── config/          # Constants, environment
+├── hooks/           # SolidJS hooks (useChat)
+├── services/        # Core services
+│   ├── auth/        # Credential management
+│   ├── llm/         # LLM clients (Anthropic, OpenRouter)
+│   └── tools/       # File tools, bash, registry
+├── stores/          # State management (sessions)
+└── types/           # TypeScript types
 
-## Project Status
+docs/
+├── ROADMAP.md       # Epic overview
+├── VISION.md        # Project vision
+├── development/     # Sprint planning
+│   ├── epics/       # Epic details
+│   └── completed/   # Done sprints
+├── architecture/    # System design
+└── reference-code/  # SOTA examples (OpenCode, Gemini CLI)
+```
 
-- **Phase 0**: Planning - Complete
-- **Phase 1**: Foundation - Ready to start
-- **Phase 2-7**: Planned
+## Configuration
 
-See [docs/BACKLOG.md](docs/BACKLOG.md) for detailed progress tracking.
+API keys can be set via:
+1. **Settings UI** in the app (stored in localStorage)
+2. **Environment variables** (see `.env.example`)
 
-## Previous Work
+Supported providers:
+- **Anthropic** - Direct API
+- **OpenRouter** - Gateway to multiple models
 
-This project evolved from an OpenCode plugin called "Delta9" implementing a similar multi-agent architecture. The plugin-era documentation is preserved in `docs/archive/opencode-plugin-era/` for reference.
+## Contributing
+
+1. Check [docs/ROADMAP.md](docs/ROADMAP.md) for current epic
+2. Read [CLAUDE.md](CLAUDE.md) for coding conventions
+3. Run `npm run lint && npm run typecheck` before committing
+4. Commits use [Conventional Commits](https://conventionalcommits.org)
 
 ## License
 

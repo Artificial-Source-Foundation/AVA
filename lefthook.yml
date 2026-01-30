@@ -1,6 +1,9 @@
 # Lefthook - Git hooks manager
 # https://github.com/evilmartians/lefthook
 
+# Source shell config to get nvm/fnm/asdf in PATH
+rc: ~/.bashrc
+
 pre-commit:
   parallel: true
   commands:

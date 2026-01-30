@@ -92,18 +92,6 @@ export async function createClient(provider: LLMProvider): Promise<LLMClient> {
   return new ClientClass()
 }
 
-/**
- * Synchronous client creation (for providers already loaded)
- * Throws if provider not registered
- */
-export function createClientSync(provider: LLMProvider): LLMClient {
-  const ClientClass = clientRegistry[provider]
-  if (!ClientClass) {
-    throw new Error(`Provider ${provider} not loaded. Use createClient() for lazy loading.`)
-  }
-  return new ClientClass()
-}
-
 // ============================================================================
 // Auth Resolution
 // ============================================================================

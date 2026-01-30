@@ -44,7 +44,7 @@ export function getCredentials(provider: LLMProvider): Credentials | null {
  * Store credentials for a provider
  * Overwrites existing credentials for that provider
  */
-export function setCredentials(provider: LLMProvider, credentials: Credentials): void {
+function setCredentials(provider: LLMProvider, credentials: Credentials): void {
   const stored = localStorage.getItem(STORAGE_KEY)
   let all: StoredCredentials = {}
 
@@ -78,53 +78,6 @@ export function clearCredentials(provider: LLMProvider): void {
   }
 }
 
-/**
- * Clear all stored credentials
- */
-export function clearAllCredentials(): void {
-  localStorage.removeItem(STORAGE_KEY)
-}
-
-// ============================================================================
-// Query Functions
-// ============================================================================
-
-/**
- * List all providers that have credentials configured
- */
-export function listConfiguredProviders(): LLMProvider[] {
-  const stored = localStorage.getItem(STORAGE_KEY)
-  if (!stored) return []
-
-  try {
-    const all: StoredCredentials = JSON.parse(stored)
-    return Object.keys(all).filter((key) => {
-      const cred = all[key]
-      // Exclude expired OAuth tokens
-      if (cred.type === 'oauth-token' && cred.expiresAt && Date.now() > cred.expiresAt) {
-        return false
-      }
-      return true
-    }) as LLMProvider[]
-  } catch {
-    return []
-  }
-}
-
-/**
- * Check if any credentials are configured
- */
-export function hasAnyCredentials(): boolean {
-  return listConfiguredProviders().length > 0
-}
-
-/**
- * Check if a specific provider has valid credentials
- */
-export function hasCredentials(provider: LLMProvider): boolean {
-  return getCredentials(provider) !== null
-}
-
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -148,35 +101,6 @@ export function getApiKey(provider: LLMProvider): string | null {
   const cred = getCredentials(provider)
   if (!cred || cred.type !== 'api-key') return null
   return cred.value
-}
-
-/**
- * Set OAuth token for a provider
- */
-export function setOAuthToken(
-  provider: LLMProvider,
-  accessToken: string,
-  expiresIn: number,
-  refreshToken?: string
-): void {
-  setCredentials(provider, {
-    provider,
-    type: 'oauth-token',
-    value: accessToken,
-    expiresAt: Date.now() + expiresIn * 1000,
-    refreshToken,
-  })
-}
-
-/**
- * Check if OAuth token needs refresh (within 5 minutes of expiry)
- */
-export function needsTokenRefresh(provider: LLMProvider): boolean {
-  const cred = getCredentials(provider)
-  if (!cred || cred.type !== 'oauth-token' || !cred.expiresAt) return false
-
-  const REFRESH_BUFFER = 5 * 60 * 1000 // 5 minutes
-  return Date.now() > cred.expiresAt - REFRESH_BUFFER
 }
 
 // ============================================================================

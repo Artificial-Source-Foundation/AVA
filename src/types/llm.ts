@@ -27,12 +27,6 @@ export interface ChatMessage {
 // Tool Types
 // ============================================================================
 
-/** Text content block */
-export interface TextBlock {
-  type: 'text'
-  text: string
-}
-
 /** Tool use block in assistant message */
 export interface ToolUseBlock {
   type: 'tool_use'
@@ -40,17 +34,6 @@ export interface ToolUseBlock {
   name: string
   input: Record<string, unknown>
 }
-
-/** Tool result block in user message */
-export interface ToolResultBlock {
-  type: 'tool_result'
-  tool_use_id: string
-  content: string
-  is_error?: boolean
-}
-
-/** Content block union for structured messages */
-export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock
 
 /** Tool definition for LLM */
 export interface ToolDefinition {
@@ -76,17 +59,6 @@ export interface ProviderConfig {
   temperature?: number
   systemPrompt?: string
   tools?: ToolDefinition[]
-}
-
-/** Model definition with provider mapping */
-export interface ModelDefinition {
-  id: string // Display ID (e.g., 'claude-sonnet-4')
-  name: string // Display name
-  provider: LLMProvider // Primary provider
-  providerId: string // Provider-specific model ID
-  openrouterId?: string // OpenRouter model ID (if different)
-  maxTokens: number // Default max tokens
-  contextWindow: number // Context window size
 }
 
 // ============================================================================
@@ -182,31 +154,3 @@ export type AnthropicStreamEvent =
   | { type: 'message_delta'; delta: { stop_reason: string }; usage: { output_tokens: number } }
   | { type: 'message_stop' }
   | { type: 'error'; error: { type: string; message: string } }
-
-// ============================================================================
-// Error Types
-// ============================================================================
-
-/** LLM-specific error with provider context */
-export class LLMError extends Error {
-  constructor(
-    message: string,
-    public provider: LLMProvider,
-    public status?: number,
-    public retryAfter?: number
-  ) {
-    super(message)
-    this.name = 'LLMError'
-  }
-}
-
-/** Error messages by status code */
-export const ERROR_MESSAGES: Record<number, string> = {
-  400: 'Invalid request',
-  401: 'Invalid API key',
-  403: 'Access forbidden',
-  404: 'Model not found',
-  429: 'Rate limit exceeded',
-  500: 'Server error',
-  529: 'API overloaded',
-}

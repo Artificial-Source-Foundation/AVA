@@ -87,7 +87,7 @@ const BINARY_EXTENSIONS = new Set([
 /**
  * Check if file is binary by extension
  */
-export function isBinaryExtension(path: string): boolean {
+function isBinaryExtension(path: string): boolean {
   const ext = path.substring(path.lastIndexOf('.')).toLowerCase()
   return BINARY_EXTENSIONS.has(ext)
 }
@@ -166,26 +166,6 @@ export function resolvePath(path: string, workingDirectory: string): string {
   }
 
   return baseParts.join('/')
-}
-
-/**
- * Get relative path from base directory
- */
-export function getRelativePath(path: string, baseDir: string): string {
-  if (path.startsWith(baseDir)) {
-    const relative = path.slice(baseDir.length)
-    return relative.startsWith('/') ? relative.slice(1) : relative
-  }
-  return path
-}
-
-/**
- * Check if path is inside directory
- */
-export function isPathInside(path: string, dir: string): boolean {
-  const normalizedPath = path.replace(/\/+$/, '')
-  const normalizedDir = dir.replace(/\/+$/, '')
-  return normalizedPath === normalizedDir || normalizedPath.startsWith(`${normalizedDir}/`)
 }
 
 // ============================================================================

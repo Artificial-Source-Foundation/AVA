@@ -11,7 +11,6 @@ export enum ToolErrorType {
   PERMISSION_DENIED = 'PERMISSION_DENIED',
   BINARY_FILE = 'BINARY_FILE',
   PATH_IS_DIRECTORY = 'PATH_IS_DIRECTORY',
-  PATH_OUTSIDE_WORKSPACE = 'PATH_OUTSIDE_WORKSPACE',
   INVALID_PATTERN = 'INVALID_PATTERN',
   CONTENT_TOO_LARGE = 'CONTENT_TOO_LARGE',
   EXECUTION_TIMEOUT = 'EXECUTION_TIMEOUT',
@@ -60,23 +59,4 @@ export class ToolError extends Error {
 
     return new ToolError(message, type, toolName)
   }
-}
-
-/** Get user-friendly error message */
-export function getToolErrorMessage(type: ToolErrorType): string {
-  const messages: Record<ToolErrorType, string> = {
-    [ToolErrorType.INVALID_PARAMS]: 'Invalid parameters provided',
-    [ToolErrorType.FILE_NOT_FOUND]: 'File not found',
-    [ToolErrorType.FILE_ALREADY_EXISTS]: 'File already exists',
-    [ToolErrorType.PERMISSION_DENIED]: 'Permission denied',
-    [ToolErrorType.BINARY_FILE]: 'Cannot read binary file',
-    [ToolErrorType.PATH_IS_DIRECTORY]: 'Path is a directory',
-    [ToolErrorType.PATH_OUTSIDE_WORKSPACE]: 'Path is outside workspace',
-    [ToolErrorType.INVALID_PATTERN]: 'Invalid pattern',
-    [ToolErrorType.CONTENT_TOO_LARGE]: 'Content exceeds maximum size limit',
-    [ToolErrorType.EXECUTION_TIMEOUT]: 'Execution timed out',
-    [ToolErrorType.EXECUTION_ABORTED]: 'Execution was aborted',
-    [ToolErrorType.UNKNOWN]: 'An unknown error occurred',
-  }
-  return messages[type]
 }

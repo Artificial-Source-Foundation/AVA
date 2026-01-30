@@ -23,7 +23,7 @@ const PROVIDER: LLMProvider = 'anthropic'
  * Anthropic client implementation
  * Uses Messages API with streaming
  */
-export class AnthropicClient implements LLMClient {
+class AnthropicClient implements LLMClient {
   async *stream(
     messages: ChatMessage[],
     config: ProviderConfig,

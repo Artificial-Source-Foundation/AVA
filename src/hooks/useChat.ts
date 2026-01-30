@@ -21,12 +21,6 @@ import type { LLMProvider, StreamError, ToolUseBlock } from '../types/llm'
 // Types
 // ============================================================================
 
-export interface ChatState {
-  isStreaming: boolean
-  error: StreamError | null
-  currentProvider: LLMProvider | null
-}
-
 interface StreamOptions {
   sessionId: string
   model: string
@@ -40,9 +34,9 @@ interface StreamOptions {
 
 /** Get the working directory for tool execution */
 function getWorkingDirectory(): string {
-  // Default to current working directory
-  // In Tauri, this would be the app's data directory or user's home
-  return '/home/xn3/Projects/Personal/Delta9'
+  // TODO: Use Tauri path API to get actual working directory
+  // For now, default to process.cwd() equivalent or user's home
+  return '.'
 }
 
 // ============================================================================

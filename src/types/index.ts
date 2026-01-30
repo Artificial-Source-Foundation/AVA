@@ -65,15 +65,3 @@ export interface TaskResult {
   errors?: string[]
   tokensUsed: number
 }
-
-export interface FileChange {
-  id: string
-  sessionId: string
-  agentId: string
-  filePath: string
-  changeType: 'create' | 'edit' | 'delete'
-  oldContent?: string
-  newContent?: string
-  createdAt: number
-  reverted: boolean
-}

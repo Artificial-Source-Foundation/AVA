@@ -37,3 +37,6 @@ coverage/
 
 # Reference code (cloned repos for inspiration)
 docs/reference-code/
+
+# Memory bank (personal session notes)
+docs/memory-bank/

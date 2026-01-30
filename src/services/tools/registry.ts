@@ -31,14 +31,14 @@ export function registerTool(tool: AnyTool): void {
 /**
  * Get a tool by name
  */
-export function getTool(name: string): Tool | undefined {
+function getTool(name: string): Tool | undefined {
   return tools.get(name)
 }
 
 /**
  * Get all registered tools
  */
-export function getAllTools(): Tool[] {
+function getAllTools(): Tool[] {
   return Array.from(tools.values())
 }
 
@@ -47,13 +47,6 @@ export function getAllTools(): Tool[] {
  */
 export function getToolDefinitions(): ToolDefinition[] {
   return getAllTools().map((t) => t.definition)
-}
-
-/**
- * Check if a tool is registered
- */
-export function hasTool(name: string): boolean {
-  return tools.has(name)
 }
 
 // ============================================================================
@@ -71,13 +64,6 @@ let toolCallCount = 0
  */
 export function resetToolCallCount(): void {
   toolCallCount = 0
-}
-
-/**
- * Get current tool call count
- */
-export function getToolCallCount(): number {
-  return toolCallCount
 }
 
 /**
@@ -134,30 +120,4 @@ export async function executeTool(
       error: toolError.type,
     }
   }
-}
-
-/**
- * Execute multiple tools in sequence
- */
-export async function executeTools(
-  calls: Array<{ name: string; params: Record<string, unknown> }>,
-  ctx: ToolContext
-): Promise<ToolResult[]> {
-  const results: ToolResult[] = []
-
-  for (const call of calls) {
-    if (ctx.signal.aborted) {
-      results.push({
-        success: false,
-        output: 'Operation was cancelled',
-        error: 'ABORTED',
-      })
-      break
-    }
-
-    const result = await executeTool(call.name, call.params, ctx)
-    results.push(result)
-  }
-
-  return results
 }

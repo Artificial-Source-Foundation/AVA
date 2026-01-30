@@ -9,6 +9,6 @@
     "**/*.test.{ts,tsx}",
     "**/*.spec.{ts,tsx}"
   ],
-  "ignoreDependencies": ["@tauri-apps/cli", "autoprefixer", "postcss", "@tailwindcss/postcss"],
-  "ignoreBinaries": ["tauri"]
+  "ignoreDependencies": [],
+  "ignoreBinaries": []
 }

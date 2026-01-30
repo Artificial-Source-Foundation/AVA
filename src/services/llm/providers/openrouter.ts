@@ -21,7 +21,7 @@ const PROVIDER: LLMProvider = 'openrouter'
  * OpenRouter client implementation
  * Uses OpenAI-compatible chat completions API
  */
-export class OpenRouterClient implements LLMClient {
+class OpenRouterClient implements LLMClient {
   async *stream(
     messages: ChatMessage[],
     config: ProviderConfig,

@@ -28,32 +28,3 @@ export const LIMITS = {
   MAX_SESSIONS_DISPLAY: 100,
   MESSAGE_MAX_LENGTH: 100000,
 } as const
-
-// UI timing constants (ms)
-export const TIMING = {
-  DEBOUNCE_DELAY: 300,
-  AUTO_SCROLL_DELAY: 100,
-  TOAST_DURATION: 3000,
-  ANIMATION_DURATION: 200,
-} as const
-
-// Model configurations
-export const MODELS = {
-  ANTHROPIC: [
-    { id: 'claude-sonnet-4-20250514', name: 'Claude 4 Sonnet', provider: 'anthropic' },
-    { id: 'claude-opus-4-20250514', name: 'Claude 4 Opus', provider: 'anthropic' },
-  ],
-  OPENROUTER: [
-    { id: 'anthropic/claude-sonnet-4', name: 'Claude 4 Sonnet (OR)', provider: 'openrouter' },
-    { id: 'openai/gpt-4o', name: 'GPT-4o (OR)', provider: 'openrouter' },
-  ],
-} as const
-
-// Session status values
-export const SESSION_STATUS = {
-  ACTIVE: 'active',
-  COMPLETED: 'completed',
-  ARCHIVED: 'archived',
-} as const
-
-export type SessionStatus = (typeof SESSION_STATUS)[keyof typeof SESSION_STATUS]

@@ -3,7 +3,7 @@
  * Validates and provides typed access to environment variables
  */
 
-export interface EnvConfig {
+interface EnvConfig {
   // OAuth configuration
   CODEX_CLIENT_ID?: string
 
@@ -19,7 +19,7 @@ export interface EnvConfig {
 /**
  * Get validated environment configuration
  */
-export function getEnvConfig(): EnvConfig {
+function getEnvConfig(): EnvConfig {
   return {
     CODEX_CLIENT_ID: import.meta.env.VITE_CODEX_CLIENT_ID,
     ANTHROPIC_API_KEY: import.meta.env.VITE_ANTHROPIC_API_KEY,
@@ -52,17 +52,4 @@ export function validateEnv(): void {
       console.warn(`  - ${w}`)
     }
   }
-}
-
-/**
- * Check if app has any authentication method available
- */
-export function hasAuthMethod(): boolean {
-  const config = getEnvConfig()
-  return !!(
-    config.CODEX_CLIENT_ID ||
-    config.ANTHROPIC_API_KEY ||
-    config.OPENROUTER_API_KEY ||
-    config.OPENAI_API_KEY
-  )
 }

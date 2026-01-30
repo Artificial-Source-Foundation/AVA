@@ -5,9 +5,6 @@
 
 import type Database from '@tauri-apps/plugin-sql'
 
-// Schema version tracking
-const SCHEMA_VERSION = 1
-
 interface TableInfo {
   name: string
 }
@@ -131,28 +128,4 @@ async function migrateV1(db: Database): Promise<void> {
   await db.execute('CREATE INDEX IF NOT EXISTS idx_agents_session ON agents(session_id)')
   await db.execute('CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC)')
   await db.execute('CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)')
-
-  console.log('Migration v1 applied: Initial schema created')
-}
-
-/**
- * Check if database needs migration
- */
-export async function needsMigration(db: Database): Promise<boolean> {
-  try {
-    const tables = await db.select<TableInfo[]>(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
-    )
-
-    if (tables.length === 0) return true
-
-    const versions = await db.select<{ version: number }[]>(
-      'SELECT MAX(version) as version FROM schema_version'
-    )
-    const currentVersion = versions[0]?.version || 0
-
-    return currentVersion < SCHEMA_VERSION
-  } catch {
-    return true
-  }
 }

@@ -3,57 +3,20 @@
  * LLM tool integration for file operations
  */
 
-export { bashTool } from './bash'
-export { createTool } from './create'
-export { deleteTool } from './delete'
 // Export errors
-export { getToolErrorMessage, ToolError, ToolErrorType } from './errors'
+
 // Export tools
-export { globTool } from './glob'
-export { grepTool } from './grep'
-export { readTool } from './read'
+
 // Export registry
 export {
   executeTool,
-  executeTools,
-  getAllTools,
-  getTool,
-  getToolCallCount,
   getToolDefinitions,
-  hasTool,
-  registerTool,
   resetToolCallCount,
 } from './registry'
 // Export types
-export type {
-  ContentBlock,
-  MessageWithBlocks,
-  TextBlock,
-  Tool,
-  ToolContext,
-  ToolDefinition,
-  ToolParameterProperty,
-  ToolParameterSchema,
-  ToolResult,
-  ToolResultBlock,
-  ToolUseBlock,
-} from './types'
-export type { TruncationResult } from './utils'
+export type { ToolContext } from './types'
+
 // Export utilities
-export {
-  formatLineNumber,
-  getRelativePath,
-  isBinaryExtension,
-  isBinaryFile,
-  isPathInside,
-  LIMITS,
-  matchesGlob,
-  resolvePath,
-  shouldSkipDirectory,
-  truncate,
-  truncateOutput,
-} from './utils'
-export { writeTool } from './write'
 
 // ============================================================================
 // Auto-register tools on import

@@ -8,8 +8,8 @@
 
 | # | Epic | Goal | Status |
 |---|------|------|--------|
-| 1 | [Chat](./development/epics/1-chat.md) | Streaming chat with multi-provider LLM | 🟡 Active |
-| 2 | [File Tools](./development/epics/2-files.md) | Read, write, edit files | ⬜ |
+| 1 | [Chat](./development/epics/1-chat.md) | Streaming chat with multi-provider LLM | ✅ Complete |
+| 2 | [File Tools](./development/epics/2-files.md) | Read, write, edit files | 🟡 Next |
 | 3 | [Tool Use](./development/epics/3-tools.md) | LLM function calling | ⬜ |
 | 4 | [Single Agent](./development/epics/4-agent.md) | Autonomous agent loop | ⬜ |
 | 5 | [Commander](./development/epics/5-commander.md) | Hierarchical delegation | ⬜ |

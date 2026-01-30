@@ -34,3 +34,6 @@ coverage/
 # Temp files
 *.tmp
 *.temp
+
+# Reference code (cloned repos for inspiration)
+docs/reference-code/

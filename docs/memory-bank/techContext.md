@@ -156,3 +156,21 @@ Or set via Settings modal in the app.
 | 2 | Multi-provider auth | Flexibility: gateway + direct + OAuth |
 | 3 | AsyncGenerator streaming | Clean pattern, works with abort |
 | 4 | SolidJS signals | Fine-grained updates during streaming |
+| 5 | TypeScript for file ops | Industry standard (OpenCode, Gemini CLI) - see [ADR-001](../architecture/decisions/001-file-operations-typescript.md) |
+
+---
+
+## Reference Code
+
+Cloned open-source AI coding agents in `docs/reference-code/` (gitignored):
+
+| Project | Language | Learn From |
+|---------|----------|------------|
+| OpenCode | TypeScript | Tool registry, file ops, LSP |
+| Aider | Python | Git integration, repo mapping |
+| Goose | Rust | MCP protocol, extensibility |
+| Plandex | Go | Multi-file planning |
+| Gemini CLI | TypeScript | Google's tool patterns |
+| OpenHands | Python | Full agent platform |
+
+See [reference-code/README.md](../reference-code/README.md) for clone commands.

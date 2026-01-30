@@ -1,7 +1,7 @@
-import { ParentComponent } from "solid-js";
-import { Sidebar } from "./Sidebar";
-import { TabBar } from "./TabBar";
-import { StatusBar } from "./StatusBar";
+import type { ParentComponent } from 'solid-js'
+import { Sidebar } from './Sidebar'
+import { StatusBar } from './StatusBar'
+import { TabBar } from './TabBar'
 
 export const AppShell: ParentComponent = (props) => {
   return (
@@ -15,13 +15,11 @@ export const AppShell: ParentComponent = (props) => {
         <TabBar />
 
         {/* Main content */}
-        <main class="flex-1 overflow-hidden">
-          {props.children}
-        </main>
+        <main class="flex-1 overflow-hidden">{props.children}</main>
 
         {/* Status bar */}
         <StatusBar />
       </div>
     </div>
-  );
-};
+  )
+}

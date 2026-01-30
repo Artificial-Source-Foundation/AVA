@@ -1,0 +1,36 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":preserveSemverRanges",
+    "group:allNonMajor"
+  ],
+  "labels": ["dependencies"],
+  "schedule": ["before 6am on monday"],
+  "timezone": "UTC",
+  "prConcurrentLimit": 5,
+  "packageRules": [
+    {
+      "description": "Group Tauri packages",
+      "matchPackagePatterns": ["^@tauri-apps/"],
+      "groupName": "Tauri packages"
+    },
+    {
+      "description": "Group testing packages",
+      "matchPackagePatterns": ["vitest", "testing-library", "jsdom"],
+      "groupName": "Testing packages"
+    },
+    {
+      "description": "Group linting packages",
+      "matchPackagePatterns": ["eslint", "oxlint", "biome"],
+      "groupName": "Linting packages"
+    },
+    {
+      "description": "Auto-merge patch updates",
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr"
+    }
+  ]
+}

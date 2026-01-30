@@ -1,0 +1,75 @@
+# Estela
+
+> Multi-Agent AI Coding Assistant - Desktop app built with Tauri + SolidJS
+
+## Quick Start
+
+- `npm run tauri dev` - Development mode
+- `npx tsc --noEmit` - Type check
+- API keys: Settings modal in app
+
+## Architecture Overview
+
+```
+src/
+├── components/     # UI components (SolidJS)
+├── config/         # Constants, env validation
+├── hooks/          # React-style hooks (useChat)
+├── services/       # Business logic
+│   ├── auth/       # Credentials, OAuth
+│   ├── llm/        # LLM clients (streaming)
+│   ├── database.ts # SQLite operations
+│   └── migrations.ts
+├── stores/         # Global state (SolidJS signals)
+└── types/          # TypeScript types
+```
+
+## Key Files
+
+### Entry Points
+- src/App.tsx - Root component with initialization
+- src/index.tsx - SolidJS render entry
+
+### State Management
+- src/stores/session.ts - Session, messages, agents state
+- src/hooks/useChat.ts - Chat streaming logic
+
+### Services
+- src/services/database.ts - SQLite CRUD operations
+- src/services/llm/client.ts - LLM provider abstraction
+- src/services/auth/credentials.ts - API key storage
+
+### Components
+- src/components/chat/ - Chat UI (MessageList, MessageInput)
+- src/components/sessions/ - Session management UI
+- src/components/settings/ - Settings modal
+
+## Data Flow
+
+```
+User Input → useChat.sendMessage()
+           → saveMessage() to SQLite
+           → resolveAuth() picks provider
+           → createClient() streams response
+           → session.updateMessageContent() updates UI
+           → updateMessage() saves final response
+```
+
+## Provider Priority
+
+1. OAuth token (if available)
+2. Direct API key (Anthropic, OpenAI)
+3. OpenRouter gateway (fallback)
+
+## Database Schema
+
+- sessions: id, name, created_at, updated_at, status
+- messages: id, session_id, role, content, tokens_used
+- agents: id, session_id, type, status, model
+- file_changes: id, session_id, agent_id, file_path, change_type
+
+## Links
+
+- [Architecture Docs](docs/architecture/README.md)
+- [Memory Bank](docs/memory-bank/)
+- [Roadmap](docs/ROADMAP.md)

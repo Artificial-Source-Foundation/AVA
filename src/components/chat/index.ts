@@ -1,3 +1,7 @@
-export { ChatView } from "./ChatView";
-export { MessageList } from "./MessageList";
-export { MessageInput } from "./MessageInput";
+export { ChatView } from './ChatView'
+export { EditForm } from './EditForm'
+export { MessageActions } from './MessageActions'
+export { MessageBubble } from './MessageBubble'
+export { MessageInput } from './MessageInput'
+export { MessageList } from './MessageList'
+export { TypingIndicator } from './TypingIndicator'

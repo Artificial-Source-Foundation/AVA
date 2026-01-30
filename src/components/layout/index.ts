@@ -1,4 +1,4 @@
-export { AppShell } from "./AppShell";
-export { Sidebar } from "./Sidebar";
-export { TabBar } from "./TabBar";
-export { StatusBar } from "./StatusBar";
+export { AppShell } from './AppShell'
+export { Sidebar } from './Sidebar'
+export { StatusBar } from './StatusBar'
+export { TabBar } from './TabBar'

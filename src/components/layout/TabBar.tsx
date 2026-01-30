@@ -1,4 +1,4 @@
-import { Component } from "solid-js";
+import type { Component } from 'solid-js'
 
 export const TabBar: Component = () => {
   return (
@@ -6,13 +6,18 @@ export const TabBar: Component = () => {
       {/* Active tab */}
       <div class="flex items-center px-4 py-1 bg-gray-900 rounded-t-lg text-sm text-white">
         <span>New Session</span>
-        <button class="ml-2 text-gray-500 hover:text-white">×</button>
+        <button type="button" class="ml-2 text-gray-500 hover:text-white">
+          ×
+        </button>
       </div>
 
       {/* Add tab button */}
-      <button class="ml-2 px-2 py-1 text-gray-500 hover:text-white hover:bg-gray-700 rounded">
+      <button
+        type="button"
+        class="ml-2 px-2 py-1 text-gray-500 hover:text-white hover:bg-gray-700 rounded"
+      >
         +
       </button>
     </div>
-  );
-};
+  )
+}

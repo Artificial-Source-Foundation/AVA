@@ -1,0 +1,205 @@
+/**
+ * Credential Management Service
+ * Handles storage and retrieval of API keys and OAuth tokens
+ */
+
+import type { Credentials, LLMProvider, StoredCredentials } from '../../types/llm'
+
+const STORAGE_KEY = 'estela_credentials'
+
+// ============================================================================
+// Core Functions
+// ============================================================================
+
+/**
+ * Get credentials for a specific provider
+ * Returns null if not found or expired (for OAuth tokens)
+ */
+export function getCredentials(provider: LLMProvider): Credentials | null {
+  const stored = localStorage.getItem(STORAGE_KEY)
+  if (!stored) return null
+
+  try {
+    const all: StoredCredentials = JSON.parse(stored)
+    const cred = all[provider]
+    if (!cred) return null
+
+    // Check expiry for OAuth tokens
+    if (cred.type === 'oauth-token' && cred.expiresAt) {
+      if (Date.now() > cred.expiresAt) {
+        // Token expired - could trigger refresh here in future
+        console.warn(`OAuth token expired for ${provider}`)
+        return null
+      }
+    }
+
+    return cred
+  } catch (err) {
+    console.error('Failed to parse credentials:', err)
+    return null
+  }
+}
+
+/**
+ * Store credentials for a provider
+ * Overwrites existing credentials for that provider
+ */
+export function setCredentials(provider: LLMProvider, credentials: Credentials): void {
+  const stored = localStorage.getItem(STORAGE_KEY)
+  let all: StoredCredentials = {}
+
+  try {
+    if (stored) {
+      all = JSON.parse(stored)
+    }
+  } catch {
+    // Start fresh if corrupted
+    all = {}
+  }
+
+  all[provider] = credentials
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(all))
+}
+
+/**
+ * Remove credentials for a provider
+ */
+export function clearCredentials(provider: LLMProvider): void {
+  const stored = localStorage.getItem(STORAGE_KEY)
+  if (!stored) return
+
+  try {
+    const all: StoredCredentials = JSON.parse(stored)
+    delete all[provider]
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(all))
+  } catch {
+    // If corrupted, clear everything
+    localStorage.removeItem(STORAGE_KEY)
+  }
+}
+
+/**
+ * Clear all stored credentials
+ */
+export function clearAllCredentials(): void {
+  localStorage.removeItem(STORAGE_KEY)
+}
+
+// ============================================================================
+// Query Functions
+// ============================================================================
+
+/**
+ * List all providers that have credentials configured
+ */
+export function listConfiguredProviders(): LLMProvider[] {
+  const stored = localStorage.getItem(STORAGE_KEY)
+  if (!stored) return []
+
+  try {
+    const all: StoredCredentials = JSON.parse(stored)
+    return Object.keys(all).filter((key) => {
+      const cred = all[key]
+      // Exclude expired OAuth tokens
+      if (cred.type === 'oauth-token' && cred.expiresAt && Date.now() > cred.expiresAt) {
+        return false
+      }
+      return true
+    }) as LLMProvider[]
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Check if any credentials are configured
+ */
+export function hasAnyCredentials(): boolean {
+  return listConfiguredProviders().length > 0
+}
+
+/**
+ * Check if a specific provider has valid credentials
+ */
+export function hasCredentials(provider: LLMProvider): boolean {
+  return getCredentials(provider) !== null
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+/**
+ * Set API key for a provider (convenience wrapper)
+ */
+export function setApiKey(provider: LLMProvider, apiKey: string): void {
+  setCredentials(provider, {
+    provider,
+    type: 'api-key',
+    value: apiKey,
+  })
+}
+
+/**
+ * Get API key for a provider (convenience wrapper)
+ * Returns null if not found or if it's an OAuth token
+ */
+export function getApiKey(provider: LLMProvider): string | null {
+  const cred = getCredentials(provider)
+  if (!cred || cred.type !== 'api-key') return null
+  return cred.value
+}
+
+/**
+ * Set OAuth token for a provider
+ */
+export function setOAuthToken(
+  provider: LLMProvider,
+  accessToken: string,
+  expiresIn: number,
+  refreshToken?: string
+): void {
+  setCredentials(provider, {
+    provider,
+    type: 'oauth-token',
+    value: accessToken,
+    expiresAt: Date.now() + expiresIn * 1000,
+    refreshToken,
+  })
+}
+
+/**
+ * Check if OAuth token needs refresh (within 5 minutes of expiry)
+ */
+export function needsTokenRefresh(provider: LLMProvider): boolean {
+  const cred = getCredentials(provider)
+  if (!cred || cred.type !== 'oauth-token' || !cred.expiresAt) return false
+
+  const REFRESH_BUFFER = 5 * 60 * 1000 // 5 minutes
+  return Date.now() > cred.expiresAt - REFRESH_BUFFER
+}
+
+// ============================================================================
+// Environment Variable Fallback
+// ============================================================================
+
+/**
+ * Get API key with environment variable fallback
+ * Useful for development
+ */
+export function getApiKeyWithFallback(provider: LLMProvider): string | null {
+  // First check localStorage
+  const stored = getApiKey(provider)
+  if (stored) return stored
+
+  // Fallback to environment variables
+  const envKeys: Record<LLMProvider, string> = {
+    openrouter: 'VITE_OPENROUTER_API_KEY',
+    anthropic: 'VITE_ANTHROPIC_API_KEY',
+    openai: 'VITE_OPENAI_API_KEY',
+    glm: 'VITE_GLM_API_KEY',
+  }
+
+  const envKey = envKeys[provider]
+  return import.meta.env[envKey] || null
+}

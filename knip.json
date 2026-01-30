@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": ["src/index.tsx", "src/App.tsx"],
+  "project": ["src/**/*.{ts,tsx}"],
+  "ignore": [
+    "src-tauri/**",
+    "**/*.d.ts",
+    "**/*.config.{js,ts}",
+    "**/*.test.{ts,tsx}",
+    "**/*.spec.{ts,tsx}"
+  ],
+  "ignoreDependencies": ["@tauri-apps/cli", "autoprefixer", "postcss", "@tailwindcss/postcss"],
+  "ignoreBinaries": ["tauri"]
+}

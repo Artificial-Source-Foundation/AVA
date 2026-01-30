@@ -1,151 +1,156 @@
 # Project Structure
 
-> Complete file organization for the Tauri + SolidJS application
+> Current file organization (Sprint 1.3.5)
 
 ---
 
+## Frontend (SolidJS + TypeScript)
+
 ```
-project/
-├── src/                          # Frontend (SolidJS + TypeScript)
-│   ├── App.tsx                   # Root component
-│   ├── index.tsx                 # Entry point
-│   ├── index.css                 # Global styles + Tailwind
-│   │
-│   ├── components/               # UI Components
-│   │   ├── layout/
-│   │   │   ├── AppShell.tsx      # Main app container
-│   │   │   ├── Sidebar.tsx       # Project/session navigation
-│   │   │   ├── TabBar.tsx        # Multi-tab support
-│   │   │   └── StatusBar.tsx     # Agent status indicators
-│   │   │
-│   │   ├── chat/
-│   │   │   ├── ChatWindow.tsx    # Main conversation area
-│   │   │   ├── MessageBubble.tsx # Individual messages
-│   │   │   ├── StreamingText.tsx # Real-time text streaming
-│   │   │   ├── CodeBlock.tsx     # Syntax-highlighted code
-│   │   │   └── InputArea.tsx     # User input with commands
-│   │   │
-│   │   ├── agents/
-│   │   │   ├── AgentPanel.tsx    # Shows active agents
-│   │   │   ├── AgentCard.tsx     # Individual agent status
-│   │   │   ├── CommanderView.tsx # Commander's plan/backlog
-│   │   │   └── OperatorList.tsx  # Active operators grid
-│   │   │
-│   │   ├── editor/
-│   │   │   ├── FileTree.tsx      # Project file browser
-│   │   │   ├── DiffViewer.tsx    # Show file changes
-│   │   │   ├── InlineEdit.tsx    # Inline code editing
-│   │   │   └── Terminal.tsx      # Embedded terminal
-│   │   │
-│   │   └── common/
-│   │       ├── Button.tsx
-│   │       ├── Modal.tsx
-│   │       ├── Tooltip.tsx
-│   │       └── LoadingSpinner.tsx
-│   │
-│   ├── stores/                   # State Management
-│   │   ├── agentStore.ts         # Agent states (Commander, Operators)
-│   │   ├── sessionStore.ts       # Current session data
-│   │   ├── projectStore.ts       # Active project/workspace
-│   │   ├── chatStore.ts          # Conversation history
-│   │   └── settingsStore.ts      # User preferences
-│   │
-│   ├── services/                 # Business Logic
-│   │   ├── agents/
-│   │   │   ├── commanderService.ts   # Commander orchestration
-│   │   │   ├── operatorService.ts    # Operator task execution
-│   │   │   └── agentFactory.ts       # Spawn new agents
-│   │   │
-│   │   ├── llm/
-│   │   │   ├── providerManager.ts    # Multi-provider support
-│   │   │   ├── anthropicClient.ts    # Claude API
-│   │   │   ├── openaiClient.ts       # OpenAI API
-│   │   │   ├── googleClient.ts       # Gemini API
-│   │   │   └── streamingHandler.ts   # Handle SSE streams
-│   │   │
-│   │   ├── tools/
-│   │   │   ├── fileEdit.ts           # str_replace, create_file
-│   │   │   ├── fileRead.ts           # Read file contents
-│   │   │   ├── bash.ts               # Execute shell commands
-│   │   │   ├── search.ts             # Grep/ripgrep wrapper
-│   │   │   └── lspBridge.ts          # LSP tool calls
-│   │   │
-│   │   └── documentation/
-│   │       ├── docManager.ts         # Manage /docs folder
-│   │       ├── docGenerator.ts       # Auto-generate docs
-│   │       └── contextCompressor.ts  # Pre-compaction summarizer
-│   │
-│   ├── hooks/                    # SolidJS Hooks
-│   │   ├── useAgent.ts           # Agent lifecycle
-│   │   ├── useChat.ts            # Chat operations
-│   │   ├── useProject.ts         # Project operations
-│   │   └── useKeyboard.ts        # Keyboard shortcuts
-│   │
-│   ├── utils/
-│   │   ├── tauri.ts              # Tauri IPC helpers
-│   │   ├── formatters.ts         # Code/text formatting
-│   │   └── validators.ts         # Input validation
-│   │
-│   └── types/
-│       ├── agent.ts              # Agent type definitions
-│       ├── message.ts            # Message types
-│       ├── tool.ts               # Tool definitions
-│       └── project.ts            # Project types
+src/
+├── App.tsx                    # Root with initialization
+├── index.tsx                  # SolidJS entry point
+├── index.css                  # Global styles + Tailwind
 │
-├── src-tauri/                    # Backend (Rust)
-│   ├── Cargo.toml                # Rust dependencies
-│   ├── tauri.conf.json           # Tauri configuration
-│   ├── capabilities/
-│   │   └── default.json          # Permissions
+├── components/                # UI Components
+│   ├── index.ts               # Barrel export
 │   │
-│   ├── src/
-│   │   ├── main.rs               # Entry point
-│   │   ├── lib.rs                # Library root
-│   │   │
-│   │   ├── commands/             # Tauri Commands (IPC)
-│   │   │   ├── mod.rs
-│   │   │   ├── file_ops.rs       # File operations
-│   │   │   ├── shell.rs          # Shell execution
-│   │   │   ├── project.rs        # Project management
-│   │   │   └── agent.rs          # Agent management
-│   │   │
-│   │   ├── lsp/                  # LSP Integration
-│   │   │   ├── mod.rs
-│   │   │   ├── client.rs         # LSP client implementation
-│   │   │   ├── manager.rs        # Multi-language LSP manager
-│   │   │   └── watcher.rs        # File watcher for LSP sync
-│   │   │
-│   │   ├── tools/                # Tool Implementations
-│   │   │   ├── mod.rs
-│   │   │   ├── str_replace.rs    # String replacement tool
-│   │   │   ├── file_create.rs    # File creation
-│   │   │   ├── bash.rs           # Bash execution
-│   │   │   └── diagnostics.rs    # LSP diagnostics tool
-│   │   │
-│   │   ├── db/                   # Database Layer
-│   │   │   ├── mod.rs
-│   │   │   ├── migrations.rs     # SQLite migrations
-│   │   │   ├── sessions.rs       # Session CRUD
-│   │   │   ├── messages.rs       # Message history
-│   │   │   └── agents.rs         # Agent state persistence
-│   │   │
-│   │   └── utils/
-│   │       ├── mod.rs
-│   │       ├── paths.rs          # Path resolution
-│   │       └── git.rs            # Git operations
+│   ├── chat/                  # Chat Interface
+│   │   ├── index.ts
+│   │   ├── ChatView.tsx       # Main chat container
+│   │   ├── MessageList.tsx    # Message list
+│   │   ├── MessageBubble.tsx  # Single message display
+│   │   ├── MessageInput.tsx   # User input area
+│   │   ├── MessageActions.tsx # Copy, edit, retry actions
+│   │   ├── EditForm.tsx       # Inline message editing
+│   │   └── TypingIndicator.tsx
 │   │
-│   └── icons/                    # App icons
+│   ├── sessions/              # Session Management
+│   │   ├── index.ts
+│   │   ├── SessionList.tsx    # Session sidebar list
+│   │   └── SessionListItem.tsx # Single session item
+│   │
+│   ├── settings/              # Settings
+│   │   ├── index.ts
+│   │   └── SettingsModal.tsx  # API key configuration
+│   │
+│   ├── layout/                # App Shell
+│   │   ├── index.ts
+│   │   ├── AppShell.tsx       # Main layout
+│   │   ├── Sidebar.tsx        # Left sidebar
+│   │   ├── TabBar.tsx         # Top tabs
+│   │   └── StatusBar.tsx      # Bottom status
+│   │
+│   └── common/                # Shared Components
+│       ├── index.ts
+│       └── ErrorBoundary.tsx  # Error handling
 │
-├── docs/                         # Project Documentation
-│   ├── VISION.md                 # Project vision and roadmap
-│   ├── architecture/             # System design
-│   ├── agents/                   # Agent specifications
-│   ├── development/              # Dev guides
-│   └── reference/                # API reference
+├── config/                    # Configuration
+│   ├── index.ts
+│   ├── constants.ts           # Magic strings, defaults
+│   └── env.ts                 # Environment validation
 │
+├── hooks/                     # Custom Hooks
+│   ├── index.ts
+│   └── useChat.ts             # Chat streaming logic
+│
+├── services/                  # Business Logic
+│   ├── index.ts               # Barrel export
+│   ├── database.ts            # SQLite CRUD operations
+│   ├── migrations.ts          # Schema versioning
+│   │
+│   ├── auth/                  # Authentication
+│   │   ├── index.ts
+│   │   ├── credentials.ts     # API key storage
+│   │   └── oauth-codex.ts     # OAuth PKCE flow
+│   │
+│   └── llm/                   # LLM Integration
+│       ├── index.ts
+│       ├── client.ts          # Provider abstraction
+│       └── providers/
+│           ├── index.ts
+│           ├── anthropic.ts   # Anthropic client
+│           └── openrouter.ts  # OpenRouter client
+│
+├── stores/                    # State Management
+│   ├── index.ts
+│   └── session.ts             # Session + messages state
+│
+└── types/                     # TypeScript Types
+    ├── index.ts               # Core types
+    └── llm.ts                 # LLM-specific types
+```
+
+---
+
+## Backend (Tauri + Rust)
+
+```
+src-tauri/
+├── Cargo.toml                 # Rust dependencies
+├── tauri.conf.json            # Tauri config
+├── capabilities/
+│   └── default.json           # Permissions
+│
+└── src/
+    ├── main.rs                # Entry point
+    └── lib.rs                 # Library root
+```
+
+---
+
+## Documentation
+
+```
+docs/
+├── ROADMAP.md                 # Epic overview
+│
+├── architecture/              # System Design
+│   ├── README.md              # This index
+│   ├── project-structure.md   # File organization
+│   ├── database-schema.md     # SQLite schema
+│   ├── data-flow.md           # Data flow diagrams
+│   ├── components.md          # Component hierarchy
+│   ├── services.md            # Service layer
+│   └── types.md               # Type definitions
+│
+├── memory-bank/               # Session Context
+│   ├── activeContext.md       # Current focus
+│   ├── progress.md            # What's done
+│   ├── techContext.md         # Technical decisions
+│   └── projectbrief.md        # Project overview
+│
+└── development/               # Development
+    ├── epics/                 # Sprint plans
+    └── completed/             # Archived sprints
+```
+
+---
+
+## Root Files
+
+```
+/
+├── CLAUDE.md                  # AI assistant instructions
+├── AGENTS.md                  # Agent-specific instructions
+├── llms.txt                   # AI navigation file
 ├── package.json
 ├── tsconfig.json
 ├── tailwind.config.js
 ├── vite.config.ts
 └── README.md
 ```
+
+---
+
+## File Counts
+
+| Directory | Files | Purpose |
+|-----------|-------|---------|
+| `src/components/` | 15 | UI components |
+| `src/services/` | 11 | Business logic |
+| `src/stores/` | 2 | State management |
+| `src/types/` | 2 | Type definitions |
+| `src/hooks/` | 2 | Custom hooks |
+| `src/config/` | 3 | Configuration |
+| `docs/` | 15+ | Documentation |

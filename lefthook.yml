@@ -1,0 +1,23 @@
+# Lefthook - Git hooks manager
+# https://github.com/evilmartians/lefthook
+
+pre-commit:
+  parallel: true
+  commands:
+    biome-check:
+      glob: "*.{ts,tsx,js,jsx,json,css}"
+      run: npx biome check --write {staged_files}
+      stage_fixed: true
+
+    oxlint:
+      glob: "*.{ts,tsx}"
+      run: npx oxlint {staged_files}
+
+    typecheck:
+      glob: "*.{ts,tsx}"
+      run: npx tsc --noEmit
+
+commit-msg:
+  commands:
+    commitlint:
+      run: npx commitlint --edit {1}

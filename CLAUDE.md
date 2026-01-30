@@ -1,120 +1,91 @@
 # Estela
 
-> Multi-Agent AI Coding Assistant (Tauri 2.0 + SolidJS)
+> Multi-Agent AI Coding Assistant
+
+---
+
+## Memory Bank
+
+**IMPORTANT: Read these files at the start of every session:**
+
+| File | Purpose | Update |
+|------|---------|--------|
+| [`activeContext.md`](docs/memory-bank/activeContext.md) | Current tasks & focus | Every session |
+| [`progress.md`](docs/memory-bank/progress.md) | What's been done | Every session |
+| [`techContext.md`](docs/memory-bank/techContext.md) | Architecture & patterns | When arch changes |
+| [`projectbrief.md`](docs/memory-bank/projectbrief.md) | What is Estela | Rarely |
+
+**Workflow:**
+1. Start → Read `activeContext.md`
+2. Work → Update as focus changes
+3. End → Update `progress.md`
+4. Context full? → "Update memory bank" then `/clear`
 
 ---
 
 ## Commands
 
 ```bash
-npm run tauri dev      # Development mode
-npm run tauri build    # Production build
-npm test               # Run tests
-npm run lint           # ESLint check
-npm run typecheck      # TypeScript check
+# Development
+npm run tauri dev      # Run app
+npm run lint           # Oxlint + ESLint
+npm run lint:fix       # Auto-fix lint issues
+npm run format         # Biome format
+npm run format:check   # Check formatting
+npx tsc --noEmit       # Type check
+
+# Testing
+npm run test           # Vitest watch
+npm run test:run       # Single run
+npm run test:coverage  # Coverage report
+
+# Code Quality
+npm run knip           # Dead code detection
+npm run knip:fix       # Remove dead code
+npm run analyze        # Bundle size analysis
 ```
 
 ---
 
-## Documentation
+## Tooling Stack
 
-| Document | Description |
-|----------|-------------|
-| `docs/VISION.md` | Project vision, architecture, roadmap |
-| `docs/BACKLOG.md` | Current development tasks |
-| `docs/architecture/` | System design documents |
-| `docs/agents/` | Agent specifications |
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| **Desktop** | Tauri 2.0 (Rust) |
-| **Frontend** | SolidJS + TypeScript |
-| **Styling** | Tailwind CSS |
-| **Database** | SQLite |
-| **LSP** | Rust client |
+| Tool | Purpose |
+|------|---------|
+| Biome | Fast formatter + linter (replaces Prettier) |
+| Oxlint | Fast linter (50-100x ESLint) |
+| ESLint | SolidJS-specific rules |
+| Lefthook | Git hooks (pre-commit, commit-msg) |
+| commitlint | Conventional commit validation |
+| Vitest | Test runner |
+| Knip | Dead code finder |
+| Renovate | Auto dependency updates |
 
 ---
 
-## Project Structure
+## Planning
 
-```
-estela/
-├── src/                    # SolidJS frontend
-│   ├── components/
-│   │   ├── layout/         # AppShell, Sidebar, TabBar, StatusBar
-│   │   ├── chat/           # MessageList, MessageInput, StreamingText
-│   │   └── agents/         # AgentCard, AgentTree
-│   ├── stores/             # State management
-│   ├── services/           # LLM, agents, file operations
-│   ├── hooks/              # Custom hooks
-│   └── types/              # TypeScript definitions
-│
-├── src-tauri/              # Rust backend
-│   └── src/
-│       ├── commands/       # Tauri IPC commands
-│       │   ├── file_ops.rs # str_replace, create_file, read_file
-│       │   ├── bash.rs     # Shell execution
-│       │   └── llm.rs      # Streaming API calls
-│       ├── lsp/            # Language server client
-│       ├── tools/          # Tool implementations
-│       └── db/             # SQLite operations
-│
-└── docs/                   # Documentation
-```
+| Doc | Purpose |
+|-----|---------|
+| [`ROADMAP.md`](docs/ROADMAP.md) | High-level epic overview |
+| [`development/epics/`](docs/development/epics/) | Detailed sprint planning |
+| [`development/completed/`](docs/development/completed/) | Archived done sprints |
 
 ---
 
-## Agent Architecture
+## Code Style
 
-```
-COMMANDER (Planning)
-    │
-    ├── Analyzes requests
-    ├── Creates task breakdown
-    ├── Assigns files to operators
-    └── Reviews results
-         │
-         ▼
-    OPERATORS (Execution)
-         │
-         ├── One file per operator
-         ├── Parallel execution
-         └── Reports summary
-              │
-              ▼
-         VALIDATOR (QA)
-              │
-              └── PASS / FIXABLE / FAIL
-```
-
-**Key Rule**: Commander NEVER writes code. Only plans and delegates.
-
----
-
-## Coding Conventions
-
-### TypeScript (Frontend)
-- Strict mode, no `any`
-- Zod for runtime validation
+- TypeScript strict, no `any`
+- Max 300 lines per file
 - kebab-case files, camelCase functions, PascalCase types
 
-### Rust (Backend)
-- Safe Rust, no unnecessary unsafe
-- Error handling with `Result<T, E>`
-- Serde for serialization
-
-### General
-- Max 300 lines per file
-- One component per file
-- Test before committing
-
 ---
 
-## Current Status
+## Architecture
 
-**Phase**: Planning complete, ready for scaffolding
-**Next**: `npm create tauri-app@latest estela -- --template solid-ts`
+```
+useChat() → resolveAuth() → createClient() → stream()
+                ↓
+    OAuth → Direct Key → OpenRouter (fallback)
+```
+
+See `docs/memory-bank/techContext.md` for details.

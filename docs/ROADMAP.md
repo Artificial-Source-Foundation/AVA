@@ -18,10 +18,10 @@
 
 | # | Epic | Goal | Status |
 |---|------|------|--------|
-| 4 | [Safety](./development/epics/4-safety.md) | Permissions, file locking, process control | 🟡 Next |
-| 5 | [Context](./development/epics/5-context.md) | Token tracking, compaction, session state | ⬜ |
-| 6 | [DX](./development/epics/6-dx.md) | Tool.define(), diffs, git snapshots | ⬜ |
-| 7 | [Platform](./development/epics/7-platform.md) | PTY allocation, MCP integration | ⬜ |
+| 4 | [Safety](./development/epics/4-safety.md) | Permissions, file locking, process control | ✅ Complete |
+| 5 | [Context](./development/epics/5-context.md) | Token tracking, compaction, session state | ✅ Complete |
+| 6 | [DX](./development/epics/6-dx.md) | Tool.define(), diffs, git snapshots | ✅ Complete |
+| 7 | [Platform](./development/epics/7-platform.md) | PTY allocation, MCP integration | 🟡 Next |
 
 ### Agent System (Future)
 

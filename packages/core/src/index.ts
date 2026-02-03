@@ -15,6 +15,8 @@ export * from './git/index.js'
 export * from './llm/index.js'
 // Model registry
 export * from './models/index.js'
+// Permission system
+export * from './permissions/index.js'
 // Platform abstraction
 export * from './platform.js'
 // Session management

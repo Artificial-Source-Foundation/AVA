@@ -37,6 +37,18 @@
     "./models": {
       "types": "./dist/models/index.d.ts",
       "import": "./dist/models/index.js"
+    },
+    "./permissions": {
+      "types": "./dist/permissions/index.d.ts",
+      "import": "./dist/permissions/index.js"
+    },
+    "./diff": {
+      "types": "./dist/diff/index.d.ts",
+      "import": "./dist/diff/index.js"
+    },
+    "./git": {
+      "types": "./dist/git/index.d.ts",
+      "import": "./dist/git/index.js"
     }
   },
   "scripts": {
@@ -47,8 +59,7 @@
   "dependencies": {
     "diff": "^8.0.3",
     "gpt-tokenizer": "^3.4.0",
-    "zod": "^4.3.6",
-    "zod-to-json-schema": "^3.25.1"
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "typescript": "~5.6.2"

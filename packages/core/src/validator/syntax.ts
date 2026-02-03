@@ -166,9 +166,7 @@ function basicSyntaxCheck(content: string, _file: string): SyntaxCheckResult {
     // Check for obvious string issues (very basic)
     const singleQuotes = (line.match(/'/g) || []).length
     const doubleQuotes = (line.match(/"/g) || []).length
-    const _backticks = (line.match(/`/g) || []).length
-
-    // Template literals can span multiple lines, so skip backtick check
+    // Note: backticks are not checked as template literals can span multiple lines
     if (singleQuotes % 2 !== 0 && !line.includes("\\'")) {
       warnings.push(`Line ${i + 1}: Possible unterminated single-quoted string`)
     }

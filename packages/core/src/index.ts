@@ -11,6 +11,8 @@ export * from './auth/index.js'
 export * from './codebase/index.js'
 // Commander (hierarchical delegation)
 export * from './commander/index.js'
+// Configuration (settings, credentials)
+export * from './config/index.js'
 // Context management (token tracking, compaction)
 export * from './context/index.js'
 // Diff tracking
@@ -21,6 +23,8 @@ export * from './git/index.js'
 export * from './llm/index.js'
 // MCP (Model Context Protocol) client
 export * from './mcp/index.js'
+// Memory system (long-term, RAG)
+export * from './memory/index.js'
 // Model registry
 export * from './models/index.js'
 // Permission system

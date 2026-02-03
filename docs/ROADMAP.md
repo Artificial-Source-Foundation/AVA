@@ -32,8 +32,8 @@
 | 10 | [Parallel](./development/epics/10-parallel.md) | Concurrent operators | ✅ Complete |
 | 11 | [Validator](./development/epics/11-validator.md) | QA verification gate | ✅ Complete |
 | 12 | [Codebase](./development/epics/12-codebase.md) | Codebase understanding, repo map | ✅ Complete |
-| 13 | [Config](./development/epics/13-config.md) | Settings UI, preferences | ⬜ |
-| 14 | [Memory](./development/epics/14-memory.md) | Long-term memory, RAG | ⬜ |
+| 13 | [Config](./development/epics/13-config.md) | Settings UI, preferences | ✅ Complete |
+| 14 | [Memory](./development/epics/14-memory.md) | Long-term memory, RAG | ✅ Complete |
 
 ---
 

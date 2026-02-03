@@ -183,7 +183,7 @@ async function runLLMReview(diffs: string, ctx: ValidationContext): Promise<Self
   // Truncate diffs if too long (keep under ~8000 tokens)
   const maxDiffChars = 30000 // ~7500 tokens
   const truncatedDiffs =
-    diffs.length > maxDiffChars ? diffs.slice(0, maxDiffChars) + '\n\n... (diff truncated)' : diffs
+    diffs.length > maxDiffChars ? `${diffs.slice(0, maxDiffChars)}\n\n... (diff truncated)` : diffs
 
   // Create messages
   const messages: ChatMessage[] = [
@@ -205,6 +205,8 @@ async function runLLMReview(diffs: string, ctx: ValidationContext): Promise<Self
 
   // Configure provider
   const providerConfig: ProviderConfig = {
+    provider: 'anthropic',
+    authMethod: 'api-key',
     model: 'claude-sonnet-4-20250514', // Fast, capable model
     maxTokens: DEFAULT_SELF_REVIEW_CONFIG.maxTokens!,
     systemPrompt: REVIEW_SYSTEM_PROMPT,
@@ -214,7 +216,7 @@ async function runLLMReview(diffs: string, ctx: ValidationContext): Promise<Self
   let response = ''
   try {
     for await (const delta of client.stream(messages, providerConfig, ctx.signal)) {
-      if (delta.type === 'text' && delta.content) {
+      if (delta.content) {
         response += delta.content
       }
     }

@@ -156,6 +156,7 @@ export type AgentEventType =
   | 'tool:start'
   | 'tool:finish'
   | 'tool:error'
+  | 'tool:metadata'
   | 'thought'
   | 'recovery:start'
   | 'recovery:finish'
@@ -251,6 +252,20 @@ export interface ToolErrorEvent extends AgentEventBase {
 }
 
 /**
+ * Tool metadata update event
+ * Emitted when a tool streams progressive updates during execution
+ */
+export interface ToolMetadataEvent extends AgentEventBase {
+  type: 'tool:metadata'
+  /** Tool name */
+  toolName: string
+  /** Metadata title (optional) */
+  title?: string
+  /** Metadata payload */
+  metadata: Record<string, unknown>
+}
+
+/**
  * Thought/reasoning event
  */
 export interface ThoughtEvent extends AgentEventBase {
@@ -303,6 +318,7 @@ export type AgentEvent =
   | ToolStartEvent
   | ToolFinishEvent
   | ToolErrorEvent
+  | ToolMetadataEvent
   | ThoughtEvent
   | RecoveryStartEvent
   | RecoveryFinishEvent

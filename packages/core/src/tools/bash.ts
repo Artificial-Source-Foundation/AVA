@@ -6,6 +6,7 @@
 
 import { getPlatform } from '../platform.js'
 import { ToolError, ToolErrorType } from './errors.js'
+import { truncateForMetadata } from './truncation.js'
 import type { Tool, ToolContext, ToolResult } from './types.js'
 import {
   isBinaryOutput,
@@ -232,6 +233,14 @@ async function executeShell(
           }
 
           stdout += decoder.decode(value, { stream: true })
+
+          // Stream metadata update for live output
+          if (ctx.metadata) {
+            ctx.metadata({
+              title: params.description,
+              metadata: { output: truncateForMetadata(stdout), stream: 'stdout' },
+            })
+          }
         }
       } catch {
         // Stream error - process may have been killed
@@ -251,6 +260,14 @@ async function executeShell(
           if (done) break
 
           stderr += decoder.decode(value, { stream: true })
+
+          // Stream metadata update for live stderr
+          if (ctx.metadata) {
+            ctx.metadata({
+              title: params.description,
+              metadata: { output: truncateForMetadata(stderr), stream: 'stderr' },
+            })
+          }
         }
       } catch {
         // Stream error - process may have been killed
@@ -423,6 +440,14 @@ async function executePty(
       // Truncate if getting too large (PTY can produce a lot of output)
       if (output.length > LIMITS.MAX_BYTES * 2) {
         output = output.slice(-LIMITS.MAX_BYTES)
+      }
+
+      // Stream metadata update for live PTY output
+      if (ctx.metadata) {
+        ctx.metadata({
+          title: params.description,
+          metadata: { output: truncateForMetadata(output), stream: 'pty' },
+        })
       }
     })
 

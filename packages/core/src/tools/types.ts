@@ -9,6 +9,27 @@ import type { ToolDefinition } from '../types/llm.js'
 export type { ToolDefinition } from '../types/llm.js'
 
 // ============================================================================
+// Metadata Streaming Types
+// ============================================================================
+
+/**
+ * Metadata update emitted during tool execution
+ * Allows tools to stream progressive updates (e.g., live bash output)
+ */
+export interface MetadataUpdate<T = Record<string, unknown>> {
+  /** Optional title for the update */
+  title?: string
+  /** Metadata payload */
+  metadata: T
+}
+
+/**
+ * Callback for streaming metadata updates during tool execution
+ * Based on OpenCode's ctx.metadata() pattern
+ */
+export type MetadataCallback = (update: MetadataUpdate) => void
+
+// ============================================================================
 // Tool Execution Types
 // ============================================================================
 
@@ -17,6 +38,11 @@ export interface ToolContext {
   sessionId: string
   workingDirectory: string
   signal: AbortSignal
+  /**
+   * Optional callback for streaming metadata updates during execution
+   * Call this to emit progressive updates (e.g., live bash output)
+   */
+  metadata?: MetadataCallback
 }
 
 /** Location affected by a tool operation */

@@ -9,6 +9,22 @@ import { getPlatform } from '../platform.js'
 // Binary Detection
 // ============================================================================
 
+// ============================================================================
+// Binary Check Types
+// ============================================================================
+
+/**
+ * Result of binary file detection
+ */
+export interface BinaryCheckResult {
+  /** Whether the file is binary */
+  isBinary: boolean
+  /** Reason for the determination */
+  reason: 'extension' | 'null_bytes' | 'non_printable_ratio' | 'none'
+  /** Confidence level */
+  confidence: 'high' | 'medium' | 'low'
+}
+
 /** Known binary file extensions */
 const BINARY_EXTENSIONS = new Set([
   // Archives
@@ -127,6 +143,80 @@ export async function isBinaryFile(path: string): Promise<boolean> {
   } catch {
     // If we can't read the file, assume text
     return false
+  }
+}
+
+/**
+ * Check if file is binary and return detailed result
+ * Enhanced version with structured output
+ */
+export async function checkBinaryFile(path: string): Promise<BinaryCheckResult> {
+  // Check extension first (fast path, high confidence)
+  if (isBinaryExtension(path)) {
+    return {
+      isBinary: true,
+      reason: 'extension',
+      confidence: 'high',
+    }
+  }
+
+  // Check content for null bytes and non-printable ratio
+  try {
+    const bytes = await getPlatform().fs.readBinary(path, 4096)
+
+    // Empty file is not binary
+    if (bytes.length === 0) {
+      return {
+        isBinary: false,
+        reason: 'none',
+        confidence: 'high',
+      }
+    }
+
+    // Check for null bytes (definitive binary indicator)
+    for (let i = 0; i < bytes.length; i++) {
+      if (bytes[i] === 0) {
+        return {
+          isBinary: true,
+          reason: 'null_bytes',
+          confidence: 'high',
+        }
+      }
+    }
+
+    // Check for high ratio of non-printable characters
+    let nonPrintable = 0
+    for (let i = 0; i < bytes.length; i++) {
+      const byte = bytes[i]
+      // Non-printable: not tab (9), newline (10), carriage return (13), or printable ASCII (32-126)
+      if (byte !== 9 && byte !== 10 && byte !== 13 && (byte < 32 || byte > 126)) {
+        nonPrintable++
+      }
+    }
+
+    const ratio = nonPrintable / bytes.length
+
+    // If more than 30% non-printable, consider binary
+    if (ratio > 0.3) {
+      return {
+        isBinary: true,
+        reason: 'non_printable_ratio',
+        confidence: ratio > 0.5 ? 'high' : 'medium',
+      }
+    }
+
+    return {
+      isBinary: false,
+      reason: 'none',
+      confidence: 'high',
+    }
+  } catch {
+    // If we can't read the file, assume text with low confidence
+    return {
+      isBinary: false,
+      reason: 'none',
+      confidence: 'low',
+    }
   }
 }
 
@@ -429,4 +519,153 @@ export function isInteractiveCommand(command: string): boolean {
  */
 export function getInteractiveCommands(): ReadonlySet<string> {
   return INTERACTIVE_COMMANDS
+}
+
+// ============================================================================
+// File Suggestions (Typo Detection)
+// ============================================================================
+
+/**
+ * File suggestion with similarity score
+ */
+export interface FileSuggestion {
+  /** Suggested file path */
+  path: string
+  /** Similarity score (0-1, higher is more similar) */
+  similarity: number
+  /** Reason for suggestion */
+  reason: 'similar_name' | 'same_extension' | 'common_typo'
+}
+
+/**
+ * Calculate Levenshtein distance between two strings
+ */
+function levenshteinDistance(a: string, b: string): number {
+  if (a.length === 0) return b.length
+  if (b.length === 0) return a.length
+
+  const matrix: number[][] = []
+
+  // Initialize matrix
+  for (let i = 0; i <= b.length; i++) {
+    matrix[i] = [i]
+  }
+  for (let j = 0; j <= a.length; j++) {
+    matrix[0][j] = j
+  }
+
+  // Fill matrix
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      const cost = a[j - 1] === b[i - 1] ? 0 : 1
+      matrix[i][j] = Math.min(
+        matrix[i - 1][j] + 1, // deletion
+        matrix[i][j - 1] + 1, // insertion
+        matrix[i - 1][j - 1] + cost // substitution
+      )
+    }
+  }
+
+  return matrix[b.length][a.length]
+}
+
+/**
+ * Calculate string similarity (0-1)
+ */
+function stringSimilarity(a: string, b: string): number {
+  const maxLen = Math.max(a.length, b.length)
+  if (maxLen === 0) return 1
+  const distance = levenshteinDistance(a.toLowerCase(), b.toLowerCase())
+  return 1 - distance / maxLen
+}
+
+/**
+ * Find similar files when a file is not found
+ * Returns suggestions sorted by similarity
+ */
+export async function findSimilarFiles(
+  notFoundPath: string,
+  workingDirectory: string,
+  maxSuggestions = 3
+): Promise<FileSuggestion[]> {
+  const fs = getPlatform().fs
+  const suggestions: FileSuggestion[] = []
+
+  // Extract filename and directory from the not found path
+  const fullPath = resolvePath(notFoundPath, workingDirectory)
+  const lastSlash = fullPath.lastIndexOf('/')
+  const directory = lastSlash >= 0 ? fullPath.substring(0, lastSlash) : workingDirectory
+  const filename = lastSlash >= 0 ? fullPath.substring(lastSlash + 1) : notFoundPath
+
+  // Get extension for matching
+  const dotIndex = filename.lastIndexOf('.')
+  const extension = dotIndex >= 0 ? filename.substring(dotIndex) : ''
+  const basename = dotIndex >= 0 ? filename.substring(0, dotIndex) : filename
+
+  try {
+    // List files in the directory
+    const entries = await fs.readDir(directory)
+
+    for (const entry of entries) {
+      // Skip directories
+      if (entry.isDirectory) continue
+
+      // Calculate similarity
+      const similarity = stringSimilarity(filename, entry.name)
+
+      // Extract entry extension
+      const entryDotIndex = entry.name.lastIndexOf('.')
+      const entryExtension = entryDotIndex >= 0 ? entry.name.substring(entryDotIndex) : ''
+      const entryBasename = entryDotIndex >= 0 ? entry.name.substring(0, entryDotIndex) : entry.name
+
+      // Determine reason and adjust score
+      let reason: FileSuggestion['reason'] = 'similar_name'
+      let adjustedSimilarity = similarity
+
+      // Boost score if extension matches
+      if (extension && extension === entryExtension) {
+        adjustedSimilarity = Math.min(1, adjustedSimilarity + 0.1)
+        if (similarity < 0.5) {
+          reason = 'same_extension'
+        }
+      }
+
+      // Check for common typos (case differences, extra/missing chars)
+      if (basename.toLowerCase() === entryBasename.toLowerCase()) {
+        adjustedSimilarity = Math.max(0.9, adjustedSimilarity)
+        reason = 'common_typo'
+      }
+
+      // Only suggest if reasonably similar
+      if (adjustedSimilarity >= 0.4) {
+        suggestions.push({
+          path: `${directory}/${entry.name}`,
+          similarity: adjustedSimilarity,
+          reason,
+        })
+      }
+    }
+
+    // Sort by similarity (descending) and limit
+    return suggestions.sort((a, b) => b.similarity - a.similarity).slice(0, maxSuggestions)
+  } catch {
+    // Directory doesn't exist or can't be read
+    return []
+  }
+}
+
+/**
+ * Format suggestions for display
+ */
+export function formatSuggestions(suggestions: FileSuggestion[]): string {
+  if (suggestions.length === 0) {
+    return ''
+  }
+
+  const lines = ['Did you mean:']
+  for (const s of suggestions) {
+    lines.push(`  - ${s.path}`)
+  }
+
+  return lines.join('\n')
 }

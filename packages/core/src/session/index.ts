@@ -10,6 +10,8 @@ export type {
   Checkpoint,
   CheckpointMeta,
   FileState,
+  ForkInfo,
+  ForkOptions,
   SerializedSessionState,
   SessionEvent,
   SessionEventListener,
@@ -17,4 +19,5 @@ export type {
   SessionMeta,
   SessionState,
   SessionStorage,
+  TodoItem,
 } from './types.js'

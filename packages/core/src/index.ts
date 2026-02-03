@@ -19,6 +19,8 @@ export * from './context/index.js'
 export * from './diff/index.js'
 // Git snapshots
 export * from './git/index.js'
+// Instructions (project/directory instructions)
+export * from './instructions/index.js'
 // LLM client
 export * from './llm/index.js'
 // MCP (Model Context Protocol) client
@@ -31,6 +33,10 @@ export * from './models/index.js'
 export * from './permissions/index.js'
 // Platform abstraction
 export * from './platform.js'
+// Question system (LLM-to-user questions)
+export * from './question/index.js'
+// Scheduler (background tasks)
+export * from './scheduler/index.js'
 // Session management
 export * from './session/index.js'
 // Tools

@@ -357,6 +357,17 @@ export class AgentExecutor {
       sessionId: this.sessionId,
       workingDirectory: cwd,
       signal,
+      metadata: (update) => {
+        // Emit tool:metadata event for streaming updates
+        this.emit({
+          type: 'tool:metadata',
+          agentId: this.agentId,
+          timestamp: Date.now(),
+          toolName: toolCalls[0]?.name ?? 'unknown',
+          title: update.title,
+          metadata: update.metadata,
+        })
+      },
     }
 
     for (const call of toolCalls) {

@@ -89,6 +89,55 @@ export interface PermissionResponse {
   scope: PermissionScope
   /** Optional pattern to apply this decision to */
   pattern?: string
+  /** Optional correction/feedback when denying (helps LLM adjust) */
+  correction?: string
+}
+
+// ============================================================================
+// CorrectedError
+// ============================================================================
+
+/**
+ * Error thrown when permission is denied with user feedback
+ * The correction can be used by the LLM to adjust its approach
+ */
+export class CorrectedError extends Error {
+  /** Permission request ID that was denied */
+  public readonly permissionId: string
+  /** User's correction/feedback */
+  public readonly correction?: string
+  /** Tool call ID that triggered the permission request */
+  public readonly toolCallId?: string
+
+  constructor(permissionId: string, correction?: string, toolCallId?: string) {
+    super(correction ?? 'Permission rejected. Try different parameters.')
+    this.name = 'CorrectedError'
+    this.permissionId = permissionId
+    this.correction = correction
+    this.toolCallId = toolCallId
+
+    // Maintain proper stack trace in V8 environments
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, CorrectedError)
+    }
+  }
+
+  /**
+   * Check if an error is a CorrectedError
+   */
+  static isCorrectedError(error: unknown): error is CorrectedError {
+    return error instanceof CorrectedError
+  }
+
+  /**
+   * Get the formatted message for LLM consumption
+   */
+  toToolResult(): string {
+    if (this.correction) {
+      return `Permission denied: ${this.correction}`
+    }
+    return 'Permission denied. Please try a different approach.'
+  }
 }
 
 // ============================================================================

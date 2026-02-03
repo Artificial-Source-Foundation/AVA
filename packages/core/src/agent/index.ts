@@ -56,6 +56,21 @@ export {
   type RollbackState,
   retryWithBackoff,
 } from './recovery.js'
+// Subagent System
+export {
+  createSubagentManager,
+  generateSubagentSessionId,
+  getParentSessionId,
+  isSubagentSession,
+  SUBAGENT_PRESETS,
+  type SubagentConfig,
+  type SubagentEvent,
+  type SubagentEventListener,
+  SubagentManager,
+  type SubagentResult,
+  type SubagentTask,
+  type SubagentType,
+} from './subagent.js'
 // Types
 export {
   type AgentConfig,

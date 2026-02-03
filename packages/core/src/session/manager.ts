@@ -28,6 +28,8 @@ import type {
   Checkpoint,
   CheckpointMeta,
   FileState,
+  ForkInfo,
+  ForkOptions,
   SerializedSessionState,
   SessionEvent,
   SessionEventListener,
@@ -218,6 +220,129 @@ export class SessionManager {
     }
 
     this.emit({ type: 'session_cleared', sessionId })
+  }
+
+  /**
+   * Fork a session from a checkpoint
+   * Creates a new session with state from the checkpoint
+   */
+  async fork(sessionId: string, options: ForkOptions): Promise<SessionState> {
+    const session = await this.get(sessionId)
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`)
+    }
+
+    // Find checkpoint
+    let checkpoint: Checkpoint | null = null
+
+    if (session.checkpoint?.id === options.checkpointId) {
+      checkpoint = session.checkpoint
+    } else if (this.storage) {
+      checkpoint = await this.storage.loadCheckpoint(sessionId, options.checkpointId)
+    }
+
+    if (!checkpoint || !checkpoint.stateSnapshot) {
+      throw new Error(`Checkpoint not found or has no snapshot: ${options.checkpointId}`)
+    }
+
+    // Parse checkpoint state
+    const checkpointState = JSON.parse(checkpoint.stateSnapshot) as SerializedSessionState
+
+    // Count existing forks for naming
+    const existingForks = await this.countForks(sessionId)
+    const forkIndex = existingForks + 1
+
+    // Generate fork name
+    const originalTitle = session.name ?? `Session ${session.id.slice(-6)}`
+    const forkName = options.name ?? `${originalTitle} (fork #${forkIndex})`
+
+    // Create new session ID
+    const now = Date.now()
+    const newId = `session-${now}-${Math.random().toString(36).slice(2, 8)}`
+
+    // Determine messages to include
+    let messages = checkpointState.messages
+    if (options.messageId) {
+      const messageIndex = messages.findIndex((m) => m.id === options.messageId)
+      if (messageIndex !== -1) {
+        // Include messages up to and including the specified message
+        messages = messages.slice(0, messageIndex + 1)
+      }
+    }
+
+    // Create fork info
+    const forkInfo: ForkInfo = {
+      checkpointId: options.checkpointId,
+      messageId: options.messageId,
+      originalTitle,
+      forkIndex,
+    }
+
+    // Create new session with forked state
+    const forkedSession: SessionState = {
+      id: newId,
+      name: forkName,
+      messages,
+      workingDirectory: checkpointState.workingDirectory,
+      toolCallCount: checkpointState.toolCallCount,
+      tokenStats: {
+        messages: new Map(checkpointState.tokenStats.messages),
+        total: checkpointState.tokenStats.total,
+        limit: checkpointState.tokenStats.limit,
+        remaining: checkpointState.tokenStats.remaining,
+        percentUsed: checkpointState.tokenStats.percentUsed,
+      },
+      openFiles: new Map(checkpointState.openFiles),
+      env: { ...checkpointState.env },
+      createdAt: now,
+      updatedAt: now,
+      status: 'active',
+      parentId: sessionId,
+      fork: forkInfo,
+    }
+
+    // Store forked session
+    this.sessions.set(newId, forkedSession)
+    this.markDirty(newId)
+    await this.maybePersist(newId)
+
+    this.emit({
+      type: 'session_forked',
+      sessionId: newId,
+      parentId: sessionId,
+      checkpointId: options.checkpointId,
+    })
+
+    return forkedSession
+  }
+
+  /**
+   * Count number of forks from a session
+   */
+  private async countForks(parentId: string): Promise<number> {
+    let count = 0
+
+    // Check cache
+    for (const session of this.sessions.values()) {
+      if (session.parentId === parentId) {
+        count++
+      }
+    }
+
+    // Check storage
+    if (this.storage) {
+      const storedIds = await this.storage.list()
+      for (const id of storedIds) {
+        if (!this.sessions.has(id)) {
+          const serialized = await this.storage.load(id)
+          if (serialized?.parentId === parentId) {
+            count++
+          }
+        }
+      }
+    }
+
+    return count
   }
 
   /**
@@ -602,6 +727,8 @@ export class SessionManager {
       updatedAt: session.updatedAt,
       status: session.status,
       errorMessage: session.errorMessage,
+      parentId: session.parentId,
+      fork: session.fork,
     }
   }
 
@@ -627,6 +754,8 @@ export class SessionManager {
       updatedAt: serialized.updatedAt,
       status: serialized.status,
       errorMessage: serialized.errorMessage,
+      parentId: serialized.parentId,
+      fork: serialized.fork,
     }
   }
 }

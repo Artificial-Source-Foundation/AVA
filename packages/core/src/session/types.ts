@@ -61,6 +61,56 @@ export interface CheckpointMeta {
 }
 
 // ============================================================================
+// Todo Types
+// ============================================================================
+
+/**
+ * A todo item for tracking progress
+ */
+export interface TodoItem {
+  /** Unique todo identifier */
+  id: string
+  /** Todo content/description */
+  content: string
+  /** Current status */
+  status: 'pending' | 'in_progress' | 'completed'
+  /** When the todo was created */
+  createdAt: number
+  /** When the todo was completed (if completed) */
+  completedAt?: number
+}
+
+// ============================================================================
+// Fork Types
+// ============================================================================
+
+/**
+ * Information about a forked session
+ */
+export interface ForkInfo {
+  /** ID of the checkpoint this was forked from */
+  checkpointId: string
+  /** Message ID to fork from (if forking at specific point) */
+  messageId?: string
+  /** Original session name */
+  originalTitle: string
+  /** Fork index (for naming: "Session (fork #N)") */
+  forkIndex: number
+}
+
+/**
+ * Options for forking a session
+ */
+export interface ForkOptions {
+  /** Checkpoint ID to fork from */
+  checkpointId: string
+  /** Optional name for the forked session */
+  name?: string
+  /** Fork from a specific message (truncate after this) */
+  messageId?: string
+}
+
+// ============================================================================
 // Session State
 // ============================================================================
 
@@ -96,6 +146,12 @@ export interface SessionState {
   status: 'active' | 'paused' | 'completed' | 'error'
   /** Error message if status is 'error' */
   errorMessage?: string
+  /** Todo items for tracking progress */
+  todos?: TodoItem[]
+  /** Parent session ID (if this is a forked session) */
+  parentId?: string
+  /** Fork information (if this is a forked session) */
+  fork?: ForkInfo
 }
 
 /**
@@ -126,6 +182,7 @@ export type SessionEvent =
   | { type: 'session_saved'; sessionId: string }
   | { type: 'session_loaded'; sessionId: string }
   | { type: 'session_cleared'; sessionId: string }
+  | { type: 'session_forked'; sessionId: string; parentId: string; checkpointId: string }
   | { type: 'status_changed'; status: SessionState['status']; sessionId: string }
 
 /**
@@ -162,6 +219,9 @@ export interface SerializedSessionState {
   updatedAt: number
   status: SessionState['status']
   errorMessage?: string
+  todos?: TodoItem[]
+  parentId?: string
+  fork?: ForkInfo
 }
 
 // ============================================================================

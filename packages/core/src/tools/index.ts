@@ -5,6 +5,17 @@
 
 export { bashTool } from './bash.js'
 export { createTool } from './create.js'
+// Export defineTool pattern (OpenCode-inspired)
+export {
+  type DefinedTool,
+  defineTool,
+  getToolLocations,
+  getToolPermissions,
+  isDefinedTool,
+  type ToolConfig,
+  type ToolExample,
+  type ToolPermission,
+} from './define.js'
 export { deleteTool } from './delete.js'
 // Export errors
 export { ToolError, ToolErrorType } from './errors.js'
@@ -12,6 +23,16 @@ export { ToolError, ToolErrorType } from './errors.js'
 // Export individual tools
 export { globTool } from './glob.js'
 export { grepTool } from './grep.js'
+// Export file locks
+export {
+  clearAllLocks,
+  getActiveLocks,
+  getLockInfo,
+  isFileLocked,
+  type LockInfo,
+  tryFileLock,
+  withFileLock,
+} from './locks.js'
 export { readTool } from './read.js'
 // Export registry
 export {
@@ -41,6 +62,8 @@ export {
   truncate,
   truncateOutput,
 } from './utils.js'
+// Export validation (Zod helpers)
+export { commonSchemas, formatZodError, isZodSchema } from './validation.js'
 export { writeTool } from './write.js'
 
 // ============================================================================

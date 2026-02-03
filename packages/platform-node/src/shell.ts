@@ -2,11 +2,15 @@
  * Node.js Shell Implementation
  */
 
+import type { ChildProcess as NodeChildProcess } from 'node:child_process'
 import { exec, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { ChildProcess, ExecOptions, ExecResult, IShell, SpawnOptions } from '@estela/core'
 
 const execAsync = promisify(exec)
+
+/** Default grace period before SIGKILL escalation (ms) */
+const DEFAULT_SIGKILL_GRACE = 5000
 
 export class NodeShell implements IShell {
   async exec(command: string, options?: ExecOptions): Promise<ExecResult> {
@@ -41,19 +45,76 @@ export class NodeShell implements IShell {
       detached: process.platform !== 'win32' && options?.killProcessGroup,
     })
 
-    // Kill function with process group support
-    const killFn = (signal: NodeJS.Signals = 'SIGTERM') => {
-      if (options?.killProcessGroup && process.platform !== 'win32' && child.pid) {
-        // Kill entire process group: kill -- -PGID
-        try {
-          process.kill(-child.pid, signal)
-        } catch {
-          // Process might already be dead
-          child.kill(signal)
-        }
-      } else {
-        child.kill(signal)
+    // Track if process is still running
+    let isRunning = true
+    child.on('exit', () => {
+      isRunning = false
+    })
+
+    // Inactivity timeout handling
+    let inactivityTimer: NodeJS.Timeout | null = null
+
+    const resetInactivityTimer = () => {
+      if (inactivityTimer) {
+        clearTimeout(inactivityTimer)
       }
+      if (options?.inactivityTimeout && isRunning) {
+        inactivityTimer = setTimeout(() => {
+          // Kill with SIGTERM, escalate to SIGKILL
+          killWithEscalation('SIGTERM', 2000)
+        }, options.inactivityTimeout)
+      }
+    }
+
+    // Attach inactivity listeners to output streams
+    if (options?.inactivityTimeout) {
+      child.stdout?.on('data', resetInactivityTimer)
+      child.stderr?.on('data', resetInactivityTimer)
+      resetInactivityTimer() // Start initial timer
+    }
+
+    // Kill with SIGKILL escalation
+    const killWithEscalation = async (
+      signal: NodeJS.Signals = 'SIGTERM',
+      graceMs: number = DEFAULT_SIGKILL_GRACE
+    ) => {
+      // Clear inactivity timer
+      if (inactivityTimer) {
+        clearTimeout(inactivityTimer)
+        inactivityTimer = null
+      }
+
+      if (!isRunning || !child.pid) return
+
+      // Send initial signal
+      sendSignal(child, child.pid, signal, options?.killProcessGroup)
+
+      // Wait for graceful exit
+      const exited = await Promise.race([
+        new Promise<boolean>((resolve) => {
+          child.once('exit', () => resolve(true))
+        }),
+        new Promise<boolean>((resolve) => {
+          setTimeout(() => resolve(false), graceMs)
+        }),
+      ])
+
+      // Force kill if still running
+      if (!exited && isRunning && child.pid) {
+        sendSignal(child, child.pid, 'SIGKILL', options?.killProcessGroup)
+      }
+    }
+
+    // Simple kill (backwards compatible)
+    const killFn = () => {
+      // Clear inactivity timer
+      if (inactivityTimer) {
+        clearTimeout(inactivityTimer)
+        inactivityTimer = null
+      }
+
+      if (!child.pid) return
+      sendSignal(child, child.pid, 'SIGTERM', options?.killProcessGroup)
     }
 
     // Convert Node streams to Web Streams
@@ -107,9 +168,44 @@ export class NodeShell implements IShell {
           })
 
           child.on('close', (code) => {
+            // Clear inactivity timer on close
+            if (inactivityTimer) {
+              clearTimeout(inactivityTimer)
+              inactivityTimer = null
+            }
             resolve({ stdout, stderr, exitCode: code ?? 0 })
           })
         }),
+    }
+  }
+}
+
+/**
+ * Send a signal to a process, optionally killing the entire process group
+ */
+function sendSignal(
+  child: NodeChildProcess,
+  pid: number,
+  signal: NodeJS.Signals,
+  killProcessGroup?: boolean
+): void {
+  if (killProcessGroup && process.platform !== 'win32') {
+    // Kill entire process group: kill -- -PGID
+    try {
+      process.kill(-pid, signal)
+    } catch {
+      // Process might already be dead
+      try {
+        child.kill(signal)
+      } catch {
+        // Ignore
+      }
+    }
+  } else {
+    try {
+      child.kill(signal)
+    } catch {
+      // Process might already be dead
     }
   }
 }

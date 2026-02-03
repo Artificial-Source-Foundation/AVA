@@ -25,6 +25,18 @@
     "./platform": {
       "types": "./dist/platform.d.ts",
       "import": "./dist/platform.js"
+    },
+    "./context": {
+      "types": "./dist/context/index.d.ts",
+      "import": "./dist/context/index.js"
+    },
+    "./session": {
+      "types": "./dist/session/index.d.ts",
+      "import": "./dist/session/index.js"
+    },
+    "./models": {
+      "types": "./dist/models/index.d.ts",
+      "import": "./dist/models/index.js"
     }
   },
   "scripts": {
@@ -32,7 +44,12 @@
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {},
+  "dependencies": {
+    "diff": "^8.0.3",
+    "gpt-tokenizer": "^3.4.0",
+    "zod": "^4.3.6",
+    "zod-to-json-schema": "^3.25.1"
+  },
   "devDependencies": {
     "typescript": "~5.6.2"
   }

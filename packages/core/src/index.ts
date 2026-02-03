@@ -7,6 +7,8 @@
 export * from './agent/index.js'
 // Authentication (API key + OAuth)
 export * from './auth/index.js'
+// Codebase understanding
+export * from './codebase/index.js'
 // Commander (hierarchical delegation)
 export * from './commander/index.js'
 // Context management (token tracking, compaction)
@@ -31,3 +33,5 @@ export * from './session/index.js'
 export * from './tools/index.js'
 // Types
 export * from './types/index.js'
+// Validator (QA verification gate)
+export * from './validator/index.js'

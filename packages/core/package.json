@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./agent": {
+      "types": "./dist/agent/index.d.ts",
+      "import": "./dist/agent/index.js"
+    },
     "./llm": {
       "types": "./dist/llm/index.d.ts",
       "import": "./dist/llm/index.js"
@@ -34,6 +38,10 @@
       "types": "./dist/session/index.d.ts",
       "import": "./dist/session/index.js"
     },
+    "./mcp": {
+      "types": "./dist/mcp/index.d.ts",
+      "import": "./dist/mcp/index.js"
+    },
     "./models": {
       "types": "./dist/models/index.d.ts",
       "import": "./dist/models/index.js"
@@ -57,6 +65,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.3",
     "diff": "^8.0.3",
     "gpt-tokenizer": "^3.4.0",
     "zod": "^4.3.6"

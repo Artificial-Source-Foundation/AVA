@@ -112,6 +112,52 @@ export interface IShell {
   spawn(command: string, args: string[], options?: SpawnOptions): ChildProcess
 }
 
+// ============================================================================
+// PTY Types
+// ============================================================================
+
+/** Options for PTY (pseudo-terminal) spawning */
+export interface PTYOptions {
+  /** Terminal columns (default: 80) */
+  cols?: number
+  /** Terminal rows (default: 24) */
+  rows?: number
+  /** Working directory */
+  cwd?: string
+  /** Environment variables */
+  env?: Record<string, string>
+}
+
+/** PTY process handle for interactive commands */
+export interface PTYProcess {
+  /** Process ID */
+  readonly pid: number
+  /** Register callback for data output */
+  onData(callback: (data: string) => void): void
+  /** Register callback for process exit */
+  onExit(callback: (code: number, signal?: number) => void): void
+  /** Write input to the PTY */
+  write(data: string): void
+  /** Resize the terminal */
+  resize(cols: number, rows: number): void
+  /** Kill the process */
+  kill(signal?: string): void
+  /** Wait for process to exit */
+  wait(): Promise<{ exitCode: number; signal?: number }>
+}
+
+/** PTY (pseudo-terminal) for interactive commands */
+export interface IPTY {
+  /** Check if PTY is supported on this platform */
+  isSupported(): boolean
+  /** Spawn a command in a PTY */
+  spawn(command: string, args: string[], options?: PTYOptions): PTYProcess
+}
+
+// ============================================================================
+// Credential Store Types
+// ============================================================================
+
 /** Credential/secret storage */
 export interface ICredentialStore {
   /** Get credential by key */
@@ -156,6 +202,8 @@ export interface IPlatformProvider {
   readonly shell: IShell
   readonly credentials: ICredentialStore
   readonly database: IDatabase
+  /** PTY support (optional - may not be available on all platforms) */
+  readonly pty?: IPTY
 }
 
 /** Global platform instance - set by platform package */

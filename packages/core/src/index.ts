@@ -3,6 +3,8 @@
  * Core business logic for Estela - LLM client, tools, types
  */
 
+// Agent system (autonomous loop)
+export * from './agent/index.js'
 // Authentication (API key + OAuth)
 export * from './auth/index.js'
 // Context management (token tracking, compaction)
@@ -13,6 +15,8 @@ export * from './diff/index.js'
 export * from './git/index.js'
 // LLM client
 export * from './llm/index.js'
+// MCP (Model Context Protocol) client
+export * from './mcp/index.js'
 // Model registry
 export * from './models/index.js'
 // Permission system

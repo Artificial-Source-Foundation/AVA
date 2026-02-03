@@ -1,0 +1,355 @@
+/**
+ * Agent Types
+ * Core types for the autonomous agent loop
+ *
+ * Based on Gemini CLI's agents/types.ts pattern
+ */
+
+// ============================================================================
+// Termination Modes
+// ============================================================================
+
+/**
+ * Describes the possible termination modes for an agent
+ */
+export enum AgentTerminateMode {
+  /** Agent encountered an error */
+  ERROR = 'ERROR',
+  /** Agent exceeded time limit */
+  TIMEOUT = 'TIMEOUT',
+  /** Agent completed its goal successfully */
+  GOAL = 'GOAL',
+  /** Agent exceeded maximum turn limit */
+  MAX_TURNS = 'MAX_TURNS',
+  /** Agent was aborted by user/signal */
+  ABORTED = 'ABORTED',
+  /** Agent stopped without calling complete_task */
+  NO_COMPLETE_TASK = 'NO_COMPLETE_TASK',
+}
+
+// ============================================================================
+// Agent Configuration
+// ============================================================================
+
+/**
+ * Configuration for an agent execution
+ */
+export interface AgentConfig {
+  /** Unique identifier for the agent */
+  id?: string
+  /** Display name for the agent */
+  name?: string
+  /** Maximum execution time in minutes */
+  maxTimeMinutes: number
+  /** Maximum number of conversation turns */
+  maxTurns: number
+  /** Maximum retries on recoverable errors */
+  maxRetries: number
+  /** List of tools the agent can use (empty = all available) */
+  tools?: string[]
+  /** Grace period in ms for final completion attempt */
+  gracePeriodMs: number
+  /** LLM provider to use */
+  provider?: 'anthropic' | 'openai' | 'openrouter'
+  /** Model to use (provider-specific) */
+  model?: string
+}
+
+/**
+ * Default agent configuration
+ */
+export const DEFAULT_AGENT_CONFIG: Omit<AgentConfig, 'maxTimeMinutes' | 'maxTurns'> = {
+  maxRetries: 3,
+  gracePeriodMs: 60 * 1000, // 1 minute
+  provider: 'anthropic',
+}
+
+// ============================================================================
+// Agent Step
+// ============================================================================
+
+/**
+ * Status of an agent step
+ */
+export type AgentStepStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped'
+
+/**
+ * Represents a single step in the agent's execution
+ */
+export interface AgentStep {
+  /** Unique step identifier */
+  id: string
+  /** Turn number when this step was executed */
+  turn: number
+  /** Description of what this step does */
+  description: string
+  /** Tools called during this step */
+  toolsCalled: ToolCallInfo[]
+  /** Current status of the step */
+  status: AgentStepStatus
+  /** Output/result from the step */
+  output?: string
+  /** Error message if failed */
+  error?: string
+  /** How many times this step has been retried */
+  retryCount: number
+  /** Timestamp when step started */
+  startedAt?: number
+  /** Timestamp when step completed */
+  completedAt?: number
+}
+
+/**
+ * Information about a tool call within a step
+ */
+export interface ToolCallInfo {
+  /** Name of the tool */
+  name: string
+  /** Arguments passed to the tool */
+  args: Record<string, unknown>
+  /** Result from the tool */
+  result?: string
+  /** Whether the tool call succeeded */
+  success: boolean
+  /** Duration in ms */
+  durationMs?: number
+}
+
+// ============================================================================
+// Agent Result
+// ============================================================================
+
+/**
+ * Result of an agent execution
+ */
+export interface AgentResult {
+  /** Whether the agent completed its goal */
+  success: boolean
+  /** How the agent terminated */
+  terminateMode: AgentTerminateMode
+  /** Final output/result from the agent */
+  output: string
+  /** All steps executed by the agent */
+  steps: AgentStep[]
+  /** Total tokens used (input + output) */
+  tokensUsed: number
+  /** Total duration in milliseconds */
+  durationMs: number
+  /** Number of turns taken */
+  turns: number
+  /** Error message if failed */
+  error?: string
+}
+
+// ============================================================================
+// Agent Events
+// ============================================================================
+
+/**
+ * Event types emitted during agent execution
+ */
+export type AgentEventType =
+  | 'agent:start'
+  | 'agent:finish'
+  | 'turn:start'
+  | 'turn:finish'
+  | 'tool:start'
+  | 'tool:finish'
+  | 'tool:error'
+  | 'thought'
+  | 'recovery:start'
+  | 'recovery:finish'
+  | 'error'
+
+/**
+ * Base agent event
+ */
+export interface AgentEventBase {
+  /** Event type */
+  type: AgentEventType
+  /** Agent ID */
+  agentId: string
+  /** Timestamp */
+  timestamp: number
+}
+
+/**
+ * Agent start event
+ */
+export interface AgentStartEvent extends AgentEventBase {
+  type: 'agent:start'
+  /** Goal/task for the agent */
+  goal: string
+  /** Agent configuration */
+  config: AgentConfig
+}
+
+/**
+ * Agent finish event
+ */
+export interface AgentFinishEvent extends AgentEventBase {
+  type: 'agent:finish'
+  /** Final result */
+  result: AgentResult
+}
+
+/**
+ * Turn start event
+ */
+export interface TurnStartEvent extends AgentEventBase {
+  type: 'turn:start'
+  /** Turn number (0-indexed) */
+  turn: number
+}
+
+/**
+ * Turn finish event
+ */
+export interface TurnFinishEvent extends AgentEventBase {
+  type: 'turn:finish'
+  /** Turn number */
+  turn: number
+  /** Tool calls made in this turn */
+  toolCalls: ToolCallInfo[]
+}
+
+/**
+ * Tool start event
+ */
+export interface ToolStartEvent extends AgentEventBase {
+  type: 'tool:start'
+  /** Tool name */
+  toolName: string
+  /** Tool arguments */
+  args: Record<string, unknown>
+}
+
+/**
+ * Tool finish event
+ */
+export interface ToolFinishEvent extends AgentEventBase {
+  type: 'tool:finish'
+  /** Tool name */
+  toolName: string
+  /** Whether tool succeeded */
+  success: boolean
+  /** Tool output */
+  output: string
+  /** Duration in ms */
+  durationMs: number
+}
+
+/**
+ * Tool error event
+ */
+export interface ToolErrorEvent extends AgentEventBase {
+  type: 'tool:error'
+  /** Tool name */
+  toolName: string
+  /** Error message */
+  error: string
+}
+
+/**
+ * Thought/reasoning event
+ */
+export interface ThoughtEvent extends AgentEventBase {
+  type: 'thought'
+  /** Thought text */
+  text: string
+}
+
+/**
+ * Recovery start event
+ */
+export interface RecoveryStartEvent extends AgentEventBase {
+  type: 'recovery:start'
+  /** Reason for recovery */
+  reason: AgentTerminateMode
+  /** Turn number */
+  turn: number
+}
+
+/**
+ * Recovery finish event
+ */
+export interface RecoveryFinishEvent extends AgentEventBase {
+  type: 'recovery:finish'
+  /** Whether recovery succeeded */
+  success: boolean
+  /** Duration in ms */
+  durationMs: number
+}
+
+/**
+ * Error event
+ */
+export interface ErrorEvent extends AgentEventBase {
+  type: 'error'
+  /** Error message */
+  error: string
+  /** Error context */
+  context?: string
+}
+
+/**
+ * Union of all agent events
+ */
+export type AgentEvent =
+  | AgentStartEvent
+  | AgentFinishEvent
+  | TurnStartEvent
+  | TurnFinishEvent
+  | ToolStartEvent
+  | ToolFinishEvent
+  | ToolErrorEvent
+  | ThoughtEvent
+  | RecoveryStartEvent
+  | RecoveryFinishEvent
+  | ErrorEvent
+
+/**
+ * Callback for agent events
+ */
+export type AgentEventCallback = (event: AgentEvent) => void
+
+// ============================================================================
+// Agent Inputs
+// ============================================================================
+
+/**
+ * Inputs passed to an agent
+ */
+export interface AgentInputs {
+  /** The goal/task for the agent to accomplish */
+  goal: string
+  /** Optional context information */
+  context?: string
+  /** Working directory */
+  cwd: string
+  /** Additional parameters */
+  [key: string]: unknown
+}
+
+// ============================================================================
+// Internal Types
+// ============================================================================
+
+/**
+ * Result of a single agent turn
+ */
+export type AgentTurnResult =
+  | {
+      status: 'continue'
+      toolCalls: ToolCallInfo[]
+    }
+  | {
+      status: 'stop'
+      terminateMode: AgentTerminateMode
+      result: string | null
+    }
+
+/**
+ * The complete_task tool name constant
+ */
+export const COMPLETE_TASK_TOOL = 'complete_task'

@@ -21,14 +21,14 @@
 | 4 | [Safety](./development/epics/4-safety.md) | Permissions, file locking, process control | ✅ Complete |
 | 5 | [Context](./development/epics/5-context.md) | Token tracking, compaction, session state | ✅ Complete |
 | 6 | [DX](./development/epics/6-dx.md) | Tool.define(), diffs, git snapshots | ✅ Complete |
-| 7 | [Platform](./development/epics/7-platform.md) | PTY allocation, MCP integration | 🟡 Next |
+| 7 | [Platform](./development/epics/7-platform.md) | PTY allocation, MCP integration | ✅ Complete |
 
-### Agent System (Future)
+### Agent System (Current)
 
 | # | Epic | Goal | Status |
 |---|------|------|--------|
-| 8 | [Agent](./development/epics/8-agent.md) | Autonomous agent loop | ⬜ |
-| 9 | [Commander](./development/epics/9-commander.md) | Hierarchical delegation | ⬜ |
+| 8 | [Agent](./development/epics/8-agent.md) | Autonomous agent loop | ✅ Complete |
+| 9 | [Commander](./development/epics/9-commander.md) | Hierarchical delegation | 🟡 Next |
 | 10 | [Parallel](./development/epics/10-parallel.md) | Concurrent operators | ⬜ |
 | 11 | [Validator](./development/epics/11-validator.md) | QA verification gate | ⬜ |
 | 12 | [Codebase](./development/epics/12-codebase.md) | Codebase understanding, repo map | ⬜ |

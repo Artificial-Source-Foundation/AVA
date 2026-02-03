@@ -324,3 +324,109 @@ export function truncateOutput(
     removedBytes,
   }
 }
+
+// ============================================================================
+// Interactive Command Detection
+// ============================================================================
+
+/**
+ * Commands that typically require a PTY for proper operation.
+ * These commands expect terminal capabilities like:
+ * - Cursor movement (vim, nano, less)
+ * - Raw input mode (ssh, python REPL)
+ * - Special key handling (top, htop)
+ *
+ * Based on patterns from Gemini CLI and OpenCode.
+ */
+const INTERACTIVE_COMMANDS = new Set([
+  // Editors
+  'vim',
+  'nvim',
+  'vi',
+  'nano',
+  'pico',
+  'emacs',
+  // Pagers
+  'less',
+  'more',
+  'most',
+  // Process monitors
+  'top',
+  'htop',
+  'btop',
+  'watch',
+  // REPLs
+  'python',
+  'python3',
+  'node',
+  'irb',
+  'ghci',
+  'lua',
+  'perl',
+  'php',
+  'erl',
+  'iex',
+  // Database CLIs
+  'psql',
+  'mysql',
+  'sqlite3',
+  'redis-cli',
+  'mongosh',
+  // SSH and remote shells
+  'ssh',
+  'telnet',
+  'ftp',
+  'sftp',
+  // Other interactive tools
+  'gdb',
+  'lldb',
+  'screen',
+  'tmux',
+  'zsh',
+  'bash',
+  'fish',
+])
+
+/**
+ * Check if a command requires a PTY (pseudo-terminal).
+ *
+ * @param command - The command string to check
+ * @returns true if the command is interactive and needs PTY support
+ */
+export function isInteractiveCommand(command: string): boolean {
+  // Extract the base command (first word)
+  const trimmed = command.trim()
+  const firstWord = trimmed.split(/\s+/)[0]
+
+  // Get just the command name (handle paths like /usr/bin/vim)
+  const cmdName = firstWord.split('/').pop() ?? firstWord
+
+  // Check if the base command is in our interactive list
+  if (INTERACTIVE_COMMANDS.has(cmdName)) {
+    return true
+  }
+
+  // Check for interactive flags that suggest PTY is needed
+  if (trimmed.includes(' -i') || trimmed.includes(' --interactive')) {
+    return true
+  }
+
+  // Check for specific patterns that indicate interactivity
+  if (
+    trimmed.startsWith('docker run -it') ||
+    trimmed.startsWith('docker exec -it') ||
+    trimmed.includes('docker run --interactive')
+  ) {
+    return true
+  }
+
+  return false
+}
+
+/**
+ * Get the list of known interactive commands
+ * Useful for debugging or documentation
+ */
+export function getInteractiveCommands(): ReadonlySet<string> {
+  return INTERACTIVE_COMMANDS
+}

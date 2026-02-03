@@ -1,12 +1,19 @@
 /**
  * Bash Tool
- * Execute shell commands with timeout, inactivity detection, and output truncation
+ * Execute shell commands with timeout, inactivity detection, and output truncation.
+ * Supports PTY (pseudo-terminal) for interactive commands.
  */
 
 import { getPlatform } from '../platform.js'
 import { ToolError, ToolErrorType } from './errors.js'
 import type { Tool, ToolContext, ToolResult } from './types.js'
-import { isBinaryOutput, LIMITS, resolvePath, truncateOutput } from './utils.js'
+import {
+  isBinaryOutput,
+  isInteractiveCommand,
+  LIMITS,
+  resolvePath,
+  truncateOutput,
+} from './utils.js'
 
 // ============================================================================
 // Types
@@ -17,6 +24,8 @@ interface BashParams {
   description: string
   workdir?: string
   timeout?: number
+  /** Force interactive mode (uses PTY if available) */
+  interactive?: boolean
 }
 
 // ============================================================================
@@ -33,7 +42,7 @@ const DEFAULT_INACTIVITY_TIMEOUT = 30 * 1000 // 30 seconds
 export const bashTool: Tool<BashParams> = {
   definition: {
     name: 'bash',
-    description: `Execute shell commands. Use the workdir parameter instead of 'cd' commands. Default timeout is 2 minutes. Output is truncated at ${LIMITS.MAX_LINES} lines or ${LIMITS.MAX_BYTES / 1024}KB. Commands are killed if no output for 30 seconds.`,
+    description: `Execute shell commands. Use the workdir parameter instead of 'cd' commands. Default timeout is 2 minutes. Output is truncated at ${LIMITS.MAX_LINES} lines or ${LIMITS.MAX_BYTES / 1024}KB. Commands are killed if no output for 30 seconds. Interactive commands (vim, ssh, python REPL) automatically use PTY when available.`,
     input_schema: {
       type: 'object',
       properties: {
@@ -55,6 +64,11 @@ export const bashTool: Tool<BashParams> = {
           type: 'number',
           description: 'Timeout in milliseconds (optional, default 120000 = 2 minutes)',
         },
+        interactive: {
+          type: 'boolean',
+          description:
+            'Force interactive mode using PTY (pseudo-terminal). Auto-detected for commands like vim, ssh, python. Set to true for commands that need terminal features.',
+        },
       },
       required: ['command', 'description'],
     },
@@ -65,7 +79,10 @@ export const bashTool: Tool<BashParams> = {
       throw new ToolError('Invalid params: expected object', ToolErrorType.INVALID_PARAMS, 'bash')
     }
 
-    const { command, description, workdir, timeout } = params as Record<string, unknown>
+    const { command, description, workdir, timeout, interactive } = params as Record<
+      string,
+      unknown
+    >
 
     if (typeof command !== 'string' || !command.trim()) {
       throw new ToolError(
@@ -97,16 +114,25 @@ export const bashTool: Tool<BashParams> = {
       }
     }
 
+    if (interactive !== undefined && typeof interactive !== 'boolean') {
+      throw new ToolError(
+        'Invalid interactive: must be boolean',
+        ToolErrorType.INVALID_PARAMS,
+        'bash'
+      )
+    }
+
     return {
       command: command.trim(),
       description: description.trim(),
       workdir: workdir?.trim(),
       timeout: timeout as number | undefined,
+      interactive: interactive as boolean | undefined,
     }
   },
 
   async execute(params: BashParams, ctx: ToolContext): Promise<ToolResult> {
-    const shell = getPlatform().shell
+    const platform = getPlatform()
     const cwd = params.workdir
       ? resolvePath(params.workdir, ctx.workingDirectory)
       : ctx.workingDirectory
@@ -121,185 +147,344 @@ export const bashTool: Tool<BashParams> = {
       }
     }
 
-    try {
-      // Spawn command using platform shell
-      const child = shell.spawn('bash', ['-c', params.command], {
-        cwd,
-        inactivityTimeout: DEFAULT_INACTIVITY_TIMEOUT,
-        killProcessGroup: true,
-      })
+    // Determine if we should use PTY
+    const needsPty = params.interactive === true || isInteractiveCommand(params.command)
+    const hasPty = platform.pty?.isSupported() ?? false
 
-      // Collect output
-      let stdout = ''
-      let stderr = ''
-      let binaryDetected = false
+    // Route to PTY execution for interactive commands
+    if (needsPty && hasPty) {
+      return executePty(params, cwd, timeout, ctx)
+    }
 
-      // Set up abort handling
-      let aborted = false
-      const abortHandler = () => {
-        aborted = true
-        child.kill()
-      }
-      ctx.signal.addEventListener('abort', abortHandler, { once: true })
-
-      // Set up timeout
-      let timedOut = false
-      const timeoutId = setTimeout(() => {
-        timedOut = true
-        child.kill()
-      }, timeout)
-
-      // Read stdout stream
-      if (child.stdout) {
-        const reader = child.stdout.getReader()
-        const decoder = new TextDecoder()
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-
-            // Check for binary output
-            if (isBinaryOutput(value)) {
-              binaryDetected = true
-              stdout += '\n[Binary output detected. Halting stream...]'
-              child.kill()
-              break
-            }
-
-            stdout += decoder.decode(value, { stream: true })
-          }
-        } catch {
-          // Stream error - process may have been killed
-        } finally {
-          reader.releaseLock()
-        }
-      }
-
-      // Read stderr stream
-      if (child.stderr) {
-        const reader = child.stderr.getReader()
-        const decoder = new TextDecoder()
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-
-            stderr += decoder.decode(value, { stream: true })
-          }
-        } catch {
-          // Stream error - process may have been killed
-        } finally {
-          reader.releaseLock()
-        }
-      }
-
-      // Wait for process to complete
-      const result = await child.wait()
-
-      // Clean up
-      clearTimeout(timeoutId)
-      ctx.signal.removeEventListener('abort', abortHandler)
-
-      // Handle timeout
-      if (timedOut) {
-        return {
-          success: false,
-          output: `Command timed out after ${timeout}ms.\n\nTo increase timeout, use the timeout parameter.`,
-          error: ToolErrorType.EXECUTION_TIMEOUT,
-          metadata: {
-            command: params.command,
-            description: params.description,
-            cwd,
-            timeout,
-            timedOut: true,
-          },
-          locations: [{ path: cwd, type: 'exec' }],
-        }
-      }
-
-      // Handle abort
-      if (aborted) {
-        return {
-          success: false,
-          output: 'Command was cancelled by user',
-          error: ToolErrorType.EXECUTION_ABORTED,
-        }
-      }
-
-      // Handle binary output detection
-      if (binaryDetected) {
-        return {
-          success: false,
-          output: `Binary output detected in command output.\n\nPartial output before binary:\n${stdout}`,
-          error: ToolErrorType.BINARY_OUTPUT,
-          metadata: {
-            command: params.command,
-            description: params.description,
-            cwd,
-            binaryDetected: true,
-          },
-          locations: [{ path: cwd, type: 'exec' }],
-        }
-      }
-
-      const exitCode = result.exitCode
-
-      // Build output
-      let output = ''
-
-      if (exitCode === 0) {
-        // Success case
-        const combined = stdout + (stderr ? `\n${stderr}` : '')
-        const truncated = truncateOutput(combined)
-
-        if (truncated.truncated) {
-          output = `Exit code: 0\n\n<output>\n${truncated.content}\n\n(Output truncated: ${truncated.removedLines} lines removed. Use read_file with offset to see full output if saved to file.)\n</output>`
-        } else {
-          output = `Exit code: 0\n\n<output>\n${combined || '(no output)'}\n</output>`
-        }
-      } else {
-        // Error case
-        const parts: string[] = [`Exit code: ${exitCode}`]
-
-        if (stderr.trim()) {
-          const truncatedErr = truncateOutput(stderr)
-          parts.push(`\n<stderr>\n${truncatedErr.content}\n</stderr>`)
-        }
-
-        if (stdout.trim()) {
-          const truncatedOut = truncateOutput(stdout)
-          parts.push(`\n<stdout>\n${truncatedOut.content}\n</stdout>`)
-        }
-
-        if (!stderr.trim() && !stdout.trim()) {
-          parts.push('\n(no output)')
-        }
-
-        output = parts.join('')
-      }
-
+    // Warn if PTY was requested but not available
+    if (needsPty && !hasPty) {
+      // Fall through to regular shell execution with warning
+      const warningPrefix =
+        '[Warning: PTY not available for interactive command. Output may be limited.]\n\n'
+      const result = await executeShell(params, cwd, timeout, ctx)
       return {
-        success: exitCode === 0,
-        output,
+        ...result,
+        output: warningPrefix + result.output,
+      }
+    }
+
+    // Regular shell execution
+    return executeShell(params, cwd, timeout, ctx)
+  },
+}
+
+// ============================================================================
+// Shell Execution
+// ============================================================================
+
+async function executeShell(
+  params: BashParams,
+  cwd: string,
+  timeout: number,
+  ctx: ToolContext
+): Promise<ToolResult> {
+  const shell = getPlatform().shell
+
+  try {
+    // Spawn command using platform shell
+    const child = shell.spawn('bash', ['-c', params.command], {
+      cwd,
+      inactivityTimeout: DEFAULT_INACTIVITY_TIMEOUT,
+      killProcessGroup: true,
+    })
+
+    // Collect output
+    let stdout = ''
+    let stderr = ''
+    let binaryDetected = false
+
+    // Set up abort handling
+    let aborted = false
+    const abortHandler = () => {
+      aborted = true
+      child.kill()
+    }
+    ctx.signal.addEventListener('abort', abortHandler, { once: true })
+
+    // Set up timeout
+    let timedOut = false
+    const timeoutId = setTimeout(() => {
+      timedOut = true
+      child.kill()
+    }, timeout)
+
+    // Read stdout stream
+    if (child.stdout) {
+      const reader = child.stdout.getReader()
+      const decoder = new TextDecoder()
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          // Check for binary output
+          if (isBinaryOutput(value)) {
+            binaryDetected = true
+            stdout += '\n[Binary output detected. Halting stream...]'
+            child.kill()
+            break
+          }
+
+          stdout += decoder.decode(value, { stream: true })
+        }
+      } catch {
+        // Stream error - process may have been killed
+      } finally {
+        reader.releaseLock()
+      }
+    }
+
+    // Read stderr stream
+    if (child.stderr) {
+      const reader = child.stderr.getReader()
+      const decoder = new TextDecoder()
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+
+          stderr += decoder.decode(value, { stream: true })
+        }
+      } catch {
+        // Stream error - process may have been killed
+      } finally {
+        reader.releaseLock()
+      }
+    }
+
+    // Wait for process to complete
+    const result = await child.wait()
+
+    // Clean up
+    clearTimeout(timeoutId)
+    ctx.signal.removeEventListener('abort', abortHandler)
+
+    // Handle timeout
+    if (timedOut) {
+      return {
+        success: false,
+        output: `Command timed out after ${timeout}ms.\n\nTo increase timeout, use the timeout parameter.`,
+        error: ToolErrorType.EXECUTION_TIMEOUT,
         metadata: {
           command: params.command,
           description: params.description,
           cwd,
-          exitCode,
-          stdoutLength: stdout.length,
-          stderrLength: stderr.length,
+          timeout,
+          timedOut: true,
         },
         locations: [{ path: cwd, type: 'exec' }],
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+    }
+
+    // Handle abort
+    if (aborted) {
       return {
         success: false,
-        output: `Error executing command: ${message}`,
-        error: ToolErrorType.UNKNOWN,
+        output: 'Command was cancelled by user',
+        error: ToolErrorType.EXECUTION_ABORTED,
       }
     }
-  },
+
+    // Handle binary output detection
+    if (binaryDetected) {
+      return {
+        success: false,
+        output: `Binary output detected in command output.\n\nPartial output before binary:\n${stdout}`,
+        error: ToolErrorType.BINARY_OUTPUT,
+        metadata: {
+          command: params.command,
+          description: params.description,
+          cwd,
+          binaryDetected: true,
+        },
+        locations: [{ path: cwd, type: 'exec' }],
+      }
+    }
+
+    const exitCode = result.exitCode
+
+    // Build output
+    let output = ''
+
+    if (exitCode === 0) {
+      // Success case
+      const combined = stdout + (stderr ? `\n${stderr}` : '')
+      const truncated = truncateOutput(combined)
+
+      if (truncated.truncated) {
+        output = `Exit code: 0\n\n<output>\n${truncated.content}\n\n(Output truncated: ${truncated.removedLines} lines removed. Use read_file with offset to see full output if saved to file.)\n</output>`
+      } else {
+        output = `Exit code: 0\n\n<output>\n${combined || '(no output)'}\n</output>`
+      }
+    } else {
+      // Error case
+      const parts: string[] = [`Exit code: ${exitCode}`]
+
+      if (stderr.trim()) {
+        const truncatedErr = truncateOutput(stderr)
+        parts.push(`\n<stderr>\n${truncatedErr.content}\n</stderr>`)
+      }
+
+      if (stdout.trim()) {
+        const truncatedOut = truncateOutput(stdout)
+        parts.push(`\n<stdout>\n${truncatedOut.content}\n</stdout>`)
+      }
+
+      if (!stderr.trim() && !stdout.trim()) {
+        parts.push('\n(no output)')
+      }
+
+      output = parts.join('')
+    }
+
+    return {
+      success: exitCode === 0,
+      output,
+      metadata: {
+        command: params.command,
+        description: params.description,
+        cwd,
+        exitCode,
+        stdoutLength: stdout.length,
+        stderrLength: stderr.length,
+      },
+      locations: [{ path: cwd, type: 'exec' }],
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return {
+      success: false,
+      output: `Error executing command: ${message}`,
+      error: ToolErrorType.UNKNOWN,
+    }
+  }
+}
+
+// ============================================================================
+// PTY Execution
+// ============================================================================
+
+/**
+ * Execute command using PTY (pseudo-terminal) for interactive commands.
+ * PTY provides proper terminal emulation for commands like vim, ssh, python REPL.
+ */
+async function executePty(
+  params: BashParams,
+  cwd: string,
+  timeout: number,
+  ctx: ToolContext
+): Promise<ToolResult> {
+  const pty = getPlatform().pty
+
+  if (!pty) {
+    return {
+      success: false,
+      output: 'PTY not available on this platform',
+      error: ToolErrorType.NOT_SUPPORTED,
+    }
+  }
+
+  try {
+    // Spawn PTY process
+    const ptyProcess = pty.spawn('bash', ['-c', params.command], {
+      cwd,
+      cols: 120,
+      rows: 40,
+    })
+
+    // Collect output
+    let output = ''
+
+    // Set up abort handling
+    let aborted = false
+    const abortHandler = () => {
+      aborted = true
+      ptyProcess.kill()
+    }
+    ctx.signal.addEventListener('abort', abortHandler, { once: true })
+
+    // Set up timeout
+    let timedOut = false
+    const timeoutId = setTimeout(() => {
+      timedOut = true
+      ptyProcess.kill()
+    }, timeout)
+
+    // Collect PTY output
+    ptyProcess.onData((data) => {
+      output += data
+      // Truncate if getting too large (PTY can produce a lot of output)
+      if (output.length > LIMITS.MAX_BYTES * 2) {
+        output = output.slice(-LIMITS.MAX_BYTES)
+      }
+    })
+
+    // Wait for exit
+    const result = await ptyProcess.wait()
+
+    // Clean up
+    clearTimeout(timeoutId)
+    ctx.signal.removeEventListener('abort', abortHandler)
+
+    // Handle timeout
+    if (timedOut) {
+      return {
+        success: false,
+        output: `Command timed out after ${timeout}ms.\n\nPartial output:\n${truncateOutput(output).content}`,
+        error: ToolErrorType.EXECUTION_TIMEOUT,
+        metadata: {
+          command: params.command,
+          description: params.description,
+          cwd,
+          timeout,
+          timedOut: true,
+          usedPty: true,
+        },
+        locations: [{ path: cwd, type: 'exec' }],
+      }
+    }
+
+    // Handle abort
+    if (aborted) {
+      return {
+        success: false,
+        output: 'Command was cancelled by user',
+        error: ToolErrorType.EXECUTION_ABORTED,
+      }
+    }
+
+    const exitCode = result.exitCode
+    const truncated = truncateOutput(output)
+
+    return {
+      success: exitCode === 0,
+      output:
+        exitCode === 0
+          ? `Exit code: 0\n\n<output>\n${truncated.content || '(no output)'}\n</output>`
+          : `Exit code: ${exitCode}\n\n<output>\n${truncated.content || '(no output)'}\n</output>`,
+      metadata: {
+        command: params.command,
+        description: params.description,
+        cwd,
+        exitCode,
+        outputLength: output.length,
+        usedPty: true,
+      },
+      locations: [{ path: cwd, type: 'exec' }],
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return {
+      success: false,
+      output: `Error executing command with PTY: ${message}`,
+      error: ToolErrorType.UNKNOWN,
+    }
+  }
 }

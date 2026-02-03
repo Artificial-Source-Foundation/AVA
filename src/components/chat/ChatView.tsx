@@ -1,6 +1,8 @@
 /**
- * ChatView Component
- * Main chat container with session loading
+ * Chat View Component
+ *
+ * Main chat container with session loading.
+ * Premium layout with seamless message flow.
  */
 
 import { type Component, createEffect, on } from 'solid-js'
@@ -19,7 +21,6 @@ export const ChatView: Component = () => {
         if (sessionId && sessionId !== prevSessionId) {
           loadSessionMessages(sessionId)
         } else if (!sessionId && prevSessionId) {
-          // Session was cleared
           clearSession()
         }
       }
@@ -27,7 +28,13 @@ export const ChatView: Component = () => {
   )
 
   return (
-    <div class="flex flex-col h-full">
+    <div
+      class="
+        flex flex-col h-full
+        bg-[var(--background)]
+        transition-colors duration-[var(--duration-normal)]
+      "
+    >
       {/* Messages area */}
       <MessageList />
 

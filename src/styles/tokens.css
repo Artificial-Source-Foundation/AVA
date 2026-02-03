@@ -1,0 +1,656 @@
+/**
+ * Estela Design System Tokens
+ *
+ * Three-layer architecture:
+ * 1. Primitives - Raw values (colors, sizes)
+ * 2. Semantic - Intent-based (background, text, interactive)
+ * 3. Component - Component-specific overrides
+ *
+ * Four themes: glass, minimal, terminal, soft
+ * Each theme has its own typography for distinct personality
+ */
+
+@layer tokens {
+  :root {
+    /* ========================================
+       PRIMITIVE TOKENS
+       ======================================== */
+
+    /* Gray Scale (neutral with slight blue undertone) */
+    --gray-50: oklch(0.985 0.002 250);
+    --gray-100: oklch(0.965 0.004 250);
+    --gray-200: oklch(0.925 0.006 250);
+    --gray-300: oklch(0.845 0.008 250);
+    --gray-400: oklch(0.685 0.01 250);
+    --gray-500: oklch(0.555 0.01 250);
+    --gray-600: oklch(0.445 0.01 250);
+    --gray-700: oklch(0.345 0.008 250);
+    --gray-800: oklch(0.235 0.006 250);
+    --gray-850: oklch(0.185 0.005 250);
+    --gray-900: oklch(0.145 0.004 250);
+    --gray-950: oklch(0.095 0.003 250);
+
+    /* Brand Colors */
+    --purple-50: oklch(0.97 0.02 290);
+    --purple-100: oklch(0.93 0.04 290);
+    --purple-200: oklch(0.87 0.08 290);
+    --purple-300: oklch(0.77 0.14 290);
+    --purple-400: oklch(0.67 0.18 290);
+    --purple-500: oklch(0.58 0.22 290);
+    --purple-600: oklch(0.5 0.22 290);
+    --purple-700: oklch(0.42 0.2 290);
+    --purple-800: oklch(0.35 0.16 290);
+    --purple-900: oklch(0.28 0.12 290);
+
+    /* Accent Colors */
+    --blue-500: oklch(0.6 0.18 250);
+    --green-500: oklch(0.65 0.18 145);
+    --yellow-500: oklch(0.8 0.15 85);
+    --orange-500: oklch(0.7 0.18 50);
+    --red-500: oklch(0.6 0.22 25);
+    --cyan-500: oklch(0.7 0.14 200);
+    --pink-500: oklch(0.65 0.2 350);
+
+    /* Terminal Theme Colors (Catppuccin Mocha inspired) */
+    --terminal-base: #1e1e2e;
+    --terminal-surface: #313244;
+    --terminal-overlay: #45475a;
+    --terminal-text: #cdd6f4;
+    --terminal-subtext: #a6adc8;
+    --terminal-lavender: #b4befe;
+    --terminal-blue: #89b4fa;
+    --terminal-sapphire: #74c7ec;
+    --terminal-sky: #89dceb;
+    --terminal-teal: #94e2d5;
+    --terminal-green: #a6e3a1;
+    --terminal-yellow: #f9e2af;
+    --terminal-peach: #fab387;
+    --terminal-maroon: #eba0ac;
+    --terminal-red: #f38ba8;
+    --terminal-mauve: #cba6f7;
+    --terminal-pink: #f5c2e7;
+    --terminal-flamingo: #f2cdcd;
+    --terminal-rosewater: #f5e0dc;
+
+    /* Spacing (4px base grid, 8px preferred) */
+    --space-0: 0px;
+    --space-0-5: 2px;
+    --space-1: 4px;
+    --space-1-5: 6px;
+    --space-2: 8px;
+    --space-2-5: 10px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --space-10: 40px;
+    --space-12: 48px;
+    --space-16: 64px;
+    --space-20: 80px;
+    --space-24: 96px;
+
+    /* Typography Scale (1.2 ratio - Minor Third) */
+    --text-2xs: 0.625rem; /* 10px */
+    --text-xs: 0.75rem; /* 12px */
+    --text-sm: 0.875rem; /* 14px */
+    --text-base: 1rem; /* 16px */
+    --text-lg: 1.125rem; /* 18px */
+    --text-xl: 1.25rem; /* 20px */
+    --text-2xl: 1.5rem; /* 24px */
+    --text-3xl: 1.875rem; /* 30px */
+    --text-4xl: 2.25rem; /* 36px */
+    --text-5xl: 3rem; /* 48px */
+
+    /* Default Font Stack (overridden per theme) */
+    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-display: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: "Geist Mono", "SF Mono", "Fira Code", monospace;
+
+    /* Font Weights */
+    --font-normal: 400;
+    --font-medium: 500;
+    --font-semibold: 600;
+    --font-bold: 700;
+
+    /* Line Heights (aligned to 4px grid) */
+    --leading-none: 1;
+    --leading-tight: 1.25;
+    --leading-snug: 1.375;
+    --leading-normal: 1.5;
+    --leading-relaxed: 1.625;
+    --leading-loose: 2;
+
+    /* Letter Spacing */
+    --tracking-tighter: -0.05em;
+    --tracking-tight: -0.025em;
+    --tracking-normal: 0;
+    --tracking-wide: 0.025em;
+    --tracking-wider: 0.05em;
+
+    /* Border Radius */
+    --radius-none: 0;
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 12px;
+    --radius-2xl: 16px;
+    --radius-3xl: 24px;
+    --radius-full: 9999px;
+
+    /* Shadows - Standard */
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    --shadow-inner: inset 0 2px 4px rgba(0, 0, 0, 0.06);
+
+    /* Glassmorphism shadows - SUBTLE, not glowing */
+    --shadow-glass: 0 4px 24px rgba(0, 0, 0, 0.08);
+    --shadow-glass-sm: 0 2px 12px rgba(0, 0, 0, 0.06);
+    --shadow-glass-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
+
+    /* Motion */
+    --duration-instant: 0ms;
+    --duration-fast: 150ms;
+    --duration-normal: 200ms;
+    --duration-slow: 300ms;
+    --duration-slower: 500ms;
+
+    --ease-linear: linear;
+    --ease-in: cubic-bezier(0.4, 0, 1, 1);
+    --ease-out: cubic-bezier(0, 0, 0.2, 1);
+    --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+    --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+
+    /* Z-Index Scale */
+    --z-base: 0;
+    --z-raised: 10;
+    --z-dropdown: 100;
+    --z-sticky: 200;
+    --z-overlay: 300;
+    --z-modal: 400;
+    --z-popover: 500;
+    --z-toast: 600;
+    --z-tooltip: 700;
+
+    /* Blur Values */
+    --blur-sm: 4px;
+    --blur-md: 8px;
+    --blur-lg: 12px;
+    --blur-xl: 16px;
+    --blur-2xl: 24px;
+    --blur-glass: 10px; /* Sweet spot for subtle frost */
+
+    /* ========================================
+       SEMANTIC TOKENS (Light Mode Default)
+       ======================================== */
+
+    /* Surfaces */
+    --background: var(--gray-50);
+    --background-subtle: var(--gray-100);
+    --surface: white;
+    --surface-raised: white;
+    --surface-overlay: white;
+    --surface-sunken: var(--gray-100);
+
+    /* Text */
+    --text-primary: var(--gray-900);
+    --text-secondary: var(--gray-600);
+    --text-tertiary: var(--gray-500);
+    --text-muted: var(--gray-400);
+    --text-inverted: white;
+    --text-on-accent: white;
+
+    /* Borders */
+    --border-subtle: var(--gray-200);
+    --border-default: var(--gray-300);
+    --border-strong: var(--gray-400);
+    --border-focus: var(--purple-500);
+
+    /* Interactive */
+    --accent: var(--purple-500);
+    --accent-hover: var(--purple-600);
+    --accent-active: var(--purple-700);
+    --accent-subtle: var(--purple-100);
+    --accent-muted: var(--purple-200);
+
+    /* Feedback */
+    --success: var(--green-500);
+    --success-subtle: oklch(0.95 0.05 145);
+    --warning: var(--yellow-500);
+    --warning-subtle: oklch(0.95 0.05 85);
+    --error: var(--red-500);
+    --error-subtle: oklch(0.95 0.05 25);
+    --info: var(--blue-500);
+    --info-subtle: oklch(0.95 0.05 250);
+
+    /* Input */
+    --input-background: white;
+    --input-border: var(--gray-300);
+    --input-border-hover: var(--gray-400);
+    --input-border-focus: var(--purple-500);
+    --input-placeholder: var(--gray-400);
+
+    /* Code */
+    --code-background: var(--gray-100);
+    --code-text: var(--gray-800);
+
+    /* Component-specific */
+    --card-background: var(--surface);
+    --card-border: var(--border-subtle);
+    --card-shadow: var(--shadow-sm);
+
+    --button-primary-bg: var(--accent);
+    --button-primary-hover: var(--accent-hover);
+    --button-primary-active: var(--accent-active);
+    --button-primary-text: var(--text-on-accent);
+
+    --button-secondary-bg: transparent;
+    --button-secondary-hover: var(--gray-100);
+    --button-secondary-active: var(--gray-200);
+    --button-secondary-text: var(--text-primary);
+    --button-secondary-border: var(--border-default);
+
+    --button-ghost-bg: transparent;
+    --button-ghost-hover: var(--gray-100);
+    --button-ghost-active: var(--gray-200);
+    --button-ghost-text: var(--text-secondary);
+
+    /* Chat specific */
+    --chat-user-bg: var(--accent);
+    --chat-user-text: var(--text-on-accent);
+    --chat-assistant-bg: var(--surface);
+    --chat-assistant-text: var(--text-primary);
+    --chat-assistant-border: var(--border-subtle);
+
+    /* Sidebar */
+    --sidebar-background: var(--surface);
+    --sidebar-border: var(--border-subtle);
+    --sidebar-item-hover: var(--gray-100);
+    --sidebar-item-active: var(--accent-subtle);
+
+    /* Theme-specific overrides (base values) */
+    --glass-bg: rgba(255, 255, 255, 0.72);
+    --glass-border: rgba(255, 255, 255, 0.2);
+    --glass-blur: var(--blur-glass);
+    --glass-saturate: saturate(180%);
+  }
+
+  /* ========================================
+     DARK MODE (applies to all themes)
+     ======================================== */
+
+  [data-mode="dark"] {
+    /* Surfaces - soft black, not pure #000 */
+    --background: #020617; /* slate-950 equivalent */
+    --background-subtle: #0f172a;
+    --surface: #0f172a;
+    --surface-raised: #1e293b;
+    --surface-overlay: #1e293b;
+    --surface-sunken: #020617;
+
+    /* Text - desaturated, not pure white */
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-tertiary: #64748b;
+    --text-muted: #475569;
+
+    /* Borders */
+    --border-subtle: rgba(255, 255, 255, 0.08);
+    --border-default: rgba(255, 255, 255, 0.12);
+    --border-strong: rgba(255, 255, 255, 0.18);
+
+    /* Accent adjustments for dark */
+    --accent-subtle: oklch(0.25 0.08 290);
+    --accent-muted: oklch(0.3 0.1 290);
+
+    /* Feedback adjustments */
+    --success-subtle: oklch(0.25 0.05 145);
+    --warning-subtle: oklch(0.25 0.05 85);
+    --error-subtle: oklch(0.25 0.05 25);
+    --info-subtle: oklch(0.25 0.05 250);
+
+    /* Input */
+    --input-background: #0f172a;
+    --input-border: rgba(255, 255, 255, 0.12);
+    --input-border-hover: rgba(255, 255, 255, 0.18);
+    --input-placeholder: #64748b;
+
+    /* Code */
+    --code-background: #1e293b;
+    --code-text: #e2e8f0;
+
+    /* Component adjustments */
+    --card-background: var(--surface);
+    --card-border: var(--border-subtle);
+    --card-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+
+    --button-secondary-hover: rgba(255, 255, 255, 0.08);
+    --button-secondary-active: rgba(255, 255, 255, 0.12);
+
+    --button-ghost-hover: rgba(255, 255, 255, 0.08);
+    --button-ghost-active: rgba(255, 255, 255, 0.12);
+
+    /* Chat */
+    --chat-assistant-bg: #1e293b;
+    --chat-assistant-border: rgba(255, 255, 255, 0.08);
+
+    /* Sidebar */
+    --sidebar-background: #0f172a;
+    --sidebar-border: rgba(255, 255, 255, 0.08);
+    --sidebar-item-hover: rgba(255, 255, 255, 0.08);
+    --sidebar-item-active: oklch(0.25 0.08 290);
+
+    /* Glass - subtle dark variant */
+    --glass-bg: rgba(15, 23, 42, 0.8);
+    --glass-border: rgba(255, 255, 255, 0.08);
+  }
+
+  /* ========================================
+     THEME: GLASS
+     Apple-inspired subtle frosted glass
+     Typography: Inter (clean, Apple-like)
+     ======================================== */
+
+  [data-theme="glass"] {
+    /* Typography - Inter for Apple-like cleanliness */
+    --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-display: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: "Geist Mono", "SF Mono", monospace;
+
+    /* Rounder corners for Apple feel */
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+    --radius-2xl: 20px;
+
+    /* SUBTLE glassmorphism - not glowy */
+    --glass-bg: rgba(255, 255, 255, 0.72);
+    --glass-border: rgba(255, 255, 255, 0.2);
+    --glass-blur: 10px;
+
+    /* Enhanced surfaces with glass */
+    --surface: var(--glass-bg);
+    --surface-raised: var(--glass-bg);
+    --card-background: var(--glass-bg);
+    --card-border: var(--glass-border);
+    --card-shadow: var(--shadow-glass);
+
+    --sidebar-background: var(--glass-bg);
+
+    /* Softer borders for glass */
+    --border-subtle: var(--glass-border);
+    --border-default: rgba(255, 255, 255, 0.25);
+
+    /* NO glowing shadows - just subtle elevation */
+    --button-primary-shadow: none;
+  }
+
+  [data-theme="glass"][data-mode="dark"] {
+    /* Dark glass - professional, not neon */
+    --glass-bg: rgba(30, 30, 30, 0.6);
+    --glass-border: rgba(255, 255, 255, 0.08);
+
+    --surface: var(--glass-bg);
+    --surface-raised: rgba(45, 45, 50, 0.6);
+    --card-background: var(--glass-bg);
+    --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+
+    --border-subtle: var(--glass-border);
+    --border-default: rgba(255, 255, 255, 0.1);
+
+    /* Inset border for depth */
+    --card-border: rgba(255, 255, 255, 0.08);
+  }
+
+  /* ========================================
+     THEME: MINIMAL
+     Linear-inspired sharp aesthetic
+     Typography: Geist (Swiss precision)
+     ======================================== */
+
+  [data-theme="minimal"] {
+    /* Typography - Geist for Swiss precision */
+    --font-sans: "Geist", "Inter", -apple-system, sans-serif;
+    --font-display: "Geist", "Inter", -apple-system, sans-serif;
+    --font-mono: "Geist Mono", "JetBrains Mono", monospace;
+
+    /* Sharper corners for precision */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-xl: 10px;
+    --radius-2xl: 12px;
+
+    /* Subtle shadows - clean, not flashy */
+    --card-shadow: var(--shadow-xs);
+    --shadow-glass: var(--shadow-md);
+
+    /* Stronger, cleaner borders */
+    --border-subtle: var(--gray-200);
+    --border-default: var(--gray-300);
+
+    /* No glass effect - solid surfaces */
+    --glass-bg: white;
+    --glass-blur: 0px;
+    --glass-saturate: none;
+
+    /* Crisp surfaces */
+    --surface: white;
+    --surface-raised: white;
+    --card-background: white;
+  }
+
+  [data-theme="minimal"][data-mode="dark"] {
+    --glass-bg: #0f172a;
+    --surface: #0f172a;
+    --surface-raised: #1e293b;
+    --card-background: #0f172a;
+
+    --border-subtle: rgba(255, 255, 255, 0.1);
+    --border-default: rgba(255, 255, 255, 0.15);
+  }
+
+  /* ========================================
+     THEME: TERMINAL
+     Developer-focused with Catppuccin colors
+     Typography: JetBrains Mono (code-first)
+     ======================================== */
+
+  [data-theme="terminal"] {
+    /* Typography - Monospace-forward for terminal vibes */
+    --font-sans: "Geist", "Inter", -apple-system, sans-serif;
+    --font-display: "JetBrains Mono", "Fira Code", monospace;
+    --font-mono: "JetBrains Mono", "Fira Code", monospace;
+
+    /* Tighter corners for terminal feel */
+    --radius-sm: 2px;
+    --radius-md: 4px;
+    --radius-lg: 6px;
+    --radius-xl: 8px;
+    --radius-2xl: 10px;
+
+    /* Terminal always uses dark colors */
+    --background: var(--terminal-base);
+    --background-subtle: var(--terminal-surface);
+    --surface: var(--terminal-surface);
+    --surface-raised: var(--terminal-overlay);
+    --surface-overlay: var(--terminal-overlay);
+
+    --text-primary: var(--terminal-text);
+    --text-secondary: var(--terminal-subtext);
+    --text-tertiary: var(--terminal-overlay);
+
+    --border-subtle: var(--terminal-surface);
+    --border-default: var(--terminal-overlay);
+
+    /* Terminal accent - lavender */
+    --accent: var(--terminal-lavender);
+    --accent-hover: var(--terminal-mauve);
+    --accent-active: var(--terminal-pink);
+    --accent-subtle: rgba(180, 190, 254, 0.15);
+
+    /* Feedback with terminal palette */
+    --success: var(--terminal-green);
+    --warning: var(--terminal-yellow);
+    --error: var(--terminal-red);
+    --info: var(--terminal-blue);
+
+    /* Subtle glow for terminal - not over the top */
+    --shadow-glass: 0 0 20px rgba(180, 190, 254, 0.1);
+    --shadow-glass-sm: 0 0 10px rgba(180, 190, 254, 0.08);
+
+    /* Code */
+    --code-background: var(--terminal-base);
+    --code-text: var(--terminal-text);
+
+    /* Chat - more terminal feel */
+    --chat-user-bg: var(--terminal-mauve);
+    --chat-assistant-bg: var(--terminal-surface);
+    --chat-assistant-border: var(--terminal-overlay);
+
+    /* Sidebar */
+    --sidebar-background: var(--terminal-base);
+    --sidebar-border: var(--terminal-surface);
+    --sidebar-item-hover: var(--terminal-surface);
+    --sidebar-item-active: rgba(180, 190, 254, 0.15);
+
+    /* Input */
+    --input-background: var(--terminal-base);
+    --input-border: var(--terminal-overlay);
+    --input-border-hover: var(--terminal-lavender);
+    --input-border-focus: var(--terminal-mauve);
+    --input-placeholder: var(--terminal-subtext);
+
+    /* No glass for terminal - solid surfaces */
+    --glass-bg: var(--terminal-surface);
+    --glass-blur: 0px;
+    --glass-saturate: none;
+
+    /* Button adjustments */
+    --button-secondary-hover: var(--terminal-surface);
+    --button-secondary-active: var(--terminal-overlay);
+    --button-ghost-hover: var(--terminal-surface);
+    --button-ghost-active: var(--terminal-overlay);
+  }
+
+  /* Terminal ignores light/dark mode toggle - always dark */
+  [data-theme="terminal"][data-mode="light"] {
+    --background: var(--terminal-base);
+    --surface: var(--terminal-surface);
+    --text-primary: var(--terminal-text);
+  }
+
+  /* ========================================
+     THEME: SOFT
+     Warm, approachable, friendly for non-coders
+     Typography: Outfit + Nunito Sans (friendly, rounded)
+     ======================================== */
+
+  [data-theme="soft"] {
+    /* Typography - Friendly, rounded fonts */
+    --font-sans: "Nunito Sans", "Nunito", -apple-system, sans-serif;
+    --font-display: "Outfit", "Figtree", -apple-system, sans-serif;
+    --font-mono: "Fira Code", "JetBrains Mono", monospace;
+
+    /* Very rounded corners for friendly feel */
+    --radius-sm: 8px;
+    --radius-md: 12px;
+    --radius-lg: 16px;
+    --radius-xl: 20px;
+    --radius-2xl: 28px;
+
+    /* Warm gray undertones (slight orange) */
+    --gray-50: oklch(0.985 0.005 60);
+    --gray-100: oklch(0.965 0.008 60);
+    --gray-200: oklch(0.925 0.01 60);
+    --gray-300: oklch(0.845 0.012 60);
+    --gray-400: oklch(0.685 0.012 60);
+    --gray-500: oklch(0.555 0.01 60);
+    --gray-600: oklch(0.445 0.01 60);
+    --gray-700: oklch(0.345 0.008 60);
+    --gray-800: oklch(0.235 0.006 60);
+    --gray-900: oklch(0.145 0.004 60);
+    --gray-950: oklch(0.095 0.003 60);
+
+    /* Warmer accent - coral/peach */
+    --accent: oklch(0.68 0.16 35);
+    --accent-hover: oklch(0.62 0.18 35);
+    --accent-active: oklch(0.56 0.2 35);
+    --accent-subtle: oklch(0.95 0.04 35);
+    --accent-muted: oklch(0.9 0.06 35);
+
+    /* Softer shadows */
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.06);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.1);
+    --shadow-glass: 0 4px 16px rgba(0, 0, 0, 0.06);
+
+    /* Warm surfaces */
+    --background: oklch(0.985 0.005 60);
+    --surface: white;
+    --surface-raised: white;
+
+    /* Softer borders */
+    --border-subtle: oklch(0.92 0.008 60);
+    --border-default: oklch(0.88 0.01 60);
+
+    /* No glass - solid, friendly surfaces */
+    --glass-bg: white;
+    --glass-blur: 0px;
+    --glass-saturate: none;
+  }
+
+  [data-theme="soft"][data-mode="dark"] {
+    /* Warm dark mode */
+    --background: oklch(0.12 0.008 60);
+    --background-subtle: oklch(0.15 0.006 60);
+    --surface: oklch(0.15 0.006 60);
+    --surface-raised: oklch(0.18 0.005 60);
+
+    --text-primary: oklch(0.95 0.005 60);
+    --text-secondary: oklch(0.7 0.008 60);
+
+    --border-subtle: oklch(0.22 0.006 60);
+    --border-default: oklch(0.28 0.008 60);
+
+    --accent-subtle: oklch(0.25 0.06 35);
+    --accent-muted: oklch(0.3 0.08 35);
+
+    --glass-bg: oklch(0.15 0.006 60);
+  }
+}
+
+/* ========================================
+   ACCESSIBILITY
+   ======================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-normal: 0ms;
+    --duration-slow: 0ms;
+    --duration-slower: 0ms;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-bg: var(--surface);
+    --glass-blur: 0px;
+    --glass-saturate: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --border-subtle: var(--border-strong);
+    --text-secondary: var(--text-primary);
+    --text-tertiary: var(--text-secondary);
+  }
+}

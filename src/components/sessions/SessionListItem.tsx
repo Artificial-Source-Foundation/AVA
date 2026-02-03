@@ -1,8 +1,11 @@
 /**
- * SessionListItem Component
- * Individual session item in the sidebar with hover actions
+ * Session List Item Component
+ *
+ * Individual session card with hover actions.
+ * Premium design with smooth animations.
  */
 
+import { Clock, MessageSquare, Pencil, Trash2 } from 'lucide-solid'
 import { type Component, createSignal, Show } from 'solid-js'
 import { LIMITS } from '../../config/constants'
 import type { SessionWithStats } from '../../types'
@@ -24,7 +27,6 @@ export const SessionListItem: Component<SessionListItemProps> = (props) => {
     e.stopPropagation()
     setEditName(props.session.name)
     setIsEditing(true)
-    // Focus input after render
     setTimeout(() => inputRef?.focus(), 0)
   }
 
@@ -72,7 +74,7 @@ export const SessionListItem: Component<SessionListItemProps> = (props) => {
   }
 
   const truncatePreview = (text?: string): string => {
-    if (!text) return 'No messages'
+    if (!text) return 'No messages yet'
     if (text.length <= LIMITS.MESSAGE_PREVIEW_LENGTH) return text
     return `${text.slice(0, LIMITS.MESSAGE_PREVIEW_LENGTH)}...`
   }
@@ -87,9 +89,16 @@ export const SessionListItem: Component<SessionListItemProps> = (props) => {
   return (
     <button
       type="button"
-      class={`group relative w-full text-left p-3 rounded-lg cursor-pointer transition-colors ${
-        props.isActive ? 'bg-blue-600 text-white' : 'hover:bg-gray-700 text-gray-200'
-      }`}
+      class={`
+        group relative w-full text-left
+        p-3 rounded-[var(--radius-lg)]
+        transition-all duration-[var(--duration-fast)]
+        ${
+          props.isActive
+            ? 'bg-[var(--sidebar-item-active)] border border-[var(--accent-muted)]'
+            : 'hover:bg-[var(--sidebar-item-hover)] border border-transparent'
+        }
+      `}
       onClick={() => !isEditing() && props.onSelect()}
       onKeyDown={handleContainerKeyDown}
     >
@@ -106,7 +115,14 @@ export const SessionListItem: Component<SessionListItemProps> = (props) => {
               onKeyDown={handleKeyDown}
               onBlur={handleSaveEdit}
               maxLength={LIMITS.SESSION_NAME_MAX}
-              class="flex-1 px-2 py-1 bg-gray-600 border border-gray-500 rounded text-white text-sm focus:outline-none focus:border-blue-400"
+              class="
+                flex-1 px-2 py-1.5
+                bg-[var(--input-background)]
+                border border-[var(--input-border-focus)]
+                rounded-[var(--radius-md)]
+                text-[var(--text-primary)] text-sm
+                focus:outline-none focus:ring-2 focus:ring-[var(--accent-subtle)]
+              "
             />
           </div>
         }
@@ -115,84 +131,70 @@ export const SessionListItem: Component<SessionListItemProps> = (props) => {
         <div class="flex items-start justify-between gap-2">
           <div class="flex-1 min-w-0">
             {/* Session name */}
-            <p class="font-medium truncate text-sm">{props.session.name}</p>
+            <p
+              class={`
+                font-medium text-sm truncate
+                ${props.isActive ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}
+              `}
+            >
+              {props.session.name}
+            </p>
 
             {/* Preview text */}
-            <p
-              class={`text-xs truncate mt-0.5 ${
-                props.isActive ? 'text-blue-100' : 'text-gray-400'
-              }`}
-            >
+            <p class="text-xs text-[var(--text-tertiary)] truncate mt-1">
               {truncatePreview(props.session.lastPreview)}
             </p>
           </div>
 
           {/* Hover action buttons */}
           <div
-            class={`flex-shrink-0 flex gap-1 ${
-              props.isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-            } transition-opacity`}
+            class={`
+              flex-shrink-0 flex gap-0.5
+              transition-opacity duration-[var(--duration-fast)]
+              ${props.isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}
+            `}
           >
             <button
               type="button"
               onClick={handleStartEdit}
-              class={`p-1 rounded hover:bg-opacity-20 ${
-                props.isActive ? 'hover:bg-white' : 'hover:bg-gray-500'
-              }`}
+              class="
+                p-1.5 rounded-[var(--radius-md)]
+                text-[var(--text-tertiary)]
+                hover:text-[var(--text-primary)]
+                hover:bg-[var(--surface-raised)]
+                transition-colors duration-[var(--duration-fast)]
+              "
               title="Rename"
             >
-              <svg
-                class="w-3.5 h-3.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                role="img"
-                aria-label="Rename"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"
-                />
-              </svg>
+              <Pencil class="w-3.5 h-3.5" />
             </button>
             <button
               type="button"
               onClick={handleArchive}
-              class={`p-1 rounded hover:bg-opacity-20 ${
-                props.isActive ? 'hover:bg-white' : 'hover:bg-gray-500'
-              }`}
-              title="Archive"
+              class="
+                p-1.5 rounded-[var(--radius-md)]
+                text-[var(--text-tertiary)]
+                hover:text-[var(--error)]
+                hover:bg-[var(--error-subtle)]
+                transition-colors duration-[var(--duration-fast)]
+              "
+              title="Delete"
             >
-              <svg
-                class="w-3.5 h-3.5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                role="img"
-                aria-label="Archive"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                />
-              </svg>
+              <Trash2 class="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
 
         {/* Metadata line */}
-        <div
-          class={`flex items-center gap-2 text-xs mt-1.5 ${
-            props.isActive ? 'text-blue-200' : 'text-gray-500'
-          }`}
-        >
-          <span>{props.session.messageCount} msgs</span>
-          <span>·</span>
-          <span>{formatDate(props.session.updatedAt)}</span>
+        <div class="flex items-center gap-3 mt-2 text-xs text-[var(--text-muted)]">
+          <span class="flex items-center gap-1">
+            <MessageSquare class="w-3 h-3" />
+            {props.session.messageCount}
+          </span>
+          <span class="flex items-center gap-1">
+            <Clock class="w-3 h-3" />
+            {formatDate(props.session.updatedAt)}
+          </span>
         </div>
       </Show>
     </button>

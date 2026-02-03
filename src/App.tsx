@@ -1,6 +1,9 @@
 /**
  * App Component
  * Root component with initialization logic
+ *
+ * Note: Preview mode is handled in index.tsx to avoid loading Node.js dependencies
+ * Access the design system preview at: http://localhost:1420/?preview=true
  */
 
 import { createSignal, onMount, Show } from 'solid-js'
@@ -58,10 +61,10 @@ function App() {
     <Show
       when={!isInitializing()}
       fallback={
-        <div class="flex h-screen items-center justify-center bg-gray-900">
+        <div class="flex h-screen items-center justify-center bg-[var(--background)]">
           <div class="text-center">
-            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto" />
-            <p class="mt-4 text-gray-400">Initializing Estela...</p>
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--accent)] mx-auto" />
+            <p class="mt-4 text-[var(--text-secondary)]">Initializing Estela...</p>
           </div>
         </div>
       }
@@ -69,15 +72,17 @@ function App() {
       <Show
         when={!initError()}
         fallback={
-          <div class="flex h-screen items-center justify-center bg-gray-900">
+          <div class="flex h-screen items-center justify-center bg-[var(--background)]">
             <div class="text-center max-w-md p-6">
-              <div class="text-red-500 text-6xl mb-4">!</div>
-              <h1 class="text-xl font-bold text-white mb-2">Initialization Error</h1>
-              <p class="text-gray-400 mb-4">{initError()}</p>
+              <div class="text-[var(--error)] text-6xl mb-4">!</div>
+              <h1 class="text-xl font-bold text-[var(--text-primary)] mb-2">
+                Initialization Error
+              </h1>
+              <p class="text-[var(--text-secondary)] mb-4">{initError()}</p>
               <button
                 type="button"
                 onClick={() => window.location.reload()}
-                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500"
+                class="px-4 py-2 bg-[var(--accent)] text-white rounded-[var(--radius-lg)] hover:bg-[var(--accent-hover)] transition-colors"
               >
                 Retry
               </button>

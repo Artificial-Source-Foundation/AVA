@@ -1,8 +1,11 @@
 /**
- * MessageInput Component
- * Captures user input and sends messages via useChat hook
+ * Message Input Component
+ *
+ * Captures user input and sends messages via useChat hook.
+ * Premium input design with themed styling.
  */
 
+import { AlertCircle, Send, Square, X, Zap } from 'lucide-solid'
 import { type Component, createSignal, Show } from 'solid-js'
 import { useChat } from '../../hooks/useChat'
 
@@ -15,16 +18,12 @@ export const MessageInput: Component = () => {
     const message = input().trim()
     if (!message || isStreaming()) return
 
-    // Clear input immediately for better UX
     setInput('')
     clearError()
-
-    // Send message (async, will update store)
     await sendMessage(message)
   }
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    // Submit on Enter (without Shift)
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSubmit(e)
@@ -32,18 +31,46 @@ export const MessageInput: Component = () => {
   }
 
   return (
-    <form onSubmit={handleSubmit} class="p-4 border-t border-gray-700">
+    <form
+      onSubmit={handleSubmit}
+      class="
+        px-6 py-4
+        border-t border-[var(--border-subtle)]
+        bg-[var(--surface-base)]
+        transition-colors duration-[var(--duration-normal)]
+      "
+    >
       {/* Error display */}
       <Show when={error()}>
-        <div class="mb-3 p-3 bg-red-900/50 border border-red-700 rounded-lg text-red-200 text-sm flex items-center justify-between">
-          <span>{error()!.message}</span>
-          <button type="button" onClick={clearError} class="text-red-400 hover:text-red-200">
-            ✕
+        <div
+          class="
+            mb-3 p-3
+            bg-[var(--error-subtle)]
+            border border-[var(--error-muted)]
+            rounded-[var(--radius-lg)]
+            flex items-center justify-between gap-3
+          "
+        >
+          <div class="flex items-center gap-2 text-sm text-[var(--error)]">
+            <AlertCircle class="w-4 h-4 flex-shrink-0" />
+            <span>{error()!.message}</span>
+          </div>
+          <button
+            type="button"
+            onClick={clearError}
+            class="
+              p-1 rounded-[var(--radius-md)]
+              text-[var(--error)] hover:text-[var(--error-hover)]
+              hover:bg-[var(--error-muted)]
+              transition-colors duration-[var(--duration-fast)]
+            "
+          >
+            <X class="w-4 h-4" />
           </button>
         </div>
       </Show>
 
-      <div class="flex space-x-4">
+      <div class="flex gap-3">
         <input
           type="text"
           value={input()}
@@ -51,7 +78,18 @@ export const MessageInput: Component = () => {
           onKeyDown={handleKeyDown}
           placeholder={isStreaming() ? 'Thinking...' : 'Type a message...'}
           disabled={isStreaming()}
-          class="flex-1 bg-gray-700 text-white placeholder-gray-400 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          class="
+            flex-1 px-4 py-3
+            bg-[var(--input-background)]
+            text-[var(--text-primary)]
+            placeholder-[var(--text-muted)]
+            border border-[var(--input-border)]
+            rounded-[var(--radius-lg)]
+            text-sm
+            transition-all duration-[var(--duration-fast)]
+            focus:outline-none focus:border-[var(--input-border-focus)] focus:ring-2 focus:ring-[var(--accent-subtle)]
+            disabled:opacity-50 disabled:cursor-not-allowed
+          "
         />
 
         <Show
@@ -60,8 +98,19 @@ export const MessageInput: Component = () => {
             <button
               type="submit"
               disabled={!input().trim()}
-              class="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              class="
+                px-5 py-3
+                bg-[var(--accent)] hover:bg-[var(--accent-hover)]
+                text-white font-medium text-sm
+                rounded-[var(--radius-lg)]
+                transition-all duration-[var(--duration-fast)]
+                focus:outline-none focus:ring-2 focus:ring-[var(--accent-subtle)]
+                disabled:opacity-50 disabled:cursor-not-allowed
+                flex items-center gap-2
+                active:scale-[0.98]
+              "
             >
+              <Send class="w-4 h-4" />
               Send
             </button>
           }
@@ -69,8 +118,18 @@ export const MessageInput: Component = () => {
           <button
             type="button"
             onClick={cancel}
-            class="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-500 focus:outline-none focus:ring-2 focus:ring-red-500 transition"
+            class="
+              px-5 py-3
+              bg-[var(--error)] hover:bg-[var(--error-hover)]
+              text-white font-medium text-sm
+              rounded-[var(--radius-lg)]
+              transition-all duration-[var(--duration-fast)]
+              focus:outline-none focus:ring-2 focus:ring-[var(--error-subtle)]
+              flex items-center gap-2
+              active:scale-[0.98]
+            "
           >
+            <Square class="w-4 h-4" />
             Stop
           </button>
         </Show>
@@ -78,7 +137,10 @@ export const MessageInput: Component = () => {
 
       {/* Provider indicator */}
       <Show when={currentProvider()}>
-        <div class="mt-2 text-xs text-gray-500">Using: {currentProvider()}</div>
+        <div class="mt-2 flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+          <Zap class="w-3 h-3" />
+          <span>Using: {currentProvider()}</span>
+        </div>
       </Show>
     </form>
   )

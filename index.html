@@ -3,9 +3,41 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" content="#0a0a0b" />
+    <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/svg+xml" href="/src/assets/logo.svg" />
-    <title>Tauri + Solid + Typescript App</title>
+    <title>Estela - AI Coding Assistant</title>
+
+    <!-- Theme detection script - runs before render to prevent flash -->
+    <script>
+      (() => {
+        // Get stored preferences
+        const theme = localStorage.getItem('estela-theme') || 'glass';
+        const mode = localStorage.getItem('estela-mode') || 'system';
+
+        // Resolve actual mode
+        let resolvedMode = mode;
+        if (mode === 'system') {
+          resolvedMode = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+
+        // Apply to document immediately
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.mode = resolvedMode;
+      })();
+    </script>
+
+    <!-- Preload fonts for all themes -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Glass theme: Inter + Geist Mono -->
+    <!-- Minimal theme: Geist + Geist Mono -->
+    <!-- Terminal theme: JetBrains Mono -->
+    <!-- Soft theme: Outfit + Nunito Sans + Fira Code -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Nunito+Sans:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
   </head>
 
   <body>

@@ -7,6 +7,8 @@
 export * from './agent/index.js'
 // Authentication (API key + OAuth)
 export * from './auth/index.js'
+// Commander (hierarchical delegation)
+export * from './commander/index.js'
 // Context management (token tracking, compaction)
 export * from './context/index.js'
 // Diff tracking

@@ -30,6 +30,10 @@
       "types": "./dist/platform.d.ts",
       "import": "./dist/platform.js"
     },
+    "./commander": {
+      "types": "./dist/commander/index.d.ts",
+      "import": "./dist/commander/index.js"
+    },
     "./context": {
       "types": "./dist/context/index.d.ts",
       "import": "./dist/context/index.js"

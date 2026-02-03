@@ -3,10 +3,10 @@
  * Remove a file from the filesystem
  */
 
-import { exists, remove, stat } from '@tauri-apps/plugin-fs'
-import { ToolError, ToolErrorType } from './errors'
-import type { Tool, ToolContext, ToolResult } from './types'
-import { resolvePath } from './utils'
+import { getPlatform } from '../platform.js'
+import { ToolError, ToolErrorType } from './errors.js'
+import type { Tool, ToolContext, ToolResult } from './types.js'
+import { resolvePath } from './utils.js'
 
 // ============================================================================
 // Types
@@ -62,6 +62,7 @@ export const deleteTool: Tool<DeleteParams> = {
   },
 
   async execute(params: DeleteParams, ctx: ToolContext): Promise<ToolResult> {
+    const fs = getPlatform().fs
     const filePath = resolvePath(params.path, ctx.workingDirectory)
 
     // Check abort signal
@@ -75,7 +76,7 @@ export const deleteTool: Tool<DeleteParams> = {
 
     // Check if file exists
     try {
-      if (!(await exists(filePath))) {
+      if (!(await fs.exists(filePath))) {
         return {
           success: false,
           output: `File not found: ${filePath}`,
@@ -92,7 +93,7 @@ export const deleteTool: Tool<DeleteParams> = {
 
     // Check if it's a directory
     try {
-      const fileStat = await stat(filePath)
+      const fileStat = await fs.stat(filePath)
       if (fileStat.isDirectory) {
         return {
           success: false,
@@ -115,7 +116,7 @@ export const deleteTool: Tool<DeleteParams> = {
 
     // Delete file
     try {
-      await remove(filePath)
+      await fs.remove(filePath)
 
       return {
         success: true,
@@ -123,6 +124,7 @@ export const deleteTool: Tool<DeleteParams> = {
         metadata: {
           filePath,
         },
+        locations: [{ path: filePath, type: 'delete' }],
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

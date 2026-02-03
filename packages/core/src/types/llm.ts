@@ -81,11 +81,6 @@ export interface Credentials {
   refreshToken?: string // For OAuth token refresh
 }
 
-/** All stored credentials indexed by provider */
-export interface StoredCredentials {
-  [provider: string]: Credentials
-}
-
 // ============================================================================
 // Streaming Types
 // ============================================================================
@@ -117,27 +112,6 @@ export interface StreamError {
 // ============================================================================
 // API Response Types
 // ============================================================================
-
-/** OpenAI/OpenRouter SSE event types */
-export interface OpenAIStreamEvent {
-  id: string
-  object: 'chat.completion.chunk'
-  created: number
-  model: string
-  choices: Array<{
-    index: number
-    delta: {
-      role?: 'assistant'
-      content?: string
-    }
-    finish_reason: string | null
-  }>
-  usage?: {
-    prompt_tokens: number
-    completion_tokens: number
-    total_tokens: number
-  }
-}
 
 /** Anthropic SSE event types */
 export type AnthropicStreamEvent =

@@ -3,7 +3,7 @@
  * Shared helper functions for tool implementations
  */
 
-import { readFile } from '@tauri-apps/plugin-fs'
+import { getPlatform } from '../platform.js'
 
 // ============================================================================
 // Binary Detection
@@ -87,13 +87,14 @@ const BINARY_EXTENSIONS = new Set([
 /**
  * Check if file is binary by extension
  */
-function isBinaryExtension(path: string): boolean {
+export function isBinaryExtension(path: string): boolean {
   const ext = path.substring(path.lastIndexOf('.')).toLowerCase()
   return BINARY_EXTENSIONS.has(ext)
 }
 
 /**
  * Check if file is binary by content (null byte detection)
+ * Uses platform abstraction for file reading
  */
 export async function isBinaryFile(path: string): Promise<boolean> {
   // Check extension first (fast path)
@@ -103,19 +104,18 @@ export async function isBinaryFile(path: string): Promise<boolean> {
 
   // Check content for null bytes (first 4KB)
   try {
-    const bytes = await readFile(path)
-    const sample = bytes.slice(0, 4096)
+    const bytes = await getPlatform().fs.readBinary(path, 4096)
 
-    for (let i = 0; i < sample.length; i++) {
-      if (sample[i] === 0) {
+    for (let i = 0; i < bytes.length; i++) {
+      if (bytes[i] === 0) {
         return true
       }
     }
 
     // Also check for high ratio of non-printable characters
     let nonPrintable = 0
-    for (let i = 0; i < sample.length; i++) {
-      const byte = sample[i]
+    for (let i = 0; i < bytes.length; i++) {
+      const byte = bytes[i]
       // Non-printable: not tab (9), newline (10), carriage return (13), or printable ASCII (32-126)
       if (byte !== 9 && byte !== 10 && byte !== 13 && (byte < 32 || byte > 126)) {
         nonPrintable++
@@ -123,11 +123,24 @@ export async function isBinaryFile(path: string): Promise<boolean> {
     }
 
     // If more than 30% non-printable, consider binary
-    return sample.length > 0 && nonPrintable / sample.length > 0.3
+    return bytes.length > 0 && nonPrintable / bytes.length > 0.3
   } catch {
     // If we can't read the file, assume text
     return false
   }
+}
+
+/**
+ * Check if byte array contains binary content (null bytes)
+ * Used for detecting binary output from shell commands
+ */
+export function isBinaryOutput(chunk: Uint8Array): boolean {
+  for (let i = 0; i < chunk.length; i++) {
+    if (chunk[i] === 0) {
+      return true
+    }
+  }
+  return false
 }
 
 // ============================================================================
@@ -138,7 +151,7 @@ export async function isBinaryFile(path: string): Promise<boolean> {
  * Resolve path relative to working directory
  */
 export function resolvePath(path: string, workingDirectory: string): string {
-  // Already absolute
+  // Already absolute (Unix)
   if (path.startsWith('/')) {
     return path
   }
@@ -249,7 +262,7 @@ export function truncate(str: string, maxLength: number): string {
   if (str.length <= maxLength) {
     return str
   }
-  return str.slice(0, maxLength - 3) + '...'
+  return `${str.slice(0, maxLength - 3)}...`
 }
 
 /**

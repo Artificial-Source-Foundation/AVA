@@ -1,0 +1,34 @@
+/**
+ * Platform Initialization for Tauri
+ * Wires up @estela/platform-tauri with @estela/core
+ */
+
+import { setPlatform } from '@estela/core'
+import { createTauriPlatform } from '@estela/platform-tauri'
+
+let initialized = false
+
+/**
+ * Initialize the platform provider for Tauri
+ * Must be called before using any @estela/core features
+ */
+export function initializePlatform(): void {
+  if (initialized) return
+
+  // Create Tauri platform with default database path
+  // Note: The actual database is managed separately by src/services/database.ts
+  // This is for the credential store and other platform services
+  const platform = createTauriPlatform('estela.db')
+
+  setPlatform(platform)
+  initialized = true
+
+  console.log('[Platform] Tauri platform initialized')
+}
+
+/**
+ * Check if platform is initialized
+ */
+export function isPlatformInitialized(): boolean {
+  return initialized
+}

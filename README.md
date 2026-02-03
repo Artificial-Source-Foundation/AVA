@@ -2,24 +2,43 @@
 
 > Multi-Agent AI Coding Assistant
 
-A Tauri 2.0 + SolidJS desktop application for AI-assisted software development. Currently implements streaming chat with tool use; working toward a hierarchical **Commander + Operators + Validator** architecture.
+A Tauri 2.0 + SolidJS desktop application for AI-assisted software development with **ACP (Agent Client Protocol)** support for editor integration. Currently implements streaming chat with tool use; working toward a hierarchical **Commander + Operators + Validator** architecture.
 
 ## Quick Start
 
 ```bash
-# Prerequisites: Node.js 20+, Rust 1.70+
+# Prerequisites: Node.js 20+, pnpm 10+, Rust 1.70+
 
 # Clone and install
 git clone https://github.com/g0dxn4/Estela.git
 cd Estela
-npm install
+pnpm install
 
 # Set up environment (optional - can also configure in Settings UI)
 cp .env.example .env
 # Edit .env with your API keys
 
-# Run development
+# Run desktop app
 npm run tauri dev
+
+# Or build the CLI for ACP mode
+pnpm build:all
+node cli/dist/index.js --help
+```
+
+## Running Modes
+
+### Desktop App (Tauri)
+Full-featured desktop application with UI:
+```bash
+npm run tauri dev
+```
+
+### CLI with ACP (for Toad/Zed)
+Run as an ACP-compatible agent for editor integration:
+```bash
+pnpm build:all
+node cli/dist/index.js --acp
 ```
 
 ## Current Status
@@ -29,6 +48,7 @@ npm run tauri dev
 | 1. Chat | Streaming chat with multi-provider LLM | ✅ Complete |
 | 2. File Tools | Read, write, edit, glob, grep, bash | ✅ Complete |
 | 3. Tool Use | LLM function calling loop | 🟡 In Progress |
+| ACP | Agent Client Protocol support | ✅ Scaffold |
 | 4+ | Single Agent → Commander → Parallel → Validator | ⬜ Planned |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for full roadmap.
@@ -62,12 +82,51 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for full roadmap.
 | Styling | Tailwind CSS v4 |
 | Database | SQLite via tauri-plugin-sql |
 | Tools | File ops via tauri-plugin-fs, shell via tauri-plugin-shell |
+| CLI | Node.js with ACP SDK |
+
+## Project Structure
+
+```
+packages/
+├── core/             # Shared business logic (platform-agnostic)
+├── platform-tauri/   # Tauri-specific implementations
+└── platform-node/    # Node.js implementations for CLI
+
+cli/
+└── src/
+    ├── index.ts      # CLI entry point
+    └── acp/          # ACP agent implementation
+
+src/                  # Tauri desktop frontend
+├── components/       # UI components (chat, layout, sessions, settings)
+├── config/          # Constants, environment
+├── hooks/           # SolidJS hooks (useChat)
+├── services/        # Core services
+│   ├── auth/        # Credential management
+│   ├── llm/         # LLM clients (Anthropic, OpenRouter)
+│   └── tools/       # File tools, bash, registry
+├── stores/          # State management (sessions)
+└── types/           # TypeScript types
+
+docs/
+├── ROADMAP.md       # Epic overview
+├── VISION.md        # Project vision
+├── development/     # Sprint planning
+└── architecture/    # System design
+```
 
 ## Development Commands
 
 ```bash
-# Run app
+# Desktop app
 npm run tauri dev
+
+# Build all packages (for CLI)
+pnpm build:all
+
+# Run CLI
+node cli/dist/index.js --help
+node cli/dist/index.js --acp
 
 # Code quality
 npm run lint          # Oxlint + ESLint
@@ -85,35 +144,12 @@ npm run knip:fix      # Remove dead code
 npm run analyze       # Bundle size
 ```
 
-## Project Structure
-
-```
-src/
-├── components/       # UI components (chat, layout, sessions, settings)
-├── config/          # Constants, environment
-├── hooks/           # SolidJS hooks (useChat)
-├── services/        # Core services
-│   ├── auth/        # Credential management
-│   ├── llm/         # LLM clients (Anthropic, OpenRouter)
-│   └── tools/       # File tools, bash, registry
-├── stores/          # State management (sessions)
-└── types/           # TypeScript types
-
-docs/
-├── ROADMAP.md       # Epic overview
-├── VISION.md        # Project vision
-├── development/     # Sprint planning
-│   ├── epics/       # Epic details
-│   └── completed/   # Done sprints
-├── architecture/    # System design
-└── reference-code/  # SOTA examples (OpenCode, Gemini CLI)
-```
-
 ## Configuration
 
 API keys can be set via:
-1. **Settings UI** in the app (stored in localStorage)
+1. **Settings UI** in the desktop app (stored in localStorage)
 2. **Environment variables** (see `.env.example`)
+3. **~/.estela/credentials.json** for CLI mode
 
 Supported providers:
 - **Anthropic** - Direct API

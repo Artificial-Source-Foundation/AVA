@@ -3,9 +3,9 @@
  * Search file contents using regex patterns
  */
 
-import { readDir, readTextFile } from '@tauri-apps/plugin-fs'
-import { ToolError, ToolErrorType } from './errors'
-import type { Tool, ToolContext, ToolResult } from './types'
+import { getPlatform } from '../platform.js'
+import { ToolError, ToolErrorType } from './errors.js'
+import type { Tool, ToolContext, ToolResult } from './types.js'
 import {
   isBinaryFile,
   LIMITS,
@@ -13,7 +13,7 @@ import {
   resolvePath,
   shouldSkipDirectory,
   truncate,
-} from './utils'
+} from './utils.js'
 
 // ============================================================================
 // Types
@@ -93,6 +93,7 @@ export const grepTool: Tool<GrepParams> = {
   },
 
   async execute(params: GrepParams, ctx: ToolContext): Promise<ToolResult> {
+    const fs = getPlatform().fs
     const searchDir = params.path
       ? resolvePath(params.path, ctx.workingDirectory)
       : ctx.workingDirectory
@@ -111,7 +112,7 @@ export const grepTool: Tool<GrepParams> = {
         // Skip binary files
         if (await isBinaryFile(filePath)) return
 
-        const content = await readTextFile(filePath)
+        const content = await fs.readFile(filePath)
         const lines = content.split('\n')
 
         for (let i = 0; i < lines.length && matches.length < LIMITS.MAX_RESULTS; i++) {
@@ -145,7 +146,7 @@ export const grepTool: Tool<GrepParams> = {
       if (ctx.signal.aborted || matches.length >= LIMITS.MAX_RESULTS) return
 
       try {
-        const entries = await readDir(dir)
+        const entries = await fs.readDirWithTypes(dir)
 
         for (const entry of entries) {
           if (ctx.signal.aborted || matches.length >= LIMITS.MAX_RESULTS) break
@@ -224,6 +225,7 @@ export const grepTool: Tool<GrepParams> = {
         searchDir,
         include: params.include,
       },
+      locations: Array.from(byFile.keys()).map((file) => ({ path: file, type: 'read' as const })),
     }
   },
 }

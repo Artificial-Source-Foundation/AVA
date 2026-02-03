@@ -3,10 +3,10 @@
  * Find files matching a glob pattern
  */
 
-import { readDir, stat } from '@tauri-apps/plugin-fs'
-import { ToolError, ToolErrorType } from './errors'
-import type { Tool, ToolContext, ToolResult } from './types'
-import { LIMITS, matchesGlob, resolvePath, shouldSkipDirectory } from './utils'
+import { getPlatform } from '../platform.js'
+import { ToolError, ToolErrorType } from './errors.js'
+import type { Tool, ToolContext, ToolResult } from './types.js'
+import { LIMITS, matchesGlob, resolvePath, shouldSkipDirectory } from './utils.js'
 
 // ============================================================================
 // Types
@@ -63,6 +63,7 @@ export const globTool: Tool<GlobParams> = {
   },
 
   async execute(params: GlobParams, ctx: ToolContext): Promise<ToolResult> {
+    const fs = getPlatform().fs
     const searchDir = params.path
       ? resolvePath(params.path, ctx.workingDirectory)
       : ctx.workingDirectory
@@ -84,7 +85,7 @@ export const globTool: Tool<GlobParams> = {
       }
 
       try {
-        const entries = await readDir(dir)
+        const entries = await fs.readDirWithTypes(dir)
 
         for (const entry of entries) {
           if (ctx.signal.aborted || matches.length >= LIMITS.MAX_RESULTS) break
@@ -101,10 +102,10 @@ export const globTool: Tool<GlobParams> = {
             // Check if file matches pattern
             if (matchesGlob(relPath, params.pattern)) {
               try {
-                const fileStat = await stat(fullPath)
+                const fileStat = await fs.stat(fullPath)
                 matches.push({
                   path: fullPath,
-                  mtime: fileStat.mtime?.getTime() || 0,
+                  mtime: fileStat.mtime,
                 })
               } catch {
                 // If we can't stat the file, still include it with mtime 0
@@ -159,6 +160,7 @@ export const globTool: Tool<GlobParams> = {
         pattern: params.pattern,
         searchDir,
       },
+      locations: matches.map((m) => ({ path: m.path, type: 'read' as const })),
     }
   },
 }

@@ -221,7 +221,10 @@ export function getOpenRouterModelId(model: string): string {
   const prefixMap: Record<LLMProvider, string> = {
     anthropic: 'anthropic',
     openai: 'openai',
+    google: 'google',
+    copilot: 'github-copilot',
     glm: 'z-ai',
+    kimi: 'moonshot',
     openrouter: '',
   }
 

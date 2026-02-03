@@ -3,32 +3,10 @@
  * Type definitions for LLM tool integration
  */
 
-// ============================================================================
-// Tool Definition Types (Anthropic-compatible)
-// ============================================================================
+import type { ToolDefinition } from '../types/llm.js'
 
-/** JSON Schema property for tool parameters */
-interface ToolParameterProperty {
-  type: 'string' | 'number' | 'boolean' | 'array' | 'object'
-  description: string
-  enum?: string[]
-  items?: ToolParameterProperty
-  default?: unknown
-}
-
-/** JSON Schema for tool parameters */
-export interface ToolParameterSchema {
-  type: 'object'
-  properties: Record<string, ToolParameterProperty>
-  required?: string[]
-}
-
-/** Tool definition sent to LLM */
-export interface ToolDefinition {
-  name: string
-  description: string
-  input_schema: ToolParameterSchema
-}
+// Re-export ToolDefinition for consumers
+export type { ToolDefinition } from '../types/llm.js'
 
 // ============================================================================
 // Tool Execution Types
@@ -41,12 +19,21 @@ export interface ToolContext {
   signal: AbortSignal
 }
 
+/** Location affected by a tool operation */
+export interface ToolLocation {
+  path: string
+  type: 'read' | 'write' | 'delete' | 'exec'
+  lines?: [number, number] // Start, end lines
+}
+
 /** Result returned from tool execution */
 export interface ToolResult {
   success: boolean
   output: string
   metadata?: Record<string, unknown>
   error?: string
+  /** Paths affected by this tool operation */
+  locations?: ToolLocation[]
 }
 
 /** Tool implementation interface */

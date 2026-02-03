@@ -1,12 +1,12 @@
 /**
  * Bash Tool
- * Execute shell commands with timeout and output truncation
+ * Execute shell commands with timeout, inactivity detection, and output truncation
  */
 
-import { Command } from '@tauri-apps/plugin-shell'
-import { ToolError, ToolErrorType } from './errors'
-import type { Tool, ToolContext, ToolResult } from './types'
-import { LIMITS, resolvePath, truncateOutput } from './utils'
+import { getPlatform } from '../platform.js'
+import { ToolError, ToolErrorType } from './errors.js'
+import type { Tool, ToolContext, ToolResult } from './types.js'
+import { isBinaryOutput, LIMITS, resolvePath, truncateOutput } from './utils.js'
 
 // ============================================================================
 // Types
@@ -24,6 +24,7 @@ interface BashParams {
 // ============================================================================
 
 const DEFAULT_TIMEOUT = 2 * 60 * 1000 // 2 minutes
+const DEFAULT_INACTIVITY_TIMEOUT = 30 * 1000 // 30 seconds
 
 // ============================================================================
 // Implementation
@@ -32,7 +33,7 @@ const DEFAULT_TIMEOUT = 2 * 60 * 1000 // 2 minutes
 export const bashTool: Tool<BashParams> = {
   definition: {
     name: 'bash',
-    description: `Execute shell commands. Use the workdir parameter instead of 'cd' commands. Default timeout is 2 minutes. Output is truncated at ${LIMITS.MAX_LINES} lines or ${LIMITS.MAX_BYTES / 1024}KB.`,
+    description: `Execute shell commands. Use the workdir parameter instead of 'cd' commands. Default timeout is 2 minutes. Output is truncated at ${LIMITS.MAX_LINES} lines or ${LIMITS.MAX_BYTES / 1024}KB. Commands are killed if no output for 30 seconds.`,
     input_schema: {
       type: 'object',
       properties: {
@@ -105,6 +106,7 @@ export const bashTool: Tool<BashParams> = {
   },
 
   async execute(params: BashParams, ctx: ToolContext): Promise<ToolResult> {
+    const shell = getPlatform().shell
     const cwd = params.workdir
       ? resolvePath(params.workdir, ctx.workingDirectory)
       : ctx.workingDirectory
@@ -120,30 +122,17 @@ export const bashTool: Tool<BashParams> = {
     }
 
     try {
-      // Create command using Tauri shell plugin
-      const cmd = Command.create('bash', ['-c', params.command], {
+      // Spawn command using platform shell
+      const child = shell.spawn('bash', ['-c', params.command], {
         cwd,
-        encoding: 'utf-8',
+        inactivityTimeout: DEFAULT_INACTIVITY_TIMEOUT,
+        killProcessGroup: true,
       })
 
-      // Collect output from events
+      // Collect output
       let stdout = ''
       let stderr = ''
-
-      cmd.on('close', () => {
-        // Process closed - handled by promise below
-      })
-
-      cmd.stdout.on('data', (data: string) => {
-        stdout += data
-      })
-
-      cmd.stderr.on('data', (data: string) => {
-        stderr += data
-      })
-
-      // Spawn the process to get Child with kill() method
-      const child = await cmd.spawn()
+      let binaryDetected = false
 
       // Set up abort handling
       let aborted = false
@@ -153,26 +142,68 @@ export const bashTool: Tool<BashParams> = {
       }
       ctx.signal.addEventListener('abort', abortHandler, { once: true })
 
-      // Create promise that resolves when process closes
-      const processPromise = new Promise<{ code: number | null }>((resolve) => {
-        cmd.on('close', (data) => {
-          resolve(data)
-        })
-      })
+      // Set up timeout
+      let timedOut = false
+      const timeoutId = setTimeout(() => {
+        timedOut = true
+        child.kill()
+      }, timeout)
 
-      // Execute with timeout
-      const timeoutPromise = new Promise<null>((resolve) => {
-        setTimeout(() => resolve(null), timeout)
-      })
+      // Read stdout stream
+      if (child.stdout) {
+        const reader = child.stdout.getReader()
+        const decoder = new TextDecoder()
 
-      const result = await Promise.race([processPromise, timeoutPromise])
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
 
-      // Clean up abort listener
+            // Check for binary output
+            if (isBinaryOutput(value)) {
+              binaryDetected = true
+              stdout += '\n[Binary output detected. Halting stream...]'
+              child.kill()
+              break
+            }
+
+            stdout += decoder.decode(value, { stream: true })
+          }
+        } catch {
+          // Stream error - process may have been killed
+        } finally {
+          reader.releaseLock()
+        }
+      }
+
+      // Read stderr stream
+      if (child.stderr) {
+        const reader = child.stderr.getReader()
+        const decoder = new TextDecoder()
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+
+            stderr += decoder.decode(value, { stream: true })
+          }
+        } catch {
+          // Stream error - process may have been killed
+        } finally {
+          reader.releaseLock()
+        }
+      }
+
+      // Wait for process to complete
+      const result = await child.wait()
+
+      // Clean up
+      clearTimeout(timeoutId)
       ctx.signal.removeEventListener('abort', abortHandler)
 
       // Handle timeout
-      if (result === null) {
-        child.kill()
+      if (timedOut) {
         return {
           success: false,
           output: `Command timed out after ${timeout}ms.\n\nTo increase timeout, use the timeout parameter.`,
@@ -184,6 +215,7 @@ export const bashTool: Tool<BashParams> = {
             timeout,
             timedOut: true,
           },
+          locations: [{ path: cwd, type: 'exec' }],
         }
       }
 
@@ -196,8 +228,23 @@ export const bashTool: Tool<BashParams> = {
         }
       }
 
-      // Handle null exit code (killed/signaled process)
-      const exitCode = result.code ?? 1
+      // Handle binary output detection
+      if (binaryDetected) {
+        return {
+          success: false,
+          output: `Binary output detected in command output.\n\nPartial output before binary:\n${stdout}`,
+          error: ToolErrorType.BINARY_OUTPUT,
+          metadata: {
+            command: params.command,
+            description: params.description,
+            cwd,
+            binaryDetected: true,
+          },
+          locations: [{ path: cwd, type: 'exec' }],
+        }
+      }
+
+      const exitCode = result.exitCode
 
       // Build output
       let output = ''
@@ -244,6 +291,7 @@ export const bashTool: Tool<BashParams> = {
           stdoutLength: stdout.length,
           stderrLength: stderr.length,
         },
+        locations: [{ path: cwd, type: 'exec' }],
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

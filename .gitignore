@@ -5,6 +5,14 @@ node_modules/
 dist/
 target/
 
+# pnpm
+.pnpm-store/
+pnpm-lock.yaml
+
+# Package builds
+packages/*/dist/
+cli/dist/
+
 # Tauri
 src-tauri/target/
 

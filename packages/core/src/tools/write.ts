@@ -1,18 +1,18 @@
 /**
- * Create File Tool
- * Create a new file with content (fails if file already exists)
+ * Write File Tool
+ * Write content to a file, creating or overwriting as needed
  */
 
-import { exists, mkdir, stat, writeTextFile } from '@tauri-apps/plugin-fs'
-import { ToolError, ToolErrorType } from './errors'
-import type { Tool, ToolContext, ToolResult } from './types'
-import { LIMITS, resolvePath } from './utils'
+import { getPlatform } from '../platform.js'
+import { ToolError, ToolErrorType } from './errors.js'
+import type { Tool, ToolContext, ToolResult } from './types.js'
+import { LIMITS, resolvePath } from './utils.js'
 
 // ============================================================================
 // Types
 // ============================================================================
 
-interface CreateParams {
+interface WriteParams {
   path: string
   content: string
 }
@@ -21,16 +21,16 @@ interface CreateParams {
 // Implementation
 // ============================================================================
 
-export const createTool: Tool<CreateParams> = {
+export const writeTool: Tool<WriteParams> = {
   definition: {
-    name: 'create_file',
-    description: `Create a new file with the specified content. Fails if the file already exists - use write_file to overwrite existing files. Maximum content size is ${LIMITS.MAX_BYTES / 1024}KB. Parent directories are created automatically.`,
+    name: 'write_file',
+    description: `Write content to a file. Creates the file if it doesn't exist, or overwrites if it does. For new files where you want to prevent accidental overwrites, use create_file instead. Maximum content size is ${LIMITS.MAX_BYTES / 1024}KB. Parent directories are created automatically.`,
     input_schema: {
       type: 'object',
       properties: {
         path: {
           type: 'string',
-          description: 'Path to the new file (absolute or relative to working directory)',
+          description: 'Path to the file (absolute or relative to working directory)',
         },
         content: {
           type: 'string',
@@ -41,12 +41,12 @@ export const createTool: Tool<CreateParams> = {
     },
   },
 
-  validate(params: unknown): CreateParams {
+  validate(params: unknown): WriteParams {
     if (typeof params !== 'object' || params === null) {
       throw new ToolError(
         'Invalid params: expected object',
         ToolErrorType.INVALID_PARAMS,
-        'create_file'
+        'write_file'
       )
     }
 
@@ -56,7 +56,7 @@ export const createTool: Tool<CreateParams> = {
       throw new ToolError(
         'Invalid path: must be non-empty string',
         ToolErrorType.INVALID_PARAMS,
-        'create_file'
+        'write_file'
       )
     }
 
@@ -64,7 +64,7 @@ export const createTool: Tool<CreateParams> = {
       throw new ToolError(
         'Invalid content: must be string',
         ToolErrorType.INVALID_PARAMS,
-        'create_file'
+        'write_file'
       )
     }
 
@@ -74,7 +74,7 @@ export const createTool: Tool<CreateParams> = {
       throw new ToolError(
         `Content too large: ${contentBytes} bytes exceeds limit of ${LIMITS.MAX_BYTES} bytes`,
         ToolErrorType.CONTENT_TOO_LARGE,
-        'create_file'
+        'write_file'
       )
     }
 
@@ -84,7 +84,8 @@ export const createTool: Tool<CreateParams> = {
     }
   },
 
-  async execute(params: CreateParams, ctx: ToolContext): Promise<ToolResult> {
+  async execute(params: WriteParams, ctx: ToolContext): Promise<ToolResult> {
+    const fs = getPlatform().fs
     const filePath = resolvePath(params.path, ctx.workingDirectory)
 
     // Check abort signal
@@ -96,38 +97,29 @@ export const createTool: Tool<CreateParams> = {
       }
     }
 
-    // Check if file already exists
+    // Check if path is a directory
+    let fileExisted = false
     try {
-      if (await exists(filePath)) {
-        // Check if it's a directory
-        try {
-          const fileStat = await stat(filePath)
-          if (fileStat.isDirectory) {
-            return {
-              success: false,
-              output: `Cannot create file: path is a directory: ${filePath}`,
-              error: ToolErrorType.PATH_IS_DIRECTORY,
-            }
+      if (await fs.exists(filePath)) {
+        const fileStat = await fs.stat(filePath)
+        if (fileStat.isDirectory) {
+          return {
+            success: false,
+            output: `Cannot write to directory: ${filePath}`,
+            error: ToolErrorType.PATH_IS_DIRECTORY,
           }
-        } catch {
-          // stat failed, but exists returned true - treat as file
         }
-
-        return {
-          success: false,
-          output: `File already exists: ${filePath}\nUse write_file to overwrite existing files.`,
-          error: ToolErrorType.FILE_ALREADY_EXISTS,
-        }
+        fileExisted = true
       }
     } catch {
-      // exists() failed - proceed with creation (file likely doesn't exist)
+      // exists() or stat() failed - proceed with creation
     }
 
     // Create parent directories if needed
     const parentDir = filePath.substring(0, filePath.lastIndexOf('/'))
     if (parentDir) {
       try {
-        await mkdir(parentDir, { recursive: true })
+        await fs.mkdir(parentDir)
       } catch {
         // Directory might already exist, continue
       }
@@ -144,25 +136,28 @@ export const createTool: Tool<CreateParams> = {
 
     // Write file
     try {
-      await writeTextFile(filePath, params.content)
+      await fs.writeFile(filePath, params.content)
 
       const lineCount = params.content.split('\n').length
       const byteCount = new TextEncoder().encode(params.content).length
+      const action = fileExisted ? 'Updated' : 'Created'
 
       return {
         success: true,
-        output: `Created file: ${filePath}\n${lineCount} lines, ${byteCount} bytes`,
+        output: `${action} file: ${filePath}\n${lineCount} lines, ${byteCount} bytes`,
         metadata: {
           filePath,
           lines: lineCount,
           bytes: byteCount,
+          overwritten: fileExisted,
         },
+        locations: [{ path: filePath, type: 'write' }],
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       return {
         success: false,
-        output: `Error creating file: ${message}`,
+        output: `Error writing file: ${message}`,
         error: ToolErrorType.UNKNOWN,
       }
     }

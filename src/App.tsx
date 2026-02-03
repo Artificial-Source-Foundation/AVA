@@ -8,6 +8,7 @@ import { ChatView } from './components/chat'
 import { AppShell } from './components/layout'
 import { validateEnv } from './config/env'
 import { initDatabase } from './services/database'
+import { initializePlatform } from './services/platform'
 import { useSession } from './stores/session'
 
 function App() {
@@ -21,6 +22,9 @@ function App() {
     try {
       // Validate environment variables
       validateEnv()
+
+      // Initialize platform provider for @estela/core
+      initializePlatform()
 
       // Initialize database (runs migrations)
       await initDatabase()

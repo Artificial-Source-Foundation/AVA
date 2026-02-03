@@ -3,8 +3,8 @@
  * Manages tool registration and execution
  */
 
-import { ToolError } from './errors'
-import type { Tool, ToolContext, ToolDefinition, ToolResult } from './types'
+import { ToolError } from './errors.js'
+import type { Tool, ToolContext, ToolDefinition, ToolResult } from './types.js'
 
 // Use a more flexible type for the registry - tools have different param types
 // biome-ignore lint/suspicious/noExplicitAny: Registry must store tools with varying param types

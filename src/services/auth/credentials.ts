@@ -116,12 +116,15 @@ export function getApiKeyWithFallback(provider: LLMProvider): string | null {
   const stored = getApiKey(provider)
   if (stored) return stored
 
-  // Fallback to environment variables
+  // Fallback to environment variables (ESTELA_ prefix for consistency with CLI)
   const envKeys: Record<LLMProvider, string> = {
     openrouter: 'VITE_OPENROUTER_API_KEY',
     anthropic: 'VITE_ANTHROPIC_API_KEY',
     openai: 'VITE_OPENAI_API_KEY',
+    google: 'VITE_GOOGLE_API_KEY',
+    copilot: 'VITE_COPILOT_API_KEY',
     glm: 'VITE_GLM_API_KEY',
+    kimi: 'VITE_KIMI_API_KEY',
   }
 
   const envKey = envKeys[provider]

@@ -15,6 +15,8 @@ export enum ToolErrorType {
   CONTENT_TOO_LARGE = 'CONTENT_TOO_LARGE',
   EXECUTION_TIMEOUT = 'EXECUTION_TIMEOUT',
   EXECUTION_ABORTED = 'EXECUTION_ABORTED',
+  BINARY_OUTPUT = 'BINARY_OUTPUT',
+  INACTIVITY_TIMEOUT = 'INACTIVITY_TIMEOUT',
   UNKNOWN = 'UNKNOWN',
 }
 
@@ -55,6 +57,10 @@ export class ToolError extends Error {
       type = ToolErrorType.EXECUTION_TIMEOUT
     } else if (lowerMsg.includes('abort')) {
       type = ToolErrorType.EXECUTION_ABORTED
+    } else if (lowerMsg.includes('binary')) {
+      type = ToolErrorType.BINARY_FILE
+    } else if (lowerMsg.includes('inactivity')) {
+      type = ToolErrorType.INACTIVITY_TIMEOUT
     }
 
     return new ToolError(message, type, toolName)

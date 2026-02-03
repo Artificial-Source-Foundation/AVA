@@ -3,16 +3,11 @@
  * Provider-agnostic chat hook with streaming support and tool integration
  */
 
+import { executeTool, getToolDefinitions, resetToolCallCount, type ToolContext } from '@estela/core'
 import { createSignal } from 'solid-js'
 import { DEFAULTS } from '../config/constants'
 import { saveMessage, updateMessage } from '../services/database'
-import { createClient, resolveAuth } from '../services/llm/client'
-import {
-  executeTool,
-  getToolDefinitions,
-  resetToolCallCount,
-  type ToolContext,
-} from '../services/tools'
+import { createClient, getProviderForModel, type LLMClient } from '../services/llm/bridge'
 import { useSession } from '../stores/session'
 import type { Message } from '../types'
 import type { LLMProvider, StreamError, ToolUseBlock } from '../types/llm'
@@ -56,17 +51,21 @@ export function useChat() {
   // ==========================================================================
 
   async function streamResponse(options: StreamOptions): Promise<void> {
-    const resolved = resolveAuth(options.model)
-    if (!resolved) {
+    // Get provider for the model
+    const provider = getProviderForModel(options.model)
+    setCurrentProvider(provider)
+
+    // Create client via core (will handle auth internally)
+    let client: LLMClient
+    try {
+      client = await createClient(options.model)
+    } catch (err) {
       options.onError({
         type: 'auth',
-        message: 'No credentials configured. Please add an API key in Settings.',
+        message: err instanceof Error ? err.message : 'Failed to create client',
       })
       return
     }
-
-    setCurrentProvider(resolved.provider)
-    const client = await createClient(resolved.provider)
 
     // Reset tool call counter at the start of each message turn
     resetToolCallCount()
@@ -95,9 +94,9 @@ export function useChat() {
         for await (const delta of client.stream(
           currentMessages as Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
           {
-            provider: resolved.provider,
+            provider,
             model: options.model,
-            authMethod: resolved.credentials.type === 'oauth-token' ? 'oauth' : 'api-key',
+            authMethod: 'api-key', // Core handles auth method internally
             maxTokens: DEFAULTS.MAX_TOKENS,
             tools,
           },
@@ -213,16 +212,7 @@ export function useChat() {
 
     const targetModel = model || session.selectedModel()
 
-    // Validate auth before creating messages
-    const resolved = resolveAuth(targetModel)
-    if (!resolved) {
-      setError({
-        type: 'auth',
-        message: 'No credentials configured. Please add an API key in Settings.',
-      })
-      return
-    }
-
+    // Note: Auth validation happens in streamResponse via core client
     setError(null)
     setIsStreaming(true)
     abortRef.current = new AbortController()

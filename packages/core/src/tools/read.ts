@@ -3,10 +3,10 @@
  * Read contents of a file with pagination support
  */
 
-import { readTextFile, stat } from '@tauri-apps/plugin-fs'
-import { ToolError, ToolErrorType } from './errors'
-import type { Tool, ToolContext, ToolResult } from './types'
-import { formatLineNumber, isBinaryFile, LIMITS, resolvePath, truncate } from './utils'
+import { getPlatform } from '../platform.js'
+import { ToolError, ToolErrorType } from './errors.js'
+import type { Tool, ToolContext, ToolResult } from './types.js'
+import { formatLineNumber, isBinaryFile, LIMITS, resolvePath, truncate } from './utils.js'
 
 // ============================================================================
 // Types
@@ -89,11 +89,12 @@ export const readTool: Tool<ReadParams> = {
   },
 
   async execute(params: ReadParams, ctx: ToolContext): Promise<ToolResult> {
+    const fs = getPlatform().fs
     const filePath = resolvePath(params.path, ctx.workingDirectory)
 
     // Check if file exists and is not a directory
     try {
-      const fileStat = await stat(filePath)
+      const fileStat = await fs.stat(filePath)
       if (fileStat.isDirectory) {
         return {
           success: false,
@@ -129,7 +130,7 @@ export const readTool: Tool<ReadParams> = {
 
     // Read file content
     try {
-      const content = await readTextFile(filePath)
+      const content = await fs.readFile(filePath)
       const lines = content.split('\n')
       const totalLines = lines.length
 
@@ -172,13 +173,13 @@ export const readTool: Tool<ReadParams> = {
 
       const lastReadLine = offset + outputLines.length
       const hasMore = lastReadLine < totalLines || bytesTruncated
-      const truncated = hasMore
+      const truncatedResult = hasMore
 
       // Build output
       let output = '<file>\n'
       output += outputLines.join('\n')
 
-      if (truncated) {
+      if (truncatedResult) {
         if (bytesTruncated) {
           output += `\n\n(Output truncated at ${LIMITS.MAX_BYTES / 1024}KB. Use offset=${lastReadLine} to continue.)`
         } else {
@@ -197,9 +198,10 @@ export const readTool: Tool<ReadParams> = {
           totalLines,
           linesRead: outputLines.length,
           offset,
-          truncated,
+          truncated: truncatedResult,
           bytesTruncated,
         },
+        locations: [{ path: filePath, type: 'read', lines: [offset + 1, lastReadLine] }],
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

@@ -34,6 +34,7 @@
 | 12 | [Codebase](./development/epics/12-codebase.md) | Codebase understanding, repo map | ✅ Complete |
 | 13 | [Config](./development/epics/13-config.md) | Settings UI, preferences | ✅ Complete |
 | 14 | [Memory](./development/epics/14-memory.md) | Long-term memory, RAG | ✅ Complete |
+| 15 | [Comparison](./development/epics/15-comparison.md) | Feature comparison vs SOTA agents | ✅ Complete |
 
 ---
 

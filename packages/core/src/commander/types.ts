@@ -133,3 +133,101 @@ export interface CombinedWorkerResult {
   /** Total duration in milliseconds */
   totalDurationMs: number
 }
+
+// ============================================================================
+// Parallel Execution Types
+// ============================================================================
+
+/**
+ * Configuration for parallel worker execution
+ */
+export interface ParallelConfig {
+  /** Maximum concurrent workers (1-8, default: 4) */
+  maxConcurrency: number
+  /** Stop all workers on first failure (default: false) */
+  failFast: boolean
+  /** How to handle file conflicts (default: 'serialize') */
+  conflictStrategy: 'block' | 'serialize' | 'fail'
+}
+
+/**
+ * Default parallel configuration
+ */
+export const DEFAULT_PARALLEL_CONFIG: ParallelConfig = {
+  maxConcurrency: 4,
+  failFast: false,
+  conflictStrategy: 'serialize',
+}
+
+/**
+ * A task to be scheduled in parallel execution
+ */
+export interface BatchTask {
+  /** Unique task identifier */
+  id: string
+  /** Worker definition to execute */
+  worker: WorkerDefinition
+  /** Worker inputs */
+  inputs: WorkerInputs
+}
+
+/**
+ * A task with dependency information for DAG scheduling
+ */
+export interface ScheduledTask extends BatchTask {
+  /** Task IDs this task depends on (must complete first) */
+  dependsOn: string[]
+  /** Optional file access hints for conflict detection */
+  expectedPaths?: {
+    reads: string[]
+    writes: string[]
+  }
+}
+
+/**
+ * Status of a scheduled task
+ */
+export type TaskStatus = 'pending' | 'ready' | 'running' | 'completed' | 'failed'
+
+/**
+ * File access declaration for conflict detection
+ */
+export interface FileAccess {
+  /** File path */
+  path: string
+  /** Access mode */
+  mode: 'read' | 'write'
+  /** Worker ID claiming this access */
+  workerId: string
+}
+
+/**
+ * Result of conflict detection
+ */
+export type ConflictResult =
+  | { conflict: false }
+  | { conflict: true; blockedBy: string; path: string }
+
+/**
+ * Information about a detected conflict
+ */
+export interface ConflictInfo {
+  /** File path with conflict */
+  path: string
+  /** Workers involved */
+  workers: string[]
+  /** How it was resolved */
+  resolution: 'serialized' | 'blocked'
+}
+
+/**
+ * Extended result for parallel execution
+ */
+export interface ParallelExecutionResult extends CombinedWorkerResult {
+  /** Order tasks were executed */
+  executionOrder: string[]
+  /** Groups of tasks that ran in parallel */
+  parallelGroups: string[][]
+  /** Conflicts detected and how they were resolved */
+  conflicts?: ConflictInfo[]
+}

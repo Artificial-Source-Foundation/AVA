@@ -39,7 +39,33 @@ export {
   getFilteredTools,
   isDelegationTool,
 } from './executor.js'
-
+export type {
+  MultiplexedActivity,
+  MultiplexedActivityCallback,
+  PartitionResult,
+} from './parallel/index.js'
+// Parallel Execution
+export {
+  // Activity multiplexing
+  ActivityMultiplexer,
+  // Conflict detection
+  ConflictDetector,
+  createAggregator,
+  // Task scheduling
+  createFanIn,
+  createFanOut,
+  createFilteredCallback,
+  createLinearChain,
+  createTaggedCallback,
+  // Batch execution
+  executeBatch,
+  executeFullParallel,
+  executeSequential,
+  executeWithConflictDetection,
+  partitionTasks,
+  Semaphore,
+  TaskScheduler,
+} from './parallel/index.js'
 // Registry
 export { createWorkerRegistry, WorkerRegistry } from './registry.js'
 // Tool Wrapper
@@ -52,7 +78,15 @@ export {
 } from './tool-wrapper.js'
 // Types
 export type {
+  BatchTask,
   CombinedWorkerResult,
+  ConflictInfo,
+  ConflictResult,
+  FileAccess,
+  ParallelConfig,
+  ParallelExecutionResult,
+  ScheduledTask,
+  TaskStatus,
   WorkerActivityCallback,
   WorkerActivityEvent,
   WorkerActivityType,
@@ -60,7 +94,7 @@ export type {
   WorkerInputs,
   WorkerResult,
 } from './types.js'
-
+export { DEFAULT_PARALLEL_CONFIG } from './types.js'
 // Utilities
 export {
   aggregateErrors,
@@ -74,7 +108,6 @@ export {
   getFailedWorkers,
   hasWorkerFailures,
 } from './utils.js'
-
 // Built-in Workers
 export {
   BUILT_IN_WORKERS,

@@ -46,6 +46,11 @@ export async function runMigrations(db: Database): Promise<void> {
     await migrateV2(db)
     await recordMigration(db, 2)
   }
+
+  if (currentVersion < 3) {
+    await migrateV3(db)
+    await recordMigration(db, 3)
+  }
 }
 
 /**
@@ -183,4 +188,85 @@ async function migrateV2(db: Database): Promise<void> {
   await db.execute('UPDATE sessions SET project_id = ? WHERE project_id IS NULL', [
     defaultProjectId,
   ])
+}
+
+/**
+ * Version 3: Add file_operations, terminal_executions, and memory_items tables
+ * - Track file read/write/edit/delete operations
+ * - Track terminal command executions with output
+ * - Track context memory items for token management
+ */
+async function migrateV3(db: Database): Promise<void> {
+  // File operations table
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS file_operations (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      agent_id TEXT,
+      agent_name TEXT,
+      type TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      lines INTEGER,
+      lines_added INTEGER,
+      lines_removed INTEGER,
+      is_new INTEGER DEFAULT 0,
+      original_content TEXT,
+      new_content TEXT,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    )
+  `)
+
+  // Terminal executions table
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS terminal_executions (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      agent_id TEXT,
+      agent_name TEXT,
+      command TEXT NOT NULL,
+      output TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'running',
+      exit_code INTEGER,
+      started_at INTEGER NOT NULL,
+      completed_at INTEGER,
+      cwd TEXT,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    )
+  `)
+
+  // Memory items table
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS memory_items (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      preview TEXT NOT NULL,
+      tokens INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      source TEXT,
+      FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    )
+  `)
+
+  // Create indexes for efficient queries
+  await db.execute(
+    'CREATE INDEX IF NOT EXISTS idx_file_operations_session ON file_operations(session_id)'
+  )
+  await db.execute(
+    'CREATE INDEX IF NOT EXISTS idx_file_operations_timestamp ON file_operations(timestamp DESC)'
+  )
+  await db.execute(
+    'CREATE INDEX IF NOT EXISTS idx_terminal_executions_session ON terminal_executions(session_id)'
+  )
+  await db.execute(
+    'CREATE INDEX IF NOT EXISTS idx_terminal_executions_started ON terminal_executions(started_at DESC)'
+  )
+  await db.execute(
+    'CREATE INDEX IF NOT EXISTS idx_memory_items_session ON memory_items(session_id)'
+  )
+  await db.execute(
+    'CREATE INDEX IF NOT EXISTS idx_memory_items_created ON memory_items(created_at DESC)'
+  )
 }

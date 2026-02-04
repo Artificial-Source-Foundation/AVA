@@ -7,11 +7,22 @@ import { createMemo, createSignal } from 'solid-js'
 import { DEFAULTS, STORAGE_KEYS } from '../config/constants'
 import {
   archiveSession as dbArchiveSession,
+  clearFileOperations as dbClearFileOperations,
+  clearMemoryItems as dbClearMemoryItems,
+  clearTerminalExecutions as dbClearTerminalExecutions,
   createSession as dbCreateSession,
+  deleteMemoryItem as dbDeleteMemoryItem,
   deleteSession as dbDeleteSession,
   updateSession as dbUpdateSession,
+  updateTerminalExecution as dbUpdateTerminalExecution,
+  getFileOperations,
+  getMemoryItems,
   getMessages,
   getSessionsWithStats,
+  getTerminalExecutions,
+  saveFileOperation,
+  saveMemoryItem,
+  saveTerminalExecution,
 } from '../services/database'
 import type {
   Agent,
@@ -224,11 +235,24 @@ export function useSession() {
         setIsLoadingMessages(false)
       }
 
-      // Clear session-specific state (would load from DB in future)
-      setAgents([])
-      setFileOperations([])
-      setTerminalExecutions([])
-      setMemoryItems([])
+      // Load session-specific data from database
+      setAgents([]) // TODO: Load agents from DB when agent persistence is implemented
+
+      try {
+        const [dbFileOps, dbTerminalExecs, dbMemItems] = await Promise.all([
+          getFileOperations(id),
+          getTerminalExecutions(id),
+          getMemoryItems(id),
+        ])
+        setFileOperations(dbFileOps)
+        setTerminalExecutions(dbTerminalExecs)
+        setMemoryItems(dbMemItems)
+      } catch (err) {
+        console.error('Failed to load session data:', err)
+        setFileOperations([])
+        setTerminalExecutions([])
+        setMemoryItems([])
+      }
 
       // Persist last session
       localStorage.setItem(STORAGE_KEYS.LAST_SESSION, id)
@@ -469,15 +493,28 @@ export function useSession() {
     /**
      * Add a file operation to the session
      */
-    addFileOperation: (operation: FileOperation) => {
+    addFileOperation: async (operation: FileOperation) => {
       setFileOperations((prev) => [operation, ...prev])
+      try {
+        await saveFileOperation(operation)
+      } catch (err) {
+        console.error('Failed to save file operation:', err)
+      }
     },
 
     /**
      * Clear all file operations
      */
-    clearFileOperations: () => {
+    clearFileOperations: async () => {
+      const sessionId = currentSession()?.id
       setFileOperations([])
+      if (sessionId) {
+        try {
+          await dbClearFileOperations(sessionId)
+        } catch (err) {
+          console.error('Failed to clear file operations:', err)
+        }
+      }
     },
 
     // ========================================================================
@@ -487,24 +524,42 @@ export function useSession() {
     /**
      * Add a terminal execution to the session
      */
-    addTerminalExecution: (execution: TerminalExecution) => {
+    addTerminalExecution: async (execution: TerminalExecution) => {
       setTerminalExecutions((prev) => [execution, ...prev])
+      try {
+        await saveTerminalExecution(execution)
+      } catch (err) {
+        console.error('Failed to save terminal execution:', err)
+      }
     },
 
     /**
      * Update a terminal execution (e.g., when it completes)
      */
-    updateTerminalExecution: (id: string, updates: Partial<TerminalExecution>) => {
+    updateTerminalExecution: async (id: string, updates: Partial<TerminalExecution>) => {
       setTerminalExecutions((prev) =>
         prev.map((exec) => (exec.id === id ? { ...exec, ...updates } : exec))
       )
+      try {
+        await dbUpdateTerminalExecution(id, updates)
+      } catch (err) {
+        console.error('Failed to update terminal execution:', err)
+      }
     },
 
     /**
      * Clear all terminal executions
      */
-    clearTerminalExecutions: () => {
+    clearTerminalExecutions: async () => {
+      const sessionId = currentSession()?.id
       setTerminalExecutions([])
+      if (sessionId) {
+        try {
+          await dbClearTerminalExecutions(sessionId)
+        } catch (err) {
+          console.error('Failed to clear terminal executions:', err)
+        }
+      }
     },
 
     // ========================================================================
@@ -514,22 +569,40 @@ export function useSession() {
     /**
      * Add a memory item to the session
      */
-    addMemoryItem: (item: MemoryItem) => {
+    addMemoryItem: async (item: MemoryItem) => {
       setMemoryItems((prev) => [item, ...prev])
+      try {
+        await saveMemoryItem(item)
+      } catch (err) {
+        console.error('Failed to save memory item:', err)
+      }
     },
 
     /**
      * Remove a memory item
      */
-    removeMemoryItem: (id: string) => {
+    removeMemoryItem: async (id: string) => {
       setMemoryItems((prev) => prev.filter((item) => item.id !== id))
+      try {
+        await dbDeleteMemoryItem(id)
+      } catch (err) {
+        console.error('Failed to delete memory item:', err)
+      }
     },
 
     /**
      * Clear all memory items
      */
-    clearMemoryItems: () => {
+    clearMemoryItems: async () => {
+      const sessionId = currentSession()?.id
       setMemoryItems([])
+      if (sessionId) {
+        try {
+          await dbClearMemoryItems(sessionId)
+        } catch (err) {
+          console.error('Failed to clear memory items:', err)
+        }
+      }
     },
 
     // ========================================================================

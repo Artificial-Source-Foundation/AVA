@@ -40,6 +40,14 @@ export default defineConfig(async () => ({
       }),
   ].filter(Boolean),
 
+  // Define globals for browser compatibility (Node.js polyfills)
+  define: {
+    global: 'globalThis',
+    'process.env': JSON.stringify({}),
+    'process.platform': JSON.stringify('browser'),
+    'process.cwd': '(() => "/")',
+  },
+
   // Exclude reference code and other non-source directories from optimization
   optimizeDeps: {
     exclude: ['docs', 'cli', 'packages'],

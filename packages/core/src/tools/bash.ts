@@ -27,6 +27,13 @@ interface BashParams {
   timeout?: number
   /** Force interactive mode (uses PTY if available) */
   interactive?: boolean
+  /**
+   * Self-reported risk assessment from LLM.
+   * Set to true for risky operations like package installation,
+   * file deletion, system changes, etc.
+   * When true, requires explicit user approval even in auto-approve mode.
+   */
+  requires_approval?: boolean
 }
 
 // ============================================================================
@@ -70,6 +77,11 @@ export const bashTool: Tool<BashParams> = {
           description:
             'Force interactive mode using PTY (pseudo-terminal). Auto-detected for commands like vim, ssh, python. Set to true for commands that need terminal features.',
         },
+        requires_approval: {
+          type: 'boolean',
+          description:
+            'Set to true for risky operations that should require explicit user approval even in auto-approve mode. Examples: package installation (npm install, pip install), file deletion (rm -rf), system modifications, network operations to external hosts. Set to false for safe read-only operations like build, test, lint.',
+        },
       },
       required: ['command', 'description'],
     },
@@ -80,10 +92,8 @@ export const bashTool: Tool<BashParams> = {
       throw new ToolError('Invalid params: expected object', ToolErrorType.INVALID_PARAMS, 'bash')
     }
 
-    const { command, description, workdir, timeout, interactive } = params as Record<
-      string,
-      unknown
-    >
+    const { command, description, workdir, timeout, interactive, requires_approval } =
+      params as Record<string, unknown>
 
     if (typeof command !== 'string' || !command.trim()) {
       throw new ToolError(
@@ -123,12 +133,21 @@ export const bashTool: Tool<BashParams> = {
       )
     }
 
+    if (requires_approval !== undefined && typeof requires_approval !== 'boolean') {
+      throw new ToolError(
+        'Invalid requires_approval: must be boolean',
+        ToolErrorType.INVALID_PARAMS,
+        'bash'
+      )
+    }
+
     return {
       command: command.trim(),
       description: description.trim(),
       workdir: workdir?.trim(),
       timeout: timeout as number | undefined,
       interactive: interactive as boolean | undefined,
+      requires_approval: requires_approval as boolean | undefined,
     }
   },
 
@@ -371,6 +390,7 @@ async function executeShell(
         exitCode,
         stdoutLength: stdout.length,
         stderrLength: stderr.length,
+        requiresApproval: params.requires_approval,
       },
       locations: [{ path: cwd, type: 'exec' }],
     }

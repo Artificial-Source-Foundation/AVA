@@ -3,6 +3,31 @@
  * User approval for destructive operations
  */
 
+// Auto-approval system
+export {
+  AUTO_APPROVE_SAFE_COMMANDS,
+  type AutoApprovalActions,
+  type AutoApprovalResult,
+  type AutoApprovalSettings,
+  checkBrowserAutoApproval,
+  checkCommandAutoApproval,
+  checkFileAutoApproval,
+  checkMcpAutoApproval,
+  checkWebFetchAutoApproval,
+  DEFAULT_AUTO_APPROVAL_SETTINGS,
+  disableYoloMode,
+  enableYoloMode,
+  extractBaseCommand,
+  getAutoApprovalSettings,
+  isCommandSafe,
+  isPathBlocked,
+  isPathLocal,
+  isPathTrusted,
+  resetAutoApprovalSettings,
+  setAutoApprovalSettings,
+  shouldAutoApprove,
+  YOLO_AUTO_APPROVAL_SETTINGS,
+} from './auto-approve.js'
 export { PermissionManager } from './manager.js'
 export {
   assessCommandRisk,

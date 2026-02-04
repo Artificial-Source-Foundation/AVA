@@ -31,6 +31,25 @@ export {
 } from './events.js'
 // Agent Loop
 export { AgentExecutor, runAgent } from './loop.js'
+// Agent Modes
+export {
+  checkPlanModeAccess,
+  clearAllPlanModeStates,
+  enterPlanMode,
+  exitPlanMode,
+  getPlanModeState,
+  getPlanModeStatus,
+  getRestrictionReason,
+  isPlanModeEnabled,
+  isPlanModeRestricted,
+  PLAN_MODE_ALLOWED_TOOLS,
+  PLAN_MODE_BLOCKED_TOOLS,
+  type PlanModeConfig,
+  type PlanModeState,
+  planEnterTool,
+  planExitTool,
+  setPlanModeState,
+} from './modes/index.js'
 // Planner
 export {
   AgentPlanner,
@@ -42,6 +61,17 @@ export {
   type RecoveryStrategy,
   type TaskPlan,
 } from './planner.js'
+// Prompts (System prompt builders)
+export {
+  BEST_PRACTICES,
+  buildScenarioPrompt,
+  buildSystemPrompt,
+  buildWorkerPrompt,
+  CAPABILITIES,
+  getModelAdjustments,
+  RULES,
+  type SystemPromptContext,
+} from './prompts/index.js'
 // Recovery (Self-Correction)
 export {
   calculateBackoffDelay,

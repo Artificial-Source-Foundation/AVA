@@ -8,9 +8,9 @@
 import { AgentTerminateMode } from '../../agent/types.js'
 import { executeWorker } from '../executor.js'
 import type {
+  DependentTask,
   ParallelConfig,
   ParallelExecutionResult,
-  ScheduledTask,
   TaskStatus,
   WorkerActivityCallback,
   WorkerActivityEvent,
@@ -29,7 +29,7 @@ import { ConflictDetector, partitionTasks } from './conflict.js'
  * Internal task state
  */
 interface TaskState {
-  task: ScheduledTask
+  task: DependentTask
   status: TaskStatus
   result?: WorkerResult
   promise?: Promise<WorkerResult>
@@ -51,7 +51,7 @@ export class TaskScheduler {
    *
    * @param task - Scheduled task with dependencies
    */
-  add(task: ScheduledTask): void {
+  add(task: DependentTask): void {
     if (this.tasks.has(task.id)) {
       throw new Error(`Task with ID '${task.id}' already exists`)
     }
@@ -65,7 +65,7 @@ export class TaskScheduler {
   /**
    * Add multiple tasks
    */
-  addAll(tasks: ScheduledTask[]): void {
+  addAll(tasks: DependentTask[]): void {
     for (const task of tasks) {
       this.add(task)
     }
@@ -128,8 +128,8 @@ export class TaskScheduler {
    *
    * @returns Array of ready tasks
    */
-  getReady(): ScheduledTask[] {
-    const ready: ScheduledTask[] = []
+  getReady(): DependentTask[] {
+    const ready: DependentTask[] = []
 
     for (const state of this.tasks.values()) {
       if (state.status !== 'pending') continue
@@ -373,7 +373,7 @@ export class TaskScheduler {
  *
  * Each task depends on the previous one
  */
-export function createLinearChain(tasks: Omit<ScheduledTask, 'dependsOn'>[]): ScheduledTask[] {
+export function createLinearChain(tasks: Omit<DependentTask, 'dependsOn'>[]): DependentTask[] {
   return tasks.map((task, i) => ({
     ...task,
     dependsOn: i > 0 ? [tasks[i - 1].id] : [],
@@ -384,9 +384,9 @@ export function createLinearChain(tasks: Omit<ScheduledTask, 'dependsOn'>[]): Sc
  * Create a fan-out pattern (one task, then multiple parallel)
  */
 export function createFanOut(
-  initial: Omit<ScheduledTask, 'dependsOn'>,
-  parallel: Omit<ScheduledTask, 'dependsOn'>[]
-): ScheduledTask[] {
+  initial: Omit<DependentTask, 'dependsOn'>,
+  parallel: Omit<DependentTask, 'dependsOn'>[]
+): DependentTask[] {
   return [
     { ...initial, dependsOn: [] },
     ...parallel.map((task) => ({ ...task, dependsOn: [initial.id] })),
@@ -397,9 +397,9 @@ export function createFanOut(
  * Create a fan-in pattern (multiple parallel, then one)
  */
 export function createFanIn(
-  parallel: Omit<ScheduledTask, 'dependsOn'>[],
-  final: Omit<ScheduledTask, 'dependsOn'>
-): ScheduledTask[] {
+  parallel: Omit<DependentTask, 'dependsOn'>[],
+  final: Omit<DependentTask, 'dependsOn'>
+): DependentTask[] {
   return [
     ...parallel.map((task) => ({ ...task, dependsOn: [] as string[] })),
     { ...final, dependsOn: parallel.map((t) => t.id) },

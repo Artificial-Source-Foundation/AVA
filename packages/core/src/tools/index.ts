@@ -4,6 +4,26 @@
  */
 
 export { bashTool } from './bash.js'
+// Export browser tool
+export {
+  type BrowserAction,
+  type BrowserActionResult,
+  BrowserSession,
+  type BrowserSessionConfig,
+  type BrowserState,
+  browserTool,
+  closeAllSessions,
+  getActiveSessions,
+} from './browser/index.js'
+// Export completion tool
+export {
+  completionTool,
+  formatCompletionResult,
+  getCompletionDetails,
+  isCompletionCall,
+  resetCompletionState,
+  wasCompletionAttempted,
+} from './completion.js'
 export { createTool } from './create.js'
 // Export defineTool pattern (OpenCode-inspired)
 export {
@@ -44,13 +64,26 @@ export {
 export { lsTool } from './ls.js'
 export { questionTool } from './question.js'
 export { readTool } from './read.js'
-// Export registry
 export {
   executeTool,
   getToolDefinitions,
   registerTool,
   resetToolCallCount,
 } from './registry.js'
+// Export registry
+// Export sanitization
+export {
+  detectSanitizeModelFamily,
+  ensureTrailingNewline,
+  extractFenceLanguage,
+  hasMarkdownFences,
+  normalizeLineEndings as normalizeLineEndingsSanitize,
+  type SanitizeModelFamily,
+  type SanitizeOptions,
+  sanitizeContent,
+  stripMarkdownFences,
+  trimTrailingWhitespace,
+} from './sanitize.js'
 export { taskTool } from './task.js'
 export { clearTodos, getTodos, setTodos, todoReadTool, todoWriteTool } from './todo.js'
 // Export truncation module
@@ -101,7 +134,10 @@ export { writeTool } from './write.js'
 // Auto-register tools on import
 // ============================================================================
 
+import { planEnterTool, planExitTool } from '../agent/modes/index.js'
 import { bashTool } from './bash.js'
+import { browserTool } from './browser/index.js'
+import { completionTool } from './completion.js'
 import { createTool } from './create.js'
 import { deleteTool } from './delete.js'
 import { editTool } from './edit.js'
@@ -133,3 +169,7 @@ registerTool(todoWriteTool)
 registerTool(taskTool)
 registerTool(webfetchTool)
 registerTool(websearchTool)
+registerTool(completionTool)
+registerTool(browserTool)
+registerTool(planEnterTool)
+registerTool(planExitTool)

@@ -43,5 +43,20 @@ export {
 } from './repomap.js'
 // Symbol Extraction
 export { extractSymbols } from './symbols.js'
+// Tree-sitter (Bash Analysis)
+export {
+  analyzeBash,
+  type BashAnalysis,
+  type BashCommand,
+  type BashPath,
+  CONDITIONALLY_DESTRUCTIVE,
+  DESTRUCTIVE_COMMANDS,
+  ELEVATION_COMMANDS,
+  getAffectedPaths,
+  getCommandRiskSummary,
+  isSafeCommand,
+  SAFE_COMMANDS,
+  SYSTEM_COMMANDS,
+} from './treesitter/index.js'
 // Types
 export * from './types.js'

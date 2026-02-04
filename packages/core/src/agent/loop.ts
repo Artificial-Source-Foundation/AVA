@@ -5,8 +5,19 @@
  * Based on Gemini CLI's local-executor.ts pattern
  */
 
+import {
+  createTaskCancelContext,
+  createTaskCompleteContext,
+  createTaskStartContext,
+  getHookRunner,
+} from '../hooks/index.js'
 import { createClient, getAuth } from '../llm/client.js'
-import { executeTool, getToolDefinitions, resetToolCallCount } from '../tools/registry.js'
+import {
+  executeTool,
+  getToolCallCount,
+  getToolDefinitions,
+  resetToolCallCount,
+} from '../tools/registry.js'
 import type { ToolContext } from '../tools/types.js'
 import type { ChatMessage, ToolDefinition } from '../types/llm.js'
 import {
@@ -26,6 +37,9 @@ import {
 // ============================================================================
 // Constants
 // ============================================================================
+
+/** Number of identical consecutive calls to trigger doom loop detection */
+const DOOM_LOOP_THRESHOLD = 3
 
 /** Generate random agent ID */
 function generateAgentId(): string {
@@ -50,6 +64,36 @@ function generateSessionId(): string {
  * 3. Call complete_task when done
  * 4. Terminate on timeout, max turns, or abort
  */
+/** Record of a tool call for doom loop detection */
+interface ToolCallRecord {
+  name: string
+  argsHash: string
+  turn: number
+}
+
+/**
+ * Hash tool arguments for comparison
+ */
+function hashArgs(args: Record<string, unknown>): string {
+  return JSON.stringify(args, Object.keys(args).sort())
+}
+
+/**
+ * Detect if agent is in a doom loop (repeated identical tool calls)
+ */
+function detectDoomLoop(history: ToolCallRecord[]): boolean {
+  if (history.length < DOOM_LOOP_THRESHOLD) {
+    return false
+  }
+
+  // Get last N calls
+  const recent = history.slice(-DOOM_LOOP_THRESHOLD)
+
+  // Check if all are identical (same tool name and args)
+  const first = recent[0]
+  return recent.every((call) => call.name === first.name && call.argsHash === first.argsHash)
+}
+
 export class AgentExecutor {
   readonly config: AgentConfig
   readonly agentId: string
@@ -59,6 +103,10 @@ export class AgentExecutor {
   private turnCounter = 0
   private tokensUsed = 0
   private sessionId: string
+  private taskStartTime = 0
+  private totalToolCalls = 0
+  private toolCallHistory: ToolCallRecord[] = []
+  private doomLoopDetected = false
 
   constructor(config: Partial<AgentConfig>, onEvent?: AgentEventCallback) {
     this.config = {
@@ -103,6 +151,24 @@ export class AgentExecutor {
       config: this.config,
     })
 
+    // Track task start time
+    this.taskStartTime = startTime
+
+    // Run TaskStart hook
+    try {
+      const hookRunner = getHookRunner(inputs.cwd)
+      await hookRunner.run(
+        'TaskStart',
+        createTaskStartContext({
+          goal: inputs.goal,
+          sessionId: this.sessionId,
+          workingDirectory: inputs.cwd,
+        })
+      )
+    } catch {
+      // Don't fail on hook errors
+    }
+
     try {
       // Resolve auth
       const provider = this.config.provider ?? 'anthropic'
@@ -141,6 +207,23 @@ export class AgentExecutor {
           terminateMode = timeoutController.signal.aborted
             ? AgentTerminateMode.TIMEOUT
             : AgentTerminateMode.ABORTED
+
+          // Run TaskCancel hook
+          try {
+            const hookRunner = getHookRunner(inputs.cwd)
+            await hookRunner.run(
+              'TaskCancel',
+              createTaskCancelContext({
+                reason: terminateMode === AgentTerminateMode.TIMEOUT ? 'Timeout' : 'Aborted',
+                sessionId: this.sessionId,
+                workingDirectory: inputs.cwd,
+                durationMs: Date.now() - this.taskStartTime,
+              })
+            )
+          } catch {
+            // Don't fail on hook errors
+          }
+
           break
         }
 
@@ -158,6 +241,36 @@ export class AgentExecutor {
           terminateMode = turnResult.terminateMode
           finalResult = turnResult.result
           break
+        }
+
+        // Check for doom loop after turn completes
+        if (this.doomLoopDetected) {
+          terminateMode = AgentTerminateMode.DOOM_LOOP
+
+          // Emit doom loop event
+          this.emit({
+            type: 'error',
+            agentId: this.agentId,
+            timestamp: Date.now(),
+            error:
+              'Doom loop detected: Agent is repeating the same action. Please provide guidance or change approach.',
+          })
+
+          // Attempt recovery with doom loop context
+          history.push({
+            role: 'user',
+            content: `DOOM LOOP DETECTED: You have called the same tool with identical arguments ${DOOM_LOOP_THRESHOLD} times in a row. This suggests you may be stuck. Please:
+1. Analyze why the tool is not giving the expected result
+2. Try a different approach or tool
+3. If you have completed the task, call \`complete_task\`
+4. If you are stuck, explain what you're trying to do
+
+Do not repeat the same action again.`,
+          })
+
+          // Reset doom loop flag and give one more chance
+          this.doomLoopDetected = false
+          this.toolCallHistory = []
         }
 
         // Continue to next turn - tool results already added to history in executeTurn
@@ -384,9 +497,30 @@ export class AgentExecutor {
       // Handle complete_task specially
       if (call.name === COMPLETE_TASK_TOOL) {
         taskCompleted = true
-        const resultArg = call.arguments['result']
+        const args = call.arguments as { result?: unknown; command?: unknown }
+        const resultArg = args.result
+        const commandArg = args.command
         submittedOutput =
           typeof resultArg === 'string' ? resultArg : JSON.stringify(resultArg, null, 2)
+
+        // Run TaskComplete hook
+        try {
+          const hookRunner = getHookRunner(cwd)
+          await hookRunner.run(
+            'TaskComplete',
+            createTaskCompleteContext({
+              success: true,
+              output: submittedOutput,
+              command: typeof commandArg === 'string' ? commandArg : undefined,
+              sessionId: this.sessionId,
+              workingDirectory: cwd,
+              durationMs: Date.now() - this.taskStartTime,
+              toolCallCount: this.totalToolCalls + getToolCallCount(),
+            })
+          )
+        } catch {
+          // Don't fail on hook errors
+        }
 
         toolResults.push(`[Tool Result: ${call.id}]\nTask marked as complete.`)
 
@@ -414,6 +548,23 @@ export class AgentExecutor {
       // Execute regular tool
       const result = await executeTool(call.name, call.arguments, toolContext)
       const durationMs = Date.now() - startTime
+
+      // Track tool call for doom loop detection
+      this.toolCallHistory.push({
+        name: call.name,
+        argsHash: hashArgs(call.arguments),
+        turn: turnNumber,
+      })
+
+      // Keep only last 10 calls to limit memory
+      if (this.toolCallHistory.length > 10) {
+        this.toolCallHistory.shift()
+      }
+
+      // Check for doom loop
+      if (detectDoomLoop(this.toolCallHistory)) {
+        this.doomLoopDetected = true
+      }
 
       toolResults.push(`[Tool Result: ${call.id}]\n${result.output}`)
 
@@ -466,6 +617,9 @@ export class AgentExecutor {
       startedAt: Date.now() - toolCallInfos.reduce((acc, t) => acc + (t.durationMs ?? 0), 0),
       completedAt: Date.now(),
     })
+
+    // Track total tool calls
+    this.totalToolCalls += toolCallInfos.length
 
     this.emit({
       type: 'turn:finish',

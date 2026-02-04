@@ -19,10 +19,14 @@ export * from './context/index.js'
 export * from './diff/index.js'
 // Git snapshots
 export * from './git/index.js'
+// Hooks (tool lifecycle hooks)
+export * from './hooks/index.js'
 // Instructions (project/directory instructions)
 export * from './instructions/index.js'
 // LLM client
 export * from './llm/index.js'
+// LSP (Language Server Protocol) integration
+export * from './lsp/index.js'
 // MCP (Model Context Protocol) client
 export * from './mcp/index.js'
 // Memory system (long-term, RAG)

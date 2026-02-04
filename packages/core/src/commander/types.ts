@@ -174,7 +174,7 @@ export interface BatchTask {
 /**
  * A task with dependency information for DAG scheduling
  */
-export interface ScheduledTask extends BatchTask {
+export interface DependentTask extends BatchTask {
   /** Task IDs this task depends on (must complete first) */
   dependsOn: string[]
   /** Optional file access hints for conflict detection */

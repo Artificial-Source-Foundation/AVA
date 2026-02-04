@@ -193,8 +193,8 @@ export class SubagentManager {
   toAgentConfig(config: SubagentConfig): Partial<AgentConfig> {
     return {
       maxTurns: config.maxTurns,
-      systemPrompt: config.systemPrompt,
-      // Note: Tool filtering is done in the tool registry, not here
+      // Note: systemPrompt is handled separately by SubagentManager
+      // Tool filtering is done in the tool registry, not here
     }
   }
 

@@ -16,6 +16,14 @@ export type LLMProvider =
   | 'copilot'
   | 'glm'
   | 'kimi'
+  // New providers
+  | 'mistral'
+  | 'groq'
+  | 'deepseek'
+  | 'xai'
+  | 'cohere'
+  | 'together'
+  | 'ollama'
 
 /** Authentication methods */
 export type AuthMethod = 'api-key' | 'oauth' | 'gateway'
@@ -88,7 +96,8 @@ export interface Credentials {
 /** Unified stream delta across providers */
 export interface StreamDelta {
   content: string
-  done: boolean
+  /** Whether the stream is complete (defaults to false for intermediate deltas) */
+  done?: boolean
   usage?: TokenUsage
   error?: StreamError
   toolUse?: ToolUseBlock
@@ -103,7 +112,7 @@ export interface TokenUsage {
 
 /** Stream error information */
 export interface StreamError {
-  type: 'rate_limit' | 'auth' | 'server' | 'network' | 'unknown'
+  type: 'rate_limit' | 'auth' | 'server' | 'network' | 'api' | 'unknown'
   message: string
   status?: number
   retryAfter?: number // Seconds until retry (for rate limits)

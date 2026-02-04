@@ -66,12 +66,43 @@ export async function createClient(provider: LLMProvider): Promise<LLMClient> {
         await import('./providers/anthropic.js')
         break
       case 'openrouter':
-        // TODO: Port openrouter provider
-        throw new Error('OpenRouter provider not yet ported to core')
+        await import('./providers/openrouter.js')
+        break
       case 'openai':
-        throw new Error('OpenAI provider not yet implemented')
+        await import('./providers/openai.js')
+        break
+      case 'google':
+        await import('./providers/google.js')
+        break
       case 'glm':
-        throw new Error('GLM provider not yet implemented')
+        await import('./providers/glm.js')
+        break
+      case 'kimi':
+        await import('./providers/kimi.js')
+        break
+      case 'mistral':
+        await import('./providers/mistral.js')
+        break
+      case 'groq':
+        await import('./providers/groq.js')
+        break
+      case 'deepseek':
+        await import('./providers/deepseek.js')
+        break
+      case 'xai':
+        await import('./providers/xai.js')
+        break
+      case 'cohere':
+        await import('./providers/cohere.js')
+        break
+      case 'together':
+        await import('./providers/together.js')
+        break
+      case 'ollama':
+        await import('./providers/ollama.js')
+        break
+      case 'copilot':
+        throw new Error('Copilot provider not yet implemented (requires OAuth)')
       default:
         throw new Error(`Unknown provider: ${provider}`)
     }
@@ -104,6 +135,14 @@ export async function getApiKey(provider: LLMProvider): Promise<string | null> {
     copilot: 'copilot-api-key', // Note: Copilot typically uses OAuth, not API keys
     glm: 'glm-api-key',
     kimi: 'kimi-api-key',
+    // New providers
+    mistral: 'mistral-api-key',
+    groq: 'groq-api-key',
+    deepseek: 'deepseek-api-key',
+    xai: 'xai-api-key',
+    cohere: 'cohere-api-key',
+    together: 'together-api-key',
+    ollama: 'ollama-api-key', // Ollama doesn't need API key, but included for consistency
   }
 
   return platform.credentials.get(keyMap[provider])

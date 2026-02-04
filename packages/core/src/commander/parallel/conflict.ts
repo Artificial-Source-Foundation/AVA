@@ -205,7 +205,7 @@ export function partitionTasks(tasks: BatchTask[]): PartitionResult {
 function getExpectedPaths(task: BatchTask): Array<{ path: string; mode: 'read' | 'write' }> {
   const paths: Array<{ path: string; mode: 'read' | 'write' }> = []
 
-  // Check for ScheduledTask with expectedPaths
+  // Check for DependentTask with expectedPaths
   const scheduled = task as { expectedPaths?: { reads?: string[]; writes?: string[] } }
 
   if (scheduled.expectedPaths) {

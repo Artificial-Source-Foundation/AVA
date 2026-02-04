@@ -25,6 +25,8 @@ export enum AgentTerminateMode {
   ABORTED = 'ABORTED',
   /** Agent stopped without calling complete_task */
   NO_COMPLETE_TASK = 'NO_COMPLETE_TASK',
+  /** Agent detected repeating the same action (doom loop) */
+  DOOM_LOOP = 'DOOM_LOOP',
 }
 
 // ============================================================================

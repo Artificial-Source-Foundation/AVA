@@ -5,6 +5,8 @@
 
 import { checkPlanModeAccess } from '../agent/modes/index.js'
 import { createPostToolUseContext, createPreToolUseContext, getHookRunner } from '../hooks/index.js'
+import { shouldAutoApprove } from '../permissions/auto-approve.js'
+import type { PermissionAction } from '../permissions/types.js'
 import { ToolError } from './errors.js'
 import type { Tool, ToolContext, ToolDefinition, ToolResult } from './types.js'
 
@@ -75,6 +77,70 @@ export function getToolCallCount(): number {
   return toolCallCount
 }
 
+// ============================================================================
+// Auto-Approval Helpers
+// ============================================================================
+
+/**
+ * Map tool names to their primary permission action
+ */
+function getToolAction(toolName: string): PermissionAction {
+  switch (toolName) {
+    // Read operations
+    case 'read':
+    case 'glob':
+    case 'grep':
+    case 'ls':
+    case 'todoread':
+      return 'read'
+
+    // Write operations
+    case 'write':
+    case 'edit':
+    case 'create':
+    case 'todowrite':
+      return 'write'
+
+    // Delete operations
+    case 'delete':
+      return 'delete'
+
+    // Execute operations
+    case 'bash':
+    case 'task':
+    case 'browser':
+      return 'execute'
+
+    // Default to read for unknown/safe tools
+    default:
+      return 'read'
+  }
+}
+
+/**
+ * Extract path or command from tool parameters for auto-approval check
+ */
+function extractAutoApprovalContext(
+  toolName: string,
+  params: Record<string, unknown>
+): { path?: string; command?: string } {
+  // File operation tools
+  if (['read', 'write', 'edit', 'create', 'delete', 'glob', 'grep', 'ls'].includes(toolName)) {
+    return { path: params.path as string | undefined }
+  }
+
+  // Bash tool
+  if (toolName === 'bash') {
+    return { command: params.command as string | undefined }
+  }
+
+  return {}
+}
+
+// ============================================================================
+// Tool Execution
+// ============================================================================
+
 /**
  * Execute a tool by name with hook support
  *
@@ -108,6 +174,39 @@ export async function executeTool(
   if (!planModeCheck.allowed) {
     return planModeCheck.error!
   }
+
+  // Check requires_approval flag for bash (LLM-reported risk)
+  if (name === 'bash' && params.requires_approval === true) {
+    return {
+      success: false,
+      output: 'This command requires explicit user approval (requires_approval=true).',
+      error: 'APPROVAL_REQUIRED',
+      metadata: {
+        command: params.command,
+        description: params.description,
+        requiresApproval: true,
+      },
+    }
+  }
+
+  // Check auto-approval settings
+  const autoResult = shouldAutoApprove(
+    name,
+    getToolAction(name),
+    extractAutoApprovalContext(name, params)
+  )
+
+  // If explicitly blocked by pattern, deny the operation
+  if (!autoResult.approved && autoResult.reason.includes('blocked')) {
+    return {
+      success: false,
+      output: `Operation blocked: ${autoResult.reason}`,
+      error: 'PERMISSION_DENIED',
+    }
+  }
+
+  // For non-approved but not blocked: operation proceeds (backwards compatible)
+  // Full PermissionManager UI integration is a future enhancement
 
   // Get tool
   const tool = getTool(name)

@@ -5,6 +5,7 @@
  * Based on Gemini CLI's local-executor.ts pattern
  */
 
+import { homedir } from 'node:os'
 import {
   createTaskCancelContext,
   createTaskCompleteContext,
@@ -20,6 +21,8 @@ import {
 } from '../tools/registry.js'
 import type { ToolContext } from '../tools/types.js'
 import type { ChatMessage, ToolDefinition } from '../types/llm.js'
+import type { SystemPromptContext } from './prompts/system.js'
+import { buildSystemPromptForModel } from './prompts/variants/index.js'
 import {
   type AgentConfig,
   type AgentEvent,
@@ -49,6 +52,36 @@ function generateAgentId(): string {
 /** Generate random session ID */
 function generateSessionId(): string {
   return `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+// ============================================================================
+// System Prompt Context Builder
+// ============================================================================
+
+/**
+ * Build SystemPromptContext from AgentInputs and environment
+ * Used for model-specific prompt variants
+ */
+function buildSystemPromptContext(
+  inputs: AgentInputs,
+  tools: ToolDefinition[]
+): SystemPromptContext {
+  // Map process.platform to expected OS type
+  const osMap: Record<string, 'linux' | 'darwin' | 'win32'> = {
+    linux: 'linux',
+    darwin: 'darwin',
+    win32: 'win32',
+  }
+
+  return {
+    cwd: inputs.cwd,
+    os: osMap[process.platform] ?? 'linux',
+    shell: process.env.SHELL ?? (process.platform === 'win32' ? 'cmd.exe' : 'bash'),
+    homeDir: homedir(),
+    tools: tools.map((t) => t.name),
+    customContext: inputs.context,
+    hasCompletionTool: true,
+  }
 }
 
 // ============================================================================
@@ -183,15 +216,15 @@ export class AgentExecutor {
       // Build conversation history
       const history: ChatMessage[] = []
 
-      // Add system message
-      const systemPrompt = this.buildSystemPrompt(inputs)
+      // Get available tools (needed for system prompt)
+      const tools = this.getAvailableTools()
+
+      // Add system message (using model-specific variant)
+      const systemPrompt = this.buildSystemPrompt(inputs, tools)
       history.push({ role: 'system', content: systemPrompt })
 
       // Add initial user message with the goal
       history.push({ role: 'user', content: inputs.goal })
-
-      // Get available tools
-      const tools = this.getAvailableTools()
 
       // Main agent loop
       while (true) {
@@ -720,34 +753,12 @@ Do not repeat the same action again.`,
   }
 
   /**
-   * Build the system prompt for the agent
+   * Build the system prompt for the agent using model-specific variants
    */
-  private buildSystemPrompt(inputs: AgentInputs): string {
-    let prompt = `You are an autonomous agent executing tasks. Your goal is to complete the user's request using the available tools.
-
-# Environment
-- Working directory: ${inputs.cwd}
-- Current date: ${new Date().toLocaleDateString()}
-
-# Available Tools
-You have access to various tools for file operations, code execution, and more. Use them systematically to accomplish your goal.
-
-# Rules
-1. You are running autonomously - you CANNOT ask the user for input or clarification.
-2. Work systematically, break down complex tasks into steps.
-3. Always use absolute paths for file operations.
-4. When you have completed your task, you MUST call the \`${COMPLETE_TASK_TOOL}\` tool with your findings.
-5. The \`${COMPLETE_TASK_TOOL}\` tool is the ONLY way to finish. If you stop calling tools without calling it, you have failed.
-6. Include comprehensive results in the "result" parameter of \`${COMPLETE_TASK_TOOL}\`.
-7. Do not call any other tools in the same turn as \`${COMPLETE_TASK_TOOL}\`.
-
-# Context`
-
-    if (inputs.context) {
-      prompt += `\n${inputs.context}`
-    }
-
-    return prompt
+  private buildSystemPrompt(inputs: AgentInputs, tools: ToolDefinition[]): string {
+    const modelId = this.config.model ?? 'claude-sonnet-4-20250514'
+    const context = buildSystemPromptContext(inputs, tools)
+    return buildSystemPromptForModel(modelId, context)
   }
 
   /**

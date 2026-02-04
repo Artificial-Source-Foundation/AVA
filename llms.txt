@@ -1,75 +1,115 @@
 # Estela
 
-> Multi-Agent AI Coding Assistant - Desktop app built with Tauri + SolidJS
+> Multi-Agent AI Coding Assistant (~19,100 lines) - Tauri + SolidJS Desktop
 
-## Quick Start
+## Quick Reference
 
-- `npm run tauri dev` - Development mode
-- `npx tsc --noEmit` - Type check
-- API keys: Settings modal in app
-
-## Architecture Overview
-
-```
-src/
-├── components/     # UI components (SolidJS)
-├── config/         # Constants, env validation
-├── hooks/          # React-style hooks (useChat)
-├── services/       # Business logic
-│   ├── auth/       # Credentials, OAuth
-│   ├── llm/        # LLM clients (streaming)
-│   ├── database.ts # SQLite operations
-│   └── migrations.ts
-├── stores/         # Global state (SolidJS signals)
-└── types/          # TypeScript types
+```bash
+npm run tauri dev      # Development
+npm run lint           # Oxlint + ESLint
+npx tsc --noEmit       # Type check
+npm run test           # Vitest
 ```
 
-## Key Files
+Read: `CLAUDE.md` for memory bank workflow
 
-### Entry Points
-- src/App.tsx - Root component with initialization
-- src/index.tsx - SolidJS render entry
+---
 
-### State Management
-- src/stores/session.ts - Session, messages, agents state
-- src/hooks/useChat.ts - Chat streaming logic
+## Architecture
 
-### Services
-- src/services/database.ts - SQLite CRUD operations
-- src/services/llm/client.ts - LLM provider abstraction
-- src/services/auth/credentials.ts - API key storage
+```
+Estela/
+├── packages/
+│   ├── core/              # Business logic (~15,400 lines)
+│   ├── platform-node/     # Node.js implementations
+│   └── platform-tauri/    # Tauri implementations
+├── cli/                   # CLI with ACP agent
+└── src/                   # Tauri SolidJS frontend (~3,700 lines)
+```
 
-### Components
-- src/components/chat/ - Chat UI (MessageList, MessageInput)
-- src/components/sessions/ - Session management UI
-- src/components/settings/ - Settings modal
+### Core Modules (`packages/core/src/`)
+
+```
+├── agent/         # Autonomous loop, subagents, recovery
+├── commander/     # Hierarchical delegation, workers
+│   └── parallel/  # Concurrent execution, conflict detection
+├── tools/         # 15 tools (file, web, task)
+├── context/       # Token tracking, compaction
+├── memory/        # Episodic, semantic, procedural
+├── config/        # Settings, credentials
+├── validator/     # QA pipeline (syntax, types, lint)
+├── codebase/      # Repo understanding, PageRank
+├── permissions/   # Safety, risk assessment
+├── session/       # State, checkpoints, forking
+├── mcp/           # MCP protocol client
+├── diff/          # Change tracking
+├── git/           # Snapshots, rollback
+├── question/      # LLM-to-user questions
+├── instructions/  # Project instructions
+├── scheduler/     # Background tasks
+├── llm/           # Provider clients
+├── models/        # Model registry
+└── auth/          # OAuth, PKCE
+```
+
+---
+
+## Tools (15)
+
+| Tool | Purpose |
+|------|---------|
+| glob | Find files by pattern |
+| read | Read file contents |
+| grep | Search file contents |
+| create | Create new file |
+| write | Overwrite file |
+| delete | Delete file |
+| bash | Execute shell commands |
+| edit | Fuzzy-matching file editing |
+| ls | Directory listing with tree |
+| todoread | Read session todo list |
+| todowrite | Update session todo list |
+| question | Ask user clarifying questions |
+| websearch | Web search (Tavily, Exa) |
+| webfetch | Fetch and process web pages |
+| task | Spawn subagents |
+
+---
+
+## Entry Points
+
+| File | Purpose |
+|------|---------|
+| `packages/core/src/index.ts` | Core exports |
+| `packages/core/src/agent/loop.ts` | AgentExecutor |
+| `packages/core/src/tools/index.ts` | Tool registry |
+| `cli/src/index.ts` | CLI entry |
+
+---
 
 ## Data Flow
 
 ```
-User Input → useChat.sendMessage()
-           → saveMessage() to SQLite
-           → resolveAuth() picks provider
-           → createClient() streams response
-           → session.updateMessageContent() updates UI
-           → updateMessage() saves final response
+CLI/Frontend → AgentExecutor.run() → Tools → LLM → Response
+                    ↓
+              Commander delegates
+                    ↓
+        Workers (parallel) → Validator → Results
 ```
 
-## Provider Priority
+---
 
-1. OAuth token (if available)
-2. Direct API key (Anthropic, OpenAI)
-3. OpenRouter gateway (fallback)
+## Status
 
-## Database Schema
+- **Epics Complete**: 1-17 (all core features)
+- **Next**: Epic 18 - Tauri Desktop GUI
 
-- sessions: id, name, created_at, updated_at, status
-- messages: id, session_id, role, content, tokens_used
-- agents: id, session_id, type, status, model
-- file_changes: id, session_id, agent_id, file_path, change_type
+---
 
 ## Links
 
-- [Architecture Docs](docs/architecture/README.md)
-- [Memory Bank](docs/memory-bank/)
-- [Roadmap](docs/ROADMAP.md)
+- [CLAUDE.md](CLAUDE.md) - Memory bank workflow
+- [AGENTS.md](AGENTS.md) - Universal AI instructions
+- [Memory Bank](docs/memory-bank/) - Current state
+- [Roadmap](docs/ROADMAP.md) - All 17 epics
+- [Architecture](docs/memory-bank/techContext.md) - Technical details

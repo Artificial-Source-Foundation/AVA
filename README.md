@@ -1,8 +1,8 @@
 # Estela
 
-> Multi-Agent AI Coding Assistant
+> Multi-Agent AI Coding Assistant (~19,100 lines)
 
-A Tauri 2.0 + SolidJS desktop application for AI-assisted software development with **ACP (Agent Client Protocol)** support for editor integration. Currently implements streaming chat with tool use; working toward a hierarchical **Commander + Operators + Validator** architecture.
+A Tauri 2.0 + SolidJS desktop application for AI-assisted software development with **ACP (Agent Client Protocol)** support for editor integration. Features autonomous agent loop, hierarchical **Commander + Workers + Validator** architecture, 15 tools, and long-term memory.
 
 ## Quick Start
 
@@ -43,13 +43,16 @@ node cli/dist/index.js --acp
 
 ## Current Status
 
-| Epic | Goal | Status |
-|------|------|--------|
-| 1. Chat | Streaming chat with multi-provider LLM | ✅ Complete |
-| 2. File Tools | Read, write, edit, glob, grep, bash | ✅ Complete |
-| 3. Tool Use | LLM function calling loop | 🟡 In Progress |
-| ACP | Agent Client Protocol support | ✅ Scaffold |
-| 4+ | Single Agent → Commander → Parallel → Validator | ⬜ Planned |
+**All core epics (1-17) complete!** Ready for frontend integration (Epic 18).
+
+| Phase | Epics | Status |
+|-------|-------|--------|
+| Foundation | 1-3: Chat, File Tools, ACP Monorepo | ✅ Complete |
+| Infrastructure | 4-7: Safety, Context, DX, MCP | ✅ Complete |
+| Agent System | 8-12: Agent Loop, Commander, Parallel, Validator, Codebase | ✅ Complete |
+| Settings & Memory | 13-14: Config, Long-term Memory | ✅ Complete |
+| Enhancement | 15-17: Comparison, OpenCode Features, Missing Tools | ✅ Complete |
+| **Next** | 18: Tauri Desktop GUI | ⬜ Planned |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for full roadmap.
 
@@ -88,31 +91,27 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for full roadmap.
 
 ```
 packages/
-├── core/             # Shared business logic (platform-agnostic)
-├── platform-tauri/   # Tauri-specific implementations
-└── platform-node/    # Node.js implementations for CLI
+├── core/              # Business logic (~15,400 lines)
+│   └── src/
+│       ├── agent/     # Autonomous loop, subagents, recovery
+│       ├── commander/ # Hierarchical delegation, workers
+│       │   └── parallel/  # Concurrent execution, DAG scheduler
+│       ├── tools/     # 15 tools (file, web, task)
+│       ├── context/   # Token tracking, compaction
+│       ├── memory/    # Episodic, semantic, procedural
+│       ├── validator/ # QA pipeline (syntax, types, lint)
+│       ├── codebase/  # Indexer, PageRank, repo map
+│       ├── config/    # Settings, credentials
+│       ├── permissions/   # Safety, risk assessment
+│       ├── session/   # State, checkpoints, forking
+│       ├── mcp/       # MCP protocol client
+│       └── ...        # diff, git, question, instructions, scheduler
+├── platform-tauri/    # Tauri implementations
+└── platform-node/     # Node.js implementations
 
-cli/
-└── src/
-    ├── index.ts      # CLI entry point
-    └── acp/          # ACP agent implementation
-
-src/                  # Tauri desktop frontend
-├── components/       # UI components (chat, layout, sessions, settings)
-├── config/          # Constants, environment
-├── hooks/           # SolidJS hooks (useChat)
-├── services/        # Core services
-│   ├── auth/        # Credential management
-│   ├── llm/         # LLM clients (Anthropic, OpenRouter)
-│   └── tools/       # File tools, bash, registry
-├── stores/          # State management (sessions)
-└── types/           # TypeScript types
-
-docs/
-├── ROADMAP.md       # Epic overview
-├── VISION.md        # Project vision
-├── development/     # Sprint planning
-└── architecture/    # System design
+cli/                   # CLI with ACP agent
+src/                   # Tauri SolidJS frontend (~3,700 lines)
+docs/                  # Documentation & memory bank
 ```
 
 ## Development Commands

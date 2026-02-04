@@ -43,6 +43,8 @@ export * from './question/index.js'
 export * from './scheduler/index.js'
 // Session management
 export * from './session/index.js'
+// Skills (reusable knowledge modules)
+export * from './skills/index.js'
 // Tools
 export * from './tools/index.js'
 // Types

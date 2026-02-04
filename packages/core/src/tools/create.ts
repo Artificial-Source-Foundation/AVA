@@ -5,6 +5,7 @@
 
 import { getPlatform } from '../platform.js'
 import { ToolError, ToolErrorType } from './errors.js'
+import { sanitizeContent } from './sanitize.js'
 import type { Tool, ToolContext, ToolResult } from './types.js'
 import { LIMITS, resolvePath } from './utils.js'
 
@@ -143,12 +144,15 @@ export const createTool: Tool<CreateParams> = {
       }
     }
 
+    // Sanitize content (strip markdown fences, normalize line endings, etc.)
+    const sanitizedContent = sanitizeContent(params.content)
+
     // Write file
     try {
-      await fs.writeFile(filePath, params.content)
+      await fs.writeFile(filePath, sanitizedContent)
 
-      const lineCount = params.content.split('\n').length
-      const byteCount = new TextEncoder().encode(params.content).length
+      const lineCount = sanitizedContent.split('\n').length
+      const byteCount = new TextEncoder().encode(sanitizedContent).length
 
       return {
         success: true,

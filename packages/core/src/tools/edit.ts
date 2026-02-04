@@ -8,6 +8,7 @@
 import { getPlatform } from '../platform.js'
 import { DEFAULT_REPLACERS, normalizeLineEndings, type Replacer } from './edit-replacers.js'
 import { ToolError, ToolErrorType } from './errors.js'
+import { sanitizeContent } from './sanitize.js'
 import type { Tool, ToolContext, ToolResult } from './types.js'
 import { resolvePath } from './utils.js'
 
@@ -277,9 +278,12 @@ Usage rules:
       // Read current content
       const oldContent = await fs.readFile(filePath)
 
+      // Sanitize newString (strip markdown fences, normalize line endings, etc.)
+      const sanitizedNewString = sanitizeContent(params.newString)
+
       // Handle empty oldString (create/append)
       if (params.oldString === '') {
-        const newContent = params.newString
+        const newContent = sanitizedNewString
         await fs.writeFile(filePath, newContent)
 
         return {
@@ -297,7 +301,7 @@ Usage rules:
       // Perform replacement
       let newContent: string
       try {
-        newContent = replace(oldContent, params.oldString, params.newString, params.replaceAll)
+        newContent = replace(oldContent, params.oldString, sanitizedNewString, params.replaceAll)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         return {

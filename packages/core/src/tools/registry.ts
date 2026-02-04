@@ -7,6 +7,7 @@ import { checkPlanModeAccess } from '../agent/modes/index.js'
 import { createPostToolUseContext, createPreToolUseContext, getHookRunner } from '../hooks/index.js'
 import { shouldAutoApprove } from '../permissions/auto-approve.js'
 import type { PermissionAction } from '../permissions/types.js'
+import { checkDoomLoop } from '../session/doom-loop.js'
 import { ToolError } from './errors.js'
 import type { Tool, ToolContext, ToolDefinition, ToolResult } from './types.js'
 
@@ -97,6 +98,7 @@ function getToolAction(toolName: string): PermissionAction {
     // Write operations
     case 'write':
     case 'edit':
+    case 'multiedit':
     case 'create':
     case 'todowrite':
       return 'write'
@@ -107,6 +109,7 @@ function getToolAction(toolName: string): PermissionAction {
 
     // Execute operations
     case 'bash':
+    case 'batch':
     case 'task':
     case 'browser':
       return 'execute'
@@ -173,6 +176,21 @@ export async function executeTool(
   const planModeCheck = checkPlanModeAccess(name, ctx.sessionId)
   if (!planModeCheck.allowed) {
     return planModeCheck.error!
+  }
+
+  // Check for doom loop (repeated identical calls)
+  const doomLoopCheck = checkDoomLoop(ctx.sessionId, name, params)
+  if (doomLoopCheck.detected) {
+    return {
+      success: false,
+      output: `Doom loop detected: ${doomLoopCheck.suggestion}\n\nThis ${name} call has been made ${doomLoopCheck.consecutiveCount} times consecutively with identical parameters. Please try a different approach or modify your parameters.`,
+      error: 'DOOM_LOOP_DETECTED',
+      metadata: {
+        tool: name,
+        consecutiveCount: doomLoopCheck.consecutiveCount,
+        params: doomLoopCheck.repeatedCall?.params,
+      },
+    }
   }
 
   // Check requires_approval flag for bash (LLM-reported risk)

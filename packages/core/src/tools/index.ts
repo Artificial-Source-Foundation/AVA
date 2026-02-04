@@ -3,7 +3,21 @@
  * Platform-agnostic LLM tool integration
  */
 
+export {
+  applyPatch,
+  applyPatchTool,
+  type FileApplyResult,
+  type ParsedPatch,
+  type PatchApplyResult,
+  type PatchChunk,
+  type PatchFile,
+  type PatchLine,
+  type PatchOperation,
+  parsePatch,
+  validatePatch,
+} from './apply-patch/index.js'
 export { bashTool } from './bash.js'
+export { batchTool } from './batch.js'
 // Export browser tool
 export {
   type BrowserAction,
@@ -62,6 +76,7 @@ export {
   withFileLock,
 } from './locks.js'
 export { lsTool } from './ls.js'
+export { multieditTool } from './multiedit.js'
 export { questionTool } from './question.js'
 export { readTool } from './read.js'
 export {
@@ -84,6 +99,7 @@ export {
   stripMarkdownFences,
   trimTrailingWhitespace,
 } from './sanitize.js'
+export { skillTool } from './skill.js'
 export { taskTool } from './task.js'
 export { clearTodos, getTodos, setTodos, todoReadTool, todoWriteTool } from './todo.js'
 // Export truncation module
@@ -135,7 +151,9 @@ export { writeTool } from './write.js'
 // ============================================================================
 
 import { planEnterTool, planExitTool } from '../agent/modes/index.js'
+import { applyPatchTool } from './apply-patch/index.js'
 import { bashTool } from './bash.js'
+import { batchTool } from './batch.js'
 import { browserTool } from './browser/index.js'
 import { completionTool } from './completion.js'
 import { createTool } from './create.js'
@@ -144,9 +162,11 @@ import { editTool } from './edit.js'
 import { globTool } from './glob.js'
 import { grepTool } from './grep.js'
 import { lsTool } from './ls.js'
+import { multieditTool } from './multiedit.js'
 import { questionTool } from './question.js'
 import { readTool } from './read.js'
 import { registerTool } from './registry.js'
+import { skillTool } from './skill.js'
 import { taskTool } from './task.js'
 import { todoReadTool, todoWriteTool } from './todo.js'
 import { webfetchTool } from './webfetch.js'
@@ -154,6 +174,7 @@ import { websearchTool } from './websearch.js'
 import { writeTool } from './write.js'
 
 // Register built-in tools
+registerTool(applyPatchTool)
 registerTool(globTool)
 registerTool(readTool)
 registerTool(grepTool)
@@ -161,9 +182,12 @@ registerTool(createTool)
 registerTool(writeTool)
 registerTool(deleteTool)
 registerTool(bashTool)
+registerTool(batchTool)
 registerTool(editTool)
 registerTool(lsTool)
+registerTool(multieditTool)
 registerTool(questionTool)
+registerTool(skillTool)
 registerTool(todoReadTool)
 registerTool(todoWriteTool)
 registerTool(taskTool)

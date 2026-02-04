@@ -146,7 +146,7 @@ async function listDirectory(
   const entries: FileEntry[] = []
 
   try {
-    const items = await fs.readDir(dirPath)
+    const items = await fs.readDirWithTypes(dirPath)
 
     // Sort: directories first, then alphabetically
     items.sort((a, b) => {
@@ -196,7 +196,7 @@ async function listDirectory(
 /**
  * Render file tree as string
  */
-function renderTree(entries: FileEntry[], prefix = '', isLast = true): string[] {
+function renderTree(entries: FileEntry[], prefix = ''): string[] {
   const lines: string[] = []
 
   for (let i = 0; i < entries.length; i++) {
@@ -211,7 +211,7 @@ function renderTree(entries: FileEntry[], prefix = '', isLast = true): string[] 
 
     // Render children if directory
     if (entry.children && entry.children.length > 0) {
-      lines.push(...renderTree(entry.children, childPrefix, isLastEntry))
+      lines.push(...renderTree(entry.children, childPrefix))
     }
   }
 

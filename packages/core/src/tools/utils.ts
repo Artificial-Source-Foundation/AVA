@@ -604,7 +604,7 @@ export async function findSimilarFiles(
 
   try {
     // List files in the directory
-    const entries = await fs.readDir(directory)
+    const entries = await fs.readDirWithTypes(directory)
 
     for (const entry of entries) {
       // Skip directories

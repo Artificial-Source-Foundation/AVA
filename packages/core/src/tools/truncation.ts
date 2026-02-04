@@ -293,16 +293,16 @@ export async function cleanupOutputFiles(
   try {
     const files = await fs.readDir(dirPath)
 
-    for (const file of files) {
-      if (!file.name.endsWith('.txt')) continue
+    for (const fileName of files) {
+      if (!fileName.endsWith('.txt')) continue
 
       try {
-        const filePath = `${dirPath}/${file.name}`
+        const filePath = `${dirPath}/${fileName}`
         const stat = await fs.stat(filePath)
         const age = now - stat.mtime
 
         if (age > maxAgeMs) {
-          await fs.rm(filePath)
+          await fs.remove(filePath)
           deleted++
         }
       } catch {

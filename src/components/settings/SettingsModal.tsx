@@ -6,33 +6,34 @@
  */
 
 import {
+  Bot,
   Check,
-  Eye,
-  EyeOff,
   Heart,
   Info,
-  Key,
+  Keyboard,
   Monitor,
   Moon,
   Palette,
-  Shield,
+  Server,
   Sparkles,
   Sun,
   Terminal,
-  Trash2,
   X,
+  Zap,
 } from 'lucide-solid'
-import { type Component, createSignal, For, onMount, Show } from 'solid-js'
+import { type Component, createSignal, For, Show } from 'solid-js'
 import { useTheme } from '../../contexts/theme'
-import { clearCredentials, getApiKey, setApiKey } from '../../services/auth/credentials'
-import type { LLMProvider } from '../../types/llm'
+import { AgentsTab, defaultAgentPresets } from './tabs/AgentsTab'
+import { defaultKeybindings, KeybindingsTab } from './tabs/KeybindingsTab'
+import { defaultMCPServers, MCPServersTab } from './tabs/MCPServersTab'
+import { defaultProviders, ProvidersTab } from './tabs/ProvidersTab'
 
 interface SettingsModalProps {
   isOpen: boolean
   onClose: () => void
 }
 
-type SettingsTab = 'appearance' | 'api-keys' | 'about'
+type SettingsTab = 'appearance' | 'providers' | 'agents' | 'mcp' | 'keybindings' | 'about'
 
 const themes = [
   { id: 'glass', name: 'Glass', icon: Sparkles, description: 'Apple-inspired with subtle blur' },
@@ -49,34 +50,16 @@ const themes = [
 export const SettingsModal: Component<SettingsModalProps> = (props) => {
   const { theme, setTheme, mode, setMode } = useTheme()
   const [activeTab, setActiveTab] = createSignal<SettingsTab>('appearance')
-  const [anthropicKey, setAnthropicKey] = createSignal('')
-  const [openrouterKey, setOpenrouterKey] = createSignal('')
-  const [showAnthropicKey, setShowAnthropicKey] = createSignal(false)
-  const [showOpenrouterKey, setShowOpenrouterKey] = createSignal(false)
   const [saveStatus, setSaveStatus] = createSignal<'idle' | 'saved' | 'error'>('idle')
 
-  // Load existing keys on mount
-  onMount(() => {
-    const existingAnthropic = getApiKey('anthropic')
-    const existingOpenrouter = getApiKey('openrouter')
-
-    if (existingAnthropic) {
-      setAnthropicKey('sk-ant-••••••••')
-    }
-    if (existingOpenrouter) {
-      setOpenrouterKey('sk-or-••••••••')
-    }
-  })
+  // State for new tabs
+  const [mcpServers] = createSignal(defaultMCPServers)
+  const [keybindings] = createSignal(defaultKeybindings)
+  const [agents, setAgents] = createSignal(defaultAgentPresets)
+  const [providers, setProviders] = createSignal(defaultProviders)
 
   const handleSave = () => {
     try {
-      if (anthropicKey() && !anthropicKey().includes('••••')) {
-        setApiKey('anthropic', anthropicKey())
-      }
-      if (openrouterKey() && !openrouterKey().includes('••••')) {
-        setApiKey('openrouter', openrouterKey())
-      }
-
       setSaveStatus('saved')
       setTimeout(() => {
         setSaveStatus('idle')
@@ -86,15 +69,6 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
       console.error('Failed to save settings:', err)
       setSaveStatus('error')
       setTimeout(() => setSaveStatus('idle'), 2000)
-    }
-  }
-
-  const handleClearKey = (provider: LLMProvider) => {
-    clearCredentials(provider)
-    if (provider === 'anthropic') {
-      setAnthropicKey('')
-    } else if (provider === 'openrouter') {
-      setOpenrouterKey('')
     }
   }
 
@@ -112,7 +86,10 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
 
   const tabs = [
     { id: 'appearance' as const, label: 'Appearance', icon: Palette },
-    { id: 'api-keys' as const, label: 'API Keys', icon: Key },
+    { id: 'providers' as const, label: 'Providers', icon: Zap },
+    { id: 'agents' as const, label: 'Agents', icon: Bot },
+    { id: 'mcp' as const, label: 'MCP', icon: Server },
+    { id: 'keybindings' as const, label: 'Keys', icon: Keyboard },
     { id: 'about' as const, label: 'About', icon: Info },
   ]
 
@@ -136,7 +113,7 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
             bg-[var(--surface-overlay)]
             border border-[var(--border-default)]
             rounded-[var(--radius-xl)]
-            w-full max-w-lg
+            w-full max-w-2xl
             shadow-xl
             overflow-hidden
           "
@@ -312,156 +289,34 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
               </div>
             </Show>
 
-            {/* API Keys Tab */}
-            <Show when={activeTab() === 'api-keys'}>
-              <div class="space-y-6">
-                {/* Anthropic API Key */}
-                <div>
-                  <label
-                    for="anthropic-key"
-                    class="block text-sm font-medium text-[var(--text-secondary)] mb-2"
-                  >
-                    Anthropic API Key
-                  </label>
-                  <div class="flex gap-2">
-                    <div class="flex-1 relative">
-                      <input
-                        id="anthropic-key"
-                        type={showAnthropicKey() ? 'text' : 'password'}
-                        value={anthropicKey()}
-                        onInput={(e) => setAnthropicKey(e.currentTarget.value)}
-                        placeholder="sk-ant-api03-..."
-                        class="
-                          w-full px-4 py-2.5 pr-10
-                          bg-[var(--input-background)]
-                          text-[var(--text-primary)]
-                          placeholder-[var(--text-muted)]
-                          border border-[var(--input-border)]
-                          rounded-[var(--radius-lg)]
-                          text-sm
-                          transition-all duration-[var(--duration-fast)]
-                          focus:outline-none focus:border-[var(--input-border-focus)] focus:ring-2 focus:ring-[var(--accent-subtle)]
-                        "
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowAnthropicKey(!showAnthropicKey())}
-                        class="
-                          absolute right-3 top-1/2 -translate-y-1/2
-                          text-[var(--text-tertiary)] hover:text-[var(--text-primary)]
-                          transition-colors duration-[var(--duration-fast)]
-                        "
-                        aria-label={showAnthropicKey() ? 'Hide API key' : 'Show API key'}
-                      >
-                        <Show when={showAnthropicKey()} fallback={<Eye class="w-4 h-4" />}>
-                          <EyeOff class="w-4 h-4" />
-                        </Show>
-                      </button>
-                    </div>
-                    <Show when={anthropicKey()}>
-                      <button
-                        type="button"
-                        onClick={() => handleClearKey('anthropic')}
-                        class="
-                          p-2.5
-                          text-[var(--error)] hover:text-[var(--error-hover)]
-                          hover:bg-[var(--error-subtle)]
-                          rounded-[var(--radius-lg)]
-                          transition-colors duration-[var(--duration-fast)]
-                        "
-                        aria-label="Clear Anthropic API key"
-                      >
-                        <Trash2 class="w-5 h-5" />
-                      </button>
-                    </Show>
-                  </div>
-                  <p class="text-xs text-[var(--text-muted)] mt-1.5">
-                    Direct access to Claude models
-                  </p>
-                </div>
+            {/* Providers Tab */}
+            <Show when={activeTab() === 'providers'}>
+              <ProvidersTab
+                providers={providers()}
+                onToggle={(id, enabled) => {
+                  setProviders((prev) => prev.map((p) => (p.id === id ? { ...p, enabled } : p)))
+                }}
+              />
+            </Show>
 
-                {/* OpenRouter API Key */}
-                <div>
-                  <label
-                    for="openrouter-key"
-                    class="block text-sm font-medium text-[var(--text-secondary)] mb-2"
-                  >
-                    OpenRouter API Key
-                  </label>
-                  <div class="flex gap-2">
-                    <div class="flex-1 relative">
-                      <input
-                        id="openrouter-key"
-                        type={showOpenrouterKey() ? 'text' : 'password'}
-                        value={openrouterKey()}
-                        onInput={(e) => setOpenrouterKey(e.currentTarget.value)}
-                        placeholder="sk-or-v1-..."
-                        class="
-                          w-full px-4 py-2.5 pr-10
-                          bg-[var(--input-background)]
-                          text-[var(--text-primary)]
-                          placeholder-[var(--text-muted)]
-                          border border-[var(--input-border)]
-                          rounded-[var(--radius-lg)]
-                          text-sm
-                          transition-all duration-[var(--duration-fast)]
-                          focus:outline-none focus:border-[var(--input-border-focus)] focus:ring-2 focus:ring-[var(--accent-subtle)]
-                        "
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowOpenrouterKey(!showOpenrouterKey())}
-                        class="
-                          absolute right-3 top-1/2 -translate-y-1/2
-                          text-[var(--text-tertiary)] hover:text-[var(--text-primary)]
-                          transition-colors duration-[var(--duration-fast)]
-                        "
-                        aria-label={showOpenrouterKey() ? 'Hide API key' : 'Show API key'}
-                      >
-                        <Show when={showOpenrouterKey()} fallback={<Eye class="w-4 h-4" />}>
-                          <EyeOff class="w-4 h-4" />
-                        </Show>
-                      </button>
-                    </div>
-                    <Show when={openrouterKey()}>
-                      <button
-                        type="button"
-                        onClick={() => handleClearKey('openrouter')}
-                        class="
-                          p-2.5
-                          text-[var(--error)] hover:text-[var(--error-hover)]
-                          hover:bg-[var(--error-subtle)]
-                          rounded-[var(--radius-lg)]
-                          transition-colors duration-[var(--duration-fast)]
-                        "
-                        aria-label="Clear OpenRouter API key"
-                      >
-                        <Trash2 class="w-5 h-5" />
-                      </button>
-                    </Show>
-                  </div>
-                  <p class="text-xs text-[var(--text-muted)] mt-1.5">
-                    Access to 100+ models via OpenRouter
-                  </p>
-                </div>
+            {/* Agents Tab */}
+            <Show when={activeTab() === 'agents'}>
+              <AgentsTab
+                agents={agents()}
+                onToggle={(id, enabled) => {
+                  setAgents((prev) => prev.map((a) => (a.id === id ? { ...a, enabled } : a)))
+                }}
+              />
+            </Show>
 
-                {/* Security Info */}
-                <div
-                  class="
-                    flex items-start gap-3
-                    p-4
-                    bg-[var(--surface-sunken)]
-                    border border-[var(--border-subtle)]
-                    rounded-[var(--radius-lg)]
-                  "
-                >
-                  <Shield class="w-5 h-5 text-[var(--success)] flex-shrink-0 mt-0.5" />
-                  <p class="text-sm text-[var(--text-secondary)]">
-                    API keys are stored locally on your device and never sent to any server except
-                    the respective provider.
-                  </p>
-                </div>
-              </div>
+            {/* MCP Servers Tab */}
+            <Show when={activeTab() === 'mcp'}>
+              <MCPServersTab servers={mcpServers()} />
+            </Show>
+
+            {/* Keybindings Tab */}
+            <Show when={activeTab() === 'keybindings'}>
+              <KeybindingsTab keybindings={keybindings()} />
             </Show>
 
             {/* About Tab */}
@@ -541,7 +396,7 @@ export const SettingsModal: Component<SettingsModalProps> = (props) => {
             >
               Cancel
             </button>
-            <Show when={activeTab() === 'api-keys'}>
+            <Show when={activeTab() === 'providers'}>
               <button
                 type="button"
                 onClick={handleSave}

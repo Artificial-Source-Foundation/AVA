@@ -23,6 +23,16 @@ import type {
 } from '../types'
 
 // ============================================================================
+// Tab Navigation
+// ============================================================================
+
+export type TabId = 'chat' | 'agents' | 'files' | 'memory' | 'terminal'
+
+const [activeTab, setActiveTab] = createSignal<TabId>('chat')
+
+export { activeTab, setActiveTab }
+
+// ============================================================================
 // Session State
 // ============================================================================
 

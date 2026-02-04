@@ -143,44 +143,46 @@ export const FileOperationsPanel: Component = () => {
 
       {/* Filter Tabs */}
       <div class="flex gap-1 px-3 py-2 border-b border-[var(--border-subtle)] overflow-x-auto">
-        {(['all', 'read', 'write', 'edit', 'delete'] as const).map((type) => {
-          const isActive = filter() === type
-          const count = operationCounts()[type]
-          const config = type !== 'all' ? operationConfig[type] : null
+        <For each={['all', 'read', 'write', 'edit', 'delete'] as const}>
+          {(type) => {
+            const isActive = () => filter() === type
+            const count = () => operationCounts()[type]
+            const config = type !== 'all' ? operationConfig[type] : null
 
-          return (
-            <button
-              type="button"
-              onClick={() => setFilter(type)}
-              class={`
-                flex items-center gap-1.5
-                px-3 py-1.5
-                rounded-[var(--radius-md)]
-                text-xs font-medium
-                whitespace-nowrap
-                transition-all duration-[var(--duration-fast)]
-                ${
-                  isActive
-                    ? 'bg-[var(--accent)] text-white'
-                    : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)]'
-                }
-              `}
-            >
-              {config ? <config.icon class="w-3 h-3" /> : <Filter class="w-3 h-3" />}
-              {type === 'all' ? 'All' : config?.label}
-              <span
+            return (
+              <button
+                type="button"
+                onClick={() => setFilter(type)}
                 class={`
-                  px-1.5 py-0.5
-                  rounded-full
-                  text-[10px]
-                  ${isActive ? 'bg-white/20' : 'bg-[var(--surface-raised)]'}
+                  flex items-center gap-1.5
+                  px-3 py-1.5
+                  rounded-[var(--radius-md)]
+                  text-xs font-medium
+                  whitespace-nowrap
+                  transition-all duration-[var(--duration-fast)]
+                  ${
+                    isActive()
+                      ? 'bg-[var(--accent)] text-white'
+                      : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)]'
+                  }
                 `}
               >
-                {count}
-              </span>
-            </button>
-          )
-        })}
+                {config ? <config.icon class="w-3 h-3" /> : <Filter class="w-3 h-3" />}
+                {type === 'all' ? 'All' : config?.label}
+                <span
+                  class={`
+                    px-1.5 py-0.5
+                    rounded-full
+                    text-[10px]
+                    ${isActive() ? 'bg-white/20' : 'bg-[var(--surface-raised)]'}
+                  `}
+                >
+                  {count()}
+                </span>
+              </button>
+            )
+          }}
+        </For>
       </div>
 
       {/* Operations List */}

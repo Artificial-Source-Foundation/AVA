@@ -2,8 +2,10 @@
 
 import { lazy, Suspense } from 'solid-js'
 import { render } from 'solid-js/web'
-import './index.css'
+import { AppErrorBoundary } from './components/ErrorBoundary'
+import { NotificationProvider } from './contexts/notification'
 import { ThemeProvider } from './contexts/theme'
+import './index.css'
 
 // Check if we're in preview mode BEFORE importing App
 // This prevents Node.js-only dependencies from being loaded in the browser
@@ -31,9 +33,13 @@ const LoadingFallback = () => (
 render(
   () => (
     <ThemeProvider>
-      <Suspense fallback={<LoadingFallback />}>
-        {isPreviewMode() ? <DesignSystemPreview /> : <App />}
-      </Suspense>
+      <NotificationProvider position="top-right">
+        <AppErrorBoundary>
+          <Suspense fallback={<LoadingFallback />}>
+            {isPreviewMode() ? <DesignSystemPreview /> : <App />}
+          </Suspense>
+        </AppErrorBoundary>
+      </NotificationProvider>
     </ThemeProvider>
   ),
   document.getElementById('root') as HTMLElement

@@ -7,7 +7,6 @@
  */
 
 import { createSignal, onMount, Show } from 'solid-js'
-import { ChatView } from './components/chat'
 import { AppShell } from './components/layout'
 import { validateEnv } from './config/env'
 import { initDatabase } from './services/database'
@@ -90,9 +89,7 @@ function App() {
           </div>
         }
       >
-        <AppShell>
-          <ChatView />
-        </AppShell>
+        <AppShell />
       </Show>
     </Show>
   )

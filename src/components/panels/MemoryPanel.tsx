@@ -290,15 +290,17 @@ export const MemoryPanel: Component = () => {
       >
         <div class="flex items-center justify-between text-xs text-[var(--text-muted)]">
           <div class="flex items-center gap-3">
-            {Object.entries(memoryTypeConfig).map(([type, config]) => {
-              const count = mockMemoryItems.filter((i) => i.type === type).length
-              return (
-                <span class="flex items-center gap-1" style={{ color: config.color }}>
-                  <config.icon class="w-3 h-3" />
-                  {count}
-                </span>
-              )
-            })}
+            <For each={Object.entries(memoryTypeConfig)}>
+              {([type, config]) => {
+                const count = () => mockMemoryItems.filter((i) => i.type === type).length
+                return (
+                  <span class="flex items-center gap-1" style={{ color: config.color }}>
+                    <config.icon class="w-3 h-3" />
+                    {count()}
+                  </span>
+                )
+              }}
+            </For>
           </div>
           <span class="font-mono">{formatTokens(maxTokens - usedTokens())} remaining</span>
         </div>

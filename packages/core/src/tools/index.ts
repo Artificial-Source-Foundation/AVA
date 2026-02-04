@@ -29,6 +29,7 @@ export {
   closeAllSessions,
   getActiveSessions,
 } from './browser/index.js'
+export { codesearchTool } from './codesearch.js'
 // Export completion tool
 export {
   completionTool,
@@ -155,6 +156,7 @@ import { applyPatchTool } from './apply-patch/index.js'
 import { bashTool } from './bash.js'
 import { batchTool } from './batch.js'
 import { browserTool } from './browser/index.js'
+import { codesearchTool } from './codesearch.js'
 import { completionTool } from './completion.js'
 import { createTool } from './create.js'
 import { deleteTool } from './delete.js'
@@ -187,6 +189,7 @@ registerTool(editTool)
 registerTool(lsTool)
 registerTool(multieditTool)
 registerTool(questionTool)
+registerTool(codesearchTool)
 registerTool(skillTool)
 registerTool(todoReadTool)
 registerTool(todoWriteTool)

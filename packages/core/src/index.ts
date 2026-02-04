@@ -23,6 +23,8 @@ export * from './git/index.js'
 export * from './hooks/index.js'
 // Instructions (project/directory instructions)
 export * from './instructions/index.js'
+// External integrations (Exa, etc.)
+export * from './integrations/index.js'
 // LLM client
 export * from './llm/index.js'
 // LSP (Language Server Protocol) integration

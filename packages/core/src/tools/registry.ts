@@ -93,12 +93,17 @@ function getToolAction(toolName: string): PermissionAction {
     case 'grep':
     case 'ls':
     case 'todoread':
+    case 'codesearch':
+    case 'websearch':
+    case 'webfetch':
+    case 'skill':
       return 'read'
 
     // Write operations
     case 'write':
     case 'edit':
     case 'multiedit':
+    case 'apply_patch':
     case 'create':
     case 'todowrite':
       return 'write'

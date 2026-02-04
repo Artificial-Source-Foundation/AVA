@@ -187,6 +187,188 @@ export async function getEslintDiagnostics(
 }
 
 // ============================================================================
+// Python Diagnostics (pyright)
+// ============================================================================
+
+/**
+ * Pyright JSON output format
+ */
+interface PyrightOutput {
+  generalDiagnostics: Array<{
+    file: string
+    severity: 'error' | 'warning' | 'information'
+    message: string
+    range: {
+      start: { line: number; character: number }
+      end: { line: number; character: number }
+    }
+    rule?: string
+  }>
+}
+
+/**
+ * Get Python diagnostics using pyright
+ */
+export async function getPythonDiagnostics(
+  filePath: string,
+  cwd: string
+): Promise<DiagnosticResult> {
+  const startTime = Date.now()
+
+  return new Promise((resolve) => {
+    const proc = spawn('pyright', ['--outputjson', filePath], {
+      cwd,
+      shell: true,
+    })
+
+    let stdout = ''
+
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString()
+    })
+
+    proc.on('close', () => {
+      try {
+        const output: PyrightOutput = JSON.parse(stdout)
+        const diagnostics: Diagnostic[] = []
+
+        for (const diag of output.generalDiagnostics || []) {
+          // Map severity
+          let severity: number
+          switch (diag.severity) {
+            case 'error':
+              severity = 1
+              break
+            case 'warning':
+              severity = 2
+              break
+            default:
+              severity = 3
+          }
+
+          diagnostics.push({
+            range: {
+              start: { line: diag.range.start.line, character: diag.range.start.character },
+              end: { line: diag.range.end.line, character: diag.range.end.character },
+            },
+            severity,
+            message: diag.message,
+            code: diag.rule,
+            source: 'pyright',
+          })
+        }
+
+        resolve({
+          file: filePath,
+          diagnostics,
+          source: 'pyright',
+          durationMs: Date.now() - startTime,
+        })
+      } catch {
+        resolve({
+          file: filePath,
+          diagnostics: [],
+          source: 'pyright',
+          durationMs: Date.now() - startTime,
+        })
+      }
+    })
+
+    proc.on('error', () => {
+      resolve({
+        file: filePath,
+        diagnostics: [],
+        source: 'pyright',
+        durationMs: Date.now() - startTime,
+      })
+    })
+  })
+}
+
+// ============================================================================
+// Go Diagnostics (gopls)
+// ============================================================================
+
+/**
+ * Parse go vet / go build output
+ */
+function parseGoOutput(output: string, source: string): Diagnostic[] {
+  const diagnostics: Diagnostic[] = []
+
+  // Go outputs errors in format: file:line:column: message
+  const errorPattern = /^(.+?):(\d+):(\d+):\s+(.+)$/gm
+
+  const matches = output.matchAll(errorPattern)
+  for (const match of matches) {
+    const [, , lineStr, colStr, message] = match
+    const line = parseInt(lineStr, 10) - 1
+    const col = parseInt(colStr, 10) - 1
+
+    // Determine severity from message content
+    const isWarning = message.includes('warning') || message.includes('unused')
+
+    diagnostics.push({
+      range: {
+        start: { line, character: col },
+        end: { line, character: col + 1 },
+      },
+      severity: isWarning ? 2 : 1,
+      message,
+      source,
+    })
+  }
+
+  return diagnostics
+}
+
+/**
+ * Get Go diagnostics using go vet and go build
+ */
+export async function getGoDiagnostics(filePath: string, cwd: string): Promise<DiagnosticResult> {
+  const startTime = Date.now()
+
+  return new Promise((resolve) => {
+    // Run go vet first, then go build for type errors
+    const proc = spawn('go', ['vet', filePath], {
+      cwd,
+      shell: true,
+    })
+
+    let stdout = ''
+    let stderr = ''
+
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString()
+    })
+
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString()
+    })
+
+    proc.on('close', () => {
+      const output = stdout + stderr
+      const diagnostics = parseGoOutput(output, 'go-vet')
+
+      resolve({
+        file: filePath,
+        diagnostics,
+        source: 'go',
+        durationMs: Date.now() - startTime,
+      })
+    })
+
+    proc.on('error', () => {
+      resolve({
+        file: filePath,
+        diagnostics: [],
+        source: 'go',
+        durationMs: Date.now() - startTime,
+      })
+    })
+  })
+}
+
+// ============================================================================
 // Universal Diagnostic Getter
 // ============================================================================
 
@@ -210,6 +392,22 @@ export async function getDiagnostics(filePath: string, cwd: string): Promise<Dia
     }
     if (eslintResult.diagnostics.length > 0) {
       results.push(eslintResult)
+    }
+  }
+
+  // Python files
+  if (ext === '.py' || ext === '.pyi') {
+    const pyrightResult = await getPythonDiagnostics(filePath, cwd)
+    if (pyrightResult.diagnostics.length > 0) {
+      results.push(pyrightResult)
+    }
+  }
+
+  // Go files
+  if (ext === '.go') {
+    const goResult = await getGoDiagnostics(filePath, cwd)
+    if (goResult.diagnostics.length > 0) {
+      results.push(goResult)
     }
   }
 

@@ -73,7 +73,7 @@ export interface DiagnosticRelatedInformation {
 /**
  * Supported language servers
  */
-export type LanguageServerId = 'typescript' | 'python' | 'go' | 'rust' | 'eslint'
+export type LanguageServerId = 'typescript' | 'python' | 'go' | 'rust' | 'java' | 'eslint'
 
 /**
  * Configuration for a language server
@@ -127,6 +127,14 @@ export const DEFAULT_SERVER_CONFIGS: Record<LanguageServerId, LanguageServerConf
     args: [],
     extensions: ['.rs'],
     rootMarkers: ['Cargo.toml'],
+    supportsDiagnostics: true,
+  },
+  java: {
+    id: 'java',
+    command: 'jdtls',
+    args: [],
+    extensions: ['.java'],
+    rootMarkers: ['pom.xml', 'build.gradle', 'build.gradle.kts', '.project'],
     supportsDiagnostics: true,
   },
   eslint: {

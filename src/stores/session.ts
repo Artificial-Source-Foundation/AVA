@@ -15,11 +15,14 @@ import {
 } from '../services/database'
 import type {
   Agent,
+  FileOperation,
+  MemoryItem,
   Message,
   MessageError,
   Session,
   SessionTokenStats,
   SessionWithStats,
+  TerminalExecution,
 } from '../types'
 import { useProject } from './project'
 
@@ -51,6 +54,15 @@ const [isLoadingMessages, setIsLoadingMessages] = createSignal(false)
 // Agents in current session
 const [agents, setAgents] = createSignal<Agent[]>([])
 
+// File operations in current session
+const [fileOperations, setFileOperations] = createSignal<FileOperation[]>([])
+
+// Terminal executions in current session
+const [terminalExecutions, setTerminalExecutions] = createSignal<TerminalExecution[]>([])
+
+// Memory/context items in current session
+const [memoryItems, setMemoryItems] = createSignal<MemoryItem[]>([])
+
 // Selected model for chat
 const [selectedModel, setSelectedModel] = createSignal(DEFAULTS.MODEL)
 
@@ -73,6 +85,31 @@ const sessionTokenStats = createMemo((): SessionTokenStats => {
   )
 })
 
+// Context window usage (estimate based on message content)
+const DEFAULT_CONTEXT_WINDOW = 200000 // Claude 3.5 Sonnet context
+const contextUsage = createMemo(() => {
+  // Rough estimate: ~4 chars per token
+  const estimatedTokens = messages().reduce((sum, msg) => {
+    return sum + Math.ceil(msg.content.length / 4)
+  }, 0)
+  return {
+    used: estimatedTokens,
+    total: DEFAULT_CONTEXT_WINDOW,
+    percentage: Math.min(100, (estimatedTokens / DEFAULT_CONTEXT_WINDOW) * 100),
+  }
+})
+
+// Agent statistics
+const agentStats = createMemo(() => {
+  const all = agents()
+  return {
+    running: all.filter((a) => a.status === 'thinking' || a.status === 'executing').length,
+    completed: all.filter((a) => a.status === 'completed').length,
+    error: all.filter((a) => a.status === 'error').length,
+    total: all.length,
+  }
+})
+
 // ============================================================================
 // Session Store Hook
 // ============================================================================
@@ -91,11 +128,19 @@ export function useSession() {
     isLoadingMessages,
     agents,
     setAgents,
+    fileOperations,
+    setFileOperations,
+    terminalExecutions,
+    setTerminalExecutions,
+    memoryItems,
+    setMemoryItems,
     selectedModel,
     setSelectedModel,
     retryingMessageId,
     editingMessageId,
     sessionTokenStats,
+    contextUsage,
+    agentStats,
 
     // ========================================================================
     // Session List Management
@@ -179,8 +224,11 @@ export function useSession() {
         setIsLoadingMessages(false)
       }
 
-      // Clear agents (would load from DB in future)
+      // Clear session-specific state (would load from DB in future)
       setAgents([])
+      setFileOperations([])
+      setTerminalExecutions([])
+      setMemoryItems([])
 
       // Persist last session
       localStorage.setItem(STORAGE_KEYS.LAST_SESSION, id)
@@ -394,10 +442,94 @@ export function useSession() {
     // ========================================================================
 
     /**
+     * Add a new agent to the session
+     */
+    addAgent: (agent: Agent) => {
+      setAgents((prev) => [...prev, agent])
+    },
+
+    /**
      * Update an agent's properties
      */
     updateAgent: (id: string, updates: Partial<Agent>) => {
       setAgents((prev) => prev.map((agent) => (agent.id === id ? { ...agent, ...updates } : agent)))
+    },
+
+    /**
+     * Remove an agent from the session
+     */
+    removeAgent: (id: string) => {
+      setAgents((prev) => prev.filter((agent) => agent.id !== id))
+    },
+
+    // ========================================================================
+    // File Operations Management
+    // ========================================================================
+
+    /**
+     * Add a file operation to the session
+     */
+    addFileOperation: (operation: FileOperation) => {
+      setFileOperations((prev) => [operation, ...prev])
+    },
+
+    /**
+     * Clear all file operations
+     */
+    clearFileOperations: () => {
+      setFileOperations([])
+    },
+
+    // ========================================================================
+    // Terminal Executions Management
+    // ========================================================================
+
+    /**
+     * Add a terminal execution to the session
+     */
+    addTerminalExecution: (execution: TerminalExecution) => {
+      setTerminalExecutions((prev) => [execution, ...prev])
+    },
+
+    /**
+     * Update a terminal execution (e.g., when it completes)
+     */
+    updateTerminalExecution: (id: string, updates: Partial<TerminalExecution>) => {
+      setTerminalExecutions((prev) =>
+        prev.map((exec) => (exec.id === id ? { ...exec, ...updates } : exec))
+      )
+    },
+
+    /**
+     * Clear all terminal executions
+     */
+    clearTerminalExecutions: () => {
+      setTerminalExecutions([])
+    },
+
+    // ========================================================================
+    // Memory Items Management
+    // ========================================================================
+
+    /**
+     * Add a memory item to the session
+     */
+    addMemoryItem: (item: MemoryItem) => {
+      setMemoryItems((prev) => [item, ...prev])
+    },
+
+    /**
+     * Remove a memory item
+     */
+    removeMemoryItem: (id: string) => {
+      setMemoryItems((prev) => prev.filter((item) => item.id !== id))
+    },
+
+    /**
+     * Clear all memory items
+     */
+    clearMemoryItems: () => {
+      setMemoryItems([])
     },
 
     // ========================================================================
@@ -430,6 +562,9 @@ export function useSession() {
       setCurrentSession(null)
       setMessages([])
       setAgents([])
+      setFileOperations([])
+      setTerminalExecutions([])
+      setMemoryItems([])
       setEditingMessageId(null)
       setRetryingMessageId(null)
     },

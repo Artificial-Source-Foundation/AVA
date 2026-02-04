@@ -68,5 +68,72 @@ export interface TaskResult {
   tokensUsed: number
 }
 
+// ============================================================================
+// File Operations
+// ============================================================================
+
+export type FileOperationType = 'read' | 'write' | 'edit' | 'delete'
+
+export interface FileOperation {
+  id: string
+  sessionId: string
+  agentId?: string
+  agentName?: string
+  type: FileOperationType
+  filePath: string
+  timestamp: number
+  /** Number of lines read/written */
+  lines?: number
+  /** Lines added (for edit operations) */
+  linesAdded?: number
+  /** Lines removed (for edit operations) */
+  linesRemoved?: number
+  /** Whether this is a new file (for write operations) */
+  isNew?: boolean
+  /** Original content (for diff display) */
+  originalContent?: string
+  /** New content (for diff display) */
+  newContent?: string
+}
+
+// ============================================================================
+// Terminal Executions
+// ============================================================================
+
+export type ExecutionStatus = 'running' | 'success' | 'error'
+
+export interface TerminalExecution {
+  id: string
+  sessionId: string
+  agentId?: string
+  agentName?: string
+  command: string
+  output: string
+  status: ExecutionStatus
+  exitCode?: number
+  startedAt: number
+  completedAt?: number
+  /** Working directory */
+  cwd?: string
+}
+
+// ============================================================================
+// Memory/Context Items
+// ============================================================================
+
+export type MemoryItemType = 'conversation' | 'file' | 'code' | 'knowledge'
+
+export interface MemoryItem {
+  id: string
+  sessionId: string
+  type: MemoryItemType
+  title: string
+  preview: string
+  tokens: number
+  createdAt: number
+  /** Source file path for file/code items */
+  source?: string
+}
+
 // Project types
 export * from './project'

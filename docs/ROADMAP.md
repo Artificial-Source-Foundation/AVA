@@ -49,6 +49,15 @@
 
 ```
 Epic 1-3 (Foundation) ──► Epic 4-7 (Infrastructure) ──► Epic 8-15 (Agents) ──► Epic 16-17 (Enhancement)
+                                                                                        │
+                                                                                        ▼
+                                                                              Epic 19 (MVP Polish)
+                                                                                        │
+                                                                                        ▼
+                                                                              Epic 20 (Browser & Safety)
+                                                                                        │
+                                                                                        ▼
+                                                                              Epic 21 (Providers & Intelligence)
 
 Specifically:
 ├── Epic 4 (Safety) required for Epic 8 (Agent) - permissions for autonomous ops
@@ -57,7 +66,10 @@ Specifically:
 ├── Epic 7 (Platform) required for Epic 9 (Commander) - sub-agent spawning, MCP
 ├── Epic 12 (Codebase) builds on Epic 5 (Context) - session + repo understanding
 ├── Epic 16 (OpenCode) enhances Epic 4-7 infrastructure
-└── Epic 17 (Tools) adds 8 new tools to complete tool suite
+├── Epic 17 (Tools) adds 8 new tools to complete tool suite
+├── Epic 19 (MVP Polish) tool hooks, attempt_completion, system prompts
+├── Epic 20 (Browser) browser automation, plan mode, doom loop, auto-approval
+└── Epic 21 (Providers) 15+ providers, model-specific prompts, LSP, tree-sitter
 ```
 
 ---
@@ -76,7 +88,16 @@ Specifically:
 | Scheduler | ~350 | 16 |
 | Question | ~370 | 17 |
 | Tools (8 new) | ~3,100 | 17 |
-| **Total Core** | **~19,100** | |
+| Hooks | ~1,200 | 19 (planned) |
+| Completion + Sanitize | ~900 | 19 (planned) |
+| System Prompt | ~400 | 19 (planned) |
+| Browser | ~700 | 20 (planned) |
+| Plan Mode + Safety | ~900 | 20 (planned) |
+| Auto-Approval | ~400 | 20 (planned) |
+| Providers (10+ new) | ~500 | 21 (planned) |
+| Prompt Variants | ~400 | 21 (planned) |
+| Tree-sitter + LSP | ~600 | 21 (planned) |
+| **Total Core** | **~25,100** | (after Epic 21) |
 
 ---
 
@@ -86,13 +107,23 @@ See [`development/completed/`](./development/completed/) for all 17 epics.
 
 ---
 
+## MVP Polish (Next)
+
+| # | Epic | Goal | Status |
+|---|------|------|--------|
+| 19 | [Tool Hooks & MVP](./development/epics/19-tool-hooks-mvp.md) | Lifecycle hooks, attempt_completion, system prompt polish | ⬜ Planning |
+| 20 | [Browser & Plan Mode](./development/epics/20-browser-plan-mode.md) | Browser automation, read-only mode, apply_patch, doom loop | ⬜ Planning |
+| 21 | [Provider Expansion](./development/epics/21-provider-expansion.md) | 15+ providers, model-specific prompts, tree-sitter bash | ⬜ Planning |
+
+---
+
 ## Future (Planned)
 
 | # | Epic | Goal | Status |
 |---|------|------|--------|
-| 18 | Tauri Desktop | Frontend GUI with SolidJS | ⬜ Planned |
-| 19 | Cloud Sync | Session sync across devices | ⬜ Planned |
-| 20 | Plugin System | MCP-based extensibility | ⬜ Planned |
+| 22 | Tauri Desktop | Frontend GUI with SolidJS | ⬜ Planned |
+| 23 | Cloud Sync | Session sync across devices | ⬜ Planned |
+| 24 | Plugin System | MCP-based extensibility | ⬜ Planned |
 
 ---
 

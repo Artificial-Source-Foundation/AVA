@@ -32,25 +32,37 @@ export async function initDatabase(): Promise<Database> {
 /**
  * Create a new session
  */
-export async function createSession(name: string): Promise<Session> {
+export async function createSession(name: string, projectId?: string): Promise<Session> {
   const database = await initDatabase()
   const id = crypto.randomUUID()
   const now = Date.now()
 
   await database.execute(
-    'INSERT INTO sessions (id, name, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?)',
-    [id, name, now, now, 'active']
+    'INSERT INTO sessions (id, name, project_id, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, ?)',
+    [id, name, projectId || null, now, now, 'active']
   )
 
-  return { id, name, createdAt: now, updatedAt: now, status: 'active' }
+  return { id, projectId, name, createdAt: now, updatedAt: now, status: 'active' }
 }
 
 /**
  * Get sessions with computed stats (message count, total tokens, last preview)
+ * @param projectId - Optional project ID to filter sessions
  */
-export async function getSessionsWithStats(): Promise<SessionWithStats[]> {
+export async function getSessionsWithStats(projectId?: string): Promise<SessionWithStats[]> {
   const database = await initDatabase()
-  const rows = await database.select<Array<Record<string, unknown>>>(`
+
+  // Build WHERE clause based on projectId
+  let whereClause = "WHERE s.status != 'archived'"
+  const params: unknown[] = []
+
+  if (projectId) {
+    whereClause += ' AND s.project_id = ?'
+    params.push(projectId)
+  }
+
+  const rows = await database.select<Array<Record<string, unknown>>>(
+    `
     SELECT
       s.*,
       COUNT(m.id) as message_count,
@@ -58,13 +70,16 @@ export async function getSessionsWithStats(): Promise<SessionWithStats[]> {
       (SELECT content FROM messages WHERE session_id = s.id ORDER BY created_at DESC LIMIT 1) as last_preview
     FROM sessions s
     LEFT JOIN messages m ON m.session_id = s.id
-    WHERE s.status != 'archived'
+    ${whereClause}
     GROUP BY s.id
     ORDER BY s.updated_at DESC
-  `)
+  `,
+    params
+  )
 
   return rows.map((row) => ({
     id: row.id as string,
+    projectId: (row.project_id as string) || undefined,
     name: row.name as string,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,

@@ -11,12 +11,14 @@ import { AppShell } from './components/layout'
 import { validateEnv } from './config/env'
 import { initDatabase } from './services/database'
 import { initializePlatform } from './services/platform'
+import { useProject } from './stores/project'
 import { useSession } from './stores/session'
 
 function App() {
   const [isInitializing, setIsInitializing] = createSignal(true)
   const [initError, setInitError] = createSignal<string | null>(null)
 
+  const { initializeProjects } = useProject()
   const { loadAllSessions, switchSession, createNewSession, getLastSessionId, sessions } =
     useSession()
 
@@ -31,7 +33,10 @@ function App() {
       // Initialize database (runs migrations)
       await initDatabase()
 
-      // Load all sessions
+      // Initialize projects first (loads projects and restores last project)
+      await initializeProjects()
+
+      // Load sessions for the current project
       await loadAllSessions()
 
       // Restore last session or create new one

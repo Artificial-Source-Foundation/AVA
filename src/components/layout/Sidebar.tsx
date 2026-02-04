@@ -7,6 +7,7 @@
 
 import { Settings, Sparkles } from 'lucide-solid'
 import { type Component, createSignal } from 'solid-js'
+import { ProjectSelector } from '../projects'
 import { SessionList } from '../sessions'
 import { SettingsModal } from '../settings'
 
@@ -41,6 +42,11 @@ export const Sidebar: Component = () => {
               <p class="text-xs text-[var(--text-tertiary)]">AI Coding Assistant</p>
             </div>
           </div>
+        </div>
+
+        {/* Project Selector */}
+        <div class="p-3 border-b border-[var(--border-subtle)]">
+          <ProjectSelector />
         </div>
 
         {/* Session list */}

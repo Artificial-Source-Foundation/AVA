@@ -21,6 +21,7 @@ import type {
   SessionTokenStats,
   SessionWithStats,
 } from '../types'
+import { useProject } from './project'
 
 // ============================================================================
 // Tab Navigation
@@ -102,11 +103,15 @@ export function useSession() {
 
     /**
      * Load all sessions from database
+     * Filters by current project if one is selected
      */
     loadAllSessions: async () => {
+      const { currentProject } = useProject()
+      const projectId = currentProject()?.id
+
       setIsLoadingSessions(true)
       try {
-        const dbSessions = await getSessionsWithStats()
+        const dbSessions = await getSessionsWithStats(projectId)
         setSessions(dbSessions)
       } catch (err) {
         console.error('Failed to load sessions:', err)
@@ -118,9 +123,13 @@ export function useSession() {
 
     /**
      * Create a new session and switch to it
+     * Automatically assigns to current project if one is selected
      */
     createNewSession: async (name?: string): Promise<Session> => {
-      const session = await dbCreateSession(name || DEFAULTS.SESSION_NAME)
+      const { currentProject } = useProject()
+      const projectId = currentProject()?.id
+
+      const session = await dbCreateSession(name || DEFAULTS.SESSION_NAME, projectId)
       const sessionWithStats: SessionWithStats = {
         ...session,
         messageCount: 0,

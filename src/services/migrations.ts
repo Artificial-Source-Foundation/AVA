@@ -42,8 +42,10 @@ export async function runMigrations(db: Database): Promise<void> {
     await recordMigration(db, 1)
   }
 
-  // Add future migrations here:
-  // if (currentVersion < 2) { await migrateV2(db); await recordMigration(db, 2); }
+  if (currentVersion < 2) {
+    await migrateV2(db)
+    await recordMigration(db, 2)
+  }
 }
 
 /**
@@ -128,4 +130,57 @@ async function migrateV1(db: Database): Promise<void> {
   await db.execute('CREATE INDEX IF NOT EXISTS idx_agents_session ON agents(session_id)')
   await db.execute('CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at DESC)')
   await db.execute('CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)')
+}
+
+/**
+ * Version 2: Add projects table and link sessions
+ * - projects table for workspace organization
+ * - project_id foreign key on sessions
+ * - Default project for orphan sessions
+ */
+async function migrateV2(db: Database): Promise<void> {
+  // Create projects table
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      directory TEXT NOT NULL UNIQUE,
+      icon TEXT,
+      git_branch TEXT,
+      git_root_commit TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      last_opened_at INTEGER,
+      is_favorite INTEGER DEFAULT 0
+    )
+  `)
+
+  // Create indexes for projects
+  await db.execute('CREATE INDEX IF NOT EXISTS idx_projects_directory ON projects(directory)')
+  await db.execute('CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects(updated_at DESC)')
+  await db.execute(
+    'CREATE INDEX IF NOT EXISTS idx_projects_last_opened ON projects(last_opened_at DESC)'
+  )
+
+  // Add project_id to sessions (nullable for existing sessions)
+  await db.execute(
+    'ALTER TABLE sessions ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL'
+  )
+
+  // Create index for session-project lookups
+  await db.execute('CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_id)')
+
+  // Create default project for orphan sessions
+  const defaultProjectId = 'default-project'
+  const now = Date.now()
+  await db.execute(
+    `INSERT OR IGNORE INTO projects (id, name, directory, created_at, updated_at, last_opened_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [defaultProjectId, 'Default Project', '~', now, now, now]
+  )
+
+  // Migrate existing sessions to default project
+  await db.execute('UPDATE sessions SET project_id = ? WHERE project_id IS NULL', [
+    defaultProjectId,
+  ])
 }

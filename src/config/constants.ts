@@ -9,6 +9,7 @@ export const STORAGE_KEYS = {
   OAUTH_VERIFIER: 'estela_oauth_verifier',
   OAUTH_STATE: 'estela_oauth_state',
   LAST_SESSION: 'estela_last_session',
+  LAST_PROJECT: 'estela_last_project',
   SETTINGS: 'estela_settings',
 } as const
 

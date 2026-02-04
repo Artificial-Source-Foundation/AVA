@@ -16,6 +16,8 @@ export interface SessionTokenStats {
 
 export interface Session {
   id: string
+  /** Project this session belongs to */
+  projectId?: string
   name: string
   createdAt: number
   updatedAt: number
@@ -65,3 +67,6 @@ export interface TaskResult {
   errors?: string[]
   tokensUsed: number
 }
+
+// Project types
+export * from './project'

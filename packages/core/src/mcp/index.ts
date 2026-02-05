@@ -21,5 +21,23 @@ export {
   loadMCPConfig,
   parseMCPCommand,
 } from './discovery.js'
+
+// OAuth
+export {
+  areTokensExpired,
+  clearPendingStates,
+  completeOAuthFlow,
+  getAuthorizationHeader,
+  getStoredTokens,
+  getValidTokens,
+  hasStoredTokens,
+  type MCPOAuthConfig,
+  type MCPOAuthTokens,
+  refreshTokens,
+  removeTokens,
+  startOAuthFlow,
+  storeTokens,
+} from './oauth.js'
+
 // Types
 export * from './types.js'

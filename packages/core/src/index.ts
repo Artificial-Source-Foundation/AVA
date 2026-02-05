@@ -17,6 +17,8 @@ export * from './config/index.js'
 export * from './context/index.js'
 // Diff tracking
 export * from './diff/index.js'
+// Focus Chain (task progress tracking)
+export * from './focus-chain/index.js'
 // Git snapshots
 export * from './git/index.js'
 // Hooks (tool lifecycle hooks)
@@ -47,6 +49,8 @@ export * from './scheduler/index.js'
 export * from './session/index.js'
 // Skills (reusable knowledge modules)
 export * from './skills/index.js'
+// Slash Commands (user-invocable commands)
+export * from './slash-commands/index.js'
 // Tools
 export * from './tools/index.js'
 // Types

@@ -43,6 +43,21 @@ export {
   validateCommand,
 } from './command-validator.js'
 export { PermissionManager } from './manager.js'
+// Persistent approvals (cross-session "always allow")
+export {
+  addPersistentApproval,
+  checkApprovalWithPersistence,
+  clearAllApprovals,
+  clearSessionApprovals,
+  getAllApprovals,
+  getToolApprovals,
+  hasPersistentApproval,
+  loadPersistentApprovals,
+  type PersistentApproval,
+  type PersistentApprovalsData,
+  removePersistentApproval,
+  savePersistentApprovals,
+} from './persistent-approvals.js'
 // Quote-aware shell parsing
 export {
   COMMAND_SEPARATORS,

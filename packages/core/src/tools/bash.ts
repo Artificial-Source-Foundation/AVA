@@ -4,6 +4,11 @@
  * Supports PTY (pseudo-terminal) for interactive commands.
  */
 
+import {
+  type CommandValidationResult,
+  getCommandValidator,
+  quickDangerCheck,
+} from '../permissions/command-validator.js'
 import { getPlatform } from '../platform.js'
 import { ToolError, ToolErrorType } from './errors.js'
 import { truncateForMetadata } from './truncation.js'
@@ -164,6 +169,24 @@ export const bashTool: Tool<BashParams> = {
         success: false,
         output: 'Command was cancelled before execution',
         error: ToolErrorType.EXECUTION_ABORTED,
+      }
+    }
+
+    // Security validation: check for dangerous characters and validate against rules
+    const validationResult = validateCommandSecurity(params.command)
+    if (!validationResult.allowed) {
+      return {
+        success: false,
+        output: formatValidationError(validationResult),
+        error: ToolErrorType.PERMISSION_DENIED,
+        metadata: {
+          command: params.command,
+          description: params.description,
+          validationReason: validationResult.reason,
+          matchedPattern: validationResult.matchedPattern,
+          failedSegment: validationResult.failedSegment,
+          detectedOperator: validationResult.detectedOperator,
+        },
       }
     }
 
@@ -532,4 +555,106 @@ async function executePty(
       error: ToolErrorType.UNKNOWN,
     }
   }
+}
+
+// ============================================================================
+// Security Validation
+// ============================================================================
+
+/**
+ * Validate command for security before execution.
+ * Uses the global CommandValidator which can be configured via:
+ * - Environment variable: ESTELA_COMMAND_PERMISSIONS
+ * - Programmatic API: setCommandPermissions()
+ *
+ * Security checks:
+ * 1. Quick danger check (backticks, newlines, unicode separators)
+ * 2. Full validation against allow/deny rules (if configured)
+ * 3. Each segment of chained commands validated separately
+ */
+function validateCommandSecurity(command: string): CommandValidationResult {
+  // Quick check for dangerous characters first (fast path)
+  const dangerCheck = quickDangerCheck(command)
+  if (dangerCheck.found) {
+    return {
+      allowed: false,
+      reason: 'dangerous_char_detected',
+      detectedOperator: dangerCheck.character,
+      failedSegment: command,
+    }
+  }
+
+  // Full validation (includes chained command parsing)
+  const validator = getCommandValidator()
+  return validator.validate(command)
+}
+
+/**
+ * Format validation error for user display.
+ * Provides clear, actionable error messages.
+ */
+function formatValidationError(result: CommandValidationResult): string {
+  const parts: string[] = ['Command blocked for security reasons.']
+
+  switch (result.reason) {
+    case 'dangerous_char_detected':
+      parts.push(`\nDetected dangerous character: ${result.detectedOperator}`)
+      if (result.detectedOperator === '`' || result.detectedOperator === '$(') {
+        parts.push('Command substitution is not allowed for security reasons.')
+        parts.push('Tip: Use single quotes to pass literal backticks.')
+      } else if (
+        result.detectedOperator?.includes('\\n') ||
+        result.detectedOperator?.includes('\\r')
+      ) {
+        parts.push('Newlines outside quotes can inject additional commands.')
+      } else {
+        parts.push('Unicode separators can be used for command injection.')
+      }
+      break
+
+    case 'denied':
+    case 'segment_denied':
+      parts.push(`\nCommand matches deny pattern: ${result.matchedPattern}`)
+      if (result.failedSegment) {
+        parts.push(`Blocked segment: ${result.failedSegment}`)
+      }
+      break
+
+    case 'segment_no_match':
+    case 'no_match_deny_default':
+      parts.push('\nCommand does not match any allowed pattern.')
+      if (result.failedSegment) {
+        parts.push(`Unmatched segment: ${result.failedSegment}`)
+      }
+      parts.push('Configure ESTELA_COMMAND_PERMISSIONS to allow this command.')
+      break
+
+    case 'redirect_detected':
+      parts.push(`\nRedirect operator detected: ${result.detectedOperator}`)
+      parts.push('Redirects are disabled in current configuration.')
+      parts.push('Set allowRedirects: true in config to enable.')
+      break
+
+    case 'subshell_denied':
+      parts.push(`\nSubshell content denied: ${result.failedSegment}`)
+      break
+
+    case 'empty_command':
+      parts.push('\nEmpty or whitespace-only command.')
+      break
+
+    default:
+      parts.push(`\nReason: ${result.reason}`)
+  }
+
+  // Show parsed segments for debugging chained commands
+  if (result.segments && result.segments.length > 1) {
+    parts.push('\n\nParsed command segments:')
+    result.segments.forEach((seg, i) => {
+      const status = i === result.failedSegmentIndex ? '❌' : '✓'
+      parts.push(`  ${status} [${i}] ${seg.command}${seg.separator ? ` ${seg.separator}` : ''}`)
+    })
+  }
+
+  return parts.join('\n')
 }

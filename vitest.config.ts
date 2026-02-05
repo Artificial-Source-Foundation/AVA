@@ -21,7 +21,7 @@ export default defineConfig({
       exclude: ['node_modules/**', 'src-tauri/**', '**/*.config.{js,ts}', '**/*.d.ts'],
     },
     // Test file patterns
-    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    include: ['src/**/*.{test,spec}.{ts,tsx}', 'packages/core/src/**/*.{test,spec}.ts'],
   },
   resolve: {
     conditions: ['development', 'browser'],

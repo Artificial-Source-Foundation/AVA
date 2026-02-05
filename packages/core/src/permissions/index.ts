@@ -28,7 +28,38 @@ export {
   shouldAutoApprove,
   YOLO_AUTO_APPROVAL_SETTINGS,
 } from './auto-approve.js'
+// Command validation (Sprint 1: Security)
+export {
+  type CommandPermissionConfig,
+  type CommandValidationReason,
+  type CommandValidationResult,
+  CommandValidator,
+  DEV_WORKFLOW_CONFIG,
+  getCommandValidator,
+  quickDangerCheck,
+  READ_ONLY_CONFIG,
+  STRICT_CONFIG,
+  setCommandPermissions,
+  validateCommand,
+} from './command-validator.js'
 export { PermissionManager } from './manager.js'
+// Quote-aware shell parsing
+export {
+  COMMAND_SEPARATORS,
+  type CommandSegment,
+  createQuoteState,
+  type DangerousCharResult,
+  detectDangerousCharacters,
+  detectRedirects,
+  extractSubshells,
+  isInSafeContext,
+  isInsideQuotes,
+  parseCommandSegments,
+  processChar,
+  type QuoteState,
+  REDIRECT_OPERATORS,
+  UNICODE_SEPARATORS,
+} from './quote-parser.js'
 export {
   assessCommandRisk,
   assessPathRisk,

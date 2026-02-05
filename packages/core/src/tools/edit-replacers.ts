@@ -6,6 +6,8 @@
  * Each replacer is a generator that yields potential matches
  */
 
+import { normalizeUnicode } from './edit/normalize.js'
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -353,6 +355,89 @@ export const MultiOccurrenceReplacer: Replacer = function* (content, find) {
   }
 }
 
+/**
+ * UnicodeNormalizedReplacer - Match with Unicode characters normalized to ASCII
+ *
+ * Handles common LLM quirks:
+ * - Smart quotes ("") → straight quotes ("")
+ * - Em/en dashes (—–) → hyphen (-)
+ * - Non-breaking spaces → regular spaces
+ * - Ellipsis (…) → three dots (...)
+ */
+export const UnicodeNormalizedReplacer: Replacer = function* (content, find) {
+  const normalizedFind = normalizeUnicode(find)
+  const normalizedContent = normalizeUnicode(content)
+
+  // Skip if normalization didn't change anything
+  if (normalizedFind === find && normalizedContent === content) {
+    return
+  }
+
+  // Find positions in normalized content
+  const lines = content.split('\n')
+  const normalizedLines = normalizedContent.split('\n')
+  const findLines = find.split('\n')
+  const normalizedFindLines = normalizedFind.split('\n')
+
+  // Single line match
+  if (findLines.length === 1) {
+    for (let i = 0; i < normalizedLines.length; i++) {
+      const normalizedLine = normalizedLines[i]
+      const originalLine = lines[i]
+
+      // Check if normalized find is in normalized line
+      const idx = normalizedLine.indexOf(normalizedFind)
+      if (idx !== -1) {
+        // Need to find corresponding position in original
+        // This is tricky because character positions may differ
+        // Use a heuristic: find the original substring that normalizes to the match
+        const matchEnd = idx + normalizedFind.length
+
+        // Find start position in original
+        let origStart = 0
+        let normPos = 0
+        while (normPos < idx && origStart < originalLine.length) {
+          const origChar = originalLine[origStart]
+          const normChar = normalizeUnicode(origChar)
+          normPos += normChar.length
+          origStart++
+        }
+
+        // Find end position in original
+        let origEnd = origStart
+        normPos = idx
+        while (normPos < matchEnd && origEnd < originalLine.length) {
+          const origChar = originalLine[origEnd]
+          const normChar = normalizeUnicode(origChar)
+          normPos += normChar.length
+          origEnd++
+        }
+
+        yield originalLine.substring(origStart, origEnd)
+      }
+    }
+    return
+  }
+
+  // Multi-line match
+  for (let i = 0; i <= normalizedLines.length - normalizedFindLines.length; i++) {
+    let matches = true
+
+    for (let j = 0; j < normalizedFindLines.length; j++) {
+      // Compare trimmed normalized lines for more flexibility
+      if (normalizedLines[i + j].trim() !== normalizedFindLines[j].trim()) {
+        matches = false
+        break
+      }
+    }
+
+    if (matches) {
+      // Extract original block
+      yield lines.slice(i, i + findLines.length).join('\n')
+    }
+  }
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -392,6 +477,7 @@ function extractBlock(
 export const DEFAULT_REPLACERS: Replacer[] = [
   SimpleReplacer,
   LineTrimmedReplacer,
+  UnicodeNormalizedReplacer, // Try Unicode normalization early (common LLM issue)
   BlockAnchorReplacer,
   WhitespaceNormalizedReplacer,
   IndentationFlexibleReplacer,

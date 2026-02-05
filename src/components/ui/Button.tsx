@@ -11,7 +11,7 @@ import { type Component, type JSX, Show, splitProps } from 'solid-js'
 
 export interface ButtonProps {
   /** Button variant */
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'success'
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'success' | 'warning'
   /** Button size */
   size?: 'sm' | 'md' | 'lg' | 'icon'
   /** Full width button */
@@ -92,6 +92,13 @@ export const Button: Component<ButtonProps> = (props) => {
     `,
     success: `
       bg-[var(--success)]
+      text-white
+      hover:brightness-110
+      active:brightness-90
+      shadow-sm hover:shadow-md
+    `,
+    warning: `
+      bg-[var(--warning)]
       text-white
       hover:brightness-110
       active:brightness-90

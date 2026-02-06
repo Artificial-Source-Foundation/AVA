@@ -523,6 +523,22 @@ Each provider gets a custom icon with branded color:
 3. **Subtle borders** - Use `rgba(255, 255, 255, 0.05)` not solid colors
 4. **Reduced contrast for secondary elements**
 
+---
+
+## WebKitGTK Performance (Tauri/Linux)
+
+### Known Issues & Fixes
+
+1. **No fixed pseudo-element overlays** — `pointer-events: none` on `position: fixed` pseudo-elements with high z-index doesn't work in WebKitGTK. Removed the noise texture overlay (`#root::after`) that was blocking all clicks.
+
+2. **GPU layer promotion for scroll** — WebKitGTK doesn't auto-promote scroll containers. Add `transform: translateZ(0)` to force GPU compositing on scroll-heavy containers (settings page).
+
+3. **`transition-colors` not `transition-all`** — Transitioning all CSS properties causes jank during scroll. Use `transition-colors` when only color changes are needed.
+
+4. **No hover transforms** — `hover:-translate-y` on buttons causes layout reflow. Use opacity or color changes instead.
+
+5. **Width-based sidebar toggle** — `margin-left: -Xpx` causes content to bleed behind the ActivityBar. Use `width: 0` with `overflow: hidden` and `transition: width 120ms ease`.
+
 ### Glow Effects (Sparingly)
 
 ```css

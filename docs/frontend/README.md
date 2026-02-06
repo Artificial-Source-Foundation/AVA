@@ -49,25 +49,49 @@
 - Dark theme with ambient gradient mesh background
 - Premium, minimalistic feel (Arc/Vercel/Warp inspired)
 
+## Sidebar Toggle
+
+The sidebar uses **width-based toggle** with `overflow: hidden` (not `margin-left`, which causes content bleed in WebKitGTK). Animation: `transition: width 120ms ease`.
+
+## Tauri Hardening
+
+- **CSP** enabled in `tauri.conf.json`
+- **Scoped FS** — limited to `$APPDATA/**` and `$HOME/.estela/**`
+- **Deferred window show** — `visible: false` + `getCurrentWindow().show()` after mount
+- **Release profile** — `lto=true, codegen-units=1, strip=true, opt-level="s"`
+- **Window state persistence** via `tauri-plugin-window-state`
+- **Native CSS** — `user-select: none` on UI chrome, drag regions
+
+## Performance Notes
+
+- **No noise texture overlay** — Removed `#root::after` pseudo-element (WebKitGTK doesn't respect `pointer-events: none` on fixed pseudo-elements, blocking all clicks)
+- **GPU layer promotion** — Settings scroll container uses `transform: translateZ(0)` for smooth scrolling in WebKitGTK
+- **`transition-colors` over `transition-all`** — All settings tabs use `transition-colors` to avoid transitioning every CSS property during scroll
+- **No `hover:-translate-y`** — Removed hover transforms that cause layout reflow
+
 ## Key Files
 
 ```
 src/
-├── App.tsx                     # Root component
+├── App.tsx                     # Root component + onboarding gate
 ├── index.css                   # Global styles + Tailwind
-├── styles/tokens.css           # Design tokens
+├── styles/tokens.css           # Design tokens (406 lines)
 ├── stores/
 │   ├── session.ts              # Session state
+│   ├── settings.ts             # Settings persistence (localStorage)
+│   ├── team.ts                 # Dev team hierarchy store
 │   ├── layout.ts               # Panel visibility
 │   └── navigation.ts           # Activity bar state
+├── types/
+│   └── team.ts                 # TeamMember, TeamDomain, TeamHierarchy
 ├── components/
 │   ├── layout/
-│   │   ├── AppShell.tsx        # 3-column layout
+│   │   ├── AppShell.tsx        # 3-column layout, width-based sidebar
 │   │   ├── ActivityBar.tsx     # Left icon bar
 │   │   ├── MainArea.tsx        # Center content
 │   │   ├── SidebarPanel.tsx    # Right sidebar
 │   │   ├── BottomPanel.tsx     # Bottom tabs
-│   │   └── StatusBar.tsx       # Status line
+│   │   └── StatusBar.tsx       # Monospace status line
 │   ├── chat/
 │   │   ├── MessageBubble.tsx   # Chat messages
 │   │   └── MessageInput.tsx    # Input with mode toggles
@@ -75,14 +99,16 @@ src/
 │   │   ├── AgentActivityPanel.tsx
 │   │   ├── FileOperationsPanel.tsx
 │   │   ├── TerminalPanel.tsx
-│   │   └── CodeEditorPanel.tsx
+│   │   ├── CodeEditorPanel.tsx
+│   │   ├── TeamPanel.tsx       # Dev team hierarchy tree
+│   │   └── TeamMemberChat.tsx  # Scoped chat per team member
 │   ├── sidebar/
 │   │   ├── SidebarSessions.tsx
 │   │   ├── SidebarExplorer.tsx
 │   │   ├── SidebarAgents.tsx
 │   │   └── SidebarMemory.tsx
 │   ├── settings/
-│   │   └── SettingsPage.tsx
+│   │   └── SettingsPage.tsx    # Full-page with sidebar tabs
 │   └── ui/                     # Design system components
 │       ├── Button.tsx, Card.tsx, Dialog.tsx
 │       ├── Input.tsx, Select.tsx, Toggle.tsx

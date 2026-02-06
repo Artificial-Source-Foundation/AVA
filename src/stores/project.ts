@@ -5,6 +5,7 @@
 
 import { createMemo, createSignal } from 'solid-js'
 import { STORAGE_KEYS } from '../config/constants'
+import { logError } from '../services/logger'
 import {
   deleteProject as dbDeleteProject,
   updateProject as dbUpdateProject,
@@ -72,7 +73,7 @@ export function useProject() {
         const dbProjects = await getProjectsWithStats()
         setProjects(dbProjects)
       } catch (err) {
-        console.error('Failed to load projects:', err)
+        logError('Project', 'Failed to load projects', err)
         setProjects([])
       } finally {
         setIsLoadingProjects(false)
@@ -119,7 +120,7 @@ export function useProject() {
           localStorage.setItem(STORAGE_KEYS.LAST_PROJECT, recentProject.id)
         }
       } catch (err) {
-        console.error('Failed to initialize projects:', err)
+        logError('Project', 'Failed to initialize projects', err)
         setProjects([])
       } finally {
         setIsLoadingProjects(false)

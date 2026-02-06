@@ -62,19 +62,18 @@ export const Card: Component<CardProps> = (props) => {
   }
 
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: role is conditionally set via onClick prop
     <div
       class={`
-        rounded-[var(--radius-xl)]
-        border border-[var(--card-border)]
-        bg-[var(--card-background)]
-        shadow-[var(--card-shadow)]
+        rounded-[var(--radius-lg)]
         overflow-hidden
-        ${local.glass ? 'glass' : ''}
-        ${isInteractive() ? 'interactive cursor-pointer hover:border-[var(--border-strong)] hover:shadow-md' : ''}
+        ${local.glass ? 'glass' : 'border border-[var(--card-border)] bg-[var(--card-background)]'}
+        ${isInteractive() ? 'interactive cursor-pointer hover:border-[var(--card-hover-border)] active:bg-[var(--surface-raised)]' : ''}
         ${local.class ?? ''}
       `}
-      onClick={local.onClick}
-      onKeyDown={local.onClick ? handleKeyDown : undefined}
+      onClick={(e) => local.onClick?.(e)}
+      // eslint-disable-next-line solid/reactivity -- conditional handler binding is intentional
+      onKeyDown={local.onClick ? (e: KeyboardEvent) => handleKeyDown(e) : undefined}
       role={local.onClick ? 'button' : undefined}
       tabIndex={local.onClick ? 0 : undefined}
       {...others}

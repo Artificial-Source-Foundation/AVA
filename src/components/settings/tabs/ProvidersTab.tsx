@@ -1,30 +1,31 @@
 /**
  * Providers Settings Tab
  *
- * Configure LLM provider settings, model preferences, and API configuration.
+ * Modern, minimal provider configuration inspired by Cursor/Windsurf/Zed.
+ * Features: OAuth-first flow, clean cards, inline editing.
  */
 
 import {
-  AlertTriangle,
+  AlertCircle,
   Bot,
-  Check,
-  ChevronDown,
-  ChevronUp,
+  ChevronRight,
+  CircleDot,
   Cpu,
   ExternalLink,
   Eye,
   EyeOff,
   Globe,
-  Key,
+  Loader2,
+  LogIn,
   RefreshCw,
   Sparkles,
-  Trash2,
   Zap,
 } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
-import { Button } from '../../ui/Button'
-import { Toggle } from '../../ui/Toggle'
+import { isOAuthSupported, startOAuthFlow } from '../../../services/auth/oauth'
+import { fetchModels, supportsDynamicFetch } from '../../../services/providers/model-fetcher'
+import type { LLMProvider } from '../../../types/llm'
 
 // ============================================================================
 // Types
@@ -60,18 +61,47 @@ export interface ProvidersTabProps {
   onClearApiKey?: (id: string) => void
   onSetDefaultModel?: (providerId: string, modelId: string) => void
   onTestConnection?: (id: string) => void
+  onUpdateModels?: (providerId: string, models: ProviderModel[]) => void
 }
 
 // ============================================================================
-// Provider Icons
+// Provider Icons & Colors (uses CSS variables from tokens.css)
 // ============================================================================
 
-const providerIcons: Record<string, IconComponent> = {
-  anthropic: Sparkles as IconComponent,
-  openai: Cpu as IconComponent,
-  openrouter: Zap as IconComponent,
-  ollama: Bot as IconComponent,
-  custom: Globe as IconComponent,
+const providerConfig: Record<
+  string,
+  { icon: IconComponent; colorVar: string; subtleVar: string; borderVar: string }
+> = {
+  anthropic: {
+    icon: Sparkles as IconComponent,
+    colorVar: '--provider-anthropic',
+    subtleVar: '--provider-anthropic-subtle',
+    borderVar: '--provider-anthropic-border',
+  },
+  openai: {
+    icon: Cpu as IconComponent,
+    colorVar: '--provider-openai',
+    subtleVar: '--provider-openai-subtle',
+    borderVar: '--provider-openai-subtle',
+  },
+  openrouter: {
+    icon: Zap as IconComponent,
+    colorVar: '--provider-openrouter',
+    subtleVar: '--provider-openrouter-subtle',
+    borderVar: '--provider-openrouter-subtle',
+  },
+  ollama: {
+    icon: Bot as IconComponent,
+    colorVar: '--provider-ollama',
+    subtleVar: '--provider-ollama-subtle',
+    borderVar: '--provider-ollama-subtle',
+  },
+  custom: {
+    icon: Globe as IconComponent,
+    colorVar: '--text-muted',
+    subtleVar: '--alpha-white-5',
+    borderVar: '--border-subtle',
+  },
 }
 
 // ============================================================================
@@ -79,333 +109,414 @@ const providerIcons: Record<string, IconComponent> = {
 // ============================================================================
 
 export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
+  const [expandedId, setExpandedId] = createSignal<string | null>(null)
+
   const connectedCount = () => props.providers.filter((p) => p.status === 'connected').length
 
   return (
-    <div class="space-y-6">
-      {/* Header */}
-      <div class="flex items-center justify-between">
+    <div class="space-y-[var(--space-4)]">
+      {/* Header - Minimal */}
+      <div class="flex items-center justify-between mb-[var(--space-6)]">
         <div>
-          <h3 class="text-sm font-medium text-[var(--text-primary)]">LLM Providers</h3>
-          <p class="text-xs text-[var(--text-muted)] mt-0.5">
-            {connectedCount()} of {props.providers.length} providers connected
+          <h3 class="text-[var(--text-base)] font-medium text-[var(--text-primary)]">Providers</h3>
+          <p class="text-[var(--text-xs)] text-[var(--text-muted)] mt-[var(--space-0_5)]">
+            {connectedCount() > 0 ? (
+              <span class="text-[var(--success)]">{connectedCount()} connected</span>
+            ) : (
+              'Configure your AI providers'
+            )}
           </p>
         </div>
       </div>
 
-      {/* Provider List */}
-      <div class="space-y-3">
+      {/* Provider Grid */}
+      <div class="space-y-[var(--space-2)]">
         <For each={props.providers}>
           {(provider) => (
-            <ProviderCard
+            <ProviderRow
               provider={provider}
+              isExpanded={expandedId() === provider.id}
+              onExpand={() => setExpandedId(expandedId() === provider.id ? null : provider.id)}
               onToggle={(enabled) => props.onToggle?.(provider.id, enabled)}
               onSaveApiKey={(key) => props.onSaveApiKey?.(provider.id, key)}
               onClearApiKey={() => props.onClearApiKey?.(provider.id)}
               onSetDefaultModel={(modelId) => props.onSetDefaultModel?.(provider.id, modelId)}
               onTestConnection={() => props.onTestConnection?.(provider.id)}
+              onUpdateModels={(models) => props.onUpdateModels?.(provider.id, models)}
             />
           )}
         </For>
       </div>
 
-      {/* Info */}
-      <div class="flex items-start gap-3 p-3 bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)]">
-        <Key class="w-5 h-5 text-[var(--info)] flex-shrink-0 mt-0.5" />
-        <div class="text-sm text-[var(--text-secondary)]">
-          <p>
-            API keys are stored securely on your device and never sent to any server except the
-            respective provider.
-          </p>
-        </div>
-      </div>
+      {/* Footer hint */}
+      <p class="text-[var(--text-xs)] text-[var(--text-muted)] text-center pt-[var(--space-4)]">
+        Keys stored locally · Never sent to Estela servers
+      </p>
     </div>
   )
 }
 
 // ============================================================================
-// Provider Card Component
+// Provider Row Component
 // ============================================================================
 
-interface ProviderCardProps {
+interface ProviderRowProps {
   provider: LLMProviderConfig
+  isExpanded: boolean
+  onExpand: () => void
   onToggle?: (enabled: boolean) => void
   onSaveApiKey?: (key: string) => void
   onClearApiKey?: () => void
   onSetDefaultModel?: (modelId: string) => void
   onTestConnection?: () => void
+  onUpdateModels?: (models: ProviderModel[]) => void
 }
 
-const ProviderCard: Component<ProviderCardProps> = (props) => {
-  const [expanded, setExpanded] = createSignal(false)
+const ProviderRow: Component<ProviderRowProps> = (props) => {
+  // eslint-disable-next-line solid/reactivity -- initial value for editing
   const [apiKey, setApiKey] = createSignal(props.provider.apiKey ? '••••••••••••' : '')
   const [showKey, setShowKey] = createSignal(false)
-  const [isEditing, setIsEditing] = createSignal(false)
+  const [isLoadingModels, setIsLoadingModels] = createSignal(false)
+  const [modelError, setModelError] = createSignal<string | null>(null)
 
-  const icon = () => providerIcons[props.provider.id] || providerIcons.custom
+  const config = () => providerConfig[props.provider.id] || providerConfig.custom
 
-  const statusConfig = {
-    connected: {
-      label: 'Connected',
-      color: 'var(--success)',
-      bg: 'var(--success-subtle)',
-      icon: Check,
-    },
-    disconnected: {
-      label: 'Not configured',
-      color: 'var(--text-muted)',
-      bg: 'var(--surface-sunken)',
-      icon: Key,
-    },
-    error: {
-      label: 'Error',
-      color: 'var(--error)',
-      bg: 'var(--error-subtle)',
-      icon: AlertTriangle,
-    },
+  const handleRefreshModels = async () => {
+    setIsLoadingModels(true)
+    setModelError(null)
+    try {
+      const key = apiKey().includes('••••') ? props.provider.apiKey : apiKey()
+      const fetched = await fetchModels(props.provider.id as LLMProvider, {
+        apiKey: key,
+        baseUrl: props.provider.baseUrl,
+      })
+      if (fetched.length > 0) {
+        const models: ProviderModel[] = fetched.map((m, idx) => ({
+          id: m.id,
+          name: m.name,
+          contextWindow: m.contextWindow,
+          isDefault: idx === 0,
+        }))
+        props.onUpdateModels?.(models)
+      }
+    } catch (err) {
+      console.error('Failed to fetch models:', err)
+      setModelError(err instanceof Error ? err.message : 'Failed to fetch models')
+    } finally {
+      setIsLoadingModels(false)
+    }
   }
-
-  const status = () => statusConfig[props.provider.status]
 
   const handleSaveKey = () => {
     if (apiKey() && !apiKey().includes('••••')) {
       props.onSaveApiKey?.(apiKey())
-      setIsEditing(false)
     }
   }
 
-  const handleClearKey = () => {
-    props.onClearApiKey?.()
-    setApiKey('')
-    setIsEditing(false)
-  }
-
   return (
-    <div class="border border-[var(--border-subtle)] rounded-[var(--radius-lg)] overflow-hidden">
-      {/* Header */}
+    <div
+      class={`
+        rounded-[var(--radius-xl)] border transition-colors duration-[var(--duration-fast)]
+        ${
+          props.isExpanded
+            ? 'border-[var(--border-default)] bg-[var(--surface-raised)]'
+            : 'border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--alpha-white-5)]'
+        }
+      `}
+    >
+      {/* Collapsed Row */}
       <button
         type="button"
-        class={`
-          w-full text-left
-          flex items-center gap-3 p-3 cursor-pointer
-          hover:bg-[var(--surface-raised)]
-          transition-colors duration-[var(--duration-fast)]
-          ${props.provider.enabled ? 'bg-[var(--surface-raised)]' : ''}
-        `}
-        onClick={() => setExpanded(!expanded())}
+        onClick={() => props.onExpand()}
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && props.onExpand()}
+        class="w-full flex items-center gap-[var(--space-3)] p-[var(--space-3)] text-left cursor-pointer bg-transparent border-none"
       >
-        {/* Icon */}
+        {/* Icon with gradient background */}
         <div
-          class={`
-            p-2 rounded-[var(--radius-md)]
-            ${
-              props.provider.enabled
-                ? 'bg-[var(--accent)] text-white'
-                : 'bg-[var(--surface-sunken)] text-[var(--text-muted)]'
-            }
-          `}
+          class="relative w-9 h-9 rounded-[var(--radius-lg)] flex items-center justify-center"
+          style={{ background: `var(${config().subtleVar})` }}
         >
-          <Dynamic component={icon()} class="w-4 h-4" />
+          <span style={{ color: `var(${config().colorVar})` }}>
+            <Dynamic component={config().icon} class="w-4 h-4" />
+          </span>
+          {/* Status dot */}
+          <div
+            class={`
+              absolute -bottom-[var(--space-0_5)] -right-[var(--space-0_5)] w-2.5 h-2.5 rounded-full border-2 border-[var(--surface)]
+              ${
+                props.provider.status === 'connected'
+                  ? 'bg-[var(--success)]'
+                  : props.provider.status === 'error'
+                    ? 'bg-[var(--error)]'
+                    : 'bg-[var(--text-muted)]'
+              }
+            `}
+          />
         </div>
 
         {/* Info */}
         <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-medium text-[var(--text-primary)]">
+          <div class="flex items-center gap-[var(--space-2)]">
+            <span class="text-[var(--text-sm)] font-medium text-[var(--text-primary)]">
               {props.provider.name}
             </span>
-            <span
-              class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full"
-              style={{ background: status().bg, color: status().color }}
-            >
-              <Dynamic component={status().icon} class="w-2.5 h-2.5" />
-              {status().label}
-            </span>
+            <Show when={props.provider.status === 'connected'}>
+              <span class="text-[var(--text-xs)] text-[var(--text-muted)]">
+                {props.provider.defaultModel?.split('/').pop()?.split('-').slice(0, 2).join(' ')}
+              </span>
+            </Show>
           </div>
-          <div class="text-xs text-[var(--text-muted)]">{props.provider.description}</div>
+          <p class="text-[var(--text-xs)] text-[var(--text-muted)] truncate">
+            {props.provider.description}
+          </p>
         </div>
 
-        {/* Toggle & Expand */}
-        {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation wrapper for nested controls */}
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: container element with nested interactive controls */}
-        <div class="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-          <Toggle
-            checked={props.provider.enabled}
-            onChange={(checked) => props.onToggle?.(checked)}
-            size="sm"
-          />
+        {/* Right side controls */}
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: stopPropagation wrapper for nested controls */}
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only stopPropagation wrapper */}
+        <div class="flex items-center gap-[var(--space-2)]" onClick={(e) => e.stopPropagation()}>
+          {/* Quick toggle */}
           <button
             type="button"
-            class="p-1 text-[var(--text-muted)]"
             onClick={(e) => {
               e.stopPropagation()
-              setExpanded(!expanded())
+              props.onToggle?.(!props.provider.enabled)
             }}
+            class={`
+              relative w-9 h-5 rounded-full transition-colors duration-[var(--duration-fast)]
+              ${props.provider.enabled ? 'bg-[var(--accent)]' : 'bg-[var(--surface-sunken)]'}
+            `}
           >
-            <Show when={expanded()} fallback={<ChevronDown class="w-4 h-4" />}>
-              <ChevronUp class="w-4 h-4" />
-            </Show>
+            <div
+              class={`
+                absolute top-[var(--space-0_5)] w-4 h-4 rounded-full bg-white shadow-sm
+                transition-transform duration-[var(--duration-fast)]
+                ${props.provider.enabled ? 'left-[18px]' : 'left-[var(--space-0_5)]'}
+              `}
+            />
           </button>
+
+          {/* Expand chevron */}
+          <ChevronRight
+            class={`
+              w-4 h-4 text-[var(--text-muted)] transition-transform duration-[var(--duration-fast)]
+              ${props.isExpanded ? 'rotate-90' : ''}
+            `}
+          />
         </div>
       </button>
 
       {/* Expanded Content */}
-      <Show when={expanded()}>
-        <div class="border-t border-[var(--border-subtle)] p-4 space-y-4">
-          {/* API Key */}
-          <div>
-            <label
-              for={`provider-api-key-${props.provider.id}`}
-              class="block text-xs font-medium text-[var(--text-secondary)] mb-2"
+      <Show when={props.isExpanded}>
+        <div class="px-[var(--space-3)] pb-[var(--space-3)] space-y-[var(--space-3)] animate-slide-up">
+          <div class="h-px bg-[var(--border-subtle)] mx-[var(--space-1)]" />
+
+          {/* OAuth Section - Primary Action */}
+          <Show when={isOAuthSupported(props.provider.id as LLMProvider)}>
+            <button
+              type="button"
+              onClick={() => startOAuthFlow(props.provider.id as LLMProvider)}
+              class="
+                w-full flex items-center gap-[var(--space-3)] p-[var(--space-3)] rounded-[var(--radius-lg)]
+                border border-[var(--border-subtle)]
+                hover:border-[var(--accent)] hover:shadow-sm
+                transition-colors duration-[var(--duration-fast)] group
+              "
+              style={{ background: `var(${config().subtleVar})` }}
             >
-              API Key
-            </label>
-            <div class="flex gap-2">
-              <div class="flex-1 relative">
-                <input
-                  id={`provider-api-key-${props.provider.id}`}
-                  type={showKey() ? 'text' : 'password'}
-                  value={apiKey()}
-                  onInput={(e) => {
-                    setApiKey(e.currentTarget.value)
-                    setIsEditing(true)
-                  }}
-                  onFocus={() => {
-                    if (apiKey().includes('••••')) {
-                      setApiKey('')
-                    }
-                  }}
-                  placeholder={`Enter ${props.provider.name} API key`}
-                  class="
-                    w-full px-3 py-2 pr-10
-                    bg-[var(--input-background)]
-                    text-[var(--text-primary)]
-                    placeholder-[var(--text-muted)]
-                    border border-[var(--input-border)]
-                    rounded-[var(--radius-md)]
-                    text-sm font-mono
-                    focus:outline-none focus:border-[var(--accent)]
-                    transition-colors duration-[var(--duration-fast)]
-                  "
-                />
+              <div
+                class="w-8 h-8 rounded-[var(--radius-md)] flex items-center justify-center"
+                style={{ background: `var(${config().colorVar})` }}
+              >
+                <LogIn class="w-4 h-4 text-white" />
+              </div>
+              <div class="flex-1 text-left">
+                <p class="text-[var(--text-sm)] font-medium text-[var(--text-primary)]">
+                  Sign in with {props.provider.id === 'anthropic' ? 'Claude' : 'ChatGPT'}
+                </p>
+                <p class="text-[var(--text-xs)] text-[var(--text-muted)]">
+                  Use your {props.provider.id === 'anthropic' ? 'Max/Pro' : 'Plus/Pro'} subscription
+                </p>
+              </div>
+              <ChevronRight class="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--accent)] transition-colors duration-[var(--duration-fast)]" />
+            </button>
+
+            <div class="flex items-center gap-[var(--space-3)] px-[var(--space-2)]">
+              <div class="flex-1 h-px bg-[var(--border-subtle)]" />
+              <span class="text-[var(--text-xs)] text-[var(--text-muted)] uppercase tracking-wider">
+                or API key
+              </span>
+              <div class="flex-1 h-px bg-[var(--border-subtle)]" />
+            </div>
+          </Show>
+
+          {/* API Key Input */}
+          <div class="space-y-[var(--space-2)]">
+            <div class="relative">
+              <input
+                type={showKey() ? 'text' : 'password'}
+                value={apiKey()}
+                onInput={(e) => setApiKey(e.currentTarget.value)}
+                onFocus={() => apiKey().includes('••••') && setApiKey('')}
+                onBlur={handleSaveKey}
+                placeholder={`${props.provider.name} API key`}
+                class="
+                  w-full h-[var(--space-10)] px-[var(--space-3)] pr-[80px]
+                  bg-[var(--input-background)]
+                  text-[var(--text-primary)] text-[var(--text-sm)] font-[var(--font-mono)]
+                  placeholder:text-[var(--input-placeholder)]
+                  border border-[var(--input-border)]
+                  rounded-[var(--radius-lg)]
+                  focus:outline-none focus:border-[var(--input-border-focus)] focus:shadow-[0_0_0_3px_var(--input-focus-ring)]
+                  transition-colors duration-[var(--duration-fast)]
+                "
+              />
+              <div class="absolute right-[var(--space-2)] top-1/2 -translate-y-1/2 flex items-center gap-[var(--space-1)]">
                 <button
                   type="button"
                   onClick={() => setShowKey(!showKey())}
-                  class="
-                    absolute right-2.5 top-1/2 -translate-y-1/2
-                    text-[var(--text-tertiary)] hover:text-[var(--text-primary)]
-                  "
+                  class="p-[var(--space-1_5)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-[var(--radius-md)] transition-colors duration-[var(--duration-fast)]"
                 >
-                  <Show when={showKey()} fallback={<Eye class="w-4 h-4" />}>
-                    <EyeOff class="w-4 h-4" />
+                  <Show when={showKey()} fallback={<Eye class="w-3.5 h-3.5" />}>
+                    <EyeOff class="w-3.5 h-3.5" />
                   </Show>
                 </button>
+                <Show when={props.provider.apiKey}>
+                  <button
+                    type="button"
+                    onClick={() => props.onClearApiKey?.()}
+                    class="p-[var(--space-1_5)] text-[var(--text-muted)] hover:text-[var(--error)] rounded-[var(--radius-md)] transition-colors duration-[var(--duration-fast)]"
+                    title="Clear API key"
+                  >
+                    <AlertCircle class="w-3.5 h-3.5" />
+                  </button>
+                </Show>
               </div>
-              <Show when={isEditing()}>
-                <Button variant="primary" size="sm" onClick={handleSaveKey}>
-                  Save
-                </Button>
-              </Show>
-              <Show when={props.provider.apiKey}>
-                <Button variant="ghost" size="sm" onClick={handleClearKey}>
-                  <Trash2 class="w-4 h-4 text-[var(--error)]" />
-                </Button>
-              </Show>
             </div>
           </div>
 
-          {/* Default Model */}
+          {/* Model Selector */}
           <Show when={props.provider.models.length > 0}>
-            <div>
-              <label
-                for={`provider-model-${props.provider.id}`}
-                class="block text-xs font-medium text-[var(--text-secondary)] mb-2"
-              >
-                Default Model
-              </label>
+            <div class="flex items-center gap-[var(--space-2)]">
               <select
-                id={`provider-model-${props.provider.id}`}
                 value={props.provider.defaultModel || ''}
                 onChange={(e) => props.onSetDefaultModel?.(e.currentTarget.value)}
                 class="
-                  w-full px-3 py-2
+                  flex-1 h-9 px-[var(--space-3)]
                   bg-[var(--input-background)]
+                  text-[var(--text-primary)] text-[var(--text-sm)]
                   border border-[var(--input-border)]
-                  rounded-[var(--radius-md)]
-                  text-sm text-[var(--text-primary)]
-                  focus:outline-none focus:border-[var(--accent)]
+                  rounded-[var(--radius-lg)]
+                  focus:outline-none focus:border-[var(--input-border-focus)]
                   transition-colors duration-[var(--duration-fast)]
+                  appearance-none cursor-pointer
                 "
+                style={{
+                  'background-image': `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2352525b' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+                  'background-repeat': 'no-repeat',
+                  'background-position': 'right 12px center',
+                }}
               >
                 <For each={props.provider.models}>
                   {(model) => (
                     <option value={model.id}>
-                      {model.name} ({formatContextWindow(model.contextWindow)})
+                      {model.name} · {formatContextWindow(model.contextWindow)}
                     </option>
                   )}
                 </For>
               </select>
+
+              <Show when={supportsDynamicFetch(props.provider.id as LLMProvider)}>
+                <button
+                  type="button"
+                  onClick={handleRefreshModels}
+                  disabled={isLoadingModels()}
+                  class="
+                    h-9 px-[var(--space-3)] flex items-center gap-[var(--space-1_5)]
+                    text-[var(--text-xs)] text-[var(--text-muted)]
+                    bg-[var(--input-background)]
+                    border border-[var(--input-border)]
+                    rounded-[var(--radius-lg)]
+                    hover:text-[var(--text-primary)] hover:border-[var(--border-default)]
+                    disabled:opacity-50
+                    transition-colors duration-[var(--duration-fast)]
+                  "
+                >
+                  <Show
+                    when={!isLoadingModels()}
+                    fallback={<Loader2 class="w-3 h-3 animate-spin" />}
+                  >
+                    <RefreshCw class="w-3 h-3" />
+                  </Show>
+                  Sync
+                </button>
+              </Show>
             </div>
+            <Show when={modelError()}>
+              <p class="text-[var(--text-xs)] text-[var(--error)] px-[var(--space-1)]">
+                {modelError()}
+              </p>
+            </Show>
           </Show>
 
-          {/* Base URL (for custom/ollama) */}
+          {/* Base URL for Ollama/Custom */}
           <Show when={props.provider.id === 'ollama' || props.provider.id === 'custom'}>
-            <div>
-              <label
-                for={`provider-baseurl-${props.provider.id}`}
-                class="block text-xs font-medium text-[var(--text-secondary)] mb-2"
-              >
-                Base URL
-              </label>
-              <input
-                id={`provider-baseurl-${props.provider.id}`}
-                type="url"
-                value={props.provider.baseUrl || ''}
-                placeholder="http://localhost:11434"
-                class="
-                  w-full px-3 py-2
-                  bg-[var(--input-background)]
-                  border border-[var(--input-border)]
-                  rounded-[var(--radius-md)]
-                  text-sm text-[var(--text-primary)]
-                  placeholder-[var(--text-muted)]
-                  focus:outline-none focus:border-[var(--accent)]
-                  transition-colors duration-[var(--duration-fast)]
-                "
-              />
-            </div>
+            <input
+              type="url"
+              value={props.provider.baseUrl || ''}
+              placeholder="http://localhost:11434"
+              class="
+                w-full h-9 px-[var(--space-3)]
+                bg-[var(--input-background)]
+                text-[var(--text-primary)] text-[var(--text-sm)]
+                placeholder:text-[var(--input-placeholder)]
+                border border-[var(--input-border)]
+                rounded-[var(--radius-lg)]
+                focus:outline-none focus:border-[var(--input-border-focus)]
+                transition-colors duration-[var(--duration-fast)]
+              "
+            />
           </Show>
 
-          {/* Test Connection */}
-          <Show when={props.provider.apiKey}>
-            <div class="flex items-center justify-between pt-2">
-              <Button variant="ghost" size="sm" onClick={() => props.onTestConnection?.()}>
-                <RefreshCw class="w-4 h-4 mr-1" />
-                Test Connection
-              </Button>
-
-              {/* Provider Docs Link */}
-              <a
-                href={getProviderDocsUrl(props.provider.id)}
-                target="_blank"
-                rel="noopener noreferrer"
+          {/* Footer Actions */}
+          <div class="flex items-center justify-between pt-[var(--space-1)]">
+            <Show when={props.provider.apiKey}>
+              <button
+                type="button"
+                onClick={() => props.onTestConnection?.()}
                 class="
-                  flex items-center gap-1 text-xs
-                  text-[var(--text-muted)] hover:text-[var(--accent)]
+                  flex items-center gap-[var(--space-1_5)] px-[var(--space-2)] py-[var(--space-1)]
+                  text-[var(--text-xs)] text-[var(--text-muted)]
+                  hover:text-[var(--accent)]
                   transition-colors duration-[var(--duration-fast)]
                 "
               >
-                API Documentation
-                <ExternalLink class="w-3 h-3" />
-              </a>
-            </div>
-          </Show>
+                <CircleDot class="w-3 h-3" />
+                Test
+              </button>
+            </Show>
+            <div class="flex-1" />
+            <a
+              href={getProviderDocsUrl(props.provider.id)}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="
+                flex items-center gap-[var(--space-1)] px-[var(--space-2)] py-[var(--space-1)]
+                text-[var(--text-xs)] text-[var(--text-muted)]
+                hover:text-[var(--accent)]
+                transition-colors duration-[var(--duration-fast)]
+              "
+            >
+              Docs
+              <ExternalLink class="w-2.5 h-2.5" />
+            </a>
+          </div>
 
-          {/* Error Message */}
+          {/* Error Display */}
           <Show when={props.provider.status === 'error' && props.provider.error}>
-            <div class="flex items-start gap-2 p-2 bg-[var(--error-subtle)] rounded-[var(--radius-md)]">
-              <AlertTriangle class="w-4 h-4 text-[var(--error)] flex-shrink-0 mt-0.5" />
-              <p class="text-xs text-[var(--error)]">{props.provider.error}</p>
+            <div class="flex items-center gap-2 px-[var(--space-3)] py-[var(--space-2)] bg-[var(--error-subtle)] border border-[var(--error-border)] rounded-[var(--radius-lg)]">
+              <AlertCircle class="w-3.5 h-3.5 text-[var(--error)]" />
+              <p class="text-[var(--text-xs)] text-[var(--error)]">{props.provider.error}</p>
             </div>
           </Show>
         </div>
@@ -420,7 +531,7 @@ const ProviderCard: Component<ProviderCardProps> = (props) => {
 
 const formatContextWindow = (tokens: number): string => {
   if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`
-  if (tokens >= 1000) return `${(tokens / 1000).toFixed(0)}K`
+  if (tokens >= 1000) return `${Math.round(tokens / 1000)}K`
   return tokens.toString()
 }
 
@@ -448,61 +559,85 @@ export const defaultProviders: LLMProviderConfig[] = [
     status: 'disconnected',
     models: [
       {
-        id: 'claude-3-5-sonnet-20241022',
-        name: 'Claude 3.5 Sonnet',
+        id: 'claude-sonnet-4-5-20250514',
+        name: 'Claude Sonnet 4.5',
         contextWindow: 200000,
         isDefault: true,
       },
-      { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', contextWindow: 200000 },
-      { id: 'claude-3-haiku-20240307', name: 'Claude 3 Haiku', contextWindow: 200000 },
+      { id: 'claude-opus-4-5-20251124', name: 'Claude Opus 4.5', contextWindow: 200000 },
+      { id: 'claude-haiku-4-5-20251022', name: 'Claude Haiku 4.5', contextWindow: 200000 },
+      { id: 'claude-opus-4-1-20250801', name: 'Claude Opus 4.1', contextWindow: 200000 },
+      { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', contextWindow: 200000 },
+      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', contextWindow: 200000 },
+      { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet', contextWindow: 200000 },
+      { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet v2', contextWindow: 200000 },
+      { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', contextWindow: 200000 },
     ],
-    defaultModel: 'claude-3-5-sonnet-20241022',
+    defaultModel: 'claude-sonnet-4-5-20250514',
   },
   {
     id: 'openai',
     name: 'OpenAI',
     icon: Cpu as IconComponent,
-    description: 'GPT models and embeddings',
+    description: 'GPT and reasoning models',
     enabled: false,
     status: 'disconnected',
     models: [
-      { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', contextWindow: 128000, isDefault: true },
+      { id: 'gpt-5.2', name: 'GPT-5.2', contextWindow: 196000, isDefault: true },
+      { id: 'gpt-5.2-mini', name: 'GPT-5.2 Mini', contextWindow: 128000 },
+      { id: 'gpt-5.1-codex-max', name: 'GPT-5.1 Codex Max', contextWindow: 196000 },
+      { id: 'gpt-4.1', name: 'GPT-4.1', contextWindow: 1000000 },
+      { id: 'gpt-4.1-mini', name: 'GPT-4.1 Mini', contextWindow: 1000000 },
+      { id: 'gpt-4.1-nano', name: 'GPT-4.1 Nano', contextWindow: 1000000 },
+      { id: 'o3', name: 'o3', contextWindow: 200000 },
+      { id: 'o3-pro', name: 'o3 Pro', contextWindow: 200000 },
+      { id: 'o4-mini', name: 'o4 Mini', contextWindow: 200000 },
       { id: 'gpt-4o', name: 'GPT-4o', contextWindow: 128000 },
-      { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', contextWindow: 16000 },
+      { id: 'gpt-4o-mini', name: 'GPT-4o Mini', contextWindow: 128000 },
     ],
-    defaultModel: 'gpt-4-turbo',
+    defaultModel: 'gpt-5.2',
   },
   {
     id: 'openrouter',
     name: 'OpenRouter',
     icon: Zap as IconComponent,
-    description: 'Access to 100+ models via single API',
+    description: 'Access 300+ models via single API',
     enabled: false,
     status: 'disconnected',
     models: [
       {
-        id: 'anthropic/claude-3.5-sonnet',
-        name: 'Claude 3.5 Sonnet',
+        id: 'anthropic/claude-sonnet-4.5',
+        name: 'Claude Sonnet 4.5',
         contextWindow: 200000,
         isDefault: true,
       },
-      { id: 'openai/gpt-4-turbo', name: 'GPT-4 Turbo', contextWindow: 128000 },
-      { id: 'google/gemini-pro', name: 'Gemini Pro', contextWindow: 32000 },
+      { id: 'anthropic/claude-opus-4.5', name: 'Claude Opus 4.5', contextWindow: 200000 },
+      { id: 'openai/gpt-5.2', name: 'GPT-5.2', contextWindow: 196000 },
+      { id: 'openai/o3', name: 'o3', contextWindow: 200000 },
+      { id: 'google/gemini-3-pro-preview', name: 'Gemini 3 Pro', contextWindow: 2000000 },
+      { id: 'google/gemini-2.5-pro', name: 'Gemini 2.5 Pro', contextWindow: 1000000 },
+      { id: 'deepseek/deepseek-r1', name: 'DeepSeek R1', contextWindow: 64000 },
+      { id: 'meta-llama/llama-4-405b', name: 'Llama 4 405B', contextWindow: 256000 },
+      { id: 'mistralai/codestral-2501', name: 'Codestral', contextWindow: 256000 },
+      { id: 'x-ai/grok-3', name: 'Grok 3', contextWindow: 131072 },
     ],
-    defaultModel: 'anthropic/claude-3.5-sonnet',
+    defaultModel: 'anthropic/claude-sonnet-4.5',
   },
   {
     id: 'ollama',
     name: 'Ollama',
     icon: Bot as IconComponent,
-    description: 'Run local models on your machine',
+    description: 'Run models locally',
     enabled: false,
     status: 'disconnected',
     baseUrl: 'http://localhost:11434',
     models: [
-      { id: 'llama2', name: 'Llama 2', contextWindow: 4096 },
-      { id: 'codellama', name: 'Code Llama', contextWindow: 16000 },
-      { id: 'mistral', name: 'Mistral', contextWindow: 8000 },
+      { id: 'llama3.3:latest', name: 'Llama 3.3', contextWindow: 128000 },
+      { id: 'deepseek-r1:latest', name: 'DeepSeek R1', contextWindow: 64000 },
+      { id: 'qwen2.5-coder:latest', name: 'Qwen 2.5 Coder', contextWindow: 32000 },
+      { id: 'codestral:latest', name: 'Codestral', contextWindow: 32000 },
+      { id: 'mistral:latest', name: 'Mistral', contextWindow: 32000 },
+      { id: 'phi4:latest', name: 'Phi-4', contextWindow: 16000 },
     ],
   },
 ]

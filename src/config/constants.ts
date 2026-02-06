@@ -11,6 +11,11 @@ export const STORAGE_KEYS = {
   LAST_SESSION: 'estela_last_session',
   LAST_PROJECT: 'estela_last_project',
   SETTINGS: 'estela_settings',
+  PANEL_SIZES: 'estela-panel-sizes',
+  SIDEBAR_COLLAPSED: 'estela-sidebar-collapsed',
+  LAYOUT_ACTIVITY: 'estela-layout-activity',
+  LAYOUT_SIDEBAR_VISIBLE: 'estela-layout-sidebar-visible',
+  LAYOUT_RIGHT_VISIBLE: 'estela-layout-right-visible',
 } as const
 
 // Default values

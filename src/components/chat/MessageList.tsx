@@ -41,7 +41,7 @@ const OVERSCAN = 5
 // ============================================================================
 
 export const MessageList: Component = () => {
-  // biome-ignore lint: SolidJS ref pattern - assigned via ref={} in JSX
+  // oxlint-disable-next-line no-unassigned-vars -- SolidJS ref pattern: assigned via ref={} in JSX
   let containerRef: HTMLDivElement | undefined
   const [shouldAutoScroll, setShouldAutoScroll] = createSignal(true)
 
@@ -171,7 +171,7 @@ export const MessageList: Component = () => {
                   <div
                     data-index={virtualItem.index}
                     ref={(el) => {
-                      // Measure actual height for better virtualization
+                      // eslint-disable-next-line solid/reactivity -- ref callback runs once per element mount
                       queueMicrotask(() => {
                         virtualizer().measureElement(el)
                       })

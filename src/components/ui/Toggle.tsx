@@ -101,7 +101,7 @@ export const Toggle: Component<ToggleProps> = (props) => {
             bg-white
             shadow-sm
             ring-0
-            transition-transform duration-[var(--duration-fast)] ease-[var(--ease-out)]
+            transition-transform duration-[var(--duration-normal)] ease-[var(--ease-spring)]
             translate-x-0.5
             ${thumbSizes[size()]}
             ${thumbTranslate[size()]}

@@ -187,7 +187,7 @@ function formatResults(response: SearchResponse): string {
     lines.push(`   URL: ${r.url}`)
     if (r.snippet) {
       // Truncate long snippets
-      const snippet = r.snippet.length > 300 ? r.snippet.slice(0, 300) + '...' : r.snippet
+      const snippet = r.snippet.length > 300 ? `${r.snippet.slice(0, 300)}...` : r.snippet
       lines.push(`   ${snippet}`)
     }
     lines.push('')

@@ -38,7 +38,11 @@ const operationConfig: Record<
 // Component
 // ============================================================================
 
-export const FileOperationsPanel: Component = () => {
+interface FileOperationsPanelProps {
+  compact?: boolean
+}
+
+export const FileOperationsPanel: Component<FileOperationsPanelProps> = (props) => {
   const { fileOperations, clearFileOperations } = useSession()
   const [selectedOperation, setSelectedOperation] = createSignal<string | null>(null)
   const [filterType, setFilterType] = createSignal<FileOperationType | 'all'>('all')
@@ -79,114 +83,116 @@ export const FileOperationsPanel: Component = () => {
 
   return (
     <div class="flex flex-col h-full">
-      {/* Header */}
-      <div
-        class="
-          flex items-center justify-between
-          px-4 py-3
-          border-b border-[var(--border-subtle)]
-        "
-      >
-        <div class="flex items-center gap-3">
-          <div
-            class="
-              p-2
-              bg-[var(--warning-subtle)]
-              rounded-[var(--radius-lg)]
-            "
-          >
-            <FolderOpen class="w-5 h-5 text-[var(--warning)]" />
-          </div>
-          <div>
-            <h2 class="text-sm font-semibold text-[var(--text-primary)]">File Operations</h2>
-            <p class="text-xs text-[var(--text-muted)]">
-              {operationCounts().all} operations · {operationCounts().edit} edits
-            </p>
-          </div>
-        </div>
-
-        {/* Filter Button */}
-        <div class="relative">
-          <button
-            type="button"
-            onClick={() => setShowFilterMenu(!showFilterMenu())}
-            class={`
-              flex items-center gap-1.5 px-2.5 py-1.5
-              rounded-[var(--radius-md)]
-              text-xs font-medium
-              transition-colors duration-[var(--duration-fast)]
-              ${
-                filterType() !== 'all'
-                  ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
-                  : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)]'
-              }
-            `}
-          >
-            <Filter class="w-3.5 h-3.5" />
-            {filterType() === 'all'
-              ? 'All'
-              : operationConfig[filterType() as FileOperationType].label}
-            <ChevronDown
-              class={`w-3 h-3 transition-transform ${showFilterMenu() ? 'rotate-180' : ''}`}
-            />
-          </button>
-
-          {/* Filter Dropdown */}
-          <Show when={showFilterMenu()}>
+      {/* Header (hidden in compact/embedded mode) */}
+      <Show when={!props.compact}>
+        <div
+          class="
+            flex items-center justify-between
+            px-4 py-3
+            border-b border-[var(--border-subtle)]
+          "
+        >
+          <div class="flex items-center gap-3">
             <div
               class="
-                absolute right-0 top-full mt-1
-                bg-[var(--surface-overlay)]
-                border border-[var(--border-default)]
+                p-2
+                bg-[var(--warning-subtle)]
                 rounded-[var(--radius-lg)]
-                shadow-lg
-                py-1 min-w-[140px]
-                z-10
               "
             >
-              <button
-                type="button"
-                onClick={() => {
-                  setFilterType('all')
-                  setShowFilterMenu(false)
-                }}
-                class={`
-                  w-full flex items-center justify-between gap-2 px-3 py-2
-                  text-xs text-left
-                  ${filterType() === 'all' ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]'}
-                `}
-              >
-                <span>All Operations</span>
-                <span class="text-[var(--text-muted)]">{operationCounts().all}</span>
-              </button>
-              <For each={Object.entries(operationConfig)}>
-                {([type, config]) => (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFilterType(type as FileOperationType)
-                      setShowFilterMenu(false)
-                    }}
-                    class={`
-                      w-full flex items-center justify-between gap-2 px-3 py-2
-                      text-xs text-left
-                      ${filterType() === type ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]'}
-                    `}
-                  >
-                    <span class="flex items-center gap-2">
-                      <config.icon class="w-3.5 h-3.5" style={{ color: config.color }} />
-                      {config.label}
-                    </span>
-                    <span class="text-[var(--text-muted)]">
-                      {operationCounts()[type as FileOperationType]}
-                    </span>
-                  </button>
-                )}
-              </For>
+              <FolderOpen class="w-5 h-5 text-[var(--warning)]" />
             </div>
-          </Show>
+            <div>
+              <h2 class="text-sm font-semibold text-[var(--text-primary)]">File Operations</h2>
+              <p class="text-xs text-[var(--text-muted)]">
+                {operationCounts().all} operations · {operationCounts().edit} edits
+              </p>
+            </div>
+          </div>
+
+          {/* Filter Button */}
+          <div class="relative">
+            <button
+              type="button"
+              onClick={() => setShowFilterMenu(!showFilterMenu())}
+              class={`
+                flex items-center gap-1.5 px-2.5 py-1.5
+                rounded-[var(--radius-md)]
+                text-xs font-medium
+                transition-colors duration-[var(--duration-fast)]
+                ${
+                  filterType() !== 'all'
+                    ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-raised)]'
+                }
+              `}
+            >
+              <Filter class="w-3.5 h-3.5" />
+              {filterType() === 'all'
+                ? 'All'
+                : operationConfig[filterType() as FileOperationType].label}
+              <ChevronDown
+                class={`w-3 h-3 transition-transform ${showFilterMenu() ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            {/* Filter Dropdown */}
+            <Show when={showFilterMenu()}>
+              <div
+                class="
+                  absolute right-0 top-full mt-1
+                  bg-[var(--surface-overlay)]
+                  border border-[var(--border-default)]
+                  rounded-[var(--radius-lg)]
+                  shadow-lg
+                  py-1 min-w-[140px]
+                  z-10
+                "
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterType('all')
+                    setShowFilterMenu(false)
+                  }}
+                  class={`
+                    w-full flex items-center justify-between gap-2 px-3 py-2
+                    text-xs text-left
+                    ${filterType() === 'all' ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]'}
+                  `}
+                >
+                  <span>All Operations</span>
+                  <span class="text-[var(--text-muted)]">{operationCounts().all}</span>
+                </button>
+                <For each={Object.entries(operationConfig)}>
+                  {([type, config]) => (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setFilterType(type as FileOperationType)
+                        setShowFilterMenu(false)
+                      }}
+                      class={`
+                        w-full flex items-center justify-between gap-2 px-3 py-2
+                        text-xs text-left
+                        ${filterType() === type ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]'}
+                      `}
+                    >
+                      <span class="flex items-center gap-2">
+                        <config.icon class="w-3.5 h-3.5" style={{ color: config.color }} />
+                        {config.label}
+                      </span>
+                      <span class="text-[var(--text-muted)]">
+                        {operationCounts()[type as FileOperationType]}
+                      </span>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
+          </div>
         </div>
-      </div>
+      </Show>
 
       {/* Operations List */}
       <div class="flex-1 overflow-y-auto p-3 space-y-2">
@@ -317,38 +323,40 @@ export const FileOperationsPanel: Component = () => {
         </Show>
       </div>
 
-      {/* Footer */}
-      <div
-        class="
-          px-4 py-3
-          border-t border-[var(--border-subtle)]
-          bg-[var(--surface-sunken)]
-        "
-      >
-        <div class="flex items-center justify-between text-xs text-[var(--text-muted)]">
-          <div class="flex items-center gap-3">
-            <For each={Object.entries(operationConfig)}>
-              {([type, config]) => (
-                <Show when={operationCounts()[type as FileOperationType] > 0}>
-                  <span class="flex items-center gap-1">
-                    <span class="w-2 h-2 rounded-full" style={{ background: config.color }} />
-                    {operationCounts()[type as FileOperationType]} {config.label}
-                  </span>
-                </Show>
-              )}
-            </For>
+      {/* Footer (hidden in compact/embedded mode) */}
+      <Show when={!props.compact}>
+        <div
+          class="
+            px-4 py-3
+            border-t border-[var(--border-subtle)]
+            bg-[var(--surface-sunken)]
+          "
+        >
+          <div class="flex items-center justify-between text-xs text-[var(--text-muted)]">
+            <div class="flex items-center gap-3">
+              <For each={Object.entries(operationConfig)}>
+                {([type, config]) => (
+                  <Show when={operationCounts()[type as FileOperationType] > 0}>
+                    <span class="flex items-center gap-1">
+                      <span class="w-2 h-2 rounded-full" style={{ background: config.color }} />
+                      {operationCounts()[type as FileOperationType]} {config.label}
+                    </span>
+                  </Show>
+                )}
+              </For>
+            </div>
+            <Show when={fileOperations().length > 0}>
+              <button
+                type="button"
+                onClick={() => clearFileOperations()}
+                class="text-[var(--text-tertiary)] hover:text-[var(--error)] transition-colors"
+              >
+                Clear All
+              </button>
+            </Show>
           </div>
-          <Show when={fileOperations().length > 0}>
-            <button
-              type="button"
-              onClick={() => clearFileOperations()}
-              class="text-[var(--text-tertiary)] hover:text-[var(--error)] transition-colors"
-            >
-              Clear All
-            </button>
-          </Show>
         </div>
-      </div>
+      </Show>
     </div>
   )
 }

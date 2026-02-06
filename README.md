@@ -1,8 +1,8 @@
 # Estela
 
-> Multi-Agent AI Coding Assistant (~19,100 lines)
+> Multi-Agent AI Coding Assistant
 
-A Tauri 2.0 + SolidJS desktop application for AI-assisted software development with **ACP (Agent Client Protocol)** support for editor integration. Features autonomous agent loop, hierarchical **Commander + Workers + Validator** architecture, 15 tools, and long-term memory.
+A Tauri 2.0 + SolidJS desktop application for AI-assisted software development with **ACP (Agent Client Protocol)** support for editor integration. Features autonomous agent loop, hierarchical **Commander + Workers + Validator** architecture, 19 tools (including browser automation and plan mode), and long-term memory.
 
 ## Quick Start
 
@@ -43,7 +43,7 @@ node cli/dist/index.js --acp
 
 ## Current Status
 
-**All core epics (1-17) complete!** Ready for frontend integration (Epic 18).
+**Core + MVP polish epics (1-21) complete!** Ready for frontend integration (Epic 18).
 
 | Phase | Epics | Status |
 |-------|-------|--------|
@@ -52,6 +52,7 @@ node cli/dist/index.js --acp
 | Agent System | 8-12: Agent Loop, Commander, Parallel, Validator, Codebase | ✅ Complete |
 | Settings & Memory | 13-14: Config, Long-term Memory | ✅ Complete |
 | Enhancement | 15-17: Comparison, OpenCode Features, Missing Tools | ✅ Complete |
+| MVP Polish | 19-21: Hooks, Browser/Plan, Providers | ✅ Complete |
 | **Next** | 18: Tauri Desktop GUI | ⬜ Planned |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for full roadmap.
@@ -96,7 +97,7 @@ packages/
 │       ├── agent/     # Autonomous loop, subagents, recovery
 │       ├── commander/ # Hierarchical delegation, workers
 │       │   └── parallel/  # Concurrent execution, DAG scheduler
-│       ├── tools/     # 15 tools (file, web, task)
+│       ├── tools/     # 19 tools (file, web, task, browser, plan)
 │       ├── context/   # Token tracking, compaction
 │       ├── memory/    # Episodic, semantic, procedural
 │       ├── validator/ # QA pipeline (syntax, types, lint)
@@ -151,8 +152,13 @@ API keys can be set via:
 3. **~/.estela/credentials.json** for CLI mode
 
 Supported providers:
-- **Anthropic** - Direct API
+- **Anthropic** - Direct API or OAuth
+- **OpenAI** - Direct API or OAuth
+- **Google** - Direct API or OAuth
 - **OpenRouter** - Gateway to multiple models
+- **Mistral, Groq, DeepSeek, xAI, Cohere, Together** - Direct APIs
+- **GLM, Kimi** - Direct APIs
+- **Ollama** - Local models
 
 ## Contributing
 

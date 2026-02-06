@@ -193,7 +193,7 @@ export const CommandPalette: Component<CommandPaletteProps> = (props) => {
         <Dialog.Overlay
           class="
             fixed inset-0 z-50
-            bg-black/50 backdrop-blur-sm
+            bg-black/60
             data-[expanded]:animate-in data-[expanded]:fade-in-0
             data-[closed]:animate-out data-[closed]:fade-out-0
           "

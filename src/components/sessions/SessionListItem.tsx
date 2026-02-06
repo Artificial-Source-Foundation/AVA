@@ -20,7 +20,9 @@ interface SessionListItemProps {
 
 export const SessionListItem: Component<SessionListItemProps> = (props) => {
   const [isEditing, setIsEditing] = createSignal(false)
+  // eslint-disable-next-line solid/reactivity -- initial value for editing
   const [editName, setEditName] = createSignal(props.session.name)
+  // oxlint-disable-next-line no-unassigned-vars -- SolidJS ref pattern: assigned via ref={} in JSX
   let inputRef: HTMLInputElement | undefined
 
   const handleStartEdit = (e: MouseEvent) => {

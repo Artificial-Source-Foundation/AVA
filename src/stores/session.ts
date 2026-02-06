@@ -24,6 +24,7 @@ import {
   saveMemoryItem,
   saveTerminalExecution,
 } from '../services/database'
+import { logError } from '../services/logger'
 import type {
   Agent,
   FileOperation,
@@ -36,16 +37,6 @@ import type {
   TerminalExecution,
 } from '../types'
 import { useProject } from './project'
-
-// ============================================================================
-// Tab Navigation
-// ============================================================================
-
-export type TabId = 'chat' | 'agents' | 'files' | 'memory' | 'terminal'
-
-const [activeTab, setActiveTab] = createSignal<TabId>('chat')
-
-export { activeTab, setActiveTab }
 
 // ============================================================================
 // Session State
@@ -170,7 +161,7 @@ export function useSession() {
         const dbSessions = await getSessionsWithStats(projectId)
         setSessions(dbSessions)
       } catch (err) {
-        console.error('Failed to load sessions:', err)
+        logError('Session', 'Failed to load sessions', err)
         setSessions([])
       } finally {
         setIsLoadingSessions(false)
@@ -229,7 +220,7 @@ export function useSession() {
         const dbMessages = await getMessages(id)
         setMessages(dbMessages)
       } catch (err) {
-        console.error('Failed to load messages:', err)
+        logError('Session', 'Failed to load messages', err)
         setMessages([])
       } finally {
         setIsLoadingMessages(false)
@@ -248,7 +239,7 @@ export function useSession() {
         setTerminalExecutions(dbTerminalExecs)
         setMemoryItems(dbMemItems)
       } catch (err) {
-        console.error('Failed to load session data:', err)
+        logError('Session', 'Failed to load session data', err)
         setFileOperations([])
         setTerminalExecutions([])
         setMemoryItems([])
@@ -392,7 +383,7 @@ export function useSession() {
         const dbMessages = await getMessages(sessionId)
         setMessages(dbMessages)
       } catch (err) {
-        console.error('Failed to load messages:', err)
+        logError('Session', 'Failed to load messages', err)
         setMessages([])
       } finally {
         setIsLoadingMessages(false)
@@ -498,7 +489,7 @@ export function useSession() {
       try {
         await saveFileOperation(operation)
       } catch (err) {
-        console.error('Failed to save file operation:', err)
+        logError('Session', 'Failed to save file operation', err)
       }
     },
 
@@ -512,7 +503,7 @@ export function useSession() {
         try {
           await dbClearFileOperations(sessionId)
         } catch (err) {
-          console.error('Failed to clear file operations:', err)
+          logError('Session', 'Failed to clear file operations', err)
         }
       }
     },
@@ -529,7 +520,7 @@ export function useSession() {
       try {
         await saveTerminalExecution(execution)
       } catch (err) {
-        console.error('Failed to save terminal execution:', err)
+        logError('Session', 'Failed to save terminal execution', err)
       }
     },
 
@@ -543,7 +534,7 @@ export function useSession() {
       try {
         await dbUpdateTerminalExecution(id, updates)
       } catch (err) {
-        console.error('Failed to update terminal execution:', err)
+        logError('Session', 'Failed to update terminal execution', err)
       }
     },
 
@@ -557,7 +548,7 @@ export function useSession() {
         try {
           await dbClearTerminalExecutions(sessionId)
         } catch (err) {
-          console.error('Failed to clear terminal executions:', err)
+          logError('Session', 'Failed to clear terminal executions', err)
         }
       }
     },
@@ -574,7 +565,7 @@ export function useSession() {
       try {
         await saveMemoryItem(item)
       } catch (err) {
-        console.error('Failed to save memory item:', err)
+        logError('Session', 'Failed to save memory item', err)
       }
     },
 
@@ -586,7 +577,7 @@ export function useSession() {
       try {
         await dbDeleteMemoryItem(id)
       } catch (err) {
-        console.error('Failed to delete memory item:', err)
+        logError('Session', 'Failed to delete memory item', err)
       }
     },
 
@@ -600,7 +591,7 @@ export function useSession() {
         try {
           await dbClearMemoryItems(sessionId)
         } catch (err) {
-          console.error('Failed to clear memory items:', err)
+          logError('Session', 'Failed to clear memory items', err)
         }
       }
     },

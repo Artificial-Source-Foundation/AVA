@@ -7,6 +7,27 @@ import { NotificationProvider } from './contexts/notification'
 import { ThemeProvider } from './contexts/theme'
 import './index.css'
 
+// Global error handlers — writes to log file via Tauri FS + console
+// Logger must be initialized async (after Tauri is ready), so early errors
+// still get buffered and flushed once initLogger() is called from App.tsx
+import { logError as fileLogError, logFatal } from './services/logger'
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('error', (e) => {
+    const stack = e.error instanceof Error ? e.error.stack : undefined
+    logFatal('Uncaught', e.error instanceof Error ? e.error.message : String(e.error), stack)
+  })
+  window.addEventListener('unhandledrejection', (e) => {
+    const reason = e.reason instanceof Error ? e.reason.message : String(e.reason)
+    const stack = e.reason instanceof Error ? e.reason.stack : undefined
+    fileLogError('UnhandledPromise', reason, stack)
+  })
+  // Disable Tauri's default context menu globally
+  document.addEventListener('contextmenu', (e) => {
+    e.preventDefault()
+  })
+}
+
 // Check if we're in preview mode BEFORE importing App
 // This prevents Node.js-only dependencies from being loaded in the browser
 const isPreviewMode = () => {

@@ -108,7 +108,7 @@ export interface TokenUsage {
 
 /** Stream error information */
 export interface StreamError {
-  type: 'rate_limit' | 'auth' | 'server' | 'network' | 'unknown'
+  type: 'rate_limit' | 'auth' | 'server' | 'network' | 'api' | 'unknown'
   message: string
   status?: number
   retryAfter?: number // Seconds until retry (for rate limits)

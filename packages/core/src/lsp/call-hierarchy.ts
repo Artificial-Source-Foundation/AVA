@@ -395,7 +395,6 @@ async function analyzeFunctionCalls(
       // Find the function and extract its body
       let inFunction = false
       let braceCount = 0
-      let startLine = -1
 
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i]
@@ -408,7 +407,6 @@ async function analyzeFunctionCalls(
             line.match(new RegExp(`${functionName}\\s*[=:]`)))
         ) {
           inFunction = true
-          startLine = i
           braceCount = (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length
           continue
         }
@@ -472,7 +470,7 @@ async function analyzeFunctionCalls(
 function extractCallerName(content: string, _lineNum: number): string | null {
   // Simple heuristic: look for function-like patterns before the call
   const funcMatch = content.match(/(?:function\s+)?(\w+)\s*(?:=\s*(?:async\s+)?function|\()/)
-  if (funcMatch && funcMatch[1]) {
+  if (funcMatch?.[1]) {
     return funcMatch[1]
   }
   return null

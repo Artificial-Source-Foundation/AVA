@@ -28,7 +28,7 @@ interface TodoWriteParams {
   todos: TodoItem[]
 }
 
-type TodoReadParams = {}
+type TodoReadParams = Record<string, never>
 
 // ============================================================================
 // In-Memory Todo Storage

@@ -142,7 +142,7 @@ function extractDescription(html: string): string | undefined {
 function normalizeUrl(url: string): string {
   // Add protocol if missing
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    url = 'https://' + url
+    url = `https://${url}`
   }
 
   // Validate URL
@@ -171,7 +171,7 @@ function truncateContent(
 
   if (lastParagraph > maxChars * 0.8) {
     return {
-      content: truncated.slice(0, lastParagraph) + '\n\n[Content truncated...]',
+      content: `${truncated.slice(0, lastParagraph)}\n\n[Content truncated...]`,
       truncated: true,
     }
   }
@@ -180,13 +180,13 @@ function truncateContent(
   const lastSpace = truncated.lastIndexOf(' ')
   if (lastSpace > maxChars * 0.9) {
     return {
-      content: truncated.slice(0, lastSpace) + '... [Content truncated]',
+      content: `${truncated.slice(0, lastSpace)}... [Content truncated]`,
       truncated: true,
     }
   }
 
   return {
-    content: truncated + '... [Content truncated]',
+    content: `${truncated}... [Content truncated]`,
     truncated: true,
   }
 }

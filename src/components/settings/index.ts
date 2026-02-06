@@ -2,4 +2,4 @@
  * Settings components barrel export
  */
 
-export { SettingsModal } from './SettingsModal'
+export { SettingsPage } from './SettingsPage'

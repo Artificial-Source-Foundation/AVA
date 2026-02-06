@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Estela Settings Preview</title>
+  <link rel="stylesheet" href="./styles/tokens.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-sans);
+      background: var(--background);
+      color: var(--text-primary);
+      padding: 40px;
+      min-height: 100vh;
+    }
+    .preview-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .preview-card {
+      background: var(--card-background);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-xl);
+      padding: var(--space-4);
+    }
+    h1 {
+      font-size: var(--text-2xl);
+      margin-bottom: var(--space-6);
+      text-align: center;
+    }
+    h2 {
+      font-size: var(--text-lg);
+      margin-bottom: var(--space-4);
+      color: var(--text-primary);
+    }
+    h3 {
+      font-size: var(--text-sm);
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: var(--space-2);
+    }
+
+    /* Provider Preview */
+    .provider-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-3);
+      border-radius: var(--radius-lg);
+      margin-bottom: var(--space-2);
+      transition: background 150ms;
+    }
+    .provider-row:hover {
+      background: var(--alpha-white-5);
+    }
+    .provider-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius-lg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+    .provider-info { flex: 1; }
+    .provider-name {
+      font-size: var(--text-sm);
+      font-weight: 500;
+    }
+    .provider-desc {
+      font-size: var(--text-xs);
+      color: var(--text-muted);
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    /* Agent Preview */
+    .agent-card {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-3);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-subtle);
+      margin-bottom: var(--space-2);
+    }
+    .agent-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-lg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+    }
+
+    /* Keybinding Preview */
+    .keybinding-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius-lg);
+      margin-bottom: var(--space-1);
+    }
+    .keybinding-row:hover {
+      background: var(--alpha-white-5);
+    }
+    .kbd {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-1);
+    }
+    kbd {
+      padding: var(--space-1) var(--space-2);
+      background: var(--surface-raised);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-md);
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      font-weight: 500;
+      box-shadow: 0 1px 0 var(--alpha-black-20);
+    }
+
+    /* MCP Server Preview */
+    .server-card {
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--card-border);
+      overflow: hidden;
+      margin-bottom: var(--space-3);
+    }
+    .server-card.connected {
+      border-color: var(--success-border);
+      background: var(--success-subtle);
+    }
+    .server-card.error {
+      border-color: var(--error-border);
+      background: var(--error-subtle);
+    }
+    .server-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: var(--space-3);
+    }
+    .server-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius-lg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .server-url {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      color: var(--text-muted);
+    }
+
+    /* Toggle */
+    .toggle {
+      width: 36px;
+      height: 20px;
+      border-radius: 10px;
+      background: var(--surface-sunken);
+      position: relative;
+      cursor: pointer;
+    }
+    .toggle.active {
+      background: var(--accent);
+    }
+    .toggle-thumb {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 8px;
+      background: white;
+      transition: transform 150ms;
+    }
+    .toggle.active .toggle-thumb {
+      transform: translateX(16px);
+    }
+
+    /* Info Banner */
+    .info-banner {
+      display: flex;
+      gap: var(--space-3);
+      padding: var(--space-4);
+      background: var(--info-subtle);
+      border: 1px solid var(--info-border);
+      border-radius: var(--radius-xl);
+      margin-top: var(--space-4);
+    }
+    .info-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--info-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--info);
+      flex-shrink: 0;
+    }
+    .info-text {
+      font-size: var(--text-sm);
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <h1>Estela Design System Preview</h1>
+
+  <div class="preview-grid">
+    <!-- Providers Preview -->
+    <div class="preview-card">
+      <h2>Providers</h2>
+
+      <div class="provider-row">
+        <div class="provider-icon" style="background: var(--provider-anthropic-subtle); color: var(--provider-anthropic);">✨</div>
+        <div class="provider-info">
+          <div class="provider-name">Anthropic</div>
+          <div class="provider-desc">Claude models with advanced reasoning</div>
+        </div>
+        <div class="status-dot" style="background: var(--success);"></div>
+        <div class="toggle active"><div class="toggle-thumb"></div></div>
+      </div>
+
+      <div class="provider-row">
+        <div class="provider-icon" style="background: var(--provider-openai-subtle); color: var(--provider-openai);">⚡</div>
+        <div class="provider-info">
+          <div class="provider-name">OpenAI</div>
+          <div class="provider-desc">GPT and reasoning models</div>
+        </div>
+        <div class="status-dot" style="background: var(--text-muted);"></div>
+        <div class="toggle"><div class="toggle-thumb"></div></div>
+      </div>
+
+      <div class="provider-row">
+        <div class="provider-icon" style="background: var(--provider-openrouter-subtle); color: var(--provider-openrouter);">⚡</div>
+        <div class="provider-info">
+          <div class="provider-name">OpenRouter</div>
+          <div class="provider-desc">Access 300+ models via single API</div>
+        </div>
+        <div class="status-dot" style="background: var(--text-muted);"></div>
+        <div class="toggle"><div class="toggle-thumb"></div></div>
+      </div>
+
+      <div class="provider-row">
+        <div class="provider-icon" style="background: var(--provider-ollama-subtle); color: var(--provider-ollama);">🤖</div>
+        <div class="provider-info">
+          <div class="provider-name">Ollama</div>
+          <div class="provider-desc">Run models locally</div>
+        </div>
+        <div class="status-dot" style="background: var(--error);"></div>
+        <div class="toggle"><div class="toggle-thumb"></div></div>
+      </div>
+    </div>
+
+    <!-- Agents Preview -->
+    <div class="preview-card">
+      <h2>Agents</h2>
+
+      <div class="agent-card">
+        <div class="agent-icon" style="background: var(--agent-coding-subtle); color: var(--agent-coding);">💻</div>
+        <div class="provider-info">
+          <div class="provider-name">Coding Assistant</div>
+          <div class="provider-desc">Write, review, and refactor code</div>
+        </div>
+        <div class="toggle active"><div class="toggle-thumb"></div></div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-icon" style="background: var(--agent-git-subtle); color: var(--agent-git);">📦</div>
+        <div class="provider-info">
+          <div class="provider-name">Git Expert</div>
+          <div class="provider-desc">Manage repositories and commits</div>
+        </div>
+        <div class="toggle active"><div class="toggle-thumb"></div></div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-icon" style="background: var(--agent-terminal-subtle); color: var(--agent-terminal);">⌨️</div>
+        <div class="provider-info">
+          <div class="provider-name">Terminal Expert</div>
+          <div class="provider-desc">Execute shell commands</div>
+        </div>
+        <div class="toggle active"><div class="toggle-thumb"></div></div>
+      </div>
+
+      <div class="agent-card">
+        <div class="agent-icon" style="background: var(--agent-docs-subtle); color: var(--agent-docs);">📚</div>
+        <div class="provider-info">
+          <div class="provider-name">Documentation</div>
+          <div class="provider-desc">Write and maintain docs</div>
+        </div>
+        <div class="toggle"><div class="toggle-thumb"></div></div>
+      </div>
+    </div>
+
+    <!-- Keybindings Preview -->
+    <div class="preview-card">
+      <h2>Keyboard Shortcuts</h2>
+
+      <h3>General</h3>
+      <div class="keybinding-row">
+        <div>
+          <div class="provider-name">Open Command Palette</div>
+          <div class="provider-desc">Quick access to all commands</div>
+        </div>
+        <div class="kbd"><kbd>⌘</kbd><span style="color: var(--text-muted); font-size: var(--text-xs);">+</span><kbd>K</kbd></div>
+      </div>
+      <div class="keybinding-row">
+        <div>
+          <div class="provider-name">New Chat</div>
+          <div class="provider-desc">Start a new conversation</div>
+        </div>
+        <div class="kbd"><kbd>⌘</kbd><span style="color: var(--text-muted); font-size: var(--text-xs);">+</span><kbd>N</kbd></div>
+      </div>
+
+      <h3 style="margin-top: var(--space-4);">Chat</h3>
+      <div class="keybinding-row">
+        <div>
+          <div class="provider-name">Send Message</div>
+          <div class="provider-desc">Send the current message</div>
+        </div>
+        <div class="kbd"><kbd>↵</kbd></div>
+      </div>
+      <div class="keybinding-row">
+        <div>
+          <div class="provider-name">New Line</div>
+          <div class="provider-desc">Insert a new line</div>
+        </div>
+        <div class="kbd"><kbd>⇧</kbd><span style="color: var(--text-muted); font-size: var(--text-xs);">+</span><kbd>↵</kbd></div>
+      </div>
+    </div>
+
+    <!-- MCP Servers Preview -->
+    <div class="preview-card">
+      <h2>MCP Servers</h2>
+      <p style="font-size: var(--text-xs); color: var(--text-tertiary); margin-bottom: var(--space-4);">2 of 3 connected</p>
+
+      <div class="server-card connected">
+        <div class="server-row">
+          <div class="server-icon" style="background: var(--success-subtle); color: var(--success);">🖥️</div>
+          <div class="provider-info">
+            <div class="provider-name">Filesystem</div>
+            <div class="server-url">mcp://localhost:3001/filesystem</div>
+          </div>
+          <div class="status-dot" style="background: var(--success);"></div>
+        </div>
+      </div>
+
+      <div class="server-card connected">
+        <div class="server-row">
+          <div class="server-icon" style="background: var(--success-subtle); color: var(--success);">📦</div>
+          <div class="provider-info">
+            <div class="provider-name">Git</div>
+            <div class="server-url">mcp://localhost:3002/git</div>
+          </div>
+          <div class="status-dot" style="background: var(--success);"></div>
+        </div>
+      </div>
+
+      <div class="server-card error">
+        <div class="server-row">
+          <div class="server-icon" style="background: var(--error-subtle); color: var(--error);">🌐</div>
+          <div class="provider-info">
+            <div class="provider-name">Web Browser</div>
+            <div class="server-url">mcp://localhost:3003/web</div>
+          </div>
+          <div class="status-dot" style="background: var(--error);"></div>
+        </div>
+      </div>
+
+      <div class="info-banner">
+        <div class="info-icon">ℹ️</div>
+        <div class="info-text">MCP servers extend Estela's capabilities with additional tools, data sources, and integrations.</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

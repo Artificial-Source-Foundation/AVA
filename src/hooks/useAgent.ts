@@ -18,7 +18,10 @@ import {
 } from '@estela/core'
 import { batch, createSignal } from 'solid-js'
 import { saveMessage, updateMessage } from '../services/database'
+import { logError, logInfo, logWarn } from '../services/logger'
 import { useSession } from '../stores/session'
+import { useSettings } from '../stores/settings'
+import { useTeam } from '../stores/team'
 import type { Message } from '../types'
 
 // ============================================================================
@@ -81,12 +84,88 @@ export function useAgent() {
 
   const abortRef = { current: null as AbortController | null }
   const session = useSession()
+  const settingsRef = useSettings()
+  const teamStore = useTeam()
+
+  // ==========================================================================
+  // Team Bridge — maps agent events to team hierarchy
+  // ==========================================================================
+
+  function bridgeToTeam(event: AgentEvent): void {
+    switch (event.type) {
+      case 'agent:start': {
+        const role = teamStore.agentTypeToRole(event.config?.name ?? 'commander')
+        const domain = teamStore.inferDomain(event.goal)
+        const name = teamStore.generateName(role, domain)
+
+        teamStore.addMember({
+          id: event.agentId,
+          name,
+          role,
+          status: 'working',
+          parentId: role === 'team-lead' ? null : (teamStore.teamLead()?.id ?? null),
+          domain,
+          model: event.config?.model ?? 'unknown',
+          task: event.goal,
+          toolCalls: [],
+          messages: [],
+          createdAt: event.timestamp,
+        })
+        break
+      }
+
+      case 'agent:finish':
+        teamStore.updateMemberStatus(event.agentId, event.result.success ? 'done' : 'error')
+        if (!event.result.success) {
+          teamStore.updateMember(event.agentId, { error: event.result.error })
+        }
+        if (event.result.output) {
+          teamStore.updateMember(event.agentId, { result: event.result.output })
+        }
+        break
+
+      case 'thought':
+        teamStore.addMessage(event.agentId, {
+          id: `thought-${event.timestamp}`,
+          role: 'assistant',
+          content: event.text,
+          timestamp: event.timestamp,
+        })
+        break
+
+      case 'tool:start':
+        teamStore.addToolCall(event.agentId, {
+          id: `${event.toolName}-${event.timestamp}`,
+          name: event.toolName,
+          status: 'running',
+          timestamp: event.timestamp,
+        })
+        break
+
+      case 'tool:finish':
+        teamStore.updateToolCall(event.agentId, `${event.toolName}-${event.timestamp}`, {
+          status: 'success',
+          durationMs: event.durationMs,
+        })
+        break
+
+      case 'tool:error':
+        // Find the running tool call for this tool name and mark as error
+        teamStore.updateToolCall(event.agentId, `${event.toolName}-${event.timestamp}`, {
+          status: 'error',
+        })
+        break
+    }
+  }
 
   // ==========================================================================
   // Event Handler
   // ==========================================================================
 
   function handleAgentEvent(event: AgentEvent): void {
+    // Bridge all events to team store for hierarchy visualization
+    bridgeToTeam(event)
+
     switch (event.type) {
       case 'agent:start':
         batch(() => {
@@ -157,21 +236,22 @@ export function useAgent() {
       }
 
       case 'error':
+        logError('Agent', `Agent error: ${event.error}`)
         batch(() => {
           setLastError(event.error)
-          // Check for doom loop
           if (event.error.includes('Doom loop')) {
             setDoomLoopDetected(true)
+            logWarn('Agent', 'Doom loop detected')
           }
         })
         break
 
       case 'recovery:start':
-        // Could show recovery UI indicator
+        logInfo('Agent', 'Recovery started')
         break
 
       case 'recovery:finish':
-        // Could update recovery status
+        logInfo('Agent', 'Recovery finished')
         break
     }
   }
@@ -252,6 +332,9 @@ export function useAgent() {
       setDoomLoopDetected(false)
     })
 
+    // Clear team for fresh run
+    teamStore.clearTeam()
+
     abortRef.current = new AbortController()
 
     try {
@@ -317,6 +400,11 @@ export function useAgent() {
       return result
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err)
+      logError(
+        'Agent',
+        `Agent run failed: ${errorMsg}`,
+        err instanceof Error ? err.stack : undefined
+      )
       setLastError(errorMsg)
       return null
     } finally {
@@ -343,12 +431,17 @@ export function useAgent() {
 
   /**
    * Check if a tool would be auto-approved
-   * Note: Uses local heuristics - full auto-approval integration deferred
+   * Checks user's "always allow" list from settings, then falls back to heuristics.
    */
   function checkAutoApproval(
     toolName: string,
     _args: Record<string, unknown>
   ): { approved: boolean; reason?: string } {
+    // Check user's persistent "always allow" list from settings
+    if (settingsRef.isToolAutoApproved(toolName)) {
+      return { approved: true, reason: 'User always-allowed' }
+    }
+
     // Read-only tools are always auto-approved
     const readOnlyTools = ['glob', 'grep', 'ls', 'websearch', 'webfetch', 'todoread', 'read_file']
     if (readOnlyTools.includes(toolName)) {

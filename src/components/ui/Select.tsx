@@ -139,13 +139,13 @@ export const Select: Component<SelectProps> = (props) => {
           border border-[var(--input-border)]
           rounded-[var(--radius-lg)]
           text-[var(--text-primary)]
-          transition-all duration-[var(--duration-fast)] ease-[var(--ease-out)]
+          transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]
           hover:border-[var(--input-border-hover)]
-          focus:outline-none focus:border-[var(--input-border-focus)] focus:ring-2 focus:ring-[var(--accent-subtle)]
+          focus-glow
           disabled:opacity-50 disabled:cursor-not-allowed
           data-[placeholder-shown]:text-[var(--input-placeholder)]
           ${sizeStyles[size()]}
-          ${local.error ? 'border-[var(--error)] focus:border-[var(--error)] focus:ring-[var(--error-subtle)]' : ''}
+          ${local.error ? 'border-[var(--error)]' : ''}
         `}
       >
         <KobalteSelect.Value<SelectOption>>
@@ -161,11 +161,10 @@ export const Select: Component<SelectProps> = (props) => {
           class="
             z-[var(--z-dropdown)]
             overflow-hidden
-            bg-[var(--surface)]
-            border border-[var(--border-subtle)]
+            glass
             rounded-[var(--radius-lg)]
             shadow-lg
-            animate-scale-in
+            animate-dropdown-in
           "
         >
           <KobalteSelect.Listbox class="p-1 max-h-60 overflow-auto" />

@@ -1,72 +1,63 @@
 # Estela Documentation
 
-> Multi-Agent AI Coding Assistant (Tauri + SolidJS)
+> The Obsidian of AI Coding
 
 ---
 
 ## Start Here
 
-| Document | Description |
-|----------|-------------|
-| **[VISION.md](./VISION.md)** | Project vision, tech stack, and roadmap |
-| **[BACKLOG.md](./BACKLOG.md)** | Current development status and tasks |
+| Doc | What You'll Learn |
+|-----|-------------------|
+| [**Vision**](VISION.md) | What Estela is, who it's for, what makes it special |
+| [**Roadmap**](ROADMAP.md) | What's built, what's next |
 
 ---
 
-## Documentation Structure
+## Architecture
 
-```
-docs/
-├── VISION.md              # Project vision and roadmap
-├── BACKLOG.md             # Active development tracking
-├── COMPLETED.md           # Completed phases archive
-│
-├── architecture/          # System design
-│   ├── README.md          # Architecture overview
-│   ├── project-structure.md
-│   └── database-schema.md
-│
-├── agents/                # Agent specifications
-│   └── README.md          # Agent hierarchy overview
-│
-├── development/           # Development guides
-│   └── README.md          # Quick start
-│
-├── reference/             # API reference
-│   └── README.md          # Types and tools
-│
-└── archive/               # Historical documents
-    └── opencode-plugin-era/  # Previous OpenCode plugin work
-```
+| Doc | Contents |
+|-----|----------|
+| [**Overview**](architecture/README.md) | System design, module breakdown, key decisions |
+| [**Components**](architecture/components.md) | Detailed module descriptions |
+| [**Data Flow**](architecture/data-flow.md) | How data moves through the system |
+| [**Database**](architecture/database-schema.md) | SQLite schema |
 
 ---
 
-## Quick Links
+## Frontend
 
-### Architecture
-- [Project Structure](./architecture/project-structure.md)
-- [Database Schema](./architecture/database-schema.md)
-
-### Agents
-- [Agent Overview](./agents/README.md)
-
-### Development
-- [Quick Start](./development/README.md)
+| Doc | Contents |
+|-----|----------|
+| [**Desktop App**](frontend/README.md) | SolidJS layout, components, design system |
+| [**Design System**](frontend/design-system.md) | Tokens, themes, animations |
 
 ---
 
-## Tech Stack
+## Development
 
-| Layer | Technology |
-|-------|------------|
-| **Desktop** | Tauri 2.0 (Rust) |
-| **Frontend** | SolidJS + TypeScript |
-| **Styling** | Tailwind CSS |
-| **Database** | SQLite |
-| **LSP** | Rust LSP client |
+| Doc | Contents |
+|-----|----------|
+| [**Active Epics**](development/epics/) | Work in progress |
+| [**Completed Epics**](development/completed/) | Finished work (Epics 1-26) |
 
 ---
 
-## Previous Work
+## Research
 
-The OpenCode plugin era documentation (87 files) is preserved in `archive/opencode-plugin-era/` for reference.
+| Doc | Contents |
+|-----|----------|
+| [**Overview**](research/README.md) | Codebase analyses index |
+| [**Cline**](research/cline/) | 8 reports — hooks, approvals, browser |
+| [**OpenCode**](research/opencode/) | 7 reports — fuzzy edits, batch tools |
+| [**Gemini CLI**](research/gemini-cli/) | 6 reports — policy, extensions, A2A |
+
+---
+
+## Internal
+
+| Doc | Contents |
+|-----|----------|
+| [**Active Context**](memory-bank/activeContext.md) | Current session focus (AI reads every session) |
+| [**Progress**](memory-bank/progress.md) | What's been built |
+| [**Tech Context**](memory-bank/techContext.md) | Technical decisions |
+| [**Project Brief**](memory-bank/projectbrief.md) | Core identity |

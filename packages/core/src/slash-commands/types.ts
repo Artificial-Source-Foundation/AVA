@@ -23,7 +23,7 @@ export interface CommandContext {
   /** Send a message to the user */
   sendMessage: (content: string) => Promise<void>
   /** Get platform */
-  getPlatform: () => import('../platform.js').Platform
+  getPlatform: () => import('../platform.js').IPlatformProvider
 }
 
 /**

@@ -146,7 +146,7 @@ export class InstructionLoader {
 
           // Truncate if too long
           if (content.length > this.config.maxContentLength) {
-            content = content.slice(0, this.config.maxContentLength) + '\n\n[... truncated ...]'
+            content = `${content.slice(0, this.config.maxContentLength)}\n\n[... truncated ...]`
           }
 
           return {

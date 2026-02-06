@@ -2,7 +2,7 @@
 
 // Message error for retry functionality
 export interface MessageError {
-  type: 'rate_limit' | 'auth' | 'server' | 'network' | 'unknown'
+  type: 'rate_limit' | 'auth' | 'server' | 'network' | 'api' | 'unknown'
   message: string
   retryAfter?: number
   timestamp: number
@@ -137,3 +137,6 @@ export interface MemoryItem {
 
 // Project types
 export * from './project'
+
+// Team types
+export * from './team'

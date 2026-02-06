@@ -81,7 +81,7 @@ export const Dialog: Component<DialogProps> = (props) => {
         <KobalteDialog.Overlay
           class="
             fixed inset-0 z-50
-            bg-black/50 backdrop-blur-sm
+            bg-black/60
             data-[expanded]:animate-in data-[expanded]:fade-in-0
             data-[closed]:animate-out data-[closed]:fade-out-0
           "
@@ -95,8 +95,7 @@ export const Dialog: Component<DialogProps> = (props) => {
             fixed left-1/2 top-1/2 z-50
             -translate-x-1/2 -translate-y-1/2
             w-full ${sizeStyles[size()]}
-            bg-[var(--surface-overlay)]
-            border border-[var(--border-default)]
+            glass-strong
             rounded-[var(--radius-xl)]
             shadow-2xl
             data-[expanded]:animate-in data-[expanded]:fade-in-0 data-[expanded]:zoom-in-95 data-[expanded]:slide-in-from-left-1/2 data-[expanded]:slide-in-from-top-[48%]
@@ -137,7 +136,7 @@ export const Dialog: Component<DialogProps> = (props) => {
           </Show>
 
           {/* Body */}
-          <div class="p-4 overflow-y-auto max-h-[60vh]">{local.children}</div>
+          <div class="p-4 overflow-y-auto max-h-[70vh]">{local.children}</div>
 
           {/* Footer */}
           <Show when={local.footer}>

@@ -3,6 +3,8 @@
  * Core business logic for Estela - LLM client, tools, types
  */
 
+// ACP (Agent Client Protocol) integration
+export * from './acp/index.js'
 // Agent system (autonomous loop)
 export * from './agent/index.js'
 // Authentication (API key + OAuth)

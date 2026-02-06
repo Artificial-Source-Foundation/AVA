@@ -7,6 +7,7 @@
 import { AlertTriangle, CheckCircle, Info, X, XCircle } from 'lucide-solid'
 import { type Component, type JSX, Show } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
+import { Motion } from 'solid-motionone'
 
 export type ToastVariant = 'info' | 'success' | 'warning' | 'error'
 
@@ -63,18 +64,19 @@ export const Toast: Component<ToastProps> = (props) => {
   const config = () => variantConfig[variant()]
 
   return (
-    <div
+    <Motion.div
+      initial={{ opacity: 0, x: '100%' }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: '100%' }}
+      transition={{ duration: 0.35, easing: [0.34, 1.56, 0.64, 1] }}
       class={`
         pointer-events-auto
         w-80 max-w-[calc(100vw-2rem)]
         p-4
-        bg-[var(--surface-overlay)]
-        border rounded-[var(--radius-lg)]
-        shadow-lg
-        animate-in slide-in-from-right-full fade-in-0
-        duration-300
+        glass
+        rounded-[var(--radius-lg)]
       `}
-      style={{ 'border-color': config().border }}
+      style={{ 'border-color': config().border, 'box-shadow': `0 0 12px ${config().border}` }}
       role="alert"
     >
       <div class="flex gap-3">
@@ -92,7 +94,7 @@ export const Toast: Component<ToastProps> = (props) => {
           <Show when={props.action}>
             <button
               type="button"
-              onClick={props.action?.onClick}
+              onClick={() => props.action?.onClick()}
               class="
                 mt-2
                 text-sm font-medium
@@ -110,7 +112,7 @@ export const Toast: Component<ToastProps> = (props) => {
         <Show when={props.onDismiss}>
           <button
             type="button"
-            onClick={props.onDismiss}
+            onClick={() => props.onDismiss?.()}
             class="
               flex-shrink-0
               p-1 rounded-[var(--radius-md)]
@@ -124,6 +126,6 @@ export const Toast: Component<ToastProps> = (props) => {
           </button>
         </Show>
       </div>
-    </div>
+    </Motion.div>
   )
 }

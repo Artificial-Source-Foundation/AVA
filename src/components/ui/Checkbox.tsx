@@ -79,7 +79,7 @@ export const Checkbox: Component<CheckboxProps> = (props) => {
           rounded-[var(--radius-sm)]
           border-2 border-[var(--border-default)]
           bg-[var(--surface)]
-          transition-all duration-[var(--duration-fast)] ease-[var(--ease-out)]
+          transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--background)]
           data-[checked]:bg-[var(--accent)] data-[checked]:border-[var(--accent)]
           data-[disabled]:cursor-not-allowed

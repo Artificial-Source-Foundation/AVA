@@ -81,6 +81,15 @@ export {
   BUILTIN_RULES,
   getHighestPathRisk,
 } from './rules.js'
+// Trusted Folders
+export {
+  getTrustedFolderManager,
+  resetTrustedFolderManager,
+  setTrustedFolderManager,
+  type TrustCheckResult,
+  type TrustedFolder,
+  TrustedFolderManager,
+} from './trusted-folders.js'
 export {
   CorrectedError,
   type PermissionAction,

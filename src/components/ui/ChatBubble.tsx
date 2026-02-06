@@ -6,6 +6,7 @@
  */
 
 import { type Component, type JSX, Show, splitProps } from 'solid-js'
+import { Motion } from 'solid-motionone'
 import { Avatar } from './Avatar'
 
 export interface ChatBubbleProps {
@@ -45,7 +46,10 @@ export const ChatBubble: Component<ChatBubbleProps> = (props) => {
   const isSystem = () => local.role === 'system'
 
   return (
-    <div
+    <Motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.25, easing: [0.34, 1.56, 0.64, 1] }}
       class={`
         flex gap-3
         ${isUser() ? 'flex-row-reverse' : 'flex-row'}
@@ -122,7 +126,7 @@ export const ChatBubble: Component<ChatBubbleProps> = (props) => {
           </div>
         </Show>
       </div>
-    </div>
+    </Motion.div>
   )
 }
 

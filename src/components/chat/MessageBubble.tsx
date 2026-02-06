@@ -28,7 +28,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
   const isUser = () => props.message.role === 'user'
 
   return (
-    <div class={`flex ${isUser() ? 'justify-end' : 'justify-start'}`}>
+    <div class={`flex ${isUser() ? 'justify-end' : 'justify-start'} animate-message-in`}>
       {/* Edit mode for user messages */}
       <Show
         when={!props.isEditing}
@@ -44,17 +44,26 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
         <div class="relative group max-w-[80%]">
           <div
             class={`
-              rounded-[var(--radius-lg)] px-4 py-3
+              rounded-[var(--radius-lg)] px-5 py-3.5
               transition-colors duration-[var(--duration-fast)]
               ${
                 isUser()
-                  ? 'bg-[var(--accent)] text-white'
-                  : 'bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)]'
+                  ? 'bg-[var(--chat-user-bg)] text-[var(--chat-user-text)]'
+                  : 'bg-[var(--chat-assistant-bg)] text-[var(--chat-assistant-text)] border border-[var(--chat-assistant-border)]'
               }
             `}
           >
-            {/* Show typing indicator for empty assistant messages */}
-            <Show when={props.message.content || isUser()} fallback={<TypingIndicator />}>
+            {/* Show typing indicator only while actively streaming */}
+            <Show
+              when={props.message.content || isUser()}
+              fallback={
+                props.isStreaming ? (
+                  <TypingIndicator />
+                ) : (
+                  <p class="text-sm text-[var(--text-muted)] italic">No response</p>
+                )
+              }
+            >
               <p class="whitespace-pre-wrap break-words text-sm leading-relaxed">
                 {props.message.content}
               </p>
@@ -62,7 +71,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
 
             {/* Token badge for assistant messages */}
             <Show when={!isUser() && props.message.tokensUsed}>
-              <div class="mt-2 text-xs text-[var(--text-muted)] text-right tabular-nums">
+              <div class="mt-2 font-[var(--font-ui-mono)] text-[10px] tracking-wide text-[var(--text-muted)] text-right tabular-nums">
                 {props.message.tokensUsed?.toLocaleString()} tokens
               </div>
             </Show>
@@ -79,7 +88,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               class="
                 mt-2 p-3
                 bg-[var(--error-subtle)]
-                border border-[var(--error-muted)]
+                border border-[var(--error)]
                 rounded-[var(--radius-md)]
               "
             >
@@ -96,7 +105,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                   disabled={props.isStreaming || props.isRetrying}
                   class="
                     px-3 py-1.5
-                    bg-[var(--error)] hover:bg-[var(--error-hover)]
+                    bg-[var(--error)] hover:brightness-110
                     text-white text-xs font-medium
                     rounded-[var(--radius-md)]
                     transition-colors duration-[var(--duration-fast)]

@@ -63,15 +63,14 @@ export class FocusChainManager {
 
     // Ensure directory exists
     const dirPath = `${workspaceRoot}/${this.options.directory}`
-    const dirExists = await platform.fs.fileExists(dirPath)
+    const dirExists = await platform.fs.exists(dirPath)
     if (!dirExists) {
-      await platform.fs.createFile(dirPath, '')
-      // Actually create directory - platform abstraction needed
+      await platform.fs.mkdir(dirPath)
     }
 
     // Try to load existing file
     let content: string
-    const fileExists = await platform.fs.fileExists(filePath)
+    const fileExists = await platform.fs.exists(filePath)
 
     if (fileExists) {
       content = await platform.fs.readFile(filePath)
@@ -379,21 +378,16 @@ export class FocusChainManager {
     // this.watchCleanup = platform.fs.watch(filePath, this.handleExternalChange)
   }
 
-  /**
-   * Handle external file changes
-   */
-  private async handleExternalChange(): Promise<void> {
-    if (!this.chain) return
-
-    const platform = getPlatform()
-    const content = await platform.fs.readFile(this.chain.filePath)
-    const tasks = parseMarkdown(content)
-
-    this.chain.tasks = tasks
-    this.updateMetadata()
-
-    this.emit({ type: 'chain:external_change', chain: this.chain })
-  }
+  // Reserved for future file watching implementation
+  // private async handleExternalChange(): Promise<void> {
+  //   if (!this.chain) return
+  //   const platform = getPlatform()
+  //   const content = await platform.fs.readFile(this.chain.filePath)
+  //   const tasks = parseMarkdown(content)
+  //   this.chain.tasks = tasks
+  //   this.updateMetadata()
+  //   this.emit({ type: 'chain:external_change', chain: this.chain })
+  // }
 }
 
 // ============================================================================

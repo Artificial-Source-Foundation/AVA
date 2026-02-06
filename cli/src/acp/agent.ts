@@ -4,6 +4,12 @@
  * Implements the Agent Client Protocol for integration with
  * Toad, Zed, and other ACP-compatible editors.
  *
+ * Uses @estela/core ACP modules for:
+ * - Session persistence (AcpSessionStore)
+ * - Mode switching (AcpModeManager)
+ * - MCP server forwarding (AcpMCPBridge)
+ * - Error handling (AcpErrorHandler)
+ *
  * Reference: https://agentclientprotocol.com/
  */
 
@@ -23,7 +29,19 @@ import {
   type SessionNotification,
 } from '@agentclientprotocol/sdk'
 import {
+  AcpError,
+  AcpErrorCode,
+  type AcpErrorHandler,
+  type AcpMCPBridge,
+  type AcpMCPServerConfig,
+  type AcpModeManager,
+  // ACP modules
+  type AcpSessionStore,
   type ChatMessage,
+  createAcpErrorHandler,
+  createAcpMCPBridge,
+  createAcpModeManager,
+  createAcpSessionStore,
   createClient,
   executeTool,
   getToolDefinitions,
@@ -33,45 +51,47 @@ import {
   type ToolUseBlock,
 } from '@estela/core'
 
+// ============================================================================
+// Constants
+// ============================================================================
+
 const VERSION = '0.1.0'
-// Protocol version is a number format: YYYYMMDD
 const PROTOCOL_VERSION = 20250101
-
-// Default model to use
 const DEFAULT_MODEL = 'claude-sonnet-4-20250514'
-
-// Maximum tool loop iterations to prevent infinite loops
 const MAX_TOOL_ITERATIONS = 10
 
-/** Session state tracking */
-interface SessionState {
-  id: string
-  workingDir: string
+// ============================================================================
+// Types
+// ============================================================================
+
+/** Transient per-session runtime state (not persisted) */
+interface SessionRuntime {
   cancelled: boolean
   abortController: AbortController | null
   messages: ChatMessage[]
 }
 
-/** Active sessions */
-const sessions = new Map<string, SessionState>()
-
-/** Tool result for message history */
-interface ToolResultMessage {
-  type: 'tool_result'
-  tool_use_id: string
-  content: string
-  is_error?: boolean
+/** ACP module bundle */
+interface AcpModules {
+  sessionStore: AcpSessionStore
+  errorHandler: AcpErrorHandler
+  modeManager: AcpModeManager
+  mcpBridge: AcpMCPBridge
 }
 
-/** Create the Estela agent handler */
-function createEstelaAgent(connection: AgentSideConnection): Agent {
+// ============================================================================
+// Agent Handler
+// ============================================================================
+
+/** Create the Estela agent handler with ACP module integration */
+function createEstelaAgent(connection: AgentSideConnection, modules: AcpModules): Agent {
+  const { sessionStore, errorHandler, modeManager, mcpBridge } = modules
+  const runtimes = new Map<string, SessionRuntime>()
+
   return {
     async initialize(_params: InitializeRequest): Promise<InitializeResponse> {
       return {
-        agentInfo: {
-          name: 'estela',
-          version: VERSION,
-        },
+        agentInfo: { name: 'estela', version: VERSION },
         protocolVersion: PROTOCOL_VERSION,
         agentCapabilities: {},
       }
@@ -80,41 +100,47 @@ function createEstelaAgent(connection: AgentSideConnection): Agent {
     async newSession(params: NewSessionRequest): Promise<NewSessionResponse> {
       const sessionId = `session-${Date.now()}`
 
-      sessions.set(sessionId, {
-        id: sessionId,
-        workingDir: params.cwd,
+      // Persistent session via store (→ ~/.estela/sessions/)
+      await sessionStore.create(sessionId, params.cwd)
+      modeManager.initSession(sessionId)
+
+      // Transient runtime state
+      runtimes.set(sessionId, {
         cancelled: false,
         abortController: null,
         messages: [
           {
             role: 'system',
-            content: `You are Estela, an AI coding assistant. You are helping a developer in their project located at: ${params.cwd}
-
-You have access to tools for file operations and shell commands. Use them to help the developer.
-
-Be concise but helpful. When asked to perform tasks, use the appropriate tools and explain what you're doing.`,
+            content: buildSystemPrompt(params.cwd),
           },
         ],
       })
 
-      return {
-        sessionId,
+      // Connect editor-provided MCP servers
+      const extParams = params as Record<string, unknown>
+      const mcpConfigs = extParams.mcpServers as AcpMCPServerConfig[] | undefined
+      if (mcpConfigs?.length) {
+        const connected = await mcpBridge.connectServers(mcpConfigs)
+        if (connected.length > 0) {
+          console.error(`[Estela] Connected MCP servers: ${connected.join(', ')}`)
+        }
       }
+
+      return { sessionId }
     },
 
     async authenticate(_params: AuthenticateRequest): Promise<AuthenticateResponse> {
-      // No authentication required for now
       return {}
     },
 
     async prompt(params: PromptRequest): Promise<PromptResponse> {
-      const session = sessions.get(params.sessionId)
-      if (!session) {
-        throw new Error(`Session not found: ${params.sessionId}`)
+      const runtime = runtimes.get(params.sessionId)
+      if (!runtime) {
+        throw new AcpError(AcpErrorCode.SESSION_NOT_FOUND, `Session not found: ${params.sessionId}`)
       }
 
-      session.cancelled = false
-      session.abortController = new AbortController()
+      runtime.cancelled = false
+      runtime.abortController = new AbortController()
 
       // Extract text from prompt content blocks
       let promptText = ''
@@ -124,231 +150,296 @@ Be concise but helpful. When asked to perform tasks, use the appropriate tools a
         }
       }
 
-      // Add user message to history
-      session.messages.push({
-        role: 'user',
-        content: promptText,
-      })
+      // Handle mode switching commands
+      const modeResult = handleModeCommand(
+        promptText.trim(),
+        params.sessionId,
+        modeManager,
+        connection
+      )
+      if (modeResult) return modeResult
 
-      // Reset tool call counter for this turn
+      runtime.messages.push({ role: 'user', content: promptText })
       resetToolCallCount()
 
-      // Get tool definitions
-      const tools = getToolDefinitions()
+      // Filter tools by current mode
+      const allTools = getToolDefinitions()
+      const allowedTools = modeManager.getAllowedTools(params.sessionId)
+      const tools = allowedTools ? allTools.filter((t) => allowedTools.includes(t.name)) : allTools
 
-      // Create tool context
       const toolCtx: ToolContext = {
         sessionId: params.sessionId,
-        workingDirectory: session.workingDir,
-        signal: session.abortController.signal,
+        workingDirectory: sessionStore.getInfo(params.sessionId)?.workingDirectory ?? '/tmp',
+        signal: runtime.abortController.signal,
       }
 
       try {
-        // Send thinking update
-        sendSessionUpdate(connection, params.sessionId, {
-          sessionUpdate: 'agent_thought_chunk',
-          content: {
-            type: 'text',
-            text: 'Thinking...',
-          },
-        })
+        sendUpdate(connection, params.sessionId, 'agent_thought_chunk', 'Thinking...')
 
-        // Create LLM client and stream response
         const client = await createClient('anthropic')
         const config: ProviderConfig = {
           provider: 'anthropic',
           model: DEFAULT_MODEL,
           authMethod: 'api-key',
           maxTokens: 4096,
-          tools, // Pass tools to LLM
+          tools,
         }
 
-        let toolIterations = 0
+        const result = await runToolLoop(
+          client,
+          config,
+          runtime,
+          params.sessionId,
+          toolCtx,
+          connection,
+          modeManager
+        )
 
-        // Tool loop - continue until no more tool calls or max iterations
-        while (toolIterations < MAX_TOOL_ITERATIONS) {
-          toolIterations++
+        // Persist session after successful prompt
+        await sessionStore.save(params.sessionId)
 
-          let fullResponse = ''
-          const pendingToolUses: ToolUseBlock[] = []
-
-          for await (const delta of client.stream(
-            session.messages,
-            config,
-            session.abortController.signal
-          )) {
-            if (session.cancelled) {
-              break
-            }
-
-            if (delta.error) {
-              sendSessionUpdate(connection, params.sessionId, {
-                sessionUpdate: 'agent_message_chunk',
-                content: {
-                  type: 'text',
-                  text: `\n\nError: ${delta.error.message}`,
-                },
-              })
-              break
-            }
-
-            // Handle text content
-            if (delta.content) {
-              fullResponse += delta.content
-              sendSessionUpdate(connection, params.sessionId, {
-                sessionUpdate: 'agent_message_chunk',
-                content: {
-                  type: 'text',
-                  text: delta.content,
-                },
-              })
-            }
-
-            // Collect tool use requests
-            if (delta.toolUse) {
-              pendingToolUses.push(delta.toolUse)
-            }
-
-            if (delta.done && delta.usage) {
-              // Log token usage
-              console.error(
-                `[Estela] Tokens: ${delta.usage.inputTokens} in, ${delta.usage.outputTokens} out`
-              )
-            }
-          }
-
-          // Add assistant response to history (text portion)
-          if (fullResponse) {
-            session.messages.push({
-              role: 'assistant',
-              content: fullResponse,
-            })
-          }
-
-          // Check cancellation
-          if (session.cancelled) {
-            return { stopReason: 'cancelled' }
-          }
-
-          // If no tool calls, we're done
-          if (pendingToolUses.length === 0) {
-            break
-          }
-
-          // Execute tools and collect results
-          const toolResults: ToolResultMessage[] = []
-
-          for (const toolUse of pendingToolUses) {
-            // Notify about tool execution via thought chunk
-            sendSessionUpdate(connection, params.sessionId, {
-              sessionUpdate: 'agent_thought_chunk',
-              content: {
-                type: 'text',
-                text: `\nExecuting tool: ${toolUse.name}...\n`,
-              },
-            })
-
-            // Execute tool
-            const result = await executeTool(toolUse.name, toolUse.input, toolCtx)
-
-            // Show tool result via message chunk
-            sendSessionUpdate(connection, params.sessionId, {
-              sessionUpdate: 'agent_message_chunk',
-              content: {
-                type: 'text',
-                text: `\n[Tool ${toolUse.name}]\n${result.output}\n`,
-              },
-            })
-
-            toolResults.push({
-              type: 'tool_result',
-              tool_use_id: toolUse.id,
-              content: result.output,
-              is_error: !result.success,
-            })
-
-            // Check cancellation between tools
-            if (session.cancelled) {
-              return { stopReason: 'cancelled' }
-            }
-          }
-
-          // Add tool results to messages for next iteration
-          // Note: This is a simplified approach - in practice, we'd need to
-          // properly format the tool results as expected by the LLM API
-          const toolResultsContent = toolResults
-            .map((r) => `Tool ${r.tool_use_id}: ${r.content}`)
-            .join('\n\n')
-
-          session.messages.push({
-            role: 'user',
-            content: `[Tool Results]\n${toolResultsContent}`,
-          })
-        }
-
-        return { stopReason: 'end_turn' }
+        return result
       } catch (error) {
-        if (error instanceof Error && error.name === 'AbortError') {
-          return { stopReason: 'cancelled' }
-        }
-
-        // Send error as a message chunk
-        sendSessionUpdate(connection, params.sessionId, {
-          sessionUpdate: 'agent_message_chunk',
-          content: {
-            type: 'text',
-            text: `\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          },
-        })
-        return { stopReason: 'end_turn' }
+        return handlePromptError(error, params.sessionId, connection, errorHandler)
       } finally {
-        session.abortController = null
+        runtime.abortController = null
       }
     },
 
     async cancel(params: CancelNotification): Promise<void> {
-      const session = sessions.get(params.sessionId)
-      if (session) {
-        session.cancelled = true
-        session.abortController?.abort()
+      const runtime = runtimes.get(params.sessionId)
+      if (runtime) {
+        runtime.cancelled = true
+        runtime.abortController?.abort()
       }
     },
   }
 }
 
-/** Send session update notification */
-function sendSessionUpdate(
+// ============================================================================
+// Tool Loop
+// ============================================================================
+
+/** Run the LLM → tool execution loop */
+async function runToolLoop(
+  client: Awaited<ReturnType<typeof createClient>>,
+  config: ProviderConfig,
+  runtime: SessionRuntime,
+  sessionId: string,
+  toolCtx: ToolContext,
+  connection: AgentSideConnection,
+  modeManager: AcpModeManager
+): Promise<PromptResponse> {
+  let toolIterations = 0
+
+  while (toolIterations < MAX_TOOL_ITERATIONS) {
+    toolIterations++
+
+    let fullResponse = ''
+    const pendingToolUses: ToolUseBlock[] = []
+
+    for await (const delta of client.stream(
+      runtime.messages,
+      config,
+      runtime.abortController!.signal
+    )) {
+      if (runtime.cancelled) break
+
+      if (delta.error) {
+        sendUpdate(
+          connection,
+          sessionId,
+          'agent_message_chunk',
+          `\n\nError: ${delta.error.message}`
+        )
+        break
+      }
+
+      if (delta.content) {
+        fullResponse += delta.content
+        sendUpdate(connection, sessionId, 'agent_message_chunk', delta.content)
+      }
+
+      if (delta.toolUse) pendingToolUses.push(delta.toolUse)
+
+      if (delta.done && delta.usage) {
+        console.error(
+          `[Estela] Tokens: ${delta.usage.inputTokens} in, ${delta.usage.outputTokens} out`
+        )
+      }
+    }
+
+    if (fullResponse) {
+      runtime.messages.push({ role: 'assistant', content: fullResponse })
+    }
+
+    if (runtime.cancelled) return { stopReason: 'cancelled' }
+    if (pendingToolUses.length === 0) break
+
+    // Execute tools with mode-based permission checks
+    const results = await executeToolBatch(
+      pendingToolUses,
+      sessionId,
+      toolCtx,
+      connection,
+      modeManager,
+      runtime
+    )
+    if (results === null) return { stopReason: 'cancelled' }
+
+    runtime.messages.push({
+      role: 'user',
+      content: `[Tool Results]\n${results}`,
+    })
+  }
+
+  return { stopReason: 'end_turn' }
+}
+
+/** Execute a batch of tool calls, returning formatted results or null if cancelled */
+async function executeToolBatch(
+  toolUses: ToolUseBlock[],
+  sessionId: string,
+  toolCtx: ToolContext,
+  connection: AgentSideConnection,
+  modeManager: AcpModeManager,
+  runtime: SessionRuntime
+): Promise<string | null> {
+  const parts: string[] = []
+
+  for (const toolUse of toolUses) {
+    // Check mode permissions
+    if (!modeManager.isToolAllowed(sessionId, toolUse.name)) {
+      parts.push(
+        `Tool ${toolUse.id}: Error - '${toolUse.name}' is not allowed in plan mode. ` +
+          'Switch to agent mode with /agent to use this tool.'
+      )
+      continue
+    }
+
+    sendUpdate(
+      connection,
+      sessionId,
+      'agent_thought_chunk',
+      `\nExecuting tool: ${toolUse.name}...\n`
+    )
+
+    const result = await executeTool(toolUse.name, toolUse.input, toolCtx)
+
+    sendUpdate(
+      connection,
+      sessionId,
+      'agent_message_chunk',
+      `\n[Tool ${toolUse.name}]\n${result.output}\n`
+    )
+
+    parts.push(`Tool ${toolUse.id}: ${result.output}`)
+
+    if (runtime.cancelled) return null
+  }
+
+  return parts.join('\n\n')
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/** Handle /plan and /agent mode commands */
+function handleModeCommand(
+  text: string,
+  sessionId: string,
+  modeManager: AcpModeManager,
+  connection: AgentSideConnection
+): PromptResponse | null {
+  if (text === '/plan') {
+    modeManager.setMode(sessionId, 'plan')
+    sendUpdate(
+      connection,
+      sessionId,
+      'agent_message_chunk',
+      'Switched to plan mode. Only read-only tools are available.'
+    )
+    return { stopReason: 'end_turn' }
+  }
+  if (text === '/agent') {
+    modeManager.setMode(sessionId, 'agent')
+    sendUpdate(
+      connection,
+      sessionId,
+      'agent_message_chunk',
+      'Switched to agent mode. All tools are available.'
+    )
+    return { stopReason: 'end_turn' }
+  }
+  return null
+}
+
+/** Handle errors during prompt execution */
+async function handlePromptError(
+  error: unknown,
+  sessionId: string,
+  connection: AgentSideConnection,
+  errorHandler: AcpErrorHandler
+): Promise<PromptResponse> {
+  if (errorHandler.isDisconnectError(error)) {
+    await errorHandler.handleDisconnect()
+    return { stopReason: 'cancelled' }
+  }
+
+  const formatted = await errorHandler.handleError(error, `prompt:${sessionId}`)
+
+  if (error instanceof Error && error.name === 'AbortError') {
+    return { stopReason: 'cancelled' }
+  }
+
+  sendUpdate(connection, sessionId, 'agent_message_chunk', `\n\nError: ${formatted.message}`)
+  return { stopReason: 'end_turn' }
+}
+
+function buildSystemPrompt(cwd: string): string {
+  return `You are Estela, an AI coding assistant. You are helping a developer in their project located at: ${cwd}
+
+You have access to tools for file operations and shell commands. Use them to help the developer.
+
+Be concise but helpful. When asked to perform tasks, use the appropriate tools and explain what you're doing.`
+}
+
+/** Send a session update notification */
+function sendUpdate(
   connection: AgentSideConnection,
   sessionId: string,
-  update: SessionNotification['update']
+  sessionUpdate: 'agent_message_chunk' | 'agent_thought_chunk',
+  text: string
 ): void {
   connection.sessionUpdate({
     sessionId,
-    update,
+    update: {
+      sessionUpdate,
+      content: { type: 'text', text },
+    } as SessionNotification['update'],
   })
 }
 
-/** Convert Node.js streams to Web Streams */
+// ============================================================================
+// Stream Conversion
+// ============================================================================
+
+/** Convert Node.js streams to Web Streams for ACP ndjson transport */
 function nodeToWebStreams(): {
   readable: ReadableStream<Uint8Array>
   writable: WritableStream<Uint8Array>
 } {
-  // Convert stdin to ReadableStream
   const readable = new ReadableStream<Uint8Array>({
     start(controller) {
       process.stdin.on('data', (chunk: Buffer) => {
         controller.enqueue(new Uint8Array(chunk))
       })
-      process.stdin.on('end', () => {
-        controller.close()
-      })
-      process.stdin.on('error', (err) => {
-        controller.error(err)
-      })
+      process.stdin.on('end', () => controller.close())
+      process.stdin.on('error', (err) => controller.error(err))
     },
   })
 
-  // Convert stdout to WritableStream
   const writable = new WritableStream<Uint8Array>({
     write(chunk) {
       return new Promise((resolve, reject) => {
@@ -363,17 +454,36 @@ function nodeToWebStreams(): {
   return { readable, writable }
 }
 
+// ============================================================================
+// Entry Point
+// ============================================================================
+
 /** Start the ACP agent - main entry point */
 export async function startAcpAgent(): Promise<void> {
-  // Convert Node.js streams to Web Streams
-  const { readable, writable } = nodeToWebStreams()
+  // Initialize ACP modules
+  const sessionStore = createAcpSessionStore()
+  const errorHandler = createAcpErrorHandler()
+  const modeManager = createAcpModeManager()
+  const mcpBridge = createAcpMCPBridge()
 
-  // Create ndjson stream
+  // Wire modules
+  errorHandler.setSessionStore(sessionStore)
+
+  // Detect stdin close as editor disconnect
+  process.stdin.on('close', () => {
+    errorHandler.handleDisconnect().catch(() => {})
+  })
+
+  const { readable, writable } = nodeToWebStreams()
   const stream = ndJsonStream(writable, readable)
 
-  // Create agent connection
-  const connection = new AgentSideConnection(createEstelaAgent, stream)
+  const connection = new AgentSideConnection(
+    (conn) => createEstelaAgent(conn, { sessionStore, errorHandler, modeManager, mcpBridge }),
+    stream
+  )
 
-  // Wait for connection to close
   await connection.closed
+
+  // Graceful cleanup
+  await Promise.all([sessionStore.dispose(), mcpBridge.dispose(), errorHandler.dispose()])
 }

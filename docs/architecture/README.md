@@ -1,121 +1,146 @@
 # Architecture
 
-> System design for Estela - Single LLM Chat (Epic 1)
+> Estela system design — desktop-first AI coding app with a virtual dev team
 
 ---
 
-## Current Phase
+## Overview
 
-**Epic 1: Single LLM Chat** - A functional chat interface with session management, multi-provider LLM support, and streaming responses.
+Estela is a monorepo with three layers:
 
-Future epics will add multi-agent orchestration, tool execution, and LSP integration.
+```
+Estela/
+├── src/                    # Desktop app (Tauri + SolidJS) ← PRIMARY
+├── src-tauri/              # Rust backend for Tauri
+├── packages/
+│   ├── core/               # Shared business logic (29,500+ lines, 531 tests)
+│   ├── platform-node/      # Node.js implementations (fs, shell, PTY)
+│   └── platform-tauri/     # Tauri implementations (fs, shell)
+└── cli/                    # CLI interface (secondary)
+```
+
+### Desktop App (`src/`)
+
+SolidJS + TypeScript + Tailwind CSS v4. IDE-inspired layout:
+- Activity Bar (left) — Sessions, Explorer, Agents, Memory, Settings
+- Main Area (center) — Chat with Team Lead, code viewer
+- Bottom Panel — Terminal, Agent Activity, File Changes
+- Agent Cards — Expandable panels showing Senior Leads and Junior Devs
+
+### Core Package (`packages/core/`)
+
+All business logic lives here. Platform-agnostic — works in both Tauri and Node.js.
+
+**Agent System** (the dev team):
+| Module | Lines | Purpose |
+|--------|-------|---------|
+| `agent/` | ~2,500 | Agent loop, planning, recovery, subagents, doom loop detection |
+| `commander/` | ~2,400 | Team Lead → Senior Leads → Junior Devs delegation |
+| `validator/` | ~1,000 | QA pipeline (syntax, types, lint, test, self-review) |
+
+**Tools** (19 total):
+| Module | Lines | Purpose |
+|--------|-------|---------|
+| `tools/` | ~4,500 | read, write, edit, glob, grep, bash, browser, task, etc. |
+
+**Intelligence**:
+| Module | Lines | Purpose |
+|--------|-------|---------|
+| `codebase/` | ~1,800 | Repo map, symbols, PageRank, dependency graph |
+| `context/` | ~1,450 | Token tracking, compaction, compression strategies |
+| `memory/` | ~1,400 | Episodic, semantic, procedural memory + RAG |
+| `lsp/` | ~400 | Language server (TS, Python, Go, Rust, Java) |
+
+**Extensibility** (plugin system):
+| Module | Lines | Purpose |
+|--------|-------|---------|
+| `extensions/` | ~600 | Install, enable, disable, reload plugins |
+| `commands/` | ~350 | TOML custom commands |
+| `hooks/` | ~1,100 | PreToolUse, PostToolUse, Task lifecycle hooks |
+| `skills/` | ~350 | Auto-invoked knowledge modules |
+| `mcp/` | ~950 | MCP protocol client + server registry |
+
+**Safety**:
+| Module | Lines | Purpose |
+|--------|-------|---------|
+| `permissions/` | ~1,700 | Risk assessment, auto-approval, path-aware checks |
+| `policy/` | ~800 | Priority rules, wildcards, regex matching |
+| `trust/` | ~400 | Per-folder security levels |
+
+**Infrastructure**:
+| Module | Lines | Purpose |
+|--------|-------|---------|
+| `llm/` | ~3,000 | 12+ provider clients |
+| `config/` | ~1,150 | Settings, credentials, Zod validation |
+| `session/` | ~800 | State, checkpoints, forking, resume |
+| `auth/` | ~500 | OAuth + PKCE |
+| `bus/` | ~400 | Message bus (pub/sub, tool confirmation) |
+
+**Protocols** (lower priority):
+| Module | Lines | Purpose |
+|--------|-------|---------|
+| `acp/` | ~600 | Editor integration (VS Code backend) |
+| `a2a/` | ~1,000 | Agent-to-agent HTTP server |
 
 ---
 
-## Documents
+## The Dev Team Flow
 
-| Document | Description |
-|----------|-------------|
-| [project-structure.md](./project-structure.md) | Current file organization |
-| [database-schema.md](./database-schema.md) | SQLite schema and migrations |
-| [data-flow.md](./data-flow.md) | How data flows through the app |
-| [components.md](./components.md) | UI component hierarchy |
-| [services.md](./services.md) | Service layer documentation |
-| [types.md](./types.md) | TypeScript type definitions |
+```
+User types request
+    │
+    ▼
+Team Lead (AgentExecutor + Commander)
+    │ Analyzes task, creates plan
+    │
+    ├─→ Senior Frontend Lead (Worker)
+    │   │ Receives frontend scope
+    │   ├─→ Jr. Dev: Component file (SubWorker)
+    │   └─→ Jr. Dev: Styling file (SubWorker)
+    │   └─→ Auto-reports to Team Lead ✓
+    │
+    ├─→ Senior Backend Lead (Worker)
+    │   │ Receives backend scope
+    │   ├─→ Jr. Dev: API routes (SubWorker)
+    │   └─→ Jr. Dev: Database (SubWorker)
+    │   └─→ Auto-reports to Team Lead ✓
+    │
+    └─→ Validator (QA)
+        │ Runs after all workers complete
+        ├─→ Syntax check
+        ├─→ Type check
+        ├─→ Lint
+        ├─→ Test
+        └─→ Self-review (LLM code review)
+            └─→ Results to Team Lead ✓
+
+Team Lead summarizes and presents to user
+```
+
+**User can intervene at any point** — click into any agent's chat, fix issues, send results back up.
 
 ---
 
-## Stack Overview
+## Database
 
-```
-┌─────────────────────────────────────────┐
-│         SolidJS Frontend                │
-│   Components → Stores → Services        │
-├─────────────────────────────────────────┤
-│         Tauri SQL Plugin                │
-│         (SQLite Database)               │
-├─────────────────────────────────────────┤
-│         Tauri Runtime                   │
-│         (Rust Backend)                  │
-└─────────────────────────────────────────┘
-```
-
----
-
-## Key Patterns
-
-### State Management
-
-SolidJS signals and stores with reactive updates:
-
-```typescript
-// Global store pattern
-const [sessions, setSessions] = createSignal<SessionWithStats[]>([]);
-const [currentSession, setCurrentSession] = createSignal<Session | null>(null);
-
-export function useSession() {
-  return {
-    sessions,
-    currentSession,
-    // ... actions
-  };
-}
-```
-
-### Service Architecture
-
-Provider-agnostic LLM client with credential resolution:
-
-```
-useChat() → resolveAuth() → createClient() → stream()
-                ↓
-    1. OAuth token (if available)
-    2. Direct API key (Anthropic, OpenAI)
-    3. OpenRouter gateway (fallback)
-```
-
-### Database Pattern
-
-SQLite with versioned migrations:
-
-```typescript
-// Migration system
-const SCHEMA_VERSION = 1;
-await runMigrations(db);  // Auto-runs pending migrations
+SQLite via `tauri-plugin-sql`:
+```sql
+sessions: id, name, created_at, updated_at
+messages: id, session_id, role, content, created_at
+files: id, session_id, path, operation, diff, created_at
 ```
 
 ---
 
-## Directory Structure
+## Key Design Decisions
 
-```
-src/
-├── components/        # UI by feature
-│   ├── chat/          # Chat interface
-│   ├── sessions/      # Session management
-│   ├── settings/      # Settings modal
-│   ├── layout/        # App shell
-│   └── common/        # Shared components
-├── config/            # Constants, env
-├── hooks/             # Custom hooks
-├── services/          # Business logic
-│   ├── auth/          # Credentials, OAuth
-│   ├── llm/           # LLM streaming
-│   └── database.ts    # SQLite operations
-├── stores/            # Global state
-└── types/             # TypeScript types
-```
-
----
-
-## Architecture Score: 8.4/10
-
-| Area | Score |
-|------|-------|
-| Folder Structure | 8.5 |
-| Separation of Concerns | 8.0 |
-| Component Organization | 8.5 |
-| Service Abstraction | 8.0 |
-| Type Organization | 8.5 |
-| Index Files (Barrel Exports) | 9.0 |
-| Scalability | 8.0 |
+| Decision | Choice | Why |
+|----------|--------|-----|
+| Desktop framework | Tauri 2.0 | ~5MB binary, 30MB RAM, Rust security |
+| Frontend | SolidJS | Fine-grained reactivity for streaming |
+| LLM calls | Frontend-first | Simpler SSE, faster iteration |
+| Tools | Platform-agnostic | Single implementation for Tauri + Node |
+| Agents | Workers as tools | Gemini CLI pattern — simple, unified |
+| Edits | 8 fuzzy strategies | Handles LLM whitespace/indent errors |
+| Shell | Process groups | Clean SIGKILL escalation |
+| Plugins | Skills + Commands | Auto-invoked + manual, like Claude Code |

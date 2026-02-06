@@ -35,7 +35,7 @@ Implement all missing tools to achieve feature parity with state-of-the-art AI c
 | webfetch | webfetch.ts | 427 | Fetch and process web pages |
 | task | task.ts | 376 | Spawn subagents for complex tasks |
 
-**Total: 8 new tools** (15 tools total in Estela)
+**Total: 8 new tools** (15 tools total at the time). Current tool count is 19 after later epics added browser, plan mode, and attempt_completion.
 
 ---
 
@@ -242,7 +242,7 @@ class SubagentManager {
 **Before Epic 17:** 7 tools
 - glob, read, grep, create, write, delete, bash
 
-**After Epic 17:** 15 tools
+**After Epic 17:** 15 tools (historic; current is 19)
 - glob, read, grep, create, write, delete, bash
 - **edit**, **ls**, **todoread**, **todowrite**, **question**, **websearch**, **webfetch**, **task**
 

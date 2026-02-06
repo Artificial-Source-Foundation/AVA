@@ -103,7 +103,7 @@ Token guidelines:
 
   schema: CodeSearchSchema,
 
-  permissions: ['network'],
+  permissions: ['read'],
 
   async execute(params: CodeSearchParams, ctx): Promise<ToolResult> {
     // Check abort signal

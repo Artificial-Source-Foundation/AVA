@@ -117,11 +117,13 @@ export class BrowserSession {
 
   /**
    * Check if Puppeteer is available
+   * Uses dynamic module name to prevent Vite from statically analyzing the import
    */
   static async isAvailable(): Promise<boolean> {
     try {
-      // @ts-expect-error - puppeteer is an optional peer dependency
-      await import('puppeteer')
+      // Use variable to prevent Vite static analysis
+      const moduleName = 'puppeteer'
+      await import(/* @vite-ignore */ moduleName)
       return true
     } catch {
       return false
@@ -137,8 +139,9 @@ export class BrowserSession {
       throw new Error('Puppeteer is not installed. Install it with: npm install puppeteer')
     }
 
-    // @ts-expect-error - puppeteer is an optional peer dependency
-    const puppeteer = await import('puppeteer')
+    // Use variable to prevent Vite static analysis
+    const moduleName = 'puppeteer'
+    const puppeteer = await import(/* @vite-ignore */ moduleName)
 
     // Launch browser if not already running
     if (!this.browser) {

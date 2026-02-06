@@ -1,3 +1,4 @@
+export { ActivityBar } from './ActivityBar'
 export { AppShell } from './AppShell'
-export { MainContent } from './MainContent'
-export { TabBar } from './TabBar'
+export { MainArea } from './MainArea'
+export { SidebarPanel } from './SidebarPanel'

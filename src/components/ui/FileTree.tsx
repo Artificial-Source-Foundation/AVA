@@ -128,7 +128,7 @@ const TreeNode: Component<TreeNodeProps> = (props) => {
     }
   }
 
-  const FileIcon = getFileIcon(props.node.name)
+  const FileIcon = () => getFileIcon(props.node.name)
 
   return (
     <div>
@@ -166,7 +166,7 @@ const TreeNode: Component<TreeNodeProps> = (props) => {
           when={isFolder()}
           fallback={
             <Dynamic
-              component={FileIcon}
+              component={FileIcon()}
               class="w-4 h-4 flex-shrink-0 text-[var(--text-tertiary)]"
             />
           }
@@ -207,8 +207,10 @@ const TreeNode: Component<TreeNodeProps> = (props) => {
 
 export const FileTree: Component<FileTreeProps> = (props) => {
   const [internalExpanded, setInternalExpanded] = createSignal<Set<string>>(
+    // eslint-disable-next-line solid/reactivity -- initial value
     new Set(props.expandedIds || [])
   )
+  // eslint-disable-next-line solid/reactivity -- initial value
   const [internalSelected, setInternalSelected] = createSignal<string | undefined>(props.selectedId)
 
   const expandedIds = () => (props.expandedIds ? new Set(props.expandedIds) : internalExpanded())

@@ -7,6 +7,79 @@ const host = process.env.TAURI_DEV_HOST
 // @ts-expect-error process is a nodejs global
 const analyze = process.env.ANALYZE === 'true'
 
+const STUB_PATH = '/home/xn3/Projects/Personal/Estela/src/stubs/node-stub.ts'
+
+// Node.js built-in modules that @estela/core imports but only uses in CLI context.
+// In the browser (Tauri webview), these get replaced with no-op stubs.
+const NODE_BUILTINS = new Set([
+  'node:child_process',
+  'child_process',
+  'node:fs',
+  'node:fs/promises',
+  'fs',
+  'fs/promises',
+  'node:path',
+  'path',
+  'node:os',
+  'os',
+  'node:crypto',
+  'crypto',
+  'node:url',
+  'url',
+  'node:buffer',
+  'buffer',
+  'node:stream',
+  'stream',
+  'node:process',
+  'process',
+  'node:events',
+  'events',
+  'node:util',
+  'util',
+  'node:net',
+  'net',
+  'node:http',
+  'http',
+  'node:https',
+  'https',
+  'cross-spawn',
+])
+
+/**
+ * Plugin that redirects all Node.js built-in imports to a stub module.
+ * Uses `resolveId` hook which fires before `vite:import-analysis`,
+ * ensuring workspace-linked packages (like @estela/core) are handled.
+ */
+function stubNodeBuiltins(): Plugin {
+  return {
+    name: 'stub-node-builtins',
+    enforce: 'pre',
+    resolveId(id) {
+      if (NODE_BUILTINS.has(id)) {
+        return STUB_PATH
+      }
+      return null
+    },
+  }
+}
+
+/**
+ * Inject a global `process` polyfill before any app code runs.
+ * The `define` config handles static `process.env`/`process.platform` replacements,
+ * but dynamic access like `process.cwd()` needs a real global object.
+ */
+function injectProcessPolyfill(): Plugin {
+  return {
+    name: 'inject-process-polyfill',
+    transformIndexHtml(html) {
+      return html.replace(
+        '<head>',
+        `<head><script>globalThis.process=globalThis.process||{};globalThis.process.env=globalThis.process.env||{};globalThis.process.platform="browser";globalThis.process.cwd=function(){return "/"};globalThis.process.argv=[];globalThis.process.version="v0.0.0";globalThis.process.versions={};globalThis.process.on=function(){return globalThis.process};globalThis.process.off=function(){return globalThis.process};globalThis.process.nextTick=function(fn){Promise.resolve().then(fn)};</script>`
+      )
+    },
+  }
+}
+
 // Plugin to exclude reference-code from being scanned
 function excludeReferenceCode(): Plugin {
   return {
@@ -29,6 +102,8 @@ function excludeReferenceCode(): Plugin {
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [
+    injectProcessPolyfill(),
+    stubNodeBuiltins(),
     excludeReferenceCode(),
     solid(),
     // Bundle analyzer - only in analyze mode
@@ -45,19 +120,39 @@ export default defineConfig(async () => ({
     global: 'globalThis',
     'process.env': JSON.stringify({}),
     'process.platform': JSON.stringify('browser'),
-    'process.cwd': '(() => "/")',
   },
 
-  // Exclude reference code and other non-source directories from optimization
+  // Exclude reference code, Node.js-only modules, and other non-source directories from optimization
   optimizeDeps: {
-    exclude: ['docs', 'cli', 'packages'],
+    exclude: ['docs', 'cli', 'packages', 'puppeteer', 'puppeteer-core'],
+    include: ['@codemirror/state', '@codemirror/view'],
     entries: ['src/**/*.{ts,tsx}'],
   },
 
-  // Build configuration - exclude reference code
+  // Build configuration - code splitting + external exclusions
   build: {
     rollupOptions: {
-      external: [/docs\/reference-code/],
+      external: [/docs\/reference-code/, 'puppeteer', 'puppeteer-core'],
+      output: {
+        manualChunks(id) {
+          // CodeMirror is heavy — isolate it
+          if (id.includes('@codemirror') || id.includes('@lezer')) {
+            return 'codemirror'
+          }
+          // Lucide icons
+          if (id.includes('lucide-solid')) {
+            return 'icons'
+          }
+          // SolidJS runtime
+          if (id.includes('solid-js') || id.includes('solid-primitives')) {
+            return 'solid'
+          }
+          // All other node_modules
+          if (id.includes('node_modules')) {
+            return 'vendor'
+          }
+        },
+      },
     },
   },
 

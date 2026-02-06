@@ -163,7 +163,7 @@ export const MemoryPanel: Component = () => {
         </div>
         <div class="h-2 bg-[var(--surface-sunken)] rounded-full overflow-hidden">
           <div
-            class={`h-full rounded-full transition-all duration-300 ${
+            class={`h-full rounded-full transition-[width] duration-300 ${
               isHighUsage()
                 ? 'bg-[var(--error)]'
                 : isWarningUsage()

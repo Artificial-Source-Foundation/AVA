@@ -21,7 +21,7 @@ npx tsc --noEmit       # Type check
 
 ## Project Overview
 
-**Estela** is a multi-agent AI coding assistant (~19,100 lines) - desktop app built with Tauri + SolidJS.
+**Estela** is a multi-agent AI coding assistant - a Tauri 2.0 + SolidJS desktop app with a TypeScript core monorepo and a CLI that speaks ACP for editor integration.
 
 | Layer | Technology |
 |-------|------------|
@@ -39,42 +39,44 @@ npx tsc --noEmit       # Type check
 ```
 Estela/
 ├── packages/
-│   ├── core/              # Business logic (~15,400 lines)
+│   ├── core/              # Business logic
 │   ├── platform-node/     # Node.js implementations
 │   └── platform-tauri/    # Tauri implementations
 ├── cli/                   # CLI with ACP agent
-└── src/                   # Tauri SolidJS frontend (~3,700 lines)
+└── src/                   # Tauri SolidJS frontend
 ```
 
 ### Core Modules (`packages/core/src/`)
 ```
-├── agent/         # Autonomous loop, subagents, recovery (~1,900 lines)
-├── commander/     # Hierarchical delegation (~1,000 lines)
-│   └── parallel/  # Concurrent execution (~1,400 lines)
-├── tools/         # 15 tools (~3,500 lines)
-├── context/       # Token tracking, compaction (~1,450 lines)
-├── memory/        # Long-term memory, RAG (~1,400 lines)
-├── config/        # Settings, credentials (~1,150 lines)
-├── validator/     # QA pipeline (~1,000 lines)
-├── codebase/      # Repo understanding (~1,200 lines)
-├── permissions/   # Safety (~1,100 lines)
-├── session/       # State management
-├── mcp/           # MCP protocol (~950 lines)
+├── agent/         # Autonomous loop, prompts, recovery, modes
+├── auth/          # OAuth + PKCE flows
+├── codebase/      # Repo map, symbols, tree-sitter
+├── commander/     # Hierarchical delegation, workers
+│   └── parallel/  # Concurrent execution
+├── config/        # Settings + validation
+├── context/       # Token tracking + compaction
 ├── diff/          # Change tracking
-├── git/           # Snapshots
-├── question/      # LLM-to-user questions (~370 lines)
-├── instructions/  # Project instructions (~300 lines)
-├── scheduler/     # Background tasks (~350 lines)
+├── git/           # Snapshots + rollback
+├── hooks/         # Lifecycle hooks
+├── instructions/  # Project instructions
 ├── llm/           # Provider clients
-├── models/        # Model registry
-└── auth/          # OAuth, PKCE
+├── lsp/           # Language Server Protocol
+├── mcp/           # MCP client + discovery
+├── memory/        # Long-term memory + RAG
+├── models/        # Model registry + pricing
+├── permissions/   # Safety + rules
+├── question/      # LLM-to-user questions
+├── scheduler/     # Background tasks
+├── session/       # State + checkpoints + forking
+├── tools/         # Tool registry + implementations
+├── types/         # Shared types
+└── validator/     # QA pipeline
 ```
 
 ---
 
 ## Data Flow
 
-### Agent Loop
 ```
 AgentExecutor.run(goal, context)
        │
@@ -84,8 +86,9 @@ AgentExecutor.run(goal, context)
        ├─→ LLM generates response
        ├─→ Parse tool calls
        ├─→ Execute tools (with retry)
-       ├─→ Send results to LLM
-       └─→ Check termination conditions
+       ├─→ Stream metadata + record usage
+       ├─→ Check termination (attempt_completion)
+       └─→ Persist session + checkpoints
 ```
 
 ### Commander Delegation
@@ -93,36 +96,40 @@ AgentExecutor.run(goal, context)
 Commander → delegate_coder → Worker AgentExecutor
          → delegate_tester → Worker AgentExecutor
          → delegate_reviewer → Worker AgentExecutor
+         → delegate_researcher → Worker AgentExecutor
+         → delegate_debugger → Worker AgentExecutor
 ```
 
-### Provider Priority
-```
-1. OAuth token (if available)
-2. Direct API key (Anthropic, OpenAI)
-3. OpenRouter gateway (fallback)
-```
+### Provider Resolution
+- OAuth token (if available)
+- Direct API key (provider-specific)
+- OpenRouter as gateway fallback (if configured)
 
 ---
 
-## Tools (15 total)
+## Tools (19 total)
 
 | Tool | File | Purpose |
 |------|------|---------|
+| read_file | read.ts | Read file contents |
+| create_file | create.ts | Create new file |
+| write_file | write.ts | Overwrite file |
+| delete_file | delete.ts | Delete file |
+| edit | edit.ts | Fuzzy text edits |
 | glob | glob.ts | Find files by pattern |
-| read | read.ts | Read file contents |
 | grep | grep.ts | Search file contents |
-| create | create.ts | Create new file |
-| write | write.ts | Overwrite file |
-| delete | delete.ts | Delete file |
-| bash | bash.ts | Execute shell commands |
-| edit | edit.ts | Fuzzy-matching file editing |
-| ls | ls.ts | Directory listing with tree |
+| ls | ls.ts | Directory listing |
+| bash | bash.ts | Execute shell commands (PTY supported) |
+| question | question.ts | Ask user clarifying questions |
 | todoread | todo.ts | Read session todo list |
 | todowrite | todo.ts | Update session todo list |
-| question | question.ts | Ask user clarifying questions |
-| websearch | websearch.ts | Web search (Tavily, Exa) |
-| webfetch | webfetch.ts | Fetch and process web pages |
 | task | task.ts | Spawn subagents |
+| websearch | websearch.ts | Web search |
+| webfetch | webfetch.ts | Fetch + convert web pages |
+| browser | browser/index.ts | Puppeteer browser automation |
+| attempt_completion | completion.ts | Finish task with summary |
+| plan_enter | agent/modes/plan.ts | Enter plan mode |
+| plan_exit | agent/modes/plan.ts | Exit plan mode |
 
 ---
 
@@ -152,7 +159,7 @@ Commander → delegate_coder → Worker AgentExecutor
 |------|---------|
 | `packages/core/src/index.ts` | Core exports |
 | `packages/core/src/agent/loop.ts` | AgentExecutor |
-| `packages/core/src/tools/index.ts` | Tool registry (15 tools) |
+| `packages/core/src/tools/index.ts` | Tool registry |
 | `packages/core/src/commander/executor.ts` | Worker delegation |
 | `cli/src/index.ts` | CLI entry |
 | `src/App.tsx` | Frontend root |
@@ -164,8 +171,8 @@ Commander → delegate_coder → Worker AgentExecutor
 
 ### Add Tool
 1. Create `packages/core/src/tools/{name}.ts`
-2. Export from `packages/core/src/tools/index.ts`
-3. Tool auto-registers on import
+2. Define with `defineTool()` if possible
+3. Export + register in `packages/core/src/tools/index.ts`
 
 ### Add Worker
 1. Add to `packages/core/src/commander/workers/definitions.ts`
@@ -228,17 +235,18 @@ Commander → delegate_coder → Worker AgentExecutor
 | Priority | Path |
 |----------|------|
 | 1 | `CLAUDE.md` - Memory bank workflow |
-| 2 | `llms.txt` - Quick reference |
-| 3 | `docs/memory-bank/` - Current state |
-| 4 | `docs/ROADMAP.md` - All 17 epics |
-| 5 | `docs/development/completed/` - Sprint details |
+| 2 | `docs/README.md` - Doc index |
+| 3 | `docs/ROADMAP.md` - Epics + status |
+| 4 | `docs/VISION.md` - Product vision |
+| 5 | `docs/development/FEATURE_GAP_ANALYSIS.md` - Gaps vs SOTA |
+| 6 | `docs/development/opencode-comparison.md` - OpenCode comparison |
+| 7 | `docs/reference-code/` - Local reference repos |
 
 ---
 
 ## Current Status
 
-- **Phase**: Epic 17 Complete (all core features)
-- **Next**: Epic 18 - Tauri Desktop GUI
-- **Lines**: ~19,100 (core: ~15,400, frontend: ~3,700)
-- **Tools**: 15 registered
-- **Modules**: 20 in packages/core/src/
+- **Core**: Tool registry, permissions, PTY, compaction, session persistence, LSP, browser tool, plan mode
+- **Tools**: 19 registered
+- **Modules**: 22 core modules + platform abstraction
+- **Next**: Frontend polish + UX integration of approvals/metadata (see `docs/ROADMAP.md`)

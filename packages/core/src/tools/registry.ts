@@ -1,12 +1,13 @@
 /**
  * Tool Registry
- * Manages tool registration and execution with hook support
+ * Manages tool registration and execution with hook support and policy engine
  */
 
 import { checkPlanModeAccess } from '../agent/modes/index.js'
+import { getMessageBus } from '../bus/message-bus.js'
 import { createPostToolUseContext, createPreToolUseContext, getHookRunner } from '../hooks/index.js'
 import { shouldAutoApprove } from '../permissions/auto-approve.js'
-import type { PermissionAction } from '../permissions/types.js'
+import type { PermissionAction, RiskLevel } from '../permissions/types.js'
 import { checkDoomLoop } from '../session/doom-loop.js'
 import { ToolError } from './errors.js'
 import type { Tool, ToolContext, ToolDefinition, ToolResult } from './types.js'
@@ -145,6 +146,51 @@ function extractAutoApprovalContext(
   return {}
 }
 
+/**
+ * Determine risk level for a tool operation
+ */
+function getToolRiskLevel(toolName: string, params: Record<string, unknown>): RiskLevel {
+  switch (toolName) {
+    case 'read_file':
+    case 'glob':
+    case 'grep':
+    case 'ls':
+    case 'todoread':
+    case 'skill':
+    case 'codesearch':
+    case 'websearch':
+    case 'webfetch':
+    case 'question':
+    case 'attempt_completion':
+      return 'low'
+
+    case 'write_file':
+    case 'edit':
+    case 'multiedit':
+    case 'create_file':
+    case 'todowrite':
+    case 'apply_patch':
+      return 'medium'
+
+    case 'delete_file':
+      return 'high'
+
+    case 'bash': {
+      // High risk for dangerous commands, medium for safe
+      if (params.requires_approval) return 'critical'
+      return 'high'
+    }
+
+    case 'browser':
+      return 'medium'
+
+    default:
+      // MCP tools are medium risk
+      if (toolName.startsWith('mcp__')) return 'medium'
+      return 'medium'
+  }
+}
+
 // ============================================================================
 // Tool Execution
 // ============================================================================
@@ -212,7 +258,7 @@ export async function executeTool(
     }
   }
 
-  // Check auto-approval settings
+  // Check auto-approval settings (legacy path - kept for backwards compatibility)
   const autoResult = shouldAutoApprove(
     name,
     getToolAction(name),
@@ -228,8 +274,24 @@ export async function executeTool(
     }
   }
 
-  // For non-approved but not blocked: operation proceeds (backwards compatible)
-  // Full PermissionManager UI integration is a future enhancement
+  // Message Bus confirmation flow (policy engine → UI)
+  const bus = getMessageBus()
+  const riskLevel = getToolRiskLevel(name, params)
+  const confirmation = await bus.confirmToolExecution(
+    name,
+    params,
+    riskLevel,
+    params.description as string | undefined
+  )
+
+  if (!confirmation.confirmed) {
+    return {
+      success: false,
+      output: `Operation denied: ${confirmation.reason}`,
+      error: 'PERMISSION_DENIED',
+      metadata: { reason: confirmation.reason },
+    }
+  }
 
   // Get tool
   const tool = getTool(name)
@@ -285,12 +347,22 @@ export async function executeTool(
     // ========================================================================
     // Tool Execution
     // ========================================================================
+    // Notify message bus of tool start
+    bus.notifyToolStart(name, params)
+
     // Validate params if validator provided
     const validatedParams = tool.validate ? tool.validate(params) : params
 
     // Execute tool
     const result = await tool.execute(validatedParams, ctx)
     const durationMs = Date.now() - startTime
+
+    // Notify message bus of tool completion
+    if (result.success) {
+      bus.notifyToolSuccess(name, durationMs, result.output?.slice(0, 200))
+    } else {
+      bus.notifyToolFailure(name, result.error ?? 'Unknown error', durationMs)
+    }
 
     // ========================================================================
     // PostToolUse Hook

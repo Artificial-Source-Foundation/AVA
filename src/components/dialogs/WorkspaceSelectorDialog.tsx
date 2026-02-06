@@ -284,7 +284,7 @@ const WorkspaceItem: Component<WorkspaceItemProps> = (props) => {
         transition-colors duration-[var(--duration-fast)]
         ${props.isSelected ? 'bg-[var(--accent-subtle)]' : 'hover:bg-[var(--surface-raised)]'}
       `}
-      onClick={props.onSelect}
+      onClick={() => props.onSelect()}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
     >

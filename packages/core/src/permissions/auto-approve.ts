@@ -8,7 +8,7 @@
  * - Yolo mode for unrestricted operation
  */
 
-import { isAbsolute, normalize, relative, resolve } from 'path'
+import { isAbsolute, normalize, relative, resolve } from 'node:path'
 import type { PermissionAction, RiskLevel } from './types.js'
 
 // ============================================================================

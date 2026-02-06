@@ -8,6 +8,7 @@
 import { Button as KobalteButton } from '@kobalte/core/button'
 import { Loader2 } from 'lucide-solid'
 import { type Component, type JSX, Show, splitProps } from 'solid-js'
+import { Motion } from 'solid-motionone'
 
 export interface ButtonProps {
   /** Button variant */
@@ -55,11 +56,10 @@ export const Button: Component<ButtonProps> = (props) => {
   const baseStyles = `
     inline-flex items-center justify-center gap-2
     font-medium
-    transition-all duration-[var(--duration-fast)] ease-[var(--ease-out)]
+    transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]
     focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--background)]
     disabled:pointer-events-none disabled:opacity-50
     select-none
-    press
   `
 
   const variantStyles = {
@@ -68,7 +68,6 @@ export const Button: Component<ButtonProps> = (props) => {
       text-[var(--button-primary-text)]
       hover:bg-[var(--button-primary-hover)]
       active:bg-[var(--button-primary-active)]
-      shadow-sm hover:shadow-md
     `,
     secondary: `
       bg-[var(--button-secondary-bg)]
@@ -88,21 +87,18 @@ export const Button: Component<ButtonProps> = (props) => {
       text-white
       hover:brightness-110
       active:brightness-90
-      shadow-sm hover:shadow-md
     `,
     success: `
       bg-[var(--success)]
       text-white
       hover:brightness-110
       active:brightness-90
-      shadow-sm hover:shadow-md
     `,
     warning: `
       bg-[var(--warning)]
       text-white
       hover:brightness-110
       active:brightness-90
-      shadow-sm hover:shadow-md
     `,
   }
 
@@ -114,25 +110,31 @@ export const Button: Component<ButtonProps> = (props) => {
   }
 
   return (
-    <KobalteButton
-      type={local.type ?? 'button'}
-      disabled={local.disabled || local.loading}
-      onClick={local.onClick}
-      class={`
-        ${baseStyles}
-        ${variantStyles[variant()]}
-        ${sizeStyles[size()]}
-        ${local.fullWidth ? 'w-full' : ''}
-        ${local.class ?? ''}
-      `}
-      {...others}
+    <Motion.div
+      press={{ scale: 0.97 }}
+      transition={{ duration: 0.15 }}
+      style={{ display: local.fullWidth ? 'block' : 'inline-block' }}
     >
-      <Show when={local.loading}>
-        <Loader2 class="h-4 w-4 animate-spin" />
-      </Show>
-      <Show when={!local.loading && local.icon}>{local.icon}</Show>
-      <Show when={local.children}>{local.children}</Show>
-      <Show when={!local.loading && local.iconRight}>{local.iconRight}</Show>
-    </KobalteButton>
+      <KobalteButton
+        type={local.type ?? 'button'}
+        disabled={local.disabled || local.loading}
+        onClick={local.onClick}
+        class={`
+          ${baseStyles}
+          ${variantStyles[variant()]}
+          ${sizeStyles[size()]}
+          ${local.fullWidth ? 'w-full' : ''}
+          ${local.class ?? ''}
+        `}
+        {...others}
+      >
+        <Show when={local.loading}>
+          <Loader2 class="h-4 w-4 animate-spin" />
+        </Show>
+        <Show when={!local.loading && local.icon}>{local.icon}</Show>
+        <Show when={local.children}>{local.children}</Show>
+        <Show when={!local.loading && local.iconRight}>{local.iconRight}</Show>
+      </KobalteButton>
+    </Motion.div>
   )
 }

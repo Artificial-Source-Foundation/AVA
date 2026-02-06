@@ -12,13 +12,18 @@
   "app": {
     "windows": [
       {
-        "title": "estela",
-        "width": 800,
-        "height": 600
+        "title": "Estela",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 640,
+        "minHeight": 480,
+        "decorations": false,
+        "transparent": false,
+        "visible": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: https://asset.localhost data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://*.anthropic.com https://openrouter.ai https://api.openai.com https://generativelanguage.googleapis.com https://api.deepseek.com"
     }
   },
   "bundle": {

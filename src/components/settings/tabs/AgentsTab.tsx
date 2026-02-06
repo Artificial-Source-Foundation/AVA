@@ -1,12 +1,14 @@
 /**
  * Agents Settings Tab
  *
+ * Modern 2026 aesthetic using semantic CSS tokens.
  * Configure AI agent behavior, presets, and custom agents.
  */
 
 import {
   Bot,
   Check,
+  ChevronRight,
   Code,
   FileText,
   GitBranch,
@@ -19,9 +21,8 @@ import {
   Wand2,
   Zap,
 } from 'lucide-solid'
-import { type Component, createSignal, For, Show } from 'solid-js'
+import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
-import { Button } from '../../ui/Button'
 import { Toggle } from '../../ui/Toggle'
 
 // ============================================================================
@@ -40,6 +41,7 @@ export interface AgentPreset {
   capabilities: string[]
   model?: string
   isCustom?: boolean
+  type?: 'coding' | 'git' | 'terminal' | 'docs' | 'fast' | 'custom'
 }
 
 export interface AgentsTabProps {
@@ -51,17 +53,48 @@ export interface AgentsTabProps {
 }
 
 // ============================================================================
-// Default Agent Icons
+// Agent Type Configuration (uses CSS variables from tokens.css)
 // ============================================================================
 
-const agentIcons: Record<string, IconComponent> = {
-  default: Bot as IconComponent,
-  code: Code as IconComponent,
-  writing: FileText as IconComponent,
-  git: GitBranch as IconComponent,
-  terminal: Terminal as IconComponent,
-  magic: Wand2 as IconComponent,
-  fast: Zap as IconComponent,
+const agentTypeConfig: Record<
+  string,
+  { icon: IconComponent; colorVar: string; subtleVar: string }
+> = {
+  coding: {
+    icon: Code as IconComponent,
+    colorVar: '--agent-coding',
+    subtleVar: '--agent-coding-subtle',
+  },
+  git: {
+    icon: GitBranch as IconComponent,
+    colorVar: '--agent-git',
+    subtleVar: '--agent-git-subtle',
+  },
+  terminal: {
+    icon: Terminal as IconComponent,
+    colorVar: '--agent-terminal',
+    subtleVar: '--agent-terminal-subtle',
+  },
+  docs: {
+    icon: FileText as IconComponent,
+    colorVar: '--agent-docs',
+    subtleVar: '--agent-docs-subtle',
+  },
+  fast: {
+    icon: Zap as IconComponent,
+    colorVar: '--agent-fast',
+    subtleVar: '--agent-fast-subtle',
+  },
+  custom: {
+    icon: Wand2 as IconComponent,
+    colorVar: '--agent-custom',
+    subtleVar: '--agent-custom-subtle',
+  },
+  default: {
+    icon: Bot as IconComponent,
+    colorVar: '--text-muted',
+    subtleVar: '--alpha-white-5',
+  },
 }
 
 // ============================================================================
@@ -94,7 +127,6 @@ export const AgentsTab: Component<AgentsTabProps> = (props) => {
     return agents
   }
 
-  // Group agents: custom first, then built-in
   const groupedAgents = () => {
     const custom = filteredAgents().filter((a) => a.isCustom)
     const builtin = filteredAgents().filter((a) => !a.isCustom)
@@ -106,56 +138,65 @@ export const AgentsTab: Component<AgentsTabProps> = (props) => {
       {/* Header */}
       <div class="flex items-center justify-between">
         <div>
-          <h3 class="text-sm font-medium text-[var(--text-primary)]">AI Agents</h3>
-          <p class="text-xs text-[var(--text-muted)] mt-0.5">
+          <h3 class="text-[var(--text-lg)] font-semibold text-[var(--text-primary)]">AI Agents</h3>
+          <p class="text-[var(--text-xs)] text-[var(--text-tertiary)] mt-[var(--space-0_5)]">
             {enabledCount()} of {props.agents.length} agents enabled
           </p>
         </div>
         <Show when={props.onCreate}>
-          <Button variant="primary" size="sm" onClick={props.onCreate}>
-            <Plus class="w-4 h-4 mr-1" />
+          <button
+            type="button"
+            onClick={() => props.onCreate?.()}
+            class="
+              flex items-center gap-[var(--space-1_5)] px-[var(--space-3)] py-[var(--space-1_5)]
+              bg-[var(--button-primary-bg)] hover:bg-[var(--button-primary-hover)]
+              text-[var(--button-primary-text)] text-[var(--text-sm)] font-medium
+              rounded-[var(--radius-lg)]
+              transition-colors duration-[var(--duration-fast)]
+            "
+          >
+            <Plus class="w-4 h-4" />
             Create Agent
-          </Button>
+          </button>
         </Show>
       </div>
 
       {/* Search and Filter */}
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-[var(--space-3)]">
         <div class="flex-1 relative">
-          <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
+          <Search class="absolute left-[var(--space-3)] top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
           <input
             type="text"
             placeholder="Search agents..."
             value={searchQuery()}
             onInput={(e) => setSearchQuery(e.currentTarget.value)}
             class="
-              w-full pl-10 pr-4 py-2
+              w-full pl-[var(--space-10)] pr-[var(--space-4)] py-[var(--space-2_5)]
               bg-[var(--input-background)]
               border border-[var(--input-border)]
               rounded-[var(--radius-lg)]
-              text-sm text-[var(--text-primary)]
-              placeholder:text-[var(--text-muted)]
-              focus:outline-none focus:border-[var(--accent)]
+              text-[var(--text-sm)] text-[var(--text-primary)]
+              placeholder:text-[var(--input-placeholder)]
+              focus:outline-none focus:border-[var(--input-border-focus)]
+              focus:shadow-[0_0_0_3px_var(--input-focus-ring)]
               transition-colors duration-[var(--duration-fast)]
             "
           />
         </div>
 
-        <label class="flex items-center gap-2 text-sm text-[var(--text-secondary)] cursor-pointer">
-          <input
-            type="checkbox"
-            checked={showCustomOnly()}
-            onChange={(e) => setShowCustomOnly(e.currentTarget.checked)}
-            class="sr-only"
-          />
+        <button
+          type="button"
+          class="flex items-center gap-[var(--space-2)] text-[var(--text-sm)] text-[var(--text-secondary)] cursor-pointer select-none"
+          onClick={() => setShowCustomOnly(!showCustomOnly())}
+        >
           <div
             class={`
-              w-4 h-4 rounded border flex items-center justify-center
+              w-4 h-4 rounded-[var(--radius-sm)] border flex items-center justify-center
               transition-colors duration-[var(--duration-fast)]
               ${
                 showCustomOnly()
                   ? 'bg-[var(--accent)] border-[var(--accent)]'
-                  : 'border-[var(--border-default)]'
+                  : 'border-[var(--border-strong)] hover:border-[var(--alpha-white-25)]'
               }
             `}
           >
@@ -164,19 +205,21 @@ export const AgentsTab: Component<AgentsTabProps> = (props) => {
             </Show>
           </div>
           Custom only
-        </label>
+        </button>
       </div>
 
       {/* Agent List */}
-      <div class="max-h-80 overflow-y-auto space-y-4 -mx-4 px-4">
+      <div class="space-y-[var(--space-4)]">
         <Show
           when={filteredAgents().length > 0}
           fallback={
-            <div class="py-8 text-center">
-              <Bot class="w-10 h-10 mx-auto mb-3 text-[var(--text-muted)]" />
-              <p class="text-sm text-[var(--text-secondary)]">No agents found</p>
+            <div class="py-[var(--space-12)] text-center">
+              <div class="w-12 h-12 mx-auto mb-[var(--space-3)] rounded-full bg-[var(--alpha-white-5)] flex items-center justify-center">
+                <Bot class="w-6 h-6 text-[var(--text-muted)]" />
+              </div>
+              <p class="text-[var(--text-sm)] text-[var(--text-secondary)]">No agents found</p>
               <Show when={showCustomOnly()}>
-                <p class="text-xs text-[var(--text-muted)] mt-1">
+                <p class="text-[var(--text-xs)] text-[var(--text-muted)] mt-[var(--space-1)]">
                   Create a custom agent to get started
                 </p>
               </Show>
@@ -186,11 +229,11 @@ export const AgentsTab: Component<AgentsTabProps> = (props) => {
           {/* Custom Agents */}
           <Show when={groupedAgents().custom.length > 0}>
             <div>
-              <h4 class="text-xs font-medium text-[var(--text-muted)] mb-2 flex items-center gap-2">
+              <h4 class="text-[var(--text-xs)] font-medium text-[var(--text-muted)] mb-[var(--space-3)] flex items-center gap-[var(--space-2)] uppercase tracking-wider">
                 <Sparkles class="w-3 h-3" />
                 Custom Agents
               </h4>
-              <div class="space-y-2">
+              <div class="space-y-[var(--space-2)]">
                 <For each={groupedAgents().custom}>
                   {(agent) => (
                     <AgentCard
@@ -208,11 +251,11 @@ export const AgentsTab: Component<AgentsTabProps> = (props) => {
           {/* Built-in Agents */}
           <Show when={groupedAgents().builtin.length > 0 && !showCustomOnly()}>
             <div>
-              <h4 class="text-xs font-medium text-[var(--text-muted)] mb-2 flex items-center gap-2">
+              <h4 class="text-[var(--text-xs)] font-medium text-[var(--text-muted)] mb-[var(--space-3)] flex items-center gap-[var(--space-2)] uppercase tracking-wider">
                 <Bot class="w-3 h-3" />
                 Built-in Agents
               </h4>
-              <div class="space-y-2">
+              <div class="space-y-[var(--space-2)]">
                 <For each={groupedAgents().builtin}>
                   {(agent) => (
                     <AgentCard
@@ -228,10 +271,19 @@ export const AgentsTab: Component<AgentsTabProps> = (props) => {
         </Show>
       </div>
 
-      {/* Info */}
-      <div class="flex items-start gap-3 p-3 bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)]">
-        <Bot class="w-5 h-5 text-[var(--info)] flex-shrink-0 mt-0.5" />
-        <p class="text-sm text-[var(--text-secondary)]">
+      {/* Info Banner */}
+      <div
+        class="
+          flex items-start gap-[var(--space-3)] p-[var(--space-4)]
+          bg-[var(--info-subtle)]
+          border border-[var(--info-border)]
+          rounded-[var(--radius-xl)]
+        "
+      >
+        <div class="w-8 h-8 rounded-full bg-[var(--info-subtle)] flex items-center justify-center flex-shrink-0">
+          <Bot class="w-4 h-4 text-[var(--info)]" />
+        </div>
+        <p class="text-[var(--text-sm)] text-[var(--text-secondary)] leading-relaxed">
           Agents are specialized AI assistants with specific capabilities. Enable the agents you
           need for your workflow.
         </p>
@@ -252,116 +304,129 @@ interface AgentCardProps {
 }
 
 const AgentCard: Component<AgentCardProps> = (props) => {
+  const config = createMemo(() => {
+    const type = props.agent.type || (props.agent.isCustom ? 'custom' : 'default')
+    return agentTypeConfig[type] || agentTypeConfig.default
+  })
+
   return (
     <div
       class={`
-        flex items-center gap-3 p-3
-        border rounded-[var(--radius-lg)]
-        transition-colors duration-[var(--duration-fast)]
+        relative overflow-hidden
+        rounded-[var(--radius-xl)]
+        border transition-colors duration-[var(--duration-fast)]
         ${
           props.agent.enabled
-            ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
-            : 'border-[var(--border-subtle)] hover:bg-[var(--surface-raised)]'
+            ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)]'
+            : 'border-[var(--card-border)] bg-[var(--card-background)] hover:border-[var(--card-hover-border)]'
         }
       `}
     >
-      {/* Icon */}
-      <div
-        class={`
-          p-2 rounded-[var(--radius-md)]
-          ${
-            props.agent.enabled
-              ? 'bg-[var(--accent)] text-white'
-              : 'bg-[var(--surface-sunken)] text-[var(--text-muted)]'
-          }
-        `}
-      >
-        <Dynamic component={props.agent.icon || agentIcons.default} class="w-4 h-4" />
-      </div>
-
-      {/* Info */}
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2">
+      <div class="relative flex items-center gap-[var(--space-3)] p-[var(--space-3)]">
+        {/* Icon with colored background */}
+        <div
+          class="p-[var(--space-2_5)] rounded-[var(--radius-lg)] transition-colors duration-[var(--duration-fast)]"
+          style={{
+            background: props.agent.enabled ? `var(${config().subtleVar})` : 'var(--alpha-white-5)',
+          }}
+        >
           <span
-            class={`text-sm font-medium ${
-              props.agent.enabled ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'
-            }`}
+            style={{
+              color: props.agent.enabled ? `var(${config().colorVar})` : 'var(--text-muted)',
+            }}
           >
-            {props.agent.name}
+            <Dynamic component={config().icon} class="w-4 h-4" />
           </span>
-          <Show when={props.agent.isCustom}>
-            <span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-[var(--info-subtle)] text-[var(--info)]">
-              Custom
-            </span>
-          </Show>
-          <Show when={props.agent.model}>
-            <span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-[var(--surface-sunken)] text-[var(--text-muted)]">
-              {props.agent.model}
-            </span>
-          </Show>
         </div>
-        <div class="text-xs text-[var(--text-muted)] truncate">{props.agent.description}</div>
-        <Show when={props.agent.capabilities.length > 0}>
-          <div class="flex flex-wrap gap-1 mt-1.5">
-            <For each={props.agent.capabilities.slice(0, 3)}>
-              {(cap) => (
-                <span class="px-1.5 py-0.5 text-[10px] bg-[var(--surface-sunken)] text-[var(--text-tertiary)] rounded">
-                  {cap}
-                </span>
-              )}
-            </For>
-            <Show when={props.agent.capabilities.length > 3}>
-              <span class="px-1.5 py-0.5 text-[10px] text-[var(--text-muted)]">
-                +{props.agent.capabilities.length - 3} more
+
+        {/* Info */}
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-[var(--space-2)]">
+            <span
+              class={`text-[var(--text-sm)] font-medium transition-colors duration-[var(--duration-fast)] ${
+                props.agent.enabled ? 'text-[var(--text-primary)]' : 'text-[var(--text-secondary)]'
+              }`}
+            >
+              {props.agent.name}
+            </span>
+            {/* Status dot */}
+            <div
+              class={`w-2 h-2 rounded-full transition-colors duration-[var(--duration-fast)] ${
+                props.agent.enabled ? 'bg-[var(--success)]' : 'bg-[var(--text-muted)]'
+              }`}
+            />
+            <Show when={props.agent.isCustom}>
+              <span class="px-[var(--space-1_5)] py-[var(--space-0_5)] text-[10px] font-medium rounded-full bg-[var(--agent-custom-subtle)] text-[var(--agent-custom)]">
+                Custom
               </span>
             </Show>
           </div>
-        </Show>
-      </div>
+          <div class="text-[var(--text-xs)] text-[var(--text-muted)] truncate mt-[var(--space-0_5)]">
+            {props.agent.description}
+          </div>
+          <Show when={props.agent.capabilities.length > 0}>
+            <div class="flex flex-wrap gap-[var(--space-1)] mt-[var(--space-2)]">
+              <For each={props.agent.capabilities.slice(0, 3)}>
+                {(cap) => (
+                  <span class="px-[var(--space-1_5)] py-[var(--space-0_5)] text-[10px] bg-[var(--alpha-white-5)] text-[var(--text-tertiary)] rounded-[var(--radius-sm)]">
+                    {cap}
+                  </span>
+                )}
+              </For>
+              <Show when={props.agent.capabilities.length > 3}>
+                <span class="px-[var(--space-1_5)] py-[var(--space-0_5)] text-[10px] text-[var(--text-muted)]">
+                  +{props.agent.capabilities.length - 3}
+                </span>
+              </Show>
+            </div>
+          </Show>
+        </div>
 
-      {/* Actions */}
-      <div class="flex items-center gap-2">
-        <Show when={props.onEdit}>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              props.onEdit?.()
-            }}
-            class="
-              p-1.5 rounded-[var(--radius-md)]
-              text-[var(--text-muted)]
-              hover:text-[var(--text-primary)]
-              hover:bg-[var(--surface-raised)]
-              transition-colors duration-[var(--duration-fast)]
-            "
-          >
-            <Settings class="w-4 h-4" />
-          </button>
-        </Show>
-        <Show when={props.agent.isCustom && props.onDelete}>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              props.onDelete?.()
-            }}
-            class="
-              p-1.5 rounded-[var(--radius-md)]
-              text-[var(--text-muted)]
-              hover:text-[var(--error)]
-              hover:bg-[var(--error-subtle)]
-              transition-colors duration-[var(--duration-fast)]
-            "
-          >
-            <Trash2 class="w-4 h-4" />
-          </button>
-        </Show>
-        <Toggle
-          checked={props.agent.enabled}
-          onChange={(checked) => props.onToggle?.(checked)}
-          size="sm"
-        />
+        {/* Actions */}
+        <div class="flex items-center gap-[var(--space-1)]">
+          <Show when={props.onEdit}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                props.onEdit?.()
+              }}
+              class="
+                p-[var(--space-1_5)] rounded-[var(--radius-md)]
+                text-[var(--text-muted)]
+                hover:text-[var(--text-primary)]
+                hover:bg-[var(--button-ghost-hover)]
+                transition-colors duration-[var(--duration-fast)]
+              "
+            >
+              <Settings class="w-4 h-4" />
+            </button>
+          </Show>
+          <Show when={props.agent.isCustom && props.onDelete}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                props.onDelete?.()
+              }}
+              class="
+                p-[var(--space-1_5)] rounded-[var(--radius-md)]
+                text-[var(--text-muted)]
+                hover:text-[var(--error)]
+                hover:bg-[var(--error-subtle)]
+                transition-colors duration-[var(--duration-fast)]
+              "
+            >
+              <Trash2 class="w-4 h-4" />
+            </button>
+          </Show>
+          <Toggle
+            checked={props.agent.enabled}
+            onChange={(checked) => props.onToggle?.(checked)}
+            size="sm"
+          />
+          <ChevronRight class="w-4 h-4 text-[var(--text-muted)] ml-[var(--space-1)]" />
+        </div>
       </div>
     </div>
   )
@@ -380,6 +445,7 @@ export const defaultAgentPresets: AgentPreset[] = [
     enabled: true,
     capabilities: ['code-generation', 'debugging', 'refactoring', 'code-review'],
     model: 'claude-3.5-sonnet',
+    type: 'coding',
   },
   {
     id: 'git-assistant',
@@ -388,6 +454,7 @@ export const defaultAgentPresets: AgentPreset[] = [
     icon: GitBranch as IconComponent,
     enabled: true,
     capabilities: ['git-status', 'commit-messages', 'branch-management', 'merge-resolution'],
+    type: 'git',
   },
   {
     id: 'terminal-agent',
@@ -396,6 +463,7 @@ export const defaultAgentPresets: AgentPreset[] = [
     icon: Terminal as IconComponent,
     enabled: true,
     capabilities: ['command-execution', 'process-management', 'environment-setup'],
+    type: 'terminal',
   },
   {
     id: 'documentation',
@@ -404,6 +472,7 @@ export const defaultAgentPresets: AgentPreset[] = [
     icon: FileText as IconComponent,
     enabled: false,
     capabilities: ['readme', 'api-docs', 'comments', 'tutorials'],
+    type: 'docs',
   },
   {
     id: 'fast-responder',
@@ -413,5 +482,6 @@ export const defaultAgentPresets: AgentPreset[] = [
     enabled: false,
     capabilities: ['quick-answers', 'simple-tasks'],
     model: 'claude-3-haiku',
+    type: 'fast',
   },
 ]

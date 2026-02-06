@@ -8,8 +8,8 @@
  * - Python: pyright --outputjson
  */
 
-import { spawn } from 'child_process'
-import { extname } from 'path'
+import { spawn } from 'node:child_process'
+import { extname } from 'node:path'
 import type { Diagnostic, DiagnosticResult, DiagnosticSummary } from './types.js'
 
 // ============================================================================

@@ -121,7 +121,7 @@ export async function actionClick(
     const x = parseInt(parts[0], 10)
     const y = parseInt(parts[1], 10)
 
-    if (isNaN(x) || isNaN(y)) {
+    if (Number.isNaN(x) || Number.isNaN(y)) {
       return { success: false, error: 'Invalid coordinates. Must be numbers.' }
     }
 

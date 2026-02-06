@@ -36,7 +36,8 @@ const ansiToClass: Record<string, string> = {
 // Parse ANSI codes and convert to styled spans
 const parseAnsi = (text: string): { text: string; class: string }[] => {
   const parts: { text: string; class: string }[] = []
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape codes require control characters
+  // oxlint-disable-next-line no-control-regex -- ANSI escape codes require control characters
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape codes require control characters by definition
   const regex = /\x1b\[(\d+)m/g
   let lastIndex = 0
   let currentClass = ''
@@ -85,7 +86,11 @@ const statusConfig: Record<
 // Component
 // ============================================================================
 
-export const TerminalPanel: Component = () => {
+interface TerminalPanelProps {
+  compact?: boolean
+}
+
+export const TerminalPanel: Component<TerminalPanelProps> = (props) => {
   const { terminalExecutions, clearTerminalExecutions } = useSession()
   const [expandedIds, setExpandedIds] = createSignal<Set<string>>(new Set())
   const [copiedId, setCopiedId] = createSignal<string | null>(null)
@@ -129,51 +134,53 @@ export const TerminalPanel: Component = () => {
 
   return (
     <div class="flex flex-col h-full bg-[var(--surface-sunken)]">
-      {/* Header */}
-      <div
-        class="
-          flex items-center justify-between
-          px-4 py-3
-          border-b border-[var(--border-subtle)]
-          bg-[var(--surface)]
-        "
-      >
-        <div class="flex items-center gap-3">
-          <div
-            class="
-              p-2
-              bg-[var(--surface-raised)]
-              rounded-[var(--radius-lg)]
-            "
-          >
-            <Terminal class="w-5 h-5 text-[var(--text-primary)]" />
+      {/* Header (hidden in compact/embedded mode) */}
+      <Show when={!props.compact}>
+        <div
+          class="
+            flex items-center justify-between
+            px-4 py-3
+            border-b border-[var(--border-subtle)]
+            bg-[var(--surface)]
+          "
+        >
+          <div class="flex items-center gap-3">
+            <div
+              class="
+                p-2
+                bg-[var(--surface-raised)]
+                rounded-[var(--radius-lg)]
+              "
+            >
+              <Terminal class="w-5 h-5 text-[var(--text-primary)]" />
+            </div>
+            <div>
+              <h2 class="text-sm font-semibold text-[var(--text-primary)]">Terminal Output</h2>
+              <p class="text-xs text-[var(--text-muted)]">
+                {executionStats().running > 0 ? `${executionStats().running} running · ` : ''}
+                {executionStats().total} executions
+              </p>
+            </div>
           </div>
-          <div>
-            <h2 class="text-sm font-semibold text-[var(--text-primary)]">Terminal Output</h2>
-            <p class="text-xs text-[var(--text-muted)]">
-              {executionStats().running > 0 ? `${executionStats().running} running · ` : ''}
-              {executionStats().total} executions
-            </p>
-          </div>
+          <Show when={terminalExecutions().length > 0}>
+            <button
+              type="button"
+              onClick={() => clearTerminalExecutions()}
+              class="
+                p-2
+                rounded-[var(--radius-md)]
+                text-[var(--text-tertiary)]
+                hover:text-[var(--error)]
+                hover:bg-[var(--error-subtle)]
+                transition-colors duration-[var(--duration-fast)]
+              "
+              title="Clear all"
+            >
+              <Trash2 class="w-4 h-4" />
+            </button>
+          </Show>
         </div>
-        <Show when={terminalExecutions().length > 0}>
-          <button
-            type="button"
-            onClick={() => clearTerminalExecutions()}
-            class="
-              p-2
-              rounded-[var(--radius-md)]
-              text-[var(--text-tertiary)]
-              hover:text-[var(--error)]
-              hover:bg-[var(--error-subtle)]
-              transition-colors duration-[var(--duration-fast)]
-            "
-            title="Clear all"
-          >
-            <Trash2 class="w-4 h-4" />
-          </button>
-        </Show>
-      </div>
+      </Show>
 
       {/* Executions List */}
       <div class="flex-1 overflow-y-auto p-3 space-y-2">
@@ -228,6 +235,7 @@ export const TerminalPanel: Component = () => {
                       bg-[var(--surface)]
                       hover:bg-[var(--surface-raised)]
                       transition-colors duration-[var(--duration-fast)]
+                      cursor-pointer border-none
                     "
                   >
                     {/* Status Icon */}
@@ -343,38 +351,40 @@ export const TerminalPanel: Component = () => {
         </Show>
       </div>
 
-      {/* Footer */}
-      <div
-        class="
-          px-4 py-3
-          border-t border-[var(--border-subtle)]
-          bg-[var(--surface)]
-        "
-      >
-        <div class="flex items-center justify-between text-xs text-[var(--text-muted)]">
-          <div class="flex items-center gap-3">
-            <Show when={executionStats().running > 0}>
-              <span class="flex items-center gap-1">
-                <span class="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse" />
-                {executionStats().running} running
-              </span>
-            </Show>
-            <Show when={executionStats().success > 0}>
-              <span class="flex items-center gap-1">
-                <span class="w-2 h-2 rounded-full bg-[var(--success)]" />
-                {executionStats().success} success
-              </span>
-            </Show>
-            <Show when={executionStats().error > 0}>
-              <span class="flex items-center gap-1">
-                <span class="w-2 h-2 rounded-full bg-[var(--error)]" />
-                {executionStats().error} errors
-              </span>
-            </Show>
+      {/* Footer (hidden in compact/embedded mode) */}
+      <Show when={!props.compact}>
+        <div
+          class="
+            px-4 py-3
+            border-t border-[var(--border-subtle)]
+            bg-[var(--surface)]
+          "
+        >
+          <div class="flex items-center justify-between text-xs text-[var(--text-muted)]">
+            <div class="flex items-center gap-3">
+              <Show when={executionStats().running > 0}>
+                <span class="flex items-center gap-1">
+                  <span class="w-2 h-2 rounded-full bg-[var(--accent)] animate-pulse" />
+                  {executionStats().running} running
+                </span>
+              </Show>
+              <Show when={executionStats().success > 0}>
+                <span class="flex items-center gap-1">
+                  <span class="w-2 h-2 rounded-full bg-[var(--success)]" />
+                  {executionStats().success} success
+                </span>
+              </Show>
+              <Show when={executionStats().error > 0}>
+                <span class="flex items-center gap-1">
+                  <span class="w-2 h-2 rounded-full bg-[var(--error)]" />
+                  {executionStats().error} errors
+                </span>
+              </Show>
+            </div>
+            <span>{executionStats().total} total</span>
           </div>
-          <span>{executionStats().total} total</span>
         </div>
-      </div>
+      </Show>
     </div>
   )
 }

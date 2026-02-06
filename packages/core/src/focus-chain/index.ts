@@ -10,23 +10,23 @@ export {
   FocusChainManager,
   getFocusChainManager,
 } from './manager.js'
-// Parser functions
+// Parser functions (renamed to avoid conflict with agent/evaluator.ts)
 export {
   addTaskToMarkdown,
-  calculateProgress,
+  calculateProgress as calculateFocusProgress,
   getNextTask,
   parseMarkdown,
   removeTaskFromMarkdown,
   serializeToMarkdown,
   updateTaskInMarkdown,
 } from './parser.js'
-// Types
+// Types (renamed to avoid conflict with commander/types.ts)
 export type {
   FocusChain,
   FocusChainEvent,
   FocusChainEventListener,
   FocusChainOptions,
   FocusTask,
-  TaskStatus,
+  TaskStatus as FocusTaskStatus,
 } from './types.js'
 export { DEFAULT_FOCUS_CHAIN_OPTIONS } from './types.js'

@@ -118,14 +118,14 @@ export const Input: Component<InputProps> = (props) => {
             rounded-[var(--radius-lg)]
             text-[var(--text-primary)]
             placeholder:text-[var(--input-placeholder)]
-            transition-all duration-[var(--duration-fast)] ease-[var(--ease-out)]
+            transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]
             hover:border-[var(--input-border-hover)]
-            focus:outline-none focus:border-[var(--input-border-focus)] focus:ring-2 focus:ring-[var(--accent-subtle)]
+            focus-glow
             disabled:opacity-50 disabled:cursor-not-allowed
             ${sizeStyles[size()]}
             ${local.icon ? iconPaddingLeft[size()] : ''}
             ${local.iconRight ? iconPaddingRight[size()] : ''}
-            ${local.error ? 'border-[var(--error)] focus:border-[var(--error)] focus:ring-[var(--error-subtle)]' : ''}
+            ${local.error ? 'border-[var(--error)]' : ''}
           `}
         />
 
@@ -229,11 +229,11 @@ export const Textarea: Component<TextareaProps> = (props) => {
           placeholder:text-[var(--input-placeholder)]
           p-3 text-sm
           resize-y min-h-[80px]
-          transition-all duration-[var(--duration-fast)] ease-[var(--ease-out)]
+          transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]
           hover:border-[var(--input-border-hover)]
-          focus:outline-none focus:border-[var(--input-border-focus)] focus:ring-2 focus:ring-[var(--accent-subtle)]
+          focus-glow
           disabled:opacity-50 disabled:cursor-not-allowed
-          ${local.error ? 'border-[var(--error)] focus:border-[var(--error)] focus:ring-[var(--error-subtle)]' : ''}
+          ${local.error ? 'border-[var(--error)]' : ''}
         `}
       />
 

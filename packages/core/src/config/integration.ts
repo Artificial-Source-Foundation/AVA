@@ -9,7 +9,7 @@ import type { AgentConfig } from '../agent/types.js'
 import type { SessionManagerConfig } from '../session/types.js'
 
 /** Placeholder for ContextManager until context module has a manager */
-type ContextManager = {}
+type ContextManager = Record<string, never>
 
 import { getSettingsManager, type SettingsManager } from './manager.js'
 import type { AgentSettings, ContextSettings, ProviderSettings, Settings } from './types.js'

@@ -22,21 +22,21 @@ export {
   parseMCPCommand,
 } from './discovery.js'
 
-// OAuth
+// OAuth (renamed to avoid conflict with auth/manager.ts exports)
 export {
-  areTokensExpired,
-  clearPendingStates,
-  completeOAuthFlow,
-  getAuthorizationHeader,
-  getStoredTokens,
-  getValidTokens,
-  hasStoredTokens,
+  areTokensExpired as areMCPTokensExpired,
+  clearPendingStates as clearMCPPendingStates,
+  completeOAuthFlow as completeMCPOAuthFlow,
+  getAuthorizationHeader as getMCPAuthorizationHeader,
+  getStoredTokens as getMCPStoredTokens,
+  getValidTokens as getMCPValidTokens,
+  hasStoredTokens as hasMCPStoredTokens,
   type MCPOAuthConfig,
   type MCPOAuthTokens,
-  refreshTokens,
-  removeTokens,
-  startOAuthFlow,
-  storeTokens,
+  refreshTokens as refreshMCPTokens,
+  removeTokens as removeMCPTokens,
+  startOAuthFlow as startMCPOAuthFlow,
+  storeTokens as storeMCPTokens,
 } from './oauth.js'
 
 // Types

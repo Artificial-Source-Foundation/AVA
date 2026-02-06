@@ -1,324 +1,123 @@
-# Component Architecture
+# Components
 
-> UI component hierarchy and patterns
-
----
-
-## Component Tree
-
-```
-App
-└── AppShell
-    ├── Sidebar
-    │   ├── Logo
-    │   ├── SessionList
-    │   │   └── SessionListItem (for each)
-    │   │       ├── Name + Preview
-    │   │       └── Actions (rename, archive)
-    │   └── Settings Button
-    │
-    ├── Main Area
-    │   ├── TabBar
-    │   │   ├── Session Tabs
-    │   │   └── Model Selector
-    │   │
-    │   └── ChatView
-    │       ├── MessageList
-    │       │   └── MessageBubble (for each)
-    │       │       ├── Avatar
-    │       │       ├── Content
-    │       │       ├── MessageActions
-    │       │       └── EditForm (when editing)
-    │       │
-    │       ├── TypingIndicator
-    │       │
-    │       └── MessageInput
-    │           ├── Textarea
-    │           └── Send Button
-    │
-    └── StatusBar
-        ├── Provider Status
-        └── Token Count
-
-Modals
-├── SettingsModal
-│   └── API Key Inputs
-└── ErrorBoundary (wraps App)
-```
+> Module breakdown of packages/core/
 
 ---
 
-## Component Categories
+## Agent System
 
-### Layout Components
+### Agent Loop (`agent/`)
+The autonomous execution loop. Receives a goal, iterates tool calls until done or limit hit.
+- `loop.ts` — AgentExecutor with doom loop detection (3x repeated calls)
+- `recovery.ts` — Error recovery with retry
+- `planner.ts` — Goal decomposition
+- `subagent.ts` — SubagentManager for spawning Junior Devs
+- `modes/plan.ts` — Plan mode (read-only tool restrictions)
+- `prompts/` — System prompts with model-specific variants (Claude XML, GPT native, Gemini)
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `AppShell` | `layout/` | Main layout container |
-| `Sidebar` | `layout/` | Left navigation panel |
-| `TabBar` | `layout/` | Top tab bar with model selector |
-| `StatusBar` | `layout/` | Bottom status bar |
+### Commander (`commander/`)
+Hierarchical delegation — Team Lead → Senior Leads → Junior Devs.
+- `registry.ts` — WorkerRegistry with phone book (LLM-based routing)
+- `executor.ts` — Worker execution with recursion prevention
+- `tool-wrapper.ts` — Creates delegate_* tools for each worker type
+- `workers/definitions.ts` — 5 built-in worker types (coder, tester, reviewer, researcher, documenter)
+- `parallel/` — Batch execution, DAG scheduler, conflict detection, semaphore
 
-### Chat Components
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `ChatView` | `chat/` | Main chat container |
-| `MessageList` | `chat/` | Renders message list |
-| `MessageBubble` | `chat/` | Single message display |
-| `MessageInput` | `chat/` | User input area |
-| `MessageActions` | `chat/` | Copy, edit, retry buttons |
-| `EditForm` | `chat/` | Inline message editing |
-| `TypingIndicator` | `chat/` | Streaming indicator |
-
-### Session Components
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `SessionList` | `sessions/` | Session sidebar list |
-| `SessionListItem` | `sessions/` | Single session item |
-
-### Settings Components
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `SettingsModal` | `settings/` | API key configuration |
-
-### Common Components
-
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `ErrorBoundary` | `common/` | Error handling wrapper |
+### Validator (`validator/`)
+QA verification pipeline, runs after worker completion.
+- `syntax.ts`, `typescript.ts` — Language validators
+- `lint.ts`, `test.ts`, `build.ts` — Tool validators
+- `self-review.ts` — LLM-based code review
 
 ---
 
-## Component Patterns
+## Tools (19)
 
-### Props Interface
+All tools use `defineTool()` with Zod schema validation.
 
-Every component defines a `Props` interface:
-
-```typescript
-interface MessageBubbleProps {
-  message: Message;
-  isEditing: boolean;
-  isRetrying: boolean;
-  isStreaming: boolean;
-  onStartEdit: () => void;
-  onSaveEdit: (content: string) => Promise<void>;
-  onCancelEdit: () => void;
-  onCopy: () => void;
-  onRetry: () => void;
-  onRegenerate: () => void;
-}
-
-export const MessageBubble: Component<MessageBubbleProps> = (props) => {
-  // ...
-};
-```
-
-### Conditional Rendering
-
-Use SolidJS `Show` for conditional content:
-
-```typescript
-<Show when={props.isEditing} fallback={<MessageContent />}>
-  <EditForm
-    content={props.message.content}
-    onSave={props.onSaveEdit}
-    onCancel={props.onCancelEdit}
-  />
-</Show>
-```
-
-### List Rendering
-
-Use SolidJS `For` for lists:
-
-```typescript
-<For each={session.messages()}>
-  {(message) => (
-    <MessageBubble
-      message={message}
-      isEditing={session.editingMessageId() === message.id}
-      // ...
-    />
-  )}
-</For>
-```
-
-### Local State
-
-Use `createSignal` for component-local state:
-
-```typescript
-const [isEditing, setIsEditing] = createSignal(false);
-const [editName, setEditName] = createSignal(props.session.name);
-```
-
-### Store Access
-
-Components access global state via hooks:
-
-```typescript
-import { useSession } from '../stores/session';
-
-export const SessionList: Component = () => {
-  const session = useSession();
-
-  return (
-    <For each={session.sessions()}>
-      {/* ... */}
-    </For>
-  );
-};
-```
+| Category | Tools |
+|----------|-------|
+| File ops | read_file, create_file, write_file, delete_file, edit, glob, grep, ls |
+| Execution | bash (PTY, requires_approval) |
+| Agents | task (spawn subagents), attempt_completion |
+| Planning | plan_enter, plan_exit |
+| User interaction | question |
+| Session | todoread, todowrite |
+| Web | websearch (Tavily/Exa), webfetch (HTML→Markdown) |
+| Browser | browser (Puppeteer: click, type, scroll, screenshot) |
 
 ---
 
-## Component Communication
+## Intelligence
 
-### Parent → Child (Props)
+### Codebase Understanding (`codebase/`)
+- File indexer with symbol extraction
+- Dependency graph with cycle detection
+- PageRank-based file ranking
+- Repo map generation with token budgets
 
-```typescript
-// Parent
-<MessageBubble
-  message={msg}
-  onRetry={() => handleRetry(msg.id)}
-/>
+### Context Management (`context/`)
+- Token tracking per message
+- Auto-compaction when approaching limit
+- Strategies: sliding-window, hierarchical, tool-truncation, split-point, verified-summarize
 
-// Child
-export const MessageBubble: Component<Props> = (props) => {
-  return <button onClick={props.onRetry}>Retry</button>;
-};
-```
+### Memory (`memory/`)
+- Episodic: session recordings and summaries
+- Semantic: learned facts via vector similarity
+- Procedural: recognized patterns
+- Consolidation: decay, merge, promote
 
-### Child → Parent (Callbacks)
-
-```typescript
-// Parent provides callback
-<SessionListItem
-  onRename={(name) => session.renameSession(id, name)}
-/>
-
-// Child calls it
-<button onClick={() => props.onRename(editName())}>Save</button>
-```
-
-### Shared State (Stores)
-
-```typescript
-// Any component can access and modify
-const session = useSession();
-
-// Read
-const messages = session.messages();
-
-// Write
-session.addMessage(newMsg);
-```
+### LSP (`lsp/`)
+CLI-based diagnostics for TypeScript, Python, Go, Rust, Java.
 
 ---
 
-## Styling Patterns
+## Extensibility
 
-### Tailwind Classes
+### Extensions (`extensions/`)
+Plugin install, enable, disable, reload. Manifest-based.
 
-All components use Tailwind for styling:
+### Custom Commands (`commands/`)
+TOML-defined commands with parameters.
 
-```typescript
-<div class="flex flex-col h-full bg-gray-900">
-  <div class="flex-1 overflow-y-auto p-4">
-    {/* content */}
-  </div>
-</div>
-```
+### Hooks (`hooks/`)
+Lifecycle hooks: PreToolUse, PostToolUse, TaskStart, TaskComplete, TaskCancel.
+Discovery from `~/.estela/hooks/` and `.estela/hooks/`.
 
-### Conditional Classes
+### Skills (`skills/`)
+Auto-invoked knowledge modules matching file glob patterns.
 
-```typescript
-<div class={`
-  p-3 rounded-lg cursor-pointer transition
-  ${props.isActive ? 'bg-blue-600' : 'hover:bg-gray-700'}
-`}>
-```
-
-### Group Hover
-
-For hover-revealed actions:
-
-```typescript
-<div class="group relative">
-  <span>{props.session.name}</span>
-  <div class="opacity-0 group-hover:opacity-100 flex gap-1">
-    <button>Edit</button>
-    <button>Delete</button>
-  </div>
-</div>
-```
+### MCP (`mcp/`)
+MCP protocol client with multi-server registry and tool bridge.
 
 ---
 
-## Error Handling
+## Safety
 
-### ErrorBoundary
+### Permissions (`permissions/`)
+13 built-in rules, risk assessment, auto-approval with path-aware checks, yolo mode.
 
-Wraps the app to catch rendering errors:
+### Policy Engine (`policy/`)
+Priority-based rules with wildcards and regex matching.
 
-```typescript
-<ErrorBoundary>
-  <App />
-</ErrorBoundary>
-```
-
-### Message-level Errors
-
-Each message can have an error state:
-
-```typescript
-<Show when={props.message.error}>
-  <div class="text-red-400">
-    {props.message.error.message}
-    <button onClick={props.onRetry}>Retry</button>
-  </div>
-</Show>
-```
+### Trusted Folders (`trust/`)
+Per-folder security levels.
 
 ---
 
-## File Structure
+## Infrastructure
 
-```
-src/components/
-├── index.ts           # Re-exports all components
-│
-├── chat/
-│   ├── index.ts       # Barrel export
-│   ├── ChatView.tsx
-│   ├── MessageList.tsx
-│   ├── MessageBubble.tsx
-│   ├── MessageInput.tsx
-│   ├── MessageActions.tsx
-│   ├── EditForm.tsx
-│   └── TypingIndicator.tsx
-│
-├── sessions/
-│   ├── index.ts
-│   ├── SessionList.tsx
-│   └── SessionListItem.tsx
-│
-├── settings/
-│   ├── index.ts
-│   └── SettingsModal.tsx
-│
-├── layout/
-│   ├── index.ts
-│   ├── AppShell.tsx
-│   ├── Sidebar.tsx
-│   ├── TabBar.tsx
-│   └── StatusBar.tsx
-│
-└── common/
-    ├── index.ts
-    └── ErrorBoundary.tsx
-```
+### LLM Providers (`llm/`)
+12+ providers: Anthropic, OpenAI, Google, Mistral, Groq, DeepSeek, xAI, Cohere, Together, Ollama, OpenRouter, GLM, Kimi.
+
+### Config (`config/`)
+Settings management with Zod validation, credentials storage, export/import.
+
+### Session (`session/`)
+State management with checkpoints, forking, file-based persistence, resume by ID.
+
+### Auth (`auth/`)
+OAuth + PKCE flow for provider authentication.
+
+### Message Bus (`bus/`)
+Pub/sub with correlation IDs and tool confirmation flow.

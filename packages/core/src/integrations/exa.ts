@@ -320,7 +320,7 @@ export function getExaClient(apiKey?: string): ExaClient {
     )
   }
 
-  if (!clientInstance || (apiKey && apiKey !== clientInstance['apiKey'])) {
+  if (!clientInstance || (apiKey && apiKey !== clientInstance.apiKey)) {
     clientInstance = new ExaClient(key)
   }
 

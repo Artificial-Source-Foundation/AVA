@@ -95,7 +95,7 @@ export async function loadPersistentApprovals(
   const filePath = getPermissionsFilePath(workspaceRoot)
 
   try {
-    const exists = await platform.fs.fileExists(filePath)
+    const exists = await platform.fs.exists(filePath)
     if (!exists) {
       cachedData = createDefaultData()
       currentWorkspaceRoot = workspaceRoot
@@ -133,7 +133,7 @@ export async function savePersistentApprovals(
 
   // Ensure directory exists
   const dirPath = `${workspaceRoot}/.estela`
-  const dirExists = await platform.fs.fileExists(dirPath)
+  const dirExists = await platform.fs.exists(dirPath)
   if (!dirExists) {
     // Create the directory by creating and writing a placeholder
     // Most platforms will create parent directories automatically

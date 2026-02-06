@@ -3,7 +3,7 @@
  * Find and load skills from configured directories
  */
 
-import * as path from 'path'
+import * as path from 'node:path'
 import { getPlatform } from '../platform.js'
 import { loadSkill, SKILL_FILE_NAME, validateSkill } from './loader.js'
 import type { Skill, SkillDiscoveryConfig, SkillDiscoveryResult } from './types.js'

@@ -289,7 +289,7 @@ export function trimTrailingWhitespace(content: string): string {
  */
 export function ensureTrailingNewline(content: string): string {
   const trimmed = content.replace(/\n+$/, '')
-  return trimmed + '\n'
+  return `${trimmed}\n`
 }
 
 // ============================================================================
@@ -360,7 +360,7 @@ export function hasMarkdownFences(content: string): boolean {
  */
 export function extractFenceLanguage(content: string): string | null {
   const match = content.match(FENCE_OPEN_REGEX)
-  if (match && match[1]) {
+  if (match?.[1]) {
     return match[1].trim()
   }
   return null

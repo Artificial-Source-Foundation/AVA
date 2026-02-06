@@ -246,7 +246,7 @@ const ProjectItem: Component<ProjectItemProps> = (props) => {
   return (
     <button
       type="button"
-      onClick={props.onSelect}
+      onClick={() => props.onSelect()}
       onMouseEnter={() => setShowActions(true)}
       onMouseLeave={() => setShowActions(false)}
       class={`

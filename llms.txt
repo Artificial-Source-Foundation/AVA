@@ -1,6 +1,6 @@
 # Estela
 
-> Multi-Agent AI Coding Assistant (~19,100 lines) - Tauri + SolidJS Desktop
+> Multi-Agent AI Coding Assistant - Tauri + SolidJS Desktop
 
 ## Quick Reference
 
@@ -33,7 +33,7 @@ Estela/
 ├── agent/         # Autonomous loop, subagents, recovery
 ├── commander/     # Hierarchical delegation, workers
 │   └── parallel/  # Concurrent execution, conflict detection
-├── tools/         # 15 tools (file, web, task)
+├── tools/         # 19 tools (file, web, task, browser, plan)
 ├── context/       # Token tracking, compaction
 ├── memory/        # Episodic, semantic, procedural
 ├── config/        # Settings, credentials
@@ -54,25 +54,29 @@ Estela/
 
 ---
 
-## Tools (15)
+## Tools (19)
 
 | Tool | Purpose |
 |------|---------|
-| glob | Find files by pattern |
-| read | Read file contents |
-| grep | Search file contents |
-| create | Create new file |
-| write | Overwrite file |
-| delete | Delete file |
-| bash | Execute shell commands |
+| read_file | Read file contents |
+| create_file | Create new file |
+| write_file | Overwrite file |
+| delete_file | Delete file |
 | edit | Fuzzy-matching file editing |
+| glob | Find files by pattern |
+| grep | Search file contents |
 | ls | Directory listing with tree |
+| bash | Execute shell commands (PTY supported) |
+| question | Ask user clarifying questions |
 | todoread | Read session todo list |
 | todowrite | Update session todo list |
-| question | Ask user clarifying questions |
+| task | Spawn subagents |
 | websearch | Web search (Tavily, Exa) |
 | webfetch | Fetch and process web pages |
-| task | Spawn subagents |
+| browser | Puppeteer browser automation |
+| attempt_completion | Finish task with summary |
+| plan_enter | Enter plan mode |
+| plan_exit | Exit plan mode |
 
 ---
 
@@ -101,8 +105,8 @@ CLI/Frontend → AgentExecutor.run() → Tools → LLM → Response
 
 ## Status
 
-- **Epics Complete**: 1-17 (all core features)
-- **Next**: Epic 18 - Tauri Desktop GUI
+- **Epics Complete**: 1-21 (core + MVP polish + browser + providers)
+- **Next**: Epic 22 - Tauri Desktop GUI
 
 ---
 
@@ -111,5 +115,5 @@ CLI/Frontend → AgentExecutor.run() → Tools → LLM → Response
 - [CLAUDE.md](CLAUDE.md) - Memory bank workflow
 - [AGENTS.md](AGENTS.md) - Universal AI instructions
 - [Memory Bank](docs/memory-bank/) - Current state
-- [Roadmap](docs/ROADMAP.md) - All 17 epics
+- [Roadmap](docs/ROADMAP.md) - Epics 1-21 complete
 - [Architecture](docs/memory-bank/techContext.md) - Technical details

@@ -50,6 +50,15 @@ export interface MCPOAuthTokens {
   scopes: string[]
 }
 
+/** OAuth token response from server */
+interface OAuthTokenResponse {
+  access_token: string
+  refresh_token?: string
+  expires_in?: number
+  token_type?: string
+  scope?: string
+}
+
 /**
  * OAuth state stored for verification
  */
@@ -104,7 +113,7 @@ async function loadTokens(workspaceRoot: string): Promise<TokenStorage> {
   const filePath = `${workspaceRoot}/${TOKEN_FILE}`
 
   try {
-    const exists = await platform.fs.fileExists(filePath)
+    const exists = await platform.fs.exists(filePath)
     if (!exists) {
       tokenCache = { version: TOKEN_STORAGE_VERSION, tokens: {}, lastModified: Date.now() }
       cacheWorkspaceRoot = workspaceRoot
@@ -276,7 +285,7 @@ export async function completeOAuthFlow(
     throw new Error(`Token exchange failed: ${error}`)
   }
 
-  const data = await response.json()
+  const data = (await response.json()) as OAuthTokenResponse
 
   const tokens: MCPOAuthTokens = {
     accessToken: data.access_token,
@@ -323,7 +332,7 @@ export async function refreshTokens(
     throw new Error(`Token refresh failed: ${error}`)
   }
 
-  const data = await response.json()
+  const data = (await response.json()) as OAuthTokenResponse
 
   const tokens: MCPOAuthTokens = {
     accessToken: data.access_token,

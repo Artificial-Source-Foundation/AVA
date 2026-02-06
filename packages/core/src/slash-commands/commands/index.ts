@@ -21,7 +21,7 @@ export const newTaskCommand: SlashCommand = {
   usage: '/newtask <task description>',
   examples: ['/newtask Implement user authentication', '/newtask Fix bug in login form'],
   execute: async (context: CommandContext): Promise<CommandResult> => {
-    const { args, rawArgs } = context
+    const { rawArgs } = context
 
     if (!rawArgs) {
       return {

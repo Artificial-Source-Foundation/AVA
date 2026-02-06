@@ -1,25 +1,19 @@
 # Estela
 
-> Multi-Agent AI Coding Assistant (~19,100 lines)
+> The Obsidian of AI Coding — Desktop AI coding app with a virtual dev team and community plugins
 
 ---
 
-## Memory Bank
+## What Is Estela
 
-**IMPORTANT: Read these files at the start of every session:**
+A **desktop-first AI coding app** (Tauri + SolidJS) for developers and vibe coders. Not an IDE replacement — an AI companion with:
 
-| File | Purpose | Update |
-|------|---------|--------|
-| [`activeContext.md`](docs/memory-bank/activeContext.md) | Current tasks & focus | Every session |
-| [`progress.md`](docs/memory-bank/progress.md) | What's been done | Every session |
-| [`techContext.md`](docs/memory-bank/techContext.md) | Architecture & patterns | When arch changes |
-| [`projectbrief.md`](docs/memory-bank/projectbrief.md) | What is Estela | Rarely |
+- **Dev Team System** — Visible Team Lead → Senior Leads → Junior Devs hierarchy
+- **Multi-Provider** — 12+ LLM providers, use the best model for each task
+- **Plugin Ecosystem** — Obsidian-style, easy to create, discover, and install
+- **Open Source** — Community-first, MIT license
 
-**Workflow:**
-1. Start → Read `activeContext.md`
-2. Work → Update as focus changes
-3. End → Update `progress.md`
-4. Context full? → "Update memory bank" then `/clear`
+See [`docs/VISION.md`](docs/VISION.md) for the full product vision.
 
 ---
 
@@ -27,21 +21,21 @@
 
 ```bash
 # Development
-npm run tauri dev      # Run app
-npm run lint           # Oxlint + ESLint
-npm run lint:fix       # Auto-fix lint issues
-npm run format         # Biome format
-npx tsc --noEmit       # Type check
+npm run tauri dev        # Run desktop app
+npm run build:packages   # Build core + platform packages
+npm run build:cli        # Build CLI (secondary interface)
+npm run lint             # Oxlint + ESLint
+npm run format           # Biome format
+npx tsc --noEmit         # Type check
 
 # Testing
-npm run test           # Vitest watch
-npm run test:run       # Single run
-npm run test:coverage  # Coverage report
+npm run test             # Vitest watch
+npm run test:run         # Single run
+npx vitest run <path>    # Run specific test file
 
 # Code Quality
-npm run knip           # Dead code detection
-npm run knip:fix       # Remove dead code
-npm run analyze        # Bundle size analysis
+npm run knip             # Dead code detection
+npm run analyze          # Bundle size analysis
 ```
 
 ---
@@ -49,91 +43,137 @@ npm run analyze        # Bundle size analysis
 ## Architecture
 
 ### Project Structure
+
 ```
 Estela/
+├── src/                   # Desktop app (Tauri + SolidJS) ← PRIMARY
+├── src-tauri/             # Rust backend
 ├── packages/
-│   ├── core/              # Shared business logic (~15,400 lines)
+│   ├── core/              # Shared business logic (29,500+ lines)
 │   ├── platform-node/     # Node.js implementations
 │   └── platform-tauri/    # Tauri implementations
-├── cli/                   # CLI with ACP agent
-└── src/                   # Tauri SolidJS frontend (~3,700 lines)
+└── cli/                   # CLI interface (secondary)
 ```
 
-### Core Modules (`packages/core/src/`)
+### The Dev Team (Agent System)
+
 ```
-├── agent/         # Autonomous loop, subagents, recovery
-├── commander/     # Hierarchical delegation, workers
-│   └── parallel/  # Concurrent execution, conflict detection
-├── tools/         # 15 tools (file, web, task)
-├── context/       # Token tracking, compaction strategies
+Team Lead (AgentExecutor + Commander)
+    │
+    ├─→ Senior Frontend Lead (Worker with filtered tools)
+    │   ├─→ Jr. Dev: Component work
+    │   └─→ Jr. Dev: Styling
+    │
+    ├─→ Senior Backend Lead (Worker with filtered tools)
+    │   ├─→ Jr. Dev: API routes
+    │   └─→ Jr. Dev: Database
+    │
+    └─→ Validator (QA verification)
+```
+
+**In the UI:**
+- Main chat shows Team Lead planning and delegating
+- Agent cards show Senior Leads and Junior Devs working
+- Workers auto-report when done; user can click into any agent to chat directly
+- User can intervene, fix issues, and send results back up the chain
+
+**In the code:**
+- `packages/core/src/commander/` — Hierarchical delegation, worker definitions
+- `packages/core/src/agent/` — Agent loop, planning, recovery, subagents
+- `packages/core/src/validator/` — QA pipeline (syntax, types, lint, test, self-review)
+
+### Core Modules (`packages/core/src/`)
+
+```
+Agent System:
+├── agent/         # Agent loop, prompts, modes, subagents
+├── commander/     # Team Lead → Senior Leads → Junior Devs
+├── validator/     # QA pipeline
+
+Tools (19):
+├── tools/         # read, write, edit, glob, grep, bash, browser, etc.
+
+Intelligence:
+├── codebase/      # Repo map, symbols, PageRank
+├── context/       # Token tracking, compaction, compression
 ├── memory/        # Episodic, semantic, procedural memory
-├── config/        # Settings, credentials, validation
-├── validator/     # QA pipeline (syntax, types, lint, test)
-├── codebase/      # Repo understanding, PageRank, symbols
-├── permissions/   # Safety, risk assessment, CorrectedError
-├── session/       # State management, checkpoints, forking
-├── mcp/           # MCP protocol client and registry
-├── diff/          # Change tracking, unified diffs
-├── git/           # Snapshots, rollback
-├── question/      # LLM-to-user questions
-├── instructions/  # Project/directory instructions
-├── scheduler/     # Background task scheduling
-├── llm/           # Provider clients
-├── models/        # Model registry, pricing
-├── auth/          # OAuth, PKCE, credentials
-└── types/         # Shared TypeScript types
+├── lsp/           # Language Server Protocol (5 languages)
+
+Extensibility:
+├── extensions/    # Plugin system (install, enable, reload)
+├── commands/      # TOML custom commands
+├── hooks/         # Lifecycle hooks (PreToolUse, PostToolUse, etc.)
+├── mcp/           # MCP protocol client
+├── skills/        # Auto-invoked knowledge modules
+
+Safety:
+├── permissions/   # Risk assessment, auto-approval
+├── policy/        # Priority rules, wildcards, regex
+├── trust/         # Per-folder security levels
+
+Infrastructure:
+├── llm/           # 12+ provider clients
+├── config/        # Settings, credentials
+├── session/       # State, checkpoints, forking, resume
+├── auth/          # OAuth + PKCE
+├── bus/           # Message bus (pub/sub)
+
+Protocols (lower priority):
+├── acp/           # Editor integration (VS Code backend)
+├── a2a/           # Agent-to-agent HTTP server
 ```
 
 ### Data Flow
+
 ```
-CLI/Frontend → AgentExecutor.run() → Tools → LLM → Response
-                    ↓
-              Commander delegates
-                    ↓
-        Workers (parallel) → Validator → Results
+Desktop App / CLI
+    → Team Lead (AgentExecutor)
+        → Delegates to Senior Leads (Workers)
+            → Senior Leads spawn Junior Devs (Sub-workers)
+                → Execute tools → LLM → Results
+            → Auto-report back to Team Lead
+        → Validator verifies results
+    → Response shown in UI
 ```
 
 ---
 
-## Tools (15 total)
+## Tools (19)
 
 | Tool | Purpose |
 |------|---------|
+| read_file | Read file contents |
+| create_file | Create new file |
+| write_file | Overwrite file |
+| delete_file | Delete file |
+| edit | Fuzzy text edits (8 strategies) |
 | glob | Find files by pattern |
-| read | Read file contents |
 | grep | Search file contents |
-| create | Create new file |
-| write | Overwrite file |
-| delete | Delete file |
-| bash | Execute shell commands |
-| edit | Fuzzy-matching file editing |
-| ls | Directory listing with tree |
+| ls | Directory listing |
+| bash | Shell commands (PTY, requires approval) |
+| question | Ask user clarifying questions |
 | todoread | Read session todo list |
 | todowrite | Update session todo list |
-| question | Ask user clarifying questions |
-| websearch | Web search (Tavily/Exa) |
-| webfetch | Fetch and process web pages |
-| task | Spawn subagents for complex tasks |
+| task | Spawn subagents |
+| websearch | Web search (Tavily, Exa) |
+| webfetch | Fetch + convert web pages |
+| browser | Puppeteer browser automation |
+| attempt_completion | Finish task with summary |
+| plan_enter | Enter plan mode |
+| plan_exit | Exit plan mode |
 
 ---
 
-## Planning
+## Plugin System
 
-| Doc | Purpose |
-|-----|---------|
-| [`ROADMAP.md`](docs/ROADMAP.md) | High-level epic overview (17 complete) |
-| [`development/completed/`](docs/development/completed/) | All completed sprints (1-17) |
+Two types of user-facing extensions:
 
----
+| Type | Trigger | Use Case |
+|------|---------|----------|
+| **Skills** | Auto-invoked by context (file globs, project type) | "When editing .tsx files, follow React patterns" |
+| **Commands** | User types `/command-name` | "/deploy", "/test", "/review" |
 
-## Reference Code
-
-**IMPORTANT:** Compare implementations against SOTA projects in `docs/reference-code/`:
-
-| Project | Stars | Key Patterns |
-|---------|-------|--------------|
-| OpenCode | 70k+ | Tool registry, fuzzy edit, metadata streaming |
-| Gemini CLI | 50k+ | ToolBuilder, workers-as-tools, error types |
+Plugins bundle skills + commands + hooks + MCP servers into a single installable package.
 
 ---
 
@@ -142,18 +182,53 @@ CLI/Frontend → AgentExecutor.run() → Tools → LLM → Response
 - TypeScript strict, no `any`
 - Max 300 lines per file
 - kebab-case files, camelCase functions, PascalCase types
+- Tests use Vitest: `npx vitest run <path>`
 
 ---
 
-## Tooling Stack
+## Important Notes
+
+- **Desktop app is Priority 1** — CLI and protocols are secondary
+- **Never use Puppeteer to test the Tauri app** — Tauri uses native webview
+- The `browser` tool is for web pages only; use `npm run tauri dev` for UI testing
+- Build sequence: `npm run build:packages` → `npm run build:cli`
+- Core tsconfig excludes test files from build: `"exclude": ["src/**/*.test.ts"]`
+- `export *` from multiple modules can cause name collisions — use `as` renames
+
+---
+
+## Naming Convention
+
+| Old Name | New Name | Role |
+|----------|----------|------|
+| Commander | Team Lead | Plans, delegates, coordinates |
+| Worker | Senior Lead | Domain specialist, leads a group |
+| Operator | Junior Dev | Executes specific file-level tasks |
+| Validator | Validator | QA verification (unchanged) |
+
+---
+
+## Key Docs
+
+| Doc | Purpose |
+|-----|---------|
+| [`docs/VISION.md`](docs/VISION.md) | Product vision and roadmap |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Epic overview and progress |
+| [`docs/memory-bank/activeContext.md`](docs/memory-bank/activeContext.md) | Current session focus |
+| [`docs/memory-bank/progress.md`](docs/memory-bank/progress.md) | What's been built |
+| [`docs/architecture/`](docs/architecture/) | System design |
+| [`docs/frontend/`](docs/frontend/) | Desktop app UI |
+
+---
+
+## Tooling
 
 | Tool | Purpose |
 |------|---------|
-| Biome | Fast formatter + linter |
+| Biome | Formatter + linter |
 | Oxlint | Fast linter (50-100x ESLint) |
 | ESLint | SolidJS-specific rules |
 | Lefthook | Git hooks (pre-commit, commit-msg) |
 | commitlint | Conventional commit validation |
 | Vitest | Test runner |
 | Knip | Dead code finder |
-| Renovate | Auto dependency updates |

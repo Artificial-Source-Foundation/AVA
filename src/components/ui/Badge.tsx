@@ -4,7 +4,7 @@
  * Small labels for status, tags, and counts.
  */
 
-import { type Component, type JSX, splitProps } from 'solid-js'
+import { type Component, type JSX, Show, splitProps } from 'solid-js'
 
 export interface BadgeProps {
   /** Badge variant */
@@ -17,10 +17,19 @@ export interface BadgeProps {
   class?: string
   /** Dot indicator instead of text */
   dot?: boolean
+  /** Pulse animation (for active/new indicators) */
+  pulse?: boolean
 }
 
 export const Badge: Component<BadgeProps> = (props) => {
-  const [local, others] = splitProps(props, ['variant', 'size', 'children', 'class', 'dot'])
+  const [local, others] = splitProps(props, [
+    'variant',
+    'size',
+    'children',
+    'class',
+    'dot',
+    'pulse',
+  ])
 
   const variant = () => local.variant ?? 'default'
   const size = () => local.size ?? 'md'
@@ -37,50 +46,54 @@ export const Badge: Component<BadgeProps> = (props) => {
   }
 
   const sizeStyles = {
-    sm: 'text-2xs px-1.5 py-0.5',
-    md: 'text-xs px-2 py-0.5',
-    lg: 'text-sm px-2.5 py-1',
+    sm: 'text-[10px] px-1.5 py-px',
+    md: 'text-[11px] px-2 py-0.5',
+    lg: 'text-xs px-2.5 py-0.5',
   }
 
-  if (local.dot) {
-    const dotColors = {
-      default: 'bg-[var(--accent)]',
-      secondary: 'bg-[var(--text-tertiary)]',
-      success: 'bg-[var(--success)]',
-      warning: 'bg-[var(--warning)]',
-      error: 'bg-[var(--error)]',
-      info: 'bg-[var(--info)]',
-      outline: 'bg-[var(--text-tertiary)]',
-    }
-
-    return (
-      <span
-        class={`
-          inline-block
-          rounded-full
-          ${dotColors[variant()]}
-          ${size() === 'sm' ? 'h-1.5 w-1.5' : size() === 'md' ? 'h-2 w-2' : 'h-2.5 w-2.5'}
-          ${local.class ?? ''}
-        `}
-        {...others}
-      />
-    )
+  const dotColors = {
+    default: 'bg-[var(--accent)]',
+    secondary: 'bg-[var(--text-tertiary)]',
+    success: 'bg-[var(--success)]',
+    warning: 'bg-[var(--warning)]',
+    error: 'bg-[var(--error)]',
+    info: 'bg-[var(--info)]',
+    outline: 'bg-[var(--text-tertiary)]',
   }
 
   return (
-    <span
-      class={`
-        inline-flex items-center justify-center
-        font-medium
-        rounded-[var(--radius-full)]
-        whitespace-nowrap
-        ${variantStyles[variant()]}
-        ${sizeStyles[size()]}
-        ${local.class ?? ''}
-      `}
-      {...others}
+    <Show
+      when={!local.dot}
+      fallback={
+        <span
+          class={`
+            inline-block
+            rounded-full
+            ${dotColors[variant()]}
+            ${size() === 'sm' ? 'h-1.5 w-1.5' : size() === 'md' ? 'h-2 w-2' : 'h-2.5 w-2.5'}
+            ${local.pulse ? 'animate-pulse-subtle' : ''}
+            ${local.class ?? ''}
+          `}
+          {...others}
+        />
+      }
     >
-      {local.children}
-    </span>
+      <span
+        class={`
+          inline-flex items-center justify-center
+          font-[var(--font-ui-mono)]
+          font-medium tracking-wide
+          rounded-[var(--radius-md)]
+          whitespace-nowrap
+          ${variantStyles[variant()]}
+          ${sizeStyles[size()]}
+          ${local.pulse ? 'animate-pulse-subtle' : ''}
+          ${local.class ?? ''}
+        `}
+        {...others}
+      >
+        {local.children}
+      </span>
+    </Show>
   )
 }

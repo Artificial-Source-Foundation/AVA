@@ -25,6 +25,7 @@ export const SidebarSessions: Component = () => {
     switchSession,
     deleteSessionPermanently,
     renameSession,
+    duplicateSession,
   } = useSession()
   const [search, setSearch] = createSignal('')
   const [contextMenu, setContextMenu] = createSignal<ContextMenuState | null>(null)
@@ -82,11 +83,7 @@ export const SidebarSessions: Component = () => {
         label: 'Duplicate',
         icon: Copy,
         action: () => {
-          // Copy session name for a new chat
-          const session = sessions().find((s) => s.id === sessionId)
-          if (session) {
-            navigator.clipboard.writeText(session.name)
-          }
+          duplicateSession(sessionId)
         },
       },
       { label: '', action: () => {}, separator: true },

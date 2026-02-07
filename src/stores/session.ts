@@ -13,6 +13,7 @@ import {
   createSession as dbCreateSession,
   deleteMemoryItem as dbDeleteMemoryItem,
   deleteSession as dbDeleteSession,
+  duplicateSessionMessages as dbDuplicateSessionMessages,
   updateSession as dbUpdateSession,
   updateTerminalExecution as dbUpdateTerminalExecution,
   getFileOperations,
@@ -350,6 +351,45 @@ export function useSession() {
           localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
         }
       }
+    },
+
+    /**
+     * Duplicate a session with all its messages
+     */
+    duplicateSession: async (sourceSessionId: string): Promise<void> => {
+      const source = sessions().find((s) => s.id === sourceSessionId)
+      if (!source) return
+
+      const { currentProject } = useProject()
+      const projectId = currentProject()?.id
+
+      // Create new session with "(copy)" suffix
+      const newSession = await dbCreateSession(`${source.name} (copy)`, projectId)
+
+      // Copy all messages
+      await dbDuplicateSessionMessages(sourceSessionId, newSession.id)
+
+      // Add to session list with source's message count
+      const sessionWithStats: SessionWithStats = {
+        ...newSession,
+        messageCount: source.messageCount,
+        totalTokens: source.totalTokens,
+        lastPreview: source.lastPreview,
+      }
+      setSessions((prev) => [sessionWithStats, ...prev])
+
+      // Switch to the new session
+      setCurrentSession(newSession)
+      setIsLoadingMessages(true)
+      try {
+        const dbMessages = await getMessages(newSession.id)
+        setMessages(dbMessages)
+      } catch {
+        setMessages([])
+      } finally {
+        setIsLoadingMessages(false)
+      }
+      localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
     },
 
     /**

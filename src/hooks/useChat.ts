@@ -6,9 +6,12 @@
 import { executeTool, getToolDefinitions, resetToolCallCount, type ToolContext } from '@estela/core'
 import { createSignal } from 'solid-js'
 import { DEFAULTS } from '../config/constants'
+import { checkAutoApproval, createApprovalGate } from '../lib/tool-approval'
 import { saveMessage, updateMessage } from '../services/database'
 import { createClient, getProviderForModel, type LLMClient } from '../services/llm/bridge'
+import { useProject } from '../stores/project'
 import { useSession } from '../stores/session'
+import { useSettings } from '../stores/settings'
 import type { Message } from '../types'
 import type { LLMProvider, StreamError, ToolUseBlock } from '../types/llm'
 
@@ -27,13 +30,6 @@ interface StreamOptions {
   enableTools?: boolean
 }
 
-/** Get the working directory for tool execution */
-function getWorkingDirectory(): string {
-  // TODO: Use Tauri path API to get actual working directory
-  // For now, default to process.cwd() equivalent or user's home
-  return '.'
-}
-
 // ============================================================================
 // Hook Implementation
 // ============================================================================
@@ -45,6 +41,9 @@ export function useChat() {
 
   const abortRef = { current: null as AbortController | null }
   const session = useSession()
+  const { currentProject } = useProject()
+  const settings = useSettings()
+  const approval = createApprovalGate()
 
   // ==========================================================================
   // Core Streaming Function (Internal)
@@ -77,7 +76,7 @@ export function useChat() {
     // Tool execution context
     const toolCtx: ToolContext = {
       sessionId: options.sessionId,
-      workingDirectory: getWorkingDirectory(),
+      workingDirectory: currentProject()?.directory || '.',
       signal: options.signal,
     }
 
@@ -140,6 +139,29 @@ export function useChat() {
               }> = []
 
               for (const toolUse of pendingToolUses) {
+                // Check auto-approval before executing
+                const autoResult = checkAutoApproval(
+                  toolUse.name,
+                  toolUse.input as Record<string, unknown>,
+                  settings.isToolAutoApproved
+                )
+
+                if (!autoResult.approved) {
+                  const approved = await approval.requestApproval(
+                    toolUse.name,
+                    toolUse.input as Record<string, unknown>
+                  )
+                  if (!approved) {
+                    toolResults.push({
+                      type: 'tool_result',
+                      tool_use_id: toolUse.id,
+                      content: 'User denied tool execution',
+                      is_error: true,
+                    })
+                    continue
+                  }
+                }
+
                 const result = await executeTool(toolUse.name, toolUse.input, toolCtx)
                 toolResults.push({
                   type: 'tool_result',
@@ -399,6 +421,7 @@ export function useChat() {
     isStreaming,
     error,
     currentProvider,
+    pendingApproval: approval.pendingApproval,
 
     // Actions
     sendMessage,
@@ -407,5 +430,6 @@ export function useChat() {
     retryMessage,
     editAndResend,
     regenerateResponse,
+    resolveApproval: approval.resolveApproval,
   }
 }

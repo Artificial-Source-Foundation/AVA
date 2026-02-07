@@ -6,8 +6,9 @@
  * Includes tool approval dialog for agent mode.
  */
 
-import { type Component, createEffect, on } from 'solid-js'
+import { type Component, createEffect, createMemo, on } from 'solid-js'
 import { useAgent } from '../../hooks/useAgent'
+import { useChat } from '../../hooks/useChat'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
 import { ToolApprovalDialog } from '../dialogs/ToolApprovalDialog'
@@ -18,6 +19,10 @@ export const ChatView: Component = () => {
   const { currentSession, loadSessionMessages, clearSession } = useSession()
   const { addAutoApprovedTool } = useSettings()
   const agent = useAgent()
+  const chat = useChat()
+
+  // Merge approval from both agent and chat modes
+  const activeApproval = createMemo(() => chat.pendingApproval() || agent.pendingApproval())
 
   // Load messages when session changes
   createEffect(
@@ -35,10 +40,16 @@ export const ChatView: Component = () => {
 
   // Handle tool approval resolution
   const handleApprovalResolve = (approved: boolean, alwaysAllow?: boolean) => {
-    if (approved && alwaysAllow && agent.pendingApproval()) {
-      addAutoApprovedTool(agent.pendingApproval()!.toolName)
+    const request = activeApproval()
+    if (approved && alwaysAllow && request) {
+      addAutoApprovedTool(request.toolName)
     }
-    agent.resolveApproval(approved)
+    // Resolve whichever approval is active
+    if (chat.pendingApproval()) {
+      chat.resolveApproval(approved)
+    } else {
+      agent.resolveApproval(approved)
+    }
   }
 
   return (
@@ -50,7 +61,7 @@ export const ChatView: Component = () => {
       <MessageInput />
 
       {/* Tool Approval Dialog */}
-      <ToolApprovalDialog request={agent.pendingApproval()} onResolve={handleApprovalResolve} />
+      <ToolApprovalDialog request={activeApproval()} onResolve={handleApprovalResolve} />
     </div>
   )
 }

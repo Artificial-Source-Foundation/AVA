@@ -196,6 +196,22 @@ export async function getMessages(sessionId: string): Promise<Message[]> {
 }
 
 /**
+ * Duplicate all messages from one session to another
+ */
+export async function duplicateSessionMessages(
+  sourceSessionId: string,
+  targetSessionId: string
+): Promise<void> {
+  const database = await initDatabase()
+  await database.execute(
+    `INSERT INTO messages (id, session_id, role, content, agent_id, created_at, tokens_used, metadata)
+     SELECT hex(randomblob(16)), ?, role, content, agent_id, created_at, tokens_used, metadata
+     FROM messages WHERE session_id = ? ORDER BY created_at ASC`,
+    [targetSessionId, sourceSessionId]
+  )
+}
+
+/**
  * Update a message
  */
 export async function updateMessage(

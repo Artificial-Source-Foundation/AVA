@@ -17,12 +17,20 @@ import {
   type ToolCallInfo,
 } from '@estela/core'
 import { batch, createSignal } from 'solid-js'
+import {
+  type ApprovalRequest,
+  checkAutoApproval as sharedCheckAutoApproval,
+} from '../lib/tool-approval'
 import { saveMessage, updateMessage } from '../services/database'
 import { logError, logInfo, logWarn } from '../services/logger'
+import { useProject } from '../stores/project'
 import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
 import { useTeam } from '../stores/team'
 import type { Message } from '../types'
+
+// Re-export for consumers that import from useAgent
+export type { ApprovalRequest }
 
 // ============================================================================
 // Types
@@ -39,17 +47,6 @@ export interface ToolActivity {
   startedAt: number
   completedAt?: number
   durationMs?: number
-}
-
-/** Approval request for dangerous operations */
-export interface ApprovalRequest {
-  id: string
-  type: 'file' | 'command' | 'browser' | 'mcp'
-  toolName: string
-  args: Record<string, unknown>
-  description: string
-  riskLevel: 'low' | 'medium' | 'high' | 'critical'
-  resolve: (approved: boolean) => void
 }
 
 /** Agent state */
@@ -86,6 +83,7 @@ export function useAgent() {
   const session = useSession()
   const settingsRef = useSettings()
   const teamStore = useTeam()
+  const { currentProject } = useProject()
 
   // ==========================================================================
   // Team Bridge — maps agent events to team hierarchy
@@ -354,7 +352,7 @@ export function useAgent() {
       // Build agent inputs
       const inputs: AgentInputs = {
         goal,
-        cwd: process.cwd?.() ?? '.',
+        cwd: currentProject()?.directory || '.',
         context: undefined, // Could add project context here
       }
 
@@ -431,44 +429,13 @@ export function useAgent() {
 
   /**
    * Check if a tool would be auto-approved
-   * Checks user's "always allow" list from settings, then falls back to heuristics.
+   * Delegates to shared logic with user's "always allow" list from settings.
    */
   function checkAutoApproval(
     toolName: string,
-    _args: Record<string, unknown>
+    args: Record<string, unknown>
   ): { approved: boolean; reason?: string } {
-    // Check user's persistent "always allow" list from settings
-    if (settingsRef.isToolAutoApproved(toolName)) {
-      return { approved: true, reason: 'User always-allowed' }
-    }
-
-    // Read-only tools are always auto-approved
-    const readOnlyTools = ['glob', 'grep', 'ls', 'websearch', 'webfetch', 'todoread', 'read_file']
-    if (readOnlyTools.includes(toolName)) {
-      return { approved: true, reason: 'Read-only tool' }
-    }
-
-    // File write operations need approval
-    if (['create_file', 'write_file', 'delete_file', 'edit'].includes(toolName)) {
-      return { approved: false, reason: 'File write operation' }
-    }
-
-    // Bash commands need approval
-    if (toolName === 'bash') {
-      return { approved: false, reason: 'Shell command' }
-    }
-
-    // Browser automation needs approval
-    if (toolName === 'browser') {
-      return { approved: false, reason: 'Browser automation' }
-    }
-
-    // MCP tools need approval
-    if (toolName.startsWith('mcp_')) {
-      return { approved: false, reason: 'MCP tool' }
-    }
-
-    return { approved: false, reason: 'Unknown tool' }
+    return sharedCheckAutoApproval(toolName, args, settingsRef.isToolAutoApproved)
   }
 
   /**

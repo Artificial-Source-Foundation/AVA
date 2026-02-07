@@ -31,20 +31,21 @@ QA verification pipeline, runs after worker completion.
 
 ---
 
-## Tools (19)
+## Tools (22)
 
 All tools use `defineTool()` with Zod schema validation.
 
 | Category | Tools |
 |----------|-------|
-| File ops | read_file, create_file, write_file, delete_file, edit, glob, grep, ls |
-| Execution | bash (PTY, requires_approval) |
+| File ops | read_file, create_file, write_file, delete_file, edit, apply_patch, multiedit, glob, grep, ls |
+| Execution | bash (PTY, requires_approval), batch |
 | Agents | task (spawn subagents), attempt_completion |
 | Planning | plan_enter, plan_exit |
 | User interaction | question |
 | Session | todoread, todowrite |
 | Web | websearch (Tavily/Exa), webfetch (HTML→Markdown) |
 | Browser | browser (Puppeteer: click, type, scroll, screenshot) |
+| Intelligence | codesearch, skill |
 
 ---
 

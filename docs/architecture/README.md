@@ -38,7 +38,7 @@ All business logic lives here. Platform-agnostic — works in both Tauri and Nod
 | `commander/` | ~2,400 | Team Lead → Senior Leads → Junior Devs delegation |
 | `validator/` | ~1,000 | QA pipeline (syntax, types, lint, test, self-review) |
 
-**Tools** (19 total):
+**Tools** (22 total):
 | Module | Lines | Purpose |
 |--------|-------|---------|
 | `tools/` | ~4,500 | read, write, edit, glob, grep, bash, browser, task, etc. |

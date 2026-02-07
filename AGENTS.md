@@ -107,7 +107,7 @@ Commander → delegate_coder → Worker AgentExecutor
 
 ---
 
-## Tools (19 total)
+## Tools (22 total)
 
 | Tool | File | Purpose |
 |------|------|---------|
@@ -116,11 +116,16 @@ Commander → delegate_coder → Worker AgentExecutor
 | write_file | write.ts | Overwrite file |
 | delete_file | delete.ts | Delete file |
 | edit | edit.ts | Fuzzy text edits |
+| apply_patch | apply-patch/index.ts | Apply unified diffs to files |
+| multiedit | multiedit.ts | Edit multiple files at once |
 | glob | glob.ts | Find files by pattern |
 | grep | grep.ts | Search file contents |
 | ls | ls.ts | Directory listing |
 | bash | bash.ts | Execute shell commands (PTY supported) |
+| batch | batch.ts | Batch execute multiple tools |
+| codesearch | codesearch.ts | Search codebase with context |
 | question | question.ts | Ask user clarifying questions |
+| skill | skill.ts | Auto-invoke skills from plugins |
 | todoread | todo.ts | Read session todo list |
 | todowrite | todo.ts | Update session todo list |
 | task | task.ts | Spawn subagents |
@@ -247,6 +252,6 @@ Commander → delegate_coder → Worker AgentExecutor
 ## Current Status
 
 - **Core**: Tool registry, permissions, PTY, compaction, session persistence, LSP, browser tool, plan mode
-- **Tools**: 19 registered
+- **Tools**: 22 registered
 - **Modules**: 22 core modules + platform abstraction
 - **Next**: Frontend polish + UX integration of approvals/metadata (see `docs/ROADMAP.md`)

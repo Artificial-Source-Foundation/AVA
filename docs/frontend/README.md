@@ -90,7 +90,6 @@ src/
 │   │   ├── ActivityBar.tsx     # Left icon bar
 │   │   ├── MainArea.tsx        # Center content
 │   │   ├── SidebarPanel.tsx    # Right sidebar
-│   │   ├── BottomPanel.tsx     # Bottom tabs
 │   │   └── StatusBar.tsx       # Monospace status line
 │   ├── chat/
 │   │   ├── MessageBubble.tsx   # Chat messages

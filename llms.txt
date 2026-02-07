@@ -20,7 +20,7 @@ Read: `CLAUDE.md` for memory bank workflow
 ```
 Estela/
 ├── packages/
-│   ├── core/              # Business logic (~15,400 lines)
+│   ├── core/              # Business logic (29,500+ lines)
 │   ├── platform-node/     # Node.js implementations
 │   └── platform-tauri/    # Tauri implementations
 ├── cli/                   # CLI with ACP agent
@@ -31,9 +31,9 @@ Estela/
 
 ```
 ├── agent/         # Autonomous loop, subagents, recovery
-├── commander/     # Hierarchical delegation, workers
+├── commander/     # Hierarchical delegation (Team Lead → Senior Leads → Junior Devs)
 │   └── parallel/  # Concurrent execution, conflict detection
-├── tools/         # 19 tools (file, web, task, browser, plan)
+├── tools/         # 22 tools (file, web, task, browser, plan, patch, batch, search)
 ├── context/       # Token tracking, compaction
 ├── memory/        # Episodic, semantic, procedural
 ├── config/        # Settings, credentials
@@ -54,7 +54,7 @@ Estela/
 
 ---
 
-## Tools (19)
+## Tools (22)
 
 | Tool | Purpose |
 |------|---------|
@@ -63,11 +63,16 @@ Estela/
 | write_file | Overwrite file |
 | delete_file | Delete file |
 | edit | Fuzzy-matching file editing |
+| apply_patch | Apply unified diffs to files |
+| multiedit | Edit multiple files at once |
 | glob | Find files by pattern |
 | grep | Search file contents |
 | ls | Directory listing with tree |
 | bash | Execute shell commands (PTY supported) |
+| batch | Batch execute multiple tools |
+| codesearch | Search codebase with context |
 | question | Ask user clarifying questions |
+| skill | Auto-invoke skills from plugins |
 | todoread | Read session todo list |
 | todowrite | Update session todo list |
 | task | Spawn subagents |
@@ -105,8 +110,9 @@ CLI/Frontend → AgentExecutor.run() → Tools → LLM → Response
 
 ## Status
 
-- **Epics Complete**: 1-21 (core + MVP polish + browser + providers)
-- **Next**: Epic 22 - Tauri Desktop GUI
+- **Epics Complete**: 1-21, 25-26, Sprints 1-7 (core + desktop app + LLM integration)
+- **Working**: Chat with streaming LLM responses (credential bridge connected)
+- **Next**: Tool execution in agent mode, session management UI
 
 ---
 

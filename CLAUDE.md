@@ -90,7 +90,7 @@ Agent System:
 ├── commander/     # Team Lead → Senior Leads → Junior Devs
 ├── validator/     # QA pipeline
 
-Tools (19):
+Tools (22):
 ├── tools/         # read, write, edit, glob, grep, bash, browser, etc.
 
 Intelligence:
@@ -138,7 +138,7 @@ Desktop App / CLI
 
 ---
 
-## Tools (19)
+## Tools (22)
 
 | Tool | Purpose |
 |------|---------|
@@ -147,11 +147,16 @@ Desktop App / CLI
 | write_file | Overwrite file |
 | delete_file | Delete file |
 | edit | Fuzzy text edits (8 strategies) |
+| apply_patch | Apply unified diffs to files |
+| multiedit | Edit multiple files at once |
 | glob | Find files by pattern |
 | grep | Search file contents |
 | ls | Directory listing |
 | bash | Shell commands (PTY, requires approval) |
+| batch | Batch execute multiple tools |
+| codesearch | Search codebase with context |
 | question | Ask user clarifying questions |
+| skill | Auto-invoke skills from plugins |
 | todoread | Read session todo list |
 | todowrite | Update session todo list |
 | task | Spawn subagents |

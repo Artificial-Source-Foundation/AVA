@@ -34,11 +34,10 @@ All backend modules are implemented and tested:
 - Settings page with provider configuration
 
 ### What's Missing for Phase 1
-- [ ] Wire Team Lead → Senior Lead → Junior Dev UI (agent cards with delegation)
-- [ ] Click-to-chat with any team member
-- [ ] Auto-report flow visualization
+- [ ] **LLM connection** — Bridge Tauri frontend to core provider system (critical path)
+- [ ] **Working chat** — Type a message, get streaming AI response
 - [ ] Session management UI (list, resume, fork)
-- [ ] Provider setup wizard (first-run experience)
+- [ ] Team delegation flow visualization
 - [ ] Plugin browser UI (prepare for Phase 2)
 
 ---

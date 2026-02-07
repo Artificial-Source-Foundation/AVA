@@ -6,6 +6,17 @@
 
 ## Current Session
 
+**Session 35** (2026-02-07)
+- ✅ **LLM Integration — Chat works end-to-end**
+  - Root cause: 3 disconnected credential stores (`estela_settings`, `estela_credentials`, `estela_cred_*`) — none synced
+  - Fix: Credential bridge in `src/stores/settings.ts` — `syncProviderCredentials()` writes to `estela_cred_*` format that core reads
+  - Fix: `syncAllApiKeys()` called at startup in `App.tsx` to hydrate existing keys
+  - Fix: `anthropic-dangerous-direct-browser-access: true` header in `packages/core/src/llm/providers/anthropic.ts`
+  - Full data path verified: MessageInput → useChat → bridge → core createClient → Anthropic provider → streaming response
+  - Pipeline confirmed: model selection, provider resolution, auth, streaming, UI update all working
+- ✅ Docs updated (activeContext, progress, ROADMAP, MEMORY.md)
+- Commit: 89f5aea
+
 **Session 34** (2026-02-07)
 - ✅ **Sidebar fix** — Changed from `margin-left: -260px` to `width: 0` + `overflow: hidden` (WebKitGTK content bleed fix)
 - ✅ **Noise texture removal** — Removed `#root::after` overlay that blocked clicks in WebKitGTK
@@ -230,6 +241,7 @@
 | **2026-02-04** | **Epic 21 complete** | **Provider & Intelligence (~1,500 lines)** |
 | **2026-02-05** | **Epic 26 complete** | **Gemini CLI Feature Parity (337 tests, 16 files)** |
 | **2026-02-05** | **Epic 25 Sprint 1+3** | **ACP Agent + A2A Server (97 tests)** |
+| **2026-02-07** | **LLM Integration** | **Chat → streaming AI response working** |
 
 ---
 
@@ -333,7 +345,7 @@
 - ✅ Tool approval "always allow" persistence
 - ✅ Sidebar fix (width-based toggle for WebKitGTK)
 - ✅ Settings scroll performance (GPU promotion, transition-colors)
-- ⬜ **LLM connection** — App can't talk to providers yet
+- ✅ **LLM connection** — Credential bridge + browser access header (Session 35)
 - ⬜ Session management UI
 - ⬜ Tool approval dialog wired to real execution
 

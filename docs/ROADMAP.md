@@ -27,17 +27,20 @@ All backend modules are implemented and tested:
 
 ### Desktop App (In Progress)
 - IDE-inspired layout with Activity Bar, Sidebar, Bottom Panel
-- Chat UI with streaming, virtual scrolling
+- Chat UI with streaming, virtual scrolling → **connected to LLM**
+- Credential sync bridge (Settings UI → core credential store)
 - Agent Activity panel, File Operations panel
 - Code viewer (CodeMirror 6)
 - Spring physics animations, glassmorphism design
 - Settings page with provider configuration
 
 ### What's Missing for Phase 1
-- [ ] **LLM connection** — Bridge Tauri frontend to core provider system (critical path)
-- [ ] **Working chat** — Type a message, get streaming AI response
+- [x] **LLM connection** — Credential bridge + browser access header (done 2026-02-07)
+- [x] **Working chat** — Type a message, get streaming AI response (done 2026-02-07)
+- [ ] Tool execution in agent mode (working directory resolution needed)
 - [ ] Session management UI (list, resume, fork)
 - [ ] Team delegation flow visualization
+- [ ] Dead code cleanup (unused frontend LLM client/providers/credentials)
 - [ ] Plugin browser UI (prepare for Phase 2)
 
 ---

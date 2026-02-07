@@ -6,41 +6,41 @@
 
 ## Current Focus
 
-**LLM Integration — Make the app actually talk to an LLM**
+**Desktop App Polish — LLM chat works, now ship the remaining UX gaps**
 
-The core engine (29,500+ lines) and desktop UI are built, but the app can't send a message to an LLM yet. The critical path is connecting the Tauri frontend to the core provider system.
+Chat → streaming LLM response is connected and working (Session 35). Focus shifts to tool execution, session management, and cleanup.
 
 ### What Needs to Happen
-- [ ] Bridge Tauri frontend → core LLM providers (API key → streaming response)
-- [ ] Chat actually works: type message → get streaming AI response
-- [ ] Provider configuration UI connects to real provider clients
-- [ ] Tool execution visible in the UI (file reads, writes, shell commands)
+- [ ] Tool execution in the UI (file reads, writes, shell commands via agent mode)
+- [ ] Working directory resolution (`useChat.ts:34` hardcoded to `'.'`)
+- [ ] Session management UI (list, resume, fork)
+- [ ] Team delegation flow visualization
+- [ ] Dead code cleanup (unused `src/services/llm/client.ts`, `src/services/llm/providers/`, `src/services/auth/credentials.ts`)
+- [ ] Plugin browser UI (Phase 2)
 
 ---
 
-## Recently Completed (Session 33-34, 2026-02-07)
+## Recently Completed (Session 35, 2026-02-07)
 
-- ✅ **Sidebar fix** — Width-based toggle (not margin-left, which broke WebKitGTK)
-- ✅ **Noise texture removal** — `#root::after` overlay blocked all clicks in WebKitGTK
-- ✅ **Settings scroll fix** — GPU layer promotion + transition-colors
-- ✅ **Biome/a11y cleanup** — All lint errors fixed, pre-commit hooks pass
-- ✅ **7 MVP sprints** — Settings persistence, tool approval, design tokens, team UI
-- ✅ **Tauri hardening** — CSP, scoped FS, deferred window show, release profile
+- ✅ **LLM Integration** — App sends messages and gets streaming AI responses
+  - Credential bridge: `syncProviderCredentials()` writes API keys from Settings UI to core credential store
+  - Startup hydration: `syncAllApiKeys()` called after `initializePlatform()` in App.tsx
+  - Browser access header: `anthropic-dangerous-direct-browser-access: true` in core Anthropic provider
+  - Root cause: 3 disconnected credential stores (`estela_settings` vs `estela_credentials` vs `estela_cred_*`)
+
+### Previous Sessions (33-34)
+- ✅ Sidebar fix, noise texture removal, settings scroll fix, Biome/a11y cleanup
+- ✅ 7 MVP sprints, Tauri hardening
 
 ### What's Already Built
 - IDE-inspired layout (ActivityBar, SidebarPanel, MainArea, BottomPanel)
-- Chat UI with streaming + virtual scrolling
+- Chat UI with streaming + virtual scrolling → **now connected to LLM**
 - Agent Activity panel, File Operations panel, Terminal panel
 - Code viewer (CodeMirror 6)
 - Spring physics animations, glassmorphism design
 - Settings page with 4 tabs (Providers, Agents, MCP Servers, Keybindings)
 - Team panel (TeamPanel + TeamMemberChat)
 - All 29,500+ lines of core engine (agent, tools, intelligence, safety, plugins)
-
-### What's Still Missing (After LLM Integration)
-- [ ] Session management UI (list, resume, fork)
-- [ ] Team delegation flow visualization
-- [ ] Plugin browser UI (Phase 2)
 
 ---
 

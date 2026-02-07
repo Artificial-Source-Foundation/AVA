@@ -6,15 +6,20 @@
 
 ## Current Session
 
+**Session 36** (2026-02-07)
+- ✅ **Working directory fix** — `useChat` and `useAgent` read from `useProject().currentProject().directory` instead of `'.'`
+- ✅ **Tool approval wired** — Shared `src/lib/tool-approval.ts` (ApprovalRequest, checkAutoApproval, createApprovalGate). Both hooks gated. ChatView merges both sources into ToolApprovalDialog.
+- ✅ **Session duplicate** — `duplicateSessionMessages()` in database, `duplicateSession()` in session store, SidebarSessions "Duplicate" creates real copy
+- ✅ **Dead code removed** — Deleted `src/services/llm/client.ts`, `providers/anthropic.ts`, `providers/openrouter.ts`, `src/services/auth/credentials.ts` (-975 lines)
+- ✅ Docs updated
+- Commit: 1307582
+
 **Session 35** (2026-02-07)
 - ✅ **LLM Integration — Chat works end-to-end**
-  - Root cause: 3 disconnected credential stores (`estela_settings`, `estela_credentials`, `estela_cred_*`) — none synced
-  - Fix: Credential bridge in `src/stores/settings.ts` — `syncProviderCredentials()` writes to `estela_cred_*` format that core reads
-  - Fix: `syncAllApiKeys()` called at startup in `App.tsx` to hydrate existing keys
-  - Fix: `anthropic-dangerous-direct-browser-access: true` header in `packages/core/src/llm/providers/anthropic.ts`
-  - Full data path verified: MessageInput → useChat → bridge → core createClient → Anthropic provider → streaming response
-  - Pipeline confirmed: model selection, provider resolution, auth, streaming, UI update all working
-- ✅ Docs updated (activeContext, progress, ROADMAP, MEMORY.md)
+  - Root cause: 3 disconnected credential stores — none synced
+  - Fix: Credential bridge in `src/stores/settings.ts`
+  - Fix: `syncAllApiKeys()` called at startup in `App.tsx`
+  - Fix: `anthropic-dangerous-direct-browser-access: true` header in core Anthropic provider
 - Commit: 89f5aea
 
 **Session 34** (2026-02-07)
@@ -242,6 +247,7 @@
 | **2026-02-05** | **Epic 26 complete** | **Gemini CLI Feature Parity (337 tests, 16 files)** |
 | **2026-02-05** | **Epic 25 Sprint 1+3** | **ACP Agent + A2A Server (97 tests)** |
 | **2026-02-07** | **LLM Integration** | **Chat → streaming AI response working** |
+| **2026-02-07** | **Frontend Gaps Fixed** | **Working dir, tool approval, session dup, dead code** |
 
 ---
 
@@ -346,8 +352,12 @@
 - ✅ Sidebar fix (width-based toggle for WebKitGTK)
 - ✅ Settings scroll performance (GPU promotion, transition-colors)
 - ✅ **LLM connection** — Credential bridge + browser access header (Session 35)
-- ⬜ Session management UI
-- ⬜ Tool approval dialog wired to real execution
+- ✅ **Working directory** — Reads from project store, not hardcoded (Session 36)
+- ✅ **Tool approval wired** — Shared approval gate in useChat + useAgent, ChatView merges both (Session 36)
+- ✅ **Session duplicate** — Right-click → Duplicate creates copy with all messages (Session 36)
+- ✅ **Dead code removed** — Unused frontend LLM client/providers/credentials deleted (Session 36)
+- ⬜ Session management UI (list, resume, fork)
+- ⬜ Team delegation flow visualization
 
 ### Gemini CLI Feature Parity (Epic 26) - NEW
 - ✅ Policy engine with priority rules, wildcards, regex

@@ -18,7 +18,7 @@ All backend modules are implemented and tested:
 | Category | Modules | Status |
 |----------|---------|--------|
 | Agent System | Agent loop, Commander, Parallel execution, Validator | Done |
-| Tools | 19 tools (file, shell, web, browser, agents) | Done |
+| Tools | 22 tools (file, shell, web, browser, agents, patch, batch, search) | Done |
 | Intelligence | Codebase understanding, context management, memory, LSP | Done |
 | Extensibility | Extensions, commands, hooks, skills, MCP | Done |
 | Safety | Permissions, policy engine, trusted folders | Done |
@@ -34,13 +34,30 @@ All backend modules are implemented and tested:
 - Spring physics animations, glassmorphism design
 - Settings page with provider configuration
 
-### What's Missing for Phase 1
-- [x] **LLM connection** — Credential bridge + browser access header (done 2026-02-07)
-- [x] **Working chat** — Type a message, get streaming AI response (done 2026-02-07)
-- [ ] Tool execution in agent mode (working directory resolution needed)
-- [ ] Session management UI (list, resume, fork)
+### What's Built for Phase 1
+
+#### MVP Sprints (Complete — 2026-02-05)
+- [x] **Settings Persistence** — `src/stores/settings.ts` with localStorage
+- [x] **Tool Approval** — "Always allow" persists in `useAgent`
+- [x] **Design Tokens** — Darker theme, tighter radii, monospace accents
+- [x] **Component Polish** — Monospace on Badge/StatusBar, sharper Card/Button
+- [x] **Team Data Model** — 10 domains, TeamGroup, TeamHierarchy in stores
+- [x] **Team UI** — TeamPanel + TeamMemberChat wired to sidebar
+- [x] **Integration** — `useAgent.bridgeToTeam()` maps events to hierarchy
+
+#### LLM Integration (Complete — 2026-02-07)
+- [x] **LLM connection** — Credential bridge + browser access header
+- [x] **Working chat** — Type a message, get streaming AI response
+
+#### Frontend Gaps Fixed (Complete — 2026-02-07)
+- [x] **Working directory** — `useChat`/`useAgent` read from project store
+- [x] **Tool approval** — Shared gate in `src/lib/tool-approval.ts`, wired to ChatView
+- [x] **Session duplicate** — Right-click → Duplicate creates copy with all messages
+- [x] **Dead code removed** — Deleted unused frontend LLM client/providers/credentials (-975 lines)
+
+### What's Remaining for Phase 1
 - [ ] Team delegation flow visualization
-- [ ] Dead code cleanup (unused frontend LLM client/providers/credentials)
+- [ ] Session management UI (list, resume, fork)
 - [ ] Plugin browser UI (prepare for Phase 2)
 
 ---

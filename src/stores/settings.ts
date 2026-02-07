@@ -12,6 +12,52 @@ import { defaultProviders } from '../components/settings/tabs/ProvidersTab'
 import { STORAGE_KEYS } from '../config/constants'
 
 // ============================================================================
+// Credential Sync — bridges Settings UI → Core credential store
+// ============================================================================
+
+const CREDENTIAL_PREFIX = 'estela_cred_'
+
+/** Maps provider IDs to the credential key names that core reads via TauriCredentialStore */
+const PROVIDER_KEY_MAP: Record<string, string> = {
+  anthropic: 'anthropic-api-key',
+  openrouter: 'openrouter-api-key',
+  openai: 'openai-api-key',
+  google: 'google-api-key',
+  copilot: 'copilot-api-key',
+  glm: 'glm-api-key',
+  kimi: 'kimi-api-key',
+  mistral: 'mistral-api-key',
+  groq: 'groq-api-key',
+  deepseek: 'deepseek-api-key',
+  xai: 'xai-api-key',
+  cohere: 'cohere-api-key',
+  together: 'together-api-key',
+  ollama: 'ollama-api-key',
+}
+
+/** Write a single provider's API key to the core credential store */
+function syncProviderCredentials(providerId: string, apiKey: string | undefined) {
+  const credKey = PROVIDER_KEY_MAP[providerId]
+  if (!credKey) return
+  const storageKey = CREDENTIAL_PREFIX + credKey
+  if (apiKey) {
+    localStorage.setItem(storageKey, apiKey)
+  } else {
+    localStorage.removeItem(storageKey)
+  }
+}
+
+/** Hydrate all provider API keys from settings into the core credential store (call at startup) */
+export function syncAllApiKeys() {
+  const current = loadSettings()
+  for (const provider of current.providers) {
+    if (provider.apiKey) {
+      syncProviderCredentials(provider.id, provider.apiKey)
+    }
+  }
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -137,6 +183,10 @@ function updateProvider(id: string, patch: Partial<LLMProviderConfig>) {
     saveSettings(next)
     return next
   })
+  // Sync API key to core credential store so LLM providers can read it
+  if (patch.apiKey !== undefined) {
+    syncProviderCredentials(id, patch.apiKey)
+  }
 }
 
 function updateAgent(id: string, patch: Partial<AgentPreset>) {

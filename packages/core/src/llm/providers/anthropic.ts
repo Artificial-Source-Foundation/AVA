@@ -81,6 +81,7 @@ class AnthropicClient implements LLMClient {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'anthropic-version': API_VERSION,
+      'anthropic-dangerous-direct-browser-access': 'true',
     }
 
     if (auth.type === 'oauth') {

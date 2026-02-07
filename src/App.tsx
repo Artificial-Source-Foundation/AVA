@@ -18,7 +18,7 @@ import { initializePlatform } from './services/platform'
 import { useLayout } from './stores/layout'
 import { useProject } from './stores/project'
 import { useSession } from './stores/session'
-import { useSettings } from './stores/settings'
+import { syncAllApiKeys, useSettings } from './stores/settings'
 
 function App() {
   const [isInitializing, setIsInitializing] = createSignal(true)
@@ -73,6 +73,10 @@ function App() {
 
       // Initialize platform provider for @estela/core
       initializePlatform()
+
+      // Sync saved API keys to the core credential store
+      // (Settings UI writes to estela_settings; core reads from estela_cred_*)
+      syncAllApiKeys()
 
       // Initialize database (runs migrations)
       await initDatabase()

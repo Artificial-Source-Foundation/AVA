@@ -12,6 +12,7 @@ import { useChat } from '../../hooks/useChat'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
 import { ToolApprovalDialog } from '../dialogs/ToolApprovalDialog'
+import { ContextBar } from './ContextBar'
 import { MessageInput } from './MessageInput'
 import { MessageList } from './MessageList'
 
@@ -59,6 +60,9 @@ export const ChatView: Component = () => {
 
       {/* Input area */}
       <MessageInput />
+
+      {/* Context usage bar */}
+      <ContextBar />
 
       {/* Tool Approval Dialog */}
       <ToolApprovalDialog request={activeApproval()} onResolve={handleApprovalResolve} />

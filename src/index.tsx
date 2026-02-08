@@ -43,10 +43,49 @@ const DesignSystemPreview = lazy(() =>
 )
 
 const LoadingFallback = () => (
-  <div class="flex h-screen items-center justify-center bg-[var(--background)]">
-    <div class="text-center">
-      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--accent)] mx-auto" />
-      <p class="mt-4 text-[var(--text-secondary)]">Loading...</p>
+  <div class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-[var(--background)]">
+    <div class="splash-logo mb-6">
+      <svg
+        width="64"
+        height="64"
+        viewBox="0 0 64 64"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        aria-hidden="true"
+      >
+        <path
+          d="M32 4L58 32L32 60L6 32L32 4Z"
+          stroke="var(--accent)"
+          stroke-width="2.5"
+          fill="none"
+          opacity="0.3"
+        />
+        <path
+          d="M32 12L50 32L32 52L14 32L32 12Z"
+          stroke="var(--accent)"
+          stroke-width="2"
+          fill="var(--accent)"
+          opacity="0.15"
+        />
+        <path d="M32 20L42 32L32 44L22 32L32 20Z" fill="var(--accent)" opacity="0.6" />
+      </svg>
+    </div>
+    <h1 class="text-xl font-semibold tracking-widest uppercase text-[var(--text-primary)] mb-8">
+      Estela
+    </h1>
+    <div class="flex gap-1.5">
+      <span
+        class="splash-dot w-1.5 h-1.5 rounded-full bg-[var(--accent)]"
+        style="animation-delay: 0ms"
+      />
+      <span
+        class="splash-dot w-1.5 h-1.5 rounded-full bg-[var(--accent)]"
+        style="animation-delay: 150ms"
+      />
+      <span
+        class="splash-dot w-1.5 h-1.5 rounded-full bg-[var(--accent)]"
+        style="animation-delay: 300ms"
+      />
     </div>
   </div>
 )

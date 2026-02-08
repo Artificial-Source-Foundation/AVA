@@ -1,29 +1,23 @@
 /**
  * Main Area Component
  *
- * Chat-first layout. When in settings mode, shows SettingsPage instead.
- * When no session is active, shows welcome state.
+ * Chat-first layout. When no session is active, shows welcome state.
  */
 
 import { Sparkles } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
-import { useNavigation } from '../../stores/navigation'
 import { useSession } from '../../stores/session'
 import { ChatView } from '../chat'
-import { SettingsPage } from '../settings'
 
 export const MainArea: Component = () => {
-  const { currentView } = useNavigation()
   const { currentSession } = useSession()
 
   return (
     <div class="flex flex-col h-full w-full min-w-0 bg-[var(--surface)]">
-      <Show when={currentView() !== 'settings'} fallback={<SettingsPage />}>
-        <Show when={currentSession()} fallback={<WelcomeState />}>
-          <div class="flex-1 overflow-hidden">
-            <ChatView />
-          </div>
-        </Show>
+      <Show when={currentSession()} fallback={<WelcomeState />}>
+        <div class="flex-1 overflow-hidden">
+          <ChatView />
+        </div>
       </Show>
     </div>
   )

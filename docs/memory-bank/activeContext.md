@@ -6,41 +6,41 @@
 
 ## Current Focus
 
-**Desktop App — Phase 1 Complete, entering polish/testing**
+**Desktop App — Core Wiring Complete, 1072 tests passing**
 
-Phase 1 is done. Session 38 focused on WebKitGTK fixes and UX polish (splash screen, layout cleanup). Now in testing mode with `npm run tauri dev`.
+Phase 1 is done. Sessions 39-40 added comprehensive backend tests (536 tests across 24 files covering Config, Context, Memory, Session, Commander) and wired the 5 core modules to the frontend via a thin integration layer.
 
-### What Just Happened (Session 38, 2026-02-08)
+### What Just Happened (Sessions 39-40, 2026-02-08)
 
-**WebKitGTK Fixes:**
-- DMABUF ghost rendering fix (`WEBKIT_DISABLE_DMABUF_RENDERER=1` in `src-tauri/src/main.rs`)
-- Nested `<button>` crash fix — outer buttons → `<div role="button">` in Settings, SessionListItem, TerminalPanel
-- Cargo linker fix for Pop OS (`gcc-14` in `.cargo/config.toml`)
+**Session 39 — Backend Testing:**
+- 536 tests across 24 test files for 5 core modules (Config, Context, Memory, Session, Commander)
+- All modules have full coverage: manager, integration, consolidation, parallel execution, batch, tool-wrapper
+- Total test count: 1072 (was 536 pre-existing + 536 new)
 
-**Splash Screen:**
-- `src/components/SplashScreen.tsx` — Diamond logo placeholder, "ESTELA" title, "AI Coding Companion" tagline, animated loading dots, real-time init status, version number
-- Window shows early so splash is visible during init
-- 800ms minimum display time, mesh gradient background, fade-out transition
-- `index.tsx` LoadingFallback matches splash look
+**Session 40 — Core Frontend Wiring:**
+- `src/services/core-bridge.ts` (NEW) — Central init for SettingsManager, ContextTracker, WorkerRegistry, MemoryManager
+- `src/stores/settings.ts` — `pushSettingsToCore()` syncs frontend AppSettings → core SettingsManager
+- `src/App.tsx` — Core bridge init in startup sequence ("Initializing core engine..." splash step)
+- `src/hooks/useChat.ts` — Real token counting via ContextTracker (addMessage on send + complete)
+- `src/stores/session.ts` — Tracker-backed `contextUsage` memo, session checkpoints (create/rollback)
+- `src/components/chat/ContextBar.tsx` (NEW) — Token usage bar below chat input
+- `src/hooks/useAgent.ts` — Episodic memory recording on agent completion
 
-**Layout Refactoring:**
-- Deleted `src/stores/navigation.ts` — replaced by `settingsOpen` signal in layout store
-- Sidebar slimmed: `ActivityId` reduced to `'sessions' | 'explorer'` (was 7 options)
-- Settings moved from page-based navigation to modal pattern (`openSettings`/`closeSettings`)
-- Added right panel, bottom panel, and bottom panel height state to layout store
-- New keyboard shortcuts: `Ctrl+,` (settings), `Ctrl+M` (bottom panel)
-- `SettingsPage.tsx` uses `closeSettings()` instead of `goToChat()`
+**Session 39 — Appearance Tab:**
+- Dedicated settings tab with dark/light mode, 6 accent colors, UI scale slider, mono font selector
+- `applyAppearance()` applies all settings to DOM immediately
 
 ---
 
 ## Next Up
 
-### Immediate (Phase 1 Polish)
-- [ ] Test splash screen in Tauri dev
-- [ ] Wire settings as modal overlay (currently `settingsOpen` signal exists but SettingsPage isn't rendered as overlay yet)
-- [ ] Wire right panel (agent activity) to layout
-- [ ] Wire bottom panel (memory/terminal) to layout
-- [ ] Fix remaining TS errors (`SidebarPanel.tsx` references removed activity IDs)
+### Immediate (Phase 1.5 Polish)
+- [ ] Test full app flow in Tauri dev (chat, tools, settings, sessions)
+- [ ] Memory recall injected into system prompts
+- [ ] Settings UI tabs for core categories (agent, context, memory, permissions)
+- [ ] Auto-compaction when context > 80%
+- [ ] Checkpoint UI in sidebar (list/rollback buttons)
+- [ ] Per-message token display in bubbles
 
 ### Phase 2: Plugin Ecosystem (THE DIFFERENTIATOR)
 See `docs/ROADMAP.md` for sprint breakdown.
@@ -82,12 +82,18 @@ See `docs/ROADMAP.md` for sprint breakdown.
 | File | Purpose |
 |------|---------|
 | `src/components/settings/SettingsPage.tsx` | Full settings UI (providers, agents, MCP, keybindings, about) |
-| `src/stores/settings.ts` | Settings persistence + credential sync bridge |
+| `src/stores/settings.ts` | Settings persistence + credential sync + `pushSettingsToCore()` |
+
+### Core Bridge
+| File | Purpose |
+|------|---------|
+| `src/services/core-bridge.ts` | Init all 5 core singletons (settings, tracker, registry, memory) |
+| `src/components/chat/ContextBar.tsx` | Token usage bar below chat input |
 
 ### Core Stores
 | File | Purpose |
 |------|---------|
-| `src/stores/session.ts` | Session CRUD, fork, duplicate |
+| `src/stores/session.ts` | Session CRUD, fork, duplicate, checkpoints, tracker-backed contextUsage |
 | `src/stores/project.ts` | Project management |
 | `src/stores/team.ts` | Dev team hierarchy state |
 

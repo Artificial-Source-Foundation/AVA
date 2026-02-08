@@ -6,7 +6,6 @@
 
 import { Copy, GitFork, MessageSquare, Pencil, Plus, Search, Trash2 } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
-import { useNavigation } from '../../stores/navigation'
 import { useSession } from '../../stores/session'
 import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu'
 
@@ -17,7 +16,6 @@ interface ContextMenuState {
 }
 
 export const SidebarSessions: Component = () => {
-  const { goToChat } = useNavigation()
   const {
     sessions,
     currentSession,
@@ -35,7 +33,6 @@ export const SidebarSessions: Component = () => {
 
   const handleNewChat = async () => {
     await createNewSession()
-    goToChat()
   }
 
   const filteredSessions = () => {
@@ -199,10 +196,7 @@ export const SidebarSessions: Component = () => {
                 >
                   <button
                     type="button"
-                    onClick={() => {
-                      switchSession(session.id)
-                      goToChat()
-                    }}
+                    onClick={() => switchSession(session.id)}
                     onContextMenu={(e) => handleContextMenu(e, session.id)}
                     class={`
                       group flex items-center gap-2 w-full

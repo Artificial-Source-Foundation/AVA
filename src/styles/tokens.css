@@ -335,6 +335,15 @@
   --radius-full: 9999px;
 
   /* ========================================
+     DENSITY
+     ======================================== */
+
+  --density-spacing: 1;
+  --density-py: 0.25rem;
+  --density-px: 0.625rem;
+  --density-gap: 0.5rem;
+
+  /* ========================================
      MOTION
      ======================================== */
 
@@ -444,4 +453,166 @@
     animation-iteration-count: 1;
     transition-duration: 0.01ms;
   }
+}
+
+/* User-toggled reduce motion (overrides OS preference) */
+[data-reduce-motion] *,
+[data-reduce-motion] *::before,
+[data-reduce-motion] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* ========================================
+   LIGHT MODE
+   Overrides semantic tokens for light theme.
+   Activated via [data-mode="light"] on <html>.
+   ======================================== */
+
+[data-mode="light"] {
+  /* Backgrounds */
+  --background: #f8f8fa;
+  --background-subtle: #f0f0f3;
+
+  /* Surfaces */
+  --surface: #ffffff;
+  --surface-raised: #f0f0f3;
+  --surface-overlay: #ffffff;
+  --surface-sunken: #e8e8ec;
+  --surface-glass: rgba(255, 255, 255, 0.8);
+  --surface-glass-strong: rgba(255, 255, 255, 0.95);
+
+  /* Text — all must be readable on light backgrounds */
+  --text-primary: #18181b;
+  --text-secondary: #3f3f46;
+  --text-tertiary: #52525b;
+  --text-muted: #71717a;
+
+  /* Borders */
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-default: rgba(0, 0, 0, 0.12);
+  --border-strong: rgba(0, 0, 0, 0.18);
+  --border-interactive: rgba(0, 0, 0, 0.12);
+  --border-emphasis: rgba(0, 0, 0, 0.22);
+
+  /* Glass */
+  --glass-bg: rgba(255, 255, 255, 0.88);
+  --glass-bg-strong: rgba(248, 248, 250, 0.95);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --glass-border-hover: rgba(0, 0, 0, 0.12);
+
+  /* Alpha variants (inverted for light bg) */
+  --alpha-white-3: rgba(0, 0, 0, 0.02);
+  --alpha-white-5: rgba(0, 0, 0, 0.04);
+  --alpha-white-8: rgba(0, 0, 0, 0.06);
+  --alpha-white-10: rgba(0, 0, 0, 0.08);
+  --alpha-white-15: rgba(0, 0, 0, 0.12);
+  --alpha-white-20: rgba(0, 0, 0, 0.16);
+  --alpha-white-25: rgba(0, 0, 0, 0.2);
+
+  --alpha-black-20: rgba(0, 0, 0, 0.08);
+  --alpha-black-40: rgba(0, 0, 0, 0.15);
+  --alpha-black-60: rgba(0, 0, 0, 0.25);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06);
+  --shadow-glow: 0 0 20px var(--violet-alpha-20);
+
+  /* Components */
+  --sidebar-background: rgba(244, 244, 246, 0.95);
+  --sidebar-item-hover: rgba(0, 0, 0, 0.04);
+  --sidebar-item-active: var(--accent-subtle);
+  --input-background: #ffffff;
+  --input-border: rgba(0, 0, 0, 0.15);
+  --input-border-hover: rgba(0, 0, 0, 0.22);
+  --input-placeholder: #71717a;
+  --input-focus-ring: var(--accent-subtle);
+  --card-background: #ffffff;
+  --card-border: rgba(0, 0, 0, 0.1);
+  --card-hover-border: rgba(0, 0, 0, 0.15);
+  --code-background: #f0f0f3;
+  --code-text: #18181b;
+  --chat-user-bg: var(--accent);
+  --chat-user-text: white;
+  --chat-assistant-bg: #f0f0f3;
+  --chat-assistant-text: #18181b;
+  --chat-assistant-border: rgba(0, 0, 0, 0.08);
+
+  /* Button overrides */
+  --button-ghost-text: #3f3f46;
+  --button-ghost-hover: rgba(0, 0, 0, 0.06);
+  --button-ghost-active: rgba(0, 0, 0, 0.1);
+
+  /* Feedback — slightly adjusted for light backgrounds */
+  --success-subtle: rgba(34, 197, 94, 0.1);
+  --warning-subtle: rgba(234, 179, 8, 0.1);
+  --error-subtle: rgba(239, 68, 68, 0.1);
+  --info-subtle: rgba(59, 130, 246, 0.1);
+
+  /* Scrollbar */
+  --gray-6: #d4d4d8;
+  --gray-7: #a1a1aa;
+
+  /* Gray primitives needed for light mode UI */
+  --gray-1: #f4f4f5;
+  --gray-3: #e4e4e7;
+}
+
+/* ========================================
+   ACCENT COLOR PRESETS
+   Override accent tokens via [data-accent] on <html>.
+   Default (violet) needs no selector.
+   ======================================== */
+
+[data-accent="blue"] {
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
+  --accent-active: #2563eb;
+  --accent-subtle: rgba(59, 130, 246, 0.15);
+  --accent-muted: #1e3a5f;
+  --accent-border: rgba(59, 130, 246, 0.3);
+  --accent-glow: rgba(59, 130, 246, 0.4);
+}
+
+[data-accent="green"] {
+  --accent: #22c55e;
+  --accent-hover: #4ade80;
+  --accent-active: #16a34a;
+  --accent-subtle: rgba(34, 197, 94, 0.15);
+  --accent-muted: #14532d;
+  --accent-border: rgba(34, 197, 94, 0.3);
+  --accent-glow: rgba(34, 197, 94, 0.4);
+}
+
+[data-accent="rose"] {
+  --accent: #f43f5e;
+  --accent-hover: #fb7185;
+  --accent-active: #e11d48;
+  --accent-subtle: rgba(244, 63, 94, 0.15);
+  --accent-muted: #4c0519;
+  --accent-border: rgba(244, 63, 94, 0.3);
+  --accent-glow: rgba(244, 63, 94, 0.4);
+}
+
+[data-accent="amber"] {
+  --accent: #f59e0b;
+  --accent-hover: #fbbf24;
+  --accent-active: #d97706;
+  --accent-subtle: rgba(245, 158, 11, 0.15);
+  --accent-muted: #78350f;
+  --accent-border: rgba(245, 158, 11, 0.3);
+  --accent-glow: rgba(245, 158, 11, 0.4);
+}
+
+[data-accent="cyan"] {
+  --accent: #06b6d4;
+  --accent-hover: #22d3ee;
+  --accent-active: #0891b2;
+  --accent-subtle: rgba(6, 182, 212, 0.15);
+  --accent-muted: #164e63;
+  --accent-border: rgba(6, 182, 212, 0.3);
+  --accent-glow: rgba(6, 182, 212, 0.4);
 }

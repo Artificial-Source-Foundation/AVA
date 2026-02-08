@@ -21,6 +21,7 @@ import {
   type ApprovalRequest,
   checkAutoApproval as sharedCheckAutoApproval,
 } from '../lib/tool-approval'
+import { getCoreMemory } from '../services/core-bridge'
 import { saveMessage, updateMessage } from '../services/database'
 import { logError, logInfo, logWarn } from '../services/logger'
 import { useProject } from '../stores/project'
@@ -392,6 +393,7 @@ export function useAgent() {
       }
 
       // Track content for message updates
+      const runStart = Date.now()
       let accumulatedContent = ''
 
       // Custom event handler that also updates messages
@@ -404,7 +406,7 @@ export function useAgent() {
           session.updateMessageContent(assistantMsg.id, accumulatedContent)
         }
 
-        // On finish, save final content
+        // On finish, save final content + record episodic memory
         if (event.type === 'agent:finish') {
           const finalContent = event.result.output || accumulatedContent
           updateMessage(assistantMsg.id, {
@@ -415,6 +417,26 @@ export function useAgent() {
             content: finalContent,
             tokensUsed: event.result.tokensUsed,
           })
+
+          // Record episodic memory for successful agent runs
+          const memory = getCoreMemory()
+          if (memory && event.result.success) {
+            memory
+              .remember(
+                {
+                  sessionId: sessionId!,
+                  summary: (event.result.output ?? goal).slice(0, 500),
+                  decisions: [],
+                  toolsUsed: [],
+                  outcome: 'success',
+                  durationMinutes: Math.round((Date.now() - runStart) / 60000),
+                },
+                'episodic'
+              )
+              .catch(() => {
+                /* silent — memory is optional */
+              })
+          }
         }
       }
 

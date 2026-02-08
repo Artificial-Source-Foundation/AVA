@@ -121,7 +121,7 @@ export interface TerminalExecution {
 // Memory/Context Items
 // ============================================================================
 
-export type MemoryItemType = 'conversation' | 'file' | 'code' | 'knowledge'
+export type MemoryItemType = 'conversation' | 'file' | 'code' | 'knowledge' | 'checkpoint'
 
 export interface MemoryItem {
   id: string

@@ -1,6 +1,6 @@
 /**
  * Layout Store
- * Global state for IDE-like layout: activity bar + sidebar
+ * Global state for IDE-like layout: activity bar, sidebar, panels, settings modal
  */
 
 import { createSignal } from 'solid-js'
@@ -10,14 +10,7 @@ import { STORAGE_KEYS } from '../config/constants'
 // Types
 // ============================================================================
 
-export type ActivityId =
-  | 'sessions'
-  | 'explorer'
-  | 'agents'
-  | 'team'
-  | 'memory'
-  | 'activity'
-  | 'plugins'
+export type ActivityId = 'sessions' | 'explorer'
 
 // ============================================================================
 // Persistence Helpers
@@ -43,6 +36,19 @@ function loadBool(key: string, fallback: boolean): boolean {
   return fallback
 }
 
+function loadNumber(key: string, fallback: number, min: number, max: number): number {
+  try {
+    const raw = localStorage.getItem(key)
+    if (raw) {
+      const n = Number(raw)
+      if (n >= min && n <= max) return n
+    }
+  } catch {
+    /* ignore */
+  }
+  return fallback
+}
+
 function save(key: string, value: string) {
   try {
     localStorage.setItem(key, value)
@@ -56,7 +62,7 @@ function save(key: string, value: string) {
 // ============================================================================
 
 const [activeActivity, setActiveActivityRaw] = createSignal<ActivityId>(
-  loadString(STORAGE_KEYS.LAYOUT_ACTIVITY, 'sessions')
+  loadString(STORAGE_KEYS.LAYOUT_ACTIVITY, 'sessions') as ActivityId
 )
 
 function setActiveActivity(id: ActivityId) {
@@ -103,49 +109,76 @@ function toggleSidebar() {
 
 const SIDEBAR_WIDTH_KEY = 'estela-sidebar-width'
 
-function loadSidebarWidth(): number {
-  try {
-    const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY)
-    if (raw) {
-      const n = Number(raw)
-      if (n >= 180 && n <= 480) return n
-    }
-  } catch {
-    /* ignore */
-  }
-  return 260
-}
-
-const [sidebarWidth, setSidebarWidthRaw] = createSignal(loadSidebarWidth())
+const [sidebarWidth, setSidebarWidthRaw] = createSignal(
+  loadNumber(SIDEBAR_WIDTH_KEY, 260, 180, 480)
+)
 
 function setSidebarWidth(w: number) {
   const clamped = Math.min(480, Math.max(180, w))
   setSidebarWidthRaw(clamped)
-  try {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(clamped))
-  } catch {
-    /* ignore */
-  }
+  save(SIDEBAR_WIDTH_KEY, String(clamped))
 }
 
 // ============================================================================
-// Keyboard Shortcuts
+// Right Panel (Agent Activity)
 // ============================================================================
 
-function setupLayoutShortcuts() {
-  const handler = (e: KeyboardEvent) => {
-    const mod = e.ctrlKey || e.metaKey
+const [rightPanelVisible, setRightPanelVisibleRaw] = createSignal(
+  loadBool(STORAGE_KEYS.LAYOUT_RIGHT_VISIBLE, false)
+)
 
-    // Ctrl+B → toggle sidebar
-    if (mod && e.key === 'b') {
-      e.preventDefault()
-      toggleSidebar()
-    }
-  }
+function setRightPanelVisible(visible: boolean) {
+  setRightPanelVisibleRaw(visible)
+  save(STORAGE_KEYS.LAYOUT_RIGHT_VISIBLE, String(visible))
+}
 
-  document.addEventListener('keydown', handler)
-  // eslint-disable-next-line solid/reactivity -- cleanup function returned from non-tracked scope
-  return () => document.removeEventListener('keydown', handler)
+function toggleRightPanel() {
+  setRightPanelVisible(!rightPanelVisible())
+}
+
+// ============================================================================
+// Bottom Panel (Memory/Context)
+// ============================================================================
+
+const [bottomPanelVisible, setBottomPanelVisibleRaw] = createSignal(
+  loadBool(STORAGE_KEYS.LAYOUT_BOTTOM_VISIBLE, false)
+)
+
+function setBottomPanelVisible(visible: boolean) {
+  setBottomPanelVisibleRaw(visible)
+  save(STORAGE_KEYS.LAYOUT_BOTTOM_VISIBLE, String(visible))
+}
+
+function toggleBottomPanel() {
+  setBottomPanelVisible(!bottomPanelVisible())
+}
+
+const [bottomPanelHeight, setBottomPanelHeightRaw] = createSignal(
+  loadNumber(STORAGE_KEYS.LAYOUT_BOTTOM_HEIGHT, 200, 100, 400)
+)
+
+function setBottomPanelHeight(h: number) {
+  const clamped = Math.min(400, Math.max(100, h))
+  setBottomPanelHeightRaw(clamped)
+  save(STORAGE_KEYS.LAYOUT_BOTTOM_HEIGHT, String(clamped))
+}
+
+// ============================================================================
+// Settings Modal
+// ============================================================================
+
+const [settingsOpen, setSettingsOpen] = createSignal(false)
+
+function openSettings() {
+  setSettingsOpen(true)
+}
+
+function closeSettings() {
+  setSettingsOpen(false)
+}
+
+function toggleSettings() {
+  setSettingsOpen(!settingsOpen())
 }
 
 // ============================================================================
@@ -168,7 +201,22 @@ export function useLayout() {
     sidebarWidth,
     setSidebarWidth,
 
-    // Keyboard shortcuts (call in onMount, returns cleanup)
-    setupLayoutShortcuts,
+    // Right panel (agent activity)
+    rightPanelVisible,
+    setRightPanelVisible,
+    toggleRightPanel,
+
+    // Bottom panel (memory)
+    bottomPanelVisible,
+    setBottomPanelVisible,
+    toggleBottomPanel,
+    bottomPanelHeight,
+    setBottomPanelHeight,
+
+    // Settings modal
+    settingsOpen,
+    openSettings,
+    closeSettings,
+    toggleSettings,
   }
 }

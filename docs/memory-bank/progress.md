@@ -6,19 +6,32 @@
 
 ## Current Session
 
-**Session 38** (2026-02-08)
-- **WebKitGTK ghost rendering fix** — DMABUF renderer produces ghost/shadow copies of DOM elements on Cosmic/Hyprland/Sway + NVIDIA. Fixed by setting `WEBKIT_DISABLE_DMABUF_RENDERER=1` in `src-tauri/src/main.rs` before WebKitGTK init.
-- **Nested button crash fix** — WebKitGTK crashes on nested `<button>` elements. Changed outer buttons to `<div role="button" tabIndex={0}>` in SettingsPage, SessionListItem, TerminalPanel.
-- **Cargo linker fix** — Pop OS 24.04 has `gcc-14` but no `cc` symlink. Added `.cargo/config.toml` with `linker = "gcc-14"`.
-- **Splash screen** — New `SplashScreen.tsx` with diamond logo placeholder, "ESTELA" title, "AI Coding Companion" tagline, animated loading dots, real-time init status text, version number (`v0.1.0`), mesh gradient background, 800ms minimum display, fade-out transition. Window shows early so splash is visible during init.
-- **Layout refactoring** — Deleted `navigation.ts` store. Sidebar slimmed to 2 activities (sessions, explorer). Settings moved to modal pattern in layout store. Added right panel, bottom panel, bottom panel height state. New shortcuts: `Ctrl+,` (settings), `Ctrl+M` (bottom panel).
-- **New files:** `src/components/SplashScreen.tsx`
-- **Deleted:** `src/stores/navigation.ts`
-- **Modified:** `App.tsx`, `index.tsx`, `index.html`, `index.css`, `layout.ts`, `layout.test.ts`, `ActivityBar.tsx`, `MainArea.tsx`, `SidebarPanel.tsx`, `SidebarSessions.tsx`, `SettingsPage.tsx`, `constants.ts`, `src-tauri/src/main.rs`, `src-tauri/.cargo/config.toml`
+**Session 40** (2026-02-08) — Core Frontend Wiring
+- **Core bridge** — `src/services/core-bridge.ts` initializes 5 core singletons (SettingsManager, ContextTracker, WorkerRegistry, MemoryManager) at startup
+- **Settings sync** — `pushSettingsToCore()` maps frontend AppSettings → core SettingsManager categories (provider, permissions, context, memory)
+- **Context tracking** — `useChat` tracks tokens via ContextTracker on send/complete; `session.ts` contextUsage falls back to rough estimate when tracker unavailable
+- **ContextBar** — `src/components/chat/ContextBar.tsx` shows token usage with progress bar below chat input
+- **Session checkpoints** — `createCheckpoint()` / `rollbackToCheckpoint()` using memoryItems DB table (type: 'checkpoint')
+- **Agent memory** — Episodic memory recorded on successful agent runs via `getCoreMemory().remember()`
+- **New files:** `src/services/core-bridge.ts`, `src/components/chat/ContextBar.tsx`
+- **Modified:** `App.tsx`, `settings.ts`, `useChat.ts`, `session.ts`, `useAgent.ts`, `ChatView.tsx`, `MemoryPanel.tsx`, `types/index.ts`
+
+**Session 39** (2026-02-08) — Backend Testing + Appearance Tab
+- **536 backend tests** across 24 files for Config, Context, Memory, Session, Commander modules
+- **Appearance tab** — Dark/light mode, 6 accent colors, UI scale, mono font, border radius, density, reduce motion
+- **Settings redesign** — All 4 tabs rewritten to flat minimal rows, OpenCode-inspired modal
+- **Layout rework** — Activity bar slimmed (7→2 icons), model selector, right panel, bottom panel
+- **Permission button** — Moved to MessageInput toolbar, ChatInfoBar deleted
 
 ---
 
 ## Recent Sessions
+
+**Session 38** (2026-02-08) — WebKitGTK + Splash + Layout
+- DMABUF ghost rendering fix, nested button crash fix, Cargo linker fix
+- Splash screen, layout refactoring (navigation store deleted, sidebar slimmed)
+
+
 
 **Session 37** (2026-02-07) — Phase 1 Completion
 - Provider expansion (14 providers, Google + Copilot OAuth, DeviceCodeDialog)
@@ -65,7 +78,7 @@
 | 2026-02-04 | Epics 19-21: Hooks, browser, providers. Feature parity sprints 1-7 |
 | 2026-02-05 | Epics 25-26: ACP/A2A protocols, Gemini CLI features. UI modernization. IDE layout. Vision alignment |
 | 2026-02-07 | **LLM integration working. Phase 1 complete.** |
-| 2026-02-08 | **WebKitGTK fixes. Splash screen. Layout refactoring.** |
+| 2026-02-08 | **WebKitGTK fixes. Splash. Layout rework. Appearance tab. Backend tests (536). Core frontend wiring (1072 total tests).** |
 
 ---
 

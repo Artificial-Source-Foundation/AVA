@@ -16,6 +16,9 @@ export const STORAGE_KEYS = {
   LAYOUT_ACTIVITY: 'estela-layout-activity',
   LAYOUT_SIDEBAR_VISIBLE: 'estela-layout-sidebar-visible',
   LAYOUT_RIGHT_VISIBLE: 'estela-layout-right-visible',
+  LAYOUT_BOTTOM_VISIBLE: 'estela-layout-bottom-visible',
+  LAYOUT_BOTTOM_HEIGHT: 'estela-layout-bottom-height',
+  SHORTCUTS: 'estela_shortcuts',
 } as const
 
 // Default values

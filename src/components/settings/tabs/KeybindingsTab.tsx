@@ -1,11 +1,10 @@
 /**
  * Keybindings Settings Tab
  *
- * Modern 2026 aesthetic using semantic CSS tokens.
+ * Flat, minimal design matching GeneralSection.
  * View and customize keyboard shortcuts.
  */
 
-import { Command, Keyboard, RotateCcw, Search } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 
 // ============================================================================
@@ -32,35 +31,6 @@ export interface KeybindingsTabProps {
 // Key Display Component
 // ============================================================================
 
-const KeyDisplay: Component<{ keys: string[] }> = (props) => {
-  return (
-    <div class="flex items-center gap-[var(--space-1)]">
-      <For each={props.keys}>
-        {(key, index) => (
-          <>
-            <kbd
-              class="
-                px-[var(--space-2)] py-[var(--space-1)]
-                bg-[var(--surface-raised)]
-                border border-[var(--border-default)]
-                rounded-[var(--radius-md)]
-                text-[var(--text-xs)] font-[var(--font-mono)] font-medium
-                text-[var(--text-primary)]
-                shadow-[0_1px_0_var(--alpha-black-20)]
-              "
-            >
-              {formatKey(key)}
-            </kbd>
-            <Show when={index() < props.keys.length - 1}>
-              <span class="text-[var(--text-muted)] text-[var(--text-xs)]">+</span>
-            </Show>
-          </>
-        )}
-      </For>
-    </div>
-  )
-}
-
 const formatKey = (key: string): string => {
   const keyMap: Record<string, string> = {
     meta: '⌘',
@@ -81,231 +51,125 @@ const formatKey = (key: string): string => {
   return keyMap[key.toLowerCase()] || key.toUpperCase()
 }
 
+const KeyCombo: Component<{ keys: string[] }> = (props) => (
+  <span class="text-[11px] font-mono text-[var(--text-muted)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded px-1.5 py-0.5">
+    {props.keys.map((k) => formatKey(k)).join(' + ')}
+  </span>
+)
+
 // ============================================================================
 // Keybindings Tab Component
 // ============================================================================
 
 export const KeybindingsTab: Component<KeybindingsTabProps> = (props) => {
   const [searchQuery, setSearchQuery] = createSignal('')
-  const [selectedCategory, setSelectedCategory] = createSignal<string | null>(null)
 
-  // Get unique categories
-  const categories = () => {
-    const cats = new Set(props.keybindings.map((k) => k.category))
-    return Array.from(cats).sort()
-  }
+  const customCount = () => props.keybindings.filter((k) => k.isCustom).length
 
-  // Filter keybindings
   const filteredKeybindings = () => {
-    let filtered = props.keybindings
-
-    if (selectedCategory()) {
-      filtered = filtered.filter((k) => k.category === selectedCategory())
-    }
-
     const query = searchQuery().toLowerCase()
-    if (query) {
-      filtered = filtered.filter(
-        (k) =>
-          k.action.toLowerCase().includes(query) ||
-          k.description.toLowerCase().includes(query) ||
-          k.keys.some((key) => key.toLowerCase().includes(query))
-      )
-    }
-
-    return filtered
+    if (!query) return props.keybindings
+    return props.keybindings.filter(
+      (k) =>
+        k.action.toLowerCase().includes(query) ||
+        k.description.toLowerCase().includes(query) ||
+        k.keys.some((key) => key.toLowerCase().includes(query))
+    )
   }
 
   // Group by category
-  const groupedKeybindings = () => {
+  const grouped = () => {
     const groups: Record<string, Keybinding[]> = {}
     for (const kb of filteredKeybindings()) {
-      if (!groups[kb.category]) {
-        groups[kb.category] = []
-      }
+      if (!groups[kb.category]) groups[kb.category] = []
       groups[kb.category].push(kb)
     }
     return groups
   }
 
-  const customCount = () => props.keybindings.filter((k) => k.isCustom).length
-
   return (
-    <div class="space-y-6">
-      {/* Header */}
-      <div class="flex items-center justify-between">
-        <div>
-          <h3 class="text-[var(--text-lg)] font-semibold text-[var(--text-primary)]">
-            Keyboard Shortcuts
-          </h3>
-          <p class="text-[var(--text-xs)] text-[var(--text-tertiary)] mt-[var(--space-0_5)]">
-            {customCount() > 0 ? `${customCount()} custom bindings` : 'Using default bindings'}
-          </p>
-        </div>
-        <Show when={customCount() > 0 && props.onResetAll}>
+    <div class="space-y-4">
+      {/* Search */}
+      <input
+        type="text"
+        placeholder="Search shortcuts..."
+        value={searchQuery()}
+        onInput={(e) => setSearchQuery(e.currentTarget.value)}
+        class="
+          w-full px-3 py-2
+          bg-[var(--input-background)]
+          border border-[var(--input-border)]
+          rounded-[var(--radius-md)]
+          text-xs text-[var(--text-primary)]
+          placeholder:text-[var(--input-placeholder)]
+          focus:outline-none focus:border-[var(--input-border-focus)]
+          transition-colors
+        "
+      />
+
+      {/* Reset all (if customized) */}
+      <Show when={customCount() > 0 && props.onResetAll}>
+        <div class="flex items-center justify-between py-1">
+          <span class="text-[10px] text-[var(--text-muted)]">{customCount()} customized</span>
           <button
             type="button"
             onClick={() => props.onResetAll?.()}
-            class="
-              flex items-center gap-[var(--space-1_5)] px-[var(--space-3)] py-[var(--space-1_5)]
-              text-[var(--text-secondary)]
-              hover:text-[var(--text-primary)]
-              hover:bg-[var(--button-ghost-hover)]
-              text-[var(--text-sm)] font-medium
-              rounded-[var(--radius-lg)]
-              transition-colors duration-[var(--duration-fast)]
-            "
+            class="text-[10px] text-[var(--text-muted)] hover:text-[var(--warning)] transition-colors"
           >
-            <RotateCcw class="w-4 h-4" />
-            Reset All
+            Reset all
           </button>
-        </Show>
-      </div>
-
-      {/* Search and Filter */}
-      <div class="flex items-center gap-[var(--space-3)]">
-        <div class="flex-1 relative">
-          <Search class="absolute left-[var(--space-3)] top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
-          <input
-            type="text"
-            placeholder="Search shortcuts..."
-            value={searchQuery()}
-            onInput={(e) => setSearchQuery(e.currentTarget.value)}
-            class="
-              w-full pl-[var(--space-10)] pr-[var(--space-4)] py-[var(--space-2_5)]
-              bg-[var(--input-background)]
-              border border-[var(--input-border)]
-              rounded-[var(--radius-lg)]
-              text-[var(--text-sm)] text-[var(--text-primary)]
-              placeholder:text-[var(--input-placeholder)]
-              focus:outline-none focus:border-[var(--input-border-focus)]
-              focus:shadow-[0_0_0_3px_var(--input-focus-ring)]
-              transition-colors duration-[var(--duration-fast)]
-            "
-          />
         </div>
+      </Show>
 
-        {/* Category Filter */}
-        <select
-          value={selectedCategory() ?? ''}
-          onChange={(e) => setSelectedCategory(e.currentTarget.value || null)}
-          class="
-            px-[var(--space-3)] py-[var(--space-2_5)]
-            bg-[var(--input-background)]
-            border border-[var(--input-border)]
-            rounded-[var(--radius-lg)]
-            text-[var(--text-sm)] text-[var(--text-primary)]
-            focus:outline-none focus:border-[var(--input-border-focus)]
-            transition-colors duration-[var(--duration-fast)]
-          "
-        >
-          <option value="">All Categories</option>
-          <For each={categories()}>{(cat) => <option value={cat}>{cat}</option>}</For>
-        </select>
-      </div>
-
-      {/* Keybindings List */}
-      <div class="space-y-[var(--space-4)]">
-        <Show
-          when={Object.keys(groupedKeybindings()).length > 0}
-          fallback={
-            <div class="py-[var(--space-12)] text-center">
-              <div class="w-12 h-12 mx-auto mb-[var(--space-3)] rounded-full bg-[var(--alpha-white-5)] flex items-center justify-center">
-                <Keyboard class="w-6 h-6 text-[var(--text-muted)]" />
-              </div>
-              <p class="text-[var(--text-sm)] text-[var(--text-secondary)]">No shortcuts found</p>
+      {/* Grouped shortcuts */}
+      <For each={Object.entries(grouped())}>
+        {([category, bindings]) => (
+          <div>
+            <h3 class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
+              {category}
+            </h3>
+            <div class="space-y-0.5">
+              <For each={bindings}>
+                {(kb) => (
+                  <div class="flex items-center justify-between py-1.5 group">
+                    <div class="flex-1 min-w-0">
+                      <span class="text-xs text-[var(--text-secondary)]">{kb.action}</span>
+                      <Show when={kb.isCustom}>
+                        <span class="ml-1.5 text-[9px] text-[var(--accent)]">modified</span>
+                      </Show>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <KeyCombo keys={kb.keys} />
+                      <Show when={props.onEdit}>
+                        <button
+                          type="button"
+                          onClick={() => props.onEdit?.(kb.id)}
+                          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-all"
+                        >
+                          Edit
+                        </button>
+                      </Show>
+                      <Show when={kb.isCustom && props.onReset}>
+                        <button
+                          type="button"
+                          onClick={() => props.onReset?.(kb.id)}
+                          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--warning)] opacity-0 group-hover:opacity-100 transition-all"
+                        >
+                          Reset
+                        </button>
+                      </Show>
+                    </div>
+                  </div>
+                )}
+              </For>
             </div>
-          }
-        >
-          <For each={Object.entries(groupedKeybindings())}>
-            {([category, bindings]) => (
-              <div>
-                <h4 class="text-[var(--text-xs)] font-medium text-[var(--text-muted)] mb-[var(--space-2)] flex items-center gap-[var(--space-2)] uppercase tracking-wider">
-                  <Command class="w-3 h-3" />
-                  {category}
-                </h4>
-                <div class="space-y-[var(--space-1)]">
-                  <For each={bindings}>
-                    {(kb) => (
-                      <div
-                        class={`
-                          flex items-center justify-between
-                          p-[var(--space-2_5)] rounded-[var(--radius-lg)]
-                          hover:bg-[var(--alpha-white-5)]
-                          transition-colors duration-[var(--duration-fast)]
-                          ${kb.isCustom ? 'border-l-2 border-[var(--accent)]' : ''}
-                        `}
-                      >
-                        <div class="flex-1 min-w-0">
-                          <div class="text-[var(--text-sm)] text-[var(--text-primary)]">
-                            {kb.action}
-                          </div>
-                          <div class="text-[var(--text-xs)] text-[var(--text-muted)]">
-                            {kb.description}
-                          </div>
-                        </div>
-                        <div class="flex items-center gap-[var(--space-2)]">
-                          <KeyDisplay keys={kb.keys} />
-                          <Show when={props.onEdit}>
-                            <button
-                              type="button"
-                              onClick={() => props.onEdit?.(kb.id)}
-                              class="
-                                px-[var(--space-2)] py-[var(--space-1)] text-[var(--text-xs)]
-                                text-[var(--text-muted)]
-                                hover:text-[var(--accent)]
-                                hover:bg-[var(--accent-subtle)]
-                                rounded-[var(--radius-md)]
-                                transition-colors duration-[var(--duration-fast)]
-                              "
-                            >
-                              Edit
-                            </button>
-                          </Show>
-                          <Show when={kb.isCustom && props.onReset}>
-                            <button
-                              type="button"
-                              onClick={() => props.onReset?.(kb.id)}
-                              class="
-                                px-[var(--space-2)] py-[var(--space-1)] text-[var(--text-xs)]
-                                text-[var(--text-muted)]
-                                hover:text-[var(--warning)]
-                                hover:bg-[var(--warning-subtle)]
-                                rounded-[var(--radius-md)]
-                                transition-colors duration-[var(--duration-fast)]
-                              "
-                            >
-                              Reset
-                            </button>
-                          </Show>
-                        </div>
-                      </div>
-                    )}
-                  </For>
-                </div>
-              </div>
-            )}
-          </For>
-        </Show>
-      </div>
+          </div>
+        )}
+      </For>
 
-      {/* Info Banner */}
-      <div
-        class="
-          flex items-start gap-[var(--space-3)] p-[var(--space-4)]
-          bg-[var(--info-subtle)]
-          border border-[var(--info-border)]
-          rounded-[var(--radius-xl)]
-        "
-      >
-        <div class="w-8 h-8 rounded-full bg-[var(--info-subtle)] flex items-center justify-center flex-shrink-0">
-          <Keyboard class="w-4 h-4 text-[var(--info)]" />
-        </div>
-        <p class="text-[var(--text-sm)] text-[var(--text-secondary)] leading-relaxed">
-          Click "Edit" to customize a shortcut. Custom shortcuts are highlighted with an accent
-          border.
-        </p>
-      </div>
+      <Show when={filteredKeybindings().length === 0}>
+        <p class="text-xs text-[var(--text-muted)] text-center py-6">No shortcuts found</p>
+      </Show>
     </div>
   )
 }

@@ -18,14 +18,30 @@ export const springs = {
   bouncy: { easing: 'spring(1, 200, 10, 0)' },
 } as const
 
-/** Detects prefers-reduced-motion and tracks changes reactively */
+/**
+ * Detects reduced motion — respects both OS preference and app setting.
+ * Returns true if either the OS `prefers-reduced-motion: reduce` is active
+ * or the user toggled "Reduce motion" in Appearance settings.
+ */
 export function useReducedMotion(): Accessor<boolean> {
   const mql = window.matchMedia('(prefers-reduced-motion: reduce)')
-  const [reduced, setReduced] = createSignal(mql.matches)
+  const appReduced = () => document.documentElement.hasAttribute('data-reduce-motion')
+  const [reduced, setReduced] = createSignal(mql.matches || appReduced())
 
-  const handler = (e: MediaQueryListEvent) => setReduced(e.matches)
-  onMount(() => mql.addEventListener('change', handler))
-  onCleanup(() => mql.removeEventListener('change', handler))
+  const handler = () => setReduced(mql.matches || appReduced())
+  onMount(() => {
+    mql.addEventListener('change', handler)
+    // Watch for data-reduce-motion attribute changes
+    const observer = new MutationObserver(handler)
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-reduce-motion'],
+    })
+    onCleanup(() => {
+      mql.removeEventListener('change', handler)
+      observer.disconnect()
+    })
+  })
 
   return reduced
 }

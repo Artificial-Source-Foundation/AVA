@@ -5,6 +5,7 @@
 
 import { createMemo, createSignal } from 'solid-js'
 import { DEFAULTS, STORAGE_KEYS } from '../config/constants'
+import { getCoreTracker } from '../services/core-bridge'
 import {
   archiveSession as dbArchiveSession,
   clearFileOperations as dbClearFileOperations,
@@ -67,7 +68,12 @@ const [terminalExecutions, setTerminalExecutions] = createSignal<TerminalExecuti
 const [memoryItems, setMemoryItems] = createSignal<MemoryItem[]>([])
 
 // Selected model for chat
-const [selectedModel, setSelectedModel] = createSignal(DEFAULTS.MODEL)
+const [selectedModel, setSelectedModel] = createSignal<string>(DEFAULTS.MODEL)
+
+// Checkpoints
+const [checkpoints, setCheckpoints] = createSignal<
+  Array<{ id: string; timestamp: number; description: string; messageCount: number }>
+>([])
 
 // UI state
 const [retryingMessageId, setRetryingMessageId] = createSignal<string | null>(null)
@@ -88,17 +94,20 @@ const sessionTokenStats = createMemo((): SessionTokenStats => {
   )
 })
 
-// Context window usage (estimate based on message content)
-const DEFAULT_CONTEXT_WINDOW = 200000 // Claude 3.5 Sonnet context
+// Context window usage — uses core tracker when available, falls back to rough estimate
+const DEFAULT_CONTEXT_WINDOW = 200000
 const contextUsage = createMemo(() => {
-  // Rough estimate: ~4 chars per token
-  const estimatedTokens = messages().reduce((sum, msg) => {
-    return sum + Math.ceil(msg.content.length / 4)
-  }, 0)
+  const tracker = getCoreTracker()
+  if (tracker) {
+    const s = tracker.getStats()
+    return { used: s.total, total: s.limit, percentage: s.percentUsed }
+  }
+  // Fallback: rough estimate (~4 chars per token)
+  const estimated = messages().reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0)
   return {
-    used: estimatedTokens,
+    used: estimated,
     total: DEFAULT_CONTEXT_WINDOW,
-    percentage: Math.min(100, (estimatedTokens / DEFAULT_CONTEXT_WINDOW) * 100),
+    percentage: Math.min(100, (estimated / DEFAULT_CONTEXT_WINDOW) * 100),
   }
 })
 
@@ -672,6 +681,54 @@ export function useSession() {
         } catch (err) {
           logError('Session', 'Failed to clear memory items', err)
         }
+      }
+    },
+
+    // ========================================================================
+    // Checkpoints
+    // ========================================================================
+    checkpoints,
+
+    /**
+     * Create a checkpoint snapshot of the current conversation
+     */
+    createCheckpoint: async (description: string): Promise<string | null> => {
+      const sess = currentSession()
+      if (!sess) return null
+      const id = `ckpt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      const snapshot = {
+        messages: messages().map((m) => ({ id: m.id, role: m.role, content: m.content })),
+      }
+      await saveMemoryItem({
+        id,
+        sessionId: sess.id,
+        type: 'checkpoint',
+        title: description,
+        preview: JSON.stringify(snapshot),
+        tokens: 0,
+        createdAt: Date.now(),
+      })
+      setCheckpoints((prev) => [
+        ...prev,
+        { id, timestamp: Date.now(), description, messageCount: messages().length },
+      ])
+      return id
+    },
+
+    /**
+     * Rollback conversation to a checkpoint
+     */
+    rollbackToCheckpoint: async (checkpointId: string): Promise<boolean> => {
+      const item = memoryItems().find((m) => m.id === checkpointId)
+      if (!item) return false
+      try {
+        const data = JSON.parse(item.preview) as {
+          messages: Array<{ id: string; role: string; content: string }>
+        }
+        setMessages(data.messages as Message[])
+        return true
+      } catch {
+        return false
       }
     },
 

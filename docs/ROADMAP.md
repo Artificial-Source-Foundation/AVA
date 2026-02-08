@@ -32,7 +32,7 @@ Everything needed for a working desktop AI coding app.
 - Spring physics animations, glassmorphism design
 - Code viewer (CodeMirror 6)
 
-### Core Engine (29,500+ lines, 531 tests)
+### Core Engine (29,500+ lines, 1072 tests)
 | Category | Modules |
 |----------|---------|
 | Agent System | Agent loop, Commander, Parallel execution, Validator |
@@ -56,13 +56,17 @@ Bug fixes, WebKitGTK compatibility, and UX refinements before moving to plugins.
 - [x] Splash screen (logo, status, version, mesh gradient, min display time)
 - [x] Layout refactoring (navigation store removed, sidebar slimmed, settings as modal)
 - [x] CSS performance (transition-colors, GPU compositing for scroll containers)
+- [x] Appearance tab (dark/light mode, accent colors, UI scale, mono font, border radius, density)
+- [x] Backend tests (536 tests for Config, Context, Memory, Session, Commander)
+- [x] Core frontend wiring (core-bridge, settings sync, context tracking, ContextBar, checkpoints, memory recording)
+- [x] 1072 total tests passing (0 TS errors, 0 Biome errors)
 
 ### Remaining
 - [ ] Test full app flow in Tauri dev (chat, tools, settings, sessions)
-- [ ] Wire settings as modal overlay (signal exists, rendering not connected)
-- [ ] Wire right panel (agent activity) into layout
-- [ ] Wire bottom panel (memory/terminal) into layout
-- [ ] Clean up remaining TS errors from layout refactor
+- [ ] Memory recall injected into system prompts
+- [ ] Settings UI for core categories (agent, context, memory, permissions)
+- [ ] Auto-compaction when context > 80%
+- [ ] Checkpoint UI in sidebar
 - [ ] Verify all keyboard shortcuts work (Ctrl+B, Ctrl+,, Ctrl+M)
 - [ ] Test on multiple Linux DEs (GNOME, KDE, Cosmic)
 

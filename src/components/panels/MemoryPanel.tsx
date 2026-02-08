@@ -7,6 +7,7 @@
 
 import {
   AlertTriangle,
+  Bookmark,
   Brain,
   ChevronRight,
   Code2,
@@ -51,6 +52,12 @@ const memoryTypeConfig: Record<
     bg: 'var(--success-subtle)',
     icon: Sparkles,
     label: 'Knowledge',
+  },
+  checkpoint: {
+    color: 'var(--text-muted)',
+    bg: 'var(--surface-raised)',
+    icon: Bookmark,
+    label: 'Checkpoint',
   },
 }
 

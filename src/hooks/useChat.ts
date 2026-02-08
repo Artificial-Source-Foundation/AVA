@@ -7,6 +7,7 @@ import { executeTool, getToolDefinitions, resetToolCallCount, type ToolContext }
 import { createSignal } from 'solid-js'
 import { DEFAULTS } from '../config/constants'
 import { checkAutoApproval, createApprovalGate } from '../lib/tool-approval'
+import { getCoreTracker } from '../services/core-bridge'
 import { saveMessage, updateMessage } from '../services/database'
 import { createClient, getProviderForModel, type LLMClient } from '../services/llm/bridge'
 import { useProject } from '../stores/project'
@@ -34,16 +35,37 @@ interface StreamOptions {
 // Hook Implementation
 // ============================================================================
 
+export interface ContextStats {
+  total: number
+  limit: number
+  remaining: number
+  percentUsed: number
+}
+
 export function useChat() {
   const [isStreaming, setIsStreaming] = createSignal(false)
   const [error, setError] = createSignal<StreamError | null>(null)
   const [currentProvider, setCurrentProvider] = createSignal<LLMProvider | null>(null)
+  const [contextStats, setContextStats] = createSignal<ContextStats | null>(null)
 
   const abortRef = { current: null as AbortController | null }
   const session = useSession()
   const { currentProject } = useProject()
   const settings = useSettings()
   const approval = createApprovalGate()
+
+  /** Sync tracker stats → signal */
+  function syncTrackerStats() {
+    const tracker = getCoreTracker()
+    if (!tracker) return
+    const s = tracker.getStats()
+    setContextStats({
+      total: s.total,
+      limit: s.limit,
+      remaining: s.remaining,
+      percentUsed: s.percentUsed,
+    })
+  }
 
   // ==========================================================================
   // Core Streaming Function (Internal)
@@ -254,6 +276,8 @@ export function useChat() {
         content,
       })
       session.addMessage(userMsg)
+      getCoreTracker()?.addMessage(userMsg.id, content)
+      syncTrackerStats()
 
       // Create assistant placeholder
       const assistantMsg = await createAssistantMessage(sessionId)
@@ -269,6 +293,8 @@ export function useChat() {
             content: text,
             tokensUsed: tokens,
           })
+          getCoreTracker()?.addMessage(assistantMsg.id, text)
+          syncTrackerStats()
         },
         onError: (err) => {
           setError(err)
@@ -421,6 +447,7 @@ export function useChat() {
     isStreaming,
     error,
     currentProvider,
+    contextStats,
     pendingApproval: approval.pendingApproval,
 
     // Actions

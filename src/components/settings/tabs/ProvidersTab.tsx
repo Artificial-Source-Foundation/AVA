@@ -1,8 +1,8 @@
 /**
  * Providers Settings Tab
  *
- * Modern, minimal provider configuration inspired by Cursor/Windsurf/Zed.
- * Features: OAuth-first flow, clean cards, inline editing.
+ * Flat, minimal design matching GeneralSection.
+ * Expand a provider to configure API key, model, etc.
  */
 
 import {
@@ -10,7 +10,6 @@ import {
   Bot,
   Braces,
   ChevronRight,
-  CircleDot,
   Cloud,
   Cpu,
   ExternalLink,
@@ -27,7 +26,6 @@ import {
   Zap,
 } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
-import { Dynamic } from 'solid-js/web'
 import {
   type DeviceCodeResponse,
   isOAuthSupported,
@@ -75,106 +73,6 @@ export interface ProvidersTabProps {
 }
 
 // ============================================================================
-// Provider Icons & Colors (uses CSS variables from tokens.css)
-// ============================================================================
-
-const providerConfig: Record<
-  string,
-  { icon: IconComponent; colorVar: string; subtleVar: string; borderVar: string }
-> = {
-  anthropic: {
-    icon: Sparkles as IconComponent,
-    colorVar: '--provider-anthropic',
-    subtleVar: '--provider-anthropic-subtle',
-    borderVar: '--provider-anthropic-border',
-  },
-  openai: {
-    icon: Cpu as IconComponent,
-    colorVar: '--provider-openai',
-    subtleVar: '--provider-openai-subtle',
-    borderVar: '--provider-openai-subtle',
-  },
-  google: {
-    icon: Globe as IconComponent,
-    colorVar: '--provider-google',
-    subtleVar: '--provider-google-subtle',
-    borderVar: '--provider-google-subtle',
-  },
-  copilot: {
-    icon: Monitor as IconComponent,
-    colorVar: '--provider-copilot',
-    subtleVar: '--provider-copilot-subtle',
-    borderVar: '--provider-copilot-subtle',
-  },
-  openrouter: {
-    icon: Zap as IconComponent,
-    colorVar: '--provider-openrouter',
-    subtleVar: '--provider-openrouter-subtle',
-    borderVar: '--provider-openrouter-subtle',
-  },
-  xai: {
-    icon: Flame as IconComponent,
-    colorVar: '--provider-xai',
-    subtleVar: '--provider-xai-subtle',
-    borderVar: '--provider-xai-subtle',
-  },
-  mistral: {
-    icon: Cloud as IconComponent,
-    colorVar: '--provider-mistral',
-    subtleVar: '--provider-mistral-subtle',
-    borderVar: '--provider-mistral-subtle',
-  },
-  groq: {
-    icon: Zap as IconComponent,
-    colorVar: '--provider-groq',
-    subtleVar: '--provider-groq-subtle',
-    borderVar: '--provider-groq-subtle',
-  },
-  deepseek: {
-    icon: Braces as IconComponent,
-    colorVar: '--provider-deepseek',
-    subtleVar: '--provider-deepseek-subtle',
-    borderVar: '--provider-deepseek-subtle',
-  },
-  cohere: {
-    icon: Shield as IconComponent,
-    colorVar: '--provider-cohere',
-    subtleVar: '--provider-cohere-subtle',
-    borderVar: '--provider-cohere-subtle',
-  },
-  together: {
-    icon: Cloud as IconComponent,
-    colorVar: '--provider-together',
-    subtleVar: '--provider-together-subtle',
-    borderVar: '--provider-together-subtle',
-  },
-  kimi: {
-    icon: Bot as IconComponent,
-    colorVar: '--provider-kimi',
-    subtleVar: '--provider-kimi-subtle',
-    borderVar: '--provider-kimi-subtle',
-  },
-  glm: {
-    icon: Cpu as IconComponent,
-    colorVar: '--provider-glm',
-    subtleVar: '--provider-glm-subtle',
-    borderVar: '--provider-glm-subtle',
-  },
-  ollama: {
-    icon: Bot as IconComponent,
-    colorVar: '--provider-ollama',
-    subtleVar: '--provider-ollama-subtle',
-    borderVar: '--provider-ollama-subtle',
-  },
-  custom: {
-    icon: Globe as IconComponent,
-    colorVar: '--text-muted',
-    subtleVar: '--alpha-white-5',
-    borderVar: '--border-subtle',
-  },
-}
-
-// ============================================================================
 // Providers Tab Component
 // ============================================================================
 
@@ -184,23 +82,16 @@ export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
   const connectedCount = () => props.providers.filter((p) => p.status === 'connected').length
 
   return (
-    <div class="space-y-[var(--space-4)]">
-      {/* Header - Minimal */}
-      <div class="flex items-center justify-between mb-[var(--space-6)]">
-        <div>
-          <h3 class="text-[var(--text-base)] font-medium text-[var(--text-primary)]">Providers</h3>
-          <p class="text-[var(--text-xs)] text-[var(--text-muted)] mt-[var(--space-0_5)]">
-            {connectedCount() > 0 ? (
-              <span class="text-[var(--success)]">{connectedCount()} connected</span>
-            ) : (
-              'Configure your AI providers'
-            )}
-          </p>
-        </div>
-      </div>
+    <div class="space-y-4">
+      <p class="text-[10px] text-[var(--text-muted)]">
+        {connectedCount() > 0 ? (
+          <span class="text-[var(--success)]">{connectedCount()} connected</span>
+        ) : (
+          'Configure your AI providers'
+        )}
+      </p>
 
-      {/* Provider Grid */}
-      <div class="space-y-[var(--space-2)]">
+      <div class="space-y-0.5">
         <For each={props.providers}>
           {(provider) => (
             <ProviderRow
@@ -218,8 +109,7 @@ export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
         </For>
       </div>
 
-      {/* Footer hint */}
-      <p class="text-[var(--text-xs)] text-[var(--text-muted)] text-center pt-[var(--space-4)]">
+      <p class="text-[10px] text-[var(--text-muted)] text-center">
         Keys stored locally · Never sent to Estela servers
       </p>
     </div>
@@ -250,11 +140,14 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
   const [modelError, setModelError] = createSignal<string | null>(null)
   const [deviceCode, setDeviceCode] = createSignal<DeviceCodeResponse | null>(null)
 
-  const config = () => providerConfig[props.provider.id] || providerConfig.custom
+  const statusColor = () => {
+    if (props.provider.status === 'connected') return 'var(--success)'
+    if (props.provider.status === 'error') return 'var(--error)'
+    return 'var(--text-muted)'
+  }
 
   const handleOAuthClick = async () => {
     const result = await startOAuthFlow(props.provider.id as LLMProvider)
-    // Device code flow returns a DeviceCodeResponse
     if (result && 'userCode' in result) {
       setDeviceCode(result)
     }
@@ -293,106 +186,56 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
   }
 
   return (
-    <div
-      class={`
-        rounded-[var(--radius-xl)] border transition-colors duration-[var(--duration-fast)]
-        ${
-          props.isExpanded
-            ? 'border-[var(--border-default)] bg-[var(--surface-raised)]'
-            : 'border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--alpha-white-5)]'
-        }
-      `}
-    >
-      {/* Collapsed Row — div (not button) to avoid nested button with toggle */}
-      {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button (toggle inside) which crashes WebKitGTK */}
+    <div>
+      {/* Collapsed row */}
+      {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */}
       <div
         role="button"
         tabIndex={0}
         onClick={() => props.onExpand()}
         onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && props.onExpand()}
-        class="w-full flex items-center gap-[var(--space-3)] p-[var(--space-3)] text-left cursor-pointer bg-transparent border-none"
+        class="flex items-center justify-between py-2 cursor-pointer group"
       >
-        {/* Icon with gradient background */}
-        <div
-          class="relative w-9 h-9 rounded-[var(--radius-lg)] flex items-center justify-center"
-          style={{ background: `var(${config().subtleVar})` }}
-        >
-          <span style={{ color: `var(${config().colorVar})` }}>
-            <Dynamic component={config().icon} class="w-4 h-4" />
-          </span>
-          {/* Status dot */}
-          <div
-            class={`
-              absolute -bottom-[var(--space-0_5)] -right-[var(--space-0_5)] w-2.5 h-2.5 rounded-full border-2 border-[var(--surface)]
-              ${
-                props.provider.status === 'connected'
-                  ? 'bg-[var(--success)]'
-                  : props.provider.status === 'error'
-                    ? 'bg-[var(--error)]'
-                    : 'bg-[var(--text-muted)]'
-              }
-            `}
-          />
-        </div>
-
-        {/* Info */}
         <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-[var(--space-2)]">
-            <span class="text-[var(--text-sm)] font-medium text-[var(--text-primary)]">
-              {props.provider.name}
-            </span>
-            <Show when={props.provider.status === 'connected'}>
-              <span class="text-[var(--text-xs)] text-[var(--text-muted)]">
-                {props.provider.defaultModel?.split('/').pop()?.split('-').slice(0, 2).join(' ')}
-              </span>
-            </Show>
+          <div class="flex items-center gap-1.5">
+            <span class="text-xs text-[var(--text-secondary)]">{props.provider.name}</span>
+            <span class="w-1.5 h-1.5 rounded-full" style={{ background: statusColor() }} />
           </div>
-          <p class="text-[var(--text-xs)] text-[var(--text-muted)] truncate">
-            {props.provider.description}
-          </p>
+          <p class="text-[10px] text-[var(--text-muted)] truncate">{props.provider.description}</p>
         </div>
-
-        {/* Right side controls */}
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: stopPropagation wrapper for nested controls */}
-        {/* biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only stopPropagation wrapper */}
-        <div class="flex items-center gap-[var(--space-2)]" onClick={(e) => e.stopPropagation()}>
-          {/* Quick toggle */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              props.onToggle?.(!props.provider.enabled)
-            }}
-            class={`
-              relative w-9 h-5 rounded-full transition-colors duration-[var(--duration-fast)]
-              ${props.provider.enabled ? 'bg-[var(--accent)]' : 'bg-[var(--surface-sunken)]'}
-            `}
-          >
-            <div
+        <div class="flex items-center gap-1.5">
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: stopPropagation wrapper */}
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only wrapper */}
+          <div class="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                props.onToggle?.(!props.provider.enabled)
+              }}
               class={`
-                absolute top-[var(--space-0_5)] w-4 h-4 rounded-full bg-white shadow-sm
-                transition-transform duration-[var(--duration-fast)]
-                ${props.provider.enabled ? 'left-[18px]' : 'left-[var(--space-0_5)]'}
+                w-9 h-5 rounded-full transition-colors flex-shrink-0 flex items-center
+                ${props.provider.enabled ? 'bg-[var(--accent)]' : 'bg-[var(--border-default)]'}
               `}
-            />
-          </button>
-
-          {/* Expand chevron */}
+            >
+              <span
+                class={`
+                  w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-150
+                  ${props.provider.enabled ? 'translate-x-[18px]' : 'translate-x-[2px]'}
+                `}
+              />
+            </button>
+          </div>
           <ChevronRight
-            class={`
-              w-4 h-4 text-[var(--text-muted)] transition-transform duration-[var(--duration-fast)]
-              ${props.isExpanded ? 'rotate-90' : ''}
-            `}
+            class={`w-3.5 h-3.5 text-[var(--text-muted)] transition-transform duration-150 ${props.isExpanded ? 'rotate-90' : ''}`}
           />
         </div>
       </div>
 
-      {/* Expanded Content */}
+      {/* Expanded detail */}
       <Show when={props.isExpanded}>
-        <div class="px-[var(--space-3)] pb-[var(--space-3)] space-y-[var(--space-3)] animate-slide-up">
-          <div class="h-px bg-[var(--border-subtle)] mx-[var(--space-1)]" />
-
-          {/* Device Code Dialog (Copilot) */}
+        <div class="pl-2 pb-3 space-y-3 border-l border-[var(--border-subtle)] ml-1 mb-2">
+          {/* Device Code Dialog */}
           <Show when={deviceCode()}>
             <DeviceCodeDialog
               provider={props.provider.id as LLMProvider}
@@ -405,110 +248,85 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
             />
           </Show>
 
-          {/* OAuth Section - Primary Action */}
+          {/* OAuth button */}
           <Show when={isOAuthSupported(props.provider.id as LLMProvider)}>
             <button
               type="button"
               onClick={handleOAuthClick}
-              class="
-                w-full flex items-center gap-[var(--space-3)] p-[var(--space-3)] rounded-[var(--radius-lg)]
-                border border-[var(--border-subtle)]
-                hover:border-[var(--accent)] hover:shadow-sm
-                transition-colors duration-[var(--duration-fast)] group
-              "
-              style={{ background: `var(${config().subtleVar})` }}
+              class="flex items-center gap-2 px-2.5 py-1.5 text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors w-full"
             >
-              <div
-                class="w-8 h-8 rounded-[var(--radius-md)] flex items-center justify-center"
-                style={{ background: `var(${config().colorVar})` }}
-              >
-                <LogIn class="w-4 h-4 text-white" />
-              </div>
-              <div class="flex-1 text-left">
-                <p class="text-[var(--text-sm)] font-medium text-[var(--text-primary)]">
-                  {oauthButtonText(props.provider.id).label}
-                </p>
-                <p class="text-[var(--text-xs)] text-[var(--text-muted)]">
-                  {oauthButtonText(props.provider.id).description}
-                </p>
-              </div>
-              <ChevronRight class="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--accent)] transition-colors duration-[var(--duration-fast)]" />
+              <LogIn class="w-3 h-3" />
+              <span>{oauthButtonText(props.provider.id).label}</span>
             </button>
-
-            <div class="flex items-center gap-[var(--space-3)] px-[var(--space-2)]">
+            <div class="flex items-center gap-2 px-1">
               <div class="flex-1 h-px bg-[var(--border-subtle)]" />
-              <span class="text-[var(--text-xs)] text-[var(--text-muted)] uppercase tracking-wider">
-                or API key
-              </span>
+              <span class="text-[9px] text-[var(--text-muted)] uppercase">or API key</span>
               <div class="flex-1 h-px bg-[var(--border-subtle)]" />
             </div>
           </Show>
 
-          {/* API Key Input */}
-          <div class="space-y-[var(--space-2)]">
-            <div class="relative">
-              <input
-                type={showKey() ? 'text' : 'password'}
-                value={apiKey()}
-                onInput={(e) => setApiKey(e.currentTarget.value)}
-                onFocus={() => apiKey().includes('••••') && setApiKey('')}
-                onBlur={handleSaveKey}
-                placeholder={`${props.provider.name} API key`}
-                class="
-                  w-full h-[var(--space-10)] px-[var(--space-3)] pr-[80px]
-                  bg-[var(--input-background)]
-                  text-[var(--text-primary)] text-[var(--text-sm)] font-[var(--font-mono)]
-                  placeholder:text-[var(--input-placeholder)]
-                  border border-[var(--input-border)]
-                  rounded-[var(--radius-lg)]
-                  focus:outline-none focus:border-[var(--input-border-focus)] focus:shadow-[0_0_0_3px_var(--input-focus-ring)]
-                  transition-colors duration-[var(--duration-fast)]
-                "
-              />
-              <div class="absolute right-[var(--space-2)] top-1/2 -translate-y-1/2 flex items-center gap-[var(--space-1)]">
+          {/* API Key */}
+          <div class="relative">
+            <input
+              type={showKey() ? 'text' : 'password'}
+              value={apiKey()}
+              onInput={(e) => setApiKey(e.currentTarget.value)}
+              onFocus={() => apiKey().includes('••••') && setApiKey('')}
+              onBlur={handleSaveKey}
+              placeholder={`${props.provider.name} API key`}
+              class="
+                w-full px-3 py-2 pr-16
+                bg-[var(--input-background)]
+                text-xs text-[var(--text-primary)] font-mono
+                placeholder:text-[var(--input-placeholder)]
+                border border-[var(--input-border)]
+                rounded-[var(--radius-md)]
+                focus:outline-none focus:border-[var(--input-border-focus)]
+                transition-colors
+              "
+            />
+            <div class="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => setShowKey(!showKey())}
+                class="p-1 text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+              >
+                <Show when={showKey()} fallback={<Eye class="w-3 h-3" />}>
+                  <EyeOff class="w-3 h-3" />
+                </Show>
+              </button>
+              <Show when={props.provider.apiKey}>
                 <button
                   type="button"
-                  onClick={() => setShowKey(!showKey())}
-                  class="p-[var(--space-1_5)] text-[var(--text-muted)] hover:text-[var(--text-primary)] rounded-[var(--radius-md)] transition-colors duration-[var(--duration-fast)]"
+                  onClick={() => props.onClearApiKey?.()}
+                  class="p-1 text-[var(--text-muted)] hover:text-[var(--error)] transition-colors"
+                  title="Clear API key"
                 >
-                  <Show when={showKey()} fallback={<Eye class="w-3.5 h-3.5" />}>
-                    <EyeOff class="w-3.5 h-3.5" />
-                  </Show>
+                  <AlertCircle class="w-3 h-3" />
                 </button>
-                <Show when={props.provider.apiKey}>
-                  <button
-                    type="button"
-                    onClick={() => props.onClearApiKey?.()}
-                    class="p-[var(--space-1_5)] text-[var(--text-muted)] hover:text-[var(--error)] rounded-[var(--radius-md)] transition-colors duration-[var(--duration-fast)]"
-                    title="Clear API key"
-                  >
-                    <AlertCircle class="w-3.5 h-3.5" />
-                  </button>
-                </Show>
-              </div>
+              </Show>
             </div>
           </div>
 
           {/* Model Selector */}
           <Show when={props.provider.models.length > 0}>
-            <div class="flex items-center gap-[var(--space-2)]">
+            <div class="flex items-center gap-2">
               <select
                 value={props.provider.defaultModel || ''}
                 onChange={(e) => props.onSetDefaultModel?.(e.currentTarget.value)}
                 class="
-                  flex-1 h-9 px-[var(--space-3)]
+                  flex-1 px-3 py-2
                   bg-[var(--input-background)]
-                  text-[var(--text-primary)] text-[var(--text-sm)]
+                  text-xs text-[var(--text-primary)]
                   border border-[var(--input-border)]
-                  rounded-[var(--radius-lg)]
+                  rounded-[var(--radius-md)]
                   focus:outline-none focus:border-[var(--input-border-focus)]
-                  transition-colors duration-[var(--duration-fast)]
-                  appearance-none cursor-pointer
+                  transition-colors appearance-none cursor-pointer
                 "
                 style={{
                   'background-image': `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2352525b' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
                   'background-repeat': 'no-repeat',
-                  'background-position': 'right 12px center',
+                  'background-position': 'right 10px center',
                 }}
               >
                 <For each={props.provider.models}>
@@ -519,22 +337,12 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
                   )}
                 </For>
               </select>
-
               <Show when={supportsDynamicFetch(props.provider.id as LLMProvider)}>
                 <button
                   type="button"
                   onClick={handleRefreshModels}
                   disabled={isLoadingModels()}
-                  class="
-                    h-9 px-[var(--space-3)] flex items-center gap-[var(--space-1_5)]
-                    text-[var(--text-xs)] text-[var(--text-muted)]
-                    bg-[var(--input-background)]
-                    border border-[var(--input-border)]
-                    rounded-[var(--radius-lg)]
-                    hover:text-[var(--text-primary)] hover:border-[var(--border-default)]
-                    disabled:opacity-50
-                    transition-colors duration-[var(--duration-fast)]
-                  "
+                  class="px-2 py-2 text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-50 transition-colors"
                 >
                   <Show
                     when={!isLoadingModels()}
@@ -542,14 +350,11 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
                   >
                     <RefreshCw class="w-3 h-3" />
                   </Show>
-                  Sync
                 </button>
               </Show>
             </div>
             <Show when={modelError()}>
-              <p class="text-[var(--text-xs)] text-[var(--error)] px-[var(--space-1)]">
-                {modelError()}
-              </p>
+              <p class="text-[10px] text-[var(--error)] px-1">{modelError()}</p>
             </Show>
           </Show>
 
@@ -560,33 +365,27 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
               value={props.provider.baseUrl || ''}
               placeholder="http://localhost:11434"
               class="
-                w-full h-9 px-[var(--space-3)]
+                w-full px-3 py-2
                 bg-[var(--input-background)]
-                text-[var(--text-primary)] text-[var(--text-sm)]
+                text-xs text-[var(--text-primary)]
                 placeholder:text-[var(--input-placeholder)]
                 border border-[var(--input-border)]
-                rounded-[var(--radius-lg)]
+                rounded-[var(--radius-md)]
                 focus:outline-none focus:border-[var(--input-border-focus)]
-                transition-colors duration-[var(--duration-fast)]
+                transition-colors
               "
             />
           </Show>
 
-          {/* Footer Actions */}
-          <div class="flex items-center justify-between pt-[var(--space-1)]">
+          {/* Footer links */}
+          <div class="flex items-center justify-between">
             <Show when={props.provider.apiKey}>
               <button
                 type="button"
                 onClick={() => props.onTestConnection?.()}
-                class="
-                  flex items-center gap-[var(--space-1_5)] px-[var(--space-2)] py-[var(--space-1)]
-                  text-[var(--text-xs)] text-[var(--text-muted)]
-                  hover:text-[var(--accent)]
-                  transition-colors duration-[var(--duration-fast)]
-                "
+                class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
               >
-                <CircleDot class="w-3 h-3" />
-                Test
+                Test connection
               </button>
             </Show>
             <div class="flex-1" />
@@ -594,24 +393,16 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
               href={getProviderDocsUrl(props.provider.id)}
               target="_blank"
               rel="noopener noreferrer"
-              class="
-                flex items-center gap-[var(--space-1)] px-[var(--space-2)] py-[var(--space-1)]
-                text-[var(--text-xs)] text-[var(--text-muted)]
-                hover:text-[var(--accent)]
-                transition-colors duration-[var(--duration-fast)]
-              "
+              class="flex items-center gap-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
             >
               Docs
               <ExternalLink class="w-2.5 h-2.5" />
             </a>
           </div>
 
-          {/* Error Display */}
+          {/* Error */}
           <Show when={props.provider.status === 'error' && props.provider.error}>
-            <div class="flex items-center gap-2 px-[var(--space-3)] py-[var(--space-2)] bg-[var(--error-subtle)] border border-[var(--error-border)] rounded-[var(--radius-lg)]">
-              <AlertCircle class="w-3.5 h-3.5 text-[var(--error)]" />
-              <p class="text-[var(--text-xs)] text-[var(--error)]">{props.provider.error}</p>
-            </div>
+            <p class="text-[10px] text-[var(--error)] px-1">{props.provider.error}</p>
           </Show>
         </div>
       </Show>

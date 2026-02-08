@@ -7,21 +7,15 @@
  */
 
 import {
-  Activity,
-  Bot,
-  Brain,
   FolderTree,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
-  Puzzle,
   Settings,
   Sparkles,
-  Users,
 } from 'lucide-solid'
 import { type Component, For, Show } from 'solid-js'
 import { type ActivityId, useLayout } from '../../stores/layout'
-import { useNavigation } from '../../stores/navigation'
 
 interface ActivityItem {
   id: ActivityId
@@ -32,16 +26,17 @@ interface ActivityItem {
 const activities: ActivityItem[] = [
   { id: 'sessions', icon: MessageSquare, label: 'Sessions' },
   { id: 'explorer', icon: FolderTree, label: 'Explorer' },
-  { id: 'agents', icon: Bot, label: 'Agents' },
-  { id: 'team', icon: Users, label: 'Dev Team' },
-  { id: 'memory', icon: Brain, label: 'Memory' },
-  { id: 'activity', icon: Activity, label: 'Activity' },
-  { id: 'plugins', icon: Puzzle, label: 'Plugins' },
 ]
 
 export const ActivityBar: Component = () => {
-  const { handleActivityClick, activeActivity, sidebarVisible, toggleSidebar } = useLayout()
-  const { goToSettings, currentView } = useNavigation()
+  const {
+    handleActivityClick,
+    activeActivity,
+    sidebarVisible,
+    toggleSidebar,
+    openSettings,
+    settingsOpen,
+  } = useLayout()
 
   const isActive = (id: ActivityId) => activeActivity() === id && sidebarVisible()
 
@@ -136,25 +131,25 @@ export const ActivityBar: Component = () => {
         {/* Settings */}
         <button
           type="button"
-          onClick={goToSettings}
+          onClick={openSettings}
           class={`
             flex items-center justify-center
             w-12 h-10
             transition-colors duration-[var(--duration-fast)]
             ${
-              currentView() === 'settings'
+              settingsOpen()
                 ? 'text-[var(--text-primary)]'
                 : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'
             }
           `}
-          title="Settings"
+          title="Settings (Ctrl+,)"
         >
           <span
             class={`
               flex items-center justify-center
               w-8 h-8 rounded-[var(--radius-md)]
               transition-colors duration-[var(--duration-fast)]
-              ${currentView() === 'settings' ? 'bg-[var(--alpha-white-8)]' : 'hover:bg-[var(--alpha-white-5)]'}
+              ${settingsOpen() ? 'bg-[var(--alpha-white-8)]' : 'hover:bg-[var(--alpha-white-5)]'}
             `}
           >
             <Settings class="w-[18px] h-[18px]" />

@@ -11,29 +11,43 @@ import { createSignal, onCleanup, onMount, Show } from 'solid-js'
 import type { OnboardingData } from './components/dialogs/OnboardingDialog'
 import { OnboardingScreen } from './components/dialogs/OnboardingDialog'
 import { AppShell } from './components/layout'
+import { SplashScreen } from './components/SplashScreen'
 import { validateEnv } from './config/env'
+import { initCoreBridge } from './services/core-bridge'
 import { initDatabase } from './services/database'
 import { initLogger, logError, logInfo } from './services/logger'
 import { initializePlatform } from './services/platform'
 import { useLayout } from './stores/layout'
 import { useProject } from './stores/project'
 import { useSession } from './stores/session'
-import { syncAllApiKeys, useSettings } from './stores/settings'
+import { applyAppearance, pushSettingsToCore, syncAllApiKeys, useSettings } from './stores/settings'
+import { useShortcuts } from './stores/shortcuts'
+
+const SPLASH_MIN_MS = 800
 
 function App() {
   const [isInitializing, setIsInitializing] = createSignal(true)
   const [initError, setInitError] = createSignal<string | null>(null)
   const [notTauri, setNotTauri] = createSignal(false)
+  const [splashStatus, setSplashStatus] = createSignal('')
 
-  const { setupLayoutShortcuts } = useLayout()
+  const { toggleSidebar, toggleSettings, toggleBottomPanel } = useLayout()
   const { initializeProjects } = useProject()
   const { loadAllSessions, switchSession, createNewSession, getLastSessionId, sessions } =
     useSession()
   const { settings, updateSettings, updateProvider } = useSettings()
+  const { registerAction, setupShortcutListener } = useShortcuts()
 
   onMount(async () => {
-    // Register keyboard shortcuts with proper cleanup
-    const cleanupShortcuts = setupLayoutShortcuts()
+    // Apply appearance settings (mode, accent, scale, font) to DOM immediately
+    applyAppearance()
+
+    // Register shortcut actions and install global listener
+    registerAction('toggle-sidebar', toggleSidebar)
+    registerAction('toggle-settings', toggleSettings)
+    registerAction('toggle-bottom-panel', toggleBottomPanel)
+    registerAction('new-chat', () => createNewSession())
+    const cleanupShortcuts = setupShortcutListener()
     onCleanup(cleanupShortcuts)
 
     // Guard: Estela requires the Tauri runtime
@@ -42,6 +56,17 @@ function App() {
       setIsInitializing(false)
       return
     }
+
+    // Show window early so the splash screen is visible during initialization.
+    // The splash covers the full viewport, so there's no white flash.
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      await getCurrentWindow().show()
+    } catch {
+      /* ignore in non-Tauri */
+    }
+
+    const splashStart = Date.now()
 
     try {
       // Clear corrupted resizable panel sizes from localStorage
@@ -64,27 +89,32 @@ function App() {
         }
       }
 
-      // Initialize file logger first so all subsequent errors are captured
+      setSplashStatus('Starting logger...')
       await initLogger()
       logInfo('App', 'Initializing Estela...')
 
-      // Validate environment variables
       validateEnv()
 
-      // Initialize platform provider for @estela/core
+      setSplashStatus('Initializing platform...')
       initializePlatform()
-
-      // Sync saved API keys to the core credential store
-      // (Settings UI writes to estela_settings; core reads from estela_cred_*)
       syncAllApiKeys()
 
-      // Initialize database (runs migrations)
+      setSplashStatus('Initializing core engine...')
+      const openAIKey = settings().providers.find((p) => p.id === 'openai')?.apiKey
+      const cleanupCore = await initCoreBridge({
+        contextLimit: 200_000,
+        openAIApiKey: openAIKey,
+      })
+      onCleanup(cleanupCore)
+      pushSettingsToCore()
+
+      setSplashStatus('Loading database...')
       await initDatabase()
 
-      // Initialize projects first (loads projects and restores last project)
+      setSplashStatus('Loading projects...')
       await initializeProjects()
 
-      // Load sessions for the current project
+      setSplashStatus('Restoring session...')
       await loadAllSessions()
 
       // Restore last session or create new one
@@ -92,13 +122,10 @@ function App() {
       const loadedSessions = sessions()
 
       if (lastSessionId && loadedSessions.some((s) => s.id === lastSessionId)) {
-        // Switch to last used session
         await switchSession(lastSessionId)
       } else if (loadedSessions.length > 0) {
-        // Switch to most recent session
         await switchSession(loadedSessions[0].id)
       } else {
-        // Create a new session
         await createNewSession()
       }
     } catch (err) {
@@ -106,16 +133,13 @@ function App() {
       const errorMsg = err instanceof Error ? `${err.message}\n\nStack: ${err.stack}` : String(err)
       setInitError(errorMsg)
     } finally {
-      setIsInitializing(false)
-
-      // Deferred window show — removes white flash on startup
-      // Window starts with visible: false in tauri.conf.json
-      try {
-        const { getCurrentWindow } = await import('@tauri-apps/api/window')
-        await getCurrentWindow().show()
-      } catch {
-        /* ignore in non-Tauri */
+      // Ensure splash shows for at least SPLASH_MIN_MS so it doesn't just flash
+      const elapsed = Date.now() - splashStart
+      const remaining = SPLASH_MIN_MS - elapsed
+      if (remaining > 0) {
+        await new Promise((r) => setTimeout(r, remaining))
       }
+      setIsInitializing(false)
     }
   })
 
@@ -162,17 +186,8 @@ function App() {
         </div>
       }
     >
-      <Show
-        when={!isInitializing()}
-        fallback={
-          <div class="flex h-screen items-center justify-center bg-[var(--background)]">
-            <div class="text-center">
-              <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--accent)] mx-auto" />
-              <p class="mt-4 text-[var(--text-secondary)]">Initializing Estela...</p>
-            </div>
-          </div>
-        }
-      >
+      <SplashScreen visible={isInitializing()} status={splashStatus()} />
+      <Show when={!isInitializing()}>
         <Show
           when={!initError()}
           fallback={

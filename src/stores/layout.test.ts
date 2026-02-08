@@ -47,8 +47,8 @@ describe('layout store', () => {
       layout.setActiveActivity('sessions')
       layout.setSidebarVisible(false)
 
-      layout.handleActivityClick('agents')
-      expect(layout.activeActivity()).toBe('agents')
+      layout.handleActivityClick('explorer')
+      expect(layout.activeActivity()).toBe('explorer')
       expect(layout.sidebarVisible()).toBe(true)
     })
   })
@@ -118,40 +118,5 @@ describe('layout store', () => {
     })
   })
 
-  // ============================================================================
-  // setupLayoutShortcuts
-  // ============================================================================
-
-  describe('setupLayoutShortcuts', () => {
-    it('Ctrl+B toggles sidebar', async () => {
-      const layout = await loadLayout()
-      layout.setSidebarVisible(true)
-      const cleanup = layout.setupLayoutShortcuts()
-
-      document.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, bubbles: true })
-      )
-      expect(layout.sidebarVisible()).toBe(false)
-
-      document.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, bubbles: true })
-      )
-      expect(layout.sidebarVisible()).toBe(true)
-
-      cleanup()
-    })
-
-    it('returns cleanup function that removes listener', async () => {
-      const layout = await loadLayout()
-      layout.setSidebarVisible(true)
-      const cleanup = layout.setupLayoutShortcuts()
-      cleanup()
-
-      // After cleanup, Ctrl+B should not toggle
-      document.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'b', ctrlKey: true, bubbles: true })
-      )
-      expect(layout.sidebarVisible()).toBe(true)
-    })
-  })
+  // setupLayoutShortcuts moved to src/stores/shortcuts.ts
 })

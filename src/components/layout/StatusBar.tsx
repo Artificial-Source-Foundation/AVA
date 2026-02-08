@@ -9,9 +9,11 @@
 import { Minus, Square, X, Zap } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
 import { useSession } from '../../stores/session'
+import { useSettings } from '../../stores/settings'
 
 export const StatusBar: Component = () => {
   const { sessionTokenStats, currentSession, selectedModel } = useSession()
+  const { settings } = useSettings()
 
   const formatTokens = (count: number): string => {
     if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`
@@ -81,11 +83,14 @@ export const StatusBar: Component = () => {
           <span>Ready</span>
         </div>
 
-        <span class="text-[var(--border-strong)]">|</span>
+        <Show when={settings().ui.showModelInTitleBar}>
+          <span class="text-[var(--border-strong)]">|</span>
+          <span class="text-[var(--accent)]">{selectedModel()}</span>
+        </Show>
 
-        <span class="text-[var(--accent)]">{selectedModel()}</span>
-
-        <Show when={currentSession() && sessionTokenStats().total > 0}>
+        <Show
+          when={settings().ui.showTokenCount && currentSession() && sessionTokenStats().total > 0}
+        >
           <span class="text-[var(--border-strong)]">|</span>
           <span class="flex items-center gap-1">
             <Zap class="w-2.5 h-2.5 text-[var(--warning)]" />

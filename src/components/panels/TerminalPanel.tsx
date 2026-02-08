@@ -224,10 +224,15 @@ export const TerminalPanel: Component<TerminalPanelProps> = (props) => {
                     }
                   `}
                 >
-                  {/* Command Header */}
-                  <button
-                    type="button"
+                  {/* Command Header — div (not button) to avoid nested button with copy */}
+                  {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button (copy inside) which crashes WebKitGTK */}
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => toggleExpanded(execution.id)}
+                    onKeyDown={(e) =>
+                      (e.key === 'Enter' || e.key === ' ') && toggleExpanded(execution.id)
+                    }
                     class="
                       w-full text-left
                       flex items-center gap-3
@@ -314,7 +319,7 @@ export const TerminalPanel: Component<TerminalPanelProps> = (props) => {
                         `}
                       />
                     </div>
-                  </button>
+                  </div>
 
                   {/* Output */}
                   <Show when={isExpanded()}>

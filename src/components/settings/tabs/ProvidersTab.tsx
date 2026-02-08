@@ -303,9 +303,11 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
         }
       `}
     >
-      {/* Collapsed Row */}
-      <button
-        type="button"
+      {/* Collapsed Row — div (not button) to avoid nested button with toggle */}
+      {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button (toggle inside) which crashes WebKitGTK */}
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => props.onExpand()}
         onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && props.onExpand()}
         class="w-full flex items-center gap-[var(--space-3)] p-[var(--space-3)] text-left cursor-pointer bg-transparent border-none"
@@ -383,7 +385,7 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
             `}
           />
         </div>
-      </button>
+      </div>
 
       {/* Expanded Content */}
       <Show when={props.isExpanded}>

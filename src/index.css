@@ -17,6 +17,15 @@
   box-sizing: border-box;
 }
 
+/* Lucide SVG icon defaults for WebKitGTK (Tauri/Linux)
+   Prevents SolidJS text-node markers from affecting icon layout. */
+svg.lucide {
+  font-size: 0;
+  line-height: 0;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
 html {
   font-family: var(--font-sans);
   font-size: 16px;
@@ -121,15 +130,9 @@ pre code {
   background: none;
 }
 
-/* Form elements */
-button,
-input,
-select,
-textarea {
-  font-family: inherit;
-  font-size: inherit;
-  color: inherit;
-}
+/* Form elements — Tailwind v4 preflight already sets
+   button { font: inherit; color: inherit } in @layer base.
+   DO NOT duplicate these un-layered; it overrides utility classes. */
 
 button {
   cursor: pointer;

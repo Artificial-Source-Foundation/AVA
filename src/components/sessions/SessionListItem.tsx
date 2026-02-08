@@ -89,8 +89,10 @@ export const SessionListItem: Component<SessionListItemProps> = (props) => {
   }
 
   return (
-    <button
-      type="button"
+    // biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button (rename/delete inside) which crashes WebKitGTK
+    <div
+      role="button"
+      tabIndex={0}
       class={`
         group relative w-full text-left
         p-3 rounded-[var(--radius-lg)]
@@ -136,7 +138,7 @@ export const SessionListItem: Component<SessionListItemProps> = (props) => {
             <p
               class={`
                 font-medium text-sm truncate
-                ${props.isActive ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}
+                $props.isActive ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'
               `}
             >
               {props.session.name}
@@ -153,7 +155,7 @@ export const SessionListItem: Component<SessionListItemProps> = (props) => {
             class={`
               flex-shrink-0 flex gap-0.5
               transition-opacity duration-[var(--duration-fast)]
-              ${props.isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}
+              $props.isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
             `}
           >
             <button
@@ -199,6 +201,6 @@ export const SessionListItem: Component<SessionListItemProps> = (props) => {
           </span>
         </div>
       </Show>
-    </button>
+    </div>
   )
 }

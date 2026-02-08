@@ -6,6 +6,17 @@
 
 ## Current Session
 
+**Session 37** (2026-02-07)
+- ✅ **Provider expansion** — ProvidersTab shows all 14 providers (was 4). Added Google, Copilot, xAI, Mistral, Groq, DeepSeek, Cohere, Together, Kimi, Zhipu/GLM with models, icons, docs URLs.
+- ✅ **OAuth expansion** — Google OAuth (PKCE) and Copilot OAuth (Device Code flow). New `DeviceCodeDialog.tsx` for Copilot auth.
+- ✅ **Team delegation flow** — SVG animated dash lines from Team Lead to teams. ParallelBadge (2+ teams working). PhaseTimeline (plan→delegate→execute→validate→done). Delegation context display. Fixed Junior Dev parentId bug (now parents to active Senior Lead in same domain, not Team Lead).
+- ✅ **Session fork** — "Fork from here" in SidebarSessions context menu. `forkSession()` in session store. Message count in session rows.
+- ✅ **Plugin browser shell** — Added `'plugins'` to ActivityId. Puzzle icon in ActivityBar. SidebarPlugins with built-in skills list, disabled Browse/Create buttons.
+- ✅ **PI Coding Agent research** — `docs/research/pi-coding-agent.md` (~140 lines). Covers minimalism (4 tools), cross-provider context handoff, session branching tree, self-extension, comparison with Estela.
+- ✅ Docs updated
+- **New files:** `src/components/settings/DeviceCodeDialog.tsx`, `src/components/sidebar/SidebarPlugins.tsx`, `docs/research/pi-coding-agent.md`
+- **Modified:** `ProvidersTab.tsx`, `oauth.ts`, `TeamPanel.tsx`, `useAgent.ts`, `team.ts` (types), `SidebarSessions.tsx`, `session.ts` (store), `layout.ts`, `ActivityBar.tsx`, `SidebarPanel.tsx`, `tokens.css`, `llm.ts` (types)
+
 **Session 36** (2026-02-07)
 - ✅ **Working directory fix** — `useChat` and `useAgent` read from `useProject().currentProject().directory` instead of `'.'`
 - ✅ **Tool approval wired** — Shared `src/lib/tool-approval.ts` (ApprovalRequest, checkAutoApproval, createApprovalGate). Both hooks gated. ChatView merges both sources into ToolApprovalDialog.
@@ -248,6 +259,7 @@
 | **2026-02-05** | **Epic 25 Sprint 1+3** | **ACP Agent + A2A Server (97 tests)** |
 | **2026-02-07** | **LLM Integration** | **Chat → streaming AI response working** |
 | **2026-02-07** | **Frontend Gaps Fixed** | **Working dir, tool approval, session dup, dead code** |
+| **2026-02-07** | **Phase 1 Complete** | **14 providers, team delegation, session fork, plugin shell** |
 
 ---
 
@@ -356,8 +368,10 @@
 - ✅ **Tool approval wired** — Shared approval gate in useChat + useAgent, ChatView merges both (Session 36)
 - ✅ **Session duplicate** — Right-click → Duplicate creates copy with all messages (Session 36)
 - ✅ **Dead code removed** — Unused frontend LLM client/providers/credentials deleted (Session 36)
-- ⬜ Session management UI (list, resume, fork)
-- ⬜ Team delegation flow visualization
+- ✅ **Provider expansion** — 14 providers visible in Settings (was 4), Google + Copilot OAuth (Session 37)
+- ✅ **Team delegation flow** — SVG lines, ParallelBadge, PhaseTimeline, parentId fix (Session 37)
+- ✅ **Session fork** — "Fork from here" context menu, message count display (Session 37)
+- ✅ **Plugin browser shell** — Plugins activity tab, built-in skills list, Phase 2 prep (Session 37)
 
 ### Gemini CLI Feature Parity (Epic 26) - NEW
 - ✅ Policy engine with priority rules, wildcards, regex

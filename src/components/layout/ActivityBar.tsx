@@ -14,6 +14,7 @@ import {
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Puzzle,
   Settings,
   Sparkles,
   Users,
@@ -35,6 +36,7 @@ const activities: ActivityItem[] = [
   { id: 'team', icon: Users, label: 'Dev Team' },
   { id: 'memory', icon: Brain, label: 'Memory' },
   { id: 'activity', icon: Activity, label: 'Activity' },
+  { id: 'plugins', icon: Puzzle, label: 'Plugins' },
 ]
 
 export const ActivityBar: Component = () => {

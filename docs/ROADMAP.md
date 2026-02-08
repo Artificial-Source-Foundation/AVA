@@ -10,7 +10,7 @@ The Tauri desktop app is the primary product. Everything else is secondary.
 
 ---
 
-## What's Built (29,500+ lines, 531 tests)
+## What's Built (29,500+ lines core, 531 tests)
 
 ### Core Engine (Complete)
 All backend modules are implemented and tested:
@@ -32,7 +32,10 @@ All backend modules are implemented and tested:
 - Agent Activity panel, File Operations panel
 - Code viewer (CodeMirror 6)
 - Spring physics animations, glassmorphism design
-- Settings page with provider configuration
+- Settings page with 14 LLM providers (4 OAuth flows)
+- Session fork + duplicate
+- Plugin browser shell (Phase 2 prep)
+- Team delegation flow visualization
 
 ### What's Built for Phase 1
 
@@ -55,10 +58,11 @@ All backend modules are implemented and tested:
 - [x] **Session duplicate** — Right-click → Duplicate creates copy with all messages
 - [x] **Dead code removed** — Deleted unused frontend LLM client/providers/credentials (-975 lines)
 
-### What's Remaining for Phase 1
-- [ ] Team delegation flow visualization
-- [ ] Session management UI (list, resume, fork)
-- [ ] Plugin browser UI (prepare for Phase 2)
+### Phase 1 Completion (Session 37 — 2026-02-07)
+- [x] **Provider expansion** — 14 providers visible (was 4), Google + Copilot OAuth, DeviceCodeDialog
+- [x] **Team delegation flow** — SVG animated lines, ParallelBadge, PhaseTimeline, parentId fix
+- [x] **Session fork** — "Fork from here" in context menu, message count display
+- [x] **Plugin browser shell** — Plugins activity tab, built-in skills, Phase 2 prep
 
 ---
 

@@ -8,24 +8,34 @@
 import {
   AlertCircle,
   Bot,
+  Braces,
   ChevronRight,
   CircleDot,
+  Cloud,
   Cpu,
   ExternalLink,
   Eye,
   EyeOff,
+  Flame,
   Globe,
   Loader2,
   LogIn,
+  Monitor,
   RefreshCw,
+  Shield,
   Sparkles,
   Zap,
 } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
-import { isOAuthSupported, startOAuthFlow } from '../../../services/auth/oauth'
+import {
+  type DeviceCodeResponse,
+  isOAuthSupported,
+  startOAuthFlow,
+} from '../../../services/auth/oauth'
 import { fetchModels, supportsDynamicFetch } from '../../../services/providers/model-fetcher'
 import type { LLMProvider } from '../../../types/llm'
+import { DeviceCodeDialog } from '../DeviceCodeDialog'
 
 // ============================================================================
 // Types
@@ -84,11 +94,71 @@ const providerConfig: Record<
     subtleVar: '--provider-openai-subtle',
     borderVar: '--provider-openai-subtle',
   },
+  google: {
+    icon: Globe as IconComponent,
+    colorVar: '--provider-google',
+    subtleVar: '--provider-google-subtle',
+    borderVar: '--provider-google-subtle',
+  },
+  copilot: {
+    icon: Monitor as IconComponent,
+    colorVar: '--provider-copilot',
+    subtleVar: '--provider-copilot-subtle',
+    borderVar: '--provider-copilot-subtle',
+  },
   openrouter: {
     icon: Zap as IconComponent,
     colorVar: '--provider-openrouter',
     subtleVar: '--provider-openrouter-subtle',
     borderVar: '--provider-openrouter-subtle',
+  },
+  xai: {
+    icon: Flame as IconComponent,
+    colorVar: '--provider-xai',
+    subtleVar: '--provider-xai-subtle',
+    borderVar: '--provider-xai-subtle',
+  },
+  mistral: {
+    icon: Cloud as IconComponent,
+    colorVar: '--provider-mistral',
+    subtleVar: '--provider-mistral-subtle',
+    borderVar: '--provider-mistral-subtle',
+  },
+  groq: {
+    icon: Zap as IconComponent,
+    colorVar: '--provider-groq',
+    subtleVar: '--provider-groq-subtle',
+    borderVar: '--provider-groq-subtle',
+  },
+  deepseek: {
+    icon: Braces as IconComponent,
+    colorVar: '--provider-deepseek',
+    subtleVar: '--provider-deepseek-subtle',
+    borderVar: '--provider-deepseek-subtle',
+  },
+  cohere: {
+    icon: Shield as IconComponent,
+    colorVar: '--provider-cohere',
+    subtleVar: '--provider-cohere-subtle',
+    borderVar: '--provider-cohere-subtle',
+  },
+  together: {
+    icon: Cloud as IconComponent,
+    colorVar: '--provider-together',
+    subtleVar: '--provider-together-subtle',
+    borderVar: '--provider-together-subtle',
+  },
+  kimi: {
+    icon: Bot as IconComponent,
+    colorVar: '--provider-kimi',
+    subtleVar: '--provider-kimi-subtle',
+    borderVar: '--provider-kimi-subtle',
+  },
+  glm: {
+    icon: Cpu as IconComponent,
+    colorVar: '--provider-glm',
+    subtleVar: '--provider-glm-subtle',
+    borderVar: '--provider-glm-subtle',
   },
   ollama: {
     icon: Bot as IconComponent,
@@ -178,8 +248,17 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
   const [showKey, setShowKey] = createSignal(false)
   const [isLoadingModels, setIsLoadingModels] = createSignal(false)
   const [modelError, setModelError] = createSignal<string | null>(null)
+  const [deviceCode, setDeviceCode] = createSignal<DeviceCodeResponse | null>(null)
 
   const config = () => providerConfig[props.provider.id] || providerConfig.custom
+
+  const handleOAuthClick = async () => {
+    const result = await startOAuthFlow(props.provider.id as LLMProvider)
+    // Device code flow returns a DeviceCodeResponse
+    if (result && 'userCode' in result) {
+      setDeviceCode(result)
+    }
+  }
 
   const handleRefreshModels = async () => {
     setIsLoadingModels(true)
@@ -311,11 +390,24 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
         <div class="px-[var(--space-3)] pb-[var(--space-3)] space-y-[var(--space-3)] animate-slide-up">
           <div class="h-px bg-[var(--border-subtle)] mx-[var(--space-1)]" />
 
+          {/* Device Code Dialog (Copilot) */}
+          <Show when={deviceCode()}>
+            <DeviceCodeDialog
+              provider={props.provider.id as LLMProvider}
+              deviceCode={deviceCode()!}
+              onClose={() => setDeviceCode(null)}
+              onSuccess={() => {
+                setDeviceCode(null)
+                props.onToggle?.(true)
+              }}
+            />
+          </Show>
+
           {/* OAuth Section - Primary Action */}
           <Show when={isOAuthSupported(props.provider.id as LLMProvider)}>
             <button
               type="button"
-              onClick={() => startOAuthFlow(props.provider.id as LLMProvider)}
+              onClick={handleOAuthClick}
               class="
                 w-full flex items-center gap-[var(--space-3)] p-[var(--space-3)] rounded-[var(--radius-lg)]
                 border border-[var(--border-subtle)]
@@ -332,10 +424,10 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
               </div>
               <div class="flex-1 text-left">
                 <p class="text-[var(--text-sm)] font-medium text-[var(--text-primary)]">
-                  Sign in with {props.provider.id === 'anthropic' ? 'Claude' : 'ChatGPT'}
+                  {oauthButtonText(props.provider.id).label}
                 </p>
                 <p class="text-[var(--text-xs)] text-[var(--text-muted)]">
-                  Use your {props.provider.id === 'anthropic' ? 'Max/Pro' : 'Plus/Pro'} subscription
+                  {oauthButtonText(props.provider.id).description}
                 </p>
               </div>
               <ChevronRight class="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--accent)] transition-colors duration-[var(--duration-fast)]" />
@@ -539,10 +631,35 @@ const getProviderDocsUrl = (providerId: string): string => {
   const urls: Record<string, string> = {
     anthropic: 'https://docs.anthropic.com/en/api',
     openai: 'https://platform.openai.com/docs/api-reference',
+    google: 'https://ai.google.dev/docs',
+    copilot: 'https://docs.github.com/en/copilot',
     openrouter: 'https://openrouter.ai/docs',
+    xai: 'https://docs.x.ai/api',
+    mistral: 'https://docs.mistral.ai/api/',
+    groq: 'https://console.groq.com/docs',
+    deepseek: 'https://platform.deepseek.com/api-docs',
+    cohere: 'https://docs.cohere.com/',
+    together: 'https://docs.together.ai/',
+    kimi: 'https://platform.moonshot.cn/docs',
+    glm: 'https://open.bigmodel.cn/dev/api',
     ollama: 'https://ollama.ai/docs',
   }
   return urls[providerId] || '#'
+}
+
+const oauthButtonText = (providerId: string): { label: string; description: string } => {
+  switch (providerId) {
+    case 'anthropic':
+      return { label: 'Sign in with Claude', description: 'Use your Max/Pro subscription' }
+    case 'openai':
+      return { label: 'Sign in with ChatGPT', description: 'Use your Plus/Pro subscription' }
+    case 'google':
+      return { label: 'Sign in with Google', description: 'Use your Gemini API access' }
+    case 'copilot':
+      return { label: 'Sign in with GitHub Copilot', description: 'Use your Copilot subscription' }
+    default:
+      return { label: `Sign in with ${providerId}`, description: 'OAuth authentication' }
+  }
 }
 
 // ============================================================================
@@ -598,6 +715,34 @@ export const defaultProviders: LLMProviderConfig[] = [
     defaultModel: 'gpt-5.2',
   },
   {
+    id: 'google',
+    name: 'Google',
+    icon: Globe as IconComponent,
+    description: 'Gemini models with large context',
+    enabled: false,
+    status: 'disconnected',
+    models: [
+      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', contextWindow: 1000000, isDefault: true },
+      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', contextWindow: 1000000 },
+      { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', contextWindow: 1000000 },
+      { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', contextWindow: 2000000 },
+    ],
+    defaultModel: 'gemini-2.5-pro',
+  },
+  {
+    id: 'copilot',
+    name: 'GitHub Copilot',
+    icon: Monitor as IconComponent,
+    description: 'Copilot subscription models via device code',
+    enabled: false,
+    status: 'disconnected',
+    models: [
+      { id: 'copilot-gpt-4o', name: 'GPT-4o (Copilot)', contextWindow: 128000, isDefault: true },
+      { id: 'copilot-claude-sonnet', name: 'Claude Sonnet (Copilot)', contextWindow: 200000 },
+    ],
+    defaultModel: 'copilot-gpt-4o',
+  },
+  {
     id: 'openrouter',
     name: 'OpenRouter',
     icon: Zap as IconComponent,
@@ -622,6 +767,122 @@ export const defaultProviders: LLMProviderConfig[] = [
       { id: 'x-ai/grok-3', name: 'Grok 3', contextWindow: 131072 },
     ],
     defaultModel: 'anthropic/claude-sonnet-4.5',
+  },
+  {
+    id: 'xai',
+    name: 'xAI',
+    icon: Flame as IconComponent,
+    description: 'Grok models for reasoning and code',
+    enabled: false,
+    status: 'disconnected',
+    models: [
+      { id: 'grok-3', name: 'Grok 3', contextWindow: 131072, isDefault: true },
+      { id: 'grok-3-mini', name: 'Grok 3 Mini', contextWindow: 131072 },
+    ],
+    defaultModel: 'grok-3',
+  },
+  {
+    id: 'mistral',
+    name: 'Mistral',
+    icon: Cloud as IconComponent,
+    description: 'European AI with code-specialized models',
+    enabled: false,
+    status: 'disconnected',
+    models: [
+      { id: 'mistral-large-latest', name: 'Mistral Large', contextWindow: 128000, isDefault: true },
+      { id: 'codestral-latest', name: 'Codestral', contextWindow: 256000 },
+      { id: 'mistral-small-latest', name: 'Mistral Small', contextWindow: 128000 },
+    ],
+    defaultModel: 'mistral-large-latest',
+  },
+  {
+    id: 'groq',
+    name: 'Groq',
+    icon: Zap as IconComponent,
+    description: 'Ultra-fast inference on open models',
+    enabled: false,
+    status: 'disconnected',
+    models: [
+      {
+        id: 'llama-3.3-70b-versatile',
+        name: 'Llama 3.3 70B',
+        contextWindow: 128000,
+        isDefault: true,
+      },
+      { id: 'mixtral-8x7b-32768', name: 'Mixtral 8x7B', contextWindow: 32768 },
+      { id: 'gemma2-9b-it', name: 'Gemma 2 9B', contextWindow: 8192 },
+    ],
+    defaultModel: 'llama-3.3-70b-versatile',
+  },
+  {
+    id: 'deepseek',
+    name: 'DeepSeek',
+    icon: Braces as IconComponent,
+    description: 'Open-weight reasoning and coding models',
+    enabled: false,
+    status: 'disconnected',
+    models: [
+      { id: 'deepseek-chat', name: 'DeepSeek V3', contextWindow: 64000, isDefault: true },
+      { id: 'deepseek-reasoner', name: 'DeepSeek R1', contextWindow: 64000 },
+    ],
+    defaultModel: 'deepseek-chat',
+  },
+  {
+    id: 'cohere',
+    name: 'Cohere',
+    icon: Shield as IconComponent,
+    description: 'Enterprise RAG and command models',
+    enabled: false,
+    status: 'disconnected',
+    models: [
+      { id: 'command-r-plus', name: 'Command R+', contextWindow: 128000, isDefault: true },
+      { id: 'command-r', name: 'Command R', contextWindow: 128000 },
+    ],
+    defaultModel: 'command-r-plus',
+  },
+  {
+    id: 'together',
+    name: 'Together',
+    icon: Cloud as IconComponent,
+    description: 'Open-source models with fast inference',
+    enabled: false,
+    status: 'disconnected',
+    models: [
+      {
+        id: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+        name: 'Llama 3.3 70B',
+        contextWindow: 128000,
+        isDefault: true,
+      },
+      { id: 'mistralai/Mixtral-8x7B-Instruct-v0.1', name: 'Mixtral 8x7B', contextWindow: 32768 },
+      { id: 'Qwen/Qwen2.5-Coder-32B-Instruct', name: 'Qwen 2.5 Coder 32B', contextWindow: 32768 },
+    ],
+    defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+  },
+  {
+    id: 'kimi',
+    name: 'Kimi',
+    icon: Bot as IconComponent,
+    description: 'Moonshot AI models with long context',
+    enabled: false,
+    status: 'disconnected',
+    models: [
+      { id: 'moonshot-v1-128k', name: 'Kimi v1 128K', contextWindow: 128000, isDefault: true },
+    ],
+    defaultModel: 'moonshot-v1-128k',
+  },
+  {
+    id: 'glm',
+    name: 'Zhipu (GLM)',
+    icon: Cpu as IconComponent,
+    description: 'Chinese AI with bilingual capabilities',
+    enabled: false,
+    status: 'disconnected',
+    models: [
+      { id: 'glm-4-plus', name: 'GLM-4 Plus', contextWindow: 128000, isDefault: true },
+      { id: 'glm-4-flash', name: 'GLM-4 Flash', contextWindow: 128000 },
+    ],
+    defaultModel: 'glm-4-plus',
   },
   {
     id: 'ollama',

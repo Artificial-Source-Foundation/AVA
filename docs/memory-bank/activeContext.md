@@ -6,27 +6,31 @@
 
 ## Current Focus
 
-**Desktop App Polish — Chat + tools work end-to-end, ship remaining UX**
+**Desktop App — Phase 1 Complete, ready for testing**
 
-LLM chat is streaming (Session 35). Tool approval, working directory, session duplicate, and dead code are all fixed (Session 36). Focus shifts to team delegation visualization and plugin prep.
+All Phase 1 items are done. LLM chat streams (Session 35), frontend gaps fixed (Session 36), providers expanded + team delegation + session fork + plugin shell (Session 37). Ready for `npm run tauri dev` testing.
 
-### What Needs to Happen
-- [ ] Team delegation flow visualization
-- [ ] Session management UI (list, resume, fork — duplicate works now)
-- [ ] Plugin browser UI (Phase 2)
+### Phase 1 Status: COMPLETE
+- [x] Team delegation flow visualization (SVG lines, parallel badge, phase timeline)
+- [x] Session management UI (list, resume, fork, duplicate, stats)
+- [x] Plugin browser UI shell (placeholder for Phase 2)
+- [x] Provider expansion (14 providers visible, 4 OAuth flows)
 
 ---
 
-## Recently Completed (Session 36, 2026-02-07)
+## Recently Completed (Session 37, 2026-02-07)
 
-- ✅ **Working directory fix** — `useChat` and `useAgent` now read from `useProject().currentProject().directory` instead of hardcoded `'.'`
-- ✅ **Tool approval wired** — Shared `src/lib/tool-approval.ts` with `ApprovalRequest` type, `checkAutoApproval()`, `createApprovalGate()`. Both `useChat` and `useAgent` gated before tool execution. `ChatView` merges both approval sources into `ToolApprovalDialog`.
-- ✅ **Session duplicate** — `duplicateSessionMessages()` in database, `duplicateSession()` in session store, right-click "Duplicate" creates actual copy with all messages
-- ✅ **Dead code removed** — Deleted `src/services/llm/client.ts`, `src/services/llm/providers/` (anthropic, openrouter), `src/services/auth/credentials.ts` (all replaced by `bridge.ts`)
+- ✅ **Provider expansion** — ProvidersTab shows all 14 providers (was 4). Added Google, Copilot, xAI, Mistral, Groq, DeepSeek, Cohere, Together, Kimi, Zhipu/GLM. Google + Copilot OAuth buttons added. DeviceCodeDialog for Copilot device code flow.
+- ✅ **Team delegation flow** — SVG animated dash lines from Team Lead to teams, ParallelBadge when 2+ teams active, PhaseTimeline (plan→delegate→execute→validate→done), delegation context display, fixed Junior Dev parentId bug.
+- ✅ **Session fork** — "Fork from here" in context menu, copies messages to new session, message count in session rows.
+- ✅ **Plugin browser shell** — Plugins activity bar icon, SidebarPlugins with "Coming in Phase 2" banner, built-in skills list, disabled Browse/Create buttons.
+- ✅ **PI Coding Agent research** — `docs/research/pi-coding-agent.md` analysis (minimalism, provider switching, session branching, self-extension).
+
+### Session 36 (2026-02-07)
+- ✅ Working directory fix, tool approval wired, session duplicate, dead code removed
 
 ### Session 35 (2026-02-07)
-- ✅ **LLM Integration** — Credential bridge + browser access header → streaming AI responses
-  - Root cause: 3 disconnected credential stores
+- ✅ LLM Integration — Credential bridge + browser access header → streaming AI responses
 
 ### Previous Sessions (33-34)
 - ✅ Sidebar fix, noise texture removal, settings scroll fix, Biome/a11y cleanup
@@ -38,7 +42,7 @@ LLM chat is streaming (Session 35). Tool approval, working directory, session du
 - Agent Activity panel, File Operations panel, Terminal panel
 - Code viewer (CodeMirror 6)
 - Spring physics animations, glassmorphism design
-- Settings page with 4 tabs (Providers, Agents, MCP Servers, Keybindings)
+- Settings page with 4 tabs (Providers [14 providers], Agents, MCP Servers, Keybindings)
 - Team panel (TeamPanel + TeamMemberChat)
 - All 29,500+ lines of core engine (agent, tools, intelligence, safety, plugins)
 

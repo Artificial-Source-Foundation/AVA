@@ -150,6 +150,10 @@ export interface TeamMember {
   result?: string
   /** Error message if failed */
   error?: string
+  /** When this member was delegated their task */
+  delegatedAt?: number
+  /** Context from parent when delegating (e.g., "Handle the frontend components") */
+  delegationContext?: string
 }
 
 /** A tool call associated with a team member */

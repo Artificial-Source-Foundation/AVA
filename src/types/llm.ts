@@ -14,8 +14,15 @@ export type LLMProvider =
   | 'openai'
   | 'google'
   | 'copilot'
+  | 'xai'
+  | 'mistral'
+  | 'groq'
+  | 'deepseek'
+  | 'cohere'
+  | 'together'
   | 'glm'
   | 'kimi'
+  | 'ollama'
 
 /** Authentication methods */
 export type AuthMethod = 'api-key' | 'oauth' | 'gateway'

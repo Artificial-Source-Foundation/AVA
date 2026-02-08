@@ -198,6 +198,33 @@
   --provider-google: var(--red-4);
   --provider-google-subtle: var(--red-alpha-15);
 
+  --provider-copilot: var(--gray-9);
+  --provider-copilot-subtle: var(--alpha-white-5);
+
+  --provider-xai: var(--blue-4);
+  --provider-xai-subtle: var(--blue-alpha-15);
+
+  --provider-mistral: var(--orange-4);
+  --provider-mistral-subtle: var(--orange-alpha-15);
+
+  --provider-groq: var(--green-4);
+  --provider-groq-subtle: var(--green-alpha-15);
+
+  --provider-deepseek: var(--cyan-4);
+  --provider-deepseek-subtle: var(--cyan-alpha-15);
+
+  --provider-cohere: var(--violet-7);
+  --provider-cohere-subtle: var(--violet-alpha-15);
+
+  --provider-together: var(--pink-4);
+  --provider-together-subtle: var(--pink-alpha-15);
+
+  --provider-kimi: var(--teal-4);
+  --provider-kimi-subtle: var(--teal-alpha-15);
+
+  --provider-glm: var(--blue-4);
+  --provider-glm-subtle: var(--blue-alpha-15);
+
   /* ========================================
      AGENT TYPE COLORS (Semantic)
      ======================================== */
@@ -393,6 +420,16 @@
 
 .animate-scale-in {
   animation: scale-in var(--duration-normal) var(--ease-out);
+}
+
+@keyframes delegation-flow {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+
+.animate-delegation-flow {
+  animation: delegation-flow 0.8s linear infinite;
 }
 
 /* ========================================

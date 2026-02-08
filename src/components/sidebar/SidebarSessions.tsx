@@ -4,7 +4,7 @@
  * Session list with search, new chat, and right-click context menu.
  */
 
-import { Copy, MessageSquare, Pencil, Plus, Search, Trash2 } from 'lucide-solid'
+import { Copy, GitFork, MessageSquare, Pencil, Plus, Search, Trash2 } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import { useNavigation } from '../../stores/navigation'
 import { useSession } from '../../stores/session'
@@ -26,6 +26,7 @@ export const SidebarSessions: Component = () => {
     deleteSessionPermanently,
     renameSession,
     duplicateSession,
+    forkSession,
   } = useSession()
   const [search, setSearch] = createSignal('')
   const [contextMenu, setContextMenu] = createSignal<ContextMenuState | null>(null)
@@ -84,6 +85,16 @@ export const SidebarSessions: Component = () => {
         icon: Copy,
         action: () => {
           duplicateSession(sessionId)
+        },
+      },
+      {
+        label: 'Fork from here',
+        icon: GitFork,
+        action: () => {
+          const session = sessions().find((s) => s.id === sessionId)
+          if (session) {
+            forkSession(sessionId, `${session.name} (fork)`)
+          }
         },
       },
       { label: '', action: () => {}, separator: true },
@@ -210,8 +221,13 @@ export const SidebarSessions: Component = () => {
                     />
                     <div class="flex-1 min-w-0">
                       <div class="text-xs truncate">{formatSessionName(session.name)}</div>
-                      <div class="text-[10px] text-[var(--text-muted)] truncate">
-                        {formatDate(session.updatedAt)}
+                      <div class="text-[10px] text-[var(--text-muted)] truncate flex items-center gap-1.5">
+                        <span>{formatDate(session.updatedAt)}</span>
+                        <Show when={session.messageCount > 0}>
+                          <span class="text-[var(--text-muted)]">
+                            {session.messageCount} msg{session.messageCount !== 1 ? 's' : ''}
+                          </span>
+                        </Show>
                       </div>
                     </div>
                   </button>

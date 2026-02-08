@@ -89,6 +89,9 @@ export function useAgent() {
   // Team Bridge — maps agent events to team hierarchy
   // ==========================================================================
 
+  // Track last thought per agent for delegation context
+  const lastThought: Record<string, string> = {}
+
   function bridgeToTeam(event: AgentEvent): void {
     switch (event.type) {
       case 'agent:start': {
@@ -96,18 +99,38 @@ export function useAgent() {
         const domain = teamStore.inferDomain(event.goal)
         const name = teamStore.generateName(role, domain)
 
+        // Determine parent: Junior Devs go under their Senior Lead, not Team Lead
+        let parentId: string | null = null
+        if (role === 'senior-lead') {
+          parentId = teamStore.teamLead()?.id ?? null
+        } else if (role === 'junior-dev') {
+          // Find the active Senior Lead in the same domain, or the most recently started one
+          const activeLead =
+            teamStore
+              .seniorLeads()
+              .find((lead) => lead.domain === domain && lead.status === 'working') ??
+            teamStore.seniorLeads().find((lead) => lead.status === 'working')
+          parentId = activeLead?.id ?? teamStore.teamLead()?.id ?? null
+        }
+        // team-lead: parentId stays null
+
+        // Capture delegation context from parent's last thought
+        const delegationContext = parentId ? lastThought[parentId] : undefined
+
         teamStore.addMember({
           id: event.agentId,
           name,
           role,
           status: 'working',
-          parentId: role === 'team-lead' ? null : (teamStore.teamLead()?.id ?? null),
+          parentId,
           domain,
           model: event.config?.model ?? 'unknown',
           task: event.goal,
           toolCalls: [],
           messages: [],
           createdAt: event.timestamp,
+          delegatedAt: event.timestamp,
+          delegationContext,
         })
         break
       }
@@ -120,9 +143,12 @@ export function useAgent() {
         if (event.result.output) {
           teamStore.updateMember(event.agentId, { result: event.result.output })
         }
+        delete lastThought[event.agentId]
         break
 
       case 'thought':
+        // Track last thought for delegation context extraction
+        lastThought[event.agentId] = event.text
         teamStore.addMessage(event.agentId, {
           id: `thought-${event.timestamp}`,
           role: 'assistant',

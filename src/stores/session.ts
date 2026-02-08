@@ -393,6 +393,45 @@ export function useSession() {
     },
 
     /**
+     * Fork a session — creates a new session with all messages copied
+     */
+    forkSession: async (sourceSessionId: string, name?: string): Promise<void> => {
+      const source = sessions().find((s) => s.id === sourceSessionId)
+      if (!source) return
+
+      const { currentProject } = useProject()
+      const projectId = currentProject()?.id
+
+      const forkName = name || `${source.name} (fork)`
+      const newSession = await dbCreateSession(forkName, projectId)
+
+      // Copy all messages up to current point
+      await dbDuplicateSessionMessages(sourceSessionId, newSession.id)
+
+      // Add to session list
+      const sessionWithStats: SessionWithStats = {
+        ...newSession,
+        messageCount: source.messageCount,
+        totalTokens: source.totalTokens,
+        lastPreview: source.lastPreview,
+      }
+      setSessions((prev) => [sessionWithStats, ...prev])
+
+      // Switch to the forked session
+      setCurrentSession(newSession)
+      setIsLoadingMessages(true)
+      try {
+        const dbMessages = await getMessages(newSession.id)
+        setMessages(dbMessages)
+      } catch {
+        setMessages([])
+      } finally {
+        setIsLoadingMessages(false)
+      }
+      localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
+    },
+
+    /**
      * Update session stats after message changes
      */
     updateSessionStats: (sessionId: string, deltaMessages: number, deltaTokens: number) => {

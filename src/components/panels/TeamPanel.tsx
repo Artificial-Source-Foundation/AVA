@@ -1,9 +1,15 @@
 /**
  * Team Panel Component
  *
- * Shows the dev team hierarchy as real teams.
- * Team Lead at top, then team cards (Frontend Team, Backend Team, etc.)
+ * Shows the dev team hierarchy as real teams with delegation flow.
+ * Team Lead at top, SVG lines to active Senior Leads, then team cards.
  * Each team shows its Senior Lead and Junior Devs.
+ *
+ * Features:
+ * - SVG delegation flow lines (animated dash for active, static for done)
+ * - Delegation context (what task was assigned)
+ * - Parallel execution indicator when 2+ teams work simultaneously
+ * - Phase timeline at bottom
  *
  * Click a team member to view their scoped chat.
  */
@@ -14,6 +20,7 @@ import {
   ChevronDown,
   ChevronRight,
   Crown,
+  GitBranch,
   Loader2,
   Users,
 } from 'lucide-solid'
@@ -31,6 +38,103 @@ const statusLabel: Record<string, string> = {
   reporting: 'Reporting',
   done: 'Done',
   error: 'Error',
+}
+
+// ============================================================================
+// Delegation Flow Lines (SVG)
+// ============================================================================
+
+const DelegationLines: Component<{ teamCount: number; groups: TeamGroup[] }> = (props) => {
+  // Simple vertical connector from Team Lead down to team cards
+  // Each line gets animated dash pattern when the team is active
+  const lineStartY = 4
+  const lineEndY = 20
+  const midX = 12
+
+  return (
+    <Show when={props.teamCount > 0}>
+      <div class="px-4 py-0.5">
+        <svg width="100%" height="24" class="overflow-visible" aria-hidden="true">
+          {/* Vertical trunk line from Team Lead */}
+          <line
+            x1={midX}
+            y1={lineStartY}
+            x2={midX}
+            y2={lineEndY}
+            stroke="var(--border-default)"
+            stroke-width="1.5"
+            stroke-dasharray={props.groups.some((g) => g.status === 'working') ? '4 3' : 'none'}
+            class={
+              props.groups.some((g) => g.status === 'working') ? 'animate-delegation-flow' : ''
+            }
+          />
+          {/* Small circle at junction */}
+          <circle cx={midX} cy={lineEndY} r="2.5" fill="var(--border-default)" />
+        </svg>
+      </div>
+    </Show>
+  )
+}
+
+// ============================================================================
+// Parallel Badge
+// ============================================================================
+
+const ParallelBadge: Component<{ count: number }> = (props) => (
+  <Show when={props.count >= 2}>
+    <div class="flex items-center gap-1 px-2 py-0.5 mx-2 mb-1 rounded-[var(--radius-sm)] bg-[var(--accent-subtle)] border border-[var(--accent-border)]">
+      <GitBranch class="w-3 h-3 text-[var(--accent)]" />
+      <span class="font-[var(--font-ui-mono)] text-[9px] tracking-wider text-[var(--accent)] font-medium">
+        {props.count} PARALLEL
+      </span>
+    </div>
+  </Show>
+)
+
+// ============================================================================
+// Phase Timeline
+// ============================================================================
+
+type Phase = 'idle' | 'planning' | 'delegating' | 'executing' | 'validating' | 'done'
+
+const PhaseTimeline: Component<{ currentPhase: Phase }> = (props) => {
+  const phases: { id: Phase; label: string }[] = [
+    { id: 'planning', label: 'Plan' },
+    { id: 'delegating', label: 'Delegate' },
+    { id: 'executing', label: 'Execute' },
+    { id: 'validating', label: 'Validate' },
+    { id: 'done', label: 'Done' },
+  ]
+
+  const phaseIndex = () => {
+    const idx = phases.findIndex((p) => p.id === props.currentPhase)
+    return idx >= 0 ? idx : -1
+  }
+
+  return (
+    <div class="flex items-center gap-0.5 px-3 py-1.5">
+      <For each={phases}>
+        {(_phase, idx) => {
+          const isActive = () => idx() === phaseIndex()
+          const isPast = () => idx() < phaseIndex()
+
+          return (
+            <>
+              <div
+                class={`
+                  flex-1 h-1 rounded-full transition-colors duration-300
+                  ${isPast() ? 'bg-[var(--accent)]' : isActive() ? 'bg-[var(--accent)]' : 'bg-[var(--surface-sunken)]'}
+                `}
+              />
+              <Show when={idx() < phases.length - 1}>
+                <div class="w-0.5" />
+              </Show>
+            </>
+          )
+        }}
+      </For>
+    </div>
+  )
 }
 
 // ============================================================================
@@ -193,6 +297,15 @@ const TeamCard: Component<{
         </div>
       </Show>
 
+      {/* Delegation context */}
+      <Show when={expanded() && props.group.lead.delegationContext}>
+        <div class="px-3 py-1 border-b border-[var(--border-subtle)]">
+          <p class="text-[9px] text-[var(--text-muted)] italic truncate">
+            Delegated: "{props.group.lead.delegationContext}"
+          </p>
+        </div>
+      </Show>
+
       {/* Team members */}
       <Show when={expanded()}>
         <div class="px-1.5 py-1 space-y-0.5">
@@ -231,6 +344,32 @@ export const TeamPanel: Component = () => {
     team.setSelectedMemberId(team.selectedMemberId() === id ? null : id)
   }
 
+  /** Determine current phase from team state */
+  const currentPhase = (): Phase => {
+    const lead = team.teamLead()
+    if (!lead) return 'idle'
+
+    const groups = team.teamGroups()
+    const stats = team.teamStats()
+
+    // All teams done
+    if (stats.totalTeams > 0 && stats.doneTeams === stats.totalTeams) return 'done'
+
+    // Teams are executing
+    if (stats.activeTeams > 0) return 'executing'
+
+    // Teams exist but none active — could be validating or delegating
+    if (stats.totalTeams > 0) return 'validating'
+
+    // Team lead working but no teams yet — planning
+    if (lead.status === 'working' && groups.length === 0) return 'planning'
+
+    // Lead done, teams exist — delegating
+    if (lead.status === 'done') return 'done'
+
+    return 'planning'
+  }
+
   return (
     <div class="flex flex-col h-full">
       {/* Header */}
@@ -250,7 +389,7 @@ export const TeamPanel: Component = () => {
 
       {/* Team Lead */}
       <Show when={team.teamLead()}>
-        <div class="px-2 pt-2 pb-1">
+        <div class="px-2 pt-2 pb-0">
           <button
             type="button"
             onClick={() => handleSelectMember(team.teamLead()!.id)}
@@ -289,7 +428,13 @@ export const TeamPanel: Component = () => {
             </Show>
           </button>
         </div>
+
+        {/* Delegation flow lines */}
+        <DelegationLines teamCount={team.teamGroups().length} groups={team.teamGroups()} />
       </Show>
+
+      {/* Parallel execution indicator */}
+      <ParallelBadge count={team.teamStats().activeTeams} />
 
       {/* Team Groups */}
       <div class="flex-1 overflow-y-auto px-2 py-1.5 space-y-2 scrollbar-none">
@@ -331,13 +476,21 @@ export const TeamPanel: Component = () => {
         </Show>
       </div>
 
-      {/* Footer Stats */}
-      <Show when={team.teamStats().totalTeams > 0}>
-        <div class="px-3 py-1.5 border-t border-[var(--border-subtle)] flex items-center gap-2">
-          <Users class="w-3 h-3 text-[var(--text-muted)]" />
-          <span class="font-[var(--font-ui-mono)] text-[10px] text-[var(--text-muted)]">
-            {team.teamStats().totalTeams} teams · {team.teamStats().totalMembers} members
-          </span>
+      {/* Phase Timeline + Footer Stats */}
+      <Show when={team.teamLead()}>
+        <div class="border-t border-[var(--border-subtle)]">
+          {/* Phase timeline */}
+          <PhaseTimeline currentPhase={currentPhase()} />
+
+          {/* Footer Stats */}
+          <Show when={team.teamStats().totalTeams > 0}>
+            <div class="px-3 py-1 flex items-center gap-2">
+              <Users class="w-3 h-3 text-[var(--text-muted)]" />
+              <span class="font-[var(--font-ui-mono)] text-[10px] text-[var(--text-muted)]">
+                {team.teamStats().totalTeams} teams · {team.teamStats().totalMembers} members
+              </span>
+            </div>
+          </Show>
         </div>
       </Show>
     </div>

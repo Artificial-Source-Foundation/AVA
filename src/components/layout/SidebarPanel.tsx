@@ -14,6 +14,7 @@ import { TeamPanel } from '../panels/TeamPanel'
 import { SidebarAgents } from '../sidebar/SidebarAgents'
 import { SidebarExplorer } from '../sidebar/SidebarExplorer'
 import { SidebarMemory } from '../sidebar/SidebarMemory'
+import { SidebarPlugins } from '../sidebar/SidebarPlugins'
 import { SidebarSessions } from '../sidebar/SidebarSessions'
 
 export const SidebarPanel: Component = () => {
@@ -52,6 +53,9 @@ export const SidebarPanel: Component = () => {
               <AgentActivityPanel />
             </div>
           </div>
+        </Match>
+        <Match when={activeActivity() === 'plugins'}>
+          <SidebarPlugins />
         </Match>
       </Switch>
     </aside>

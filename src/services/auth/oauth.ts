@@ -24,6 +24,16 @@ interface OAuthConfig {
   tokenUrl: string
   scopes: string[]
   redirectPort: number
+  flow?: 'pkce' | 'device-code'
+}
+
+/** Device code flow response from GitHub */
+export interface DeviceCodeResponse {
+  deviceCode: string
+  userCode: string
+  verificationUri: string
+  expiresIn: number
+  interval: number
 }
 
 interface PKCEParams {
@@ -50,6 +60,7 @@ const OAUTH_CONFIGS: Record<string, OAuthConfig> = {
     tokenUrl: 'https://console.anthropic.com/v1/oauth/token',
     scopes: ['user:inference'],
     redirectPort: 8716,
+    flow: 'pkce',
   },
   openai: {
     // OpenAI Codex OAuth (ChatGPT Plus/Pro)
@@ -58,6 +69,25 @@ const OAUTH_CONFIGS: Record<string, OAuthConfig> = {
     tokenUrl: 'https://auth.openai.com/oauth/token',
     scopes: ['openid', 'profile', 'email', 'offline_access'],
     redirectPort: 8717,
+    flow: 'pkce',
+  },
+  google: {
+    // Google Gemini API OAuth
+    clientId: 'estela-desktop', // Placeholder — user registers via Google Cloud Console
+    authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+    tokenUrl: 'https://oauth2.googleapis.com/token',
+    scopes: ['https://www.googleapis.com/auth/generative-language'],
+    redirectPort: 8718,
+    flow: 'pkce',
+  },
+  copilot: {
+    // GitHub Copilot Device Code flow
+    clientId: 'Iv1.b507a08c87ecfe98', // GitHub Copilot CLI client ID
+    authorizationUrl: 'https://github.com/login/device/code',
+    tokenUrl: 'https://github.com/login/oauth/access_token',
+    scopes: ['read:user'],
+    redirectPort: 0, // Not used for device code flow
+    flow: 'device-code',
   },
 }
 
@@ -146,28 +176,125 @@ function buildAuthUrl(config: OAuthConfig, pkce: PKCEParams): string {
 
 /**
  * Start OAuth flow - opens browser for user authorization
+ * For device-code providers (copilot), returns DeviceCodeResponse instead
  */
-export async function startOAuthFlow(provider: LLMProvider): Promise<void> {
+export async function startOAuthFlow(
+  provider: LLMProvider
+): Promise<DeviceCodeResponse | undefined> {
   const config = OAUTH_CONFIGS[provider]
   if (!config) {
     throw new Error(`OAuth not supported for provider: ${provider}`)
   }
 
-  // Generate PKCE params
+  // Device code flow (GitHub Copilot)
+  if (config.flow === 'device-code') {
+    return startDeviceCodeFlow(provider)
+  }
+
+  // Standard PKCE flow
   const pkce = await generatePKCE()
-
-  // Store for later verification
   storePKCE(provider, pkce)
-
-  // Build and open authorization URL
   const authUrl = buildAuthUrl(config, pkce)
-
-  // Open in default browser using Tauri
   await open(authUrl)
-
-  // Note: The callback will be handled by a local server
-  // that needs to be started before this
   console.log(`OAuth flow started for ${provider}. Waiting for callback...`)
+}
+
+/**
+ * Start Device Code flow (for GitHub Copilot)
+ * Returns the device code response for UI display
+ */
+export async function startDeviceCodeFlow(provider: LLMProvider): Promise<DeviceCodeResponse> {
+  const config = OAUTH_CONFIGS[provider]
+  if (!config) {
+    throw new Error(`Device code flow not supported for provider: ${provider}`)
+  }
+
+  const response = await fetch(config.authorizationUrl, {
+    method: 'POST',
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      client_id: config.clientId,
+      scope: config.scopes.join(' '),
+    }).toString(),
+  })
+
+  if (!response.ok) {
+    throw new Error(`Device code request failed: ${response.statusText}`)
+  }
+
+  const data = (await response.json()) as Record<string, unknown>
+
+  return {
+    deviceCode: data.device_code as string,
+    userCode: data.user_code as string,
+    verificationUri: data.verification_uri as string,
+    expiresIn: data.expires_in as number,
+    interval: (data.interval as number) || 5,
+  }
+}
+
+/**
+ * Poll for device code authorization (used by Copilot)
+ * Returns tokens when user has authorized, or null if expired
+ */
+export async function pollDeviceCodeAuth(
+  provider: LLMProvider,
+  deviceCode: string,
+  interval: number,
+  signal?: AbortSignal
+): Promise<OAuthTokens | null> {
+  const config = OAUTH_CONFIGS[provider]
+  if (!config) {
+    throw new Error(`Device code flow not supported for provider: ${provider}`)
+  }
+
+  const pollOnce = async (): Promise<OAuthTokens | 'pending' | 'expired'> => {
+    const response = await fetch(config.tokenUrl, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: config.clientId,
+        device_code: deviceCode,
+        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+      }).toString(),
+    })
+
+    const data = (await response.json()) as Record<string, unknown>
+
+    if (data.access_token) {
+      return {
+        accessToken: data.access_token as string,
+        refreshToken: data.refresh_token as string | undefined,
+        expiresAt: data.expires_in ? Date.now() + (data.expires_in as number) * 1000 : undefined,
+      }
+    }
+
+    const error = data.error as string
+    if (error === 'authorization_pending' || error === 'slow_down') {
+      return 'pending'
+    }
+
+    return 'expired'
+  }
+
+  // Poll loop
+  while (!signal?.aborted) {
+    await new Promise((resolve) => setTimeout(resolve, interval * 1000))
+    if (signal?.aborted) return null
+
+    const result = await pollOnce()
+    if (result === 'expired') return null
+    if (result === 'pending') continue
+    return result
+  }
+
+  return null
 }
 
 /**

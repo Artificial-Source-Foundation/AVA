@@ -176,7 +176,7 @@ export function clearExaCache(): void {
  * Exa API client
  */
 export class ExaClient {
-  private apiKey: string
+  readonly apiKey: string
 
   constructor(apiKey: string) {
     this.apiKey = apiKey

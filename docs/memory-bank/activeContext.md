@@ -6,57 +6,90 @@
 
 ## Current Focus
 
-**Desktop App — Phase 1 Complete, ready for testing**
+**Desktop App — Phase 1 Complete, entering polish/testing**
 
-All Phase 1 items are done. LLM chat streams (Session 35), frontend gaps fixed (Session 36), providers expanded + team delegation + session fork + plugin shell (Session 37). Ready for `npm run tauri dev` testing.
+Phase 1 is done. Session 38 focused on WebKitGTK fixes and UX polish (splash screen, layout cleanup). Now in testing mode with `npm run tauri dev`.
 
-### Phase 1 Status: COMPLETE
-- [x] Team delegation flow visualization (SVG lines, parallel badge, phase timeline)
-- [x] Session management UI (list, resume, fork, duplicate, stats)
-- [x] Plugin browser UI shell (placeholder for Phase 2)
-- [x] Provider expansion (14 providers visible, 4 OAuth flows)
+### What Just Happened (Session 38, 2026-02-08)
+
+**WebKitGTK Fixes:**
+- DMABUF ghost rendering fix (`WEBKIT_DISABLE_DMABUF_RENDERER=1` in `src-tauri/src/main.rs`)
+- Nested `<button>` crash fix — outer buttons → `<div role="button">` in Settings, SessionListItem, TerminalPanel
+- Cargo linker fix for Pop OS (`gcc-14` in `.cargo/config.toml`)
+
+**Splash Screen:**
+- `src/components/SplashScreen.tsx` — Diamond logo placeholder, "ESTELA" title, "AI Coding Companion" tagline, animated loading dots, real-time init status, version number
+- Window shows early so splash is visible during init
+- 800ms minimum display time, mesh gradient background, fade-out transition
+- `index.tsx` LoadingFallback matches splash look
+
+**Layout Refactoring:**
+- Deleted `src/stores/navigation.ts` — replaced by `settingsOpen` signal in layout store
+- Sidebar slimmed: `ActivityId` reduced to `'sessions' | 'explorer'` (was 7 options)
+- Settings moved from page-based navigation to modal pattern (`openSettings`/`closeSettings`)
+- Added right panel, bottom panel, and bottom panel height state to layout store
+- New keyboard shortcuts: `Ctrl+,` (settings), `Ctrl+M` (bottom panel)
+- `SettingsPage.tsx` uses `closeSettings()` instead of `goToChat()`
 
 ---
 
-## Recently Completed (Session 37, 2026-02-07)
+## Next Up
 
-- ✅ **Provider expansion** — ProvidersTab shows all 14 providers (was 4). Added Google, Copilot, xAI, Mistral, Groq, DeepSeek, Cohere, Together, Kimi, Zhipu/GLM. Google + Copilot OAuth buttons added. DeviceCodeDialog for Copilot device code flow.
-- ✅ **Team delegation flow** — SVG animated dash lines from Team Lead to teams, ParallelBadge when 2+ teams active, PhaseTimeline (plan→delegate→execute→validate→done), delegation context display, fixed Junior Dev parentId bug.
-- ✅ **Session fork** — "Fork from here" in context menu, copies messages to new session, message count in session rows.
-- ✅ **Plugin browser shell** — Plugins activity bar icon, SidebarPlugins with "Coming in Phase 2" banner, built-in skills list, disabled Browse/Create buttons.
-- ✅ **PI Coding Agent research** — `docs/research/pi-coding-agent.md` analysis (minimalism, provider switching, session branching, self-extension).
+### Immediate (Phase 1 Polish)
+- [ ] Test splash screen in Tauri dev
+- [ ] Wire settings as modal overlay (currently `settingsOpen` signal exists but SettingsPage isn't rendered as overlay yet)
+- [ ] Wire right panel (agent activity) to layout
+- [ ] Wire bottom panel (memory/terminal) to layout
+- [ ] Fix remaining TS errors (`SidebarPanel.tsx` references removed activity IDs)
 
-### Session 36 (2026-02-07)
-- ✅ Working directory fix, tool approval wired, session duplicate, dead code removed
-
-### Session 35 (2026-02-07)
-- ✅ LLM Integration — Credential bridge + browser access header → streaming AI responses
-
-### Previous Sessions (33-34)
-- ✅ Sidebar fix, noise texture removal, settings scroll fix, Biome/a11y cleanup
-- ✅ 7 MVP sprints, Tauri hardening
-
-### What's Already Built
-- IDE-inspired layout (ActivityBar, SidebarPanel, MainArea, BottomPanel)
-- Chat UI with streaming + virtual scrolling → **connected to LLM + tool approval**
-- Agent Activity panel, File Operations panel, Terminal panel
-- Code viewer (CodeMirror 6)
-- Spring physics animations, glassmorphism design
-- Settings page with 4 tabs (Providers [14 providers], Agents, MCP Servers, Keybindings)
-- Team panel (TeamPanel + TeamMemberChat)
-- All 29,500+ lines of core engine (agent, tools, intelligence, safety, plugins)
+### Phase 2: Plugin Ecosystem (THE DIFFERENTIATOR)
+See `docs/ROADMAP.md` for sprint breakdown.
 
 ---
 
 ## Platform Priority
 
 ```
-1. Desktop App (Tauri)     ← CURRENT FOCUS
-2. Plugin Ecosystem        ← NEXT
-3. CLI                     ← Secondary
-4. Editor Integration      ← Future
-5. Agent Network           ← Future
+1. Desktop App (Tauri)     <- CURRENT (polish/testing)
+2. Plugin Ecosystem        <- NEXT
+3. CLI                     <- Secondary
+4. Editor Integration      <- Future
+5. Agent Network           <- Future
 ```
+
+---
+
+## Key File Map (Quick Reference)
+
+### Layout System
+| File | Purpose |
+|------|---------|
+| `src/stores/layout.ts` | All layout state (sidebar, panels, settings modal, shortcuts) |
+| `src/components/layout/AppShell.tsx` | 3-column layout with @corvu/resizable |
+| `src/components/layout/ActivityBar.tsx` | Left icon strip (sessions, explorer, settings) |
+| `src/components/layout/SidebarPanel.tsx` | Contextual sidebar (sessions or explorer) |
+| `src/components/layout/MainArea.tsx` | Chat view or welcome state |
+
+### Splash / Init
+| File | Purpose |
+|------|---------|
+| `src/components/SplashScreen.tsx` | Splash screen component |
+| `src/App.tsx` | Init sequence, splash orchestration, window show |
+| `src/index.tsx` | Suspense fallback (matches splash look) |
+| `index.html` | Dark background on `#root` to prevent flash |
+
+### Settings
+| File | Purpose |
+|------|---------|
+| `src/components/settings/SettingsPage.tsx` | Full settings UI (providers, agents, MCP, keybindings, about) |
+| `src/stores/settings.ts` | Settings persistence + credential sync bridge |
+
+### Core Stores
+| File | Purpose |
+|------|---------|
+| `src/stores/session.ts` | Session CRUD, fork, duplicate |
+| `src/stores/project.ts` | Project management |
+| `src/stores/team.ts` | Dev team hierarchy state |
 
 ---
 
@@ -67,16 +100,3 @@ All Phase 1 items are done. LLM chat streams (Session 35), frontend gaps fixed (
 | Commander | Team Lead | Plans, delegates, coordinates |
 | Worker | Senior Lead | Domain specialist, leads a group |
 | Operator | Junior Dev | Executes specific tasks |
-
----
-
-## Completed
-
-| What | Status |
-|------|--------|
-| Epics 1-21 | ✅ Foundation through Enhancement (~25,000 lines) |
-| Epic 25 Sprints 1-3 | ✅ ACP + A2A (194 tests) |
-| Epic 26 | ✅ Gemini CLI Feature Parity (337 tests) |
-| Feature Parity Sprints 1-7 | ✅ Cline + OpenCode features |
-| UI Modernization | ✅ 8 phases + IDE layout redesign |
-| Vision alignment | ✅ Docs reorganized |

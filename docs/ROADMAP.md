@@ -9,7 +9,7 @@
 | Phase | Status | Focus |
 |-------|--------|-------|
 | **1: Desktop App** | **Done** | Core UI, LLM chat, settings, team flow |
-| **1.5: Desktop Polish** | **In Progress** | Testing, bug fixes, UX refinements |
+| **1.5: Desktop Polish** | **Done** | Settings, appearance, wiring, gap closing |
 | **2: Plugin Ecosystem** | Next | THE differentiator — Obsidian-style plugins |
 | **3: Community & CLI** | Future | CLI interface, docs site, templates |
 | **4: Integrations** | Future | Editor (ACP), agent network (A2A), voice, vision |
@@ -45,42 +45,42 @@ Everything needed for a working desktop AI coding app.
 
 ---
 
-## Phase 1.5: Desktop Polish (IN PROGRESS)
+## Phase 1.5: Desktop Polish (COMPLETE)
 
-Bug fixes, WebKitGTK compatibility, UX refinements, and competitive gap closing before moving to plugins.
+Bug fixes, WebKitGTK compatibility, UX refinements, and competitive gap closing.
 
-### Done
-- [x] WebKitGTK DMABUF ghost rendering fix (NVIDIA + Wayland compositors)
-- [x] Nested button crash fix (div+role=button pattern)
-- [x] Cargo linker fix for Pop OS / Cosmic
-- [x] Splash screen (logo, status, version, mesh gradient, min display time)
-- [x] Layout refactoring (navigation store removed, sidebar slimmed, settings as modal)
-- [x] CSS performance (transition-colors, GPU compositing for scroll containers)
-- [x] Appearance tab (dark/light mode, 6 accents, UI scale, mono font, density)
-- [x] Appearance expansion (system theme, dark variants, code themes, ligatures, chat font size, custom accent, sans font, high contrast)
-- [x] Density + font wiring (8 components, CSS utility classes, section density vars)
-- [x] Backend tests Phase 1 (536 tests for Config, Context, Memory, Session, Commander)
-- [x] Backend tests Phase 2 (706 tests for Agent, Tools, LLM — 1778 total across 64 files)
-- [x] Core frontend wiring (core-bridge, settings sync, context tracking, ContextBar, checkpoints, memory recording)
-- [x] Settings hardening (16 new settings, LLM + Behavior tabs, generation/agent/behavior/notification controls)
-- [x] Custom instructions (injected as system message in buildApiMessages)
-- [x] Configurable send key (Enter vs Ctrl+Enter) with dynamic ShortcutHint
-- [x] Desktop notifications + sound chime (AudioContext, unfocused-only, configurable volume)
-- [x] Settings data management (export JSON, import with deep merge, clear all)
-- [x] Cost tracking UI (per-message cost + tokens in bubbles, session total in ContextBar)
-- [x] Vision/image support (paste, drop, base64, multimodal API, inline display)
-- [x] Iterative lint→fix loop (autoFixLint setting, biome/eslint after file edits, errors fed back to LLM)
-- [x] Checkpoint UI (create button, inline display with restore, full DB rollback)
-- [x] Per-message token display in bubbles
-- [x] 0 TS errors, 0 Biome errors, vite build passes
+All development work is done. Only manual Tauri testing remains.
 
-- [x] Memory recall injected into system prompts (recallSimilar + procedural recall → system message)
-- [x] Auto-compaction when context > 80% (sliding window, syncs state + DB + tracker)
+### What's Built
+- WebKitGTK fixes (DMABUF ghost rendering, nested button crash, cargo linker)
+- Splash screen (logo, status, version, mesh gradient)
+- Layout rework (settings modal, activity bar slimmed, bottom/right panels)
+- Appearance system (light/dark/system, 3 dark variants, 6 accents + custom hex, 6 code themes, 3 density levels, ligatures, high contrast, UI scale, chat font size, mono + sans font selectors)
+- Settings hardening (16 settings across LLM + Behavior tabs, custom instructions, send key, notifications + sound)
+- Settings data management (export JSON, import with deep merge, clear all)
+- Core frontend wiring (core-bridge, settings sync, context tracking, ContextBar, checkpoints, agent memory)
+- Cost tracking (per-message tokens + cost in bubbles, session total in ContextBar)
+- Vision/image support (paste, drop, base64, multimodal API, inline display)
+- Iterative lint-fix loop (autoFixLint after file edits, errors fed back to LLM)
+- Memory recall + auto-compaction (sliding window at 80% context)
+- File explorer (recursive tree, Tauri FS lazy-load, expand/collapse)
+- Code editor file reading (readFileContent, auto-open from explorer)
+- Agent persistence (DB CRUD — save, get, update — wired in session store)
+- Google models API (dynamic fetch with hardcoded fallback)
+- DiffViewer split view (buildSplitPairs, two-column rendering)
+- Chat rendering (markdown + syntax highlighting, tool call cards, date separators, model change indicators)
+- Backend tests (1778 tests across 64 files)
+- 0 TS errors, 0 Biome errors, vite build passes, 0 TODOs in src/
 
-### Remaining
+### Manual Testing (Before Phase 2)
 - [ ] Test full app flow in Tauri dev (chat, tools, settings, sessions)
-- [ ] Verify all keyboard shortcuts work (Ctrl+B, Ctrl+,, Ctrl+M)
+- [ ] Verify keyboard shortcuts (Ctrl+B, Ctrl+,, Ctrl+M, Ctrl+N)
 - [ ] Test on multiple Linux DEs (GNOME, KDE, Cosmic)
+- [ ] Test light mode across all components
+- [ ] Test file explorer + code editor with real projects
+
+See [Frontend Changelog](docs/frontend/changelog.md) for session-by-session details.
+See [Frontend Backlog](docs/frontend/backlog.md) for what's next.
 
 ---
 

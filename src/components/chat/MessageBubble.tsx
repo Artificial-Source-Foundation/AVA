@@ -30,11 +30,16 @@ interface MessageBubbleProps {
   onDelete: () => void
 }
 
-const COLLAPSE_THRESHOLD = 1500 // characters
+const ASSISTANT_COLLAPSE_CHARS = 1500
+const USER_COLLAPSE_LINES = 8
 
 export const MessageBubble: Component<MessageBubbleProps> = (props) => {
   const isUser = () => props.message.role === 'user'
-  const isLong = () => !isUser() && props.message.content.length > COLLAPSE_THRESHOLD
+  const lineCount = () => props.message.content.split('\n').length
+  const isLong = () => {
+    if (isUser()) return lineCount() > USER_COLLAPSE_LINES
+    return props.message.content.length > ASSISTANT_COLLAPSE_CHARS
+  }
   const [expanded, setExpanded] = createSignal(false)
   const shouldCollapse = () => isLong() && !expanded() && !props.isStreaming
 
@@ -109,7 +114,13 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                 />
                 {/* Fade gradient for collapsed long messages */}
                 <Show when={shouldCollapse()}>
-                  <div class="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-[var(--chat-assistant-bg)] to-transparent pointer-events-none" />
+                  <div
+                    class="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t to-transparent pointer-events-none"
+                    classList={{
+                      'from-[var(--chat-user-bg)]': isUser(),
+                      'from-[var(--chat-assistant-bg)]': !isUser(),
+                    }}
+                  />
                 </Show>
               </div>
               {/* Show more/less toggle */}
@@ -122,7 +133,11 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                   <Show when={expanded()} fallback={<ChevronDown class="w-3 h-3" />}>
                     <ChevronUp class="w-3 h-3" />
                   </Show>
-                  {expanded() ? 'Show less' : 'Show more'}
+                  {expanded()
+                    ? 'Show less'
+                    : isUser()
+                      ? `Show ${lineCount() - USER_COLLAPSE_LINES} more lines`
+                      : 'Show more'}
                 </button>
               </Show>
             </Show>

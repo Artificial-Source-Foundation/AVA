@@ -10,6 +10,8 @@ import {
   Bookmark,
   Bot,
   ChevronDown,
+  ChevronUp,
+  Clipboard,
   FileSearch,
   FileText,
   Image,
@@ -41,6 +43,10 @@ import { ShortcutHint } from './ShortcutHint'
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024 // 5MB
 const MAX_IMAGES = 4
 const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+
+// Paste collapse constants
+const PASTE_LINE_THRESHOLD = 5
+const PASTE_PREVIEW_LINES = 3
 
 // File context constants
 const MAX_FILE_SIZE = 100 * 1024 // 100KB
@@ -83,6 +89,10 @@ export const MessageInput: Component = () => {
     Array<{ data: string; mimeType: string; name?: string }>
   >([])
   const [pendingFiles, setPendingFiles] = createSignal<Array<{ name: string; content: string }>>([])
+  const [pendingPastes, setPendingPastes] = createSignal<
+    Array<{ content: string; lineCount: number }>
+  >([])
+  const [expandedPasteIndex, setExpandedPasteIndex] = createSignal<number | null>(null)
   const [isDragging, setIsDragging] = createSignal(false)
   let submitting = false
   // oxlint-disable-next-line no-unassigned-vars -- SolidJS ref pattern: assigned via ref={} in JSX
@@ -205,10 +215,12 @@ export const MessageInput: Component = () => {
     }
   }
 
-  // Paste handler for images
+  // Paste handler for images and large text blocks
   const handlePaste = (e: ClipboardEvent) => {
     const items = e.clipboardData?.items
     if (!items) return
+
+    // Check for images first
     const imageFiles: File[] = []
     for (const item of items) {
       if (item.type.startsWith('image/')) {
@@ -219,7 +231,31 @@ export const MessageInput: Component = () => {
     if (imageFiles.length > 0) {
       e.preventDefault()
       addImages(imageFiles)
+      return
     }
+
+    // Check for large text pastes
+    const text = e.clipboardData?.getData('text/plain')
+    if (text) {
+      const lines = text.split('\n')
+      if (lines.length > PASTE_LINE_THRESHOLD) {
+        e.preventDefault()
+        setPendingPastes((prev) => [...prev, { content: text, lineCount: lines.length }])
+      }
+    }
+  }
+
+  const removePaste = (index: number) => {
+    setPendingPastes((prev) => prev.filter((_, i) => i !== index))
+    if (expandedPasteIndex() === index) setExpandedPasteIndex(null)
+  }
+
+  const togglePastePreview = (index: number) => {
+    setExpandedPasteIndex((prev) => (prev === index ? null : index))
+  }
+
+  const getPastePreview = (content: string) => {
+    return content.split('\n').slice(0, PASTE_PREVIEW_LINES).join('\n')
   }
 
   // Drop handler for images and text files
@@ -289,6 +325,10 @@ export const MessageInput: Component = () => {
     const files = pendingFiles()
     setPendingFiles([])
 
+    const pastes = pendingPastes()
+    setPendingPastes([])
+    setExpandedPasteIndex(null)
+
     // Prepend file context as fenced code blocks
     let fullMessage = message
     if (files.length > 0) {
@@ -298,7 +338,13 @@ export const MessageInput: Component = () => {
           return `**${f.name}:**\n\`\`\`${ext}\n${f.content}\n\`\`\``
         })
         .join('\n\n')
-      fullMessage = `${fileBlocks}\n\n${message}`
+      fullMessage = `${fileBlocks}\n\n${fullMessage}`
+    }
+
+    // Append pasted text blocks
+    if (pastes.length > 0) {
+      const pasteBlocks = pastes.map((p) => `\`\`\`\n${p.content}\n\`\`\``).join('\n\n')
+      fullMessage = `${fullMessage}\n\n${pasteBlocks}`
     }
 
     try {
@@ -394,6 +440,54 @@ export const MessageInput: Component = () => {
                     >
                       <X class="w-2.5 h-2.5" />
                     </button>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+
+          {/* Pending paste chips */}
+          <Show when={pendingPastes().length > 0}>
+            <div class="flex flex-col gap-1.5 mb-2 px-3">
+              <For each={pendingPastes()}>
+                {(paste, i) => (
+                  <div>
+                    <div class="flex items-center gap-1.5 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)] w-fit">
+                      <Clipboard class="w-3 h-3 text-[var(--text-muted)]" />
+                      <button
+                        type="button"
+                        onClick={() => togglePastePreview(i())}
+                        class="flex items-center gap-1 hover:text-[var(--accent)] transition-colors"
+                      >
+                        <span>
+                          Pasted text · {paste.lineCount} line{paste.lineCount !== 1 ? 's' : ''}
+                        </span>
+                        <Show
+                          when={expandedPasteIndex() === i()}
+                          fallback={<ChevronDown class="w-3 h-3" />}
+                        >
+                          <ChevronUp class="w-3 h-3" />
+                        </Show>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removePaste(i())}
+                        class="w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-[var(--alpha-white-10)] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors"
+                      >
+                        <X class="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                    {/* Expandable preview */}
+                    <Show when={expandedPasteIndex() === i()}>
+                      <pre class="mt-1 ml-1 px-2 py-1.5 text-[10px] leading-tight bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] overflow-x-auto max-h-[120px] overflow-y-auto text-[var(--text-secondary)] font-[var(--font-ui-mono)]">
+                        {getPastePreview(paste.content)}
+                        <Show when={paste.lineCount > PASTE_PREVIEW_LINES}>
+                          <span class="text-[var(--text-muted)]">
+                            {'\n'}... {paste.lineCount - PASTE_PREVIEW_LINES} more lines
+                          </span>
+                        </Show>
+                      </pre>
+                    </Show>
                   </div>
                 )}
               </For>

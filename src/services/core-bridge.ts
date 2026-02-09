@@ -7,15 +7,19 @@
  */
 
 import {
+  BusMessageType,
   type Compactor,
   type ContextTracker,
   createCompactor,
   createContextTracker,
   createDefaultRegistry,
   createMemoryManager,
+  getMessageBus,
   getSettingsManager,
   type MemoryManager,
+  type MessageBus,
   type SettingsManager,
+  type ToolConfirmationRequest,
   type WorkerRegistry,
 } from '@estela/core'
 
@@ -28,6 +32,7 @@ let _tracker: ContextTracker | null = null
 let _compactor: Compactor | null = null
 let _registry: WorkerRegistry | null = null
 let _memory: MemoryManager | null = null
+let _bus: MessageBus | null = null
 
 // ============================================================================
 // Getters
@@ -58,6 +63,22 @@ export function getCoreMemory(): MemoryManager | null {
   return _memory
 }
 
+/** Get the core MessageBus (null if not initialized) */
+export function getCoreBus(): MessageBus | null {
+  return _bus
+}
+
+/**
+ * Subscribe to tool approval requests from the message bus.
+ * Returns an unsubscribe function.
+ */
+export function subscribeToolApproval(
+  handler: (request: ToolConfirmationRequest) => void
+): () => void {
+  if (!_bus) return () => {}
+  return _bus.subscribe(BusMessageType.TOOL_CONFIRMATION_REQUEST, handler)
+}
+
 // ============================================================================
 // Initialization
 // ============================================================================
@@ -76,6 +97,9 @@ export interface CoreBridgeOptions {
 export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() => void> {
   // Settings — use the core singleton
   _settings = getSettingsManager()
+
+  // Message bus — connects tool execution to UI approval
+  _bus = getMessageBus()
 
   // Context tracking — real token counting via gpt-tokenizer
   _tracker = createContextTracker(opts.contextLimit ?? 200_000)
@@ -98,6 +122,7 @@ export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() =
   return () => {
     _memory?.dispose()
     _memory = null
+    _bus = null
     _compactor = null
     _tracker = null
     _registry = null

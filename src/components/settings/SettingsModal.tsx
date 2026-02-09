@@ -38,7 +38,7 @@ import { AppearanceTab } from './tabs/AppearanceTab'
 import { BehaviorTab } from './tabs/BehaviorTab'
 import { type Keybinding, KeybindingsTab } from './tabs/KeybindingsTab'
 import { LLMTab } from './tabs/LLMTab'
-import { defaultMCPServers, MCPServersTab } from './tabs/MCPServersTab'
+import { type MCPServer, MCPServersTab } from './tabs/MCPServersTab'
 import { ProvidersTab } from './tabs/ProvidersTab'
 
 // ============================================================================
@@ -158,12 +158,28 @@ const builtInSkills = [
 
 export const SettingsModal: Component = () => {
   const { settingsOpen, closeSettings } = useLayout()
-  const { settings, updateProvider, updateAgent, addAgent, removeAgent } = useSettings()
+  const {
+    settings,
+    updateProvider,
+    updateAgent,
+    addAgent,
+    removeAgent,
+    addMcpServer,
+    removeMcpServer,
+  } = useSettings()
   const { shortcuts, updateShortcut, resetShortcut, resetAll: resetAllShortcuts } = useShortcuts()
   const [activeTab, setActiveTab] = createSignal<SettingsTab>('general')
   const [saveStatus, setSaveStatus] = createSignal<'idle' | 'saved'>('idle')
 
-  const [mcpServers] = createSignal(defaultMCPServers)
+  // Map core MCPServerConfig[] → MCPServer[] for the UI tab
+  const mcpServers = (): MCPServer[] =>
+    settings().mcpServers.map((s) => ({
+      id: s.name,
+      name: s.name,
+      url: s.url ?? (s.command ? `${s.command} ${(s.args ?? []).join(' ')}` : 'stdio'),
+      status: 'disconnected' as const,
+      description: `${s.type} transport`,
+    }))
 
   const [editingAgent, setEditingAgent] = createSignal<AgentPreset | null>(null)
   const [editingKeybinding, setEditingKeybinding] = createSignal<Keybinding | null>(null)
@@ -428,7 +444,15 @@ export const SettingsModal: Component = () => {
                 </Show>
 
                 <Show when={activeTab() === 'mcp'}>
-                  <MCPServersTab servers={mcpServers()} />
+                  <MCPServersTab
+                    servers={mcpServers()}
+                    onRemove={(id) => removeMcpServer(id)}
+                    onAdd={() => {
+                      // Add a placeholder server for the user to edit
+                      const name = `server-${Date.now()}`
+                      addMcpServer({ name, type: 'sse', url: 'http://localhost:3001' })
+                    }}
+                  />
                 </Show>
 
                 <Show when={activeTab() === 'plugins'}>

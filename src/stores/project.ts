@@ -3,6 +3,7 @@
  * Global state management for projects/workspaces
  */
 
+import { invoke } from '@tauri-apps/api/core'
 import { createMemo, createSignal } from 'solid-js'
 import { STORAGE_KEYS } from '../config/constants'
 import { logError } from '../services/logger'
@@ -109,6 +110,8 @@ export function useProject() {
                 ? { branch: detected.branch, rootCommit: detected.rootCommit }
                 : undefined,
             })
+            // Expand Tauri FS scope to include project directory
+            invoke('allow_project_path', { path: project.directory }).catch(() => {})
             return
           }
         }
@@ -118,6 +121,7 @@ export function useProject() {
         if (recentProject) {
           setCurrentProject(recentProject)
           localStorage.setItem(STORAGE_KEYS.LAST_PROJECT, recentProject.id)
+          invoke('allow_project_path', { path: recentProject.directory }).catch(() => {})
         }
       } catch (err) {
         logError('Project', 'Failed to initialize projects', err)
@@ -157,6 +161,9 @@ export function useProject() {
       }
       setCurrentProject(updatedProject)
 
+      // Expand Tauri FS scope to include project directory
+      invoke('allow_project_path', { path: updatedProject.directory }).catch(() => {})
+
       // Persist last project
       localStorage.setItem(STORAGE_KEYS.LAST_PROJECT, project.id)
 
@@ -195,6 +202,9 @@ export function useProject() {
         lastOpenedAt: Date.now(),
         git: gitInfo,
       })
+
+      // Expand Tauri FS scope to include project directory
+      invoke('allow_project_path', { path: project.directory }).catch(() => {})
 
       localStorage.setItem(STORAGE_KEYS.LAST_PROJECT, projectId)
 

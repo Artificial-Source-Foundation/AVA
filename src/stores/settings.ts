@@ -4,7 +4,7 @@
  * Follows the same pattern as layout.ts — module-level signals + export hook.
  */
 
-import type { LLMProvider } from '@estela/core'
+import type { LLMProvider, MCPServerConfig } from '@estela/core'
 import { invoke } from '@tauri-apps/api/core'
 import { createSignal } from 'solid-js'
 import type { AgentPreset } from '../components/settings/tabs/AgentsTab'
@@ -225,6 +225,7 @@ export interface AppSettings {
   behavior: BehaviorSettings
   notifications: NotificationSettings
   permissionMode: PermissionMode
+  mcpServers: MCPServerConfig[]
 }
 
 const DEFAULT_UI: UISettings = {
@@ -293,6 +294,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   behavior: { ...DEFAULT_BEHAVIOR },
   notifications: { ...DEFAULT_NOTIFICATIONS },
   permissionMode: 'ask',
+  mcpServers: [],
 }
 
 // ============================================================================
@@ -896,6 +898,29 @@ function resetSettings() {
 }
 
 // ============================================================================
+// MCP Server CRUD
+// ============================================================================
+
+function addMcpServer(config: MCPServerConfig) {
+  const current = settings()
+  const existing = current.mcpServers.find((s) => s.name === config.name)
+  if (existing) return // No duplicates by name
+  updateSettings({ mcpServers: [...current.mcpServers, config] })
+}
+
+function removeMcpServer(name: string) {
+  const current = settings()
+  updateSettings({ mcpServers: current.mcpServers.filter((s) => s.name !== name) })
+}
+
+function updateMcpServer(name: string, updates: Partial<MCPServerConfig>) {
+  const current = settings()
+  updateSettings({
+    mcpServers: current.mcpServers.map((s) => (s.name === name ? { ...s, ...updates } : s)),
+  })
+}
+
+// ============================================================================
 // Export Hook
 // ============================================================================
 
@@ -920,5 +945,8 @@ export function useSettings() {
     resetSettings,
     exportSettings,
     importSettings,
+    addMcpServer,
+    removeMcpServer,
+    updateMcpServer,
   }
 }

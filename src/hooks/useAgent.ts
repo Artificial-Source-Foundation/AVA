@@ -13,15 +13,18 @@ import {
   type AgentEvent,
   type AgentInputs,
   type AgentResult,
+  BusMessageType,
   runAgent,
   type ToolCallInfo,
+  type ToolConfirmationRequest,
+  type ToolConfirmationResponse,
 } from '@estela/core'
-import { batch, createSignal } from 'solid-js'
+import { batch, createSignal, onCleanup } from 'solid-js'
 import {
   type ApprovalRequest,
   checkAutoApproval as sharedCheckAutoApproval,
 } from '../lib/tool-approval'
-import { getCoreMemory } from '../services/core-bridge'
+import { getCoreBus, getCoreMemory, subscribeToolApproval } from '../services/core-bridge'
 import { saveMessage, updateMessage } from '../services/database'
 import { logError, logInfo, logWarn } from '../services/logger'
 import { notifyCompletion } from '../services/notifications'
@@ -86,6 +89,43 @@ export function useAgent() {
   const settingsRef = useSettings()
   const teamStore = useTeam()
   const { currentProject } = useProject()
+
+  // ==========================================================================
+  // Message Bus → Approval Bridge
+  // ==========================================================================
+  // Core agent loop publishes TOOL_CONFIRMATION_REQUEST via the message bus.
+  // We subscribe here and bridge into the existing SolidJS signal system
+  // so the ToolApprovalDialog renders. When the user responds, we publish
+  // the TOOL_CONFIRMATION_RESPONSE back to the bus.
+
+  const unsubscribeBus = subscribeToolApproval((busRequest: ToolConfirmationRequest) => {
+    setPendingApproval({
+      id: busRequest.correlationId,
+      type:
+        busRequest.toolName === 'bash'
+          ? 'command'
+          : busRequest.toolName.startsWith('mcp_')
+            ? 'mcp'
+            : 'file',
+      toolName: busRequest.toolName,
+      args: busRequest.toolArgs,
+      description: busRequest.description ?? `Execute ${busRequest.toolName}`,
+      riskLevel: busRequest.riskLevel,
+      resolve: (approved: boolean) => {
+        const bus = getCoreBus()
+        if (!bus) return
+        bus.publish({
+          type: BusMessageType.TOOL_CONFIRMATION_RESPONSE,
+          correlationId: busRequest.correlationId,
+          timestamp: Date.now(),
+          confirmed: approved,
+          rememberChoice: false,
+        } satisfies ToolConfirmationResponse)
+      },
+    })
+  })
+
+  onCleanup(() => unsubscribeBus())
 
   // ==========================================================================
   // Team Bridge — maps agent events to team hierarchy

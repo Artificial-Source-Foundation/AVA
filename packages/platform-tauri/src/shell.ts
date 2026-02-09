@@ -12,7 +12,18 @@ export class TauriShell implements IShell {
       env: options?.env,
     })
 
-    const result = await cmd.execute()
+    const execPromise = cmd.execute()
+    const result = options?.timeout
+      ? await Promise.race([
+          execPromise,
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error(`Command timed out after ${options.timeout}ms`)),
+              options.timeout
+            )
+          ),
+        ])
+      : await execPromise
 
     return {
       stdout: result.stdout,

@@ -10,8 +10,10 @@
  * - https://github.com/numman-ali/opencode-openai-codex-auth
  */
 
+import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-shell'
 import { STORAGE_KEYS } from '../../config/constants'
+import { syncProviderCredentials } from '../../stores/settings'
 import type { Credentials, LLMProvider } from '../../types/llm'
 
 // ============================================================================
@@ -42,7 +44,7 @@ interface PKCEParams {
   state: string
 }
 
-interface OAuthTokens {
+export interface OAuthTokens {
   accessToken: string
   refreshToken?: string
   expiresAt?: number
@@ -174,13 +176,21 @@ function buildAuthUrl(config: OAuthConfig, pkce: PKCEParams): string {
   return `${config.authorizationUrl}?${params.toString()}`
 }
 
+/** Response shape from the Rust oauth_listen command */
+interface RustOAuthCallback {
+  code: string
+  state: string
+}
+
 /**
- * Start OAuth flow - opens browser for user authorization
- * For device-code providers (copilot), returns DeviceCodeResponse instead
+ * Start OAuth flow - opens browser for user authorization.
+ * For PKCE providers: starts Rust callback server, opens browser, waits for
+ * redirect, exchanges code for tokens, stores credentials, and returns tokens.
+ * For device-code providers (copilot): returns DeviceCodeResponse for UI polling.
  */
 export async function startOAuthFlow(
   provider: LLMProvider
-): Promise<DeviceCodeResponse | undefined> {
+): Promise<DeviceCodeResponse | OAuthTokens> {
   const config = OAUTH_CONFIGS[provider]
   if (!config) {
     throw new Error(`OAuth not supported for provider: ${provider}`)
@@ -191,12 +201,30 @@ export async function startOAuthFlow(
     return startDeviceCodeFlow(provider)
   }
 
-  // Standard PKCE flow
+  // Standard PKCE flow with Rust callback server
   const pkce = await generatePKCE()
   storePKCE(provider, pkce)
   const authUrl = buildAuthUrl(config, pkce)
+
+  // Start the Rust callback server BEFORE opening the browser
+  // (it waits for the redirect with a 120s timeout)
+  const callbackPromise = invoke<RustOAuthCallback>('oauth_listen', {
+    port: config.redirectPort,
+  })
+
+  // Open the browser for user authorization
   await open(authUrl)
-  console.log(`OAuth flow started for ${provider}. Waiting for callback...`)
+
+  // Wait for the callback from the Rust server
+  const callback = await callbackPromise
+
+  // Exchange the authorization code for tokens
+  const tokens = await exchangeCodeForTokens(provider, callback.code, callback.state)
+
+  // Store tokens and bridge to core credential store
+  storeOAuthCredentials(provider, tokens)
+
+  return tokens
 }
 
 /**
@@ -389,7 +417,7 @@ export async function refreshOAuthToken(
 }
 
 /**
- * Store OAuth credentials
+ * Store OAuth credentials in both frontend store and core credential store
  */
 export function storeOAuthCredentials(provider: LLMProvider, tokens: OAuthTokens): void {
   const credentials: Credentials = {
@@ -400,6 +428,7 @@ export function storeOAuthCredentials(provider: LLMProvider, tokens: OAuthTokens
     refreshToken: tokens.refreshToken,
   }
 
+  // Store in frontend credentials store
   const stored = localStorage.getItem('estela_credentials')
   let all: Record<string, Credentials> = {}
 
@@ -413,6 +442,9 @@ export function storeOAuthCredentials(provider: LLMProvider, tokens: OAuthTokens
 
   all[provider] = credentials
   localStorage.setItem('estela_credentials', JSON.stringify(all))
+
+  // Bridge to core credential store so LLM clients can find the token
+  syncProviderCredentials(provider, tokens.accessToken)
 }
 
 /**

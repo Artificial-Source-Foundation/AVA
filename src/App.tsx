@@ -24,6 +24,7 @@ import { useProject } from './stores/project'
 import { useSession } from './stores/session'
 import {
   applyAppearance,
+  detectEnvApiKeys,
   hydrateSettingsFromFS,
   pushSettingsToCore,
   setupSystemThemeListener,
@@ -113,6 +114,7 @@ function App() {
       await initSettingsFS()
       await hydrateSettingsFromFS()
       syncAllApiKeys()
+      await detectEnvApiKeys()
 
       setSplashStatus('Initializing core engine...')
       const openAIKey = settings().providers.find((p) => p.id === 'openai')?.apiKey

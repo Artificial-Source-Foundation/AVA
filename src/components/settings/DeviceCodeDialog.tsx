@@ -16,7 +16,7 @@ interface DeviceCodeDialogProps {
   provider: LLMProvider
   deviceCode: DeviceCodeResponse
   onClose: () => void
-  onSuccess: () => void
+  onSuccess: (accessToken: string) => void
 }
 
 export const DeviceCodeDialog: Component<DeviceCodeDialogProps> = (props) => {
@@ -47,7 +47,7 @@ export const DeviceCodeDialog: Component<DeviceCodeDialogProps> = (props) => {
         if (tokens) {
           storeOAuthCredentials(props.provider, tokens)
           setStatus('success')
-          setTimeout(() => props.onSuccess(), 1000)
+          setTimeout(() => props.onSuccess(tokens.accessToken), 1000)
         } else {
           setStatus('error')
           setErrorMsg('Authorization expired or was denied')

@@ -217,13 +217,15 @@ Plugins bundle skills + commands + hooks + MCP servers into a single installable
 
 | Doc | Purpose |
 |-----|---------|
-| [`docs/VISION.md`](docs/VISION.md) | Product vision and roadmap |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Epic overview and progress |
-| [`docs/memory-bank/activeContext.md`](docs/memory-bank/activeContext.md) | Current session focus |
-| [`docs/memory-bank/progress.md`](docs/memory-bank/progress.md) | What's been built |
+| [`docs/VISION.md`](docs/VISION.md) | Product vision |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phase overview and progress |
+| [`docs/frontend/`](docs/frontend/) | **Desktop app: file map, settings, appearance, data flow, Tauri** |
+| [`docs/frontend/changelog.md`](docs/frontend/changelog.md) | Frontend changelog (session by session) |
+| [`docs/frontend/backlog.md`](docs/frontend/backlog.md) | Frontend backlog (what's missing, prioritized) |
+| [`docs/frontend/design-system.md`](docs/frontend/design-system.md) | Design system (colors, glass, typography, motion) |
 | [`docs/backend/`](docs/backend/) | Backend modules, test coverage, backlog, changelog |
+| [`docs/backend/gap-analysis.md`](docs/backend/gap-analysis.md) | Competitive gap analysis (15 features vs 8 codebases) |
 | [`docs/architecture/`](docs/architecture/) | System design |
-| [`docs/frontend/`](docs/frontend/) | Desktop app UI |
 
 ---
 

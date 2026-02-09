@@ -29,6 +29,7 @@ import { type Component, createSignal, For, Show } from 'solid-js'
 import {
   type DeviceCodeResponse,
   isOAuthSupported,
+  type OAuthTokens,
   startOAuthFlow,
 } from '../../../services/auth/oauth'
 import { fetchModels, supportsDynamicFetch } from '../../../services/providers/model-fetcher'
@@ -137,7 +138,9 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
   const [apiKey, setApiKey] = createSignal(props.provider.apiKey ? '••••••••••••' : '')
   const [showKey, setShowKey] = createSignal(false)
   const [isLoadingModels, setIsLoadingModels] = createSignal(false)
+  const [isOAuthLoading, setIsOAuthLoading] = createSignal(false)
   const [modelError, setModelError] = createSignal<string | null>(null)
+  const [oauthError, setOauthError] = createSignal<string | null>(null)
   const [deviceCode, setDeviceCode] = createSignal<DeviceCodeResponse | null>(null)
 
   const statusColor = () => {
@@ -147,9 +150,23 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
   }
 
   const handleOAuthClick = async () => {
-    const result = await startOAuthFlow(props.provider.id as LLMProvider)
-    if (result && 'userCode' in result) {
-      setDeviceCode(result)
+    setOauthError(null)
+    setIsOAuthLoading(true)
+    try {
+      const result = await startOAuthFlow(props.provider.id as LLMProvider)
+      if ('userCode' in result) {
+        // Device code flow — show dialog for user to enter code
+        setDeviceCode(result as DeviceCodeResponse)
+      } else {
+        // PKCE flow completed — tokens returned, already stored + synced
+        const tokens = result as OAuthTokens
+        props.onSaveApiKey?.(tokens.accessToken)
+      }
+    } catch (err) {
+      console.error('OAuth flow failed:', err)
+      setOauthError(err instanceof Error ? err.message : 'OAuth flow failed')
+    } finally {
+      setIsOAuthLoading(false)
     }
   }
 
@@ -241,9 +258,9 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
               provider={props.provider.id as LLMProvider}
               deviceCode={deviceCode()!}
               onClose={() => setDeviceCode(null)}
-              onSuccess={() => {
+              onSuccess={(accessToken) => {
                 setDeviceCode(null)
-                props.onToggle?.(true)
+                props.onSaveApiKey?.(accessToken)
               }}
             />
           </Show>
@@ -253,11 +270,21 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
             <button
               type="button"
               onClick={handleOAuthClick}
-              class="flex items-center gap-2 px-2.5 py-1.5 text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors w-full"
+              disabled={isOAuthLoading()}
+              class="flex items-center gap-2 px-2.5 py-1.5 text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors w-full disabled:opacity-50"
             >
-              <LogIn class="w-3 h-3" />
-              <span>{oauthButtonText(props.provider.id).label}</span>
+              <Show when={isOAuthLoading()} fallback={<LogIn class="w-3 h-3" />}>
+                <Loader2 class="w-3 h-3 animate-spin" />
+              </Show>
+              <span>
+                {isOAuthLoading()
+                  ? 'Waiting for authorization...'
+                  : oauthButtonText(props.provider.id).label}
+              </span>
             </button>
+            <Show when={oauthError()}>
+              <p class="text-[10px] text-[var(--error)] px-1">{oauthError()}</p>
+            </Show>
             <div class="flex items-center gap-2 px-1">
               <div class="flex-1 h-px bg-[var(--border-subtle)]" />
               <span class="text-[9px] text-[var(--text-muted)] uppercase">or API key</span>

@@ -126,9 +126,11 @@ describe('startOAuthFlow', () => {
 
     const result = await startOAuthFlow('copilot')
     expect(result).toBeDefined()
-    expect(result!.deviceCode).toBe('DC-123')
-    expect(result!.userCode).toBe('ABCD-1234')
-    expect(result!.verificationUri).toBe('https://github.com/login/device')
+    expect('deviceCode' in result).toBe(true)
+    const deviceResult = result as import('./oauth').DeviceCodeResponse
+    expect(deviceResult.deviceCode).toBe('DC-123')
+    expect(deviceResult.userCode).toBe('ABCD-1234')
+    expect(deviceResult.verificationUri).toBe('https://github.com/login/device')
 
     vi.unstubAllGlobals()
   })

@@ -27,10 +27,12 @@ import {
   Zap,
 } from 'lucide-solid'
 import { type Component, createSignal, For, type JSXElement, Show } from 'solid-js'
+import { fetchModels } from '../../services/providers/model-fetcher'
 import { useLayout } from '../../stores/layout'
 import type { UISettings } from '../../stores/settings'
 import { useSettings } from '../../stores/settings'
 import { useShortcuts } from '../../stores/shortcuts'
+import type { LLMProvider } from '../../types/llm'
 import { type AgentPreset, AgentsTab } from './tabs/AgentsTab'
 import { AppearanceTab } from './tabs/AppearanceTab'
 import { BehaviorTab } from './tabs/BehaviorTab'
@@ -382,6 +384,25 @@ export const SettingsModal: Component = () => {
                         models,
                         defaultModel: models.find((m) => m.isDefault)?.id || models[0]?.id,
                       })
+                    }}
+                    onTestConnection={async (id) => {
+                      const provider = settings().providers.find((p) => p.id === id)
+                      if (!provider?.apiKey) return
+                      try {
+                        const models = await fetchModels(id as LLMProvider, {
+                          apiKey: provider.apiKey,
+                          baseUrl: provider.baseUrl,
+                        })
+                        updateProvider(id, {
+                          status: models.length > 0 ? 'connected' : 'disconnected',
+                          error: undefined,
+                        })
+                      } catch (err) {
+                        updateProvider(id, {
+                          status: 'error',
+                          error: err instanceof Error ? err.message : 'Connection failed',
+                        })
+                      }
                     }}
                   />
                 </Show>

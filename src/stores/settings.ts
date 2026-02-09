@@ -5,6 +5,7 @@
  */
 
 import type { LLMProvider } from '@estela/core'
+import { invoke } from '@tauri-apps/api/core'
 import { createSignal } from 'solid-js'
 import type { AgentPreset } from '../components/settings/tabs/AgentsTab'
 import { defaultAgentPresets } from '../components/settings/tabs/AgentsTab'
@@ -39,7 +40,7 @@ const PROVIDER_KEY_MAP: Record<string, string> = {
 }
 
 /** Write a single provider's API key to the core credential store */
-function syncProviderCredentials(providerId: string, apiKey: string | undefined) {
+export function syncProviderCredentials(providerId: string, apiKey: string | undefined) {
   const credKey = PROVIDER_KEY_MAP[providerId]
   if (!credKey) return
   const storageKey = CREDENTIAL_PREFIX + credKey
@@ -58,6 +59,57 @@ export function syncAllApiKeys() {
       syncProviderCredentials(provider.id, provider.apiKey)
     }
   }
+}
+
+// ============================================================================
+// Environment Variable Auto-Detection
+// ============================================================================
+
+/** Map of provider IDs to their standard environment variable names */
+const ENV_VAR_MAP: Record<string, string> = {
+  anthropic: 'ANTHROPIC_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  google: 'GOOGLE_API_KEY',
+  groq: 'GROQ_API_KEY',
+  mistral: 'MISTRAL_API_KEY',
+  deepseek: 'DEEPSEEK_API_KEY',
+  xai: 'XAI_API_KEY',
+  cohere: 'COHERE_API_KEY',
+  together: 'TOGETHER_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+}
+
+/**
+ * Auto-detect API keys from environment variables via Rust IPC.
+ * Only fills in providers that don't already have a key configured.
+ * Returns the number of keys detected.
+ */
+export async function detectEnvApiKeys(): Promise<number> {
+  const current = settings()
+  let detected = 0
+
+  for (const [providerId, envVar] of Object.entries(ENV_VAR_MAP)) {
+    const provider = current.providers.find((p) => p.id === providerId)
+    // Skip if provider already has a key
+    if (provider?.apiKey) continue
+
+    try {
+      const value = await invoke<string | null>('get_env_var', { name: envVar })
+      if (value) {
+        // updateProvider already bridges to core via syncProviderCredentials
+        updateProvider(providerId, { apiKey: value, status: 'connected' })
+        detected++
+      }
+    } catch {
+      // Rust command not available (e.g., running in browser) — skip silently
+    }
+  }
+
+  if (detected > 0) {
+    console.log(`Auto-detected ${detected} API key(s) from environment variables`)
+  }
+
+  return detected
 }
 
 // ============================================================================

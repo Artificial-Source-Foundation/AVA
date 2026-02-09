@@ -5,6 +5,7 @@
 
 import Database from '@tauri-apps/plugin-sql'
 import type {
+  Agent,
   FileOperation,
   MemoryItem,
   Message,
@@ -74,6 +75,7 @@ export async function getSessionsWithStats(projectId?: string): Promise<SessionW
       s.*,
       COUNT(m.id) as message_count,
       COALESCE(SUM(m.tokens_used), 0) as total_tokens,
+      COALESCE(SUM(m.cost_usd), 0) as total_cost,
       (SELECT content FROM messages WHERE session_id = s.id ORDER BY created_at DESC LIMIT 1) as last_preview
     FROM sessions s
     LEFT JOIN messages m ON m.session_id = s.id
@@ -163,8 +165,8 @@ export async function saveMessage(message: Omit<Message, 'id' | 'createdAt'>): P
   const createdAt = Date.now()
 
   await database.execute(
-    `INSERT INTO messages (id, session_id, role, content, agent_id, created_at, tokens_used, metadata)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO messages (id, session_id, role, content, agent_id, created_at, tokens_used, metadata, cost_usd, model)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       message.sessionId,
@@ -174,6 +176,8 @@ export async function saveMessage(message: Omit<Message, 'id' | 'createdAt'>): P
       createdAt,
       message.tokensUsed || 0,
       JSON.stringify(message.metadata || {}),
+      message.costUSD || null,
+      message.model || null,
     ]
   )
 
@@ -242,6 +246,30 @@ export async function updateMessage(
   await database.execute(`UPDATE messages SET ${setClauses.join(', ')} WHERE id = ?`, values)
 }
 
+/**
+ * Delete a single message by ID
+ */
+export async function deleteMessageFromDb(id: string): Promise<void> {
+  const database = await initDatabase()
+  await database.execute('DELETE FROM messages WHERE id = ?', [id])
+}
+
+/**
+ * Delete all messages in a session created at or after a given timestamp.
+ * Used for conversation rollback.
+ */
+export async function deleteMessagesFromTimestamp(
+  sessionId: string,
+  fromCreatedAt: number
+): Promise<number> {
+  const database = await initDatabase()
+  const result = await database.execute(
+    'DELETE FROM messages WHERE session_id = ? AND created_at >= ?',
+    [sessionId, fromCreatedAt]
+  )
+  return result.rowsAffected
+}
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -250,16 +278,24 @@ export async function updateMessage(
  * Map database rows to Message objects
  */
 function mapDbMessages(rows: Array<Record<string, unknown>>): Message[] {
-  return rows.map((row) => ({
-    id: row.id as string,
-    sessionId: row.session_id as string,
-    role: row.role as Message['role'],
-    content: row.content as string,
-    agentId: row.agent_id as string | undefined,
-    createdAt: row.created_at as number,
-    tokensUsed: row.tokens_used as number | undefined,
-    metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
-  }))
+  return rows.map((row) => {
+    const metadata = row.metadata
+      ? (JSON.parse(row.metadata as string) as Record<string, unknown>)
+      : undefined
+    return {
+      id: row.id as string,
+      sessionId: row.session_id as string,
+      role: row.role as Message['role'],
+      content: row.content as string,
+      agentId: row.agent_id as string | undefined,
+      createdAt: row.created_at as number,
+      tokensUsed: row.tokens_used as number | undefined,
+      costUSD: (row.cost_usd as number | null) ?? undefined,
+      model: (row.model as string | null) ?? undefined,
+      metadata,
+      toolCalls: metadata?.toolCalls as Message['toolCalls'],
+    }
+  })
 }
 
 // ============================================================================
@@ -488,4 +524,155 @@ export async function deleteMemoryItem(id: string): Promise<void> {
 export async function clearMemoryItems(sessionId: string): Promise<void> {
   const database = await initDatabase()
   await database.execute('DELETE FROM memory_items WHERE session_id = ?', [sessionId])
+}
+
+/**
+ * Delete all messages for a session (used by checkpoint rollback)
+ */
+export async function deleteSessionMessages(sessionId: string): Promise<void> {
+  const database = await initDatabase()
+  await database.execute('DELETE FROM messages WHERE session_id = ?', [sessionId])
+}
+
+/**
+ * Insert multiple messages in a batch (used by checkpoint restore)
+ */
+export async function insertMessages(msgs: Message[]): Promise<void> {
+  const database = await initDatabase()
+  for (const msg of msgs) {
+    await database.execute(
+      `INSERT INTO messages (id, session_id, role, content, agent_id, created_at, tokens_used, metadata, cost_usd, model)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        msg.id,
+        msg.sessionId,
+        msg.role,
+        msg.content,
+        msg.agentId || null,
+        msg.createdAt,
+        msg.tokensUsed || 0,
+        JSON.stringify(msg.metadata || {}),
+        msg.costUSD || null,
+        msg.model || null,
+      ]
+    )
+  }
+}
+
+// ============================================================================
+// Agent Operations
+// ============================================================================
+
+/**
+ * Save a new agent
+ */
+export async function saveAgent(agent: Agent): Promise<void> {
+  const database = await initDatabase()
+  await database.execute(
+    `INSERT INTO agents (id, session_id, type, status, model, created_at, completed_at, assigned_files, task_description, result)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      agent.id,
+      agent.sessionId,
+      agent.type,
+      agent.status,
+      agent.model,
+      agent.createdAt,
+      agent.completedAt || null,
+      agent.assignedFiles ? JSON.stringify(agent.assignedFiles) : null,
+      agent.taskDescription || null,
+      agent.result ? JSON.stringify(agent.result) : null,
+    ]
+  )
+}
+
+/**
+ * Get all agents for a session
+ */
+export async function getAgents(sessionId: string): Promise<Agent[]> {
+  const database = await initDatabase()
+  const rows = await database.select<Array<Record<string, unknown>>>(
+    'SELECT * FROM agents WHERE session_id = ? ORDER BY created_at ASC',
+    [sessionId]
+  )
+  return rows.map((row) => ({
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    type: row.type as Agent['type'],
+    status: row.status as Agent['status'],
+    model: row.model as string,
+    createdAt: row.created_at as number,
+    completedAt: (row.completed_at as number | null) ?? undefined,
+    assignedFiles: row.assigned_files
+      ? (JSON.parse(row.assigned_files as string) as string[])
+      : undefined,
+    taskDescription: (row.task_description as string | null) ?? undefined,
+    result: row.result ? (JSON.parse(row.result as string) as Agent['result']) : undefined,
+  }))
+}
+
+/**
+ * Update an agent's properties
+ */
+export async function updateAgentInDb(
+  id: string,
+  updates: Partial<Pick<Agent, 'status' | 'completedAt' | 'result' | 'taskDescription'>>
+): Promise<void> {
+  const database = await initDatabase()
+  const setClauses: string[] = []
+  const values: unknown[] = []
+
+  if (updates.status !== undefined) {
+    setClauses.push('status = ?')
+    values.push(updates.status)
+  }
+  if (updates.completedAt !== undefined) {
+    setClauses.push('completed_at = ?')
+    values.push(updates.completedAt)
+  }
+  if (updates.result !== undefined) {
+    setClauses.push('result = ?')
+    values.push(JSON.stringify(updates.result))
+  }
+  if (updates.taskDescription !== undefined) {
+    setClauses.push('task_description = ?')
+    values.push(updates.taskDescription)
+  }
+
+  if (setClauses.length === 0) return
+
+  values.push(id)
+  await database.execute(`UPDATE agents SET ${setClauses.join(', ')} WHERE id = ?`, values)
+}
+
+// ============================================================================
+// Checkpoint Operations
+// ============================================================================
+
+/**
+ * Get checkpoint memory items for a session
+ */
+export async function getCheckpoints(
+  sessionId: string
+): Promise<Array<{ id: string; timestamp: number; description: string; messageCount: number }>> {
+  const database = await initDatabase()
+  const rows = await database.select<Array<Record<string, unknown>>>(
+    "SELECT * FROM memory_items WHERE session_id = ? AND type = 'checkpoint' ORDER BY created_at ASC",
+    [sessionId]
+  )
+  return rows.map((row) => {
+    let messageCount = 0
+    try {
+      const data = JSON.parse(row.preview as string) as { messages?: unknown[] }
+      messageCount = data.messages?.length ?? 0
+    } catch {
+      /* ignore */
+    }
+    return {
+      id: row.id as string,
+      timestamp: row.created_at as number,
+      description: row.title as string,
+      messageCount,
+    }
+  })
 }

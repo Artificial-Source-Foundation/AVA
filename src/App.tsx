@@ -8,6 +8,7 @@
 
 import { isTauri } from '@tauri-apps/api/core'
 import { createSignal, onCleanup, onMount, Show } from 'solid-js'
+import { CommandPalette, createDefaultCommands } from './components/CommandPalette'
 import type { OnboardingData } from './components/dialogs/OnboardingDialog'
 import { OnboardingScreen } from './components/dialogs/OnboardingDialog'
 import { AppShell } from './components/layout'
@@ -17,10 +18,18 @@ import { initCoreBridge } from './services/core-bridge'
 import { initDatabase } from './services/database'
 import { initLogger, logError, logInfo } from './services/logger'
 import { initializePlatform } from './services/platform'
+import { initSettingsFS } from './services/settings-fs'
 import { useLayout } from './stores/layout'
 import { useProject } from './stores/project'
 import { useSession } from './stores/session'
-import { applyAppearance, pushSettingsToCore, syncAllApiKeys, useSettings } from './stores/settings'
+import {
+  applyAppearance,
+  hydrateSettingsFromFS,
+  pushSettingsToCore,
+  setupSystemThemeListener,
+  syncAllApiKeys,
+  useSettings,
+} from './stores/settings'
 import { useShortcuts } from './stores/shortcuts'
 
 const SPLASH_MIN_MS = 800
@@ -41,6 +50,10 @@ function App() {
   onMount(async () => {
     // Apply appearance settings (mode, accent, scale, font) to DOM immediately
     applyAppearance()
+
+    // Listen for OS theme changes when mode is 'system'
+    const cleanupTheme = setupSystemThemeListener()
+    onCleanup(cleanupTheme)
 
     // Register shortcut actions and install global listener
     registerAction('toggle-sidebar', toggleSidebar)
@@ -97,6 +110,8 @@ function App() {
 
       setSplashStatus('Initializing platform...')
       initializePlatform()
+      await initSettingsFS()
+      await hydrateSettingsFromFS()
       syncAllApiKeys()
 
       setSplashStatus('Initializing core engine...')
@@ -221,6 +236,12 @@ function App() {
             }
           >
             <AppShell />
+            <CommandPalette
+              commands={createDefaultCommands({
+                newChat: () => createNewSession(),
+                openSettings: toggleSettings,
+              })}
+            />
           </Show>
         </Show>
       </Show>

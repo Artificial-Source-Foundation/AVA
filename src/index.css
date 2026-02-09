@@ -85,6 +85,19 @@ input,
     var(--background);
 }
 
+/* Midnight: no gradient, pure black */
+[data-mode="midnight"] #root::before {
+  background: #000000;
+}
+
+/* Charcoal: warm-tinted gradient */
+[data-mode="charcoal"] #root::before {
+  background:
+    radial-gradient(ellipse at 15% 80%, rgba(139, 92, 246, 0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 85% 20%, rgba(120, 90, 60, 0.03) 0%, transparent 50%),
+    var(--background);
+}
+
 /* Typography */
 h1,
 h2,
@@ -116,6 +129,7 @@ a:hover {
 code,
 pre {
   font-family: var(--font-mono);
+  color: var(--code-text);
 }
 
 code {
@@ -721,6 +735,297 @@ button {
 .message-content {
   -webkit-user-select: text;
   user-select: text;
+}
+
+/* ========================================
+   MARKDOWN CONTENT STYLES
+   Styles for rendered markdown inside chat messages.
+   ======================================== */
+
+.message-content h1,
+.message-content h2,
+.message-content h3,
+.message-content h4 {
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.message-content h1 {
+  font-size: 1.4em;
+}
+.message-content h2 {
+  font-size: 1.2em;
+  border-bottom: 1px solid var(--border-subtle);
+  padding-bottom: 0.3em;
+}
+.message-content h3 {
+  font-size: 1.05em;
+}
+.message-content h4 {
+  font-size: 1em;
+  color: var(--text-secondary);
+}
+
+.message-content p {
+  margin: 0.5em 0;
+  line-height: 1.6;
+}
+
+.message-content p:first-child {
+  margin-top: 0;
+}
+.message-content p:last-child {
+  margin-bottom: 0;
+}
+
+.message-content ul,
+.message-content ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.message-content ul {
+  list-style-type: disc;
+}
+.message-content ol {
+  list-style-type: decimal;
+}
+.message-content li {
+  margin: 0.25em 0;
+  line-height: 1.5;
+}
+.message-content li > ul,
+.message-content li > ol {
+  margin: 0.15em 0;
+}
+
+.message-content blockquote {
+  margin: 0.75em 0;
+  padding: 0.5em 1em;
+  border-left: 3px solid var(--accent-muted);
+  background: var(--alpha-white-3);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--text-secondary);
+}
+
+.message-content blockquote p {
+  margin: 0.25em 0;
+}
+
+.message-content table {
+  margin: 0.75em 0;
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9em;
+}
+
+.message-content th,
+.message-content td {
+  border: 1px solid var(--border-subtle);
+  padding: 0.4em 0.75em;
+  text-align: left;
+}
+
+.message-content th {
+  background: var(--alpha-white-5);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.message-content tr:nth-child(even) td {
+  background: var(--alpha-white-3);
+}
+
+.message-content a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.message-content a:hover {
+  color: var(--accent-hover);
+}
+
+.message-content hr {
+  margin: 1em 0;
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.message-content strong {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.message-content em {
+  font-style: italic;
+}
+.message-content del {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+/* Code blocks with header */
+.message-content .code-block-wrapper {
+  margin: 0.75em 0;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+}
+
+.message-content .code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: var(--alpha-white-5);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.message-content .code-lang {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: lowercase;
+}
+
+.message-content .code-copy-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 150ms;
+}
+
+.message-content .code-copy-btn:hover {
+  color: var(--text-primary);
+  background: var(--alpha-white-5);
+  border-color: var(--border-subtle);
+}
+
+.message-content .code-copy-btn.copied {
+  color: var(--success);
+}
+
+.message-content .code-copy-label {
+  font-family: var(--font-mono);
+}
+
+.message-content .code-block-wrapper pre {
+  margin: 0;
+  border-radius: 0;
+  border: none;
+}
+
+/* Line numbers: shown when parent has data-line-numbers */
+[data-line-numbers] .code-block-wrapper pre code {
+  counter-reset: line;
+}
+
+[data-line-numbers] .code-block-wrapper pre code > .line,
+[data-line-numbers] .code-block-wrapper pre code > span {
+  counter-increment: line;
+}
+
+[data-line-numbers] .code-block-wrapper pre code > .line::before,
+[data-line-numbers] .code-block-wrapper pre code > span::before {
+  content: counter(line);
+  display: inline-block;
+  width: 2.5em;
+  margin-right: 1em;
+  text-align: right;
+  color: var(--text-muted);
+  opacity: 0.4;
+  font-size: 0.85em;
+  user-select: none;
+}
+
+/* Word wrap: wrap long lines when data-word-wrap is present */
+[data-word-wrap] .code-block-wrapper pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+[data-word-wrap] .code-block-wrapper pre code {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Inline code inside message (not in pre) */
+.message-content code:not(pre code) {
+  padding: 2px 6px;
+  background: var(--code-background);
+  border-radius: var(--radius-sm);
+  font-size: 0.88em;
+  font-family: var(--font-mono);
+  color: var(--accent);
+}
+
+/* ========================================
+   SYNTAX HIGHLIGHTING CLASSES
+   Map to --syntax-* CSS variables defined in tokens.css
+   ======================================== */
+
+.syn-keyword {
+  color: var(--syntax-keyword);
+}
+.syn-string {
+  color: var(--syntax-string);
+}
+.syn-comment {
+  color: var(--syntax-comment);
+  font-style: italic;
+}
+.syn-function {
+  color: var(--syntax-function);
+}
+.syn-number {
+  color: var(--syntax-number);
+}
+.syn-operator {
+  color: var(--syntax-operator);
+}
+.syn-type {
+  color: var(--syntax-type);
+}
+.syn-variable {
+  color: var(--syntax-variable);
+}
+
+/* ========================================
+   DENSITY-AWARE SPACING
+   Components use these classes to respect --density-* vars.
+   ======================================== */
+
+.density-py {
+  padding-top: var(--density-py);
+  padding-bottom: var(--density-py);
+}
+.density-px {
+  padding-left: var(--density-px);
+  padding-right: var(--density-px);
+}
+.density-gap {
+  gap: var(--density-gap);
+}
+.density-section-py {
+  padding-top: var(--density-section-py);
+  padding-bottom: var(--density-section-py);
+}
+.density-section-px {
+  padding-left: var(--density-section-px);
+  padding-right: var(--density-section-px);
+}
+.density-section {
+  padding: var(--density-section-py) var(--density-section-px);
 }
 
 /* Message appear */

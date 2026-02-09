@@ -6,6 +6,40 @@
 
 ## Current Session
 
+**Session 46** (2026-02-09) — Settings Hardening + Gap Closure
+- **16 new settings** across 4 sub-interfaces: GenerationSettings, AgentLimitSettings, BehaviorSettings, NotificationSettings
+- **2 new tabs** — LLM (maxTokens, temperature, topP, custom instructions, agent limits) + Behavior (sendKey, autoScroll, autoTitle, lineNumbers, wordWrap, notifications, sound)
+- **3 new files** — `LLMTab.tsx`, `BehaviorTab.tsx`, `src/services/notifications.ts`
+- **4 hardcoded values wired** — maxTokens/temperature to useChat, agentMaxTurns/maxTimeMinutes to useAgent
+- Custom instructions injected as system message in `buildApiMessages()` via `msgs.unshift()`
+- Configurable send key (Enter vs Ctrl+Enter) in MessageInput + dynamic ShortcutHint
+- Desktop notifications (unfocused-only) + AudioContext chime with configurable volume
+- Code block settings: `[data-line-numbers]` CSS counter + `[data-word-wrap]` pre-wrap
+- Data management: export (JSON download), import (file picker + deep merge), clear all
+- **Gap closure**: Cost tracking UI (per-message + session), vision/image support (paste/drop/multimodal), iterative lint→fix (autoFixLint after file edits), checkpoint UI (create/display/restore), per-message token display
+- Appearance expansion: system theme, dark variants, code themes, ligatures, chat font size, custom accent, sans font, high contrast
+- Density recalibration: compact/default/comfortable, 8 components wired, CSS utility classes
+- 0 TS errors, 0 Biome errors, vite build passes
+
+**Session 45** (2026-02-08) — Competitive Gap Analysis
+- Analyzed 8 reference codebases via 6 parallel subagents
+- Created `docs/backend/gap-analysis.md` — 300+ line competitive comparison
+- **15 gaps identified**, **14 unique advantages** documented
+- Prioritized roadmap: 4 items for Phase 1.5, 6 for Phase 2, 5 for Phase 3+
+
+**Session 44** (2026-02-08) — Backend Documentation
+- Created `docs/backend/` folder with 5 files (937 lines)
+- Architecture overview, per-module docs, test coverage, backlog, changelog
+
+**Session 43** (2026-02-08) — Backend Test Coverage Phase 2
+- **706 new tests** across 15 new test files (+ 2 helper files) covering Agent, Tools, LLM modules
+- **Agent tests:** evaluator (35), events (53), recovery (107), planner (32), plan mode (36) = **263 tests**
+- **Tools tests:** utils (95), sanitize (76), truncation (22), locks (33), completion (31), validation (31), define (40), todo (19), edit-replacers (65) = **412 tests**
+- **LLM tests:** client (31) = **31 tests**
+- **Total: 1778 tests** across 64 test files (was 1072)
+- Fixed 5 missing module exports in `packages/core/src/index.ts` (bus, custom-commands, extensions + collision fixes for a2a, policy)
+- 0 TS errors, 0 biome errors, vite build passes
+
 **Session 40** (2026-02-08) — Core Frontend Wiring
 - **Core bridge** — `src/services/core-bridge.ts` initializes 5 core singletons (SettingsManager, ContextTracker, WorkerRegistry, MemoryManager) at startup
 - **Settings sync** — `pushSettingsToCore()` maps frontend AppSettings → core SettingsManager categories (provider, permissions, context, memory)
@@ -78,7 +112,8 @@
 | 2026-02-04 | Epics 19-21: Hooks, browser, providers. Feature parity sprints 1-7 |
 | 2026-02-05 | Epics 25-26: ACP/A2A protocols, Gemini CLI features. UI modernization. IDE layout. Vision alignment |
 | 2026-02-07 | **LLM integration working. Phase 1 complete.** |
-| 2026-02-08 | **WebKitGTK fixes. Splash. Layout rework. Appearance tab. Backend tests (536). Core frontend wiring (1072 total tests).** |
+| 2026-02-08 | **WebKitGTK fixes. Splash. Layout rework. Appearance tab. Backend tests (1778). Core frontend wiring.** |
+| 2026-02-09 | **Settings hardening (16 settings). Gap closure: cost tracking, vision, lint→fix, checkpoints, per-message tokens.** |
 
 ---
 
@@ -86,8 +121,8 @@
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| Phase 1: Desktop App | **Done + polish** | Core UI, chat, LLM, settings, team flow |
-| Phase 1.5: Polish | **In progress** | Splash screen, WebKitGTK fixes, layout cleanup, testing |
+| Phase 1: Desktop App | **Done** | Core UI, chat, LLM, settings, team flow |
+| Phase 1.5: Polish | **Feature-complete** | All features done. Manual testing remains (Tauri dev, shortcuts, multi-DE) |
 | Phase 2: Plugin Ecosystem | Next | Plugin SDK, marketplace, community |
 | Phase 3: Polish & Community | Future | CLI, plugin wizard, docs site |
 | Phase 4: Integrations | Future | ACP (editor), A2A (agents), voice, vision |

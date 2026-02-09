@@ -7,7 +7,9 @@
  */
 
 import {
+  type Compactor,
   type ContextTracker,
+  createCompactor,
   createContextTracker,
   createDefaultRegistry,
   createMemoryManager,
@@ -23,6 +25,7 @@ import {
 
 let _settings: SettingsManager | null = null
 let _tracker: ContextTracker | null = null
+let _compactor: Compactor | null = null
 let _registry: WorkerRegistry | null = null
 let _memory: MemoryManager | null = null
 
@@ -38,6 +41,11 @@ export function getCoreSettings(): SettingsManager | null {
 /** Get the core ContextTracker (null if not initialized) */
 export function getCoreTracker(): ContextTracker | null {
   return _tracker
+}
+
+/** Get the core Compactor (null if not initialized) */
+export function getCoreCompactor(): Compactor | null {
+  return _compactor
 }
 
 /** Get the core WorkerRegistry (null if not initialized) */
@@ -72,6 +80,9 @@ export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() =
   // Context tracking — real token counting via gpt-tokenizer
   _tracker = createContextTracker(opts.contextLimit ?? 200_000)
 
+  // Compactor — auto-compacts conversation when context exceeds threshold
+  _compactor = createCompactor(_tracker, 50)
+
   // Worker registry — 5 built-in workers (coder, tester, reviewer, researcher, debugger)
   _registry = createDefaultRegistry()
 
@@ -87,6 +98,7 @@ export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() =
   return () => {
     _memory?.dispose()
     _memory = null
+    _compactor = null
     _tracker = null
     _registry = null
     _settings = null

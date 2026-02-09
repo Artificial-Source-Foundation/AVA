@@ -7,9 +7,12 @@
 
 import {
   ArrowUp,
+  Bookmark,
   Bot,
   ChevronDown,
   FileSearch,
+  FileText,
+  Image,
   Shield,
   ShieldAlert,
   ShieldOff,
@@ -17,17 +20,70 @@ import {
   X,
   Zap,
 } from 'lucide-solid'
-import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
+import {
+  type Component,
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  on,
+  onCleanup,
+  Show,
+} from 'solid-js'
 import { useAgent } from '../../hooks/useAgent'
 import { useChat } from '../../hooks/useChat'
 import { useSession } from '../../stores/session'
 import type { PermissionMode } from '../../stores/settings'
 import { useSettings } from '../../stores/settings'
+import { ShortcutHint } from './ShortcutHint'
+
+// Vision constants
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024 // 5MB
+const MAX_IMAGES = 4
+const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+
+// File context constants
+const MAX_FILE_SIZE = 100 * 1024 // 100KB
+const MAX_FILES = 5
+const TEXT_EXTENSIONS = new Set([
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.json',
+  '.md',
+  '.txt',
+  '.css',
+  '.html',
+  '.py',
+  '.rs',
+  '.go',
+  '.java',
+  '.c',
+  '.cpp',
+  '.h',
+  '.yml',
+  '.yaml',
+  '.toml',
+  '.env',
+  '.sh',
+  '.bash',
+  '.sql',
+  '.graphql',
+  '.xml',
+  '.svg',
+])
 
 export const MessageInput: Component = () => {
   const [input, setInput] = createSignal('')
   const [useAgentMode, setUseAgentMode] = createSignal(false)
   const [modelDropdownOpen, setModelDropdownOpen] = createSignal(false)
+  const [sendCount, setSendCount] = createSignal(0)
+  const [pendingImages, setPendingImages] = createSignal<
+    Array<{ data: string; mimeType: string; name?: string }>
+  >([])
+  const [pendingFiles, setPendingFiles] = createSignal<Array<{ name: string; content: string }>>([])
+  const [isDragging, setIsDragging] = createSignal(false)
   let submitting = false
   // oxlint-disable-next-line no-unassigned-vars -- SolidJS ref pattern: assigned via ref={} in JSX
   let textareaRef: HTMLTextAreaElement | undefined
@@ -39,7 +95,8 @@ export const MessageInput: Component = () => {
   const agent = useAgent()
 
   // Session + Settings for model selection
-  const { selectedModel, setSelectedModel } = useSession()
+  const sessionStore = useSession()
+  const { selectedModel, setSelectedModel } = sessionStore
   const { settings, cyclePermissionMode } = useSettings()
 
   // Permission mode config
@@ -74,6 +131,119 @@ export const MessageInput: Component = () => {
     setModelDropdownOpen(false)
   }
 
+  // Checkpoint handler
+  const handleCreateCheckpoint = async () => {
+    const count = sessionStore.messages().length
+    if (count === 0) return
+    await sessionStore.createCheckpoint(`Checkpoint at message #${count}`)
+  }
+
+  // Vision: process a File into base64 image data
+  const processImageFile = (
+    file: File
+  ): Promise<{ data: string; mimeType: string; name: string } | null> => {
+    if (!ACCEPTED_TYPES.includes(file.type)) return Promise.resolve(null)
+    if (file.size > MAX_IMAGE_SIZE) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = reader.result as string
+        const base64 = result.split(',')[1]
+        if (base64) {
+          resolve({ data: base64, mimeType: file.type, name: file.name })
+        } else {
+          resolve(null)
+        }
+      }
+      reader.onerror = () => resolve(null)
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const addImages = async (files: File[]) => {
+    const current = pendingImages()
+    const remaining = MAX_IMAGES - current.length
+    if (remaining <= 0) return
+    const toProcess = files.slice(0, remaining)
+    const results = await Promise.all(toProcess.map(processImageFile))
+    const valid = results.filter((r): r is NonNullable<typeof r> => r !== null)
+    if (valid.length > 0) {
+      setPendingImages((prev) => [...prev, ...valid])
+    }
+  }
+
+  const removeImage = (index: number) => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const removeFile = (index: number) => {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  /** Read a text file and return its content */
+  const processTextFile = (file: File): Promise<{ name: string; content: string } | null> => {
+    const ext = `.${file.name.split('.').pop()?.toLowerCase()}`
+    if (!TEXT_EXTENSIONS.has(ext)) return Promise.resolve(null)
+    if (file.size > MAX_FILE_SIZE) return Promise.resolve(null)
+    return new Promise((resolve) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve({ name: file.name, content: reader.result as string })
+      reader.onerror = () => resolve(null)
+      reader.readAsText(file)
+    })
+  }
+
+  const addTextFiles = async (files: File[]) => {
+    const current = pendingFiles()
+    const remaining = MAX_FILES - current.length
+    if (remaining <= 0) return
+    const toProcess = files.slice(0, remaining)
+    const results = await Promise.all(toProcess.map(processTextFile))
+    const valid = results.filter((r): r is NonNullable<typeof r> => r !== null)
+    if (valid.length > 0) {
+      setPendingFiles((prev) => [...prev, ...valid])
+    }
+  }
+
+  // Paste handler for images
+  const handlePaste = (e: ClipboardEvent) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    const imageFiles: File[] = []
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) imageFiles.push(file)
+      }
+    }
+    if (imageFiles.length > 0) {
+      e.preventDefault()
+      addImages(imageFiles)
+    }
+  }
+
+  // Drop handler for images and text files
+  const handleDrop = (e: DragEvent) => {
+    e.preventDefault()
+    setIsDragging(false)
+    const files = e.dataTransfer?.files
+    if (!files) return
+    const allFiles = Array.from(files)
+    const imageFiles = allFiles.filter((f) => f.type.startsWith('image/'))
+    const textFiles = allFiles.filter((f) => !f.type.startsWith('image/'))
+    if (imageFiles.length > 0) addImages(imageFiles)
+    if (textFiles.length > 0) addTextFiles(textFiles)
+  }
+
+  const handleDragOver = (e: DragEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = () => {
+    setIsDragging(false)
+  }
+
   const autoResize = () => {
     if (!textareaRef) return
     textareaRef.style.height = 'auto'
@@ -82,22 +252,60 @@ export const MessageInput: Component = () => {
 
   const isProcessing = () => chat.isStreaming() || agent.isRunning()
 
+  // Streaming elapsed timer
+  const [elapsedSeconds, setElapsedSeconds] = createSignal(0)
+  createEffect(
+    on(
+      () => chat.streamingStartedAt(),
+      (startedAt) => {
+        if (!startedAt) {
+          setElapsedSeconds(0)
+          return
+        }
+        setElapsedSeconds(0)
+        const interval = setInterval(() => {
+          setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000))
+        }, 1000)
+        onCleanup(() => clearInterval(interval))
+      }
+    )
+  )
+
   const handleSubmit = async (e: Event) => {
     e.preventDefault()
     const message = input().trim()
     if (!message || isProcessing() || submitting) return
 
     submitting = true
+    setSendCount((c) => c + 1)
     setInput('')
     if (textareaRef) textareaRef.style.height = 'auto'
     chat.clearError()
     agent.clearError()
 
+    const images = pendingImages()
+    setPendingImages([])
+
+    const files = pendingFiles()
+    setPendingFiles([])
+
+    // Prepend file context as fenced code blocks
+    let fullMessage = message
+    if (files.length > 0) {
+      const fileBlocks = files
+        .map((f) => {
+          const ext = f.name.split('.').pop() || ''
+          return `**${f.name}:**\n\`\`\`${ext}\n${f.content}\n\`\`\``
+        })
+        .join('\n\n')
+      fullMessage = `${fileBlocks}\n\n${message}`
+    }
+
     try {
       if (useAgentMode()) {
-        await agent.run(message, { model: selectedModel() })
+        await agent.run(fullMessage, { model: selectedModel() })
       } else {
-        await chat.sendMessage(message, selectedModel())
+        await chat.sendMessage(fullMessage, selectedModel(), images.length > 0 ? images : undefined)
       }
     } finally {
       submitting = false
@@ -105,9 +313,19 @@ export const MessageInput: Component = () => {
   }
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSubmit(e)
+    const sendKey = settings().behavior.sendKey
+    if (sendKey === 'enter') {
+      // Enter sends, Shift+Enter for newline
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        handleSubmit(e)
+      }
+    } else {
+      // Ctrl+Enter sends, Enter for newline
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault()
+        handleSubmit(e)
+      }
     }
   }
 
@@ -119,40 +337,68 @@ export const MessageInput: Component = () => {
     }
   }
 
-  const currentError = () => {
-    if (useAgentMode()) {
-      return agent.lastError() ? { message: agent.lastError()! } : null
-    }
-    return chat.error()
-  }
-
-  const clearCurrentError = () => {
-    if (useAgentMode()) {
-      agent.clearError()
-    } else {
-      chat.clearError()
-    }
-  }
-
   return (
-    <div class="p-4 border-t border-[var(--border-subtle)]">
-      {/* Error display */}
-      <Show when={currentError()}>
-        <div class="mb-3 p-3 bg-[var(--error-subtle)] border border-[var(--error)] rounded-lg flex items-center justify-between gap-3">
-          <span class="text-sm text-[var(--error)]">{currentError()!.message}</span>
-          <button
-            type="button"
-            onClick={clearCurrentError}
-            class="p-1 rounded text-[var(--error)] hover:bg-[var(--error-subtle)] transition-colors"
-          >
-            <X class="w-4 h-4" />
-          </button>
-        </div>
-      </Show>
-
+    <div class="density-section-px density-section-py border-t border-[var(--border-subtle)]">
       {/* Input form */}
       <form onSubmit={handleSubmit} class="space-y-2">
-        <div class="relative">
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: drop zone for images and files */}
+        <div
+          class="relative"
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+        >
+          {/* Drag overlay */}
+          <Show when={isDragging()}>
+            <div class="absolute inset-0 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-[var(--accent)] bg-[var(--accent-subtle)]">
+              <span class="text-xs font-medium text-[var(--accent)]">Drop files here</span>
+            </div>
+          </Show>
+
+          {/* Pending image previews */}
+          <Show when={pendingImages().length > 0}>
+            <div class="flex gap-2 mb-2 flex-wrap px-3">
+              <For each={pendingImages()}>
+                {(img, i) => (
+                  <div class="relative w-14 h-14 rounded overflow-hidden border border-[var(--border-subtle)]">
+                    <img
+                      src={`data:${img.mimeType};base64,${img.data}`}
+                      alt={img.name || 'Preview'}
+                      class="w-full h-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => removeImage(i())}
+                      class="absolute -top-1 -right-1 w-4 h-4 bg-[var(--error)] text-white rounded-full text-[10px] leading-none flex items-center justify-center"
+                    >
+                      <X class="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+
+          {/* Pending file chips */}
+          <Show when={pendingFiles().length > 0}>
+            <div class="flex gap-1.5 mb-2 flex-wrap px-3">
+              <For each={pendingFiles()}>
+                {(file, i) => (
+                  <div class="flex items-center gap-1.5 px-2 py-1 rounded-[var(--radius-md)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] text-[11px] text-[var(--text-secondary)]">
+                    <FileText class="w-3 h-3 text-[var(--text-muted)]" />
+                    <span class="truncate max-w-[120px]">{file.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => removeFile(i())}
+                      class="w-3.5 h-3.5 flex items-center justify-center rounded-full hover:bg-[var(--alpha-white-10)] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors"
+                    >
+                      <X class="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
           <textarea
             ref={textareaRef}
             value={input()}
@@ -161,6 +407,7 @@ export const MessageInput: Component = () => {
               autoResize()
             }}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={
               isProcessing()
                 ? useAgentMode()
@@ -173,22 +420,29 @@ export const MessageInput: Component = () => {
             disabled={isProcessing()}
             rows={1}
             class="
-              w-full px-4 py-3
+              w-full density-section-px density-section-py
               bg-[var(--input-background)] text-[var(--text-primary)]
               placeholder-[var(--input-placeholder)]
               border border-[var(--input-border)] rounded-lg
-              text-sm resize-none
+              resize-none
               transition-colors
               focus:outline-none focus:border-[var(--input-border-focus)]
               disabled:opacity-50
             "
-            style={{ 'min-height': '44px', 'max-height': '200px' }}
+            style={{
+              'min-height': '44px',
+              'max-height': '200px',
+              'font-size': 'var(--chat-font-size)',
+            }}
           />
         </div>
 
+        {/* Shortcut hint */}
+        <ShortcutHint sendCount={sendCount()} />
+
         {/* Bottom toolbar */}
-        <div class="flex items-center justify-between gap-2">
-          <div class="flex items-center gap-1.5">
+        <div class="flex items-center justify-between density-gap">
+          <div class="flex items-center density-gap">
             {/* Model selector */}
             <div class="relative">
               <button
@@ -316,11 +570,47 @@ export const MessageInput: Component = () => {
                 </button>
               )
             })()}
+
+            {/* Checkpoint button */}
+            <Show when={sessionStore.messages().length > 0}>
+              <button
+                type="button"
+                onClick={handleCreateCheckpoint}
+                disabled={isProcessing()}
+                class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] hover:border-[var(--accent-muted)] transition-colors text-[var(--text-secondary)] disabled:opacity-50"
+                title="Save checkpoint"
+              >
+                <Bookmark class="w-3 h-3" />
+              </button>
+            </Show>
+
+            {/* Image paste indicator */}
+            <Show when={!useAgentMode()}>
+              <span class="text-[var(--text-muted)]" title="Paste or drop images (Ctrl+V)">
+                <Image class="w-3 h-3" />
+              </span>
+            </Show>
           </div>
 
           {/* Right side: status + send/cancel */}
-          <div class="flex items-center gap-2">
-            {/* Status indicators */}
+          <div class="flex items-center density-gap">
+            {/* Streaming stats */}
+            <Show when={chat.isStreaming()}>
+              <span class="flex items-center gap-1.5 text-[10px] text-[var(--text-tertiary)] tabular-nums">
+                <span class="w-1.5 h-1.5 bg-[var(--accent)] rounded-full animate-pulse" />
+                {elapsedSeconds()}s
+                <Show when={chat.streamingTokenEstimate() > 0}>
+                  <span class="text-[var(--border-muted)]">&middot;</span>~
+                  {chat.streamingTokenEstimate().toLocaleString()} tokens
+                </Show>
+                <Show when={chat.activeToolCalls().length > 0}>
+                  <span class="text-[var(--border-muted)]">&middot;</span>
+                  {chat.activeToolCalls().length} tools
+                </Show>
+              </span>
+            </Show>
+
+            {/* Agent status indicators */}
             <Show when={agent.isRunning()}>
               <span class="flex items-center gap-1 text-[10px] text-[var(--text-tertiary)]">
                 <span class="w-1.5 h-1.5 bg-[var(--accent)] rounded-full animate-pulse" />

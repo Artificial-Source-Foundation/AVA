@@ -82,7 +82,7 @@ Team Lead (AgentExecutor + Commander)
 - `packages/core/src/agent/` — Agent loop, planning, recovery, subagents
 - `packages/core/src/validator/` — QA pipeline (syntax, types, lint, test, self-review)
 
-### Core Modules (`packages/core/src/`)
+### Core Modules (`packages/core/src/`) — [Full docs](docs/backend/)
 
 ```
 Agent System:
@@ -221,6 +221,7 @@ Plugins bundle skills + commands + hooks + MCP servers into a single installable
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Epic overview and progress |
 | [`docs/memory-bank/activeContext.md`](docs/memory-bank/activeContext.md) | Current session focus |
 | [`docs/memory-bank/progress.md`](docs/memory-bank/progress.md) | What's been built |
+| [`docs/backend/`](docs/backend/) | Backend modules, test coverage, backlog, changelog |
 | [`docs/architecture/`](docs/architecture/) | System design |
 | [`docs/frontend/`](docs/frontend/) | Desktop app UI |
 

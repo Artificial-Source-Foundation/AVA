@@ -267,6 +267,40 @@ function getAnthropicModels(): FetchedModel[] {
   ]
 }
 
+/**
+ * Fetch models from Google AI (Generative Language API)
+ */
+async function fetchGoogleModels(apiKey: string): Promise<FetchedModel[]> {
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
+  )
+
+  if (!response.ok) {
+    throw new Error(`Google AI API error: ${response.status} ${response.statusText}`)
+  }
+
+  interface GoogleModel {
+    name: string
+    displayName: string
+    inputTokenLimit?: number
+    outputTokenLimit?: number
+    supportedGenerationMethods?: string[]
+  }
+
+  const data = (await response.json()) as { models: GoogleModel[] }
+  const models = data.models || []
+
+  // Only include models that support generateContent (chat-capable)
+  return models
+    .filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
+    .map((model) => ({
+      id: model.name.replace('models/', ''),
+      name: model.displayName || model.name.replace('models/', ''),
+      contextWindow: model.inputTokenLimit || 32000,
+    }))
+    .sort((a, b) => b.contextWindow - a.contextWindow)
+}
+
 // ============================================================================
 // Main Export
 // ============================================================================
@@ -298,7 +332,14 @@ export async function fetchModels(
       return getAnthropicModels()
 
     case 'google':
-      // TODO: Implement Google AI models API
+      if (options.apiKey) {
+        try {
+          return await fetchGoogleModels(options.apiKey)
+        } catch {
+          console.warn('Could not fetch Google models, using defaults')
+        }
+      }
+      // Fallback when no API key or fetch fails
       return [
         { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', contextWindow: 2000000 },
         { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', contextWindow: 1000000 },
@@ -321,7 +362,7 @@ export async function fetchModels(
  * Check if a provider supports dynamic model fetching
  */
 export function supportsDynamicFetch(provider: LLMProvider): boolean {
-  return ['openai', 'openrouter', 'ollama'].includes(provider)
+  return ['openai', 'openrouter', 'ollama', 'google'].includes(provider)
 }
 
 // ============================================================================

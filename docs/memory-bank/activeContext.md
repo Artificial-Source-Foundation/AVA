@@ -6,41 +6,38 @@
 
 ## Current Focus
 
-**Desktop App — Core Wiring Complete, 1072 tests passing**
+**Desktop App — Phase 1.5 feature-complete, 1778 tests passing**
 
-Phase 1 is done. Sessions 39-40 added comprehensive backend tests (536 tests across 24 files covering Config, Context, Memory, Session, Commander) and wired the 5 core modules to the frontend via a thin integration layer.
+Phase 1 is done. Phase 1.5 has closed all competitive gaps, added comprehensive settings, and wired memory recall + auto-compaction. Only manual testing/verification remains.
 
-### What Just Happened (Sessions 39-40, 2026-02-08)
+### What Just Happened (2026-02-09)
 
-**Session 39 — Backend Testing:**
-- 536 tests across 24 test files for 5 core modules (Config, Context, Memory, Session, Commander)
-- All modules have full coverage: manager, integration, consolidation, parallel execution, batch, tool-wrapper
-- Total test count: 1072 (was 536 pre-existing + 536 new)
+**Settings Hardening (Session 46):**
+- **16 new settings** across 4 sub-interfaces: GenerationSettings, AgentLimitSettings, BehaviorSettings, NotificationSettings
+- **2 new tabs** — LLM (maxTokens, temperature, topP, custom instructions, agent limits) + Behavior (sendKey, autoScroll, autoTitle, lineNumbers, wordWrap, notifications, sound)
+- **3 new files** — `LLMTab.tsx`, `BehaviorTab.tsx`, `src/services/notifications.ts`
+- **4 hardcoded values wired** — maxTokens/temperature to useChat, agentMaxTurns/maxTimeMinutes to useAgent
+- Data management: export (JSON download), import (file picker + deep merge), clear all
 
-**Session 40 — Core Frontend Wiring:**
-- `src/services/core-bridge.ts` (NEW) — Central init for SettingsManager, ContextTracker, WorkerRegistry, MemoryManager
-- `src/stores/settings.ts` — `pushSettingsToCore()` syncs frontend AppSettings → core SettingsManager
-- `src/App.tsx` — Core bridge init in startup sequence ("Initializing core engine..." splash step)
-- `src/hooks/useChat.ts` — Real token counting via ContextTracker (addMessage on send + complete)
-- `src/stores/session.ts` — Tracker-backed `contextUsage` memo, session checkpoints (create/rollback)
-- `src/components/chat/ContextBar.tsx` (NEW) — Token usage bar below chat input
-- `src/hooks/useAgent.ts` — Episodic memory recording on agent completion
+**Gap Closure (Sessions 46+):**
+- ~~Cost tracking UI~~ — Per-message cost + tokens in bubbles, session total in ContextBar
+- ~~Vision/image support~~ — Paste, drop, base64 multimodal, inline display
+- ~~Iterative lint→fix~~ — autoFixLint after file edits, errors fed back to LLM
+- ~~Checkpoint UI~~ — Create button, inline display with restore, full DB rollback
+- ~~Per-message token display~~ — Shown in message bubbles
 
-**Session 39 — Appearance Tab:**
-- Dedicated settings tab with dark/light mode, 6 accent colors, UI scale slider, mono font selector
-- `applyAppearance()` applies all settings to DOM immediately
+**Previous sessions:** Backend docs, gap analysis (15 gaps across 8 codebases), appearance expansion, density wiring
 
 ---
 
 ## Next Up
 
-### Immediate (Phase 1.5 Polish)
+### Phase 1.5 Remaining (testing only)
+- [x] ~~Memory recall in system prompts~~ — Done (recallSimilar + procedural → system message)
+- [x] ~~Auto-compaction at 80% context~~ — Done (sliding window, syncs state + DB + tracker)
 - [ ] Test full app flow in Tauri dev (chat, tools, settings, sessions)
-- [ ] Memory recall injected into system prompts
-- [ ] Settings UI tabs for core categories (agent, context, memory, permissions)
-- [ ] Auto-compaction when context > 80%
-- [ ] Checkpoint UI in sidebar (list/rollback buttons)
-- [ ] Per-message token display in bubbles
+- [ ] Verify all keyboard shortcuts work (Ctrl+B, Ctrl+,, Ctrl+M)
+- [ ] Test on multiple Linux DEs (GNOME, KDE, Cosmic)
 
 ### Phase 2: Plugin Ecosystem (THE DIFFERENTIATOR)
 See `docs/ROADMAP.md` for sprint breakdown.
@@ -81,8 +78,12 @@ See `docs/ROADMAP.md` for sprint breakdown.
 ### Settings
 | File | Purpose |
 |------|---------|
-| `src/components/settings/SettingsPage.tsx` | Full settings UI (providers, agents, MCP, keybindings, about) |
+| `src/components/settings/SettingsModal.tsx` | Settings modal (providers, agents, MCP, shortcuts, appearance, LLM, behavior) |
+| `src/components/settings/tabs/LLMTab.tsx` | Generation params, agent limits, custom instructions |
+| `src/components/settings/tabs/BehaviorTab.tsx` | Send key, auto-scroll, code blocks, notifications |
+| `src/components/settings/tabs/AppearanceTab.tsx` | Theme, accents, fonts, density, code themes |
 | `src/stores/settings.ts` | Settings persistence + credential sync + `pushSettingsToCore()` |
+| `src/services/notifications.ts` | Desktop notifications + AudioContext chime |
 
 ### Core Bridge
 | File | Purpose |

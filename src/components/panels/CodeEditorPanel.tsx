@@ -16,7 +16,9 @@ import {
   createEditorControlledValue,
   createEditorReadonly,
 } from 'solid-codemirror'
-import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
+import { type Component, createEffect, createMemo, createSignal, For, on, Show } from 'solid-js'
+import { readFileContent } from '../../services/file-browser'
+import { useLayout } from '../../stores/layout'
 import { useSession } from '../../stores/session'
 
 // ============================================================================
@@ -102,8 +104,10 @@ function getFileExt(path: string): string {
 
 export const CodeEditorPanel: Component = () => {
   const { fileOperations } = useSession()
+  const { codeEditorFile, closeCodeEditor } = useLayout()
   const [selectedFilePath, setSelectedFilePath] = createSignal<string | null>(null)
   const [content, setContent] = createSignal('')
+  const [fileError, setFileError] = createSignal<string | null>(null)
 
   // Deduplicate files by path, keep latest operation first
   const uniqueFiles = createMemo(() => {
@@ -148,21 +152,35 @@ export const CodeEditorPanel: Component = () => {
   createEditorReadonly(editorView, () => true)
   createEditorControlledValue(editorView, content)
 
-  // Select a file tab
-  const handleSelectFile = (filePath: string) => {
+  // Select a file tab — reads actual file content via Tauri FS
+  const handleSelectFile = async (filePath: string) => {
     setSelectedFilePath(filePath)
-    // TODO: Read actual file content via Tauri fs commands
-    const fileName = getFileName(filePath)
-    setContent(
-      `// ${fileName}\n// Path: ${filePath}\n//\n// File content will be loaded when connected\n// to the Tauri file system backend.\n`
-    )
+    setFileError(null)
+    const text = await readFileContent(filePath)
+    if (text !== null) {
+      setContent(text)
+    } else {
+      setFileError(`Could not read file: ${getFileName(filePath)}`)
+      setContent(`// Could not read file\n// Path: ${filePath}\n`)
+    }
   }
+
+  // Auto-open file when explorer sends a path via layout store
+  createEffect(
+    on(codeEditorFile, (path) => {
+      if (path) {
+        handleSelectFile(path)
+        closeCodeEditor() // Reset signal after consuming
+      }
+    })
+  )
 
   // Close active file tab
   const handleCloseFile = (e: MouseEvent) => {
     e.stopPropagation()
     setSelectedFilePath(null)
     setContent('')
+    setFileError(null)
   }
 
   return (
@@ -232,7 +250,10 @@ export const CodeEditorPanel: Component = () => {
         {/* File Info Bar */}
         <div class="flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-muted)] bg-[var(--surface-sunken)] border-b border-[var(--border-subtle)]">
           <span class="font-mono truncate">{selectedFilePath()}</span>
-          <Show when={selectedFile()}>
+          <Show when={fileError()}>
+            <span class="text-[var(--error)] text-[10px]">{fileError()}</span>
+          </Show>
+          <Show when={selectedFile() || selectedFilePath()}>
             <span class="ml-auto flex items-center gap-2 flex-shrink-0">
               <span class="uppercase text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[var(--surface-raised)]">
                 {getFileExt(selectedFilePath()!)}

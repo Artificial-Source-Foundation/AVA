@@ -12,6 +12,7 @@ export interface MessageError {
 export interface SessionTokenStats {
   total: number
   count: number
+  totalCost: number
 }
 
 export interface Session {
@@ -40,11 +41,36 @@ export interface Message {
   agentId?: string
   createdAt: number
   tokensUsed?: number
+  costUSD?: number
+  model?: string
   metadata?: Record<string, unknown>
   // Sprint 1.2: Error and edit tracking
   error?: MessageError
   editedAt?: number
   regeneratedFrom?: string
+  // Vision support
+  images?: Array<{ data: string; mimeType: string; name?: string }>
+  // Tool execution visibility
+  toolCalls?: ToolCall[]
+}
+
+// ============================================================================
+// Tool Calls (Sprint 1: Tool Execution Visibility)
+// ============================================================================
+
+export type ToolCallStatus = 'pending' | 'running' | 'success' | 'error'
+
+export interface ToolCall {
+  id: string
+  name: string
+  args: Record<string, unknown>
+  status: ToolCallStatus
+  output?: string
+  error?: string
+  startedAt: number
+  completedAt?: number
+  filePath?: string
+  diff?: { oldContent: string; newContent: string }
 }
 
 export interface Agent {

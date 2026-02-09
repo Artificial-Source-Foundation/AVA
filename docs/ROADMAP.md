@@ -32,7 +32,7 @@ Everything needed for a working desktop AI coding app.
 - Spring physics animations, glassmorphism design
 - Code viewer (CodeMirror 6)
 
-### Core Engine (29,500+ lines, 1072 tests)
+### Core Engine (29,500+ lines, 1778 tests)
 | Category | Modules |
 |----------|---------|
 | Agent System | Agent loop, Commander, Parallel execution, Validator |
@@ -47,7 +47,7 @@ Everything needed for a working desktop AI coding app.
 
 ## Phase 1.5: Desktop Polish (IN PROGRESS)
 
-Bug fixes, WebKitGTK compatibility, and UX refinements before moving to plugins.
+Bug fixes, WebKitGTK compatibility, UX refinements, and competitive gap closing before moving to plugins.
 
 ### Done
 - [x] WebKitGTK DMABUF ghost rendering fix (NVIDIA + Wayland compositors)
@@ -56,17 +56,29 @@ Bug fixes, WebKitGTK compatibility, and UX refinements before moving to plugins.
 - [x] Splash screen (logo, status, version, mesh gradient, min display time)
 - [x] Layout refactoring (navigation store removed, sidebar slimmed, settings as modal)
 - [x] CSS performance (transition-colors, GPU compositing for scroll containers)
-- [x] Appearance tab (dark/light mode, accent colors, UI scale, mono font, border radius, density)
-- [x] Backend tests (536 tests for Config, Context, Memory, Session, Commander)
+- [x] Appearance tab (dark/light mode, 6 accents, UI scale, mono font, density)
+- [x] Appearance expansion (system theme, dark variants, code themes, ligatures, chat font size, custom accent, sans font, high contrast)
+- [x] Density + font wiring (8 components, CSS utility classes, section density vars)
+- [x] Backend tests Phase 1 (536 tests for Config, Context, Memory, Session, Commander)
+- [x] Backend tests Phase 2 (706 tests for Agent, Tools, LLM — 1778 total across 64 files)
 - [x] Core frontend wiring (core-bridge, settings sync, context tracking, ContextBar, checkpoints, memory recording)
-- [x] 1072 total tests passing (0 TS errors, 0 Biome errors)
+- [x] Settings hardening (16 new settings, LLM + Behavior tabs, generation/agent/behavior/notification controls)
+- [x] Custom instructions (injected as system message in buildApiMessages)
+- [x] Configurable send key (Enter vs Ctrl+Enter) with dynamic ShortcutHint
+- [x] Desktop notifications + sound chime (AudioContext, unfocused-only, configurable volume)
+- [x] Settings data management (export JSON, import with deep merge, clear all)
+- [x] Cost tracking UI (per-message cost + tokens in bubbles, session total in ContextBar)
+- [x] Vision/image support (paste, drop, base64, multimodal API, inline display)
+- [x] Iterative lint→fix loop (autoFixLint setting, biome/eslint after file edits, errors fed back to LLM)
+- [x] Checkpoint UI (create button, inline display with restore, full DB rollback)
+- [x] Per-message token display in bubbles
+- [x] 0 TS errors, 0 Biome errors, vite build passes
+
+- [x] Memory recall injected into system prompts (recallSimilar + procedural recall → system message)
+- [x] Auto-compaction when context > 80% (sliding window, syncs state + DB + tracker)
 
 ### Remaining
 - [ ] Test full app flow in Tauri dev (chat, tools, settings, sessions)
-- [ ] Memory recall injected into system prompts
-- [ ] Settings UI for core categories (agent, context, memory, permissions)
-- [ ] Auto-compaction when context > 80%
-- [ ] Checkpoint UI in sidebar
 - [ ] Verify all keyboard shortcuts work (Ctrl+B, Ctrl+,, Ctrl+M)
 - [ ] Test on multiple Linux DEs (GNOME, KDE, Cosmic)
 

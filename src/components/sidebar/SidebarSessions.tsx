@@ -4,7 +4,7 @@
  * Session list with search, new chat, and right-click context menu.
  */
 
-import { Copy, GitFork, MessageSquare, Pencil, Plus, Search, Trash2 } from 'lucide-solid'
+import { Check, Copy, GitFork, MessageSquare, Pencil, Plus, Search, Trash2, X } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import { useSession } from '../../stores/session'
 import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu'
@@ -30,6 +30,7 @@ export const SidebarSessions: Component = () => {
   const [contextMenu, setContextMenu] = createSignal<ContextMenuState | null>(null)
   const [renamingId, setRenamingId] = createSignal<string | null>(null)
   const [renameValue, setRenameValue] = createSignal('')
+  const [confirmDeleteId, setConfirmDeleteId] = createSignal<string | null>(null)
 
   const handleNewChat = async () => {
     await createNewSession()
@@ -100,7 +101,7 @@ export const SidebarSessions: Component = () => {
         icon: Trash2,
         danger: true,
         action: () => {
-          deleteSessionPermanently(sessionId)
+          setConfirmDeleteId(sessionId)
         },
       },
     ]
@@ -117,7 +118,7 @@ export const SidebarSessions: Component = () => {
   return (
     <div class="flex flex-col h-full">
       {/* Header */}
-      <div class="flex items-center justify-between px-3 h-10 flex-shrink-0 border-b border-[var(--border-subtle)]">
+      <div class="flex items-center justify-between density-px h-10 flex-shrink-0 border-b border-[var(--border-subtle)]">
         <span class="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
           Sessions
         </span>
@@ -138,7 +139,7 @@ export const SidebarSessions: Component = () => {
       </div>
 
       {/* Search */}
-      <div class="px-2 py-1.5 flex-shrink-0">
+      <div class="density-px density-py flex-shrink-0">
         <div class="relative">
           <Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]" />
           <input
@@ -166,43 +167,82 @@ export const SidebarSessions: Component = () => {
             {(session) => {
               const isActive = () => currentSession()?.id === session.id
               const isRenaming = () => renamingId() === session.id
+              const isConfirmingDelete = () => confirmDeleteId() === session.id
 
               return (
                 <Show
-                  when={!isRenaming()}
+                  when={!isRenaming() && !isConfirmingDelete()}
                   fallback={
-                    <div class="px-2 py-1">
-                      <input
-                        type="text"
-                        value={renameValue()}
-                        onInput={(e) => setRenameValue(e.currentTarget.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleRenameSubmit(session.id)
-                          if (e.key === 'Escape') setRenamingId(null)
-                        }}
-                        onBlur={() => handleRenameSubmit(session.id)}
-                        autofocus
-                        class="
-                          w-full px-2 py-1 text-xs
-                          bg-[var(--input-background)]
-                          border border-[var(--accent)]
-                          rounded-[var(--radius-sm)]
-                          text-[var(--text-primary)]
-                          focus:outline-none
-                        "
-                      />
-                    </div>
+                    <Show
+                      when={isRenaming()}
+                      fallback={
+                        /* Delete confirmation row */
+                        <div class="flex items-center gap-1.5 density-px density-py rounded-[var(--radius-md)] bg-[var(--error-subtle)] border border-[var(--error)]">
+                          <Trash2 class="w-3 h-3 text-[var(--error)] flex-shrink-0" />
+                          <span class="text-[10px] text-[var(--error)] flex-1 truncate">
+                            Delete session?
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              deleteSessionPermanently(session.id)
+                              setConfirmDeleteId(null)
+                            }}
+                            class="p-1 rounded-[var(--radius-sm)] text-[var(--error)] hover:bg-[var(--error)] hover:text-white"
+                            title="Confirm delete"
+                          >
+                            <Check class="w-3 h-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(null)}
+                            class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]"
+                            title="Cancel"
+                          >
+                            <X class="w-3 h-3" />
+                          </button>
+                        </div>
+                      }
+                    >
+                      {/* Rename input */}
+                      <div class="px-2 py-1">
+                        <input
+                          type="text"
+                          value={renameValue()}
+                          onInput={(e) => setRenameValue(e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleRenameSubmit(session.id)
+                            if (e.key === 'Escape') setRenamingId(null)
+                          }}
+                          onBlur={() => handleRenameSubmit(session.id)}
+                          autofocus
+                          class="
+                            w-full px-2 py-1 text-xs
+                            bg-[var(--input-background)]
+                            border border-[var(--accent)]
+                            rounded-[var(--radius-sm)]
+                            text-[var(--text-primary)]
+                            focus:outline-none
+                          "
+                        />
+                      </div>
+                    </Show>
                   }
                 >
-                  <button
-                    type="button"
+                  {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */}
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => switchSession(session.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') switchSession(session.id)
+                    }}
                     onContextMenu={(e) => handleContextMenu(e, session.id)}
                     class={`
-                      group flex items-center gap-2 w-full
-                      px-2 py-1.5
+                      group flex items-center w-full
+                      density-px density-py density-gap
                       rounded-[var(--radius-md)]
-                      text-left transition-colors
+                      text-left transition-colors cursor-pointer
                       ${
                         isActive()
                           ? 'bg-[var(--sidebar-item-active)] text-[var(--text-primary)]'
@@ -224,7 +264,34 @@ export const SidebarSessions: Component = () => {
                         </Show>
                       </div>
                     </div>
-                  </button>
+
+                    {/* Hover actions — visible on group hover */}
+                    <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setRenamingId(session.id)
+                          setRenameValue(session.name)
+                        }}
+                        class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]"
+                        title="Rename"
+                      >
+                        <Pencil class="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setConfirmDeleteId(session.id)
+                        }}
+                        class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)]"
+                        title="Delete"
+                      >
+                        <Trash2 class="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
                 </Show>
               )
             }}

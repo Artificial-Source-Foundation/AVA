@@ -6,7 +6,7 @@
  */
 
 import { Check, Copy, Minus, Plus, X } from 'lucide-solid'
-import { type Component, createSignal, For, Show } from 'solid-js'
+import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
 import { Button } from './Button'
 
 // ============================================================================
@@ -140,16 +140,67 @@ const computeDiff = (oldText: string, newText: string): DiffLine[] => {
 }
 
 // ============================================================================
+// Split View Pairing
+// ============================================================================
+
+interface SplitPair {
+  left: DiffLine | null
+  right: DiffLine | null
+}
+
+function buildSplitPairs(lines: DiffLine[]): SplitPair[] {
+  const pairs: SplitPair[] = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    if (line.type === 'unchanged') {
+      pairs.push({ left: line, right: line })
+      i++
+    } else if (line.type === 'remove') {
+      // Collect consecutive removes
+      const removes: DiffLine[] = []
+      while (i < lines.length && lines[i].type === 'remove') {
+        removes.push(lines[i])
+        i++
+      }
+      // Collect consecutive adds that follow
+      const adds: DiffLine[] = []
+      while (i < lines.length && lines[i].type === 'add') {
+        adds.push(lines[i])
+        i++
+      }
+      // Pair them up
+      const max = Math.max(removes.length, adds.length)
+      for (let j = 0; j < max; j++) {
+        pairs.push({
+          left: j < removes.length ? removes[j] : null,
+          right: j < adds.length ? adds[j] : null,
+        })
+      }
+    } else {
+      // Standalone add (no preceding remove)
+      pairs.push({ left: null, right: line })
+      i++
+    }
+  }
+
+  return pairs
+}
+
+// ============================================================================
 // Diff Viewer Component
 // ============================================================================
 
 export const DiffViewer: Component<DiffViewerProps> = (props) => {
   const [copied, setCopied] = createSignal(false)
 
-  // const mode = () => props.mode ?? 'unified' // TODO: implement split view
+  const mode = () => props.mode ?? 'unified'
   const showLineNumbers = () => props.showLineNumbers ?? true
 
   const diffLines = () => computeDiff(props.oldContent, props.newContent)
+  const splitPairs = createMemo(() => (mode() === 'split' ? buildSplitPairs(diffLines()) : []))
 
   const stats = () => {
     const lines = diffLines()
@@ -233,53 +284,102 @@ export const DiffViewer: Component<DiffViewerProps> = (props) => {
         </div>
       </div>
 
-      {/* Diff Content */}
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm font-mono">
-          <tbody>
-            <For each={diffLines()}>
-              {(line) => (
-                <tr class={lineStyles[line.type]}>
-                  {/* Line Numbers */}
-                  <Show when={showLineNumbers()}>
+      {/* Diff Content — Unified */}
+      <Show when={mode() === 'unified'}>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm font-mono">
+            <tbody>
+              <For each={diffLines()}>
+                {(line) => (
+                  <tr class={lineStyles[line.type]}>
+                    <Show when={showLineNumbers()}>
+                      <td
+                        class={`px-2 py-0.5 text-right select-none w-12 border-r border-[var(--border-subtle)] ${lineNumberStyles[line.type]}`}
+                      >
+                        {line.oldLineNumber ?? ''}
+                      </td>
+                      <td
+                        class={`px-2 py-0.5 text-right select-none w-12 border-r border-[var(--border-subtle)] ${lineNumberStyles[line.type]}`}
+                      >
+                        {line.newLineNumber ?? ''}
+                      </td>
+                    </Show>
                     <td
-                      class={`
-                        px-2 py-0.5 text-right select-none w-12
-                        border-r border-[var(--border-subtle)]
-                        ${lineNumberStyles[line.type]}
-                      `}
+                      class={`px-2 py-0.5 text-center select-none w-6 ${lineNumberStyles[line.type]}`}
                     >
-                      {line.oldLineNumber ?? ''}
+                      {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
                     </td>
-                    <td
-                      class={`
-                        px-2 py-0.5 text-right select-none w-12
-                        border-r border-[var(--border-subtle)]
-                        ${lineNumberStyles[line.type]}
-                      `}
-                    >
-                      {line.newLineNumber ?? ''}
-                    </td>
-                  </Show>
+                    <td class="px-3 py-0.5 whitespace-pre">{line.content || ' '}</td>
+                  </tr>
+                )}
+              </For>
+            </tbody>
+          </table>
+        </div>
+      </Show>
 
-                  {/* Line Indicator */}
-                  <td
-                    class={`
-                      px-2 py-0.5 text-center select-none w-6
-                      ${lineNumberStyles[line.type]}
-                    `}
-                  >
-                    {line.type === 'add' ? '+' : line.type === 'remove' ? '-' : ' '}
-                  </td>
+      {/* Diff Content — Split (side-by-side) */}
+      <Show when={mode() === 'split'}>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm font-mono">
+            <tbody>
+              <For each={splitPairs()}>
+                {(pair) => {
+                  const leftType = pair.left?.type ?? 'unchanged'
+                  const rightType = pair.right?.type ?? 'unchanged'
+                  const leftStyle = pair.left ? lineStyles[leftType] : 'bg-[var(--surface-sunken)]'
+                  const rightStyle = pair.right
+                    ? lineStyles[rightType]
+                    : 'bg-[var(--surface-sunken)]'
+                  const leftNumStyle = pair.left
+                    ? lineNumberStyles[leftType]
+                    : 'bg-[var(--surface-sunken)]'
+                  const rightNumStyle = pair.right
+                    ? lineNumberStyles[rightType]
+                    : 'bg-[var(--surface-sunken)]'
 
-                  {/* Content */}
-                  <td class="px-3 py-0.5 whitespace-pre">{line.content || ' '}</td>
-                </tr>
-              )}
-            </For>
-          </tbody>
-        </table>
-      </div>
+                  return (
+                    <tr>
+                      {/* Left side (old) */}
+                      <Show when={showLineNumbers()}>
+                        <td
+                          class={`px-2 py-0.5 text-right select-none w-10 border-r border-[var(--border-subtle)] ${leftNumStyle}`}
+                        >
+                          {pair.left?.oldLineNumber ?? ''}
+                        </td>
+                      </Show>
+                      <td class={`px-2 py-0.5 text-center select-none w-5 ${leftNumStyle}`}>
+                        {pair.left ? (leftType === 'remove' ? '-' : ' ') : ''}
+                      </td>
+                      <td class={`px-3 py-0.5 whitespace-pre w-1/2 ${leftStyle}`}>
+                        {pair.left?.content || ' '}
+                      </td>
+
+                      {/* Divider */}
+                      <td class="w-px bg-[var(--border-default)]" />
+
+                      {/* Right side (new) */}
+                      <Show when={showLineNumbers()}>
+                        <td
+                          class={`px-2 py-0.5 text-right select-none w-10 border-r border-[var(--border-subtle)] ${rightNumStyle}`}
+                        >
+                          {pair.right?.newLineNumber ?? ''}
+                        </td>
+                      </Show>
+                      <td class={`px-2 py-0.5 text-center select-none w-5 ${rightNumStyle}`}>
+                        {pair.right ? (rightType === 'add' ? '+' : ' ') : ''}
+                      </td>
+                      <td class={`px-3 py-0.5 whitespace-pre w-1/2 ${rightStyle}`}>
+                        {pair.right?.content || ' '}
+                      </td>
+                    </tr>
+                  )
+                }}
+              </For>
+            </tbody>
+          </table>
+        </div>
+      </Show>
 
       {/* Empty State */}
       <Show when={diffLines().length === 0}>

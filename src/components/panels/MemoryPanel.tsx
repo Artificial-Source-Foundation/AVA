@@ -115,7 +115,7 @@ export const MemoryPanel: Component = () => {
       <div
         class="
           flex items-center justify-between
-          px-4 py-3
+          density-section-px density-section-py
           border-b border-[var(--border-subtle)]
         "
       >
@@ -153,7 +153,7 @@ export const MemoryPanel: Component = () => {
       </div>
 
       {/* Context Usage Bar */}
-      <div class="px-4 py-3 border-b border-[var(--border-subtle)]">
+      <div class="density-section-px density-section-py border-b border-[var(--border-subtle)]">
         <div class="flex items-center justify-between mb-2">
           <span class="text-xs font-medium text-[var(--text-secondary)]">Context Window Usage</span>
           <span
@@ -191,7 +191,7 @@ export const MemoryPanel: Component = () => {
       </div>
 
       {/* Memory Items List */}
-      <div class="flex-1 overflow-y-auto p-3 space-y-2">
+      <div class="flex-1 overflow-y-auto density-section space-y-2">
         <Show
           when={displayItems().length > 0}
           fallback={
@@ -217,7 +217,7 @@ export const MemoryPanel: Component = () => {
                   onClick={() => setSelectedItem(selectedItem() === item.id ? null : item.id)}
                   class={`
                     w-full text-left
-                    p-3
+                    density-section-px density-section-py
                     rounded-[var(--radius-lg)]
                     border
                     transition-all duration-[var(--duration-fast)]
@@ -323,7 +323,7 @@ export const MemoryPanel: Component = () => {
       {/* Footer */}
       <div
         class="
-          px-4 py-3
+          density-section-px density-section-py
           border-t border-[var(--border-subtle)]
           bg-[var(--surface-sunken)]
         "

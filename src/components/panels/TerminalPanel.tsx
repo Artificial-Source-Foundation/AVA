@@ -139,7 +139,7 @@ export const TerminalPanel: Component<TerminalPanelProps> = (props) => {
         <div
           class="
             flex items-center justify-between
-            px-4 py-3
+            density-section-px density-section-py
             border-b border-[var(--border-subtle)]
             bg-[var(--surface)]
           "
@@ -183,7 +183,7 @@ export const TerminalPanel: Component<TerminalPanelProps> = (props) => {
       </Show>
 
       {/* Executions List */}
-      <div class="flex-1 overflow-y-auto p-3 space-y-2">
+      <div class="flex-1 overflow-y-auto density-section space-y-2">
         <Show
           when={terminalExecutions().length > 0}
           fallback={
@@ -235,8 +235,8 @@ export const TerminalPanel: Component<TerminalPanelProps> = (props) => {
                     }
                     class="
                       w-full text-left
-                      flex items-center gap-3
-                      p-3
+                      flex items-center density-gap
+                      density-section-px density-section-py
                       bg-[var(--surface)]
                       hover:bg-[var(--surface-raised)]
                       transition-colors duration-[var(--duration-fast)]
@@ -326,7 +326,7 @@ export const TerminalPanel: Component<TerminalPanelProps> = (props) => {
                     <div
                       class="
                         p-3
-                        bg-[#0a0a0b]
+                        bg-[var(--code-background)]
                         border-t border-[var(--border-subtle)]
                         max-h-64 overflow-y-auto
                       "
@@ -360,7 +360,7 @@ export const TerminalPanel: Component<TerminalPanelProps> = (props) => {
       <Show when={!props.compact}>
         <div
           class="
-            px-4 py-3
+            density-section-px density-section-py
             border-t border-[var(--border-subtle)]
             bg-[var(--surface)]
           "

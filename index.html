@@ -16,10 +16,19 @@
         const mode = localStorage.getItem('estela-mode') || 'system';
 
         // Resolve actual mode
+        // 'system' resolves to OS preference; 'dark' may use darkStyle variant
         let resolvedMode = mode;
         if (mode === 'system') {
           resolvedMode = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        } else if (mode === 'dark') {
+          // Check for dark style variant (midnight/charcoal) from settings blob
+          try {
+            const s = JSON.parse(localStorage.getItem('estela_settings') || '{}');
+            const ds = s?.appearance?.darkStyle;
+            if (ds === 'midnight' || ds === 'charcoal') resolvedMode = ds;
+          } catch { /* use dark */ }
         }
+        // midnight and charcoal pass through as-is
 
         // Apply to document immediately
         document.documentElement.dataset.theme = theme;

@@ -3,17 +3,23 @@
  * Provider-agnostic chat hook with streaming support and tool integration
  */
 
-import { executeTool, getToolDefinitions, resetToolCallCount, type ToolContext } from '@estela/core'
+import {
+  estimateCost,
+  executeTool,
+  getToolDefinitions,
+  resetToolCallCount,
+  type ToolContext,
+} from '@estela/core'
 import { createSignal } from 'solid-js'
-import { DEFAULTS } from '../config/constants'
 import { checkAutoApproval, createApprovalGate } from '../lib/tool-approval'
-import { getCoreTracker } from '../services/core-bridge'
-import { saveMessage, updateMessage } from '../services/database'
+import { getCoreCompactor, getCoreMemory, getCoreTracker } from '../services/core-bridge'
+import { deleteMessageFromDb, saveMessage, updateMessage } from '../services/database'
 import { createClient, getProviderForModel, type LLMClient } from '../services/llm/bridge'
+import { notifyCompletion } from '../services/notifications'
 import { useProject } from '../stores/project'
 import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
-import type { Message } from '../types'
+import type { Message, ToolCall } from '../types'
 import type { LLMProvider, StreamError, ToolUseBlock } from '../types/llm'
 
 // ============================================================================
@@ -25,8 +31,9 @@ interface StreamOptions {
   model: string
   messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }>
   onContent: (content: string) => void
-  onComplete: (content: string, tokens?: number) => void
+  onComplete: (content: string, tokens?: number, toolCalls?: ToolCall[]) => void
   onError: (error: StreamError) => void
+  onToolUpdate?: (toolCalls: ToolCall[]) => void
   signal: AbortSignal
   enableTools?: boolean
 }
@@ -47,6 +54,9 @@ export function useChat() {
   const [error, setError] = createSignal<StreamError | null>(null)
   const [currentProvider, setCurrentProvider] = createSignal<LLMProvider | null>(null)
   const [contextStats, setContextStats] = createSignal<ContextStats | null>(null)
+  const [streamingTokenEstimate, setStreamingTokenEstimate] = createSignal(0)
+  const [streamingStartedAt, setStreamingStartedAt] = createSignal<number | null>(null)
+  const [activeToolCalls, setActiveToolCalls] = createSignal<ToolCall[]>([])
 
   const abortRef = { current: null as AbortController | null }
   const session = useSession()
@@ -65,6 +75,89 @@ export function useChat() {
       remaining: s.remaining,
       percentUsed: s.percentUsed,
     })
+  }
+
+  /**
+   * Auto-compact conversation when context exceeds 80%.
+   * Uses sliding window to trim to ~50%, syncs state + DB.
+   */
+  async function maybeCompact(): Promise<void> {
+    const tracker = getCoreTracker()
+    const compactor = getCoreCompactor()
+    if (!tracker || !compactor || !compactor.needsCompaction(80)) return
+
+    const currentMsgs = session.messages()
+    if (currentMsgs.length <= 4) return
+
+    // Convert frontend messages to core Message format
+    const coreMessages = currentMsgs.map((m) => ({
+      id: m.id,
+      sessionId: m.sessionId,
+      role: m.role as 'user' | 'assistant' | 'system',
+      content: m.content,
+      createdAt: m.createdAt,
+    }))
+
+    try {
+      const result = await compactor.compact(coreMessages)
+      if (result.tokensSaved === 0) return
+
+      // Determine which messages were removed
+      const keptIds = new Set(result.messages.map((m) => m.id))
+      const removedMsgs = currentMsgs.filter((m) => !keptIds.has(m.id))
+
+      // Update frontend state: keep only surviving messages
+      session.setMessages(currentMsgs.filter((m) => keptIds.has(m.id)))
+
+      // Sync database: delete removed messages
+      await Promise.all(removedMsgs.map((m) => deleteMessageFromDb(m.id)))
+
+      // Rebuild tracker with remaining messages
+      tracker.clear()
+      for (const m of result.messages) {
+        tracker.addMessage(m.id, m.content)
+      }
+      syncTrackerStats()
+
+      console.info(
+        `[Compaction] Removed ${result.originalCount - result.compactedCount} messages, saved ~${result.tokensSaved} tokens (${result.strategyUsed})`
+      )
+    } catch (err) {
+      console.warn('[Compaction] Failed:', err)
+    }
+  }
+
+  // ==========================================================================
+  // Lint Check Helpers (for iterative lint-fix loop)
+  // ==========================================================================
+
+  /** Extract the file path from a file-modifying tool's input */
+  function getModifiedFilePath(toolName: string, input: Record<string, unknown>): string | null {
+    if (toolName === 'write_file' || toolName === 'create_file')
+      return (input.path as string) || null
+    if (toolName === 'edit') return (input.filePath as string) || null
+    if (toolName === 'apply_patch') return (input.filePath as string) || null
+    return null
+  }
+
+  /** Run linter on a file and return errors, or null if clean */
+  async function checkLintErrors(filePath: string, ctx: ToolContext): Promise<string | null> {
+    try {
+      const result = await executeTool(
+        'bash',
+        {
+          command: `npx biome check "${filePath}" 2>&1 || npx eslint "${filePath}" 2>&1`,
+          timeout: 10000,
+        },
+        ctx
+      )
+      if (!result.success && result.output) {
+        return result.output.split('\n').slice(0, 50).join('\n')
+      }
+      return null
+    } catch {
+      return null
+    }
   }
 
   // ==========================================================================
@@ -105,6 +198,9 @@ export function useChat() {
     // Get tool definitions if tools are enabled
     const tools = options.enableTools !== false ? getToolDefinitions() : undefined
 
+    // Accumulate all tool calls across streaming iterations
+    const allToolCalls: ToolCall[] = []
+
     // Stream loop - may iterate multiple times if tools are used
     let continueStreaming = true
     while (continueStreaming) {
@@ -112,13 +208,16 @@ export function useChat() {
       const pendingToolUses: ToolUseBlock[] = []
 
       try {
+        // Read generation settings at call time
+        const gen = settings.settings().generation
         for await (const delta of client.stream(
           currentMessages as Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
           {
             provider,
             model: options.model,
             authMethod: 'api-key', // Core handles auth method internally
-            maxTokens: DEFAULTS.MAX_TOKENS,
+            maxTokens: gen.maxTokens,
+            temperature: gen.temperature,
             tools,
           },
           options.signal
@@ -137,6 +236,19 @@ export function useChat() {
           // Handle tool use
           if (delta.toolUse) {
             pendingToolUses.push(delta.toolUse)
+
+            // Create pending ToolCall and notify UI
+            const input = delta.toolUse.input as Record<string, unknown>
+            const tc: ToolCall = {
+              id: delta.toolUse.id,
+              name: delta.toolUse.name,
+              args: input,
+              status: 'pending',
+              startedAt: Date.now(),
+              filePath: getModifiedFilePath(delta.toolUse.name, input) ?? undefined,
+            }
+            allToolCalls.push(tc)
+            options.onToolUpdate?.([...allToolCalls])
           }
 
           if (delta.done) {
@@ -161,6 +273,9 @@ export function useChat() {
               }> = []
 
               for (const toolUse of pendingToolUses) {
+                // Find the matching ToolCall to update status
+                const tc = allToolCalls.find((t) => t.id === toolUse.id)
+
                 // Check auto-approval before executing
                 const autoResult = checkAutoApproval(
                   toolUse.name,
@@ -174,6 +289,12 @@ export function useChat() {
                     toolUse.input as Record<string, unknown>
                   )
                   if (!approved) {
+                    if (tc) {
+                      tc.status = 'error'
+                      tc.error = 'User denied'
+                      tc.completedAt = Date.now()
+                    }
+                    options.onToolUpdate?.([...allToolCalls])
                     toolResults.push({
                       type: 'tool_result',
                       tool_use_id: toolUse.id,
@@ -184,11 +305,40 @@ export function useChat() {
                   }
                 }
 
+                // Mark running
+                if (tc) tc.status = 'running'
+                options.onToolUpdate?.([...allToolCalls])
+
                 const result = await executeTool(toolUse.name, toolUse.input, toolCtx)
+                let toolOutput = result.output
+
+                // Lint check: if file was modified and autoFixLint is on, run linter
+                if (result.success && settings.settings().agentLimits.autoFixLint) {
+                  const filePath = getModifiedFilePath(
+                    toolUse.name,
+                    toolUse.input as Record<string, unknown>
+                  )
+                  if (filePath) {
+                    const lintErrors = await checkLintErrors(filePath, toolCtx)
+                    if (lintErrors) {
+                      toolOutput += `\n\nLint errors found:\n${lintErrors}\nPlease fix these issues.`
+                    }
+                  }
+                }
+
+                // Update ToolCall with result
+                if (tc) {
+                  tc.status = result.success ? 'success' : 'error'
+                  tc.output = toolOutput.slice(0, 2000) // Cap stored output
+                  tc.error = result.error
+                  tc.completedAt = Date.now()
+                }
+                options.onToolUpdate?.([...allToolCalls])
+
                 toolResults.push({
                   type: 'tool_result',
                   tool_use_id: toolUse.id,
-                  content: result.output,
+                  content: toolOutput,
                   is_error: !result.success,
                 })
               }
@@ -203,7 +353,11 @@ export function useChat() {
               continueStreaming = true
             } else {
               // No tools, we're done
-              options.onComplete(fullContent, delta.usage?.totalTokens)
+              options.onComplete(
+                fullContent,
+                delta.usage?.totalTokens,
+                allToolCalls.length > 0 ? allToolCalls : undefined
+              )
             }
           }
         }
@@ -234,14 +388,98 @@ export function useChat() {
     return msg
   }
 
-  function buildApiMessages(excludeId?: string) {
-    return session
+  /**
+   * Recall relevant memories for the current user message.
+   * Returns a formatted system message string, or empty if unavailable.
+   */
+  async function recallMemoryContext(userMessage: string): Promise<string> {
+    const memory = getCoreMemory()
+    if (!memory) return ''
+
+    try {
+      const [similar, procedural] = await Promise.all([
+        memory.recallSimilar(userMessage, 3),
+        memory.recall({
+          type: 'procedural',
+          minImportance: 0.5,
+          limit: 3,
+          orderBy: 'importance',
+          order: 'desc',
+        }),
+      ])
+
+      if (similar.length === 0 && procedural.length === 0) return ''
+
+      const parts: string[] = ['## Relevant Memories\n']
+
+      if (similar.length > 0) {
+        parts.push('### Past Experiences')
+        for (const r of similar) {
+          const pct = (r.similarity * 100).toFixed(0)
+          parts.push(`- ${r.memory.content.slice(0, 200)} (${pct}% match)`)
+        }
+        parts.push('')
+      }
+
+      if (procedural.length > 0) {
+        parts.push('### Learned Patterns')
+        for (const p of procedural) {
+          const meta = p.metadata
+          const rate =
+            meta.successRate != null ? ` (${(meta.successRate * 100).toFixed(0)}% success)` : ''
+          parts.push(`- ${p.content.slice(0, 200)}${rate}`)
+        }
+      }
+
+      return parts.join('\n')
+    } catch {
+      return '' // Graceful degradation — memory is optional
+    }
+  }
+
+  async function buildApiMessages(excludeId?: string, userMessage?: string) {
+    const msgs = session
       .messages()
       .filter((m) => m.id !== excludeId)
-      .map((m) => ({
-        role: m.role as 'user' | 'assistant' | 'system',
-        content: m.content,
-      }))
+      .map((m) => {
+        // Build multimodal content if message has images
+        const imgs = (m.metadata?.images ?? []) as Array<{
+          data: string
+          mimeType: string
+        }>
+        if (imgs.length > 0) {
+          return {
+            role: m.role as 'user' | 'assistant' | 'system',
+            content: [
+              ...imgs.map((img) => ({
+                type: 'image' as const,
+                source: { type: 'base64' as const, media_type: img.mimeType, data: img.data },
+              })),
+              { type: 'text' as const, text: m.content },
+            ] as unknown as string,
+          }
+        }
+        return {
+          role: m.role as 'user' | 'assistant' | 'system',
+          content: m.content,
+        }
+      })
+
+    // Prepend custom instructions as system message
+    const instructions = settings.settings().generation.customInstructions.trim()
+    if (instructions) {
+      msgs.unshift({ role: 'system', content: instructions })
+    }
+
+    // Prepend memory context (before custom instructions so instructions take priority)
+    if (userMessage) {
+      const memoryContext = await recallMemoryContext(userMessage)
+      if (memoryContext) {
+        msgs.unshift({ role: 'system', content: memoryContext })
+      }
+    }
+
+    return msgs
   }
 
   // ==========================================================================
@@ -251,7 +489,11 @@ export function useChat() {
   /**
    * Send a new message and stream the response
    */
-  async function sendMessage(content: string, model?: string): Promise<void> {
+  async function sendMessage(
+    content: string,
+    model?: string,
+    images?: Array<{ data: string; mimeType: string; name?: string }>
+  ): Promise<void> {
     if (isStreaming()) return
 
     const targetModel = model || session.selectedModel()
@@ -259,6 +501,9 @@ export function useChat() {
     // Note: Auth validation happens in streamResponse via core client
     setError(null)
     setIsStreaming(true)
+    setStreamingStartedAt(Date.now())
+    setStreamingTokenEstimate(0)
+    setActiveToolCalls([])
     abortRef.current = new AbortController()
 
     try {
@@ -269,11 +514,12 @@ export function useChat() {
         sessionId = newSession.id
       }
 
-      // Create user message
+      // Create user message (store images in metadata)
       const userMsg = await saveMessage({
         sessionId,
         role: 'user',
         content,
+        metadata: images?.length ? { images } : undefined,
       })
       session.addMessage(userMsg)
       getCoreTracker()?.addMessage(userMsg.id, content)
@@ -286,15 +532,35 @@ export function useChat() {
       await streamResponse({
         sessionId,
         model: targetModel,
-        messages: buildApiMessages(assistantMsg.id),
-        onContent: (text) => session.updateMessageContent(assistantMsg.id, text),
-        onComplete: async (text, tokens) => {
+        messages: await buildApiMessages(assistantMsg.id, content),
+        onContent: (text) => {
+          session.updateMessageContent(assistantMsg.id, text)
+          setStreamingTokenEstimate(Math.ceil(text.length / 4))
+        },
+        onToolUpdate: (toolCalls) => {
+          setActiveToolCalls(toolCalls)
+          session.updateMessage(assistantMsg.id, { toolCalls })
+        },
+        onComplete: async (text, tokens, toolCalls) => {
+          setStreamingTokenEstimate(0)
+          setActiveToolCalls([])
+          // Estimate cost from token usage
+          const totalTokens = tokens || Math.ceil(text.length / 4)
+          const inputTokens = Math.floor(totalTokens * 0.7)
+          const outputTokens = Math.ceil(totalTokens * 0.3)
+          const cost = estimateCost(targetModel, inputTokens, outputTokens) ?? undefined
+          const meta: Record<string, unknown> = { costUSD: cost, model: targetModel }
+          if (toolCalls) meta.toolCalls = toolCalls
           await updateMessage(assistantMsg.id, {
             content: text,
             tokensUsed: tokens,
+            metadata: meta,
           })
+          session.updateMessage(assistantMsg.id, { costUSD: cost, model: targetModel, toolCalls })
           getCoreTracker()?.addMessage(assistantMsg.id, text)
           syncTrackerStats()
+          await maybeCompact()
+          notifyCompletion('Chat complete', text.slice(0, 100))
         },
         onError: (err) => {
           setError(err)
@@ -309,6 +575,7 @@ export function useChat() {
       })
     } finally {
       setIsStreaming(false)
+      setStreamingStartedAt(null)
       abortRef.current = null
     }
   }
@@ -326,6 +593,8 @@ export function useChat() {
 
     setError(null)
     setIsStreaming(true)
+    setStreamingStartedAt(Date.now())
+    setActiveToolCalls([])
     abortRef.current = new AbortController()
 
     try {
@@ -334,13 +603,24 @@ export function useChat() {
       await streamResponse({
         sessionId,
         model: targetModel,
-        messages: buildApiMessages(assistantMsg.id),
+        messages: await buildApiMessages(assistantMsg.id),
         onContent: (text) => session.updateMessageContent(assistantMsg.id, text),
-        onComplete: async (text, tokens) => {
+        onToolUpdate: (toolCalls) => {
+          setActiveToolCalls(toolCalls)
+          session.updateMessage(assistantMsg.id, { toolCalls })
+        },
+        onComplete: async (text, tokens, toolCalls) => {
+          setActiveToolCalls([])
+          const meta: Record<string, unknown> = {}
+          if (toolCalls) meta.toolCalls = toolCalls
           await updateMessage(assistantMsg.id, {
             content: text,
             tokensUsed: tokens,
+            metadata: Object.keys(meta).length > 0 ? meta : undefined,
           })
+          syncTrackerStats()
+          await maybeCompact()
+          notifyCompletion('Regeneration complete', text.slice(0, 100))
         },
         onError: (err) => {
           setError(err)
@@ -355,6 +635,7 @@ export function useChat() {
       })
     } finally {
       setIsStreaming(false)
+      setStreamingStartedAt(null)
       abortRef.current = null
     }
   }
@@ -448,6 +729,9 @@ export function useChat() {
     error,
     currentProvider,
     contextStats,
+    streamingTokenEstimate,
+    streamingStartedAt,
+    activeToolCalls,
     pendingApproval: approval.pendingApproval,
 
     // Actions

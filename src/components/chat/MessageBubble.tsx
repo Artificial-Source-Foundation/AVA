@@ -1,15 +1,18 @@
 /**
  * Message Bubble Component
  *
- * Individual message display with tokens, error state, and actions.
- * Premium styling with themed colors and smooth interactions.
+ * Individual message display with markdown rendering, tokens, error state,
+ * and actions (copy, delete, edit, regenerate, retry).
  */
 
-import { AlertCircle, Loader2, RotateCcw } from 'lucide-solid'
-import { type Component, Show } from 'solid-js'
+import { formatCost } from '@estela/core'
+import { AlertCircle, ChevronDown, ChevronUp, Loader2, RotateCcw } from 'lucide-solid'
+import { type Component, createSignal, For, Show } from 'solid-js'
 import type { Message } from '../../types'
 import { EditForm } from './EditForm'
+import { MarkdownContent } from './MarkdownContent'
 import { MessageActions } from './MessageActions'
+import { ToolCallGroup } from './ToolCallGroup'
 import { TypingIndicator } from './TypingIndicator'
 
 interface MessageBubbleProps {
@@ -17,15 +20,23 @@ interface MessageBubbleProps {
   isEditing: boolean
   isRetrying: boolean
   isStreaming: boolean
+  isLastMessage: boolean
   onStartEdit: () => void
   onCancelEdit: () => void
   onSaveEdit: (content: string) => Promise<void>
   onRetry: () => void
   onRegenerate: () => void
+  onCopy: () => void
+  onDelete: () => void
 }
+
+const COLLAPSE_THRESHOLD = 1500 // characters
 
 export const MessageBubble: Component<MessageBubbleProps> = (props) => {
   const isUser = () => props.message.role === 'user'
+  const isLong = () => !isUser() && props.message.content.length > COLLAPSE_THRESHOLD
+  const [expanded, setExpanded] = createSignal(false)
+  const shouldCollapse = () => isLong() && !expanded() && !props.isStreaming
 
   return (
     <div class={`flex ${isUser() ? 'justify-end' : 'justify-start'} animate-message-in`}>
@@ -44,7 +55,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
         <div class="relative group max-w-[80%]">
           <div
             class={`
-              rounded-[var(--radius-lg)] px-5 py-3.5
+              rounded-[var(--radius-lg)] density-section-px density-section-py
               transition-colors duration-[var(--duration-fast)]
               ${
                 isUser()
@@ -53,6 +64,29 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               }
             `}
           >
+            {/* Attached images */}
+            <Show
+              when={
+                (props.message.metadata?.images as Array<{ data: string; mimeType: string }>) ?? []
+              }
+            >
+              {(images) => (
+                <Show when={images().length > 0}>
+                  <div class="flex gap-2 mb-2 flex-wrap">
+                    <For each={images()}>
+                      {(img) => (
+                        <img
+                          src={`data:${img.mimeType};base64,${img.data}`}
+                          alt="Attached"
+                          class="max-w-[200px] max-h-[200px] rounded object-contain"
+                        />
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              )}
+            </Show>
+
             {/* Show typing indicator only while actively streaming */}
             <Show
               when={props.message.content || isUser()}
@@ -64,15 +98,51 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                 )
               }
             >
-              <p class="whitespace-pre-wrap break-words text-sm leading-relaxed">
-                {props.message.content}
-              </p>
+              <div
+                class={shouldCollapse() ? 'relative overflow-hidden' : ''}
+                style={shouldCollapse() ? { 'max-height': '300px' } : {}}
+              >
+                <MarkdownContent
+                  content={props.message.content}
+                  role={props.message.role}
+                  isStreaming={props.isStreaming}
+                />
+                {/* Fade gradient for collapsed long messages */}
+                <Show when={shouldCollapse()}>
+                  <div class="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-[var(--chat-assistant-bg)] to-transparent pointer-events-none" />
+                </Show>
+              </div>
+              {/* Show more/less toggle */}
+              <Show when={isLong()}>
+                <button
+                  type="button"
+                  onClick={() => setExpanded((v) => !v)}
+                  class="flex items-center gap-1 mt-1 text-xs text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+                >
+                  <Show when={expanded()} fallback={<ChevronDown class="w-3 h-3" />}>
+                    <ChevronUp class="w-3 h-3" />
+                  </Show>
+                  {expanded() ? 'Show less' : 'Show more'}
+                </button>
+              </Show>
             </Show>
 
-            {/* Token badge for assistant messages */}
+            {/* Tool calls for assistant messages */}
+            <Show when={!isUser() && props.message.toolCalls?.length}>
+              <ToolCallGroup
+                toolCalls={props.message.toolCalls!}
+                isStreaming={props.isStreaming && props.isLastMessage}
+              />
+            </Show>
+
+            {/* Token badge + cost for assistant messages */}
             <Show when={!isUser() && props.message.tokensUsed}>
               <div class="mt-2 font-[var(--font-ui-mono)] text-[10px] tracking-wide text-[var(--text-muted)] text-right tabular-nums">
                 {props.message.tokensUsed?.toLocaleString()} tokens
+                <Show when={props.message.costUSD}>
+                  {' '}
+                  &middot; {formatCost(props.message.costUSD!)}
+                </Show>
               </div>
             </Show>
 
@@ -136,11 +206,14 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
           </Show>
 
           {/* Action buttons on hover */}
-          <Show when={props.message.content && !props.message.error}>
+          <Show when={props.message.content}>
             <MessageActions
               message={props.message}
+              isLastMessage={props.isLastMessage}
               onEdit={props.onStartEdit}
               onRegenerate={props.onRegenerate}
+              onCopy={props.onCopy}
+              onDelete={props.onDelete}
               isLoading={props.isStreaming}
             />
           </Show>

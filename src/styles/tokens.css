@@ -293,11 +293,32 @@
   --code-background: var(--surface-raised);
   --code-text: var(--text-primary);
 
+  /* Chat font size (overridden by applyAppearance) */
+  --chat-font-size: 13px;
+
+  /* Density defaults (overridden by applyAppearance — must exist before JS runs) */
+  --density-spacing: 1;
+  --density-py: 0.375rem;
+  --density-px: 0.75rem;
+  --density-gap: 0.5rem;
+  --density-section-py: 0.75rem;
+  --density-section-px: 1rem;
+
+  /* Syntax highlighting tokens (defaults = One Dark) */
+  --syntax-keyword: #c678dd;
+  --syntax-string: #98c379;
+  --syntax-comment: #5c6370;
+  --syntax-function: #61afef;
+  --syntax-number: #d19a66;
+  --syntax-operator: #56b6c2;
+  --syntax-type: #e5c07b;
+  --syntax-variable: #e06c75;
+
   /* ========================================
      TYPOGRAPHY
      ======================================== */
 
-  --font-sans: "Geist Sans", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: "Geist", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "Geist Mono", "JetBrains Mono", "Fira Code", "SF Mono", monospace;
   --font-ui-mono: var(--font-mono); /* For labels, badges, status, agent names */
 
@@ -333,15 +354,6 @@
   --radius-xl: 10px;
   --radius-2xl: 14px;
   --radius-full: 9999px;
-
-  /* ========================================
-     DENSITY
-     ======================================== */
-
-  --density-spacing: 1;
-  --density-py: 0.25rem;
-  --density-px: 0.625rem;
-  --density-gap: 0.5rem;
 
   /* ========================================
      MOTION
@@ -615,4 +627,166 @@
   --accent-muted: #164e63;
   --accent-border: rgba(6, 182, 212, 0.3);
   --accent-glow: rgba(6, 182, 212, 0.4);
+}
+
+/* ========================================
+   DARK THEME VARIANTS
+   Midnight = pure black OLED, Charcoal = warm dark
+   ======================================== */
+
+[data-mode="midnight"] {
+  --gray-0: #000000;
+  --gray-1: #050505;
+  --gray-2: #0a0a0a;
+  --gray-3: #0f0f0f;
+  --gray-4: #141414;
+  --gray-5: #1a1a1a;
+
+  --background: #000000;
+  --background-subtle: #050505;
+  --surface: #0a0a0a;
+  --surface-raised: #0f0f0f;
+  --surface-overlay: #141414;
+  --surface-sunken: #050505;
+  --surface-glass: rgba(5, 5, 5, 0.92);
+  --surface-glass-strong: rgba(10, 10, 10, 0.98);
+
+  --glass-bg: rgba(5, 5, 5, 0.92);
+  --glass-bg-strong: rgba(10, 10, 10, 0.98);
+
+  --sidebar-background: rgba(5, 5, 5, 0.98);
+  --card-background: rgba(5, 5, 5, 0.92);
+  --code-background: #0a0a0a;
+  --chat-assistant-bg: #0f0f0f;
+}
+
+[data-mode="charcoal"] {
+  --gray-0: #101014;
+  --gray-1: #141418;
+  --gray-2: #19191e;
+  --gray-3: #1f1f25;
+  --gray-4: #25252c;
+  --gray-5: #2c2c34;
+
+  --background: #101014;
+  --background-subtle: #141418;
+  --surface: #19191e;
+  --surface-raised: #1f1f25;
+  --surface-overlay: #25252c;
+  --surface-sunken: #141418;
+  --surface-glass: rgba(25, 25, 30, 0.92);
+  --surface-glass-strong: rgba(31, 31, 37, 0.98);
+
+  --glass-bg: rgba(25, 25, 30, 0.92);
+  --glass-bg-strong: rgba(31, 31, 37, 0.98);
+
+  --sidebar-background: rgba(20, 20, 24, 0.98);
+  --card-background: rgba(25, 25, 30, 0.92);
+  --code-background: #19191e;
+  --chat-assistant-bg: #1f1f25;
+}
+
+/* ========================================
+   CODE THEME PRESETS
+   Override syntax tokens + code background via [data-code-theme]
+   ======================================== */
+
+[data-code-theme="github-dark"] {
+  --code-background: #0d1117;
+  --code-text: #e6edf3;
+  --syntax-keyword: #ff7b72;
+  --syntax-string: #a5d6ff;
+  --syntax-comment: #8b949e;
+  --syntax-function: #d2a8ff;
+  --syntax-number: #79c0ff;
+  --syntax-operator: #ff7b72;
+  --syntax-type: #ffa657;
+  --syntax-variable: #ffa657;
+}
+
+[data-code-theme="monokai"] {
+  --code-background: #272822;
+  --code-text: #f8f8f2;
+  --syntax-keyword: #f92672;
+  --syntax-string: #e6db74;
+  --syntax-comment: #75715e;
+  --syntax-function: #a6e22e;
+  --syntax-number: #ae81ff;
+  --syntax-operator: #f92672;
+  --syntax-type: #66d9ef;
+  --syntax-variable: #fd971f;
+}
+
+[data-code-theme="nord"] {
+  --code-background: #2e3440;
+  --code-text: #d8dee9;
+  --syntax-keyword: #81a1c1;
+  --syntax-string: #a3be8c;
+  --syntax-comment: #616e88;
+  --syntax-function: #88c0d0;
+  --syntax-number: #b48ead;
+  --syntax-operator: #81a1c1;
+  --syntax-type: #8fbcbb;
+  --syntax-variable: #d08770;
+}
+
+[data-code-theme="solarized-dark"] {
+  --code-background: #002b36;
+  --code-text: #839496;
+  --syntax-keyword: #859900;
+  --syntax-string: #2aa198;
+  --syntax-comment: #586e75;
+  --syntax-function: #268bd2;
+  --syntax-number: #d33682;
+  --syntax-operator: #859900;
+  --syntax-type: #b58900;
+  --syntax-variable: #cb4b16;
+}
+
+[data-code-theme="catppuccin"] {
+  --code-background: #1e1e2e;
+  --code-text: #cdd6f4;
+  --syntax-keyword: #cba6f7;
+  --syntax-string: #a6e3a1;
+  --syntax-comment: #6c7086;
+  --syntax-function: #89b4fa;
+  --syntax-number: #fab387;
+  --syntax-operator: #89dceb;
+  --syntax-type: #f9e2af;
+  --syntax-variable: #f38ba8;
+}
+
+/* ========================================
+   HIGH CONTRAST MODE
+   Stronger text and borders for accessibility
+   ======================================== */
+
+[data-high-contrast] {
+  --text-primary: #ffffff;
+  --text-secondary: #d4d4d8;
+  --text-tertiary: #a1a1aa;
+  --text-muted: #71717a;
+
+  --border-subtle: rgba(255, 255, 255, 0.12);
+  --border-default: rgba(255, 255, 255, 0.2);
+  --border-strong: rgba(255, 255, 255, 0.3);
+  --border-emphasis: rgba(255, 255, 255, 0.35);
+
+  --glass-border: rgba(255, 255, 255, 0.15);
+  --glass-border-hover: rgba(255, 255, 255, 0.25);
+}
+
+[data-mode="light"][data-high-contrast] {
+  --text-primary: #000000;
+  --text-secondary: #18181b;
+  --text-tertiary: #27272a;
+  --text-muted: #3f3f46;
+
+  --border-subtle: rgba(0, 0, 0, 0.15);
+  --border-default: rgba(0, 0, 0, 0.25);
+  --border-strong: rgba(0, 0, 0, 0.35);
+  --border-emphasis: rgba(0, 0, 0, 0.4);
+
+  --glass-border: rgba(0, 0, 0, 0.18);
+  --glass-border-hover: rgba(0, 0, 0, 0.28);
 }

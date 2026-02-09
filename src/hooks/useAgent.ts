@@ -24,6 +24,7 @@ import {
 import { getCoreMemory } from '../services/core-bridge'
 import { saveMessage, updateMessage } from '../services/database'
 import { logError, logInfo, logWarn } from '../services/logger'
+import { notifyCompletion } from '../services/notifications'
 import { useProject } from '../stores/project'
 import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
@@ -383,12 +384,13 @@ export function useAgent() {
         context: undefined, // Could add project context here
       }
 
-      // Build agent config
+      // Build agent config (read limits from settings)
+      const limits = settingsRef.settings().agentLimits
       const agentConfig: Partial<AgentConfig> = {
         provider: 'anthropic',
         model: session.selectedModel(),
-        maxTurns: 20,
-        maxTimeMinutes: 10,
+        maxTurns: limits.agentMaxTurns,
+        maxTimeMinutes: limits.agentMaxTimeMinutes,
         ...config,
       }
 
@@ -417,6 +419,12 @@ export function useAgent() {
             content: finalContent,
             tokensUsed: event.result.tokensUsed,
           })
+
+          // Notify user
+          notifyCompletion(
+            event.result.success ? 'Agent complete' : 'Agent failed',
+            (event.result.output ?? goal).slice(0, 100)
+          )
 
           // Record episodic memory for successful agent runs
           const memory = getCoreMemory()

@@ -13,15 +13,23 @@ import {
   clearTerminalExecutions as dbClearTerminalExecutions,
   createSession as dbCreateSession,
   deleteMemoryItem as dbDeleteMemoryItem,
+  deleteMessageFromDb as dbDeleteMessage,
+  deleteMessagesFromTimestamp as dbDeleteMessagesFromTimestamp,
   deleteSession as dbDeleteSession,
+  deleteSessionMessages as dbDeleteSessionMessages,
   duplicateSessionMessages as dbDuplicateSessionMessages,
+  insertMessages as dbInsertMessages,
+  updateAgentInDb as dbUpdateAgent,
   updateSession as dbUpdateSession,
   updateTerminalExecution as dbUpdateTerminalExecution,
+  getAgents,
+  getCheckpoints,
   getFileOperations,
   getMemoryItems,
   getMessages,
   getSessionsWithStats,
   getTerminalExecutions,
+  saveAgent,
   saveFileOperation,
   saveMemoryItem,
   saveTerminalExecution,
@@ -89,8 +97,9 @@ const sessionTokenStats = createMemo((): SessionTokenStats => {
     (stats, msg) => ({
       total: stats.total + (msg.tokensUsed || 0),
       count: stats.count + (msg.tokensUsed ? 1 : 0),
+      totalCost: stats.totalCost + (msg.costUSD || 0),
     }),
-    { total: 0, count: 0 }
+    { total: 0, count: 0, totalCost: 0 }
   )
 })
 
@@ -237,22 +246,28 @@ export function useSession() {
       }
 
       // Load session-specific data from database
-      setAgents([]) // TODO: Load agents from DB when agent persistence is implemented
-
       try {
-        const [dbFileOps, dbTerminalExecs, dbMemItems] = await Promise.all([
-          getFileOperations(id),
-          getTerminalExecutions(id),
-          getMemoryItems(id),
-        ])
+        const [dbAgents, dbFileOps, dbTerminalExecs, dbMemItems, dbCheckpoints] = await Promise.all(
+          [
+            getAgents(id),
+            getFileOperations(id),
+            getTerminalExecutions(id),
+            getMemoryItems(id),
+            getCheckpoints(id),
+          ]
+        )
+        setAgents(dbAgents)
         setFileOperations(dbFileOps)
         setTerminalExecutions(dbTerminalExecs)
         setMemoryItems(dbMemItems)
+        setCheckpoints(dbCheckpoints)
       } catch (err) {
         logError('Session', 'Failed to load session data', err)
+        setAgents([])
         setFileOperations([])
         setTerminalExecutions([])
         setMemoryItems([])
+        setCheckpoints([])
       }
 
       // Persist last session
@@ -524,14 +539,19 @@ export function useSession() {
     },
 
     /**
-     * Delete a message
+     * Delete a message (from signal + DB)
      */
-    deleteMessage: (id: string) => {
+    deleteMessage: async (id: string) => {
       setMessages((prev) => prev.filter((msg) => msg.id !== id))
+      try {
+        await dbDeleteMessage(id)
+      } catch (err) {
+        logError('Session', 'Failed to delete message from DB', err)
+      }
     },
 
     /**
-     * Delete all messages after a specific message
+     * Delete all messages after a specific message (signal only)
      */
     deleteMessagesAfter: (messageId: string) => {
       setMessages((prev) => {
@@ -540,22 +560,65 @@ export function useSession() {
       })
     },
 
+    /**
+     * Rollback conversation: delete a message and everything after it.
+     * Removes from both reactive signal and database.
+     */
+    rollbackToMessage: async (messageId: string) => {
+      const msgs = messages()
+      const index = msgs.findIndex((m) => m.id === messageId)
+      if (index === -1) return
+
+      const target = msgs[index]
+      const sessionId = target.sessionId
+      const removedMessages = msgs.slice(index)
+
+      // Update signal: keep everything before this message
+      setMessages((prev) => prev.slice(0, index))
+
+      // Update session stats
+      const removedTokens = removedMessages.reduce((sum, m) => sum + (m.tokensUsed || 0), 0)
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === sessionId
+            ? {
+                ...s,
+                messageCount: Math.max(0, s.messageCount - removedMessages.length),
+                totalTokens: Math.max(0, s.totalTokens - removedTokens),
+                updatedAt: Date.now(),
+              }
+            : s
+        )
+      )
+
+      // Delete from database
+      try {
+        await dbDeleteMessagesFromTimestamp(sessionId, target.createdAt)
+      } catch (err) {
+        logError('Session', 'Failed to delete messages from DB', err)
+      }
+    },
+
     // ========================================================================
     // Agent Management
     // ========================================================================
 
     /**
-     * Add a new agent to the session
+     * Add a new agent to the session (signal + DB)
      */
     addAgent: (agent: Agent) => {
       setAgents((prev) => [...prev, agent])
+      saveAgent(agent).catch((err) => logError('Session', 'Failed to save agent', err))
     },
 
     /**
-     * Update an agent's properties
+     * Update an agent's properties (signal + DB)
      */
     updateAgent: (id: string, updates: Partial<Agent>) => {
       setAgents((prev) => prev.map((agent) => (agent.id === id ? { ...agent, ...updates } : agent)))
+      dbUpdateAgent(id, updates).catch((err) =>
+        logError('Session', 'Failed to update agent in DB', err)
+      )
     },
 
     /**
@@ -697,7 +760,15 @@ export function useSession() {
       if (!sess) return null
       const id = `ckpt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
       const snapshot = {
-        messages: messages().map((m) => ({ id: m.id, role: m.role, content: m.content })),
+        messages: messages().map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          tokensUsed: m.tokensUsed,
+          costUSD: m.costUSD,
+          model: m.model,
+          metadata: m.metadata,
+        })),
       }
       await saveMemoryItem({
         id,
@@ -716,16 +787,36 @@ export function useSession() {
     },
 
     /**
-     * Rollback conversation to a checkpoint
+     * Rollback conversation to a checkpoint — restores both in-memory and DB state
      */
     rollbackToCheckpoint: async (checkpointId: string): Promise<boolean> => {
       const item = memoryItems().find((m) => m.id === checkpointId)
       if (!item) return false
+      const sess = currentSession()
+      if (!sess) return false
       try {
         const data = JSON.parse(item.preview) as {
-          messages: Array<{ id: string; role: string; content: string }>
+          messages: Array<{
+            id: string
+            role: string
+            content: string
+            tokensUsed?: number
+            costUSD?: number
+            model?: string
+            metadata?: Record<string, unknown>
+          }>
         }
-        setMessages(data.messages as Message[])
+        const restored = data.messages.map((m) => ({
+          ...m,
+          sessionId: sess.id,
+          createdAt: Date.now(),
+          role: m.role as Message['role'],
+        })) as Message[]
+        // Update in-memory state
+        setMessages(restored)
+        // Sync database: delete all existing messages, re-insert snapshot
+        await dbDeleteSessionMessages(sess.id)
+        await dbInsertMessages(restored)
         return true
       } catch {
         return false

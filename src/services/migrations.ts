@@ -51,6 +51,11 @@ export async function runMigrations(db: Database): Promise<void> {
     await migrateV3(db)
     await recordMigration(db, 3)
   }
+
+  if (currentVersion < 4) {
+    await migrateV4(db)
+    await recordMigration(db, 4)
+  }
 }
 
 /**
@@ -269,4 +274,14 @@ async function migrateV3(db: Database): Promise<void> {
   await db.execute(
     'CREATE INDEX IF NOT EXISTS idx_memory_items_created ON memory_items(created_at DESC)'
   )
+}
+
+/**
+ * Version 4: Add cost_usd and model columns to messages
+ * - Track per-message cost for budget visibility
+ * - Track which model generated each message
+ */
+async function migrateV4(db: Database): Promise<void> {
+  await db.execute('ALTER TABLE messages ADD COLUMN cost_usd REAL')
+  await db.execute('ALTER TABLE messages ADD COLUMN model TEXT')
 }

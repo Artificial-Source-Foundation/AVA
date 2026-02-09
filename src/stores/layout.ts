@@ -164,6 +164,20 @@ function setBottomPanelHeight(h: number) {
 }
 
 // ============================================================================
+// Code Editor Panel
+// ============================================================================
+
+const [codeEditorFile, setCodeEditorFileRaw] = createSignal<string | null>(null)
+
+function openCodeEditor(filePath: string) {
+  setCodeEditorFileRaw(filePath)
+}
+
+function closeCodeEditor() {
+  setCodeEditorFileRaw(null)
+}
+
+// ============================================================================
 // Settings Modal
 // ============================================================================
 
@@ -212,6 +226,11 @@ export function useLayout() {
     toggleBottomPanel,
     bottomPanelHeight,
     setBottomPanelHeight,
+
+    // Code editor
+    codeEditorFile,
+    openCodeEditor,
+    closeCodeEditor,
 
     // Settings modal
     settingsOpen,

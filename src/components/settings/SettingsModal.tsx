@@ -283,7 +283,10 @@ export const SettingsModal: Component = () => {
               <h2 class="text-sm font-semibold text-[var(--text-primary)]">Settings</h2>
             </div>
 
-            <div class="flex-1 space-y-3 px-2">
+            <div
+              class="flex-1 overflow-y-auto space-y-3 px-2"
+              style={{ transform: 'translateZ(0)' }}
+            >
               <For each={tabGroups}>
                 {(group) => (
                   <div>

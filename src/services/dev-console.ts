@@ -3,9 +3,11 @@
  *
  * Intercepts console.log/warn/error/info and stores entries in a reactive
  * signal so they can be displayed in the Developer settings tab.
- * Capped at 1000 entries to avoid memory bloat.
+ * Also flushes to daily log files in `logs/` for offline debugging.
+ * Capped at 1000 entries in memory to avoid bloat.
  */
 
+import { invoke } from '@tauri-apps/api/core'
 import { createSignal } from 'solid-js'
 
 // ============================================================================
@@ -24,8 +26,14 @@ export interface DevLogEntry {
 // ============================================================================
 
 const MAX_ENTRIES = 1000
+const FLUSH_INTERVAL_MS = 3000
+const LOG_RETENTION_DAYS = 7
+
 let nextId = 0
 let installed = false
+let flushTimer: ReturnType<typeof setInterval> | null = null
+let fileBuffer: string[] = []
+let logDir = ''
 
 const [entries, setEntries] = createSignal<DevLogEntry[]>([])
 
@@ -38,7 +46,7 @@ const originals = {
 }
 
 // ============================================================================
-// Stringify helper
+// Helpers
 // ============================================================================
 
 function stringify(args: unknown[]): string {
@@ -55,6 +63,61 @@ function stringify(args: unknown[]): string {
     .join(' ')
 }
 
+const LEVEL_LABELS: Record<string, string> = {
+  log: 'LOG',
+  info: 'INF',
+  warn: 'WRN',
+  error: 'ERR',
+}
+
+function formatTimestamp(ts: number): string {
+  const d = new Date(ts)
+  return d.toISOString().replace('T', ' ').replace('Z', '')
+}
+
+function todayDateString(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function formatForFile(entry: DevLogEntry): string {
+  return `[${formatTimestamp(entry.timestamp)}] ${LEVEL_LABELS[entry.level]} ${entry.message}`
+}
+
+// ============================================================================
+// File flushing
+// ============================================================================
+
+async function flushToFile(): Promise<void> {
+  if (fileBuffer.length === 0 || !logDir) return
+
+  const lines = `${fileBuffer.join('\n')}\n`
+  fileBuffer = []
+
+  const logPath = `${logDir}/estela-${todayDateString()}.log`
+  try {
+    await invoke('append_log', { path: logPath, content: lines })
+  } catch {
+    // Silent — don't recurse into console.error
+    originals.warn('[dev-console] Failed to flush to file')
+  }
+}
+
+async function cleanupOldLogs(): Promise<void> {
+  if (!logDir) return
+  try {
+    const deleted = await invoke<number>('cleanup_old_logs', {
+      dir: logDir,
+      maxAgeDays: LOG_RETENTION_DAYS,
+    })
+    if (deleted && (deleted as number) > 0) {
+      originals.info(`[dev-console] Cleaned up ${deleted} old log file(s)`)
+    }
+  } catch {
+    // Silent
+  }
+}
+
 // ============================================================================
 // Capture
 // ============================================================================
@@ -66,15 +129,33 @@ function capture(level: DevLogEntry['level'], args: unknown[]): void {
     level,
     message: stringify(args),
   }
+
+  // In-memory for UI
   setEntries((prev) => {
     const next = [...prev, entry]
     return next.length > MAX_ENTRIES ? next.slice(-MAX_ENTRIES) : next
   })
+
+  // Buffer for file
+  fileBuffer.push(formatForFile(entry))
+
+  // Immediate flush for errors
+  if (level === 'error') {
+    flushToFile()
+  }
 }
 
 // ============================================================================
 // Public API
 // ============================================================================
+
+/**
+ * Set the logs directory path. Call once during init with the project root.
+ * Logs will be written to `{dir}/logs/`.
+ */
+export function setLogDirectory(projectDir: string): void {
+  logDir = `${projectDir}/logs`
+}
 
 /** Start capturing console output. Idempotent. */
 export function installConsoleCapture(): void {
@@ -97,6 +178,20 @@ export function installConsoleCapture(): void {
     originals.error(...args)
     capture('error', args)
   }
+
+  // Periodic flush + cleanup
+  flushTimer = setInterval(flushToFile, FLUSH_INTERVAL_MS)
+  cleanupOldLogs()
+
+  // Write session start marker
+  const marker: DevLogEntry = {
+    id: nextId++,
+    timestamp: Date.now(),
+    level: 'info',
+    message: '--- Dev console session started ---',
+  }
+  setEntries((prev) => [...prev, marker])
+  fileBuffer.push(formatForFile(marker))
 }
 
 /** Stop capturing console output and restore originals. */
@@ -107,6 +202,14 @@ export function uninstallConsoleCapture(): void {
   console.info = originals.info
   console.warn = originals.warn
   console.error = originals.error
+
+  // Final flush
+  flushToFile()
+
+  if (flushTimer) {
+    clearInterval(flushTimer)
+    flushTimer = null
+  }
 }
 
 /** Reactive accessor for captured log entries. */

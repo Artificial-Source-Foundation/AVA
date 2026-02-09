@@ -1,6 +1,6 @@
 mod commands;
 
-use commands::{allow_project_path, get_env_var, greet, oauth_listen};
+use commands::{allow_project_path, append_log, cleanup_old_logs, get_cwd, get_env_var, greet, oauth_listen};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -10,7 +10,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
-        .invoke_handler(tauri::generate_handler![greet, oauth_listen, get_env_var, allow_project_path])
+        .invoke_handler(tauri::generate_handler![greet, oauth_listen, get_env_var, allow_project_path, append_log, cleanup_old_logs, get_cwd])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -6,7 +6,7 @@
  * Access the design system preview at: http://localhost:1420/?preview=true
  */
 
-import { isTauri } from '@tauri-apps/api/core'
+import { invoke, isTauri } from '@tauri-apps/api/core'
 import { createSignal, onCleanup, onMount, Show } from 'solid-js'
 import { CommandPalette, createDefaultCommands } from './components/CommandPalette'
 import type { OnboardingData } from './components/dialogs/OnboardingDialog'
@@ -16,7 +16,7 @@ import { SplashScreen } from './components/SplashScreen'
 import { validateEnv } from './config/env'
 import { initCoreBridge } from './services/core-bridge'
 import { initDatabase } from './services/database'
-import { installConsoleCapture } from './services/dev-console'
+import { installConsoleCapture, setLogDirectory } from './services/dev-console'
 import { initLogger, logError, logInfo } from './services/logger'
 import { initializePlatform } from './services/platform'
 import { initSettingsFS } from './services/settings-fs'
@@ -53,7 +53,10 @@ function App() {
     // Apply appearance settings (mode, accent, scale, font) to DOM immediately
     applyAppearance()
 
-    // Install dev console capture early so it catches all init logs
+    // Set up dev console log directory and install capture if enabled
+    invoke<string>('get_cwd')
+      .then((cwd) => setLogDirectory(cwd))
+      .catch(() => {})
     if (settings().devMode) {
       installConsoleCapture()
     }

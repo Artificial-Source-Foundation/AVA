@@ -166,34 +166,3 @@ export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
     </div>
   )
 }
-
-// ============================================================================
-// Default/Example Servers
-// ============================================================================
-
-export const defaultMCPServers: MCPServer[] = [
-  {
-    id: 'filesystem',
-    name: 'Filesystem',
-    url: 'mcp://localhost:3001/filesystem',
-    status: 'connected',
-    description: 'File system operations',
-    capabilities: ['read', 'write', 'list', 'search'],
-  },
-  {
-    id: 'git',
-    name: 'Git',
-    url: 'mcp://localhost:3002/git',
-    status: 'connected',
-    description: 'Git repository operations',
-    capabilities: ['status', 'diff', 'commit', 'branch'],
-  },
-  {
-    id: 'web',
-    name: 'Web Browser',
-    url: 'mcp://localhost:3003/web',
-    status: 'disconnected',
-    description: 'Web browsing and scraping',
-    capabilities: ['fetch', 'screenshot', 'extract'],
-  },
-]

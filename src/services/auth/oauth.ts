@@ -26,6 +26,10 @@ interface OAuthConfig {
   tokenUrl: string
   scopes: string[]
   redirectPort: number
+  redirectPath?: string // defaults to '/callback'
+  extraAuthParams?: Record<string, string>
+  /** Post-OAuth step: mint an API key from the access token */
+  apiKeyUrl?: string
   flow?: 'pkce' | 'device-code'
 }
 
@@ -56,30 +60,28 @@ export interface OAuthTokens {
 
 const OAUTH_CONFIGS: Record<string, OAuthConfig> = {
   anthropic: {
-    // Claude Max/Pro OAuth
-    clientId: 'claude-code', // Standard client ID used by Claude Code
+    // Claude Max/Pro OAuth — uses same client as querymt/anthropic-auth
+    clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
     authorizationUrl: 'https://claude.ai/oauth/authorize',
     tokenUrl: 'https://console.anthropic.com/v1/oauth/token',
-    scopes: ['user:inference'],
-    redirectPort: 8716,
+    scopes: ['org:create_api_key', 'user:profile', 'user:inference'],
+    redirectPort: 1455,
+    apiKeyUrl: 'https://api.anthropic.com/api/oauth/claude_cli/create_api_key',
     flow: 'pkce',
   },
   openai: {
-    // OpenAI Codex OAuth (ChatGPT Plus/Pro)
+    // OpenAI Codex OAuth (ChatGPT Plus/Pro) — same client as openai/codex CLI
     clientId: 'app_EMoamEEZ73f0CkXaXp7hrann',
     authorizationUrl: 'https://auth.openai.com/oauth/authorize',
     tokenUrl: 'https://auth.openai.com/oauth/token',
     scopes: ['openid', 'profile', 'email', 'offline_access'],
-    redirectPort: 8717,
-    flow: 'pkce',
-  },
-  google: {
-    // Google Gemini API OAuth
-    clientId: 'estela-desktop', // Placeholder — user registers via Google Cloud Console
-    authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
-    tokenUrl: 'https://oauth2.googleapis.com/token',
-    scopes: ['https://www.googleapis.com/auth/generative-language'],
-    redirectPort: 8718,
+    redirectPort: 1455,
+    redirectPath: '/auth/callback',
+    extraAuthParams: {
+      id_token_add_organizations: 'true',
+      codex_cli_simplified_flow: 'true',
+      originator: 'codex_cli_rs',
+    },
     flow: 'pkce',
   },
   copilot: {
@@ -132,6 +134,39 @@ async function generatePKCE(): Promise<PKCEParams> {
 }
 
 // ============================================================================
+// API Key Minting (Anthropic)
+// ============================================================================
+
+/**
+ * Use an OAuth access token to mint an API key.
+ * Anthropic's OAuth flow returns a token that must be exchanged for a real API key
+ * via the create_api_key endpoint.
+ */
+async function mintApiKey(apiKeyUrl: string, accessToken: string): Promise<string> {
+  const response = await fetch(apiKeyUrl, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ name: 'estela-desktop' }),
+  })
+
+  if (!response.ok) {
+    const error = await response.text()
+    throw new Error(`API key creation failed: ${error}`)
+  }
+
+  const data = (await response.json()) as Record<string, unknown>
+  const apiKey = data.api_key as string | undefined
+  if (!apiKey) {
+    throw new Error('API key creation returned no key')
+  }
+
+  return apiKey
+}
+
+// ============================================================================
 // OAuth Flow
 // ============================================================================
 
@@ -166,11 +201,12 @@ function buildAuthUrl(config: OAuthConfig, pkce: PKCEParams): string {
   const params = new URLSearchParams({
     client_id: config.clientId,
     response_type: 'code',
-    redirect_uri: `http://localhost:${config.redirectPort}/callback`,
+    redirect_uri: `http://localhost:${config.redirectPort}${config.redirectPath || '/callback'}`,
     scope: config.scopes.join(' '),
     state: pkce.state,
     code_challenge: pkce.challenge,
     code_challenge_method: 'S256',
+    ...config.extraAuthParams,
   })
 
   return `${config.authorizationUrl}?${params.toString()}`
@@ -220,6 +256,12 @@ export async function startOAuthFlow(
 
   // Exchange the authorization code for tokens
   const tokens = await exchangeCodeForTokens(provider, callback.code, callback.state)
+
+  // For providers with apiKeyUrl (Anthropic), mint an API key from the OAuth token
+  if (config.apiKeyUrl) {
+    const apiKey = await mintApiKey(config.apiKeyUrl, tokens.accessToken)
+    tokens.accessToken = apiKey
+  }
 
   // Store tokens and bridge to core credential store
   storeOAuthCredentials(provider, tokens)
@@ -359,7 +401,7 @@ export async function exchangeCodeForTokens(
       grant_type: 'authorization_code',
       client_id: config.clientId,
       code,
-      redirect_uri: `http://localhost:${config.redirectPort}/callback`,
+      redirect_uri: `http://localhost:${config.redirectPort}${config.redirectPath || '/callback'}`,
       code_verifier: stored.verifier,
     }).toString(),
   })

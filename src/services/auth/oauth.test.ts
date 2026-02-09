@@ -1,9 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LLMProvider } from '../../types/llm'
 
-// Mock @tauri-apps/plugin-shell before importing oauth
+// Mock Tauri modules before importing oauth
 vi.mock('@tauri-apps/plugin-shell', () => ({
   open: vi.fn(),
+}))
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(async (cmd: string) => {
+    if (cmd === 'oauth_listen') {
+      // Read the state that storePKCE just wrote to localStorage
+      const state = localStorage.getItem('estela_oauth_state_anthropic') || 'mock-state'
+      return { code: 'test-auth-code', state }
+    }
+    return null
+  }),
+}))
+vi.mock('../../stores/settings', () => ({
+  syncProviderCredentials: vi.fn(),
 }))
 
 import { open } from '@tauri-apps/plugin-shell'
@@ -15,13 +28,14 @@ import { getOAuthConfig, isOAuthSupported, startOAuthFlow, storeOAuthCredentials
 
 describe('isOAuthSupported', () => {
   it('returns true for supported providers', () => {
-    for (const p of ['anthropic', 'openai', 'google', 'copilot'] as LLMProvider[]) {
+    for (const p of ['anthropic', 'openai', 'copilot'] as LLMProvider[]) {
       expect(isOAuthSupported(p)).toBe(true)
     }
   })
 
   it('returns false for unsupported providers', () => {
     for (const p of [
+      'google',
       'xai',
       'mistral',
       'groq',
@@ -45,7 +59,7 @@ describe('getOAuthConfig', () => {
   it('returns config for supported providers', () => {
     const anthropic = getOAuthConfig('anthropic')
     expect(anthropic).not.toBeNull()
-    expect(anthropic!.clientId).toBe('claude-code')
+    expect(anthropic!.clientId).toBe('9d1c250a-e61b-44d9-88ed-5944d1962f5e')
     expect(anthropic!.flow).toBe('pkce')
 
     const copilot = getOAuthConfig('copilot')
@@ -101,13 +115,40 @@ describe('startOAuthFlow', () => {
     await expect(startOAuthFlow('ollama')).rejects.toThrow('OAuth not supported')
   })
 
-  it('opens browser for PKCE providers', async () => {
+  it('opens browser and completes PKCE flow for anthropic', async () => {
+    // Mock fetch: first call = token exchange, second call = API key minting
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            access_token: 'oauth-access-tok',
+            refresh_token: 'oauth-refresh-tok',
+            expires_in: 3600,
+          }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ api_key: 'sk-ant-minted-key' }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
     const mockOpen = vi.mocked(open)
-    await startOAuthFlow('anthropic')
+    const result = await startOAuthFlow('anthropic')
+
+    // Browser was opened with correct auth URL
     expect(mockOpen).toHaveBeenCalledOnce()
     const url = mockOpen.mock.calls[0][0]
     expect(url).toContain('claude.ai/oauth/authorize')
     expect(url).toContain('code_challenge_method=S256')
+
+    // Tokens returned with minted API key (not raw OAuth token)
+    expect('accessToken' in result).toBe(true)
+    const tokens = result as import('./oauth').OAuthTokens
+    expect(tokens.accessToken).toBe('sk-ant-minted-key')
+
+    vi.unstubAllGlobals()
   })
 
   it('returns DeviceCodeResponse for copilot', async () => {

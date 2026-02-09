@@ -226,6 +226,7 @@ export interface AppSettings {
   notifications: NotificationSettings
   permissionMode: PermissionMode
   mcpServers: MCPServerConfig[]
+  devMode: boolean
 }
 
 const DEFAULT_UI: UISettings = {
@@ -295,6 +296,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   notifications: { ...DEFAULT_NOTIFICATIONS },
   permissionMode: 'ask',
   mcpServers: [],
+  devMode: false,
 }
 
 // ============================================================================

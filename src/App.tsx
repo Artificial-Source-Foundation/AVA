@@ -16,6 +16,7 @@ import { SplashScreen } from './components/SplashScreen'
 import { validateEnv } from './config/env'
 import { initCoreBridge } from './services/core-bridge'
 import { initDatabase } from './services/database'
+import { installConsoleCapture } from './services/dev-console'
 import { initLogger, logError, logInfo } from './services/logger'
 import { initializePlatform } from './services/platform'
 import { initSettingsFS } from './services/settings-fs'
@@ -51,6 +52,11 @@ function App() {
   onMount(async () => {
     // Apply appearance settings (mode, accent, scale, font) to DOM immediately
     applyAppearance()
+
+    // Install dev console capture early so it catches all init logs
+    if (settings().devMode) {
+      installConsoleCapture()
+    }
 
     // Listen for OS theme changes when mode is 'system'
     const cleanupTheme = setupSystemThemeListener()

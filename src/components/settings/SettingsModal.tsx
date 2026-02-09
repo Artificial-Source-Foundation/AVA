@@ -9,6 +9,7 @@
 import {
   Bot,
   Check,
+  Code2,
   Cpu,
   Download,
   ExternalLink,
@@ -36,6 +37,7 @@ import type { LLMProvider } from '../../types/llm'
 import { type AgentPreset, AgentsTab } from './tabs/AgentsTab'
 import { AppearanceTab } from './tabs/AppearanceTab'
 import { BehaviorTab } from './tabs/BehaviorTab'
+import { DeveloperTab } from './tabs/DeveloperTab'
 import { type Keybinding, KeybindingsTab } from './tabs/KeybindingsTab'
 import { LLMTab } from './tabs/LLMTab'
 import { type MCPServer, MCPServersTab } from './tabs/MCPServersTab'
@@ -55,6 +57,7 @@ type SettingsTab =
   | 'models'
   | 'mcp'
   | 'plugins'
+  | 'developer'
   | 'about'
 
 interface TabGroup {
@@ -86,6 +89,10 @@ const tabGroups: TabGroup[] = [
       { id: 'mcp', label: 'MCP Servers', icon: Server },
       { id: 'plugins', label: 'Plugins', icon: Puzzle },
     ],
+  },
+  {
+    label: 'Advanced',
+    tabs: [{ id: 'developer', label: 'Developer', icon: Code2 }],
   },
   {
     label: '',
@@ -457,6 +464,10 @@ export const SettingsModal: Component = () => {
 
                 <Show when={activeTab() === 'plugins'}>
                   <PluginsSection />
+                </Show>
+
+                <Show when={activeTab() === 'developer'}>
+                  <DeveloperTab />
                 </Show>
 
                 <Show when={activeTab() === 'about'}>

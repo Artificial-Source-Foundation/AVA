@@ -123,10 +123,21 @@ export function pushSettingsToCore() {
   const s = settings()
 
   const activeProvider = s.providers.find((p) => p.enabled && p.apiKey)
-  sm.set('provider', {
+  const providerUpdate: Record<string, unknown> = {
     defaultProvider: (activeProvider?.id ?? 'anthropic') as LLMProvider,
     defaultModel: activeProvider?.defaultModel ?? 'claude-sonnet-4-20250514',
-  })
+  }
+  // Sync weak model if configured
+  if (s.generation.weakModel) {
+    providerUpdate.weakModel = s.generation.weakModel
+    // Provider inference happens in core's getWeakModelConfig()
+  }
+  // Sync editor model if configured (architect/editor split)
+  if (s.generation.editorModel) {
+    providerUpdate.editorModel = s.generation.editorModel
+    // Provider inference happens in core's getEditorModelConfig()
+  }
+  sm.set('provider', providerUpdate)
 
   sm.set('permissions', {
     allowBashExecution: s.permissionMode !== 'ask',
@@ -135,6 +146,12 @@ export function pushSettingsToCore() {
 
   sm.set('context', { maxTokens: s.generation.maxTokens, compactionThreshold: 80 })
   sm.set('memory', { enabled: true })
+  sm.set('git', {
+    enabled: s.git.enabled,
+    autoCommit: s.git.autoCommit,
+    branchPrefix: 'estela/',
+    messagePrefix: s.git.commitPrefix,
+  })
 }
 
 // ============================================================================
@@ -189,6 +206,8 @@ export interface GenerationSettings {
   temperature: number // 0.0–2.0, default 0.7
   topP: number // 0.0–1.0, default 1.0
   customInstructions: string // prepended as system message
+  weakModel: string // cheaper model for secondary tasks ('' = use default)
+  editorModel: string // cheaper model for file edits by Junior Devs ('' = use primary)
 }
 
 export interface AgentLimitSettings {
@@ -203,12 +222,19 @@ export interface BehaviorSettings {
   autoScroll: boolean
   lineNumbers: boolean
   wordWrap: boolean
+  fileWatcher: boolean // Watch project files for AI comments (// AI!, // AI?)
 }
 
 export interface NotificationSettings {
   notifyOnCompletion: boolean
   soundOnCompletion: boolean
   soundVolume: number // 0–100, default 50
+}
+
+export interface GitSettings {
+  enabled: boolean // Enable git integration (auto-detect repos)
+  autoCommit: boolean // Auto-commit after successful AI edits
+  commitPrefix: string // Commit message prefix, default '[estela]'
 }
 
 export interface AppSettings {
@@ -224,6 +250,7 @@ export interface AppSettings {
   agentLimits: AgentLimitSettings
   behavior: BehaviorSettings
   notifications: NotificationSettings
+  git: GitSettings
   permissionMode: PermissionMode
   mcpServers: MCPServerConfig[]
   devMode: boolean
@@ -259,6 +286,8 @@ const DEFAULT_GENERATION: GenerationSettings = {
   temperature: 0.7,
   topP: 1.0,
   customInstructions: '',
+  weakModel: '',
+  editorModel: '',
 }
 
 const DEFAULT_AGENT_LIMITS: AgentLimitSettings = {
@@ -273,12 +302,19 @@ const DEFAULT_BEHAVIOR: BehaviorSettings = {
   autoScroll: true,
   lineNumbers: true,
   wordWrap: false,
+  fileWatcher: false,
 }
 
 const DEFAULT_NOTIFICATIONS: NotificationSettings = {
   notifyOnCompletion: true,
   soundOnCompletion: false,
   soundVolume: 50,
+}
+
+const DEFAULT_GIT: GitSettings = {
+  enabled: true,
+  autoCommit: false,
+  commitPrefix: '[estela]',
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -294,6 +330,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   agentLimits: { ...DEFAULT_AGENT_LIMITS },
   behavior: { ...DEFAULT_BEHAVIOR },
   notifications: { ...DEFAULT_NOTIFICATIONS },
+  git: { ...DEFAULT_GIT },
   permissionMode: 'ask',
   mcpServers: [],
   devMode: false,
@@ -318,6 +355,7 @@ function loadSettings(): AppSettings {
         agentLimits: { ...DEFAULT_AGENT_LIMITS, ...(parsed.agentLimits ?? {}) },
         behavior: { ...DEFAULT_BEHAVIOR, ...(parsed.behavior ?? {}) },
         notifications: { ...DEFAULT_NOTIFICATIONS, ...(parsed.notifications ?? {}) },
+        git: { ...DEFAULT_GIT, ...(parsed.git ?? {}) },
       }
     }
   } catch {
@@ -552,6 +590,14 @@ function updateNotifications(patch: Partial<NotificationSettings>) {
   })
 }
 
+function updateGit(patch: Partial<GitSettings>) {
+  setSettingsRaw((prev) => {
+    const next = { ...prev, git: { ...prev.git, ...patch } }
+    saveSettings(next)
+    return next
+  })
+}
+
 /** Export current settings as a JSON file (triggers download) */
 function exportSettings() {
   const data = serializeSettings(settings())
@@ -588,6 +634,7 @@ async function importSettings(): Promise<void> {
           agentLimits: { ...DEFAULT_AGENT_LIMITS, ...(parsed.agentLimits ?? {}) },
           behavior: { ...DEFAULT_BEHAVIOR, ...(parsed.behavior ?? {}) },
           notifications: { ...DEFAULT_NOTIFICATIONS, ...(parsed.notifications ?? {}) },
+          git: { ...DEFAULT_GIT, ...(parsed.git ?? {}) },
         }
         merged.providers = hydrateProviders(
           (merged.providers ?? defaultProviders) as LLMProviderConfig[]
@@ -868,6 +915,7 @@ export async function hydrateSettingsFromFS(): Promise<void> {
       agentLimits: { ...DEFAULT_AGENT_LIMITS, ...(parsed.agentLimits ?? {}) },
       behavior: { ...DEFAULT_BEHAVIOR, ...(parsed.behavior ?? {}) },
       notifications: { ...DEFAULT_NOTIFICATIONS, ...(parsed.notifications ?? {}) },
+      git: { ...DEFAULT_GIT, ...(parsed.git ?? {}) },
     }
     merged.providers = hydrateProviders(
       (merged.providers ?? defaultProviders) as LLMProviderConfig[]
@@ -943,6 +991,7 @@ export function useSettings() {
     updateAgentLimits,
     updateBehavior,
     updateNotifications,
+    updateGit,
     cyclePermissionMode,
     resetSettings,
     exportSettings,

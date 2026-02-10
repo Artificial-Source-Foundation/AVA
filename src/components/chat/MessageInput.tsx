@@ -19,6 +19,7 @@ import {
   ShieldAlert,
   ShieldOff,
   Square,
+  Undo2,
   X,
   Zap,
 } from 'lucide-solid'
@@ -146,6 +147,15 @@ export const MessageInput: Component = () => {
     const count = sessionStore.messages().length
     if (count === 0) return
     await sessionStore.createCheckpoint(`Checkpoint at message #${count}`)
+  }
+
+  // Undo handler — reverts last auto-committed AI edit
+  const [undoStatus, setUndoStatus] = createSignal<string | null>(null)
+  const handleUndo = async () => {
+    setUndoStatus('Undoing...')
+    const result = await chat.undoLastEdit()
+    setUndoStatus(result.success ? 'Reverted!' : result.message)
+    setTimeout(() => setUndoStatus(null), 2500)
   }
 
   // Vision: process a File into base64 image data
@@ -307,10 +317,21 @@ export const MessageInput: Component = () => {
     )
   )
 
+  // Clear message queue on session switch
+  createEffect(
+    on(
+      () => sessionStore.currentSession()?.id,
+      () => {
+        chat.clearQueue()
+      }
+    )
+  )
+
   const handleSubmit = async (e: Event) => {
     e.preventDefault()
     const message = input().trim()
-    if (!message || isProcessing() || submitting) return
+    if (!message || submitting) return
+    if (useAgentMode() && isProcessing()) return
 
     submitting = true
     setSendCount((c) => c + 1)
@@ -359,6 +380,17 @@ export const MessageInput: Component = () => {
   }
 
   const handleKeyDown = (e: KeyboardEvent) => {
+    // Steer: Ctrl+Shift+Enter while streaming in chat mode
+    if (e.key === 'Enter' && e.ctrlKey && e.shiftKey && chat.isStreaming() && !useAgentMode()) {
+      e.preventDefault()
+      const message = input().trim()
+      if (!message) return
+      chat.steer(message, selectedModel())
+      setInput('')
+      if (textareaRef) textareaRef.style.height = 'auto'
+      return
+    }
+
     const sendKey = settings().behavior.sendKey
     if (sendKey === 'enter') {
       // Enter sends, Shift+Enter for newline
@@ -506,12 +538,14 @@ export const MessageInput: Component = () => {
               isProcessing()
                 ? useAgentMode()
                   ? `Working... (turn ${agent.currentTurn()})`
-                  : 'Generating...'
+                  : chat.queuedCount() > 0
+                    ? `${chat.queuedCount()} queued — type to add more...`
+                    : 'Type to queue follow-up...'
                 : agent.isPlanMode()
                   ? 'Plan your approach...'
                   : 'Ask anything...'
             }
-            disabled={isProcessing()}
+            disabled={useAgentMode() && isProcessing()}
             rows={1}
             class="
               w-full density-section-px density-section-py
@@ -678,6 +712,28 @@ export const MessageInput: Component = () => {
               </button>
             </Show>
 
+            {/* Undo button — visible when git auto-commit is enabled */}
+            <Show when={settings().git.enabled && settings().git.autoCommit}>
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={isProcessing() || undoStatus() === 'Undoing...'}
+                class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] hover:border-[var(--accent-muted)] transition-colors text-[var(--text-secondary)] disabled:opacity-50"
+                title="Undo last AI edit (git revert)"
+              >
+                <Undo2 class="w-3 h-3" />
+              </button>
+            </Show>
+
+            {/* Undo status feedback */}
+            <Show when={undoStatus()}>
+              <span
+                class={`text-[10px] font-medium ${undoStatus() === 'Reverted!' ? 'text-[var(--success)]' : 'text-[var(--text-muted)]'}`}
+              >
+                {undoStatus()}
+              </span>
+            </Show>
+
             {/* Image paste indicator */}
             <Show when={!useAgentMode()}>
               <span class="text-[var(--text-muted)]" title="Paste or drop images (Ctrl+V)">
@@ -715,26 +771,15 @@ export const MessageInput: Component = () => {
               <span class="text-[10px] text-[var(--warning)]">Loop</span>
             </Show>
 
-            {/* Send / Cancel button */}
-            <Show
-              when={isProcessing()}
-              fallback={
-                <button
-                  type="submit"
-                  disabled={!input().trim()}
-                  class="
-                    p-2
-                    bg-[var(--accent)] hover:bg-[var(--accent-hover)]
-                    text-white
-                    rounded-[var(--radius-md)]
-                    transition-colors
-                    disabled:opacity-30 disabled:cursor-not-allowed
-                  "
-                >
-                  <ArrowUp class="w-4 h-4" />
-                </button>
-              }
-            >
+            {/* Queue badge */}
+            <Show when={chat.queuedCount() > 0}>
+              <span class="text-[10px] text-[var(--accent)] font-medium tabular-nums">
+                {chat.queuedCount()} queued
+              </span>
+            </Show>
+
+            {/* Cancel button */}
+            <Show when={isProcessing()}>
               <button
                 type="button"
                 onClick={handleCancel}
@@ -749,6 +794,28 @@ export const MessageInput: Component = () => {
                 <Square class="w-4 h-4" />
               </button>
             </Show>
+
+            {/* Send / Queue button */}
+            <button
+              type="submit"
+              disabled={!input().trim() || (useAgentMode() && isProcessing())}
+              class={`
+                p-2 rounded-[var(--radius-md)] transition-colors
+                disabled:opacity-30 disabled:cursor-not-allowed
+                ${
+                  !useAgentMode() && isProcessing()
+                    ? 'bg-[var(--surface-raised)] border border-[var(--accent-border)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
+                    : 'bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white'
+                }
+              `}
+              title={
+                !useAgentMode() && isProcessing()
+                  ? 'Queue message (Ctrl+Shift+Enter to steer)'
+                  : 'Send message'
+              }
+            >
+              <ArrowUp class="w-4 h-4" />
+            </button>
           </div>
         </div>
       </form>

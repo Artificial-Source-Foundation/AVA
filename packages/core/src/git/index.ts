@@ -3,6 +3,8 @@
  * Git snapshots and history tracking
  */
 
+// Auto-commit (after tool execution)
+export { autoCommitIfEnabled, getAutoCommitCount, undoLastAutoCommit } from './auto-commit.js'
 // Snapshots
 export {
   clearSnapshots,

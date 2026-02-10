@@ -5,7 +5,7 @@
  * Based on Gemini CLI's codebase-investigator pattern for structured output
  */
 
-import { createClient, getAuth } from '../llm/client.js'
+import { createClient, getAuth, getWeakModelConfig } from '../llm/client.js'
 import { getToolDefinitions } from '../tools/registry.js'
 import type { ChatMessage, ToolDefinition } from '../types/llm.js'
 import type { AgentStep, ToolCallInfo } from './types.js'
@@ -91,10 +91,13 @@ export interface PlannerConfig {
   maxSteps?: number
 }
 
-const DEFAULT_PLANNER_CONFIG: Required<PlannerConfig> = {
-  provider: 'anthropic',
-  model: 'claude-sonnet-4-20250514',
-  maxSteps: 15,
+function getDefaultPlannerConfig(): Required<PlannerConfig> {
+  const weak = getWeakModelConfig()
+  return {
+    provider: weak.provider as 'anthropic' | 'openai' | 'openrouter',
+    model: weak.model,
+    maxSteps: 15,
+  }
 }
 
 // ============================================================================
@@ -108,7 +111,7 @@ export class AgentPlanner {
   private config: Required<PlannerConfig>
 
   constructor(config: PlannerConfig = {}) {
-    this.config = { ...DEFAULT_PLANNER_CONFIG, ...config }
+    this.config = { ...getDefaultPlannerConfig(), ...config }
   }
 
   /**

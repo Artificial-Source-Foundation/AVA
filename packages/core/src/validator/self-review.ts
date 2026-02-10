@@ -11,7 +11,7 @@
  */
 
 import { createDiff } from '../diff/unified.js'
-import { createClient, type LLMClient } from '../llm/client.js'
+import { createClient, getWeakModelConfig, type LLMClient } from '../llm/client.js'
 import { getPlatform } from '../platform.js'
 import type { ChatMessage, ProviderConfig } from '../types/llm.js'
 import { createFailedResult, createPassedResult } from './pipeline.js'
@@ -190,10 +190,13 @@ async function runLLMReview(diffs: string, ctx: ValidationContext): Promise<Self
     { role: 'user', content: `Review these code changes:\n\n${truncatedDiffs}` },
   ]
 
+  // Use weak model for code review (secondary task)
+  const weak = getWeakModelConfig()
+
   // Create LLM client
   let client: LLMClient
   try {
-    client = await createClient('anthropic')
+    client = await createClient(weak.provider)
   } catch {
     // Try fallback
     try {
@@ -205,9 +208,9 @@ async function runLLMReview(diffs: string, ctx: ValidationContext): Promise<Self
 
   // Configure provider
   const providerConfig: ProviderConfig = {
-    provider: 'anthropic',
+    provider: weak.provider,
     authMethod: 'api-key',
-    model: 'claude-sonnet-4-20250514', // Fast, capable model
+    model: weak.model,
     maxTokens: DEFAULT_SELF_REVIEW_CONFIG.maxTokens!,
     systemPrompt: REVIEW_SYSTEM_PROMPT,
   }

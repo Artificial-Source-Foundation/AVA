@@ -28,11 +28,8 @@ export async function initSettingsFS(): Promise<void> {
   try {
     const fs = await getFsModule()
     if (!fs) return
-    // Ensure app data dir exists
-    const exists = await fs.exists('', { baseDir: fs.BaseDirectory.AppData })
-    if (!exists) {
-      await fs.mkdir('', { baseDir: fs.BaseDirectory.AppData, recursive: true })
-    }
+    // $APPDATA dir is guaranteed to exist by Tauri — no need to check/create it.
+    // Just verify we can access the FS plugin.
     fsAvailable = true
   } catch (err) {
     console.warn('[settings-fs] Failed to initialize:', err)

@@ -9,6 +9,7 @@ import {
   getToolDefinitions,
   resetToolCallCount,
   type ToolContext,
+  undoLastAutoCommit,
 } from '@estela/core'
 import { createSignal } from 'solid-js'
 import { checkAutoApproval, createApprovalGate } from '../lib/tool-approval'
@@ -38,6 +39,12 @@ interface StreamOptions {
   enableTools?: boolean
 }
 
+interface QueuedMessage {
+  content: string
+  model?: string
+  images?: Array<{ data: string; mimeType: string; name?: string }>
+}
+
 // ============================================================================
 // Hook Implementation
 // ============================================================================
@@ -57,6 +64,7 @@ export function useChat() {
   const [streamingTokenEstimate, setStreamingTokenEstimate] = createSignal(0)
   const [streamingStartedAt, setStreamingStartedAt] = createSignal<number | null>(null)
   const [activeToolCalls, setActiveToolCalls] = createSignal<ToolCall[]>([])
+  const [messageQueue, setMessageQueue] = createSignal<QueuedMessage[]>([])
 
   const abortRef = { current: null as AbortController | null }
   const session = useSession()
@@ -494,7 +502,10 @@ export function useChat() {
     model?: string,
     images?: Array<{ data: string; mimeType: string; name?: string }>
   ): Promise<void> {
-    if (isStreaming()) return
+    if (isStreaming()) {
+      setMessageQueue((prev) => [...prev, { content, model, images }])
+      return
+    }
 
     const targetModel = model || session.selectedModel()
 
@@ -577,6 +588,7 @@ export function useChat() {
       setIsStreaming(false)
       setStreamingStartedAt(null)
       abortRef.current = null
+      void processQueue()
     }
   }
 
@@ -641,11 +653,40 @@ export function useChat() {
   }
 
   /**
-   * Cancel ongoing stream
+   * Cancel ongoing stream and clear any queued messages
    */
   function cancel(): void {
     abortRef.current?.abort()
+    setMessageQueue([])
     setIsStreaming(false)
+  }
+
+  /** Process the next queued follow-up message */
+  async function processQueue(): Promise<void> {
+    const queue = messageQueue()
+    if (queue.length === 0) return
+    const next = queue[0]
+    setMessageQueue((prev) => prev.slice(1))
+    await sendMessage(next.content, next.model, next.images)
+  }
+
+  /**
+   * Steer: cancel current stream and send a new message immediately.
+   * Clears any queued follow-ups — the steer message takes priority.
+   */
+  function steer(
+    content: string,
+    model?: string,
+    images?: Array<{ data: string; mimeType: string; name?: string }>
+  ): void {
+    setMessageQueue([{ content, model, images }])
+    abortRef.current?.abort()
+    setIsStreaming(false)
+  }
+
+  /** Clear all queued messages */
+  function clearQueue(): void {
+    setMessageQueue([])
   }
 
   /**
@@ -702,6 +743,25 @@ export function useChat() {
   }
 
   /**
+   * Undo the last auto-committed AI edit.
+   * Finds the most recent estela-prefixed commit and reverts it.
+   * @returns true if undo succeeded, false otherwise
+   */
+  async function undoLastEdit(): Promise<{ success: boolean; message: string }> {
+    const cwd = currentProject()?.directory
+    if (!cwd) {
+      return { success: false, message: 'No project directory' }
+    }
+    const result = await undoLastAutoCommit(cwd)
+    return {
+      success: result.success,
+      message: result.success
+        ? `Reverted last AI edit: ${result.output}`
+        : result.error || 'No AI edit to undo',
+    }
+  }
+
+  /**
    * Regenerate an assistant response
    */
   async function regenerateResponse(assistantMessageId: string): Promise<void> {
@@ -734,6 +794,11 @@ export function useChat() {
     activeToolCalls,
     pendingApproval: approval.pendingApproval,
 
+    // Queue
+    queuedCount: () => messageQueue().length,
+    steer,
+    clearQueue,
+
     // Actions
     sendMessage,
     cancel,
@@ -741,6 +806,7 @@ export function useChat() {
     retryMessage,
     editAndResend,
     regenerateResponse,
+    undoLastEdit,
     resolveApproval: approval.resolveApproval,
   }
 }

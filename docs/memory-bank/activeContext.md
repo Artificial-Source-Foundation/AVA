@@ -12,21 +12,77 @@ Phase 1 is done. Phase 1.5 has closed all competitive gaps, added comprehensive 
 
 ### What Just Happened (2026-02-09)
 
-**Settings Hardening (Session 46):**
-- **16 new settings** across 4 sub-interfaces: GenerationSettings, AgentLimitSettings, BehaviorSettings, NotificationSettings
-- **2 new tabs** — LLM (maxTokens, temperature, topP, custom instructions, agent limits) + Behavior (sendKey, autoScroll, autoTitle, lineNumbers, wordWrap, notifications, sound)
-- **3 new files** — `LLMTab.tsx`, `BehaviorTab.tsx`, `src/services/notifications.ts`
-- **4 hardcoded values wired** — maxTokens/temperature to useChat, agentMaxTurns/maxTimeMinutes to useAgent
-- Data management: export (JSON download), import (file picker + deep merge), clear all
+**File Watcher + Step-Level Undo (Session 53):**
+- **File watcher service** — `src/services/file-watcher.ts` (~200 lines) watches project directory via Tauri FS plugin
+- **6 AI patterns** — `// AI!`, `// AI?`, `# AI!`, `# AI?`, `-- AI!`, `-- AI?` for multi-language support
+- **Smart filtering** — 30+ scannable extensions, IGNORE_DIRS (node_modules, .git, dist, etc.)
+- **Dedup tracking** — processedHashes Set prevents re-triggering same comment
+- **Settings toggle** — `fileWatcher: boolean` in BehaviorSettings, toggle in Behavior tab
+- **ChatView wiring** — `createEffect` starts/stops watcher based on settings + project dir; `onComment` auto-sends as chat message
+- **FS permissions** — `fs:allow-watch` and `fs:allow-unwatch` added to Tauri capabilities
+- **Undo button** — Undo2 icon in MessageInput toolbar, calls `chat.undoLastEdit()` (git revert), 2.5s status feedback
+- **Undo visibility** — Only shows when git auto-commit is enabled in settings
+- **1 new file** — `src/services/file-watcher.ts`
+- **Streaming tool preview** — Confirmed already implemented (reactive chain: onToolUpdate → session.updateMessage → ToolCallGroup/ToolCallCard)
+- **Gap scorecard** — 12/15 gaps DONE. Phase 2 roadmap fully complete. Only sandbox, tree-sitter, RPC, telemetry remain (Phase 3+)
+- **1 new file** — `src/services/file-watcher.ts`
+- **4 modified files** — `ChatView.tsx`, `BehaviorTab.tsx`, `MessageInput.tsx`, `settings.ts`
+- 0 TS errors, 0 biome errors, vite build passes
 
-**Gap Closure (Sessions 46+):**
-- ~~Cost tracking UI~~ — Per-message cost + tokens in bubbles, session total in ContextBar
-- ~~Vision/image support~~ — Paste, drop, base64 multimodal, inline display
-- ~~Iterative lint→fix~~ — autoFixLint after file edits, errors fed back to LLM
-- ~~Checkpoint UI~~ — Create button, inline display with restore, full DB rollback
-- ~~Per-message token display~~ — Shown in message bubbles
+**Message Queue / Steering Interrupts (Session 52):**
+- **Message queue** — `useChat` queues follow-up messages when streaming; auto-dequeues after completion
+- **Steer function** — `steer()` cancels current stream and sends new message immediately
+- **Type-ahead** — Textarea stays enabled during chat streaming so user can type ahead
+- **Queue badge** — Shows queued message count in toolbar
+- **Keyboard shortcut** — `Ctrl+Shift+Enter` triggers steer (cancel + send immediately)
+- **Cancel clears queue** — Stop button cancels stream AND clears queued messages
+- **Session switch clears queue** — `createEffect` watching session ID
+- **Send/Queue button** — Changes style during streaming to indicate queue mode
+- **2 modified files** — `useChat.ts`, `MessageInput.tsx`
+- 0 TS errors, 0 biome errors, vite build passes
 
-**Previous sessions:** Backend docs, gap analysis (15 gaps across 8 codebases), appearance expansion, density wiring
+**OAuth Fix + Error Logging (Session 51):**
+- **Root cause found** — OpenAI OAuth tokens were stored as plain API keys via `syncProviderCredentials()`. Core's OpenAI provider checked `auth.type` and saw `'api-key'` instead of `'oauth'`, routing requests to `api.openai.com` instead of the ChatGPT Codex endpoint. Error: "insufficient permissions for this operation"
+- **Fix** — `storeOAuthCredentials()` now routes by provider: Anthropic stores minted API key (correct), OpenAI/Copilot store via core's `setStoredAuth()` as `type: 'oauth'` with `accountId` extracted from JWT `id_token`
+- **Scopes** — Reverted incorrect `model.request` scope from OpenAI config
+- **CSP** — Added `https://chatgpt.com` for Codex API endpoint
+- **OAuth disconnect UI** — "Connected via OAuth" badge + disconnect button in ProvidersTab
+- **Error logging** — Full structured logging across OAuth flow (start, PKCE, browser, callback, token exchange, storage, errors)
+- **Browser opener** — Fixed `@tauri-apps/plugin-shell` → `@tauri-apps/plugin-opener` import
+- **Files modified** — `oauth.ts`, `ProvidersTab.tsx`, `tauri.conf.json`
+
+**Architect + Editor Model Split (Session 50):**
+- **Core config** — `editorModel` + `editorModelProvider` optional fields on `ProviderSettings`
+- **Helper** — `getEditorModelConfig()` in `llm/client.ts` reads settings, infers provider from model name
+- **Commander wired** — `commander/executor.ts` auto-applies editor model to workers when no per-worker override
+- **Frontend** — `editorModel` field in `GenerationSettings`, dropdown in LLMTab with 8 editor model presets
+- **Auto-pair** — Button suggests editor model based on primary (e.g., Opus → Sonnet, Sonnet → Haiku)
+- **Settings sync** — `pushSettingsToCore()` bridges `editorModel` to core `ProviderSettings`
+- **6 modified files** — `config/types.ts`, `config/schema.ts`, `llm/client.ts`, `llm/index.ts`, `commander/executor.ts`, `settings.ts`, `LLMTab.tsx`
+- 0 TS errors, 0 biome errors, vite build passes
+
+**Weak Model for Secondary Tasks (Session 49):**
+- **Core config** — `weakModel` + `weakModelProvider` optional fields on `ProviderSettings`
+- **Helper** — `getWeakModelConfig()` in `llm/client.ts` reads settings, infers provider from model name prefix
+- **Planner wired** — `agent/planner.ts` uses `getWeakModelConfig()` instead of hardcoded `claude-sonnet-4-20250514`
+- **Self-review wired** — `validator/self-review.ts` uses weak model for code review (secondary task)
+- **Frontend** — `weakModel` field in `GenerationSettings`, dropdown in LLMTab with 9 model presets
+- **Auto-pair** — Button suggests cheap model based on active primary model (e.g., Sonnet → Haiku)
+- **Settings sync** — `pushSettingsToCore()` bridges `weakModel` to core `ProviderSettings`
+- **6 modified files** — `config/types.ts`, `config/schema.ts`, `llm/client.ts`, `llm/index.ts`, `agent/planner.ts`, `validator/self-review.ts`, `settings.ts`, `LLMTab.tsx`
+- 0 TS errors, 0 biome errors, vite build passes
+
+**Git Auto-Commit (Session 48):**
+- **Auto-commit module** — `packages/core/src/git/auto-commit.ts` stages + commits after file-modifying tools
+- **Tool registry wiring** — PostToolUse in `registry.ts` calls `autoCommitIfEnabled()` for write locations
+- **Undo action** — `undoLastAutoCommit()` reverts the most recent estela-prefixed commit
+- **Frontend settings** — `GitSettings` interface (enabled, autoCommit, commitPrefix) with BehaviorTab UI
+- **Settings sync** — `pushSettingsToCore()` bridges frontend git settings to core `SettingsManager`
+- **1 new file** — `packages/core/src/git/auto-commit.ts`
+- **6 modified files** — `config/types.ts`, `tools/registry.ts`, `git/index.ts`, `settings.ts`, `BehaviorTab.tsx`, `useChat.ts`
+- 0 TS errors, 0 biome errors, vite build passes
+
+**Previous sessions:** Backend gaps (paste collapse, tool approval, MCP, FS scope, shell timeout, OAuth), docs reorg, settings hardening, gap closure (cost tracking, vision, lint→fix, checkpoints), appearance expansion, density wiring, 706 backend tests (1778 total)
 
 ---
 

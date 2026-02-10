@@ -4,6 +4,7 @@
  */
 
 import { getAccountId, getStoredAuth, getValidAccessToken } from '../auth/index.js'
+import { getSettingsManager } from '../config/manager.js'
 import { getPlatform } from '../platform.js'
 import type { ChatMessage, LLMProvider, ProviderConfig, StreamDelta } from '../types/llm.js'
 
@@ -114,6 +115,77 @@ export async function createClient(provider: LLMProvider): Promise<LLMClient> {
   }
 
   return new ClientClass()
+}
+
+// ============================================================================
+// Weak Model Resolution
+// ============================================================================
+
+/** Provider inference from model name prefix */
+const MODEL_PREFIX_PROVIDERS: [string, LLMProvider][] = [
+  ['claude', 'anthropic'],
+  ['gpt', 'openai'],
+  ['o1', 'openai'],
+  ['o3', 'openai'],
+  ['gemini', 'google'],
+  ['glm', 'glm'],
+  ['kimi', 'kimi'],
+  ['moonshot', 'kimi'],
+  ['mistral', 'mistral'],
+  ['deepseek', 'deepseek'],
+  ['llama', 'groq'],
+  ['mixtral', 'groq'],
+]
+
+/** Infer provider from a model name string */
+function inferProvider(model: string): LLMProvider {
+  for (const [prefix, provider] of MODEL_PREFIX_PROVIDERS) {
+    if (model.startsWith(prefix)) return provider
+  }
+  return 'openrouter' // fallback for unknown models
+}
+
+/**
+ * Get model + provider config for secondary tasks (summaries, reviews, planning).
+ * Returns the weak model if configured, otherwise falls back to default model.
+ */
+export function getWeakModelConfig(): { model: string; provider: LLMProvider } {
+  try {
+    const providerSettings = getSettingsManager().get('provider')
+    if (providerSettings.weakModel) {
+      return {
+        model: providerSettings.weakModel,
+        provider: providerSettings.weakModelProvider ?? inferProvider(providerSettings.weakModel),
+      }
+    }
+    return { model: providerSettings.defaultModel, provider: providerSettings.defaultProvider }
+  } catch {
+    // Settings manager not initialized — use defaults
+    return { model: 'claude-sonnet-4-20250514', provider: 'anthropic' }
+  }
+}
+
+/**
+ * Get model + provider config for editor tasks (file edits by Junior Devs).
+ * Returns the editor model if configured, otherwise falls back to default model.
+ * Part of the architect/editor split: Team Lead uses primary (architect) model,
+ * Junior Devs use cheaper editor model for actual file changes.
+ */
+export function getEditorModelConfig(): { model: string; provider: LLMProvider } {
+  try {
+    const providerSettings = getSettingsManager().get('provider')
+    if (providerSettings.editorModel) {
+      return {
+        model: providerSettings.editorModel,
+        provider:
+          providerSettings.editorModelProvider ?? inferProvider(providerSettings.editorModel),
+      }
+    }
+    return { model: providerSettings.defaultModel, provider: providerSettings.defaultProvider }
+  } catch {
+    // Settings manager not initialized — use defaults
+    return { model: 'claude-sonnet-4-20250514', provider: 'anthropic' }
+  }
 }
 
 // ============================================================================

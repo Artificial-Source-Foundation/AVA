@@ -43,6 +43,8 @@
       "identifier": "fs:allow-mkdir",
       "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.estela/**" }]
     },
+    "fs:allow-watch",
+    "fs:allow-unwatch",
     "shell:allow-execute",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",

@@ -6,9 +6,12 @@
  * Includes tool approval dialog for agent mode.
  */
 
-import { type Component, createMemo } from 'solid-js'
+import { type Component, createEffect, createMemo, on, onCleanup } from 'solid-js'
 import { useAgent } from '../../hooks/useAgent'
 import { useChat } from '../../hooks/useChat'
+import type { AIComment } from '../../services/file-watcher'
+import { startFileWatcher, stopFileWatcher } from '../../services/file-watcher'
+import { useProject } from '../../stores/project'
 import { useSettings } from '../../stores/settings'
 import { ToolApprovalDialog } from '../dialogs/ToolApprovalDialog'
 import { ContextBar } from './ContextBar'
@@ -16,9 +19,34 @@ import { MessageInput } from './MessageInput'
 import { MessageList } from './MessageList'
 
 export const ChatView: Component = () => {
-  const { addAutoApprovedTool } = useSettings()
+  const { settings, addAutoApprovedTool } = useSettings()
+  const { currentProject } = useProject()
   const agent = useAgent()
   const chat = useChat()
+
+  // File watcher — start/stop based on settings + project directory
+  const handleAIComment = (comment: AIComment) => {
+    const prefix = comment.type === 'execute' ? '' : '[Question] '
+    const message = `${prefix}${comment.content}\n\n\`\`\`\n// File: ${comment.filePath}:${comment.lineNumber}\n${comment.context}\n\`\`\``
+    void chat.sendMessage(message)
+  }
+
+  createEffect(
+    on(
+      () => [settings().behavior.fileWatcher, currentProject()?.directory] as const,
+      ([enabled, dir]) => {
+        if (enabled && dir && dir !== '~') {
+          void startFileWatcher(dir, handleAIComment)
+        } else {
+          void stopFileWatcher()
+        }
+      }
+    )
+  )
+
+  onCleanup(() => {
+    void stopFileWatcher()
+  })
 
   // Merge approval from both agent and chat modes
   const activeApproval = createMemo(() => chat.pendingApproval() || agent.pendingApproval())

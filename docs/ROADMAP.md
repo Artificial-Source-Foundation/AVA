@@ -69,6 +69,10 @@ All development work is done. Only manual Tauri testing remains.
 - Google models API (dynamic fetch with hardcoded fallback)
 - DiffViewer split view (buildSplitPairs, two-column rendering)
 - Chat rendering (markdown + syntax highlighting, tool call cards, date separators, model change indicators)
+- Message queue + steering (queue follow-ups during streaming, steer to cancel + send, Ctrl+Shift+Enter)
+- File watcher (AI comments: `// AI!` execute, `// AI?` question — 6 patterns, 30+ extensions, Tauri FS watch)
+- Step-level undo (Undo button in toolbar, git revert of last auto-committed AI edit)
+- Streaming tool preview (live tool call cards with status transitions during streaming)
 - Backend tests (1778 tests across 64 files)
 - 0 TS errors, 0 Biome errors, vite build passes, 0 TODOs in src/
 

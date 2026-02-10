@@ -9,5 +9,6 @@ These reports were created during Epics 25-26 to understand SOTA patterns from o
 | [Gemini CLI](gemini-cli/) | 6 reports (~139KB) | A2A, policy engine, extensions, PTY |
 | [Cline](cline/) | 8 reports | Tool hooks, approvals, browser, VS Code |
 | [OpenCode](opencode/) | 7 reports | Fuzzy edits, batch tools, session model |
+| [PI Coding Agent](pi-coding-agent.md) | 1 report | Architecture analysis, key takeaways |
 
 For local clones of these codebases, see `docs/reference-code/README.md`.

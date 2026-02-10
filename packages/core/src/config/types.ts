@@ -5,6 +5,7 @@
  * Settings are organized by category for easy access and updates.
  */
 
+import type { GitConfig } from '../git/types.js'
 import type { LLMProvider } from '../types/llm.js'
 
 // Re-export for convenience (but allow both sources)
@@ -20,6 +21,14 @@ export interface ProviderSettings {
   defaultProvider: LLMProvider
   /** Default model for the selected provider */
   defaultModel: string
+  /** Cheaper/faster model for secondary tasks (summaries, reviews, commit messages) */
+  weakModel?: string
+  /** Provider for the weak model (inferred from weakModel name if not set) */
+  weakModelProvider?: LLMProvider
+  /** Cheaper/faster model for file edits by Junior Devs (architect/editor split) */
+  editorModel?: string
+  /** Provider for the editor model (inferred from editorModel name if not set) */
+  editorModelProvider?: LLMProvider
   /** Request timeout in milliseconds */
   timeout: number
   /** Fall back to OpenRouter if direct API fails */
@@ -149,6 +158,7 @@ export interface Settings {
   context: ContextSettings
   memory: MemorySettings
   ui: UISettings
+  git: GitConfig
 }
 
 /** Settings category keys */
@@ -227,6 +237,7 @@ export const DEFAULT_SETTINGS: Settings = {
   context: DEFAULT_CONTEXT_SETTINGS,
   memory: DEFAULT_MEMORY_SETTINGS,
   ui: DEFAULT_UI_SETTINGS,
+  git: { enabled: true, autoCommit: false, branchPrefix: 'estela/', messagePrefix: '[estela]' },
 }
 
 // ============================================================================

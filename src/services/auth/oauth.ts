@@ -10,11 +10,15 @@
  * - https://github.com/numman-ali/opencode-openai-codex-auth
  */
 
+import { setStoredAuth } from '@estela/core'
 import { invoke } from '@tauri-apps/api/core'
-import { open } from '@tauri-apps/plugin-shell'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { STORAGE_KEYS } from '../../config/constants'
 import { syncProviderCredentials } from '../../stores/settings'
 import type { Credentials, LLMProvider } from '../../types/llm'
+import { logDebug, logError, logInfo, logWarn } from '../logger'
+
+const LOG_SRC = 'oauth'
 
 // ============================================================================
 // Types
@@ -52,6 +56,8 @@ export interface OAuthTokens {
   accessToken: string
   refreshToken?: string
   expiresAt?: number
+  /** JWT id_token from OpenID Connect (contains account/org claims) */
+  idToken?: string
 }
 
 // ============================================================================
@@ -131,6 +137,42 @@ async function generatePKCE(): Promise<PKCEParams> {
   const state = generateRandomString(32)
 
   return { verifier, challenge, state }
+}
+
+// ============================================================================
+// JWT Utilities (for OpenID Connect id_token parsing)
+// ============================================================================
+
+/**
+ * Decode JWT payload without signature verification.
+ * Safe for extracting claims from tokens already validated by the auth server.
+ */
+function decodeJwtPayload(jwt: string): Record<string, unknown> {
+  const parts = jwt.split('.')
+  if (parts.length !== 3) return {}
+  try {
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4)
+    return JSON.parse(atob(padded)) as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Extract ChatGPT account ID from an OpenAI id_token.
+ * The id_token contains organization claims when `id_token_add_organizations=true`.
+ */
+function extractAccountId(idToken: string): string | undefined {
+  const payload = decodeJwtPayload(idToken)
+  // Direct field (some responses include it at top level)
+  if (typeof payload.chatgpt_account_id === 'string') return payload.chatgpt_account_id
+  // In organizations array (from id_token_add_organizations param)
+  const orgs = payload.organizations as Array<Record<string, unknown>> | undefined
+  if (Array.isArray(orgs) && orgs.length > 0) {
+    return orgs[0].id as string | undefined
+  }
+  return undefined
 }
 
 // ============================================================================
@@ -218,6 +260,9 @@ interface RustOAuthCallback {
   state: string
 }
 
+/** Guard: only one PKCE OAuth flow can run at a time (port 1455 is shared) */
+let pkceInProgress = false
+
 /**
  * Start OAuth flow - opens browser for user authorization.
  * For PKCE providers: starts Rust callback server, opens browser, waits for
@@ -237,36 +282,64 @@ export async function startOAuthFlow(
     return startDeviceCodeFlow(provider)
   }
 
-  // Standard PKCE flow with Rust callback server
-  const pkce = await generatePKCE()
-  storePKCE(provider, pkce)
-  const authUrl = buildAuthUrl(config, pkce)
-
-  // Start the Rust callback server BEFORE opening the browser
-  // (it waits for the redirect with a 120s timeout)
-  const callbackPromise = invoke<RustOAuthCallback>('oauth_listen', {
-    port: config.redirectPort,
-  })
-
-  // Open the browser for user authorization
-  await open(authUrl)
-
-  // Wait for the callback from the Rust server
-  const callback = await callbackPromise
-
-  // Exchange the authorization code for tokens
-  const tokens = await exchangeCodeForTokens(provider, callback.code, callback.state)
-
-  // For providers with apiKeyUrl (Anthropic), mint an API key from the OAuth token
-  if (config.apiKeyUrl) {
-    const apiKey = await mintApiKey(config.apiKeyUrl, tokens.accessToken)
-    tokens.accessToken = apiKey
+  // Prevent multiple PKCE flows — they share port 1455
+  if (pkceInProgress) {
+    logWarn(LOG_SRC, `PKCE flow already in progress, rejecting ${provider}`)
+    throw new Error('An OAuth flow is already in progress. Complete or close it first.')
   }
+  pkceInProgress = true
+  logInfo(LOG_SRC, `Starting PKCE OAuth flow for ${provider}`)
 
-  // Store tokens and bridge to core credential store
-  storeOAuthCredentials(provider, tokens)
+  try {
+    // Standard PKCE flow with Rust callback server
+    const pkce = await generatePKCE()
+    storePKCE(provider, pkce)
+    const authUrl = buildAuthUrl(config, pkce)
+    logDebug(LOG_SRC, `Auth URL built for ${provider}`, { port: config.redirectPort })
 
-  return tokens
+    // Start the Rust callback server BEFORE opening the browser
+    // (it waits for the redirect with a 120s timeout)
+    const callbackPromise = invoke<RustOAuthCallback>('oauth_listen', {
+      port: config.redirectPort,
+    })
+
+    // Open the browser for user authorization
+    await openUrl(authUrl)
+    logDebug(LOG_SRC, `Browser opened for ${provider} authorization`)
+
+    // Wait for the callback from the Rust server
+    const callback = await callbackPromise
+    logDebug(LOG_SRC, `Callback received for ${provider}`, { hasCode: !!callback.code })
+
+    // Exchange the authorization code for tokens
+    const tokens = await exchangeCodeForTokens(provider, callback.code, callback.state)
+    logInfo(LOG_SRC, `Token exchange successful for ${provider}`, {
+      hasRefreshToken: !!tokens.refreshToken,
+      hasIdToken: !!tokens.idToken,
+      expiresAt: tokens.expiresAt,
+    })
+
+    // For providers with apiKeyUrl (Anthropic), mint an API key from the OAuth token
+    if (config.apiKeyUrl) {
+      logDebug(LOG_SRC, `Minting API key for ${provider}`)
+      const apiKey = await mintApiKey(config.apiKeyUrl, tokens.accessToken)
+      tokens.accessToken = apiKey
+      logInfo(LOG_SRC, `API key minted for ${provider}`)
+    }
+
+    // Store tokens and bridge to core credential store
+    storeOAuthCredentials(provider, tokens)
+
+    return tokens
+  } catch (err) {
+    logError(LOG_SRC, `OAuth flow failed for ${provider}`, {
+      error: err instanceof Error ? err.message : String(err),
+      stack: err instanceof Error ? err.stack : undefined,
+    })
+    throw err
+  } finally {
+    pkceInProgress = false
+  }
 }
 
 /**
@@ -278,6 +351,7 @@ export async function startDeviceCodeFlow(provider: LLMProvider): Promise<Device
   if (!config) {
     throw new Error(`Device code flow not supported for provider: ${provider}`)
   }
+  logInfo(LOG_SRC, `Starting device code flow for ${provider}`)
 
   const response = await fetch(config.authorizationUrl, {
     method: 'POST',
@@ -388,8 +462,13 @@ export async function exchangeCodeForTokens(
 
   // Validate state for CSRF protection
   if (stored.state !== returnedState) {
+    logError(LOG_SRC, `State mismatch for ${provider} — possible CSRF`, {
+      expected: `${stored.state.slice(0, 8)}...`,
+      got: `${returnedState.slice(0, 8)}...`,
+    })
     throw new Error('State mismatch. Possible CSRF attack.')
   }
+  logDebug(LOG_SRC, `Exchanging code for tokens (${provider})`)
 
   // Exchange code for tokens
   const response = await fetch(config.tokenUrl, {
@@ -408,15 +487,26 @@ export async function exchangeCodeForTokens(
 
   if (!response.ok) {
     const error = await response.text()
+    logError(LOG_SRC, `Token exchange failed for ${provider}`, {
+      status: response.status,
+      body: error.slice(0, 500),
+    })
     throw new Error(`Token exchange failed: ${error}`)
   }
 
-  const data = await response.json()
+  const data = (await response.json()) as Record<string, unknown>
+  logDebug(LOG_SRC, `Token exchange response for ${provider}`, {
+    hasAccessToken: !!data.access_token,
+    hasRefreshToken: !!data.refresh_token,
+    hasIdToken: !!data.id_token,
+    expiresIn: data.expires_in,
+  })
 
   return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : undefined,
+    accessToken: data.access_token as string,
+    refreshToken: data.refresh_token as string | undefined,
+    expiresAt: data.expires_in ? Date.now() + (data.expires_in as number) * 1000 : undefined,
+    idToken: data.id_token as string | undefined,
   }
 }
 
@@ -449,19 +539,26 @@ export async function refreshOAuthToken(
     throw new Error(`Token refresh failed: ${error}`)
   }
 
-  const data = await response.json()
+  const data = (await response.json()) as Record<string, unknown>
 
   return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token || refreshToken,
-    expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : undefined,
+    accessToken: data.access_token as string,
+    refreshToken: (data.refresh_token as string | undefined) || refreshToken,
+    expiresAt: data.expires_in ? Date.now() + (data.expires_in as number) * 1000 : undefined,
+    idToken: data.id_token as string | undefined,
   }
 }
 
 /**
- * Store OAuth credentials in both frontend store and core credential store
+ * Store OAuth credentials in both frontend store and core credential store.
+ *
+ * For Anthropic: OAuth mints a real API key, so store as plain API key.
+ * For OpenAI/Copilot: Store as OAuth type in core auth system so provider
+ * clients detect `auth.type === 'oauth'` and route to the correct endpoint
+ * (e.g. ChatGPT Codex endpoint instead of api.openai.com).
  */
 export function storeOAuthCredentials(provider: LLMProvider, tokens: OAuthTokens): void {
+  // Store in frontend credentials store (for UI state display)
   const credentials: Credentials = {
     provider,
     type: 'oauth-token',
@@ -469,24 +566,40 @@ export function storeOAuthCredentials(provider: LLMProvider, tokens: OAuthTokens
     expiresAt: tokens.expiresAt,
     refreshToken: tokens.refreshToken,
   }
-
-  // Store in frontend credentials store
   const stored = localStorage.getItem('estela_credentials')
   let all: Record<string, Credentials> = {}
-
   try {
-    if (stored) {
-      all = JSON.parse(stored)
-    }
+    if (stored) all = JSON.parse(stored)
   } catch {
     all = {}
   }
-
   all[provider] = credentials
   localStorage.setItem('estela_credentials', JSON.stringify(all))
 
-  // Bridge to core credential store so LLM clients can find the token
-  syncProviderCredentials(provider, tokens.accessToken)
+  // Anthropic: OAuth mints a real API key — store as plain API key
+  if (provider === 'anthropic') {
+    logInfo(LOG_SRC, `Storing minted API key for ${provider}`)
+    syncProviderCredentials(provider, tokens.accessToken)
+    return
+  }
+
+  // OpenAI/Copilot: Store as OAuth in core auth system so provider clients
+  // see auth.type === 'oauth' and route to the correct endpoint
+  const accountId = tokens.idToken ? extractAccountId(tokens.idToken) : undefined
+  logInfo(LOG_SRC, `Storing OAuth credentials for ${provider}`, {
+    hasAccountId: !!accountId,
+    hasRefreshToken: !!tokens.refreshToken,
+    expiresAt: tokens.expiresAt,
+  })
+  setStoredAuth(provider, {
+    type: 'oauth',
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken ?? '',
+    expiresAt: tokens.expiresAt ?? Date.now() + 3600_000,
+    accountId,
+  }).catch((e: unknown) => {
+    logError(LOG_SRC, `Failed to store OAuth auth for ${provider}`, { error: String(e) })
+  })
 }
 
 /**

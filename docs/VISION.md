@@ -147,15 +147,22 @@ Priority 5: Agent Network           ← Remote agent calls (A2A)
 
 ## Roadmap
 
-### Phase 1: Desktop App (Current Priority)
-- [ ] Working Tauri desktop app with chat + dev team UI
-- [ ] Team Lead → Senior Leads → Junior Devs visible in UI
-- [ ] Agent cards with progress, expand to see work
-- [ ] Click-to-chat with any team member
-- [ ] Lightweight code viewer
-- [ ] Settings, session management, provider configuration
+### Phase 1: Desktop App — COMPLETE
+- [x] Working Tauri desktop app with chat + dev team UI
+- [x] Team Lead → Senior Leads → Junior Devs visible in UI
+- [x] Agent cards with progress, expand to see work
+- [x] Click-to-chat with any team member
+- [x] Lightweight code viewer
+- [x] Settings, session management, provider configuration
 
-### Phase 2: Plugin Ecosystem
+### Phase 1.5: Polish — COMPLETE
+- [x] Appearance system (dark/light/system theme, 6 accents, density, fonts, code themes)
+- [x] Settings hardening (16 settings, LLM tab, Behavior tab, data management)
+- [x] Backend test coverage (1778 tests across 64 files)
+- [x] Core frontend wiring (context tracking, checkpoints, agent memory)
+- [x] WebKitGTK fixes (ghost rendering, nested buttons, cargo linker)
+
+### Phase 2: Plugin Ecosystem — NEXT
 - [ ] Unified plugin format (skills + commands + hooks)
 - [ ] Plugin SDK — dead simple to create
 - [ ] Built-in marketplace UI

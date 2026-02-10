@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LLMProvider } from '../../types/llm'
 
 // Mock Tauri modules before importing oauth
-vi.mock('@tauri-apps/plugin-shell', () => ({
-  open: vi.fn(),
+vi.mock('@tauri-apps/plugin-opener', () => ({
+  openUrl: vi.fn(),
 }))
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string) => {
@@ -19,7 +19,7 @@ vi.mock('../../stores/settings', () => ({
   syncProviderCredentials: vi.fn(),
 }))
 
-import { open } from '@tauri-apps/plugin-shell'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { getOAuthConfig, isOAuthSupported, startOAuthFlow, storeOAuthCredentials } from './oauth'
 
 // ============================================================================
@@ -134,12 +134,12 @@ describe('startOAuthFlow', () => {
       })
     vi.stubGlobal('fetch', fetchMock)
 
-    const mockOpen = vi.mocked(open)
+    const mockOpenUrl = vi.mocked(openUrl)
     const result = await startOAuthFlow('anthropic')
 
     // Browser was opened with correct auth URL
-    expect(mockOpen).toHaveBeenCalledOnce()
-    const url = mockOpen.mock.calls[0][0]
+    expect(mockOpenUrl).toHaveBeenCalledOnce()
+    const url = mockOpenUrl.mock.calls[0][0]
     expect(url).toContain('claude.ai/oauth/authorize')
     expect(url).toContain('code_challenge_method=S256')
 

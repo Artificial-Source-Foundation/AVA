@@ -17,15 +17,16 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 | ~~Checkpointing / time-travel undo~~ | Cline, Gemini CLI, Plandex, Aider | ~~Critical~~ **DONE** |
 | ~~Cost/token tracking UI~~ | Cline, Aider, PI, Gemini CLI | ~~Critical~~ **DONE** |
 | ~~Vision/image support~~ | Cline, Aider, PI | ~~High~~ **DONE** |
-| Git auto-commit on edits | Aider, Gemini CLI | **High** |
-| Weak model for secondary tasks | Aider, PI | **High** |
+| ~~Git auto-commit on edits~~ | Aider, Gemini CLI | ~~**High**~~ **DONE** |
+| ~~Weak model for secondary tasks~~ | Aider, PI | ~~**High**~~ **DONE** |
+| ~~Architect + editor model split~~ | Aider, PI | ~~**Medium**~~ **DONE** |
 | Sandbox/container execution | Gemini CLI, OpenHands, Goose | **High** |
 | ~~Iterative lint → fix loop~~ | Aider, Cline, Gemini CLI | ~~High~~ **DONE** |
-| Streaming tool preview | Cline, OpenCode | **Medium** |
-| File watcher / AI comments | Aider, OpenCode | **Medium** |
-| Architect + editor model split | Aider, PI | **Medium** |
-| Session revert/step-level undo | OpenCode, Cline, Plandex | **Medium** |
-| Message queue (steering/follow-up) | PI | **Medium** |
+| ~~Streaming tool preview~~ | Cline, OpenCode | ~~**Medium**~~ **DONE** |
+| ~~File watcher / AI comments~~ | Aider, OpenCode | ~~**Medium**~~ **DONE** |
+| ~~Architect + editor model split~~ | Aider, PI | ~~**Medium**~~ **DONE** |
+| ~~Session revert/step-level undo~~ | OpenCode, Cline, Plandex | ~~**Medium**~~ **DONE** |
+| ~~Message queue (steering/follow-up)~~ | PI | ~~**Medium**~~ **DONE** |
 | Tree-sitter (100+ languages) | Aider | **Medium** |
 | RPC/SDK mode for embedding | PI, Aider | **Low** |
 | Telemetry/analytics | Cline, Gemini CLI | **Low** |
@@ -95,11 +96,9 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Aider**: Auto-commit after every edit. Weak model generates commit message. `/undo` reverts last. Author attribution: `"User (aider)"`.
 - **Gemini CLI**: Git checkpoint integration for time-travel.
 
-**Estela status**: `git/` module exists with snapshot capabilities but no auto-commit workflow.
+**Estela status**: **DONE**. `git/auto-commit.ts` auto-stages and commits after file-modifying tools. Settings UI toggle in Behavior tab. `undoLastAutoCommit()` reverts the most recent estela commit. Commit message prefix is configurable.
 
 **Impact**: Safety net. Never lose work. Git history shows exactly what AI changed vs what user changed.
-
-**Implementation**: After tool `write_file`/`edit` succeeds → `git add` + `git commit` with weak model message.
 
 ---
 
@@ -111,11 +110,9 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Aider**: `weak_model_name` per model. Claude Sonnet → Claude Haiku for commits.
 - **PI**: Different models for different sub-tasks.
 
-**Estela status**: Model selector in UI lets user choose main model. No concept of secondary model for cheaper tasks.
+**Estela status**: **DONE**. `weakModel` optional field in `ProviderSettings` + `getWeakModelConfig()` helper. Planner and self-review validator use weak model when configured. Frontend: dropdown in LLM tab with model pair auto-suggestions. Off by default (uses primary model).
 
 **Impact**: 50-80% cost reduction on secondary tasks (commit messages, summaries, simple classification).
-
-**Implementation**: Add `weakModel` field to provider config. Use for: commit messages, task summaries, error classification.
 
 ---
 
@@ -153,7 +150,7 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 
 ---
 
-### 8. Streaming Tool Preview (MEDIUM)
+### ~~8. Streaming Tool Preview (MEDIUM)~~ — DONE
 
 **What**: Show tool results (diffs, terminal output) while the model is still generating its response, not after.
 
@@ -161,15 +158,13 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Cline**: `handlePartialBlock()` in tool handlers. See diffs appearing in real-time.
 - **OpenCode**: Streaming tool execution with live terminal output.
 
-**Estela status**: Streams LLM text but tool results appear only after complete response.
+**Estela status**: **DONE** — Already implemented in the streaming pipeline. `onToolUpdate` callback fires on every tool state change during streaming, updating `session.updateMessage()` reactively. `ToolCallGroup` auto-expands while active (pending/running tools). `ToolCallCard` shows spinner for running tools, status transitions, args summary, duration, and expandable output. The full reactive chain: `streamResponse` → `onToolUpdate` → `setActiveToolCalls` + `session.updateMessage` → `MessageBubble` → `ToolCallGroup(isStreaming=true)` → `ToolCallCard`.
 
 **Impact**: Better perceived performance. User sees progress immediately.
 
-**Implementation**: Parse tool calls from partial streaming response, execute optimistically.
-
 ---
 
-### 9. File Watcher / AI Comments in Code (MEDIUM)
+### ~~9. File Watcher / AI Comments in Code (MEDIUM)~~ — DONE
 
 **What**: Monitor project files for special comments (`// AI!`, `// AI?`). When detected, agent processes the comment as an instruction.
 
@@ -177,11 +172,9 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Aider**: `watch.py` — `AI!` triggers edit, `AI?` triggers question. Works with any language.
 - **OpenCode**: File watcher for reactive workflows.
 
-**Estela status**: No file monitoring. Desktop app doesn't watch user's editor files.
+**Estela status**: **DONE** — `src/services/file-watcher.ts` watches project directory via Tauri FS plugin. Detects `// AI!`, `// AI?`, `# AI!`, `# AI?`, `-- AI!`, `-- AI?` patterns across 30+ file extensions. 500ms debounced recursive watch. Configurable toggle in Settings → Behavior. Wired to ChatView — detected comments auto-send as chat messages.
 
 **Impact**: Seamless IDE integration without VS Code extension. User writes comment, switches to Estela, sees result.
-
-**Implementation**: Add file watcher via Tauri's `notify` crate. Parse comments with configurable patterns.
 
 ---
 
@@ -193,15 +186,13 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Aider**: `architect_coder.py`. o1 (architect) + Sonnet (editor). `editor-diff` format.
 - **PI**: Extensible model routing for different task phases.
 
-**Estela status**: Team Lead plans and delegates, but all agents use the same model. No explicit architect/editor split.
+**Estela status**: **DONE**. `editorModel` optional field in `ProviderSettings` + `getEditorModelConfig()` helper. Commander executor auto-applies editor model to workers (Junior Devs) when no per-worker override exists. Frontend: dropdown in LLM tab with 8 editor model presets and auto-pair suggestions (e.g., Opus → Sonnet, Sonnet → Haiku). Team Lead uses primary (architect) model for planning, Junior Devs use cheaper editor model for file changes.
 
 **Impact**: Better results with reasoning models (o1, DeepSeek R1) that plan well but edit poorly. Cost savings.
 
-**Implementation**: Add `editorModel` to agent config. Team Lead uses main model, Junior Devs use editor model.
-
 ---
 
-### 11. Session Revert / Step-Level Undo (MEDIUM)
+### ~~11. Session Revert / Step-Level Undo (MEDIUM)~~ — DONE
 
 **What**: Undo individual steps within a session, not just fork from a point.
 
@@ -210,11 +201,9 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Cline**: Checkpoint restore (task, workspace, or both).
 - **Plandex**: Plan rewind/branch with version control.
 
-**Estela status**: Fork creates a new session from a point. No in-place undo.
+**Estela status**: **DONE** — Built on git auto-commit foundation. Each file-modifying tool creates an estela-prefixed commit. Undo button in MessageInput toolbar reverts the most recent estela commit via `git revert --no-edit`. Shows success/error feedback for 2.5s. Only visible when git auto-commit is enabled. Plus session checkpoints (from Session 40) for coarser rollback.
 
 **Impact**: Lighter than forking — just undo last step without creating new session.
-
-**Implementation**: Track file diffs per step. `/undo` reverts last step's changes.
 
 ---
 
@@ -225,11 +214,9 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 **Who has it**:
 - **PI**: Message queue with steering (interrupt) and follow-up (after completion) modes.
 
-**Estela status**: No message queue. User must wait for agent to finish before sending next message.
+**Estela status**: **DONE**. `useChat` has a `messageQueue` signal — messages sent while streaming are queued as follow-ups and auto-dequeued after completion. `steer()` function cancels current stream and sends immediately. `Ctrl+Shift+Enter` keyboard shortcut for steering. Queue badge in MessageInput toolbar. Textarea stays enabled during chat streaming for type-ahead. Session switch clears queue. Cancel clears queue.
 
 **Impact**: Better for long-running tasks. User can steer without canceling.
-
-**Implementation**: Add message queue to `useChat`. If agent is running, queue as steering or follow-up.
 
 ---
 
@@ -314,12 +301,12 @@ These are Estela's **unique advantages** — features no other codebase implemen
 
 | # | Feature | Effort | Impact | Source |
 |---|---------|--------|--------|--------|
-| 5 | **Git auto-commit** | 1 week | High | Aider |
-| 6 | **Weak model support** | 1 week | High | Aider |
-| 7 | **Architect/editor model split** | 1 week | Medium | Aider |
-| 8 | **Streaming tool preview** | 1 week | Medium | Cline |
-| 9 | **File watcher + AI comments** | 1 week | Medium | Aider, OpenCode |
-| 10 | **Message queue** | 3-4 days | Medium | PI |
+| 5 | ~~**Git auto-commit**~~ | ~~1 week~~ | ~~High~~ **DONE** | Aider |
+| 6 | ~~**Weak model support**~~ | ~~1 week~~ | ~~High~~ **DONE** | Aider |
+| 7 | ~~**Architect/editor model split**~~ | ~~1 week~~ | ~~Medium~~ **DONE** | Aider |
+| 8 | ~~**Streaming tool preview**~~ | ~~1 week~~ | ~~Medium~~ **DONE** | Cline |
+| 9 | ~~**File watcher + AI comments**~~ | ~~1 week~~ | ~~Medium~~ **DONE** | Aider, OpenCode |
+| 10 | ~~**Message queue**~~ | ~~3-4 days~~ | ~~Medium~~ **DONE** | PI |
 
 ### Phase 3+ (Longer Term)
 
@@ -327,7 +314,7 @@ These are Estela's **unique advantages** — features no other codebase implemen
 |---|---------|--------|--------|--------|
 | 11 | **Sandbox execution** | 2-3 weeks | High | Gemini CLI, OpenHands |
 | 12 | **Tree-sitter integration** | 2 weeks | Medium | Aider |
-| 13 | **Session step-level undo** | 1 week | Medium | OpenCode, Cline |
+| 13 | ~~**Session step-level undo**~~ | ~~1 week~~ | ~~Medium~~ **DONE** | OpenCode, Cline |
 | 14 | **Voice coding** | 2 weeks | Medium | Aider |
 | 15 | **RPC/SDK mode** | 2-3 weeks | Low | PI |
 
@@ -342,12 +329,12 @@ These are Estela's **unique advantages** — features no other codebase implemen
 
 ### OpenCode
 - **Philosophy**: Terminal-first with rich TUI. Client/server architecture.
-- **Steal**: File watcher, session revert/step-level undo, formatter abstraction, header-based retry
+- **Steal**: ~~File watcher~~, ~~session revert/step-level undo~~, formatter abstraction, header-based retry
 - **Skip**: Client/server split (we're desktop-first)
 
 ### Cline
 - **Philosophy**: VS Code extension with polished IDE integration.
-- **Steal**: Checkpoints (3 restore modes), cost tracking, streaming tool preview, auto-condense tool
+- **Steal**: ~~Checkpoints (3 restore modes)~~, ~~cost tracking~~, ~~streaming tool preview~~, auto-condense tool
 - **Skip**: VS Code-specific integrations (not applicable to desktop)
 
 ### Gemini CLI

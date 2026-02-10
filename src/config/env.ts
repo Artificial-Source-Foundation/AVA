@@ -4,9 +4,6 @@
  */
 
 interface EnvConfig {
-  // OAuth configuration
-  CODEX_CLIENT_ID?: string
-
   // API keys (for development - prefer UI-based storage)
   ANTHROPIC_API_KEY?: string
   OPENROUTER_API_KEY?: string
@@ -21,7 +18,6 @@ interface EnvConfig {
  */
 function getEnvConfig(): EnvConfig {
   return {
-    CODEX_CLIENT_ID: import.meta.env.VITE_CODEX_CLIENT_ID,
     ANTHROPIC_API_KEY: import.meta.env.VITE_ANTHROPIC_API_KEY,
     OPENROUTER_API_KEY: import.meta.env.VITE_OPENROUTER_API_KEY,
     OPENAI_API_KEY: import.meta.env.VITE_OPENAI_API_KEY,
@@ -30,26 +26,12 @@ function getEnvConfig(): EnvConfig {
 }
 
 /**
- * Check for required environment variables and log warnings
- * Called on app initialization
+ * Check for required environment variables and log warnings.
+ * OAuth client IDs are hardcoded in oauth.ts — no env vars needed.
+ * API keys are optional (can be set via UI).
  */
 export function validateEnv(): void {
-  const config = getEnvConfig()
-  const warnings: string[] = []
-
-  // OAuth is optional but recommended
-  if (!config.CODEX_CLIENT_ID) {
-    warnings.push('VITE_CODEX_CLIENT_ID not set - OAuth login will be unavailable')
-  }
-
-  // API keys are optional (can be set via UI)
-  // No warnings for missing API keys
-
-  // Log warnings in development
-  if (config.DEBUG_MODE && warnings.length > 0) {
-    console.warn('[Estela] Environment warnings:')
-    for (const w of warnings) {
-      console.warn(`  - ${w}`)
-    }
-  }
+  // Currently no required env vars — API keys and OAuth are configured in UI.
+  // Keep this function as a hook for future env validation.
+  getEnvConfig()
 }

@@ -6,6 +6,26 @@
 
 ## Current Session
 
+**Session 51** (2026-02-09) — OAuth Fix + Error Logging
+- Fixed OpenAI OAuth "insufficient permissions" error — tokens stored as `type: 'oauth'` via `setStoredAuth()` instead of plain API key
+- JWT `id_token` parsing for ChatGPT `accountId` extraction
+- Reverted incorrect `model.request` scope, added `https://chatgpt.com` to CSP
+- OAuth disconnect UI (badge + LogOut button) in ProvidersTab
+- Structured error logging across entire OAuth flow via file logger
+- Browser opener fix (`@tauri-apps/plugin-shell` → `@tauri-apps/plugin-opener`)
+- PKCE concurrent flow guard
+- 0 TS errors, 0 Biome errors, vite build passes
+
+**Session 47** (2026-02-09) — Backend Gaps Fix + Docs Reorg
+- **Paste collapse** — Large text pastes collapsed into chips, user messages >8 lines collapse in bubble
+- **Tool approval bridge** — Message bus → SolidJS signal → ToolApprovalDialog → response back to bus
+- **MCP settings CRUD** — `mcpServers[]` with add/remove/update, wired to SettingsModal
+- **FS scope expansion** — Rust `allow_project_path` command via `FsExt` for project file access
+- **Shell timeout** — `Promise.race()` wrapper in TauriShell.exec()
+- **OAuth fix** — Corrected Anthropic + OpenAI configs (client IDs, ports, scopes)
+- **Docs reorg** — 8 priority fixes: README, techContext, architecture, database-schema, VISION, docs index, research index, Epic 25 moved to completed
+- 0 TS errors, 0 Biome errors, vite build passes
+
 **Session 46** (2026-02-09) — Settings Hardening + Gap Closure
 - **16 new settings** across 4 sub-interfaces: GenerationSettings, AgentLimitSettings, BehaviorSettings, NotificationSettings
 - **2 new tabs** — LLM (maxTokens, temperature, topP, custom instructions, agent limits) + Behavior (sendKey, autoScroll, autoTitle, lineNumbers, wordWrap, notifications, sound)
@@ -104,9 +124,9 @@
 
 | Date | Milestone |
 |------|-----------|
-| 2025-01-28 | Project scaffold (Tauri + SolidJS + SQLite) |
-| 2025-01-29 | Epic 1: Multi-provider LLM streaming |
-| 2025-01-30 | Epic 2: File tools (7 tools) |
+| 2026-01-28 | Project scaffold (Tauri + SolidJS + SQLite) |
+| 2026-01-29 | Epic 1: Multi-provider LLM streaming |
+| 2026-01-30 | Epic 2: File tools (7 tools) |
 | 2026-02-02 | Epics 3-7: ACP monorepo, safety, context, DX, platform |
 | 2026-02-03 | Epics 8-17: Agent system, commander, parallel, validator, codebase, config, memory, tools |
 | 2026-02-04 | Epics 19-21: Hooks, browser, providers. Feature parity sprints 1-7 |

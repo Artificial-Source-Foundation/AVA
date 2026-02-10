@@ -5,7 +5,7 @@
  * Shows the user code, opens browser, polls for authorization.
  */
 
-import { open } from '@tauri-apps/plugin-shell'
+import { openUrl } from '@tauri-apps/plugin-opener'
 import { Check, Clipboard, ExternalLink, Loader2, X } from 'lucide-solid'
 import { type Component, createSignal, onCleanup, onMount, Show } from 'solid-js'
 import type { DeviceCodeResponse } from '../../services/auth/oauth'
@@ -32,7 +32,7 @@ export const DeviceCodeDialog: Component<DeviceCodeDialogProps> = (props) => {
   }
 
   const openBrowser = () => {
-    open(props.deviceCode.verificationUri)
+    openUrl(props.deviceCode.verificationUri)
   }
 
   onMount(() => {

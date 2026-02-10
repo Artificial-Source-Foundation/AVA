@@ -24,6 +24,10 @@ export const LLMProviderSchema = z.enum([
 export const ProviderSettingsSchema = z.object({
   defaultProvider: LLMProviderSchema,
   defaultModel: z.string().min(1),
+  weakModel: z.string().min(1).optional(),
+  weakModelProvider: LLMProviderSchema.optional(),
+  editorModel: z.string().min(1).optional(),
+  editorModelProvider: LLMProviderSchema.optional(),
   timeout: z.number().int().min(1000).max(600000),
   openRouterFallback: z.boolean(),
   customEndpoints: z.record(z.string(), z.string().url()).optional(),
@@ -108,6 +112,17 @@ export const UISettingsSchema = z.object({
 })
 
 // ============================================================================
+// Git Schema
+// ============================================================================
+
+export const GitConfigSchema = z.object({
+  enabled: z.boolean(),
+  autoCommit: z.boolean(),
+  branchPrefix: z.string().min(1),
+  messagePrefix: z.string(),
+})
+
+// ============================================================================
 // Combined Schema
 // ============================================================================
 
@@ -118,6 +133,7 @@ export const SettingsSchema = z.object({
   context: ContextSettingsSchema,
   memory: MemorySettingsSchema,
   ui: UISettingsSchema,
+  git: GitConfigSchema,
 })
 
 // ============================================================================
@@ -130,6 +146,7 @@ export const PartialPermissionSettingsSchema = PermissionSettingsSchema.partial(
 export const PartialContextSettingsSchema = ContextSettingsSchema.partial()
 export const PartialMemorySettingsSchema = MemorySettingsSchema.partial()
 export const PartialUISettingsSchema = UISettingsSchema.partial()
+export const PartialGitConfigSchema = GitConfigSchema.partial()
 
 // ============================================================================
 // Export Schema

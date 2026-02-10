@@ -1,18 +1,18 @@
 # Estela
 
-> Multi-Agent AI Coding Assistant
+> The Obsidian of AI Coding — Desktop AI coding app with a virtual dev team and community plugins
 
-A Tauri 2.0 + SolidJS desktop application for AI-assisted software development with **ACP (Agent Client Protocol)** support for editor integration. Features autonomous agent loop, hierarchical **Commander + Workers + Validator** architecture, 19 tools (including browser automation and plan mode), and long-term memory.
+A Tauri 2.0 + SolidJS desktop application for AI-assisted software development. Features autonomous agent loop, hierarchical **Team Lead + Senior Leads + Junior Devs + Validator** architecture, 22 tools, multi-provider LLM support (14 providers), and long-term memory.
 
 ## Quick Start
 
 ```bash
-# Prerequisites: Node.js 20+, pnpm 10+, Rust 1.70+
+# Prerequisites: Node.js 20+, Rust 1.70+
 
 # Clone and install
 git clone https://github.com/g0dxn4/Estela.git
 cd Estela
-pnpm install
+npm install
 
 # Set up environment (optional - can also configure in Settings UI)
 cp .env.example .env
@@ -21,39 +21,25 @@ cp .env.example .env
 # Run desktop app
 npm run tauri dev
 
-# Or build the CLI for ACP mode
-pnpm build:all
+# Or build CLI
+npm run build:packages && npm run build:cli
 node cli/dist/index.js --help
-```
-
-## Running Modes
-
-### Desktop App (Tauri)
-Full-featured desktop application with UI:
-```bash
-npm run tauri dev
-```
-
-### CLI with ACP (for Toad/Zed)
-Run as an ACP-compatible agent for editor integration:
-```bash
-pnpm build:all
-node cli/dist/index.js --acp
 ```
 
 ## Current Status
 
-**Core + MVP polish epics (1-21) complete!** Ready for frontend integration (Epic 18).
+**Phase 1 (Desktop App) and Phase 1.5 (Polish) complete.** Ready for Phase 2 (Plugin Ecosystem).
 
-| Phase | Epics | Status |
-|-------|-------|--------|
-| Foundation | 1-3: Chat, File Tools, ACP Monorepo | ✅ Complete |
-| Infrastructure | 4-7: Safety, Context, DX, MCP | ✅ Complete |
-| Agent System | 8-12: Agent Loop, Commander, Parallel, Validator, Codebase | ✅ Complete |
-| Settings & Memory | 13-14: Config, Long-term Memory | ✅ Complete |
-| Enhancement | 15-17: Comparison, OpenCode Features, Missing Tools | ✅ Complete |
-| MVP Polish | 19-21: Hooks, Browser/Plan, Providers | ✅ Complete |
-| **Next** | 18: Tauri Desktop GUI | ⬜ Planned |
+| Phase | Status |
+|-------|--------|
+| Foundation (Epics 1-3) | Done |
+| Infrastructure (Epics 4-7) | Done |
+| Agent System (Epics 8-14) | Done |
+| Enhancement (Epics 15-21) | Done |
+| ACP/A2A Protocols (Epics 25-26) | Done |
+| **Phase 1: Desktop App** | **Done** |
+| **Phase 1.5: Polish** | **Done** |
+| Phase 2: Plugin Ecosystem | Next |
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for full roadmap.
 
@@ -61,43 +47,41 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for full roadmap.
 
 ```
                     ┌─────────────┐
-                    │  Commander  │  Strategic Planning
+                    │  Team Lead  │  Strategic Planning
                     └──────┬──────┘
                            │
               ┌────────────┼────────────┐
               ▼            ▼            ▼
         ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │ Operator │ │ Operator │ │ Operator │  Parallel Execution
-        │ (file A) │ │ (file B) │ │ (file C) │
+        │ Sr. Lead │ │ Sr. Lead │ │ Sr. Lead │  Domain Specialists
+        │(Frontend)│ │(Backend) │ │(Testing) │
         └────┬─────┘ └────┬─────┘ └────┬─────┘
-              └────────────┼────────────┘
-                           ▼
-                    ┌─────────────┐
-                    │  Validator  │  Quality Gate
-                    └─────────────┘
+              │            │            │
+         Jr. Devs     Jr. Devs     Validator
+        (file-level)  (file-level)  (QA Gate)
 ```
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
-| Desktop | Tauri 2.0 (Rust) - 3-10MB app, 30-40MB RAM |
+| Desktop | Tauri 2.0 (Rust) — ~5MB app, 30MB RAM |
 | Frontend | SolidJS + TypeScript (~7KB runtime) |
 | Styling | Tailwind CSS v4 |
 | Database | SQLite via tauri-plugin-sql |
 | Tools | File ops via tauri-plugin-fs, shell via tauri-plugin-shell |
-| CLI | Node.js with ACP SDK |
+| CLI | Node.js (secondary interface) |
 
 ## Project Structure
 
 ```
 packages/
-├── core/              # Business logic (~15,400 lines)
+├── core/              # Business logic (~56,500 lines, 1778 tests)
 │   └── src/
 │       ├── agent/     # Autonomous loop, subagents, recovery
-│       ├── commander/ # Hierarchical delegation, workers
+│       ├── commander/ # Team Lead → Senior Leads → Junior Devs
 │       │   └── parallel/  # Concurrent execution, DAG scheduler
-│       ├── tools/     # 19 tools (file, web, task, browser, plan)
+│       ├── tools/     # 22 tools (file, web, task, browser, plan)
 │       ├── context/   # Token tracking, compaction
 │       ├── memory/    # Episodic, semantic, procedural
 │       ├── validator/ # QA pipeline (syntax, types, lint)
@@ -106,12 +90,12 @@ packages/
 │       ├── permissions/   # Safety, risk assessment
 │       ├── session/   # State, checkpoints, forking
 │       ├── mcp/       # MCP protocol client
-│       └── ...        # diff, git, question, instructions, scheduler
+│       └── ...        # diff, git, hooks, extensions, bus, auth, llm
 ├── platform-tauri/    # Tauri implementations
 └── platform-node/     # Node.js implementations
 
-cli/                   # CLI with ACP agent
-src/                   # Tauri SolidJS frontend (~3,700 lines)
+cli/                   # CLI interface (secondary)
+src/                   # Tauri SolidJS frontend (~16,000+ lines)
 docs/                  # Documentation & memory bank
 ```
 
@@ -121,18 +105,17 @@ docs/                  # Documentation & memory bank
 # Desktop app
 npm run tauri dev
 
-# Build all packages (for CLI)
-pnpm build:all
+# Build packages (required before CLI)
+npm run build:packages
 
-# Run CLI
+# Build + run CLI
+npm run build:cli
 node cli/dist/index.js --help
-node cli/dist/index.js --acp
 
 # Code quality
 npm run lint          # Oxlint + ESLint
-npm run lint:fix      # Auto-fix
 npm run format        # Biome format
-npm run typecheck     # TypeScript check
+npx tsc --noEmit      # Type check
 
 # Testing
 npm run test          # Vitest watch
@@ -140,7 +123,6 @@ npm run test:run      # Single run
 
 # Maintenance
 npm run knip          # Find dead code
-npm run knip:fix      # Remove dead code
 npm run analyze       # Bundle size
 ```
 
@@ -152,19 +134,19 @@ API keys can be set via:
 3. **~/.estela/credentials.json** for CLI mode
 
 Supported providers:
-- **Anthropic** - Direct API or OAuth
-- **OpenAI** - Direct API or OAuth
-- **Google** - Direct API or OAuth
-- **OpenRouter** - Gateway to multiple models
-- **Mistral, Groq, DeepSeek, xAI, Cohere, Together** - Direct APIs
-- **GLM, Kimi** - Direct APIs
-- **Ollama** - Local models
+- **Anthropic** — Direct API or OAuth
+- **OpenAI** — Direct API or OAuth
+- **Google** — Direct API or OAuth
+- **OpenRouter** — Gateway to multiple models
+- **Mistral, Groq, DeepSeek, xAI, Cohere, Together** — Direct APIs
+- **GLM, Kimi** — Direct APIs
+- **Ollama** — Local models
 
 ## Contributing
 
-1. Check [docs/ROADMAP.md](docs/ROADMAP.md) for current epic
+1. Check [docs/ROADMAP.md](docs/ROADMAP.md) for current phase
 2. Read [CLAUDE.md](CLAUDE.md) for coding conventions
-3. Run `npm run lint && npm run typecheck` before committing
+3. Run `npm run lint && npx tsc --noEmit` before committing
 4. Commits use [Conventional Commits](https://conventionalcommits.org)
 
 ## License

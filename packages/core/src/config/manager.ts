@@ -27,9 +27,11 @@ import type { ZodError, ZodSchema } from 'zod'
 import {
   AgentSettingsSchema,
   ContextSettingsSchema,
+  GitConfigSchema,
   MemorySettingsSchema,
   PartialAgentSettingsSchema,
   PartialContextSettingsSchema,
+  PartialGitConfigSchema,
   PartialMemorySettingsSchema,
   PartialPermissionSettingsSchema,
   PartialProviderSettingsSchema,
@@ -66,6 +68,7 @@ const CATEGORY_SCHEMAS: Record<SettingsCategory, ZodSchema> = {
   context: ContextSettingsSchema,
   memory: MemorySettingsSchema,
   ui: UISettingsSchema,
+  git: GitConfigSchema,
 }
 
 /** Partial schemas by category (for updates) */
@@ -76,6 +79,7 @@ const PARTIAL_SCHEMAS: Record<SettingsCategory, ZodSchema> = {
   context: PartialContextSettingsSchema,
   memory: PartialMemorySettingsSchema,
   ui: PartialUISettingsSchema,
+  git: PartialGitConfigSchema,
 }
 
 // ============================================================================

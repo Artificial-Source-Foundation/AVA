@@ -8,6 +8,7 @@
 import { AgentExecutor } from '../agent/loop.js'
 import type { AgentEvent, AgentEventCallback, AgentResult } from '../agent/types.js'
 import { AgentTerminateMode } from '../agent/types.js'
+import { getEditorModelConfig } from '../llm/client.js'
 import type {
   WorkerActivityCallback,
   WorkerActivityEvent,
@@ -82,6 +83,13 @@ export async function executeWorker(
       ? createEventBridge(definition.name, onActivity)
       : undefined
 
+    // Resolve editor model for workers without explicit model override
+    // (architect/editor split: Team Lead uses primary model, workers use editor model)
+    const editorConfig = getEditorModelConfig()
+    const workerModel = definition.model ?? editorConfig.model
+    const workerProvider =
+      definition.provider ?? (editorConfig.provider as 'anthropic' | 'openai' | 'openrouter')
+
     // Create isolated agent executor for this worker
     const executor = new AgentExecutor(
       {
@@ -92,8 +100,8 @@ export async function executeWorker(
         maxRetries: DEFAULT_WORKER_CONFIG.maxRetries,
         gracePeriodMs: DEFAULT_WORKER_CONFIG.gracePeriodMs,
         tools: allowedTools,
-        model: definition.model,
-        provider: definition.provider,
+        model: workerModel,
+        provider: workerProvider,
       },
       eventCallback
     )

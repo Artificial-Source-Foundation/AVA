@@ -5,6 +5,7 @@
 
 import { checkPlanModeAccess } from '../agent/modes/index.js'
 import { getMessageBus } from '../bus/message-bus.js'
+import { autoCommitIfEnabled } from '../git/auto-commit.js'
 import { createPostToolUseContext, createPreToolUseContext, getHookRunner } from '../hooks/index.js'
 import { shouldAutoApprove } from '../permissions/auto-approve.js'
 import type { PermissionAction, RiskLevel } from '../permissions/types.js'
@@ -384,6 +385,14 @@ export async function executeTool(
       hookContextModification = hookContextModification
         ? `${hookContextModification}\n\n${postHookResult.contextModification}`
         : postHookResult.contextModification
+    }
+
+    // Git auto-commit: stage and commit modified files (fire-and-forget)
+    if (result.success && result.locations) {
+      const writePaths = result.locations.filter((l) => l.type === 'write').map((l) => l.path)
+      if (writePaths.length > 0) {
+        autoCommitIfEnabled(name, writePaths, ctx.workingDirectory).catch(() => {})
+      }
     }
 
     // Return result with hook context modifications

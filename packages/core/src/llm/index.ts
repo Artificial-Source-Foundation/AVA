@@ -7,6 +7,8 @@ export {
   createClient,
   getApiKey,
   getAuth,
+  getEditorModelConfig,
+  getWeakModelConfig,
   type LLMClient,
   registerClient,
 } from './client.js'

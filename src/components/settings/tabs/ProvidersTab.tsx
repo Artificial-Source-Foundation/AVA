@@ -5,6 +5,7 @@
  * Expand a provider to configure API key, model, etc.
  */
 
+import { removeStoredAuth } from '@estela/core'
 import {
   AlertCircle,
   Bot,
@@ -19,6 +20,7 @@ import {
   Globe,
   Loader2,
   LogIn,
+  LogOut,
   Monitor,
   RefreshCw,
   Shield,
@@ -139,6 +141,7 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
   const [showKey, setShowKey] = createSignal(false)
   const [isLoadingModels, setIsLoadingModels] = createSignal(false)
   const [isOAuthLoading, setIsOAuthLoading] = createSignal(false)
+  const [isOAuthConnected, setIsOAuthConnected] = createSignal(false)
   const [modelError, setModelError] = createSignal<string | null>(null)
   const [oauthError, setOauthError] = createSignal<string | null>(null)
   const [deviceCode, setDeviceCode] = createSignal<DeviceCodeResponse | null>(null)
@@ -158,15 +161,37 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
         // Device code flow — show dialog for user to enter code
         setDeviceCode(result as DeviceCodeResponse)
       } else {
-        // PKCE flow completed — tokens returned, already stored + synced
+        // PKCE flow completed — tokens stored via storeOAuthCredentials
+        // For Anthropic: minted API key stored as plain key (onSaveApiKey updates UI)
+        // For OpenAI/Copilot: stored as OAuth in core auth system (skip onSaveApiKey)
         const tokens = result as OAuthTokens
-        props.onSaveApiKey?.(tokens.accessToken)
+        if (props.provider.id === 'anthropic') {
+          props.onSaveApiKey?.(tokens.accessToken)
+        }
+        setIsOAuthConnected(true)
       }
     } catch (err) {
       console.error('OAuth flow failed:', err)
       setOauthError(err instanceof Error ? err.message : 'OAuth flow failed')
     } finally {
       setIsOAuthLoading(false)
+    }
+  }
+
+  const handleOAuthDisconnect = async () => {
+    try {
+      await removeStoredAuth(props.provider.id as LLMProvider)
+      // Also clear from frontend credentials store
+      const stored = localStorage.getItem('estela_credentials')
+      if (stored) {
+        const all = JSON.parse(stored) as Record<string, unknown>
+        delete all[props.provider.id]
+        localStorage.setItem('estela_credentials', JSON.stringify(all))
+      }
+      setIsOAuthConnected(false)
+      props.onClearApiKey?.()
+    } catch (err) {
+      console.error('OAuth disconnect failed:', err)
     }
   }
 
@@ -267,21 +292,41 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
 
           {/* OAuth button */}
           <Show when={isOAuthSupported(props.provider.id as LLMProvider)}>
-            <button
-              type="button"
-              onClick={handleOAuthClick}
-              disabled={isOAuthLoading()}
-              class="flex items-center gap-2 px-2.5 py-1.5 text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors w-full disabled:opacity-50"
+            <Show
+              when={isOAuthConnected()}
+              fallback={
+                <button
+                  type="button"
+                  onClick={handleOAuthClick}
+                  disabled={isOAuthLoading()}
+                  class="flex items-center gap-2 px-2.5 py-1.5 text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors w-full disabled:opacity-50"
+                >
+                  <Show when={isOAuthLoading()} fallback={<LogIn class="w-3 h-3" />}>
+                    <Loader2 class="w-3 h-3 animate-spin" />
+                  </Show>
+                  <span>
+                    {isOAuthLoading()
+                      ? 'Waiting for authorization...'
+                      : oauthButtonText(props.provider.id).label}
+                  </span>
+                </button>
+              }
             >
-              <Show when={isOAuthLoading()} fallback={<LogIn class="w-3 h-3" />}>
-                <Loader2 class="w-3 h-3 animate-spin" />
-              </Show>
-              <span>
-                {isOAuthLoading()
-                  ? 'Waiting for authorization...'
-                  : oauthButtonText(props.provider.id).label}
-              </span>
-            </button>
+              <div class="flex items-center gap-2">
+                <div class="flex items-center gap-1.5 flex-1 px-2.5 py-1.5 text-[11px] text-[var(--success)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)]">
+                  <span class="w-1.5 h-1.5 rounded-full bg-[var(--success)]" />
+                  <span>Connected via OAuth</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleOAuthDisconnect}
+                  class="px-2 py-1.5 text-[11px] text-[var(--text-muted)] hover:text-[var(--error)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
+                  title="Disconnect OAuth"
+                >
+                  <LogOut class="w-3 h-3" />
+                </button>
+              </div>
+            </Show>
             <Show when={oauthError()}>
               <p class="text-[10px] text-[var(--error)] px-1">{oauthError()}</p>
             </Show>

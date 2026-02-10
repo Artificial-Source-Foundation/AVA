@@ -4,6 +4,21 @@
 
 ---
 
+## Session 47 — Backend Gaps + Polish (2026-02-09)
+
+**4 backend gaps fixed** + paste collapse + docs reorg.
+
+- **Paste collapse** — Large text pastes (>5 lines) collapsed into expandable chips in MessageInput; user messages >8 lines collapse in MessageBubble
+- **Tool approval bridge** — Core agent loop `TOOL_CONFIRMATION_REQUEST` → SolidJS signal → ToolApprovalDialog → `TOOL_CONFIRMATION_RESPONSE` back to bus
+- **MCP settings CRUD** — `mcpServers: MCPServerConfig[]` in settings store with `addMcpServer()`, `removeMcpServer()`, `updateMcpServer()`; SettingsModal maps to MCPServersTab
+- **FS scope expansion** — Runtime `allow_project_path` Rust command via `FsExt` for project file access
+- **Shell timeout** — `Promise.race()` wrapper in `TauriShell.exec()` when `options.timeout` is set
+- **OAuth fix** — Corrected Anthropic (client ID, port 1455, API key minting) and OpenAI (port 1455, `/auth/callback`, extra params) configs
+- **Dead mock removal** — Removed hardcoded `defaultMCPServers` from MCPServersTab (now uses real settings state)
+- Commits: `0c9388c`, `28ba7ed`, `7d3e1a6`, `55caf7a`
+
+---
+
 ## Session 45 — Frontend Gaps (2026-02-09)
 
 **5 gaps closed** across 1 new file + 7 modified files.

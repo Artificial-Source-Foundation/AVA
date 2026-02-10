@@ -4,6 +4,42 @@
 
 ---
 
+## 2026-02-09
+
+### Session 51 — OAuth Fix + Error Logging
+- **OAuth credential bridging fix** — OpenAI OAuth tokens stored as `type: 'oauth'` via core `setStoredAuth()` (was plain API key). Enables Codex endpoint routing.
+- **JWT id_token parsing** — `decodeJwtPayload()` + `extractAccountId()` for ChatGPT account ID
+- **Scopes fix** — Reverted `model.request` scope (was causing "insufficient permissions")
+- **CSP** — Added `https://chatgpt.com` to `connect-src` for Codex endpoint
+- **OAuth disconnect UI** — "Connected via OAuth" badge + LogOut button in ProvidersTab
+- **OAuth error logging** — Structured logging via file logger across entire OAuth flow
+- **Browser opener fix** — `@tauri-apps/plugin-shell` → `@tauri-apps/plugin-opener`
+- **PKCE guard** — Prevents concurrent flows on shared port 1455
+
+### Session 47 — Backend Gaps Fix
+- Tool approval bridge: message bus `TOOL_CONFIRMATION_REQUEST` → frontend signal → `TOOL_CONFIRMATION_RESPONSE`
+- MCP settings CRUD: `mcpServers[]` in settings store with add/remove/update
+- FS scope expansion: Rust `allow_project_path` command via `FsExt`
+- Shell timeout: `Promise.race()` wrapper in `TauriShell.exec()`
+- OAuth configs: corrected Anthropic (client ID, port, scopes) and OpenAI (port, path, params)
+- Paste collapse: large text pastes collapsed into expandable chips
+- Dead mock removal: `defaultMCPServers` replaced with real settings state
+
+### Session 46 — Settings Hardening + Appearance
+- 16 new settings across GenerationSettings, AgentLimitSettings, BehaviorSettings, NotificationSettings
+- 2 new tabs: LLM, Behavior
+- Appearance expansion: system theme, dark variants, code themes, ligatures, chat font size, custom accent, sans font, high contrast
+- Density recalibration: compact/default/comfortable, 8 components wired
+- 706 new backend tests (Agent, Tools, LLM client) → 1778 total
+
+### Session 45 — Frontend Gaps
+- File explorer via Tauri FS, code editor reads real files
+- Agent DB persistence (saveAgent, getAgents, updateAgentInDb)
+- Google models API (dynamic fetch with hardcoded fallback)
+- DiffViewer split view (buildSplitPairs)
+
+---
+
 ## 2026-02-08
 
 ### Session 43 — Backend Test Coverage Phase 2
@@ -120,7 +156,7 @@
 
 ---
 
-## 2025-01-28
+## 2026-01-28
 
 ### Project Scaffold
 - Tauri + SolidJS + SQLite initial setup
@@ -128,4 +164,4 @@
 
 ---
 
-*Last updated: 2026-02-08*
+*Last updated: 2026-02-09*

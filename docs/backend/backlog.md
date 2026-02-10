@@ -81,7 +81,7 @@
 ## Architecture Debt
 
 ### Known Issues
-- [ ] **Export collisions** — `a2a` and `policy` modules need named exports to avoid `TaskStatus` and `BUILTIN_RULES` collisions with other modules
+- [x] ~~**Export collisions** — `a2a` and `policy` modules need named exports~~ (Fixed in Session 43)
 - [ ] **Platform abstraction gaps** — `platform.ts` has different behavior for Node/Tauri/browser but tests only cover Node
 - [ ] **Circular dependency risk** — `tools/index.ts` imports from `agent/modes/` (plan tools), creating a cross-module dependency
 - [ ] **Large barrel export** — `index.ts` exports 33 modules via `export *`, making tree-shaking harder
@@ -100,11 +100,11 @@ This backlog feeds into the project roadmap:
 
 | Phase | Backend Work |
 |-------|-------------|
-| **1.5 Polish** (current) | Fix bugs found in Tauri dev testing, wire memory recall to system prompts |
+| **1.5 Polish** (complete) | Settings hardening, appearance system, core wiring, backend tests |
 | **2 Plugins** | Extension system needs: manifest validation, hot reload, sandboxing |
 | **3 CLI** | CLI-specific session storage, config paths, terminal rendering |
 | **4 Integrations** | ACP terminal wiring, A2A server deployment, MCP server hosting |
 
 ---
 
-*Last updated: 2026-02-08*
+*Last updated: 2026-02-09*

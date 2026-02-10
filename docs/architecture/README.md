@@ -13,7 +13,7 @@ Estela/
 ├── src/                    # Desktop app (Tauri + SolidJS) ← PRIMARY
 ├── src-tauri/              # Rust backend for Tauri
 ├── packages/
-│   ├── core/               # Shared business logic (29,500+ lines, 531 tests)
+│   ├── core/               # Shared business logic (~56,500 lines, 1778 tests)
 │   ├── platform-node/      # Node.js implementations (fs, shell, PTY)
 │   └── platform-tauri/     # Tauri implementations (fs, shell)
 └── cli/                    # CLI interface (secondary)
@@ -22,10 +22,11 @@ Estela/
 ### Desktop App (`src/`)
 
 SolidJS + TypeScript + Tailwind CSS v4. IDE-inspired layout:
-- Activity Bar (left) — Sessions, Explorer, Agents, Memory, Settings
+- Activity Bar (left) — Sessions, Explorer (2 icons)
 - Main Area (center) — Chat with Team Lead, code viewer
-- Bottom Panel — Terminal, Agent Activity, File Changes
-- Agent Cards — Expandable panels showing Senior Leads and Junior Devs
+- Right Panel — Agent activity on demand (320px, closeable)
+- Bottom Panel — Memory panel (resizable, Ctrl+M toggle)
+- Settings — Modal overlay (Ctrl+,)
 
 ### Core Package (`packages/core/`)
 
@@ -55,7 +56,7 @@ All business logic lives here. Platform-agnostic — works in both Tauri and Nod
 | Module | Lines | Purpose |
 |--------|-------|---------|
 | `extensions/` | ~600 | Install, enable, disable, reload plugins |
-| `commands/` | ~350 | TOML custom commands |
+| `custom-commands/` | ~350 | TOML custom commands |
 | `hooks/` | ~1,100 | PreToolUse, PostToolUse, Task lifecycle hooks |
 | `skills/` | ~350 | Auto-invoked knowledge modules |
 | `mcp/` | ~950 | MCP protocol client + server registry |
@@ -65,7 +66,7 @@ All business logic lives here. Platform-agnostic — works in both Tauri and Nod
 |--------|-------|---------|
 | `permissions/` | ~1,700 | Risk assessment, auto-approval, path-aware checks |
 | `policy/` | ~800 | Priority rules, wildcards, regex matching |
-| `trust/` | ~400 | Per-folder security levels |
+| `permissions/trusted-folders` | ~400 | Per-folder security levels |
 
 **Infrastructure**:
 | Module | Lines | Purpose |
@@ -126,8 +127,11 @@ Team Lead summarizes and presents to user
 SQLite via `tauri-plugin-sql`:
 ```sql
 sessions: id, name, created_at, updated_at
-messages: id, session_id, role, content, created_at
-files: id, session_id, path, operation, diff, created_at
+messages: id, session_id, role, content, tokens_used, cost, model, created_at
+agents: id, session_id, type, status, model, created_at, completed_at, task_description, result
+file_operations: id, session_id, path, operation, diff, created_at
+terminal_executions: id, session_id, command, output, exit_code, cwd, created_at
+memory_items: id, session_id, type, key, value, created_at
 ```
 
 ---

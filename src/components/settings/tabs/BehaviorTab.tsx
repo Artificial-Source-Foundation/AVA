@@ -67,7 +67,7 @@ const ToggleRow: Component<{
 // ============================================================================
 
 export const BehaviorTab: Component = () => {
-  const { settings, updateBehavior, updateNotifications } = useSettings()
+  const { settings, updateBehavior, updateNotifications, updateGit } = useSettings()
 
   return (
     <div class="space-y-5">
@@ -165,6 +165,53 @@ export const BehaviorTab: Component = () => {
               </span>
             </div>
           </div>
+        </Show>
+      </div>
+
+      {/* File Watcher */}
+      <div class="pt-2 border-t border-[var(--border-subtle)]">
+        <SectionHeader title="File Watcher" />
+        <ToggleRow
+          label="Watch for AI comments"
+          description="Detect // AI! and // AI? in project files"
+          checked={settings().behavior.fileWatcher}
+          onChange={(v) => updateBehavior({ fileWatcher: v })}
+        />
+      </div>
+
+      {/* Git Integration */}
+      <div class="pt-2 border-t border-[var(--border-subtle)]">
+        <SectionHeader title="Git Integration" />
+        <ToggleRow
+          label="Enable git integration"
+          description="Detect git repos and enable auto-commit features"
+          checked={settings().git.enabled}
+          onChange={(v) => updateGit({ enabled: v })}
+        />
+        <Show when={settings().git.enabled}>
+          <ToggleRow
+            label="Auto-commit AI edits"
+            description="Commit file changes after each successful AI edit. Enables undo."
+            checked={settings().git.autoCommit}
+            onChange={(v) => updateGit({ autoCommit: v })}
+          />
+          <Show when={settings().git.autoCommit}>
+            <div class="flex items-center justify-between py-1.5 gap-3">
+              <div>
+                <span class="text-xs text-[var(--text-secondary)]">Commit prefix</span>
+                <p class="text-[10px] text-[var(--text-muted)]">
+                  Prepended to auto-commit messages
+                </p>
+              </div>
+              <input
+                type="text"
+                value={settings().git.commitPrefix}
+                onInput={(e) => updateGit({ commitPrefix: e.currentTarget.value })}
+                class="w-28 px-2 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
+                placeholder="[estela]"
+              />
+            </div>
+          </Show>
         </Show>
       </div>
     </div>

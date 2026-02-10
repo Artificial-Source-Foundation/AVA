@@ -7,7 +7,7 @@
 
 import { removeStoredAuth } from '@estela/core'
 import {
-  AlertCircle,
+  AlertTriangle,
   Bot,
   Braces,
   ChevronRight,
@@ -185,6 +185,9 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
   const [modelError, setModelError] = createSignal<string | null>(null)
   const [oauthError, setOauthError] = createSignal<string | null>(null)
   const [deviceCode, setDeviceCode] = createSignal<DeviceCodeResponse | null>(null)
+  const [showClearConfirm, setShowClearConfirm] = createSignal(false)
+
+  const hasAnyCredentials = () => !!props.provider.apiKey || isOAuthConnected()
 
   const statusColor = () => {
     if (props.provider.status === 'connected') return 'var(--success)'
@@ -218,24 +221,13 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
     }
   }
 
-  const handleOAuthDisconnect = async () => {
-    try {
-      await removeStoredAuth(props.provider.id as LLMProvider)
-      clearProviderCredentials(props.provider.id)
-      setIsOAuthConnected(false)
-      props.onClearApiKey?.()
-    } catch (err) {
-      console.error('OAuth disconnect failed:', err)
-    }
-  }
-
   const handleClearAll = async () => {
     try {
-      // Clear OAuth from core auth store
       await removeStoredAuth(props.provider.id as LLMProvider).catch(() => {})
       clearProviderCredentials(props.provider.id)
       setIsOAuthConnected(false)
       setApiKey('')
+      setShowClearConfirm(false)
       props.onClearApiKey?.()
     } catch (err) {
       console.error('Clear credentials failed:', err)
@@ -366,7 +358,7 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
                 </div>
                 <button
                   type="button"
-                  onClick={handleOAuthDisconnect}
+                  onClick={() => setShowClearConfirm(true)}
                   class="px-2 py-1.5 text-[11px] text-[var(--text-muted)] hover:text-[var(--error)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
                   title="Disconnect OAuth"
                 >
@@ -417,11 +409,11 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
               <Show when={props.provider.apiKey}>
                 <button
                   type="button"
-                  onClick={() => props.onClearApiKey?.()}
+                  onClick={() => setShowClearConfirm(true)}
                   class="p-1 text-[var(--text-muted)] hover:text-[var(--error)] transition-colors"
                   title="Clear API key"
                 >
-                  <AlertCircle class="w-3 h-3" />
+                  <Trash2 class="w-3 h-3" />
                 </button>
               </Show>
             </div>
@@ -496,6 +488,43 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
             />
           </Show>
 
+          {/* Clear confirmation warning */}
+          <Show when={showClearConfirm()}>
+            <div class="flex flex-col gap-2 p-2.5 bg-[rgba(239,68,68,0.08)] border border-[rgba(239,68,68,0.25)] rounded-[var(--radius-md)]">
+              <div class="flex items-start gap-2">
+                <AlertTriangle class="w-3.5 h-3.5 text-[var(--error)] flex-shrink-0 mt-0.5" />
+                <div class="flex-1 min-w-0">
+                  <p class="text-[11px] font-medium text-[var(--error)]">Clear all credentials?</p>
+                  <p class="text-[10px] text-[var(--text-muted)] mt-0.5">
+                    This will remove{' '}
+                    {isOAuthConnected() && props.provider.apiKey
+                      ? 'the API key and OAuth connection'
+                      : isOAuthConnected()
+                        ? 'the OAuth connection'
+                        : 'the API key'}{' '}
+                    for {props.provider.name}. You will need to re-authenticate.
+                  </p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 ml-5.5">
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  class="px-2.5 py-1 text-[10px] font-medium text-white bg-[var(--error)] rounded-[var(--radius-md)] hover:brightness-110 transition-colors"
+                >
+                  Yes, clear
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowClearConfirm(false)}
+                  class="px-2.5 py-1 text-[10px] text-[var(--text-secondary)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] hover:border-[var(--border-default)] transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </Show>
+
           {/* Footer links */}
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-3">
@@ -508,10 +537,10 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
                   Test connection
                 </button>
               </Show>
-              <Show when={props.provider.apiKey || isOAuthConnected()}>
+              <Show when={hasAnyCredentials() && !showClearConfirm()}>
                 <button
                   type="button"
-                  onClick={handleClearAll}
+                  onClick={() => setShowClearConfirm(true)}
                   class="flex items-center gap-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors"
                   title="Clear all credentials for this provider"
                 >

@@ -6,15 +6,42 @@
 
 ## Current Session
 
-**Session 51** (2026-02-09) — OAuth Fix + Error Logging
-- Fixed OpenAI OAuth "insufficient permissions" error — tokens stored as `type: 'oauth'` via `setStoredAuth()` instead of plain API key
-- JWT `id_token` parsing for ChatGPT `accountId` extraction
-- Reverted incorrect `model.request` scope, added `https://chatgpt.com` to CSP
-- OAuth disconnect UI (badge + LogOut button) in ProvidersTab
-- Structured error logging across entire OAuth flow via file logger
-- Browser opener fix (`@tauri-apps/plugin-shell` → `@tauri-apps/plugin-opener`)
-- PKCE concurrent flow guard
+**Session 53** (2026-02-09) — File Watcher + Step-Level Undo
+- File watcher service (`src/services/file-watcher.ts`) — Tauri FS `watch()`, 6 AI patterns, 30+ extensions, dedup
+- ChatView wiring — starts/stops watcher based on settings + project dir, auto-sends AI comments as chat messages
+- Undo button in MessageInput toolbar — calls `undoLastAutoCommit()` (git revert), 2.5s feedback, only visible when auto-commit enabled
+- FS permissions — `fs:allow-watch`, `fs:allow-unwatch` in Tauri capabilities
+- Streaming tool preview confirmed already working (reactive chain: onToolUpdate → ToolCallGroup → ToolCallCard)
+- Gap scorecard: 12/15 DONE. Only sandbox, tree-sitter, RPC, telemetry remain (Phase 3+)
 - 0 TS errors, 0 Biome errors, vite build passes
+
+**Session 52** (2026-02-09) — Message Queue + Steering Interrupts
+- Message queue in `useChat` — queues follow-ups during streaming, auto-dequeues after completion
+- `steer()` cancels current stream + sends new message immediately
+- Type-ahead enabled during streaming, queue badge, send/queue button style change
+- `Ctrl+Shift+Enter` = steer, cancel clears queue, session switch clears queue
+- 0 TS errors, 0 Biome errors, vite build passes
+
+**Session 51** (2026-02-09) — OAuth Fix + Error Logging
+- Fixed OpenAI OAuth "insufficient permissions" — tokens stored as `type: 'oauth'` via `setStoredAuth()`
+- JWT parsing for ChatGPT `accountId`, reverted `model.request` scope, CSP updated
+- OAuth disconnect UI, structured error logging, browser opener fix, PKCE guard
+- 0 TS errors, 0 Biome errors, vite build passes
+
+**Session 50** (2026-02-09) — Architect + Editor Model Split
+- `editorModel` + `editorModelProvider` on core `ProviderSettings`
+- `getEditorModelConfig()` helper, commander executor auto-applies to workers
+- Frontend: dropdown in LLMTab with auto-pair suggestions (Opus → Sonnet, etc.)
+
+**Session 49** (2026-02-09) — Weak Model for Secondary Tasks
+- `weakModel` + `weakModelProvider` on core `ProviderSettings`
+- `getWeakModelConfig()` helper, planner + self-review wired
+- Frontend: dropdown in LLMTab with auto-pair suggestions (Sonnet → Haiku, etc.)
+
+**Session 48** (2026-02-09) — Git Auto-Commit
+- `packages/core/src/git/auto-commit.ts` — stages + commits after file-modifying tools
+- Tool registry PostToolUse wiring, `undoLastAutoCommit()` for revert
+- Frontend: `GitSettings` in BehaviorTab (enabled, autoCommit, commitPrefix)
 
 **Session 47** (2026-02-09) — Backend Gaps Fix + Docs Reorg
 - **Paste collapse** — Large text pastes collapsed into chips, user messages >8 lines collapse in bubble
@@ -134,6 +161,7 @@
 | 2026-02-07 | **LLM integration working. Phase 1 complete.** |
 | 2026-02-08 | **WebKitGTK fixes. Splash. Layout rework. Appearance tab. Backend tests (1778). Core frontend wiring.** |
 | 2026-02-09 | **Settings hardening (16 settings). Gap closure: cost tracking, vision, lint→fix, checkpoints, per-message tokens.** |
+| 2026-02-09 | **Sessions 48-53: git auto-commit, weak/editor models, OAuth fix, message queue, file watcher, step-level undo. 12/15 gaps DONE.** |
 
 ---
 

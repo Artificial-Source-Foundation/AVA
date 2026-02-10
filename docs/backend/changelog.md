@@ -6,6 +6,38 @@
 
 ## 2026-02-09
 
+### Session 53 — File Watcher + Step-Level Undo
+- **File watcher** — `src/services/file-watcher.ts` watches project dir via Tauri FS `watch()` (500ms debounce, recursive)
+- **6 AI patterns** — `// AI!`, `// AI?`, `# AI!`, `# AI?`, `-- AI!`, `-- AI?` across 30+ extensions
+- **ChatView wiring** — `createEffect` starts/stops watcher; `onComment` auto-sends as chat message
+- **Undo button** — Undo2 icon in MessageInput, calls `undoLastAutoCommit()` (git revert), 2.5s feedback
+- **FS permissions** — `fs:allow-watch`, `fs:allow-unwatch` added to Tauri capabilities
+
+### Session 52 — Message Queue + Steering Interrupts
+- **Message queue** — `useChat` queues follow-ups during streaming, auto-dequeues after completion
+- **Steer** — `steer()` cancels current stream + sends new message immediately
+- **Cancel** — Now clears queue + aborts (stop = stop everything)
+- **Keyboard** — `Ctrl+Shift+Enter` = steer, textarea enabled during streaming for type-ahead
+
+### Session 50 — Architect + Editor Model Split
+- **Core config** — `editorModel` + `editorModelProvider` on `ProviderSettings`
+- **Helper** — `getEditorModelConfig()` in `llm/client.ts`
+- **Commander wired** — `executor.ts` auto-applies editor model to workers
+- **Frontend** — `editorModel` dropdown in LLMTab with auto-pair suggestions
+
+### Session 49 — Weak Model for Secondary Tasks
+- **Core config** — `weakModel` + `weakModelProvider` on `ProviderSettings`
+- **Helper** — `getWeakModelConfig()` in `llm/client.ts`
+- **Planner wired** — `agent/planner.ts` uses weak model instead of hardcoded Sonnet
+- **Self-review wired** — `validator/self-review.ts` uses weak model for code review
+- **Frontend** — `weakModel` dropdown in LLMTab with auto-pair suggestions
+
+### Session 48 — Git Auto-Commit
+- **Auto-commit module** — `packages/core/src/git/auto-commit.ts` stages + commits after file-modifying tools
+- **Tool registry** — PostToolUse in `registry.ts` calls `autoCommitIfEnabled()`
+- **Undo** — `undoLastAutoCommit()` reverts most recent estela-prefixed commit
+- **Frontend** — `GitSettings` (enabled, autoCommit, commitPrefix) in BehaviorTab
+
 ### Session 51 — OAuth Fix + Error Logging
 - **OAuth credential bridging fix** — OpenAI OAuth tokens stored as `type: 'oauth'` via core `setStoredAuth()` (was plain API key). Enables Codex endpoint routing.
 - **JWT id_token parsing** — `decodeJwtPayload()` + `extractAccountId()` for ChatGPT account ID

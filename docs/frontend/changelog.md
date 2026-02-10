@@ -4,6 +4,86 @@
 
 ---
 
+## Session 53 — File Watcher + Step-Level Undo (2026-02-09)
+
+- **File watcher service** — `src/services/file-watcher.ts` (~270 lines) watches project dir via Tauri FS `watch()` (500ms debounce, recursive)
+- **6 AI patterns** — `// AI!`, `// AI?`, `# AI!`, `# AI?`, `-- AI!`, `-- AI?` across 30+ scannable extensions
+- **Dedup tracking** — `processedHashes` Set prevents re-triggering same comment (key: `filePath:lineNumber:content`)
+- **ChatView wiring** — `createEffect` starts/stops watcher based on `settings().behavior.fileWatcher` + `currentProject()?.directory`; `onComment` auto-sends as chat message with file context
+- **Settings toggle** — `fileWatcher: boolean` in BehaviorSettings, toggle in Behavior tab
+- **FS permissions** — `fs:allow-watch` and `fs:allow-unwatch` added to Tauri capabilities
+- **Undo button** — Undo2 icon in MessageInput toolbar, calls `chat.undoLastEdit()` → `undoLastAutoCommit()` (git revert), 2.5s status feedback
+- **Undo visibility** — Only shows when git auto-commit is enabled in settings
+- New file: `src/services/file-watcher.ts`
+- Modified: `ChatView.tsx`, `MessageInput.tsx`, `BehaviorTab.tsx`, `settings.ts`
+
+---
+
+## Session 52 — Message Queue + Steering (2026-02-09)
+
+- **Message queue** — `useChat` `messageQueue` signal queues follow-up messages when streaming; `processQueue()` auto-dequeues in `finally` block
+- **Steer function** — `steer()` replaces queue with single message, aborts current stream; `processQueue` picks it up
+- **Cancel clears queue** — `cancel()` now clears queue + aborts (stop = stop everything)
+- **Type-ahead** — Textarea stays enabled during streaming so user can type ahead
+- **Queue badge** — Shows queued message count in toolbar
+- **Send/Queue button** — Changes style during streaming to indicate queue mode
+- **Keyboard shortcut** — `Ctrl+Shift+Enter` triggers steer (cancel + send immediately)
+- **Session switch** — `createEffect` watching session ID calls `clearQueue()`
+- Modified: `useChat.ts`, `MessageInput.tsx`
+
+---
+
+## Session 51 — OAuth Fix + Error Logging (2026-02-09)
+
+- **Root cause** — OpenAI OAuth tokens stored as plain API keys → core saw `type: 'api-key'` → wrong endpoint
+- **Fix** — `storeOAuthCredentials()` routes by provider: Anthropic → API key, OpenAI/Copilot → `setStoredAuth(type:'oauth')` with `accountId` from JWT
+- **JWT parsing** — `decodeJwtPayload()` + `extractAccountId()` for ChatGPT account ID from `id_token`
+- **Scopes** — Reverted incorrect `model.request` scope
+- **CSP** — Added `https://chatgpt.com` to `connect-src`
+- **OAuth disconnect UI** — "Connected via OAuth" badge + LogOut button in ProvidersTab
+- **Error logging** — Structured logging via file logger across entire OAuth flow
+- **Browser opener** — `@tauri-apps/plugin-shell` → `@tauri-apps/plugin-opener`
+- Modified: `oauth.ts`, `ProvidersTab.tsx`, `tauri.conf.json`
+
+---
+
+## Session 50 — Architect + Editor Model Split (2026-02-09)
+
+- **Core config** — `editorModel` + `editorModelProvider` optional fields on `ProviderSettings`
+- **Helper** — `getEditorModelConfig()` in `llm/client.ts`, exported from `llm/index.ts`
+- **Commander wired** — `commander/executor.ts` auto-applies editor model to workers when no per-worker override
+- **Frontend** — `editorModel` field in `GenerationSettings`, dropdown in LLMTab with 8 editor model presets
+- **Auto-pair** — Button suggests editor model based on primary (Opus → Sonnet, Sonnet → Haiku, o1/o3 → GPT-4o)
+- **Settings sync** — `pushSettingsToCore()` bridges `editorModel` to core `ProviderSettings`
+- Modified: `config/types.ts`, `config/schema.ts`, `llm/client.ts`, `llm/index.ts`, `commander/executor.ts`, `settings.ts`, `LLMTab.tsx`
+
+---
+
+## Session 49 — Weak Model for Secondary Tasks (2026-02-09)
+
+- **Core config** — `weakModel` + `weakModelProvider` optional fields on `ProviderSettings`
+- **Helper** — `getWeakModelConfig()` in `llm/client.ts`, reads settings and infers provider from model name prefix
+- **Planner wired** — `agent/planner.ts` uses `getWeakModelConfig()` instead of hardcoded `claude-sonnet-4-20250514`
+- **Self-review wired** — `validator/self-review.ts` uses weak model for code review
+- **Frontend** — `weakModel` field in `GenerationSettings`, dropdown in LLMTab with 9 model presets
+- **Auto-pair** — Button suggests cheap model based on active primary (Sonnet → Haiku, GPT-4o → GPT-4o-mini)
+- **Settings sync** — `pushSettingsToCore()` bridges `weakModel` to core `ProviderSettings`
+- Modified: `config/types.ts`, `config/schema.ts`, `llm/client.ts`, `llm/index.ts`, `agent/planner.ts`, `validator/self-review.ts`, `settings.ts`, `LLMTab.tsx`
+
+---
+
+## Session 48 — Git Auto-Commit (2026-02-09)
+
+- **Auto-commit module** — `packages/core/src/git/auto-commit.ts` stages + commits after file-modifying tools
+- **Tool registry wiring** — PostToolUse in `registry.ts` calls `autoCommitIfEnabled()` for write locations
+- **Undo action** — `undoLastAutoCommit()` reverts the most recent estela-prefixed commit via `git revert --no-edit`
+- **Frontend settings** — `GitSettings` interface (enabled, autoCommit, commitPrefix) with BehaviorTab UI
+- **Settings sync** — `pushSettingsToCore()` bridges frontend git settings to core `SettingsManager`
+- New file: `packages/core/src/git/auto-commit.ts`
+- Modified: `config/types.ts`, `tools/registry.ts`, `git/index.ts`, `settings.ts`, `BehaviorTab.tsx`, `useChat.ts`
+
+---
+
 ## Session 47 — Backend Gaps + Polish (2026-02-09)
 
 **4 backend gaps fixed** + paste collapse + docs reorg.

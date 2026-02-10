@@ -25,6 +25,7 @@ import {
   RefreshCw,
   Shield,
   Sparkles,
+  Trash2,
   Zap,
 } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
@@ -120,6 +121,45 @@ export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
 }
 
 // ============================================================================
+// OAuth Detection Helper
+// ============================================================================
+
+function clearProviderCredentials(providerId: string): void {
+  // Clear from frontend credentials store
+  try {
+    const stored = localStorage.getItem('estela_credentials')
+    if (stored) {
+      const all = JSON.parse(stored) as Record<string, unknown>
+      delete all[providerId]
+      localStorage.setItem('estela_credentials', JSON.stringify(all))
+    }
+  } catch {
+    // Ignore
+  }
+  // Clear stale estela_cred_ prefixed keys (API key + auth)
+  localStorage.removeItem(`estela_cred_${providerId}-api-key`)
+  localStorage.removeItem(`estela_cred_auth-${providerId}`)
+}
+
+function checkStoredOAuth(providerId: string): boolean {
+  try {
+    const stored = localStorage.getItem('estela_credentials')
+    if (stored) {
+      const all = JSON.parse(stored) as Record<string, { type?: string }>
+      if (all[providerId]?.type === 'oauth-token') return true
+    }
+    const coreAuth = localStorage.getItem(`estela_cred_auth-${providerId}`)
+    if (coreAuth) {
+      const parsed = JSON.parse(coreAuth) as { type?: string }
+      if (parsed.type === 'oauth') return true
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return false
+}
+
+// ============================================================================
 // Provider Row Component
 // ============================================================================
 
@@ -141,7 +181,7 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
   const [showKey, setShowKey] = createSignal(false)
   const [isLoadingModels, setIsLoadingModels] = createSignal(false)
   const [isOAuthLoading, setIsOAuthLoading] = createSignal(false)
-  const [isOAuthConnected, setIsOAuthConnected] = createSignal(false)
+  const [isOAuthConnected, setIsOAuthConnected] = createSignal(checkStoredOAuth(props.provider.id))
   const [modelError, setModelError] = createSignal<string | null>(null)
   const [oauthError, setOauthError] = createSignal<string | null>(null)
   const [deviceCode, setDeviceCode] = createSignal<DeviceCodeResponse | null>(null)
@@ -181,17 +221,24 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
   const handleOAuthDisconnect = async () => {
     try {
       await removeStoredAuth(props.provider.id as LLMProvider)
-      // Also clear from frontend credentials store
-      const stored = localStorage.getItem('estela_credentials')
-      if (stored) {
-        const all = JSON.parse(stored) as Record<string, unknown>
-        delete all[props.provider.id]
-        localStorage.setItem('estela_credentials', JSON.stringify(all))
-      }
+      clearProviderCredentials(props.provider.id)
       setIsOAuthConnected(false)
       props.onClearApiKey?.()
     } catch (err) {
       console.error('OAuth disconnect failed:', err)
+    }
+  }
+
+  const handleClearAll = async () => {
+    try {
+      // Clear OAuth from core auth store
+      await removeStoredAuth(props.provider.id as LLMProvider).catch(() => {})
+      clearProviderCredentials(props.provider.id)
+      setIsOAuthConnected(false)
+      setApiKey('')
+      props.onClearApiKey?.()
+    } catch (err) {
+      console.error('Clear credentials failed:', err)
     }
   }
 
@@ -451,16 +498,28 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
 
           {/* Footer links */}
           <div class="flex items-center justify-between">
-            <Show when={props.provider.apiKey}>
-              <button
-                type="button"
-                onClick={() => props.onTestConnection?.()}
-                class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
-              >
-                Test connection
-              </button>
-            </Show>
-            <div class="flex-1" />
+            <div class="flex items-center gap-3">
+              <Show when={props.provider.apiKey}>
+                <button
+                  type="button"
+                  onClick={() => props.onTestConnection?.()}
+                  class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+                >
+                  Test connection
+                </button>
+              </Show>
+              <Show when={props.provider.apiKey || isOAuthConnected()}>
+                <button
+                  type="button"
+                  onClick={handleClearAll}
+                  class="flex items-center gap-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors"
+                  title="Clear all credentials for this provider"
+                >
+                  <Trash2 class="w-2.5 h-2.5" />
+                  Clear credentials
+                </button>
+              </Show>
+            </div>
             <a
               href={getProviderDocsUrl(props.provider.id)}
               target="_blank"

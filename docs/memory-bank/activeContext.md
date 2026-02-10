@@ -6,9 +6,25 @@
 
 ## Current Focus
 
-**Desktop App — Phase 1.5 feature-complete, 1778 tests passing**
+**Session 54 — Planning & Audit: Testing, Debug Logging, PI Parity**
 
-Phase 1 is done. Phase 1.5 has closed all competitive gaps, added comprehensive settings, and wired memory recall + auto-compaction. Only manual testing/verification remains.
+Phase 1.5 remains feature-complete. Focus is now a full audit, test planning (OAuth + message flow), debug logging coverage, and PI Coding Agent parity planning before Phase 2.
+
+### What Just Happened (2026-02-10)
+
+**Audit + Planning (Session 54):**
+- Ran full codebase audit (LOC, tests, typecheck, Biome, TODO/FIXME/HACK, console.log scan, git status, file length violations)
+- Compared reference codebases and identified new gaps (PI parity items, MCP OAuth, remote browser, minimal mode)
+- Drafted OAuth and message flow test plans
+- Audited logging gaps in chat/agent/core/session/settings/file-watcher/ChatView
+- Planned Sprint 1.6: Testing & Debug; created ticket list
+
+**Debug Logging Pass (Session 55):**
+- Added structured logging in `useChat` (send/queue/steer/cancel/stream errors)
+- Added structured logging in core bridge init/dispose
+- Added structured logging in file watcher start/stop/dedup
+- Replaced console warnings in settings/session store with file logger
+- Logged tool approval resolution in ChatView
 
 ### What Just Happened (2026-02-09)
 
@@ -94,6 +110,33 @@ Phase 1 is done. Phase 1.5 has closed all competitive gaps, added comprehensive 
 - [ ] Test full app flow in Tauri dev (chat, tools, settings, sessions)
 - [ ] Verify all keyboard shortcuts work (Ctrl+B, Ctrl+,, Ctrl+M)
 - [ ] Test on multiple Linux DEs (GNOME, KDE, Cosmic)
+
+### Sprint 1.6: Testing & Debug (Planned)
+- OAuth unit tests + integration tests
+- Message flow unit + integration tests
+- Debug logging coverage (chat/agent/core/session/settings/file-watcher)
+- PI Coding Agent parity items
+- Manual Tauri OAuth test checklist
+
+### Session 54 Planning Output
+Ready to implement tomorrow (priority order):
+- OAuth test suite (unit + integration)
+- Message flow test suite (unit + integration)
+- Debug logging coverage pass
+- PI Coding Agent parity items
+- Manual Tauri OAuth testing
+Estimated sessions:
+- OAuth tests: 2 sessions
+- Message flow tests: 2 sessions
+- Debug logging: 1 session
+- PI parity: 2 sessions
+- Manual Tauri test sweep: 1 session
+Dependencies:
+- OAuth integration tests depend on stable credential storage keys
+- Message flow integration tests depend on chat stream mock harness
+- Debug logging should land before manual test sweep for better diagnostics
+Most important first:
+- OAuth test suite (prevents regression of OAuth credential routing)
 
 ### Phase 2: Plugin Ecosystem (THE DIFFERENTIATOR)
 See `docs/ROADMAP.md` for sprint breakdown.

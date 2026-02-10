@@ -15,12 +15,28 @@ vi.mock('@tauri-apps/api/core', () => ({
     return null
   }),
 }))
+vi.mock('@estela/core', () => ({
+  setStoredAuth: vi.fn().mockResolvedValue(undefined),
+}))
 vi.mock('../../stores/settings', () => ({
   syncProviderCredentials: vi.fn(),
 }))
+vi.mock('../logger', () => ({
+  logDebug: vi.fn(),
+  logInfo: vi.fn(),
+  logWarn: vi.fn(),
+  logError: vi.fn(),
+}))
 
 import { openUrl } from '@tauri-apps/plugin-opener'
-import { getOAuthConfig, isOAuthSupported, startOAuthFlow, storeOAuthCredentials } from './oauth'
+import {
+  decodeJwtPayload,
+  extractAccountId,
+  getOAuthConfig,
+  isOAuthSupported,
+  startOAuthFlow,
+  storeOAuthCredentials,
+} from './oauth'
 
 // ============================================================================
 // isOAuthSupported
@@ -97,6 +113,55 @@ describe('storeOAuthCredentials', () => {
     const parsed = JSON.parse(localStorage.getItem('estela_credentials')!)
     expect(parsed.anthropic.value).toBe('tok-a')
     expect(parsed.openai.value).toBe('tok-o')
+  })
+})
+
+// ============================================================================
+// decodeJwtPayload / extractAccountId
+// ============================================================================
+
+function base64UrlEncode(value: string): string {
+  return Buffer.from(value)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+}
+
+function makeJwt(payload: Record<string, unknown>): string {
+  const header = base64UrlEncode(JSON.stringify({ alg: 'none', typ: 'JWT' }))
+  const body = base64UrlEncode(JSON.stringify(payload))
+  return `${header}.${body}.`
+}
+
+describe('decodeJwtPayload', () => {
+  it('decodes valid JWT payload', () => {
+    const jwt = makeJwt({ sub: '123', chatgpt_account_id: 'acct-1' })
+    const decoded = decodeJwtPayload(jwt)
+    expect(decoded.sub).toBe('123')
+    expect(decoded.chatgpt_account_id).toBe('acct-1')
+  })
+
+  it('returns empty object for invalid JWT', () => {
+    expect(decodeJwtPayload('bad.token')).toEqual({})
+    expect(decodeJwtPayload('not-a-jwt')).toEqual({})
+  })
+})
+
+describe('extractAccountId', () => {
+  it('extracts accountId from root claim', () => {
+    const jwt = makeJwt({ chatgpt_account_id: 'acct-root' })
+    expect(extractAccountId(jwt)).toBe('acct-root')
+  })
+
+  it('extracts accountId from organizations array', () => {
+    const jwt = makeJwt({ organizations: [{ id: 'org-123' }] })
+    expect(extractAccountId(jwt)).toBe('org-123')
+  })
+
+  it('returns undefined when claim missing', () => {
+    const jwt = makeJwt({ sub: '123' })
+    expect(extractAccountId(jwt)).toBeUndefined()
   })
 })
 

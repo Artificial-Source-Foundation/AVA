@@ -34,7 +34,7 @@ import {
   saveMemoryItem,
   saveTerminalExecution,
 } from '../services/database'
-import { logError } from '../services/logger'
+import { logDebug, logError, logInfo, logWarn } from '../services/logger'
 import type {
   Agent,
   FileOperation,
@@ -179,6 +179,7 @@ export function useSession() {
       try {
         const dbSessions = await getSessionsWithStats(projectId)
         setSessions(dbSessions)
+        logDebug('session', 'Loaded sessions', { count: dbSessions.length })
       } catch (err) {
         logError('Session', 'Failed to load sessions', err)
         setSessions([])
@@ -210,6 +211,8 @@ export function useSession() {
       setMessages([])
       setAgents([])
 
+      logInfo('session', 'Session created', { id: session.id })
+
       // Persist last session
       localStorage.setItem(STORAGE_KEYS.LAST_SESSION, session.id)
 
@@ -222,7 +225,7 @@ export function useSession() {
     switchSession: async (id: string): Promise<void> => {
       const session = sessions().find((s) => s.id === id)
       if (!session) {
-        console.warn(`Session ${id} not found`)
+        logWarn('session', 'Session not found', { id })
         return
       }
 
@@ -238,6 +241,7 @@ export function useSession() {
       try {
         const dbMessages = await getMessages(id)
         setMessages(dbMessages)
+        logInfo('session', 'Session switched', { id, messageCount: dbMessages.length })
       } catch (err) {
         logError('Session', 'Failed to load messages', err)
         setMessages([])

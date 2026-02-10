@@ -16,6 +16,7 @@ import { checkAutoApproval, createApprovalGate } from '../lib/tool-approval'
 import { getCoreCompactor, getCoreMemory, getCoreTracker } from '../services/core-bridge'
 import { deleteMessageFromDb, saveMessage, updateMessage } from '../services/database'
 import { createClient, getProviderForModel, type LLMClient } from '../services/llm/bridge'
+import { logDebug, logError, logInfo, logWarn } from '../services/logger'
 import { notifyCompletion } from '../services/notifications'
 import { useProject } from '../stores/project'
 import { useSession } from '../stores/session'
@@ -57,6 +58,7 @@ export interface ContextStats {
 }
 
 export function useChat() {
+  const LOG_SRC = 'chat'
   const [isStreaming, setIsStreaming] = createSignal(false)
   const [error, setError] = createSignal<StreamError | null>(null)
   const [currentProvider, setCurrentProvider] = createSignal<LLMProvider | null>(null)
@@ -127,11 +129,13 @@ export function useChat() {
       }
       syncTrackerStats()
 
-      console.info(
-        `[Compaction] Removed ${result.originalCount - result.compactedCount} messages, saved ~${result.tokensSaved} tokens (${result.strategyUsed})`
-      )
+      logInfo(LOG_SRC, 'Compaction complete', {
+        removed: result.originalCount - result.compactedCount,
+        tokensSaved: result.tokensSaved,
+        strategy: result.strategyUsed,
+      })
     } catch (err) {
-      console.warn('[Compaction] Failed:', err)
+      logWarn(LOG_SRC, 'Compaction failed', err)
     }
   }
 
@@ -176,6 +180,11 @@ export function useChat() {
     // Get provider for the model
     const provider = getProviderForModel(options.model)
     setCurrentProvider(provider)
+    logDebug(LOG_SRC, 'Stream start', {
+      sessionId: options.sessionId,
+      model: options.model,
+      provider,
+    })
 
     // Create client via core (will handle auth internally)
     let client: LLMClient
@@ -232,6 +241,7 @@ export function useChat() {
         )) {
           if (delta.error) {
             options.onError(delta.error)
+            logError(LOG_SRC, 'Stream error', delta.error)
             return
           }
 
@@ -262,6 +272,10 @@ export function useChat() {
           if (delta.done) {
             // If there are pending tool uses, execute them
             if (pendingToolUses.length > 0) {
+              logDebug(LOG_SRC, 'Tool execution start', {
+                count: pendingToolUses.length,
+                sessionId: options.sessionId,
+              })
               // Add assistant message with tool uses to conversation
               const assistantContent = [
                 ...(fullContent ? [{ type: 'text' as const, text: fullContent }] : []),
@@ -297,6 +311,10 @@ export function useChat() {
                     toolUse.input as Record<string, unknown>
                   )
                   if (!approved) {
+                    logInfo(LOG_SRC, 'Tool denied', {
+                      toolName: toolUse.name,
+                      sessionId: options.sessionId,
+                    })
                     if (tc) {
                       tc.status = 'error'
                       tc.error = 'User denied'
@@ -318,6 +336,10 @@ export function useChat() {
                 options.onToolUpdate?.([...allToolCalls])
 
                 const result = await executeTool(toolUse.name, toolUse.input, toolCtx)
+                logDebug(LOG_SRC, 'Tool finished', {
+                  toolName: toolUse.name,
+                  success: result.success,
+                })
                 let toolOutput = result.output
 
                 // Lint check: if file was modified and autoFixLint is on, run linter
@@ -361,6 +383,10 @@ export function useChat() {
               continueStreaming = true
             } else {
               // No tools, we're done
+              logDebug(LOG_SRC, 'Stream done', {
+                sessionId: options.sessionId,
+                toolCalls: allToolCalls.length,
+              })
               options.onComplete(
                 fullContent,
                 delta.usage?.totalTokens,
@@ -371,12 +397,14 @@ export function useChat() {
         }
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') {
+          logInfo(LOG_SRC, 'Stream aborted', { sessionId: options.sessionId })
           return // Silently handle abort
         }
         options.onError({
           type: 'unknown',
           message: err instanceof Error ? err.message : 'Unknown error',
         })
+        logError(LOG_SRC, 'Stream failed', err)
         return
       }
     }
@@ -504,6 +532,9 @@ export function useChat() {
   ): Promise<void> {
     if (isStreaming()) {
       setMessageQueue((prev) => [...prev, { content, model, images }])
+      logInfo(LOG_SRC, 'Queued message', {
+        queueLength: messageQueue().length + 1,
+      })
       return
     }
 
@@ -516,6 +547,10 @@ export function useChat() {
     setStreamingTokenEstimate(0)
     setActiveToolCalls([])
     abortRef.current = new AbortController()
+    logInfo(LOG_SRC, 'Send message', {
+      model: targetModel,
+      sessionId: session.currentSession()?.id ?? 'new',
+    })
 
     try {
       // Ensure session exists
@@ -572,6 +607,11 @@ export function useChat() {
           syncTrackerStats()
           await maybeCompact()
           notifyCompletion('Chat complete', text.slice(0, 100))
+          logInfo(LOG_SRC, 'Message complete', {
+            model: targetModel,
+            tokens: tokens ?? null,
+            toolCalls: toolCalls?.length ?? 0,
+          })
         },
         onError: (err) => {
           setError(err)
@@ -581,6 +621,7 @@ export function useChat() {
             retryAfter: err.retryAfter,
             timestamp: Date.now(),
           })
+          logError(LOG_SRC, 'Message failed', err)
         },
         signal: abortRef.current!.signal,
       })
@@ -608,6 +649,7 @@ export function useChat() {
     setStreamingStartedAt(Date.now())
     setActiveToolCalls([])
     abortRef.current = new AbortController()
+    logInfo(LOG_SRC, 'Regenerate start', { sessionId })
 
     try {
       const assistantMsg = await createAssistantMessage(sessionId)
@@ -633,6 +675,11 @@ export function useChat() {
           syncTrackerStats()
           await maybeCompact()
           notifyCompletion('Regeneration complete', text.slice(0, 100))
+          logInfo(LOG_SRC, 'Regenerate complete', {
+            sessionId,
+            tokens: tokens ?? null,
+            toolCalls: toolCalls?.length ?? 0,
+          })
         },
         onError: (err) => {
           setError(err)
@@ -642,6 +689,7 @@ export function useChat() {
             retryAfter: err.retryAfter,
             timestamp: Date.now(),
           })
+          logError(LOG_SRC, 'Regenerate failed', err)
         },
         signal: abortRef.current!.signal,
       })
@@ -659,6 +707,7 @@ export function useChat() {
     abortRef.current?.abort()
     setMessageQueue([])
     setIsStreaming(false)
+    logInfo(LOG_SRC, 'Cancel', {})
   }
 
   /** Process the next queued follow-up message */
@@ -667,6 +716,7 @@ export function useChat() {
     if (queue.length === 0) return
     const next = queue[0]
     setMessageQueue((prev) => prev.slice(1))
+    logDebug(LOG_SRC, 'Dequeue message', { remaining: messageQueue().length })
     await sendMessage(next.content, next.model, next.images)
   }
 
@@ -682,11 +732,13 @@ export function useChat() {
     setMessageQueue([{ content, model, images }])
     abortRef.current?.abort()
     setIsStreaming(false)
+    logInfo(LOG_SRC, 'Steer', { queued: 1 })
   }
 
   /** Clear all queued messages */
   function clearQueue(): void {
     setMessageQueue([])
+    logDebug(LOG_SRC, 'Clear queue')
   }
 
   /**
@@ -715,6 +767,7 @@ export function useChat() {
     session.setRetryingMessageId(assistantMessageId)
     session.setMessageError(assistantMessageId, null)
     session.deleteMessage(assistantMessageId)
+    logInfo(LOG_SRC, 'Retry message', { messageId: assistantMessageId })
 
     try {
       await regenerate()
@@ -739,6 +792,7 @@ export function useChat() {
     session.stopEditing()
 
     // Regenerate response
+    logInfo(LOG_SRC, 'Edit and resend', { messageId })
     await regenerate()
   }
 
@@ -753,6 +807,7 @@ export function useChat() {
       return { success: false, message: 'No project directory' }
     }
     const result = await undoLastAutoCommit(cwd)
+    logInfo(LOG_SRC, 'Undo last edit', { success: result.success })
     return {
       success: result.success,
       message: result.success

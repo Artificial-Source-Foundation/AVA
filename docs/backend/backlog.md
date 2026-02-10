@@ -6,6 +6,22 @@
 
 ## Test Coverage Gaps (Priority Order)
 
+## Audit Additions (Session 54)
+
+### P0
+- OAuth unit tests (decodeJwtPayload, extractAccountId, checkStoredOAuth, clearProviderCredentials)
+- OAuth integration tests (credential routing, store/clear flow, isOAuthConnected init)
+- Message flow tests (queue/steer/cancel/stream + watcher → chat)
+- Debug logging coverage across chat/agent/core/session/settings/file-watcher/ChatView
+
+### P1
+- PI Coding Agent parity items (provider switching, session branching tree, minimal tool mode, runtime skill creation)
+- MCP OAuth flows (auth + refresh + storage)
+- Remote browser support baseline
+
+### P2
+- Reduce oversized frontend files (>300 lines) to meet CLAUDE.md constraints
+
 ### High Priority — Pure Functions, Easy Wins
 
 | Module | Files to Test | Estimated Tests | Effort |
@@ -107,4 +123,4 @@ This backlog feeds into the project roadmap:
 
 ---
 
-*Last updated: 2026-02-09*
+*Last updated: 2026-02-10*

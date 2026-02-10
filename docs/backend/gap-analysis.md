@@ -10,6 +10,8 @@
 
 Estela has strong foundations in multi-agent orchestration, codebase intelligence, memory, and permissions — areas where most competitors have nothing. But there are **15 high-impact gaps** that multiple codebases implement and Estela lacks entirely.
 
+**Closed since last update (Sessions 48-53):** message queue, file watcher, step-level undo, git auto-commit, weak/editor model split, streaming tool preview.
+
 **Biggest gaps by frequency** (how many codebases have it):
 
 | Gap | Who Has It | Priority |
@@ -30,6 +32,17 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 | Tree-sitter (100+ languages) | Aider | **Medium** |
 | RPC/SDK mode for embedding | PI, Aider | **Low** |
 | Telemetry/analytics | Cline, Gemini CLI | **Low** |
+
+### New Gaps Identified (2026-02-10 Audit)
+
+| Gap | Source | Priority |
+|-----|--------|----------|
+| Mid-session provider switching | PI | **Medium** |
+| Session branching tree (true forks, shared prefix) | PI | **Medium** |
+| Minimal tool mode (4-tool subset) | PI | Low |
+| Runtime skill/tool creation + hot reload | PI | Medium |
+| MCP OAuth flows (auth + refresh + storage) | Cline, Gemini CLI, Goose | Medium |
+| Remote browser support | Cline | Medium |
 
 ---
 
@@ -324,7 +337,7 @@ These are Estela's **unique advantages** — features no other codebase implemen
 
 ### PI Coding Agent (v0.52.9)
 - **Philosophy**: Minimal core, maximum extensibility. "No permission popups."
-- **Steal**: Message queue (steering + follow-up), RPC mode, scoped models, hot reload
+- **Steal**: Mid-session provider switching, session branching tree, minimal tool mode, runtime skill creation, RPC mode
 - **Skip**: Their extension system (we have plugins)
 
 ### OpenCode
@@ -364,4 +377,4 @@ These are Estela's **unique advantages** — features no other codebase implemen
 
 ---
 
-*Last updated: 2026-02-09*
+*Last updated: 2026-02-10*

@@ -6,6 +6,20 @@
 
 ## Current Session
 
+**Session 55** (2026-02-10) — Debug Logging Pass
+- Added structured logging for chat flow (send/queue/steer/cancel/stream errors)
+- Added core bridge init/dispose logging
+- Added file watcher start/stop/dedup logging
+- Replaced console warnings in settings/session with file logger
+- Logged tool approval resolution in ChatView
+
+**Session 54** (2026-02-10) — Planning & Audit
+- Codebase audit: LOC, tests, typecheck, Biome, TODO/FIXME, console.log scan, git status, file size violations
+- Reference comparisons: PI, Cline, Gemini CLI, OpenCode, Aider, Goose, Plandex, OpenHands
+- Test plans drafted: OAuth flows + message flow (queue/steer/cancel/watch)
+- Logging audit across chat/agent/core/session/settings/file-watcher/ChatView
+- Sprint 1.6 planning + tickets (testing + debug logging + PI parity)
+
 **Session 53** (2026-02-09) — File Watcher + Step-Level Undo
 - File watcher service (`src/services/file-watcher.ts`) — Tauri FS `watch()`, 6 AI patterns, 30+ extensions, dedup
 - ChatView wiring — starts/stops watcher based on settings + project dir, auto-sends AI comments as chat messages
@@ -162,6 +176,8 @@
 | 2026-02-08 | **WebKitGTK fixes. Splash. Layout rework. Appearance tab. Backend tests (1778). Core frontend wiring.** |
 | 2026-02-09 | **Settings hardening (16 settings). Gap closure: cost tracking, vision, lint→fix, checkpoints, per-message tokens.** |
 | 2026-02-09 | **Sessions 48-53: git auto-commit, weak/editor models, OAuth fix, message queue, file watcher, step-level undo. 12/15 gaps DONE.** |
+| 2026-02-10 | **Session 54: Audit + planning for Sprint 1.6 (testing, logging, PI parity).** |
+| 2026-02-10 | **Session 55: Debug logging pass across chat/core/session/settings/file-watcher.** |
 
 ---
 

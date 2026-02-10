@@ -11,6 +11,7 @@ import { useAgent } from '../../hooks/useAgent'
 import { useChat } from '../../hooks/useChat'
 import type { AIComment } from '../../services/file-watcher'
 import { startFileWatcher, stopFileWatcher } from '../../services/file-watcher'
+import { logInfo } from '../../services/logger'
 import { useProject } from '../../stores/project'
 import { useSettings } from '../../stores/settings'
 import { ToolApprovalDialog } from '../dialogs/ToolApprovalDialog'
@@ -26,6 +27,11 @@ export const ChatView: Component = () => {
 
   // File watcher — start/stop based on settings + project directory
   const handleAIComment = (comment: AIComment) => {
+    logInfo('chat', 'AI comment received', {
+      filePath: comment.filePath,
+      lineNumber: comment.lineNumber,
+      type: comment.type,
+    })
     const prefix = comment.type === 'execute' ? '' : '[Question] '
     const message = `${prefix}${comment.content}\n\n\`\`\`\n// File: ${comment.filePath}:${comment.lineNumber}\n${comment.context}\n\`\`\``
     void chat.sendMessage(message)
@@ -56,6 +62,13 @@ export const ChatView: Component = () => {
     const request = activeApproval()
     if (approved && alwaysAllow && request) {
       addAutoApprovedTool(request.toolName)
+    }
+    if (request) {
+      logInfo('approval', 'Tool approval resolved', {
+        toolName: request.toolName,
+        approved,
+        alwaysAllow: !!alwaysAllow,
+      })
     }
     // Resolve whichever approval is active
     if (chat.pendingApproval()) {

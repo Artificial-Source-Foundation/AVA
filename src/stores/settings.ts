@@ -13,6 +13,7 @@ import type { LLMProviderConfig } from '../components/settings/tabs/ProvidersTab
 import { defaultProviders } from '../components/settings/tabs/ProvidersTab'
 import { STORAGE_KEYS } from '../config/constants'
 import { getCoreSettings } from '../services/core-bridge'
+import { logDebug, logError, logInfo, logWarn } from '../services/logger'
 import { readSettingsFromFS, writeSettingsToFS } from '../services/settings-fs'
 
 // ============================================================================
@@ -106,7 +107,7 @@ export async function detectEnvApiKeys(): Promise<number> {
   }
 
   if (detected > 0) {
-    console.log(`Auto-detected ${detected} API key(s) from environment variables`)
+    logInfo('settings', 'Auto-detected API keys', { count: detected })
   }
 
   return detected
@@ -138,6 +139,10 @@ export function pushSettingsToCore() {
     // Provider inference happens in core's getEditorModelConfig()
   }
   sm.set('provider', providerUpdate)
+  logDebug('settings', 'Provider settings synced', {
+    defaultProvider: providerUpdate.defaultProvider,
+    defaultModel: providerUpdate.defaultModel,
+  })
 
   sm.set('permissions', {
     allowBashExecution: s.permissionMode !== 'ask',
@@ -152,6 +157,7 @@ export function pushSettingsToCore() {
     branchPrefix: 'estela/',
     messagePrefix: s.git.commitPrefix,
   })
+  logDebug('settings', 'Core settings synced')
 }
 
 // ============================================================================
@@ -401,7 +407,7 @@ function saveSettings(settings: AppSettings) {
     // Bridge estela-mode for index.html flash-prevention script
     localStorage.setItem('estela-mode', settings.mode)
   } catch (err) {
-    console.warn('[settings] localStorage write failed:', err)
+    logWarn('settings', 'localStorage write failed', err)
   }
   // Write to Tauri FS backend (async, fire-and-forget)
   writeSettingsToFS(serializable).catch(() => {})
@@ -644,7 +650,7 @@ async function importSettings(): Promise<void> {
         saveSettings(merged)
         applyAppearance()
       } catch (err) {
-        console.warn('[settings] Import failed:', err)
+        logWarn('settings', 'Import failed', err)
       }
       resolve()
     }
@@ -937,7 +943,7 @@ export async function hydrateSettingsFromFS(): Promise<void> {
       applyAppearance()
     }
   } catch (err) {
-    console.warn('[settings] FS hydration failed:', err)
+    logWarn('settings', 'FS hydration failed', err)
   }
 }
 

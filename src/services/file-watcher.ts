@@ -12,6 +12,7 @@
  */
 
 import { createSignal } from 'solid-js'
+import { logDebug, logInfo, logWarn } from './logger'
 
 // ============================================================================
 // Types
@@ -211,11 +212,20 @@ export async function startFileWatcher(
                 processedHashes.add(key)
                 newComments.push(comment)
                 onComment(comment)
+              } else {
+                logDebug('file-watcher', 'Dedup comment', {
+                  filePath: comment.filePath,
+                  lineNumber: comment.lineNumber,
+                })
               }
             }
 
             if (newComments.length > 0) {
               setPendingComments((prev) => [...prev, ...newComments])
+              logInfo('file-watcher', 'AI comment detected', {
+                count: newComments.length,
+                filePath,
+              })
             }
           } catch {
             // File might be deleted, binary, or locked — skip silently
@@ -227,9 +237,9 @@ export async function startFileWatcher(
 
     unwatchFn = unwatch as () => void
     setIsWatching(true)
-    console.info(`[FileWatcher] Watching: ${projectDir}`)
+    logInfo('file-watcher', 'Watching started', { projectDir })
   } catch (err) {
-    console.warn('[FileWatcher] Failed to start:', err)
+    logWarn('file-watcher', 'Failed to start', err)
   }
 }
 
@@ -242,8 +252,9 @@ export async function stopFileWatcher(): Promise<void> {
     unwatchFn = null
   }
   processedHashes.clear()
-  setIsWatching(false)
   setPendingComments([])
+  setIsWatching(false)
+  logInfo('file-watcher', 'Watching stopped')
 }
 
 /**

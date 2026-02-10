@@ -88,6 +88,33 @@ See [Frontend Backlog](docs/frontend/backlog.md) for what's next.
 
 ---
 
+## Sprint 1.6: Testing & Debug (PLANNED)
+
+Hardening sprint focused on tests, logging, and parity with PI Coding Agent.
+
+### Sprint 1.6.1: OAuth Test Suite
+- Unit tests for JWT decode + accountId extraction
+- Integration tests for credential routing + storage
+
+### Sprint 1.6.2: Message Flow Test Suite
+- Queue/steer/cancel unit tests
+- Stream integration tests + watcher-triggered messages
+
+### Sprint 1.6.3: Debug Logging Coverage
+- Structured logs across chat/agent/core/session/settings/file-watcher
+
+### Sprint 1.6.4: PI Coding Agent Parity
+- Mid-session provider switching
+- Session branching tree
+- Minimal tool mode
+- Runtime skill creation
+
+### Sprint 1.6.5: Manual Tauri Testing
+- OAuth browser flow, callback, token exchange
+- Chat stream validation per provider
+
+---
+
 ## Phase 2: Plugin Ecosystem (NEXT — THE DIFFERENTIATOR)
 
 This is what makes Estela "The Obsidian of AI Coding". Easy to create, discover, install.

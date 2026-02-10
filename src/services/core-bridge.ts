@@ -22,6 +22,7 @@ import {
   type ToolConfirmationRequest,
   type WorkerRegistry,
 } from '@estela/core'
+import { logInfo, logWarn } from './logger'
 
 // ============================================================================
 // Singleton State
@@ -95,6 +96,10 @@ export interface CoreBridgeOptions {
  * Returns a cleanup function to dispose resources.
  */
 export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() => void> {
+  logInfo('core', 'Init core bridge', {
+    contextLimit: opts.contextLimit ?? 200_000,
+    hasOpenAIApiKey: !!opts.openAIApiKey,
+  })
   // Settings — use the core singleton
   _settings = getSettingsManager()
 
@@ -115,6 +120,7 @@ export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() =
     try {
       _memory = createMemoryManager({ openAIApiKey: opts.openAIApiKey })
     } catch {
+      logWarn('core', 'Memory init failed')
       _memory = null
     }
   }
@@ -127,5 +133,6 @@ export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() =
     _tracker = null
     _registry = null
     _settings = null
+    logInfo('core', 'Core bridge disposed')
   }
 }

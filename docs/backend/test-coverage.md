@@ -19,6 +19,24 @@
 | TS errors | 0 |
 | Biome errors | 0 |
 
+## Planned Tests (Session 54)
+
+### OAuth (Frontend + Core Routing)
+- `src/services/auth/oauth.test.ts` — add unit tests for `decodeJwtPayload`, `extractAccountId`
+- `src/components/settings/tabs/ProvidersTab.test.tsx` — `checkStoredOAuth`, `clearProviderCredentials`, `isOAuthConnected` init
+- `src/stores/settings.test.ts` — `syncProviderCredentials`, `syncAllApiKeys`, `handleClearAll` credential clearing
+- Integration: OpenAI OAuth vs Anthropic API key routing via `packages/core/src/llm/providers/openai.ts` + `packages/core/src/llm/client.ts`
+
+### Message Flow (Frontend)
+- `src/hooks/useChat.test.ts` — queue/steer/cancel behavior, session switch clears queue
+- `src/hooks/useAgent.test.ts` — tool approval events + cancel flow
+- `src/components/chat/ChatView.test.tsx` — watcher-triggered AI comment → auto-send
+
+## Current Gaps (Audit)
+
+- OAuth: no targeted unit/integration coverage for JWT parsing, credential routing, or clear-all flows
+- Message flow: 0 frontend tests for send→stream→complete, queue/steer/cancel, watcher→chat
+
 ---
 
 ## Coverage by Module
@@ -158,4 +176,4 @@ These modules have pure functions that could be unit tested:
 
 ---
 
-*Last updated: 2026-02-08*
+*Last updated: 2026-02-10*

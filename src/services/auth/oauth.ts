@@ -147,7 +147,7 @@ async function generatePKCE(): Promise<PKCEParams> {
  * Decode JWT payload without signature verification.
  * Safe for extracting claims from tokens already validated by the auth server.
  */
-function decodeJwtPayload(jwt: string): Record<string, unknown> {
+export function decodeJwtPayload(jwt: string): Record<string, unknown> {
   const parts = jwt.split('.')
   if (parts.length !== 3) return {}
   try {
@@ -163,7 +163,7 @@ function decodeJwtPayload(jwt: string): Record<string, unknown> {
  * Extract ChatGPT account ID from an OpenAI id_token.
  * The id_token contains organization claims when `id_token_add_organizations=true`.
  */
-function extractAccountId(idToken: string): string | undefined {
+export function extractAccountId(idToken: string): string | undefined {
   const payload = decodeJwtPayload(idToken)
   // Direct field (some responses include it at top level)
   if (typeof payload.chatgpt_account_id === 'string') return payload.chatgpt_account_id

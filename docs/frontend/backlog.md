@@ -1,6 +1,6 @@
 # Frontend Backlog
 
-> What's missing, prioritized. Updated 2026-02-09.
+> What's missing, prioritized. Updated 2026-02-13.
 
 ---
 
@@ -44,7 +44,13 @@ These gaps were prioritized previously and are now mostly delivered based on cha
 
 ### Remaining hardening
 - [x] Add automated tests for queue/steer/cancel, watcher-triggered flow, and OAuth edge cases (Sprint 1.6)
+- [x] Stabilize streaming jitter/flicker and chat overflow behavior in desktop runtime
 - [ ] Expand manual Tauri validation on Linux DE variants and light mode polish
+
+### Next execution queue
+- [ ] Implement session auto-title UX validation and polish
+- [ ] Final manual QA pass for chat stream UX across long sessions
+- [ ] Begin Sprint 2.3 plugin UX implementation from plan doc
 
 ---
 

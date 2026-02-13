@@ -118,7 +118,13 @@ This sprint is partially implemented and now tracked as active.
 
 ### Sprint 1.6 Verification Workflow
 - Added `npm run verify:mvp` to run lint + typecheck + full test suite.
-- Current blocker: repository has pre-existing lint/type issues outside this sprint scope; tests are green.
+- Current status: verification pipeline is green in current branch (`verify:mvp` passed).
+
+### Next Build Steps (Immediate)
+- [ ] Implement automatic session titles from first user message for new chats
+- [ ] Finish chat streaming polish (eliminate remaining send/start/end micro-jitter)
+- [ ] Complete manual Tauri OAuth validation (connect/disconnect + send flow per provider)
+- [ ] Start Sprint 2.3 frontend plugin UX implementation from `docs/plans/2026-02-13-frontend-plugin-ux-sprint-2-3.md`
 
 ---
 

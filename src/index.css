@@ -374,12 +374,10 @@ button {
 @keyframes mesh-breathe {
   0%,
   100% {
-    background-position: 0% 50%;
-    opacity: 0.6;
+    opacity: 0.58;
   }
   50% {
-    background-position: 100% 50%;
-    opacity: 0.8;
+    opacity: 0.72;
   }
 }
 
@@ -394,13 +392,14 @@ button {
 .onboarding-bg::before {
   content: "";
   position: absolute;
-  inset: -50%;
+  inset: -12%;
   background:
     radial-gradient(ellipse 80% 60% at 20% 80%, rgba(139, 92, 246, 0.12) 0%, transparent 60%),
     radial-gradient(ellipse 60% 80% at 80% 20%, rgba(59, 130, 246, 0.08) 0%, transparent 60%),
     radial-gradient(ellipse 50% 50% at 50% 50%, rgba(139, 92, 246, 0.04) 0%, transparent 70%);
-  background-size: 200% 200%;
-  animation: mesh-breathe 12s ease-in-out infinite;
+  background-size: 120% 120%;
+  animation: mesh-breathe 16s ease-in-out infinite;
+  will-change: opacity;
   pointer-events: none;
 }
 
@@ -610,8 +609,14 @@ button {
   inset: 0;
   background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.03), transparent);
   background-size: 200% 100%;
-  animation: shimmer 3s ease-in-out infinite;
+  opacity: 0;
+  transition: opacity 160ms ease;
   pointer-events: none;
+}
+
+.feature-card:hover::before {
+  opacity: 1;
+  animation: shimmer 2.2s ease-out 1;
 }
 
 /* Floating particle dots */
@@ -1067,12 +1072,12 @@ button {
 /* Ambient mesh gradient — reuses onboarding breathe animation */
 .splash-mesh {
   position: absolute;
-  inset: -50%;
+  inset: -12%;
   background:
     radial-gradient(ellipse 80% 60% at 20% 80%, rgba(139, 92, 246, 0.08) 0%, transparent 60%),
     radial-gradient(ellipse 60% 80% at 80% 20%, rgba(59, 130, 246, 0.06) 0%, transparent 60%);
-  background-size: 200% 200%;
-  animation: mesh-breathe 12s ease-in-out infinite;
+  background-size: 120% 120%;
+  opacity: 0.74;
   pointer-events: none;
 }
 
@@ -1119,4 +1124,19 @@ button {
   opacity: 0;
   transition: opacity 0.4s ease-out;
   pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-bg::before,
+  .onboarding-logo,
+  .step-enter,
+  .stagger-child,
+  .floating-particle,
+  .feature-card::before,
+  .splash-mesh,
+  .splash-logo,
+  .splash-dot {
+    animation: none !important;
+    transition: none !important;
+  }
 }

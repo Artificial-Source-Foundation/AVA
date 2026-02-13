@@ -1,101 +1,69 @@
 # Sprint 1.6: Testing & Debug
 
-TICKET-01: OAuth Unit Tests (JWT + Storage Helpers)
+Status update date: 2026-02-13
 
-Priority: P0
-Effort: M
-Files: src/services/auth/oauth.test.ts, src/components/settings/tabs/ProvidersTab.test.tsx
-Description: Add unit tests for `decodeJwtPayload`, `extractAccountId`, `checkStoredOAuth`, `clearProviderCredentials`.
-Acceptance Criteria:
-- decodeJwtPayload handles valid/invalid JWTs
-- extractAccountId returns correct claim variants (root, organizations)
+## Ticket Board
 
-TICKET-02: OAuth Integration Tests (Routing + Storage)
+| Ticket | Title | Priority | Status | Evidence | Notes |
+|---|---|---|---|---|---|
+| TICKET-01 | OAuth Unit Tests (JWT + Storage Helpers) | P0 | done | `packages/core/src/llm/client.test.ts`, `src/services/auth/oauth.test.ts`, `src/services/auth/oauth-flow.test.ts` | Added reconnect/clear-provider coverage and additional `getAuth` edge tests. |
+| TICKET-02 | OAuth Integration Tests (Routing + Storage) | P0 | done | `src/services/auth/oauth.test.ts`, `src/services/auth/oauth-flow.test.ts`, `packages/core/src/llm/client.test.ts` | OpenAI/Copilot/Anthropic auth flow behavior and storage routing covered in automated tests. |
+| TICKET-03 | OAuth Manual Test + Fix Session | P0 | todo | `docs/development/sprint-1.6-testing.md` | Requires manual `npm run tauri dev` pass for Anthropic/OpenAI/Copilot OAuth flows. |
+| TICKET-04 | Message Flow Unit Tests (useChat) | P0 | done | `src/hooks/useChat.integration.test.ts` | Added queue/steer/cancel behavior assertions with mocked streaming. |
+| TICKET-05 | Message Flow Integration Tests (Stream + Watcher) | P1 | done | `src/components/chat/ChatView.integration.test.tsx` | Added watcher->message forwarding test including question prefix and file context metadata. |
+| TICKET-06 | Debug Logging Coverage (useChat + useAgent) | P1 | in_progress | `src/hooks/useChat.ts`, `src/hooks/useAgent.ts` | Logging-related hardening is ongoing; keep source-tag + masking requirements. |
+| TICKET-07 | Debug Logging Coverage (core-bridge + settings + session) | P1 | in_progress | `src/services/core-bridge.ts`, `src/stores/settings.ts`, `src/stores/session.ts` | Continue structured logging pass and error-path checks. |
+| TICKET-08 | Debug Logging Coverage (file-watcher + ChatView) | P1 | in_progress | `src/services/file-watcher.ts`, `src/components/chat/ChatView.tsx` | Keep logs for watch lifecycle, matches, and approval flow; avoid secret leakage. |
+| TICKET-09 | PI Coding Agent Feature Parity | P2 | todo | `docs/backend/gap-analysis.md`, `docs/ROADMAP.md` | Scope/design remains documentation-first before implementation. |
+| TICKET-10 | Console Devtools Improvements | P2 | in_progress | `src/services/dev-console.ts`, `src/components/panels/TerminalPanel.tsx` | Core files exist; complete filtering UX and validation pass. |
 
-Priority: P0
-Effort: L
-Files: packages/core/src/llm/providers/openai.test.ts, packages/core/src/llm/client.test.ts, src/stores/settings.test.ts
-Description: Test credential routing (Anthropic API key vs OpenAI OAuth) and localStorage key storage via `storeOAuthCredentials()`.
-Acceptance Criteria:
+Status legend: `todo`, `in_progress`, `done`, `blocked`.
+
+## Verification Evidence (2026-02-13)
+
+- `npx vitest run packages/core/src/llm/client.test.ts src/services/auth/oauth.test.ts src/services/auth/oauth-flow.test.ts` -> pass (51 tests)
+- `npx vitest run src/hooks/useChat.integration.test.ts src/components/chat/ChatView.integration.test.tsx src/components/settings/tabs/PluginsTab.smoke.test.tsx packages/core/src/extensions/manager.test.ts` -> pass (40 tests)
+- `npm run test:run` -> pass (69 files, 1798 tests)
+- `npm run verify:mvp` -> blocked by pre-existing repo lint/type issues outside this sprint scope (not introduced by these changes)
+
+## Acceptance Criteria (Unchanged)
+
+### TICKET-01
+- `decodeJwtPayload` handles valid/invalid JWTs
+- `extractAccountId` returns correct claim variants (root, organizations)
+
+### TICKET-02
 - OpenAI OAuth routes to Codex endpoint with account header when present
 - Anthropic OAuth mints API key and routes via api-key path
 
-TICKET-03: OAuth Manual Test + Fix Session
-
-Priority: P0
-Effort: M
-Files: docs/development/sprint-1.6-testing.md, docs/memory-bank/activeContext.md
-Description: Run `npm run tauri dev` and verify OAuth flows for Anthropic, OpenAI, Copilot; document any failures and fixes.
-Acceptance Criteria:
+### TICKET-03
 - Each provider completes browser flow and can chat
 - Clear credentials works and reconnects cleanly
 
-TICKET-04: Message Flow Unit Tests (useChat)
+### TICKET-04
+- Send during streaming queues and auto-dequeues after completion
+- Steer cancels current stream and sends new message
 
-Priority: P0
-Effort: M
-Files: src/hooks/useChat.test.ts
-Description: Unit tests for queue, steer, cancel, and session switch behavior.
-Acceptance Criteria:
-- send during streaming queues and auto-dequeues after completion
-- steer cancels current stream and sends new message
-
-TICKET-05: Message Flow Integration Tests (Stream + Watcher)
-
-Priority: P1
-Effort: L
-Files: src/components/chat/ChatView.test.tsx, src/services/file-watcher.test.ts
-Description: Integration tests for send→stream→complete flow and file watcher AI comment → chat message.
-Acceptance Criteria:
+### TICKET-05
 - Chat stream completes and updates UI state
 - AI comment triggers auto-send with correct metadata
 
-TICKET-06: Debug Logging Coverage (useChat + useAgent)
-
-Priority: P1
-Effort: S
-Files: src/hooks/useChat.ts, src/hooks/useAgent.ts
-Description: Add structured logs for send/receive/queue/steer/cancel and agent start/finish/tool events.
-Acceptance Criteria:
+### TICKET-06
 - Logs include source tags and masked credentials
-- No new console.log usage
+- No new `console.log` usage
 
-TICKET-07: Debug Logging Coverage (core-bridge + settings + session)
-
-Priority: P1
-Effort: S
-Files: src/services/core-bridge.ts, src/stores/settings.ts, src/stores/session.ts
-Description: Add logging for init, settings sync, and session CRUD/checkpoints.
-Acceptance Criteria:
+### TICKET-07
 - Init and errors are logged with source tags
 - Settings sync errors are logged without secrets
 
-TICKET-08: Debug Logging Coverage (file-watcher + ChatView)
-
-Priority: P1
-Effort: S
-Files: src/services/file-watcher.ts, src/components/chat/ChatView.tsx
-Description: Add logs for watch start/stop, pattern matches, dedup hits, and tool approval events.
-Acceptance Criteria:
+### TICKET-08
 - Watcher start/stop and errors logged
 - Tool approval resolve logged with tool name only
 
-TICKET-09: PI Coding Agent Feature Parity
-
-Priority: P2
-Effort: L
-Files: docs/backend/gap-analysis.md, docs/ROADMAP.md, packages/core/src/session/*, src/components/chat/*
-Description: Scope and implement PI parity items: mid-session provider switching, session branching tree, minimal tool mode, runtime skill creation.
-Acceptance Criteria:
+### TICKET-09
 - Parity checklist defined with owners and milestones
 - Design notes captured in docs
 
-TICKET-10: Console Devtools Improvements
-
-Priority: P2
-Effort: M
-Files: src/services/dev-console.ts, src/components/panels/TerminalPanel.tsx
-Description: Add structured log viewer with filtering by source tag and severity.
-Acceptance Criteria:
+### TICKET-10
 - Log viewer can filter by source + level
 - Logger output is structured and searchable

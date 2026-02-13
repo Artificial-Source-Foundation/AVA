@@ -13,7 +13,6 @@ import { EditForm } from './EditForm'
 import { MarkdownContent } from './MarkdownContent'
 import { MessageActions } from './MessageActions'
 import { ToolCallGroup } from './ToolCallGroup'
-import { TypingIndicator } from './TypingIndicator'
 
 interface MessageBubbleProps {
   message: Message
@@ -35,6 +34,7 @@ const USER_COLLAPSE_LINES = 8
 
 export const MessageBubble: Component<MessageBubbleProps> = (props) => {
   const isUser = () => props.message.role === 'user'
+  const shouldAnimateIn = () => isUser() && !props.isEditing
   const lineCount = () => props.message.content.split('\n').length
   const isLong = () => {
     if (isUser()) return lineCount() > USER_COLLAPSE_LINES
@@ -44,7 +44,9 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
   const shouldCollapse = () => isLong() && !expanded() && !props.isStreaming
 
   return (
-    <div class={`flex ${isUser() ? 'justify-end' : 'justify-start'} animate-message-in`}>
+    <div
+      class={`flex ${isUser() ? 'justify-end' : 'justify-start'} ${shouldAnimateIn() ? 'animate-message-in' : ''}`}
+    >
       {/* Edit mode for user messages */}
       <Show
         when={!props.isEditing}
@@ -95,13 +97,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
             {/* Show typing indicator only while actively streaming */}
             <Show
               when={props.message.content || isUser()}
-              fallback={
-                props.isStreaming ? (
-                  <TypingIndicator />
-                ) : (
-                  <p class="text-sm text-[var(--text-muted)] italic">No response</p>
-                )
-              }
+              fallback={<div class={props.isLastMessage && !props.message.error ? 'h-5' : 'h-3'} />}
             >
               <div
                 class={shouldCollapse() ? 'relative overflow-hidden' : ''}
@@ -178,9 +174,9 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               "
             >
               <div class="flex items-center justify-between gap-3">
-                <div class="flex items-center gap-2 flex-1 min-w-0">
+                <div class="flex items-start gap-2 flex-1 min-w-0">
                   <AlertCircle class="w-4 h-4 text-[var(--error)] flex-shrink-0" />
-                  <span class="text-sm text-[var(--error)] truncate">
+                  <span class="text-sm text-[var(--error)] break-words whitespace-pre-wrap leading-relaxed">
                     {props.message.error!.message}
                   </span>
                 </div>

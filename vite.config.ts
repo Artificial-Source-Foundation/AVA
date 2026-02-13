@@ -1,13 +1,12 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig, type Plugin } from 'vite'
 import { analyzer } from 'vite-bundle-analyzer'
 import solid from 'vite-plugin-solid'
 
-// @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST
-// @ts-expect-error process is a nodejs global
 const analyze = process.env.ANALYZE === 'true'
 
-const STUB_PATH = '/home/xn3/Projects/Personal/Estela/src/stubs/node-stub.ts'
+const STUB_PATH = fileURLToPath(new URL('./src/stubs/node-stub.ts', import.meta.url))
 
 // Node.js built-in modules that @estela/core imports but only uses in CLI context.
 // In the browser (Tauri webview), these get replaced with no-op stubs.
@@ -172,6 +171,13 @@ export default defineConfig(async () => ({
           port: 1421,
         }
       : undefined,
+    proxy: {
+      '/__chatgpt_proxy': {
+        target: 'https://chatgpt.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/__chatgpt_proxy/, ''),
+      },
+    },
     watch: {
       // 3. tell Vite to ignore watching `src-tauri` and reference code
       ignored: ['**/src-tauri/**', '**/docs/reference-code/**'],

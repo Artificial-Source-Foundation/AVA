@@ -355,6 +355,31 @@ describe('ExtensionManager', () => {
       expect(mgr2.isEnabled('ext-a')).toBe(false)
     })
 
+    it('runs full install->disable->enable->uninstall lifecycle with persisted state', async () => {
+      await manager.loadExtensions()
+      const source = await createExtensionSource('lifecycle-ext')
+
+      await manager.install(source)
+      expect(manager.isEnabled('lifecycle-ext')).toBe(true)
+
+      await manager.disable('lifecycle-ext')
+      expect(manager.isEnabled('lifecycle-ext')).toBe(false)
+
+      const mgr2 = new ExtensionManager({
+        extensionsDir,
+        enablementPath,
+      })
+      await mgr2.loadExtensions()
+      expect(mgr2.isEnabled('lifecycle-ext')).toBe(false)
+
+      await mgr2.enable('lifecycle-ext')
+      expect(mgr2.isEnabled('lifecycle-ext')).toBe(true)
+
+      await mgr2.uninstall('lifecycle-ext')
+      expect(mgr2.findExtension('lifecycle-ext')).toBeUndefined()
+      expect(existsSync(join(extensionsDir, 'lifecycle-ext'))).toBe(false)
+    })
+
     it('should emit enable/disable events', async () => {
       await createExtension('ext-a')
       await manager.loadExtensions()

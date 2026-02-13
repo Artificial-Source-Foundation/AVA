@@ -79,7 +79,7 @@ export const ChatView: Component = () => {
   }
 
   return (
-    <div class="flex flex-col h-full bg-[var(--surface)]">
+    <div class="flex flex-col h-full min-h-0 bg-[var(--surface)]">
       {/* Messages area */}
       <MessageList />
 

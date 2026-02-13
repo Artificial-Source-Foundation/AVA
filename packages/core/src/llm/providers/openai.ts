@@ -12,6 +12,23 @@ import { getAuth, type LLMClient, registerClient } from '../client.js'
 
 const BASE_URL = 'https://api.openai.com/v1'
 const PROVIDER: LLMProvider = 'openai'
+const DEV_CODEX_PROXY_ENDPOINT = '/__chatgpt_proxy/backend-api/codex/responses'
+
+function resolveOAuthEndpoint(): string {
+  const location = (
+    globalThis as { location?: { hostname?: string; port?: string; protocol?: string } }
+  ).location
+
+  if (
+    location?.protocol?.startsWith('http') &&
+    (location.hostname === 'localhost' || location.hostname === '127.0.0.1') &&
+    location.port === '1420'
+  ) {
+    return DEV_CODEX_PROXY_ENDPOINT
+  }
+
+  return OPENAI_OAUTH_CONFIG.apiEndpoint
+}
 
 interface OpenAIStreamEvent {
   choices?: Array<{
@@ -50,28 +67,191 @@ class OpenAIClient implements LLMClient {
     }
 
     // Determine endpoint based on auth type
-    // OAuth uses Codex endpoint, API key uses standard endpoint
-    let endpoint = `${BASE_URL}/chat/completions`
+    // OAuth uses Codex endpoint, API key uses standard chat completions endpoint
+    const endpoint = auth.type === 'oauth' ? resolveOAuthEndpoint() : `${BASE_URL}/chat/completions`
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     }
 
     if (auth.type === 'oauth') {
       // Codex endpoint for ChatGPT Plus/Pro subscribers
-      endpoint = OPENAI_OAUTH_CONFIG.apiEndpoint
       headers.Authorization = `Bearer ${auth.token}`
 
       // Add account ID if available (required for Codex)
       const accountId = await getAccountId(PROVIDER)
       if (accountId) {
-        headers['X-ChatGPT-Account-ID'] = accountId
+        headers['ChatGPT-Account-Id'] = accountId
       }
+
+      headers.originator = 'estela'
     } else {
       // Standard API key auth
       headers.Authorization = `Bearer ${auth.token}`
     }
 
-    // Build request body
+    // OAuth Codex endpoint is responses-style; API key uses chat completions streaming.
+    if (auth.type === 'oauth') {
+      const systemInstructions = messages
+        .filter((m) => m.role === 'system')
+        .map((m) => m.content)
+        .join('\n\n')
+
+      const oauthBody = {
+        model: config.model,
+        instructions: systemInstructions || 'You are Estela, a coding assistant.',
+        input: messages
+          .filter((m) => m.role !== 'system')
+          .map((m) => ({
+            role: m.role,
+            content: [
+              {
+                type: m.role === 'assistant' ? 'output_text' : 'input_text',
+                text: m.content,
+              },
+            ],
+          })),
+        store: false,
+        stream: true,
+      }
+
+      try {
+        const response = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(oauthBody),
+          signal,
+        })
+
+        if (!response.ok) {
+          const errorBody = await response.text().catch(() => '')
+          yield {
+            content: '',
+            done: true,
+            error: {
+              type: getErrorType(response.status),
+              message: getErrorMessage(response.status, errorBody),
+              status: response.status,
+              retryAfter: parseRetryAfter(response.headers.get('retry-after')),
+            },
+          }
+          return
+        }
+
+        const reader = response.body?.getReader()
+        if (!reader) {
+          yield {
+            content: '',
+            done: true,
+            error: { type: 'unknown', message: 'No response body' },
+          }
+          return
+        }
+
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let inputTokens = 0
+        let outputTokens = 0
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
+
+            for (const line of lines) {
+              if (!line.trim() || line.startsWith(':')) continue
+              if (!line.startsWith('data: ')) continue
+
+              const data = line.slice(6).trim()
+              if (data === '[DONE]') {
+                yield {
+                  content: '',
+                  done: true,
+                  usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+                }
+                return
+              }
+
+              try {
+                const event = JSON.parse(data) as {
+                  type?: string
+                  delta?: string
+                  response?: {
+                    usage?: {
+                      input_tokens?: number
+                      output_tokens?: number
+                      total_tokens?: number
+                    }
+                  }
+                  usage?: {
+                    input_tokens?: number
+                    output_tokens?: number
+                    total_tokens?: number
+                  }
+                  error?: {
+                    message?: string
+                  }
+                }
+
+                if (event.type === 'response.output_text.delta' && event.delta) {
+                  outputTokens++
+                  yield { content: event.delta, done: false }
+                }
+
+                if (event.type === 'error' || event.type === 'response.error') {
+                  yield {
+                    content: '',
+                    done: true,
+                    error: {
+                      type: 'server',
+                      message: event.error?.message || 'OpenAI Codex stream error',
+                    },
+                  }
+                  return
+                }
+
+                if (event.type === 'response.completed') {
+                  const usage = event.response?.usage || event.usage
+                  if (usage) {
+                    inputTokens = usage.input_tokens ?? 0
+                    outputTokens = usage.output_tokens ?? outputTokens
+                  }
+                }
+              } catch {
+                // Ignore malformed SSE chunks
+              }
+            }
+          }
+        } finally {
+          reader.releaseLock()
+        }
+
+        yield {
+          content: '',
+          done: true,
+          usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+        }
+        return
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') {
+          return
+        }
+        yield {
+          content: '',
+          done: true,
+          error: {
+            type: 'network',
+            message: `Network error: ${err instanceof Error ? err.message : 'Unknown'}`,
+          },
+        }
+        return
+      }
+    }
+
+    // Build request body for API key mode (chat completions)
     const body = {
       model: config.model,
       messages: messages.map((m) => ({
@@ -213,6 +393,11 @@ function getErrorMessage(status: number, body: string): string {
     429: 'Rate limit exceeded - try again later',
     500: 'Server error',
     503: 'Service overloaded',
+  }
+
+  if (status === 400 && body.trim().length > 0) {
+    const bodySnippet = body.trim().slice(0, 240)
+    return `Invalid request: ${bodySnippet}`
   }
 
   return messages[status] || `HTTP ${status}`

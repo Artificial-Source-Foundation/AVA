@@ -7,8 +7,8 @@
  * attaches copy handlers to code blocks.
  */
 
-import { type Component, createEffect, createSignal, on, onCleanup } from 'solid-js'
-import { renderMarkdown, renderMarkdownStreaming } from '../../lib/markdown'
+import { type Component, createEffect, createSignal, on } from 'solid-js'
+import { renderMarkdown } from '../../lib/markdown'
 import { useSettings } from '../../stores/settings'
 
 interface MarkdownContentProps {
@@ -21,54 +21,35 @@ export const MarkdownContent: Component<MarkdownContentProps> = (props) => {
   let containerRef: HTMLDivElement | undefined
   const [renderedHtml, setRenderedHtml] = createSignal('')
   const { settings } = useSettings()
-  let rafId: number | null = null
 
   // Render markdown when content changes
   createEffect(
     on(
       () => props.content,
       (content) => {
-        if (!content || props.role === 'user') {
+        if (!content || props.role === 'user' || props.isStreaming) {
           setRenderedHtml('')
           return
         }
 
-        if (props.isStreaming) {
-          // Debounce rendering during streaming to avoid jank
-          if (rafId !== null) cancelAnimationFrame(rafId)
-          rafId = requestAnimationFrame(() => {
-            setRenderedHtml(renderMarkdownStreaming(content))
-            rafId = null
-          })
-        } else {
-          // Immediate render for completed messages
-          if (rafId !== null) {
-            cancelAnimationFrame(rafId)
-            rafId = null
-          }
-          setRenderedHtml(renderMarkdown(content))
-        }
+        setRenderedHtml(renderMarkdown(content))
       }
     )
   )
 
-  onCleanup(() => {
-    if (rafId !== null) cancelAnimationFrame(rafId)
-  })
-
-  // Attach code block copy handlers after render
+  // Apply rendered HTML and attach copy handlers after render
   createEffect(
     on(renderedHtml, () => {
       if (!containerRef) return
-      // Wait for DOM update
-      queueMicrotask(() => attachCopyHandlers(containerRef!))
+      containerRef.innerHTML = renderedHtml()
+      queueMicrotask(() => attachCopyHandlers(containerRef))
     })
   )
 
   return (
     <>
       {/* User messages: plain text */}
-      {props.role === 'user' ? (
+      {props.role === 'user' || props.isStreaming ? (
         <p
           class="whitespace-pre-wrap break-words leading-relaxed"
           style={{ 'font-size': 'var(--chat-font-size)' }}
@@ -83,7 +64,6 @@ export const MarkdownContent: Component<MarkdownContentProps> = (props) => {
           style={{ 'font-size': 'var(--chat-font-size)' }}
           data-line-numbers={settings().behavior.lineNumbers ? '' : undefined}
           data-word-wrap={settings().behavior.wordWrap ? '' : undefined}
-          innerHTML={renderedHtml()}
         />
       )}
     </>

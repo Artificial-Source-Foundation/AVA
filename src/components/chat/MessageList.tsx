@@ -12,7 +12,6 @@
  * - Delete/rollback with confirmation dialog
  */
 
-import { createVirtualizer } from '@tanstack/solid-virtual'
 import { Bookmark, Sparkles } from 'lucide-solid'
 import {
   type Component,
@@ -20,6 +19,7 @@ import {
   createMemo,
   createSignal,
   For,
+  onCleanup,
   onMount,
   Show,
 } from 'solid-js'
@@ -28,26 +28,8 @@ import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
 import type { Message } from '../../types'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
-import { DateSeparator, formatDateLabel } from './DateSeparator'
 import { MessageBubble } from './MessageBubble'
 import { ModelChangeIndicator } from './ModelChangeIndicator'
-
-// ============================================================================
-// Types
-// ============================================================================
-
-type ChatItem =
-  | { type: 'separator'; label: string; key: string }
-  | { type: 'message'; message: Message }
-  | { type: 'model-change'; from: string; to: string; key: string }
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-const ESTIMATED_MESSAGE_HEIGHT = 120
-const ESTIMATED_SEPARATOR_HEIGHT = 40
-const OVERSCAN = 5
 
 // ============================================================================
 // Component
@@ -56,6 +38,8 @@ const OVERSCAN = 5
 export const MessageList: Component = () => {
   // oxlint-disable-next-line no-unassigned-vars -- SolidJS ref pattern: assigned via ref={} in JSX
   let containerRef: HTMLDivElement | undefined
+  let lastAutoScrollAt = 0
+  let scrollRaf: number | undefined
   const { settings } = useSettings()
   const [shouldAutoScroll, setShouldAutoScroll] = createSignal(true)
   const [deleteTarget, setDeleteTarget] = createSignal<{
@@ -76,45 +60,46 @@ export const MessageList: Component = () => {
   } = useSession()
   const { isStreaming, retryMessage, editAndResend, regenerateResponse } = useChat()
 
-  // Match checkpoints to message indices
-  const checkpointAtIndex = (msgIndex: number): { id: string; description: string } | null => {
-    const ckpts = checkpoints()
-    const match = ckpts.find((c) => c.messageCount === msgIndex + 1)
-    return match ? { id: match.id, description: match.description } : null
-  }
-
-  // Build flattened items with date separators and model change indicators
-  const chatItems = createMemo((): ChatItem[] => {
+  const messageIndexById = createMemo(() => {
+    const indexMap = new Map<string, number>()
     const msgs = messages()
-    const items: ChatItem[] = []
-    let lastDate = ''
-    let lastModel = ''
-
-    for (const msg of msgs) {
-      const dateLabel = formatDateLabel(msg.createdAt)
-      if (dateLabel !== lastDate) {
-        items.push({ type: 'separator', label: dateLabel, key: `sep-${dateLabel}` })
-        lastDate = dateLabel
-      }
-
-      // Insert model change indicator between assistant messages with different models
-      const msgModel = (msg.metadata?.model as string) || msg.model || ''
-      if (msg.role === 'assistant' && msgModel && lastModel && msgModel !== lastModel) {
-        items.push({
-          type: 'model-change',
-          from: lastModel,
-          to: msgModel,
-          key: `model-${msg.id}`,
-        })
-      }
-      if (msg.role === 'assistant' && msgModel) {
-        lastModel = msgModel
-      }
-
-      items.push({ type: 'message', message: msg })
+    for (let i = 0; i < msgs.length; i++) {
+      indexMap.set(msgs[i].id, i)
     }
-    return items
+    return indexMap
   })
+
+  const checkpointByIndex = createMemo(() => {
+    const map = new Map<number, { id: string; description: string }>()
+    for (const c of checkpoints()) {
+      map.set(c.messageCount - 1, { id: c.id, description: c.description })
+    }
+    return map
+  })
+
+  const modelChangeById = createMemo(() => {
+    const map = new Map<string, { from: string; to: string }>()
+    let lastAssistantModel = ''
+
+    for (const msg of messages()) {
+      if (msg.role !== 'assistant') continue
+
+      const currentModel = (msg.metadata?.model as string) || msg.model || ''
+      if (!currentModel) continue
+
+      if (lastAssistantModel && lastAssistantModel !== currentModel) {
+        map.set(msg.id, { from: lastAssistantModel, to: currentModel })
+      }
+
+      lastAssistantModel = currentModel
+    }
+
+    return map
+  })
+
+  // Match checkpoints to message indices
+  const checkpointAtIndex = (msgIndex: number): { id: string; description: string } | null =>
+    checkpointByIndex().get(msgIndex) ?? null
 
   // Track which message is the last one (for delete vs rollback label)
   const lastMessageId = createMemo(() => {
@@ -122,40 +107,23 @@ export const MessageList: Component = () => {
     return msgs.length > 0 ? msgs[msgs.length - 1].id : null
   })
 
-  // Create virtualizer
-  const virtualizer = createMemo(() => {
-    const items = chatItems()
-    return createVirtualizer({
-      get count() {
-        return items.length
-      },
-      getScrollElement: () => containerRef ?? null,
-      estimateSize: (index) => {
-        const t = items[index]?.type
-        return t === 'separator' || t === 'model-change'
-          ? ESTIMATED_SEPARATOR_HEIGHT
-          : ESTIMATED_MESSAGE_HEIGHT
-      },
-      overscan: OVERSCAN,
-      scrollMargin: 0,
-    })
-  })
-
-  const virtualItems = createMemo(() => virtualizer().getVirtualItems())
-  const totalSize = createMemo(() => virtualizer().getTotalSize())
-
-  // Auto-scroll to bottom when new messages arrive
+  // Auto-scroll to bottom when new content arrives
   createEffect(() => {
-    const items = chatItems()
+    const msgs = messages()
+    const lastMsg = msgs[msgs.length - 1]
+    const streamKey = lastMsg ? `${lastMsg.id}:${lastMsg.content.length}` : 'none'
+    streamKey
+
     const streaming = isStreaming()
 
-    if (items.length > 0 && containerRef && shouldAutoScroll() && settings().behavior.autoScroll) {
+    if (msgs.length > 0 && containerRef && shouldAutoScroll() && settings().behavior.autoScroll) {
+      const now = performance.now()
+      if (streaming && now - lastAutoScrollAt < 180) return
+      lastAutoScrollAt = now
+
       requestAnimationFrame(() => {
         if (containerRef) {
-          containerRef.scrollTo({
-            top: containerRef.scrollHeight,
-            behavior: streaming ? 'auto' : 'smooth',
-          })
+          containerRef.scrollTop = containerRef.scrollHeight
         }
       })
     }
@@ -163,9 +131,27 @@ export const MessageList: Component = () => {
 
   const handleScroll = () => {
     if (!containerRef) return
-    const { scrollTop, scrollHeight, clientHeight } = containerRef
-    setShouldAutoScroll(scrollHeight - scrollTop - clientHeight < 100)
+    if (scrollRaf !== undefined) return
+
+    scrollRaf = requestAnimationFrame(() => {
+      if (!containerRef) {
+        scrollRaf = undefined
+        return
+      }
+
+      const { scrollTop, scrollHeight, clientHeight } = containerRef
+      const nextAutoScroll = scrollHeight - scrollTop - clientHeight < 100
+      if (nextAutoScroll !== shouldAutoScroll()) {
+        setShouldAutoScroll(nextAutoScroll)
+      }
+
+      scrollRaf = undefined
+    })
   }
+
+  onCleanup(() => {
+    if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf)
+  })
 
   onMount(() => {
     if (containerRef) containerRef.scrollTop = containerRef.scrollHeight
@@ -173,9 +159,50 @@ export const MessageList: Component = () => {
 
   const scrollToBottom = () => {
     if (containerRef) {
-      containerRef.scrollTo({ top: containerRef.scrollHeight, behavior: 'smooth' })
+      containerRef.scrollTop = containerRef.scrollHeight
       setShouldAutoScroll(true)
     }
+  }
+
+  const renderMessageRow = (
+    msg: Message,
+    msgIndex: number,
+    isStreamingRow: boolean,
+    showCheckpoint = true
+  ) => {
+    const ckpt = showCheckpoint ? checkpointAtIndex(msgIndex) : undefined
+
+    return (
+      <div class="density-py">
+        <MessageBubble
+          message={msg}
+          isEditing={editingMessageId() === msg.id}
+          isRetrying={retryingMessageId() === msg.id}
+          isStreaming={isStreamingRow}
+          isLastMessage={msg.id === lastMessageId()}
+          onStartEdit={() => startEditing(msg.id)}
+          onCancelEdit={stopEditing}
+          onSaveEdit={(content) => editAndResend(msg.id, content)}
+          onRetry={() => retryMessage(msg.id)}
+          onRegenerate={() => regenerateResponse(msg.id)}
+          onCopy={() => {}}
+          onDelete={() => handleDeleteRequest(msg.id)}
+        />
+        <Show when={ckpt}>
+          <div class="flex items-center gap-2 py-1 text-[10px] text-[var(--text-muted)]">
+            <Bookmark class="w-3 h-3 text-[var(--accent)]" />
+            <span>{ckpt!.description}</span>
+            <button
+              type="button"
+              onClick={() => rollbackToCheckpoint(ckpt!.id)}
+              class="text-[var(--accent)] hover:underline"
+            >
+              Restore
+            </button>
+          </div>
+        </Show>
+      </div>
+    )
   }
 
   // Delete/rollback handlers
@@ -191,11 +218,12 @@ export const MessageList: Component = () => {
   }
 
   return (
-    <div class="relative flex-1 flex flex-col">
+    <div class="relative flex-1 min-h-0 flex flex-col overflow-hidden">
       <div
         ref={containerRef}
         onScroll={handleScroll}
         class="flex-1 overflow-y-auto density-section-px density-section-py"
+        style={{ 'overflow-anchor': 'none' }}
       >
         {/* Loading skeleton */}
         <Show when={isLoadingMessages()}>
@@ -228,83 +256,25 @@ export const MessageList: Component = () => {
           </div>
         </Show>
 
-        {/* Virtualized items (messages + date separators) */}
-        <Show when={!isLoadingMessages() && chatItems().length > 0}>
-          <div
-            style={{
-              height: `${totalSize()}px`,
-              width: '100%',
-              position: 'relative',
-            }}
-          >
-            <For each={virtualItems()}>
-              {(virtualItem) => {
-                const item = () => chatItems()[virtualItem.index]
+        {/* Message items */}
+        <Show when={!isLoadingMessages() && messages().length > 0}>
+          <div>
+            <For each={messages()}>
+              {(msg) => {
+                const msgIndex = messageIndexById().get(msg.id) ?? -1
+                const modelChange = modelChangeById().get(msg.id)
+
                 return (
-                  <div
-                    data-index={virtualItem.index}
-                    ref={(el) => {
-                      // eslint-disable-next-line solid/reactivity -- ref callback runs once per element mount
-                      queueMicrotask(() => virtualizer().measureElement(el))
-                    }}
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      transform: `translateY(${virtualItem.start}px)`,
-                    }}
-                  >
-                    <Show when={item()}>
-                      {item()!.type === 'separator' ? (
-                        <DateSeparator label={(item() as ChatItem & { type: 'separator' }).label} />
-                      ) : item()!.type === 'model-change' ? (
-                        <ModelChangeIndicator
-                          from={(item() as ChatItem & { type: 'model-change' }).from}
-                          to={(item() as ChatItem & { type: 'model-change' }).to}
-                        />
-                      ) : (
-                        <div class="density-py">
-                          {(() => {
-                            const msg = (item() as ChatItem & { type: 'message' }).message
-                            const msgIndex = messages().findIndex((m) => m.id === msg.id)
-                            const ckpt = checkpointAtIndex(msgIndex)
-                            return (
-                              <>
-                                <MessageBubble
-                                  message={msg}
-                                  isEditing={editingMessageId() === msg.id}
-                                  isRetrying={retryingMessageId() === msg.id}
-                                  isStreaming={isStreaming()}
-                                  isLastMessage={msg.id === lastMessageId()}
-                                  onStartEdit={() => startEditing(msg.id)}
-                                  onCancelEdit={stopEditing}
-                                  onSaveEdit={(content) => editAndResend(msg.id, content)}
-                                  onRetry={() => retryMessage(msg.id)}
-                                  onRegenerate={() => regenerateResponse(msg.id)}
-                                  onCopy={() => {}}
-                                  onDelete={() => handleDeleteRequest(msg.id)}
-                                />
-                                <Show when={ckpt}>
-                                  <div class="flex items-center gap-2 py-1 text-[10px] text-[var(--text-muted)]">
-                                    <Bookmark class="w-3 h-3 text-[var(--accent)]" />
-                                    <span>{ckpt!.description}</span>
-                                    <button
-                                      type="button"
-                                      onClick={() => rollbackToCheckpoint(ckpt!.id)}
-                                      class="text-[var(--accent)] hover:underline"
-                                    >
-                                      Restore
-                                    </button>
-                                  </div>
-                                </Show>
-                              </>
-                            )
-                          })()}
-                        </div>
-                      )}
+                  <>
+                    <Show when={modelChange}>
+                      <ModelChangeIndicator from={modelChange!.from} to={modelChange!.to} />
                     </Show>
-                  </div>
+                    {renderMessageRow(
+                      msg,
+                      msgIndex,
+                      isStreaming() && msg.id === lastMessageId() && msg.role === 'assistant'
+                    )}
+                  </>
                 )
               }}
             </For>

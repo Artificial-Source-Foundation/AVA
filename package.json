@@ -21,6 +21,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "verify:mvp": "bash scripts/verify-mvp.sh",
     "knip": "knip",
     "knip:fix": "knip --fix",
     "analyze": "ANALYZE=true vite build",

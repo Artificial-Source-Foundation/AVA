@@ -98,6 +98,7 @@ export const MessageInput: Component = () => {
   let submitting = false
   // oxlint-disable-next-line no-unassigned-vars -- SolidJS ref pattern: assigned via ref={} in JSX
   let textareaRef: HTMLTextAreaElement | undefined
+  let resizeFrame: number | undefined
 
   // Chat mode (simple single-turn)
   const chat = useChat()
@@ -292,9 +293,23 @@ export const MessageInput: Component = () => {
 
   const autoResize = () => {
     if (!textareaRef) return
-    textareaRef.style.height = 'auto'
-    textareaRef.style.height = `${Math.min(textareaRef.scrollHeight, 200)}px`
+    if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
+
+    resizeFrame = requestAnimationFrame(() => {
+      if (!textareaRef) return
+
+      const nextHeight = `${Math.min(textareaRef.scrollHeight, 200)}px`
+      if (textareaRef.style.height !== nextHeight) {
+        textareaRef.style.height = nextHeight
+      }
+
+      resizeFrame = undefined
+    })
   }
+
+  onCleanup(() => {
+    if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
+  })
 
   const isProcessing = () => chat.isStreaming() || agent.isRunning()
 

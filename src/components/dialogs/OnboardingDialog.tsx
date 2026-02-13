@@ -111,14 +111,6 @@ export const OnboardingScreen: Component<OnboardingProps> = (props) => {
         class="floating-particle"
         style={{ top: '70%', left: '75%', animation: 'float-particle 8s ease-in-out infinite 2s' }}
       />
-      <div
-        class="floating-particle"
-        style={{ top: '40%', left: '85%', animation: 'float-particle 7s ease-in-out infinite 1s' }}
-      />
-      <div
-        class="floating-particle"
-        style={{ top: '80%', left: '30%', animation: 'float-particle 9s ease-in-out infinite 3s' }}
-      />
 
       {/* Main card */}
       <div class="onboarding-card w-full max-w-lg mx-4 p-8">

@@ -10,7 +10,7 @@
 |-------|--------|-------|
 | **1: Desktop App** | **Done** | Core UI, LLM chat, settings, team flow |
 | **1.5: Desktop Polish** | **Done** | Settings, appearance, wiring, gap closing |
-| **2: Plugin Ecosystem** | Next | THE differentiator — Obsidian-style plugins |
+| **2: Plugin Ecosystem** | In progress | Backend foundations shipped, frontend UX next |
 | **3: Community & CLI** | Future | CLI interface, docs site, templates |
 | **4: Integrations** | Future | Editor (ACP), agent network (A2A), voice, vision |
 
@@ -88,17 +88,20 @@ See [Frontend Backlog](docs/frontend/backlog.md) for what's next.
 
 ---
 
-## Sprint 1.6: Testing & Debug (PLANNED)
+## Sprint 1.6: Testing & Debug (IN PROGRESS)
 
 Hardening sprint focused on tests, logging, and parity with PI Coding Agent.
+This sprint is partially implemented and now tracked as active.
 
 ### Sprint 1.6.1: OAuth Test Suite
 - Unit tests for JWT decode + accountId extraction
 - Integration tests for credential routing + storage
+- Status: automated coverage expanded with `src/services/auth/oauth-flow.test.ts`
 
 ### Sprint 1.6.2: Message Flow Test Suite
 - Queue/steer/cancel unit tests
 - Stream integration tests + watcher-triggered messages
+- Status: initial automation added via `src/hooks/useChat.integration.test.ts` and `src/components/chat/ChatView.integration.test.tsx`
 
 ### Sprint 1.6.3: Debug Logging Coverage
 - Structured logs across chat/agent/core/session/settings/file-watcher
@@ -113,17 +116,22 @@ Hardening sprint focused on tests, logging, and parity with PI Coding Agent.
 - OAuth browser flow, callback, token exchange
 - Chat stream validation per provider
 
+### Sprint 1.6 Verification Workflow
+- Added `npm run verify:mvp` to run lint + typecheck + full test suite.
+- Current blocker: repository has pre-existing lint/type issues outside this sprint scope; tests are green.
+
 ---
 
-## Phase 2: Plugin Ecosystem (NEXT — THE DIFFERENTIATOR)
+## Phase 2: Plugin Ecosystem (IN PROGRESS — THE DIFFERENTIATOR)
 
 This is what makes Estela "The Obsidian of AI Coding". Easy to create, discover, install.
 
-### Sprint 2.1: Plugin Format & SDK
-- [ ] Define unified plugin manifest (skills + commands + hooks + MCP in one package)
-- [ ] Plugin SDK with TypeScript types and helpers
-- [ ] Plugin lifecycle (install, enable, disable, uninstall, reload)
-- [ ] Plugin sandboxing (what plugins can/can't access)
+### Sprint 2.1: Plugin Format & SDK (Backend foundation mostly done)
+- [x] Define plugin manifest + parsing/validation (`packages/core/src/extensions/manifest.ts`)
+- [x] Plugin lifecycle core (`install`, `enable`, `disable`, `uninstall`, `reload` in `packages/core/src/extensions/manager.ts`)
+- [x] Extension persistence + tests (`packages/core/src/extensions/storage.ts`, `*.test.ts`)
+- [ ] Plugin SDK packaging/docs pass (public developer-facing SDK contract)
+- [ ] Plugin sandboxing policy hardening
 
 **Key files:** `packages/core/src/extensions/`, `packages/core/src/hooks/`, `packages/core/src/commands/toml.ts`
 
@@ -134,12 +142,12 @@ This is what makes Estela "The Obsidian of AI Coding". Easy to create, discover,
 - [ ] Plugin documentation template
 
 ### Sprint 2.3: Built-in Marketplace UI
-- [ ] Plugin browser in sidebar (upgrade from shell placeholder)
+- [ ] Plugin browser in sidebar/settings plugin surface (replace removed sidebar placeholder)
 - [ ] Search, categories, featured plugins
 - [ ] Install/uninstall with one click
 - [ ] Plugin settings page per plugin
 
-**Key files:** `src/components/sidebar/SidebarPlugins.tsx` (current placeholder)
+**Key files:** `src/components/settings/SettingsModal.tsx`, `src/components/sidebar/`
 
 ### Sprint 2.4: Plugin Distribution
 - [ ] Publish plugins from GitHub repos

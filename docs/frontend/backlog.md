@@ -10,8 +10,8 @@
 |-------|--------|-----------|
 | **1: Desktop App** | **Complete** | - |
 | **1.5: Desktop Polish** | **Complete** | Manual testing only |
-| **2: Plugin Ecosystem** | Not started | THE differentiator |
-| **2+: Competitive Gaps** | Not started | High-impact quick wins |
+| **2: Plugin Ecosystem** | In progress | Backend foundations shipped; frontend UX pending |
+| **2+: Competitive Gaps** | Mostly complete | Focus moved to verification + plugin UX |
 
 ---
 
@@ -29,78 +29,22 @@ These require running `npm run tauri dev` and manually verifying:
 
 ---
 
-## Phase 2 — Competitive Gaps (Quick Wins)
+## Phase 2+ — Competitive Gaps (Status Normalized)
 
-High-impact features that other tools have. Each is ~1 week or less.
+These gaps were prioritized previously and are now mostly delivered based on changelog + code audit.
 
-### P0: Git Auto-Commit on Edits
-**What**: After each successful file edit, auto-commit with AI-generated message. `/undo` reverts last AI commit. Separates user vs AI work in git history.
-**Who has it**: Aider, Gemini CLI
-**Effort**: 1 week
-**Frontend work**:
-- Toggle in Settings (Behavior tab): "Auto-commit AI edits"
-- Commit message shown in tool call card or notification
-- Undo button in message actions or command palette
-**Backend**: Wire `git add` + `git commit` after write_file/edit tool success. Weak model for commit message.
+### Delivered
+- [x] Git auto-commit on AI edits
+- [x] Weak/secondary model support
+- [x] Streaming tool preview
+- [x] File watcher + AI comment patterns
+- [x] Architect/editor model split
+- [x] Message queue + steering
+- [x] Session step-level undo
 
-### P0: Weak Model for Secondary Tasks
-**What**: Every main model has an associated cheap/fast model for commit messages, summaries, classification.
-**Who has it**: Aider, PI
-**Effort**: 1 week
-**Frontend work**:
-- "Secondary model" dropdown per provider in Settings (Providers tab)
-- Show which model is being used in ToolCallCard (e.g., "Generating commit message with Haiku...")
-**Backend**: Add `weakModel` field to provider config. Route secondary tasks to it.
-
-### P1: Streaming Tool Preview
-**What**: Show diffs and terminal output while the model is still generating, not after.
-**Who has it**: Cline, OpenCode
-**Effort**: 1 week
-**Frontend work**:
-- ToolCallCard renders incrementally as tool call is parsed from streaming response
-- DiffViewer appears mid-stream, populated as content arrives
-- Terminal output streams in real-time
-**Backend**: Parse tool calls from partial streaming response, execute optimistically.
-
-### P1: File Watcher + AI Comments
-**What**: Monitor project files for `// AI!` and `// AI?` comments. Agent processes them as instructions.
-**Who has it**: Aider, OpenCode
-**Effort**: 1 week
-**Frontend work**:
-- Toggle in Settings (Behavior tab): "Watch for AI comments in files"
-- Indicator in status bar when watcher is active
-- Notification when AI comment detected + auto-queued
-**Backend**: Tauri `notify` crate for file watching. Parse configurable comment patterns.
-
-### P1: Architect + Editor Model Split
-**What**: Team Lead uses expensive reasoning model, Junior Devs use cheaper editor model.
-**Who has it**: Aider, PI
-**Effort**: 1 week
-**Frontend work**:
-- "Editor model" dropdown in Settings (LLM tab)
-- Agent cards show which model each agent is using
-- Cost display distinguishes architect vs editor model usage
-**Backend**: Add `editorModel` to agent config. Team Lead uses main model, Junior Devs use editor model.
-
-### P2: Message Queue / Steering
-**What**: Queue messages while agent is running. "Steering" interrupts, "follow-up" runs after.
-**Who has it**: PI
-**Effort**: 3-4 days
-**Frontend work**:
-- MessageInput stays active while agent is running (currently disabled)
-- Visual indicator: "Message will be sent as steering/follow-up"
-- Toggle between steering (interrupt) and follow-up (queue) mode
-**Backend**: Add message queue to agent loop. Steering injects into current context.
-
-### P2: Session Step-Level Undo
-**What**: Undo individual steps within a session without forking.
-**Who has it**: OpenCode, Cline, Plandex
-**Effort**: 1 week
-**Frontend work**:
-- "Undo" button per tool call in MessageActions
-- Shows file diffs that would be reverted
-- Confirmation dialog for destructive undos
-**Backend**: Track file diffs per step. Revert tool stores reverse diff.
+### Remaining hardening
+- [x] Add automated tests for queue/steer/cancel, watcher-triggered flow, and OAuth edge cases (Sprint 1.6)
+- [ ] Expand manual Tauri validation on Linux DE variants and light mode polish
 
 ---
 

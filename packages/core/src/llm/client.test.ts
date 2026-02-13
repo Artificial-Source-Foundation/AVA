@@ -247,6 +247,19 @@ describe('getAuth', () => {
     } satisfies AuthInfo)
   })
 
+  it('should preserve accountId when returned for non-openai providers', async () => {
+    mockGetStoredAuth.mockResolvedValueOnce({ type: 'oauth', accessToken: 'old-token' })
+    mockGetValidAccessToken.mockResolvedValueOnce('fresh-access-token')
+    mockGetAccountId.mockResolvedValueOnce('acct-anthropic')
+
+    const result = await getAuth('anthropic')
+    expect(result).toEqual({
+      type: 'oauth',
+      token: 'fresh-access-token',
+      accountId: 'acct-anthropic',
+    } satisfies AuthInfo)
+  })
+
   it('should fall back to API key when OAuth stored but token refresh fails', async () => {
     mockGetStoredAuth.mockResolvedValueOnce({ type: 'oauth', accessToken: 'expired-token' })
     mockGetValidAccessToken.mockResolvedValueOnce(null) // refresh failed
@@ -278,6 +291,16 @@ describe('getAuth', () => {
       token: 'sk-direct-key',
     } satisfies AuthInfo)
     expect(mockGetValidAccessToken).not.toHaveBeenCalled()
+  })
+
+  it('should not call getAccountId when valid oauth access token is missing', async () => {
+    mockGetStoredAuth.mockResolvedValueOnce({ type: 'oauth', accessToken: 'expired-token' })
+    mockGetValidAccessToken.mockResolvedValueOnce(null)
+    mockCredentialsGet.mockResolvedValueOnce('sk-fallback-key')
+
+    await getAuth('openai')
+
+    expect(mockGetAccountId).not.toHaveBeenCalled()
   })
 
   it('should pass provider to getStoredAuth', async () => {

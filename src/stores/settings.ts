@@ -13,7 +13,7 @@ import type { LLMProviderConfig } from '../components/settings/tabs/ProvidersTab
 import { defaultProviders } from '../components/settings/tabs/ProvidersTab'
 import { STORAGE_KEYS } from '../config/constants'
 import { getCoreSettings } from '../services/core-bridge'
-import { logDebug, logError, logInfo, logWarn } from '../services/logger'
+import { logDebug, logInfo, logWarn } from '../services/logger'
 import { readSettingsFromFS, writeSettingsToFS } from '../services/settings-fs'
 
 // ============================================================================

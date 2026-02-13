@@ -12,6 +12,7 @@ import {
   undoLastAutoCommit,
 } from '@estela/core'
 import { createSignal } from 'solid-js'
+import { DEFAULTS, LIMITS } from '../config/constants'
 import { checkAutoApproval, createApprovalGate } from '../lib/tool-approval'
 import { getCoreCompactor, getCoreMemory, getCoreTracker } from '../services/core-bridge'
 import { deleteMessageFromDb, saveMessage, updateMessage } from '../services/database'
@@ -57,7 +58,18 @@ export interface ContextStats {
   percentUsed: number
 }
 
+type ChatStore = ReturnType<typeof createChatStore>
+let chatStoreSingleton: ChatStore | null = null
+
 export function useChat() {
+  if (!chatStoreSingleton) {
+    chatStoreSingleton = createChatStore()
+  }
+
+  return chatStoreSingleton
+}
+
+function createChatStore() {
   const LOG_SRC = 'chat'
   const [isStreaming, setIsStreaming] = createSignal(false)
   const [error, setError] = createSignal<StreamError | null>(null)
@@ -552,6 +564,8 @@ export function useChat() {
       sessionId: session.currentSession()?.id ?? 'new',
     })
 
+    let streamFlushTimer: ReturnType<typeof setTimeout> | null = null
+
     try {
       // Ensure session exists
       let sessionId = session.currentSession()?.id
@@ -571,23 +585,62 @@ export function useChat() {
       getCoreTracker()?.addMessage(userMsg.id, content)
       syncTrackerStats()
 
+      // Auto-title new chats from first user message when enabled.
+      const autoTitleEnabled = settings.settings().behavior.sessionAutoTitle
+      const currentSession = session.currentSession()
+      if (
+        autoTitleEnabled &&
+        currentSession?.id === sessionId &&
+        currentSession.name.trim() === DEFAULTS.SESSION_NAME
+      ) {
+        const normalizedTitle = content.replace(/\s+/g, ' ').trim()
+        if (normalizedTitle) {
+          const nextTitle = normalizedTitle.slice(0, LIMITS.MESSAGE_PREVIEW_LENGTH).trim()
+          if (nextTitle) {
+            await session.renameSession(sessionId, nextTitle)
+          }
+        }
+      }
+
       // Create assistant placeholder
       const assistantMsg = await createAssistantMessage(sessionId)
 
       // Stream response
+      let latestStreamText = ''
+      let lastFlushedStreamText = ''
+
       await streamResponse({
         sessionId,
         model: targetModel,
         messages: await buildApiMessages(assistantMsg.id, content),
         onContent: (text) => {
-          session.updateMessageContent(assistantMsg.id, text)
-          setStreamingTokenEstimate(Math.ceil(text.length / 4))
+          latestStreamText = text
+          if (streamFlushTimer !== null) return
+
+          streamFlushTimer = setTimeout(() => {
+            if (latestStreamText !== lastFlushedStreamText) {
+              session.updateMessageContent(assistantMsg.id, latestStreamText)
+              setStreamingTokenEstimate(Math.ceil(latestStreamText.length / 4))
+              lastFlushedStreamText = latestStreamText
+            }
+            streamFlushTimer = null
+          }, 100)
         },
         onToolUpdate: (toolCalls) => {
           setActiveToolCalls(toolCalls)
           session.updateMessage(assistantMsg.id, { toolCalls })
         },
         onComplete: async (text, tokens, toolCalls) => {
+          if (streamFlushTimer !== null) {
+            clearTimeout(streamFlushTimer)
+            streamFlushTimer = null
+          }
+
+          if (text !== lastFlushedStreamText) {
+            session.updateMessageContent(assistantMsg.id, text)
+            lastFlushedStreamText = text
+          }
+
           setStreamingTokenEstimate(0)
           setActiveToolCalls([])
           // Estimate cost from token usage
@@ -626,6 +679,10 @@ export function useChat() {
         signal: abortRef.current!.signal,
       })
     } finally {
+      if (streamFlushTimer !== null) {
+        clearTimeout(streamFlushTimer)
+        streamFlushTimer = null
+      }
       setIsStreaming(false)
       setStreamingStartedAt(null)
       abortRef.current = null

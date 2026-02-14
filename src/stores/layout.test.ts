@@ -37,8 +37,8 @@ describe('layout store', () => {
       layout.setActiveActivity('sessions')
       layout.setSidebarVisible(true)
 
-      layout.handleActivityClick('explorer')
-      expect(layout.activeActivity()).toBe('explorer')
+      layout.handleActivityClick('plugins')
+      expect(layout.activeActivity()).toBe('plugins')
       expect(layout.sidebarVisible()).toBe(true)
     })
 
@@ -107,8 +107,8 @@ describe('layout store', () => {
   describe('persistence', () => {
     it('persists active activity to localStorage', async () => {
       const layout = await loadLayout()
-      layout.setActiveActivity('explorer')
-      expect(localStorage.getItem('estela-layout-activity')).toBe('explorer')
+      layout.setActiveActivity('plugins')
+      expect(localStorage.getItem('estela-layout-activity')).toBe('plugins')
     })
 
     it('persists sidebar visibility to localStorage', async () => {

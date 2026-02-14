@@ -4,6 +4,19 @@
 
 ---
 
+## Session 55 — Sprint 2.3 Plugin Browser Surfaces (2026-02-14)
+
+- **Shared plugin domain store** — `src/stores/plugins.ts` now owns catalog, filters, install state, and settings target intent
+- **Marketplace data adapter** — `src/services/plugins/catalog.ts` provides typed plugin catalog used by both surfaces
+- **Lifecycle adapter** — `src/services/plugins/lifecycle.ts` adds install/uninstall persistence with AVA + legacy key mirroring
+- **Settings plugin browser** — new `src/components/settings/tabs/PluginsTab.tsx` replaces placeholder with search, categories, featured, and install controls
+- **Sidebar plugin surface** — new `src/components/sidebar/SidebarPlugins.tsx` adds compact quick install/uninstall and settings entry
+- **Activity wiring** — `ActivityBar`, `SidebarPanel`, and `layout` store now support `plugins` activity
+- **Plugin types** — `src/types/plugin.ts` + `src/types/index.ts` export plugin domain interfaces
+- **Tests** — added `src/stores/plugins.test.ts`, updated `PluginsTab.smoke.test.tsx`, and expanded `layout.test.ts` coverage for plugins activity
+
+---
+
 ## Session 54 — Project Hub + Project-Scoped Sessions (2026-02-14)
 
 - **Project hub screen** — `ProjectHub.tsx` adds startup hub with open-project and resume actions

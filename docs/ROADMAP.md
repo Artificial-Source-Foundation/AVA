@@ -149,12 +149,12 @@ This is what makes AVA "The Obsidian of AI Coding". Easy to create, discover, in
 
 ### Sprint 2.3: Built-in Marketplace UI
 - [x] Project Hub + project-scoped session restore + sidebar quick project switching
-- [ ] Plugin browser in sidebar/settings plugin surface (replace removed sidebar placeholder)
-- [ ] Search, categories, featured plugins
-- [ ] Install/uninstall with one click
-- [ ] Plugin settings page per plugin
+- [x] Plugin browser in sidebar/settings plugin surface (replace removed sidebar placeholder)
+- [x] Search, categories, featured plugins
+- [x] Install/uninstall with one click
+- [x] Plugin settings page per plugin
 
-**Key files:** `src/App.tsx`, `src/components/projects/`, `src/components/sidebar/`, `src/stores/session.ts`
+**Key files:** `src/components/settings/tabs/PluginsTab.tsx`, `src/components/sidebar/SidebarPlugins.tsx`, `src/stores/plugins.ts`, `src/services/plugins/`
 
 ### Sprint 2.4: Plugin Distribution
 - [ ] Publish plugins from GitHub repos

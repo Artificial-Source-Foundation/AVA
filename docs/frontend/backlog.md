@@ -10,7 +10,7 @@
 |-------|--------|-----------|
 | **1: Desktop App** | **Complete** | - |
 | **1.5: Desktop Polish** | **Complete** | Manual testing only |
-| **2: Plugin Ecosystem** | In progress | Backend foundations shipped; frontend UX pending |
+| **2: Plugin Ecosystem** | In progress | Sprint 2.3 browser shipped; distribution/dev tooling pending |
 | **2+: Competitive Gaps** | Mostly complete | Focus moved to verification + plugin UX |
 
 ---
@@ -50,7 +50,7 @@ These gaps were prioritized previously and are now mostly delivered based on cha
 ### Next execution queue
 - [ ] Implement session auto-title UX validation and polish
 - [ ] Final manual QA pass for chat stream UX across long sessions
-- [ ] Begin Sprint 2.3 plugin UX implementation from plan doc
+- [ ] Wire plugin install/uninstall to real backend lifecycle APIs (replace local mock adapter)
 
 ---
 
@@ -73,11 +73,11 @@ This is what makes AVA "The Obsidian of AI Coding".
 **Frontend**: Plugin dev panel showing reload status, logs
 
 ### Sprint 2.3: Built-in Marketplace UI
-- [ ] Plugin browser in sidebar (replace SidebarPlugins placeholder — currently deleted)
-- [ ] Search, categories, featured plugins
-- [ ] Install/uninstall with one click
-- [ ] Plugin settings page per plugin
-**Frontend**: Major work — new sidebar view, plugin cards, search, install flow
+- [x] Plugin browser in sidebar/settings surfaces
+- [x] Search, categories, featured plugins
+- [x] Install/uninstall with one click
+- [x] Plugin settings entry per plugin
+**Frontend**: Shipped with shared `plugins` store and mock lifecycle adapter
 
 ### Sprint 2.4: Plugin Distribution
 - [ ] Publish plugins from GitHub repos
@@ -135,6 +135,8 @@ These were identified as gaps but are now fully implemented:
 | Project hub screen + resume/open flow | 54 | Full-screen hub, open-folder CTA, resume current project |
 | Project-scoped session restore | 54 | Last-session persistence per project + startup restore |
 | Sidebar quick project switching | 54 | Hub shortcut, open-project action, project switch dropdown |
+| Plugin browser in settings + sidebar | 55 | Shared plugin store, search, categories, featured, quick actions |
+| Plugin install/uninstall + settings entry | 55 | One-click actions with AVA/legacy install-state compatibility |
 
 ---
 

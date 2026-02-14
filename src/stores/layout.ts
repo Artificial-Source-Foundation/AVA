@@ -10,7 +10,7 @@ import { STORAGE_KEYS } from '../config/constants'
 // Types
 // ============================================================================
 
-export type ActivityId = 'sessions' | 'explorer'
+export type ActivityId = 'sessions' | 'explorer' | 'plugins'
 
 // ============================================================================
 // Persistence Helpers

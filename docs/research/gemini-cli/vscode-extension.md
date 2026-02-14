@@ -2,7 +2,7 @@
 
 > Analysis of the Gemini CLI Companion VS Code Extension architecture and patterns.
 
-**Source Location:** `/home/xn3/Projects/Personal/Estela/docs/reference-code/gemini-cli/packages/vscode-ide-companion/`
+**Source Location:** `docs/reference-code/gemini-cli/packages/vscode-ide-companion/`
 
 ---
 

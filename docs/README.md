@@ -41,7 +41,7 @@
 |-----|----------|
 | [**Overview**](backend/README.md) | Core package stats, module listing |
 | [**Modules**](backend/modules.md) | Per-file module documentation |
-| [**Test Coverage**](backend/test-coverage.md) | 1778 tests across 64 files |
+| [**Test Coverage**](backend/test-coverage.md) | Latest baseline: 1801 tests across 70 files |
 | [**Gap Analysis**](backend/gap-analysis.md) | Competitive comparison |
 | [**Changelog**](backend/changelog.md) | Backend development history |
 | [**Backlog**](backend/backlog.md) | Test gaps, feature gaps, debt |
@@ -53,6 +53,8 @@
 | Doc | Contents |
 |-----|----------|
 | [**Active Epics**](development/epics/) | Work in progress |
+| [Sprint 1.6 Testing & Hardening](development/epics/sprint-1.6-testing-hardening.md) | Current sprint status, evidence, remaining gates |
+| [Plugin Ecosystem UX & Integration](development/epics/plugin-ecosystem-ux-integration.md) | Current plugin track, dependencies, exit criteria |
 | [**Completed Epics**](development/completed/) | Finished work (Epics 1-26) |
 
 ---

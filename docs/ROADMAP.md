@@ -32,7 +32,7 @@ Everything needed for a working desktop AI coding app.
 - Spring physics animations, glassmorphism design
 - Code viewer (CodeMirror 6)
 
-### Core Engine (29,500+ lines, 1778 tests)
+### Core Engine (29,500+ lines, latest baseline: 1801 tests across 70 files)
 | Category | Modules |
 |----------|---------|
 | Agent System | Agent loop, Commander, Parallel execution, Validator |
@@ -73,7 +73,7 @@ All development work is done. Only manual Tauri testing remains.
 - File watcher (AI comments: `// AI!` execute, `// AI?` question — 6 patterns, 30+ extensions, Tauri FS watch)
 - Step-level undo (Undo button in toolbar, git revert of last auto-committed AI edit)
 - Streaming tool preview (live tool call cards with status transitions during streaming)
-- Backend tests (1778 tests across 64 files)
+- Backend and integration baseline tests (1801 tests across 70 files)
 - 0 TS errors, 0 Biome errors, vite build passes, 0 TODOs in src/
 
 ### Manual Testing (Before Phase 2)
@@ -83,8 +83,8 @@ All development work is done. Only manual Tauri testing remains.
 - [ ] Test light mode across all components
 - [ ] Test file explorer + code editor with real projects
 
-See [Frontend Changelog](docs/frontend/changelog.md) for session-by-session details.
-See [Frontend Backlog](docs/frontend/backlog.md) for what's next.
+See [Frontend Changelog](frontend/changelog.md) for session-by-session details.
+See [Frontend Backlog](frontend/backlog.md) for what's next.
 
 ---
 
@@ -118,10 +118,9 @@ This sprint is partially implemented and now tracked as active.
 
 ### Sprint 1.6 Verification Workflow
 - Added `npm run verify:mvp` to run lint + typecheck + full test suite.
-- Current status: verification pipeline is green in current branch (`verify:mvp` passed).
+- Current status: verification pipeline is green in the latest readiness run (`verify:mvp` passed, full suite `1801 tests / 70 files`).
 
 ### Next Build Steps (Immediate)
-- [ ] Implement automatic session titles from first user message for new chats
 - [ ] Finish chat streaming polish (eliminate remaining send/start/end micro-jitter)
 - [ ] Complete manual Tauri OAuth validation (connect/disconnect + send flow per provider)
 - [ ] Start Sprint 2.3 frontend plugin UX implementation from `docs/plans/2026-02-13-frontend-plugin-ux-sprint-2-3.md`

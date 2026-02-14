@@ -23,8 +23,8 @@ Status legend: `todo`, `in_progress`, `done`, `blocked`.
 
 - `npx vitest run packages/core/src/llm/client.test.ts src/services/auth/oauth.test.ts src/services/auth/oauth-flow.test.ts` -> pass (51 tests)
 - `npx vitest run src/hooks/useChat.integration.test.ts src/components/chat/ChatView.integration.test.tsx src/components/settings/tabs/PluginsTab.smoke.test.tsx packages/core/src/extensions/manager.test.ts` -> pass (40 tests)
-- `npm run test:run` -> pass (69 files, 1798 tests)
-- `npm run verify:mvp` -> blocked by pre-existing repo lint/type issues outside this sprint scope (not introduced by these changes)
+- `npm run test:run` -> pass (70 files, 1801 tests)
+- `npm run verify:mvp` -> pass
 
 ## Acceptance Criteria (Unchanged)
 

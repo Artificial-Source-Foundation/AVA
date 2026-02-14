@@ -1,6 +1,6 @@
 # Backend — @estela/core
 
-> The brain of Estela. 234 files, ~56,500 lines, 1778 tests across 64 test files.
+> The brain of Estela. 234 files, ~56,500 lines, latest verified baseline: 1801 tests across 70 files.
 
 **Package:** `packages/core/` | **Entry:** `packages/core/src/index.ts` | **Exports:** 33 modules
 
@@ -195,4 +195,4 @@ All in `tools/` and auto-registered in `tools/index.ts`:
 
 ---
 
-*Last updated: 2026-02-08 — 1778 tests, 64 test files, 0 TS errors, 0 biome errors*
+*Last updated: 2026-02-14 — latest verified baseline 1801 tests across 70 files; manual OAuth runtime matrix still in progress*

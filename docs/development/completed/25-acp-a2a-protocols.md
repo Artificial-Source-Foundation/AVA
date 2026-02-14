@@ -2,7 +2,7 @@
 
 > Make Estela work in any editor (ACP) and communicate with other agents (A2A)
 
-**Research:** [`docs/analysis/gemini-cli/A2A-ACP-RESEARCH.md`](../../analysis/gemini-cli/A2A-ACP-RESEARCH.md)
+**Research:** [`docs/research/gemini-cli/A2A-ACP-RESEARCH.md`](../../research/gemini-cli/A2A-ACP-RESEARCH.md)
 
 ---
 

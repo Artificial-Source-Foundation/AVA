@@ -242,5 +242,5 @@ As of 2026-02-09:
 - **0 TypeScript errors** (`tsc --noEmit`)
 - **0 Biome errors** (3 intentional `!important` warnings in reduce-motion CSS)
 - **Vite build passes** in ~8s with code splitting
-- **1778 backend tests** across 64 files
+- **1801 backend/integration tests** across 70 files (latest baseline)
 - **0 TODO/FIXME markers** in `src/`

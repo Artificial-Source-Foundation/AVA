@@ -72,6 +72,17 @@
 
 ---
 
+## 2026-02-14
+
+### Documentation Normalization — Tested Baseline Alignment
+- Normalized status docs to the latest verified baseline: **1801 tests across 70 files**
+- Synced roadmap, vision, backend overview, and development matrix references
+- Added active epic tracking docs under `docs/development/epics/`
+- Marked legacy sprint plan docs as historical context and linked current status sources
+- Clarified that manual desktop OAuth runtime matrix remains the last manual MVP gate
+
+---
+
 ## 2026-02-08
 
 ### Session 43 — Backend Test Coverage Phase 2
@@ -196,4 +207,4 @@
 
 ---
 
-*Last updated: 2026-02-09*
+*Last updated: 2026-02-14*

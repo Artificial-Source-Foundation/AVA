@@ -158,11 +158,11 @@ Priority 5: Agent Network           ← Remote agent calls (A2A)
 ### Phase 1.5: Polish — COMPLETE
 - [x] Appearance system (dark/light/system theme, 6 accents, density, fonts, code themes)
 - [x] Settings hardening (16 settings, LLM tab, Behavior tab, data management)
-- [x] Backend test coverage (1778 tests across 64 files)
+- [x] Backend and integration test baseline (1801 tests across 70 files)
 - [x] Core frontend wiring (context tracking, checkpoints, agent memory)
 - [x] WebKitGTK fixes (ghost rendering, nested buttons, cargo linker)
 
-### Phase 2: Plugin Ecosystem — NEXT
+### Phase 2: Plugin Ecosystem — IN PROGRESS
 - [ ] Unified plugin format (skills + commands + hooks)
 - [ ] Plugin SDK — dead simple to create
 - [ ] Built-in marketplace UI
@@ -185,6 +185,6 @@ Priority 5: Agent Network           ← Remote agent calls (A2A)
 
 ## The Name
 
-**Estela** — Spanish for "star trail" or "wake" (the trail a ship leaves).
+**AVA** — short, fast, and easy to remember.
 
-Your AI team leaves a trail of completed work behind it.
+It reflects the product goal: an AI teammate that moves work forward with minimal friction.

@@ -76,7 +76,7 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for full roadmap.
 
 ```
 packages/
-├── core/              # Business logic (~56,500 lines, 1778 tests)
+├── core/              # Business logic (~56,500 lines, baseline: 1801 tests / 70 files)
 │   └── src/
 │       ├── agent/     # Autonomous loop, subagents, recovery
 │       ├── commander/ # Team Lead → Senior Leads → Junior Devs

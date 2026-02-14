@@ -9,10 +9,9 @@
 ## Audit Additions (Session 54)
 
 ### P0
-- OAuth unit tests (decodeJwtPayload, extractAccountId, checkStoredOAuth, clearProviderCredentials)
-- OAuth integration tests (credential routing, store/clear flow, isOAuthConnected init)
-- Message flow tests (queue/steer/cancel/stream + watcher → chat)
-- Debug logging coverage across chat/agent/core/session/settings/file-watcher/ChatView
+- Complete manual OAuth desktop matrix (OpenAI, Anthropic, Copilot: connect/disconnect/send flow)
+- Finish debug logging coverage across chat/agent/core/session/settings/file-watcher/ChatView
+- Align sprint evidence docs whenever full-suite totals change
 
 ### P1
 - PI Coding Agent parity items (provider switching, session branching tree, minimal tool mode, runtime skill creation)
@@ -123,4 +122,4 @@ This backlog feeds into the project roadmap:
 
 ---
 
-*Last updated: 2026-02-10*
+*Last updated: 2026-02-14*

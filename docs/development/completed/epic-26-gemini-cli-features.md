@@ -2,7 +2,7 @@
 
 > Infrastructure features from Gemini CLI that enhance Estela's safety, extensibility, and UX
 
-**Analysis:** [`docs/analysis/gemini-cli/COMPARISON.md`](../../analysis/gemini-cli/COMPARISON.md)
+**Analysis:** [`docs/research/gemini-cli/COMPARISON.md`](../../research/gemini-cli/COMPARISON.md)
 
 ---
 

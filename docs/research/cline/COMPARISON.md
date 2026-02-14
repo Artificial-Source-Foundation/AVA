@@ -51,8 +51,8 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 | Feature | Cline | Estela | Gap |
 |---------|-------|--------|-----|
-| Hook System | ✅ (8 hooks) | ❌ | **Major** |
-| PreToolUse/PostToolUse | ✅ | ❌ | **Major** |
+| Hook System | ✅ (8 hooks) | Partial | **Medium** |
+| PreToolUse/PostToolUse | ✅ | ✅ | - |
 | UserPromptSubmit Hook | ✅ | ❌ | **Medium** |
 | Hook Subprocess Isolation | ✅ | ❌ | **Medium** |
 | Hook Cancellation UI | ✅ | ❌ | **Minor** |
@@ -121,7 +121,7 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 | Feature | Cline | Estela | Gap |
 |---------|-------|--------|-----|
 | CLI with React Ink | ✅ | Terminal-based | Different |
-| ACP (Agent Client Protocol) | ✅ | ❌ | **Medium** |
+| ACP (Agent Client Protocol) | ✅ | ✅ | - |
 | Standalone gRPC Service | ✅ | ❌ | **Major** |
 | Plain Text Mode | ✅ | ❌ | **Minor** |
 | YOLO Mode with Timeout | ✅ | ❌ | **Minor** |

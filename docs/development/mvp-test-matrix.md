@@ -47,6 +47,8 @@ npx vitest run packages/core/src/extensions/manager.test.ts src/components/setti
 
 - Focused auth suite: pass (51 tests)
 - Focused chat/plugin suites: pass (40 tests)
-- Full `npm run test:run`: pass (1798 tests)
+- Full `npm run test:run`: pass (70 files, 1801 tests)
 - `npm run verify:mvp`: pass
 - `npm run tauri dev` smoke: frontend + Rust build startup confirmed after switching linker config to `gcc`
+
+Evidence source: `docs/development/mvp-readiness-report-2026-02-13.md` verification run.

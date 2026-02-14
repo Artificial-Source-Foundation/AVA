@@ -13,7 +13,7 @@ Estela/
 ├── src/                    # Desktop app (Tauri + SolidJS) ← PRIMARY
 ├── src-tauri/              # Rust backend for Tauri
 ├── packages/
-│   ├── core/               # Shared business logic (~56,500 lines, 1778 tests)
+│   ├── core/               # Shared business logic (~56,500 lines, latest baseline: 1801 tests)
 │   ├── platform-node/      # Node.js implementations (fs, shell, PTY)
 │   └── platform-tauri/     # Tauri implementations (fs, shell)
 └── cli/                    # CLI interface (secondary)

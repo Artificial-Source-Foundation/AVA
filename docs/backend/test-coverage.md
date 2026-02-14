@@ -1,6 +1,6 @@
 # Backend Test Coverage
 
-> 1778 tests across 64 test files. Overall file coverage: ~30% (56/188 testable files).
+> Latest verified baseline: 1801 tests across 70 test files. Overall file coverage: ~30% (56/188 testable files).
 >
 > Strategy: Test pure functions and stateful classes. Skip LLM/FS/HTTP-dependent code.
 
@@ -10,8 +10,8 @@
 
 | Metric | Value |
 |--------|-------|
-| Total tests | 1778 |
-| Test files | 64 |
+| Total tests | 1801 |
+| Test files | 70 |
 | Source files (excluding barrels/types) | ~188 |
 | Files with tests | 56 |
 | Files without tests | 132 |
@@ -19,23 +19,22 @@
 | TS errors | 0 |
 | Biome errors | 0 |
 
-## Planned Tests (Session 54)
+## Recently Delivered (Sprint 1.6)
 
 ### OAuth (Frontend + Core Routing)
-- `src/services/auth/oauth.test.ts` — add unit tests for `decodeJwtPayload`, `extractAccountId`
-- `src/components/settings/tabs/ProvidersTab.test.tsx` — `checkStoredOAuth`, `clearProviderCredentials`, `isOAuthConnected` init
-- `src/stores/settings.test.ts` — `syncProviderCredentials`, `syncAllApiKeys`, `handleClearAll` credential clearing
-- Integration: OpenAI OAuth vs Anthropic API key routing via `packages/core/src/llm/providers/openai.ts` + `packages/core/src/llm/client.ts`
+- `src/services/auth/oauth-flow.test.ts` — automated auth flow edge-case coverage
+- `src/services/auth/oauth.test.ts` and `packages/core/src/llm/client.test.ts` — credential routing, reconnect/clear behavior, and provider path validation
+- Integration behavior for OpenAI/Copilot/Anthropic routing is now covered in automated suites
 
 ### Message Flow (Frontend)
-- `src/hooks/useChat.test.ts` — queue/steer/cancel behavior, session switch clears queue
-- `src/hooks/useAgent.test.ts` — tool approval events + cancel flow
-- `src/components/chat/ChatView.test.tsx` — watcher-triggered AI comment → auto-send
+- `src/hooks/useChat.integration.test.ts` — queue/steer/cancel behavior and stream state transitions
+- `src/components/chat/ChatView.integration.test.tsx` — watcher-triggered AI comment -> auto-send with metadata assertions
+- `src/components/settings/tabs/PluginsTab.smoke.test.tsx` + `packages/core/src/extensions/manager.test.ts` — plugin baseline smoke/regression checks
 
 ## Current Gaps (Audit)
 
-- OAuth: no targeted unit/integration coverage for JWT parsing, credential routing, or clear-all flows
-- Message flow: 0 frontend tests for send→stream→complete, queue/steer/cancel, watcher→chat
+- Manual OAuth desktop runtime matrix is still pending (provider-by-provider connect/disconnect/send validation)
+- Logging hardening remains in progress across chat/agent/core-bridge/session/settings/file-watcher surfaces
 
 ---
 
@@ -176,4 +175,4 @@ These modules have pure functions that could be unit tested:
 
 ---
 
-*Last updated: 2026-02-10*
+*Last updated: 2026-02-14*

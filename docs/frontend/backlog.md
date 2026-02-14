@@ -137,6 +137,7 @@ These were identified as gaps but are now fully implemented:
 | Sidebar quick project switching | 54 | Hub shortcut, open-project action, project switch dropdown |
 | Plugin browser in settings + sidebar | 55 | Shared plugin store, search, categories, featured, quick actions |
 | Plugin install/uninstall + settings entry | 55 | One-click actions with AVA/legacy install-state compatibility |
+| Plugin scaffold CLI foundation | 56 | `ava plugin init` command + generated package template docs |
 
 ---
 

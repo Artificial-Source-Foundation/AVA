@@ -4,6 +4,17 @@
 
 ---
 
+## Session 56 — Sprint 2.4 Plugin Devx Foundation (2026-02-14)
+
+- **Plugin scaffold command** — new `ava plugin init` in `cli/src/commands/plugin.ts` creates plugin starter packages
+- **CLI routing** — `cli/src/index.ts` now dispatches `plugin` subcommands and shows plugin usage in help output
+- **AVA command alias** — `cli/package.json` now exposes `ava` bin while keeping `estela` for backward compatibility
+- **Scaffold tests** — `cli/src/commands/plugin.test.ts` validates file generation and non-empty directory guard behavior
+- **Developer template docs** — new `docs/plugins/PLUGIN_TEMPLATE.md` describes generated structure, conventions, and workflow
+- **Auth/help consistency** — `cli/src/commands/auth.ts` usage examples updated to `ava` naming
+
+---
+
 ## Session 55 — Sprint 2.3 Plugin Browser Surfaces (2026-02-14)
 
 - **Shared plugin domain store** — `src/stores/plugins.ts` now owns catalog, filters, install state, and settings target intent

@@ -4,6 +4,7 @@
   "description": "AVA CLI - ACP-compatible AI coding assistant",
   "type": "module",
   "bin": {
+    "ava": "dist/index.js",
     "estela": "dist/index.js"
   },
   "main": "dist/index.js",

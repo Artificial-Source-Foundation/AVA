@@ -8,8 +8,19 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import type { ICredentialStore } from '@ava/core'
 
-const CONFIG_DIR = path.join(os.homedir(), '.estela')
-const CREDS_FILE = path.join(CONFIG_DIR, 'credentials.json')
+const PRIMARY_CONFIG_DIR = path.join(os.homedir(), '.ava')
+const LEGACY_CONFIG_DIR = path.join(os.homedir(), '.estela')
+const PRIMARY_CREDS_FILE = path.join(PRIMARY_CONFIG_DIR, 'credentials.json')
+const LEGACY_CREDS_FILE = path.join(LEGACY_CONFIG_DIR, 'credentials.json')
+
+async function readCredentialsFile(filePath: string): Promise<Record<string, string> | null> {
+  try {
+    const content = await fs.readFile(filePath, 'utf-8')
+    return JSON.parse(content) as Record<string, string>
+  } catch {
+    return null
+  }
+}
 
 export class NodeCredentialStore implements ICredentialStore {
   private cache: Record<string, string> | null = null
@@ -17,19 +28,30 @@ export class NodeCredentialStore implements ICredentialStore {
   private async loadCredentials(): Promise<Record<string, string>> {
     if (this.cache) return this.cache
 
-    try {
-      const content = await fs.readFile(CREDS_FILE, 'utf-8')
-      this.cache = JSON.parse(content)
-      return this.cache!
-    } catch {
-      this.cache = {}
+    const primaryCredentials = await readCredentialsFile(PRIMARY_CREDS_FILE)
+    if (primaryCredentials) {
+      this.cache = primaryCredentials
+      return primaryCredentials
+    }
+
+    const legacyCredentials = await readCredentialsFile(LEGACY_CREDS_FILE)
+    if (legacyCredentials) {
+      this.cache = legacyCredentials
+      try {
+        await this.saveCredentials(legacyCredentials)
+      } catch {
+        // Non-fatal migration write failure; keep legacy credentials in memory.
+      }
       return this.cache
     }
+
+    this.cache = {}
+    return this.cache
   }
 
   private async saveCredentials(creds: Record<string, string>): Promise<void> {
-    await fs.mkdir(CONFIG_DIR, { recursive: true })
-    await fs.writeFile(CREDS_FILE, JSON.stringify(creds, null, 2), {
+    await fs.mkdir(PRIMARY_CONFIG_DIR, { recursive: true })
+    await fs.writeFile(PRIMARY_CREDS_FILE, JSON.stringify(creds, null, 2), {
       mode: 0o600, // User read/write only
     })
     this.cache = creds
@@ -37,9 +59,16 @@ export class NodeCredentialStore implements ICredentialStore {
 
   async get(key: string): Promise<string | null> {
     // Check environment variable first
-    const envKey = `ESTELA_${key.toUpperCase().replace(/-/g, '_')}`
-    if (process.env[envKey]) {
-      return process.env[envKey]!
+    const normalizedKey = key.toUpperCase().replace(/-/g, '_')
+    const avaEnvKey = `AVA_${normalizedKey}`
+    const legacyEnvKey = `ESTELA_${normalizedKey}`
+
+    if (process.env[avaEnvKey]) {
+      return process.env[avaEnvKey]!
+    }
+
+    if (process.env[legacyEnvKey]) {
+      return process.env[legacyEnvKey]!
     }
 
     // Fall back to stored credentials

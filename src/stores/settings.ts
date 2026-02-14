@@ -4,7 +4,7 @@
  * Follows the same pattern as layout.ts — module-level signals + export hook.
  */
 
-import type { LLMProvider, MCPServerConfig } from '@estela/core'
+import type { LLMProvider, MCPServerConfig } from '@ava/core'
 import { invoke } from '@tauri-apps/api/core'
 import { createSignal } from 'solid-js'
 import type { AgentPreset } from '../components/settings/tabs/AgentsTab'

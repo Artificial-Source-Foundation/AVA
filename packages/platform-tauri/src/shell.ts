@@ -2,7 +2,7 @@
  * Tauri Shell Implementation
  */
 
-import type { ChildProcess, ExecOptions, ExecResult, IShell, SpawnOptions } from '@estela/core'
+import type { ChildProcess, ExecOptions, ExecResult, IShell, SpawnOptions } from '@ava/core'
 import { Command } from '@tauri-apps/plugin-shell'
 
 export class TauriShell implements IShell {

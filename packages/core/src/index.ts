@@ -1,5 +1,5 @@
 /**
- * @estela/core
+ * @ava/core
  * Core business logic for Estela - LLM client, tools, types
  */
 

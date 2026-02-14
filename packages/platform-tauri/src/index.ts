@@ -1,9 +1,9 @@
 /**
- * @estela/platform-tauri
+ * @ava/platform-tauri
  * Tauri platform implementations
  */
 
-import type { IPlatformProvider } from '@estela/core'
+import type { IPlatformProvider } from '@ava/core'
 import { TauriCredentialStore } from './credentials.js'
 import { TauriDatabase } from './database.js'
 import { TauriFileSystem } from './fs.js'

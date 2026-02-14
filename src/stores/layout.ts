@@ -183,6 +183,31 @@ function closeCodeEditor() {
 
 const [settingsOpen, setSettingsOpen] = createSignal(false)
 
+// ============================================================================
+// Project Hub Visibility
+// ============================================================================
+
+const [projectHubVisible, setProjectHubVisibleRaw] = createSignal(
+  loadBool(STORAGE_KEYS.LAYOUT_PROJECT_HUB_VISIBLE, false)
+)
+
+function setProjectHubVisible(visible: boolean) {
+  setProjectHubVisibleRaw(visible)
+  save(STORAGE_KEYS.LAYOUT_PROJECT_HUB_VISIBLE, String(visible))
+}
+
+function openProjectHub() {
+  setProjectHubVisible(true)
+}
+
+function closeProjectHub() {
+  setProjectHubVisible(false)
+}
+
+function toggleProjectHub() {
+  setProjectHubVisible(!projectHubVisible())
+}
+
 function openSettings() {
   setSettingsOpen(true)
 }
@@ -237,5 +262,12 @@ export function useLayout() {
     openSettings,
     closeSettings,
     toggleSettings,
+
+    // Project hub
+    projectHubVisible,
+    setProjectHubVisible,
+    openProjectHub,
+    closeProjectHub,
+    toggleProjectHub,
   }
 }

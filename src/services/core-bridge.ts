@@ -21,7 +21,7 @@ import {
   type SettingsManager,
   type ToolConfirmationRequest,
   type WorkerRegistry,
-} from '@estela/core'
+} from '@ava/core'
 import { logInfo, logWarn } from './logger'
 
 // ============================================================================

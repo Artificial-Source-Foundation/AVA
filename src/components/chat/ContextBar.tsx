@@ -3,7 +3,7 @@
  * Token usage indicator shown below the message input.
  */
 
-import { formatCost } from '@estela/core'
+import { formatCost } from '@ava/core'
 import { Activity } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
 import { useChat } from '../../hooks/useChat'

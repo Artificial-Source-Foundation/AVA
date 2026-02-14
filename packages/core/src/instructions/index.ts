@@ -1,5 +1,5 @@
 /**
- * @estela/core Instructions Module
+ * @ava/core Instructions Module
  * Load project and directory instructions for context injection
  */
 

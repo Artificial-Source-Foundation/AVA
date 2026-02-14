@@ -9,6 +9,7 @@ export const STORAGE_KEYS = {
   OAUTH_VERIFIER: 'estela_oauth_verifier',
   OAUTH_STATE: 'estela_oauth_state',
   LAST_SESSION: 'estela_last_session',
+  LAST_SESSION_BY_PROJECT: 'estela_last_session_by_project',
   LAST_PROJECT: 'estela_last_project',
   SETTINGS: 'estela_settings',
   PANEL_SIZES: 'estela-panel-sizes',
@@ -18,6 +19,7 @@ export const STORAGE_KEYS = {
   LAYOUT_RIGHT_VISIBLE: 'estela-layout-right-visible',
   LAYOUT_BOTTOM_VISIBLE: 'estela-layout-bottom-visible',
   LAYOUT_BOTTOM_HEIGHT: 'estela-layout-bottom-height',
+  LAYOUT_PROJECT_HUB_VISIBLE: 'estela-layout-project-hub-visible',
   SHORTCUTS: 'estela_shortcuts',
 } as const
 

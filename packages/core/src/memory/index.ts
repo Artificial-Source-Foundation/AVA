@@ -5,7 +5,7 @@
  *
  * @example
  * ```ts
- * import { createMemoryManager } from '@estela/core/memory'
+ * import { createMemoryManager } from '@ava/core/memory'
  *
  * // Create memory manager
  * const memory = createMemoryManager({

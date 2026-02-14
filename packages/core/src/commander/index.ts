@@ -17,7 +17,7 @@
  *   createDefaultRegistry,
  *   createAllWorkerTools,
  *   generatePhoneBook
- * } from '@estela/core/commander'
+ * } from '@ava/core/commander'
  *
  * // Create registry with built-in workers
  * const registry = createDefaultRegistry()

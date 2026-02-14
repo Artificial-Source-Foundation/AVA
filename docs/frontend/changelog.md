@@ -4,6 +4,20 @@
 
 ---
 
+## Session 54 — Project Hub + Project-Scoped Sessions (2026-02-14)
+
+- **Project hub screen** — `ProjectHub.tsx` adds startup hub with open-project and resume actions
+- **Auto-resume behavior** — `App.tsx` now restores the last session for the active project on startup
+- **Session persistence map** — `session-persistence.ts` stores `lastSessionByProject` in localStorage
+- **Project-safe session fallback** — `session.ts` archive/delete fallback now creates replacement sessions in the active project
+- **Sidebar quick switching** — `SidebarSessions.tsx` gets Hub/Open actions and a compact project switch dropdown
+- **No-project guards** — `useChat.ts` and `useAgent.ts` block execution until a project is selected
+- **Layout state** — persisted hub/workspace toggle in `layout.ts` + tests in `layout.test.ts`
+- New files: `ProjectHub.tsx`, `session-persistence.ts`, `session.test.ts`
+- Modified: `App.tsx`, `SidebarSessions.tsx`, `layout.ts`, `session.ts`, `constants.ts`
+
+---
+
 ## Session 53 — File Watcher + Step-Level Undo (2026-02-09)
 
 - **File watcher service** — `src/services/file-watcher.ts` (~270 lines) watches project dir via Tauri FS `watch()` (500ms debounce, recursive)

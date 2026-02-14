@@ -132,6 +132,9 @@ These were identified as gaps but are now fully implemented:
 | Custom instructions | 44 | Injected as system message |
 | Desktop notifications | 44 | Unfocused-only + AudioContext chime |
 | Settings export/import | 44 | JSON download, file picker, deep merge |
+| Project hub screen + resume/open flow | 54 | Full-screen hub, open-folder CTA, resume current project |
+| Project-scoped session restore | 54 | Last-session persistence per project + startup restore |
+| Sidebar quick project switching | 54 | Hub shortcut, open-project action, project switch dropdown |
 
 ---
 

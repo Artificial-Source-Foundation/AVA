@@ -3,7 +3,7 @@
  * Uses localStorage for now - can be enhanced with secure storage later
  */
 
-import type { ICredentialStore } from '@estela/core'
+import type { ICredentialStore } from '@ava/core'
 
 const STORAGE_PREFIX = 'estela_cred_'
 

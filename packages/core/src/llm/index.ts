@@ -1,5 +1,5 @@
 /**
- * @estela/core LLM Module
+ * @ava/core LLM Module
  */
 
 export {

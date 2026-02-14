@@ -47,6 +47,7 @@ import type {
   TerminalExecution,
 } from '../types'
 import { useProject } from './project'
+import { getLastSessionForProject, setLastSessionForProject } from './session-persistence'
 
 // ============================================================================
 // Session State
@@ -136,7 +137,7 @@ const agentStats = createMemo(() => {
 // ============================================================================
 
 export function useSession() {
-  return {
+  const store = {
     // ========================================================================
     // State Accessors
     // ========================================================================
@@ -172,6 +173,13 @@ export function useSession() {
      * Filters by current project if one is selected
      */
     loadAllSessions: async () => {
+      await store.loadSessionsForCurrentProject()
+    },
+
+    /**
+     * Load sessions for current project
+     */
+    loadSessionsForCurrentProject: async () => {
       const { currentProject } = useProject()
       const projectId = currentProject()?.id
 
@@ -186,6 +194,34 @@ export function useSession() {
       } finally {
         setIsLoadingSessions(false)
       }
+    },
+
+    /**
+     * Restore best session candidate for current project
+     */
+    restoreForCurrentProject: async (): Promise<void> => {
+      const { currentProject } = useProject()
+      const projectId = currentProject()?.id
+      const projectSessions = sessions()
+
+      if (projectSessions.length === 0) {
+        await store.createNewSession()
+        return
+      }
+
+      const lastProjectSessionId = getLastSessionForProject(projectId)
+      const globalLastSessionId = localStorage.getItem(STORAGE_KEYS.LAST_SESSION)
+      const restoreTarget =
+        projectSessions.find((session) => session.id === lastProjectSessionId) ||
+        projectSessions.find((session) => session.id === globalLastSessionId) ||
+        projectSessions[0]
+
+      if (!restoreTarget) {
+        await store.createNewSession()
+        return
+      }
+
+      await store.switchSession(restoreTarget.id)
     },
 
     /**
@@ -215,6 +251,7 @@ export function useSession() {
 
       // Persist last session
       localStorage.setItem(STORAGE_KEYS.LAST_SESSION, session.id)
+      setLastSessionForProject(projectId, session.id)
 
       return session
     },
@@ -276,6 +313,8 @@ export function useSession() {
 
       // Persist last session
       localStorage.setItem(STORAGE_KEYS.LAST_SESSION, id)
+      const { currentProject } = useProject()
+      setLastSessionForProject(currentProject()?.id, id)
     },
 
     /**
@@ -304,6 +343,9 @@ export function useSession() {
      * Archive a session (soft delete)
      */
     archiveSession: async (id: string): Promise<void> => {
+      const { currentProject } = useProject()
+      const projectId = currentProject()?.id
+
       await dbArchiveSession(id)
 
       // Remove from session list
@@ -326,9 +368,10 @@ export function useSession() {
             setIsLoadingMessages(false)
           }
           localStorage.setItem(STORAGE_KEYS.LAST_SESSION, mostRecent.id)
+          setLastSessionForProject(projectId, mostRecent.id)
         } else {
           // Create new session
-          const newSession = await dbCreateSession(DEFAULTS.SESSION_NAME)
+          const newSession = await dbCreateSession(DEFAULTS.SESSION_NAME, projectId)
           const sessionWithStats: SessionWithStats = {
             ...newSession,
             messageCount: 0,
@@ -338,6 +381,7 @@ export function useSession() {
           setCurrentSession(newSession)
           setMessages([])
           localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
+          setLastSessionForProject(projectId, newSession.id)
         }
       }
     },
@@ -346,6 +390,9 @@ export function useSession() {
      * Delete a session permanently
      */
     deleteSessionPermanently: async (id: string): Promise<void> => {
+      const { currentProject } = useProject()
+      const projectId = currentProject()?.id
+
       await dbDeleteSession(id)
 
       // Same logic as archive
@@ -366,8 +413,9 @@ export function useSession() {
             setIsLoadingMessages(false)
           }
           localStorage.setItem(STORAGE_KEYS.LAST_SESSION, mostRecent.id)
+          setLastSessionForProject(projectId, mostRecent.id)
         } else {
-          const newSession = await dbCreateSession(DEFAULTS.SESSION_NAME)
+          const newSession = await dbCreateSession(DEFAULTS.SESSION_NAME, projectId)
           const sessionWithStats: SessionWithStats = {
             ...newSession,
             messageCount: 0,
@@ -377,6 +425,7 @@ export function useSession() {
           setCurrentSession(newSession)
           setMessages([])
           localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
+          setLastSessionForProject(projectId, newSession.id)
         }
       }
     },
@@ -418,6 +467,7 @@ export function useSession() {
         setIsLoadingMessages(false)
       }
       localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
+      setLastSessionForProject(projectId, newSession.id)
     },
 
     /**
@@ -457,6 +507,7 @@ export function useSession() {
         setIsLoadingMessages(false)
       }
       localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
+      setLastSessionForProject(projectId, newSession.id)
     },
 
     /**
@@ -870,5 +921,14 @@ export function useSession() {
     getLastSessionId: (): string | null => {
       return localStorage.getItem(STORAGE_KEYS.LAST_SESSION)
     },
+
+    /**
+     * Get the last session ID for a specific project
+     */
+    getLastSessionForProject: (projectId: string | null | undefined): string | null => {
+      return getLastSessionForProject(projectId)
+    },
   }
+
+  return store
 }

@@ -5,7 +5,7 @@
  * Expand a provider to configure API key, model, etc.
  */
 
-import { removeStoredAuth } from '@estela/core'
+import { removeStoredAuth } from '@ava/core'
 import {
   AlertTriangle,
   Bot,

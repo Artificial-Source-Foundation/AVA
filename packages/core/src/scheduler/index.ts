@@ -1,5 +1,5 @@
 /**
- * @estela/core Scheduler Module
+ * @ava/core Scheduler Module
  * Background task scheduling for cleanup and maintenance
  */
 

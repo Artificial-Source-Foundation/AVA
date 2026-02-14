@@ -10,7 +10,7 @@ import {
   resetToolCallCount,
   type ToolContext,
   undoLastAutoCommit,
-} from '@estela/core'
+} from '@ava/core'
 import { createSignal } from 'solid-js'
 import { DEFAULTS, LIMITS } from '../config/constants'
 import { checkAutoApproval, createApprovalGate } from '../lib/tool-approval'
@@ -125,7 +125,7 @@ function createChatStore() {
       if (result.tokensSaved === 0) return
 
       // Determine which messages were removed
-      const keptIds = new Set(result.messages.map((m) => m.id))
+      const keptIds = new Set<string>(result.messages.map((m: { id: string }) => m.id))
       const removedMsgs = currentMsgs.filter((m) => !keptIds.has(m.id))
 
       // Update frontend state: keep only surviving messages
@@ -542,6 +542,12 @@ function createChatStore() {
     model?: string,
     images?: Array<{ data: string; mimeType: string; name?: string }>
   ): Promise<void> {
+    const project = currentProject()
+    if (!project) {
+      setError({ type: 'unknown', message: 'Open a project before sending messages.' })
+      return
+    }
+
     if (isStreaming()) {
       setMessageQueue((prev) => [...prev, { content, model, images }])
       logInfo(LOG_SRC, 'Queued message', {
@@ -696,6 +702,11 @@ function createChatStore() {
    */
   async function regenerate(): Promise<void> {
     if (isStreaming()) return
+
+    if (!currentProject()) {
+      setError({ type: 'unknown', message: 'Open a project before regenerating.' })
+      return
+    }
 
     const targetModel = session.selectedModel()
     const sessionId = session.currentSession()?.id

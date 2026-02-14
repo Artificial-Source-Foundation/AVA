@@ -15,7 +15,7 @@ vi.mock('@tauri-apps/api/core', () => ({
     return null
   }),
 }))
-vi.mock('@estela/core', () => ({
+vi.mock('@ava/core', () => ({
   setStoredAuth: vi.fn().mockResolvedValue(undefined),
 }))
 vi.mock('../../stores/settings', () => ({

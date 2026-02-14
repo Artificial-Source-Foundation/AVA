@@ -46,7 +46,7 @@ packages/platform-node/src/pty.ts    # Node-pty implementation
 ### Dependencies
 
 ```bash
-pnpm add node-pty -w --filter @estela/platform-node
+pnpm add node-pty -w --filter @ava/platform-node
 ```
 
 ### Interface
@@ -91,7 +91,7 @@ export interface IPTY {
 ```typescript
 // packages/platform-node/src/pty.ts
 import * as pty from 'node-pty'
-import type { IPTY, PTYProcess, PTYOptions } from '@estela/core'
+import type { IPTY, PTYProcess, PTYOptions } from '@ava/core'
 
 export class NodePTY implements IPTY {
   isSupported(): boolean {

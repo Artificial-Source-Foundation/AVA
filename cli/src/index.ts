@@ -13,8 +13,8 @@
 
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { setPlatform } from '@estela/core'
-import { createNodePlatform } from '@estela/platform-node'
+import { setPlatform } from '@ava/core'
+import { createNodePlatform } from '@ava/platform-node'
 import { startAcpAgent } from './acp/agent.js'
 import { runAuthCommand } from './commands/auth.js'
 

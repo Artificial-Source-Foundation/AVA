@@ -8,7 +8,9 @@
 import { open } from '@tauri-apps/plugin-dialog'
 import { Check, ChevronDown, Folder, FolderOpen, GitBranch, Plus, Star, Trash2 } from 'lucide-solid'
 import { type Component, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
+import { logError } from '../../services/logger'
 import { useProject } from '../../stores/project'
+import { useSession } from '../../stores/session'
 import type { ProjectId, ProjectWithStats } from '../../types'
 
 // ============================================================================
@@ -26,6 +28,7 @@ export const ProjectSelector: Component = () => {
     toggleFavorite,
     removeProject,
   } = useProject()
+  const { loadSessionsForCurrentProject, restoreForCurrentProject } = useSession()
 
   const [isOpen, setIsOpen] = createSignal(false)
   let containerRef: HTMLDivElement | undefined
@@ -55,16 +58,24 @@ export const ProjectSelector: Component = () => {
 
       if (selected && typeof selected === 'string') {
         await openDirectory(selected)
+        await loadSessionsForCurrentProject()
+        await restoreForCurrentProject()
         setIsOpen(false)
       }
     } catch (err) {
-      console.error('Failed to open folder:', err)
+      logError('ProjectSelector', 'Failed to open folder', err)
     }
   }
 
   const handleSelectProject = async (projectId: ProjectId) => {
-    await switchProject(projectId)
-    setIsOpen(false)
+    try {
+      await switchProject(projectId)
+      await loadSessionsForCurrentProject()
+      await restoreForCurrentProject()
+      setIsOpen(false)
+    } catch (err) {
+      logError('ProjectSelector', 'Failed to switch project', err)
+    }
   }
 
   return (

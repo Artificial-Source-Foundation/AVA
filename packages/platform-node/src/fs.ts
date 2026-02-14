@@ -3,7 +3,7 @@
  */
 
 import * as fs from 'node:fs/promises'
-import type { DirEntry, FileStat, IFileSystem } from '@estela/core'
+import type { DirEntry, FileStat, IFileSystem } from '@ava/core'
 import fg from 'fast-glob'
 
 export class NodeFileSystem implements IFileSystem {

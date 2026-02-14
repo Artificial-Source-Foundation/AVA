@@ -6,7 +6,7 @@
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import type { ICredentialStore } from '@estela/core'
+import type { ICredentialStore } from '@ava/core'
 
 const CONFIG_DIR = path.join(os.homedir(), '.estela')
 const CREDS_FILE = path.join(CONFIG_DIR, 'credentials.json')

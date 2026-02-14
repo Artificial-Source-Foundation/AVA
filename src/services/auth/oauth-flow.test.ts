@@ -11,7 +11,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }))
 
-vi.mock('@estela/core', () => ({
+vi.mock('@ava/core', () => ({
   setStoredAuth: (...args: unknown[]) => mockSetStoredAuth(...args),
 }))
 

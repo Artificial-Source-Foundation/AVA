@@ -12,6 +12,7 @@ import { CommandPalette, createDefaultCommands } from './components/CommandPalet
 import type { OnboardingData } from './components/dialogs/OnboardingDialog'
 import { OnboardingScreen } from './components/dialogs/OnboardingDialog'
 import { AppShell } from './components/layout'
+import { ProjectHub } from './components/projects'
 import { SplashScreen } from './components/SplashScreen'
 import { validateEnv } from './config/env'
 import { initCoreBridge } from './services/core-bridge'
@@ -42,10 +43,15 @@ function App() {
   const [notTauri, setNotTauri] = createSignal(false)
   const [splashStatus, setSplashStatus] = createSignal('')
 
-  const { toggleSidebar, toggleSettings, toggleBottomPanel } = useLayout()
-  const { initializeProjects } = useProject()
-  const { loadAllSessions, switchSession, createNewSession, getLastSessionId, sessions } =
-    useSession()
+  const {
+    toggleSidebar,
+    toggleSettings,
+    toggleBottomPanel,
+    projectHubVisible,
+    setProjectHubVisible,
+  } = useLayout()
+  const { initializeProjects, currentProject } = useProject()
+  const { loadSessionsForCurrentProject, restoreForCurrentProject, createNewSession } = useSession()
   const { settings, updateSettings, updateProvider } = useSettings()
   const { registerAction, setupShortcutListener } = useShortcuts()
 
@@ -69,7 +75,15 @@ function App() {
     registerAction('toggle-sidebar', toggleSidebar)
     registerAction('toggle-settings', toggleSettings)
     registerAction('toggle-bottom-panel', toggleBottomPanel)
-    registerAction('new-chat', () => createNewSession())
+    registerAction('new-chat', async () => {
+      if (!currentProject()) {
+        setProjectHubVisible(true)
+        return
+      }
+
+      await createNewSession()
+      setProjectHubVisible(false)
+    })
     const cleanupShortcuts = setupShortcutListener()
     onCleanup(cleanupShortcuts)
 
@@ -140,19 +154,13 @@ function App() {
       setSplashStatus('Loading projects...')
       await initializeProjects()
 
-      setSplashStatus('Restoring session...')
-      await loadAllSessions()
-
-      // Restore last session or create new one
-      const lastSessionId = getLastSessionId()
-      const loadedSessions = sessions()
-
-      if (lastSessionId && loadedSessions.some((s) => s.id === lastSessionId)) {
-        await switchSession(lastSessionId)
-      } else if (loadedSessions.length > 0) {
-        await switchSession(loadedSessions[0].id)
+      setSplashStatus('Restoring project session...')
+      if (currentProject()) {
+        setProjectHubVisible(false)
+        await loadSessionsForCurrentProject()
+        await restoreForCurrentProject()
       } else {
-        await createNewSession()
+        setProjectHubVisible(true)
       }
     } catch (err) {
       logError('App', 'Failed to initialize', err instanceof Error ? err.stack : String(err))
@@ -246,13 +254,23 @@ function App() {
               />
             }
           >
-            <AppShell />
-            <CommandPalette
-              commands={createDefaultCommands({
-                newChat: () => createNewSession(),
-                openSettings: toggleSettings,
-              })}
-            />
+            <Show when={!projectHubVisible()} fallback={<ProjectHub />}>
+              <AppShell />
+              <CommandPalette
+                commands={createDefaultCommands({
+                  newChat: async () => {
+                    if (!currentProject()) {
+                      setProjectHubVisible(true)
+                      return
+                    }
+
+                    await createNewSession()
+                    setProjectHubVisible(false)
+                  },
+                  openSettings: toggleSettings,
+                })}
+              />
+            </Show>
           </Show>
         </Show>
       </Show>

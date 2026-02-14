@@ -116,6 +116,27 @@ describe('layout store', () => {
       layout.setSidebarVisible(false)
       expect(localStorage.getItem('estela-layout-sidebar-visible')).toBe('false')
     })
+
+    it('persists project hub visibility to localStorage', async () => {
+      const layout = await loadLayout()
+      layout.setProjectHubVisible(true)
+      expect(localStorage.getItem('estela-layout-project-hub-visible')).toBe('true')
+    })
+  })
+
+  describe('project hub controls', () => {
+    it('opens, closes, and toggles project hub visibility', async () => {
+      const layout = await loadLayout()
+
+      layout.closeProjectHub()
+      expect(layout.projectHubVisible()).toBe(false)
+
+      layout.openProjectHub()
+      expect(layout.projectHubVisible()).toBe(true)
+
+      layout.toggleProjectHub()
+      expect(layout.projectHubVisible()).toBe(false)
+    })
   })
 
   // setupLayoutShortcuts moved to src/stores/shortcuts.ts

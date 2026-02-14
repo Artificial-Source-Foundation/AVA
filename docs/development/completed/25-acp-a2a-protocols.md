@@ -156,7 +156,7 @@ export class AcpSession {
 ```typescript
 // Add --acp flag
 if (args.acp) {
-  const { AcpAgent } = await import('@estela/core/acp');
+  const { AcpAgent } = await import('@ava/core/acp');
   const agent = new AcpAgent(config);
   await agent.start();  // Blocks until stdin closes
   return;

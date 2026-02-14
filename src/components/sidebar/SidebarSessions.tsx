@@ -4,9 +4,26 @@
  * Session list with search, new chat, and right-click context menu.
  */
 
-import { Check, Copy, GitFork, MessageSquare, Pencil, Plus, Search, Trash2, X } from 'lucide-solid'
-import { type Component, createSignal, For, Show } from 'solid-js'
+import { open } from '@tauri-apps/plugin-dialog'
+import {
+  Check,
+  Compass,
+  Copy,
+  FolderOpen,
+  GitFork,
+  MessageSquare,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-solid'
+import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
+import { logError } from '../../services/logger'
+import { useLayout } from '../../stores/layout'
+import { useProject } from '../../stores/project'
 import { useSession } from '../../stores/session'
+import type { ProjectId, ProjectWithStats } from '../../types'
 import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu'
 
 interface ContextMenuState {
@@ -25,15 +42,77 @@ export const SidebarSessions: Component = () => {
     renameSession,
     duplicateSession,
     forkSession,
+    loadSessionsForCurrentProject,
+    restoreForCurrentProject,
   } = useSession()
+  const { currentProject, favoriteProjects, recentProjects, switchProject, openDirectory } =
+    useProject()
+  const { openProjectHub, closeProjectHub } = useLayout()
   const [search, setSearch] = createSignal('')
   const [contextMenu, setContextMenu] = createSignal<ContextMenuState | null>(null)
   const [renamingId, setRenamingId] = createSignal<string | null>(null)
   const [renameValue, setRenameValue] = createSignal('')
   const [confirmDeleteId, setConfirmDeleteId] = createSignal<string | null>(null)
 
+  const quickProjects = createMemo(() => {
+    const seen = new Set<string>()
+    const combined: Array<ProjectWithStats | null> = [
+      currentProject() as ProjectWithStats | null,
+      ...favoriteProjects(),
+      ...recentProjects(),
+    ]
+    return combined.filter((project): project is ProjectWithStats => {
+      if (!project) {
+        return false
+      }
+
+      if (seen.has(project.id)) {
+        return false
+      }
+
+      seen.add(project.id)
+      return true
+    })
+  })
+
   const handleNewChat = async () => {
     await createNewSession()
+    closeProjectHub()
+  }
+
+  const handleProjectSwitch = async (projectId: string) => {
+    if (!projectId || projectId === currentProject()?.id) {
+      return
+    }
+
+    try {
+      await switchProject(projectId as ProjectId)
+      await loadSessionsForCurrentProject()
+      await restoreForCurrentProject()
+      closeProjectHub()
+    } catch (err) {
+      logError('SidebarSessions', 'Failed to switch project from sidebar', err)
+    }
+  }
+
+  const handleOpenProject = async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        title: 'Select Project Folder',
+      })
+
+      if (!selected || typeof selected !== 'string') {
+        return
+      }
+
+      await openDirectory(selected)
+      await loadSessionsForCurrentProject()
+      await restoreForCurrentProject()
+      closeProjectHub()
+    } catch (err) {
+      logError('SidebarSessions', 'Failed to open project from sidebar', err)
+    }
   }
 
   const filteredSessions = () => {
@@ -139,6 +218,50 @@ export const SidebarSessions: Component = () => {
       </div>
 
       {/* Search */}
+      <div class="density-px density-py flex-shrink-0 border-b border-[var(--border-subtle)] space-y-2">
+        <div class="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={openProjectHub}
+            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-default)]"
+            title="Open project hub"
+          >
+            <Compass class="h-3 w-3" />
+            Hub
+          </button>
+
+          <button
+            type="button"
+            onClick={handleOpenProject}
+            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-default)]"
+            title="Open project folder"
+          >
+            <FolderOpen class="h-3 w-3" />
+            Open
+          </button>
+        </div>
+
+        <select
+          value={currentProject()?.id ?? ''}
+          onChange={(e) => {
+            void handleProjectSwitch(e.currentTarget.value)
+          }}
+          class="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-sunken)] px-2 py-1.5 text-xs text-[var(--text-primary)] focus-glow"
+        >
+          <option value="" disabled>
+            Select project
+          </option>
+          <For each={quickProjects()}>
+            {(project) => (
+              <option value={project.id}>
+                {project.name}
+                {project.isFavorite ? ' *' : ''}
+              </option>
+            )}
+          </For>
+        </select>
+      </div>
+
       <div class="density-px density-py flex-shrink-0">
         <div class="relative">
           <Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]" />

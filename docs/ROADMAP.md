@@ -148,12 +148,13 @@ This is what makes Estela "The Obsidian of AI Coding". Easy to create, discover,
 - [ ] Plugin documentation template
 
 ### Sprint 2.3: Built-in Marketplace UI
+- [x] Project Hub + project-scoped session restore + sidebar quick project switching
 - [ ] Plugin browser in sidebar/settings plugin surface (replace removed sidebar placeholder)
 - [ ] Search, categories, featured plugins
 - [ ] Install/uninstall with one click
 - [ ] Plugin settings page per plugin
 
-**Key files:** `src/components/settings/SettingsModal.tsx`, `src/components/sidebar/`
+**Key files:** `src/App.tsx`, `src/components/projects/`, `src/components/sidebar/`, `src/stores/session.ts`
 
 ### Sprint 2.4: Plugin Distribution
 - [ ] Publish plugins from GitHub repos

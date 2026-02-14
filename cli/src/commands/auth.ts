@@ -10,7 +10,7 @@ import {
   type OAuthProvider,
   removeStoredAuth,
   startOAuthFlow,
-} from '@estela/core'
+} from '@ava/core'
 
 const SUPPORTED_PROVIDERS: OAuthProvider[] = ['anthropic', 'openai', 'google', 'copilot']
 

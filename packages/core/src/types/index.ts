@@ -1,5 +1,5 @@
 /**
- * @estela/core Types
+ * @ava/core Types
  */
 
 export * from './llm.js'

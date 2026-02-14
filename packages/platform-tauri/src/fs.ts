@@ -2,7 +2,7 @@
  * Tauri File System Implementation
  */
 
-import type { DirEntry, FileStat, IFileSystem } from '@estela/core'
+import type { DirEntry, FileStat, IFileSystem } from '@ava/core'
 import {
   readFile as readBinaryFile,
   readTextFile,

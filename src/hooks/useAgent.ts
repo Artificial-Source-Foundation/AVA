@@ -1,6 +1,6 @@
 /**
  * useAgent Hook
- * Integrates AgentExecutor from @estela/core with SolidJS reactive state
+ * Integrates AgentExecutor from @ava/core with SolidJS reactive state
  *
  * Provides:
  * - Full agent loop with hooks, doom loop detection, recovery
@@ -18,7 +18,7 @@ import {
   type ToolCallInfo,
   type ToolConfirmationRequest,
   type ToolConfirmationResponse,
-} from '@estela/core'
+} from '@ava/core'
 import { batch, createSignal, onCleanup } from 'solid-js'
 import {
   type ApprovalRequest,
@@ -389,6 +389,11 @@ export function useAgent() {
    */
   async function run(goal: string, config?: Partial<AgentConfig>): Promise<AgentResult | null> {
     if (isRunning()) return null
+
+    if (!currentProject()) {
+      setLastError('Open a project before running agent mode.')
+      return null
+    }
 
     // Reset state
     batch(() => {

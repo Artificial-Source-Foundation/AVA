@@ -9,7 +9,7 @@
  *   TaskScheduler,
  *   ConflictDetector,
  *   ActivityMultiplexer,
- * } from '@estela/core/commander'
+ * } from '@ava/core/commander'
  *
  * // Simple parallel batch
  * const results = await executeBatch(tasks, { maxConcurrency: 4 }, signal)

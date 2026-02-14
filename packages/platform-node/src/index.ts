@@ -1,9 +1,9 @@
 /**
- * @estela/platform-node
+ * @ava/platform-node
  * Node.js platform implementations for CLI
  */
 
-import type { IPlatformProvider, IPTY } from '@estela/core'
+import type { IPlatformProvider, IPTY } from '@ava/core'
 import { NodeCredentialStore } from './credentials.js'
 import { NodeDatabase } from './database.js'
 import { NodeFileSystem } from './fs.js'

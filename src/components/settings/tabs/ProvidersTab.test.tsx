@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { checkStoredOAuth, clearProviderCredentials } from './providers-tab-helpers'
 
-vi.mock('@estela/core', () => ({
+vi.mock('@ava/core', () => ({
   removeStoredAuth: vi.fn(),
 }))
 

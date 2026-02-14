@@ -1,16 +1,16 @@
 /**
  * Platform Initialization for Tauri
- * Wires up @estela/platform-tauri with @estela/core
+ * Wires up @ava/platform-tauri with @ava/core
  */
 
-import { setPlatform } from '@estela/core'
-import { createTauriPlatform } from '@estela/platform-tauri'
+import { setPlatform } from '@ava/core'
+import { createTauriPlatform } from '@ava/platform-tauri'
 
 let initialized = false
 
 /**
  * Initialize the platform provider for Tauri
- * Must be called before using any @estela/core features
+ * Must be called before using any @ava/core features
  */
 export function initializePlatform(): void {
   if (initialized) return

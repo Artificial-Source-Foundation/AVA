@@ -5,7 +5,7 @@
  * and actions (copy, delete, edit, regenerate, retry).
  */
 
-import { formatCost } from '@estela/core'
+import { formatCost } from '@ava/core'
 import { AlertCircle, ChevronDown, ChevronUp, Loader2, RotateCcw } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import type { Message } from '../../types'

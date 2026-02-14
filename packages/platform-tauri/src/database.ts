@@ -3,7 +3,7 @@
  * Uses tauri-plugin-sql for SQLite
  */
 
-import type { IDatabase, Migration } from '@estela/core'
+import type { IDatabase, Migration } from '@ava/core'
 import Database from '@tauri-apps/plugin-sql'
 
 export class TauriDatabase implements IDatabase {

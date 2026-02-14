@@ -1,5 +1,5 @@
 /**
- * @estela/core Models Module
+ * @ava/core Models Module
  * Centralized model configurations and registry
  */
 

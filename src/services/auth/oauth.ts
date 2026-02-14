@@ -10,7 +10,7 @@
  * - https://github.com/numman-ali/opencode-openai-codex-auth
  */
 
-import { setStoredAuth } from '@estela/core'
+import { setStoredAuth } from '@ava/core'
 import { invoke } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { STORAGE_KEYS } from '../../config/constants'

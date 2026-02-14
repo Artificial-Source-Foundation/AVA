@@ -4,7 +4,7 @@
  * Implements the Agent Client Protocol for integration with
  * Toad, Zed, and other ACP-compatible editors.
  *
- * Uses @estela/core ACP modules for:
+ * Uses @ava/core ACP modules for:
  * - Session persistence (AcpSessionStore)
  * - Mode switching (AcpModeManager)
  * - MCP server forwarding (AcpMCPBridge)
@@ -49,7 +49,7 @@ import {
   resetToolCallCount,
   type ToolContext,
   type ToolUseBlock,
-} from '@estela/core'
+} from '@ava/core'
 
 // ============================================================================
 // Constants

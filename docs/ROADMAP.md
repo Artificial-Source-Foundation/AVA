@@ -157,6 +157,7 @@ This is what makes AVA "The Obsidian of AI Coding". Easy to create, discover, in
 **Key files:** `src/components/settings/tabs/PluginsTab.tsx`, `src/components/sidebar/SidebarPlugins.tsx`, `src/stores/plugins.ts`, `src/services/plugins/`
 
 ### Sprint 2.4: Plugin Distribution
+- [x] `ava plugin init` scaffold command + plugin template docs
 - [ ] Publish plugins from GitHub repos
 - [ ] Plugin registry API
 - [ ] Version management and updates

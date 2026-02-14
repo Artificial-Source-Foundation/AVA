@@ -3,7 +3,7 @@
     "target": "ES2020",
     "useDefineForClassFields": true,
     "module": "ESNext",
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": ["ES2021", "DOM", "DOM.Iterable"],
     "skipLibCheck": true,
 
     /* Bundler mode */
@@ -14,6 +14,12 @@
     "noEmit": true,
     "jsx": "preserve",
     "jsxImportSource": "solid-js",
+    "baseUrl": ".",
+    "paths": {
+      "@ava/core": ["packages/core/src/index.ts"],
+      "@ava/platform-node": ["packages/platform-node/src/index.ts"],
+      "@ava/platform-tauri": ["packages/platform-tauri/src/index.ts"]
+    },
 
     /* Linting */
     "strict": true,

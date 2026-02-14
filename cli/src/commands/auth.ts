@@ -24,7 +24,7 @@ export async function runAuthCommand(args: string[]): Promise<void> {
   switch (subcommand) {
     case 'login':
       if (!provider || !SUPPORTED_PROVIDERS.includes(provider)) {
-        console.log(`Usage: estela auth login <provider>`)
+        console.log(`Usage: ava auth login <provider>`)
         console.log(`Providers: ${SUPPORTED_PROVIDERS.join(', ')}`)
         return
       }
@@ -33,7 +33,7 @@ export async function runAuthCommand(args: string[]): Promise<void> {
 
     case 'logout':
       if (!provider || !SUPPORTED_PROVIDERS.includes(provider)) {
-        console.log(`Usage: estela auth logout <provider>`)
+        console.log(`Usage: ava auth logout <provider>`)
         console.log(`Providers: ${SUPPORTED_PROVIDERS.join(', ')}`)
         return
       }
@@ -134,7 +134,7 @@ function printHelp(): void {
 AVA Auth - Manage authentication for LLM providers
 
 USAGE:
-  estela auth <command> [provider]
+  ava auth <command> [provider]
 
 COMMANDS:
   login <provider>   Connect using OAuth (consumer subscriptions)
@@ -148,18 +148,18 @@ PROVIDERS:
   copilot     GitHub Copilot subscription
 
 EXAMPLES:
-  estela auth login anthropic    # Connect Claude subscription
-  estela auth login openai       # Connect ChatGPT subscription
-  estela auth login google       # Connect Gemini/Antigravity
-  estela auth login copilot      # Connect GitHub Copilot
-  estela auth status             # Check auth status
-  estela auth logout anthropic   # Disconnect Claude
+  ava auth login anthropic    # Connect Claude subscription
+  ava auth login openai       # Connect ChatGPT subscription
+  ava auth login google       # Connect Gemini/Antigravity
+  ava auth login copilot      # Connect GitHub Copilot
+  ava auth status             # Check auth status
+  ava auth logout anthropic   # Disconnect Claude
 
 NOTE:
   You can also use API keys via environment variables:
-    ESTELA_ANTHROPIC_API_KEY
-    ESTELA_OPENAI_API_KEY
-    ESTELA_GOOGLE_API_KEY
+    AVA_ANTHROPIC_API_KEY
+    AVA_OPENAI_API_KEY
+    AVA_GOOGLE_API_KEY
 `)
 }
 

@@ -19,6 +19,7 @@ import type { Credentials, LLMProvider } from '../../types/llm'
 import { logDebug, logError, logInfo, logWarn } from '../logger'
 
 const LOG_SRC = 'oauth'
+const AVA_CREDENTIALS_KEY = 'ava_credentials'
 
 // ============================================================================
 // Types
@@ -566,7 +567,8 @@ export function storeOAuthCredentials(provider: LLMProvider, tokens: OAuthTokens
     expiresAt: tokens.expiresAt,
     refreshToken: tokens.refreshToken,
   }
-  const stored = localStorage.getItem('estela_credentials')
+  const stored =
+    localStorage.getItem(AVA_CREDENTIALS_KEY) || localStorage.getItem(STORAGE_KEYS.CREDENTIALS)
   let all: Record<string, Credentials> = {}
   try {
     if (stored) all = JSON.parse(stored)
@@ -574,7 +576,9 @@ export function storeOAuthCredentials(provider: LLMProvider, tokens: OAuthTokens
     all = {}
   }
   all[provider] = credentials
-  localStorage.setItem('estela_credentials', JSON.stringify(all))
+  const serialized = JSON.stringify(all)
+  localStorage.setItem(AVA_CREDENTIALS_KEY, serialized)
+  localStorage.setItem(STORAGE_KEYS.CREDENTIALS, serialized)
 
   // Anthropic: OAuth mints a real API key — store as plain API key
   if (provider === 'anthropic') {

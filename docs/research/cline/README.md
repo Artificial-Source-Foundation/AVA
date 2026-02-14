@@ -6,7 +6,7 @@
 
 ## Overview
 
-Cline is a VS Code extension that provides AI-powered coding assistance. This analysis documents its architecture, patterns, and features to identify what Estela can learn from or adopt.
+Cline is a VS Code extension that provides AI-powered coding assistance. This analysis documents its architecture, patterns, and features to identify what AVA can learn from or adopt.
 
 **Source:** `docs/reference-code/cline/`
 **Version Analyzed:** Latest as of February 2026
@@ -25,7 +25,7 @@ Cline is a VS Code extension that provides AI-powered coding assistance. This an
 | 06 | [Webview UI](./06-webview-ui.md) | React components, state management |
 | 07 | [CLI & Standalone](./07-cli-standalone.md) | CLI commands, standalone app |
 | 08 | [Types & Utilities](./08-types-utilities.md) | Type definitions, shared utilities |
-| 09 | [Comparison](./COMPARISON.md) | Cline vs Estela feature comparison |
+| 09 | [Comparison](./COMPARISON.md) | Cline vs AVA feature comparison |
 
 ---
 
@@ -102,7 +102,7 @@ cline/
 
 ## Key Findings
 
-### What Cline Has That Estela Should Adopt
+### What Cline Has That AVA Should Adopt
 
 **Critical:**
 1. **Hook System** - 8 lifecycle hooks with subprocess isolation
@@ -118,7 +118,7 @@ cline/
 9. Diagnostics tracking (pre/post edit)
 10. Virtual scrolling for large histories
 
-### Where Estela is Ahead
+### Where AVA is Ahead
 
 1. **Batch Tool** - Execute up to 25 tools in parallel
 2. **Multi-Edit Tool** - Multiple sequential edits

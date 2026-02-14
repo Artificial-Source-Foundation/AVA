@@ -130,7 +130,7 @@ This sprint is partially implemented and now tracked as active.
 
 ## Phase 2: Plugin Ecosystem (IN PROGRESS — THE DIFFERENTIATOR)
 
-This is what makes Estela "The Obsidian of AI Coding". Easy to create, discover, install.
+This is what makes AVA "The Obsidian of AI Coding". Easy to create, discover, install.
 
 ### Sprint 2.1: Plugin Format & SDK (Backend foundation mostly done)
 - [x] Define plugin manifest + parsing/validation (`packages/core/src/extensions/manifest.ts`)

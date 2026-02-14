@@ -56,7 +56,7 @@ These gaps were prioritized previously and are now mostly delivered based on cha
 
 ## Phase 2 — Plugin Ecosystem (THE DIFFERENTIATOR)
 
-This is what makes Estela "The Obsidian of AI Coding".
+This is what makes AVA "The Obsidian of AI Coding".
 
 ### Sprint 2.1: Plugin Format & SDK
 - [ ] Define unified plugin manifest (skills + commands + hooks + MCP in one package)
@@ -138,7 +138,7 @@ These were identified as gaps but are now fully implemented:
 
 ---
 
-## Unique Advantages (Estela vs Everyone)
+## Unique Advantages (AVA vs Everyone)
 
 Features no other AI coding tool has:
 

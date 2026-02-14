@@ -1,7 +1,7 @@
 {
   "name": "@ava/cli",
   "version": "0.1.0",
-  "description": "Estela CLI - ACP-compatible AI coding assistant",
+  "description": "AVA CLI - ACP-compatible AI coding assistant",
   "type": "module",
   "bin": {
     "estela": "dist/index.js"

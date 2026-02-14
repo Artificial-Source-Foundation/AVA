@@ -14,7 +14,7 @@ const SUCCESS_HTML: &str = r#"<!DOCTYPE html>
 <html><head><title>Authorization Complete</title>
 <style>body{font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#0a0a0f;color:#e4e4e7}
 .card{text-align:center;padding:2rem}h1{font-size:1.25rem;margin-bottom:0.5rem}p{color:#71717a;font-size:0.875rem}</style>
-</head><body><div class="card"><h1>Authorization successful</h1><p>You can close this tab and return to Estela.</p></div></body></html>"#;
+</head><body><div class="card"><h1>Authorization successful</h1><p>You can close this tab and return to AVA.</p></div></body></html>"#;
 
 const TIMEOUT_SECS: u64 = 120;
 

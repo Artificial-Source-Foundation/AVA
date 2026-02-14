@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Estela CLI Entry Point
+ * AVA CLI Entry Point
  *
  * Usage:
  *   estela              - Interactive TUI mode (future)
@@ -52,7 +52,7 @@ async function main() {
   }
 
   // Default: Show help (TUI not implemented yet)
-  console.log('Estela CLI')
+  console.log('AVA CLI')
   console.log('')
   console.log('TUI mode not yet implemented. Use --acp for ACP agent mode.')
   console.log('Run `estela --help` for more information.')
@@ -60,7 +60,7 @@ async function main() {
 
 function printHelp() {
   console.log(`
-Estela CLI - Multi-Agent AI Coding Assistant
+AVA CLI - Multi-Agent AI Coding Assistant
 
 USAGE:
   estela [OPTIONS]
@@ -95,7 +95,7 @@ ENVIRONMENT VARIABLES:
   ESTELA_OPENROUTER_API_KEY   OpenRouter API key
   ESTELA_OPENAI_API_KEY       OpenAI API key (alternative to OAuth)
 
-For more information, visit: https://github.com/g0dxn4/Estela
+For more information, visit: https://github.com/g0dxn4/AVA
 `)
 }
 

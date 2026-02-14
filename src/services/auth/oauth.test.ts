@@ -99,18 +99,19 @@ describe('storeOAuthCredentials', () => {
 
   it('stores credentials in localStorage', () => {
     storeOAuthCredentials('anthropic', { accessToken: 'tok-abc' })
-    const raw = localStorage.getItem('estela_credentials')
+    const raw = localStorage.getItem('ava_credentials')
     expect(raw).not.toBeNull()
     const parsed = JSON.parse(raw!)
     expect(parsed.anthropic.provider).toBe('anthropic')
     expect(parsed.anthropic.type).toBe('oauth-token')
     expect(parsed.anthropic.value).toBe('tok-abc')
+    expect(localStorage.getItem('estela_credentials')).toBe(raw)
   })
 
   it('stores multiple providers without overwriting', () => {
     storeOAuthCredentials('anthropic', { accessToken: 'tok-a' })
     storeOAuthCredentials('openai', { accessToken: 'tok-o' })
-    const parsed = JSON.parse(localStorage.getItem('estela_credentials')!)
+    const parsed = JSON.parse(localStorage.getItem('ava_credentials')!)
     expect(parsed.anthropic.value).toBe('tok-a')
     expect(parsed.openai.value).toBe('tok-o')
   })

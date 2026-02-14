@@ -1,7 +1,7 @@
 {
   "name": "@ava/platform-tauri",
   "version": "0.1.0",
-  "description": "Tauri platform implementations for Estela",
+  "description": "Tauri platform implementations for AVA",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -657,7 +657,7 @@ const GeneralSection: Component = () => {
       </div>
 
       <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <span class="text-[10px] font-mono text-[var(--text-muted)]">Estela v0.1.0-alpha</span>
+        <span class="text-[10px] font-mono text-[var(--text-muted)]">AVA v0.1.0-alpha</span>
       </div>
     </div>
   )
@@ -719,7 +719,7 @@ const AboutSection: Component = () => {
   return (
     <div class="space-y-4">
       <div>
-        <h3 class="text-sm font-semibold text-[var(--text-primary)]">Estela</h3>
+        <h3 class="text-sm font-semibold text-[var(--text-primary)]">AVA</h3>
         <p class="text-xs text-[var(--text-muted)] mt-1">
           Desktop AI coding app with a virtual dev team and community plugins.
         </p>
@@ -740,7 +740,7 @@ const AboutSection: Component = () => {
       </div>
 
       <a
-        href="https://github.com/estela-ai/estela"
+        href="https://github.com/g0dxn4/AVA"
         target="_blank"
         rel="noopener noreferrer"
         class="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"

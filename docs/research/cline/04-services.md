@@ -159,7 +159,7 @@ class Service {
 
 ---
 
-## Notable Features for Estela
+## Notable Features for AVA
 
 ### 1. Remote Browser Support
 Robust remote Chrome debugging via WebSocket + auto-discovery.

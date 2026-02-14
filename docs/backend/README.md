@@ -1,6 +1,6 @@
 # Backend — @ava/core
 
-> The brain of Estela. 234 files, ~56,500 lines, 1778 tests across 64 test files.
+> The brain of AVA. 234 files, ~56,500 lines, 1778 tests across 64 test files.
 
 **Package:** `packages/core/` | **Entry:** `packages/core/src/index.ts` | **Exports:** 33 modules
 

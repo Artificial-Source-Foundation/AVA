@@ -233,7 +233,7 @@ Supports:
 
 ---
 
-## Notable Features for Estela
+## Notable Features for AVA
 
 ### 1. Multi-Provider Architecture at Scale
 Factory pattern for 40+ providers with unified interface.

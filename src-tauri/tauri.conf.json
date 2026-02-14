@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "estela",
+  "productName": "AVA",
   "version": "0.1.0",
   "identifier": "com.xn3.estela",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Estela",
+        "title": "AVA",
         "width": 1200,
         "height": 800,
         "minWidth": 640,

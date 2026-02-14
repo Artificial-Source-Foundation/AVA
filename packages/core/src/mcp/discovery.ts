@@ -46,7 +46,7 @@ export function getMCPConfigPaths(): string[] {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? ''
 
   return [
-    // Estela config
+    // AVA config
     `${home}/.estela/mcp.json`,
 
     // Claude Code config (for compatibility)

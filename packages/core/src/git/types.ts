@@ -13,7 +13,7 @@ export interface GitConfig {
   enabled: boolean
   /** Automatically commit before modifications */
   autoCommit: boolean
-  /** Prefix for Estela-created branches */
+  /** Prefix for AVA-created branches */
   branchPrefix: string
   /** Default commit message prefix */
   messagePrefix: string

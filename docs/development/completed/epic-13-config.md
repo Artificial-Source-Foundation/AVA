@@ -6,7 +6,7 @@
 
 ## Goal
 
-Build a comprehensive settings UI for configuring Estela's behavior, providers, and preferences.
+Build a comprehensive settings UI for configuring AVA's behavior, providers, and preferences.
 
 ---
 

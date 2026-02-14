@@ -1,5 +1,5 @@
 /**
- * Estela CLI Auth Command
+ * AVA CLI Auth Command
  * Handles OAuth authentication for LLM providers
  */
 
@@ -131,7 +131,7 @@ async function showAuthStatus(): Promise<void> {
  */
 function printHelp(): void {
   console.log(`
-Estela Auth - Manage authentication for LLM providers
+AVA Auth - Manage authentication for LLM providers
 
 USAGE:
   estela auth <command> [provider]

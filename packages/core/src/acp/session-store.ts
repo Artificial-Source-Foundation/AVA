@@ -1,8 +1,8 @@
 /**
  * ACP Session Store
  *
- * Bridges ACP sessions to Estela's SessionManager for persistence.
- * Maps ACP session IDs to Estela session IDs and handles save/load/resume.
+ * Bridges ACP sessions to AVA's SessionManager for persistence.
+ * Maps ACP session IDs to AVA session IDs and handles save/load/resume.
  */
 
 import { createFileSessionStorage } from '../session/file-storage.js'
@@ -22,9 +22,9 @@ const ACP_SESSION_PREFIX = 'ACP: '
 // ============================================================================
 
 /**
- * Manages ACP session persistence using Estela's SessionManager.
+ * Manages ACP session persistence using AVA's SessionManager.
  *
- * - Maps ACP session IDs → Estela session IDs
+ * - Maps ACP session IDs → AVA session IDs
  * - Persists sessions to ~/.estela/sessions/
  * - Supports resume via `session/load`
  */
@@ -66,7 +66,7 @@ export class AcpSessionStore {
   }
 
   /**
-   * Get the Estela session for an ACP session ID
+   * Get the AVA session for an ACP session ID
    */
   async get(acpSessionId: string): Promise<SessionState | null> {
     this.ensureNotDisposed()
@@ -78,7 +78,7 @@ export class AcpSessionStore {
   }
 
   /**
-   * Load a previously persisted session by Estela session ID.
+   * Load a previously persisted session by AVA session ID.
    * Used by ACP's `session/load` capability.
    */
   async load(estelaSessionId: string): Promise<SessionState | null> {
@@ -167,9 +167,9 @@ export class AcpSessionStore {
   }
 
   /**
-   * Get the Estela session ID for an ACP session
+   * Get the AVA session ID for an ACP session
    */
-  getEstelaId(acpSessionId: string): string | null {
+  getAVAId(acpSessionId: string): string | null {
     return this.mappings.get(acpSessionId)?.estelaSessionId ?? null
   }
 

@@ -1148,7 +1148,7 @@ const desktopPlatform: Platform = {
 
 ---
 
-## Key Takeaways for Estela
+## Key Takeaways for AVA
 
 ### Desktop App Patterns
 

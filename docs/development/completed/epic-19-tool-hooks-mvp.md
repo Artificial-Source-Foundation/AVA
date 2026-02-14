@@ -34,7 +34,7 @@ Remaining gaps:
 
 ### Tool System Gaps
 
-| Feature | Cline | Estela | Priority |
+| Feature | Cline | AVA | Priority |
 |---------|-------|--------|----------|
 | Tool hooks (PreToolUse, PostToolUse) | ✅ | ✅ | High |
 | `requires_approval` self-report | ✅ | ✅ | High |
@@ -46,7 +46,7 @@ Remaining gaps:
 
 ### System Prompt Gaps
 
-| Feature | Cline | Estela | Priority |
+| Feature | Cline | AVA | Priority |
 |---------|-------|--------|----------|
 | RULES section with detailed guidance | ✅ 10k | ✅ | High |
 | CAPABILITIES section | ✅ | ✅ | Medium |

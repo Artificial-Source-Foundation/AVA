@@ -305,7 +305,7 @@ export function createFileSessionStorage(baseDir?: string): FileSessionStorage {
 }
 
 /**
- * Get the default Estela base directory
+ * Get the default AVA base directory
  */
 function getDefaultBaseDir(): string {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? '.'

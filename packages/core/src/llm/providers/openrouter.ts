@@ -66,7 +66,7 @@ class OpenRouterClient implements LLMClient {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${auth.token}`,
           'HTTP-Referer': 'https://estela.app',
-          'X-Title': 'Estela',
+          'X-Title': 'AVA',
         },
         body: JSON.stringify(body),
         signal,

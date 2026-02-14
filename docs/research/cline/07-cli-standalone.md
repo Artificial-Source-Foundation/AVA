@@ -210,7 +210,7 @@ Standalone:
 
 ---
 
-## Notable Features for Estela
+## Notable Features for AVA
 
 ### 1. ACP (Agent Client Protocol)
 Programmatic agent interface for editor integration.

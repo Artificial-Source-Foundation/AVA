@@ -138,7 +138,7 @@ export const OnboardingScreen: Component<OnboardingProps> = (props) => {
 
               <div class="stagger-child">
                 <h1 class="text-3xl font-bold text-[var(--text-primary)] tracking-tight mb-3">
-                  Welcome to Estela
+                  Welcome to AVA
                 </h1>
               </div>
 
@@ -341,7 +341,7 @@ export const OnboardingScreen: Component<OnboardingProps> = (props) => {
                 <h2 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-1">
                   What You Can Do
                 </h2>
-                <p class="text-sm text-[var(--text-muted)]">Estela's core capabilities</p>
+                <p class="text-sm text-[var(--text-muted)]">AVA's core capabilities</p>
               </div>
 
               <div class="grid grid-cols-2 gap-3 mb-6">
@@ -379,7 +379,7 @@ export const OnboardingScreen: Component<OnboardingProps> = (props) => {
 
               <div class="stagger-child">
                 <p class="text-base text-[var(--text-secondary)] max-w-sm leading-relaxed mb-8">
-                  Estela is ready. Start a conversation to begin coding with your AI team.
+                  AVA is ready. Start a conversation to begin coding with your AI team.
                 </p>
               </div>
 
@@ -390,7 +390,7 @@ export const OnboardingScreen: Component<OnboardingProps> = (props) => {
                   class="onboarding-btn-primary inline-flex items-center gap-2 px-8 py-3 bg-[var(--accent)] text-white font-medium rounded-xl text-base"
                 >
                   <Sparkles class="w-5 h-5" />
-                  Launch Estela
+                  Launch AVA
                 </button>
               </div>
             </div>

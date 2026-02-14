@@ -1,6 +1,6 @@
-# Sprint Plan: Estela Feature Parity
+# Sprint Plan: AVA Feature Parity
 
-> Making Estela as good as Cline and beyond
+> Making AVA as good as Cline and beyond
 
 ---
 

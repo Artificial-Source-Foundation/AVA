@@ -1,7 +1,7 @@
 /**
  * ACP MCP Bridge
  *
- * Forwards MCP server configurations from the editor to Estela's
+ * Forwards MCP server configurations from the editor to AVA's
  * MCPClientManager. When an editor sends MCP server configs during
  * session creation, this bridge connects them automatically.
  */
@@ -16,10 +16,10 @@ import { AcpError, AcpErrorCode } from './types.js'
 // ============================================================================
 
 /**
- * Bridges editor MCP server configs to Estela's MCP client.
+ * Bridges editor MCP server configs to AVA's MCP client.
  *
  * When editors send MCP configs in `session/new`, this bridge:
- * 1. Converts ACP config format → Estela MCPServerConfig
+ * 1. Converts ACP config format → AVA MCPServerConfig
  * 2. Connects to each server via MCPClientManager
  * 3. Discovers tools from connected servers
  * 4. Makes tools available in the ACP session
@@ -167,7 +167,7 @@ export class AcpMCPBridge {
   // ==========================================================================
 
   /**
-   * Convert ACP MCP config to Estela MCPServerConfig
+   * Convert ACP MCP config to AVA MCPServerConfig
    */
   private normalizeConfig(config: AcpMCPServerConfig): MCPServerConfig {
     return {

@@ -1,5 +1,5 @@
 /**
- * Estela ACP Agent
+ * AVA ACP Agent
  *
  * Implements the Agent Client Protocol for integration with
  * Toad, Zed, and other ACP-compatible editors.
@@ -83,8 +83,8 @@ interface AcpModules {
 // Agent Handler
 // ============================================================================
 
-/** Create the Estela agent handler with ACP module integration */
-function createEstelaAgent(connection: AgentSideConnection, modules: AcpModules): Agent {
+/** Create the AVA agent handler with ACP module integration */
+function createAVAAgent(connection: AgentSideConnection, modules: AcpModules): Agent {
   const { sessionStore, errorHandler, modeManager, mcpBridge } = modules
   const runtimes = new Map<string, SessionRuntime>()
 
@@ -122,7 +122,7 @@ function createEstelaAgent(connection: AgentSideConnection, modules: AcpModules)
       if (mcpConfigs?.length) {
         const connected = await mcpBridge.connectServers(mcpConfigs)
         if (connected.length > 0) {
-          console.error(`[Estela] Connected MCP servers: ${connected.join(', ')}`)
+          console.error(`[AVA] Connected MCP servers: ${connected.join(', ')}`)
         }
       }
 
@@ -264,7 +264,7 @@ async function runToolLoop(
 
       if (delta.done && delta.usage) {
         console.error(
-          `[Estela] Tokens: ${delta.usage.inputTokens} in, ${delta.usage.outputTokens} out`
+          `[AVA] Tokens: ${delta.usage.inputTokens} in, ${delta.usage.outputTokens} out`
         )
       }
     }
@@ -398,7 +398,7 @@ async function handlePromptError(
 }
 
 function buildSystemPrompt(cwd: string): string {
-  return `You are Estela, an AI coding assistant. You are helping a developer in their project located at: ${cwd}
+  return `You are AVA, an AI coding assistant. You are helping a developer in their project located at: ${cwd}
 
 You have access to tools for file operations and shell commands. Use them to help the developer.
 
@@ -478,7 +478,7 @@ export async function startAcpAgent(): Promise<void> {
   const stream = ndJsonStream(writable, readable)
 
   const connection = new AgentSideConnection(
-    (conn) => createEstelaAgent(conn, { sessionStore, errorHandler, modeManager, mcpBridge }),
+    (conn) => createAVAAgent(conn, { sessionStore, errorHandler, modeManager, mcpBridge }),
     stream
   )
 

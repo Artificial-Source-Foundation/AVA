@@ -89,7 +89,7 @@ describe('A2AServer', () => {
       const { status, body } = await fetchJson(`${baseUrl}/.well-known/agent.json`)
 
       expect(status).toBe(200)
-      expect(body.name).toBe('Estela')
+      expect(body.name).toBe('AVA')
       expect(body.protocolVersion).toBe(A2A_PROTOCOL_VERSION)
       expect(body.version).toBe(DEFAULT_AGENT_VERSION)
     })
@@ -105,7 +105,7 @@ describe('A2AServer', () => {
 
       const { status, body } = await fetchJson(`${url}/.well-known/agent.json`)
       expect(status).toBe(200)
-      expect(body.name).toBe('Estela')
+      expect(body.name).toBe('AVA')
     })
 
     it('should include capabilities', async () => {
@@ -126,7 +126,7 @@ describe('A2AServer', () => {
         body: JSON.stringify({
           message: {
             role: 'user',
-            parts: [{ type: 'text', text: 'Hello, Estela' }],
+            parts: [{ type: 'text', text: 'Hello, AVA' }],
           },
         }),
       })

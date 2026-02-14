@@ -1,4 +1,4 @@
-# Estela Documentation
+# AVA Documentation
 
 > The Obsidian of AI Coding
 
@@ -8,7 +8,7 @@
 
 | Doc | What You'll Learn |
 |-----|-------------------|
-| [**Vision**](VISION.md) | What Estela is, who it's for, what makes it special |
+| [**Vision**](VISION.md) | What AVA is, who it's for, what makes it special |
 | [**Roadmap**](ROADMAP.md) | What's built, what's next |
 
 ---

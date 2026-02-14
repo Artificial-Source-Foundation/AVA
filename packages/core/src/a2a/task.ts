@@ -2,7 +2,7 @@
  * A2A Task Manager
  *
  * Manages A2A task lifecycle: create, execute, cancel.
- * Bridges between A2A protocol and Estela's AgentExecutor.
+ * Bridges between A2A protocol and AVA's AgentExecutor.
  */
 
 import { randomUUID } from 'node:crypto'

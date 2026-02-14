@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import solidPlugin from 'vite-plugin-solid'
 import { defineConfig } from 'vitest/config'
 
@@ -25,5 +26,14 @@ export default defineConfig({
   },
   resolve: {
     conditions: ['development', 'browser'],
+    alias: {
+      '@ava/core': fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),
+      '@ava/platform-tauri': fileURLToPath(
+        new URL('./packages/platform-tauri/src/index.ts', import.meta.url)
+      ),
+      '@ava/platform-node': fileURLToPath(
+        new URL('./packages/platform-node/src/index.ts', import.meta.url)
+      ),
+    },
   },
 })

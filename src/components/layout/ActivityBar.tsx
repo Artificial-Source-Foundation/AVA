@@ -11,6 +11,7 @@ import {
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
+  Puzzle,
   Settings,
   Sparkles,
 } from 'lucide-solid'
@@ -26,6 +27,7 @@ interface ActivityItem {
 const activities: ActivityItem[] = [
   { id: 'sessions', icon: MessageSquare, label: 'Sessions' },
   { id: 'explorer', icon: FolderTree, label: 'Explorer' },
+  { id: 'plugins', icon: Puzzle, label: 'Plugins' },
 ]
 
 export const ActivityBar: Component = () => {

@@ -41,6 +41,7 @@ import { DeveloperTab } from './tabs/DeveloperTab'
 import { type Keybinding, KeybindingsTab } from './tabs/KeybindingsTab'
 import { LLMTab } from './tabs/LLMTab'
 import { type MCPServer, MCPServersTab } from './tabs/MCPServersTab'
+import { PluginsTab } from './tabs/PluginsTab'
 import { ProvidersTab } from './tabs/ProvidersTab'
 
 // ============================================================================
@@ -144,19 +145,6 @@ const ALL_CAPABILITIES = [
   'testing',
   'security-analysis',
   'performance-optimization',
-]
-
-// Built-in skills for the Plugins tab
-const builtInSkills = [
-  {
-    name: 'Code Navigation',
-    description: 'Jump to definitions, references, and symbols',
-    active: true,
-  },
-  { name: 'Git Integration', description: 'Stage, commit, and diff from chat', active: true },
-  { name: 'Test Runner', description: 'Run and debug tests inline', active: true },
-  { name: 'Web Search', description: 'Search the web for documentation', active: true },
-  { name: 'Browser Automation', description: 'Puppeteer-based web interaction', active: false },
 ]
 
 // ============================================================================
@@ -466,7 +454,7 @@ export const SettingsModal: Component = () => {
                 </Show>
 
                 <Show when={activeTab() === 'plugins'}>
-                  <PluginsSection />
+                  <PluginsTab />
                 </Show>
 
                 <Show when={activeTab() === 'developer'}>
@@ -662,47 +650,6 @@ const GeneralSection: Component = () => {
     </div>
   )
 }
-
-// ============================================================================
-// Plugins Section
-// ============================================================================
-
-const PluginsSection: Component = () => (
-  <div class="space-y-3">
-    <p class="text-[10px] text-[var(--text-muted)]">
-      Obsidian-style plugin ecosystem coming in Phase 2.
-    </p>
-
-    <div>
-      <h3 class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-        Built-in Skills
-      </h3>
-      <div class="space-y-1">
-        <For each={builtInSkills}>
-          {(skill) => (
-            <div
-              class={`
-                flex items-center gap-2.5 px-2.5 py-2
-                rounded-[var(--radius-md)]
-                border border-[var(--border-subtle)]
-                ${skill.active ? 'bg-[var(--surface)]' : 'bg-[var(--surface-sunken)] opacity-60'}
-              `}
-            >
-              <Puzzle class="w-3.5 h-3.5 flex-shrink-0 text-[var(--text-muted)]" />
-              <div class="flex-1 min-w-0">
-                <p class="text-xs text-[var(--text-primary)]">{skill.name}</p>
-                <p class="text-[10px] text-[var(--text-muted)]">{skill.description}</p>
-              </div>
-              <span
-                class={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${skill.active ? 'bg-[var(--success)]' : 'bg-[var(--gray-6)]'}`}
-              />
-            </div>
-          )}
-        </For>
-      </div>
-    </div>
-  </div>
-)
 
 // ============================================================================
 // About Section

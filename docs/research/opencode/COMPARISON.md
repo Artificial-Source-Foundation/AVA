@@ -1,4 +1,4 @@
-# OpenCode vs Estela Feature Comparison
+# OpenCode vs AVA Feature Comparison
 
 > Comprehensive comparison based on thorough OpenCode codebase analysis
 
@@ -7,8 +7,8 @@
 ## Executive Summary
 
 After analyzing ~178KB of documentation covering every aspect of OpenCode's codebase, this document identifies:
-- **Critical missing features** in Estela
-- **Estela advantages** over OpenCode
+- **Critical missing features** in AVA
+- **AVA advantages** over OpenCode
 - **Architecture differences** worth considering
 - **Recommended action items** prioritized by impact
 
@@ -18,7 +18,7 @@ After analyzing ~178KB of documentation covering every aspect of OpenCode's code
 
 ### OpenCode Tools (20 total)
 
-| Tool | Description | Estela Equivalent |
+| Tool | Description | AVA Equivalent |
 |------|-------------|-------------------|
 | `read` | Read files with line numbers | `read_file` ✅ |
 | `write` | Overwrite files | `write_file` ✅ |
@@ -43,7 +43,7 @@ After analyzing ~178KB of documentation covering every aspect of OpenCode's code
 | `lsp` | LSP operations (experimental) | ⚠️ In progress |
 | `invalid` | Error handling for malformed calls | ⚠️ Implicit |
 
-### Estela-Only Tools
+### AVA-Only Tools
 
 | Tool | Description | OpenCode Equivalent |
 |------|-------------|---------------------|
@@ -195,7 +195,7 @@ Combines multiple edits to a single file:
 
 ### Key Provider Features
 
-| Feature | OpenCode | Estela |
+| Feature | OpenCode | AVA |
 |---------|----------|--------|
 | Prompt caching (Anthropic) | ✅ Ephemeral | ⚠️ Verify |
 | Responses API (OpenAI) | ✅ Custom SDK | ⚠️ Verify |
@@ -221,7 +221,7 @@ Combines multiple edits to a single file:
 
 ### Transport Types
 
-| Transport | OpenCode | Estela |
+| Transport | OpenCode | AVA |
 |-----------|----------|--------|
 | Local (stdio) | ✅ | ✅ |
 | HTTP (streamable) | ✅ | ⚠️ Verify |
@@ -230,7 +230,7 @@ Combines multiple edits to a single file:
 
 ### MCP Features
 
-| Feature | OpenCode | Estela |
+| Feature | OpenCode | AVA |
 |---------|----------|--------|
 | Tool integration | ✅ Automatic | ⚠️ Verify |
 | Resource reading | ✅ | ⚠️ Verify |
@@ -263,7 +263,7 @@ Combines multiple edits to a single file:
 - Per-agent permission overrides
 - Session-level permission merging
 
-### Estela Permission Model
+### AVA Permission Model
 
 Location: `packages/core/src/permissions/`
 
@@ -302,7 +302,7 @@ pending → running → completed | error
 - Prunes old tool outputs (keeps last 40k tokens)
 - Protected tools: `["skill"]`
 
-### Estela Session Model
+### AVA Session Model
 
 Location: `packages/core/src/session/`
 
@@ -340,7 +340,7 @@ Location: `packages/core/src/session/`
 - `documentSymbol`, `workspaceSymbol`
 - `prepareCallHierarchy`, `incomingCalls`, `outgoingCalls`
 
-### Estela LSP
+### AVA LSP
 
 Location: `packages/core/src/lsp/`
 
@@ -368,7 +368,7 @@ Location: `packages/core/src/lsp/`
 - Step limits
 - Color/visibility
 
-### Estela Agent System
+### AVA Agent System
 
 Location: `packages/core/src/agent/`
 
@@ -387,7 +387,7 @@ Based on CLAUDE.md: Similar subagent architecture with `task` tool delegation.
 - Real-time streaming
 - Permission dialogs
 
-### Estela TUI
+### AVA TUI
 
 Location: `cli/` and `src/` (SolidJS Tauri frontend)
 
@@ -407,7 +407,7 @@ Location: `cli/` and `src/` (SolidJS Tauri frontend)
 | `Snapshot.restore()` | Restore specific snapshot |
 | Session revert | Undo to message/part |
 
-### Estela Snapshot System
+### AVA Snapshot System
 
 Location: `packages/core/src/git/`
 
@@ -425,7 +425,7 @@ Location: `packages/core/src/git/`
 - Session management API
 - Workspace operations
 
-### Estela SDK
+### AVA SDK
 
 **Status:** Internal use in `packages/core/`
 
@@ -542,9 +542,9 @@ const context: Tool.Context = {
 
 ---
 
-## Estela Advantages
+## AVA Advantages
 
-| Feature | Estela | OpenCode |
+| Feature | AVA | OpenCode |
 |---------|--------|----------|
 | Browser Automation | ✅ Puppeteer tool | ❌ |
 | Native Desktop App | ✅ Tauri + SolidJS | ❌ Terminal only |
@@ -572,13 +572,13 @@ This analysis generated 7 comprehensive documents:
 
 ## Conclusion
 
-OpenCode has several mature features worth porting to Estela:
+OpenCode has several mature features worth porting to AVA:
 
 1. **Batch tool** - Significant performance improvement
 2. **Fuzzy edit strategies** - Critical for reliability
 3. **Skill system** - Extensibility pattern
 4. **Doom loop detection** - Safety feature
 
-Estela has unique advantages in browser automation and native desktop experience that OpenCode lacks.
+AVA has unique advantages in browser automation and native desktop experience that OpenCode lacks.
 
 **Recommended approach:** Prioritize batch tool and fuzzy edits first, as they directly improve daily usage reliability and performance.

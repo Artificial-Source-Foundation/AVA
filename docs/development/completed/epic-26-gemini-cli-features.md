@@ -1,6 +1,6 @@
 # Epic 26: Gemini CLI Feature Parity
 
-> Infrastructure features from Gemini CLI that enhance Estela's safety, extensibility, and UX
+> Infrastructure features from Gemini CLI that enhance AVA's safety, extensibility, and UX
 
 **Analysis:** [`docs/analysis/gemini-cli/COMPARISON.md`](../../analysis/gemini-cli/COMPARISON.md)
 

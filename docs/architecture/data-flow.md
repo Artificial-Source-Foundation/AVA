@@ -1,6 +1,6 @@
 # Data Flow
 
-> How data moves through Estela
+> How data moves through AVA
 
 ---
 

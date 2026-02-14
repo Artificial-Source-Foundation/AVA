@@ -1,7 +1,7 @@
 /**
  * A2A HTTP Server
  *
- * Exposes Estela as an A2A-compatible agent over HTTP.
+ * Exposes AVA as an A2A-compatible agent over HTTP.
  * Uses Node's native http module (no Express dependency).
  *
  * Endpoints:

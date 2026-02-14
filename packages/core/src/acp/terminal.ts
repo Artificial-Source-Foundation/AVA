@@ -22,7 +22,7 @@ import { AcpError, AcpErrorCode } from './types.js'
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000
 
 /** Terminal name prefix */
-const TERMINAL_PREFIX = 'Estela'
+const TERMINAL_PREFIX = 'AVA'
 
 // ============================================================================
 // ACP Terminal Bridge

@@ -11,7 +11,7 @@ describe('agent-card', () => {
     it('should create card with defaults', () => {
       const card = createAgentCard()
 
-      expect(card.name).toBe('Estela')
+      expect(card.name).toBe('AVA')
       expect(card.protocolVersion).toBe(A2A_PROTOCOL_VERSION)
       expect(card.version).toBe(DEFAULT_AGENT_VERSION)
       expect(card.url).toBe(`http://localhost:${DEFAULT_A2A_PORT}/`)
@@ -73,7 +73,7 @@ describe('agent-card', () => {
       const card = createAgentCard()
 
       expect(card.provider).toBeDefined()
-      expect(card.provider!.organization).toBe('Estela')
+      expect(card.provider!.organization).toBe('AVA')
     })
 
     it('should include input/output modes', () => {

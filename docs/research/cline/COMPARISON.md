@@ -1,4 +1,4 @@
-# Cline vs Estela Feature Comparison
+# Cline vs AVA Feature Comparison
 
 > Comprehensive feature matrix identifying gaps and opportunities
 
@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-After comprehensive analysis of the Cline codebase (~150+ files examined), this document identifies **key features** that Estela could adopt or improve upon. Cline is a mature, enterprise-ready VS Code extension with sophisticated patterns for multi-provider support, approval workflows, and extensibility.
+After comprehensive analysis of the Cline codebase (~150+ files examined), this document identifies **key features** that AVA could adopt or improve upon. Cline is a mature, enterprise-ready VS Code extension with sophisticated patterns for multi-provider support, approval workflows, and extensibility.
 
 ---
 
@@ -14,7 +14,7 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 ### Provider Support
 
-| Feature | Cline | Estela | Gap |
+| Feature | Cline | AVA | Gap |
 |---------|-------|--------|-----|
 | Provider Count | 40+ | ~10 | **Major** |
 | Provider Factory Pattern | ✅ | ✅ | - |
@@ -25,19 +25,19 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 ### Tools & Execution
 
-| Feature | Cline | Estela | Gap |
+| Feature | Cline | AVA | Gap |
 |---------|-------|--------|-----|
 | Tool Count | 25+ | 19 | Minor |
-| Batch Tool | ❌ | ✅ | Estela ahead |
-| Multi-Edit Tool | ❌ | ✅ | Estela ahead |
-| Fuzzy Edit Strategies | ❌ | ✅ | Estela ahead |
+| Batch Tool | ❌ | ✅ | AVA ahead |
+| Multi-Edit Tool | ❌ | ✅ | AVA ahead |
+| Fuzzy Edit Strategies | ❌ | ✅ | AVA ahead |
 | Dual-Phase Execution (Partial + Complete) | ✅ | ❌ | **Medium** |
 | Tool Handler Registry | ✅ | ✅ | - |
 | Read-Only Tool Classification | ✅ | ❌ | **Minor** |
 
 ### Permissions & Safety
 
-| Feature | Cline | Estela | Gap |
+| Feature | Cline | AVA | Gap |
 |---------|-------|--------|-----|
 | Permission System | ✅ (glob patterns) | ✅ | - |
 | Chained Command Validation | ✅ (per-segment) | ❌ | **Medium** |
@@ -49,7 +49,7 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 ### Hooks & Lifecycle
 
-| Feature | Cline | Estela | Gap |
+| Feature | Cline | AVA | Gap |
 |---------|-------|--------|-----|
 | Hook System | ✅ (8 hooks) | ❌ | **Major** |
 | PreToolUse/PostToolUse | ✅ | ❌ | **Major** |
@@ -60,7 +60,7 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 ### System Prompts
 
-| Feature | Cline | Estela | Gap |
+| Feature | Cline | AVA | Gap |
 |---------|-------|--------|-----|
 | Model-Family Variants | ✅ (8+ variants) | Basic | **Medium** |
 | Component Overrides | ✅ | ❌ | **Minor** |
@@ -70,7 +70,7 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 ### Context Management
 
-| Feature | Cline | Estela | Gap |
+| Feature | Cline | AVA | Gap |
 |---------|-------|--------|-----|
 | Task Summarization | ✅ (10 sections) | Basic | **Medium** |
 | Focus Chain (Task Progress) | ✅ | ✅ (todo list) | - |
@@ -80,7 +80,7 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 ### Services
 
-| Feature | Cline | Estela | Gap |
+| Feature | Cline | AVA | Gap |
 |---------|-------|--------|-----|
 | Remote Browser Support | ✅ | ❌ | **Major** |
 | MCP OAuth Support | ✅ | ❌ | **Major** |
@@ -92,7 +92,7 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 ### Integrations
 
-| Feature | Cline | Estela | Gap |
+| Feature | Cline | AVA | Gap |
 |---------|-------|--------|-----|
 | Checkpoint System (Shadow Git) | ✅ | ❌ | **Major** |
 | Distributed Locking | ✅ | ❌ | **Medium** |
@@ -105,7 +105,7 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 ### UI/UX (Webview)
 
-| Feature | Cline | Estela | Gap |
+| Feature | Cline | AVA | Gap |
 |---------|-------|--------|-----|
 | Virtual Scrolling | ✅ (Virtuoso) | ❌ | **Medium** |
 | gRPC Communication | ✅ | ❌ | **Major** |
@@ -118,7 +118,7 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 ### CLI & Standalone
 
-| Feature | Cline | Estela | Gap |
+| Feature | Cline | AVA | Gap |
 |---------|-------|--------|-----|
 | CLI with React Ink | ✅ | Terminal-based | Different |
 | ACP (Agent Client Protocol) | ✅ | ❌ | **Medium** |
@@ -164,7 +164,7 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 ---
 
-## Where Estela is Ahead
+## Where AVA is Ahead
 
 1. **Batch Tool** - Execute up to 25 tools in parallel
 2. **Multi-Edit Tool** - Multiple sequential edits in one call
@@ -180,7 +180,7 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 ### Communication Pattern
 
-| Aspect | Cline | Estela |
+| Aspect | Cline | AVA |
 |--------|-------|--------|
 | Webview-Extension | gRPC (protobuf) | Direct calls |
 | Streaming | gRPC streaming | AsyncGenerator |
@@ -189,7 +189,7 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 ### State Management
 
-| Aspect | Cline | Estela |
+| Aspect | Cline | AVA |
 |--------|-------|--------|
 | Storage | StateManager + Secrets | SQLite + Memory |
 | State Keys | Central registry (118 fields) | Distributed |
@@ -198,7 +198,7 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 ### Tool Execution
 
-| Aspect | Cline | Estela |
+| Aspect | Cline | AVA |
 |--------|-------|--------|
 | Registry | ToolExecutorCoordinator | Tool Registry |
 | Handlers | IFullyManagedTool interface | Tool functions |
@@ -236,10 +236,10 @@ After comprehensive analysis of the Cline codebase (~150+ files examined), this 
 
 ## Conclusion
 
-Cline has invested heavily in **enterprise features** (OAuth, remote browser, checkpoints) and **safety mechanisms** (chained validation, hook system, diagnostics tracking). Estela has stronger **tool execution capabilities** (batch, multi-edit, fuzzy strategies) and **knowledge systems** (skills, code search).
+Cline has invested heavily in **enterprise features** (OAuth, remote browser, checkpoints) and **safety mechanisms** (chained validation, hook system, diagnostics tracking). AVA has stronger **tool execution capabilities** (batch, multi-edit, fuzzy strategies) and **knowledge systems** (skills, code search).
 
 The recommended approach is to:
 1. Adopt Cline's safety patterns (hooks, validation)
 2. Adopt Cline's enterprise features (OAuth, checkpoints)
-3. Keep Estela's tool advantages (batch, fuzzy edits)
+3. Keep AVA's tool advantages (batch, fuzzy edits)
 4. Implement missing UI patterns (virtual scroll, message grouping)

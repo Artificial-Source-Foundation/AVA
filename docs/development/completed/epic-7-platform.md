@@ -333,7 +333,7 @@ export async function discoverServers(): Promise<MCPServer[]> {
     }
   } catch {}
 
-  // Check Estela config
+  // Check AVA config
   const estelaConfig = join(homedir(), '.estela', 'mcp.json')
   try {
     const config = JSON.parse(await readFile(estelaConfig, 'utf-8'))
@@ -414,6 +414,6 @@ This epic owns:
 - [ ] PTY works for interactive commands (ssh, vim)
 - [ ] PTY falls back to regular shell when not supported
 - [ ] MCP client connects to stdio and SSE servers
-- [ ] MCP server discovery finds Claude Code and Estela configs
+- [ ] MCP server discovery finds Claude Code and AVA configs
 - [ ] MCP tools appear in LLM tool list with `mcp_` prefix
 - [ ] MCP tool calls work through the tool execution loop

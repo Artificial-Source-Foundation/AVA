@@ -1,6 +1,6 @@
 # OpenCode Analysis
 
-> Comprehensive analysis of the OpenCode codebase for comparison with Estela
+> Comprehensive analysis of the OpenCode codebase for comparison with AVA
 
 ## Documents
 
@@ -19,14 +19,14 @@
 
 ## Quick Reference
 
-### Critical Missing Features in Estela
+### Critical Missing Features in AVA
 
 1. **Batch Tool** - Parallel execution of up to 25 tools
 2. **Fuzzy Edit Strategies** - 9 strategies for reliable text replacement
 3. **Skill System** - Reusable knowledge modules
 4. **Doom Loop Detection** - Safety feature for repeated identical calls
 
-### Estela Advantages
+### AVA Advantages
 
 - Browser automation (Puppeteer)
 - Native desktop app (Tauri + SolidJS)

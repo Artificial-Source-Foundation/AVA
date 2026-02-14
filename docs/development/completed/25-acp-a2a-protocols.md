@@ -1,6 +1,6 @@
 # Epic 25: ACP & A2A Protocol Support
 
-> Make Estela work in any editor (ACP) and communicate with other agents (A2A)
+> Make AVA work in any editor (ACP) and communicate with other agents (A2A)
 
 **Research:** [`docs/analysis/gemini-cli/A2A-ACP-RESEARCH.md`](../../analysis/gemini-cli/A2A-ACP-RESEARCH.md)
 
@@ -8,14 +8,14 @@
 
 ## Overview
 
-Two protocols that make Estela interoperable:
+Two protocols that make AVA interoperable:
 
-1. **ACP (Agent Client Protocol)** - Estela works inside Zed, JetBrains, Neovim, etc.
-2. **A2A (Agent-to-Agent Protocol)** - Estela talks to other AI agents over HTTP
+1. **ACP (Agent Client Protocol)** - AVA works inside Zed, JetBrains, Neovim, etc.
+2. **A2A (Agent-to-Agent Protocol)** - AVA talks to other AI agents over HTTP
 
 ```
 ┌──────────┐  ACP   ┌──────────┐  A2A   ┌──────────────┐
-│  Editor   │◄─────►│  Estela  │◄─────►│ Remote Agent  │
+│  Editor   │◄─────►│  AVA  │◄─────►│ Remote Agent  │
 │(Zed/IDEA) │ stdio  │  Agent   │ HTTP   │(GPT/Gemini/..)│
 └──────────┘        └────┬─────┘        └──────────────┘
                          │ MCP
@@ -28,7 +28,7 @@ Two protocols that make Estela interoperable:
 
 ## Sprint 1: ACP Agent (Editor Integration)
 
-**Goal:** Estela runs inside any ACP-compatible editor
+**Goal:** AVA runs inside any ACP-compatible editor
 
 **Estimated scope:** ~1,200 lines
 
@@ -83,7 +83,7 @@ export class AcpAgent {
   async handleInitialize(params: InitializeRequest): Promise<InitializeResponse> {
     return {
       protocolVersion: 1,
-      agentName: 'Estela',
+      agentName: 'AVA',
       agentVersion: '1.0.0',
       capabilities: {
         streaming: true,
@@ -111,7 +111,7 @@ export class AcpAgent {
 
 **File:** `packages/core/src/acp/session.ts`
 
-Bridge between ACP protocol and Estela's AgentExecutor:
+Bridge between ACP protocol and AVA's AgentExecutor:
 
 ```typescript
 export class AcpSession {
@@ -262,7 +262,7 @@ Support `session/set_mode` for agent/plan mode switching from editor UI.
 
 **File:** `packages/core/src/acp/mcp-bridge.ts`
 
-Allow editor to pass MCP server configs to Estela sessions:
+Allow editor to pass MCP server configs to AVA sessions:
 
 ```typescript
 // Editor sends MCP configs in session/new
@@ -290,9 +290,9 @@ Allow editor to pass MCP server configs to Estela sessions:
 
 ---
 
-## Sprint 3: A2A Server (Expose Estela as Agent)
+## Sprint 3: A2A Server (Expose AVA as Agent)
 
-**Goal:** Other agents can connect to Estela over HTTP
+**Goal:** Other agents can connect to AVA over HTTP
 
 **Estimated scope:** ~1,500 lines
 
@@ -301,9 +301,9 @@ Allow editor to pass MCP server configs to Estela sessions:
 **File:** `packages/core/src/a2a/agent-card.ts`
 
 ```typescript
-export function createAgentCard(config: EstelaConfig): AgentCard {
+export function createAgentCard(config: AVAConfig): AgentCard {
   return {
-    name: 'Estela',
+    name: 'AVA',
     description: 'Multi-agent AI coding assistant with browser automation, fuzzy edits, and parallel execution',
     url: `http://localhost:${config.a2aPort}/`,
     protocolVersion: '0.3.0',
@@ -352,7 +352,7 @@ export class A2AServer {
   private app: express.Application;
   private executor: A2AExecutor;
 
-  constructor(config: EstelaConfig) {
+  constructor(config: AVAConfig) {
     this.app = express();
     this.setupRoutes();
   }
@@ -381,7 +381,7 @@ export class A2AServer {
 
 **File:** `packages/core/src/a2a/executor.ts`
 
-Bridge between A2A protocol and Estela's AgentExecutor:
+Bridge between A2A protocol and AVA's AgentExecutor:
 
 ```typescript
 export class A2AExecutor {
@@ -483,7 +483,7 @@ Bearer token authentication for A2A endpoints.
 
 ## Sprint 4: A2A Client (Connect to Remote Agents)
 
-**Goal:** Estela can delegate tasks to other AI agents
+**Goal:** AVA can delegate tasks to other AI agents
 
 **Estimated scope:** ~800 lines
 
@@ -525,7 +525,7 @@ export class A2AClientManager {
 
 **File:** `packages/core/src/tools/remote-agent.ts`
 
-Wrap remote A2A agents as Estela tools:
+Wrap remote A2A agents as AVA tools:
 
 ```typescript
 export const remoteAgentTool = defineTool({
@@ -558,7 +558,7 @@ export class A2AAgentRegistry {
   async register(name: string, url: string): Promise<AgentCard>;
 
   /** Discover agents from config */
-  async discoverFromConfig(config: EstelaConfig): Promise<void>;
+  async discoverFromConfig(config: AVAConfig): Promise<void>;
 
   /** List registered agents */
   list(): RegisteredAgent[];
@@ -628,7 +628,7 @@ Update settings panel to show ACP/A2A configuration.
 ### Sprint 5 Acceptance Criteria
 
 - [ ] ACP/A2A settings configurable
-- [ ] End-to-end test: Editor → Estela (ACP) → Remote Agent (A2A)
+- [ ] End-to-end test: Editor → AVA (ACP) → Remote Agent (A2A)
 - [ ] Documentation updated
 - [ ] Memory bank updated
 

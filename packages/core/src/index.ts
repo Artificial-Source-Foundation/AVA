@@ -1,6 +1,6 @@
 /**
  * @ava/core
- * Core business logic for Estela - LLM client, tools, types
+ * Core business logic for AVA - LLM client, tools, types
  */
 
 export type {

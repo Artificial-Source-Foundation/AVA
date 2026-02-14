@@ -282,7 +282,7 @@ Strategy:
 
 ---
 
-## Notable Features for Estela
+## Notable Features for AVA
 
 ### 1. Extended Thinking & Reasoning Support
 `reasoning_details` field for extended thinking content.

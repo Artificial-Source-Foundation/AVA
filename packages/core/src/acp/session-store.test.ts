@@ -37,10 +37,10 @@ describe('AcpSessionStore', () => {
       expect(session.status).toBe('active')
     })
 
-    it('should map ACP session ID to Estela session', async () => {
+    it('should map ACP session ID to AVA session', async () => {
       const session = await store.create('acp-2', '/tmp')
 
-      const estelaId = store.getEstelaId('acp-2')
+      const estelaId = store.getAVAId('acp-2')
       expect(estelaId).toBe(session.id)
     })
 
@@ -71,7 +71,7 @@ describe('AcpSessionStore', () => {
   })
 
   describe('load', () => {
-    it('should load a session by Estela ID', async () => {
+    it('should load a session by AVA ID', async () => {
       const created = await store.create('acp-load-1', '/tmp')
       const loaded = await store.load(created.id)
 
@@ -79,7 +79,7 @@ describe('AcpSessionStore', () => {
       expect(loaded!.id).toBe(created.id)
     })
 
-    it('should return null for unknown Estela ID', async () => {
+    it('should return null for unknown AVA ID', async () => {
       const result = await store.load('nonexistent')
       expect(result).toBeNull()
     })

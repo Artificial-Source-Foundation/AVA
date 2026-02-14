@@ -782,9 +782,9 @@ enum ToolConfirmationOutcome {
 
 ---
 
-## Key Takeaways for Estela
+## Key Takeaways for AVA
 
-### Features Estela Might Be Missing
+### Features AVA Might Be Missing
 
 1. **A2A Protocol Support**
    - Standardized agent-to-agent communication
@@ -863,9 +863,9 @@ enum ToolConfirmationOutcome {
 
 ---
 
-## Comparison with Estela
+## Comparison with AVA
 
-| Feature | Gemini A2A | Estela | Gap |
+| Feature | Gemini A2A | AVA | Gap |
 |---------|------------|--------|-----|
 | Agent-to-Agent Protocol | Yes (A2A 0.3) | No | Missing |
 | Task Persistence | GCS + InMemory | SQLite | Similar |
@@ -882,7 +882,7 @@ enum ToolConfirmationOutcome {
 ## Recommendations
 
 1. **Consider A2A Protocol Support**
-   - Would enable Estela to be controlled by other AI agents
+   - Would enable AVA to be controlled by other AI agents
    - Useful for multi-agent orchestration scenarios
    - SDK available (`@a2a-js/sdk`)
 

@@ -1,7 +1,7 @@
 /**
  * A2A Agent Card
  *
- * Describes Estela's capabilities for agent discovery.
+ * Describes AVA's capabilities for agent discovery.
  * Served at /.well-known/agent.json
  */
 
@@ -13,10 +13,10 @@ import { A2A_PROTOCOL_VERSION, DEFAULT_A2A_PORT, DEFAULT_AGENT_VERSION } from '.
 // ============================================================================
 
 /**
- * Create the Estela agent card for A2A discovery.
+ * Create the AVA agent card for A2A discovery.
  *
  * @param config - Server configuration
- * @returns AgentCard describing Estela's capabilities
+ * @returns AgentCard describing AVA's capabilities
  */
 export function createAgentCard(config: A2AServerConfig = {}): AgentCard {
   const port = config.port ?? DEFAULT_A2A_PORT
@@ -24,15 +24,15 @@ export function createAgentCard(config: A2AServerConfig = {}): AgentCard {
   const version = config.agentVersion ?? DEFAULT_AGENT_VERSION
 
   return {
-    name: 'Estela',
+    name: 'AVA',
     description:
       'Multi-agent AI coding assistant with browser automation, fuzzy edits, and parallel execution',
     url: `http://${host}:${port}/`,
     version,
     protocolVersion: A2A_PROTOCOL_VERSION,
     provider: {
-      organization: 'Estela',
-      url: 'https://github.com/estela-ai/estela',
+      organization: 'AVA',
+      url: 'https://github.com/g0dxn4/AVA',
     },
     capabilities: {
       streaming: true,

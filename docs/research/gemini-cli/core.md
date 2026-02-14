@@ -2,7 +2,7 @@
 
 **Analysis Date**: 2026-02-04
 **Package Path**: `docs/reference-code/gemini-cli/packages/core/src/`
-**Purpose**: Comprehensive analysis of Gemini CLI's core architecture for Estela reference
+**Purpose**: Comprehensive analysis of Gemini CLI's core architecture for AVA reference
 
 ---
 
@@ -850,9 +850,9 @@ Chat compression uses:
 
 ---
 
-## Key Takeaways for Estela
+## Key Takeaways for AVA
 
-### Features Estela Should Consider
+### Features AVA Should Consider
 
 1. **Hook System**
    - Gemini CLI's command-based hooks (shell scripts with JSON I/O) are simple yet powerful
@@ -891,7 +891,7 @@ Chat compression uses:
 
 ### Architecture Differences
 
-| Aspect | Gemini CLI | Estela (Current) |
+| Aspect | Gemini CLI | AVA (Current) |
 |--------|------------|------------------|
 | Tool Approval | Message Bus + Policy Engine | Direct confirmation |
 | Hooks | Command-based (shell) | TypeScript functions |

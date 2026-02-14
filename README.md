@@ -1,4 +1,4 @@
-# Estela
+# AVA
 
 > The Obsidian of AI Coding — Desktop AI coding app with a virtual dev team and community plugins
 
@@ -10,8 +10,8 @@ A Tauri 2.0 + SolidJS desktop application for AI-assisted software development. 
 # Prerequisites: Node.js 20+, Rust 1.70+
 
 # Clone and install
-git clone https://github.com/g0dxn4/Estela.git
-cd Estela
+git clone https://github.com/g0dxn4/AVA.git
+cd AVA
 npm install
 
 # Set up environment (optional - can also configure in Settings UI)

@@ -166,7 +166,7 @@ export async function initLogger(): Promise<void> {
     initialized = true
 
     // Write startup marker
-    pushEntry('info', 'Logger', '--- Estela session started ---')
+    pushEntry('info', 'Logger', '--- AVA session started ---')
     pushEntry('info', 'Logger', `Log file: $APPDATA/${LOG_FILE}`)
   } catch (err) {
     console.warn('[Logger] Failed to initialize file logger:', err)

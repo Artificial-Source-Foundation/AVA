@@ -219,7 +219,7 @@ groupLowStakesTools() → collapses non-critical tools
 
 ---
 
-## Notable Features for Estela
+## Notable Features for AVA
 
 ### 1. Advanced Input Handling
 - Drag-drop from VSCode Explorer (URI parsing)

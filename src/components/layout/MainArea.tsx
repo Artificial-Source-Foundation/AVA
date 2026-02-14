@@ -40,7 +40,7 @@ const WelcomeState: Component = () => (
       >
         <Sparkles class="w-8 h-8 text-white" />
       </div>
-      <h2 class="text-lg font-semibold text-[var(--text-primary)] mb-1">Welcome to Estela</h2>
+      <h2 class="text-lg font-semibold text-[var(--text-primary)] mb-1">Welcome to AVA</h2>
       <p class="text-sm text-[var(--text-secondary)] mb-4">Start a new conversation to begin</p>
       <kbd class="px-2 py-1 text-xs text-[var(--text-muted)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)]">
         Ctrl+N

@@ -1,6 +1,6 @@
 # Epic 15: In-Depth Codebase Comparison
 
-> Estela vs. SOTA AI Coding Agents - Technical Deep Dive
+> AVA vs. SOTA AI Coding Agents - Technical Deep Dive
 
 ---
 
@@ -8,7 +8,7 @@
 
 | Project | Language | LOC (Core) | Stars | Architecture |
 |---------|----------|------------|-------|--------------|
-| **Estela** | TypeScript | ~23,000 | - | Monorepo, Platform-agnostic |
+| **AVA** | TypeScript | ~23,000 | - | Monorepo, Platform-agnostic |
 | **OpenCode** | TypeScript | ~10,000 | 70k+ | Bun-native, Plugin-based |
 | **Aider** | Python | ~35,000 | 25k+ | Monolithic, Git-native |
 | **Goose** | Rust | ~15,000 | 15k+ | Crate-based, MCP-first |
@@ -20,7 +20,7 @@
 
 ### 1.1 Agent Loop Implementation
 
-#### Estela (~2,900 LOC)
+#### AVA (~2,900 LOC)
 ```
 packages/core/src/agent/
 ├── loop.ts          (450 LOC)  - Main executor
@@ -33,7 +33,7 @@ packages/core/src/agent/
 
 **Key Pattern: Event-driven with recovery**
 ```typescript
-// Estela uses enum-based termination tracking
+// AVA uses enum-based termination tracking
 enum AgentTerminateMode {
   ERROR, TIMEOUT, GOAL, MAX_TURNS, ABORTED, NO_COMPLETE_TASK
 }
@@ -129,7 +129,7 @@ if (hookState.hasFiredBeforeAgent) return undefined;
 
 ### Comparison Table: Agent Loop
 
-| Feature | Estela | OpenCode | Aider | Goose | Gemini CLI |
+| Feature | AVA | OpenCode | Aider | Goose | Gemini CLI |
 |---------|--------|----------|-------|-------|------------|
 | Max turns configurable | ✅ 20 | ✅ 100 | ✅ var | ✅ var | ✅ 100 |
 | Doom loop detection | ❌ | ✅ 3x | ❌ | ❌ | ❌ |
@@ -143,7 +143,7 @@ if (hookState.hasFiredBeforeAgent) return undefined;
 
 ### 1.2 Tool System
 
-#### Estela (~2,876 LOC)
+#### AVA (~2,876 LOC)
 ```
 packages/core/src/tools/
 ├── bash.ts          (490 LOC)  - Shell with PTY
@@ -296,7 +296,7 @@ interface ToolInvocation<TParams, TResult> {
 
 ### Comparison Table: Tools
 
-| Feature | Estela | OpenCode | Aider | Goose | Gemini CLI |
+| Feature | AVA | OpenCode | Aider | Goose | Gemini CLI |
 |---------|--------|----------|-------|-------|------------|
 | Total tool LOC | 2,876 | 2,400 | 20,000 | 3,600 | 26,600 |
 | Edit formats | 1 | 1 | 15+ | 1 | 1 |
@@ -312,7 +312,7 @@ interface ToolInvocation<TParams, TResult> {
 
 ### 1.3 Permission System
 
-#### Estela (~784 LOC)
+#### AVA (~784 LOC)
 ```
 packages/core/src/permissions/
 ├── manager.ts       (400 LOC)  - Risk assessment
@@ -415,7 +415,7 @@ protected getMessageBusDecision(signal: AbortSignal): Promise<'ALLOW' | 'DENY' |
 
 ### Comparison Table: Permissions
 
-| Feature | Estela | OpenCode | Aider | Goose | Gemini CLI |
+| Feature | AVA | OpenCode | Aider | Goose | Gemini CLI |
 |---------|--------|----------|-------|-------|------------|
 | Permission LOC | 784 | 500 | 0 | 637 | 1,000+ |
 | Risk classification | ✅ | ❌ | ❌ | ❌ | ✅ Kind |
@@ -429,7 +429,7 @@ protected getMessageBusDecision(signal: AbortSignal): Promise<'ALLOW' | 'DENY' |
 
 ### 1.4 Codebase Understanding
 
-#### Estela (~2,835 LOC)
+#### AVA (~2,835 LOC)
 ```
 packages/core/src/codebase/
 ├── indexer.ts       (350 LOC)  - File discovery
@@ -509,7 +509,7 @@ def get_ranked_tags(self, chat_fnames, other_fnames, max_map_tokens):
 
 ### Comparison Table: Codebase Understanding
 
-| Feature | Estela | OpenCode | Aider | Goose | Gemini CLI |
+| Feature | AVA | OpenCode | Aider | Goose | Gemini CLI |
 |---------|--------|----------|-------|-------|------------|
 | Understanding LOC | 2,835 | 1,000 | 848 | 0 | 0 |
 | File indexing | ✅ | ✅ | ✅ | ❌ | ❌ |
@@ -525,7 +525,7 @@ def get_ranked_tags(self, chat_fnames, other_fnames, max_map_tokens):
 
 ### 1.5 Memory System
 
-#### Estela (~2,747 LOC)
+#### AVA (~2,747 LOC)
 ```
 packages/core/src/memory/
 ├── manager.ts       (300 LOC)  - Unified interface
@@ -592,7 +592,7 @@ pub struct ExtensionData {
 
 ### Comparison Table: Memory
 
-| Feature | Estela | OpenCode | Aider | Goose | Gemini CLI |
+| Feature | AVA | OpenCode | Aider | Goose | Gemini CLI |
 |---------|--------|----------|-------|-------|------------|
 | Memory LOC | 2,747 | 0 | 0 | 191 | 0 |
 | Episodic memory | ✅ | ❌ | ❌ | ❌ | ❌ |
@@ -607,7 +607,7 @@ pub struct ExtensionData {
 
 ### 1.6 Parallel Execution / Multi-Agent
 
-#### Estela (~2,550 LOC)
+#### AVA (~2,550 LOC)
 ```
 packages/core/src/commander/
 ├── executor.ts      (250 LOC)  - Worker execution
@@ -688,7 +688,7 @@ pub enum SessionType {
 
 ### Comparison Table: Parallel Execution
 
-| Feature | Estela | OpenCode | Aider | Goose | Gemini CLI |
+| Feature | AVA | OpenCode | Aider | Goose | Gemini CLI |
 |---------|--------|----------|-------|-------|------------|
 | Parallel LOC | 2,550 | 175 | 0 | 988 | 0 |
 | DAG scheduling | ✅ | ❌ | ❌ | ❌ | ❌ |
@@ -704,7 +704,7 @@ pub enum SessionType {
 
 ### Process Group Handling
 
-#### Estela
+#### AVA
 ```typescript
 // packages/core/src/tools/bash.ts
 // Uses platform abstraction for process groups
@@ -757,7 +757,7 @@ if (isWindows) {
 
 ### Comparison: Shell Execution Features
 
-| Feature | Estela | OpenCode | Aider | Goose | Gemini CLI |
+| Feature | AVA | OpenCode | Aider | Goose | Gemini CLI |
 |---------|--------|----------|-------|-------|------------|
 | Process groups | ✅ | ❌ | ❌ | ✅ | ✅ |
 | PTY support | ✅ | ❌ | ❌ | ❌ | ❌ |
@@ -775,7 +775,7 @@ if (isWindows) {
 
 | Project | Provider LOC | Providers Supported |
 |---------|--------------|---------------------|
-| Estela | ~500 | 7 (Anthropic, OpenAI, OpenRouter, Google, GLM, Kimi, Copilot) |
+| AVA | ~500 | 7 (Anthropic, OpenAI, OpenRouter, Google, GLM, Kimi, Copilot) |
 | OpenCode | ~2,000 | 20+ (via AI SDK) |
 | Aider | ~1,300 | 10+ (via litellm) |
 | Goose | ~15,000 | 30+ (native implementations) |
@@ -783,7 +783,7 @@ if (isWindows) {
 
 ### Key Patterns
 
-#### Estela
+#### AVA
 ```typescript
 // Factory pattern with provider registration
 export async function createClient(provider: LLMProvider): Promise<LLMClient> {
@@ -859,7 +859,7 @@ pub trait Provider: Send + Sync {
 
 | Project | Config LOC | Key Features |
 |---------|------------|--------------|
-| Estela | 2,082 | Zod validation, reactive updates, credential store |
+| AVA | 2,082 | Zod validation, reactive updates, credential store |
 | OpenCode | ~1,500 | YAML config, feature flags, env vars |
 | Aider | ~945 | CLI args, .aider files, model settings |
 | Goose | 2,977 | YAML, migration, extension config |
@@ -867,7 +867,7 @@ pub trait Provider: Send + Sync {
 
 ### Validation Patterns
 
-#### Estela (Zod)
+#### AVA (Zod)
 ```typescript
 export const SettingsSchema = z.object({
   provider: ProviderSettingsSchema,
@@ -910,7 +910,7 @@ pub struct PermissionConfig {
 
 | Project | Test LOC | Test/Impl Ratio | CI/CD |
 |---------|----------|-----------------|-------|
-| Estela | ~2,000 | ~10% | GitHub Actions |
+| AVA | ~2,000 | ~10% | GitHub Actions |
 | OpenCode | ~20,000 | ~200% | GitHub Actions |
 | Aider | ~15,000 | ~50% | GitHub Actions |
 | Goose | ~5,000 | ~30% | GitHub Actions |
@@ -920,7 +920,7 @@ pub struct PermissionConfig {
 
 ## 6. Unique Strengths by Project
 
-### Estela
+### AVA
 1. **Cognitive memory system** - Only agent with episodic/semantic/procedural memory
 2. **DAG-based parallel execution** - Conflict detection & scheduling
 3. **Workers-as-tools pattern** - Hierarchical delegation
@@ -957,7 +957,7 @@ pub struct PermissionConfig {
 
 ---
 
-## 7. What Estela Should Adopt
+## 7. What AVA Should Adopt
 
 ### From OpenCode
 - [ ] Doom loop detection (3x identical tool calls)
@@ -983,7 +983,7 @@ pub struct PermissionConfig {
 
 ## 8. Architecture Diagrams
 
-### Estela Architecture
+### AVA Architecture
 ```
 ┌────────────────────────────────────────────────────────────┐
 │                     LLM Providers (7)                      │
@@ -1055,9 +1055,9 @@ pub struct PermissionConfig {
 
 ## 9. Conclusion
 
-Estela achieves **comprehensive feature parity** with SOTA agents while introducing unique capabilities:
+AVA achieves **comprehensive feature parity** with SOTA agents while introducing unique capabilities:
 
-| Category | Estela Rank | Key Differentiator |
+| Category | AVA Rank | Key Differentiator |
 |----------|-------------|-------------------|
 | Agent Loop | 2nd | Planning + recovery (OpenCode has doom loop) |
 | Tools | 3rd | File locking (Aider has 15+ formats) |
@@ -1069,4 +1069,4 @@ Estela achieves **comprehensive feature parity** with SOTA agents while introduc
 
 **Total Implementation: ~23,000 LOC** (competitive with OpenCode at ~10K, smaller than Aider at ~35K)
 
-The comparison reveals that while each agent excels in specific areas, Estela's unique combination of memory system, parallel execution, and comprehensive validation pipeline positions it as a next-generation AI coding assistant.
+The comparison reveals that while each agent excels in specific areas, AVA's unique combination of memory system, parallel execution, and comprehensive validation pipeline positions it as a next-generation AI coding assistant.

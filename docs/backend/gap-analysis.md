@@ -1,6 +1,6 @@
 # Competitive Gap Analysis
 
-> Estela vs 7 reference codebases + PI Coding Agent. Compiled 2026-02-08.
+> AVA vs 7 reference codebases + PI Coding Agent. Compiled 2026-02-08.
 >
 > Sources analyzed: **OpenCode**, **Aider**, **Cline**, **Gemini CLI**, **Goose**, **OpenHands**, **Plandex**, **PI Coding Agent**
 
@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-Estela has strong foundations in multi-agent orchestration, codebase intelligence, memory, and permissions — areas where most competitors have nothing. But there are **15 high-impact gaps** that multiple codebases implement and Estela lacks entirely.
+AVA has strong foundations in multi-agent orchestration, codebase intelligence, memory, and permissions — areas where most competitors have nothing. But there are **15 high-impact gaps** that multiple codebases implement and AVA lacks entirely.
 
 **Closed since last update (Sessions 48-53):** message queue, file watcher, step-level undo, git auto-commit, weak/editor model split, streaming tool preview.
 
@@ -58,7 +58,7 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Plandex**: Version control on plans with rewind/branch. Every plan change creates a versioned snapshot.
 - **Aider**: Git auto-commit = implicit checkpoint. `/undo` reverts last commit.
 
-**Estela status**: Session forking exists ("Fork from here") but it's one-time branching, not iterative checkpointing. `createCheckpoint()` / `rollbackToCheckpoint()` were scaffolded in Session 40 but not wired to UI.
+**AVA status**: Session forking exists ("Fork from here") but it's one-time branching, not iterative checkpointing. `createCheckpoint()` / `rollbackToCheckpoint()` were scaffolded in Session 40 but not wired to UI.
 
 **Impact**: Enables exploratory coding — try approach A, rollback, try approach B. Critical for vibe coders.
 
@@ -76,7 +76,7 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **PI**: `/session` command shows token count + estimated cost.
 - **Gemini CLI**: Token usage displayed per response.
 
-**Estela status**: Internal `ContextTracker` counts tokens. `ContextBar.tsx` shows a progress bar. No cost calculation, no per-request metrics, no cache tracking.
+**AVA status**: Internal `ContextTracker` counts tokens. `ContextBar.tsx` shows a progress bar. No cost calculation, no per-request metrics, no cache tracking.
 
 **Impact**: Users managing API budgets need cost visibility. #1 requested feature in most AI coding tools.
 
@@ -93,7 +93,7 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Aider**: `/add image.png`, `/paste` from clipboard, auto-detects vision models.
 - **PI**: Image input support in chat.
 
-**Estela status**: Browser tool takes screenshots but images can't be input to chat. No vision model detection.
+**AVA status**: Browser tool takes screenshots but images can't be input to chat. No vision model detection.
 
 **Impact**: Visual debugging (screenshot → fix), mockup → code, diagram → implementation.
 
@@ -109,7 +109,7 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Aider**: Auto-commit after every edit. Weak model generates commit message. `/undo` reverts last. Author attribution: `"User (aider)"`.
 - **Gemini CLI**: Git checkpoint integration for time-travel.
 
-**Estela status**: **DONE**. `git/auto-commit.ts` auto-stages and commits after file-modifying tools. Settings UI toggle in Behavior tab. `undoLastAutoCommit()` reverts the most recent estela commit. Commit message prefix is configurable.
+**AVA status**: **DONE**. `git/auto-commit.ts` auto-stages and commits after file-modifying tools. Settings UI toggle in Behavior tab. `undoLastAutoCommit()` reverts the most recent estela commit. Commit message prefix is configurable.
 
 **Impact**: Safety net. Never lose work. Git history shows exactly what AI changed vs what user changed.
 
@@ -123,7 +123,7 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Aider**: `weak_model_name` per model. Claude Sonnet → Claude Haiku for commits.
 - **PI**: Different models for different sub-tasks.
 
-**Estela status**: **DONE**. `weakModel` optional field in `ProviderSettings` + `getWeakModelConfig()` helper. Planner and self-review validator use weak model when configured. Frontend: dropdown in LLM tab with model pair auto-suggestions. Off by default (uses primary model).
+**AVA status**: **DONE**. `weakModel` optional field in `ProviderSettings` + `getWeakModelConfig()` helper. Planner and self-review validator use weak model when configured. Frontend: dropdown in LLM tab with model pair auto-suggestions. Off by default (uses primary model).
 
 **Impact**: 50-80% cost reduction on secondary tasks (commit messages, summaries, simple classification).
 
@@ -138,7 +138,7 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **OpenHands**: Full containerized sandbox — every agent runs in Docker with mounted workspace.
 - **Goose**: Extension-based sandboxing.
 
-**Estela status**: No sandboxing. Bash tool executes directly on host. Permission system is the safety layer.
+**AVA status**: No sandboxing. Bash tool executes directly on host. Permission system is the safety layer.
 
 **Impact**: Safety for autonomous agents. Critical for "let it run overnight" workflows.
 
@@ -155,7 +155,7 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Cline**: Editor integration with VS Code Problems panel.
 - **Gemini CLI**: Auto-test + auto-lint with feedback loop.
 
-**Estela status**: `validator/` module has linting checks (syntax, TypeScript, eslint) but it's **read-only** — doesn't feed errors back to the model for retry.
+**AVA status**: `validator/` module has linting checks (syntax, TypeScript, eslint) but it's **read-only** — doesn't feed errors back to the model for retry.
 
 **Impact**: Dramatically improves first-time code correctness. Agent fixes its own mistakes.
 
@@ -171,7 +171,7 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Cline**: `handlePartialBlock()` in tool handlers. See diffs appearing in real-time.
 - **OpenCode**: Streaming tool execution with live terminal output.
 
-**Estela status**: **DONE** — Already implemented in the streaming pipeline. `onToolUpdate` callback fires on every tool state change during streaming, updating `session.updateMessage()` reactively. `ToolCallGroup` auto-expands while active (pending/running tools). `ToolCallCard` shows spinner for running tools, status transitions, args summary, duration, and expandable output. The full reactive chain: `streamResponse` → `onToolUpdate` → `setActiveToolCalls` + `session.updateMessage` → `MessageBubble` → `ToolCallGroup(isStreaming=true)` → `ToolCallCard`.
+**AVA status**: **DONE** — Already implemented in the streaming pipeline. `onToolUpdate` callback fires on every tool state change during streaming, updating `session.updateMessage()` reactively. `ToolCallGroup` auto-expands while active (pending/running tools). `ToolCallCard` shows spinner for running tools, status transitions, args summary, duration, and expandable output. The full reactive chain: `streamResponse` → `onToolUpdate` → `setActiveToolCalls` + `session.updateMessage` → `MessageBubble` → `ToolCallGroup(isStreaming=true)` → `ToolCallCard`.
 
 **Impact**: Better perceived performance. User sees progress immediately.
 
@@ -185,9 +185,9 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Aider**: `watch.py` — `AI!` triggers edit, `AI?` triggers question. Works with any language.
 - **OpenCode**: File watcher for reactive workflows.
 
-**Estela status**: **DONE** — `src/services/file-watcher.ts` watches project directory via Tauri FS plugin. Detects `// AI!`, `// AI?`, `# AI!`, `# AI?`, `-- AI!`, `-- AI?` patterns across 30+ file extensions. 500ms debounced recursive watch. Configurable toggle in Settings → Behavior. Wired to ChatView — detected comments auto-send as chat messages.
+**AVA status**: **DONE** — `src/services/file-watcher.ts` watches project directory via Tauri FS plugin. Detects `// AI!`, `// AI?`, `# AI!`, `# AI?`, `-- AI!`, `-- AI?` patterns across 30+ file extensions. 500ms debounced recursive watch. Configurable toggle in Settings → Behavior. Wired to ChatView — detected comments auto-send as chat messages.
 
-**Impact**: Seamless IDE integration without VS Code extension. User writes comment, switches to Estela, sees result.
+**Impact**: Seamless IDE integration without VS Code extension. User writes comment, switches to AVA, sees result.
 
 ---
 
@@ -199,7 +199,7 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Aider**: `architect_coder.py`. o1 (architect) + Sonnet (editor). `editor-diff` format.
 - **PI**: Extensible model routing for different task phases.
 
-**Estela status**: **DONE**. `editorModel` optional field in `ProviderSettings` + `getEditorModelConfig()` helper. Commander executor auto-applies editor model to workers (Junior Devs) when no per-worker override exists. Frontend: dropdown in LLM tab with 8 editor model presets and auto-pair suggestions (e.g., Opus → Sonnet, Sonnet → Haiku). Team Lead uses primary (architect) model for planning, Junior Devs use cheaper editor model for file changes.
+**AVA status**: **DONE**. `editorModel` optional field in `ProviderSettings` + `getEditorModelConfig()` helper. Commander executor auto-applies editor model to workers (Junior Devs) when no per-worker override exists. Frontend: dropdown in LLM tab with 8 editor model presets and auto-pair suggestions (e.g., Opus → Sonnet, Sonnet → Haiku). Team Lead uses primary (architect) model for planning, Junior Devs use cheaper editor model for file changes.
 
 **Impact**: Better results with reasoning models (o1, DeepSeek R1) that plan well but edit poorly. Cost savings.
 
@@ -214,7 +214,7 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Cline**: Checkpoint restore (task, workspace, or both).
 - **Plandex**: Plan rewind/branch with version control.
 
-**Estela status**: **DONE** — Built on git auto-commit foundation. Each file-modifying tool creates an estela-prefixed commit. Undo button in MessageInput toolbar reverts the most recent estela commit via `git revert --no-edit`. Shows success/error feedback for 2.5s. Only visible when git auto-commit is enabled. Plus session checkpoints (from Session 40) for coarser rollback.
+**AVA status**: **DONE** — Built on git auto-commit foundation. Each file-modifying tool creates an estela-prefixed commit. Undo button in MessageInput toolbar reverts the most recent estela commit via `git revert --no-edit`. Shows success/error feedback for 2.5s. Only visible when git auto-commit is enabled. Plus session checkpoints (from Session 40) for coarser rollback.
 
 **Impact**: Lighter than forking — just undo last step without creating new session.
 
@@ -227,7 +227,7 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 **Who has it**:
 - **PI**: Message queue with steering (interrupt) and follow-up (after completion) modes.
 
-**Estela status**: **DONE**. `useChat` has a `messageQueue` signal — messages sent while streaming are queued as follow-ups and auto-dequeued after completion. `steer()` function cancels current stream and sends immediately. `Ctrl+Shift+Enter` keyboard shortcut for steering. Queue badge in MessageInput toolbar. Textarea stays enabled during chat streaming for type-ahead. Session switch clears queue. Cancel clears queue.
+**AVA status**: **DONE**. `useChat` has a `messageQueue` signal — messages sent while streaming are queued as follow-ups and auto-dequeued after completion. `steer()` function cancels current stream and sends immediately. `Ctrl+Shift+Enter` keyboard shortcut for steering. Queue badge in MessageInput toolbar. Textarea stays enabled during chat streaming for type-ahead. Session switch clears queue. Cancel clears queue.
 
 **Impact**: Better for long-running tasks. User can steer without canceling.
 
@@ -240,7 +240,7 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 **Who has it**:
 - **Aider**: `repomap.py` with tree-sitter. 100+ language support. Disk-based tag cache.
 
-**Estela status**: `codebase/` module uses LSP-based symbols (5 languages: TS, Python, Go, Rust, Java).
+**AVA status**: `codebase/` module uses LSP-based symbols (5 languages: TS, Python, Go, Rust, Java).
 
 **Impact**: Support any language without installing language servers. Faster than LSP for simple symbol extraction.
 
@@ -256,9 +256,9 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **PI**: `createAgentSession()` SDK + `--mode rpc` for stdin/stdout protocol.
 - **Aider**: Python library mode.
 
-**Estela status**: Planned for Phase 4. Core is importable as library but no RPC server.
+**AVA status**: Planned for Phase 4. Core is importable as library but no RPC server.
 
-**Impact**: Enables embedding Estela in CI/CD, custom tools, other apps.
+**Impact**: Enables embedding AVA in CI/CD, custom tools, other apps.
 
 ---
 
@@ -270,17 +270,17 @@ Estela has strong foundations in multi-agent orchestration, codebase intelligenc
 - **Cline**: PostHog + OpenTelemetry.
 - **Gemini CLI**: Enterprise-grade telemetry.
 
-**Estela status**: None. Privacy-first philosophy.
+**AVA status**: None. Privacy-first philosophy.
 
 **Impact**: Product improvement data. Optional/opt-in is fine.
 
 ---
 
-## What Estela Has That Others Don't
+## What AVA Has That Others Don't
 
-These are Estela's **unique advantages** — features no other codebase implements:
+These are AVA's **unique advantages** — features no other codebase implements:
 
-| Feature | Estela | Closest Competitor |
+| Feature | AVA | Closest Competitor |
 |---------|--------|-------------------|
 | **Multi-agent hierarchy** (Team Lead → Seniors → Juniors) | Built-in with visible UI | None (all are single-agent) |
 | **Worker scope filtering** (each agent only sees relevant files/tools) | Native | None |

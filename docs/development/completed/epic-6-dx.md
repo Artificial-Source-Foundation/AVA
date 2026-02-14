@@ -6,7 +6,7 @@
 
 ## Goal
 
-Improve the developer experience for both Estela contributors and users. Better tool definitions with validation, unified diff tracking, and git-based safety snapshots.
+Improve the developer experience for both AVA contributors and users. Better tool definitions with validation, unified diff tracking, and git-based safety snapshots.
 
 ---
 

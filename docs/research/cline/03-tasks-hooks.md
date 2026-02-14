@@ -192,7 +192,7 @@ interface HookExecution {
 
 ---
 
-## Notable Features for Estela
+## Notable Features for AVA
 
 ### 1. Dual-Phase Tool Execution (Partial + Complete)
 Tools have `handlePartialBlock()` for streaming UI + `execute()` for completion.

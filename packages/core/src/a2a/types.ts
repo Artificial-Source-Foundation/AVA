@@ -2,7 +2,7 @@
  * A2A Protocol Types
  *
  * Types for the Agent-to-Agent protocol (v0.3.0).
- * Allows Estela to be discovered and used by other AI agents over HTTP.
+ * Allows AVA to be discovered and used by other AI agents over HTTP.
  *
  * Reference: https://google.github.io/A2A/
  */
@@ -216,5 +216,5 @@ export const DEFAULT_A2A_PORT = 41242
 /** Default A2A protocol version */
 export const A2A_PROTOCOL_VERSION = '0.3.0'
 
-/** Default Estela agent version */
+/** Default AVA agent version */
 export const DEFAULT_AGENT_VERSION = '1.0.0'

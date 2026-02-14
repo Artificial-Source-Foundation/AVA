@@ -98,7 +98,7 @@ class OpenAIClient implements LLMClient {
 
       const oauthBody = {
         model: config.model,
-        instructions: systemInstructions || 'You are Estela, a coding assistant.',
+        instructions: systemInstructions || 'You are AVA, a coding assistant.',
         input: messages
           .filter((m) => m.role !== 'system')
           .map((m) => ({

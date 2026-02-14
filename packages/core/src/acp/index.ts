@@ -1,7 +1,7 @@
 /**
  * ACP (Agent Client Protocol) Module
  *
- * Production-quality ACP integration for Estela.
+ * Production-quality ACP integration for AVA.
  * Provides session persistence, terminal bridging, MCP forwarding,
  * mode switching, and error handling for editor integration.
  */

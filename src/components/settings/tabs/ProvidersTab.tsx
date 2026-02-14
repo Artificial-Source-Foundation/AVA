@@ -115,7 +115,7 @@ export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
       </div>
 
       <p class="text-[10px] text-[var(--text-muted)] text-center">
-        Keys stored locally · Never sent to Estela servers
+        Keys stored locally · Never sent to AVA servers
       </p>
     </div>
   )

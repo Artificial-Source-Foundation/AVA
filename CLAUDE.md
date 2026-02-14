@@ -1,10 +1,10 @@
-# Estela
+# AVA
 
 > The Obsidian of AI Coding — Desktop AI coding app with a virtual dev team and community plugins
 
 ---
 
-## What Is Estela
+## What Is AVA
 
 A **desktop-first AI coding app** (Tauri + SolidJS) for developers and vibe coders. Not an IDE replacement — an AI companion with:
 
@@ -45,7 +45,7 @@ npm run analyze          # Bundle size analysis
 ### Project Structure
 
 ```
-Estela/
+AVA/
 ├── src/                   # Desktop app (Tauri + SolidJS) ← PRIMARY
 ├── src-tauri/             # Rust backend
 ├── packages/

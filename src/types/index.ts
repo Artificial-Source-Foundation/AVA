@@ -1,4 +1,4 @@
-// Core types for Estela
+// Core types for AVA
 
 // Message error for retry functionality
 export interface MessageError {

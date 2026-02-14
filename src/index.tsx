@@ -71,7 +71,7 @@ const LoadingFallback = () => (
       </svg>
     </div>
     <h1 class="text-xl font-semibold tracking-widest uppercase text-[var(--text-primary)] mb-8">
-      Estela
+      AVA
     </h1>
     <div class="flex gap-1.5">
       <span

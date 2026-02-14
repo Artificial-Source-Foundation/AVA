@@ -1,4 +1,4 @@
-# Estela — Vision
+# AVA — Vision
 
 > The Obsidian of AI Coding
 
@@ -6,7 +6,7 @@
 
 ## The Pitch
 
-Estela is a **desktop AI coding app** for developers and vibe coders. Think Claude Code meets Obsidian — simple to use, open source, multi-provider, with a community plugin ecosystem where anyone can build and share their workflows.
+AVA is a **desktop AI coding app** for developers and vibe coders. Think Claude Code meets Obsidian — simple to use, open source, multi-provider, with a community plugin ecosystem where anyone can build and share their workflows.
 
 It's not an IDE replacement. It's the AI companion that makes your IDE better.
 
@@ -31,7 +31,7 @@ It's not an IDE replacement. It's the AI companion that makes your IDE better.
 
 ---
 
-## What Makes Estela Special
+## What Makes AVA Special
 
 ### 1. The Dev Team
 
@@ -176,7 +176,7 @@ Priority 5: Agent Network           ← Remote agent calls (A2A)
 - [ ] Documentation site
 
 ### Phase 4: Integrations
-- [ ] Editor integration (ACP — use Estela as VS Code backend)
+- [ ] Editor integration (ACP — use AVA as VS Code backend)
 - [ ] Agent network (A2A — connect to remote agents)
 - [ ] Voice input
 - [ ] Vision models (image understanding)
@@ -185,6 +185,6 @@ Priority 5: Agent Network           ← Remote agent calls (A2A)
 
 ## The Name
 
-**Estela** — Spanish for "star trail" or "wake" (the trail a ship leaves).
+**AVA** — Spanish for "star trail" or "wake" (the trail a ship leaves).
 
 Your AI team leaves a trail of completed work behind it.

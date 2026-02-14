@@ -248,7 +248,7 @@ export const MessageList: Component = () => {
               <Sparkles class="w-8 h-8 text-[var(--accent)]" />
             </div>
             <h2 class="text-xl font-semibold text-[var(--text-primary)] font-display">
-              Welcome to Estela
+              Welcome to AVA
             </h2>
             <p class="text-sm text-[var(--text-tertiary)] mt-2 max-w-sm text-center">
               Your AI coding assistant is ready. Start a conversation to begin.

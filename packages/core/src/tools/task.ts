@@ -5,6 +5,7 @@
  * Based on OpenCode's task tool pattern
  */
 
+import { AgentExecutor } from '../agent/loop.js'
 import {
   createSubagentManager,
   generateSubagentSessionId,
@@ -13,7 +14,11 @@ import {
   type SubagentTask,
   type SubagentType,
 } from '../agent/subagent.js'
+import type { AgentEvent } from '../agent/types.js'
+import { AgentTerminateMode } from '../agent/types.js'
+import { getEditorModelConfig } from '../llm/client.js'
 import { ToolError, ToolErrorType } from './errors.js'
+import { getToolDefinitions } from './registry.js'
 import type { Tool, ToolContext, ToolResult } from './types.js'
 
 // ============================================================================
@@ -48,6 +53,22 @@ const VALID_AGENT_TYPES: SubagentType[] = ['explore', 'plan', 'execute', 'custom
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/**
+ * Map AgentTerminateMode to SubagentResult terminationReason
+ */
+function mapTerminateMode(mode: AgentTerminateMode): SubagentResult['terminationReason'] {
+  switch (mode) {
+    case AgentTerminateMode.GOAL:
+      return 'completed'
+    case AgentTerminateMode.MAX_TURNS:
+      return 'max_turns'
+    case AgentTerminateMode.ABORTED:
+      return 'cancelled'
+    default:
+      return 'error'
+  }
+}
 
 /**
  * Format subagent result for LLM consumption
@@ -282,37 +303,64 @@ The subagent runs independently and returns results when done.`,
         task,
       })
 
-      // NOTE: This is a placeholder implementation
-      // In a real implementation, this would:
-      // 1. Create a new session (or resume existing)
-      // 2. Run the agent loop with filtered tools
-      // 3. Stream progress events
-      // 4. Return final result
-
-      // For now, we return a "not implemented" result that shows the infrastructure works
       const sessionId = params.sessionId ?? generateSubagentSessionId(ctx.sessionId, config.id)
 
+      // Build tool list: use preset allowedTools if set, otherwise all tools minus 'task' (recursion prevention)
+      const allowedTools =
+        config.allowedTools ??
+        getToolDefinitions()
+          .map((t) => t.name)
+          .filter((t) => t !== 'task')
+
+      // Create event callback bridging AgentEvent → SubagentManager progress events
+      const eventCallback = (event: AgentEvent): void => {
+        if (event.type === 'turn:start' || event.type === 'turn:finish') {
+          manager.emit({
+            type: 'subagent_progress',
+            subagentId: config.id,
+            turn: event.turn,
+            event,
+          })
+        }
+      }
+
+      // Resolve editor model (subagents use cheaper model, same as workers)
+      const editorConfig = getEditorModelConfig()
+
+      // Create isolated AgentExecutor
+      const executor = new AgentExecutor(
+        {
+          id: `subagent-${config.type}-${Date.now()}`,
+          name: config.name,
+          maxTurns: config.maxTurns ?? 30,
+          maxTimeMinutes: 10,
+          maxRetries: 2,
+          gracePeriodMs: 30 * 1000,
+          tools: allowedTools,
+          model: editorConfig.model,
+          provider: editorConfig.provider as 'anthropic' | 'openai' | 'openrouter',
+        },
+        eventCallback
+      )
+
+      // Run the agent loop
+      const agentResult = await executor.run(
+        {
+          goal: params.prompt,
+          context: config.systemPrompt,
+          cwd: ctx.workingDirectory,
+        },
+        ctx.signal
+      )
+
+      // Map AgentResult → SubagentResult
       const result: SubagentResult = {
         subagentId: config.id,
-        success: false,
-        output: `Subagent infrastructure is ready, but execution requires agent loop integration.
-
-To complete this implementation:
-1. Import AgentExecutor from agent/loop.ts
-2. Create a new session with filtered tools
-3. Run the agent loop with the task prompt
-4. Collect and return the result
-
-Subagent Configuration:
-- Type: ${params.agentType}
-- Allowed Tools: ${config.allowedTools?.join(', ') ?? 'all'}
-- Max Turns: ${config.maxTurns}
-
-Task:
-${params.prompt}`,
-        turns: 0,
-        terminationReason: 'error',
-        error: 'Subagent execution not yet implemented',
+        success: agentResult.success,
+        output: agentResult.output,
+        turns: agentResult.turns,
+        terminationReason: mapTerminateMode(agentResult.terminateMode),
+        error: agentResult.error,
         sessionId,
       }
 

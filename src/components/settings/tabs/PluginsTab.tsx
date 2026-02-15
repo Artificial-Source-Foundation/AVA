@@ -33,6 +33,11 @@ export const PluginsTab: Component = () => {
 
   const categoryLabel = (category: string) => category.charAt(0).toUpperCase() + category.slice(1)
 
+  const formatSyncTime = (timestamp: number | null) => {
+    if (!timestamp) return 'never'
+    return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+
   return (
     <div class="space-y-3">
       <div class="flex items-center justify-between">
@@ -52,7 +57,30 @@ export const PluginsTab: Component = () => {
           <RefreshCw class="w-3 h-3" />
           Refresh
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            void plugins.syncCatalog()
+          }}
+          disabled={plugins.catalogStatus() === 'syncing'}
+          class="flex items-center gap-1.5 px-2 py-1 text-[10px] text-[var(--text-secondary)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] disabled:opacity-50"
+        >
+          <RefreshCw
+            class={`w-3 h-3 ${plugins.catalogStatus() === 'syncing' ? 'animate-spin' : ''}`}
+          />
+          Sync catalog
+        </button>
       </div>
+
+      <div class="text-[10px] text-[var(--text-muted)]">
+        <span>Status: {plugins.catalogStatus()}</span>
+        <span class="mx-1">•</span>
+        <span>Last sync: {formatSyncTime(plugins.lastCatalogSyncAt())}</span>
+      </div>
+
+      <Show when={plugins.catalogError()}>
+        <p class="text-[10px] text-[var(--error)]">{plugins.catalogError()}</p>
+      </Show>
 
       <div class="flex items-center gap-2">
         <div class="relative flex-1">

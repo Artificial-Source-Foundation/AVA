@@ -15,6 +15,7 @@ import { logInfo } from '../../services/logger'
 import { useProject } from '../../stores/project'
 import { useSettings } from '../../stores/settings'
 import { ToolApprovalDialog } from '../dialogs/ToolApprovalDialog'
+import { ApprovalStateBar } from './ApprovalStateBar'
 import { ContextBar } from './ContextBar'
 import { GitControlStrip } from './GitControlStrip'
 import { MessageInput } from './MessageInput'
@@ -81,6 +82,12 @@ export const ChatView: Component = () => {
 
   return (
     <div class="flex flex-col h-full min-h-0 bg-[var(--surface)]">
+      <ApprovalStateBar
+        request={activeApproval()}
+        onApprove={() => handleApprovalResolve(true)}
+        onReject={() => handleApprovalResolve(false)}
+      />
+
       {/* Messages area */}
       <MessageList />
 

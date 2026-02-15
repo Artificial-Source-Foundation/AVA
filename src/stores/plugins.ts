@@ -6,52 +6,15 @@ import {
   uninstallPlugin,
 } from '../services/plugins-fs'
 import type { PluginCatalogItem, PluginState } from '../types/plugin'
+import {
+  FEATURED_PLUGIN_IDS,
+  PLUGIN_CATALOG,
+  type PluginCatalogStatus,
+  syncPluginCatalog,
+} from './plugins-catalog'
 
 type PluginAction = 'install' | 'uninstall' | 'toggle'
 type PluginCategoryFilter = PluginCatalogItem['category'] | 'all'
-
-const PLUGIN_CATALOG: PluginCatalogItem[] = [
-  {
-    id: 'task-planner',
-    name: 'Task Planner',
-    description: 'Breaks goals into actionable implementation steps.',
-    category: 'workflow',
-    version: '1.4.0',
-    source: 'official',
-    trust: 'verified',
-    changelogSummary: 'Added milestone templates and dependency hints.',
-  },
-  {
-    id: 'test-guard',
-    name: 'Test Guard',
-    description: 'Runs verification checks before completion.',
-    category: 'quality',
-    version: '0.9.3',
-    source: 'official',
-    trust: 'verified',
-    changelogSummary: 'Expanded flaky-test diagnostics and retry classification.',
-  },
-  {
-    id: 'git-helper',
-    name: 'Git Helper',
-    description: 'Guides commit hygiene and pull request workflows.',
-    category: 'workflow',
-    version: '1.1.2',
-    source: 'community',
-    trust: 'reviewed',
-    changelogSummary: 'Improved commit message hints and branch naming checks.',
-  },
-  {
-    id: 'mcp-inspector',
-    name: 'MCP Inspector',
-    description: 'Inspects and validates MCP server wiring.',
-    category: 'integration',
-    version: '0.7.0',
-    source: 'official',
-    trust: 'verified',
-    changelogSummary: 'Added auth flow checks and endpoint handshake diagnostics.',
-  },
-]
 
 let store: ReturnType<typeof createPluginsStore> | null = null
 
@@ -64,14 +27,15 @@ function createPluginsStore() {
   const [showInstalledOnly, setShowInstalledOnly] = createSignal(false)
   const [categoryFilter, setCategoryFilter] = createSignal<PluginCategoryFilter>('all')
   const [pluginState, setPluginState] = createSignal<Record<string, PluginState>>({})
+  const [catalogStatus, setCatalogStatus] = createSignal<PluginCatalogStatus>('idle')
+  const [catalogError, setCatalogError] = createSignal<string | null>(null)
+  const [lastCatalogSyncAt, setLastCatalogSyncAt] = createSignal<number | null>(null)
   const [pendingActions, setPendingActions] = createSignal<Record<string, PluginAction | null>>({})
   const [errorsByPlugin, setErrorsByPlugin] = createSignal<Record<string, string>>({})
   const [failedActionsByPlugin, setFailedActionsByPlugin] = createSignal<
     Record<string, PluginAction | null>
   >({})
   let lifecycleQueue: Promise<void> = Promise.resolve()
-
-  const featuredPluginIds = ['task-planner', 'test-guard']
 
   const categories = createMemo(() => {
     const unique = new Set<PluginCatalogItem['category']>()
@@ -80,7 +44,7 @@ function createPluginsStore() {
   })
 
   const featuredPlugins = createMemo(() =>
-    PLUGIN_CATALOG.filter((plugin) => featuredPluginIds.includes(plugin.id))
+    PLUGIN_CATALOG.filter((plugin) => FEATURED_PLUGIN_IDS.includes(plugin.id))
   )
 
   const filteredPlugins = createMemo(() => {
@@ -262,6 +226,22 @@ function createPluginsStore() {
     setPluginState(state)
   }
 
+  const syncCatalog = async () => {
+    setCatalogStatus('syncing')
+    setCatalogError(null)
+
+    try {
+      await syncPluginCatalog()
+      setCatalogStatus('ready')
+      setLastCatalogSyncAt(Date.now())
+    } catch (error) {
+      setCatalogStatus('error')
+      setCatalogError(
+        error instanceof Error ? error.message : 'Failed to sync plugin catalog metadata.'
+      )
+    }
+  }
+
   void refresh()
 
   return {
@@ -271,12 +251,16 @@ function createPluginsStore() {
     showInstalledOnly,
     categoryFilter,
     pluginState,
+    catalogStatus,
+    catalogError,
+    lastCatalogSyncAt,
     installedCount,
     categories,
     featuredPlugins,
     setSearch,
     setShowInstalledOnly,
     setCategoryFilter,
+    syncCatalog,
     install,
     uninstall,
     toggleEnabled,

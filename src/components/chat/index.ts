@@ -1,3 +1,4 @@
+export { ApprovalStateBar } from './ApprovalStateBar'
 export { ChatView } from './ChatView'
 export { ContextBar } from './ContextBar'
 export { DateSeparator, formatDateLabel } from './DateSeparator'

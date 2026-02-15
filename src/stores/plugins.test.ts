@@ -113,6 +113,26 @@ describe('plugins store', () => {
     })
   })
 
+  it('updates catalog sync status', async () => {
+    await new Promise<void>((resolve) => {
+      createRoot((dispose) => {
+        void (async () => {
+          const plugins = usePlugins()
+          expect(plugins.catalogStatus()).toBe('idle')
+
+          await plugins.syncCatalog()
+
+          expect(plugins.catalogStatus()).toBe('ready')
+          expect(plugins.lastCatalogSyncAt()).not.toBeNull()
+          expect(plugins.catalogError()).toBeNull()
+
+          dispose()
+          resolve()
+        })()
+      })
+    })
+  })
+
   it('captures an error when enabling a non-installed plugin', async () => {
     await new Promise<void>((resolve) => {
       createRoot((dispose) => {

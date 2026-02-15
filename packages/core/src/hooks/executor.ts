@@ -212,6 +212,7 @@ async function executeHookScript(
         args = []
     }
 
+    const isWin = process.platform === 'win32'
     const proc = spawn(command, args, {
       cwd: config.workingDirectory,
       env: {
@@ -220,17 +221,25 @@ async function executeHookScript(
         AVA_HOOK_SOURCE: location.source,
       },
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: config.timeout,
+      detached: !isWin, // Use process group on Unix for clean timeout kills
     })
 
     let stdout = ''
     let stderr = ''
     let timedOut = false
 
-    // Set up timeout
+    // Set up timeout — kill the entire process group to avoid orphaned children
     const timeoutId = setTimeout(() => {
       timedOut = true
-      proc.kill('SIGKILL')
+      try {
+        if (!isWin && proc.pid) {
+          process.kill(-proc.pid, 'SIGKILL') // Kill process group
+        } else {
+          proc.kill('SIGKILL')
+        }
+      } catch {
+        // Process may have already exited
+      }
     }, config.timeout)
 
     // Collect output
@@ -241,6 +250,9 @@ async function executeHookScript(
     proc.stderr?.on('data', (data) => {
       stderr += data.toString()
     })
+
+    // Suppress EPIPE errors (hook may exit before stdin is consumed)
+    proc.stdin?.on('error', () => {})
 
     // Write input and close stdin
     proc.stdin?.write(input)

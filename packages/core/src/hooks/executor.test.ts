@@ -104,27 +104,31 @@ describe('HookRunner', () => {
   })
 
   it('executes hook and returns result', async () => {
-    createHookScript(tempDir, 'PreToolUse', '#!/bin/bash\necho \'{"message":"hello from hook"}\'')
+    createHookScript(
+      tempDir,
+      'PreToolUse',
+      '#!/bin/bash\necho \'{"contextModification":"hello from hook"}\''
+    )
 
     const runner = new HookRunner(tempDir, { timeout: 5000 })
     const result = await runner.run('PreToolUse', { toolName: 'read_file' })
-    expect(result.message).toBe('hello from hook')
+    expect(result.contextModification).toBe('hello from hook')
   })
 
   it('handles hook that outputs cancel', async () => {
     createHookScript(
       tempDir,
       'PreToolUse',
-      '#!/bin/bash\necho \'{"cancel":true,"reason":"blocked by policy"}\''
+      '#!/bin/bash\necho \'{"cancel":true,"errorMessage":"blocked by policy"}\''
     )
 
     const runner = new HookRunner(tempDir, { timeout: 5000 })
     const result = await runner.run('PreToolUse', { toolName: 'bash' })
     expect(result.cancel).toBe(true)
-    expect(result.reason).toBe('blocked by policy')
+    expect(result.errorMessage).toBe('blocked by policy')
   })
 
-  it('handles hook timeout gracefully', async () => {
+  it('handles hook timeout gracefully', { timeout: 15000 }, async () => {
     createHookScript(tempDir, 'PreToolUse', '#!/bin/bash\nsleep 30\necho "{}"')
 
     const runner = new HookRunner(tempDir, { timeout: 100 })

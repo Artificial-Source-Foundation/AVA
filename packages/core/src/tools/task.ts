@@ -2,7 +2,8 @@
  * Task Tool
  * Spawn subagents for complex multi-step tasks
  *
- * Based on OpenCode's task tool pattern
+ * Supports both single and parallel execution modes.
+ * Based on OpenCode's task tool pattern.
  */
 
 import { AgentExecutor } from '../agent/loop.js'
@@ -19,44 +20,43 @@ import { AgentTerminateMode } from '../agent/types.js'
 import { getEditorModelConfig } from '../llm/client.js'
 import { ToolError, ToolErrorType } from './errors.js'
 import { getToolDefinitions } from './registry.js'
+import {
+  executeParallel,
+  MAX_CONCURRENCY,
+  MAX_PARALLEL_TASKS,
+  type ParallelTask,
+} from './task-parallel.js'
 import type { Tool, ToolContext, ToolResult } from './types.js'
+
+// Re-export for consumers
+export type { ParallelTask } from './task-parallel.js'
 
 // ============================================================================
 // Types
 // ============================================================================
 
 interface TaskParams {
-  /** Short description of the task (3-5 words) */
   description: string
-  /** Full task prompt with detailed instructions */
   prompt: string
-  /** Subagent type to use */
   agentType: SubagentType
-  /** Session ID to resume (optional) */
   sessionId?: string
-  /** Maximum turns (optional, uses preset default) */
   maxTurns?: number
-  /** Custom tools to allow (for 'custom' type) */
   allowedTools?: string[]
+  tasks?: ParallelTask[]
+  maxConcurrent?: number
 }
 
 // ============================================================================
 // Constants
 // ============================================================================
 
-/** Maximum turns allowed for any subagent */
 const MAX_TURNS_LIMIT = 100
-
-/** Valid agent types */
 const VALID_AGENT_TYPES: SubagentType[] = ['explore', 'plan', 'execute', 'custom']
 
 // ============================================================================
 // Helper Functions
 // ============================================================================
 
-/**
- * Map AgentTerminateMode to SubagentResult terminationReason
- */
 function mapTerminateMode(mode: AgentTerminateMode): SubagentResult['terminationReason'] {
   switch (mode) {
     case AgentTerminateMode.GOAL:
@@ -70,15 +70,12 @@ function mapTerminateMode(mode: AgentTerminateMode): SubagentResult['termination
   }
 }
 
-/**
- * Format subagent result for LLM consumption
- */
 function formatResult(result: SubagentResult, config: SubagentConfig): string {
   const lines: string[] = [
     `## Subagent Result`,
     '',
     `**Agent:** ${config.name} (${config.type})`,
-    `**Status:** ${result.success ? '✓ Completed' : '✗ Failed'}`,
+    `**Status:** ${result.success ? 'Completed' : 'Failed'}`,
     `**Turns Used:** ${result.turns}${config.maxTurns ? `/${config.maxTurns}` : ''}`,
     `**Termination:** ${result.terminationReason}`,
   ]
@@ -102,12 +99,12 @@ function formatResult(result: SubagentResult, config: SubagentConfig): string {
 export const taskTool: Tool<TaskParams> = {
   definition: {
     name: 'task',
-    description: `Spawn a subagent to handle complex, multi-step tasks autonomously.
+    description: `Spawn subagents to handle complex, multi-step tasks autonomously.
 
 Use this tool when:
 - A task requires multiple steps or extensive exploration
 - You need to delegate work while continuing other tasks
-- The task would benefit from focused, isolated execution
+- Multiple independent tasks can run in parallel
 
 Agent Types:
 - **explore**: Read-only codebase exploration (glob, grep, read, ls)
@@ -115,35 +112,39 @@ Agent Types:
 - **execute**: Full execution capabilities (all tools)
 - **custom**: Custom tool set (specify with allowedTools)
 
-The subagent runs independently and returns results when done.`,
+Parallel mode: Provide a "tasks" array to run multiple subagents concurrently.`,
     input_schema: {
       type: 'object',
       properties: {
-        description: {
-          type: 'string',
-          description: 'Short description (3-5 words) for status display',
-        },
-        prompt: {
-          type: 'string',
-          description: 'Full task instructions with all necessary context',
-        },
+        description: { type: 'string', description: 'Short description (3-5 words)' },
+        prompt: { type: 'string', description: 'Full task instructions' },
         agentType: {
           type: 'string',
           enum: ['explore', 'plan', 'execute', 'custom'],
           description: 'Type of subagent to spawn',
         },
-        sessionId: {
-          type: 'string',
-          description: 'Session ID to resume (optional)',
-        },
-        maxTurns: {
-          type: 'number',
-          description: 'Maximum turns before termination (default varies by type)',
-        },
+        sessionId: { type: 'string', description: 'Session ID to resume (optional)' },
+        maxTurns: { type: 'number', description: 'Maximum turns (default varies by type)' },
         allowedTools: {
           type: 'array',
           items: { type: 'string' },
           description: 'Tools to allow (only for custom type)',
+        },
+        tasks: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              description: { type: 'string' },
+              prompt: { type: 'string' },
+            },
+            required: ['description', 'prompt'],
+          },
+          description: 'Multiple tasks to run in parallel',
+        },
+        maxConcurrent: {
+          type: 'number',
+          description: 'Max concurrent subagents (explore=5, plan=3, execute=1)',
         },
       },
       required: ['description', 'prompt', 'agentType'],
@@ -155,93 +156,100 @@ The subagent runs independently and returns results when done.`,
       throw new ToolError('Invalid params: expected object', ToolErrorType.INVALID_PARAMS, 'task')
     }
 
-    const { description, prompt, agentType, sessionId, maxTurns, allowedTools } = params as Record<
-      string,
-      unknown
-    >
+    const p = params as Record<string, unknown>
+    const {
+      description,
+      prompt,
+      agentType,
+      sessionId,
+      maxTurns,
+      allowedTools,
+      tasks,
+      maxConcurrent,
+    } = p
 
-    // Validate description
-    if (typeof description !== 'string' || !description.trim()) {
+    if (typeof description !== 'string' || !description.trim())
       throw new ToolError(
         'Invalid description: must be non-empty string',
         ToolErrorType.INVALID_PARAMS,
         'task'
       )
-    }
 
-    // Validate prompt
-    if (typeof prompt !== 'string' || !prompt.trim()) {
+    if (typeof prompt !== 'string' || !prompt.trim())
       throw new ToolError(
         'Invalid prompt: must be non-empty string',
         ToolErrorType.INVALID_PARAMS,
         'task'
       )
-    }
 
-    // Validate agentType
-    if (typeof agentType !== 'string' || !VALID_AGENT_TYPES.includes(agentType as SubagentType)) {
+    if (typeof agentType !== 'string' || !VALID_AGENT_TYPES.includes(agentType as SubagentType))
       throw new ToolError(
         `Invalid agentType: must be one of ${VALID_AGENT_TYPES.join(', ')}`,
         ToolErrorType.INVALID_PARAMS,
         'task'
       )
-    }
 
-    // Validate sessionId
-    if (sessionId !== undefined && typeof sessionId !== 'string') {
+    if (sessionId !== undefined && typeof sessionId !== 'string')
       throw new ToolError('Invalid sessionId: must be string', ToolErrorType.INVALID_PARAMS, 'task')
-    }
 
-    // Validate maxTurns
-    if (maxTurns !== undefined) {
-      if (typeof maxTurns !== 'number' || maxTurns < 1 || maxTurns > MAX_TURNS_LIMIT) {
-        throw new ToolError(
-          `Invalid maxTurns: must be number between 1 and ${MAX_TURNS_LIMIT}`,
-          ToolErrorType.INVALID_PARAMS,
-          'task'
-        )
-      }
-    }
+    if (
+      maxTurns !== undefined &&
+      (typeof maxTurns !== 'number' || maxTurns < 1 || maxTurns > MAX_TURNS_LIMIT)
+    )
+      throw new ToolError(
+        `Invalid maxTurns: must be 1-${MAX_TURNS_LIMIT}`,
+        ToolErrorType.INVALID_PARAMS,
+        'task'
+      )
 
-    // Validate allowedTools
     if (allowedTools !== undefined) {
-      if (!Array.isArray(allowedTools)) {
+      if (!Array.isArray(allowedTools) || !allowedTools.every((t) => typeof t === 'string'))
         throw new ToolError(
-          'Invalid allowedTools: must be array',
+          'Invalid allowedTools: must be string array',
           ToolErrorType.INVALID_PARAMS,
           'task'
         )
-      }
-      if (!allowedTools.every((t) => typeof t === 'string')) {
-        throw new ToolError(
-          'Invalid allowedTools: all items must be strings',
-          ToolErrorType.INVALID_PARAMS,
-          'task'
-        )
-      }
-
-      // Custom type requires allowedTools
-      if (agentType === 'custom' && allowedTools.length === 0) {
+      if (agentType === 'custom' && allowedTools.length === 0)
         throw new ToolError(
           'Custom agent type requires at least one allowedTool',
           ToolErrorType.INVALID_PARAMS,
           'task'
         )
-      }
+    }
+
+    if (tasks !== undefined) {
+      validateParallelTasks(tasks)
+    }
+
+    const agentTypeStr = agentType as SubagentType
+    if (maxConcurrent !== undefined) {
+      if (typeof maxConcurrent !== 'number' || maxConcurrent < 1)
+        throw new ToolError(
+          'Invalid maxConcurrent: must be positive',
+          ToolErrorType.INVALID_PARAMS,
+          'task'
+        )
+      if (maxConcurrent > MAX_CONCURRENCY[agentTypeStr])
+        throw new ToolError(
+          `Invalid maxConcurrent: ${agentTypeStr} limited to ${MAX_CONCURRENCY[agentTypeStr]}`,
+          ToolErrorType.INVALID_PARAMS,
+          'task'
+        )
     }
 
     return {
       description: description.trim(),
       prompt: prompt.trim(),
-      agentType: agentType as SubagentType,
+      agentType: agentTypeStr,
       sessionId: typeof sessionId === 'string' ? sessionId.trim() : undefined,
       maxTurns: maxTurns as number | undefined,
       allowedTools: allowedTools as string[] | undefined,
+      tasks: tasks as ParallelTask[] | undefined,
+      maxConcurrent: maxConcurrent as number | undefined,
     }
   },
 
   async execute(params: TaskParams, ctx: ToolContext): Promise<ToolResult> {
-    // Check abort signal
     if (ctx.signal.aborted) {
       return {
         success: false,
@@ -250,175 +258,188 @@ The subagent runs independently and returns results when done.`,
       }
     }
 
-    // Create subagent manager
-    const manager = createSubagentManager((event) => {
-      // Forward events via metadata
-      if (ctx.metadata && event.type === 'subagent_progress') {
-        ctx.metadata({
-          title: `[${params.description}] Turn ${event.turn}`,
-          metadata: {
-            subagentId: event.subagentId,
-            turn: event.turn,
-            eventType: event.event.type,
-          },
-        })
-      }
-    })
-
-    // Create subagent configuration
-    const config = manager.createConfig(params.agentType, {
-      maxTurns: params.maxTurns,
-      allowedTools: params.allowedTools,
-      parentSessionId: ctx.sessionId,
-    })
-
-    // Register the subagent
-    manager.register(config)
-
-    // Create task
-    const task: SubagentTask = {
-      description: params.description,
-      prompt: params.prompt,
-      workingDirectory: ctx.workingDirectory,
+    if (params.tasks && params.tasks.length > 0) {
+      return executeParallel(
+        {
+          agentType: params.agentType,
+          maxTurns: params.maxTurns,
+          allowedTools: params.allowedTools,
+          tasks: params.tasks,
+          maxConcurrent: params.maxConcurrent,
+        },
+        ctx
+      )
     }
 
-    // Stream start metadata
+    return executeSingle(params, ctx)
+  },
+}
+
+// ============================================================================
+// Validation Helpers
+// ============================================================================
+
+function validateParallelTasks(tasks: unknown): void {
+  if (!Array.isArray(tasks))
+    throw new ToolError('Invalid tasks: must be array', ToolErrorType.INVALID_PARAMS, 'task')
+  if (tasks.length === 0)
+    throw new ToolError(
+      'Invalid tasks: must have at least one task',
+      ToolErrorType.INVALID_PARAMS,
+      'task'
+    )
+  if (tasks.length > MAX_PARALLEL_TASKS)
+    throw new ToolError(
+      `Invalid tasks: maximum ${MAX_PARALLEL_TASKS} allowed`,
+      ToolErrorType.INVALID_PARAMS,
+      'task'
+    )
+
+  for (const t of tasks) {
+    if (typeof t !== 'object' || t === null)
+      throw new ToolError(
+        'Invalid tasks: each must be an object',
+        ToolErrorType.INVALID_PARAMS,
+        'task'
+      )
+    const obj = t as Record<string, unknown>
+    if (typeof obj.description !== 'string' || !obj.description.trim())
+      throw new ToolError(
+        'Invalid tasks: each must have non-empty description',
+        ToolErrorType.INVALID_PARAMS,
+        'task'
+      )
+    if (typeof obj.prompt !== 'string' || !obj.prompt.trim())
+      throw new ToolError(
+        'Invalid tasks: each must have non-empty prompt',
+        ToolErrorType.INVALID_PARAMS,
+        'task'
+      )
+  }
+}
+
+// ============================================================================
+// Single Task Execution
+// ============================================================================
+
+async function executeSingle(params: TaskParams, ctx: ToolContext): Promise<ToolResult> {
+  const manager = createSubagentManager((event) => {
+    if (ctx.metadata && event.type === 'subagent_progress') {
+      ctx.metadata({
+        title: `[${params.description}] Turn ${event.turn}`,
+        metadata: { subagentId: event.subagentId, turn: event.turn, eventType: event.event.type },
+      })
+    }
+  })
+
+  const config = manager.createConfig(params.agentType, {
+    maxTurns: params.maxTurns,
+    allowedTools: params.allowedTools,
+    parentSessionId: ctx.sessionId,
+  })
+
+  manager.register(config)
+
+  const task: SubagentTask = {
+    description: params.description,
+    prompt: params.prompt,
+    workingDirectory: ctx.workingDirectory,
+  }
+
+  if (ctx.metadata) {
+    ctx.metadata({
+      title: `Starting: ${params.description}`,
+      metadata: {
+        subagentId: config.id,
+        agentType: params.agentType,
+        maxTurns: config.maxTurns,
+        task,
+      },
+    })
+  }
+
+  try {
+    manager.emit({ type: 'subagent_started', subagentId: config.id, task })
+
+    const sessionId = params.sessionId ?? generateSubagentSessionId(ctx.sessionId, config.id)
+    const allowedTools =
+      config.allowedTools ??
+      getToolDefinitions()
+        .map((t) => t.name)
+        .filter((t) => t !== 'task')
+
+    const eventCallback = (event: AgentEvent): void => {
+      if (event.type === 'turn:start' || event.type === 'turn:finish') {
+        manager.emit({ type: 'subagent_progress', subagentId: config.id, turn: event.turn, event })
+      }
+    }
+
+    const editorConfig = getEditorModelConfig()
+    const executor = new AgentExecutor(
+      {
+        id: `subagent-${config.type}-${Date.now()}`,
+        name: config.name,
+        maxTurns: config.maxTurns ?? 30,
+        maxTimeMinutes: 10,
+        maxRetries: 2,
+        gracePeriodMs: 30 * 1000,
+        tools: allowedTools,
+        model: editorConfig.model,
+        provider: editorConfig.provider as 'anthropic' | 'openai' | 'openrouter',
+      },
+      eventCallback
+    )
+
+    const agentResult = await executor.run(
+      { goal: params.prompt, context: config.systemPrompt, cwd: ctx.workingDirectory },
+      ctx.signal
+    )
+
+    const result: SubagentResult = {
+      subagentId: config.id,
+      success: agentResult.success,
+      output: agentResult.output,
+      turns: agentResult.turns,
+      terminationReason: mapTerminateMode(agentResult.terminateMode),
+      error: agentResult.error,
+      sessionId,
+    }
+
+    manager.emit({ type: 'subagent_completed', subagentId: config.id, result })
+
     if (ctx.metadata) {
       ctx.metadata({
-        title: `Starting: ${params.description}`,
+        title: `Completed: ${params.description}`,
         metadata: {
           subagentId: config.id,
-          agentType: params.agentType,
-          maxTurns: config.maxTurns,
-          task,
-        },
-      })
-    }
-
-    try {
-      // Emit start event
-      manager.emit({
-        type: 'subagent_started',
-        subagentId: config.id,
-        task,
-      })
-
-      const sessionId = params.sessionId ?? generateSubagentSessionId(ctx.sessionId, config.id)
-
-      // Build tool list: use preset allowedTools if set, otherwise all tools minus 'task' (recursion prevention)
-      const allowedTools =
-        config.allowedTools ??
-        getToolDefinitions()
-          .map((t) => t.name)
-          .filter((t) => t !== 'task')
-
-      // Create event callback bridging AgentEvent → SubagentManager progress events
-      const eventCallback = (event: AgentEvent): void => {
-        if (event.type === 'turn:start' || event.type === 'turn:finish') {
-          manager.emit({
-            type: 'subagent_progress',
-            subagentId: config.id,
-            turn: event.turn,
-            event,
-          })
-        }
-      }
-
-      // Resolve editor model (subagents use cheaper model, same as workers)
-      const editorConfig = getEditorModelConfig()
-
-      // Create isolated AgentExecutor
-      const executor = new AgentExecutor(
-        {
-          id: `subagent-${config.type}-${Date.now()}`,
-          name: config.name,
-          maxTurns: config.maxTurns ?? 30,
-          maxTimeMinutes: 10,
-          maxRetries: 2,
-          gracePeriodMs: 30 * 1000,
-          tools: allowedTools,
-          model: editorConfig.model,
-          provider: editorConfig.provider as 'anthropic' | 'openai' | 'openrouter',
-        },
-        eventCallback
-      )
-
-      // Run the agent loop
-      const agentResult = await executor.run(
-        {
-          goal: params.prompt,
-          context: config.systemPrompt,
-          cwd: ctx.workingDirectory,
-        },
-        ctx.signal
-      )
-
-      // Map AgentResult → SubagentResult
-      const result: SubagentResult = {
-        subagentId: config.id,
-        success: agentResult.success,
-        output: agentResult.output,
-        turns: agentResult.turns,
-        terminationReason: mapTerminateMode(agentResult.terminateMode),
-        error: agentResult.error,
-        sessionId,
-      }
-
-      // Emit completion event
-      manager.emit({
-        type: 'subagent_completed',
-        subagentId: config.id,
-        result,
-      })
-
-      // Stream completion metadata
-      if (ctx.metadata) {
-        ctx.metadata({
-          title: `Completed: ${params.description}`,
-          metadata: {
-            subagentId: config.id,
-            success: result.success,
-            turns: result.turns,
-            terminationReason: result.terminationReason,
-          },
-        })
-      }
-
-      // Format output for LLM
-      const output = formatResult(result, config)
-
-      return {
-        success: result.success,
-        output,
-        metadata: {
-          subagentId: config.id,
-          sessionId: result.sessionId,
+          success: result.success,
           turns: result.turns,
           terminationReason: result.terminationReason,
         },
-      }
-    } catch (err) {
-      // Handle errors
-      const errorMessage = err instanceof Error ? err.message : String(err)
-
-      manager.emit({
-        type: 'subagent_error',
-        subagentId: config.id,
-        error: errorMessage,
       })
-
-      return {
-        success: false,
-        output: `Subagent error: ${errorMessage}`,
-        error: ToolErrorType.UNKNOWN,
-        metadata: {
-          subagentId: config.id,
-          error: errorMessage,
-        },
-      }
-    } finally {
-      // Unregister subagent
-      manager.unregister(config.id)
     }
-  },
+
+    return {
+      success: result.success,
+      output: formatResult(result, config),
+      metadata: {
+        subagentId: config.id,
+        sessionId: result.sessionId,
+        turns: result.turns,
+        terminationReason: result.terminationReason,
+      },
+    }
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err)
+    manager.emit({ type: 'subagent_error', subagentId: config.id, error: errorMessage })
+
+    return {
+      success: false,
+      output: `Subagent error: ${errorMessage}`,
+      error: ToolErrorType.UNKNOWN,
+      metadata: { subagentId: config.id, error: errorMessage },
+    }
+  } finally {
+    manager.unregister(config.id)
+  }
 }

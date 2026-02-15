@@ -147,6 +147,26 @@ export interface UISettings {
 }
 
 // ============================================================================
+// Sandbox Settings
+// ============================================================================
+
+/** Sandbox execution settings */
+export interface SandboxSettings {
+  /** Sandbox mode: 'none' (host) or 'docker' (isolated container) */
+  mode: 'none' | 'docker'
+  /** Docker image to use */
+  image: string
+  /** Timeout in seconds */
+  timeoutSeconds: number
+  /** Whether to allow network access inside container */
+  networkAccess: boolean
+  /** Memory limit (Docker format, e.g. '512m', '1g') */
+  memoryLimit: string
+  /** CPU limit (e.g. '1', '2') */
+  cpuLimit: string
+}
+
+// ============================================================================
 // Combined Settings
 // ============================================================================
 
@@ -159,6 +179,7 @@ export interface Settings {
   memory: MemorySettings
   ui: UISettings
   git: GitConfig
+  sandbox: SandboxSettings
 }
 
 /** Settings category keys */
@@ -229,6 +250,16 @@ export const DEFAULT_UI_SETTINGS: UISettings = {
   compactMode: false,
 }
 
+/** Default sandbox settings */
+export const DEFAULT_SANDBOX_SETTINGS: SandboxSettings = {
+  mode: 'none',
+  image: 'node:20-slim',
+  timeoutSeconds: 120,
+  networkAccess: false,
+  memoryLimit: '512m',
+  cpuLimit: '1',
+}
+
 /** Default complete settings */
 export const DEFAULT_SETTINGS: Settings = {
   provider: DEFAULT_PROVIDER_SETTINGS,
@@ -238,6 +269,7 @@ export const DEFAULT_SETTINGS: Settings = {
   memory: DEFAULT_MEMORY_SETTINGS,
   ui: DEFAULT_UI_SETTINGS,
   git: { enabled: true, autoCommit: false, branchPrefix: 'ava/', messagePrefix: '[ava]' },
+  sandbox: DEFAULT_SANDBOX_SETTINGS,
 }
 
 // ============================================================================

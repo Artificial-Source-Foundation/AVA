@@ -30,26 +30,11 @@
 
 ### High Priority — Pure Functions, Easy Wins
 
-| Module | Files to Test | Estimated Tests | Effort |
-|--------|--------------|-----------------|--------|
-| focus-chain/ | parser.ts, manager.ts | ~30 | Low |
-| diff/ | unified.ts, tracker.ts | ~25 | Low |
-| models/ | registry.ts | ~20 | Low |
-| question/ | manager.ts | ~15 | Low |
-| scheduler/ | scheduler.ts | ~15 | Low |
-| **Subtotal** | | **~105** | **Low** |
+> **DONE (Sprint B1)** — All 6 modules covered: focus-chain/parser (45 tests), diff/unified (26 tests), diff/tracker (33 tests), models/registry (34 tests), question/manager (22 tests), scheduler/scheduler (22 tests), mcp/oauth expanded (+12 tests). Total: +196 tests across 6 new + 1 expanded test files.
 
 ### Medium Priority — Some Mocking Required
 
-| Module | Files to Test | Estimated Tests | Effort |
-|--------|--------------|-----------------|--------|
-| agent/prompts/ | system.ts + 4 variants | ~40 | Medium |
-| codebase/ | ranking.ts, graph.ts, imports.ts | ~50 | Medium |
-| permissions/ | rules.ts, auto-approve.ts, quote-parser.ts | ~40 | Medium |
-| config/ | credentials.ts, migration.ts, export.ts | ~35 | Medium |
-| context/strategies/ | hierarchical.ts, sliding-window.ts, summarize.ts | ~30 | Medium |
-| commander/parallel/ | activity.ts, scheduler.ts | ~25 | Medium |
-| **Subtotal** | | **~220** | **Medium** |
+> **DONE (Sprint B2)** — All 6 medium-priority modules covered: permissions/rules+quote-parser (76 tests), config/credentials+migration+export (64 tests), agent/prompts/system (40 tests), codebase/ranking+graph (49 tests), context/strategies (27 tests), commander/parallel/activity+scheduler (30 tests). Plus NEW agent/metrics.ts source + tests (15 tests). Total: +301 tests across 12 new test files + 1 new source file.
 
 ### Low Priority — Integration Tests / Heavy Mocking
 
@@ -69,10 +54,12 @@
 ## Feature Gaps
 
 ### Missing in Agent System
-- [ ] **Agent loop tests** — `loop.ts` is the core but untested (requires LLM mocking)
-- [ ] **Subagent tests** — `subagent.ts` manages child agents, no tests
+- [x] **Agent loop tests** — ~~`loop.ts` is the core but untested~~ **DONE** (10 integration tests via mock LLM in `agent/__tests__/agent-pipeline.integration.test.ts`)
+- [x] **Subagent tests** — ~~`subagent.ts` manages child agents, no tests~~ **DONE** (task tool spawning + recursion prevention tested)
 - [ ] **Prompt variant tests** — 4 variants (Claude, GPT, Gemini, generic), none tested
-- [ ] **Agent metrics** — No persistent metrics collection (turns, tokens, duration per session)
+- [x] **Agent metrics** — ~~No persistent metrics collection~~ **DONE** (`agent/metrics.ts` + 15 tests)
+- [x] **Parallel subagents** — ~~Task tool spawns 1 subagent at a time~~ **DONE** (Sprint B4: `tasks` array with semaphore-based concurrency, explore=5, execute=1)
+- [ ] **Lead-worker auto-routing** — Commander requires manual delegation; Goose auto-routes to developer/researcher/data-analyst
 
 ### Missing in Tools
 - [ ] **Tool execution tests** — Individual tool `execute()` methods untested
@@ -88,15 +75,22 @@
 
 ### Missing in Safety
 - [ ] **Permission manager tests** — Central `manager.ts` untested
-- [ ] **Auto-approve tests** — Auto-approval logic untested
-- [ ] **Rules tests** — Rule definitions untested
-- [ ] **Quote parser tests** — Shell quoting analysis untested
+- [x] **Auto-approve tests** — ~~Auto-approval logic untested~~ **DONE** (pre-existing)
+- [x] **Rules tests** — ~~Rule definitions untested~~ **DONE** (28 tests)
+- [x] **Quote parser tests** — ~~Shell quoting analysis untested~~ **DONE** (48 tests)
+- [x] **Security inspector pipeline** — ~~Goose has 3-inspector chain~~ **DONE** (Sprint B5: SecurityInspector + RepetitionInspector + InspectorPipeline + AuditTrail, 73 tests)
+- [x] **Container/sandbox execution** — ~~Bash runs on host~~ **DONE** (Sprint B6: Sandbox abstraction, DockerSandbox, NoopSandbox, opt-in `mode: 'docker'`, bash.ts wired with graceful fallback)
 
 ### Missing in Infrastructure
-- [ ] **Config credential tests** — Credential storage untested
-- [ ] **Config migration tests** — Version migration untested
+- [x] **Config credential tests** — ~~Credential storage untested~~ **DONE** (20 tests)
+- [x] **Config migration tests** — ~~Version migration untested~~ **DONE** (24 tests)
 - [ ] **MCP client tests** — MCP protocol client untested
 - [ ] **Hook executor tests** — Hook execution untested
+- [ ] **SQLite session storage** — Sessions are file-based JSON; Goose uses SQLite for durability + querying
+- [x] **Visibility metadata** — ~~Compacted messages are fully removed~~ **DONE** (Sprint B3: `MessageVisibility` type, visibility-aware compaction)
+- [x] **Auto-compaction threshold** — ~~Fixed strategy~~ **DONE** (Sprint B3: configurable threshold, tested)
+- [x] **Tool prefix namespacing** — ~~Flat tool registry risks name collisions~~ **DONE** (Sprint B4: `tools/namespacing.ts` with `mcp__`/`ext__` prefixes, backward-compat lookupTool)
+- [x] **Batch parallel tool exec** — ~~Batch tool executes sequentially~~ **DONE** (Sprint B4: task-parallel.ts, Semaphore-based concurrency via Promise.allSettled)
 
 ---
 

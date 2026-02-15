@@ -1,8 +1,8 @@
 # Competitive Gap Analysis
 
-> AVA vs 7 reference codebases + PI Coding Agent. Compiled 2026-02-08.
+> AVA vs 8 reference codebases + PI Coding Agent. Updated 2026-02-14.
 >
-> Sources analyzed: **OpenCode**, **Aider**, **Cline**, **Gemini CLI**, **Goose**, **OpenHands**, **Plandex**, **PI Coding Agent**
+> Sources analyzed: **OpenCode**, **Aider**, **Cline**, **Roo Code**, **Gemini CLI**, **Goose**, **OpenHands**, **Plandex**, **PI Coding Agent**
 
 ---
 
@@ -22,7 +22,7 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 | ~~Git auto-commit on edits~~ | Aider, Gemini CLI | ~~**High**~~ **DONE** |
 | ~~Weak model for secondary tasks~~ | Aider, PI | ~~**High**~~ **DONE** |
 | ~~Architect + editor model split~~ | Aider, PI | ~~**Medium**~~ **DONE** |
-| Sandbox/container execution | Gemini CLI, OpenHands, Goose | **High** |
+| ~~Sandbox/container execution~~ | Gemini CLI, OpenHands, Goose | ~~**High**~~ **DONE** |
 | ~~Iterative lint → fix loop~~ | Aider, Cline, Gemini CLI | ~~High~~ **DONE** |
 | ~~Streaming tool preview~~ | Cline, OpenCode | ~~**Medium**~~ **DONE** |
 | ~~File watcher / AI comments~~ | Aider, OpenCode | ~~**Medium**~~ **DONE** |
@@ -43,6 +43,30 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 | Runtime skill/tool creation + hot reload | PI | Medium |
 | MCP OAuth flows (auth + refresh + storage) | Cline, Gemini CLI, Goose | Medium |
 | Remote browser support | Cline | Medium |
+
+### New Gaps Identified (2026-02-14 Deep Audit — Goose, OpenCode, Cline, Roo Code)
+
+| Gap | Who Has It | AVA Status | Priority |
+|-----|-----------|------------|----------|
+| Lead-Worker model auto-routing | Goose | Manual editor model split (no auto-fallback) | **High** |
+| ~~Parallel subagents (multi-task)~~ | Cline (5 parallel read-only), OpenCode (batch) | **DONE** (task-parallel.ts: Semaphore concurrency, explore=5, execute=1) | ~~High~~ Done |
+| Resumable subagents | OpenCode (`task_id` param) | **DONE** (task tool has `sessionId`) | Done |
+| ~~Batch tool (parallel tool exec)~~ | OpenCode (25 parallel via Promise.all) | **DONE** (task-parallel.ts: Promise.allSettled + Semaphore) | ~~Medium~~ Done |
+| ~~Visibility metadata on messages~~ | Goose (user_visible + agent_visible flags) | **DONE** (MessageVisibility type + visibility strategy) | ~~Medium~~ Done |
+| MCP-native tool architecture | Goose (all tools via MCP) | Native tools + MCP bridge | Low |
+| ~~Tool prefix namespacing~~ | Goose (`ext__tool`) | **DONE** (namespacing.ts: `mcp__`/`ext__` prefixes, backward-compat lookup) | ~~Medium~~ Done |
+| ~~Security inspector pipeline~~ | Goose (pattern-based, confidence scores, audit trail) | **DONE** (SecurityInspector + RepetitionInspector + InspectorPipeline + AuditTrail) | ~~Medium~~ Done |
+| Mode system with tool restrictions | Roo Code (4 modes + custom) | Workers have filtered tools (same concept) | Done (via workers) |
+| Boomerang task delegation | Roo Code (parent-child tree, mode-per-subtask) | Team hierarchy (same concept, more structured) | Done (via commander) |
+| Toolshim for non-tool-calling models | Goose (prompt-based tool extraction) | No — requires native tool calling | Low |
+| ~~Context visibility layering~~ | Goose (compacted = agent-visible only) | **DONE** (visibility.ts strategy) | ~~Medium~~ Done |
+| ~~Auto-compaction threshold~~ | Goose (80%), Roo Code (configurable %) | **DONE** (createAutoCompactor + compactionThreshold setting, default 80%) | ~~Medium~~ Done |
+| Recipe system (YAML task automation) | Goose (cron scheduling, success checks, retry) | Custom commands (TOML, no scheduling) | Low |
+| ~~Container/sandbox execution~~ | Goose (Docker), Gemini CLI, OpenHands | **DONE** (DockerSandbox + NoopSandbox, opt-in mode, graceful fallback) | ~~High~~ Done |
+| Extension malware checking | Goose | No — plugins trusted by default | Low |
+| SQLite session storage | Goose | File-based JSON | **Medium** |
+| Client/server architecture | OpenCode (Hono HTTP + SSE) | Tauri IPC (desktop-only) | Low |
+| Tool repetition detection in registry | Roo Code (ToolRepetitionDetector) | Doom loop in agent loop only (not registry) | Low |
 
 ---
 
@@ -138,11 +162,9 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 - **OpenHands**: Full containerized sandbox — every agent runs in Docker with mounted workspace.
 - **Goose**: Extension-based sandboxing.
 
-**AVA status**: No sandboxing. Bash tool executes directly on host. Permission system is the safety layer.
+**AVA status**: **Done** (Sprint B6). `tools/sandbox/` module: `DockerSandbox` (Docker-based), `NoopSandbox` (host passthrough, default). `SandboxSettings` in config (`mode: 'none' | 'docker'`). Bash tool routes through sandbox when `mode: 'docker'`, with graceful fallback to host if Docker unavailable. Memory/CPU limits, network isolation, timeout enforcement.
 
 **Impact**: Safety for autonomous agents. Critical for "let it run overnight" workflows.
-
-**Implementation**: Phase 2+. Could use Docker or Tauri's IPC to isolate bash execution.
 
 ---
 
@@ -282,20 +304,21 @@ These are AVA's **unique advantages** — features no other codebase implements:
 
 | Feature | AVA | Closest Competitor |
 |---------|--------|-------------------|
-| **Multi-agent hierarchy** (Team Lead → Seniors → Juniors) | Built-in with visible UI | None (all are single-agent) |
-| **Worker scope filtering** (each agent only sees relevant files/tools) | Native | None |
-| **Parallel agent execution** (multiple seniors simultaneously) | Built-in | Plandex (limited) |
-| **Auto-reporting** (workers report up the chain) | Native | None |
+| **Multi-agent hierarchy** (Team Lead → Seniors → Juniors) | Built-in with visible UI | Roo Code (flat parent-child, no typed roles) |
+| **Worker scope filtering** (each agent only sees relevant files/tools) | Native | Roo Code (mode-based tool groups, similar) |
+| **Parallel agent execution** (multiple seniors simultaneously) | Built-in | Cline (5 read-only subagents), Plandex (limited) |
+| **Auto-reporting** (workers report up the chain) | Native | Goose (text-only summary return) |
 | **User intervention points** (click into any agent's chat) | Desktop UI | None |
-| **Doom loop detection** (prevent agents getting stuck) | Built-in | Gemini CLI (basic) |
-| **Validator/QA pipeline** (syntax, types, lint, test, review) | 9-file module | Aider (basic lint) |
+| **Doom loop detection** (agent loop + registry level) | Built-in | Goose (RepetitionInspector), Roo Code (ToolRepetitionDetector) |
+| **Validator/QA pipeline** (syntax, types, lint, test, review) | 9-file module | Aider (basic lint only) |
 | **Codebase intelligence** (PageRank, dependency graph, symbols) | Built-in | Aider (repo map only) |
 | **Memory system** (episodic + semantic + procedural + RAG) | Built-in | None |
-| **Permission/policy engine** (risk assessment, auto-approval, rules) | Built-in | None (PI defers to user) |
-| **Hook system** (PreToolUse, PostToolUse, lifecycle) | Native | None |
-| **Desktop UI** (activity bar, agent cards, animations) | Tauri + SolidJS | Cline (VS Code only) |
+| **Permission/policy engine** (risk assessment, auto-approval, rules) | Built-in | Goose (3-inspector pipeline, closest match) |
+| **Hook system** (PreToolUse, PostToolUse, lifecycle) | Native | Cline (hooks, similar) |
+| **Desktop UI** (activity bar, agent cards, animations) | Tauri + SolidJS | Cline/Roo Code (VS Code only) |
 | **Plugin marketplace** (Phase 2) | Planned | PI (npm only) |
 | **Protocol support** (ACP + A2A) | Built-in | None |
+| **Real subagent execution** (task tool → AgentExecutor) | Built-in + tested | OpenCode (similar), Goose (Rust equivalent) |
 
 ---
 
@@ -325,11 +348,18 @@ These are AVA's **unique advantages** — features no other codebase implements:
 
 | # | Feature | Effort | Impact | Source |
 |---|---------|--------|--------|--------|
-| 11 | **Sandbox execution** | 2-3 weeks | High | Gemini CLI, OpenHands |
-| 12 | **Tree-sitter integration** | 2 weeks | Medium | Aider |
-| 13 | ~~**Session step-level undo**~~ | ~~1 week~~ | ~~Medium~~ **DONE** | OpenCode, Cline |
-| 14 | **Voice coding** | 2 weeks | Medium | Aider |
-| 15 | **RPC/SDK mode** | 2-3 weeks | Low | PI |
+| 11 | **Sandbox execution** | 2-3 weeks | High | Gemini CLI, OpenHands, Goose |
+| 12 | **Parallel subagents** | 1-2 weeks | High | Cline (5 concurrent), OpenCode (batch) |
+| 13 | **Lead-worker auto-routing** | 1 week | High | Goose (auto-selects worker type) |
+| 14 | **Batch parallel tool exec** | 1 week | Medium | OpenCode (25 via Promise.all) |
+| 15 | **Security inspector pipeline** | 1-2 weeks | Medium | Goose (pattern + confidence + audit) |
+| 16 | **Visibility metadata** | 3-4 days | Medium | Goose (user_visible/agent_visible) |
+| 17 | **SQLite session storage** | 1 week | Medium | Goose |
+| 18 | **Auto-compaction threshold** | 3-4 days | Medium | Goose (80%), Roo Code (configurable) |
+| 19 | **Tree-sitter integration** | 2 weeks | Medium | Aider |
+| 20 | ~~**Session step-level undo**~~ | ~~1 week~~ | ~~Medium~~ **DONE** | OpenCode, Cline |
+| 21 | **Voice coding** | 2 weeks | Medium | Aider |
+| 22 | **RPC/SDK mode** | 2-3 weeks | Low | PI |
 
 ---
 
@@ -340,15 +370,23 @@ These are AVA's **unique advantages** — features no other codebase implements:
 - **Steal**: Mid-session provider switching, session branching tree, minimal tool mode, runtime skill creation, RPC mode
 - **Skip**: Their extension system (we have plugins)
 
-### OpenCode
-- **Philosophy**: Terminal-first with rich TUI. Client/server architecture.
-- **Steal**: ~~File watcher~~, ~~session revert/step-level undo~~, formatter abstraction, header-based retry
+### OpenCode (Deep Audit — 2026-02-14)
+- **Architecture**: TypeScript, Hono HTTP server + SSE streaming. Client/server split.
+- **Agent system**: Resumable subagents with `task_id` for session continuity. Batch tool executes up to 25 tools in parallel via Promise.all. Rule-based permission system with glob patterns.
+- **Steal**: ~~File watcher~~, ~~session revert/step-level undo~~, batch parallel execution (25 tools), formatter abstraction, header-based retry, resumable subagent pattern
 - **Skip**: Client/server split (we're desktop-first)
 
-### Cline
-- **Philosophy**: VS Code extension with polished IDE integration.
-- **Steal**: ~~Checkpoints (3 restore modes)~~, ~~cost tracking~~, ~~streaming tool preview~~, auto-condense tool
+### Cline (Deep Audit — 2026-02-14)
+- **Architecture**: VS Code extension with polished IDE integration.
+- **Agent system**: Parallel subagents — up to 5 read-only subagents simultaneously. Git-based checkpoints for workspace snapshots. Human-in-the-loop approval for dangerous operations. Hooks system similar to ours.
+- **Steal**: ~~Checkpoints (3 restore modes)~~, ~~cost tracking~~, ~~streaming tool preview~~, parallel read-only subagents (5 concurrent), auto-condense tool
 - **Skip**: VS Code-specific integrations (not applicable to desktop)
+
+### Roo Code (New — 2026-02-14)
+- **Architecture**: VS Code extension, fork of Cline with mode system.
+- **Agent system**: 4 built-in modes (Code, Architect, Ask, Debug) + custom modes. Each mode restricts available tools differently. Boomerang pattern: parent agent delegates subtasks to child agents in different modes. `SwitchModeTool` for dynamic mode changes during execution. `ToolRepetitionDetector` for stuck detection at registry level.
+- **Steal**: Dynamic mode switching during execution, tool repetition detection at registry level, configurable compaction thresholds
+- **Skip**: Mode system itself (we have typed worker roles — same concept, more structured)
 
 ### Gemini CLI
 - **Philosophy**: Google-scale safety with sandboxing.
@@ -360,10 +398,13 @@ These are AVA's **unique advantages** — features no other codebase implements:
 - **Steal**: Git auto-commit, weak models, architect mode, tree-sitter, iterative linting, watch mode, voice
 - **Skip**: Copy/paste web bridge (niche), Python-specific patterns
 
-### Goose
-- **Philosophy**: Extension-based with YAML recipes.
-- **Steal**: Recipe workflows (declarative task sequences), MCP allowlists
-- **Skip**: Extension system specifics (we have plugins)
+### Goose (Deep Audit — 2026-02-14)
+- **Architecture**: Rust core with MCP-native tool architecture. All tools are MCP servers, even built-ins.
+- **Agent system**: Lead-worker model with automatic routing — developer → researcher → data-analyst. Three-inspector pipeline: SecurityInspector (pattern-based blocking), PermissionInspector (user approval), RepetitionInspector (stuck detection). Confidence scores on security checks.
+- **Sessions**: SQLite-based session storage. Visibility metadata on messages (user_visible vs agent_visible flags for compaction control). Auto-compaction at 80% context usage.
+- **Extensibility**: YAML recipe system with cron scheduling, success checks, retry logic. Extension malware checking. Tool prefix namespacing (`ext__tool`).
+- **Steal**: Lead-worker auto-routing, 3-inspector security pipeline, visibility metadata, SQLite sessions, auto-compaction threshold, toolshim for non-tool-calling models
+- **Skip**: MCP-native-only architecture (we support both native + MCP), Rust-specific patterns
 
 ### OpenHands
 - **Philosophy**: Enterprise-grade with containerized execution.
@@ -377,4 +418,4 @@ These are AVA's **unique advantages** — features no other codebase implements:
 
 ---
 
-*Last updated: 2026-02-10*
+*Last updated: 2026-02-14*

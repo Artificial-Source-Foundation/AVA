@@ -4,7 +4,7 @@
 
 ---
 
-## agent/ (12 files, 4,197 lines)
+## agent/ (15 files, ~4,690 lines)
 
 Autonomous agent loop — plans tasks, executes tools, recovers from errors.
 
@@ -17,6 +17,7 @@ Autonomous agent loop — plans tasks, executes tools, recovers from errors.
 | `recovery.ts` | ~500 | `RecoveryManager` — error classification, backoff, retry strategies |
 | `subagent.ts` | ~400 | `SubagentManager` — spawn/manage child agents, presets |
 | `types.ts` | ~250 | `AgentConfig`, `AgentStep`, `AgentEvent`, `ToolCallInfo` types |
+| `metrics.ts` | ~120 | `MetricsCollector` — per-session agent metrics (turns, tokens, tools, errors) |
 | `test-helpers.ts` | ~60 | Mock factories for testing |
 | `index.ts` | ~130 | Barrel export |
 | **modes/** | | |
@@ -32,7 +33,11 @@ Autonomous agent loop — plans tasks, executes tools, recovers from errors.
 | `prompts/variants/types.ts` | ~30 | Variant type definitions |
 | `prompts/variants/index.ts` | ~20 | Barrel export |
 
-**Key exports:** `AgentExecutor`, `runAgent`, `AgentPlanner`, `RecoveryManager`, `AgentEventEmitter`, `SubagentManager`, `planEnterTool`, `planExitTool`
+| **__tests__/** | | |
+| `__tests__/mock-llm.ts` | ~70 | Programmable mock LLMClient for testing (scripted StreamDelta sequences) |
+| `__tests__/agent-pipeline.integration.test.ts` | ~300 | 10 integration tests: tool dispatch, termination modes, doom loop, abort, events, workers, subagents |
+
+**Key exports:** `AgentExecutor`, `runAgent`, `AgentPlanner`, `RecoveryManager`, `AgentEventEmitter`, `SubagentManager`, `MetricsCollector`, `planEnterTool`, `planExitTool`
 
 ---
 
@@ -61,7 +66,7 @@ Team Lead → Senior Leads → Junior Devs hierarchical delegation.
 
 ---
 
-## tools/ (37 files, 10,990 lines)
+## tools/ (39 files, ~11,510 lines)
 
 22 registered tools plus utilities, sanitization, validation, and locking.
 
@@ -79,7 +84,9 @@ Team Lead → Senior Leads → Junior Devs hierarchical delegation.
 | `ls.ts` | ls | Directory listing |
 | `bash.ts` | bash | Shell command execution (PTY) |
 | `batch.ts` | batch | Execute multiple tools in batch |
-| `task.ts` | task | Spawn subagent tasks |
+| `task.ts` | task | Spawn subagent tasks (single + parallel dispatch) |
+| `task-parallel.ts` | — | Parallel task execution (Semaphore, Promise.allSettled) |
+| `namespacing.ts` | — | Tool name prefixing (`mcp__`/`ext__`), backward-compat lookup |
 | `question.ts` | question | Ask user clarifying questions |
 | `skill.ts` | skill | Auto-invoke knowledge skills |
 | `todo.ts` | todo_read/write | Session todo list management |
@@ -160,9 +167,9 @@ Long-term memory with episodic, semantic, and procedural stores.
 
 ---
 
-## permissions/ (9 files, 3,130 lines)
+## permissions/ (13 files, ~3,780 lines)
 
-Risk assessment and tool approval system.
+Risk assessment, tool approval, and security inspection pipeline.
 
 | File | Purpose |
 |------|---------|
@@ -173,6 +180,10 @@ Risk assessment and tool approval system.
 | `auto-approve.ts` | Auto-approval logic for low-risk operations |
 | `persistent-approvals.ts` | Remember user approvals across sessions |
 | `trusted-folders.ts` | Per-folder trust levels |
+| `security-inspector.ts` | Pattern-based threat detection with confidence scores |
+| `repetition-inspector.ts` | Per-tool-call stuck detection with time window |
+| `inspector-pipeline.ts` | 3-stage inspection chain (Security → Permission → Repetition) |
+| `audit.ts` | Audit trail — records all inspector decisions |
 | `types.ts` | Permission type definitions |
 | `index.ts` | Barrel export |
 
@@ -335,4 +346,4 @@ Agent Client Protocol. Files: `terminal.ts`, `session-store.ts`, `mcp-bridge.ts`
 
 ---
 
-*Last updated: 2026-02-08*
+*Last updated: 2026-02-14*

@@ -35,9 +35,11 @@ import {
   PartialMemorySettingsSchema,
   PartialPermissionSettingsSchema,
   PartialProviderSettingsSchema,
+  PartialSandboxSettingsSchema,
   PartialUISettingsSchema,
   PermissionSettingsSchema,
   ProviderSettingsSchema,
+  SandboxSettingsSchema,
   SettingsSchema,
   UISettingsSchema,
 } from './schema.js'
@@ -48,6 +50,7 @@ import type {
   MemorySettings,
   PermissionSettings,
   ProviderSettings,
+  SandboxSettings,
   Settings,
   SettingsCategory,
   SettingsEvent,
@@ -69,6 +72,7 @@ const CATEGORY_SCHEMAS: Record<SettingsCategory, ZodSchema> = {
   memory: MemorySettingsSchema,
   ui: UISettingsSchema,
   git: GitConfigSchema,
+  sandbox: SandboxSettingsSchema,
 }
 
 /** Partial schemas by category (for updates) */
@@ -80,6 +84,7 @@ const PARTIAL_SCHEMAS: Record<SettingsCategory, ZodSchema> = {
   memory: PartialMemorySettingsSchema,
   ui: PartialUISettingsSchema,
   git: PartialGitConfigSchema,
+  sandbox: PartialSandboxSettingsSchema,
 }
 
 // ============================================================================
@@ -246,6 +251,10 @@ export class SettingsManager {
 
   get ui(): UISettings {
     return this.settings.ui
+  }
+
+  get sandbox(): SandboxSettings {
+    return this.settings.sandbox
   }
 
   // ==========================================================================

@@ -4,6 +4,7 @@
  * Supports PTY (pseudo-terminal) for interactive commands.
  */
 
+import { getSettingsManager } from '../config/manager.js'
 import {
   type CommandValidationResult,
   getCommandValidator,
@@ -11,6 +12,8 @@ import {
 } from '../permissions/command-validator.js'
 import { getPlatform } from '../platform.js'
 import { ToolError, ToolErrorType } from './errors.js'
+import { createSandbox } from './sandbox/index.js'
+import type { Sandbox } from './sandbox/types.js'
 import { truncateForMetadata } from './truncation.js'
 import type { Tool, ToolContext, ToolResult } from './types.js'
 import {
@@ -188,6 +191,12 @@ export const bashTool: Tool<BashParams> = {
           detectedOperator: validationResult.detectedOperator,
         },
       }
+    }
+
+    // Check for Docker sandbox mode
+    const sandbox = getSandboxInstance()
+    if (sandbox.type === 'docker') {
+      return executeSandboxed(sandbox, params, cwd, timeout, ctx)
     }
 
     // Determine if we should use PTY
@@ -552,6 +561,133 @@ async function executePty(
     return {
       success: false,
       output: `Error executing command with PTY: ${message}`,
+      error: ToolErrorType.UNKNOWN,
+    }
+  }
+}
+
+// ============================================================================
+// Sandbox Execution
+// ============================================================================
+
+let _sandbox: Sandbox | null = null
+
+/**
+ * Get or create the sandbox instance based on settings.
+ * Lazily initialized and cached for the process lifetime.
+ * Call resetSandbox() to force re-creation (e.g., after settings change).
+ */
+function getSandboxInstance(): Sandbox {
+  if (!_sandbox) {
+    try {
+      const settings = getSettingsManager().sandbox
+      _sandbox = createSandbox(settings)
+    } catch {
+      // Config not available (e.g., in tests) — use default (noop)
+      _sandbox = createSandbox()
+    }
+  }
+  return _sandbox
+}
+
+/** Reset sandbox instance (for testing or after settings change) */
+export function resetSandbox(): void {
+  _sandbox = null
+}
+
+/**
+ * Execute command in Docker sandbox.
+ * Falls back to regular shell execution if Docker is unavailable.
+ */
+async function executeSandboxed(
+  sandbox: Sandbox,
+  params: BashParams,
+  cwd: string,
+  timeout: number,
+  ctx: ToolContext
+): Promise<ToolResult> {
+  // Check if Docker is available
+  const available = await sandbox.isAvailable()
+  if (!available) {
+    // Graceful fallback to host execution with warning
+    const warningPrefix =
+      '[Warning: Docker sandbox requested but Docker is not available. Running on host.]\n\n'
+    const result = await executeShell(params, cwd, timeout, ctx)
+    return {
+      ...result,
+      output: warningPrefix + result.output,
+    }
+  }
+
+  try {
+    const result = await sandbox.exec(params.command, cwd, ctx.signal)
+
+    if (result.timedOut) {
+      return {
+        success: false,
+        output: `Command timed out in Docker sandbox.\n\nTo increase timeout, configure sandbox.timeoutSeconds in settings.`,
+        error: ToolErrorType.EXECUTION_TIMEOUT,
+        metadata: {
+          command: params.command,
+          description: params.description,
+          cwd,
+          timeout,
+          timedOut: true,
+          sandboxed: true,
+        },
+        locations: [{ path: cwd, type: 'exec' }],
+      }
+    }
+
+    const exitCode = result.exitCode
+    let output = ''
+
+    if (exitCode === 0) {
+      const combined = result.stdout + (result.stderr ? `\n${result.stderr}` : '')
+      const truncated = truncateOutput(combined)
+
+      if (truncated.truncated) {
+        output = `Exit code: 0 (sandboxed)\n\n<output>\n${truncated.content}\n\n(Output truncated: ${truncated.removedLines} lines removed.)\n</output>`
+      } else {
+        output = `Exit code: 0 (sandboxed)\n\n<output>\n${combined || '(no output)'}\n</output>`
+      }
+    } else {
+      const parts: string[] = [`Exit code: ${exitCode} (sandboxed)`]
+
+      if (result.stderr.trim()) {
+        const truncatedErr = truncateOutput(result.stderr)
+        parts.push(`\n<stderr>\n${truncatedErr.content}\n</stderr>`)
+      }
+
+      if (result.stdout.trim()) {
+        const truncatedOut = truncateOutput(result.stdout)
+        parts.push(`\n<stdout>\n${truncatedOut.content}\n</stdout>`)
+      }
+
+      if (!result.stderr.trim() && !result.stdout.trim()) {
+        parts.push('\n(no output)')
+      }
+
+      output = parts.join('')
+    }
+
+    return {
+      success: exitCode === 0,
+      output,
+      metadata: {
+        command: params.command,
+        description: params.description,
+        cwd,
+        exitCode,
+        sandboxed: true,
+      },
+      locations: [{ path: cwd, type: 'exec' }],
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return {
+      success: false,
+      output: `Error executing command in sandbox: ${message}`,
       error: ToolErrorType.UNKNOWN,
     }
   }

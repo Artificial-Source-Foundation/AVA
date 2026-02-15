@@ -476,6 +476,14 @@ export function clearPendingStates(): void {
   pendingStates.clear()
 }
 
+/**
+ * Reset token cache (for testing)
+ */
+export function resetTokenCache(): void {
+  tokenCache = null
+  cacheWorkspaceRoot = null
+}
+
 // ============================================================================
 // Integration with MCP Client
 // ============================================================================

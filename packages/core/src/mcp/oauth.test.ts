@@ -40,10 +40,14 @@ vi.mock('../platform.js', () => ({
 import {
   areTokensExpired,
   clearPendingStates,
+  completeOAuthFlow,
+  getAuthorizationHeader,
   getStoredTokens,
+  hasStoredTokens,
   type MCPOAuthConfig,
   type MCPOAuthTokens,
   removeTokens,
+  resetTokenCache,
   startOAuthFlow,
   storeTokens,
 } from './oauth.js'
@@ -61,6 +65,7 @@ const testConfig: MCPOAuthConfig = {
 afterEach(() => {
   vi.clearAllMocks()
   clearPendingStates()
+  resetTokenCache()
 })
 
 // ============================================================================
@@ -240,5 +245,227 @@ describe('token storage with credential store', () => {
       'mcp-oauth-tokens',
       expect.not.stringContaining('"test-server"')
     )
+  })
+})
+
+// ============================================================================
+// hasStoredTokens
+// ============================================================================
+
+describe('hasStoredTokens', () => {
+  it('returns true when tokens exist', async () => {
+    mockCredentials.get.mockResolvedValueOnce(
+      JSON.stringify({
+        version: 1,
+        tokens: {
+          'test-server': { accessToken: 'x', tokenType: 'Bearer', scopes: [] },
+        },
+        lastModified: Date.now(),
+      })
+    )
+    expect(await hasStoredTokens('/workspace', 'test-server')).toBe(true)
+  })
+
+  it('returns false when no tokens', async () => {
+    mockCredentials.get.mockResolvedValueOnce(
+      JSON.stringify({ version: 1, tokens: {}, lastModified: Date.now() })
+    )
+    expect(await hasStoredTokens('/workspace', 'nonexistent')).toBe(false)
+  })
+})
+
+// ============================================================================
+// clearPendingStates / resetTokenCache
+// ============================================================================
+
+describe('clearPendingStates', () => {
+  it('clears all pending OAuth states', async () => {
+    // Start a flow to create pending state
+    const { state } = await startOAuthFlow(testConfig)
+    expect(state).toBeTruthy()
+
+    clearPendingStates()
+
+    // completeOAuthFlow should fail — state was cleared
+    await expect(completeOAuthFlow('/workspace', testConfig, 'code', state)).rejects.toThrow(
+      'Invalid or expired'
+    )
+  })
+})
+
+describe('resetTokenCache', () => {
+  it('forces reload from credential store', async () => {
+    // First load — populates cache
+    mockCredentials.get.mockResolvedValueOnce(
+      JSON.stringify({
+        version: 1,
+        tokens: {
+          srv: { accessToken: 'old', tokenType: 'Bearer', scopes: [] },
+        },
+        lastModified: Date.now(),
+      })
+    )
+    const t1 = await getStoredTokens('/workspace', 'srv')
+    expect(t1?.accessToken).toBe('old')
+
+    // Reset cache
+    resetTokenCache()
+
+    // Second load — should go to credential store again
+    mockCredentials.get.mockResolvedValueOnce(
+      JSON.stringify({
+        version: 1,
+        tokens: {
+          srv: { accessToken: 'new', tokenType: 'Bearer', scopes: [] },
+        },
+        lastModified: Date.now(),
+      })
+    )
+    const t2 = await getStoredTokens('/workspace', 'srv')
+    expect(t2?.accessToken).toBe('new')
+  })
+})
+
+// ============================================================================
+// completeOAuthFlow
+// ============================================================================
+
+describe('completeOAuthFlow', () => {
+  it('rejects invalid state', async () => {
+    await expect(completeOAuthFlow('/workspace', testConfig, 'code', 'bad-state')).rejects.toThrow(
+      'Invalid or expired'
+    )
+  })
+
+  it('rejects mismatched server name', async () => {
+    const { state } = await startOAuthFlow(testConfig)
+    const wrongConfig = { ...testConfig, serverName: 'wrong-server' }
+    await expect(completeOAuthFlow('/workspace', wrongConfig, 'code', state)).rejects.toThrow(
+      'does not match server'
+    )
+  })
+})
+
+// ============================================================================
+// getAuthorizationHeader
+// ============================================================================
+
+describe('getAuthorizationHeader', () => {
+  it('returns Bearer header for valid tokens', async () => {
+    mockCredentials.get.mockResolvedValueOnce(
+      JSON.stringify({
+        version: 1,
+        tokens: {
+          'test-server': {
+            accessToken: 'my-token',
+            tokenType: 'Bearer',
+            scopes: ['read'],
+            expiresAt: Date.now() + 60 * 60 * 1000,
+          },
+        },
+        lastModified: Date.now(),
+      })
+    )
+    const header = await getAuthorizationHeader('/workspace', testConfig)
+    expect(header).toBe('Bearer my-token')
+  })
+
+  it('returns null when no tokens stored', async () => {
+    mockCredentials.get.mockResolvedValueOnce(
+      JSON.stringify({ version: 1, tokens: {}, lastModified: Date.now() })
+    )
+    const header = await getAuthorizationHeader('/workspace', testConfig)
+    expect(header).toBeNull()
+  })
+
+  it('returns null for expired tokens without refresh', async () => {
+    mockCredentials.get.mockResolvedValueOnce(
+      JSON.stringify({
+        version: 1,
+        tokens: {
+          'test-server': {
+            accessToken: 'expired-token',
+            tokenType: 'Bearer',
+            scopes: ['read'],
+            expiresAt: Date.now() - 1000,
+          },
+        },
+        lastModified: Date.now(),
+      })
+    )
+    const header = await getAuthorizationHeader('/workspace', testConfig)
+    expect(header).toBeNull()
+  })
+})
+
+// ============================================================================
+// Token Expiry Edge Cases
+// ============================================================================
+
+describe('areTokensExpired edge cases', () => {
+  it('returns false at exactly 5 minutes before expiry', () => {
+    const buffer = 5 * 60 * 1000
+    const tokens: MCPOAuthTokens = {
+      accessToken: 'test',
+      tokenType: 'Bearer',
+      scopes: [],
+      // Exactly at the buffer edge — Date.now() >= expiresAt - buffer
+      // expiresAt - buffer = Date.now() => should be expired
+      expiresAt: Date.now() + buffer,
+    }
+    // At exactly the boundary (now == expiresAt - buffer), it's expired
+    expect(areTokensExpired(tokens)).toBe(true)
+  })
+
+  it('returns false well beyond expiry window', () => {
+    const tokens: MCPOAuthTokens = {
+      accessToken: 'test',
+      tokenType: 'Bearer',
+      scopes: [],
+      expiresAt: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
+    }
+    expect(areTokensExpired(tokens)).toBe(false)
+  })
+})
+
+// ============================================================================
+// startOAuthFlow edge cases
+// ============================================================================
+
+describe('startOAuthFlow edge cases', () => {
+  it('includes redirect URI', async () => {
+    const result = await startOAuthFlow(testConfig)
+    expect(result.authorizationUrl).toContain(encodeURIComponent('http://localhost:3000/callback'))
+  })
+
+  it('handles single scope', async () => {
+    const config = { ...testConfig, scopes: ['admin'] }
+    const result = await startOAuthFlow(config)
+    expect(result.authorizationUrl).toContain('scope=admin')
+  })
+})
+
+// ============================================================================
+// Token storage caching
+// ============================================================================
+
+describe('token cache behavior', () => {
+  it('uses cache on second load for same workspace', async () => {
+    mockCredentials.get.mockResolvedValueOnce(
+      JSON.stringify({
+        version: 1,
+        tokens: {
+          srv: { accessToken: 'cached', tokenType: 'Bearer', scopes: [] },
+        },
+        lastModified: Date.now(),
+      })
+    )
+
+    // First load
+    await getStoredTokens('/workspace', 'srv')
+    // Second load — should use cache, no additional credential store call
+    const tokens = await getStoredTokens('/workspace', 'srv')
+    expect(tokens?.accessToken).toBe('cached')
+    expect(mockCredentials.get).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,6 +1,6 @@
 # Backend Test Coverage
 
-> Latest verified baseline: 1801 tests across 70 test files. Overall file coverage: ~30% (56/188 testable files).
+> Latest verified baseline: **2687 tests** across **109 test files**. Overall file coverage: ~43% (85/200 testable files).
 >
 > Strategy: Test pure functions and stateful classes. Skip LLM/FS/HTTP-dependent code.
 
@@ -10,16 +10,16 @@
 
 | Metric | Value |
 |--------|-------|
-| Total tests | 1801 |
-| Test files | 70 |
-| Source files (excluding barrels/types) | ~188 |
-| Files with tests | 56 |
-| Files without tests | 132 |
-| File coverage | ~30% |
+| Total tests | 2687 |
+| Test files | 109 |
+| Source files (excluding barrels/types) | ~200 |
+| Files with tests | 85 |
+| Files without tests | 115 |
+| File coverage | ~43% |
 | TS errors | 0 |
 | Biome errors | 0 |
 
-## Recently Delivered (Sprint 1.6)
+## Recently Delivered (Sprint B4)
 
 ### OAuth (Frontend + Core Routing)
 - `src/services/auth/oauth-flow.test.ts` — automated auth flow edge-case coverage
@@ -59,12 +59,18 @@
 | context/ | 2 | 4 | 50% | Missing: types |
 | custom-commands/ | 3 | 6 | 50% | Missing: loader, types |
 | llm/ | 1 | 2 | 50% | Client tested, not providers |
-| agent/ | 4 | 9 | 44% | Missing: loop, subagent, types |
-| context/strategies/ | 3 | 7 | 43% | Missing: hierarchical, sliding-window, summarize |
-| commander/parallel/ | 2 | 5 | 40% | Missing: activity, scheduler |
+| agent/ | 7 | 10 | 70% | metrics.ts NEW. Missing: subagent unit, types |
+| context/strategies/ | 4 | 7 | 57% | strategies.test.ts covers sliding-window, hierarchical, summarize |
+| commander/parallel/ | 4 | 5 | 80% | activity.ts + scheduler.ts tested |
 | policy/ | 2 | 5 | 40% | Missing: rules, types |
+| focus-chain/ | 1 | 4 | 25% | parser.ts tested (45 tests) |
+| diff/ | 2 | 4 | 50% | unified.ts (26 tests) + tracker.ts (33 tests) |
+| models/ | 1 | 3 | 33% | registry.ts tested (34 tests) |
+| question/ | 1 | 3 | 33% | manager.ts tested (22 tests) |
+| scheduler/ | 1 | 3 | 33% | scheduler.ts tested (22 tests) |
+| mcp/ | 1 | 6 | 17% | oauth.ts tested (27 tests) |
 | bus/ | 1 | 3 | 33% | message-bus tested |
-| tools/ | 10 | 35 | 29% | Utilities tested, individual tools not tested |
+| tools/ | 13 | 37 | 35% | Utilities + namespacing + task-parallel + sandbox tested |
 
 ### No Coverage (0%)
 
@@ -72,35 +78,32 @@
 |--------|-------|-----|
 | llm/providers/ | 14 | Integration test territory (real HTTP) |
 | auth/ | 8 | OAuth flows require real HTTP |
-| codebase/ | 11 | Requires real filesystem + tree-sitter |
+| codebase/ | 9 | Partially tested (ranking, graph). Indexer/symbols require filesystem |
 | validator/ | 9 | Requires real filesystem (lint, build, test) |
-| mcp/ | 6 | Requires MCP server connections |
-| hooks/ | 4 | Requires real tool execution |
+| hooks/ | 4 | executor.ts tested (16 tests). Remaining require real tool execution |
 | lsp/ | 4 | Requires language servers |
-| focus-chain/ | 4 | Pure functions, good candidate for testing |
 | git/ | 4 | Requires real git repository |
-| diff/ | 4 | Some pure functions testable |
 | skills/ | 4 | Requires filesystem |
 | slash-commands/ | 3 | Requires filesystem |
 | instructions/ | 3 | Requires filesystem |
-| models/ | 3 | Registry is testable |
-| question/ | 3 | Simple state management |
-| scheduler/ | 3 | Testable with mocks |
 | integrations/ | 2 | Requires HTTP (Exa API) |
-| agent/prompts/ | 7 | Template strings, testable but low priority |
+| agent/prompts/ | 6 | system.ts tested (40 tests), variant files low priority |
 
 ---
 
-## Tested Files (56 total)
+## Tested Files (76 total)
 
-### agent/ (5 test files)
+### agent/ (8 test files)
 - `evaluator.test.ts` — 35 tests (progress, goals, tool usage, metrics)
 - `events.test.ts` — 53 tests (emitter, buffer, filtering, stats)
 - `recovery.test.ts` — 107 tests (error classification, backoff, retry, manager)
 - `planner.test.ts` — 32 tests (error classification, constructor)
 - `modes/plan.test.ts` — 36 tests (state, restrictions, enter/exit tools)
+- `__tests__/agent-pipeline.integration.test.ts` — 10 tests (tool dispatch, MAX_TURNS, NO_COMPLETE_TASK, doom loop, abort, event ordering, filtered tools, worker execution, subagent spawning, recursion prevention)
+- `metrics.test.ts` — 15 tests (record events, turns, tokens, tool calls, errors, recoveries, duration, export, singleton)
+- `prompts/system.test.ts` — 40 tests (RULES/CAPABILITIES constants, buildSystemPrompt, buildWorkerPrompt, buildScenarioPrompt, getModelAdjustments)
 
-### tools/ (11 test files)
+### tools/ (14 test files)
 - `utils.test.ts` — 95 tests (binary detection, path resolution, glob, skip dirs)
 - `sanitize.test.ts` — 76 tests (model families, fence stripping, normalization)
 - `truncation.test.ts` — 22 tests (line/metadata truncation)
@@ -110,6 +113,9 @@
 - `define.test.ts` — 40 tests (tool factory, permissions, locations)
 - `todo.test.ts` — 19 tests (todo state management)
 - `edit-replacers.test.ts` — 65 tests (levenshtein, similarity, replacers)
+- `namespacing.test.ts` — 29 tests (namespace, strip, lookup, MCP/ext helpers)
+- `task-parallel.test.ts` — 37 tests (concurrency constants, tasks validation, maxConcurrent, schema, dispatch)
+- `sandbox/sandbox.test.ts` — 25 tests (config defaults, Docker args, NoopSandbox, factory, edge cases)
 - `edit/normalize.test.ts` — existing tests
 
 ### llm/ (1 test file)
@@ -124,18 +130,28 @@
 - `manager.test.ts`, `episodic.test.ts`, `semantic.test.ts`
 - `procedural.test.ts`, `consolidation.test.ts`
 
-### config/ (2 test files)
+### config/ (5 test files)
 - `manager.test.ts`, `schema.test.ts`
+- `credentials.test.ts` — 20 tests (key operations, provider listing, validation, singleton)
+- `migration.test.ts` — 24 tests (migrateSettings, mergeWithDefaults, findEnvApiKeys, needsMigration, getChangedFields)
+- `export.test.ts` — 20 tests (exportSettingsToJson, importSettingsFromJson, mergeSettings, diffSettings, getDefaultSettingsJson)
 
-### context/ (5 test files)
+### context/ (6 test files)
 - `compactor.test.ts`, `tracker.test.ts`
 - `strategies/split-point.test.ts`, `strategies/tool-truncation.test.ts`, `strategies/verified-summarize.test.ts`
+- `strategies/strategies.test.ts` — 27 tests (slidingWindow, createSlidingWindow, buildSummaryTree, selectLevel, createSummarize, getSummarizationPrompt, extractSummary)
 
 ### session/ (4 test files)
 - `manager.test.ts`, `file-storage.test.ts`, `resume.test.ts`, `doom-loop.test.ts`
 
-### permissions/ (2 test files)
+### permissions/ (8 test files)
 - `command-validator.test.ts`, `trusted-folders.test.ts`
+- `rules.test.ts` — 28 tests (BUILTIN_RULES, assessCommandRisk, assessPathRisk, getHighestPathRisk)
+- `quote-parser.test.ts` — 48 tests (createQuoteState, processChar, isInsideQuotes, isInSafeContext, detectDangerousCharacters, parseCommandSegments, detectRedirects, extractSubshells)
+- `security-inspector.test.ts` — 25 tests (threat categories, pattern matching, custom patterns, block threshold)
+- `repetition-inspector.test.ts` — 14 tests (threshold, windowing, params hashing, config)
+- `inspector-pipeline.test.ts` — 19 tests (pipeline flow, blocking, adapters, audit, factory)
+- `audit.test.ts` — 15 tests (record, query filters, export, clear, maxEntries, singleton)
 
 ### policy/ (2 test files)
 - `engine.test.ts`, `matcher.test.ts`
@@ -145,6 +161,30 @@
 
 ### extensions/ (3 test files)
 - `manager.test.ts`, `manifest.test.ts`, `storage.test.ts`
+
+### focus-chain/ (1 test file)
+- `parser.test.ts` — 45 tests (parse, serialize, update, add, remove, progress, next task)
+
+### diff/ (2 test files)
+- `unified.test.ts` — 26 tests (createDiff, parseDiffHunks, getDiffStats, hasChanges, extractPaths, formatDiffLines)
+- `tracker.test.ts` — 33 tests (add, apply, reject, queries, bulk ops, events, singleton)
+
+### models/ (1 test file)
+- `registry.test.ts` — 34 tests (lookup, query, pricing, validation, suggestions)
+
+### question/ (1 test file)
+- `manager.test.ts` — 22 tests (ask/answer, cancel, timeout, queries, events, factory)
+
+### scheduler/ (1 test file)
+- `scheduler.test.ts` — 22 tests (register, start/stop, runNow, concurrency, callbacks, factory)
+
+### codebase/ (2 test files)
+- `ranking.test.ts` — 25 tests (calculatePageRank, calculateRelevanceScore, extractKeywords, sortByRank, sortByScore)
+- `graph.test.ts` — 24 tests (getEdges, findRoots, findLeaves, findCircularDependencies, getDependencyDepth, getTransitiveDependencies, getTransitiveDependents, getGraphStats)
+
+### commander/parallel/ (2 test files added)
+- `activity.test.ts` — 17 tests (ActivityMultiplexer, createTaggedCallback, createFilteredCallback, createAggregator)
+- `scheduler.test.ts` — 13 tests (TaskScheduler, createLinearChain, createFanOut, createFanIn)
 
 ### bus/ (1 test file)
 - `message-bus.test.ts`
@@ -159,19 +199,16 @@
 
 ## What's Testable But Not Tested (Priority Candidates)
 
-These modules have pure functions that could be unit tested:
+> **DONE (Sprint B2)** — All 6 medium-priority modules covered. See below.
 
-| Module | Testable Files | Effort |
+| Module | Testable Files | Status |
 |--------|---------------|--------|
-| focus-chain/ | parser.ts, manager.ts | Low |
-| diff/ | unified.ts, tracker.ts | Low |
-| models/ | registry.ts | Low |
-| question/ | manager.ts | Low |
-| scheduler/ | scheduler.ts | Low |
-| agent/prompts/ | system.ts, variants/* | Medium |
-| codebase/ | ranking.ts, graph.ts | Medium |
-| permissions/ | rules.ts, auto-approve.ts, quote-parser.ts | Medium |
-| config/ | credentials.ts, migration.ts, export.ts | Medium |
+| ~~agent/prompts/~~ | ~~system.ts, variants/*~~ | **DONE** (system.ts tested, 40 tests) |
+| ~~codebase/~~ | ~~ranking.ts, graph.ts~~ | **DONE** (49 tests) |
+| ~~permissions/~~ | ~~rules.ts, auto-approve.ts, quote-parser.ts~~ | **DONE** (76 tests + existing auto-approve) |
+| ~~config/~~ | ~~credentials.ts, migration.ts, export.ts~~ | **DONE** (64 tests) |
+| ~~context/strategies/~~ | ~~hierarchical.ts, sliding-window.ts, summarize.ts~~ | **DONE** (27 tests) |
+| ~~commander/parallel/~~ | ~~activity.ts, scheduler.ts~~ | **DONE** (30 tests) |
 
 ---
 

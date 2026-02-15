@@ -10,6 +10,16 @@ import type { ChatMessage } from '../types/llm.js'
 // ============================================================================
 
 /**
+ * Message visibility level
+ *
+ * Controls where a message appears:
+ * - `all` — shown in UI + sent to LLM (default)
+ * - `user_visible` — shown in UI only (not sent to LLM)
+ * - `agent_visible` — sent to LLM but hidden from UI (e.g. compacted messages)
+ */
+export type MessageVisibility = 'all' | 'user_visible' | 'agent_visible'
+
+/**
  * Extended message with metadata for context tracking
  * Extends ChatMessage with session and timing information
  */
@@ -22,6 +32,8 @@ export interface Message extends ChatMessage {
   createdAt: number
   /** Optional: Token count (cached for performance) */
   tokenCount?: number
+  /** Visibility level (default: 'all') */
+  visibility?: MessageVisibility
 }
 
 // ============================================================================

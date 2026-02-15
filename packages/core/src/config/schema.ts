@@ -123,6 +123,19 @@ export const GitConfigSchema = z.object({
 })
 
 // ============================================================================
+// Sandbox Schema
+// ============================================================================
+
+export const SandboxSettingsSchema = z.object({
+  mode: z.enum(['none', 'docker']).default('none'),
+  image: z.string().min(1).default('node:20-slim'),
+  timeoutSeconds: z.number().int().min(10).max(600).default(120),
+  networkAccess: z.boolean().default(false),
+  memoryLimit: z.string().min(1).default('512m'),
+  cpuLimit: z.string().min(1).default('1'),
+})
+
+// ============================================================================
 // Combined Schema
 // ============================================================================
 
@@ -134,6 +147,7 @@ export const SettingsSchema = z.object({
   memory: MemorySettingsSchema,
   ui: UISettingsSchema,
   git: GitConfigSchema,
+  sandbox: SandboxSettingsSchema,
 })
 
 // ============================================================================
@@ -147,6 +161,7 @@ export const PartialContextSettingsSchema = ContextSettingsSchema.partial()
 export const PartialMemorySettingsSchema = MemorySettingsSchema.partial()
 export const PartialUISettingsSchema = UISettingsSchema.partial()
 export const PartialGitConfigSchema = GitConfigSchema.partial()
+export const PartialSandboxSettingsSchema = SandboxSettingsSchema.partial()
 
 // ============================================================================
 // Export Schema

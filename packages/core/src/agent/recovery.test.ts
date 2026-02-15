@@ -762,8 +762,9 @@ describe('RecoveryManager', () => {
       const plan = makeRecoveryPlan({ strategy: 'rollback', failedStep })
 
       const result = await manager.executeRecovery(plan)
-      expect(result.success).toBe(true)
+      expect(result.success).toBe(false)
       expect(result.action).toBe('rolled_back')
+      expect(result.error).toContain('not yet implemented')
       expect(manager.getState().rolledBackSteps).toContain(failedStep)
     })
 

@@ -101,6 +101,20 @@ export const PluginsTab: Component = () => {
                   <div class="flex items-center gap-1.5 mb-0.5">
                     <Puzzle class="w-3 h-3 text-[var(--accent)]" />
                     <span class="text-[11px] text-[var(--text-primary)]">{plugin.name}</span>
+                    <span class="text-[9px] text-[var(--text-muted)]">v{plugin.version}</span>
+                  </div>
+                  <div class="mb-0.5 flex items-center gap-1 text-[9px] text-[var(--text-muted)]">
+                    <span class="uppercase">{plugin.source}</span>
+                    <span>•</span>
+                    <span
+                      class={
+                        plugin.trust === 'verified'
+                          ? 'text-[var(--success)]'
+                          : 'text-[var(--accent)]'
+                      }
+                    >
+                      {plugin.trust}
+                    </span>
                   </div>
                   <p class="text-[10px] text-[var(--text-muted)] line-clamp-2">
                     {plugin.description}
@@ -140,6 +154,21 @@ export const PluginsTab: Component = () => {
                       <Puzzle class="w-3.5 h-3.5 flex-shrink-0 text-[var(--text-muted)]" />
                       <div class="flex-1 min-w-0">
                         <p class="text-xs text-[var(--text-primary)]">{plugin.name}</p>
+                        <div class="flex items-center gap-1 text-[9px] text-[var(--text-muted)]">
+                          <span>v{plugin.version}</span>
+                          <span>•</span>
+                          <span class="uppercase">{plugin.source}</span>
+                          <span>•</span>
+                          <span
+                            class={
+                              plugin.trust === 'verified'
+                                ? 'text-[var(--success)]'
+                                : 'text-[var(--accent)]'
+                            }
+                          >
+                            {plugin.trust}
+                          </span>
+                        </div>
                         <p class="text-[10px] text-[var(--text-muted)]">{plugin.description}</p>
                       </div>
                     </button>

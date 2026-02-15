@@ -100,6 +100,19 @@ describe('plugins store', () => {
     })
   })
 
+  it('exposes metadata for featured plugins', () => {
+    createRoot((dispose) => {
+      const plugins = usePlugins()
+      const featured = plugins.featuredPlugins()
+      expect(featured.length).toBeGreaterThan(0)
+      expect(featured[0]?.version).toBeTruthy()
+      expect(featured[0]?.trust).toBeTruthy()
+      expect(featured[0]?.source).toBeTruthy()
+
+      dispose()
+    })
+  })
+
   it('captures an error when enabling a non-installed plugin', async () => {
     await new Promise<void>((resolve) => {
       createRoot((dispose) => {

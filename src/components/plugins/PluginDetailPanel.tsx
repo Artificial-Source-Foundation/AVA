@@ -24,6 +24,20 @@ export const PluginDetailPanel: Component<PluginDetailPanelProps> = (props) => {
               </span>
             </div>
             <p class="text-[11px] text-[var(--text-secondary)]">{plugin().description}</p>
+            <div class="flex items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
+              <span class="px-1.5 py-0.5 rounded-[var(--radius-sm)] border border-[var(--border-subtle)]">
+                v{plugin().version}
+              </span>
+              <span class="px-1.5 py-0.5 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] uppercase">
+                {plugin().source}
+              </span>
+              <span
+                class={`px-1.5 py-0.5 rounded-[var(--radius-sm)] border uppercase ${plugin().trust === 'verified' ? 'text-[var(--success)] border-[var(--success)]' : 'text-[var(--accent)] border-[var(--accent)]'}`}
+              >
+                {plugin().trust}
+              </span>
+            </div>
+            <p class="text-[10px] text-[var(--text-muted)]">{plugin().changelogSummary}</p>
             <p class="text-[10px] text-[var(--text-muted)]">
               Status:{' '}
               <span class="text-[var(--text-secondary)]">

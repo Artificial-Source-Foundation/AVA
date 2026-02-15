@@ -5,6 +5,10 @@ export interface PluginCatalogItem {
   name: string
   description: string
   category: PluginCategory
+  version: string
+  source: 'official' | 'community'
+  trust: 'verified' | 'reviewed'
+  changelogSummary: string
 }
 
 export interface PluginState {

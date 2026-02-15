@@ -8,6 +8,10 @@ const samplePlugin: PluginCatalogItem = {
   name: 'Task Planner',
   description: 'Breaks goals into actionable implementation steps.',
   category: 'workflow',
+  version: '1.4.0',
+  source: 'official',
+  trust: 'verified',
+  changelogSummary: 'Added milestone templates and dependency hints.',
 }
 
 const enabledState: PluginState = {
@@ -40,6 +44,9 @@ describe('PluginDetailPanel', () => {
 
     expect(container.textContent).toContain('Task Planner')
     expect(container.textContent).toContain('workflow')
+    expect(container.textContent).toContain('v1.4.0')
+    expect(container.textContent).toContain('official')
+    expect(container.textContent).toContain('verified')
     expect(container.textContent).toContain('Installed + enabled')
 
     dispose()

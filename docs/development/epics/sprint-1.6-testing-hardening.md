@@ -28,6 +28,7 @@ Ship a high-confidence MVP baseline by hardening auth flow reliability, chat str
 - MVP verification command pipeline added and passing:
   - `scripts/verify-mvp.sh`
   - `npm run verify:mvp`
+- Chat streaming micro-jitter stabilization completed for stream start/end transitions.
 
 ## In Progress
 
@@ -37,8 +38,8 @@ Ship a high-confidence MVP baseline by hardening auth flow reliability, chat str
 ## Next
 
 1. Complete provider-by-provider manual OAuth runtime matrix.
-2. Finalize residual stream micro-jitter polish in desktop runtime.
-3. Close Sprint 1.6 with an evidence refresh in matrix/readiness docs.
+2. Close Sprint 1.6 with an evidence refresh in matrix/readiness docs.
+3. Publish Sprint 1.6 closeout in `docs/development/sprints/2026-S1.6-testing-hardening-closeout.md`.
 
 ## Dependencies
 

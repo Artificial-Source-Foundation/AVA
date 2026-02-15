@@ -93,6 +93,11 @@ See [Frontend Backlog](frontend/backlog.md) for what's next.
 Hardening sprint focused on tests, logging, and parity with PI Coding Agent.
 This sprint is partially implemented and now tracked as active.
 
+Active execution docs:
+- [Current Focus](development/status/current-focus.md)
+- [Sprint 1.6 Execution](development/sprints/2026-S1.6-testing-hardening-closeout.md)
+- [Sprint DX-1 Docs Hardening](development/sprints/2026-DX-1-docs-architecture-hardening.md)
+
 ### Sprint 1.6.1: OAuth Test Suite
 - Unit tests for JWT decode + accountId extraction
 - Integration tests for credential routing + storage
@@ -121,15 +126,17 @@ This sprint is partially implemented and now tracked as active.
 - Current status: verification pipeline is green in the latest readiness run (`verify:mvp` passed, full suite `1801 tests / 70 files`).
 
 ### Next Build Steps (Immediate)
-- [ ] Finish chat streaming polish (eliminate remaining send/start/end micro-jitter)
+- [x] Implement automatic session titles from first user message for new chats
+- [x] Finish chat streaming polish (stream-end/start micro-jitter stabilized)
 - [ ] Complete manual Tauri OAuth validation (connect/disconnect + send flow per provider)
-- [ ] Start Sprint 2.3 frontend plugin UX implementation from `docs/plans/2026-02-13-frontend-plugin-ux-sprint-2-3.md`
+- [ ] Complete Sprint 2.3 frontend-backend lifecycle wiring from [execution sprint doc](development/sprints/2026-S2.3-plugin-ux-wiring.md)
+- [ ] Continue DX-1 docs architecture hardening from [execution sprint doc](development/sprints/2026-DX-1-docs-architecture-hardening.md)
 
 ---
 
 ## Phase 2: Plugin Ecosystem (IN PROGRESS — THE DIFFERENTIATOR)
 
-This is what makes Estela "The Obsidian of AI Coding". Easy to create, discover, install.
+This is what makes AVA "The Obsidian of AI Coding". Easy to create, discover, install.
 
 ### Sprint 2.1: Plugin Format & SDK (Backend foundation mostly done)
 - [x] Define plugin manifest + parsing/validation (`packages/core/src/extensions/manifest.ts`)
@@ -141,18 +148,20 @@ This is what makes Estela "The Obsidian of AI Coding". Easy to create, discover,
 **Key files:** `packages/core/src/extensions/`, `packages/core/src/hooks/`, `packages/core/src/commands/toml.ts`
 
 ### Sprint 2.2: Plugin Development Experience
-- [ ] `estela plugin init` scaffold command
+- [ ] `ava plugin init` scaffold command
 - [ ] Hot reload during plugin development
 - [ ] Plugin testing utilities
 - [ ] Plugin documentation template
 
 ### Sprint 2.3: Built-in Marketplace UI
-- [ ] Plugin browser in sidebar/settings plugin surface (replace removed sidebar placeholder)
-- [ ] Search, categories, featured plugins
-- [ ] Install/uninstall with one click
-- [ ] Plugin settings page per plugin
+- [x] Settings-only plugin manager surface (replace inline placeholder)
+- [x] Search + category-aware filtering in settings manager
+- [x] Install/uninstall + enable/disable controls (settings manager MVP)
+- [x] Plugin detail/settings panel in settings manager
+- [ ] Featured plugin catalog (curation + remote source)
+- [ ] Backend extension lifecycle wiring in frontend manager (replace local mock state; tracked in [Integration Backlog](development/backlogs/integration-backlog.md#active))
 
-**Key files:** `src/components/settings/SettingsModal.tsx`, `src/components/sidebar/`
+**Key files:** `src/components/settings/SettingsModal.tsx`, `src/components/settings/tabs/PluginsTab.tsx`
 
 ### Sprint 2.4: Plugin Distribution
 - [ ] Publish plugins from GitHub repos

@@ -1,4 +1,4 @@
-# Estela Documentation
+# AVA Documentation
 
 > The Obsidian of AI Coding
 
@@ -8,7 +8,7 @@
 
 | Doc | What You'll Learn |
 |-----|-------------------|
-| [**Vision**](VISION.md) | What Estela is, who it's for, what makes it special |
+| [**Vision**](VISION.md) | What AVA is, who it's for, what makes it special |
 | [**Roadmap**](ROADMAP.md) | What's built, what's next |
 
 ---
@@ -55,6 +55,9 @@
 | [**Active Epics**](development/epics/) | Work in progress |
 | [Sprint 1.6 Testing & Hardening](development/epics/sprint-1.6-testing-hardening.md) | Current sprint status, evidence, remaining gates |
 | [Plugin Ecosystem UX & Integration](development/epics/plugin-ecosystem-ux-integration.md) | Current plugin track, dependencies, exit criteria |
+| [**Current Focus**](development/status/current-focus.md) | Weekly active sprint pulse + blockers |
+| [**Integration Backlog**](development/backlogs/integration-backlog.md) | Frontend-backend wiring tasks and dependencies |
+| [**Sprint Execution Docs**](development/sprints/README.md) | Active sprint templates, ticket boards, closeout checklists |
 | [**Completed Epics**](development/completed/) | Finished work (Epics 1-26) |
 
 ---

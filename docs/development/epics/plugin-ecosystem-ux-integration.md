@@ -24,13 +24,16 @@ Deliver the first usable plugin management experience in the desktop app by conn
 
 - Frontend plugin management flow refinement in settings surface
 - Prioritization of plugin UX sprint execution sequencing
+- Integration execution tracking in `docs/development/backlogs/integration-backlog.md`
 
 ## Next
 
-1. Wire real backend lifecycle actions to install/enable/disable/uninstall controls.
-2. Add featured/search/catalog UX polish and metadata surfaces.
-3. Define SDK packaging/docs pass for external plugin creators.
-4. Document sandbox policy hardening requirements before broader distribution.
+1. Complete `INT-001` lifecycle wiring from settings manager controls to backend extension manager.
+2. Complete `INT-002` state synchronization and optimistic UI handling for plugin lifecycle actions.
+3. Complete `INT-003` error surfacing and recovery UX for lifecycle failures.
+4. Add featured/search/catalog UX polish and metadata surfaces.
+5. Define SDK packaging/docs pass for external plugin creators.
+6. Document sandbox policy hardening requirements before broader distribution.
 
 ## Dependencies
 
@@ -48,4 +51,6 @@ Deliver the first usable plugin management experience in the desktop app by conn
 
 - `docs/ROADMAP.md`
 - `docs/frontend/backlog.md`
+- `docs/development/backlogs/integration-backlog.md`
+- `docs/development/sprints/2026-S2.3-plugin-ux-wiring.md`
 - `docs/development/mvp-readiness-report-2026-02-13.md`

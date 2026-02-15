@@ -1,6 +1,6 @@
 # Frontend Backlog
 
-> What's missing, prioritized. Updated 2026-02-13.
+> What's missing, prioritized. Updated 2026-02-14.
 
 ---
 
@@ -12,6 +12,12 @@
 | **1.5: Desktop Polish** | **Complete** | Manual testing only |
 | **2: Plugin Ecosystem** | In progress | Backend foundations shipped; frontend UX pending |
 | **2+: Competitive Gaps** | Mostly complete | Focus moved to verification + plugin UX |
+
+## Ownership Rules
+
+- Source of truth here: frontend-only scope and UI deliverables.
+- Cross-cutting frontend-backend work is tracked in `docs/development/backlogs/integration-backlog.md`.
+- Roadmap and sprint docs should reference this backlog instead of duplicating frontend status details.
 
 ---
 
@@ -48,15 +54,15 @@ These gaps were prioritized previously and are now mostly delivered based on cha
 - [ ] Expand manual Tauri validation on Linux DE variants and light mode polish
 
 ### Next execution queue
-- [ ] Implement session auto-title UX validation and polish
+- [x] Implement session auto-title UX validation and polish
 - [ ] Final manual QA pass for chat stream UX across long sessions
-- [ ] Begin Sprint 2.3 plugin UX implementation from plan doc
+- [ ] Complete Sprint 2.3 plugin UX implementation from `docs/development/sprints/2026-S2.3-plugin-ux-wiring.md`
 
 ---
 
 ## Phase 2 — Plugin Ecosystem (THE DIFFERENTIATOR)
 
-This is what makes Estela "The Obsidian of AI Coding".
+This is what makes AVA "The Obsidian of AI Coding".
 
 ### Sprint 2.1: Plugin Format & SDK
 - [ ] Define unified plugin manifest (skills + commands + hooks + MCP in one package)
@@ -66,18 +72,20 @@ This is what makes Estela "The Obsidian of AI Coding".
 **Frontend**: None yet (backend-first)
 
 ### Sprint 2.2: Plugin Development Experience
-- [ ] `estela plugin init` scaffold command
+- [ ] `ava plugin init` scaffold command
 - [ ] Hot reload during plugin development
 - [ ] Plugin testing utilities
 - [ ] Plugin documentation template
 **Frontend**: Plugin dev panel showing reload status, logs
 
 ### Sprint 2.3: Built-in Marketplace UI
-- [ ] Plugin browser in sidebar (replace SidebarPlugins placeholder — currently deleted)
-- [ ] Search, categories, featured plugins
-- [ ] Install/uninstall with one click
-- [ ] Plugin settings page per plugin
-**Frontend**: Major work — new sidebar view, plugin cards, search, install flow
+- [x] Settings-only plugin manager surface (replace Plugins placeholder)
+- [x] Search + category-aware filtering in settings manager
+- [x] Install/uninstall + enable/disable controls in settings manager
+- [x] Plugin detail/settings panel in settings manager
+- [ ] Featured plugin catalog (curation + remote source)
+- [ ] Wire settings manager actions to real backend extension lifecycle APIs (tracked as `INT-001`/`INT-002`/`INT-003` in `docs/development/backlogs/integration-backlog.md`)
+**Frontend**: Settings tab plugin manager, search, install flow, detail/settings view
 
 ### Sprint 2.4: Plugin Distribution
 - [ ] Publish plugins from GitHub repos
@@ -135,7 +143,7 @@ These were identified as gaps but are now fully implemented:
 
 ---
 
-## Unique Advantages (Estela vs Everyone)
+## Unique Advantages (AVA vs Everyone)
 
 Features no other AI coding tool has:
 

@@ -2,6 +2,12 @@
 
 > Gaps, missing features, and future work for `packages/core/`.
 
+## Ownership Rules
+
+- Source of truth here: backend/core implementation backlog only.
+- Frontend-only implementation items belong in `docs/frontend/backlog.md`.
+- Cross-cutting frontend-backend lifecycle wiring is tracked in `docs/development/backlogs/integration-backlog.md`.
+
 ---
 
 ## Test Coverage Gaps (Priority Order)
@@ -12,6 +18,7 @@
 - Complete manual OAuth desktop matrix (OpenAI, Anthropic, Copilot: connect/disconnect/send flow)
 - Finish debug logging coverage across chat/agent/core/session/settings/file-watcher/ChatView
 - Align sprint evidence docs whenever full-suite totals change
+- Support plugin lifecycle wiring contracts consumed by frontend settings manager (`INT-001`, `INT-002`, `INT-003`)
 
 ### P1
 - PI Coding Agent parity items (provider switching, session branching tree, minimal tool mode, runtime skill creation)

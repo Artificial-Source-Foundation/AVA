@@ -72,6 +72,19 @@
 
 ---
 
+## 2026-02-15
+
+### Documentation Audit — Comprehensive Backend Docs Update
+- **Architecture guide** — NEW `docs/backend/architecture-guide.md` (~827 lines). Deep navigation guide covering: 18 singletons, request lifecycle, agent system internals, tools system, intelligence modules, safety & permissions (3-layer model), configuration, extensibility, infrastructure, protocols, 7 key patterns, 6 common task recipes.
+- **Full codebase exploration** — 6 parallel agents mapped every module in `packages/core/src/`. Results: **257 source files, ~59,700 lines** across 32 directories.
+- **modules.md rewrite** — All file counts and line counts updated from actual `wc -l` measurements. Key corrections: agent/ 19 files/5,264 lines (was 12/4,197), tools/ 43 files/12,123 lines (was 37/10,990), llm/ 20 files/2,956 lines (was 16/3,222), permissions/ 13 files/3,924 lines (was 9/3,130), git/ 5 files/969 lines (was 4/799). Added missing files: `tools/sandbox/*`, `tools/namespacing.ts`, `tools/task-parallel.ts`, `permissions/security-inspector.ts`, `permissions/repetition-inspector.ts`, `permissions/inspector-pipeline.ts`, `permissions/audit.ts`, `context/strategies/visibility.ts`, `git/auto-commit.ts`, `llm/utils/*`, `agent/metrics.ts`.
+- **README.md updated** — Header stats corrected, module map updated with accurate file/line counts for all 32 directories.
+- **gap-analysis.md** — Phase 3+ roadmap items marked DONE: sandbox, parallel subagents, batch parallel, security inspector, visibility metadata, auto-compaction.
+- **backlog.md** — Fixed stale file counts (tools/ 43, git/ 5, llm/ includes utils/), marked hook executor tests as DONE.
+- **test-coverage.md** — Added source file/line totals, fixed module file counts.
+
+---
+
 ## 2026-02-14
 
 ### Sprint B6 — Container/Sandbox Execution
@@ -280,4 +293,4 @@
 
 ---
 
-*Last updated: 2026-02-14*
+*Last updated: 2026-02-15*

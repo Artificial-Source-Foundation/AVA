@@ -40,14 +40,14 @@
 
 | Module | Files to Test | Reason |
 |--------|--------------|--------|
-| llm/providers/ (14 files) | All providers | Requires HTTP mocking per provider |
+| llm/providers/ (14 files) + utils/ (4 files) | All providers + utils | Requires HTTP mocking per provider |
 | auth/ (8 files) | OAuth flows | Requires HTTP + browser mocking |
 | validator/ (9 files) | QA pipeline | Requires filesystem + build tools |
 | mcp/ (6 files) | MCP client | Requires MCP server |
 | hooks/ (4 files) | Lifecycle hooks | Requires tool execution context |
-| git/ (4 files) | Git operations | Requires real git repo |
+| git/ (5 files) | Git operations | Requires real git repo |
 | lsp/ (4 files) | LSP integration | Requires language servers |
-| tools/ individual (25 files) | Each tool | Requires filesystem + network |
+| tools/ individual (~25 files) | Each tool | Requires filesystem + network |
 
 ---
 
@@ -85,7 +85,7 @@
 - [x] **Config credential tests** — ~~Credential storage untested~~ **DONE** (20 tests)
 - [x] **Config migration tests** — ~~Version migration untested~~ **DONE** (24 tests)
 - [ ] **MCP client tests** — MCP protocol client untested
-- [ ] **Hook executor tests** — Hook execution untested
+- [x] **Hook executor tests** — ~~Hook execution untested~~ **DONE** (executor.ts tested, 16 tests)
 - [ ] **SQLite session storage** — Sessions are file-based JSON; Goose uses SQLite for durability + querying
 - [x] **Visibility metadata** — ~~Compacted messages are fully removed~~ **DONE** (Sprint B3: `MessageVisibility` type, visibility-aware compaction)
 - [x] **Auto-compaction threshold** — ~~Fixed strategy~~ **DONE** (Sprint B3: configurable threshold, tested)
@@ -103,7 +103,7 @@
 - [ ] **Large barrel export** — `index.ts` exports 33 modules via `export *`, making tree-shaking harder
 
 ### Opportunities
-- [ ] **Split tools/ into subcategories** — 37 files in one directory is large; could split into file-tools/, search-tools/, web-tools/
+- [ ] **Split tools/ into subcategories** — 43 files in one directory is large; could split into file-tools/, search-tools/, web-tools/
 - [ ] **Extract tool utilities** — `utils.ts`, `sanitize.ts`, `truncation.ts`, `locks.ts` could be a separate `tool-utils/` module
 - [ ] **Standardize provider interface** — All 14 LLM providers implement `stream()` differently; could add a test harness
 - [ ] **Memory consolidation scheduling** — `ConsolidationEngine` exists but isn't wired to run automatically
@@ -123,4 +123,4 @@ This backlog feeds into the project roadmap:
 
 ---
 
-*Last updated: 2026-02-14*
+*Last updated: 2026-02-15*

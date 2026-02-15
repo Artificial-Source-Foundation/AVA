@@ -1,6 +1,6 @@
 # Backend — @ava/core
 
-> The brain of AVA. 234 files, ~56,500 lines, latest verified baseline: 1801 tests across 70 files.
+> The brain of AVA. 257 source files, ~59,700 lines. Test baseline: 2687 tests across 109 files (~43% coverage).
 
 **Package:** `packages/core/` | **Entry:** `packages/core/src/index.ts` | **Exports:** 33 modules
 
@@ -21,28 +21,28 @@ User (Desktop/CLI)
 
 ---
 
-## Module Map (31 directories)
+## Module Map (32 directories)
 
 ### Agent System (core loop)
 
 | Module | Files | Lines | Purpose |
 |--------|-------|-------|---------|
-| `agent/` | 12 | 4,197 | Autonomous loop, planning, recovery, subagents, modes |
-| `commander/` | 12 | 2,744 | Team Lead → Senior Leads → Junior Devs delegation |
-| `validator/` | 9 | 2,253 | QA pipeline (syntax, lint, build, test, self-review) |
+| `agent/` | 19 | 5,264 | Autonomous loop, planning, recovery, subagents, modes, metrics |
+| `commander/` | 12 | 2,752 | Team Lead → Senior Leads → Junior Devs delegation |
+| `validator/` | 9 | 2,256 | QA pipeline (syntax, lint, build, test, self-review) |
 
 ### Tools (22 registered tools)
 
 | Module | Files | Lines | Purpose |
 |--------|-------|-------|---------|
-| `tools/` | 37 | 10,990 | read, write, edit, bash, glob, grep, browser, websearch, etc. |
+| `tools/` | 43 | 12,123 | read, write, edit, bash, glob, grep, browser, websearch, sandbox, etc. |
 
 ### Intelligence
 
 | Module | Files | Lines | Purpose |
 |--------|-------|-------|---------|
 | `codebase/` | 11 | 3,431 | Repo map, symbols, imports, PageRank, tree-sitter |
-| `context/` | 11 | 2,077 | Token tracking, compaction (summarize, sliding-window, hierarchical) |
+| `context/` | 12 | 2,206 | Token tracking, compaction, visibility metadata, auto-compaction |
 | `memory/` | 9 | 2,747 | Episodic, semantic, procedural memory, embedding, RAG |
 | `lsp/` | 4 | 1,219 | Language Server Protocol (5 languages) |
 
@@ -52,8 +52,8 @@ User (Desktop/CLI)
 |--------|-------|-------|---------|
 | `extensions/` | 5 | 947 | Plugin system (manifest, storage, manager) |
 | `custom-commands/` | 6 | 993 | TOML-based user commands (discovery, parsing, templating) |
-| `hooks/` | 4 | 1,135 | Lifecycle hooks (PreToolUse, PostToolUse, etc.) |
-| `mcp/` | 6 | 1,470 | Model Context Protocol client (OAuth, bridge, discovery) |
+| `hooks/` | 4 | 1,147 | Lifecycle hooks (PreToolUse, PostToolUse, etc.) |
+| `mcp/` | 6 | 1,495 | Model Context Protocol client (OAuth, bridge, discovery) |
 | `skills/` | 4 | 629 | Auto-invoked knowledge modules |
 | `slash-commands/` | 4 | 854 | User-invocable `/commands` |
 
@@ -61,15 +61,15 @@ User (Desktop/CLI)
 
 | Module | Files | Lines | Purpose |
 |--------|-------|-------|---------|
-| `permissions/` | 9 | 3,130 | Risk assessment, auto-approval, rules engine, trusted folders |
+| `permissions/` | 13 | 3,924 | Risk assessment, auto-approval, security inspector pipeline, audit trail |
 | `policy/` | 5 | 1,071 | Policy engine (tool approval rules, wildcards, regex) |
 
 ### Infrastructure
 
 | Module | Files | Lines | Purpose |
 |--------|-------|-------|---------|
-| `llm/` | 16 | 3,222 | LLM client factory + 14 provider implementations |
-| `config/` | 9 | 2,082 | Settings, credentials, schema, storage, migration |
+| `llm/` | 20 | 2,956 | LLM client factory + 14 providers + utils (retry, SSE, OpenAI-compat) |
+| `config/` | 9 | 2,172 | Settings, credentials, schema, storage, migration, sandbox settings |
 | `session/` | 6 | 2,024 | Session management, resume, forking, doom-loop detection |
 | `auth/` | 8 | 1,107 | OAuth + PKCE (Anthropic, Copilot, Google, OpenAI) |
 | `bus/` | 3 | 524 | Message bus (pub/sub event system) |
@@ -90,7 +90,7 @@ User (Desktop/CLI)
 |--------|-------|-------|---------|
 | `diff/` | 4 | 657 | Diff tracking, unified format |
 | `focus-chain/` | 4 | 825 | Task progress tracking |
-| `git/` | 4 | 799 | Git snapshots, version control utilities |
+| `git/` | 5 | 969 | Git snapshots, auto-commit, version control utilities |
 | `instructions/` | 3 | 321 | Project/directory instructions loader |
 | `integrations/` | 2 | 351 | External integrations (Exa web search) |
 | `types/` | 2 | 151 | Shared type definitions |
@@ -100,7 +100,7 @@ User (Desktop/CLI)
 | File | Lines | Purpose |
 |------|-------|---------|
 | `index.ts` | 144 | Main barrel export (all 33 modules) |
-| `platform.ts` | 223 | Platform abstraction (Node.js, Tauri, browser) |
+| `platform.ts` | 226 | Platform abstraction (Node.js, Tauri, browser) |
 
 ---
 
@@ -187,6 +187,7 @@ All in `tools/` and auto-registered in `tools/index.ts`:
 
 | File | What |
 |------|------|
+| [architecture-guide.md](./architecture-guide.md) | **Deep navigation guide** — where things are, why, how they work, data flows, patterns |
 | [modules.md](./modules.md) | Detailed per-module file listing with descriptions |
 | [test-coverage.md](./test-coverage.md) | Test coverage report — tested vs untested files |
 | [backlog.md](./backlog.md) | What's missing, gaps, and future work |
@@ -195,4 +196,4 @@ All in `tools/` and auto-registered in `tools/index.ts`:
 
 ---
 
-*Last updated: 2026-02-14 — latest verified baseline 1801 tests across 70 files; manual OAuth runtime matrix still in progress*
+*Last updated: 2026-02-15 — 2687 tests across 109 files (~43% coverage)*

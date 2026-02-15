@@ -13,6 +13,8 @@
 | Total tests | 2687 |
 | Test files | 109 |
 | Source files (excluding barrels/types) | ~200 |
+| Source files (total) | 257 |
+| Source lines | ~59,700 |
 | Files with tests | 85 |
 | Files without tests | 115 |
 | File coverage | ~43% |
@@ -58,8 +60,8 @@
 | memory/ | 5 | 10 | 50% | Missing: embedding, store |
 | context/ | 2 | 4 | 50% | Missing: types |
 | custom-commands/ | 3 | 6 | 50% | Missing: loader, types |
-| llm/ | 1 | 2 | 50% | Client tested, not providers |
-| agent/ | 7 | 10 | 70% | metrics.ts NEW. Missing: subagent unit, types |
+| llm/ | 1 | 2 | 50% | Client tested, not providers (14) or utils (4) |
+| agent/ | 7 | 10 | 70% | metrics.ts tested. Missing: subagent unit, types |
 | context/strategies/ | 4 | 7 | 57% | strategies.test.ts covers sliding-window, hierarchical, summarize |
 | commander/parallel/ | 4 | 5 | 80% | activity.ts + scheduler.ts tested |
 | policy/ | 2 | 5 | 40% | Missing: rules, types |
@@ -70,7 +72,7 @@
 | scheduler/ | 1 | 3 | 33% | scheduler.ts tested (22 tests) |
 | mcp/ | 1 | 6 | 17% | oauth.ts tested (27 tests) |
 | bus/ | 1 | 3 | 33% | message-bus tested |
-| tools/ | 13 | 37 | 35% | Utilities + namespacing + task-parallel + sandbox tested |
+| tools/ | 13 | 43 | 30% | Utilities + namespacing + task-parallel + sandbox tested |
 
 ### No Coverage (0%)
 
@@ -82,7 +84,7 @@
 | validator/ | 9 | Requires real filesystem (lint, build, test) |
 | hooks/ | 4 | executor.ts tested (16 tests). Remaining require real tool execution |
 | lsp/ | 4 | Requires language servers |
-| git/ | 4 | Requires real git repository |
+| git/ | 5 | Requires real git repository (includes auto-commit.ts) |
 | skills/ | 4 | Requires filesystem |
 | slash-commands/ | 3 | Requires filesystem |
 | instructions/ | 3 | Requires filesystem |
@@ -91,7 +93,7 @@
 
 ---
 
-## Tested Files (76 total)
+## Tested Files (~85 total)
 
 ### agent/ (8 test files)
 - `evaluator.test.ts` — 35 tests (progress, goals, tool usage, metrics)
@@ -212,4 +214,4 @@
 
 ---
 
-*Last updated: 2026-02-14*
+*Last updated: 2026-02-15*

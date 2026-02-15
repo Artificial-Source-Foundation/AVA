@@ -348,14 +348,14 @@ These are AVA's **unique advantages** — features no other codebase implements:
 
 | # | Feature | Effort | Impact | Source |
 |---|---------|--------|--------|--------|
-| 11 | **Sandbox execution** | 2-3 weeks | High | Gemini CLI, OpenHands, Goose |
-| 12 | **Parallel subagents** | 1-2 weeks | High | Cline (5 concurrent), OpenCode (batch) |
+| 11 | ~~**Sandbox execution**~~ | ~~2-3 weeks~~ | ~~High~~ **DONE** | Gemini CLI, OpenHands, Goose |
+| 12 | ~~**Parallel subagents**~~ | ~~1-2 weeks~~ | ~~High~~ **DONE** | Cline (5 concurrent), OpenCode (batch) |
 | 13 | **Lead-worker auto-routing** | 1 week | High | Goose (auto-selects worker type) |
-| 14 | **Batch parallel tool exec** | 1 week | Medium | OpenCode (25 via Promise.all) |
-| 15 | **Security inspector pipeline** | 1-2 weeks | Medium | Goose (pattern + confidence + audit) |
-| 16 | **Visibility metadata** | 3-4 days | Medium | Goose (user_visible/agent_visible) |
+| 14 | ~~**Batch parallel tool exec**~~ | ~~1 week~~ | ~~Medium~~ **DONE** | OpenCode (25 via Promise.all) |
+| 15 | ~~**Security inspector pipeline**~~ | ~~1-2 weeks~~ | ~~Medium~~ **DONE** | Goose (pattern + confidence + audit) |
+| 16 | ~~**Visibility metadata**~~ | ~~3-4 days~~ | ~~Medium~~ **DONE** | Goose (user_visible/agent_visible) |
 | 17 | **SQLite session storage** | 1 week | Medium | Goose |
-| 18 | **Auto-compaction threshold** | 3-4 days | Medium | Goose (80%), Roo Code (configurable) |
+| 18 | ~~**Auto-compaction threshold**~~ | ~~3-4 days~~ | ~~Medium~~ **DONE** | Goose (80%), Roo Code (configurable) |
 | 19 | **Tree-sitter integration** | 2 weeks | Medium | Aider |
 | 20 | ~~**Session step-level undo**~~ | ~~1 week~~ | ~~Medium~~ **DONE** | OpenCode, Cline |
 | 21 | **Voice coding** | 2 weeks | Medium | Aider |
@@ -418,4 +418,4 @@ These are AVA's **unique advantages** — features no other codebase implements:
 
 ---
 
-*Last updated: 2026-02-14*
+*Last updated: 2026-02-15*

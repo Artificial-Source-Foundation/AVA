@@ -1,47 +1,44 @@
 # Backend Modules — Detailed File Listing
 
 > Every file in `packages/core/src/` with its purpose. Organized by module.
+>
+> **257 source files, ~59,700 lines** across 32 directories + 2 top-level files.
 
 ---
 
-## agent/ (15 files, ~4,690 lines)
+## agent/ (19 files, ~5,264 lines)
 
 Autonomous agent loop — plans tasks, executes tools, recovers from errors.
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `loop.ts` | ~600 | `AgentExecutor` — main agent loop, turn execution, tool dispatch |
-| `evaluator.ts` | ~300 | Progress tracking: `calculateProgress`, `evaluateGoal`, `analyzeToolUsage` |
-| `events.ts` | ~450 | `AgentEventEmitter`, `EventBuffer`, event filtering/stats utilities |
-| `planner.ts` | ~350 | `AgentPlanner` — task planning, error classification, recovery planning |
-| `recovery.ts` | ~500 | `RecoveryManager` — error classification, backoff, retry strategies |
-| `subagent.ts` | ~400 | `SubagentManager` — spawn/manage child agents, presets |
-| `types.ts` | ~250 | `AgentConfig`, `AgentStep`, `AgentEvent`, `ToolCallInfo` types |
-| `metrics.ts` | ~120 | `MetricsCollector` — per-session agent metrics (turns, tokens, tools, errors) |
-| `test-helpers.ts` | ~60 | Mock factories for testing |
-| `index.ts` | ~130 | Barrel export |
+| `loop.ts` | ~902 | `AgentExecutor` — main agent loop, turn execution, tool dispatch |
+| `evaluator.ts` | ~329 | Progress tracking: `calculateProgress`, `evaluateGoal`, `analyzeToolUsage` |
+| `events.ts` | ~315 | `AgentEventEmitter`, `EventBuffer`, event filtering/stats utilities |
+| `planner.ts` | ~518 | `AgentPlanner` — task planning, error classification, recovery planning |
+| `recovery.ts` | ~577 | `RecoveryManager` — error classification, backoff, retry strategies |
+| `subagent.ts` | ~317 | `SubagentManager` — spawn/manage child agents, presets |
+| `types.ts` | ~373 | `AgentConfig`, `AgentStep`, `AgentEvent`, `ToolCallInfo` types |
+| `metrics.ts` | ~192 | `MetricsCollector` — per-session agent metrics (turns, tokens, tools, errors) |
+| `index.ts` | ~131 | Barrel export |
 | **modes/** | | |
-| `modes/plan.ts` | ~300 | Plan mode state, tool restrictions, enter/exit tools |
-| `modes/index.ts` | ~20 | Barrel export |
+| `modes/plan.ts` | ~363 | Plan mode state, tool restrictions, enter/exit tools |
+| `modes/index.ts` | ~24 | Barrel export |
 | **prompts/** | | |
-| `prompts/system.ts` | ~400 | System prompt builder (`buildSystemPrompt`, `buildWorkerPrompt`) |
-| `prompts/index.ts` | ~30 | Barrel export |
-| `prompts/variants/claude.ts` | ~150 | Claude-specific prompt adjustments |
-| `prompts/variants/gpt.ts` | ~120 | GPT-specific prompt adjustments |
-| `prompts/variants/gemini.ts` | ~120 | Gemini-specific prompt adjustments |
-| `prompts/variants/generic.ts` | ~80 | Fallback prompt variant |
-| `prompts/variants/types.ts` | ~30 | Variant type definitions |
-| `prompts/variants/index.ts` | ~20 | Barrel export |
-
-| **__tests__/** | | |
-| `__tests__/mock-llm.ts` | ~70 | Programmable mock LLMClient for testing (scripted StreamDelta sequences) |
-| `__tests__/agent-pipeline.integration.test.ts` | ~300 | 10 integration tests: tool dispatch, termination modes, doom loop, abort, events, workers, subagents |
+| `prompts/system.ts` | ~316 | System prompt builder (`buildSystemPrompt`, `buildWorkerPrompt`) |
+| `prompts/index.ts` | ~32 | Barrel export |
+| `prompts/variants/claude.ts` | ~246 | Claude-specific prompt adjustments |
+| `prompts/variants/gpt.ts` | ~151 | GPT-specific prompt adjustments |
+| `prompts/variants/gemini.ts` | ~177 | Gemini-specific prompt adjustments |
+| `prompts/variants/generic.ts` | ~99 | Fallback prompt variant |
+| `prompts/variants/types.ts` | ~124 | Variant type definitions |
+| `prompts/variants/index.ts` | ~78 | Barrel export |
 
 **Key exports:** `AgentExecutor`, `runAgent`, `AgentPlanner`, `RecoveryManager`, `AgentEventEmitter`, `SubagentManager`, `MetricsCollector`, `planEnterTool`, `planExitTool`
 
 ---
 
-## commander/ (12 files, 2,744 lines)
+## commander/ (12 files, ~2,752 lines)
 
 Team Lead → Senior Leads → Junior Devs hierarchical delegation.
 
@@ -66,90 +63,102 @@ Team Lead → Senior Leads → Junior Devs hierarchical delegation.
 
 ---
 
-## tools/ (39 files, ~11,510 lines)
+## tools/ (43 files, ~12,123 lines)
 
-22 registered tools plus utilities, sanitization, validation, and locking.
+22 registered tools plus utilities, sanitization, validation, locking, namespacing, and sandbox.
 
 ### Tool Files (one per tool)
-| File | Tool Name | Purpose |
-|------|-----------|---------|
-| `read.ts` | read_file | Read file contents with line numbers |
-| `create.ts` | create_file | Create new files |
-| `write.ts` | write_file | Overwrite file contents |
-| `delete.ts` | delete_file | Delete files |
-| `edit.ts` | edit | Fuzzy text replacement (8 strategies) |
-| `multiedit.ts` | multiedit | Edit multiple files atomically |
-| `glob.ts` | glob | Find files by pattern |
-| `grep.ts` | grep | Search file contents (regex) |
-| `ls.ts` | ls | Directory listing |
-| `bash.ts` | bash | Shell command execution (PTY) |
-| `batch.ts` | batch | Execute multiple tools in batch |
-| `task.ts` | task | Spawn subagent tasks (single + parallel dispatch) |
-| `task-parallel.ts` | — | Parallel task execution (Semaphore, Promise.allSettled) |
-| `namespacing.ts` | — | Tool name prefixing (`mcp__`/`ext__`), backward-compat lookup |
-| `question.ts` | question | Ask user clarifying questions |
-| `skill.ts` | skill | Auto-invoke knowledge skills |
-| `todo.ts` | todo_read/write | Session todo list management |
-| `codesearch.ts` | codesearch | Search codebase with context |
-| `websearch.ts` | websearch | Web search (Tavily, Exa) |
-| `webfetch.ts` | webfetch | Fetch + convert web pages |
-| `completion.ts` | attempt_completion | Mark task as complete |
+| File | Lines | Tool Name | Purpose |
+|------|-------|-----------|---------|
+| `read.ts` | ~215 | read_file | Read file contents with line numbers |
+| `create.ts` | ~176 | create_file | Create new files |
+| `write.ts` | ~169 | write_file | Overwrite file contents |
+| `delete.ts` | ~138 | delete_file | Delete files |
+| `edit.ts` | ~389 | edit | Fuzzy text replacement (8 strategies) |
+| `multiedit.ts` | ~244 | multiedit | Edit multiple files atomically |
+| `glob.ts` | ~166 | glob | Find files by pattern |
+| `grep.ts` | ~231 | grep | Search file contents (regex) |
+| `ls.ts` | ~419 | ls | Directory listing |
+| `bash.ts` | ~796 | bash | Shell command execution (PTY, sandbox routing) |
+| `batch.ts` | ~266 | batch | Execute multiple tools in batch |
+| `task.ts` | ~445 | task | Spawn subagent tasks (single + parallel dispatch) |
+| `task-parallel.ts` | ~342 | — | Parallel task execution (Semaphore, Promise.allSettled) |
+| `namespacing.ts` | ~181 | — | Tool name prefixing (`mcp__`/`ext__`), backward-compat lookup |
+| `question.ts` | ~323 | question | Ask user clarifying questions |
+| `skill.ts` | ~207 | skill | Auto-invoke knowledge skills |
+| `todo.ts` | ~351 | todo_read/write | Session todo list management |
+| `codesearch.ts` | ~313 | codesearch | Search codebase with context |
+| `websearch.ts` | ~379 | websearch | Web search (Tavily, Exa) |
+| `webfetch.ts` | ~426 | webfetch | Fetch + convert web pages |
+| `completion.ts` | ~193 | attempt_completion | Mark task as complete |
 
 ### Tool Subdirectories
-| Path | Purpose |
-|------|---------|
-| `apply-patch/index.ts` | Apply unified diffs |
-| `apply-patch/parser.ts` | Parse patch format |
-| `apply-patch/applier.ts` | Apply parsed patches |
-| `browser/index.ts` | Puppeteer browser automation tool |
-| `browser/session.ts` | Browser session management |
-| `edit/normalize.ts` | Edit normalization utilities |
+| Path | Lines | Purpose |
+|------|-------|---------|
+| `apply-patch/index.ts` | ~198 | Apply unified diffs |
+| `apply-patch/parser.ts` | ~293 | Parse patch format |
+| `apply-patch/applier.ts` | ~496 | Apply parsed patches |
+| `browser/index.ts` | ~215 | Puppeteer browser automation tool |
+| `browser/session.ts` | ~362 | Browser session management |
+| `browser/actions.ts` | ~325 | Browser action implementations |
+| `edit/normalize.ts` | ~210 | Edit normalization utilities |
+| **sandbox/** | | |
+| `sandbox/types.ts` | ~63 | `Sandbox` interface, `SandboxConfig`, `SandboxExecResult` |
+| `sandbox/docker.ts` | ~175 | `DockerSandbox` — Docker-based sandboxed execution |
+| `sandbox/noop.ts` | ~102 | `NoopSandbox` — host passthrough (default) |
+| `sandbox/index.ts` | ~27 | `createSandbox(config)` factory |
 
 ### Utility Files
-| File | Purpose |
-|------|---------|
-| `registry.ts` | `registerTool`, `getTool`, `executeTool`, `getToolDefinitions` |
-| `define.ts` | `defineTool` factory pattern (OpenCode-inspired) |
-| `utils.ts` | Path resolution, binary detection, glob matching, line formatting |
-| `sanitize.ts` | Content sanitization (strip fences, normalize line endings) |
-| `truncation.ts` | Output truncation (line-level and byte-level) |
-| `locks.ts` | File locking (`tryFileLock`, `withFileLock`) |
-| `validation.ts` | Zod schema helpers (`formatZodError`, `isZodSchema`) |
-| `edit-replacers.ts` | Edit strategies (levenshtein, similarity, line-level replace) |
-| `errors.ts` | `ToolError`, `ToolErrorType` |
-| `types.ts` | `Tool`, `ToolContext`, `ToolResult`, `ToolLocation` |
+| File | Lines | Purpose |
+|------|-------|---------|
+| `registry.ts` | ~534 | `registerTool`, `getTool`, `executeTool`, `getToolDefinitions` |
+| `define.ts` | ~206 | `defineTool` factory pattern (OpenCode-inspired) |
+| `utils.ts` | ~698 | Path resolution, binary detection, glob matching, line formatting |
+| `sanitize.ts` | ~367 | Content sanitization (strip fences, normalize line endings) |
+| `truncation.ts` | ~320 | Output truncation (line-level and byte-level) |
+| `locks.ts` | ~221 | File locking (`tryFileLock`, `withFileLock`) |
+| `validation.ts` | ~115 | Zod schema helpers (`formatZodError`, `isZodSchema`) |
+| `edit-replacers.ts` | ~486 | Edit strategies (levenshtein, similarity, line-level replace) |
+| `errors.ts` | ~69 | `ToolError`, `ToolErrorType` |
+| `types.ts` | ~70 | `Tool`, `ToolContext`, `ToolResult`, `ToolLocation` |
+| `index.ts` | ~202 | Barrel export + tool registration |
 
 ---
 
-## llm/ (16 files, 3,222 lines)
+## llm/ (20 files, ~2,956 lines)
 
-LLM client factory + 14 provider implementations.
+LLM client factory + 14 provider implementations + utilities.
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `client.ts` | ~350 | `LLMClient` base, `registerClient`, `createClient` factory |
-| `index.ts` | ~50 | Barrel export |
+| `client.ts` | ~265 | `LLMClient` base, `registerClient`, `createClient` factory |
+| `index.ts` | ~17 | Barrel export |
 | **providers/** | | |
-| `providers/anthropic.ts` | ~250 | Anthropic Claude provider |
-| `providers/openai.ts` | ~250 | OpenAI GPT provider |
-| `providers/google.ts` | ~250 | Google Gemini provider |
-| `providers/openrouter.ts` | ~200 | OpenRouter multi-model |
-| `providers/deepseek.ts` | ~150 | DeepSeek provider |
-| `providers/groq.ts` | ~150 | Groq provider |
-| `providers/mistral.ts` | ~150 | Mistral AI provider |
-| `providers/cohere.ts` | ~150 | Cohere provider |
-| `providers/together.ts` | ~150 | Together AI provider |
-| `providers/xai.ts` | ~150 | xAI (Grok) provider |
-| `providers/ollama.ts` | ~200 | Ollama local provider |
-| `providers/glm.ts` | ~150 | GLM provider |
-| `providers/kimi.ts` | ~150 | Kimi (Moonshot) provider |
-| `providers/index.ts` | ~30 | Barrel export |
+| `providers/anthropic.ts` | ~318 | Anthropic Claude provider |
+| `providers/openai.ts` | ~412 | OpenAI GPT provider |
+| `providers/google.ts` | ~236 | Google Gemini provider |
+| `providers/openrouter.ts` | ~206 | OpenRouter multi-model |
+| `providers/deepseek.ts` | ~15 | DeepSeek provider (OpenAI-compat) |
+| `providers/groq.ts` | ~28 | Groq provider (OpenAI-compat) |
+| `providers/mistral.ts` | ~15 | Mistral AI provider (OpenAI-compat) |
+| `providers/cohere.ts` | ~164 | Cohere provider |
+| `providers/together.ts` | ~15 | Together AI provider (OpenAI-compat) |
+| `providers/xai.ts` | ~15 | xAI/Grok provider (OpenAI-compat) |
+| `providers/ollama.ts` | ~235 | Ollama local provider |
+| `providers/glm.ts` | ~196 | GLM provider |
+| `providers/kimi.ts` | ~196 | Kimi (Moonshot) provider |
+| `providers/index.ts` | ~27 | Barrel export |
+| **utils/** | | |
+| `utils/openai-compat.ts` | ~324 | Shared OpenAI-compatible streaming/request logic |
+| `utils/retry.ts` | ~120 | Retry with exponential backoff |
+| `utils/errors.ts` | ~77 | LLM error types and classification |
+| `utils/sse.ts` | ~75 | Server-Sent Events parser |
 
 **Key exports:** `LLMClient`, `registerClient`, `createClient`
 
 ---
 
-## memory/ (9 files, 2,747 lines)
+## memory/ (9 files, ~2,747 lines)
 
 Long-term memory with episodic, semantic, and procedural stores.
 
@@ -167,68 +176,69 @@ Long-term memory with episodic, semantic, and procedural stores.
 
 ---
 
-## permissions/ (13 files, ~3,780 lines)
+## permissions/ (13 files, ~3,924 lines)
 
 Risk assessment, tool approval, and security inspection pipeline.
 
-| File | Purpose |
-|------|---------|
-| `manager.ts` | `PermissionManager` — central permission checks |
-| `rules.ts` | Rule definitions for tool risk levels |
-| `command-validator.ts` | Validates shell commands for safety |
-| `quote-parser.ts` | Parse shell quoting for command analysis |
-| `auto-approve.ts` | Auto-approval logic for low-risk operations |
-| `persistent-approvals.ts` | Remember user approvals across sessions |
-| `trusted-folders.ts` | Per-folder trust levels |
-| `security-inspector.ts` | Pattern-based threat detection with confidence scores |
-| `repetition-inspector.ts` | Per-tool-call stuck detection with time window |
-| `inspector-pipeline.ts` | 3-stage inspection chain (Security → Permission → Repetition) |
-| `audit.ts` | Audit trail — records all inspector decisions |
-| `types.ts` | Permission type definitions |
-| `index.ts` | Barrel export |
+| File | Lines | Purpose |
+|------|-------|---------|
+| `manager.ts` | ~386 | `PermissionManager` — central permission checks |
+| `rules.ts` | ~243 | Rule definitions for tool risk levels |
+| `command-validator.ts` | ~453 | Validates shell commands for safety |
+| `quote-parser.ts` | ~430 | Parse shell quoting for command analysis |
+| `auto-approve.ts` | ~621 | Auto-approval logic for low-risk operations |
+| `persistent-approvals.ts` | ~395 | Remember user approvals across sessions |
+| `trusted-folders.ts` | ~317 | Per-folder trust levels |
+| `security-inspector.ts` | ~301 | Pattern-based threat detection with confidence scores |
+| `repetition-inspector.ts` | ~150 | Per-tool-call stuck detection with time window |
+| `inspector-pipeline.ts` | ~202 | 3-stage inspection chain (Security → Permission → Repetition) |
+| `audit.ts` | ~141 | Audit trail — records all inspector decisions |
+| `types.ts` | ~178 | Permission type definitions |
+| `index.ts` | ~107 | Barrel export |
 
 ---
 
-## context/ (11 files, 2,077 lines)
+## context/ (12 files, ~2,206 lines)
 
 Token tracking and context window management.
 
-| File | Purpose |
-|------|---------|
-| `tracker.ts` | `ContextTracker` — token counting, budget tracking |
-| `compactor.ts` | `ContextCompactor` — triggers compaction when budget exceeded |
-| `types.ts` | Context type definitions |
-| `index.ts` | Barrel export |
-| **strategies/** | |
-| `strategies/summarize.ts` | Summarization-based compaction |
-| `strategies/sliding-window.ts` | Drop oldest messages |
-| `strategies/hierarchical.ts` | Multi-level compaction |
-| `strategies/split-point.ts` | Smart split point detection |
-| `strategies/tool-truncation.ts` | Truncate tool outputs first |
-| `strategies/verified-summarize.ts` | Verified summarization with quality check |
-| `strategies/index.ts` | Barrel export |
+| File | Lines | Purpose |
+|------|-------|---------|
+| `tracker.ts` | ~291 | `ContextTracker` — token counting, budget tracking |
+| `compactor.ts` | ~270 | `ContextCompactor` — triggers compaction when budget exceeded |
+| `types.ts` | ~132 | Context type definitions (includes `MessageVisibility`) |
+| `index.ts` | ~68 | Barrel export |
+| **strategies/** | | |
+| `strategies/summarize.ts` | ~184 | Summarization-based compaction |
+| `strategies/sliding-window.ts` | ~181 | Drop oldest messages |
+| `strategies/hierarchical.ts` | ~303 | Multi-level compaction |
+| `strategies/split-point.ts` | ~173 | Smart split point detection |
+| `strategies/tool-truncation.ts` | ~171 | Truncate tool outputs first |
+| `strategies/verified-summarize.ts` | ~271 | Verified summarization with quality check |
+| `strategies/visibility.ts` | ~117 | Visibility-aware compaction (agent_visible tagging) |
+| `strategies/index.ts` | ~45 | Barrel export |
 
 ---
 
-## config/ (9 files, 2,082 lines)
+## config/ (9 files, ~2,172 lines)
 
 Settings, credentials, and configuration management.
 
-| File | Purpose |
-|------|---------|
-| `manager.ts` | `SettingsManager` — read/write settings |
-| `schema.ts` | Settings schema validation |
-| `storage.ts` | Config file persistence |
-| `credentials.ts` | API key + OAuth credential storage |
-| `migration.ts` | Config version migration |
-| `export.ts` | Export config for sharing |
-| `integration.ts` | Cross-module config integration |
-| `types.ts` | Config type definitions |
-| `index.ts` | Barrel export |
+| File | Lines | Purpose |
+|------|-------|---------|
+| `manager.ts` | ~361 | `SettingsManager` — read/write settings |
+| `schema.ts` | ~186 | Zod validation schemas for all settings categories |
+| `storage.ts` | ~114 | Config file persistence |
+| `credentials.ts` | ~270 | API key + OAuth credential storage |
+| `migration.ts` | ~224 | Config version migration |
+| `export.ts` | ~272 | Export/import config for sharing |
+| `integration.ts` | ~278 | Cross-module config integration |
+| `types.ts` | ~325 | Config type definitions (includes `SandboxSettings`) |
+| `index.ts` | ~142 | Barrel export |
 
 ---
 
-## session/ (6 files, 2,024 lines)
+## session/ (6 files, ~2,024 lines)
 
 Session persistence, resume, and forking.
 
@@ -243,7 +253,7 @@ Session persistence, resume, and forking.
 
 ---
 
-## codebase/ (11 files, 3,431 lines)
+## codebase/ (11 files, ~3,431 lines)
 
 Repository understanding and code intelligence.
 
@@ -264,7 +274,7 @@ Repository understanding and code intelligence.
 
 ---
 
-## validator/ (9 files, 2,253 lines)
+## validator/ (9 files, ~2,256 lines)
 
 QA verification pipeline — runs after agent produces results.
 
@@ -284,66 +294,78 @@ QA verification pipeline — runs after agent produces results.
 
 ## Remaining Modules (Brief)
 
-### auth/ (8 files, 1,107 lines)
+### auth/ (8 files, ~1,107 lines)
 OAuth + PKCE flows. Files: `manager.ts`, `anthropic-oauth.ts`, `copilot-oauth.ts`, `google-oauth.ts`, `openai-oauth.ts`, `pkce.ts`, `types.ts`, `index.ts`
 
-### bus/ (3 files, 524 lines)
+### bus/ (3 files, ~524 lines)
 Pub/sub message bus. Files: `message-bus.ts`, `types.ts`, `index.ts`
 
-### custom-commands/ (6 files, 993 lines)
+### custom-commands/ (6 files, ~993 lines)
 TOML user commands. Files: `discovery.ts`, `parser.ts`, `template.ts`, `loader.ts`, `types.ts`, `index.ts`
 
-### diff/ (4 files, 657 lines)
+### diff/ (4 files, ~657 lines)
 Diff tracking. Files: `tracker.ts`, `unified.ts`, `types.ts`, `index.ts`
 
-### extensions/ (5 files, 947 lines)
+### extensions/ (5 files, ~947 lines)
 Plugin system. Files: `manager.ts`, `manifest.ts`, `storage.ts`, `types.ts`, `index.ts`
 
-### focus-chain/ (4 files, 825 lines)
+### focus-chain/ (4 files, ~825 lines)
 Task progress tracking. Files: `manager.ts`, `parser.ts`, `types.ts`, `index.ts`
 
-### git/ (4 files, 799 lines)
-Git snapshots. Files: `snapshot.ts`, `utils.ts`, `types.ts`, `index.ts`
+### git/ (5 files, ~969 lines)
+Git snapshots + auto-commit. Files: `snapshot.ts`, `utils.ts`, `auto-commit.ts`, `types.ts`, `index.ts`
 
-### hooks/ (4 files, 1,135 lines)
+### hooks/ (4 files, ~1,147 lines)
 Lifecycle hooks. Files: `executor.ts`, `factory.ts`, `types.ts`, `index.ts`
 
-### instructions/ (3 files, 321 lines)
+### instructions/ (3 files, ~321 lines)
 Project instructions. Files: `loader.ts`, `types.ts`, `index.ts`
 
-### integrations/ (2 files, 351 lines)
+### integrations/ (2 files, ~351 lines)
 External APIs. Files: `exa.ts`, `index.ts`
 
-### lsp/ (4 files, 1,219 lines)
+### lsp/ (4 files, ~1,219 lines)
 Language Server Protocol. Files: `diagnostics.ts`, `call-hierarchy.ts`, `types.ts`, `index.ts`
 
-### mcp/ (6 files, 1,470 lines)
+### mcp/ (6 files, ~1,495 lines)
 Model Context Protocol. Files: `client.ts`, `bridge.ts`, `discovery.ts`, `oauth.ts`, `types.ts`, `index.ts`
 
-### models/ (3 files, 674 lines)
+### models/ (3 files, ~674 lines)
 Model registry. Files: `registry.ts`, `types.ts`, `index.ts`
 
-### policy/ (5 files, 1,071 lines)
+### policy/ (5 files, ~1,071 lines)
 Policy engine. Files: `engine.ts`, `matcher.ts`, `rules.ts`, `types.ts`, `index.ts`
 
-### question/ (3 files, 361 lines)
+### question/ (3 files, ~361 lines)
 User questions. Files: `manager.ts`, `types.ts`, `index.ts`
 
-### scheduler/ (3 files, 337 lines)
+### scheduler/ (3 files, ~337 lines)
 Background tasks. Files: `scheduler.ts`, `types.ts`, `index.ts`
 
-### skills/ (4 files, 629 lines)
+### skills/ (4 files, ~629 lines)
 Knowledge modules. Files: `discovery.ts`, `loader.ts`, `types.ts`, `index.ts`
 
-### slash-commands/ (4 files, 854 lines)
+### slash-commands/ (4 files, ~854 lines)
 User slash commands. Files: `registry.ts`, `commands/index.ts`, `types.ts`, `index.ts`
 
-### a2a/ (7 files, 1,466 lines)
+### a2a/ (7 files, ~1,466 lines)
 Agent-to-Agent protocol. Files: `server.ts`, `streaming.ts`, `task.ts`, `auth.ts`, `agent-card.ts`, `types.ts`, `index.ts`
 
-### acp/ (7 files, 1,377 lines)
+### acp/ (7 files, ~1,377 lines)
 Agent Client Protocol. Files: `terminal.ts`, `session-store.ts`, `mcp-bridge.ts`, `error-handler.ts`, `mode.ts`, `types.ts`, `index.ts`
+
+### types/ (2 files, ~151 lines)
+Shared type definitions. Files: `llm.ts`, `index.ts`
 
 ---
 
-*Last updated: 2026-02-14*
+## Top-Level Files
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `index.ts` | ~144 | Main barrel export (all 33 modules) |
+| `platform.ts` | ~226 | Platform abstraction (Node.js, Tauri, browser) |
+
+---
+
+*Last updated: 2026-02-15*

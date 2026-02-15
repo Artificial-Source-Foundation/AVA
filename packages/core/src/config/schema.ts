@@ -82,20 +82,6 @@ export const ContextSettingsSchema = z.object({
 })
 
 // ============================================================================
-// Memory Schema
-// ============================================================================
-
-export const MemorySettingsSchema = z.object({
-  enabled: z.boolean(),
-  embeddingModel: z.string().min(1),
-  maxRetrievals: z.number().int().min(1).max(50),
-  minSimilarity: z.number().min(0).max(1),
-  consolidationInterval: z.number().int().min(0).max(168),
-  decayRate: z.number().min(0).max(1),
-  maxMemories: z.number().int().min(100).max(100000),
-})
-
-// ============================================================================
 // UI Schema
 // ============================================================================
 
@@ -144,7 +130,6 @@ export const SettingsSchema = z.object({
   agent: AgentSettingsSchema,
   permissions: PermissionSettingsSchema,
   context: ContextSettingsSchema,
-  memory: MemorySettingsSchema,
   ui: UISettingsSchema,
   git: GitConfigSchema,
   sandbox: SandboxSettingsSchema,
@@ -158,7 +143,6 @@ export const PartialProviderSettingsSchema = ProviderSettingsSchema.partial()
 export const PartialAgentSettingsSchema = AgentSettingsSchema.partial()
 export const PartialPermissionSettingsSchema = PermissionSettingsSchema.partial()
 export const PartialContextSettingsSchema = ContextSettingsSchema.partial()
-export const PartialMemorySettingsSchema = MemorySettingsSchema.partial()
 export const PartialUISettingsSchema = UISettingsSchema.partial()
 export const PartialGitConfigSchema = GitConfigSchema.partial()
 export const PartialSandboxSettingsSchema = SandboxSettingsSchema.partial()
@@ -182,5 +166,4 @@ export type ValidatedProviderSettings = z.infer<typeof ProviderSettingsSchema>
 export type ValidatedAgentSettings = z.infer<typeof AgentSettingsSchema>
 export type ValidatedPermissionSettings = z.infer<typeof PermissionSettingsSchema>
 export type ValidatedContextSettings = z.infer<typeof ContextSettingsSchema>
-export type ValidatedMemorySettings = z.infer<typeof MemorySettingsSchema>
 export type ValidatedUISettings = z.infer<typeof UISettingsSchema>

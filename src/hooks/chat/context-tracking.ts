@@ -3,7 +3,7 @@
  * Handles token tracking sync, auto-compaction, memory recall, and API message building.
  */
 
-import { getCoreCompactor, getCoreMemory, getCoreTracker } from '../../services/core-bridge'
+import { getCoreCompactor, getCoreTracker } from '../../services/core-bridge'
 import { deleteMessageFromDb } from '../../services/database'
 import { logInfo, logWarn } from '../../services/logger'
 import type { ChatDeps } from './types'
@@ -82,67 +82,13 @@ export async function maybeCompact(deps: ChatDeps): Promise<void> {
 }
 
 // ============================================================================
-// Memory Recall
-// ============================================================================
-
-/**
- * Recall relevant memories for the current user message.
- * Returns a formatted system message string, or empty if unavailable.
- */
-export async function recallMemoryContext(userMessage: string): Promise<string> {
-  const memory = getCoreMemory()
-  if (!memory) return ''
-
-  try {
-    const [similar, procedural] = await Promise.all([
-      memory.recallSimilar(userMessage, 3),
-      memory.recall({
-        type: 'procedural',
-        minImportance: 0.5,
-        limit: 3,
-        orderBy: 'importance',
-        order: 'desc',
-      }),
-    ])
-
-    if (similar.length === 0 && procedural.length === 0) return ''
-
-    const parts: string[] = ['## Relevant Memories\n']
-
-    if (similar.length > 0) {
-      parts.push('### Past Experiences')
-      for (const r of similar) {
-        const pct = (r.similarity * 100).toFixed(0)
-        parts.push(`- ${r.memory.content.slice(0, 200)} (${pct}% match)`)
-      }
-      parts.push('')
-    }
-
-    if (procedural.length > 0) {
-      parts.push('### Learned Patterns')
-      for (const p of procedural) {
-        const meta = p.metadata
-        const rate =
-          meta.successRate != null ? ` (${(meta.successRate * 100).toFixed(0)}% success)` : ''
-        parts.push(`- ${p.content.slice(0, 200)}${rate}`)
-      }
-    }
-
-    return parts.join('\n')
-  } catch {
-    return '' // Graceful degradation — memory is optional
-  }
-}
-
-// ============================================================================
 // API Message Building
 // ============================================================================
 
 /** Build the messages array to send to the LLM API */
 export async function buildApiMessages(
   deps: ChatDeps,
-  excludeId?: string,
-  userMessage?: string
+  excludeId?: string
 ): Promise<Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }>> {
   const msgs = deps.session
     .messages()
@@ -175,14 +121,6 @@ export async function buildApiMessages(
   const instructions = deps.settings.settings().generation.customInstructions.trim()
   if (instructions) {
     msgs.unshift({ role: 'system', content: instructions })
-  }
-
-  // Prepend memory context (before custom instructions so instructions take priority)
-  if (userMessage) {
-    const memoryContext = await recallMemoryContext(userMessage)
-    if (memoryContext) {
-      msgs.unshift({ role: 'system', content: memoryContext })
-    }
   }
 
   return msgs

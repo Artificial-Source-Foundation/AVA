@@ -1,8 +1,8 @@
 # Backend — @ava/core
 
-> The brain of AVA. 257 source files, ~59,700 lines. Test baseline: 2687 tests across 109 files (~43% coverage).
+> The brain of AVA. ~218 source files, ~52,300 lines. Test baseline: ~2487 tests across ~94 files (~43% coverage).
 
-**Package:** `packages/core/` | **Entry:** `packages/core/src/index.ts` | **Exports:** 33 modules
+**Package:** `packages/core/` | **Entry:** `packages/core/src/index.ts` | **Exports:** 29 modules
 
 ---
 
@@ -21,7 +21,7 @@ User (Desktop/CLI)
 
 ---
 
-## Module Map (32 directories)
+## Module Map (29 directories)
 
 ### Agent System (core loop)
 
@@ -43,7 +43,6 @@ User (Desktop/CLI)
 |--------|-------|-------|---------|
 | `codebase/` | 11 | 3,431 | Repo map, symbols, imports, PageRank, tree-sitter |
 | `context/` | 12 | 2,206 | Token tracking, compaction, visibility metadata, auto-compaction |
-| `memory/` | 9 | 2,747 | Episodic, semantic, procedural memory, embedding, RAG |
 | `lsp/` | 4 | 1,219 | Language Server Protocol (5 languages) |
 
 ### Extensibility
@@ -68,7 +67,7 @@ User (Desktop/CLI)
 
 | Module | Files | Lines | Purpose |
 |--------|-------|-------|---------|
-| `llm/` | 20 | 2,956 | LLM client factory + 14 providers + utils (retry, SSE, OpenAI-compat) |
+| `llm/` | 18 | 2,716 | LLM client factory + 14 providers + utils (SSE, OpenAI-compat) |
 | `config/` | 9 | 2,172 | Settings, credentials, schema, storage, migration, sandbox settings |
 | `session/` | 6 | 2,024 | Session management, resume, forking, doom-loop detection |
 | `auth/` | 8 | 1,107 | OAuth + PKCE (Anthropic, Copilot, Google, OpenAI) |
@@ -76,13 +75,6 @@ User (Desktop/CLI)
 | `models/` | 3 | 674 | Model registry (50+ LLM models) |
 | `scheduler/` | 3 | 337 | Background task scheduler |
 | `question/` | 3 | 361 | LLM-to-user question system |
-
-### Protocols (future priority)
-
-| Module | Files | Lines | Purpose |
-|--------|-------|-------|---------|
-| `a2a/` | 7 | 1,466 | Agent-to-Agent protocol (HTTP streaming, task management) |
-| `acp/` | 7 | 1,377 | Agent Client Protocol (editor integration, terminal) |
 
 ### Utility
 
@@ -99,7 +91,7 @@ User (Desktop/CLI)
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `index.ts` | 144 | Main barrel export (all 33 modules) |
+| `index.ts` | ~86 | Main barrel export (all 29 modules) |
 | `platform.ts` | 226 | Platform abstraction (Node.js, Tauri, browser) |
 
 ---
@@ -118,13 +110,10 @@ User (Desktop/CLI)
 | `ConflictDetector` | commander/parallel/conflict.ts | File access conflict detection |
 | `ValidationPipeline` | validator/pipeline.ts | Multi-step QA checks |
 | `LLMClient` | llm/client.ts | Provider-agnostic LLM client factory |
-| `MemoryManager` | memory/manager.ts | Long-term memory (episodic/semantic/procedural) |
 | `PermissionManager` | permissions/manager.ts | Tool permission risk assessment |
 | `PolicyEngine` | policy/engine.ts | Rule-based tool approval |
 | `SessionManager` | session/manager.ts | Session CRUD, resume, fork |
 | `ContextTracker` | context/tracker.ts | Token counting + budget management |
-| `A2AServer` | a2a/server.ts | Agent-to-agent HTTP server |
-
 ---
 
 ## LLM Providers (14)
@@ -196,4 +185,4 @@ All in `tools/` and auto-registered in `tools/index.ts`:
 
 ---
 
-*Last updated: 2026-02-15 — 2687 tests across 109 files (~43% coverage)*
+*Last updated: 2026-02-15 — ~2487 tests across ~94 files (~43% coverage)*

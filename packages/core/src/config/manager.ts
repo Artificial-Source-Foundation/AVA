@@ -28,11 +28,9 @@ import {
   AgentSettingsSchema,
   ContextSettingsSchema,
   GitConfigSchema,
-  MemorySettingsSchema,
   PartialAgentSettingsSchema,
   PartialContextSettingsSchema,
   PartialGitConfigSchema,
-  PartialMemorySettingsSchema,
   PartialPermissionSettingsSchema,
   PartialProviderSettingsSchema,
   PartialSandboxSettingsSchema,
@@ -47,7 +45,6 @@ import { loadSettingsFromFile, saveSettingsToFile } from './storage.js'
 import type {
   AgentSettings,
   ContextSettings,
-  MemorySettings,
   PermissionSettings,
   ProviderSettings,
   SandboxSettings,
@@ -69,7 +66,6 @@ const CATEGORY_SCHEMAS: Record<SettingsCategory, ZodSchema> = {
   agent: AgentSettingsSchema,
   permissions: PermissionSettingsSchema,
   context: ContextSettingsSchema,
-  memory: MemorySettingsSchema,
   ui: UISettingsSchema,
   git: GitConfigSchema,
   sandbox: SandboxSettingsSchema,
@@ -81,7 +77,6 @@ const PARTIAL_SCHEMAS: Record<SettingsCategory, ZodSchema> = {
   agent: PartialAgentSettingsSchema,
   permissions: PartialPermissionSettingsSchema,
   context: PartialContextSettingsSchema,
-  memory: PartialMemorySettingsSchema,
   ui: PartialUISettingsSchema,
   git: PartialGitConfigSchema,
   sandbox: PartialSandboxSettingsSchema,
@@ -243,10 +238,6 @@ export class SettingsManager {
 
   get context(): ContextSettings {
     return this.settings.context
-  }
-
-  get memory(): MemorySettings {
-    return this.settings.memory
   }
 
   get ui(): UISettings {

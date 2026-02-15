@@ -174,9 +174,8 @@ describe('diffSettings', () => {
     const modified = structuredClone(DEFAULT_SETTINGS)
     modified.ui.fontSize = 20
     modified.agent.maxTurns = 100
-    modified.memory.enabled = false
     const diffs = diffSettings(DEFAULT_SETTINGS, modified)
-    expect(diffs).toHaveLength(3)
+    expect(diffs).toHaveLength(2)
   })
 })
 

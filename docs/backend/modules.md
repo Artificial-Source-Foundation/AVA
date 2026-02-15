@@ -2,7 +2,7 @@
 
 > Every file in `packages/core/src/` with its purpose. Organized by module.
 >
-> **257 source files, ~59,700 lines** across 32 directories + 2 top-level files.
+> **~218 source files, ~52,300 lines** across 29 directories + 2 top-level files.
 
 ---
 
@@ -125,7 +125,7 @@ Team Lead → Senior Leads → Junior Devs hierarchical delegation.
 
 ---
 
-## llm/ (20 files, ~2,956 lines)
+## llm/ (18 files, ~2,716 lines)
 
 LLM client factory + 14 provider implementations + utilities.
 
@@ -150,29 +150,10 @@ LLM client factory + 14 provider implementations + utilities.
 | `providers/index.ts` | ~27 | Barrel export |
 | **utils/** | | |
 | `utils/openai-compat.ts` | ~324 | Shared OpenAI-compatible streaming/request logic |
-| `utils/retry.ts` | ~120 | Retry with exponential backoff |
 | `utils/errors.ts` | ~77 | LLM error types and classification |
 | `utils/sse.ts` | ~75 | Server-Sent Events parser |
 
 **Key exports:** `LLMClient`, `registerClient`, `createClient`
-
----
-
-## memory/ (9 files, ~2,747 lines)
-
-Long-term memory with episodic, semantic, and procedural stores.
-
-| File | Purpose |
-|------|---------|
-| `manager.ts` | `MemoryManager` — unified interface, remember/recall |
-| `episodic.ts` | `EpisodicMemoryManager` — session memories (what happened) |
-| `semantic.ts` | `SemanticMemoryManager` — facts/knowledge (what is true) |
-| `procedural.ts` | `ProceduralMemoryManager` — patterns/actions (what to do) |
-| `embedding.ts` | `OpenAIEmbedder`, `CachingEmbedder`, `MockEmbedder` |
-| `consolidation.ts` | `ConsolidationEngine` — merge/decay old memories |
-| `store.ts` | `SQLiteVectorStore` — vector storage backend |
-| `types.ts` | Memory type definitions |
-| `test-helpers.ts` | Mock factories for testing |
 
 ---
 
@@ -348,12 +329,6 @@ Knowledge modules. Files: `discovery.ts`, `loader.ts`, `types.ts`, `index.ts`
 ### slash-commands/ (4 files, ~854 lines)
 User slash commands. Files: `registry.ts`, `commands/index.ts`, `types.ts`, `index.ts`
 
-### a2a/ (7 files, ~1,466 lines)
-Agent-to-Agent protocol. Files: `server.ts`, `streaming.ts`, `task.ts`, `auth.ts`, `agent-card.ts`, `types.ts`, `index.ts`
-
-### acp/ (7 files, ~1,377 lines)
-Agent Client Protocol. Files: `terminal.ts`, `session-store.ts`, `mcp-bridge.ts`, `error-handler.ts`, `mode.ts`, `types.ts`, `index.ts`
-
 ### types/ (2 files, ~151 lines)
 Shared type definitions. Files: `llm.ts`, `index.ts`
 
@@ -363,7 +338,7 @@ Shared type definitions. Files: `llm.ts`, `index.ts`
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `index.ts` | ~144 | Main barrel export (all 33 modules) |
+| `index.ts` | ~86 | Main barrel export (all 29 modules) |
 | `platform.ts` | ~226 | Platform abstraction (Node.js, Tauri, browser) |
 
 ---

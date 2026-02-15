@@ -3,7 +3,7 @@
  *
  * Central initialization for core engine singletons.
  * Connects the frontend to the well-tested core modules:
- * SettingsManager, ContextTracker, WorkerRegistry, MemoryManager.
+ * SettingsManager, ContextTracker, WorkerRegistry.
  */
 
 import {
@@ -13,16 +13,14 @@ import {
   createCompactor,
   createContextTracker,
   createDefaultRegistry,
-  createMemoryManager,
   getMessageBus,
   getSettingsManager,
-  type MemoryManager,
   type MessageBus,
   type SettingsManager,
   type ToolConfirmationRequest,
   type WorkerRegistry,
 } from '@ava/core'
-import { logInfo, logWarn } from './logger'
+import { logInfo } from './logger'
 
 // ============================================================================
 // Singleton State
@@ -32,7 +30,6 @@ let _settings: SettingsManager | null = null
 let _tracker: ContextTracker | null = null
 let _compactor: Compactor | null = null
 let _registry: WorkerRegistry | null = null
-let _memory: MemoryManager | null = null
 let _bus: MessageBus | null = null
 
 // ============================================================================
@@ -59,11 +56,6 @@ export function getCoreRegistry(): WorkerRegistry | null {
   return _registry
 }
 
-/** Get the core MemoryManager (null if not initialized) */
-export function getCoreMemory(): MemoryManager | null {
-  return _memory
-}
-
 /** Get the core MessageBus (null if not initialized) */
 export function getCoreBus(): MessageBus | null {
   return _bus
@@ -87,8 +79,6 @@ export function subscribeToolApproval(
 export interface CoreBridgeOptions {
   /** Context window limit in tokens (default: 200_000) */
   contextLimit?: number
-  /** OpenAI API key for memory embeddings (optional, memory disabled without it) */
-  openAIApiKey?: string
 }
 
 /**
@@ -98,7 +88,6 @@ export interface CoreBridgeOptions {
 export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() => void> {
   logInfo('core', 'Init core bridge', {
     contextLimit: opts.contextLimit ?? 200_000,
-    hasOpenAIApiKey: !!opts.openAIApiKey,
   })
   // Settings — use the core singleton
   _settings = getSettingsManager()
@@ -115,19 +104,7 @@ export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() =
   // Worker registry — 5 built-in workers (coder, tester, reviewer, researcher, debugger)
   _registry = createDefaultRegistry()
 
-  // Memory — requires OpenAI API key for embeddings, graceful degradation
-  if (opts.openAIApiKey) {
-    try {
-      _memory = createMemoryManager({ openAIApiKey: opts.openAIApiKey })
-    } catch {
-      logWarn('core', 'Memory init failed')
-      _memory = null
-    }
-  }
-
   return () => {
-    _memory?.dispose()
-    _memory = null
     _bus = null
     _compactor = null
     _tracker = null

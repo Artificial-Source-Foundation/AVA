@@ -1,6 +1,6 @@
 # Backend Test Coverage
 
-> Latest verified baseline: **2687 tests** across **109 test files**. Overall file coverage: ~43% (85/200 testable files).
+> Latest verified baseline: **~2487 tests** across **~94 test files**. Overall file coverage: ~43%.
 >
 > Strategy: Test pure functions and stateful classes. Skip LLM/FS/HTTP-dependent code.
 
@@ -10,13 +10,10 @@
 
 | Metric | Value |
 |--------|-------|
-| Total tests | 2687 |
-| Test files | 109 |
-| Source files (excluding barrels/types) | ~200 |
-| Source files (total) | 257 |
-| Source lines | ~59,700 |
-| Files with tests | 85 |
-| Files without tests | 115 |
+| Total tests | ~2487 |
+| Test files | ~94 |
+| Source files (total) | ~218 |
+| Source lines | ~52,300 |
 | File coverage | ~43% |
 | TS errors | 0 |
 | Biome errors | 0 |
@@ -47,8 +44,6 @@
 | Module | Tested | Total | Coverage | Notes |
 |--------|--------|-------|----------|-------|
 | commander/workers/ | 1 | 1 | 100% | Worker definitions fully tested |
-| a2a/ | 5 | 7 | 71% | Missing: types.ts (type-only) |
-| acp/ | 5 | 7 | 71% | Missing: types.ts (type-only) |
 | session/ | 4 | 6 | 67% | Missing: types.ts |
 | commander/ | 4 | 6 | 67% | Missing: types.ts |
 | extensions/ | 3 | 5 | 60% | Missing: types.ts |
@@ -57,7 +52,6 @@
 
 | Module | Tested | Total | Coverage | Notes |
 |--------|--------|-------|----------|-------|
-| memory/ | 5 | 10 | 50% | Missing: embedding, store |
 | context/ | 2 | 4 | 50% | Missing: types |
 | custom-commands/ | 3 | 6 | 50% | Missing: loader, types |
 | llm/ | 1 | 2 | 50% | Client tested, not providers (14) or utils (4) |
@@ -128,10 +122,6 @@
 - `parallel/batch.test.ts`, `parallel/conflict.test.ts`
 - `workers/definitions.test.ts`
 
-### memory/ (6 test files)
-- `manager.test.ts`, `episodic.test.ts`, `semantic.test.ts`
-- `procedural.test.ts`, `consolidation.test.ts`
-
 ### config/ (5 test files)
 - `manager.test.ts`, `schema.test.ts`
 - `credentials.test.ts` — 20 tests (key operations, provider listing, validation, singleton)
@@ -191,12 +181,6 @@
 ### bus/ (1 test file)
 - `message-bus.test.ts`
 
-### a2a/ (5 test files)
-- `server.test.ts`, `streaming.test.ts`, `task.test.ts`, `auth.test.ts`, `agent-card.test.ts`
-
-### acp/ (5 test files)
-- `terminal.test.ts`, `session-store.test.ts`, `mcp-bridge.test.ts`, `error-handler.test.ts`, `mode.test.ts`
-
 ---
 
 ## What's Testable But Not Tested (Priority Candidates)
@@ -214,4 +198,4 @@
 
 ---
 
-*Last updated: 2026-02-15*
+*Last updated: 2026-02-15 — removed dead modules (a2a, acp, memory) and llm/utils/retry*

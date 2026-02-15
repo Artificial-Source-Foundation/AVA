@@ -312,12 +312,10 @@ These are AVA's **unique advantages** — features no other codebase implements:
 | **Doom loop detection** (agent loop + registry level) | Built-in | Goose (RepetitionInspector), Roo Code (ToolRepetitionDetector) |
 | **Validator/QA pipeline** (syntax, types, lint, test, review) | 9-file module | Aider (basic lint only) |
 | **Codebase intelligence** (PageRank, dependency graph, symbols) | Built-in | Aider (repo map only) |
-| **Memory system** (episodic + semantic + procedural + RAG) | Built-in | None |
 | **Permission/policy engine** (risk assessment, auto-approval, rules) | Built-in | Goose (3-inspector pipeline, closest match) |
 | **Hook system** (PreToolUse, PostToolUse, lifecycle) | Native | Cline (hooks, similar) |
 | **Desktop UI** (activity bar, agent cards, animations) | Tauri + SolidJS | Cline/Roo Code (VS Code only) |
 | **Plugin marketplace** (Phase 2) | Planned | PI (npm only) |
-| **Protocol support** (ACP + A2A) | Built-in | None |
 | **Real subagent execution** (task tool → AgentExecutor) | Built-in + tested | OpenCode (similar), Goose (Rust equivalent) |
 
 ---

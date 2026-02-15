@@ -16,7 +16,6 @@ import {
 import {
   DEFAULT_AGENT_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
-  DEFAULT_MEMORY_SETTINGS,
   DEFAULT_PERMISSION_SETTINGS,
   DEFAULT_PROVIDER_SETTINGS,
   DEFAULT_SETTINGS,
@@ -153,7 +152,6 @@ describe('SettingsManager', () => {
       expect(manager.get('agent')).toEqual(DEFAULT_AGENT_SETTINGS)
       expect(manager.get('permissions')).toEqual(DEFAULT_PERMISSION_SETTINGS)
       expect(manager.get('context')).toEqual(DEFAULT_CONTEXT_SETTINGS)
-      expect(manager.get('memory')).toEqual(DEFAULT_MEMORY_SETTINGS)
       expect(manager.get('ui')).toEqual(DEFAULT_UI_SETTINGS)
     })
   })
@@ -224,7 +222,6 @@ describe('SettingsManager', () => {
       expect(manager.agent).toEqual(DEFAULT_AGENT_SETTINGS)
       expect(manager.permissions).toEqual(DEFAULT_PERMISSION_SETTINGS)
       expect(manager.context).toEqual(DEFAULT_CONTEXT_SETTINGS)
-      expect(manager.memory).toEqual(DEFAULT_MEMORY_SETTINGS)
       expect(manager.ui).toEqual(DEFAULT_UI_SETTINGS)
     })
   })

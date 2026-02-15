@@ -109,7 +109,7 @@ export async function sendMessage(
       {
         sessionId,
         model: targetModel,
-        messages: await buildApiMessages(deps, assistantMsg.id, content),
+        messages: await buildApiMessages(deps, assistantMsg.id),
         onContent: (text) => {
           latestStreamText = text
           if (streamFlushTimer !== null) return

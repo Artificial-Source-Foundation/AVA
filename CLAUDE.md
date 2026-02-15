@@ -96,7 +96,6 @@ Tools (22):
 Intelligence:
 ├── codebase/      # Repo map, symbols, PageRank
 ├── context/       # Token tracking, compaction, compression
-├── memory/        # Episodic, semantic, procedural memory
 ├── lsp/           # Language Server Protocol (5 languages)
 
 Extensibility:
@@ -118,9 +117,6 @@ Infrastructure:
 ├── auth/          # OAuth + PKCE
 ├── bus/           # Message bus (pub/sub)
 
-Protocols (lower priority):
-├── acp/           # Editor integration (VS Code backend)
-├── a2a/           # Agent-to-agent HTTP server
 ```
 
 ### Data Flow

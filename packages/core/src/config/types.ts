@@ -103,28 +103,6 @@ export interface ContextSettings {
 }
 
 // ============================================================================
-// Memory Settings
-// ============================================================================
-
-/** Long-term memory settings */
-export interface MemorySettings {
-  /** Enable long-term memory */
-  enabled: boolean
-  /** Embedding model to use */
-  embeddingModel: string
-  /** Maximum memories to retrieve per query */
-  maxRetrievals: number
-  /** Minimum similarity score for retrieval (0-1) */
-  minSimilarity: number
-  /** Memory consolidation interval in hours (0 = manual only) */
-  consolidationInterval: number
-  /** Decay rate for importance (lambda in exponential decay) */
-  decayRate: number
-  /** Maximum memories to store (oldest/lowest importance removed first) */
-  maxMemories: number
-}
-
-// ============================================================================
 // UI Settings
 // ============================================================================
 
@@ -176,7 +154,6 @@ export interface Settings {
   agent: AgentSettings
   permissions: PermissionSettings
   context: ContextSettings
-  memory: MemorySettings
   ui: UISettings
   git: GitConfig
   sandbox: SandboxSettings
@@ -228,17 +205,6 @@ export const DEFAULT_CONTEXT_SETTINGS: ContextSettings = {
   maxSessions: 10,
 }
 
-/** Default memory settings */
-export const DEFAULT_MEMORY_SETTINGS: MemorySettings = {
-  enabled: true,
-  embeddingModel: 'text-embedding-3-small',
-  maxRetrievals: 5,
-  minSimilarity: 0.7,
-  consolidationInterval: 24, // Daily
-  decayRate: 0.001,
-  maxMemories: 10000,
-}
-
 /** Default UI settings */
 export const DEFAULT_UI_SETTINGS: UISettings = {
   theme: 'system',
@@ -266,7 +232,6 @@ export const DEFAULT_SETTINGS: Settings = {
   agent: DEFAULT_AGENT_SETTINGS,
   permissions: DEFAULT_PERMISSION_SETTINGS,
   context: DEFAULT_CONTEXT_SETTINGS,
-  memory: DEFAULT_MEMORY_SETTINGS,
   ui: DEFAULT_UI_SETTINGS,
   git: { enabled: true, autoCommit: false, branchPrefix: 'ava/', messagePrefix: '[ava]' },
   sandbox: DEFAULT_SANDBOX_SETTINGS,

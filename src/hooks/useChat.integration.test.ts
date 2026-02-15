@@ -70,10 +70,6 @@ vi.mock('../lib/tool-approval', () => ({
 
 vi.mock('../services/core-bridge', () => ({
   getCoreCompactor: vi.fn(() => null),
-  getCoreMemory: vi.fn(() => ({
-    recallSimilar: vi.fn(async () => []),
-    recallProcedural: vi.fn(async () => []),
-  })),
   getCoreTracker: vi.fn(() => h.tracker),
 }))
 

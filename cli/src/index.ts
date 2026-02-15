@@ -5,7 +5,6 @@
  *
  * Usage:
  *   ava              - Interactive TUI mode (future)
- *   ava --acp        - ACP agent mode for Toad/Zed
  *   ava auth         - Manage authentication
  *   ava --version    - Show version
  *   ava --help       - Show help
@@ -15,7 +14,6 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { setPlatform } from '@ava/core'
 import { createNodePlatform } from '@ava/platform-node'
-import { startAcpAgent } from './acp/agent.js'
 import { runAuthCommand } from './commands/auth.js'
 
 const VERSION = '0.1.0'
@@ -39,12 +37,6 @@ async function main() {
   const platform = createNodePlatform(dbPath)
   setPlatform(platform)
 
-  // ACP mode
-  if (args.includes('--acp')) {
-    await startAcpAgent()
-    return
-  }
-
   // Auth command
   if (args[0] === 'auth') {
     await runAuthCommand(args.slice(1))
@@ -54,7 +46,7 @@ async function main() {
   // Default: Show help (TUI not implemented yet)
   console.log('AVA CLI')
   console.log('')
-  console.log('TUI mode not yet implemented. Use --acp for ACP agent mode.')
+  console.log('TUI mode not yet implemented.')
   console.log('Run `ava --help` for more information.')
 }
 
@@ -70,7 +62,6 @@ COMMANDS:
   auth            Manage authentication (OAuth login/logout)
 
 OPTIONS:
-  --acp           Run as ACP agent (for Toad, Zed, etc.)
   --version, -v   Show version
   --help, -h      Show this help
 
@@ -83,9 +74,6 @@ AUTHENTICATION:
 EXAMPLES:
   # Connect Claude subscription for OAuth
   ava auth login anthropic
-
-  # Run as ACP agent
-  ava --acp
 
   # Check version
   ava --version

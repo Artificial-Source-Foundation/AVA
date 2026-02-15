@@ -69,8 +69,6 @@
 
 ### Missing in Intelligence
 - [ ] **Codebase indexer tests** — No tests for file discovery or symbol extraction
-- [ ] **Memory embedding tests** — `embedding.ts` untested (OpenAI API dependent)
-- [ ] **Memory store tests** — `store.ts` (SQLite) untested
 - [ ] **Context strategy benchmarks** — No comparison of compaction strategies
 
 ### Missing in Safety
@@ -97,16 +95,14 @@
 ## Architecture Debt
 
 ### Known Issues
-- [x] ~~**Export collisions** — `a2a` and `policy` modules need named exports~~ (Fixed in Session 43)
 - [ ] **Platform abstraction gaps** — `platform.ts` has different behavior for Node/Tauri/browser but tests only cover Node
 - [ ] **Circular dependency risk** — `tools/index.ts` imports from `agent/modes/` (plan tools), creating a cross-module dependency
-- [ ] **Large barrel export** — `index.ts` exports 33 modules via `export *`, making tree-shaking harder
+- [ ] **Large barrel export** — `index.ts` exports 29 modules via `export *`, making tree-shaking harder
 
 ### Opportunities
 - [ ] **Split tools/ into subcategories** — 43 files in one directory is large; could split into file-tools/, search-tools/, web-tools/
 - [ ] **Extract tool utilities** — `utils.ts`, `sanitize.ts`, `truncation.ts`, `locks.ts` could be a separate `tool-utils/` module
 - [ ] **Standardize provider interface** — All 14 LLM providers implement `stream()` differently; could add a test harness
-- [ ] **Memory consolidation scheduling** — `ConsolidationEngine` exists but isn't wired to run automatically
 
 ---
 

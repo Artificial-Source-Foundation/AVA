@@ -20,7 +20,7 @@ import {
 } from '@ava/core'
 import { batch, createSignal, onCleanup } from 'solid-js'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
-import { getCoreBus, getCoreMemory, subscribeToolApproval } from '../services/core-bridge'
+import { getCoreBus, subscribeToolApproval } from '../services/core-bridge'
 import { saveMessage, updateMessage } from '../services/database'
 import { logError } from '../services/logger'
 import { notifyCompletion } from '../services/notifications'
@@ -161,7 +161,6 @@ export function useAgent() {
         ...config,
       }
 
-      const runStart = Date.now()
       let accumulatedContent = ''
 
       const eventHandler = (event: AgentEvent) => {
@@ -188,25 +187,6 @@ export function useAgent() {
             (event.result.output ?? goal).slice(0, 100),
             settingsRef.settings().notifications
           )
-
-          const memory = getCoreMemory()
-          if (memory && event.result.success) {
-            memory
-              .remember(
-                {
-                  sessionId: sessionId!,
-                  summary: (event.result.output ?? goal).slice(0, 500),
-                  decisions: [],
-                  toolsUsed: [],
-                  outcome: 'success',
-                  durationMinutes: Math.round((Date.now() - runStart) / 60000),
-                },
-                'episodic'
-              )
-              .catch(() => {
-                /* silent — memory is optional */
-              })
-          }
         }
       }
 

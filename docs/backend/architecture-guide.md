@@ -38,7 +38,6 @@ Every major subsystem uses the same singleton pattern: a module-level `let _inst
 | Permission Manager | `permissions/manager.ts` | `getPermissionManager()` |
 | Message Bus | `bus/message-bus.ts` | `getMessageBus()` |
 | Session Manager | `session/manager.ts` | `getSessionManager()` |
-| Memory Manager | `memory/manager.ts` | `getMemoryManager()` |
 | Extension Manager | `extensions/manager.ts` | `getExtensionManager()` |
 | Hook Runner | `hooks/executor.ts` | `getHookRunner()` |
 | Scheduler | `scheduler/scheduler.ts` | `getScheduler()` |
@@ -390,28 +389,6 @@ Functions: `namespaceTool()`, `stripNamespace()`, `isMcpTool()`, `isNamespaced()
 
 **Auto-compaction:** `createAutoCompactor()` triggers compaction when context exceeds configured threshold % of max tokens.
 
-### memory/ — Long-Term Memory
-
-**Why it exists:** Persistent learning across sessions — remembers past mistakes, learned facts, and successful patterns.
-
-| File | Lines | Key Export | Purpose |
-|------|-------|-----------|---------|
-| `manager.ts` | ~200+ | `MemoryManager` | Coordinates 3 subsystems + consolidation |
-| `store.ts` | ~372 | `SQLiteVectorStore` | SQLite persistence with cosine similarity search |
-| `embedding.ts` | ~200+ | `OpenAIEmbedder`, `CachingEmbedder` | Generate embeddings via OpenAI API |
-| `episodic.ts` | ~150+ | `EpisodicMemoryManager` | Session-based memories (what happened) |
-| `semantic.ts` | ~150+ | `SemanticMemoryManager` | Fact-based memories (what we know) |
-| `procedural.ts` | ~150+ | `ProceduralMemoryManager` | Pattern-based memories (what works) |
-| `consolidation.ts` | ~200+ | `consolidateMemories` | Merge similar/redundant memories |
-| `types.ts` | ~284 | `MemoryEntry`, `VectorStore` | All memory types |
-
-**Three Memory Types:**
-- **Episodic** — "In session X, we debugged a TypeScript error by..." (session summaries)
-- **Semantic** — "The project uses Vitest for testing" (facts)
-- **Procedural** — "When editing .tsx files, use the edit tool with..." (patterns with success rates)
-
-**Storage:** SQLite via platform abstraction, embeddings as BLOB (Float32Array), cosine similarity computed in JS.
-
 ### lsp/ — Language Server Protocol
 
 | File | Lines | Purpose |
@@ -520,7 +497,7 @@ Layer 3: InspectorPipeline (permissions/inspector-pipeline.ts)
 | `integration.ts` | ~250 | `createAgentConfigFromSettings` | Bridge settings → agent config |
 | `export.ts` | ~200 | `exportSettingsToFile`, `importSettingsFromFile` | Import/export/backup |
 
-**Settings Categories:** `provider`, `agent`, `permissions`, `context`, `memory`, `ui`, `git`, `sandbox`
+**Settings Categories:** `provider`, `agent`, `permissions`, `context`, `ui`, `git`, `sandbox`
 
 Each category has: full Zod schema + partial schema (for updates) + TypeScript interface + defaults.
 
@@ -716,32 +693,6 @@ Each category has: full Zod schema + partial schema (for updates) + TypeScript i
 
 ---
 
-## Protocols
-
-### a2a/ — Agent-to-Agent Protocol
-
-**Why it exists:** HTTP-based protocol for agents to communicate (task delegation, progress streaming).
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| `server.ts` | ~300 | HTTP server with task management endpoints |
-| `client.ts` | ~200 | A2A client for remote agent communication |
-| `task.ts` | ~250 | Task state machine (submitted → working → completed/failed) |
-| `types.ts` | ~200 | A2A protocol types |
-| `streaming.ts` | ~150 | SSE streaming for task progress |
-
-### acp/ — Agent Client Protocol
-
-**Why it exists:** Editor integration backend (VS Code, terminal bridge).
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| `server.ts` | ~300 | WebSocket server for editor communication |
-| `types.ts` | ~200 | ACP protocol types |
-| `terminal.ts` | ~200 | Terminal session management |
-
----
-
 ## Key Patterns
 
 ### 1. Singleton with DI
@@ -750,7 +701,7 @@ Every major service uses `let _instance` + `get/set/reset` functions. Tests call
 
 ### 2. Event-Driven Architecture
 
-Components communicate via typed events. Pattern: `on(listener)` returns unsubscribe function, `emit(event)` broadcasts to all listeners. Used in: `AgentEventEmitter`, `SessionManager`, `MemoryManager`, `ExtensionManager`, `HookRunner`, `DiffTracker`, `MessageBus`.
+Components communicate via typed events. Pattern: `on(listener)` returns unsubscribe function, `emit(event)` broadcasts to all listeners. Used in: `AgentEventEmitter`, `SessionManager`, `ExtensionManager`, `HookRunner`, `DiffTracker`, `MessageBus`.
 
 ### 3. Zod Validation at Boundaries
 

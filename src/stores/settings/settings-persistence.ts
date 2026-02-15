@@ -143,7 +143,6 @@ export function pushSettingsToCore(s: AppSettings): void {
   })
 
   sm.set('context', { maxTokens: s.generation.maxTokens, compactionThreshold: 80 })
-  sm.set('memory', { enabled: true })
   sm.set('git', {
     enabled: s.git.enabled,
     autoCommit: s.git.autoCommit,

@@ -70,7 +70,6 @@ describe('mergeWithDefaults', () => {
   it('preserves defaults for missing categories', () => {
     const result = mergeWithDefaults({ provider: { timeout: 5000 } } as Record<string, unknown>)
     expect(result.agent).toEqual(DEFAULT_SETTINGS.agent)
-    expect(result.memory).toEqual(DEFAULT_SETTINGS.memory)
   })
 
   it('ignores unknown categories', () => {

@@ -10,10 +10,8 @@ import {
   ContextSettingsSchema,
   ExportableSettingsSchema,
   LLMProviderSchema,
-  MemorySettingsSchema,
   PartialAgentSettingsSchema,
   PartialContextSettingsSchema,
-  PartialMemorySettingsSchema,
   PartialPermissionSettingsSchema,
   PartialProviderSettingsSchema,
   PartialUISettingsSchema,
@@ -25,7 +23,6 @@ import {
 import {
   DEFAULT_AGENT_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
-  DEFAULT_MEMORY_SETTINGS,
   DEFAULT_PERMISSION_SETTINGS,
   DEFAULT_PROVIDER_SETTINGS,
   DEFAULT_SETTINGS,
@@ -217,48 +214,6 @@ describe('ContextSettingsSchema', () => {
 })
 
 // ============================================================================
-// Memory Schema
-// ============================================================================
-
-describe('MemorySettingsSchema', () => {
-  it('accepts valid defaults', () => {
-    expect(MemorySettingsSchema.safeParse(DEFAULT_MEMORY_SETTINGS).success).toBe(true)
-  })
-
-  it('rejects minSimilarity above 1', () => {
-    const result = MemorySettingsSchema.safeParse({
-      ...DEFAULT_MEMORY_SETTINGS,
-      minSimilarity: 1.5,
-    })
-    expect(result.success).toBe(false)
-  })
-
-  it('rejects negative decayRate', () => {
-    const result = MemorySettingsSchema.safeParse({
-      ...DEFAULT_MEMORY_SETTINGS,
-      decayRate: -0.1,
-    })
-    expect(result.success).toBe(false)
-  })
-
-  it('rejects empty embeddingModel', () => {
-    const result = MemorySettingsSchema.safeParse({
-      ...DEFAULT_MEMORY_SETTINGS,
-      embeddingModel: '',
-    })
-    expect(result.success).toBe(false)
-  })
-
-  it('rejects maxMemories below 100', () => {
-    const result = MemorySettingsSchema.safeParse({
-      ...DEFAULT_MEMORY_SETTINGS,
-      maxMemories: 50,
-    })
-    expect(result.success).toBe(false)
-  })
-})
-
-// ============================================================================
 // UI Schema
 // ============================================================================
 
@@ -337,10 +292,6 @@ describe('partial schemas', () => {
     expect(PartialContextSettingsSchema.safeParse({ maxTokens: 100000 }).success).toBe(true)
   })
 
-  it('PartialMemorySettingsSchema accepts subset', () => {
-    expect(PartialMemorySettingsSchema.safeParse({ enabled: false }).success).toBe(true)
-  })
-
   it('PartialUISettingsSchema accepts subset', () => {
     expect(PartialUISettingsSchema.safeParse({ theme: 'dark' }).success).toBe(true)
   })
@@ -353,7 +304,6 @@ describe('partial schemas', () => {
     expect(PartialProviderSettingsSchema.safeParse({}).success).toBe(true)
     expect(PartialAgentSettingsSchema.safeParse({}).success).toBe(true)
     expect(PartialContextSettingsSchema.safeParse({}).success).toBe(true)
-    expect(PartialMemorySettingsSchema.safeParse({}).success).toBe(true)
     expect(PartialUISettingsSchema.safeParse({}).success).toBe(true)
   })
 })

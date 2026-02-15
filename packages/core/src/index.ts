@@ -3,64 +3,6 @@
  * Core business logic for AVA - LLM client, tools, types
  */
 
-export type {
-  A2AEvent,
-  A2AMessage,
-  A2AServerConfig,
-  A2ATask,
-  A2ATaskState,
-  AgentAuthentication,
-  AgentCapabilities,
-  AgentCard,
-  AgentProvider,
-  AgentSkill,
-  Artifact,
-  AuthenticationScheme,
-  AuthResult,
-  CancelTaskResponse,
-  DataPart,
-  FilePart,
-  GetTaskResponse,
-  Part,
-  SendMessageRequest,
-  SendMessageResponse,
-  SSEWritable,
-  TaskArtifactUpdateEvent,
-  TaskEventListener,
-  TaskExecutor,
-  TaskStatus as A2ATaskStatus,
-  TaskStatusUpdateEvent,
-  TextPart,
-} from './a2a/index.js'
-// A2A (Agent-to-Agent protocol) — named exports to avoid TaskStatus collision
-export {
-  A2A_PROTOCOL_VERSION,
-  A2AServer,
-  agentMessage,
-  checkAuth,
-  createAgentCard,
-  createArtifactEvent,
-  createStatusEvent,
-  DEFAULT_A2A_PORT,
-  DEFAULT_AGENT_VERSION,
-  dataPart,
-  extractBearerToken,
-  formatJsonRpcSSE,
-  formatSSE,
-  getA2AServer,
-  resetA2AServer,
-  SSE_HEADERS,
-  SSEWriter,
-  setA2AServer,
-  startKeepalive,
-  statusEvent,
-  TaskManager as A2ATaskManager,
-  textPart,
-  userMessage,
-  validateBearerToken,
-} from './a2a/index.js'
-// ACP (Agent Client Protocol) integration
-export * from './acp/index.js'
 // Agent system (autonomous loop)
 export * from './agent/index.js'
 // Authentication (API key + OAuth)
@@ -97,8 +39,6 @@ export * from './llm/index.js'
 export * from './lsp/index.js'
 // MCP (Model Context Protocol) client
 export * from './mcp/index.js'
-// Memory system (long-term, RAG)
-export * from './memory/index.js'
 // Model registry
 export * from './models/index.js'
 // Permission system

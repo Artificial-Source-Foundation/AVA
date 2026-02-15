@@ -10,4 +10,6 @@ pub use env::get_env_var;
 pub use fs_scope::allow_project_path;
 pub use greet::greet;
 pub use oauth::{oauth_copilot_device_poll, oauth_copilot_device_start, oauth_listen};
-pub use plugin_state::{get_plugins_state, set_plugins_state};
+pub use plugin_state::{
+    get_plugins_state, install_plugin, set_plugin_enabled, set_plugins_state, uninstall_plugin,
+};

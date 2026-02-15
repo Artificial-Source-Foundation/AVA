@@ -12,7 +12,6 @@
  * - Delete/rollback with confirmation dialog
  */
 
-import { Bookmark, Sparkles } from 'lucide-solid'
 import {
   type Component,
   createEffect,
@@ -27,10 +26,10 @@ import {
 import { useChat } from '../../hooks/useChat'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
-import type { Message } from '../../types'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
-import { MessageBubble } from './MessageBubble'
 import { ModelChangeIndicator } from './ModelChangeIndicator'
+import { MessageRow } from './message-list/message-row'
+import { MessageListEmpty, MessageListLoading, ScrollToBottomButton } from './message-list/sections'
 
 // ============================================================================
 // Component
@@ -43,6 +42,7 @@ export const MessageList: Component = () => {
   let scrollRaf: number | undefined
   const { settings } = useSettings()
   const [shouldAutoScroll, setShouldAutoScroll] = createSignal(true)
+  const [visibleLimit, setVisibleLimit] = createSignal(220)
   const [deleteTarget, setDeleteTarget] = createSignal<{
     messageId: string
     isLast: boolean
@@ -101,6 +101,17 @@ export const MessageList: Component = () => {
   // Match checkpoints to message indices
   const checkpointAtIndex = (msgIndex: number): { id: string; description: string } | null =>
     checkpointByIndex().get(msgIndex) ?? null
+
+  const visibleMessages = createMemo(() => {
+    const all = messages()
+    const limit = visibleLimit()
+    if (all.length <= limit) return all
+    return all.slice(-limit)
+  })
+
+  const hiddenMessageCount = createMemo(() =>
+    Math.max(0, messages().length - visibleMessages().length)
+  )
 
   // Track which message is the last one (for delete vs rollback label)
   const lastMessageId = createMemo(() => {
@@ -175,45 +186,8 @@ export const MessageList: Component = () => {
     }
   }
 
-  const renderMessageRow = (
-    msg: Message,
-    msgIndex: number,
-    isStreamingRow: boolean,
-    showCheckpoint = true
-  ) => {
-    const ckpt = showCheckpoint ? checkpointAtIndex(msgIndex) : undefined
-
-    return (
-      <div class="density-py">
-        <MessageBubble
-          message={msg}
-          isEditing={editingMessageId() === msg.id}
-          isRetrying={retryingMessageId() === msg.id}
-          isStreaming={isStreamingRow}
-          isLastMessage={msg.id === lastMessageId()}
-          onStartEdit={() => startEditing(msg.id)}
-          onCancelEdit={stopEditing}
-          onSaveEdit={(content) => editAndResend(msg.id, content)}
-          onRetry={() => retryMessage(msg.id)}
-          onRegenerate={() => regenerateResponse(msg.id)}
-          onCopy={() => {}}
-          onDelete={() => handleDeleteRequest(msg.id)}
-        />
-        <Show when={ckpt}>
-          <div class="flex items-center gap-2 py-1 text-[10px] text-[var(--text-muted)]">
-            <Bookmark class="w-3 h-3 text-[var(--accent)]" />
-            <span>{ckpt!.description}</span>
-            <button
-              type="button"
-              onClick={() => rollbackToCheckpoint(ckpt!.id)}
-              class="text-[var(--accent)] hover:underline"
-            >
-              Restore
-            </button>
-          </div>
-        </Show>
-      </div>
-    )
+  const loadOlderMessages = () => {
+    setVisibleLimit((limit) => limit + 220)
   }
 
   // Delete/rollback handlers
@@ -238,53 +212,57 @@ export const MessageList: Component = () => {
       >
         {/* Loading skeleton */}
         <Show when={isLoadingMessages()}>
-          <div class="space-y-4 animate-pulse">
-            <div class="h-16 bg-[var(--surface-raised)] rounded-[var(--radius-lg)] w-2/3" />
-            <div class="h-24 bg-[var(--surface-raised)] rounded-[var(--radius-lg)] w-3/4 ml-auto" />
-            <div class="h-16 bg-[var(--surface-raised)] rounded-[var(--radius-lg)] w-2/3" />
-          </div>
+          <MessageListLoading />
         </Show>
 
         {/* Empty state */}
         <Show when={!isLoadingMessages() && messages().length === 0}>
-          <div class="flex flex-col items-center justify-center h-full">
-            <div
-              class="
-                w-16 h-16 mb-6
-                rounded-[var(--radius-xl)]
-                bg-[var(--accent-subtle)]
-                flex items-center justify-center
-              "
-            >
-              <Sparkles class="w-8 h-8 text-[var(--accent)]" />
-            </div>
-            <h2 class="text-xl font-semibold text-[var(--text-primary)] font-display">
-              Welcome to AVA
-            </h2>
-            <p class="text-sm text-[var(--text-tertiary)] mt-2 max-w-sm text-center">
-              Your AI coding assistant is ready. Start a conversation to begin.
-            </p>
-          </div>
+          <MessageListEmpty />
         </Show>
 
         {/* Message items */}
         <Show when={!isLoadingMessages() && messages().length > 0}>
           <div>
-            <For each={messages()}>
+            <Show when={hiddenMessageCount() > 0}>
+              <div class="mb-2 flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={loadOlderMessages}
+                  class="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2.5 py-1 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                >
+                  Load {Math.min(220, hiddenMessageCount())} older messages ({hiddenMessageCount()}{' '}
+                  hidden)
+                </button>
+              </div>
+            </Show>
+
+            <For each={visibleMessages()}>
               {(msg) => {
-                const msgIndex = messageIndexById().get(msg.id) ?? -1
-                const modelChange = modelChangeById().get(msg.id)
+                const msgIndex = () => messageIndexById().get(msg.id) ?? -1
+                const modelChange = () => modelChangeById().get(msg.id)
 
                 return (
                   <>
-                    <Show when={modelChange}>
-                      <ModelChangeIndicator from={modelChange!.from} to={modelChange!.to} />
+                    <Show when={modelChange()}>
+                      {(change) => <ModelChangeIndicator from={change().from} to={change().to} />}
                     </Show>
-                    {renderMessageRow(
-                      msg,
-                      msgIndex,
-                      isStreaming() && msg.id === lastMessageId() && msg.role === 'assistant'
-                    )}
+                    <MessageRow
+                      message={msg}
+                      isEditing={editingMessageId() === msg.id}
+                      isRetrying={retryingMessageId() === msg.id}
+                      isStreaming={
+                        isStreaming() && msg.id === lastMessageId() && msg.role === 'assistant'
+                      }
+                      isLastMessage={msg.id === lastMessageId()}
+                      checkpoint={checkpointAtIndex(msgIndex()) ?? undefined}
+                      onStartEdit={() => startEditing(msg.id)}
+                      onCancelEdit={stopEditing}
+                      onSaveEdit={(content) => editAndResend(msg.id, content)}
+                      onRetry={() => retryMessage(msg.id)}
+                      onRegenerate={() => regenerateResponse(msg.id)}
+                      onDelete={() => handleDeleteRequest(msg.id)}
+                      onRestoreCheckpoint={rollbackToCheckpoint}
+                    />
                   </>
                 )
               }}
@@ -295,37 +273,7 @@ export const MessageList: Component = () => {
 
       {/* Scroll to bottom button */}
       <Show when={!shouldAutoScroll() && messages().length > 0}>
-        <button
-          type="button"
-          onClick={scrollToBottom}
-          class="
-            absolute bottom-4 right-8
-            p-2 rounded-full
-            bg-[var(--surface-raised)] border border-[var(--border-subtle)]
-            shadow-md
-            text-[var(--text-secondary)]
-            hover:bg-[var(--accent)] hover:text-white hover:border-[var(--accent)]
-            transition-all duration-[var(--duration-fast)]
-            z-10
-          "
-          title="Scroll to bottom"
-        >
-          <svg
-            class="w-5 h-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            aria-labelledby="scroll-icon-title"
-          >
-            <title id="scroll-icon-title">Scroll to bottom</title>
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M19 14l-7 7m0 0l-7-7m7 7V3"
-            />
-          </svg>
-        </button>
+        <ScrollToBottomButton onClick={scrollToBottom} />
       </Show>
 
       {/* Delete confirmation dialog */}

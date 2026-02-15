@@ -1,9 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { checkStoredOAuth, clearProviderCredentials } from './providers-tab-helpers'
-
-vi.mock('@ava/core', () => ({
-  removeStoredAuth: vi.fn(),
-}))
 
 function writeCredentials(payload: Record<string, unknown>) {
   localStorage.setItem('ava_credentials', JSON.stringify(payload))

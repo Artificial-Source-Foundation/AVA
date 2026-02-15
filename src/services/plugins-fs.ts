@@ -1,10 +1,18 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
-import type { PluginState } from '../stores/plugins'
+import type { PluginState } from '../types/plugin'
 import { logWarn } from './logger'
 
 const STORAGE_KEY = 'ava_plugins_state'
 
 type PluginStateMap = Record<string, PluginState>
+
+function assertPluginInstalled(pluginId: string, state: PluginStateMap): PluginState {
+  const current = state[pluginId] ?? { installed: false, enabled: false }
+  if (!current.installed) {
+    throw new Error(`Plugin '${pluginId}' must be installed before enabling/disabling.`)
+  }
+  return current
+}
 
 function readLocalState(): PluginStateMap {
   try {
@@ -38,16 +46,38 @@ export async function loadPluginsState(): Promise<PluginStateMap> {
   }
 }
 
-export async function savePluginsState(state: PluginStateMap): Promise<void> {
+export async function installPlugin(pluginId: string): Promise<PluginState> {
   if (!isTauri()) {
-    writeLocalState(state)
-    return
+    const state = readLocalState()
+    const next = { installed: true, enabled: true }
+    writeLocalState({ ...state, [pluginId]: next })
+    return next
   }
 
-  try {
-    await invoke('set_plugins_state', { state })
-  } catch (err) {
-    logWarn('plugins-fs', 'Failed to persist plugin state in tauri, writing local fallback', err)
-    writeLocalState(state)
+  return invoke<PluginState>('install_plugin', { pluginId })
+}
+
+export async function uninstallPlugin(pluginId: string): Promise<PluginState> {
+  if (!isTauri()) {
+    const state = readLocalState()
+    assertPluginInstalled(pluginId, state)
+    const next = { ...state }
+    delete next[pluginId]
+    writeLocalState(next)
+    return { installed: false, enabled: false }
   }
+
+  return invoke<PluginState>('uninstall_plugin', { pluginId })
+}
+
+export async function setPluginEnabled(pluginId: string, enabled: boolean): Promise<PluginState> {
+  if (!isTauri()) {
+    const state = readLocalState()
+    assertPluginInstalled(pluginId, state)
+    const next = { installed: true, enabled }
+    writeLocalState({ ...state, [pluginId]: next })
+    return next
+  }
+
+  return invoke<PluginState>('set_plugin_enabled', { pluginId, enabled })
 }

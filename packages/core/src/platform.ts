@@ -101,6 +101,9 @@ export interface IFileSystem {
 
   /** Glob pattern matching */
   glob(pattern: string, cwd: string): Promise<string[]>
+
+  /** Resolve symlinks and return canonical path (TOCTOU mitigation) */
+  realpath(path: string): Promise<string>
 }
 
 /** Shell command execution */

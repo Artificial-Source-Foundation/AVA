@@ -237,7 +237,7 @@ export const DEFAULT_SETTINGS: Settings = {
   context: DEFAULT_CONTEXT_SETTINGS,
   memory: DEFAULT_MEMORY_SETTINGS,
   ui: DEFAULT_UI_SETTINGS,
-  git: { enabled: true, autoCommit: false, branchPrefix: 'estela/', messagePrefix: '[estela]' },
+  git: { enabled: true, autoCommit: false, branchPrefix: 'ava/', messagePrefix: '[ava]' },
 }
 
 // ============================================================================
@@ -267,8 +267,8 @@ export type CredentialProvider =
   | 'cohere'
   | 'mistral'
 
-/** Credential key format: estela:{provider}:api_key */
-export type CredentialKey = `estela:${CredentialProvider}:api_key`
+/** Credential key format: ava:{provider}:api_key */
+export type CredentialKey = `ava:${CredentialProvider}:api_key`
 
 /** Credential provider info */
 export interface CredentialProviderInfo {

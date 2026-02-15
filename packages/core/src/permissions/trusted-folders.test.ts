@@ -16,7 +16,7 @@ describe('TrustedFolderManager', () => {
   beforeEach(async () => {
     testDir = join(
       tmpdir(),
-      `estela-trust-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      `ava-trust-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     )
     await mkdir(testDir, { recursive: true })
     storagePath = join(testDir, 'trusted-folders.json')

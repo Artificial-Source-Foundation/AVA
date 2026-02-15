@@ -40,10 +40,10 @@ Usage:
 - List available skills: { "name": "", "list": true }
 
 Skill locations (searched in order):
-1. .estela/skills/ (project-local)
-2. ~/.estela/skills/ (user-global)
+1. .ava/skills/ (project-local)
+2. ~/.ava/skills/ (user-global)
 
-Example skill file (.estela/skills/typescript/SKILL.md):
+Example skill file (.ava/skills/typescript/SKILL.md):
 \`\`\`markdown
 ---
 name: typescript-patterns
@@ -84,8 +84,8 @@ When writing TypeScript:
             output: `No skills found.
 
 Skills are loaded from:
-- .estela/skills/*/SKILL.md (project-local)
-- ~/.estela/skills/*/SKILL.md (user-global)
+- .ava/skills/*/SKILL.md (project-local)
+- ~/.ava/skills/*/SKILL.md (user-global)
 
 Create a skill by adding a SKILL.md file with YAML frontmatter:
 \`\`\`markdown

@@ -2,7 +2,7 @@
  * Settings Storage
  *
  * File-based storage for settings using platform abstraction.
- * Settings are stored in ~/.estela/settings.json
+ * Settings are stored in ~/.ava/settings.json
  */
 
 import { getPlatform } from '../platform.js'
@@ -13,7 +13,7 @@ import type { Settings } from './types.js'
 // ============================================================================
 
 /** Settings directory path */
-const SETTINGS_DIR = '~/.estela'
+const SETTINGS_DIR = '~/.ava'
 
 /** Settings file name */
 const SETTINGS_FILE = 'settings.json'

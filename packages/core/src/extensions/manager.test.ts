@@ -18,10 +18,7 @@ describe('ExtensionManager', () => {
   let manager: ExtensionManager
 
   beforeEach(async () => {
-    testDir = join(
-      tmpdir(),
-      `estela-ext-mgr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    )
+    testDir = join(tmpdir(), `ava-ext-mgr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
     extensionsDir = join(testDir, 'extensions')
     enablementPath = join(testDir, 'enablement.json')
     await mkdir(extensionsDir, { recursive: true })

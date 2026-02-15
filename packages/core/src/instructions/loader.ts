@@ -19,7 +19,7 @@ import type {
 const DEFAULT_FILENAMES = ['AGENTS.md', 'CLAUDE.md', 'instructions.md']
 
 /** Default global instructions directory */
-const DEFAULT_GLOBAL_DIR = '~/.estela'
+const DEFAULT_GLOBAL_DIR = '~/.ava'
 
 /** Maximum files to load */
 const DEFAULT_MAX_FILES = 10

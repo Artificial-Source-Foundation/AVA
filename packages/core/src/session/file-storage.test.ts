@@ -57,7 +57,7 @@ describe('FileSessionStorage', () => {
   let testDir: string
 
   beforeEach(async () => {
-    testDir = join(tmpdir(), `estela-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+    testDir = join(tmpdir(), `ava-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
     storage = new FileSessionStorage(testDir)
   })
 

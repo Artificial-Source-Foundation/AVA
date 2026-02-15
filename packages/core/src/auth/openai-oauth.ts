@@ -83,7 +83,7 @@ export async function authorizeOpenAI(): Promise<OAuthAuthorizationResult> {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'estela-cli/0.1.0',
+        'User-Agent': 'ava-cli/0.1.0',
       },
       body: JSON.stringify({ client_id: OPENAI_OAUTH_CONFIG.clientId }),
     }
@@ -115,7 +115,7 @@ export async function authorizeOpenAI(): Promise<OAuthAuthorizationResult> {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'User-Agent': 'estela-cli/0.1.0',
+              'User-Agent': 'ava-cli/0.1.0',
             },
             body: JSON.stringify({
               device_auth_id: deviceData.device_auth_id,

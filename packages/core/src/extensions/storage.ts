@@ -3,11 +3,11 @@
  * File system operations for extension installation and persistence.
  *
  * Storage layout:
- * ~/.estela/extensions/
+ * ~/.ava/extensions/
  *   {name}/
- *     estela-extension.json          - Extension config
- *     .estela-extension-install.json - Install metadata
- *     ESTELA.md                       - Context file (optional)
+ *     ava-extension.json          - Extension config
+ *     .ava-extension-install.json - Install metadata
+ *     AVA.md                       - Context file (optional)
  *     ...                             - Extension assets
  *   extension-enablement.json         - Global enablement state
  */
@@ -21,9 +21,9 @@ import type { EnablementData, InstallMetadata } from './types.js'
 // Constants
 // ============================================================================
 
-const CONFIG_DIR = '.estela'
+const CONFIG_DIR = '.ava'
 const EXTENSIONS_DIR = 'extensions'
-const INSTALL_METADATA_FILENAME = '.estela-extension-install.json'
+const INSTALL_METADATA_FILENAME = '.ava-extension-install.json'
 const ENABLEMENT_FILENAME = 'extension-enablement.json'
 
 export { INSTALL_METADATA_FILENAME }

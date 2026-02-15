@@ -27,7 +27,7 @@ import {
 
 /**
  * Configuration for command permissions
- * Can be set via ESTELA_COMMAND_PERMISSIONS environment variable
+ * Can be set via AVA_COMMAND_PERMISSIONS environment variable
  */
 export interface CommandPermissionConfig {
   /** Glob patterns for allowed commands */
@@ -89,16 +89,16 @@ export class CommandValidator {
   }
 
   /**
-   * Parse config from ESTELA_COMMAND_PERMISSIONS environment variable
+   * Parse config from AVA_COMMAND_PERMISSIONS environment variable
    */
   private parseConfigFromEnv(): CommandPermissionConfig | null {
-    const envValue = process.env.ESTELA_COMMAND_PERMISSIONS
+    const envValue = process.env.AVA_COMMAND_PERMISSIONS
     if (!envValue) return null
 
     try {
       return JSON.parse(envValue) as CommandPermissionConfig
     } catch {
-      console.warn('Invalid ESTELA_COMMAND_PERMISSIONS JSON, ignoring')
+      console.warn('Invalid AVA_COMMAND_PERMISSIONS JSON, ignoring')
       return null
     }
   }

@@ -3,7 +3,7 @@
  * Core lifecycle management for extensions.
  *
  * Responsibilities:
- * - Discover and load installed extensions from ~/.estela/extensions/
+ * - Discover and load installed extensions from ~/.ava/extensions/
  * - Install extensions from local paths, git repos, or symlinks
  * - Enable/disable extensions per-user
  * - Emit lifecycle events

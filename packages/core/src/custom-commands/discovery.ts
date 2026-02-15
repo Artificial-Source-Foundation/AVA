@@ -3,8 +3,8 @@
  * Scans directories for TOML command files and resolves command names.
  *
  * Discovery order (higher priority wins):
- * 1. Project-level: <project>/.estela/commands/
- * 2. User-level: ~/.estela/commands/
+ * 1. Project-level: <project>/.ava/commands/
+ * 2. User-level: ~/.ava/commands/
  *
  * Naming convention:
  * - commands/test.toml → "test"
@@ -23,7 +23,7 @@ import type { CommandDiscoveryConfig, CommandFileInfo } from './types.js'
 const TOML_EXT = '.toml'
 const NAMESPACE_SEPARATOR = ':'
 const COMMANDS_DIR_NAME = 'commands'
-const CONFIG_DIR_NAME = '.estela'
+const CONFIG_DIR_NAME = '.ava'
 
 // ============================================================================
 // Discovery

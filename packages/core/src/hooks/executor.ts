@@ -3,8 +3,8 @@
  * Discovers and executes hook scripts
  *
  * Hook discovery order:
- * 1. Global: ~/.estela/hooks/{HookType}
- * 2. Project: .estela/hooks/{HookType}
+ * 1. Global: ~/.ava/hooks/{HookType}
+ * 2. Project: .ava/hooks/{HookType}
  *
  * Both run if present (global first, then project)
  *
@@ -40,10 +40,10 @@ import type {
 // ============================================================================
 
 /** Global hooks directory */
-const GLOBAL_HOOKS_DIR = path.join(homedir(), '.estela', 'hooks')
+const GLOBAL_HOOKS_DIR = path.join(homedir(), '.ava', 'hooks')
 
 /** Project hooks directory (relative to working directory) */
-const PROJECT_HOOKS_DIR = '.estela/hooks'
+const PROJECT_HOOKS_DIR = '.ava/hooks'
 
 /** All hook types in execution order */
 const ALL_HOOK_TYPES: HookType[] = [
@@ -216,8 +216,8 @@ async function executeHookScript(
       cwd: config.workingDirectory,
       env: {
         ...process.env,
-        ESTELA_HOOK_TYPE: location.type,
-        ESTELA_HOOK_SOURCE: location.source,
+        AVA_HOOK_TYPE: location.type,
+        AVA_HOOK_SOURCE: location.source,
       },
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: config.timeout,

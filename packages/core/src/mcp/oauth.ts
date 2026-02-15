@@ -82,7 +82,8 @@ interface TokenStorage {
 // Constants
 // ============================================================================
 
-const TOKEN_FILE = '.estela/mcp-tokens.json'
+const LEGACY_TOKEN_FILE = '.ava/mcp-tokens.json'
+const CREDENTIAL_KEY_PREFIX = 'mcp-oauth-tokens'
 const STATE_EXPIRY_MS = 10 * 60 * 1000 // 10 minutes
 const TOKEN_STORAGE_VERSION = 1
 
@@ -102,7 +103,7 @@ let cacheWorkspaceRoot: string | null = null
 // ============================================================================
 
 /**
- * Load tokens from storage
+ * Load tokens from credential store (with one-time migration from legacy file)
  */
 async function loadTokens(workspaceRoot: string): Promise<TokenStorage> {
   if (tokenCache && cacheWorkspaceRoot === workspaceRoot) {
@@ -110,39 +111,55 @@ async function loadTokens(workspaceRoot: string): Promise<TokenStorage> {
   }
 
   const platform = getPlatform()
-  const filePath = `${workspaceRoot}/${TOKEN_FILE}`
 
+  // Try credential store first
   try {
-    const exists = await platform.fs.exists(filePath)
-    if (!exists) {
-      tokenCache = { version: TOKEN_STORAGE_VERSION, tokens: {}, lastModified: Date.now() }
+    const stored = await platform.credentials.get(CREDENTIAL_KEY_PREFIX)
+    if (stored) {
+      tokenCache = JSON.parse(stored) as TokenStorage
       cacheWorkspaceRoot = workspaceRoot
       return tokenCache
     }
-
-    const content = await platform.fs.readFile(filePath)
-    tokenCache = JSON.parse(content) as TokenStorage
-    cacheWorkspaceRoot = workspaceRoot
-    return tokenCache
-  } catch (error) {
-    console.error('Failed to load MCP OAuth tokens:', error)
-    tokenCache = { version: TOKEN_STORAGE_VERSION, tokens: {}, lastModified: Date.now() }
-    cacheWorkspaceRoot = workspaceRoot
-    return tokenCache
+  } catch {
+    // Credential store not available or corrupt — continue
   }
+
+  // One-time migration from legacy plaintext file
+  const legacyPath = `${workspaceRoot}/${LEGACY_TOKEN_FILE}`
+  try {
+    const exists = await platform.fs.exists(legacyPath)
+    if (exists) {
+      const content = await platform.fs.readFile(legacyPath)
+      const legacy = JSON.parse(content) as TokenStorage
+      // Migrate to credential store
+      await platform.credentials.set(CREDENTIAL_KEY_PREFIX, JSON.stringify(legacy))
+      // Remove legacy file
+      try {
+        await platform.fs.remove(legacyPath)
+      } catch {
+        // Non-critical — legacy file stays but tokens are now in credential store
+      }
+      tokenCache = legacy
+      cacheWorkspaceRoot = workspaceRoot
+      return tokenCache
+    }
+  } catch {
+    // Legacy file doesn't exist or can't be read
+  }
+
+  tokenCache = { version: TOKEN_STORAGE_VERSION, tokens: {}, lastModified: Date.now() }
+  cacheWorkspaceRoot = workspaceRoot
+  return tokenCache
 }
 
 /**
- * Save tokens to storage
+ * Save tokens to credential store
  */
 async function saveTokens(workspaceRoot: string, storage: TokenStorage): Promise<void> {
   const platform = getPlatform()
-  const filePath = `${workspaceRoot}/${TOKEN_FILE}`
 
   storage.lastModified = Date.now()
-  const content = JSON.stringify(storage, null, 2)
-
-  await platform.fs.writeFile(filePath, content)
+  await platform.credentials.set(CREDENTIAL_KEY_PREFIX, JSON.stringify(storage))
   tokenCache = storage
   cacheWorkspaceRoot = workspaceRoot
 }

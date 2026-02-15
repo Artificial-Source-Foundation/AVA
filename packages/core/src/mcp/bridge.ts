@@ -1,6 +1,6 @@
 /**
  * MCP Tool Bridge
- * Converts MCP tools to Estela tool format and registers them
+ * Converts MCP tools to AVA tool format and registers them
  */
 
 import { ToolErrorType } from '../tools/errors.js'
@@ -14,7 +14,7 @@ import type { DiscoveredMCPTool, MCPToolContent } from './types.js'
 // ============================================================================
 
 /**
- * Convert MCP tool to Estela tool format
+ * Convert MCP tool to AVA tool format
  */
 export function createToolFromMCP(mcpTool: DiscoveredMCPTool): Tool {
   const definition: ToolDefinition = {
@@ -48,7 +48,7 @@ export function createToolFromMCP(mcpTool: DiscoveredMCPTool): Tool {
         // Execute MCP tool
         const result = await mcpTool.execute(params)
 
-        // Convert MCP result to Estela format
+        // Convert MCP result to AVA format
         const output = formatMCPContent(result.content)
 
         return {

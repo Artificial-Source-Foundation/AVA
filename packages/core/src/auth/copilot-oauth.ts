@@ -34,7 +34,7 @@ export async function authorizeCopilot(): Promise<OAuthAuthorizationResult> {
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json',
-      'User-Agent': 'estela-cli/0.1.0',
+      'User-Agent': 'ava-cli/0.1.0',
     },
     body: JSON.stringify({
       client_id: COPILOT_OAUTH_CONFIG.clientId,
@@ -64,7 +64,7 @@ export async function authorizeCopilot(): Promise<OAuthAuthorizationResult> {
           headers: {
             Accept: 'application/json',
             'Content-Type': 'application/json',
-            'User-Agent': 'estela-cli/0.1.0',
+            'User-Agent': 'ava-cli/0.1.0',
           },
           body: JSON.stringify({
             client_id: COPILOT_OAUTH_CONFIG.clientId,

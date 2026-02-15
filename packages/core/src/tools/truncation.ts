@@ -24,7 +24,7 @@ export const TRUNCATION_LIMITS = {
 } as const
 
 /** Directory for storing full output files */
-const OUTPUT_DIR = '.estela/tool-output'
+const OUTPUT_DIR = '.ava/tool-output'
 
 // ============================================================================
 // Types
@@ -217,7 +217,10 @@ async function persistOutput(
   outputId?: string
 ): Promise<string> {
   const fs = getPlatform().fs
-  const id = outputId ?? `output-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  const rawId = outputId ?? `output-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+  // Sanitize: extract basename and strip non-alphanumeric/dash/underscore characters
+  const basename = rawId.split('/').pop()!.split('\\').pop()!
+  const id = basename.replace(/[^a-zA-Z0-9_-]/g, '_')
   const dirPath = `${workingDirectory}/${OUTPUT_DIR}`
   const filePath = `${dirPath}/${id}.txt`
 

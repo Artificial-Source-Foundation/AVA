@@ -2,7 +2,7 @@
  * Extension Manifest
  * Loading and validation of extension configuration files.
  *
- * Each extension declares its capabilities in `estela-extension.json`:
+ * Each extension declares its capabilities in `ava-extension.json`:
  * - name and version (required)
  * - MCP servers, context files, excluded tools (optional)
  */
@@ -16,9 +16,9 @@ import type { ExtensionConfig, InstallMetadata } from './types.js'
 // Constants
 // ============================================================================
 
-export const CONFIG_FILENAME = 'estela-extension.json'
-export const INSTALL_METADATA_FILENAME = '.estela-extension-install.json'
-export const DEFAULT_CONTEXT_FILES = ['ESTELA.md']
+export const CONFIG_FILENAME = 'ava-extension.json'
+export const INSTALL_METADATA_FILENAME = '.ava-extension-install.json'
+export const DEFAULT_CONTEXT_FILES = ['AVA.md']
 
 /** Valid extension name pattern: alphanumeric + dashes */
 const NAME_PATTERN = /^[a-zA-Z0-9][-a-zA-Z0-9]*$/

@@ -1,8 +1,8 @@
 /**
  * ACP Session Store
  *
- * Bridges ACP sessions to Estela's SessionManager for persistence.
- * Maps ACP session IDs to Estela session IDs and handles save/load/resume.
+ * Bridges ACP sessions to AVA's SessionManager for persistence.
+ * Maps ACP session IDs to AVA session IDs and handles save/load/resume.
  */
 
 import { createFileSessionStorage } from '../session/file-storage.js'
@@ -22,10 +22,10 @@ const ACP_SESSION_PREFIX = 'ACP: '
 // ============================================================================
 
 /**
- * Manages ACP session persistence using Estela's SessionManager.
+ * Manages ACP session persistence using AVA's SessionManager.
  *
- * - Maps ACP session IDs → Estela session IDs
- * - Persists sessions to ~/.estela/sessions/
+ * - Maps ACP session IDs → AVA session IDs
+ * - Persists sessions to ~/.ava/sessions/
  * - Supports resume via `session/load`
  */
 export class AcpSessionStore {
@@ -54,7 +54,7 @@ export class AcpSessionStore {
 
     const info: AcpSessionInfo = {
       sessionId: acpSessionId,
-      estelaSessionId: session.id,
+      avaSessionId: session.id,
       workingDirectory,
       createdAt: Date.now(),
       lastActiveAt: Date.now(),
@@ -66,7 +66,7 @@ export class AcpSessionStore {
   }
 
   /**
-   * Get the Estela session for an ACP session ID
+   * Get the AVA session for an ACP session ID
    */
   async get(acpSessionId: string): Promise<SessionState | null> {
     this.ensureNotDisposed()
@@ -74,24 +74,24 @@ export class AcpSessionStore {
     const info = this.mappings.get(acpSessionId)
     if (!info) return null
 
-    return this.sessionManager.get(info.estelaSessionId)
+    return this.sessionManager.get(info.avaSessionId)
   }
 
   /**
-   * Load a previously persisted session by Estela session ID.
+   * Load a previously persisted session by AVA session ID.
    * Used by ACP's `session/load` capability.
    */
-  async load(estelaSessionId: string): Promise<SessionState | null> {
+  async load(avaSessionId: string): Promise<SessionState | null> {
     this.ensureNotDisposed()
 
-    const session = await this.sessionManager.get(estelaSessionId)
+    const session = await this.sessionManager.get(avaSessionId)
     if (!session) return null
 
     // Create a mapping for the loaded session
     const acpSessionId = `resumed-${Date.now()}`
     const info: AcpSessionInfo = {
       sessionId: acpSessionId,
-      estelaSessionId: session.id,
+      avaSessionId: session.id,
       workingDirectory: session.workingDirectory,
       createdAt: session.createdAt,
       lastActiveAt: Date.now(),
@@ -112,7 +112,7 @@ export class AcpSessionStore {
     if (!info) return
 
     info.lastActiveAt = Date.now()
-    await this.sessionManager.save(info.estelaSessionId)
+    await this.sessionManager.save(info.avaSessionId)
   }
 
   /**
@@ -123,7 +123,7 @@ export class AcpSessionStore {
 
     for (const info of this.mappings.values()) {
       info.lastActiveAt = Date.now()
-      await this.sessionManager.save(info.estelaSessionId)
+      await this.sessionManager.save(info.avaSessionId)
     }
   }
 
@@ -136,7 +136,7 @@ export class AcpSessionStore {
     const info = this.mappings.get(acpSessionId)
     if (!info) return
 
-    await this.sessionManager.delete(info.estelaSessionId)
+    await this.sessionManager.delete(info.avaSessionId)
     this.mappings.delete(acpSessionId)
   }
 
@@ -167,10 +167,10 @@ export class AcpSessionStore {
   }
 
   /**
-   * Get the Estela session ID for an ACP session
+   * Get the AVA session ID for an ACP session
    */
-  getEstelaId(acpSessionId: string): string | null {
-    return this.mappings.get(acpSessionId)?.estelaSessionId ?? null
+  getAVAId(acpSessionId: string): string | null {
+    return this.mappings.get(acpSessionId)?.avaSessionId ?? null
   }
 
   /**
@@ -215,7 +215,7 @@ export class AcpSessionStore {
     try {
       for (const info of this.mappings.values()) {
         info.lastActiveAt = Date.now()
-        await this.sessionManager.save(info.estelaSessionId)
+        await this.sessionManager.save(info.avaSessionId)
       }
     } catch {
       // Best-effort save during dispose

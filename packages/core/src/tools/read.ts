@@ -6,7 +6,7 @@
 import { getPlatform } from '../platform.js'
 import { ToolError, ToolErrorType } from './errors.js'
 import type { Tool, ToolContext, ToolResult } from './types.js'
-import { formatLineNumber, isBinaryFile, LIMITS, resolvePath, truncate } from './utils.js'
+import { formatLineNumber, isBinaryFile, LIMITS, resolvePathSafe, truncate } from './utils.js'
 
 // ============================================================================
 // Types
@@ -90,7 +90,7 @@ export const readTool: Tool<ReadParams> = {
 
   async execute(params: ReadParams, ctx: ToolContext): Promise<ToolResult> {
     const fs = getPlatform().fs
-    const filePath = resolvePath(params.path, ctx.workingDirectory)
+    const filePath = await resolvePathSafe(params.path, ctx.workingDirectory)
 
     // Check if file exists and is not a directory
     try {

@@ -19,12 +19,9 @@ describe('discoverCommands', () => {
   let userDir: string
 
   beforeEach(async () => {
-    testDir = join(
-      tmpdir(),
-      `estela-cmd-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    )
-    projectDir = join(testDir, 'project', '.estela', 'commands')
-    userDir = join(testDir, 'user', '.estela', 'commands')
+    testDir = join(tmpdir(), `ava-cmd-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+    projectDir = join(testDir, 'project', '.ava', 'commands')
+    userDir = join(testDir, 'user', '.ava', 'commands')
 
     await mkdir(projectDir, { recursive: true })
     await mkdir(userDir, { recursive: true })

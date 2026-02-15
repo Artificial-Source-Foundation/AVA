@@ -2,7 +2,7 @@
  * Persistent Approval Storage
  *
  * Stores "always allow" approvals across sessions
- * Saves to .estela/permissions.json
+ * Saves to .ava/permissions.json
  */
 
 import { getPlatform } from '../platform.js'
@@ -48,7 +48,7 @@ export interface PersistentApprovalsData {
 // ============================================================================
 
 const CURRENT_VERSION = 1
-const PERMISSIONS_FILE = '.estela/permissions.json'
+const PERMISSIONS_FILE = '.ava/permissions.json'
 
 // ============================================================================
 // In-Memory Cache
@@ -132,7 +132,7 @@ export async function savePersistentApprovals(
   const filePath = getPermissionsFilePath(workspaceRoot)
 
   // Ensure directory exists
-  const dirPath = `${workspaceRoot}/.estela`
+  const dirPath = `${workspaceRoot}/.ava`
   const dirExists = await platform.fs.exists(dirPath)
   if (!dirExists) {
     // Create the directory by creating and writing a placeholder

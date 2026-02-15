@@ -105,9 +105,9 @@ export interface CommandFileInfo {
  * Discovery locations for custom commands
  */
 export interface CommandDiscoveryConfig {
-  /** Project-level commands directory (e.g., <project>/.estela/commands/) */
+  /** Project-level commands directory (e.g., <project>/.ava/commands/) */
   projectDir?: string
-  /** User-level commands directory (e.g., ~/.estela/commands/) */
+  /** User-level commands directory (e.g., ~/.ava/commands/) */
   userDir?: string
   /** Additional custom directories */
   extraDirs?: string[]

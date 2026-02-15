@@ -6,7 +6,7 @@
 import { getPlatform } from '../platform.js'
 import { ToolError, ToolErrorType } from './errors.js'
 import type { Tool, ToolContext, ToolResult } from './types.js'
-import { resolvePath } from './utils.js'
+import { resolvePathSafe } from './utils.js'
 
 // ============================================================================
 // Types
@@ -63,7 +63,7 @@ export const deleteTool: Tool<DeleteParams> = {
 
   async execute(params: DeleteParams, ctx: ToolContext): Promise<ToolResult> {
     const fs = getPlatform().fs
-    const filePath = resolvePath(params.path, ctx.workingDirectory)
+    const filePath = await resolvePathSafe(params.path, ctx.workingDirectory)
 
     // Check abort signal
     if (ctx.signal.aborted) {

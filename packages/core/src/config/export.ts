@@ -239,7 +239,7 @@ export async function previewImport(
  */
 export async function backupSettings(manager: SettingsManager): Promise<string> {
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const backupPath = `~/.estela/settings-backup-${timestamp}.json`
+  const backupPath = `~/.ava/settings-backup-${timestamp}.json`
 
   await exportFromManager(manager, backupPath)
   return backupPath

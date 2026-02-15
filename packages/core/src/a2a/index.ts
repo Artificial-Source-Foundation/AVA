@@ -1,7 +1,7 @@
 /**
  * A2A (Agent-to-Agent) Protocol
  *
- * Exposes Estela as an A2A-compatible agent over HTTP.
+ * Exposes AVA as an A2A-compatible agent over HTTP.
  *
  * @module a2a
  */

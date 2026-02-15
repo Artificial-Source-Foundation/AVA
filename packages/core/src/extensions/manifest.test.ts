@@ -24,7 +24,7 @@ describe('manifest', () => {
   beforeEach(async () => {
     testDir = join(
       tmpdir(),
-      `estela-ext-manifest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      `ava-ext-manifest-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     )
     await mkdir(testDir, { recursive: true })
   })
@@ -182,11 +182,11 @@ describe('manifest', () => {
 
   describe('getContextFilePaths', () => {
     it('should return default context files that exist', async () => {
-      await writeFile(join(testDir, 'ESTELA.md'), '# Context', 'utf-8')
+      await writeFile(join(testDir, 'AVA.md'), '# Context', 'utf-8')
 
       const paths = getContextFilePaths({ name: 'test', version: '1.0.0' }, testDir)
       expect(paths).toHaveLength(1)
-      expect(paths[0]).toContain('ESTELA.md')
+      expect(paths[0]).toContain('AVA.md')
     })
 
     it('should return empty array if no context files exist', () => {
@@ -233,11 +233,11 @@ describe('manifest', () => {
 
   describe('constants', () => {
     it('should have correct config filename', () => {
-      expect(CONFIG_FILENAME).toBe('estela-extension.json')
+      expect(CONFIG_FILENAME).toBe('ava-extension.json')
     })
 
     it('should have correct default context files', () => {
-      expect(DEFAULT_CONTEXT_FILES).toEqual(['ESTELA.md'])
+      expect(DEFAULT_CONTEXT_FILES).toEqual(['AVA.md'])
     })
   })
 })

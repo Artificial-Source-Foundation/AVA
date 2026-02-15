@@ -13,10 +13,10 @@ import type { Skill, SkillDiscoveryConfig, SkillDiscoveryResult } from './types.
 // ============================================================================
 
 /** Default project skill directory name */
-const DEFAULT_PROJECT_SKILL_DIR = '.estela/skills'
+const DEFAULT_PROJECT_SKILL_DIR = '.ava/skills'
 
 /** Default user skill directory */
-const DEFAULT_USER_SKILL_DIR = '.estela/skills'
+const DEFAULT_USER_SKILL_DIR = '.ava/skills'
 
 // ============================================================================
 // Discovery Functions

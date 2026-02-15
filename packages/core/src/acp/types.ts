@@ -2,7 +2,7 @@
  * ACP (Agent Client Protocol) Types
  *
  * Type definitions for the ACP integration layer.
- * These types bridge between the ACP protocol and Estela's internal systems.
+ * These types bridge between the ACP protocol and AVA's internal systems.
  */
 
 // ============================================================================
@@ -13,8 +13,8 @@
 export interface AcpSessionInfo {
   /** Session ID (ACP protocol) */
   sessionId: string
-  /** Mapped Estela session ID (from SessionManager) */
-  estelaSessionId: string
+  /** Mapped AVA session ID (from SessionManager) */
+  avaSessionId: string
   /** Working directory for this session */
   workingDirectory: string
   /** When the session was created */

@@ -564,7 +564,7 @@ async function executePty(
 /**
  * Validate command for security before execution.
  * Uses the global CommandValidator which can be configured via:
- * - Environment variable: ESTELA_COMMAND_PERMISSIONS
+ * - Environment variable: AVA_COMMAND_PERMISSIONS
  * - Programmatic API: setCommandPermissions()
  *
  * Security checks:
@@ -626,7 +626,7 @@ function formatValidationError(result: CommandValidationResult): string {
       if (result.failedSegment) {
         parts.push(`Unmatched segment: ${result.failedSegment}`)
       }
-      parts.push('Configure ESTELA_COMMAND_PERMISSIONS to allow this command.')
+      parts.push('Configure AVA_COMMAND_PERMISSIONS to allow this command.')
       break
 
     case 'redirect_detected':

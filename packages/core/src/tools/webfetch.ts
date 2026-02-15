@@ -27,8 +27,7 @@ interface WebFetchParams {
 const DEFAULT_MAX_CHARS = 50000
 
 /** User agent for requests */
-const USER_AGENT =
-  'Mozilla/5.0 (compatible; Estela/1.0; +https://github.com/estela) Estela WebFetch'
+const USER_AGENT = 'Mozilla/5.0 (compatible; AVA/1.0; +https://github.com/ava) AVA WebFetch'
 
 /** Request timeout in milliseconds */
 const REQUEST_TIMEOUT = 30000

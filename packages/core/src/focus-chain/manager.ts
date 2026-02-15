@@ -33,7 +33,7 @@ import {
  *
  * Provides task progress tracking through a markdown file.
  * Supports:
- * - Load/save from .estela/tasks.md
+ * - Load/save from .ava/tasks.md
  * - Add, update, remove tasks
  * - Progress calculation
  * - Event notifications

@@ -5,7 +5,7 @@
  * Users can mark directories as trusted, which causes file operations
  * within those directories to be auto-approved without confirmation.
  *
- * Storage: ~/.estela/trusted-folders.json
+ * Storage: ~/.ava/trusted-folders.json
  *
  * Usage:
  * ```ts
@@ -279,7 +279,7 @@ function isWithinDirectory(filePath: string, dirPath: string): boolean {
 
 function getDefaultStoragePath(): string {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? '.'
-  return join(home, '.estela', 'trusted-folders.json')
+  return join(home, '.ava', 'trusted-folders.json')
 }
 
 function isNotFoundError(err: unknown): boolean {

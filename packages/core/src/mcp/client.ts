@@ -56,7 +56,7 @@ export class MCPClientManager {
   private readonly clientName: string
   private readonly clientVersion: string
 
-  constructor(clientName = 'estela', clientVersion = '0.1.0') {
+  constructor(clientName = 'ava', clientVersion = '0.1.0') {
     this.clientName = clientName
     this.clientVersion = clientVersion
   }

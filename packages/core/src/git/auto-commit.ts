@@ -29,7 +29,7 @@ function getGitConfig(): GitConfig {
   try {
     return getSettingsManager().get('git')
   } catch {
-    return { enabled: true, autoCommit: false, branchPrefix: 'estela/', messagePrefix: '[estela]' }
+    return { enabled: true, autoCommit: false, branchPrefix: 'ava/', messagePrefix: '[ava]' }
   }
 }
 
@@ -125,9 +125,9 @@ export async function autoCommitIfEnabled(
 }
 
 /**
- * Undo the last auto-commit made by Estela.
+ * Undo the last auto-commit made by AVA.
  *
- * Finds the most recent commit with the Estela prefix and reverts it.
+ * Finds the most recent commit with the AVA prefix and reverts it.
  * Only reverts commits that match the configured message prefix.
  *
  * @param cwd - Working directory (project root)
@@ -141,16 +141,16 @@ export async function undoLastAutoCommit(cwd: string): Promise<GitResult> {
   const config = getGitConfig()
   const history = await getHistory({ limit: 20 }, cwd)
 
-  // Find the most recent Estela auto-commit
-  const estelaCommit = history.find((c) => c.message.startsWith(config.messagePrefix))
-  if (!estelaCommit) {
-    return { success: false, output: '', error: 'No Estela auto-commit found to undo' }
+  // Find the most recent AVA auto-commit
+  const avaCommit = history.find((c) => c.message.startsWith(config.messagePrefix))
+  if (!avaCommit) {
+    return { success: false, output: '', error: 'No AVA auto-commit found to undo' }
   }
 
   // Revert the commit (creates a new revert commit)
-  const result = await execGit(`revert --no-edit ${estelaCommit.sha}`, cwd)
+  const result = await execGit(`revert --no-edit ${avaCommit.sha}`, cwd)
   if (result.success) {
-    console.info(`[git-auto-commit] Reverted: ${estelaCommit.message}`)
+    console.info(`[git-auto-commit] Reverted: ${avaCommit.message}`)
   }
 
   return result

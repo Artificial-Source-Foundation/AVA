@@ -1,5 +1,5 @@
 /**
- * @estela/core Context Module
+ * @ava/core Context Module
  * Token tracking, compaction strategies, and context window management
  */
 

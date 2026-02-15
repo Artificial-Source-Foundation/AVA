@@ -17,7 +17,7 @@ describe('ExtensionStorage', () => {
   beforeEach(async () => {
     testDir = join(
       tmpdir(),
-      `estela-ext-storage-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      `ava-ext-storage-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     )
     extensionsDir = join(testDir, 'extensions')
     await mkdir(extensionsDir, { recursive: true })

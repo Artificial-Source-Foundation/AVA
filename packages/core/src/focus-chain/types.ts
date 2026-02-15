@@ -107,7 +107,7 @@ export interface FocusChainOptions {
  * Default options
  */
 export const DEFAULT_FOCUS_CHAIN_OPTIONS: Required<FocusChainOptions> = {
-  directory: '.estela',
+  directory: '.ava',
   fileName: 'tasks.md',
   watchFile: true,
   watchDebounce: 300,

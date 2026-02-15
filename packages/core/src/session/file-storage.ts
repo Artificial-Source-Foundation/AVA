@@ -1,9 +1,9 @@
 /**
  * File-Based Session Storage
- * Persists sessions to disk at ~/.estela/sessions/
+ * Persists sessions to disk at ~/.ava/sessions/
  *
  * Directory structure:
- *   ~/.estela/sessions/
+ *   ~/.ava/sessions/
  *     ├── <sessionId>.json          # Session state
  *     └── checkpoints/
  *         └── <sessionId>/
@@ -296,7 +296,7 @@ function isNotFoundError(err: unknown): boolean {
 /**
  * Create a file-based session storage at the default location.
  *
- * @param baseDir - Base directory (defaults to ~/.estela)
+ * @param baseDir - Base directory (defaults to ~/.ava)
  * @returns FileSessionStorage instance
  */
 export function createFileSessionStorage(baseDir?: string): FileSessionStorage {
@@ -305,9 +305,9 @@ export function createFileSessionStorage(baseDir?: string): FileSessionStorage {
 }
 
 /**
- * Get the default Estela base directory
+ * Get the default AVA base directory
  */
 function getDefaultBaseDir(): string {
   const home = process.env.HOME ?? process.env.USERPROFILE ?? '.'
-  return join(home, '.estela')
+  return join(home, '.ava')
 }

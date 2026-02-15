@@ -1,7 +1,7 @@
 /**
  * Built-in Slash Commands
  *
- * Core commands that ship with Estela
+ * Core commands that ship with AVA
  */
 
 import { getFocusChainManager } from '../../focus-chain/index.js'

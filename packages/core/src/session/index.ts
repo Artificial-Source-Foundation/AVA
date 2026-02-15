@@ -1,5 +1,5 @@
 /**
- * @estela/core Session Module
+ * @ava/core Session Module
  * Session state management, persistence, and checkpoints
  */
 

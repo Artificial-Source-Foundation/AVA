@@ -482,14 +482,11 @@ export class RecoveryManager {
     // Add to rolled back list
     this.state.rolledBackSteps.push(step)
 
-    // In a real implementation, this would:
-    // 1. Revert file changes using git or snapshots
-    // 2. Clean up any created resources
-    // 3. Reset state to before the step
-
+    // Rollback is not yet implemented — would need git or snapshot integration
     return {
-      success: true,
+      success: false,
       action: 'rolled_back',
+      error: 'Rollback not yet implemented. Manual intervention may be needed.',
     }
   }
 

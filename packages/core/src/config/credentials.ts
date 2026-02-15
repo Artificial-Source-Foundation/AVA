@@ -29,8 +29,8 @@ import type { CredentialKey, CredentialProvider, CredentialProviderInfo } from '
 // Constants
 // ============================================================================
 
-/** Key prefix for all Estela credentials */
-const KEY_PREFIX = 'estela'
+/** Key prefix for all AVA credentials */
+const KEY_PREFIX = 'ava'
 
 /** API key suffix */
 const API_KEY_SUFFIX = 'api_key'

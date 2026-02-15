@@ -2,7 +2,7 @@
  * ACP Mode Switching
  *
  * Manages plan/agent mode switching for ACP sessions.
- * Integrates with Estela's plan mode system to restrict tools
+ * Integrates with AVA's plan mode system to restrict tools
  * when in plan mode.
  */
 

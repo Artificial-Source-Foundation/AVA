@@ -7,11 +7,11 @@
  */
 
 // ============================================================================
-// Extension Config (on-disk format: estela-extension.json)
+// Extension Config (on-disk format: ava-extension.json)
 // ============================================================================
 
 /**
- * Extension configuration as stored in `estela-extension.json`.
+ * Extension configuration as stored in `ava-extension.json`.
  * This is the source-of-truth schema for what an extension declares.
  */
 export interface ExtensionConfig {
@@ -23,7 +23,7 @@ export interface ExtensionConfig {
   description?: string
   /** MCP servers provided by this extension */
   mcpServers?: Record<string, MCPServerExtConfig>
-  /** Context file names to load (default: ["ESTELA.md"]) */
+  /** Context file names to load (default: ["AVA.md"]) */
   contextFiles?: string | string[]
   /** Tool names to exclude when this extension is active */
   excludeTools?: string[]
@@ -43,7 +43,7 @@ export interface MCPServerExtConfig {
 }
 
 // ============================================================================
-// Install Metadata (on-disk format: .estela-extension-install.json)
+// Install Metadata (on-disk format: .ava-extension-install.json)
 // ============================================================================
 
 /** How the extension was installed */
@@ -51,7 +51,7 @@ export type InstallType = 'local' | 'link' | 'git'
 
 /**
  * Metadata about how an extension was installed.
- * Stored alongside the extension in `.estela-extension-install.json`.
+ * Stored alongside the extension in `.ava-extension-install.json`.
  */
 export interface InstallMetadata {
   /** Installation method */
@@ -118,7 +118,7 @@ export type ExtensionEventListener = (event: ExtensionEvent) => void
 export interface ExtensionManagerOptions {
   /** Working directory (for workspace-scoped enablement) */
   workspaceDir?: string
-  /** Custom extensions directory (default: ~/.estela/extensions/) */
+  /** Custom extensions directory (default: ~/.ava/extensions/) */
   extensionsDir?: string
   /** Custom enablement storage path */
   enablementPath?: string

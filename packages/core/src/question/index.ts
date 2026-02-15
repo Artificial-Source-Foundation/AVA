@@ -1,5 +1,5 @@
 /**
- * @estela/core Question Module
+ * @ava/core Question Module
  * LLM-to-user question system
  */
 

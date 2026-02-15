@@ -271,6 +271,33 @@ export function resolvePath(path: string, workingDirectory: string): string {
   return baseParts.join('/')
 }
 
+/**
+ * Resolve path with symlink resolution for TOCTOU mitigation.
+ * Resolves the path first, then calls realpath() to follow symlinks,
+ * and verifies the resolved path is still within the working directory.
+ *
+ * @throws Error if the resolved path escapes the working directory
+ */
+export async function resolvePathSafe(path: string, workingDirectory: string): Promise<string> {
+  const resolved = resolvePath(path, workingDirectory)
+
+  try {
+    const real = await getPlatform().fs.realpath(resolved)
+    // Verify the real path is still under the working directory
+    const realWorkDir = await getPlatform().fs.realpath(workingDirectory)
+    if (!real.startsWith(`${realWorkDir}/`) && real !== realWorkDir) {
+      throw new Error(`Path escapes working directory: ${path} resolves to ${real}`)
+    }
+    return real
+  } catch (err) {
+    // File doesn't exist yet — fall back to resolved path (e.g., for create operations)
+    if (err instanceof Error && 'code' in err && (err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return resolved
+    }
+    throw err
+  }
+}
+
 // ============================================================================
 // Pattern Matching
 // ============================================================================

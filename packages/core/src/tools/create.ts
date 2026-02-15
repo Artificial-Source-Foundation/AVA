@@ -7,7 +7,7 @@ import { getPlatform } from '../platform.js'
 import { ToolError, ToolErrorType } from './errors.js'
 import { sanitizeContent } from './sanitize.js'
 import type { Tool, ToolContext, ToolResult } from './types.js'
-import { LIMITS, resolvePath } from './utils.js'
+import { LIMITS, resolvePathSafe } from './utils.js'
 
 // ============================================================================
 // Types
@@ -87,7 +87,7 @@ export const createTool: Tool<CreateParams> = {
 
   async execute(params: CreateParams, ctx: ToolContext): Promise<ToolResult> {
     const fs = getPlatform().fs
-    const filePath = resolvePath(params.path, ctx.workingDirectory)
+    const filePath = await resolvePathSafe(params.path, ctx.workingDirectory)
 
     // Check abort signal
     if (ctx.signal.aborted) {

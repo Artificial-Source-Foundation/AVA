@@ -9,7 +9,7 @@
  *   getSettingsManager,
  *   getCredentialsManager,
  *   createAgentConfigFromSettings,
- * } from '@estela/core/config'
+ * } from '@ava/core/config'
  *
  * // Initialize settings
  * const settings = getSettingsManager()

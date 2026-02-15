@@ -3,8 +3,8 @@
  * TOML-based user-defined slash commands
  *
  * Discover, parse, and execute custom commands from:
- *   - <project>/.estela/commands/*.toml (project-level, higher priority)
- *   - ~/.estela/commands/*.toml (user-level, lower priority)
+ *   - <project>/.ava/commands/*.toml (project-level, higher priority)
+ *   - ~/.ava/commands/*.toml (user-level, lower priority)
  *
  * Template placeholders:
  *   @{path}     - File content injection

@@ -6,7 +6,7 @@
  *
  * Usage:
  * ```ts
- * import { getModel, getContextLimit, findModels } from '@estela/core/models'
+ * import { getModel, getContextLimit, findModels } from '@ava/core/models'
  *
  * const model = getModel('claude-sonnet-4')
  * const limit = getContextLimit('gpt-4o') // 128000

@@ -39,7 +39,7 @@ class AnthropicClient implements LLMClient {
         error: {
           type: 'auth',
           message:
-            'No Anthropic authentication configured. Set ESTELA_ANTHROPIC_API_KEY or use `estela auth anthropic` for OAuth.',
+            'No Anthropic authentication configured. Set AVA_ANTHROPIC_API_KEY or use `ava auth anthropic` for OAuth.',
         },
       }
       return

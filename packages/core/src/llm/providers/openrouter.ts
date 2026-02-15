@@ -39,7 +39,7 @@ class OpenRouterClient implements LLMClient {
         done: true,
         error: {
           type: 'auth',
-          message: 'No OpenRouter API key configured. Set ESTELA_OPENROUTER_API_KEY.',
+          message: 'No OpenRouter API key configured. Set AVA_OPENROUTER_API_KEY.',
         },
       }
       return
@@ -65,8 +65,8 @@ class OpenRouterClient implements LLMClient {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${auth.token}`,
-          'HTTP-Referer': 'https://estela.app',
-          'X-Title': 'Estela',
+          'HTTP-Referer': 'https://ava.app',
+          'X-Title': 'AVA',
         },
         body: JSON.stringify(body),
         signal,

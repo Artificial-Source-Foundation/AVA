@@ -60,7 +60,7 @@ class OpenAIClient implements LLMClient {
         error: {
           type: 'auth',
           message:
-            'No OpenAI authentication configured. Set ESTELA_OPENAI_API_KEY or use `estela auth openai` for OAuth.',
+            'No OpenAI authentication configured. Set AVA_OPENAI_API_KEY or use `ava auth openai` for OAuth.',
         },
       }
       return
@@ -83,7 +83,7 @@ class OpenAIClient implements LLMClient {
         headers['ChatGPT-Account-Id'] = accountId
       }
 
-      headers.originator = 'estela'
+      headers.originator = 'ava'
     } else {
       // Standard API key auth
       headers.Authorization = `Bearer ${auth.token}`
@@ -98,7 +98,7 @@ class OpenAIClient implements LLMClient {
 
       const oauthBody = {
         model: config.model,
-        instructions: systemInstructions || 'You are Estela, a coding assistant.',
+        instructions: systemInstructions || 'You are AVA, a coding assistant.',
         input: messages
           .filter((m) => m.role !== 'system')
           .map((m) => ({

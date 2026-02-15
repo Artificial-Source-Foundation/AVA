@@ -44,7 +44,7 @@ class GoogleClient implements LLMClient {
         error: {
           type: 'auth',
           message:
-            'No Google authentication configured. Set ESTELA_GOOGLE_API_KEY or use `estela auth google` for OAuth.',
+            'No Google authentication configured. Set AVA_GOOGLE_API_KEY or use `ava auth google` for OAuth.',
         },
       }
       return

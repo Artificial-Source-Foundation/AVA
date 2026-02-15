@@ -15,7 +15,7 @@ const PROVIDER: LLMProvider = 'ollama'
  * Get Ollama base URL from environment or default
  */
 function getBaseUrl(): string {
-  return process.env.ESTELA_OLLAMA_URL ?? process.env.OLLAMA_HOST ?? DEFAULT_BASE_URL
+  return process.env.AVA_OLLAMA_URL ?? process.env.OLLAMA_HOST ?? DEFAULT_BASE_URL
 }
 
 /**

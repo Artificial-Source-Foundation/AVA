@@ -40,7 +40,7 @@ class KimiClient implements LLMClient {
         done: true,
         error: {
           type: 'auth',
-          message: 'No Moonshot API key configured. Set ESTELA_KIMI_API_KEY.',
+          message: 'No Moonshot API key configured. Set AVA_KIMI_API_KEY.',
         },
       }
       return

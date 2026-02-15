@@ -40,7 +40,7 @@ class GLMClient implements LLMClient {
         done: true,
         error: {
           type: 'auth',
-          message: 'No Zhipu AI API key configured. Set ESTELA_GLM_API_KEY.',
+          message: 'No Zhipu AI API key configured. Set AVA_GLM_API_KEY.',
         },
       }
       return

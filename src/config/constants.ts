@@ -5,20 +5,20 @@
 
 // Storage keys for localStorage
 export const STORAGE_KEYS = {
-  CREDENTIALS: 'estela_credentials',
-  OAUTH_VERIFIER: 'estela_oauth_verifier',
-  OAUTH_STATE: 'estela_oauth_state',
-  LAST_SESSION: 'estela_last_session',
-  LAST_PROJECT: 'estela_last_project',
-  SETTINGS: 'estela_settings',
-  PANEL_SIZES: 'estela-panel-sizes',
-  SIDEBAR_COLLAPSED: 'estela-sidebar-collapsed',
-  LAYOUT_ACTIVITY: 'estela-layout-activity',
-  LAYOUT_SIDEBAR_VISIBLE: 'estela-layout-sidebar-visible',
-  LAYOUT_RIGHT_VISIBLE: 'estela-layout-right-visible',
-  LAYOUT_BOTTOM_VISIBLE: 'estela-layout-bottom-visible',
-  LAYOUT_BOTTOM_HEIGHT: 'estela-layout-bottom-height',
-  SHORTCUTS: 'estela_shortcuts',
+  CREDENTIALS: 'ava_credentials',
+  OAUTH_VERIFIER: 'ava_oauth_verifier',
+  OAUTH_STATE: 'ava_oauth_state',
+  LAST_SESSION: 'ava_last_session',
+  LAST_PROJECT: 'ava_last_project',
+  SETTINGS: 'ava_settings',
+  PANEL_SIZES: 'ava-panel-sizes',
+  SIDEBAR_COLLAPSED: 'ava-sidebar-collapsed',
+  LAYOUT_ACTIVITY: 'ava-layout-activity',
+  LAYOUT_SIDEBAR_VISIBLE: 'ava-layout-sidebar-visible',
+  LAYOUT_RIGHT_VISIBLE: 'ava-layout-right-visible',
+  LAYOUT_BOTTOM_VISIBLE: 'ava-layout-bottom-visible',
+  LAYOUT_BOTTOM_HEIGHT: 'ava-layout-bottom-height',
+  SHORTCUTS: 'ava_shortcuts',
 } as const
 
 // Default values

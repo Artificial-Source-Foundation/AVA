@@ -8,6 +8,7 @@
 import { open } from '@tauri-apps/plugin-dialog'
 import { Check, ChevronDown, Folder, FolderOpen, GitBranch, Plus, Star, Trash2 } from 'lucide-solid'
 import { type Component, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
+import { logError } from '../../services/logger'
 import { useProject } from '../../stores/project'
 import type { ProjectId, ProjectWithStats } from '../../types'
 
@@ -58,7 +59,7 @@ export const ProjectSelector: Component = () => {
         setIsOpen(false)
       }
     } catch (err) {
-      console.error('Failed to open folder:', err)
+      logError('project-selector', 'Failed to open folder', err)
     }
   }
 

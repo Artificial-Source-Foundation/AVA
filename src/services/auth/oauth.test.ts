@@ -9,13 +9,25 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string) => {
     if (cmd === 'oauth_listen') {
       // Read the state that storePKCE just wrote to localStorage
-      const state = localStorage.getItem('estela_oauth_state_anthropic') || 'mock-state'
+      const state = localStorage.getItem('ava_oauth_state_anthropic') || 'mock-state'
       return { code: 'test-auth-code', state }
+    }
+    if (cmd === 'oauth_copilot_device_start') {
+      return {
+        device_code: 'DC-123',
+        user_code: 'ABCD-1234',
+        verification_uri: 'https://github.com/login/device',
+        expires_in: 900,
+        interval: 5,
+      }
+    }
+    if (cmd === 'oauth_copilot_device_poll') {
+      return { error: 'authorization_pending' }
     }
     return null
   }),
 }))
-vi.mock('@estela/core', () => ({
+vi.mock('@ava/core', () => ({
   setStoredAuth: vi.fn().mockResolvedValue(undefined),
 }))
 vi.mock('../../stores/settings', () => ({
@@ -28,6 +40,7 @@ vi.mock('../logger', () => ({
   logError: vi.fn(),
 }))
 
+import { invoke } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import {
   decodeJwtPayload,
@@ -99,7 +112,7 @@ describe('storeOAuthCredentials', () => {
 
   it('stores credentials in localStorage', () => {
     storeOAuthCredentials('anthropic', { accessToken: 'tok-abc' })
-    const raw = localStorage.getItem('estela_credentials')
+    const raw = localStorage.getItem('ava_credentials')
     expect(raw).not.toBeNull()
     const parsed = JSON.parse(raw!)
     expect(parsed.anthropic.provider).toBe('anthropic')
@@ -110,7 +123,7 @@ describe('storeOAuthCredentials', () => {
   it('stores multiple providers without overwriting', () => {
     storeOAuthCredentials('anthropic', { accessToken: 'tok-a' })
     storeOAuthCredentials('openai', { accessToken: 'tok-o' })
-    const parsed = JSON.parse(localStorage.getItem('estela_credentials')!)
+    const parsed = JSON.parse(localStorage.getItem('ava_credentials')!)
     expect(parsed.anthropic.value).toBe('tok-a')
     expect(parsed.openai.value).toBe('tok-o')
   })
@@ -217,18 +230,7 @@ describe('startOAuthFlow', () => {
   })
 
   it('returns DeviceCodeResponse for copilot', async () => {
-    const mockResponse = {
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          device_code: 'DC-123',
-          user_code: 'ABCD-1234',
-          verification_uri: 'https://github.com/login/device',
-          expires_in: 900,
-          interval: 5,
-        }),
-    }
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse))
+    const mockInvoke = vi.mocked(invoke)
 
     const result = await startOAuthFlow('copilot')
     expect(result).toBeDefined()
@@ -237,7 +239,9 @@ describe('startOAuthFlow', () => {
     expect(deviceResult.deviceCode).toBe('DC-123')
     expect(deviceResult.userCode).toBe('ABCD-1234')
     expect(deviceResult.verificationUri).toBe('https://github.com/login/device')
-
-    vi.unstubAllGlobals()
+    expect(mockInvoke).toHaveBeenCalledWith('oauth_copilot_device_start', {
+      clientId: 'Iv1.b507a08c87ecfe98',
+      scope: 'read:user',
+    })
   })
 })

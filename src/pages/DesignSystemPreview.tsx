@@ -41,7 +41,7 @@ export const DesignSystemPreview: Component = () => {
             <div class="w-12 h-12 rounded-xl bg-[var(--accent)] flex items-center justify-center">
               <Sparkles class="w-6 h-6 text-white" />
             </div>
-            <h1 class="text-3xl font-bold">Estela Design System</h1>
+            <h1 class="text-3xl font-bold">AVA Design System</h1>
           </div>
           <p class="text-[var(--text-secondary)]">Component library preview - Dark theme</p>
         </div>

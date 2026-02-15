@@ -6,6 +6,7 @@
  */
 
 import { isTauri } from '@tauri-apps/api/core'
+import { logWarn } from './logger'
 
 // ============================================================================
 // Types
@@ -80,7 +81,7 @@ export async function readDirectory(path: string, showHidden = false): Promise<F
 
     return result
   } catch (err) {
-    console.warn('[file-browser] Failed to read directory:', path, err)
+    logWarn('file-browser', 'Failed to read directory', { path, err })
     return []
   }
 }
@@ -96,7 +97,7 @@ export async function readFileContent(path: string): Promise<string | null> {
   try {
     return await fs.readTextFile(path)
   } catch (err) {
-    console.warn('[file-browser] Failed to read file:', path, err)
+    logWarn('file-browser', 'Failed to read file', { path, err })
     return null
   }
 }

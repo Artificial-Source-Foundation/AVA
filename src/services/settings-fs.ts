@@ -7,6 +7,7 @@
  */
 
 import { isTauri } from '@tauri-apps/api/core'
+import { logWarn } from './logger'
 
 const SETTINGS_FILE = 'settings.json'
 let fsAvailable = false
@@ -32,7 +33,7 @@ export async function initSettingsFS(): Promise<void> {
     // Just verify we can access the FS plugin.
     fsAvailable = true
   } catch (err) {
-    console.warn('[settings-fs] Failed to initialize:', err)
+    logWarn('settings-fs', 'Failed to initialize', err)
   }
 }
 
@@ -47,7 +48,7 @@ export async function readSettingsFromFS(): Promise<Record<string, unknown> | nu
     const text = await fs.readTextFile(SETTINGS_FILE, { baseDir: fs.BaseDirectory.AppData })
     return JSON.parse(text)
   } catch (err) {
-    console.warn('[settings-fs] Failed to read settings:', err)
+    logWarn('settings-fs', 'Failed to read settings', err)
     return null
   }
 }
@@ -62,6 +63,6 @@ export async function writeSettingsToFS(data: Record<string, unknown>): Promise<
       baseDir: fs.BaseDirectory.AppData,
     })
   } catch (err) {
-    console.warn('[settings-fs] Failed to write settings:', err)
+    logWarn('settings-fs', 'Failed to write settings', err)
   }
 }

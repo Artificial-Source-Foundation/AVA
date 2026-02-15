@@ -227,8 +227,13 @@ export async function startFileWatcher(
                 filePath,
               })
             }
-          } catch {
-            // File might be deleted, binary, or locked — skip silently
+          } catch (err) {
+            // File might be deleted, binary, or locked.
+            // Keep as debug-level to avoid noisy logs on active projects.
+            logDebug('file-watcher', 'Read skipped', {
+              filePath,
+              reason: err instanceof Error ? err.message : 'unknown',
+            })
           }
         }
       },

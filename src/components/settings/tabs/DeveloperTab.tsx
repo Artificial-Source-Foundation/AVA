@@ -7,7 +7,16 @@
  */
 
 import { Copy, Trash2 } from 'lucide-solid'
-import { type Component, createEffect, createSignal, For, on, onCleanup, Show } from 'solid-js'
+import {
+  type Component,
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  on,
+  onCleanup,
+  Show,
+} from 'solid-js'
 import {
   clearDevLogs,
   getDevLogs,
@@ -63,6 +72,11 @@ function formatTime(ts: number): string {
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}.${d.getMilliseconds().toString().padStart(3, '0')}`
 }
 
+function extractSource(message: string): string {
+  const match = /^\[(.*?)\]/.exec(message)
+  return match?.[1] ? match[1] : 'unknown'
+}
+
 // ============================================================================
 // Main Tab
 // ============================================================================
@@ -71,7 +85,33 @@ export const DeveloperTab: Component = () => {
   const { settings, updateSettings } = useSettings()
   const logs = getDevLogs()
   const [copied, setCopied] = createSignal(false)
+  const [levelFilter, setLevelFilter] = createSignal<'all' | 'log' | 'info' | 'warn' | 'error'>(
+    'all'
+  )
+  const [sourceFilter, setSourceFilter] = createSignal('all')
+  const [textFilter, setTextFilter] = createSignal('')
+  const [stickToBottom, setStickToBottom] = createSignal(true)
   let scrollRef: HTMLDivElement | undefined
+
+  const availableSources = createMemo(() => {
+    const unique = new Set<string>()
+    for (const entry of logs()) {
+      unique.add(extractSource(entry.message))
+    }
+    return ['all', ...Array.from(unique).sort()]
+  })
+
+  const filteredLogs = createMemo(() => {
+    const query = textFilter().trim().toLowerCase()
+    const level = levelFilter()
+    const source = sourceFilter()
+    return logs().filter((entry) => {
+      if (level !== 'all' && entry.level !== level) return false
+      if (source !== 'all' && extractSource(entry.message) !== source) return false
+      if (!query) return true
+      return entry.message.toLowerCase().includes(query)
+    })
+  })
 
   // Install/uninstall capture when devMode changes
   createEffect(
@@ -97,17 +137,23 @@ export const DeveloperTab: Component = () => {
   // Auto-scroll to bottom when new entries arrive
   createEffect(
     on(
-      () => logs().length,
+      () => filteredLogs().length,
       () => {
-        if (scrollRef) {
+        if (scrollRef && stickToBottom()) {
           scrollRef.scrollTop = scrollRef.scrollHeight
         }
       }
     )
   )
 
+  const handleLogScroll = () => {
+    if (!scrollRef) return
+    const distanceFromBottom = scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight
+    setStickToBottom(distanceFromBottom < 16)
+  }
+
   const handleCopy = async () => {
-    const text = logs()
+    const text = filteredLogs()
       .map((e) => `[${formatTime(e.timestamp)}] ${levelLabel[e.level]} ${e.message}`)
       .join('\n')
     try {
@@ -152,7 +198,11 @@ export const DeveloperTab: Component = () => {
           <div class="flex items-center justify-between mb-2">
             <SectionHeader title="Console Output" />
             <div class="flex items-center gap-2">
-              <span class="text-[10px] text-[var(--text-muted)]">{logs().length} entries</span>
+              <span class="text-[10px] text-[var(--text-muted)]">
+                {filteredLogs().length}
+                <Show when={filteredLogs().length !== logs().length}> / {logs().length}</Show>{' '}
+                entries
+              </span>
               <button
                 type="button"
                 onClick={handleCopy}
@@ -172,8 +222,54 @@ export const DeveloperTab: Component = () => {
             </div>
           </div>
 
+          <div class="flex items-center gap-2 mb-2">
+            <select
+              value={levelFilter()}
+              onChange={(e) =>
+                setLevelFilter(e.currentTarget.value as 'all' | 'log' | 'info' | 'warn' | 'error')
+              }
+              class="px-2 py-1 text-[10px] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)]"
+            >
+              <option value="all">All levels</option>
+              <option value="log">LOG</option>
+              <option value="info">INF</option>
+              <option value="warn">WRN</option>
+              <option value="error">ERR</option>
+            </select>
+            <select
+              value={sourceFilter()}
+              onChange={(e) => setSourceFilter(e.currentTarget.value)}
+              class="px-2 py-1 text-[10px] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)]"
+            >
+              <For each={availableSources()}>
+                {(source) => <option value={source}>{source}</option>}
+              </For>
+            </select>
+            <input
+              type="text"
+              value={textFilter()}
+              onInput={(e) => setTextFilter(e.currentTarget.value)}
+              placeholder="Filter text..."
+              class="flex-1 px-2 py-1 text-[10px] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)] placeholder:text-[var(--text-muted)] outline-none"
+            />
+            <Show when={!stickToBottom()}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!scrollRef) return
+                  scrollRef.scrollTop = scrollRef.scrollHeight
+                  setStickToBottom(true)
+                }}
+                class="px-2 py-1 text-[10px] text-[var(--accent)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)]"
+              >
+                Jump to latest
+              </button>
+            </Show>
+          </div>
+
           <div
             ref={scrollRef}
+            onScroll={handleLogScroll}
             class="bg-[var(--gray-1)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] overflow-auto font-mono text-[11px] leading-[1.6]"
             style={{
               height: '320px',
@@ -181,15 +277,15 @@ export const DeveloperTab: Component = () => {
             }}
           >
             <Show
-              when={logs().length > 0}
+              when={filteredLogs().length > 0}
               fallback={
                 <p class="text-[var(--text-muted)] text-center py-8 text-[11px]">
-                  Console output will appear here...
+                  No logs match current filters.
                 </p>
               }
             >
               <div class="p-2">
-                <For each={logs()}>
+                <For each={filteredLogs()}>
                   {(entry) => (
                     <div class="flex gap-2 py-0.5 hover:bg-[var(--alpha-white-3)]">
                       <span class="text-[var(--text-muted)] flex-shrink-0 select-none">

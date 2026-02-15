@@ -62,7 +62,7 @@ export function SplashScreen(props: SplashScreenProps) {
 
         {/* App name */}
         <h1 class="text-2xl font-semibold tracking-[0.25em] uppercase text-[var(--text-primary)] mb-1.5">
-          Estela
+          AVA
         </h1>
 
         {/* Tagline */}

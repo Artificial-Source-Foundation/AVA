@@ -10,7 +10,7 @@
  * - https://github.com/numman-ali/opencode-openai-codex-auth
  */
 
-import { setStoredAuth } from '@estela/core'
+import { setStoredAuth } from '@ava/core'
 import { invoke } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { STORAGE_KEYS } from '../../config/constants'
@@ -191,7 +191,7 @@ async function mintApiKey(apiKeyUrl: string, accessToken: string): Promise<strin
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ name: 'estela-desktop' }),
+    body: JSON.stringify({ name: 'ava-desktop' }),
   })
 
   if (!response.ok) {
@@ -353,23 +353,16 @@ export async function startDeviceCodeFlow(provider: LLMProvider): Promise<Device
   }
   logInfo(LOG_SRC, `Starting device code flow for ${provider}`)
 
-  const response = await fetch(config.authorizationUrl, {
-    method: 'POST',
-    headers: {
-      Accept: 'application/json',
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
-    body: new URLSearchParams({
-      client_id: config.clientId,
+  let data: Record<string, unknown>
+  try {
+    data = (await invoke('oauth_copilot_device_start', {
+      clientId: config.clientId,
       scope: config.scopes.join(' '),
-    }).toString(),
-  })
-
-  if (!response.ok) {
-    throw new Error(`Device code request failed: ${response.statusText}`)
+    })) as Record<string, unknown>
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    throw new Error(`Device code request failed: ${message}`)
   }
-
-  const data = (await response.json()) as Record<string, unknown>
 
   return {
     deviceCode: data.device_code as string,
@@ -395,21 +388,19 @@ export async function pollDeviceCodeAuth(
     throw new Error(`Device code flow not supported for provider: ${provider}`)
   }
 
-  const pollOnce = async (): Promise<OAuthTokens | 'pending' | 'expired'> => {
-    const response = await fetch(config.tokenUrl, {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        client_id: config.clientId,
-        device_code: deviceCode,
-        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-      }).toString(),
-    })
+  let currentInterval = interval
 
-    const data = (await response.json()) as Record<string, unknown>
+  const pollOnce = async (): Promise<OAuthTokens | 'pending' | 'expired'> => {
+    let data: Record<string, unknown>
+    try {
+      data = (await invoke('oauth_copilot_device_poll', {
+        clientId: config.clientId,
+        deviceCode,
+      })) as Record<string, unknown>
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      throw new Error(`Device code poll failed: ${message}`)
+    }
 
     if (data.access_token) {
       return {
@@ -420,7 +411,12 @@ export async function pollDeviceCodeAuth(
     }
 
     const error = data.error as string
-    if (error === 'authorization_pending' || error === 'slow_down') {
+    if (error === 'slow_down') {
+      currentInterval += 5
+      return 'pending'
+    }
+
+    if (error === 'authorization_pending') {
       return 'pending'
     }
 
@@ -429,7 +425,7 @@ export async function pollDeviceCodeAuth(
 
   // Poll loop
   while (!signal?.aborted) {
-    await new Promise((resolve) => setTimeout(resolve, interval * 1000))
+    await new Promise((resolve) => setTimeout(resolve, currentInterval * 1000))
     if (signal?.aborted) return null
 
     const result = await pollOnce()
@@ -566,7 +562,7 @@ export function storeOAuthCredentials(provider: LLMProvider, tokens: OAuthTokens
     expiresAt: tokens.expiresAt,
     refreshToken: tokens.refreshToken,
   }
-  const stored = localStorage.getItem('estela_credentials')
+  const stored = localStorage.getItem('ava_credentials')
   let all: Record<string, Credentials> = {}
   try {
     if (stored) all = JSON.parse(stored)
@@ -574,7 +570,7 @@ export function storeOAuthCredentials(provider: LLMProvider, tokens: OAuthTokens
     all = {}
   }
   all[provider] = credentials
-  localStorage.setItem('estela_credentials', JSON.stringify(all))
+  localStorage.setItem('ava_credentials', JSON.stringify(all))
 
   // Anthropic: OAuth mints a real API key — store as plain API key
   if (provider === 'anthropic') {

@@ -10,7 +10,7 @@ import {
   resetToolCallCount,
   type ToolContext,
   undoLastAutoCommit,
-} from '@estela/core'
+} from '@ava/core'
 import { createSignal } from 'solid-js'
 import { DEFAULTS, LIMITS } from '../config/constants'
 import { checkAutoApproval, createApprovalGate } from '../lib/tool-approval'
@@ -855,7 +855,7 @@ function createChatStore() {
 
   /**
    * Undo the last auto-committed AI edit.
-   * Finds the most recent estela-prefixed commit and reverts it.
+   * Finds the most recent ava-prefixed commit and reverts it.
    * @returns true if undo succeeded, false otherwise
    */
   async function undoLastEdit(): Promise<{ success: boolean; message: string }> {

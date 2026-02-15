@@ -6,14 +6,14 @@
     <meta name="theme-color" content="#0a0a0b" />
     <meta name="color-scheme" content="light dark" />
     <link rel="icon" type="image/svg+xml" href="/src/assets/logo.svg" />
-    <title>Estela - AI Coding Assistant</title>
+    <title>AVA - AI Coding Assistant</title>
 
     <!-- Theme detection script - runs before render to prevent flash -->
     <script>
       (() => {
         // Get stored preferences
-        const theme = localStorage.getItem('estela-theme') || 'glass';
-        const mode = localStorage.getItem('estela-mode') || 'system';
+        const theme = localStorage.getItem('ava-theme') || 'glass';
+        const mode = localStorage.getItem('ava-mode') || 'system';
 
         // Resolve actual mode
         // 'system' resolves to OS preference; 'dark' may use darkStyle variant
@@ -23,7 +23,7 @@
         } else if (mode === 'dark') {
           // Check for dark style variant (midnight/charcoal) from settings blob
           try {
-            const s = JSON.parse(localStorage.getItem('estela_settings') || '{}');
+            const s = JSON.parse(localStorage.getItem('ava_settings') || '{}');
             const ds = s?.appearance?.darkStyle;
             if (ds === 'midnight' || ds === 'charcoal') resolvedMode = ds;
           } catch { /* use dark */ }

@@ -94,7 +94,7 @@ async function flushToFile(): Promise<void> {
   const lines = `${fileBuffer.join('\n')}\n`
   fileBuffer = []
 
-  const logPath = `${logDir}/estela-${todayDateString()}.log`
+  const logPath = `${logDir}/ava-${todayDateString()}.log`
   try {
     await invoke('append_log', { path: logPath, content: lines })
   } catch {

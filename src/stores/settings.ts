@@ -4,7 +4,7 @@
  * Follows the same pattern as layout.ts — module-level signals + export hook.
  */
 
-import type { LLMProvider, MCPServerConfig } from '@estela/core'
+import type { LLMProvider, MCPServerConfig } from '@ava/core'
 import { invoke } from '@tauri-apps/api/core'
 import { createSignal } from 'solid-js'
 import type { AgentPreset } from '../components/settings/tabs/AgentsTab'
@@ -20,7 +20,7 @@ import { readSettingsFromFS, writeSettingsToFS } from '../services/settings-fs'
 // Credential Sync — bridges Settings UI → Core credential store
 // ============================================================================
 
-const CREDENTIAL_PREFIX = 'estela_cred_'
+const CREDENTIAL_PREFIX = 'ava_cred_'
 
 /** Maps provider IDs to the credential key names that core reads via TauriCredentialStore */
 const PROVIDER_KEY_MAP: Record<string, string> = {
@@ -154,7 +154,7 @@ export function pushSettingsToCore() {
   sm.set('git', {
     enabled: s.git.enabled,
     autoCommit: s.git.autoCommit,
-    branchPrefix: 'estela/',
+    branchPrefix: 'ava/',
     messagePrefix: s.git.commitPrefix,
   })
   logDebug('settings', 'Core settings synced')
@@ -240,7 +240,7 @@ export interface NotificationSettings {
 export interface GitSettings {
   enabled: boolean // Enable git integration (auto-detect repos)
   autoCommit: boolean // Auto-commit after successful AI edits
-  commitPrefix: string // Commit message prefix, default '[estela]'
+  commitPrefix: string // Commit message prefix, default '[ava]'
 }
 
 export interface AppSettings {
@@ -320,7 +320,7 @@ const DEFAULT_NOTIFICATIONS: NotificationSettings = {
 const DEFAULT_GIT: GitSettings = {
   enabled: true,
   autoCommit: false,
-  commitPrefix: '[estela]',
+  commitPrefix: '[ava]',
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -404,8 +404,8 @@ function saveSettings(settings: AppSettings) {
   const serializable = serializeSettings(settings)
   try {
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(serializable))
-    // Bridge estela-mode for index.html flash-prevention script
-    localStorage.setItem('estela-mode', settings.mode)
+    // Bridge ava-mode for index.html flash-prevention script
+    localStorage.setItem('ava-mode', settings.mode)
   } catch (err) {
     logWarn('settings', 'localStorage write failed', err)
   }
@@ -611,7 +611,7 @@ function exportSettings() {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `estela-settings-${new Date().toISOString().slice(0, 10)}.json`
+  a.download = `ava-settings-${new Date().toISOString().slice(0, 10)}.json`
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -936,7 +936,7 @@ export async function hydrateSettingsFromFS(): Promise<void> {
       // Sync localStorage with FS data
       try {
         localStorage.setItem(STORAGE_KEYS.SETTINGS, fsJson)
-        localStorage.setItem('estela-mode', merged.mode)
+        localStorage.setItem('ava-mode', merged.mode)
       } catch {
         /* ignore */
       }

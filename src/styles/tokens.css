@@ -1,5 +1,5 @@
 /**
- * Estela Design System 2026
+ * AVA Design System 2026
  *
  * Premium, minimal, dark-first design tokens.
  * Architecture: Primitives → Semantic Tokens → Component Tokens
@@ -471,9 +471,9 @@
 [data-reduce-motion] *,
 [data-reduce-motion] *::before,
 [data-reduce-motion] *::after {
-  animation-duration: 0.01ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms;
+  animation-iteration-count: 1;
+  transition-duration: 0.01ms;
 }
 
 /* ========================================

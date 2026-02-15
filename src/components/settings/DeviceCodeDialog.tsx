@@ -92,7 +92,7 @@ export const DeviceCodeDialog: Component<DeviceCodeDialogProps> = (props) => {
 
         {/* Instructions */}
         <p class="text-[var(--text-sm)] text-[var(--text-secondary)] mb-4">
-          Go to the URL below and enter the code to authorize Estela.
+          Go to the URL below and enter the code to authorize AVA.
         </p>
 
         {/* User Code */}

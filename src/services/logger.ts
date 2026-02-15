@@ -4,7 +4,7 @@
  * Writes errors and debug info to a log file in the app data directory.
  * Uses Tauri's FS plugin for file access.
  *
- * Log file location: $APPDATA/estela/logs/estela.log
+ * Log file location: $APPDATA/ava/logs/ava.log
  * Rotates when file exceeds ~500KB.
  */
 
@@ -37,8 +37,8 @@ interface LogEntry {
 // ============================================================================
 
 const LOG_DIR = 'logs'
-const LOG_FILE = 'logs/estela.log'
-const LOG_FILE_PREV = 'logs/estela.prev.log'
+const LOG_FILE = 'logs/ava.log'
+const LOG_FILE_PREV = 'logs/ava.prev.log'
 const MAX_LOG_SIZE = 512 * 1024 // 512KB before rotation
 const FLUSH_INTERVAL_MS = 2000
 
@@ -166,7 +166,7 @@ export async function initLogger(): Promise<void> {
     initialized = true
 
     // Write startup marker
-    pushEntry('info', 'Logger', '--- Estela session started ---')
+    pushEntry('info', 'Logger', '--- AVA session started ---')
     pushEntry('info', 'Logger', `Log file: $APPDATA/${LOG_FILE}`)
   } catch (err) {
     console.warn('[Logger] Failed to initialize file logger:', err)

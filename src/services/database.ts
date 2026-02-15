@@ -27,7 +27,7 @@ let db: Database | null = null
 export async function initDatabase(): Promise<Database> {
   if (db) return db
 
-  db = await Database.load('sqlite:estela.db')
+  db = await Database.load('sqlite:ava.db')
   await runMigrations(db)
 
   return db

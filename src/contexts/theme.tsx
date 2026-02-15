@@ -1,5 +1,5 @@
 /**
- * Theme Context for Estela
+ * Theme Context for AVA
  *
  * Single dark theme - no switching needed.
  * Kept minimal for future expansion if needed.

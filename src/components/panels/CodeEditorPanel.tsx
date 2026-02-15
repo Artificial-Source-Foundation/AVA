@@ -49,7 +49,7 @@ function getLanguageExtension(filePath: string) {
 // Custom Theme (transparent bg to show glass)
 // ============================================================================
 
-const estelaEditorTheme = EditorView.theme({
+const avaEditorTheme = EditorView.theme({
   '&': {
     backgroundColor: 'transparent',
     fontSize: '13px',
@@ -144,7 +144,7 @@ export const CodeEditorPanel: Component = () => {
 
   // Extensions
   createExtension(() => oneDark)
-  createExtension(() => estelaEditorTheme)
+  createExtension(() => avaEditorTheme)
   createExtension(() => languageExtension())
   createExtension(() => EditorView.lineWrapping)
 

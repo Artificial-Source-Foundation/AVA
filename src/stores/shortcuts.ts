@@ -72,7 +72,7 @@ const DEFAULT_SHORTCUTS: ShortcutDef[] = [
 // Persistence
 // ============================================================================
 
-const STORAGE_KEY = STORAGE_KEYS.SHORTCUTS ?? 'estela_shortcuts'
+const STORAGE_KEY = STORAGE_KEYS.SHORTCUTS ?? 'ava_shortcuts'
 
 function loadOverrides(): Record<string, string[]> {
   try {

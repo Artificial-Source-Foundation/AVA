@@ -73,7 +73,7 @@ function App() {
     const cleanupShortcuts = setupShortcutListener()
     onCleanup(cleanupShortcuts)
 
-    // Guard: Estela requires the Tauri runtime
+    // Guard: AVA requires the Tauri runtime
     if (!isTauri()) {
       setNotTauri(true)
       setIsInitializing(false)
@@ -94,7 +94,7 @@ function App() {
     try {
       // Clear corrupted resizable panel sizes from localStorage
       // (caused size.endsWith crash in @corvu/resizable)
-      for (const key of ['estela-sidebar-sizes', 'estela-bottom-sizes']) {
+      for (const key of ['ava-sidebar-sizes', 'ava-bottom-sizes']) {
         try {
           const raw = localStorage.getItem(key)
           if (raw) {
@@ -114,7 +114,7 @@ function App() {
 
       setSplashStatus('Starting logger...')
       await initLogger()
-      logInfo('App', 'Initializing Estela...')
+      logInfo('App', 'Initializing AVA...')
 
       validateEnv()
 
@@ -202,7 +202,7 @@ function App() {
               Tauri Runtime Required
             </h1>
             <p class="text-[var(--text-secondary)] mb-4 text-sm leading-relaxed">
-              Estela is a desktop app that requires the Tauri runtime. Run{' '}
+              AVA is a desktop app that requires the Tauri runtime. Run{' '}
               <code class="px-1.5 py-0.5 bg-[var(--surface-raised)] border border-[var(--border-default)] rounded text-xs font-mono">
                 npm run tauri dev
               </code>{' '}

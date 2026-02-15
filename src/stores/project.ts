@@ -6,7 +6,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { createMemo, createSignal } from 'solid-js'
 import { STORAGE_KEYS } from '../config/constants'
-import { logError } from '../services/logger'
+import { logError, logWarn } from '../services/logger'
 import {
   deleteProject as dbDeleteProject,
   updateProject as dbUpdateProject,
@@ -180,7 +180,7 @@ export function useProject() {
     switchProject: async (projectId: ProjectId): Promise<void> => {
       const project = projects().find((p) => p.id === projectId)
       if (!project) {
-        console.warn(`Project ${projectId} not found`)
+        logWarn('project', 'Project not found', { projectId })
         return
       }
 
@@ -253,7 +253,7 @@ export function useProject() {
      */
     removeProject: async (id: ProjectId): Promise<void> => {
       if (id === 'default-project') {
-        console.warn('Cannot remove default project')
+        logWarn('project', 'Cannot remove default project')
         return
       }
 

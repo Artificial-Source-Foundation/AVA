@@ -96,7 +96,7 @@ describe('layout store', () => {
     it('persists width to localStorage', async () => {
       const layout = await loadLayout()
       layout.setSidebarWidth(350)
-      expect(localStorage.getItem('estela-sidebar-width')).toBe('350')
+      expect(localStorage.getItem('ava-sidebar-width')).toBe('350')
     })
   })
 
@@ -108,13 +108,13 @@ describe('layout store', () => {
     it('persists active activity to localStorage', async () => {
       const layout = await loadLayout()
       layout.setActiveActivity('explorer')
-      expect(localStorage.getItem('estela-layout-activity')).toBe('explorer')
+      expect(localStorage.getItem('ava-layout-activity')).toBe('explorer')
     })
 
     it('persists sidebar visibility to localStorage', async () => {
       const layout = await loadLayout()
       layout.setSidebarVisible(false)
-      expect(localStorage.getItem('estela-layout-sidebar-visible')).toBe('false')
+      expect(localStorage.getItem('ava-layout-sidebar-visible')).toBe('false')
     })
   })
 

@@ -52,7 +52,7 @@ const h = vi.hoisted(() => {
   }
 })
 
-vi.mock('@estela/core', () => ({
+vi.mock('@ava/core', () => ({
   estimateCost: vi.fn(() => 0),
   executeTool: vi.fn(),
   getToolDefinitions: vi.fn(() => []),

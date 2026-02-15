@@ -5,7 +5,7 @@
  * Expand a provider to configure API key, model, etc.
  */
 
-import { removeStoredAuth } from '@estela/core'
+import { removeStoredAuth } from '@ava/core'
 import {
   AlertTriangle,
   Bot,
@@ -35,6 +35,7 @@ import {
   type OAuthTokens,
   startOAuthFlow,
 } from '../../../services/auth/oauth'
+import { logError } from '../../../services/logger'
 import { fetchModels, supportsDynamicFetch } from '../../../services/providers/model-fetcher'
 import type { LLMProvider } from '../../../types/llm'
 import { DeviceCodeDialog } from '../DeviceCodeDialog'
@@ -115,7 +116,7 @@ export const ProvidersTab: Component<ProvidersTabProps> = (props) => {
       </div>
 
       <p class="text-[10px] text-[var(--text-muted)] text-center">
-        Keys stored locally · Never sent to Estela servers
+        Keys stored locally · Never sent to AVA servers
       </p>
     </div>
   )
@@ -180,7 +181,7 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
         setIsOAuthConnected(true)
       }
     } catch (err) {
-      console.error('OAuth flow failed:', err)
+      logError('providers', 'OAuth flow failed', err)
       setOauthError(err instanceof Error ? err.message : 'OAuth flow failed')
     } finally {
       setIsOAuthLoading(false)
@@ -196,7 +197,7 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
       setShowClearConfirm(false)
       props.onClearApiKey?.()
     } catch (err) {
-      console.error('Clear credentials failed:', err)
+      logError('providers', 'Clear credentials failed', err)
     }
   }
 
@@ -219,7 +220,7 @@ const ProviderRow: Component<ProviderRowProps> = (props) => {
         props.onUpdateModels?.(models)
       }
     } catch (err) {
-      console.error('Failed to fetch models:', err)
+      logError('providers', 'Failed to fetch models', err)
       setModelError(err instanceof Error ? err.message : 'Failed to fetch models')
     } finally {
       setIsLoadingModels(false)

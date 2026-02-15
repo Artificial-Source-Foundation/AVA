@@ -107,7 +107,7 @@ function toggleSidebar() {
 // Sidebar Width (persisted)
 // ============================================================================
 
-const SIDEBAR_WIDTH_KEY = 'estela-sidebar-width'
+const SIDEBAR_WIDTH_KEY = 'ava-sidebar-width'
 
 const [sidebarWidth, setSidebarWidthRaw] = createSignal(
   loadNumber(SIDEBAR_WIDTH_KEY, 260, 180, 480)

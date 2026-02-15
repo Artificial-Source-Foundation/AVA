@@ -15,6 +15,7 @@
  */
 
 import type { LLMProvider } from '../../types/llm'
+import { logWarn } from '../logger'
 
 // ============================================================================
 // Types
@@ -336,7 +337,7 @@ export async function fetchModels(
         try {
           return await fetchGoogleModels(options.apiKey)
         } catch {
-          console.warn('Could not fetch Google models, using defaults')
+          logWarn('models', 'Could not fetch Google models, using defaults')
         }
       }
       // Fallback when no API key or fetch fails
@@ -352,7 +353,7 @@ export async function fetchModels(
       try {
         return await fetchOllamaModels(options.baseUrl)
       } catch {
-        console.warn(`Could not fetch models for ${provider}, using defaults`)
+        logWarn('models', 'Could not fetch models, using defaults', { provider })
         return []
       }
   }

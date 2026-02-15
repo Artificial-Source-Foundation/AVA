@@ -208,7 +208,7 @@ export const BehaviorTab: Component = () => {
                 value={settings().git.commitPrefix}
                 onInput={(e) => updateGit({ commitPrefix: e.currentTarget.value })}
                 class="w-28 px-2 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
-                placeholder="[estela]"
+                placeholder="[ava]"
               />
             </div>
           </Show>

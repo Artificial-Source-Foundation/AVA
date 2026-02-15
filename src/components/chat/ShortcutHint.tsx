@@ -9,7 +9,7 @@
 import { type Component, createEffect, createSignal, onCleanup, Show } from 'solid-js'
 import { useSettings } from '../../stores/settings'
 
-const STORAGE_KEY = 'estela-shortcut-hint-dismissed'
+const STORAGE_KEY = 'ava-shortcut-hint-dismissed'
 const AUTO_DISMISS_MS = 8000
 const DISMISS_AFTER_SENDS = 3
 

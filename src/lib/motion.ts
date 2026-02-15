@@ -1,5 +1,5 @@
 /**
- * Motion utilities for Estela
+ * Motion utilities for AVA
  *
  * Reusable spring presets and reduced-motion hook.
  * Uses solid-motionone (Motion One for SolidJS).

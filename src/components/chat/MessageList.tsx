@@ -42,6 +42,7 @@ export const MessageList: Component = () => {
   let scrollRaf: number | undefined
   const { settings } = useSettings()
   const [shouldAutoScroll, setShouldAutoScroll] = createSignal(true)
+  const [visibleLimit, setVisibleLimit] = createSignal(220)
   const [deleteTarget, setDeleteTarget] = createSignal<{
     messageId: string
     isLast: boolean
@@ -100,6 +101,17 @@ export const MessageList: Component = () => {
   // Match checkpoints to message indices
   const checkpointAtIndex = (msgIndex: number): { id: string; description: string } | null =>
     checkpointByIndex().get(msgIndex) ?? null
+
+  const visibleMessages = createMemo(() => {
+    const all = messages()
+    const limit = visibleLimit()
+    if (all.length <= limit) return all
+    return all.slice(-limit)
+  })
+
+  const hiddenMessageCount = createMemo(() =>
+    Math.max(0, messages().length - visibleMessages().length)
+  )
 
   // Track which message is the last one (for delete vs rollback label)
   const lastMessageId = createMemo(() => {
@@ -174,6 +186,10 @@ export const MessageList: Component = () => {
     }
   }
 
+  const loadOlderMessages = () => {
+    setVisibleLimit((limit) => limit + 220)
+  }
+
   // Delete/rollback handlers
   const handleDeleteRequest = (messageId: string) => {
     setDeleteTarget({ messageId, isLast: messageId === lastMessageId() })
@@ -207,7 +223,20 @@ export const MessageList: Component = () => {
         {/* Message items */}
         <Show when={!isLoadingMessages() && messages().length > 0}>
           <div>
-            <For each={messages()}>
+            <Show when={hiddenMessageCount() > 0}>
+              <div class="mb-2 flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={loadOlderMessages}
+                  class="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2.5 py-1 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                >
+                  Load {Math.min(220, hiddenMessageCount())} older messages ({hiddenMessageCount()}{' '}
+                  hidden)
+                </button>
+              </div>
+            </Show>
+
+            <For each={visibleMessages()}>
               {(msg) => {
                 const msgIndex = () => messageIndexById().get(msg.id) ?? -1
                 const modelChange = () => modelChangeById().get(msg.id)

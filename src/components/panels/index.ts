@@ -1,4 +1,7 @@
 export { AgentActivityPanel } from './AgentActivityPanel'
+export { CodeEditorPanel } from './CodeEditorPanel'
 export { FileOperationsPanel } from './FileOperationsPanel'
 export { MemoryPanel } from './MemoryPanel'
+export { TeamMemberChat } from './TeamMemberChat'
+export { TeamPanel } from './TeamPanel'
 export { TerminalPanel } from './TerminalPanel'

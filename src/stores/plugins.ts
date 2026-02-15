@@ -1,17 +1,14 @@
 import { createMemo, createSignal } from 'solid-js'
-import { loadPluginsState, savePluginsState } from '../services/plugins-fs'
+import {
+  installPlugin,
+  loadPluginsState,
+  setPluginEnabled,
+  uninstallPlugin,
+} from '../services/plugins-fs'
+import type { PluginCatalogItem, PluginState } from '../types/plugin'
 
-export interface PluginCatalogItem {
-  id: string
-  name: string
-  description: string
-  category: 'workflow' | 'quality' | 'integration'
-}
-
-export interface PluginState {
-  installed: boolean
-  enabled: boolean
-}
+type PluginAction = 'install' | 'uninstall' | 'toggle'
+type PluginCategoryFilter = PluginCatalogItem['category'] | 'all'
 
 const PLUGIN_CATALOG: PluginCatalogItem[] = [
   {
@@ -49,13 +46,34 @@ export function resetPluginsStore() {
 function createPluginsStore() {
   const [search, setSearch] = createSignal('')
   const [showInstalledOnly, setShowInstalledOnly] = createSignal(false)
+  const [categoryFilter, setCategoryFilter] = createSignal<PluginCategoryFilter>('all')
   const [pluginState, setPluginState] = createSignal<Record<string, PluginState>>({})
+  const [pendingActions, setPendingActions] = createSignal<Record<string, PluginAction | null>>({})
+  const [errorsByPlugin, setErrorsByPlugin] = createSignal<Record<string, string>>({})
+  const [failedActionsByPlugin, setFailedActionsByPlugin] = createSignal<
+    Record<string, PluginAction | null>
+  >({})
+  let lifecycleQueue: Promise<void> = Promise.resolve()
+
+  const featuredPluginIds = ['task-planner', 'test-guard']
+
+  const categories = createMemo(() => {
+    const unique = new Set<PluginCatalogItem['category']>()
+    for (const plugin of PLUGIN_CATALOG) unique.add(plugin.category)
+    return ['all', ...Array.from(unique)] as PluginCategoryFilter[]
+  })
+
+  const featuredPlugins = createMemo(() =>
+    PLUGIN_CATALOG.filter((plugin) => featuredPluginIds.includes(plugin.id))
+  )
 
   const filteredPlugins = createMemo(() => {
     const query = search().trim().toLowerCase()
+    const category = categoryFilter()
     return PLUGIN_CATALOG.filter((plugin) => {
       const state = pluginState()[plugin.id]
       if (showInstalledOnly() && !state?.installed) return false
+      if (category !== 'all' && plugin.category !== category) return false
       if (!query) return true
       return (
         plugin.name.toLowerCase().includes(query) ||
@@ -68,15 +86,155 @@ function createPluginsStore() {
   const setState = (id: string, next: PluginState) => {
     const updated = { ...pluginState(), [id]: next }
     setPluginState(updated)
-    void savePluginsState(updated)
   }
 
-  const install = (id: string) => setState(id, { installed: true, enabled: true })
-  const uninstall = (id: string) => setState(id, { installed: false, enabled: false })
-  const toggleEnabled = (id: string) => {
+  const clearState = (id: string) => {
+    const current = pluginState()
+    if (!(id in current)) return
+
+    const next = { ...current }
+    delete next[id]
+    setPluginState(next)
+  }
+
+  const setPendingAction = (id: string, action: PluginAction | null) => {
+    setPendingActions((prev) => ({ ...prev, [id]: action }))
+  }
+
+  const setError = (id: string, message: string) => {
+    setErrorsByPlugin((prev) => ({ ...prev, [id]: message }))
+  }
+
+  const clearError = (id: string) => {
+    setErrorsByPlugin((prev) => {
+      if (!(id in prev)) return prev
+      const next = { ...prev }
+      delete next[id]
+      return next
+    })
+  }
+
+  const setFailedAction = (id: string, action: PluginAction | null) => {
+    setFailedActionsByPlugin((prev) => ({ ...prev, [id]: action }))
+  }
+
+  const runLifecycle = <T>(operation: () => Promise<T>) => {
+    const task = lifecycleQueue.then(operation, operation)
+    lifecycleQueue = task.then(
+      () => undefined,
+      () => undefined
+    )
+    return task
+  }
+
+  const install = async (id: string) => {
+    if (pendingActions()[id]) return
+
+    const previous = pluginState()[id]
+    clearError(id)
+    setPendingAction(id, 'install')
+    setState(id, { installed: true, enabled: true })
+
+    try {
+      const next = await runLifecycle(() => installPlugin(id))
+      setState(id, next)
+      setFailedAction(id, null)
+    } catch (error) {
+      if (previous) {
+        setState(id, previous)
+      } else {
+        clearState(id)
+      }
+      setFailedAction(id, 'install')
+      setError(id, error instanceof Error ? error.message : 'Failed to install plugin.')
+    } finally {
+      setPendingAction(id, null)
+    }
+  }
+
+  const uninstall = async (id: string) => {
+    if (pendingActions()[id]) return
+
+    const previous = pluginState()[id] ?? { installed: false, enabled: false }
+    if (!previous.installed) {
+      setError(id, 'Plugin is not installed.')
+      return
+    }
+
+    clearError(id)
+    setPendingAction(id, 'uninstall')
+    clearState(id)
+
+    try {
+      const next = await runLifecycle(() => uninstallPlugin(id))
+      if (next.installed) {
+        setState(id, next)
+      } else {
+        clearState(id)
+      }
+      setFailedAction(id, null)
+    } catch (error) {
+      setState(id, previous)
+      setFailedAction(id, 'uninstall')
+      setError(id, error instanceof Error ? error.message : 'Failed to uninstall plugin.')
+    } finally {
+      setPendingAction(id, null)
+    }
+  }
+
+  const toggleEnabled = async (id: string) => {
+    if (pendingActions()[id]) return
+
     const current = pluginState()[id] ?? { installed: false, enabled: false }
-    if (!current.installed) return
-    setState(id, { ...current, enabled: !current.enabled })
+    if (!current.installed) {
+      setError(id, 'Plugin must be installed before enabling or disabling.')
+      return
+    }
+
+    const optimistic = { ...current, enabled: !current.enabled }
+    clearError(id)
+    setPendingAction(id, 'toggle')
+    setState(id, optimistic)
+
+    try {
+      const next = await runLifecycle(() => setPluginEnabled(id, optimistic.enabled))
+      setState(id, next)
+      setFailedAction(id, null)
+    } catch (error) {
+      setState(id, current)
+      setFailedAction(id, 'toggle')
+      setError(id, error instanceof Error ? error.message : 'Failed to update plugin state.')
+    } finally {
+      setPendingAction(id, null)
+    }
+  }
+
+  const retry = async (id: string) => {
+    const failedAction = failedActionsByPlugin()[id]
+    if (!failedAction || pendingActions()[id]) return
+
+    if (failedAction === 'install') {
+      await install(id)
+      return
+    }
+
+    if (failedAction === 'uninstall') {
+      await uninstall(id)
+      return
+    }
+
+    await toggleEnabled(id)
+  }
+
+  const recover = async (id: string) => {
+    const current = pluginState()[id] ?? { installed: false, enabled: false }
+    if (current.installed) {
+      await uninstall(id)
+      return
+    }
+
+    clearError(id)
+    setFailedAction(id, null)
   }
 
   const installedCount = createMemo(
@@ -95,13 +253,23 @@ function createPluginsStore() {
     filteredPlugins,
     search,
     showInstalledOnly,
+    categoryFilter,
     pluginState,
     installedCount,
+    categories,
+    featuredPlugins,
     setSearch,
     setShowInstalledOnly,
+    setCategoryFilter,
     install,
     uninstall,
     toggleEnabled,
+    pendingAction: (id: string) => pendingActions()[id] ?? null,
+    failedAction: (id: string) => failedActionsByPlugin()[id] ?? null,
+    errorFor: (id: string) => errorsByPlugin()[id] ?? null,
+    clearError,
+    retry,
+    recover,
     refresh,
   }
 }

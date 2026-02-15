@@ -2,8 +2,8 @@ mod commands;
 
 use commands::{
     allow_project_path, append_log, cleanup_old_logs, get_cwd, get_env_var, get_plugins_state,
-    greet, oauth_copilot_device_poll, oauth_copilot_device_start, oauth_listen,
-    set_plugins_state,
+    greet, install_plugin, oauth_copilot_device_poll, oauth_copilot_device_start, oauth_listen,
+    set_plugin_enabled, set_plugins_state, uninstall_plugin,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -25,7 +25,10 @@ pub fn run() {
             cleanup_old_logs,
             get_cwd,
             get_plugins_state,
-            set_plugins_state
+            set_plugins_state,
+            install_plugin,
+            uninstall_plugin,
+            set_plugin_enabled
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

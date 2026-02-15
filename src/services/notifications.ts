@@ -6,9 +6,13 @@
  * Lazily requests permission on first use.
  */
 
-import { useSettings } from '../stores/settings'
-
 let permissionRequested = false
+
+export interface CompletionNotificationSettings {
+  notifyOnCompletion: boolean
+  soundOnCompletion: boolean
+  soundVolume: number
+}
 
 /** Request notification permission if not already granted */
 async function ensurePermission(): Promise<boolean> {
@@ -47,15 +51,12 @@ function playSound(volume: number) {
   }
 }
 
-/**
- * Send a completion notification (desktop + optional sound).
- * Reads settings to decide whether to notify/play sound.
- */
-export async function notifyCompletion(title: string, body: string): Promise<void> {
-  const { settings } = useSettings()
-  const s = settings()
-
-  if (s.notifications.notifyOnCompletion) {
+export async function notifyCompletion(
+  title: string,
+  body: string,
+  settings: CompletionNotificationSettings
+): Promise<void> {
+  if (settings.notifyOnCompletion) {
     // Only notify if the window is not focused (user is tabbed away)
     if (!document.hasFocus()) {
       const allowed = await ensurePermission()
@@ -65,7 +66,7 @@ export async function notifyCompletion(title: string, body: string): Promise<voi
     }
   }
 
-  if (s.notifications.soundOnCompletion) {
-    playSound(s.notifications.soundVolume)
+  if (settings.soundOnCompletion) {
+    playSound(settings.soundVolume)
   }
 }

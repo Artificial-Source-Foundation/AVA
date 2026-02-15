@@ -1,0 +1,1 @@
+export { PluginDetailPanel } from './PluginDetailPanel'

@@ -1,0 +1,116 @@
+import { type Component, Show } from 'solid-js'
+import type { AppSettings } from '../../stores/settings'
+import { AboutSection } from './settings-about-section'
+import { GeneralSection } from './settings-general-section'
+import type { SettingsTab } from './settings-modal-config'
+import { AgentsTab } from './tabs/AgentsTab'
+import { AppearanceTab } from './tabs/AppearanceTab'
+import { BehaviorTab } from './tabs/BehaviorTab'
+import { DeveloperTab } from './tabs/DeveloperTab'
+import { type Keybinding, KeybindingsTab } from './tabs/KeybindingsTab'
+import { LLMTab } from './tabs/LLMTab'
+import { type MCPServer, MCPServersTab } from './tabs/MCPServersTab'
+import { PluginsTab } from './tabs/PluginsTab'
+import { ProvidersTab } from './tabs/ProvidersTab'
+
+interface SettingsModalContentProps {
+  activeTab: () => SettingsTab
+  settings: () => AppSettings
+  keybindings: () => Keybinding[]
+  mcpServers: () => MCPServer[]
+  onEditKeybinding: (id: string) => void
+  onResetKeybinding: (id: string) => void
+  onResetAllKeybindings: () => void
+  onUpdateProvider: (id: string, patch: Partial<AppSettings['providers'][number]>) => void
+  onUpdateAgent: (id: string, patch: Partial<AppSettings['agents'][number]>) => void
+  onTestProvider: (id: string) => Promise<void>
+  onEditAgent: (id: string) => void
+  onDeleteAgent: (id: string) => void
+  onCreateAgent: () => void
+  onRemoveMcpServer: (id: string) => void
+  onAddMcpServer: () => void
+}
+
+export const SettingsModalContent: Component<SettingsModalContentProps> = (props) => {
+  return (
+    <div class="max-w-2xl mx-auto px-6 py-6">
+      <Show when={props.activeTab() === 'general'}>
+        <GeneralSection />
+      </Show>
+
+      <Show when={props.activeTab() === 'appearance'}>
+        <AppearanceTab />
+      </Show>
+
+      <Show when={props.activeTab() === 'behavior'}>
+        <BehaviorTab />
+      </Show>
+
+      <Show when={props.activeTab() === 'shortcuts'}>
+        <KeybindingsTab
+          keybindings={props.keybindings()}
+          onEdit={props.onEditKeybinding}
+          onReset={props.onResetKeybinding}
+          onResetAll={props.onResetAllKeybindings}
+        />
+      </Show>
+
+      <Show when={props.activeTab() === 'providers'}>
+        <ProvidersTab
+          providers={props.settings().providers}
+          onToggle={(id, enabled) => props.onUpdateProvider(id, { enabled })}
+          onSaveApiKey={(id, key) =>
+            props.onUpdateProvider(id, { apiKey: key, status: 'connected' })
+          }
+          onClearApiKey={(id) =>
+            props.onUpdateProvider(id, { apiKey: undefined, status: 'disconnected' })
+          }
+          onSetDefaultModel={(providerId, modelId) =>
+            props.onUpdateProvider(providerId, { defaultModel: modelId })
+          }
+          onUpdateModels={(providerId, models) => {
+            props.onUpdateProvider(providerId, {
+              models,
+              defaultModel: models.find((m) => m.isDefault)?.id || models[0]?.id,
+            })
+          }}
+          onTestConnection={props.onTestProvider}
+        />
+      </Show>
+
+      <Show when={props.activeTab() === 'llm'}>
+        <LLMTab />
+      </Show>
+
+      <Show when={props.activeTab() === 'models'}>
+        <AgentsTab
+          agents={props.settings().agents}
+          onToggle={(id, enabled) => props.onUpdateAgent(id, { enabled })}
+          onEdit={props.onEditAgent}
+          onDelete={props.onDeleteAgent}
+          onCreate={props.onCreateAgent}
+        />
+      </Show>
+
+      <Show when={props.activeTab() === 'mcp'}>
+        <MCPServersTab
+          servers={props.mcpServers()}
+          onRemove={props.onRemoveMcpServer}
+          onAdd={props.onAddMcpServer}
+        />
+      </Show>
+
+      <Show when={props.activeTab() === 'plugins'}>
+        <PluginsTab />
+      </Show>
+
+      <Show when={props.activeTab() === 'developer'}>
+        <DeveloperTab />
+      </Show>
+
+      <Show when={props.activeTab() === 'about'}>
+        <AboutSection />
+      </Show>
+    </div>
+  )
+}

@@ -1,6 +1,6 @@
 import { render } from 'solid-js/web'
 import { afterEach, describe, expect, it } from 'vitest'
-import type { PluginCatalogItem, PluginState } from '../../stores/plugins'
+import type { PluginCatalogItem, PluginState } from '../../types/plugin'
 import { PluginDetailPanel } from './PluginDetailPanel'
 
 const samplePlugin: PluginCatalogItem = {

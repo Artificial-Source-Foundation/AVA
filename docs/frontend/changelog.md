@@ -4,6 +4,19 @@
 
 ---
 
+## Session 55 — Frontend Gap Closure Batch (2026-02-15)
+
+- **Merged frontend modernization branch** — Local merge of `feat/frontend-gap-closure` into `master` (`11ef4d2`) after isolating and resolving feature-branch-only core test regressions.
+- **Chat Git control strip (FG-001)** — Added in-chat branch switch, pull, push, and PR-open flow with status/error feedback (`GitControlStrip.tsx`, `git-actions.ts`).
+- **Usage visibility improvements (FG-002)** — Added `UsageDetailsDialog` for session-level context/tokens/cost and recent tokenized turns; wired from chat strip.
+- **Plugin catalog maturity pass (FG-003)** — Added metadata fields (`version`, `source`, `trust`, `changelogSummary`), surfaced in list/detail cards, and added catalog sync state + error handling (`plugins-catalog.ts`, `plugins.ts`, `PluginsTab.tsx`).
+- **Approval-state UX (FG-005)** — Added persistent inline approval banner above chat timeline (`ApprovalStateBar.tsx`) with approve/reject actions.
+- **Long-session rendering hardening (FG-004 partial)** — Added incremental message backfill loading for large histories in `MessageList.tsx`.
+- **Deep modularization delivered** — Split oversized frontend modules into focused files for settings, hooks, chat input/list, stores, and tabs; established missing barrels and cleaner type ownership.
+- **Verification evidence** — Typecheck + focused frontend suites green during rollout; merge performed after full-suite comparison against baseline and core regression restoration.
+
+---
+
 ## Session 53 — File Watcher + Step-Level Undo (2026-02-09)
 
 - **File watcher service** — `src/services/file-watcher.ts` (~270 lines) watches project dir via Tauri FS `watch()` (500ms debounce, recursive)

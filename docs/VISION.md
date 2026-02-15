@@ -1,4 +1,4 @@
-# Estela — Vision
+# AVA — Vision
 
 > The Obsidian of AI Coding
 
@@ -6,7 +6,7 @@
 
 ## The Pitch
 
-Estela is a **desktop AI coding app** for developers and vibe coders. Think Claude Code meets Obsidian — simple to use, open source, multi-provider, with a community plugin ecosystem where anyone can build and share their workflows.
+AVA is a **desktop AI coding app** for developers and vibe coders. Think Claude Code meets Obsidian — simple to use, open source, multi-provider, with a community plugin ecosystem where anyone can build and share their workflows.
 
 It's not an IDE replacement. It's the AI companion that makes your IDE better.
 
@@ -31,7 +31,7 @@ It's not an IDE replacement. It's the AI companion that makes your IDE better.
 
 ---
 
-## What Makes Estela Special
+## What Makes AVA Special
 
 ### 1. The Dev Team
 
@@ -136,7 +136,7 @@ Built with Tauri (Rust backend + SolidJS frontend):
 ## Platform Priority
 
 ```
-Priority 1: Desktop App (Tauri)     ← THIS IS ESTELA
+Priority 1: Desktop App (Tauri)     ← THIS IS AVA
 Priority 2: Plugin Ecosystem        ← THE DIFFERENTIATOR
 Priority 3: CLI                     ← Secondary interface
 Priority 4: Editor Integration      ← VS Code/Cursor backend (ACP)
@@ -176,7 +176,7 @@ Priority 5: Agent Network           ← Remote agent calls (A2A)
 - [ ] Documentation site
 
 ### Phase 4: Integrations
-- [ ] Editor integration (ACP — use Estela as VS Code backend)
+- [ ] Editor integration (ACP — use AVA as VS Code backend)
 - [ ] Agent network (A2A — connect to remote agents)
 - [ ] Voice input
 - [ ] Vision models (image understanding)

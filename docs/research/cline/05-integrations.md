@@ -206,7 +206,7 @@ src/file.ts
 
 ---
 
-## Notable Features for Estela
+## Notable Features for AVA
 
 ### 1. Checkpoint System
 Version control for changes without repo interference.

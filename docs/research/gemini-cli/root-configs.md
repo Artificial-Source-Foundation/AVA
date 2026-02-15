@@ -1,6 +1,6 @@
 # Gemini CLI Root Configs Analysis
 
-> Comprehensive analysis of Gemini CLI's root-level files and configurations for Estela reference.
+> Comprehensive analysis of Gemini CLI's root-level files and configurations for AVA reference.
 
 ---
 
@@ -430,7 +430,7 @@ Uses a forked version of Ink (`@jrichman/ink`) for custom features or fixes.
 
 ---
 
-## Key Takeaways for Estela
+## Key Takeaways for AVA
 
 ### What to Adopt
 
@@ -445,9 +445,9 @@ Uses a forked version of Ink (`@jrichman/ink`) for custom features or fixes.
 9. **Environment isolation**: Wrappers for `homedir()`/`tmpdir()`
 10. **License headers**: Enforced via ESLint plugin
 
-### Differences from Estela
+### Differences from AVA
 
-| Aspect | Gemini CLI | Estela |
+| Aspect | Gemini CLI | AVA |
 |--------|------------|--------|
 | UI Framework | React (Ink) for CLI | SolidJS for Tauri |
 | Platform | Node.js CLI only | Tauri desktop + CLI |

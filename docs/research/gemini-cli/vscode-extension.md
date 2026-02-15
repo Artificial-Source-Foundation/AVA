@@ -687,9 +687,9 @@ Special handling for Firebase Studio, Cloud Shell, etc.:
 
 ---
 
-## Implications for Estela
+## Implications for AVA
 
-For Estela's VS Code extension implementation, consider:
+For AVA's VS Code extension implementation, consider:
 
 1. **Use MCP** - Provides standardized tooling and is becoming an industry standard
 2. **Environment Variable Injection** - Most reliable discovery mechanism

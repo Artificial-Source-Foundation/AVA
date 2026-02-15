@@ -1,15 +1,15 @@
 # Architecture
 
-> Estela system design — desktop-first AI coding app with a virtual dev team
+> AVA system design — desktop-first AI coding app with a virtual dev team
 
 ---
 
 ## Overview
 
-Estela is a monorepo with three layers:
+AVA is a monorepo with three layers:
 
 ```
-Estela/
+AVA/
 ├── src/                    # Desktop app (Tauri + SolidJS) ← PRIMARY
 ├── src-tauri/              # Rust backend for Tauri
 ├── packages/

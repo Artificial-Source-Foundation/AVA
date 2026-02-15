@@ -1,4 +1,4 @@
-# Estela
+# AVA
 
 > Multi-Agent AI Coding Assistant - Tauri + SolidJS Desktop
 
@@ -18,7 +18,7 @@ Read: `CLAUDE.md` for memory bank workflow
 ## Architecture
 
 ```
-Estela/
+AVA/
 ├── packages/
 │   ├── core/              # Business logic (29,500+ lines)
 │   ├── platform-node/     # Node.js implementations

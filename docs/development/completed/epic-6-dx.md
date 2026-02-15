@@ -6,7 +6,7 @@
 
 ## Goal
 
-Improve the developer experience for both Estela contributors and users. Better tool definitions with validation, unified diff tracking, and git-based safety snapshots.
+Improve the developer experience for both AVA contributors and users. Better tool definitions with validation, unified diff tracking, and git-based safety snapshots.
 
 ---
 
@@ -46,7 +46,7 @@ packages/core/src/tools/
 ### Dependencies
 
 ```bash
-pnpm add zod zod-to-json-schema -w --filter @estela/core
+pnpm add zod zod-to-json-schema -w --filter @ava/core
 ```
 
 ### Implementation
@@ -169,7 +169,7 @@ packages/core/src/diff/
 ### Dependencies
 
 ```bash
-pnpm add diff -w --filter @estela/core
+pnpm add diff -w --filter @ava/core
 ```
 
 ### Implementation
@@ -294,7 +294,7 @@ export interface Snapshot {
 export interface GitConfig {
   enabled: boolean
   autoCommit: boolean
-  branchPrefix: string  // e.g., 'estela/'
+  branchPrefix: string  // e.g., 'ava/'
 }
 
 // snapshot.ts

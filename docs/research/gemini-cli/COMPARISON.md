@@ -1,4 +1,4 @@
-# Gemini CLI vs Estela: Comparison & Feature Gaps
+# Gemini CLI vs AVA: Comparison & Feature Gaps
 
 > Comprehensive comparison based on full codebase analysis of Gemini CLI
 
@@ -6,12 +6,12 @@
 
 ## Executive Summary
 
-Gemini CLI is a production-grade AI coding assistant built on React + Ink for terminal UI. After analyzing all 5 packages (~150+ files), several architectural patterns and features could enhance Estela.
+Gemini CLI is a production-grade AI coding assistant built on React + Ink for terminal UI. After analyzing all 5 packages (~150+ files), several architectural patterns and features could enhance AVA.
 
 **Key Findings:**
 - Gemini CLI has **more mature infrastructure** (policy engine, message bus, extension system)
-- Estela has **unique strengths** (browser automation, Tauri desktop, SolidJS)
-- Several **high-value features** are missing from Estela
+- AVA has **unique strengths** (browser automation, Tauri desktop, SolidJS)
+- Several **high-value features** are missing from AVA
 
 ---
 
@@ -31,7 +31,7 @@ Gemini CLI is a production-grade AI coding assistant built on React + Ink for te
 
 ## Architecture Comparison
 
-| Aspect | Gemini CLI | Estela |
+| Aspect | Gemini CLI | AVA |
 |--------|------------|--------|
 | **UI Framework** | React + Ink (terminal) | SolidJS + Tauri (desktop) |
 | **Runtime** | Node.js CLI | Tauri (Rust + Web) |
@@ -49,7 +49,7 @@ Gemini CLI is a production-grade AI coding assistant built on React + Ink for te
 
 ### Critical Gaps (High Impact)
 
-| Feature | Gemini CLI | Estela | Priority |
+| Feature | Gemini CLI | AVA | Priority |
 |---------|------------|--------|----------|
 | **Policy Engine** | Priority-based rules, wildcards, regex | Simple auto-approve list | 🔴 High |
 | **Message Bus** | Decoupled tool/UI, correlation IDs | Tight coupling | 🔴 High |
@@ -58,7 +58,7 @@ Gemini CLI is a production-grade AI coding assistant built on React + Ink for te
 
 ### Important Gaps (Medium Impact)
 
-| Feature | Gemini CLI | Estela | Priority |
+| Feature | Gemini CLI | AVA | Priority |
 |---------|------------|--------|----------|
 | **Chat Compression** | LLM summarization with verification | Basic token compaction | 🟡 Medium |
 | **PTY Shell** | xterm with 300K scrollback | Basic spawn | 🟡 Medium |
@@ -69,7 +69,7 @@ Gemini CLI is a production-grade AI coding assistant built on React + Ink for te
 
 ### Nice-to-Have Gaps (Lower Impact)
 
-| Feature | Gemini CLI | Estela | Priority |
+| Feature | Gemini CLI | AVA | Priority |
 |---------|------------|--------|----------|
 | **A2A Protocol** | Multi-agent REST API | None | 🟢 Low |
 | **Agent Cards** | `.well-known/agent-card.json` | None | 🟢 Low |
@@ -78,9 +78,9 @@ Gemini CLI is a production-grade AI coding assistant built on React + Ink for te
 
 ---
 
-## What Estela Does Better
+## What AVA Does Better
 
-| Feature | Estela Advantage |
+| Feature | AVA Advantage |
 |---------|------------------|
 | **Browser Automation** | Built-in Puppeteer tool, not in Gemini CLI |
 | **Desktop App** | Native Tauri app with SolidJS |
@@ -131,7 +131,7 @@ interface MessageBus {
 
 **4. TOML Custom Commands** (~400 lines)
 ```toml
-# ~/.estela/commands/deploy.toml
+# ~/.ava/commands/deploy.toml
 description = "Deploy to production"
 prompt = """
 Run the deployment script:
@@ -224,7 +224,7 @@ Exit codes control behavior:
 
 ## Code Statistics
 
-| Component | Gemini CLI | Estela |
+| Component | Gemini CLI | AVA |
 |-----------|------------|--------|
 | Core Package | ~25K lines | ~25K lines |
 | CLI/Frontend | ~15K lines | ~5K lines |

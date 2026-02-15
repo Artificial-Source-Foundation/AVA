@@ -297,7 +297,7 @@ All stores use SolidJS `createSignal` / `createMemo`. No external state library.
 
 ### Security
 - **CSP** enabled in `tauri.conf.json`
-- **Scoped FS** — Limited to `$APPDATA/**` and `$HOME/.estela/**`
+- **Scoped FS** — Limited to `$APPDATA/**` and `$HOME/.ava/**`
 - **Deferred window show** — `visible: false` + `show()` after mount
 
 ### Lazy Import Pattern

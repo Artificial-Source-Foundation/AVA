@@ -210,7 +210,7 @@ Result: DENIED (segment "nc attacker.com 1234" not in allow list)
 
 ---
 
-## Notable Features for Estela
+## Notable Features for AVA
 
 ### 1. Chained Command Validation
 Validates EACH segment of piped/chained commands.

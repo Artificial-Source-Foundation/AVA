@@ -30,6 +30,10 @@ This pass focused on MVP confidence for auth reliability, chat flow reliability,
   - reduced stream jitter and flicker in list/bubble rendering
   - improved scroll stability and overflow handling
 
+- Developer console UX improvements:
+  - level/source/text filters in log viewer
+  - optional sticky-bottom behavior with "Jump to latest"
+
 - Added session auto-title behavior:
   - first user message renames default "New Chat" sessions when enabled
 
@@ -54,5 +58,5 @@ This pass focused on MVP confidence for auth reliability, chat flow reliability,
 ## Next Priorities
 
 1. Complete final chat streaming micro-jitter polish in desktop runtime.
-2. Execute manual OAuth validation matrix for OpenAI, Anthropic, and Copilot.
+2. Execute manual OAuth validation matrix for OpenAI, Anthropic, and Copilot (`docs/development/oauth-manual-validation-matrix.md`).
 3. Start Sprint 2.3 plugin UX implementation (settings/sidebar plugin surface).

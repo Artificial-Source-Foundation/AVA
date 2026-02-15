@@ -611,7 +611,7 @@ if ("refresh" in result) {
 
 ---
 
-## Key Takeaways for Estela
+## Key Takeaways for AVA
 
 1. **Use AI SDK abstractions**: OpenCode builds on Vercel AI SDK, providing a clean abstraction layer
 

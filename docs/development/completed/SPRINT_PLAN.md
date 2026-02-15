@@ -1,4 +1,4 @@
-# Sprint Plan: Estela Feature Parity
+# Sprint Plan: AVA Feature Parity
 
 > Historical archive: this plan is retained for context and is not the current execution plan.
 >
@@ -7,7 +7,7 @@
 > - `docs/development/sprint-1.6-testing.md`
 > - `docs/development/mvp-readiness-report-2026-02-13.md`
 
-> Making Estela as good as Cline and beyond
+> Making AVA as good as Cline and beyond
 
 ---
 

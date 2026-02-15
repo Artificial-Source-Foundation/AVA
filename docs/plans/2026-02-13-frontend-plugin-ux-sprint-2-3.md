@@ -4,9 +4,21 @@
 
 **Goal:** Ship the first usable frontend plugin experience: browse installed/available plugins, install/uninstall, enable/disable, and per-plugin settings entry points.
 
-**Architecture:** Keep backend extension lifecycle as source of truth (`packages/core/src/extensions/*`) and add a thin frontend orchestration layer via existing bridge/services. Start with settings-surface MVP (since sidebar placeholder was removed), then optionally promote to dedicated sidebar page after UX validation.
+**Architecture:** Keep backend extension lifecycle as source of truth (`packages/core/src/extensions/*`) and add a thin frontend orchestration layer via existing bridge/services. Implement a settings-only plugin manager surface (no sidebar plugin browser).
 
 **Tech Stack:** SolidJS + TypeScript + Tauri bridge + existing settings/store patterns.
+
+## Status Update (2026-02-14)
+
+- Completed in current branch:
+  - Settings-only `PluginsTab` UI replaced inline placeholder in `SettingsModal`.
+  - Plugin store/state module added (`src/stores/plugins.ts`) with tests.
+  - Plugin detail panel added (`src/components/plugins/PluginDetailPanel.tsx`) with tests.
+  - Smoke + store + detail tests pass.
+- Remaining for Sprint 2.3 completion:
+  - Replace local plugin state simulation with real backend extension lifecycle wiring.
+  - Add featured/curated plugin source and metadata pipeline.
+  - Manual QA in desktop runtime for plugin manager flows.
 
 ---
 

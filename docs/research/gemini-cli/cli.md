@@ -870,14 +870,14 @@ Extension Structure:
 
 ---
 
-## Key Takeaways for Estela
+## Key Takeaways for AVA
 
 ### Features to Consider
 
 1. **Extension System**
    - Gemini CLI has a sophisticated extension system supporting GitHub, local, and linked extensions
    - Extensions can provide: commands, MCP servers, skills, themes, hooks
-   - Estela could benefit from a similar plugin architecture
+   - AVA could benefit from a similar plugin architecture
 
 2. **Session Resume**
    - Full session resume with `--resume latest` or `--resume <id>`
@@ -888,7 +888,7 @@ Extension Structure:
    - `--yolo` for full automation
    - `--auto-edit` for edit-only automation
    - `--plan` for planning mode
-   - Estela should consider similar granular approval controls
+   - AVA should consider similar granular approval controls
 
 4. **Sandbox Execution**
    - Built-in support for Docker, Podman, sandbox-exec
@@ -947,7 +947,7 @@ Extension Structure:
    - Centralized cleanup with sync and async handlers
    - Telemetry shutdown as final step
 
-### Missing in Estela (Potential Gaps)
+### Missing in AVA (Potential Gaps)
 
 1. **Session Browser UI** - Interactive session selection
 2. **Extension Marketplace** - GitHub-based extension discovery

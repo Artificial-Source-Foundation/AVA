@@ -1,6 +1,6 @@
 # A2A & ACP Protocol Research
 
-> Deep research into Agent-to-Agent and Agent Client Protocol for Estela implementation
+> Deep research into Agent-to-Agent and Agent Client Protocol for AVA implementation
 
 ---
 
@@ -10,9 +10,9 @@ The AI agent ecosystem has converged on three complementary protocols:
 
 | Protocol | Focus | Transport | Status |
 |----------|-------|-----------|--------|
-| **MCP** (Anthropic) | Agent ↔ Tool | JSON-RPC over stdio/HTTP | Estela has this |
-| **ACP** (Zed/JetBrains) | Agent ↔ Editor | JSON-RPC over stdio | New for Estela |
-| **A2A** (Google/Linux Foundation) | Agent ↔ Agent | HTTP/SSE/gRPC | New for Estela |
+| **MCP** (Anthropic) | Agent ↔ Tool | JSON-RPC over stdio/HTTP | AVA has this |
+| **ACP** (Zed/JetBrains) | Agent ↔ Editor | JSON-RPC over stdio | New for AVA |
+| **A2A** (Google/Linux Foundation) | Agent ↔ Agent | HTTP/SSE/gRPC | New for AVA |
 
 ```
                     ┌──────────────┐
@@ -22,7 +22,7 @@ The AI agent ecosystem has converged on three complementary protocols:
                            │ ACP (JSON-RPC over stdio)
                            │
                     ┌──────▼───────┐
-                    │   Estela     │
+                    │   AVA     │
                     │  (AI Agent)  │
                     └──┬───────┬───┘
                        │       │
@@ -53,7 +53,7 @@ Every A2A agent publishes a JSON file at `/.well-known/agent.json`:
 
 ```json
 {
-  "name": "Estela Coding Agent",
+  "name": "AVA Coding Agent",
   "description": "AI coding assistant with browser automation, fuzzy edits, and parallel execution",
   "url": "http://localhost:41242/",
   "protocolVersion": "0.3.0",
@@ -170,9 +170,9 @@ data: {"taskId":"t1","status":{"state":"completed","message":{"role":"agent","pa
    - Maintains contextId/taskId for continuity
    - Extracts text from parts for LLM consumption
 
-### What Estela Needs
+### What AVA Needs
 
-**A2A Server** (expose Estela as an agent):
+**A2A Server** (expose AVA as an agent):
 - Agent Card at `/.well-known/agent.json`
 - HTTP/REST endpoints for messages, tasks, streaming
 - Task lifecycle management
@@ -193,7 +193,7 @@ data: {"taskId":"t1","status":{"state":"completed","message":{"role":"agent","pa
 ACP is a protocol for connecting AI coding agents to code editors. Think of it as **LSP for AI agents** - any agent can work in any supporting editor.
 
 **Key participants:**
-- **Agent** (Estela): Processes prompts, executes tools, modifies code
+- **Agent** (AVA): Processes prompts, executes tools, modifies code
 - **Client** (Editor): Manages UI, file access, terminal, permissions
 
 ### Protocol Specification
@@ -202,7 +202,7 @@ ACP is a protocol for connecting AI coding agents to code editors. Think of it a
 
 JSON-RPC 2.0 over **stdin/stdout** (subprocess model):
 ```
-Editor spawns: estela --experimental-acp
+Editor spawns: ava --experimental-acp
                 ↕ stdin/stdout (JSON-RPC)
 ```
 
@@ -267,7 +267,7 @@ Client                          Agent
 // Agent → Client (initialize response)
 {
   "protocolVersion": 1,
-  "agentName": "Estela",
+  "agentName": "AVA",
   "agentVersion": "1.0.0",
   "capabilities": {
     "streaming": true,
@@ -327,7 +327,7 @@ class AcpFileSystemService implements FileSystemService {
 | goose | Supported |
 | StackPack | Supported |
 
-### What Estela Needs
+### What AVA Needs
 
 1. **ACP Agent Implementation** - Handle JSON-RPC over stdin/stdout
 2. **Session Management** - Create, prompt, cancel sessions
@@ -341,7 +341,7 @@ class AcpFileSystemService implements FileSystemService {
 
 ### Why ACP First
 
-1. **Immediate user value** - Estela works in Zed, JetBrains, Neovim
+1. **Immediate user value** - AVA works in Zed, JetBrains, Neovim
 2. **Simpler protocol** - JSON-RPC over stdio, no HTTP server needed
 3. **Complementary to existing CLI** - Just a new mode
 4. **SDK available** - `@agentclientprotocol/sdk` (TypeScript)

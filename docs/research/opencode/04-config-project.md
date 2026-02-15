@@ -36,7 +36,7 @@
 9. [Instructions System](#instructions-system)
 10. [Skills & Plugins](#skills--plugins)
 11. [Authentication Storage](#authentication-storage)
-12. [Key Takeaways for Estela](#key-takeaways-for-estela)
+12. [Key Takeaways for AVA](#key-takeaways-for-ava)
 
 ---
 
@@ -905,7 +905,7 @@ export async function set(key: string, info: Info) {
 
 ---
 
-## Key Takeaways for Estela
+## Key Takeaways for AVA
 
 ### Configuration Best Practices
 

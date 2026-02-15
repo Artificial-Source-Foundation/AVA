@@ -34,7 +34,7 @@ Remaining gaps:
 
 ### Tool System Gaps
 
-| Feature | Cline | Estela | Priority |
+| Feature | Cline | AVA | Priority |
 |---------|-------|--------|----------|
 | Tool hooks (PreToolUse, PostToolUse) | ✅ | ✅ | High |
 | `requires_approval` self-report | ✅ | ✅ | High |
@@ -46,7 +46,7 @@ Remaining gaps:
 
 ### System Prompt Gaps
 
-| Feature | Cline | Estela | Priority |
+| Feature | Cline | AVA | Priority |
 |---------|-------|--------|----------|
 | RULES section with detailed guidance | ✅ 10k | ✅ | High |
 | CAPABILITIES section | ✅ | ✅ | Medium |
@@ -116,8 +116,8 @@ Tool Execute Request
 ```
 
 **Hook Discovery**:
-- Global: `~/.estela/hooks/{HookName}` (executable script)
-- Project: `.estela/hooks/{HookName}` (executable script)
+- Global: `~/.ava/hooks/{HookName}` (executable script)
+- Project: `.ava/hooks/{HookName}` (executable script)
 - Both run if present (global first, then project)
 
 **Hook Protocol**:
@@ -141,7 +141,7 @@ Tool Execute Request
 
 ```bash
 #!/bin/bash
-# .estela/hooks/PreToolUse - Run linter before file writes
+# .ava/hooks/PreToolUse - Run linter before file writes
 
 INPUT=$(cat)
 TOOL=$(echo "$INPUT" | jq -r '.toolName')
@@ -157,7 +157,7 @@ fi
 
 ```bash
 #!/bin/bash
-# .estela/hooks/PostToolUse - Auto-run linter after file edits
+# .ava/hooks/PostToolUse - Auto-run linter after file edits
 
 INPUT=$(cat)
 TOOL=$(echo "$INPUT" | jq -r '.toolName')
@@ -370,7 +370,7 @@ Use these tools to accomplish tasks efficiently. Prefer tools over asking questi
 
 ## Future Considerations (Not in this Epic)
 
-- `.estelaignore` file support (like .clineignore)
+- `.avaignore` file support (like .clineignore)
 - Model-family prompt variants
 - Environment details auto-injection
 - Browser automation tool

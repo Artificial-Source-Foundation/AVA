@@ -122,10 +122,10 @@ for (const toolUse of pendingToolUses) {
 
 ```bash
 # CLI usage
-estela chat "Hello"              # One-shot chat
-estela auth login anthropic      # OAuth login
-estela auth status               # Show auth status
-estela --acp                     # ACP agent mode for editors
+ava chat "Hello"              # One-shot chat
+ava auth login anthropic      # OAuth login
+ava auth status               # Show auth status
+ava --acp                     # ACP agent mode for editors
 
 # Development
 pnpm build:all                   # Build all packages

@@ -46,7 +46,7 @@ packages/platform-node/src/pty.ts    # Node-pty implementation
 ### Dependencies
 
 ```bash
-pnpm add node-pty -w --filter @estela/platform-node
+pnpm add node-pty -w --filter @ava/platform-node
 ```
 
 ### Interface
@@ -91,7 +91,7 @@ export interface IPTY {
 ```typescript
 // packages/platform-node/src/pty.ts
 import * as pty from 'node-pty'
-import type { IPTY, PTYProcess, PTYOptions } from '@estela/core'
+import type { IPTY, PTYProcess, PTYOptions } from '@ava/core'
 
 export class NodePTY implements IPTY {
   isSupported(): boolean {
@@ -333,10 +333,10 @@ export async function discoverServers(): Promise<MCPServer[]> {
     }
   } catch {}
 
-  // Check Estela config
-  const estelaConfig = join(homedir(), '.estela', 'mcp.json')
+  // Check AVA config
+  const avaConfig = join(homedir(), '.ava', 'mcp.json')
   try {
-    const config = JSON.parse(await readFile(estelaConfig, 'utf-8'))
+    const config = JSON.parse(await readFile(avaConfig, 'utf-8'))
     if (config.servers) {
       servers.push(...config.servers)
     }
@@ -414,6 +414,6 @@ This epic owns:
 - [ ] PTY works for interactive commands (ssh, vim)
 - [ ] PTY falls back to regular shell when not supported
 - [ ] MCP client connects to stdio and SSE servers
-- [ ] MCP server discovery finds Claude Code and Estela configs
+- [ ] MCP server discovery finds Claude Code and AVA configs
 - [ ] MCP tools appear in LLM tool list with `mcp_` prefix
 - [ ] MCP tool calls work through the tool execution loop

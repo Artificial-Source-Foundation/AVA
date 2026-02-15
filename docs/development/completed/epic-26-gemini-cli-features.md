@@ -1,6 +1,6 @@
 # Epic 26: Gemini CLI Feature Parity
 
-> Infrastructure features from Gemini CLI that enhance Estela's safety, extensibility, and UX
+> Infrastructure features from Gemini CLI that enhance AVA's safety, extensibility, and UX
 
 **Analysis:** [`docs/research/gemini-cli/COMPARISON.md`](../../research/gemini-cli/COMPARISON.md)
 
@@ -310,7 +310,7 @@ export class SessionManager {
 3. `"latest"` keyword
 4. Error with suggestions if not found
 
-**Storage format:** `~/.estela/sessions/{id}.json`
+**Storage format:** `~/.ava/sessions/{id}.json`
 
 ```json
 {
@@ -346,8 +346,8 @@ export interface TomlCommand {
 export class TomlCommandLoader {
   /** Discovery locations (in priority order) */
   private dirs = [
-    '.estela/commands/',        // Project-level
-    '~/.estela/commands/',      // User-level
+    '.ava/commands/',        // Project-level
+    '~/.ava/commands/',      // User-level
   ];
 
   /** Load all TOML commands */
@@ -360,7 +360,7 @@ export class TomlCommandLoader {
 
 **TOML format:**
 ```toml
-# ~/.estela/commands/deploy.toml
+# ~/.ava/commands/deploy.toml
 description = "Deploy to production"
 prompt = """
 Run the deployment process:
@@ -392,7 +392,7 @@ Integrate with existing slash commands registry.
 
 ### Sprint 2 Acceptance Criteria
 
-- [ ] Sessions save to `~/.estela/sessions/`
+- [ ] Sessions save to `~/.ava/sessions/`
 - [ ] Resume by ID, index, or "latest"
 - [ ] Session list with metadata (time, messages, summary)
 - [ ] Session search by content
@@ -493,9 +493,9 @@ Persistence layer for installed extensions:
 - Enable/disable state
 - Settings values
 
-**Storage:** `~/.estela/extensions/{name}/`
+**Storage:** `~/.ava/extensions/{name}/`
 ```
-~/.estela/extensions/
+~/.ava/extensions/
   my-extension/
     manifest.json
     install-metadata.json
@@ -531,7 +531,7 @@ export class TrustedFolders {
   private config: TrustConfig;
 
   constructor(configPath?: string) {
-    // Default: ~/.estela/trusted-folders.json
+    // Default: ~/.ava/trusted-folders.json
   }
 
   /** Check if path is in a trusted folder */
@@ -566,7 +566,7 @@ export class TrustedFolders {
 - [ ] Install from GitHub, local path, link
 - [ ] Enable/disable extensions
 - [ ] Extensions can provide commands, MCP servers, skills
-- [ ] Trusted folders config at `~/.estela/trusted-folders.json`
+- [ ] Trusted folders config at `~/.ava/trusted-folders.json`
 - [ ] Trust check integrated with hooks and commands
 - [ ] Project hooks blocked in untrusted folders
 - [ ] 25+ unit tests

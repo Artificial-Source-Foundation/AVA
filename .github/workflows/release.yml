@@ -54,7 +54,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Estela ${{ github.ref_name }}'
+          releaseName: 'AVA ${{ github.ref_name }}'
           releaseBody: 'See the assets to download and install this version.'
           releaseDraft: true
           prerelease: false

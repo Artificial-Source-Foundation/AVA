@@ -49,3 +49,6 @@ docs/reference-code/
 
 # Memory bank (personal session notes)
 docs/memory-bank/
+
+# Local git worktrees
+.worktrees/

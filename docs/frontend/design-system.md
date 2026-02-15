@@ -1,4 +1,4 @@
-# Estela Design System 2026
+# AVA Design System 2026
 
 > Modern, minimal, dark-first design inspired by Cursor, Windsurf, Zed, and 2026 UI trends.
 
@@ -569,7 +569,7 @@ Each provider gets a custom icon with branded color:
 
 ### Desktop-First
 
-Estela is a desktop app, so we design desktop-first:
+AVA is a desktop app, so we design desktop-first:
 
 1. Full sidebar visible by default
 2. Multi-panel layouts

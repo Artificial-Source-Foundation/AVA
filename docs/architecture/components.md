@@ -83,7 +83,7 @@ TOML-defined commands with parameters.
 
 ### Hooks (`hooks/`)
 Lifecycle hooks: PreToolUse, PostToolUse, TaskStart, TaskComplete, TaskCancel.
-Discovery from `~/.estela/hooks/` and `.estela/hooks/`.
+Discovery from `~/.ava/hooks/` and `.ava/hooks/`.
 
 ### Skills (`skills/`)
 Auto-invoked knowledge modules matching file glob patterns.

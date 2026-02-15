@@ -76,7 +76,7 @@
 
 - **Auto-commit module** — `packages/core/src/git/auto-commit.ts` stages + commits after file-modifying tools
 - **Tool registry wiring** — PostToolUse in `registry.ts` calls `autoCommitIfEnabled()` for write locations
-- **Undo action** — `undoLastAutoCommit()` reverts the most recent estela-prefixed commit via `git revert --no-edit`
+- **Undo action** — `undoLastAutoCommit()` reverts the most recent ava-prefixed commit via `git revert --no-edit`
 - **Frontend settings** — `GitSettings` interface (enabled, autoCommit, commitPrefix) with BehaviorTab UI
 - **Settings sync** — `pushSettingsToCore()` bridges frontend git settings to core `SettingsManager`
 - New file: `packages/core/src/git/auto-commit.ts`
@@ -149,7 +149,7 @@
 - **Sans font** — `SansFont = 'default' | 'inter' | 'outfit' | 'nunito'`, sets `--font-sans`
 - **Chat font size** — 11-20px via `--chat-font-size` in MessageBubble + MessageInput
 - **High contrast** — `[data-high-contrast]` selector, stronger text/borders
-- **localStorage bridge** — `saveSettings()` writes `estela-mode` for flash prevention
+- **localStorage bridge** — `saveSettings()` writes `ava-mode` for flash prevention
 
 ---
 

@@ -35,7 +35,7 @@
 ### Session 48 — Git Auto-Commit
 - **Auto-commit module** — `packages/core/src/git/auto-commit.ts` stages + commits after file-modifying tools
 - **Tool registry** — PostToolUse in `registry.ts` calls `autoCommitIfEnabled()`
-- **Undo** — `undoLastAutoCommit()` reverts most recent estela-prefixed commit
+- **Undo** — `undoLastAutoCommit()` reverts most recent ava-prefixed commit
 - **Frontend** — `GitSettings` (enabled, autoCommit, commitPrefix) in BehaviorTab
 
 ### Session 51 — OAuth Fix + Error Logging

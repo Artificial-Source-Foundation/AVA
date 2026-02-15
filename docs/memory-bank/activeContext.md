@@ -91,7 +91,7 @@ Phase 1.5 remains feature-complete. Focus is now a full audit, test planning (OA
 **Git Auto-Commit (Session 48):**
 - **Auto-commit module** — `packages/core/src/git/auto-commit.ts` stages + commits after file-modifying tools
 - **Tool registry wiring** — PostToolUse in `registry.ts` calls `autoCommitIfEnabled()` for write locations
-- **Undo action** — `undoLastAutoCommit()` reverts the most recent estela-prefixed commit
+- **Undo action** — `undoLastAutoCommit()` reverts the most recent ava-prefixed commit
 - **Frontend settings** — `GitSettings` interface (enabled, autoCommit, commitPrefix) with BehaviorTab UI
 - **Settings sync** — `pushSettingsToCore()` bridges frontend git settings to core `SettingsManager`
 - **1 new file** — `packages/core/src/git/auto-commit.ts`

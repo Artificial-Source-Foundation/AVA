@@ -1,10 +1,10 @@
 {
-  "name": "@estela/cli",
+  "name": "@ava/cli",
   "version": "0.1.0",
-  "description": "Estela CLI - ACP-compatible AI coding assistant",
+  "description": "AVA CLI - ACP-compatible AI coding assistant",
   "type": "module",
   "bin": {
-    "estela": "dist/index.js"
+    "ava": "dist/index.js"
   },
   "main": "dist/index.js",
   "scripts": {
@@ -16,8 +16,8 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.13.1",
-    "@estela/core": "workspace:*",
-    "@estela/platform-node": "workspace:*"
+    "@ava/core": "workspace:*",
+    "@ava/platform-node": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

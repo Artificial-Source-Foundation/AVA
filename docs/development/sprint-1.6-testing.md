@@ -8,14 +8,14 @@ Status update date: 2026-02-13
 |---|---|---|---|---|---|
 | TICKET-01 | OAuth Unit Tests (JWT + Storage Helpers) | P0 | done | `packages/core/src/llm/client.test.ts`, `src/services/auth/oauth.test.ts`, `src/services/auth/oauth-flow.test.ts` | Added reconnect/clear-provider coverage and additional `getAuth` edge tests. |
 | TICKET-02 | OAuth Integration Tests (Routing + Storage) | P0 | done | `src/services/auth/oauth.test.ts`, `src/services/auth/oauth-flow.test.ts`, `packages/core/src/llm/client.test.ts` | OpenAI/Copilot/Anthropic auth flow behavior and storage routing covered in automated tests. |
-| TICKET-03 | OAuth Manual Test + Fix Session | P0 | todo | `docs/development/sprint-1.6-testing.md` | Requires manual `npm run tauri dev` pass for Anthropic/OpenAI/Copilot OAuth flows. |
+| TICKET-03 | OAuth Manual Test + Fix Session | P0 | in_progress | `docs/development/oauth-manual-validation-matrix.md` | Matrix and evidence template added; provider-by-provider manual run still in progress. |
 | TICKET-04 | Message Flow Unit Tests (useChat) | P0 | done | `src/hooks/useChat.integration.test.ts` | Added queue/steer/cancel behavior assertions with mocked streaming. |
 | TICKET-05 | Message Flow Integration Tests (Stream + Watcher) | P1 | done | `src/components/chat/ChatView.integration.test.tsx` | Added watcher->message forwarding test including question prefix and file context metadata. |
-| TICKET-06 | Debug Logging Coverage (useChat + useAgent) | P1 | in_progress | `src/hooks/useChat.ts`, `src/hooks/useAgent.ts` | Logging-related hardening is ongoing; keep source-tag + masking requirements. |
-| TICKET-07 | Debug Logging Coverage (core-bridge + settings + session) | P1 | in_progress | `src/services/core-bridge.ts`, `src/stores/settings.ts`, `src/stores/session.ts` | Continue structured logging pass and error-path checks. |
-| TICKET-08 | Debug Logging Coverage (file-watcher + ChatView) | P1 | in_progress | `src/services/file-watcher.ts`, `src/components/chat/ChatView.tsx` | Keep logs for watch lifecycle, matches, and approval flow; avoid secret leakage. |
-| TICKET-09 | PI Coding Agent Feature Parity | P2 | todo | `docs/backend/gap-analysis.md`, `docs/ROADMAP.md` | Scope/design remains documentation-first before implementation. |
-| TICKET-10 | Console Devtools Improvements | P2 | in_progress | `src/services/dev-console.ts`, `src/components/panels/TerminalPanel.tsx` | Core files exist; complete filtering UX and validation pass. |
+| TICKET-06 | Debug Logging Coverage (useChat + useAgent) | P1 | in_progress | `src/hooks/useChat.ts`, `src/hooks/useAgent.ts` | `useChat` logging is structured; remaining work is final `useAgent` audit pass. |
+| TICKET-07 | Debug Logging Coverage (core-bridge + settings + session) | P1 | in_progress | `src/services/core-bridge.ts`, `src/stores/settings.ts`, `src/stores/session.ts`, `src/services/settings-fs.ts`, `src/stores/project.ts` | Added structured logger usage in settings/project paths and removed ad-hoc console warnings. |
+| TICKET-08 | Debug Logging Coverage (file-watcher + ChatView) | P1 | in_progress | `src/services/file-watcher.ts`, `src/components/chat/ChatView.tsx` | Added debug-level read-skip logging in watcher; chat approval/comment logs remain structured. |
+| TICKET-09 | PI Coding Agent Feature Parity | P2 | done | `docs/development/pi-parity-scope-2026-02-13.md` | Prioritized parity scope with estimates and milestone mapping documented. |
+| TICKET-10 | Console Devtools Improvements | P2 | done | `src/components/settings/tabs/DeveloperTab.tsx`, `src/services/dev-console.ts` | Console viewer now supports level + source + text filtering and jump-to-latest behavior. |
 
 Status legend: `todo`, `in_progress`, `done`, `blocked`.
 

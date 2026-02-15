@@ -107,7 +107,7 @@ interface InstructionResult {
 ### Instruction File Search Order
 1. Directory-level: Walk up from file to project root
 2. Project-level: `AGENTS.md`, `CLAUDE.md`, `instructions.md`
-3. Global: `~/.estela/AGENTS.md`
+3. Global: `~/.ava/AGENTS.md`
 
 ---
 

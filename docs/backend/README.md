@@ -1,6 +1,6 @@
-# Backend — @estela/core
+# Backend — @ava/core
 
-> The brain of Estela. 234 files, ~56,500 lines, latest verified baseline: 1801 tests across 70 files.
+> The brain of AVA. 234 files, ~56,500 lines, latest verified baseline: 1801 tests across 70 files.
 
 **Package:** `packages/core/` | **Entry:** `packages/core/src/index.ts` | **Exports:** 33 modules
 

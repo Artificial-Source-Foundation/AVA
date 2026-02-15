@@ -1,6 +1,6 @@
 # AI Coding Agent Instructions
 
-> Universal instructions for AI assistants working on Estela
+> Universal instructions for AI assistants working on AVA
 
 ---
 
@@ -21,7 +21,7 @@ npx tsc --noEmit       # Type check
 
 ## Project Overview
 
-**Estela** is a multi-agent AI coding assistant - a Tauri 2.0 + SolidJS desktop app with a TypeScript core monorepo and a CLI that speaks ACP for editor integration.
+**AVA** is a multi-agent AI coding assistant - a Tauri 2.0 + SolidJS desktop app with a TypeScript core monorepo and a CLI that speaks ACP for editor integration.
 
 | Layer | Technology |
 |-------|------------|
@@ -37,7 +37,7 @@ npx tsc --noEmit       # Type check
 
 ### Project Structure
 ```
-Estela/
+AVA/
 ├── packages/
 │   ├── core/              # Business logic
 │   ├── platform-node/     # Node.js implementations

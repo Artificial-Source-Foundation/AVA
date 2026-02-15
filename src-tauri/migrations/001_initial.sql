@@ -1,4 +1,4 @@
--- Initial database schema for Estela
+-- Initial database schema for AVA
 -- Sessions, Messages, Agents, File Changes
 
 -- Sessions table

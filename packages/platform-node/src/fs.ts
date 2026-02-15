@@ -3,7 +3,7 @@
  */
 
 import * as fs from 'node:fs/promises'
-import type { DirEntry, FileStat, IFileSystem } from '@estela/core'
+import type { DirEntry, FileStat, IFileSystem } from '@ava/core'
 import fg from 'fast-glob'
 
 export class NodeFileSystem implements IFileSystem {
@@ -101,5 +101,9 @@ export class NodeFileSystem implements IFileSystem {
       onlyFiles: true,
       ignore: ['**/node_modules/**', '**/.git/**'],
     })
+  }
+
+  async realpath(filePath: string): Promise<string> {
+    return fs.realpath(filePath)
   }
 }

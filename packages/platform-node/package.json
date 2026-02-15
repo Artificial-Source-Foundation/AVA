@@ -1,7 +1,7 @@
 {
-  "name": "@estela/platform-node",
+  "name": "@ava/platform-node",
   "version": "0.1.0",
-  "description": "Node.js platform implementations for Estela CLI",
+  "description": "Node.js platform implementations for AVA CLI",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@estela/core": "workspace:*",
+    "@ava/core": "workspace:*",
     "better-sqlite3": "^11.0.0",
     "fast-glob": "^3.3.3"
   },

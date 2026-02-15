@@ -1,7 +1,7 @@
 {
-  "name": "@estela/platform-tauri",
+  "name": "@ava/platform-tauri",
   "version": "0.1.0",
-  "description": "Tauri platform implementations for Estela",
+  "description": "Tauri platform implementations for AVA",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@estela/core": "workspace:*",
+    "@ava/core": "workspace:*",
     "@tauri-apps/plugin-fs": "^2.4.5",
     "@tauri-apps/plugin-shell": "^2.3.4",
     "@tauri-apps/plugin-sql": "^2.3.1"

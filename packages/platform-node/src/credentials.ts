@@ -6,9 +6,9 @@
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import type { ICredentialStore } from '@estela/core'
+import type { ICredentialStore } from '@ava/core'
 
-const CONFIG_DIR = path.join(os.homedir(), '.estela')
+const CONFIG_DIR = path.join(os.homedir(), '.ava')
 const CREDS_FILE = path.join(CONFIG_DIR, 'credentials.json')
 
 export class NodeCredentialStore implements ICredentialStore {
@@ -37,7 +37,7 @@ export class NodeCredentialStore implements ICredentialStore {
 
   async get(key: string): Promise<string | null> {
     // Check environment variable first
-    const envKey = `ESTELA_${key.toUpperCase().replace(/-/g, '_')}`
+    const envKey = `AVA_${key.toUpperCase().replace(/-/g, '_')}`
     if (process.env[envKey]) {
       return process.env[envKey]!
     }

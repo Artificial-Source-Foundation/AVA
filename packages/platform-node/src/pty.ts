@@ -7,7 +7,7 @@
  * - OpenCode: Lazy loading, buffer management, session lifecycle
  */
 
-import type { IPTY, PTYOptions, PTYProcess } from '@estela/core'
+import type { IPTY, PTYOptions, PTYProcess } from '@ava/core'
 
 /** PTY implementation info */
 export interface PTYImplementation {
@@ -224,7 +224,7 @@ export class NodePTY implements IPTY {
         ...(process.env as Record<string, string>),
         ...options?.env,
         TERM: 'xterm-256color',
-        ESTELA_TERMINAL: '1', // Mark as Estela terminal (like OpenCode's OPENCODE_TERMINAL)
+        AVA_TERMINAL: '1', // Mark as AVA terminal (like OpenCode's OPENCODE_TERMINAL)
       },
     })
 

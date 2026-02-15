@@ -2,7 +2,7 @@
  * Tauri File System Implementation
  */
 
-import type { DirEntry, FileStat, IFileSystem } from '@estela/core'
+import type { DirEntry, FileStat, IFileSystem } from '@ava/core'
 import {
   readFile as readBinaryFile,
   readTextFile,
@@ -107,6 +107,11 @@ export class TauriFileSystem implements IFileSystem {
 
   async remove(path: string): Promise<void> {
     await tauriRemove(path, { recursive: true })
+  }
+
+  async realpath(path: string): Promise<string> {
+    // Tauri doesn't expose realpath — return as-is for now
+    return path
   }
 
   async glob(pattern: string, cwd: string): Promise<string[]> {

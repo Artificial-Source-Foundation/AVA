@@ -13,35 +13,35 @@
     "sql:allow-close",
     {
       "identifier": "fs:allow-read-text-file",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.estela/**" }]
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
     },
     {
       "identifier": "fs:allow-read-file",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.estela/**" }]
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
     },
     {
       "identifier": "fs:allow-read-dir",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.estela/**" }]
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
     },
     {
       "identifier": "fs:allow-stat",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.estela/**" }]
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
     },
     {
       "identifier": "fs:allow-write-text-file",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.estela/**" }]
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
     },
     {
       "identifier": "fs:allow-remove",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.estela/**" }]
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
     },
     {
       "identifier": "fs:allow-exists",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.estela/**" }]
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
     },
     {
       "identifier": "fs:allow-mkdir",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.estela/**" }]
+      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
     },
     "fs:allow-watch",
     "fs:allow-unwatch",

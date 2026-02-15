@@ -3,9 +3,9 @@
  * Uses localStorage for now - can be enhanced with secure storage later
  */
 
-import type { ICredentialStore } from '@estela/core'
+import type { ICredentialStore } from '@ava/core'
 
-const STORAGE_PREFIX = 'estela_cred_'
+const STORAGE_PREFIX = 'ava_cred_'
 
 export class TauriCredentialStore implements ICredentialStore {
   async get(key: string): Promise<string | null> {

@@ -13,7 +13,7 @@ AVA/
 ├── src/                    # Desktop app (Tauri + SolidJS) ← PRIMARY
 ├── src-tauri/              # Rust backend for Tauri
 ├── packages/
-│   ├── core/               # Shared business logic (~56,500 lines, latest baseline: 1801 tests)
+│   ├── core/               # Shared business logic (~54,200 lines, latest baseline: ~2321 tests)
 │   ├── platform-node/      # Node.js implementations (fs, shell, PTY)
 │   └── platform-tauri/     # Tauri implementations (fs, shell)
 └── cli/                    # CLI interface (secondary)
@@ -39,7 +39,7 @@ All business logic lives here. Platform-agnostic — works in both Tauri and Nod
 | `commander/` | ~2,400 | Team Lead → Senior Leads → Junior Devs delegation |
 | `validator/` | ~1,000 | QA pipeline (syntax, types, lint, test, self-review) |
 
-**Tools** (22 total):
+**Tools** (24 total):
 | Module | Lines | Purpose |
 |--------|-------|---------|
 | `tools/` | ~4,500 | read, write, edit, glob, grep, bash, browser, task, etc. |
@@ -49,7 +49,6 @@ All business logic lives here. Platform-agnostic — works in both Tauri and Nod
 |--------|-------|---------|
 | `codebase/` | ~1,800 | Repo map, symbols, PageRank, dependency graph |
 | `context/` | ~1,450 | Token tracking, compaction, compression strategies |
-| `memory/` | ~1,400 | Episodic, semantic, procedural memory + RAG |
 | `lsp/` | ~400 | Language server (TS, Python, Go, Rust, Java) |
 
 **Extensibility** (plugin system):
@@ -71,17 +70,11 @@ All business logic lives here. Platform-agnostic — works in both Tauri and Nod
 **Infrastructure**:
 | Module | Lines | Purpose |
 |--------|-------|---------|
-| `llm/` | ~3,000 | 12+ provider clients |
+| `llm/` | ~2,600 | 13 provider clients |
 | `config/` | ~1,150 | Settings, credentials, Zod validation |
 | `session/` | ~800 | State, checkpoints, forking, resume |
 | `auth/` | ~500 | OAuth + PKCE |
 | `bus/` | ~400 | Message bus (pub/sub, tool confirmation) |
-
-**Protocols** (lower priority):
-| Module | Lines | Purpose |
-|--------|-------|---------|
-| `acp/` | ~600 | Editor integration (VS Code backend) |
-| `a2a/` | ~1,000 | Agent-to-agent HTTP server |
 
 ---
 

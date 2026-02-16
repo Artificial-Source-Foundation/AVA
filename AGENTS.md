@@ -252,6 +252,6 @@ Commander → delegate_coder → Worker AgentExecutor
 ## Current Status
 
 - **Core**: Tool registry, permissions, PTY, compaction, session persistence, LSP, browser tool, plan mode
-- **Tools**: 22 registered
-- **Modules**: 22 core modules + platform abstraction
+- **Tools**: 24 registered
+- **Modules**: 29 core modules + platform abstraction
 - **Next**: Frontend polish + UX integration of approvals/metadata (see `docs/ROADMAP.md`)

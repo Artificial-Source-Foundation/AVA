@@ -31,7 +31,7 @@ QA verification pipeline, runs after worker completion.
 
 ---
 
-## Tools (22)
+## Tools (24)
 
 All tools use `defineTool()` with Zod schema validation.
 
@@ -62,12 +62,6 @@ All tools use `defineTool()` with Zod schema validation.
 - Auto-compaction when approaching limit
 - Strategies: sliding-window, hierarchical, tool-truncation, split-point, verified-summarize
 
-### Memory (`memory/`)
-- Episodic: session recordings and summaries
-- Semantic: learned facts via vector similarity
-- Procedural: recognized patterns
-- Consolidation: decay, merge, promote
-
 ### LSP (`lsp/`)
 CLI-based diagnostics for TypeScript, Python, Go, Rust, Java.
 
@@ -78,7 +72,7 @@ CLI-based diagnostics for TypeScript, Python, Go, Rust, Java.
 ### Extensions (`extensions/`)
 Plugin install, enable, disable, reload. Manifest-based.
 
-### Custom Commands (`commands/`)
+### Custom Commands (`custom-commands/`)
 TOML-defined commands with parameters.
 
 ### Hooks (`hooks/`)
@@ -96,20 +90,17 @@ MCP protocol client with multi-server registry and tool bridge.
 ## Safety
 
 ### Permissions (`permissions/`)
-13 built-in rules, risk assessment, auto-approval with path-aware checks, yolo mode.
+13 built-in rules, risk assessment, auto-approval with path-aware checks, yolo mode, trusted folders.
 
 ### Policy Engine (`policy/`)
 Priority-based rules with wildcards and regex matching.
-
-### Trusted Folders (`trust/`)
-Per-folder security levels.
 
 ---
 
 ## Infrastructure
 
 ### LLM Providers (`llm/`)
-12+ providers: Anthropic, OpenAI, Google, Mistral, Groq, DeepSeek, xAI, Cohere, Together, Ollama, OpenRouter, GLM, Kimi.
+13 providers: Anthropic, OpenAI, Google, Mistral, Groq, DeepSeek, xAI, Cohere, Together, Ollama, OpenRouter, GLM, Kimi (+ Copilot via OpenAI).
 
 ### Config (`config/`)
 Settings management with Zod validation, credentials storage, export/import.

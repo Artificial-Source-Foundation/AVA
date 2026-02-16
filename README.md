@@ -2,7 +2,7 @@
 
 > The Obsidian of AI Coding — Desktop AI coding app with a virtual dev team and community plugins
 
-A Tauri 2.0 + SolidJS desktop application for AI-assisted software development. Features autonomous agent loop, hierarchical **Team Lead + Senior Leads + Junior Devs + Validator** architecture, 22 tools, multi-provider LLM support (14 providers), and long-term memory.
+A Tauri 2.0 + SolidJS desktop application for AI-assisted software development. Features autonomous agent loop, hierarchical **Team Lead + Senior Leads + Junior Devs + Validator** architecture, 24 tools, multi-provider LLM support (14 providers), and context management.
 
 ## Quick Start
 
@@ -76,12 +76,12 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for full roadmap.
 
 ```
 packages/
-├── core/              # Business logic (~56,500 lines, baseline: 1801 tests / 70 files)
+├── core/              # Business logic (~54,200 lines, baseline: ~2321 tests / 81 files)
 │   └── src/
 │       ├── agent/     # Autonomous loop, subagents, recovery
 │       ├── commander/ # Team Lead → Senior Leads → Junior Devs
 │       │   └── parallel/  # Concurrent execution, DAG scheduler
-│       ├── tools/     # 22 tools (file, web, task, browser, plan)
+│       ├── tools/     # 24 tools (file, web, task, browser, plan)
 │       ├── context/   # Token tracking, compaction
 │       ├── memory/    # Episodic, semantic, procedural
 │       ├── validator/ # QA pipeline (syntax, types, lint)

@@ -2,11 +2,11 @@
 
 > Every file in `packages/core/src/` with its purpose. Organized by module.
 >
-> **~218 source files, ~52,300 lines** across 29 directories + 2 top-level files.
+> **~235 source files, ~54,200 lines** across 29 directories + 2 top-level files.
 
 ---
 
-## agent/ (19 files, ~5,264 lines)
+## agent/ (21 files, ~5,264 lines)
 
 Autonomous agent loop — plans tasks, executes tools, recovers from errors.
 
@@ -33,6 +33,9 @@ Autonomous agent loop — plans tasks, executes tools, recovers from errors.
 | `prompts/variants/generic.ts` | ~99 | Fallback prompt variant |
 | `prompts/variants/types.ts` | ~124 | Variant type definitions |
 | `prompts/variants/index.ts` | ~78 | Barrel export |
+| **test support** | | |
+| `test-helpers.ts` | ~60 | Shared test utilities for agent tests |
+| `__tests__/mock-llm.ts` | ~80 | Mock LLM client for integration tests |
 
 **Key exports:** `AgentExecutor`, `runAgent`, `AgentPlanner`, `RecoveryManager`, `AgentEventEmitter`, `SubagentManager`, `MetricsCollector`, `planEnterTool`, `planExitTool`
 
@@ -65,7 +68,7 @@ Team Lead → Senior Leads → Junior Devs hierarchical delegation.
 
 ## tools/ (43 files, ~12,123 lines)
 
-22 registered tools plus utilities, sanitization, validation, locking, namespacing, and sandbox.
+24 registered tools plus utilities, sanitization, validation, locking, namespacing, and sandbox.
 
 ### Tool Files (one per tool)
 | File | Lines | Tool Name | Purpose |
@@ -125,7 +128,7 @@ Team Lead → Senior Leads → Junior Devs hierarchical delegation.
 
 ---
 
-## llm/ (18 files, ~2,716 lines)
+## llm/ (19 files, ~2,596 lines)
 
 LLM client factory + 14 provider implementations + utilities.
 

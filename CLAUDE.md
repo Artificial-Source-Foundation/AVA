@@ -49,7 +49,7 @@ AVA/
 ├── src/                   # Desktop app (Tauri + SolidJS) ← PRIMARY
 ├── src-tauri/             # Rust backend
 ├── packages/
-│   ├── core/              # Shared business logic (29,500+ lines)
+│   ├── core/              # Shared business logic (54,000+ lines)
 │   ├── platform-node/     # Node.js implementations
 │   └── platform-tauri/    # Tauri implementations
 └── cli/                   # CLI interface (secondary)
@@ -90,32 +90,41 @@ Agent System:
 ├── commander/     # Team Lead → Senior Leads → Junior Devs
 ├── validator/     # QA pipeline
 
-Tools (22):
+Tools (24):
 ├── tools/         # read, write, edit, glob, grep, bash, browser, etc.
 
 Intelligence:
 ├── codebase/      # Repo map, symbols, PageRank
 ├── context/       # Token tracking, compaction, compression
 ├── lsp/           # Language Server Protocol (5 languages)
+├── diff/          # Diff tracking, unified format
+├── focus-chain/   # Task progress tracking
 
 Extensibility:
 ├── extensions/    # Plugin system (install, enable, reload)
-├── commands/      # TOML custom commands
+├── custom-commands/ # TOML custom commands
 ├── hooks/         # Lifecycle hooks (PreToolUse, PostToolUse, etc.)
 ├── mcp/           # MCP protocol client
 ├── skills/        # Auto-invoked knowledge modules
+├── slash-commands/ # User-invocable /commands
 
 Safety:
-├── permissions/   # Risk assessment, auto-approval
+├── permissions/   # Risk assessment, auto-approval, trusted folders
 ├── policy/        # Priority rules, wildcards, regex
-├── trust/         # Per-folder security levels
 
 Infrastructure:
-├── llm/           # 12+ provider clients
+├── llm/           # 13 provider clients
 ├── config/        # Settings, credentials
 ├── session/       # State, checkpoints, forking, resume
 ├── auth/          # OAuth + PKCE
 ├── bus/           # Message bus (pub/sub)
+├── models/        # Model registry (~16 LLM models)
+├── scheduler/     # Background task scheduler
+├── question/      # LLM-to-user question system
+├── git/           # Git snapshots, auto-commit
+├── instructions/  # Project/directory instructions
+├── integrations/  # External APIs (Exa search)
+├── types/         # Shared type definitions
 
 ```
 
@@ -134,7 +143,7 @@ Desktop App / CLI
 
 ---
 
-## Tools (22)
+## Tools (24)
 
 | Tool | Purpose |
 |------|---------|

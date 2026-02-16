@@ -1,6 +1,6 @@
 # Backend — @ava/core
 
-> The brain of AVA. ~218 source files, ~52,300 lines. Test baseline: ~2487 tests across ~94 files (~43% coverage).
+> The brain of AVA. ~235 source files, ~54,200 lines. Test baseline: ~2321 tests across ~81 files (~34% coverage).
 
 **Package:** `packages/core/` | **Entry:** `packages/core/src/index.ts` | **Exports:** 29 modules
 
@@ -27,11 +27,11 @@ User (Desktop/CLI)
 
 | Module | Files | Lines | Purpose |
 |--------|-------|-------|---------|
-| `agent/` | 19 | 5,264 | Autonomous loop, planning, recovery, subagents, modes, metrics |
+| `agent/` | 21 | 5,264 | Autonomous loop, planning, recovery, subagents, modes, metrics |
 | `commander/` | 12 | 2,752 | Team Lead → Senior Leads → Junior Devs delegation |
 | `validator/` | 9 | 2,256 | QA pipeline (syntax, lint, build, test, self-review) |
 
-### Tools (22 registered tools)
+### Tools (24 registered tools)
 
 | Module | Files | Lines | Purpose |
 |--------|-------|-------|---------|
@@ -67,12 +67,12 @@ User (Desktop/CLI)
 
 | Module | Files | Lines | Purpose |
 |--------|-------|-------|---------|
-| `llm/` | 18 | 2,716 | LLM client factory + 14 providers + utils (SSE, OpenAI-compat) |
+| `llm/` | 19 | 2,596 | LLM client factory + 14 providers + utils (SSE, OpenAI-compat) |
 | `config/` | 9 | 2,172 | Settings, credentials, schema, storage, migration, sandbox settings |
 | `session/` | 6 | 2,024 | Session management, resume, forking, doom-loop detection |
 | `auth/` | 8 | 1,107 | OAuth + PKCE (Anthropic, Copilot, Google, OpenAI) |
 | `bus/` | 3 | 524 | Message bus (pub/sub event system) |
-| `models/` | 3 | 674 | Model registry (50+ LLM models) |
+| `models/` | 3 | 674 | Model registry (~16 LLM models) |
 | `scheduler/` | 3 | 337 | Background task scheduler |
 | `question/` | 3 | 361 | LLM-to-user question system |
 
@@ -139,7 +139,7 @@ All in `llm/providers/`:
 
 ---
 
-## Registered Tools (22)
+## Registered Tools (24)
 
 All in `tools/` and auto-registered in `tools/index.ts`:
 
@@ -185,4 +185,4 @@ All in `tools/` and auto-registered in `tools/index.ts`:
 
 ---
 
-*Last updated: 2026-02-15 — ~2487 tests across ~94 files (~43% coverage)*
+*Last updated: 2026-02-15 — ~2321 tests across ~81 files (~34% coverage)*

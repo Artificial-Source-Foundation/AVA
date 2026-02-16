@@ -2,7 +2,7 @@
 
 > Deep navigation guide for `packages/core/src/`. Explains where things are, why they exist, and how they work — so future sessions can navigate and modify the codebase quickly.
 
-**Scope:** 200+ source files, ~30,000 lines, 26 modules in `packages/core/src/`
+**Scope:** ~235 source files, ~54,200 lines, 29 modules in `packages/core/src/`
 
 ---
 
@@ -241,7 +241,7 @@ tools/
 │   ├── truncation.ts     # Smart output truncation with file persistence
 │   └── utils.ts          # Binary detection, path resolution, glob matching
 │
-├── 22 Tool Implementations
+├── 24 Tool Implementations
 │   ├── File: read.ts, write.ts, create.ts, delete.ts, edit.ts, multiedit.ts
 │   ├── Search: glob.ts, grep.ts, ls.ts, codesearch.ts
 │   ├── Exec: bash.ts, batch.ts, task.ts, browser/
@@ -409,7 +409,7 @@ Functions: `namespaceTool()`, `stripNamespace()`, `isMcpTool()`, `isNamespaced()
 - `manager.ts` — `FocusChainManager` manages active task chains
 
 **models/** — LLM model registry:
-- `registry.ts` — `getModel()`, `getContextLimit()`, `estimateCost()` for 50+ models
+- `registry.ts` — `getModel()`, `getContextLimit()`, `estimateCost()` for ~16 models
 - `types.ts` — `ModelInfo` with capabilities, pricing, context limits
 
 ---
@@ -622,7 +622,6 @@ Each category has: full Zod schema + partial schema (for updates) + TypeScript i
 | `providers/ollama.ts` | ~235 | Ollama client | Local models |
 | `utils/openai-compat.ts` | ~325 | `createOpenAICompatClient` | DRY factory for OpenAI-compatible providers |
 | `utils/errors.ts` | ~78 | `classifyHttpError` | HTTP error classification |
-| `utils/retry.ts` | ~121 | `withRetry` | Exponential backoff with jitter |
 | `utils/sse.ts` | ~76 | `parseSSELines`, `readSSEStream` | SSE stream parsing |
 
 **14 Providers:** Anthropic, OpenAI, Google, OpenRouter, DeepSeek, Groq, Mistral, Cohere, Together, xAI, Ollama, GLM, Kimi, Copilot
@@ -723,7 +722,7 @@ Edit tool tries 8 replacement strategies from exact to fuzzy. First match wins. 
 
 ### 7. Barrel Exports
 
-Every module has `index.ts` re-exporting its public API. Top-level `src/index.ts` re-exports all 33 modules. **Caution:** `export *` from multiple modules can cause name collisions — use `as` renames when needed.
+Every module has `index.ts` re-exporting its public API. Top-level `src/index.ts` re-exports all 29 modules. **Caution:** `export *` from multiple modules can cause name collisions — use `as` renames when needed.
 
 ---
 

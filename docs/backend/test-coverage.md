@@ -1,6 +1,6 @@
 # Backend Test Coverage
 
-> Latest verified baseline: **~2487 tests** across **~94 test files**. Overall file coverage: ~43%.
+> Latest verified baseline: **~2321 tests** across **~81 test files**. Overall file coverage: ~34%.
 >
 > Strategy: Test pure functions and stateful classes. Skip LLM/FS/HTTP-dependent code.
 
@@ -10,11 +10,11 @@
 
 | Metric | Value |
 |--------|-------|
-| Total tests | ~2487 |
-| Test files | ~94 |
-| Source files (total) | ~218 |
-| Source lines | ~52,300 |
-| File coverage | ~43% |
+| Total tests | ~2321 |
+| Test files | ~81 |
+| Source files (total) | ~235 |
+| Source lines | ~54,200 |
+| File coverage | ~34% |
 | TS errors | 0 |
 | Biome errors | 0 |
 
@@ -52,11 +52,11 @@
 
 | Module | Tested | Total | Coverage | Notes |
 |--------|--------|-------|----------|-------|
-| context/ | 2 | 4 | 50% | Missing: types |
+| context/ | 3 | 4 | 75% | auto-compaction, compactor, tracker tested. Missing: types |
 | custom-commands/ | 3 | 6 | 50% | Missing: loader, types |
-| llm/ | 1 | 2 | 50% | Client tested, not providers (14) or utils (4) |
+| llm/ | 6 | 19 | 32% | Client + 2 providers (openai, openai-compat) + 3 utils tested |
 | agent/ | 7 | 10 | 70% | metrics.ts tested. Missing: subagent unit, types |
-| context/strategies/ | 4 | 7 | 57% | strategies.test.ts covers sliding-window, hierarchical, summarize |
+| context/strategies/ | 5 | 8 | 63% | strategies.test.ts covers sliding-window, hierarchical, summarize + visibility |
 | commander/parallel/ | 4 | 5 | 80% | activity.ts + scheduler.ts tested |
 | policy/ | 2 | 5 | 40% | Missing: rules, types |
 | focus-chain/ | 1 | 4 | 25% | parser.ts tested (45 tests) |
@@ -66,17 +66,17 @@
 | scheduler/ | 1 | 3 | 33% | scheduler.ts tested (22 tests) |
 | mcp/ | 1 | 6 | 17% | oauth.ts tested (27 tests) |
 | bus/ | 1 | 3 | 33% | message-bus tested |
-| tools/ | 13 | 43 | 30% | Utilities + namespacing + task-parallel + sandbox tested |
+| tools/ | 14 | 43 | 33% | Utilities + namespacing + task-parallel + sandbox + bash tested |
 
 ### No Coverage (0%)
 
 | Module | Files | Why |
 |--------|-------|-----|
-| llm/providers/ | 14 | Integration test territory (real HTTP) |
+| llm/providers/ | 14 | 2 tested (openai, openai-compat). Rest require real HTTP |
 | auth/ | 8 | OAuth flows require real HTTP |
-| codebase/ | 9 | Partially tested (ranking, graph). Indexer/symbols require filesystem |
+| codebase/ | 11 | ranking + graph tested (49 tests). Indexer/symbols require filesystem |
 | validator/ | 9 | Requires real filesystem (lint, build, test) |
-| hooks/ | 4 | executor.ts tested (16 tests). Remaining require real tool execution |
+| hooks/ | 4 | executor.ts tested (16 tests). factory/types require real tool execution |
 | lsp/ | 4 | Requires language servers |
 | git/ | 5 | Requires real git repository (includes auto-commit.ts) |
 | skills/ | 4 | Requires filesystem |
@@ -87,7 +87,7 @@
 
 ---
 
-## Tested Files (~85 total)
+## Tested Files (~81 total)
 
 ### agent/ (8 test files)
 - `evaluator.test.ts` — 35 tests (progress, goals, tool usage, metrics)
@@ -100,6 +100,7 @@
 - `prompts/system.test.ts` — 40 tests (RULES/CAPABILITIES constants, buildSystemPrompt, buildWorkerPrompt, buildScenarioPrompt, getModelAdjustments)
 
 ### tools/ (14 test files)
+- `bash.test.ts` — bash tool execution tests
 - `utils.test.ts` — 95 tests (binary detection, path resolution, glob, skip dirs)
 - `sanitize.test.ts` — 76 tests (model families, fence stripping, normalization)
 - `truncation.test.ts` — 22 tests (line/metadata truncation)
@@ -114,30 +115,36 @@
 - `sandbox/sandbox.test.ts` — 25 tests (config defaults, Docker args, NoopSandbox, factory, edge cases)
 - `edit/normalize.test.ts` — existing tests
 
-### llm/ (1 test file)
+### llm/ (6 test files)
 - `client.test.ts` — 31 tests (registry, factory, credential resolution)
+- `providers/openai.test.ts` — OpenAI provider tests
+- `providers/openai-compat.test.ts` — OpenAI-compatible provider tests
+- `utils/errors.test.ts` — error classification tests
+- `utils/openai-compat.test.ts` — shared OpenAI-compat streaming tests
+- `utils/sse.test.ts` — SSE parser tests
 
-### commander/ (7 test files)
+### commander/ (9 test files)
 - `executor.test.ts`, `registry.test.ts`, `tool-wrapper.test.ts`, `utils.test.ts`
-- `parallel/batch.test.ts`, `parallel/conflict.test.ts`
+- `parallel/batch.test.ts`, `parallel/conflict.test.ts`, `parallel/activity.test.ts`, `parallel/scheduler.test.ts`
 - `workers/definitions.test.ts`
 
-### config/ (5 test files)
+### config/ (6 test files)
 - `manager.test.ts`, `schema.test.ts`
 - `credentials.test.ts` — 20 tests (key operations, provider listing, validation, singleton)
 - `migration.test.ts` — 24 tests (migrateSettings, mergeWithDefaults, findEnvApiKeys, needsMigration, getChangedFields)
 - `export.test.ts` — 20 tests (exportSettingsToJson, importSettingsFromJson, mergeSettings, diffSettings, getDefaultSettingsJson)
+- `integration.test.ts` — cross-module config integration tests
 
-### context/ (6 test files)
-- `compactor.test.ts`, `tracker.test.ts`
-- `strategies/split-point.test.ts`, `strategies/tool-truncation.test.ts`, `strategies/verified-summarize.test.ts`
+### context/ (8 test files)
+- `auto-compaction.test.ts`, `compactor.test.ts`, `tracker.test.ts`
+- `strategies/split-point.test.ts`, `strategies/tool-truncation.test.ts`, `strategies/verified-summarize.test.ts`, `strategies/visibility.test.ts`
 - `strategies/strategies.test.ts` — 27 tests (slidingWindow, createSlidingWindow, buildSummaryTree, selectLevel, createSummarize, getSummarizationPrompt, extractSummary)
 
 ### session/ (4 test files)
 - `manager.test.ts`, `file-storage.test.ts`, `resume.test.ts`, `doom-loop.test.ts`
 
-### permissions/ (8 test files)
-- `command-validator.test.ts`, `trusted-folders.test.ts`
+### permissions/ (9 test files)
+- `auto-approve.test.ts`, `command-validator.test.ts`, `trusted-folders.test.ts`
 - `rules.test.ts` — 28 tests (BUILTIN_RULES, assessCommandRisk, assessPathRisk, getHighestPathRisk)
 - `quote-parser.test.ts` — 48 tests (createQuoteState, processChar, isInsideQuotes, isInSafeContext, detectDangerousCharacters, parseCommandSegments, detectRedirects, extractSubshells)
 - `security-inspector.test.ts` — 25 tests (threat categories, pattern matching, custom patterns, block threshold)
@@ -174,9 +181,8 @@
 - `ranking.test.ts` — 25 tests (calculatePageRank, calculateRelevanceScore, extractKeywords, sortByRank, sortByScore)
 - `graph.test.ts` — 24 tests (getEdges, findRoots, findLeaves, findCircularDependencies, getDependencyDepth, getTransitiveDependencies, getTransitiveDependents, getGraphStats)
 
-### commander/parallel/ (2 test files added)
-- `activity.test.ts` — 17 tests (ActivityMultiplexer, createTaggedCallback, createFilteredCallback, createAggregator)
-- `scheduler.test.ts` — 13 tests (TaskScheduler, createLinearChain, createFanOut, createFanIn)
+### hooks/ (1 test file)
+- `executor.test.ts` — 16 tests (hook discovery, execution, cancellation)
 
 ### bus/ (1 test file)
 - `message-bus.test.ts`
@@ -198,4 +204,4 @@
 
 ---
 
-*Last updated: 2026-02-15 — removed dead modules (a2a, acp, memory) and llm/utils/retry*
+*Last updated: 2026-02-15 — audit-corrected counts after dead module removal*

@@ -32,11 +32,11 @@ Everything needed for a working desktop AI coding app.
 - Spring physics animations, glassmorphism design
 - Code viewer (CodeMirror 6)
 
-### Core Engine (29,500+ lines, latest baseline: 1801 tests across 70 files)
+### Core Engine (~54,200 lines, latest baseline: ~2321 tests across 81 files)
 | Category | Modules |
 |----------|---------|
 | Agent System | Agent loop, Commander, Parallel execution, Validator |
-| Tools | 22 tools (file, shell, web, browser, agents, patch, batch, search) |
+| Tools | 24 tools (file, shell, web, browser, agents, patch, batch, search) |
 | Intelligence | Codebase understanding, context management, memory, LSP |
 | Extensibility | Extensions, commands, hooks, skills, MCP |
 | Safety | Permissions, policy engine, trusted folders |
@@ -200,19 +200,17 @@ This is what makes AVA "The Obsidian of AI Coding". Easy to create, discover, in
 
 ## Phase 4: Integrations
 
-### Sprint 4.1: Editor Integration (ACP)
-- [ ] VS Code extension (backend already at `packages/core/src/acp/`)
+### Sprint 4.1: Editor Integration
+- [ ] VS Code extension (ACP protocol — needs reimplementation)
 - [ ] Cursor/Windsurf support
 - [ ] Session sync between desktop app and editor
 
-**Key files:** `packages/core/src/acp/`, `cli/src/acp/agent.ts`
-
-### Sprint 4.2: Agent Network (A2A)
-- [ ] Agent-to-agent HTTP communication (server already at `packages/core/src/a2a/`)
+### Sprint 4.2: Agent Network
+- [ ] Agent-to-agent HTTP communication (A2A protocol — needs reimplementation)
 - [ ] Remote agent discovery
 - [ ] Cross-agent task delegation
 
-**Key files:** `packages/core/src/a2a/`
+*Note: ACP and A2A modules were removed as dead code (available in git history). Reimplementation needed when these features are prioritized.*
 
 ### Sprint 4.3: Advanced I/O
 - [ ] Voice input

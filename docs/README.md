@@ -41,7 +41,7 @@
 |-----|----------|
 | [**Overview**](backend/README.md) | Core package stats, module listing |
 | [**Modules**](backend/modules.md) | Per-file module documentation |
-| [**Test Coverage**](backend/test-coverage.md) | Latest baseline: 1801 tests across 70 files |
+| [**Test Coverage**](backend/test-coverage.md) | Latest baseline: ~2321 tests across 81 files |
 | [**Gap Analysis**](backend/gap-analysis.md) | Competitive comparison |
 | [**Changelog**](backend/changelog.md) | Backend development history |
 | [**Backlog**](backend/backlog.md) | Test gaps, feature gaps, debt |
@@ -55,6 +55,7 @@
 | [**Active Epics**](development/epics/) | Work in progress |
 | [Sprint 1.6 Testing & Hardening](development/epics/sprint-1.6-testing-hardening.md) | Current sprint status, evidence, remaining gates |
 | [Plugin Ecosystem UX & Integration](development/epics/plugin-ecosystem-ux-integration.md) | Current plugin track, dependencies, exit criteria |
+| [Frontend Gap Matrix 2026-02-15](development/frontend-gap-matrix-2026-02-15.md) | Benchmark-driven missing UX/features with P0/P1/P2 execution IDs |
 | [**Current Focus**](development/status/current-focus.md) | Weekly active sprint pulse + blockers |
 | [**Integration Backlog**](development/backlogs/integration-backlog.md) | Frontend-backend wiring tasks and dependencies |
 | [**Sprint Execution Docs**](development/sprints/README.md) | Active sprint templates, ticket boards, closeout checklists |

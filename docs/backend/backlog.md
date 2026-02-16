@@ -40,7 +40,7 @@
 
 | Module | Files to Test | Reason |
 |--------|--------------|--------|
-| llm/providers/ (14 files) + utils/ (4 files) | All providers + utils | Requires HTTP mocking per provider |
+| llm/providers/ (13 files) + utils/ (3 files) | Remaining providers + utils | 6 test files exist; rest require HTTP mocking |
 | auth/ (8 files) | OAuth flows | Requires HTTP + browser mocking |
 | validator/ (9 files) | QA pipeline | Requires filesystem + build tools |
 | mcp/ (6 files) | MCP client | Requires MCP server |
@@ -115,7 +115,7 @@ This backlog feeds into the project roadmap:
 | **1.5 Polish** (complete) | Settings hardening, appearance system, core wiring, backend tests |
 | **2 Plugins** | Extension system needs: manifest validation, hot reload, sandboxing |
 | **3 CLI** | CLI-specific session storage, config paths, terminal rendering |
-| **4 Integrations** | ACP terminal wiring, A2A server deployment, MCP server hosting |
+| **4 Integrations** | MCP server hosting, external tool connectors |
 
 ---
 

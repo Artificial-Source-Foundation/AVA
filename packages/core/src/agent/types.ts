@@ -5,6 +5,8 @@
  * Based on Gemini CLI's agents/types.ts pattern
  */
 
+import type { LLMProvider } from '../types/llm.js'
+
 // ============================================================================
 // Termination Modes
 // ============================================================================
@@ -52,9 +54,15 @@ export interface AgentConfig {
   /** Grace period in ms for final completion attempt */
   gracePeriodMs: number
   /** LLM provider to use */
-  provider?: 'anthropic' | 'openai' | 'openrouter'
+  provider?: LLMProvider
   /** Model to use (provider-specific) */
   model?: string
+  /** Enable validation pipeline before task completion */
+  validationEnabled?: boolean
+  /** Max retries for agent to fix validation failures (default: 2) */
+  maxValidationRetries?: number
+  /** Tool mode: full (all tools), minimal (core only), plan (read-only) */
+  toolMode?: 'full' | 'minimal' | 'plan'
 }
 
 /**
@@ -162,6 +170,10 @@ export type AgentEventType =
   | 'thought'
   | 'recovery:start'
   | 'recovery:finish'
+  | 'validation:start'
+  | 'validation:result'
+  | 'validation:finish'
+  | 'provider:switch'
   | 'error'
 
 /**
@@ -310,6 +322,48 @@ export interface ErrorEvent extends AgentEventBase {
 }
 
 /**
+ * Validation start event
+ */
+export interface ValidationStartEvent extends AgentEventBase {
+  type: 'validation:start'
+  /** Files being validated */
+  files: string[]
+}
+
+/**
+ * Validation result event
+ */
+export interface ValidationResultEvent extends AgentEventBase {
+  type: 'validation:result'
+  /** Whether validation passed */
+  passed: boolean
+  /** Summary of validation results */
+  summary: string
+}
+
+/**
+ * Validation finish event
+ */
+export interface ValidationFinishEvent extends AgentEventBase {
+  type: 'validation:finish'
+  /** Whether validation passed */
+  passed: boolean
+  /** Duration in ms */
+  durationMs: number
+}
+
+/**
+ * Provider switch event
+ */
+export interface ProviderSwitchEvent extends AgentEventBase {
+  type: 'provider:switch'
+  /** New provider */
+  provider: string
+  /** New model */
+  model: string
+}
+
+/**
  * Union of all agent events
  */
 export type AgentEvent =
@@ -324,6 +378,10 @@ export type AgentEvent =
   | ThoughtEvent
   | RecoveryStartEvent
   | RecoveryFinishEvent
+  | ValidationStartEvent
+  | ValidationResultEvent
+  | ValidationFinishEvent
+  | ProviderSwitchEvent
   | ErrorEvent
 
 /**

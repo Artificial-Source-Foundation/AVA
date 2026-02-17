@@ -9,6 +9,8 @@ import { AgentExecutor } from '../agent/loop.js'
 import type { AgentEvent, AgentEventCallback, AgentResult } from '../agent/types.js'
 import { AgentTerminateMode } from '../agent/types.js'
 import { getEditorModelConfig } from '../llm/client.js'
+import type { WorkerRegistry } from './registry.js'
+import { analyzeTask, selectWorker } from './router.js'
 import type {
   WorkerActivityCallback,
   WorkerActivityEvent,
@@ -345,4 +347,40 @@ function convertToWorkerResult(result: AgentResult): WorkerResult {
     error: result.error,
     steps: result.steps,
   }
+}
+
+// ============================================================================
+// Auto-Routing
+// ============================================================================
+
+/**
+ * Try to auto-route a task to the best worker based on keyword analysis.
+ * Returns null if confidence is too low — caller should fall back to LLM routing.
+ *
+ * @param goal - Task description
+ * @param registry - Worker registry
+ * @param signal - AbortSignal for cancellation
+ * @param cwd - Working directory
+ * @param onActivity - Optional activity callback
+ * @param minConfidence - Minimum confidence threshold (default: 0.7)
+ */
+export async function executeWithAutoRouting(
+  goal: string,
+  registry: WorkerRegistry,
+  signal: AbortSignal,
+  cwd: string,
+  onActivity?: WorkerActivityCallback,
+  minConfidence = 0.7
+): Promise<WorkerResult | null> {
+  const analysis = analyzeTask(goal)
+  if (analysis.confidence < minConfidence) {
+    return null
+  }
+
+  const worker = selectWorker(analysis, registry)
+  if (!worker) {
+    return null
+  }
+
+  return executeWorker(worker, { task: goal, cwd }, signal, onActivity)
 }

@@ -3,6 +3,15 @@
  * Operating modes that affect tool availability and agent behavior
  */
 
+// Minimal Mode
+export {
+  checkMinimalModeAccess,
+  clearAllMinimalModeStates,
+  enterMinimalMode,
+  exitMinimalMode,
+  isMinimalModeActive,
+  MINIMAL_MODE_ALLOWED_TOOLS,
+} from './minimal.js'
 // Plan Mode
 export {
   checkPlanModeAccess,

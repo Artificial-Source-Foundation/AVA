@@ -40,6 +40,7 @@ export function createAgentConfigFromSettings(
     gracePeriodMs: agentSettings.gracePeriodMs,
     provider: providerSettings.defaultProvider as AgentConfig['provider'],
     model: providerSettings.defaultModel,
+    validationEnabled: agentSettings.validatorsEnabled,
     ...overrides,
   }
 }

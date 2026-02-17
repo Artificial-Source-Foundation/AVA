@@ -20,7 +20,14 @@ import {
   resetToolCallCount,
 } from '../tools/registry.js'
 import type { ToolContext } from '../tools/types.js'
-import type { ChatMessage, ToolDefinition } from '../types/llm.js'
+import type { ChatMessage, LLMProvider, ToolDefinition } from '../types/llm.js'
+import {
+  lintValidator,
+  SimpleValidatorRegistry,
+  syntaxValidator,
+  typescriptValidator,
+  ValidationPipeline,
+} from '../validator/index.js'
 import type { SystemPromptContext } from './prompts/system.js'
 import { buildSystemPromptForModel } from './prompts/variants/index.js'
 import {
@@ -140,6 +147,9 @@ export class AgentExecutor {
   private totalToolCalls = 0
   private toolCallHistory: ToolCallRecord[] = []
   private doomLoopDetected = false
+  private modifiedFiles: Set<string> = new Set()
+  private validationRetries = 0
+  private pendingProviderSwitch: { provider: LLMProvider; model?: string } | null = null
 
   constructor(config: Partial<AgentConfig>, onEvent?: AgentEventCallback) {
     this.config = {
@@ -210,8 +220,8 @@ export class AgentExecutor {
         throw new Error(`No authentication configured for provider: ${provider}`)
       }
 
-      // Create LLM client
-      const client = await createClient(provider)
+      // Create LLM client (mutable for mid-session provider switching)
+      let client = await createClient(provider)
 
       // Build conversation history
       const history: ChatMessage[] = []
@@ -258,6 +268,26 @@ export class AgentExecutor {
           }
 
           break
+        }
+
+        // Check for pending provider switch
+        if (this.pendingProviderSwitch) {
+          const { provider: newProvider, model: newModel } = this.pendingProviderSwitch
+          this.pendingProviderSwitch = null
+          try {
+            client = await createClient(newProvider)
+            this.config.provider = newProvider as AgentConfig['provider']
+            if (newModel) this.config.model = newModel
+            this.emit({
+              type: 'provider:switch',
+              agentId: this.agentId,
+              timestamp: Date.now(),
+              provider: newProvider,
+              model: newModel ?? this.config.model ?? '',
+            })
+          } catch {
+            // Keep existing client on switch failure
+          }
         }
 
         // Execute a turn
@@ -529,12 +559,51 @@ Do not repeat the same action again.`,
 
       // Handle complete_task specially
       if (call.name === COMPLETE_TASK_TOOL) {
-        taskCompleted = true
         const args = call.arguments as { result?: unknown; command?: unknown }
         const resultArg = args.result
         const commandArg = args.command
         submittedOutput =
           typeof resultArg === 'string' ? resultArg : JSON.stringify(resultArg, null, 2)
+
+        // Run validation pipeline if enabled
+        const maxRetries = this.config.maxValidationRetries ?? 2
+        if (
+          this.config.validationEnabled &&
+          this.modifiedFiles.size > 0 &&
+          this.validationRetries < maxRetries
+        ) {
+          const validationPassed = await this.runValidation(
+            Array.from(this.modifiedFiles),
+            cwd,
+            signal
+          )
+          if (!validationPassed) {
+            this.validationRetries++
+            // Don't complete — agent gets another chance to fix
+            toolResults.push(
+              `[Tool Result: ${call.id}]\nValidation failed. Please fix the issues above and try again.`
+            )
+            toolCallInfos.push({
+              name: call.name,
+              args: call.arguments,
+              result: 'Validation failed — fix issues and retry.',
+              success: false,
+              durationMs: Date.now() - startTime,
+            })
+            this.emit({
+              type: 'tool:finish',
+              agentId: this.agentId,
+              timestamp: Date.now(),
+              toolName: call.name,
+              success: false,
+              output: 'Validation failed — fix issues and retry.',
+              durationMs: Date.now() - startTime,
+            })
+            continue
+          }
+        }
+
+        taskCompleted = true
 
         // Run TaskComplete hook
         try {
@@ -597,6 +666,19 @@ Do not repeat the same action again.`,
       // Check for doom loop
       if (detectDoomLoop(this.toolCallHistory)) {
         this.doomLoopDetected = true
+      }
+
+      // Track modified files for validation
+      if (
+        result.success &&
+        ['write_file', 'create_file', 'edit', 'delete_file', 'apply_patch', 'multiedit'].includes(
+          call.name
+        )
+      ) {
+        const filePath =
+          (call.arguments.path as string | undefined) ??
+          (call.arguments.file_path as string | undefined)
+        if (typeof filePath === 'string') this.modifiedFiles.add(filePath)
       }
 
       toolResults.push(`[Tool Result: ${call.id}]\n${result.output}`)
@@ -792,6 +874,66 @@ Do not repeat the same action again.`,
     }
 
     return [...tools, completeTaskTool]
+  }
+
+  /**
+   * Run validation pipeline on modified files
+   * Returns true if validation passed, false if failed
+   */
+  private async runValidation(files: string[], cwd: string, signal: AbortSignal): Promise<boolean> {
+    const startTime = Date.now()
+
+    this.emit({
+      type: 'validation:start',
+      agentId: this.agentId,
+      timestamp: Date.now(),
+      files,
+    })
+
+    try {
+      const registry = new SimpleValidatorRegistry()
+      registry.register(syntaxValidator)
+      registry.register(typescriptValidator)
+      registry.register(lintValidator)
+
+      const pipeline = new ValidationPipeline(registry)
+      const result = await pipeline.run(files, {}, signal, cwd)
+      const report = pipeline.formatReport(result)
+
+      this.emit({
+        type: 'validation:result',
+        agentId: this.agentId,
+        timestamp: Date.now(),
+        passed: result.passed,
+        summary: report,
+      })
+
+      this.emit({
+        type: 'validation:finish',
+        agentId: this.agentId,
+        timestamp: Date.now(),
+        passed: result.passed,
+        durationMs: Date.now() - startTime,
+      })
+
+      return result.passed
+    } catch {
+      this.emit({
+        type: 'validation:finish',
+        agentId: this.agentId,
+        timestamp: Date.now(),
+        passed: true, // Don't block on validation errors
+        durationMs: Date.now() - startTime,
+      })
+      return true
+    }
+  }
+
+  /**
+   * Request a provider switch before the next turn
+   */
+  requestProviderSwitch(provider: LLMProvider, model?: string): void {
+    this.pendingProviderSwitch = { provider, model }
   }
 
   /**

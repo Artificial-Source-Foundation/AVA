@@ -35,6 +35,7 @@
 // Executor
 export {
   DELEGATE_TOOL_PREFIX,
+  executeWithAutoRouting,
   executeWorker,
   getFilteredTools,
   isDelegationTool,
@@ -68,6 +69,8 @@ export {
 } from './parallel/index.js'
 // Registry
 export { createWorkerRegistry, WorkerRegistry } from './registry.js'
+// Router
+export { analyzeTask, selectWorker, type TaskAnalysis } from './router.js'
 // Tool Wrapper
 export type { WorkerToolParams } from './tool-wrapper.js'
 export {

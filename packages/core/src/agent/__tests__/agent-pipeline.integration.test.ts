@@ -70,9 +70,7 @@ vi.mock('../prompts/variants/index.js', () => ({
 
 // Import after mocks so they use mocked versions
 const { resetDoomLoopDetector } = await import('../../session/doom-loop.js')
-const { resetToolCallCount, registerTool, getToolDefinitions } = await import(
-  '../../tools/registry.js'
-)
+const { resetToolCallCount, registerTool } = await import('../../tools/registry.js')
 const { resetMessageBus } = await import('../../bus/message-bus.js')
 const { executeWorker } = await import('../../commander/executor.js')
 
@@ -269,7 +267,7 @@ describe('Agent Pipeline Integration', () => {
     ]
 
     const events: AgentEvent[] = []
-    const executor = makeExecutor({
+    const _executor = makeExecutor({
       maxTurns: 10,
       onEvent: undefined,
     })

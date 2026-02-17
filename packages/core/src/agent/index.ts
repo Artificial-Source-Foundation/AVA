@@ -33,15 +33,21 @@ export {
 export { AgentExecutor, runAgent } from './loop.js'
 // Agent Modes
 export {
+  checkMinimalModeAccess,
   checkPlanModeAccess,
+  clearAllMinimalModeStates,
   clearAllPlanModeStates,
+  enterMinimalMode,
   enterPlanMode,
+  exitMinimalMode,
   exitPlanMode,
   getPlanModeState,
   getPlanModeStatus,
   getRestrictionReason,
+  isMinimalModeActive,
   isPlanModeEnabled,
   isPlanModeRestricted,
+  MINIMAL_MODE_ALLOWED_TOOLS,
   PLAN_MODE_ALLOWED_TOOLS,
   PLAN_MODE_BLOCKED_TOOLS,
   type PlanModeConfig,
@@ -119,6 +125,7 @@ export {
   COMPLETE_TASK_TOOL,
   DEFAULT_AGENT_CONFIG,
   type ErrorEvent,
+  type ProviderSwitchEvent,
   type RecoveryFinishEvent,
   type RecoveryStartEvent,
   type ThoughtEvent,
@@ -128,4 +135,7 @@ export {
   type ToolStartEvent,
   type TurnFinishEvent,
   type TurnStartEvent,
+  type ValidationFinishEvent,
+  type ValidationResultEvent,
+  type ValidationStartEvent,
 } from './types.js'

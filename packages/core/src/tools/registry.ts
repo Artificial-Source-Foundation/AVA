@@ -3,7 +3,7 @@
  * Manages tool registration and execution with hook support and policy engine
  */
 
-import { checkPlanModeAccess } from '../agent/modes/index.js'
+import { checkMinimalModeAccess, checkPlanModeAccess } from '../agent/modes/index.js'
 import { getMessageBus } from '../bus/message-bus.js'
 import { autoCommitIfEnabled } from '../git/auto-commit.js'
 import { createPostToolUseContext, createPreToolUseContext, getHookRunner } from '../hooks/index.js'
@@ -228,6 +228,12 @@ export async function executeTool(
   const planModeCheck = checkPlanModeAccess(name, ctx.sessionId)
   if (!planModeCheck.allowed) {
     return planModeCheck.error!
+  }
+
+  // Check minimal mode restrictions
+  const minimalModeCheck = checkMinimalModeAccess(name, ctx.sessionId)
+  if (!minimalModeCheck.allowed) {
+    return minimalModeCheck.error!
   }
 
   // Check for doom loop (repeated identical calls)

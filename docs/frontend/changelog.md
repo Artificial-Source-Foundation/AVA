@@ -4,7 +4,18 @@
 
 ---
 
-## Session 55 — Frontend Gap Closure Batch (2026-02-15)
+## Session 56 — Sprint 2.4 Plugin Devx Foundation (2026-02-14)
+
+- **Plugin scaffold command** — new `ava plugin init` in `cli/src/commands/plugin.ts` creates plugin starter packages
+- **CLI routing** — `cli/src/index.ts` now dispatches `plugin` subcommands and shows plugin usage in help output
+- **AVA command alias** — `cli/package.json` now exposes `ava` bin while keeping `estela` for backward compatibility
+- **Scaffold tests** — `cli/src/commands/plugin.test.ts` validates file generation and non-empty directory guard behavior
+- **Developer template docs** — new `docs/plugins/PLUGIN_TEMPLATE.md` describes generated structure, conventions, and workflow
+- **Auth/help consistency** — `cli/src/commands/auth.ts` usage examples updated to `ava` naming
+
+---
+
+## Session 55 — Frontend Gap Closure Batch + Plugin Browser Surfaces (2026-02-15)
 
 - **Merged frontend modernization branch** — Local merge of `feat/frontend-gap-closure` into `master` (`11ef4d2`) after isolating and resolving feature-branch-only core test regressions.
 - **Chat Git control strip (FG-001)** — Added in-chat branch switch, pull, push, and PR-open flow with status/error feedback (`GitControlStrip.tsx`, `git-actions.ts`).
@@ -13,10 +24,31 @@
 - **Approval-state UX (FG-005)** — Added persistent inline approval banner above chat timeline (`ApprovalStateBar.tsx`) with approve/reject actions.
 - **Long-session rendering hardening (FG-004 partial)** — Added incremental message backfill loading for large histories in `MessageList.tsx`.
 - **Deep modularization delivered** — Split oversized frontend modules into focused files for settings, hooks, chat input/list, stores, and tabs; established missing barrels and cleaner type ownership.
+- **Shared plugin domain store** — `src/stores/plugins.ts` now owns catalog, filters, install state, and settings target intent
+- **Marketplace data adapter** — `src/services/plugins/catalog.ts` provides typed plugin catalog used by both surfaces
+- **Lifecycle adapter** — `src/services/plugins/lifecycle.ts` adds install/uninstall persistence with AVA + legacy key mirroring
+- **Settings plugin browser** — new `src/components/settings/tabs/PluginsTab.tsx` replaces placeholder with search, categories, featured, and install controls
+- **Sidebar plugin surface** — new `src/components/sidebar/SidebarPlugins.tsx` adds compact quick install/uninstall and settings entry
+- **Activity wiring** — `ActivityBar`, `SidebarPanel`, and `layout` store now support `plugins` activity
+- **Plugin types** — `src/types/plugin.ts` + `src/types/index.ts` export plugin domain interfaces
+- **Tests** — added `src/stores/plugins.test.ts`, updated `PluginsTab.smoke.test.tsx`, and expanded `layout.test.ts` coverage for plugins activity
 - **Verification evidence** — Typecheck + focused frontend suites green during rollout; merge performed after full-suite comparison against baseline and core regression restoration.
 
 ---
 
+## Session 54 — Project Hub + Project-Scoped Sessions (2026-02-14)
+
+- **Project hub screen** — `ProjectHub.tsx` adds startup hub with open-project and resume actions
+- **Auto-resume behavior** — `App.tsx` now restores the last session for the active project on startup
+- **Session persistence map** — `session-persistence.ts` stores `lastSessionByProject` in localStorage
+- **Project-safe session fallback** — `session.ts` archive/delete fallback now creates replacement sessions in the active project
+- **Sidebar quick switching** — `SidebarSessions.tsx` gets Hub/Open actions and a compact project switch dropdown
+- **No-project guards** — `useChat.ts` and `useAgent.ts` block execution until a project is selected
+- **Layout state** — persisted hub/workspace toggle in `layout.ts` + tests in `layout.test.ts`
+- New files: `ProjectHub.tsx`, `session-persistence.ts`, `session.test.ts`
+- Modified: `App.tsx`, `SidebarSessions.tsx`, `layout.ts`, `session.ts`, `constants.ts`
+
+---
 ## Session 53 — File Watcher + Step-Level Undo (2026-02-09)
 
 - **File watcher service** — `src/services/file-watcher.ts` (~270 lines) watches project dir via Tauri FS `watch()` (500ms debounce, recursive)

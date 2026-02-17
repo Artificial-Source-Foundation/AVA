@@ -37,8 +37,8 @@ describe('layout store', () => {
       layout.setActiveActivity('sessions')
       layout.setSidebarVisible(true)
 
-      layout.handleActivityClick('explorer')
-      expect(layout.activeActivity()).toBe('explorer')
+      layout.handleActivityClick('plugins')
+      expect(layout.activeActivity()).toBe('plugins')
       expect(layout.sidebarVisible()).toBe(true)
     })
 
@@ -115,6 +115,27 @@ describe('layout store', () => {
       const layout = await loadLayout()
       layout.setSidebarVisible(false)
       expect(localStorage.getItem('ava-layout-sidebar-visible')).toBe('false')
+    })
+
+    it('persists project hub visibility to localStorage', async () => {
+      const layout = await loadLayout()
+      layout.setProjectHubVisible(true)
+      expect(localStorage.getItem('ava-layout-project-hub-visible')).toBe('true')
+    })
+  })
+
+  describe('project hub controls', () => {
+    it('opens, closes, and toggles project hub visibility', async () => {
+      const layout = await loadLayout()
+
+      layout.closeProjectHub()
+      expect(layout.projectHubVisible()).toBe(false)
+
+      layout.openProjectHub()
+      expect(layout.projectHubVisible()).toBe(true)
+
+      layout.toggleProjectHub()
+      expect(layout.projectHubVisible()).toBe(false)
     })
   })
 

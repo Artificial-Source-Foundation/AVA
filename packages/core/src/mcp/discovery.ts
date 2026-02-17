@@ -49,6 +49,9 @@ export function getMCPConfigPaths(): string[] {
     // AVA config
     `${home}/.ava/mcp.json`,
 
+    // Legacy config (backwards compatibility)
+    `${home}/.estela/mcp.json`,
+
     // Claude Code config (for compatibility)
     `${home}/.claude/claude_desktop_config.json`,
 

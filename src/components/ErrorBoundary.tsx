@@ -127,7 +127,7 @@ const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
           {/* Report link */}
           <div class="stagger-child mt-6">
             <a
-              href="https://github.com/ava/issues/new"
+              href="https://github.com/g0dxn4/AVA/issues/new"
               target="_blank"
               rel="noopener noreferrer"
               class="inline-flex items-center gap-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"

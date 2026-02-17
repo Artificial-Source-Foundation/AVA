@@ -118,6 +118,7 @@ describe('storeOAuthCredentials', () => {
     expect(parsed.anthropic.provider).toBe('anthropic')
     expect(parsed.anthropic.type).toBe('oauth-token')
     expect(parsed.anthropic.value).toBe('tok-abc')
+    expect(localStorage.getItem('estela_credentials')).toBe(raw)
   })
 
   it('stores multiple providers without overwriting', () => {

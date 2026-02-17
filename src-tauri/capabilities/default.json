@@ -13,35 +13,67 @@
     "sql:allow-close",
     {
       "identifier": "fs:allow-read-text-file",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$HOME/.ava/**" },
+        { "path": "$HOME/.estela/**" }
+      ]
     },
     {
       "identifier": "fs:allow-read-file",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$HOME/.ava/**" },
+        { "path": "$HOME/.estela/**" }
+      ]
     },
     {
       "identifier": "fs:allow-read-dir",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$HOME/.ava/**" },
+        { "path": "$HOME/.estela/**" }
+      ]
     },
     {
       "identifier": "fs:allow-stat",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$HOME/.ava/**" },
+        { "path": "$HOME/.estela/**" }
+      ]
     },
     {
       "identifier": "fs:allow-write-text-file",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$HOME/.ava/**" },
+        { "path": "$HOME/.estela/**" }
+      ]
     },
     {
       "identifier": "fs:allow-remove",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$HOME/.ava/**" },
+        { "path": "$HOME/.estela/**" }
+      ]
     },
     {
       "identifier": "fs:allow-exists",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$HOME/.ava/**" },
+        { "path": "$HOME/.estela/**" }
+      ]
     },
     {
       "identifier": "fs:allow-mkdir",
-      "allow": [{ "path": "$APPDATA/**" }, { "path": "$HOME/.ava/**" }]
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$HOME/.ava/**" },
+        { "path": "$HOME/.estela/**" }
+      ]
     },
     "fs:allow-watch",
     "fs:allow-unwatch",

@@ -4,10 +4,11 @@
  * AVA CLI Entry Point
  *
  * Usage:
- *   ava              - Interactive TUI mode (future)
- *   ava auth         - Manage authentication
- *   ava --version    - Show version
- *   ava --help       - Show help
+ *   ava                 - Interactive TUI mode (future)
+ *   ava auth            - Manage authentication
+ *   ava plugin          - Plugin development commands
+ *   ava --version       - Show version
+ *   ava --help          - Show help
  */
 
 import * as os from 'node:os'
@@ -15,6 +16,7 @@ import * as path from 'node:path'
 import { setPlatform } from '@ava/core'
 import { createNodePlatform } from '@ava/platform-node'
 import { runAuthCommand } from './commands/auth.js'
+import { runPluginCommand } from './commands/plugin.js'
 
 const VERSION = '0.1.0'
 
@@ -43,6 +45,12 @@ async function main() {
     return
   }
 
+  // Plugin command
+  if (args[0] === 'plugin') {
+    await runPluginCommand(args.slice(1))
+    return
+  }
+
   // Default: Show help (TUI not implemented yet)
   console.log('AVA CLI')
   console.log('')
@@ -60,6 +68,7 @@ USAGE:
 
 COMMANDS:
   auth            Manage authentication (OAuth login/logout)
+  plugin          Plugin development commands
 
 OPTIONS:
   --version, -v   Show version
@@ -71,9 +80,19 @@ AUTHENTICATION:
   ava auth status             Show authentication status
   ava auth logout <provider>  Disconnect a provider
 
+PLUGIN DEVELOPMENT:
+  ava plugin init my-plugin                Create plugin scaffold in current directory
+  ava plugin init my-plugin --dir ./plugins  Create scaffold in a custom directory
+  ava plugin init my-plugin --force        Overwrite in non-empty target directory
+  ava plugin dev my-plugin --dir ./plugins Run plugin dev/watch script
+  ava plugin test my-plugin --dir ./plugins Run plugin test suite
+
 EXAMPLES:
   # Connect Claude subscription for OAuth
   ava auth login anthropic
+
+  # Scaffold a plugin
+  ava plugin init my-plugin
 
   # Check version
   ava --version

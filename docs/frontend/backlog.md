@@ -60,6 +60,7 @@ These gaps were prioritized previously and are now mostly delivered based on cha
 - [ ] Final manual QA pass for chat stream UX across long sessions
 - [ ] Complete Sprint 2.3 plugin UX runtime wiring/validation from `docs/development/sprints/2026-S2.3-plugin-ux-wiring.md`
 - [ ] Complete benchmark-derived frontend gaps FG-004 remainder, FG-006, and FG-007 from `docs/development/status/frontend-gap-matrix-2026-02-15.md`
+- [ ] Wire plugin install/uninstall to real backend lifecycle APIs (replace local mock adapter)
 
 ---
 
@@ -82,6 +83,7 @@ This is what makes AVA "The Obsidian of AI Coding".
 **Frontend**: Plugin dev panel showing reload status, logs
 
 ### Sprint 2.3: Built-in Marketplace UI
+- [x] Plugin browser in sidebar/settings surfaces
 - [x] Settings-only plugin manager surface (replace Plugins placeholder)
 - [x] Search + category-aware filtering in settings manager
 - [x] Install/uninstall + enable/disable controls in settings manager
@@ -89,7 +91,7 @@ This is what makes AVA "The Obsidian of AI Coding".
 - [x] Metadata/trust/version/changelog fields surfaced in plugin cards/details
 - [ ] Featured plugin catalog curation + remote source integration
 - [ ] Wire settings manager actions to real backend extension lifecycle APIs (tracked as `INT-001`/`INT-002`/`INT-003` in `docs/development/backlogs/integration-backlog.md`)
-**Frontend**: Settings tab plugin manager, search, install flow, detail/settings view
+**Frontend**: Settings tab plugin manager, search, install flow, detail/settings view. Shipped with shared `plugins` store and mock lifecycle adapter.
 
 ---
 
@@ -172,6 +174,12 @@ These were identified as gaps but are now fully implemented:
 | Custom instructions | 44 | Injected as system message |
 | Desktop notifications | 44 | Unfocused-only + AudioContext chime |
 | Settings export/import | 44 | JSON download, file picker, deep merge |
+| Project hub screen + resume/open flow | 54 | Full-screen hub, open-folder CTA, resume current project |
+| Project-scoped session restore | 54 | Last-session persistence per project + startup restore |
+| Sidebar quick project switching | 54 | Hub shortcut, open-project action, project switch dropdown |
+| Plugin browser in settings + sidebar | 55 | Shared plugin store, search, categories, featured, quick actions |
+| Plugin install/uninstall + settings entry | 55 | One-click actions with AVA/legacy install-state compatibility |
+| Plugin scaffold CLI foundation | 56 | `ava plugin init` command + generated package template docs |
 
 ---
 

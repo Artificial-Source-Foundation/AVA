@@ -126,6 +126,11 @@ export function useAgent() {
   async function run(goal: string, config?: Partial<AgentConfig>): Promise<AgentResult | null> {
     if (isRunning()) return null
 
+    if (!currentProject()) {
+      setLastError('Open a project before running agent mode.')
+      return null
+    }
+
     batch(() => {
       setIsRunning(true)
       setCurrentThought('')

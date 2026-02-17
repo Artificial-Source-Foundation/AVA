@@ -1,21 +1,20 @@
 {
   "name": "@ava/cli",
   "version": "0.1.0",
-  "description": "AVA CLI - ACP-compatible AI coding assistant",
+  "description": "AVA CLI - AI coding assistant",
   "type": "module",
   "bin": {
-    "ava": "dist/index.js"
+    "ava": "dist/index.js",
+    "estela": "dist/index.js"
   },
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
-    "start:acp": "node dist/index.js --acp",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.13.1",
     "@ava/core": "workspace:*",
     "@ava/platform-node": "workspace:*"
   },

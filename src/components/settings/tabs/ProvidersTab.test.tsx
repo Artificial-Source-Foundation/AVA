@@ -20,6 +20,11 @@ describe('ProvidersTab helpers', () => {
     expect(checkStoredOAuth('openai')).toBe(true)
   })
 
+  it('checkStoredOAuth falls back to legacy estela credentials', () => {
+    localStorage.setItem('estela_credentials', JSON.stringify({ openai: { type: 'oauth-token' } }))
+    expect(checkStoredOAuth('openai')).toBe(true)
+  })
+
   it('checkStoredOAuth returns true for core oauth auth', () => {
     writeCoreAuth('openai', { type: 'oauth' })
     expect(checkStoredOAuth('openai')).toBe(true)
@@ -36,7 +41,9 @@ describe('ProvidersTab helpers', () => {
       anthropic: { type: 'oauth-token' },
     })
     localStorage.setItem('ava_cred_openai-api-key', 'sk-openai')
+    localStorage.setItem('estela_cred_openai-api-key', 'legacy-openai')
     writeCoreAuth('openai', { type: 'oauth' })
+    localStorage.setItem('estela_cred_auth-openai', JSON.stringify({ type: 'oauth' }))
 
     clearProviderCredentials('openai')
 
@@ -48,5 +55,8 @@ describe('ProvidersTab helpers', () => {
     expect(stored.anthropic).toBeDefined()
     expect(localStorage.getItem('ava_cred_openai-api-key')).toBeNull()
     expect(localStorage.getItem('ava_cred_auth-openai')).toBeNull()
+    expect(localStorage.getItem('estela_cred_openai-api-key')).toBeNull()
+    expect(localStorage.getItem('estela_cred_auth-openai')).toBeNull()
+    expect(localStorage.getItem('estela_credentials')).toBe(localStorage.getItem('ava_credentials'))
   })
 })

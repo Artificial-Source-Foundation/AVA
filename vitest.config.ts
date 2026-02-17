@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url'
 import solidPlugin from 'vite-plugin-solid'
 import { defineConfig } from 'vitest/config'
 
@@ -21,9 +22,22 @@ export default defineConfig({
       exclude: ['node_modules/**', 'src-tauri/**', '**/*.config.{js,ts}', '**/*.d.ts'],
     },
     // Test file patterns
-    include: ['src/**/*.{test,spec}.{ts,tsx}', 'packages/core/src/**/*.{test,spec}.ts'],
+    include: [
+      'src/**/*.{test,spec}.{ts,tsx}',
+      'packages/core/src/**/*.{test,spec}.ts',
+      'cli/src/**/*.{test,spec}.ts',
+    ],
   },
   resolve: {
     conditions: ['development', 'browser'],
+    alias: {
+      '@ava/core': fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),
+      '@ava/platform-tauri': fileURLToPath(
+        new URL('./packages/platform-tauri/src/index.ts', import.meta.url)
+      ),
+      '@ava/platform-node': fileURLToPath(
+        new URL('./packages/platform-node/src/index.ts', import.meta.url)
+      ),
+    },
   },
 })

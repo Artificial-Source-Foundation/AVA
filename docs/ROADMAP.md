@@ -156,6 +156,7 @@ This is what makes AVA "The Obsidian of AI Coding". Easy to create, discover, in
 - [ ] Plugin documentation template
 
 ### Sprint 2.3: Built-in Marketplace UI
+- [x] Project Hub + project-scoped session restore + sidebar quick project switching
 - [x] Settings-only plugin manager surface (replace inline placeholder)
 - [x] Search + category-aware filtering in settings manager
 - [x] Install/uninstall + enable/disable controls (settings manager MVP)
@@ -164,9 +165,10 @@ This is what makes AVA "The Obsidian of AI Coding". Easy to create, discover, in
 - [ ] Featured plugin catalog curation + remote source
 - [ ] Runtime validation closeout for backend extension lifecycle wiring and failure recovery (tracked in [Integration Backlog](development/backlogs/integration-backlog.md#active))
 
-**Key files:** `src/components/settings/SettingsModal.tsx`, `src/components/settings/tabs/PluginsTab.tsx`
+**Key files:** `src/components/settings/tabs/PluginsTab.tsx`, `src/components/sidebar/SidebarPlugins.tsx`, `src/stores/plugins.ts`, `src/services/plugins/`
 
 ### Sprint 2.4: Plugin Distribution
+- [x] `ava plugin init` scaffold command + plugin template docs
 - [ ] Publish plugins from GitHub repos
 - [ ] Plugin registry API
 - [ ] Version management and updates

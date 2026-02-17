@@ -1,6 +1,6 @@
 # Backend Test Coverage
 
-> Latest verified baseline: **~2321 tests** across **~81 test files**. Overall file coverage: ~34%.
+> Latest verified baseline: **~2369 tests** across **~87 test files**. Overall file coverage: ~37%.
 >
 > Strategy: Test pure functions and stateful classes. Skip LLM/FS/HTTP-dependent code.
 
@@ -10,13 +10,27 @@
 
 | Metric | Value |
 |--------|-------|
-| Total tests | ~2321 |
-| Test files | ~81 |
-| Source files (total) | ~235 |
-| Source lines | ~54,200 |
-| File coverage | ~34% |
+| Total tests | ~2369 |
+| Test files | ~87 |
+| Source files (total) | ~237 |
+| Source lines | ~54,500 |
+| File coverage | ~37% |
 | TS errors | 0 |
 | Biome errors | 0 |
+
+## Recently Delivered (Sprint B7-B10)
+
+### Validation Pipeline Integration (B7)
+- `packages/core/src/agent/__tests__/agent-validation.integration.test.ts` — 5 tests (validation on completion, failure feedback, skip when disabled, skip when no files, retry limit)
+
+### Minimal Tool Mode (B8)
+- `packages/core/src/agent/modes/minimal.test.ts` — 13 tests (state management, tool access, per-session isolation, allowed tools list)
+
+### Mid-Session Provider Switching (B9)
+- `packages/core/src/agent/__tests__/agent-provider-switch.test.ts` — 4 tests (switch via requestProviderSwitch, history preserved, events emitted, invalid provider)
+
+### Lead-Worker Auto-Routing (B10)
+- `packages/core/src/commander/router.test.ts` — 26 tests (analyzeTask keyword matching, confidence, code path detection, selectWorker scoring)
 
 ## Recently Delivered (Sprint B4)
 
@@ -45,7 +59,7 @@
 |--------|--------|-------|----------|-------|
 | commander/workers/ | 1 | 1 | 100% | Worker definitions fully tested |
 | session/ | 4 | 6 | 67% | Missing: types.ts |
-| commander/ | 4 | 6 | 67% | Missing: types.ts |
+| commander/ | 5 | 7 | 71% | +router.ts (auto-routing). Missing: types.ts |
 | extensions/ | 3 | 5 | 60% | Missing: types.ts |
 
 ### Moderate Coverage (30-59%)
@@ -55,7 +69,7 @@
 | context/ | 3 | 4 | 75% | auto-compaction, compactor, tracker tested. Missing: types |
 | custom-commands/ | 3 | 6 | 50% | Missing: loader, types |
 | llm/ | 6 | 19 | 32% | Client + 2 providers (openai, openai-compat) + 3 utils tested |
-| agent/ | 7 | 10 | 70% | metrics.ts tested. Missing: subagent unit, types |
+| agent/ | 10 | 11 | 91% | +minimal mode, validation integration, provider switch. Missing: subagent unit |
 | context/strategies/ | 5 | 8 | 63% | strategies.test.ts covers sliding-window, hierarchical, summarize + visibility |
 | commander/parallel/ | 4 | 5 | 80% | activity.ts + scheduler.ts tested |
 | policy/ | 2 | 5 | 40% | Missing: rules, types |
@@ -75,7 +89,7 @@
 | llm/providers/ | 14 | 2 tested (openai, openai-compat). Rest require real HTTP |
 | auth/ | 8 | OAuth flows require real HTTP |
 | codebase/ | 11 | ranking + graph tested (49 tests). Indexer/symbols require filesystem |
-| validator/ | 9 | Requires real filesystem (lint, build, test) |
+| validator/ | 9 | Integration tested via agent-validation.integration.test.ts (mocked). Direct unit tests require real filesystem |
 | hooks/ | 4 | executor.ts tested (16 tests). factory/types require real tool execution |
 | lsp/ | 4 | Requires language servers |
 | git/ | 5 | Requires real git repository (includes auto-commit.ts) |
@@ -89,13 +103,16 @@
 
 ## Tested Files (~81 total)
 
-### agent/ (8 test files)
+### agent/ (11 test files)
 - `evaluator.test.ts` — 35 tests (progress, goals, tool usage, metrics)
 - `events.test.ts` — 53 tests (emitter, buffer, filtering, stats)
 - `recovery.test.ts` — 107 tests (error classification, backoff, retry, manager)
 - `planner.test.ts` — 32 tests (error classification, constructor)
 - `modes/plan.test.ts` — 36 tests (state, restrictions, enter/exit tools)
+- `modes/minimal.test.ts` — 13 tests (state management, tool access blocking/allowing, per-session isolation, allowed tools list)
 - `__tests__/agent-pipeline.integration.test.ts` — 10 tests (tool dispatch, MAX_TURNS, NO_COMPLETE_TASK, doom loop, abort, event ordering, filtered tools, worker execution, subagent spawning, recursion prevention)
+- `__tests__/agent-validation.integration.test.ts` — 5 tests (validation on completion, failure feedback loop, skip when disabled, skip when no files, maxValidationRetries)
+- `__tests__/agent-provider-switch.test.ts` — 4 tests (switch provider between turns, history preserved, events emitted, invalid provider handled)
 - `metrics.test.ts` — 15 tests (record events, turns, tokens, tool calls, errors, recoveries, duration, export, singleton)
 - `prompts/system.test.ts` — 40 tests (RULES/CAPABILITIES constants, buildSystemPrompt, buildWorkerPrompt, buildScenarioPrompt, getModelAdjustments)
 
@@ -123,8 +140,9 @@
 - `utils/openai-compat.test.ts` — shared OpenAI-compat streaming tests
 - `utils/sse.test.ts` — SSE parser tests
 
-### commander/ (9 test files)
+### commander/ (10 test files)
 - `executor.test.ts`, `registry.test.ts`, `tool-wrapper.test.ts`, `utils.test.ts`
+- `router.test.ts` — 26 tests (analyzeTask keyword matching for 5 task types, confidence scaling, code path detection, selectWorker scoring, null returns)
 - `parallel/batch.test.ts`, `parallel/conflict.test.ts`, `parallel/activity.test.ts`, `parallel/scheduler.test.ts`
 - `workers/definitions.test.ts`
 
@@ -204,4 +222,4 @@
 
 ---
 
-*Last updated: 2026-02-15 — audit-corrected counts after dead module removal*
+*Last updated: 2026-02-15 — updated after Sprint B7-B10 (validation, minimal mode, provider switch, auto-routing)*

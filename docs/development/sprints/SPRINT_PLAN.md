@@ -4,8 +4,8 @@
 >
 > Current status sources:
 > - `docs/ROADMAP.md`
-> - `docs/development/sprint-1.6-testing.md`
-> - `docs/development/mvp-readiness-report-2026-02-13.md`
+> - `docs/development/sprints/sprint-1.6-testing.md`
+> - `docs/development/status/mvp-readiness-report-2026-02-13.md`
 
 > Making AVA as good as Cline and beyond
 

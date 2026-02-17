@@ -10,7 +10,7 @@
 |-------|--------|-------|
 | **1: Desktop App** | **Done** | Core UI, LLM chat, settings, team flow |
 | **1.5: Desktop Polish** | **Done** | Settings, appearance, wiring, gap closing |
-| **2: Plugin Ecosystem** | In progress | Backend foundations shipped, frontend UX next |
+| **2: Plugin Ecosystem** | In progress | UX baseline shipped; runtime validation + catalog maturity next |
 | **3: Community & CLI** | Future | CLI interface, docs site, templates |
 | **4: Integrations** | Future | Editor (ACP), agent network (A2A), voice, vision |
 
@@ -32,7 +32,7 @@ Everything needed for a working desktop AI coding app.
 - Spring physics animations, glassmorphism design
 - Code viewer (CodeMirror 6)
 
-### Core Engine (~54,200 lines, latest baseline: ~2321 tests across 81 files)
+### Core Engine (~54,500 lines, latest baseline: ~2369 tests across 87 files)
 | Category | Modules |
 |----------|---------|
 | Agent System | Agent loop, Commander, Parallel execution, Validator |
@@ -112,10 +112,10 @@ Active execution docs:
 - Structured logs across chat/agent/core/session/settings/file-watcher
 
 ### Sprint 1.6.4: PI Coding Agent Parity
-- Mid-session provider switching
-- Session branching tree
-- Minimal tool mode
-- Runtime skill creation
+- [x] Mid-session provider switching (Sprint B9 — `requestProviderSwitch()` on AgentExecutor)
+- [ ] Session branching tree
+- [x] Minimal tool mode (Sprint B8 — 9-tool subset, per-session state, plan mode pattern)
+- [ ] Runtime skill creation
 
 ### Sprint 1.6.5: Manual Tauri Testing
 - OAuth browser flow, callback, token exchange
@@ -123,13 +123,15 @@ Active execution docs:
 
 ### Sprint 1.6 Verification Workflow
 - Added `npm run verify:mvp` to run lint + typecheck + full test suite.
-- Current status: verification pipeline is green in the latest readiness run (`verify:mvp` passed, full suite `1801 tests / 70 files`).
+- Current status: verification pipeline is green in the latest readiness run (`verify:mvp` passed, full suite `2369 tests / 87 files`).
 
 ### Next Build Steps (Immediate)
 - [x] Implement automatic session titles from first user message for new chats
 - [x] Finish chat streaming polish (stream-end/start micro-jitter stabilized)
+- [x] Execute benchmark P0 frontend gap baseline (`FG-001`/`FG-002`/`FG-003`)
 - [ ] Complete manual Tauri OAuth validation (connect/disconnect + send flow per provider)
-- [ ] Complete Sprint 2.3 frontend-backend lifecycle wiring from [execution sprint doc](development/sprints/2026-S2.3-plugin-ux-wiring.md)
+- [ ] Complete Sprint 2.3 frontend-backend lifecycle runtime validation from [execution sprint doc](development/sprints/2026-S2.3-plugin-ux-wiring.md)
+- [ ] Execute remaining frontend gaps (`FG-004` remainder, `FG-006`, `FG-007`) from [frontend gap matrix](development/status/frontend-gap-matrix-2026-02-15.md)
 - [ ] Continue DX-1 docs architecture hardening from [execution sprint doc](development/sprints/2026-DX-1-docs-architecture-hardening.md)
 
 ---
@@ -158,8 +160,9 @@ This is what makes AVA "The Obsidian of AI Coding". Easy to create, discover, in
 - [x] Search + category-aware filtering in settings manager
 - [x] Install/uninstall + enable/disable controls (settings manager MVP)
 - [x] Plugin detail/settings panel in settings manager
-- [ ] Featured plugin catalog (curation + remote source)
-- [ ] Backend extension lifecycle wiring in frontend manager (replace local mock state; tracked in [Integration Backlog](development/backlogs/integration-backlog.md#active))
+- [x] Metadata/trust/version/changelog surfaced in plugin cards/details
+- [ ] Featured plugin catalog curation + remote source
+- [ ] Runtime validation closeout for backend extension lifecycle wiring and failure recovery (tracked in [Integration Backlog](development/backlogs/integration-backlog.md#active))
 
 **Key files:** `src/components/settings/SettingsModal.tsx`, `src/components/settings/tabs/PluginsTab.tsx`
 

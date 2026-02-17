@@ -86,9 +86,9 @@ Team Lead (AgentExecutor + Commander)
 
 ```
 Agent System:
-├── agent/         # Agent loop, prompts, modes, subagents
-├── commander/     # Team Lead → Senior Leads → Junior Devs
-├── validator/     # QA pipeline
+├── agent/         # Agent loop, prompts, modes (plan + minimal), subagents, validation gate
+├── commander/     # Team Lead → Senior Leads → Junior Devs, keyword auto-routing
+├── validator/     # QA pipeline — wired into agent completion gate
 
 Tools (24):
 ├── tools/         # read, write, edit, glob, grep, bash, browser, etc.
@@ -133,11 +133,11 @@ Infrastructure:
 ```
 Desktop App / CLI
     → Team Lead (AgentExecutor)
-        → Delegates to Senior Leads (Workers)
+        → Auto-route or delegate to Senior Leads (Workers)
             → Senior Leads spawn Junior Devs (Sub-workers)
                 → Execute tools → LLM → Results
             → Auto-report back to Team Lead
-        → Validator verifies results
+        → Validator gate on completion (syntax → types → lint)
     → Response shown in UI
 ```
 

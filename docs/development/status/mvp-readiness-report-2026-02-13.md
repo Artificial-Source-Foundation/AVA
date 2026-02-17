@@ -19,8 +19,8 @@ This pass focused on MVP confidence for auth reliability, chat flow reliability,
   - `scripts/verify-mvp.sh`
   - `package.json` -> `verify:mvp`
 - Synced sprint and roadmap/backlog docs:
-  - `docs/development/sprint-1.6-testing.md`
-  - `docs/development/mvp-test-matrix.md`
+  - `docs/development/sprints/sprint-1.6-testing.md`
+  - `docs/development/sprints/mvp-test-matrix.md`
   - `docs/frontend/backlog.md`
   - `docs/ROADMAP.md`
 - Stabilized OpenAI OAuth Codex transport and streaming behavior:
@@ -58,5 +58,5 @@ This pass focused on MVP confidence for auth reliability, chat flow reliability,
 ## Next Priorities
 
 1. Complete final chat streaming micro-jitter polish in desktop runtime.
-2. Execute manual OAuth validation matrix for OpenAI, Anthropic, and Copilot (`docs/development/oauth-manual-validation-matrix.md`).
+2. Execute manual OAuth validation matrix for OpenAI, Anthropic, and Copilot (`docs/development/sprints/oauth-manual-validation-matrix.md`).
 3. Start Sprint 2.3 plugin UX implementation (settings/sidebar plugin surface).

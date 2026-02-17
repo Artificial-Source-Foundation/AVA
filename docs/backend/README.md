@@ -1,6 +1,6 @@
 # Backend — @ava/core
 
-> The brain of AVA. ~235 source files, ~54,200 lines. Test baseline: ~2321 tests across ~81 files (~34% coverage).
+> The brain of AVA. ~237 source files, ~54,500 lines. Test baseline: ~2369 tests across ~87 files (~37% coverage).
 
 **Package:** `packages/core/` | **Entry:** `packages/core/src/index.ts` | **Exports:** 29 modules
 
@@ -27,9 +27,9 @@ User (Desktop/CLI)
 
 | Module | Files | Lines | Purpose |
 |--------|-------|-------|---------|
-| `agent/` | 21 | 5,264 | Autonomous loop, planning, recovery, subagents, modes, metrics |
-| `commander/` | 12 | 2,752 | Team Lead → Senior Leads → Junior Devs delegation |
-| `validator/` | 9 | 2,256 | QA pipeline (syntax, lint, build, test, self-review) |
+| `agent/` | 22 | 5,530 | Autonomous loop, planning, recovery, subagents, modes (plan + minimal), metrics, validation gate |
+| `commander/` | 13 | 2,870 | Team Lead → Senior Leads → Junior Devs delegation, keyword auto-routing |
+| `validator/` | 9 | 2,256 | QA pipeline (syntax, lint, build, test, self-review) — wired into agent loop completion gate |
 
 ### Tools (24 registered tools)
 
@@ -185,4 +185,4 @@ All in `tools/` and auto-registered in `tools/index.ts`:
 
 ---
 
-*Last updated: 2026-02-15 — ~2321 tests across ~81 files (~34% coverage)*
+*Last updated: 2026-02-15 — ~2369 tests across ~87 files (~37% coverage)*

@@ -1,6 +1,6 @@
 # Frontend
 
-> Desktop app built with SolidJS + Tauri v2
+> Desktop app built with SolidJS + Tauri v2. Status snapshot updated 2026-02-15.
 
 ---
 
@@ -15,6 +15,14 @@
 | Code viewer | CodeMirror 6 (solid-codemirror) |
 | Virtual scroll | @tanstack/solid-virtual |
 | Icons | lucide-solid |
+
+---
+
+## Status Snapshot
+
+- Recently delivered: in-chat git control strip (`FG-001`), usage details dialog (`FG-002`), plugin metadata/trust pass (`FG-003`), and inline approval-state banner baseline (`FG-005`).
+- Remaining frontend gaps: `FG-004` remainder (very long session performance validation), `FG-006` (share/export UX), `FG-007` (panel adaptability).
+- Plugin UX still needs runtime closeout evidence for `INT-001`/`INT-002`/`INT-003` in desktop runtime.
 
 ---
 
@@ -114,6 +122,7 @@ src/
 │   │       ├── BehaviorTab.tsx      # Send key, auto-scroll, notifications, sound
 │   │       ├── AgentsTab.tsx        # Agent configuration
 │   │       ├── MCPServersTab.tsx    # MCP server management
+│   │       ├── PluginsTab.tsx       # Plugin manager (catalog, lifecycle, recovery)
 │   │       └── KeybindingsTab.tsx   # Keyboard shortcut customization
 │   │
 │   ├── dialogs/
@@ -206,7 +215,7 @@ src/
 
 Settings are stored in `localStorage` and synced to the core engine via `core-bridge.ts`.
 
-### Settings Groups (7 tabs)
+### Settings Groups (8 tabs)
 
 | Tab | Key Settings |
 |-----|-------------|
@@ -216,6 +225,7 @@ Settings are stored in `localStorage` and synced to the core engine via `core-br
 | **Behavior** | Send key (Enter/Ctrl+Enter), auto-scroll, auto-title, line numbers, word wrap, notifications, sound |
 | **Agents** | Agent configuration |
 | **MCP** | MCP server management |
+| **Plugins** | Plugin catalog, install/uninstall, enable/disable, retry/recovery |
 | **Shortcuts** | Keyboard shortcut customization |
 
 ### Data Management

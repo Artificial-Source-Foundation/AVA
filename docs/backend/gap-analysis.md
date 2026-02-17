@@ -12,6 +12,8 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 
 **Closed since last update (Sessions 48-53):** message queue, file watcher, step-level undo, git auto-commit, weak/editor model split, streaming tool preview.
 
+**Closed (Sprint B7-B10):** mid-session provider switching, minimal tool mode, lead-worker auto-routing, iterative lint→fix loop (validator wired into agent completion gate).
+
 **Biggest gaps by frequency** (how many codebases have it):
 
 | Gap | Who Has It | Priority |
@@ -23,7 +25,7 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 | ~~Weak model for secondary tasks~~ | Aider, PI | ~~**High**~~ **DONE** |
 | ~~Architect + editor model split~~ | Aider, PI | ~~**Medium**~~ **DONE** |
 | ~~Sandbox/container execution~~ | Gemini CLI, OpenHands, Goose | ~~**High**~~ **DONE** |
-| ~~Iterative lint → fix loop~~ | Aider, Cline, Gemini CLI | ~~High~~ **DONE** |
+| ~~Iterative lint → fix loop~~ | Aider, Cline, Gemini CLI | ~~High~~ **DONE** (validator wired into agent loop) |
 | ~~Streaming tool preview~~ | Cline, OpenCode | ~~**Medium**~~ **DONE** |
 | ~~File watcher / AI comments~~ | Aider, OpenCode | ~~**Medium**~~ **DONE** |
 | ~~Architect + editor model split~~ | Aider, PI | ~~**Medium**~~ **DONE** |
@@ -37,9 +39,9 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 
 | Gap | Source | Priority |
 |-----|--------|----------|
-| Mid-session provider switching | PI | **Medium** |
+| ~~Mid-session provider switching~~ | PI | ~~**Medium**~~ **DONE** |
 | Session branching tree (true forks, shared prefix) | PI | **Medium** |
-| Minimal tool mode (4-tool subset) | PI | Low |
+| ~~Minimal tool mode (4-tool subset)~~ | PI | ~~Low~~ **DONE** |
 | Runtime skill/tool creation + hot reload | PI | Medium |
 | MCP OAuth flows (auth + refresh + storage) | Cline, Gemini CLI, Goose | Medium |
 | Remote browser support | Cline | Medium |
@@ -48,7 +50,7 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 
 | Gap | Who Has It | AVA Status | Priority |
 |-----|-----------|------------|----------|
-| Lead-Worker model auto-routing | Goose | Manual editor model split (no auto-fallback) | **High** |
+| ~~Lead-Worker model auto-routing~~ | Goose | **DONE** (commander/router.ts: keyword analysis + confidence scoring + auto-select) | ~~**High**~~ Done |
 | ~~Parallel subagents (multi-task)~~ | Cline (5 parallel read-only), OpenCode (batch) | **DONE** (task-parallel.ts: Semaphore concurrency, explore=5, execute=1) | ~~High~~ Done |
 | Resumable subagents | OpenCode (`task_id` param) | **DONE** (task tool has `sessionId`) | Done |
 | ~~Batch tool (parallel tool exec)~~ | OpenCode (25 parallel via Promise.all) | **DONE** (task-parallel.ts: Promise.allSettled + Semaphore) | ~~Medium~~ Done |
@@ -177,11 +179,9 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 - **Cline**: Editor integration with VS Code Problems panel.
 - **Gemini CLI**: Auto-test + auto-lint with feedback loop.
 
-**AVA status**: `validator/` module has linting checks (syntax, TypeScript, eslint) but it's **read-only** — doesn't feed errors back to the model for retry.
+**AVA status**: **DONE** (Sprint B7). `validator/` pipeline (syntax → TypeScript → lint) is now wired into the agent loop's `complete_task` handler. On task completion, if files were modified, validation runs automatically. Failures inject feedback into the conversation and the agent gets up to `maxValidationRetries` (default 2) attempts to fix issues before accepting completion.
 
 **Impact**: Dramatically improves first-time code correctness. Agent fixes its own mistakes.
-
-**Implementation**: After edit → run `validator` → if errors → inject into next LLM turn → retry. Max 3 retries.
 
 ---
 
@@ -348,7 +348,7 @@ These are AVA's **unique advantages** — features no other codebase implements:
 |---|---------|--------|--------|--------|
 | 11 | ~~**Sandbox execution**~~ | ~~2-3 weeks~~ | ~~High~~ **DONE** | Gemini CLI, OpenHands, Goose |
 | 12 | ~~**Parallel subagents**~~ | ~~1-2 weeks~~ | ~~High~~ **DONE** | Cline (5 concurrent), OpenCode (batch) |
-| 13 | **Lead-worker auto-routing** | 1 week | High | Goose (auto-selects worker type) |
+| 13 | ~~**Lead-worker auto-routing**~~ | ~~1 week~~ | ~~High~~ **DONE** | Goose (auto-selects worker type) |
 | 14 | ~~**Batch parallel tool exec**~~ | ~~1 week~~ | ~~Medium~~ **DONE** | OpenCode (25 via Promise.all) |
 | 15 | ~~**Security inspector pipeline**~~ | ~~1-2 weeks~~ | ~~Medium~~ **DONE** | Goose (pattern + confidence + audit) |
 | 16 | ~~**Visibility metadata**~~ | ~~3-4 days~~ | ~~Medium~~ **DONE** | Goose (user_visible/agent_visible) |
@@ -365,7 +365,7 @@ These are AVA's **unique advantages** — features no other codebase implements:
 
 ### PI Coding Agent (v0.52.9)
 - **Philosophy**: Minimal core, maximum extensibility. "No permission popups."
-- **Steal**: Mid-session provider switching, session branching tree, minimal tool mode, runtime skill creation, RPC mode
+- **Steal**: ~~Mid-session provider switching~~ **DONE**, session branching tree, ~~minimal tool mode~~ **DONE**, runtime skill creation, RPC mode
 - **Skip**: Their extension system (we have plugins)
 
 ### OpenCode (Deep Audit — 2026-02-14)
@@ -401,7 +401,7 @@ These are AVA's **unique advantages** — features no other codebase implements:
 - **Agent system**: Lead-worker model with automatic routing — developer → researcher → data-analyst. Three-inspector pipeline: SecurityInspector (pattern-based blocking), PermissionInspector (user approval), RepetitionInspector (stuck detection). Confidence scores on security checks.
 - **Sessions**: SQLite-based session storage. Visibility metadata on messages (user_visible vs agent_visible flags for compaction control). Auto-compaction at 80% context usage.
 - **Extensibility**: YAML recipe system with cron scheduling, success checks, retry logic. Extension malware checking. Tool prefix namespacing (`ext__tool`).
-- **Steal**: Lead-worker auto-routing, 3-inspector security pipeline, visibility metadata, SQLite sessions, auto-compaction threshold, toolshim for non-tool-calling models
+- **Steal**: ~~Lead-worker auto-routing~~ **DONE**, ~~3-inspector security pipeline~~ **DONE**, ~~visibility metadata~~ **DONE**, SQLite sessions, ~~auto-compaction threshold~~ **DONE**, toolshim for non-tool-calling models
 - **Skip**: MCP-native-only architecture (we support both native + MCP), Rust-specific patterns
 
 ### OpenHands

@@ -53,4 +53,4 @@ Deliver the first usable plugin management experience in the desktop app by conn
 - `docs/frontend/backlog.md`
 - `docs/development/backlogs/integration-backlog.md`
 - `docs/development/sprints/2026-S2.3-plugin-ux-wiring.md`
-- `docs/development/mvp-readiness-report-2026-02-13.md`
+- `docs/development/status/mvp-readiness-report-2026-02-13.md`

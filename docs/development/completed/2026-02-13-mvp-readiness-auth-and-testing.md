@@ -13,7 +13,7 @@
 ### Task 1: Define MVP quality gates and test matrix
 
 **Files:**
-- Create: `docs/development/mvp-test-matrix.md`
+- Create: `docs/development/sprints/mvp-test-matrix.md`
 - Modify: `.opencode/todo.md`
 
 **Step 1: Write the MVP gate checklist doc**
@@ -30,7 +30,7 @@
 **Files:**
 - Modify: `packages/core/src/llm/client.test.ts`
 - Create: `src/services/auth/oauth-flow.test.ts`
-- Modify: `docs/development/sprint-1.6-testing.md`
+- Modify: `docs/development/sprints/sprint-1.6-testing.md`
 
 **Step 1: Add failing auth edge-case tests in core**
 - Cases: expired token fallback, missing account id, provider mismatch, clear-and-reconnect flow.
@@ -52,7 +52,7 @@
 **Files:**
 - Create: `src/hooks/useChat.integration.test.ts`
 - Create: `src/components/chat/ChatView.integration.test.tsx`
-- Modify: `docs/development/sprint-1.6-testing.md`
+- Modify: `docs/development/sprints/sprint-1.6-testing.md`
 
 **Step 1: Add failing integration scenarios**
 - Cases: send while streaming, steering/cancel behavior, queued follow-up, watcher-originated message metadata.
@@ -87,7 +87,7 @@
 **Files:**
 - Create: `scripts/verify-mvp.sh`
 - Modify: `package.json`
-- Modify: `docs/development/mvp-test-matrix.md`
+- Modify: `docs/development/sprints/mvp-test-matrix.md`
 
 **Step 1: Add non-interactive verification script**
 - Script runs lint + typecheck + test run in sequence with clear failure exits.
@@ -104,7 +104,7 @@
 ### Task 6: Final MVP verification and release-readiness report
 
 **Files:**
-- Create: `docs/development/mvp-readiness-report-2026-02-13.md`
+- Create: `docs/development/status/mvp-readiness-report-2026-02-13.md`
 - Modify: `docs/ROADMAP.md`
 - Modify: `.opencode/work-log.md`
 

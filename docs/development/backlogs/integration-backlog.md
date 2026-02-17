@@ -5,21 +5,21 @@
 ## Active
 
 - `INT-001` Plugin lifecycle wiring (settings UI controls -> extension manager actions)
-  - Status: in progress
+  - Status: in progress (frontend wiring landed; runtime validation pending)
   - Owners: frontend + backend
   - Frontend links: `docs/frontend/backlog.md`
   - Backend links: `docs/backend/backlog.md`
   - Exit evidence: install/enable/disable/uninstall flows succeed in desktop runtime.
 
 - `INT-002` Plugin state synchronization and optimistic UX behavior
-  - Status: in progress
+  - Status: in progress (optimistic/reconcile baseline landed; stress validation pending)
   - Owners: frontend + backend
   - Frontend links: `docs/frontend/backlog.md`
   - Backend links: `docs/backend/backlog.md`
   - Exit evidence: UI state remains consistent under fast toggles, retries, and action failures.
 
 - `INT-003` Plugin lifecycle failure handling and recovery UX
-  - Status: in progress
+  - Status: in progress (retry/recovery baseline landed; runtime failure evidence pending)
   - Owners: frontend + backend
   - Frontend links: `docs/frontend/backlog.md`
   - Backend links: `docs/backend/backlog.md`

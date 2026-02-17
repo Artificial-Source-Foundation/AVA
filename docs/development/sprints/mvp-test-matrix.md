@@ -51,4 +51,4 @@ npx vitest run packages/core/src/extensions/manager.test.ts src/components/setti
 - `npm run verify:mvp`: pass
 - `npm run tauri dev` smoke: frontend + Rust build startup confirmed after switching linker config to `gcc`
 
-Evidence source: `docs/development/mvp-readiness-report-2026-02-13.md` verification run.
+Evidence source: `docs/development/status/mvp-readiness-report-2026-02-13.md` verification run.

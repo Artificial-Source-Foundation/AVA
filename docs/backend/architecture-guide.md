@@ -110,13 +110,24 @@ User Message (Desktop/CLI)
   │     │
   │     ├─ DoomLoopDetector.check()           # session/doom-loop.ts
   │     │
+  │     ├─ File tracking (modifiedFiles set)  # agent/loop.ts
+  │     │
   │     ├─ MetricsCollector.record()          # agent/metrics.ts
+  │     │
+  │     ├─ On complete_task:
+  │     │   └─ ValidationPipeline.run()       # validator/pipeline.ts
+  │     │       ├─ syntax → typescript → lint
+  │     │       ├─ If passed → complete
+  │     │       └─ If failed → feedback to agent, retry
+  │     │
+  │     ├─ Provider switch check              # Mid-session provider switching
+  │     │   └─ createClient(newProvider)       # If pendingProviderSwitch set
   │     │
   │     └─ Termination check:
   │         ├─ MAX_TURNS reached
   │         ├─ TIMEOUT exceeded
   │         ├─ DOOM_LOOP detected (3 identical calls)
-  │         ├─ GOAL reached (attempt_completion)
+  │         ├─ GOAL reached (complete_task)
   │         └─ ABORTED (user/signal)
   │
   └─ AgentResult returned to UI
@@ -154,8 +165,8 @@ Team Lead (AgentExecutor)
 
 | File | Lines | Key Export | Purpose |
 |------|-------|-----------|---------|
-| `loop.ts` | ~900 | `AgentExecutor`, `runAgent` | Main loop: LLM stream → extract tool calls → execute → repeat |
-| `types.ts` | ~374 | `AgentConfig`, `AgentEvent`, `AgentResult` | All agent types; `AgentTerminateMode` enum (7 modes) |
+| `loop.ts` | ~960 | `AgentExecutor`, `runAgent` | Main loop: LLM stream → extract tool calls → execute → validate → repeat |
+| `types.ts` | ~430 | `AgentConfig`, `AgentEvent`, `AgentResult` | All agent types; `AgentTerminateMode` enum (7 modes), validation + provider switch events |
 | `events.ts` | ~316 | `AgentEventEmitter`, `EventBuffer` | Event emission + circular buffer for collection |
 | `planner.ts` | ~519 | `AgentPlanner` | LLM-based task planning + recovery planning (uses weak model) |
 | `recovery.ts` | ~578 | `RecoveryManager` | Error classification (9 categories), exponential backoff, retry |
@@ -164,6 +175,8 @@ Team Lead (AgentExecutor)
 | `metrics.ts` | ~193 | `MetricsCollector` | Per-session metrics (turns, tokens, tool counts, errors) |
 
 **agent/modes/plan.ts** (~364 lines) — Plan Mode restricts tools to read-only (`read`, `glob`, `grep`, `ls`, `websearch`, `webfetch`). Blocks all write/execute tools. Per-session state tracking.
+
+**agent/modes/minimal.ts** (~95 lines) — Minimal Mode restricts to 8 core tools (`read_file`, `write_file`, `edit`, `bash`, `glob`, `grep`, `attempt_completion`, `question`). Same per-session Map pattern as plan mode. Reduces token usage for focused tasks. Wired into `registry.ts` via `checkMinimalModeAccess()`.
 
 **agent/prompts/** — System prompt construction:
 - `system.ts` — `buildSystemPrompt()` with `RULES`, `CAPABILITIES`, `BEST_PRACTICES` constants (~2000 tokens)
@@ -176,8 +189,11 @@ Team Lead (AgentExecutor)
 **Key Design Decisions:**
 - **Doom loop detection in loop.ts**: 3 consecutive identical tool calls with same params → terminate. Hash-based comparison.
 - **Grace period**: On MAX_TURNS/TIMEOUT, gives agent 1 final turn to attempt completion before hard stop.
-- **Event-driven**: Every action emits typed events → UI can render live progress.
+- **Event-driven**: Every action emits typed events → UI can render live progress. Validation events: `validation:start`, `validation:result`, `validation:finish`. Provider switch: `provider:switch`.
 - **Weak model for planning**: `AgentPlanner` uses `getWeakModelConfig()` for cheaper/faster plan generation.
+- **File tracking**: `modifiedFiles: Set<string>` in AgentExecutor tracks all files changed by write/edit/create/delete/patch/multiedit tools. Used by validation pipeline.
+- **Validation gate**: On `complete_task`, if `validationEnabled` and files were modified, runs `ValidationPipeline` (syntax → typescript → lint). On failure, sends feedback to agent and retries up to `maxValidationRetries` (default: 2).
+- **Mid-session provider switching**: `requestProviderSwitch(provider, model)` queues a switch. Main loop creates new LLM client before next turn. Conversation history preserved — messages use provider-agnostic format.
 
 ### commander/ — Hierarchical Delegation
 
@@ -185,14 +201,15 @@ Team Lead (AgentExecutor)
 
 | File | Lines | Key Export | Purpose |
 |------|-------|-----------|---------|
-| `executor.ts` | ~250 | `executeWorker` | Execute a worker with filtered tools + recursion prevention |
+| `executor.ts` | ~300 | `executeWorker`, `executeWithAutoRouting` | Execute a worker with filtered tools + recursion prevention + auto-routing |
 | `registry.ts` | ~100 | `WorkerRegistry` | Registry of available workers + phone book generation |
+| `router.ts` | ~115 | `analyzeTask`, `selectWorker` | Keyword/heuristic task analysis for auto-routing to best worker |
 | `tool-wrapper.ts` | ~120 | `createWorkerTool` | Wraps `WorkerDefinition` as a callable `delegate_<name>` tool |
 | `utils.ts` | ~80 | `generatePhoneBook` | Formats worker directory for Team Lead's system prompt |
 | `types.ts` | ~234 | `WorkerDefinition`, `WorkerResult` | Worker config, activity events, parallel config |
 
 **commander/workers/** — Built-in worker definitions:
-- `definitions.ts` — `CODER_WORKER` (write code, 15 turns), `TESTER_WORKER` (write/run tests), `REVIEWER_WORKER` (read-only review), `REFACTORER_WORKER`, `DOCUMENTER_WORKER`
+- `definitions.ts` — `CODER_WORKER` (write code, 15 turns), `TESTER_WORKER` (write/run tests), `REVIEWER_WORKER` (read-only review), `RESEARCHER_WORKER` (info gathering), `DEBUGGER_WORKER` (debugging/fixing)
 
 **commander/parallel/** — Parallel execution:
 - `batch.ts` — `BatchExecutor` with `Semaphore` for concurrency control
@@ -203,10 +220,11 @@ Team Lead (AgentExecutor)
 **Key Design Decisions:**
 - **Phone book**: `registry.ts` generates a text directory of workers that gets injected into the Team Lead's system prompt, teaching it who to delegate to.
 - **Tool prefix convention**: All worker tools are `delegate_<worker_name>`. The `DELEGATE_TOOL_PREFIX = 'delegate_'` constant is checked in `getFilteredTools()` to block recursion.
+- **Auto-routing**: `router.ts` provides `analyzeTask()` for keyword/heuristic analysis and `selectWorker()` to map task type → worker. `executeWithAutoRouting()` tries auto-route at confidence ≥ 0.7 before falling back to LLM phone book routing. Routes: test→tester, review→reviewer, research→researcher, debug→debugger, write→coder.
 
-### validator/ — QA Pipeline
+### validator/ — QA Pipeline (Wired into Agent Loop)
 
-**Why it exists:** Runs automated checks after code changes to verify quality.
+**Why it exists:** Runs automated checks after code changes to verify quality. Now wired into `AgentExecutor` — runs automatically on `complete_task` when files were modified.
 
 | File | Lines | Key Export | Purpose |
 |------|-------|-----------|---------|
@@ -219,7 +237,9 @@ Team Lead (AgentExecutor)
 | `self-review.ts` | ~300 | `SelfReviewValidator` | LLM reviews its own changes |
 | `types.ts` | ~150 | `ValidatorResult`, `ValidatorType` | 5 validator types |
 
-**Pipeline runs in order:** syntax → typescript → lint → test → self-review. First failure stops chain (configurable via `AgentSettings.enabledValidators`).
+**Pipeline runs in order:** syntax → typescript → lint → test → self-review. First critical failure stops chain (configurable via `AgentSettings.enabledValidators`).
+
+**Integration with agent loop:** When `AgentConfig.validationEnabled` is true and the agent calls `complete_task` with modified files, the pipeline runs automatically. If validation fails, the agent receives error feedback and gets another turn to fix issues (up to `maxValidationRetries`, default 2). This prevents the agent from marking tasks complete with syntax errors or type failures.
 
 ---
 
@@ -268,15 +288,16 @@ This is the most critical function in the codebase — every tool call goes thro
 
 1. **Rate Limit** — `toolCallCount < MAX_TOOL_CALLS (10)` per turn
 2. **Plan Mode** — `checkPlanModeAccess()` blocks write tools in plan mode
-3. **Doom Loop** — Detect 3+ identical consecutive calls
-4. **Approval Override** — Check `requires_approval` flag (LLM can flag dangerous commands)
-5. **Legacy Auto-Approval** — `shouldAutoApprove()` checks path/command patterns
-6. **Bus Confirmation** — `bus.confirmToolExecution()` shows UI dialog with risk level
-7. **PreToolUse Hook** — Plugin hooks can cancel or inject context
-8. **Validation** — `tool.validate(params)` via Zod schema
-9. **Execution** — `tool.execute(params, ctx)` with abort signal
-10. **PostToolUse Hook** — Plugin hooks for logging/modification
-11. **Git Auto-Commit** — Optional staging of modified files
+3. **Minimal Mode** — `checkMinimalModeAccess()` restricts to 8 core tools
+4. **Doom Loop** — Detect 3+ identical consecutive calls
+5. **Approval Override** — Check `requires_approval` flag (LLM can flag dangerous commands)
+6. **Legacy Auto-Approval** — `shouldAutoApprove()` checks path/command patterns
+7. **Bus Confirmation** — `bus.confirmToolExecution()` shows UI dialog with risk level
+8. **PreToolUse Hook** — Plugin hooks can cancel or inject context
+9. **Validation** — `tool.validate(params)` via Zod schema
+10. **Execution** — `tool.execute(params, ctx)` with abort signal
+11. **PostToolUse Hook** — Plugin hooks for logging/modification
+12. **Git Auto-Commit** — Optional staging of modified files
 
 ### Risk Levels
 

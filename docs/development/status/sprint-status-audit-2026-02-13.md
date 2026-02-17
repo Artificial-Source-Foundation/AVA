@@ -19,7 +19,7 @@ Align roadmap/backlog documentation with current code reality so execution can c
 - Sprint-1.6-related work appears partially present:
   - OAuth coverage exists in `packages/core/src/llm/client.test.ts`
   - Message bus tests exist in `packages/core/src/bus/message-bus.test.ts`
-  - Sprint doc `docs/development/sprint-1.6-testing.md` remains a plan/spec with ticket list.
+  - Sprint doc `docs/development/sprints/sprint-1.6-testing.md` remains a plan/spec with ticket list.
 
 ## Mismatches Found
 
@@ -54,5 +54,5 @@ Rationale:
 
 1. Update `docs/ROADMAP.md` phase wording to reflect "2.1 backend foundation done/mostly done".
 2. Normalize `docs/frontend/backlog.md` by converting already-shipped items to done and isolating true TODOs.
-3. Convert `docs/development/sprint-1.6-testing.md` tickets into explicit status rows (todo/in-progress/done, owner, evidence link).
+3. Convert `docs/development/sprints/sprint-1.6-testing.md` tickets into explicit status rows (todo/in-progress/done, owner, evidence link).
 4. Start a focused sprint card for frontend plugin UX (replacement for removed `SidebarPlugins.tsx`).

@@ -54,6 +54,6 @@ Ship a high-confidence MVP baseline by hardening auth flow reliability, chat str
 
 ## Evidence Sources
 
-- `docs/development/sprint-1.6-testing.md`
-- `docs/development/mvp-test-matrix.md`
-- `docs/development/mvp-readiness-report-2026-02-13.md`
+- `docs/development/sprints/sprint-1.6-testing.md`
+- `docs/development/sprints/mvp-test-matrix.md`
+- `docs/development/status/mvp-readiness-report-2026-02-13.md`

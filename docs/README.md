@@ -55,7 +55,7 @@
 | [**Active Epics**](development/epics/) | Work in progress |
 | [Sprint 1.6 Testing & Hardening](development/epics/sprint-1.6-testing-hardening.md) | Current sprint status, evidence, remaining gates |
 | [Plugin Ecosystem UX & Integration](development/epics/plugin-ecosystem-ux-integration.md) | Current plugin track, dependencies, exit criteria |
-| [Frontend Gap Matrix 2026-02-15](development/frontend-gap-matrix-2026-02-15.md) | Benchmark-driven missing UX/features with P0/P1/P2 execution IDs |
+| [Frontend Gap Matrix 2026-02-15](development/status/frontend-gap-matrix-2026-02-15.md) | Benchmark-driven missing UX/features with P0/P1/P2 execution IDs |
 | [**Current Focus**](development/status/current-focus.md) | Weekly active sprint pulse + blockers |
 | [**Integration Backlog**](development/backlogs/integration-backlog.md) | Frontend-backend wiring tasks and dependencies |
 | [**Sprint Execution Docs**](development/sprints/README.md) | Active sprint templates, ticket boards, closeout checklists |
@@ -80,14 +80,4 @@
 | Doc | Contents |
 |-----|----------|
 | [**WebKitGTK Rendering**](troubleshooting/webkitgtk-rendering.md) | DMABUF ghost rendering, nested buttons, CSS gotchas |
-
----
-
-## Internal
-
-| Doc | Contents |
-|-----|----------|
-| [**Active Context**](memory-bank/activeContext.md) | Current session focus (AI reads every session) |
-| [**Progress**](memory-bank/progress.md) | What's been built |
-| [**Tech Context**](memory-bank/techContext.md) | Technical decisions |
-| [**Project Brief**](memory-bank/projectbrief.md) | Core identity |
+| [**Tauri Toolchain**](troubleshooting/tauri-toolchain-checklist.md) | Build toolchain setup checklist |

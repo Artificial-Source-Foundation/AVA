@@ -1,6 +1,6 @@
 # Frontend Backlog
 
-> What's missing, prioritized. Updated 2026-02-14.
+> What's missing, prioritized. Updated 2026-02-15.
 
 ---
 
@@ -10,7 +10,7 @@
 |-------|--------|-----------|
 | **1: Desktop App** | **Complete** | - |
 | **1.5: Desktop Polish** | **Complete** | Manual testing only |
-| **2: Plugin Ecosystem** | In progress | Backend foundations shipped; frontend UX pending |
+| **2: Plugin Ecosystem** | In progress | UX baseline shipped; runtime validation + parity gaps pending |
 | **2+: Competitive Gaps** | Mostly complete | Focus moved to verification + plugin UX |
 
 ## Ownership Rules
@@ -55,8 +55,11 @@ These gaps were prioritized previously and are now mostly delivered based on cha
 
 ### Next execution queue
 - [x] Implement session auto-title UX validation and polish
+- [x] Execute benchmark-derived frontend gaps FG-001/FG-002/FG-003 (chat git strip, usage details dialog, plugin metadata/trust pass)
+- [x] Land inline approval-state UX baseline (FG-005)
 - [ ] Final manual QA pass for chat stream UX across long sessions
-- [ ] Complete Sprint 2.3 plugin UX implementation from `docs/development/sprints/2026-S2.3-plugin-ux-wiring.md`
+- [ ] Complete Sprint 2.3 plugin UX runtime wiring/validation from `docs/development/sprints/2026-S2.3-plugin-ux-wiring.md`
+- [ ] Complete benchmark-derived frontend gaps FG-004 remainder, FG-006, and FG-007 from `docs/development/status/frontend-gap-matrix-2026-02-15.md`
 
 ---
 
@@ -83,9 +86,38 @@ This is what makes AVA "The Obsidian of AI Coding".
 - [x] Search + category-aware filtering in settings manager
 - [x] Install/uninstall + enable/disable controls in settings manager
 - [x] Plugin detail/settings panel in settings manager
-- [ ] Featured plugin catalog (curation + remote source)
+- [x] Metadata/trust/version/changelog fields surfaced in plugin cards/details
+- [ ] Featured plugin catalog curation + remote source integration
 - [ ] Wire settings manager actions to real backend extension lifecycle APIs (tracked as `INT-001`/`INT-002`/`INT-003` in `docs/development/backlogs/integration-backlog.md`)
 **Frontend**: Settings tab plugin manager, search, install flow, detail/settings view
+
+---
+
+## Frontend Gaps Currently Open
+
+- **FG-004 (partial):** long-session performance still needs render-window/backfill hardening validation for very large histories.
+- **FG-006:** session share/export UX is still not implemented.
+- **FG-007:** panel adaptability (draggable/persisted panel ratios) is still limited.
+- **INT-001/INT-002/INT-003 closeout:** plugin lifecycle wiring exists, but runtime validation and failure-path evidence are still open in sprint docs.
+- **Manual QA closeout:** Linux DE matrix and light-mode regression pass still required.
+
+### Goose parity checklist (prioritized)
+
+Reference baseline: `docs/reference-code/goose/ui/desktop`.
+
+#### P0 - high impact
+- [ ] Implement conversation/session share UX (create share link, open shared session) and lightweight export path (`FG-006`).
+- [ ] Add explicit user-triggered compaction UX in chat ("compact now" action + clear compaction state feedback).
+- [ ] Add in-chat search UX (find in conversation, next/previous navigation, keyboard path).
+
+#### P1 - maturity and ergonomics
+- [ ] Expand plugin UX beyond settings manager: per-chat plugin selection + stronger install/load warning/error affordances.
+- [ ] Improve long-session context ergonomics with clearer context-pressure alerts and validation against very large histories (`FG-004` remainder).
+- [ ] Increase panel adaptability (split ratio persistence + richer panel layout controls) (`FG-007`).
+
+#### P2 - differentiation opportunities
+- [ ] Evaluate voice dictation input workflow (microphone input in `MessageInput`) as optional UX parity item.
+- [ ] Evaluate recipe/schedule/app-launcher style automation surfaces for user workflows.
 
 ### Sprint 2.4: Plugin Distribution
 - [ ] Publish plugins from GitHub repos

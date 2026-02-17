@@ -74,6 +74,14 @@
 
 ## 2026-02-15
 
+### Sprints B7-B10 — Validator Integration + Minimal Tool Mode + Provider Switching + Auto-Routing
+- **B7: Validator pipeline wired into agent loop** — `AgentExecutor` now tracks modified files (`write_file`, `create_file`, `edit`, `delete_file`, `apply_patch`, `multiedit`). On `complete_task`, runs `ValidationPipeline` (syntax, typescript, lint) before accepting completion. On failure, agent gets feedback and retries (up to `maxValidationRetries`). New `validationEnabled` and `maxValidationRetries` fields on `AgentConfig`. `validation:start`/`validation:result`/`validation:finish` events emitted. Settings integration wires `AgentSettings.validatorsEnabled` → `AgentConfig.validationEnabled`.
+- **B8: Minimal tool mode** — NEW `agent/modes/minimal.ts` (~95 lines). Per-session state (same pattern as plan mode). 8 allowed tools: `read_file`, `write_file`, `edit`, `bash`, `glob`, `grep`, `attempt_completion`, `complete_task`, `question`. `checkMinimalModeAccess()` wired into `tools/registry.ts` after plan mode check. `toolMode` field added to `AgentConfig`.
+- **B9: Mid-session provider switching** — `AgentExecutor.run()` refactored to use mutable `let client`. New `requestProviderSwitch(provider, model)` public method. Main loop checks `pendingProviderSwitch` before each turn; on switch, creates new client and emits `provider:switch` event. Graceful fallback on failure. `AgentConfig.provider` widened from 3-provider union to full `LLMProvider` type.
+- **B10: Lead-worker auto-routing** — NEW `commander/router.ts` (~115 lines). `analyzeTask()` does keyword/heuristic analysis returning `TaskAnalysis` (taskType, confidence, keywords, hasCodePaths). `selectWorker()` maps task type → worker (test→tester, review→reviewer, research→researcher, debug→debugger, write→coder). `executeWithAutoRouting()` tries auto-route at confidence ≥ 0.7, returns null for LLM fallback.
+- **48 new tests** across 4 files: `agent-validation.integration.test.ts` (5), `minimal.test.ts` (13), `agent-provider-switch.test.ts` (4), `router.test.ts` (26)
+- **Total: ~2369 tests** across ~87 test files
+
 ### Documentation Audit — Comprehensive Backend Docs Update
 - **Architecture guide** — NEW `docs/backend/architecture-guide.md` (~827 lines). Deep navigation guide covering: 18 singletons, request lifecycle, agent system internals, tools system, intelligence modules, safety & permissions (3-layer model), configuration, extensibility, infrastructure, protocols, 7 key patterns, 6 common task recipes.
 - **Full codebase exploration** — 6 parallel agents mapped every module in `packages/core/src/`. Results: **257 source files, ~59,700 lines** across 32 directories.
@@ -293,4 +301,4 @@
 
 ---
 
-*Last updated: 2026-02-15*
+*Last updated: 2026-02-15 — ~2369 tests across ~87 files*

@@ -8,6 +8,7 @@
 
 import { type Component, Match, Switch } from 'solid-js'
 import { useLayout } from '../../stores/layout'
+import { ProjectSelector } from '../projects/ProjectSelector'
 import { SidebarExplorer } from '../sidebar/SidebarExplorer'
 import { SidebarSessions } from '../sidebar/SidebarSessions'
 
@@ -19,6 +20,9 @@ export const SidebarPanel: Component = () => {
       <Switch>
         <Match when={activeActivity() === 'sessions'}>
           <SidebarSessions />
+        </Match>
+        <Match when={activeActivity() === 'projects'}>
+          <ProjectSelector />
         </Match>
         <Match when={activeActivity() === 'explorer'}>
           <SidebarExplorer />

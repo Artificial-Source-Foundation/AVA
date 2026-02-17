@@ -22,8 +22,19 @@ import {
   Terminal,
   Wand2,
 } from 'lucide-solid'
-import { type Component, createSignal, For, Show } from 'solid-js'
+import {
+  type Component,
+  createEffect,
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+  untrack,
+} from 'solid-js'
 import { Dynamic } from 'solid-js/web'
+import { useSettings } from '../../stores/settings'
+import { applyAppearanceToDOM } from '../../stores/settings/settings-appearance'
 
 // ============================================================================
 // Types
@@ -65,13 +76,20 @@ const features = [
 // ============================================================================
 
 export const OnboardingScreen: Component<OnboardingProps> = (props) => {
+  const { settings } = useSettings()
   const [step, setStep] = createSignal<Step>('welcome')
-  const [selectedTheme, setSelectedTheme] = createSignal('glass')
+  const [selectedTheme, setSelectedTheme] = createSignal<(typeof themes)[number]['id']>('glass')
   const [selectedMode, setSelectedMode] = createSignal<'light' | 'dark'>('dark')
   const [anthropicKey, setAnthropicKey] = createSignal('')
   const [openrouterKey, setOpenrouterKey] = createSignal('')
   const [showAnthropicKey, setShowAnthropicKey] = createSignal(false)
   const [showOpenrouterKey, setShowOpenrouterKey] = createSignal(false)
+
+  const themePreviewMap = {
+    glass: { accentColor: 'violet', codeTheme: 'default' },
+    minimal: { accentColor: 'blue', codeTheme: 'github-dark' },
+    terminal: { accentColor: 'green', codeTheme: 'monokai' },
+  } as const
 
   const steps: Step[] = ['welcome', 'theme', 'api-keys', 'features', 'complete']
   const currentIndex = () => steps.indexOf(step())
@@ -100,22 +118,36 @@ export const OnboardingScreen: Component<OnboardingProps> = (props) => {
     })
   }
 
+  onMount(() => {
+    const originalTheme = untrack(() => settings().theme)
+    onCleanup(() => {
+      applyAppearanceToDOM(settings())
+      document.documentElement.dataset.onboardingTheme = originalTheme
+    })
+  })
+
+  createEffect(() => {
+    const base = untrack(() => settings())
+    const preview = themePreviewMap[selectedTheme()]
+    document.documentElement.dataset.onboardingTheme = selectedTheme()
+    applyAppearanceToDOM({
+      ...base,
+      mode: selectedMode(),
+      theme: selectedTheme(),
+      appearance: {
+        ...base.appearance,
+        accentColor: preview.accentColor,
+        codeTheme: preview.codeTheme,
+      },
+    })
+  })
+
   return (
     <div class="onboarding-bg flex items-center justify-center">
-      {/* Floating particles */}
-      <div
-        class="floating-particle"
-        style={{ top: '15%', left: '20%', animation: 'float-particle 6s ease-in-out infinite' }}
-      />
-      <div
-        class="floating-particle"
-        style={{ top: '70%', left: '75%', animation: 'float-particle 8s ease-in-out infinite 2s' }}
-      />
-
       {/* Main card */}
-      <div class="onboarding-card w-full max-w-lg mx-4 p-8">
+      <div class="onboarding-card w-full max-w-2xl mx-6 p-10 md:p-12">
         {/* Step indicators */}
-        <div class="flex items-center justify-center gap-2 mb-8">
+        <div class="flex items-center justify-center gap-2.5 mb-10">
           <For each={steps}>
             {(_, index) => (
               <div
@@ -131,22 +163,23 @@ export const OnboardingScreen: Component<OnboardingProps> = (props) => {
         <div>
           {/* ========== Welcome ========== */}
           <Show when={step() === 'welcome'}>
-            <div class="step-enter flex flex-col items-center text-center">
-              <div class="onboarding-logo w-20 h-20 mb-6 rounded-2xl bg-gradient-to-br from-[var(--accent)] to-[var(--blue-4)] flex items-center justify-center shadow-lg">
-                <Sparkles class="w-10 h-10 text-white" />
+            <div class="step-enter onboarding-hero flex flex-col items-center text-center">
+              <div class="onboarding-logo w-24 h-24 mb-8 rounded-3xl bg-gradient-to-br from-[var(--accent)] to-[var(--blue-4)] flex items-center justify-center shadow-lg">
+                <Sparkles class="w-11 h-11 text-white" />
               </div>
 
               <div class="stagger-child">
-                <h1 class="text-3xl font-bold text-[var(--text-primary)] tracking-tight mb-3">
+                <h1 class="onboarding-hero-title text-4xl md:text-5xl font-bold text-[var(--text-primary)] tracking-tight leading-[1.08] mb-0">
                   Welcome to AVA
                 </h1>
               </div>
 
-              <div class="stagger-child">
-                <p class="text-base text-[var(--text-secondary)] max-w-sm leading-relaxed mb-8">
+              <div class="stagger-child onboarding-hero-copy">
+                <p class="text-xl text-[var(--text-secondary)] leading-8 tracking-[0.01em]">
                   Your multi-agent AI coding assistant.
-                  <br />
-                  <span class="text-[var(--text-muted)]">Let's get you set up in a few steps.</span>
+                </p>
+                <p class="text-base text-[var(--text-muted)] leading-7 tracking-[0.005em]">
+                  Let's get you set up in a few focused steps.
                 </p>
               </div>
 
@@ -154,18 +187,18 @@ export const OnboardingScreen: Component<OnboardingProps> = (props) => {
                 <button
                   type="button"
                   onClick={nextStep}
-                  class="onboarding-btn-primary inline-flex items-center gap-2 px-8 py-3 bg-[var(--accent)] text-white font-medium rounded-xl text-base"
+                  class="onboarding-btn-primary inline-flex items-center gap-2.5 px-10 py-3.5 bg-[var(--accent)] text-white font-semibold rounded-xl text-lg"
                 >
                   Get Started
                   <ArrowRight class="w-5 h-5" />
                 </button>
               </div>
 
-              <div class="stagger-child mt-4">
+              <div class="stagger-child mt-6">
                 <button
                   type="button"
                   onClick={() => props.onSkip?.()}
-                  class="text-sm text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+                  class="text-sm font-medium text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
                 >
                   Skip setup
                 </button>
@@ -180,7 +213,7 @@ export const OnboardingScreen: Component<OnboardingProps> = (props) => {
                 <h2 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-1">
                   Choose Your Style
                 </h2>
-                <p class="text-sm text-[var(--text-muted)]">Pick a visual theme</p>
+                <p class="text-sm text-[var(--text-muted)]">Pick a visual theme (live preview)</p>
               </div>
 
               {/* Theme cards */}

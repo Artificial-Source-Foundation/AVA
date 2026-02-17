@@ -126,10 +126,8 @@ function App() {
       await detectEnvApiKeys()
 
       setSplashStatus('Initializing core engine...')
-      const openAIKey = settings().providers.find((p) => p.id === 'openai')?.apiKey
       const cleanupCore = await initCoreBridge({
         contextLimit: 200_000,
-        openAIApiKey: openAIKey,
       })
       onCleanup(cleanupCore)
       pushSettingsToCore()

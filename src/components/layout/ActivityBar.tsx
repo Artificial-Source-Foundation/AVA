@@ -6,7 +6,9 @@
  * Inspired by VS Code / Cursor activity bar.
  */
 
+import { open } from '@tauri-apps/plugin-dialog'
 import {
+  FolderOpen,
   FolderTree,
   MessageSquare,
   PanelLeftClose,
@@ -15,7 +17,9 @@ import {
   Sparkles,
 } from 'lucide-solid'
 import { type Component, For, Show } from 'solid-js'
+import { logError } from '../../services/logger'
 import { type ActivityId, useLayout } from '../../stores/layout'
+import { useProject } from '../../stores/project'
 
 interface ActivityItem {
   id: ActivityId
@@ -25,6 +29,7 @@ interface ActivityItem {
 
 const activities: ActivityItem[] = [
   { id: 'sessions', icon: MessageSquare, label: 'Sessions' },
+  { id: 'projects', icon: FolderOpen, label: 'Projects' },
   { id: 'explorer', icon: FolderTree, label: 'Explorer' },
 ]
 
@@ -37,6 +42,22 @@ export const ActivityBar: Component = () => {
     openSettings,
     settingsOpen,
   } = useLayout()
+  const { openDirectory } = useProject()
+
+  const handleOpenProject = async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        title: 'Select Project Folder',
+      })
+
+      if (selected && typeof selected === 'string') {
+        await openDirectory(selected)
+      }
+    } catch (err) {
+      logError('activity-bar', 'Failed to open project folder', err)
+    }
+  }
 
   const isActive = (id: ActivityId) => activeActivity() === id && sidebarVisible()
 
@@ -105,8 +126,27 @@ export const ActivityBar: Component = () => {
         </For>
       </div>
 
-      {/* Bottom icons: Sidebar toggle + Settings */}
+      {/* Bottom icons: open project + sidebar toggle + settings */}
       <div class="flex flex-col items-center gap-0.5 mb-2">
+        {/* Open project folder */}
+        <button
+          type="button"
+          onClick={() => {
+            void handleOpenProject()
+          }}
+          class="
+            flex items-center justify-center
+            w-12 h-10
+            transition-colors duration-[var(--duration-fast)]
+            text-[var(--text-muted)] hover:text-[var(--text-secondary)]
+          "
+          title="Open Project Folder"
+        >
+          <span class="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] hover:bg-[var(--alpha-white-5)] transition-colors">
+            <FolderOpen class="w-[18px] h-[18px]" />
+          </span>
+        </button>
+
         {/* Sidebar toggle */}
         <button
           type="button"

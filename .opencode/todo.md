@@ -2,7 +2,7 @@
 
 ## M1: Define MVP gates and tracking | status: completed
 ### T1.1: Create MVP quality matrix | agent:Commander
-- [x] S1.1.1: Add `docs/development/mvp-test-matrix.md` with release gates | size:S
+- [x] S1.1.1: Add `docs/development/sprints/mvp-test-matrix.md` with release gates | size:S
 - [x] S1.1.2: Wire gate evidence links as tests land | size:S
 
 ## M2: Auth reliability hardening | status: completed

@@ -23,7 +23,7 @@ export interface MockLLMTurn {
 /**
  * Create a mock LLM client that yields scripted turns.
  * Each call to stream() pops the next turn from the queue.
- * If the queue is empty, auto-yields complete_task to prevent infinite loops.
+ * If the queue is empty, auto-yields attempt_completion to prevent infinite loops.
  */
 export function createMockLLMClient(turns: MockLLMTurn[]): LLMClient {
   const queue = [...turns]
@@ -37,7 +37,7 @@ export function createMockLLMClient(turns: MockLLMTurn[]): LLMClient {
         const toolUse: ToolUseBlock = {
           type: 'tool_use',
           id: 'auto-complete',
-          name: 'complete_task',
+          name: 'attempt_completion',
           input: { result: 'Auto-completed: no more scripted turns' },
         }
         yield { content: '', toolUse }

@@ -146,7 +146,6 @@ describe('Minimal Mode', () => {
 
     it('includes completion tools', () => {
       expect(MINIMAL_MODE_ALLOWED_TOOLS).toContain('attempt_completion')
-      expect(MINIMAL_MODE_ALLOWED_TOOLS).toContain('complete_task')
       expect(MINIMAL_MODE_ALLOWED_TOOLS).toContain('question')
     })
   })

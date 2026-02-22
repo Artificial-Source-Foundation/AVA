@@ -25,7 +25,7 @@ export enum AgentTerminateMode {
   MAX_TURNS = 'MAX_TURNS',
   /** Agent was aborted by user/signal */
   ABORTED = 'ABORTED',
-  /** Agent stopped without calling complete_task */
+  /** Agent stopped without calling attempt_completion */
   NO_COMPLETE_TASK = 'NO_COMPLETE_TASK',
   /** Agent detected repeating the same action (doom loop) */
   DOOM_LOOP = 'DOOM_LOOP',
@@ -430,6 +430,6 @@ export type AgentTurnResult =
     }
 
 /**
- * The complete_task tool name constant
+ * The attempt_completion tool name constant
  */
-export const COMPLETE_TASK_TOOL = 'complete_task'
+export const COMPLETE_TASK_TOOL = 'attempt_completion'

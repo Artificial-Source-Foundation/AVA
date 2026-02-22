@@ -30,7 +30,6 @@ export const MINIMAL_MODE_ALLOWED_TOOLS: readonly string[] = [
   'bash',
   // Completion & interaction
   'attempt_completion',
-  'complete_task',
   'question',
 ] as const
 

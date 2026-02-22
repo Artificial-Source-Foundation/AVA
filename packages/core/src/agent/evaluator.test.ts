@@ -165,7 +165,7 @@ describe('evaluateGoal', () => {
 
     expect(evaluation.achieved).toBe(true)
     expect(evaluation.confidence).toBeGreaterThanOrEqual(0.8)
-    expect(evaluation.evidence).toContain('Agent signaled goal completion via complete_task')
+    expect(evaluation.evidence).toContain('Agent signaled goal completion via attempt_completion')
   })
 
   it('increases confidence for successful result with many steps', () => {
@@ -236,7 +236,7 @@ describe('evaluateGoal', () => {
     const evaluation = evaluateGoal('Task', result)
 
     expect(evaluation.missingRequirements).toContain('No output provided')
-    expect(evaluation.suggestions).toContain('Ensure complete_task is called with a result')
+    expect(evaluation.suggestions).toContain('Ensure attempt_completion is called with a result')
   })
 
   it('adds missing requirements for failed steps', () => {
@@ -265,7 +265,7 @@ describe('evaluateGoal', () => {
     })
     const evaluation = evaluateGoal('Task', result)
 
-    expect(evaluation.evidence).toContain('Agent signaled goal completion via complete_task')
+    expect(evaluation.evidence).toContain('Agent signaled goal completion via attempt_completion')
   })
 
   it('generates suggestions on failure', () => {

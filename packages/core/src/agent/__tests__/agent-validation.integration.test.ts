@@ -168,7 +168,7 @@ describe('Agent Validation Integration', () => {
         ],
       },
       {
-        toolCalls: [{ id: 'tc-2', name: 'complete_task', input: { result: 'Done writing' } }],
+        toolCalls: [{ id: 'tc-2', name: 'attempt_completion', input: { result: 'Done writing' } }],
       },
     ]
 
@@ -204,11 +204,11 @@ describe('Agent Validation Integration', () => {
       },
       // First completion attempt — fails validation
       {
-        toolCalls: [{ id: 'tc-2', name: 'complete_task', input: { result: 'Done' } }],
+        toolCalls: [{ id: 'tc-2', name: 'attempt_completion', input: { result: 'Done' } }],
       },
       // Agent fixes and tries again — still fails
       {
-        toolCalls: [{ id: 'tc-3', name: 'complete_task', input: { result: 'Fixed now' } }],
+        toolCalls: [{ id: 'tc-3', name: 'attempt_completion', input: { result: 'Fixed now' } }],
       },
       // After max retries, validation is skipped and completion proceeds
     ]
@@ -237,7 +237,7 @@ describe('Agent Validation Integration', () => {
         ],
       },
       {
-        toolCalls: [{ id: 'tc-2', name: 'complete_task', input: { result: 'Done' } }],
+        toolCalls: [{ id: 'tc-2', name: 'attempt_completion', input: { result: 'Done' } }],
       },
     ]
 
@@ -263,7 +263,7 @@ describe('Agent Validation Integration', () => {
         toolCalls: [{ id: 'tc-1', name: 'glob', input: { pattern: '*.ts' } }],
       },
       {
-        toolCalls: [{ id: 'tc-2', name: 'complete_task', input: { result: 'Found files' } }],
+        toolCalls: [{ id: 'tc-2', name: 'attempt_completion', input: { result: 'Found files' } }],
       },
     ]
 
@@ -294,11 +294,11 @@ describe('Agent Validation Integration', () => {
       },
       // First attempt — fails
       {
-        toolCalls: [{ id: 'tc-2', name: 'complete_task', input: { result: 'Try 1' } }],
+        toolCalls: [{ id: 'tc-2', name: 'attempt_completion', input: { result: 'Try 1' } }],
       },
       // Second attempt — fails (maxValidationRetries: 1)
       {
-        toolCalls: [{ id: 'tc-3', name: 'complete_task', input: { result: 'Try 2' } }],
+        toolCalls: [{ id: 'tc-3', name: 'attempt_completion', input: { result: 'Try 2' } }],
       },
     ]
 
@@ -313,7 +313,7 @@ describe('Agent Validation Integration', () => {
     const result = await executor.run({ goal: 'Write code', cwd: '/tmp/test' }, controller.signal)
 
     // With maxValidationRetries: 1, only 1 retry allowed
-    // First complete_task fails validation, second bypasses it
+    // First attempt_completion fails validation, second bypasses it
     expect(result.success).toBe(true)
   })
 })

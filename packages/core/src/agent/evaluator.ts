@@ -161,7 +161,7 @@ export function evaluateGoal(_goal: string, result: AgentResult): GoalEvaluation
 
   // Check termination mode
   if (result.terminateMode === 'GOAL') {
-    evidence.push('Agent signaled goal completion via complete_task')
+    evidence.push('Agent signaled goal completion via attempt_completion')
   }
 
   // Check if we have successful steps
@@ -203,7 +203,7 @@ export function evaluateGoal(_goal: string, result: AgentResult): GoalEvaluation
     }
   } else {
     missingRequirements.push('No output provided')
-    suggestions.push('Ensure complete_task is called with a result')
+    suggestions.push('Ensure attempt_completion is called with a result')
   }
 
   // Calculate confidence

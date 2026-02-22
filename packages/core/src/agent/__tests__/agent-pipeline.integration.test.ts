@@ -171,7 +171,7 @@ function makeExecutor(overrides: Record<string, unknown> = {}) {
 // ============================================================================
 
 describe('Agent Pipeline Integration', () => {
-  it('dispatches tool call and completes via complete_task', async () => {
+  it('dispatches tool call and completes via attempt_completion', async () => {
     mockTurns = [
       {
         content: 'Let me search for files.',
@@ -180,7 +180,7 @@ describe('Agent Pipeline Integration', () => {
       {
         content: 'Found the files. Task complete.',
         toolCalls: [
-          { id: 'tc-2', name: 'complete_task', input: { result: 'Found 2 TypeScript files' } },
+          { id: 'tc-2', name: 'attempt_completion', input: { result: 'Found 2 TypeScript files' } },
         ],
       },
     ]
@@ -326,7 +326,7 @@ describe('Agent Pipeline Integration', () => {
         toolCalls: [{ id: 'tc-1', name: 'glob', input: { pattern: '*.ts' } }],
       },
       {
-        toolCalls: [{ id: 'tc-2', name: 'complete_task', input: { result: 'Done' } }],
+        toolCalls: [{ id: 'tc-2', name: 'attempt_completion', input: { result: 'Done' } }],
       },
     ]
 
@@ -364,7 +364,7 @@ describe('Agent Pipeline Integration', () => {
   it('only exposes allowed tools when configured', async () => {
     mockTurns = [
       {
-        toolCalls: [{ id: 'tc-1', name: 'complete_task', input: { result: 'Checked tools' } }],
+        toolCalls: [{ id: 'tc-1', name: 'attempt_completion', input: { result: 'Checked tools' } }],
       },
     ]
 
@@ -392,10 +392,10 @@ describe('Agent Pipeline Integration', () => {
     const controller = createAbortController()
     await executor.run({ goal: 'Check tools', cwd: '/tmp/test' }, controller.signal)
 
-    // Should only have glob, grep, and the auto-added complete_task
+    // Should only have glob, grep, and the auto-added attempt_completion
     expect(toolsSentToLLM).toContain('glob')
     expect(toolsSentToLLM).toContain('grep')
-    expect(toolsSentToLLM).toContain('complete_task')
+    expect(toolsSentToLLM).toContain('attempt_completion')
     expect(toolsSentToLLM).not.toContain('read_file')
     expect(toolsSentToLLM).not.toContain('ls')
   })
@@ -412,7 +412,7 @@ describe('Agent Pipeline Integration', () => {
       },
       {
         toolCalls: [
-          { id: 'tc-2', name: 'complete_task', input: { result: 'Found 5 React components' } },
+          { id: 'tc-2', name: 'attempt_completion', input: { result: 'Found 5 React components' } },
         ],
       },
     ]
@@ -452,7 +452,7 @@ describe('Agent Pipeline Integration', () => {
       },
       {
         toolCalls: [
-          { id: 'tc-2', name: 'complete_task', input: { result: 'Found TypeScript files' } },
+          { id: 'tc-2', name: 'attempt_completion', input: { result: 'Found TypeScript files' } },
         ],
       },
     ]
@@ -490,7 +490,7 @@ describe('Agent Pipeline Integration', () => {
     // The 'execute' type gets all tools — but 'task' should be filtered out
     mockTurns = [
       {
-        toolCalls: [{ id: 'tc-1', name: 'complete_task', input: { result: 'Done' } }],
+        toolCalls: [{ id: 'tc-1', name: 'attempt_completion', input: { result: 'Done' } }],
       },
     ]
 
@@ -534,7 +534,7 @@ describe('Agent Pipeline Integration', () => {
     expect(subagentTools).not.toContain('task')
     // But other tools should be present
     expect(subagentTools).toContain('glob')
-    // complete_task is always added by AgentExecutor
-    expect(subagentTools).toContain('complete_task')
+    // attempt_completion is always added by AgentExecutor
+    expect(subagentTools).toContain('attempt_completion')
   })
 })

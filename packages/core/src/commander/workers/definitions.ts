@@ -35,7 +35,7 @@ export const CODER_WORKER: WorkerDefinition = {
 3. Implement the changes
 4. Verify your changes by reading the modified files
 
-When done, call complete_task with a summary of what you changed.`,
+When done, call attempt_completion with a summary of what you changed.`,
   tools: ['read', 'write', 'create', 'delete', 'grep', 'glob'],
   maxTurns: 15,
   maxTimeMinutes: 5,
@@ -66,7 +66,7 @@ export const TESTER_WORKER: WorkerDefinition = {
 3. Write tests following existing patterns
 4. Run tests to verify they pass
 
-When done, call complete_task with a summary of tests written and their results.`,
+When done, call attempt_completion with a summary of tests written and their results.`,
   tools: ['read', 'write', 'create', 'bash', 'grep', 'glob'],
   maxTurns: 10,
   maxTimeMinutes: 5,
@@ -97,7 +97,7 @@ export const REVIEWER_WORKER: WorkerDefinition = {
 - **Minor**: Code style, naming, minor optimizations
 - **Suggestions**: Nice-to-haves, alternative approaches
 
-When done, call complete_task with your review organized by category.`,
+When done, call attempt_completion with your review organized by category.`,
   tools: ['read', 'grep', 'glob'],
   maxTurns: 10,
   maxTimeMinutes: 5,
@@ -128,7 +128,7 @@ export const RESEARCHER_WORKER: WorkerDefinition = {
 - Read files to understand implementation details
 - Look at imports to understand dependencies
 
-When done, call complete_task with your findings organized clearly.`,
+When done, call attempt_completion with your findings organized clearly.`,
   tools: ['read', 'grep', 'glob'],
   maxTurns: 15,
   maxTimeMinutes: 5,
@@ -160,7 +160,7 @@ export const DEBUGGER_WORKER: WorkerDefinition = {
 4. Verify the hypothesis
 5. Implement and test the fix
 
-When done, call complete_task with:
+When done, call attempt_completion with:
 - What the issue was
 - Root cause analysis
 - What you changed to fix it`,

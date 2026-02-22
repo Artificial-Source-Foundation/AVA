@@ -102,7 +102,7 @@ function buildSystemPromptContext(
  * The agent will:
  * 1. Plan and execute steps using available tools
  * 2. Self-correct on errors
- * 3. Call complete_task when done
+ * 3. Call attempt_completion when done
  * 4. Terminate on timeout, max turns, or abort
  */
 /** Record of a tool call for doom loop detection */
@@ -337,7 +337,7 @@ export class AgentExecutor {
             content: `DOOM LOOP DETECTED: You have called the same tool with identical arguments ${DOOM_LOOP_THRESHOLD} times in a row. This suggests you may be stuck. Please:
 1. Analyze why the tool is not giving the expected result
 2. Try a different approach or tool
-3. If you have completed the task, call \`complete_task\`
+3. If you have completed the task, call \`attempt_completion\`
 4. If you are stuck, explain what you're trying to do
 
 Do not repeat the same action again.`,
@@ -535,7 +535,7 @@ Do not repeat the same action again.`,
         toolCalls: [],
       })
 
-      // Agent stopped without calling complete_task
+      // Agent stopped without calling attempt_completion
       return {
         status: 'stop',
         terminateMode: AgentTerminateMode.NO_COMPLETE_TASK,
@@ -578,7 +578,7 @@ Do not repeat the same action again.`,
         args: call.arguments,
       })
 
-      // Handle complete_task specially
+      // Handle attempt_completion specially
       if (call.name === COMPLETE_TASK_TOOL) {
         const args = call.arguments as { result?: unknown; command?: unknown }
         const resultArg = args.result
@@ -882,7 +882,12 @@ Do not repeat the same action again.`,
       tools = tools.filter((t) => allowedTools.has(t.name))
     }
 
-    // Add complete_task tool
+    // Ensure attempt_completion tool is present (add if not already registered)
+    const hasCompletionTool = tools.some((t) => t.name === COMPLETE_TASK_TOOL)
+    if (hasCompletionTool) {
+      return tools
+    }
+
     const completeTaskTool: ToolDefinition = {
       name: COMPLETE_TASK_TOOL,
       description:
@@ -1025,7 +1030,7 @@ Do not repeat the same action again.`,
       case AgentTerminateMode.MAX_TURNS:
         return `Agent reached maximum turn limit (${this.config.maxTurns}).`
       case AgentTerminateMode.NO_COMPLETE_TASK:
-        return 'Agent stopped without calling complete_task.'
+        return 'Agent stopped without calling attempt_completion.'
       case AgentTerminateMode.ABORTED:
         return 'Agent was aborted.'
       default:

@@ -113,7 +113,9 @@ describe('Agent Provider Switching', () => {
         toolCalls: [{ id: 'tc-1', name: 'glob', input: { pattern: '*.ts' } }],
       },
       {
-        toolCalls: [{ id: 'tc-2', name: 'complete_task', input: { result: 'Done with openai' } }],
+        toolCalls: [
+          { id: 'tc-2', name: 'attempt_completion', input: { result: 'Done with openai' } },
+        ],
       },
     ]
 
@@ -172,7 +174,7 @@ describe('Agent Provider Switching', () => {
       {
         content: 'Turn 2 with openai after switch.',
         toolCalls: [
-          { id: 'tc-2', name: 'complete_task', input: { result: 'Completed after switch' } },
+          { id: 'tc-2', name: 'attempt_completion', input: { result: 'Completed after switch' } },
         ],
       },
     ]
@@ -213,7 +215,7 @@ describe('Agent Provider Switching', () => {
         toolCalls: [{ id: 'tc-1', name: 'glob', input: { pattern: '*.ts' } }],
       },
       {
-        toolCalls: [{ id: 'tc-2', name: 'complete_task', input: { result: 'Done' } }],
+        toolCalls: [{ id: 'tc-2', name: 'attempt_completion', input: { result: 'Done' } }],
       },
     ]
 
@@ -256,7 +258,7 @@ describe('Agent Provider Switching', () => {
         toolCalls: [{ id: 'tc-1', name: 'glob', input: { pattern: '*.ts' } }],
       },
       {
-        toolCalls: [{ id: 'tc-2', name: 'complete_task', input: { result: 'Done anyway' } }],
+        toolCalls: [{ id: 'tc-2', name: 'attempt_completion', input: { result: 'Done anyway' } }],
       },
     ]
 

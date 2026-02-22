@@ -6,7 +6,7 @@
 import type { ChatMessage, LLMClient, ProviderConfig, StreamDelta } from '@ava/core'
 
 /**
- * Mock LLM client that yields a single complete_task tool call.
+ * Mock LLM client that yields a single attempt_completion tool call.
  * Used with `--mock` flag for testing without an API key.
  */
 export class MockLLMClient implements LLMClient {
@@ -24,20 +24,16 @@ export class MockLLMClient implements LLMClient {
       content: `Mock agent processing: "${goal}"`,
     }
 
-    // Yield a complete_task tool call
+    // Yield an attempt_completion tool call
     yield {
       content: '',
       toolUse: {
         type: 'tool_use',
         id: `mock-tc-${Date.now()}`,
-        name: 'complete_task',
+        name: 'attempt_completion',
         input: {
           result: `[Mock] Task completed: ${goal}`,
         },
-      },
-      usage: {
-        inputTokens: 100,
-        outputTokens: 50,
       },
       done: true,
     }

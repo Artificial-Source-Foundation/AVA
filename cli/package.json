@@ -4,8 +4,7 @@
   "description": "AVA CLI - AI coding assistant",
   "type": "module",
   "bin": {
-    "ava": "dist/index.js",
-    "estela": "dist/index.js"
+    "ava": "dist/index.js"
   },
   "main": "dist/index.js",
   "scripts": {

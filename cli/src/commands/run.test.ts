@@ -28,7 +28,7 @@ describe('run command', () => {
   })
 
   describe('MockLLMClient', () => {
-    it('should yield a complete_task tool call', async () => {
+    it('should yield an attempt_completion tool call', async () => {
       const { MockLLMClient } = await import('./mock-client.js')
       const client = new MockLLMClient()
 
@@ -49,9 +49,9 @@ describe('run command', () => {
       // First delta is the thought
       expect(deltas[0].content).toContain('Test goal')
 
-      // Second delta has the complete_task tool call
+      // Second delta has the attempt_completion tool call
       expect(deltas[1].toolUse).toBeDefined()
-      expect(deltas[1].toolUse!.name).toBe('complete_task')
+      expect(deltas[1].toolUse!.name).toBe('attempt_completion')
     })
 
     it('should extract goal from last user message', async () => {
@@ -75,6 +75,47 @@ describe('run command', () => {
       }
 
       expect(deltas[0].content).toContain('Do the thing')
+    })
+
+    it('should include tool input with result summary', async () => {
+      const { MockLLMClient } = await import('./mock-client.js')
+      const client = new MockLLMClient()
+
+      const messages = [{ role: 'user' as const, content: 'Read the README' }]
+      const config = {
+        provider: 'anthropic' as const,
+        model: 'test',
+        authMethod: 'api-key' as const,
+      }
+
+      const deltas = []
+      for await (const delta of client.stream(messages, config)) {
+        deltas.push(delta)
+      }
+
+      const toolDelta = deltas.find((d) => d.toolUse)
+      expect(toolDelta?.toolUse?.input).toEqual({
+        result: '[Mock] Task completed: Read the README',
+      })
+    })
+
+    it('should set done: true on the tool call delta', async () => {
+      const { MockLLMClient } = await import('./mock-client.js')
+      const client = new MockLLMClient()
+
+      const messages = [{ role: 'user' as const, content: 'test' }]
+      const config = {
+        provider: 'anthropic' as const,
+        model: 'test',
+        authMethod: 'api-key' as const,
+      }
+
+      const deltas = []
+      for await (const delta of client.stream(messages, config)) {
+        deltas.push(delta)
+      }
+
+      expect(deltas[deltas.length - 1].done).toBe(true)
     })
   })
 

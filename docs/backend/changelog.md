@@ -4,6 +4,34 @@
 
 ---
 
+## 2026-02-21
+
+### Session 54 — OpenRouter Tool Calling + Completion Tool Naming Fix
+
+**OpenRouter provider rewrite** — Refactored `llm/providers/openrouter.ts` to use shared `openai-compat.ts` utilities (`buildOpenAIRequestBody`, `ToolCallBuffer`, `readSSEStream`). OpenRouter now sends tools in API requests and parses `delta.tool_calls` from the stream, matching the pattern used by DeepSeek, Groq, Mistral, xAI, and Together providers. Previously, OpenRouter hand-rolled SSE parsing and completely ignored tools, so the agent loop always terminated with `NO_COMPLETE_TASK`.
+
+**Completion tool naming unification** — Fixed a naming mismatch where the system prompt told models to call `attempt_completion` but the agent loop injected a dynamic tool named `complete_task`. Models received conflicting instructions and would return plain text instead of calling either tool. Renamed `COMPLETE_TASK_TOOL` constant from `'complete_task'` to `'attempt_completion'` and added deduplication in `getAvailableTools()` to prevent duplicate tool definitions (both the registered tool from `completion.ts` and the dynamic one from the agent loop were named `attempt_completion` after the rename, which caused providers to silently reject requests).
+
+**CLI cleanup** — Fixed `mock-client.ts` tool name (`complete_task` → `attempt_completion`), removed stale `"estela"` binary alias from `cli/package.json`.
+
+**Tests** — 11 new OpenRouter provider tests (tool calls, auth, HTTP errors, headers, usage). Updated all agent tests to use `attempt_completion` naming. 103 test files, 2466 tests passing.
+
+**Known behavior:** Sonnet via OpenRouter completes in 3 turns (read → text response → recovery → `attempt_completion`) because the model returns its analysis as plain text before calling the completion tool. The `NO_COMPLETE_TASK` recovery handles this gracefully — it's a model behavior pattern, not a bug.
+
+**Files changed:**
+- `packages/core/src/llm/providers/openrouter.ts` — rewritten with shared utils
+- `packages/core/src/llm/providers/openrouter.test.ts` — new (11 tests)
+- `packages/core/src/agent/types.ts` — `COMPLETE_TASK_TOOL = 'attempt_completion'`
+- `packages/core/src/agent/loop.ts` — dedup in `getAvailableTools()`, naming updates
+- `packages/core/src/agent/evaluator.ts` — naming updates
+- `packages/core/src/agent/modes/minimal.ts` — removed duplicate `complete_task` entry
+- `packages/core/src/commander/workers/definitions.ts` — worker prompts updated
+- `cli/src/commands/mock-client.ts` — tool name fix
+- `cli/package.json` — removed `estela` alias
+- 5 test files updated for naming consistency
+
+---
+
 ## 2026-02-09
 
 ### Session 53 — File Watcher + Step-Level Undo

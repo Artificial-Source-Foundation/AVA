@@ -12,6 +12,7 @@ import type {
   AgentStartEvent,
   AgentStep,
   ErrorEvent,
+  ProviderSwitchEvent,
   RecoveryFinishEvent,
   RecoveryStartEvent,
   ThoughtEvent,
@@ -22,6 +23,9 @@ import type {
   ToolStartEvent,
   TurnFinishEvent,
   TurnStartEvent,
+  ValidationFinishEvent,
+  ValidationResultEvent,
+  ValidationStartEvent,
 } from './types.js'
 import { AgentTerminateMode } from './types.js'
 
@@ -207,6 +211,41 @@ export function createMockEvent(
         durationMs: 100,
         ...overrides,
       } as RecoveryFinishEvent
+
+    case 'validation:start':
+      return {
+        ...base,
+        type: 'validation:start',
+        files: [],
+        ...overrides,
+      } as ValidationStartEvent
+
+    case 'validation:result':
+      return {
+        ...base,
+        type: 'validation:result',
+        passed: true,
+        summary: 'all checks passed',
+        ...overrides,
+      } as ValidationResultEvent
+
+    case 'validation:finish':
+      return {
+        ...base,
+        type: 'validation:finish',
+        passed: true,
+        durationMs: 100,
+        ...overrides,
+      } as ValidationFinishEvent
+
+    case 'provider:switch':
+      return {
+        ...base,
+        type: 'provider:switch',
+        provider: 'test-provider',
+        model: 'test-model',
+        ...overrides,
+      } as ProviderSwitchEvent
 
     default: {
       // Exhaustive check

@@ -2,6 +2,8 @@ import { fileURLToPath } from 'node:url'
 import solidPlugin from 'vite-plugin-solid'
 import { defineConfig } from 'vitest/config'
 
+const stub = (name: string) => fileURLToPath(new URL(`./src/stubs/${name}.ts`, import.meta.url))
+
 export default defineConfig({
   plugins: [solidPlugin()],
   test: {
@@ -11,8 +13,13 @@ export default defineConfig({
     deps: {
       optimizer: {
         web: {
-          include: ['solid-js'],
+          include: ['solid-js', 'lucide-solid'],
         },
+      },
+    },
+    server: {
+      deps: {
+        inline: ['lucide-solid'],
       },
     },
     // Coverage configuration
@@ -38,6 +45,15 @@ export default defineConfig({
       '@ava/platform-node': fileURLToPath(
         new URL('./packages/platform-node/src/index.ts', import.meta.url)
       ),
+      // Tauri API stubs — each module gets its own file so vi.mock works correctly
+      '@tauri-apps/api/core': stub('tauri-api-core'),
+      '@tauri-apps/api/event': stub('tauri-api-event'),
+      '@tauri-apps/plugin-opener': stub('tauri-plugin-opener'),
+      '@tauri-apps/plugin-dialog': stub('tauri-plugin-dialog'),
+      '@tauri-apps/plugin-fs': stub('tauri-plugin-fs'),
+      '@tauri-apps/plugin-shell': stub('tauri-plugin-shell'),
+      '@tauri-apps/plugin-sql': stub('tauri-plugin-sql'),
+      '@tauri-apps/plugin-window-state': stub('tauri-plugin-window-state'),
     },
   },
 })

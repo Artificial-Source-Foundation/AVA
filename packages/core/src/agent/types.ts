@@ -226,6 +226,10 @@ export interface TurnFinishEvent extends AgentEventBase {
   turn: number
   /** Tool calls made in this turn */
   toolCalls: ToolCallInfo[]
+  /** Input tokens used in this turn */
+  tokensIn?: number
+  /** Output tokens used in this turn */
+  tokensOut?: number
 }
 
 /**

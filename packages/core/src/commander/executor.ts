@@ -9,8 +9,12 @@ import { AgentExecutor } from '../agent/loop.js'
 import type { AgentEvent, AgentEventCallback, AgentResult } from '../agent/types.js'
 import { AgentTerminateMode } from '../agent/types.js'
 import { getEditorModelConfig } from '../llm/client.js'
+import { createLogger } from '../logger.js'
 import type { WorkerRegistry } from './registry.js'
 import { analyzeTask, selectWorker } from './router.js'
+
+const log = createLogger('Commander')
+
 import type {
   WorkerActivityCallback,
   WorkerActivityEvent,
@@ -73,6 +77,12 @@ export async function executeWorker(
   })
 
   try {
+    log.info('Worker executing', {
+      worker: definition.name,
+      task: inputs.task.slice(0, 100),
+      toolCount: definition.tools?.length ?? 0,
+    })
+
     // Get filtered tool list
     // CRITICAL: This prevents workers from calling other workers (recursion prevention)
     const allowedTools = getFilteredTools(definition.tools)

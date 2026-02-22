@@ -7,7 +7,7 @@ import { claudeVariant } from './claude.js'
 import { geminiVariant } from './gemini.js'
 import { genericVariant } from './generic.js'
 import { gptVariant } from './gpt.js'
-import type { PromptModelFamily, PromptVariant } from './types.js'
+import { detectPromptModelFamily, type PromptModelFamily, type PromptVariant } from './types.js'
 
 // Re-export variants
 export { claudeVariant } from './claude.js'
@@ -50,7 +50,6 @@ export function getVariant(family: PromptModelFamily): PromptVariant {
  * Get the prompt variant for a model ID
  */
 export function getVariantForModel(modelId: string): PromptVariant {
-  const { detectPromptModelFamily } = require('./types.js')
   const family = detectPromptModelFamily(modelId)
   return getVariant(family)
 }

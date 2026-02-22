@@ -13,6 +13,7 @@ import {
   getHookRunner,
 } from '../hooks/index.js'
 import { createClient, getAuth } from '../llm/client.js'
+import { createLogger } from '../logger.js'
 import {
   executeTool,
   getToolCallCount,
@@ -150,6 +151,7 @@ export class AgentExecutor {
   private modifiedFiles: Set<string> = new Set()
   private validationRetries = 0
   private pendingProviderSwitch: { provider: LLMProvider; model?: string } | null = null
+  private log
 
   constructor(config: Partial<AgentConfig>, onEvent?: AgentEventCallback) {
     this.config = {
@@ -161,6 +163,7 @@ export class AgentExecutor {
     this.agentId = config.id ?? generateAgentId()
     this.sessionId = generateSessionId()
     this.onEvent = onEvent
+    this.log = createLogger(`Agent:${this.agentId}`)
   }
 
   /**
@@ -215,8 +218,17 @@ export class AgentExecutor {
     try {
       // Resolve auth
       const provider = this.config.provider ?? 'anthropic'
+      this.log.info('Agent started', {
+        goal: inputs.goal.slice(0, 100),
+        provider,
+        model: this.config.model,
+        maxTurns: this.config.maxTurns,
+        maxTimeMinutes: this.config.maxTimeMinutes,
+      })
+
       const auth = await getAuth(provider)
       if (!auth) {
+        this.log.error('No auth configured', { provider })
         throw new Error(`No authentication configured for provider: ${provider}`)
       }
 
@@ -433,6 +445,13 @@ Do not repeat the same action again.`,
     signal: AbortSignal
   ): Promise<AgentTurnResult> {
     const turnNumber = this.turnCounter++
+    const turnStartMs = performance.now()
+
+    this.log.info('Turn started', {
+      turn: turnNumber,
+      historyLength: history.length,
+      tokensUsed: this.tokensUsed,
+    })
 
     this.emit({
       type: 'turn:start',
@@ -507,6 +526,7 @@ Do not repeat the same action again.`,
 
     // If no tool calls, check if we should stop
     if (toolCalls.length === 0) {
+      this.log.timing('Turn (no tools)', turnStartMs, { turn: turnNumber })
       this.emit({
         type: 'turn:finish',
         agentId: this.agentId,
@@ -548,6 +568,7 @@ Do not repeat the same action again.`,
 
     for (const call of toolCalls) {
       const startTime = Date.now()
+      this.log.debug('Tool call', { tool: call.name, args: Object.keys(call.arguments) })
 
       this.emit({
         type: 'tool:start',
@@ -735,6 +756,12 @@ Do not repeat the same action again.`,
 
     // Track total tool calls
     this.totalToolCalls += toolCallInfos.length
+
+    this.log.timing('Turn completed', turnStartMs, {
+      turn: turnNumber,
+      toolCalls: toolCallInfos.length,
+      completed: taskCompleted,
+    })
 
     this.emit({
       type: 'turn:finish',

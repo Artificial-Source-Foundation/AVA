@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { createPluginSource, createReadme } from './plugin-templates'
+import { createPluginSource, createReadme } from './plugin-templates.js'
 
 interface PluginInitOptions {
   pluginName: string

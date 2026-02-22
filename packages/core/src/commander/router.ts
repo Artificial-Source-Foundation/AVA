@@ -4,8 +4,11 @@
  * for a given task without requiring LLM phone book lookup.
  */
 
+import { createLogger } from '../logger.js'
 import type { WorkerRegistry } from './registry.js'
 import type { WorkerDefinition } from './types.js'
+
+const log = createLogger('Commander:router')
 
 // ============================================================================
 // Types
@@ -116,11 +119,20 @@ export function selectWorker(
   registry: WorkerRegistry
 ): WorkerDefinition | null {
   if (analysis.taskType === 'general' || analysis.confidence < 0.5) {
+    log.debug('No auto-route', { taskType: analysis.taskType, confidence: analysis.confidence })
     return null
   }
 
   const workerName = WORKER_TYPE_MAP[analysis.taskType]
   if (!workerName) return null
 
-  return registry.get(workerName) ?? null
+  const worker = registry.get(workerName) ?? null
+  if (worker) {
+    log.info('Auto-routed to worker', {
+      worker: workerName,
+      taskType: analysis.taskType,
+      confidence: analysis.confidence,
+    })
+  }
+  return worker
 }

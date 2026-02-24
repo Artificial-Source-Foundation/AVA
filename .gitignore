@@ -52,3 +52,8 @@ docs/memory-bank/
 
 # Local git worktrees
 .worktrees/
+
+# E2E test artifacts
+e2e/screenshots/
+playwright-report/
+test-results/

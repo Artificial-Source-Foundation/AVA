@@ -69,17 +69,17 @@ These gaps were prioritized previously and are now mostly delivered based on cha
 This is what makes AVA "The Obsidian of AI Coding".
 
 ### Sprint 2.1: Plugin Format & SDK
-- [ ] Define unified plugin manifest (skills + commands + hooks + MCP in one package)
-- [ ] Plugin SDK with TypeScript types and helpers
-- [ ] Plugin lifecycle (install, enable, disable, uninstall, reload)
+- [x] Define unified plugin manifest (skills + commands + hooks + MCP in one package) — **DONE** (Sprint 10: `ava-extension.json` manifest format)
+- [x] Plugin SDK with TypeScript types and helpers — **DONE** (Sprint 10: `docs/plugins/PLUGIN_SDK.md`, `ExtensionAPI` interface, `defineTool()`)
+- [ ] Plugin lifecycle (install, enable, disable, uninstall, reload) — frontend wired to mock adapter; real backend lifecycle still needed
 - [ ] Plugin sandboxing (what plugins can/can't access)
 **Frontend**: None yet (backend-first)
 
 ### Sprint 2.2: Plugin Development Experience
-- [ ] `ava plugin init` scaffold command
+- [x] `ava plugin init` scaffold command — **DONE** (Sprint 10: generates ExtensionAPI source + manifest + tests)
 - [ ] Hot reload during plugin development
-- [ ] Plugin testing utilities
-- [ ] Plugin documentation template
+- [x] Plugin testing utilities — **DONE** (Sprint 10: `createMockExtensionAPI()` + provider test harness)
+- [x] Plugin documentation template — **DONE** (Sprint 10: `docs/plugins/PLUGIN_SDK.md`)
 **Frontend**: Plugin dev panel showing reload status, logs
 
 ### Sprint 2.3: Built-in Marketplace UI
@@ -89,7 +89,7 @@ This is what makes AVA "The Obsidian of AI Coding".
 - [x] Install/uninstall + enable/disable controls in settings manager
 - [x] Plugin detail/settings panel in settings manager
 - [x] Metadata/trust/version/changelog fields surfaced in plugin cards/details
-- [ ] Featured plugin catalog curation + remote source integration
+- [x] Featured plugin catalog curation + remote source integration — **DONE** (Sprint 10: remote fetch + localStorage cache with 30-min TTL + fallback catalog)
 - [ ] Wire settings manager actions to real backend extension lifecycle APIs (tracked as `INT-001`/`INT-002`/`INT-003` in `docs/development/backlogs/integration-backlog.md`)
 **Frontend**: Settings tab plugin manager, search, install flow, detail/settings view. Shipped with shared `plugins` store and mock lifecycle adapter.
 
@@ -129,10 +129,14 @@ Reference baseline: `docs/reference-code/goose/ui/desktop`.
 **Frontend**: Publish flow in settings, update notifications
 
 ### Sprint 2.5: Starter Plugins
-- [ ] 5-10 built-in plugins demonstrating the system
+- [x] 5-10 built-in plugins demonstrating the system — **DONE** (Sprint 10: 5 example plugins with tests in `docs/examples/plugins/`)
+- [x] Example: timestamp-tool (registerTool + Zod schema)
+- [x] Example: file-stats (registerTool + platform.fs)
+- [x] Example: polite-middleware (addToolMiddleware + priority)
+- [x] Example: session-notes (registerCommand + storage API)
+- [x] Example: event-logger (api.on + emit + events + storage)
 - [ ] Example: "React Patterns" skill plugin
 - [ ] Example: "/deploy" command plugin
-- [ ] Example: "Auto-commit" hook plugin
 **Frontend**: Plugin showcase page
 
 ---
@@ -180,6 +184,8 @@ These were identified as gaps but are now fully implemented:
 | Plugin browser in settings + sidebar | 55 | Shared plugin store, search, categories, featured, quick actions |
 | Plugin install/uninstall + settings entry | 55 | One-click actions with AVA/legacy install-state compatibility |
 | Plugin scaffold CLI foundation | 56 | `ava plugin init` command + generated package template docs |
+| Plugin SDK + test utilities | 57 | `createMockExtensionAPI()`, provider test harness, 5 example plugins |
+| Remote plugin catalog | 57 | Fetch + localStorage cache + fallback, `PluginCatalogItem` extended fields |
 
 ---
 

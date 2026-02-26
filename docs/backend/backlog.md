@@ -62,7 +62,7 @@
 - [ ] **Lead-worker auto-routing** — Commander requires manual delegation; Goose auto-routes to developer/researcher/data-analyst
 
 ### Missing in Tools
-- [ ] **Tool execution tests** — Individual tool `execute()` methods untested
+- [x] **Tool execution tests** — ~~Individual tool `execute()` methods untested~~ **DONE** (write + edit execute tests already comprehensive; 11 + 12 tests respectively)
 - [ ] **Browser tool tests** — Requires Puppeteer mocking
 - [ ] **Apply-patch tests** — Parser and applier untested
 - [ ] **Edit strategy benchmarks** — No comparison of 8 edit strategies on real diffs
@@ -82,7 +82,7 @@
 ### Missing in Infrastructure
 - [x] **Config credential tests** — ~~Credential storage untested~~ **DONE** (20 tests)
 - [x] **Config migration tests** — ~~Version migration untested~~ **DONE** (24 tests)
-- [ ] **MCP client tests** — MCP protocol client untested
+- [x] **MCP client tests** — ~~MCP protocol client untested~~ **DONE** (Sprint 10: MCP manager tests — addServer, removeServer, getTools, resetMCP — 9 tests)
 - [x] **Hook executor tests** — ~~Hook execution untested~~ **DONE** (executor.ts tested, 16 tests)
 - [ ] **SQLite session storage** — Sessions are file-based JSON; Goose uses SQLite for durability + querying
 - [x] **Visibility metadata** — ~~Compacted messages are fully removed~~ **DONE** (Sprint B3: `MessageVisibility` type, visibility-aware compaction)
@@ -102,7 +102,7 @@
 ### Opportunities
 - [ ] **Split tools/ into subcategories** — 43 files in one directory is large; could split into file-tools/, search-tools/, web-tools/
 - [ ] **Extract tool utilities** — `utils.ts`, `sanitize.ts`, `truncation.ts`, `locks.ts` could be a separate `tool-utils/` module
-- [ ] **Standardize provider interface** — All 14 LLM providers implement `stream()` differently; could add a test harness
+- [x] **Standardize provider interface** — ~~All 14 LLM providers implement `stream()` differently; could add a test harness~~ **DONE** (Sprint 10: `providers/_shared/src/test-harness.ts` + anthropic/openai/google tests)
 
 ---
 
@@ -113,10 +113,32 @@ This backlog feeds into the project roadmap:
 | Phase | Backend Work |
 |-------|-------------|
 | **1.5 Polish** (complete) | Settings hardening, appearance system, core wiring, backend tests |
-| **2 Plugins** | Extension system needs: manifest validation, hot reload, sandboxing |
+| **2 Plugins** | Plugin SDK shipped (Sprint 10); manifest validation, hot reload, real install remaining |
 | **3 CLI** | CLI-specific session storage, config paths, terminal rendering |
 | **4 Integrations** | MCP server hosting, external tool connectors |
 
 ---
 
-*Last updated: 2026-02-15*
+---
+
+## Core-v2 / Extensions Test Coverage (Sprint 10)
+
+> **Sprint 10** added 102 new tests for the new stack. Total: 3,417 tests / 188 files.
+
+### Completed
+- [x] Mock ExtensionAPI test utility (`createMockExtensionAPI()`) — 9 tests
+- [x] Activation tests for all 14 stub extension modules — 43 tests
+- [x] Provider test harness + anthropic/openai/google provider tests — 9 tests
+- [x] MCP manager unit tests (addServer, removeServer, getTools, resetMCP) — 9 tests
+- [x] Plugin catalog fetch/cache/fallback tests — 8 tests
+- [x] CLI scaffold template tests (manifest, ExtensionAPI source, test generation) — 3 tests
+- [x] 5 example plugin tests (timestamp-tool, file-stats, polite-middleware, session-notes, event-logger) — 21 tests
+
+### Still Needed
+- [ ] Wire 14 stub extensions to actually register tools/commands/modes (currently only log)
+- [ ] Create `models/src/registry.ts` and `instructions/src/loader.ts` modules
+- [ ] Connect MCP manager to `activate()` in mcp extension
+- [ ] Provider tests for remaining 11 providers (same harness pattern)
+- [ ] Real plugin install/uninstall (currently state-only in frontend)
+
+*Last updated: 2026-02-26*

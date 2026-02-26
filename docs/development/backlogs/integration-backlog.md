@@ -1,6 +1,6 @@
 # Integration Backlog
 
-> Cross-cutting frontend-backend work only. Updated 2026-02-14.
+> Cross-cutting frontend-backend work only. Updated 2026-02-26.
 
 ## Active
 
@@ -32,3 +32,6 @@
 ## Done
 
 - Streaming jitter stabilization for chat start/end transitions.
+- Plugin SDK + test utilities (Sprint 10): `createMockExtensionAPI()`, provider test harness, 5 example plugins, `PLUGIN_SDK.md`.
+- Remote plugin catalog with fetch + cache + fallback (Sprint 10): `PluginCatalogItem` extended with `repo`, `downloadUrl`, `readme` fields.
+- CLI scaffold updated (Sprint 10): generates `ExtensionAPI`-based source, `ava-extension.json` manifest, and test file.

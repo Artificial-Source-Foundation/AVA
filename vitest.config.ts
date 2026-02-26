@@ -32,12 +32,43 @@ export default defineConfig({
     include: [
       'src/**/*.{test,spec}.{ts,tsx}',
       'packages/core/src/**/*.{test,spec}.ts',
+      'packages/core-v2/src/**/*.{test,spec}.ts',
+      'packages/extensions/**/*.{test,spec}.ts',
       'cli/src/**/*.{test,spec}.ts',
     ],
   },
   resolve: {
     conditions: ['development', 'browser'],
     alias: {
+      // core-v2 submodule aliases (must come before main @ava/core-v2)
+      '@ava/core-v2/agent': fileURLToPath(
+        new URL('./packages/core-v2/src/agent/index.ts', import.meta.url)
+      ),
+      '@ava/core-v2/llm': fileURLToPath(
+        new URL('./packages/core-v2/src/llm/index.ts', import.meta.url)
+      ),
+      '@ava/core-v2/tools': fileURLToPath(
+        new URL('./packages/core-v2/src/tools/index.ts', import.meta.url)
+      ),
+      '@ava/core-v2/extensions': fileURLToPath(
+        new URL('./packages/core-v2/src/extensions/index.ts', import.meta.url)
+      ),
+      '@ava/core-v2/platform': fileURLToPath(
+        new URL('./packages/core-v2/src/platform.ts', import.meta.url)
+      ),
+      '@ava/core-v2/bus': fileURLToPath(
+        new URL('./packages/core-v2/src/bus/index.ts', import.meta.url)
+      ),
+      '@ava/core-v2/config': fileURLToPath(
+        new URL('./packages/core-v2/src/config/index.ts', import.meta.url)
+      ),
+      '@ava/core-v2/session': fileURLToPath(
+        new URL('./packages/core-v2/src/session/index.ts', import.meta.url)
+      ),
+      '@ava/core-v2/logger': fileURLToPath(
+        new URL('./packages/core-v2/src/logger/index.ts', import.meta.url)
+      ),
+      '@ava/core-v2': fileURLToPath(new URL('./packages/core-v2/src/index.ts', import.meta.url)),
       '@ava/core': fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),
       '@ava/platform-tauri': fileURLToPath(
         new URL('./packages/platform-tauri/src/index.ts', import.meta.url)

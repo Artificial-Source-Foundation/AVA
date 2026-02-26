@@ -191,34 +191,33 @@ export class MockShell implements IShell {
   spawn(command: string, args: string[]): ChildProcess {
     const cmd = `${command} ${args.join(' ')}`
     const result = this.execResults.get(cmd) ?? this.defaultResult
-    const stdoutCbs: Array<(data: string) => void> = []
-    const stderrCbs: Array<(data: string) => void> = []
+    const encoder = new TextEncoder()
+
+    const stdoutStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        if (result.stdout) {
+          controller.enqueue(encoder.encode(result.stdout))
+        }
+        controller.close()
+      },
+    })
+
+    const stderrStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        if (result.stderr) {
+          controller.enqueue(encoder.encode(result.stderr))
+        }
+        controller.close()
+      },
+    })
 
     return {
       pid: 123,
-      stdin: {
-        write() {},
-        end() {},
-      },
-      stdout: {
-        on(_event: 'data', cb: (data: string) => void) {
-          stdoutCbs.push(cb)
-        },
-      },
-      stderr: {
-        on(_event: 'data', cb: (data: string) => void) {
-          stderrCbs.push(cb)
-        },
-      },
+      stdin: null,
+      stdout: stdoutStream,
+      stderr: stderrStream,
       kill() {},
       async wait(): Promise<ExecResult> {
-        // Fire data callbacks before resolving (simulates process output before exit)
-        if (result.stdout) {
-          for (const cb of stdoutCbs) cb(result.stdout)
-        }
-        if (result.stderr) {
-          for (const cb of stderrCbs) cb(result.stderr)
-        }
         return result
       },
     }

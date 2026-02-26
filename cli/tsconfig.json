@@ -18,5 +18,10 @@
   },
   "include": ["src"],
   "exclude": ["src/**/*.test.ts"],
-  "references": [{ "path": "../packages/core" }, { "path": "../packages/platform-node" }]
+  "references": [
+    { "path": "../packages/core" },
+    { "path": "../packages/core-v2" },
+    { "path": "../packages/extensions" },
+    { "path": "../packages/platform-node" }
+  ]
 }

@@ -18,6 +18,16 @@
     "baseUrl": ".",
     "paths": {
       "@ava/core": ["packages/core/src/index.ts"],
+      "@ava/core-v2": ["packages/core-v2/src/index.ts"],
+      "@ava/core-v2/agent": ["packages/core-v2/src/agent/index.ts"],
+      "@ava/core-v2/llm": ["packages/core-v2/src/llm/index.ts"],
+      "@ava/core-v2/tools": ["packages/core-v2/src/tools/index.ts"],
+      "@ava/core-v2/extensions": ["packages/core-v2/src/extensions/index.ts"],
+      "@ava/core-v2/platform": ["packages/core-v2/src/platform.ts"],
+      "@ava/core-v2/bus": ["packages/core-v2/src/bus/index.ts"],
+      "@ava/core-v2/config": ["packages/core-v2/src/config/index.ts"],
+      "@ava/core-v2/session": ["packages/core-v2/src/session/index.ts"],
+      "@ava/core-v2/logger": ["packages/core-v2/src/logger/index.ts"],
       "@ava/platform-node": ["packages/platform-node/src/index.ts"],
       "@ava/platform-tauri": ["packages/platform-tauri/src/index.ts"]
     },

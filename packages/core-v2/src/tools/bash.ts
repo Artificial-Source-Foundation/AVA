@@ -56,33 +56,54 @@ export const bashTool = defineTool({
     // Abort handler
     const abortHandler = () => {
       killed = true
-      child.kill('SIGTERM')
+      child.kill()
     }
     ctx.signal.addEventListener('abort', abortHandler, { once: true })
 
     // Timeout handler
     const timer = setTimeout(() => {
       killed = true
-      child.kill('SIGTERM')
+      child.kill()
     }, timeout)
 
-    // Collect output
-    child.stdout.on('data', (data) => {
-      // Check for binary output
+    // Collect output via Web Streams
+    const decoder = new TextDecoder()
+
+    const readStream = async (
+      stream: ReadableStream<Uint8Array> | null,
+      onChunk: (text: string) => void
+    ) => {
+      if (!stream) return
+      const reader = stream.getReader()
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          onChunk(decoder.decode(value, { stream: true }))
+        }
+      } catch {
+        // Stream may be cancelled on kill
+      } finally {
+        reader.releaseLock()
+      }
+    }
+
+    const stdoutPromise = readStream(child.stdout, (data) => {
       if (isBinaryOutput(new TextEncoder().encode(data))) {
         killed = true
-        child.kill('SIGTERM')
+        child.kill()
         return
       }
       stdout += data
     })
 
-    child.stderr.on('data', (data) => {
+    const stderrPromise = readStream(child.stderr, (data) => {
       stderr += data
     })
 
     let result: ExecResult
     try {
+      await Promise.all([stdoutPromise, stderrPromise])
       result = await child.wait()
     } finally {
       clearTimeout(timer)

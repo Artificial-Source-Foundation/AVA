@@ -59,11 +59,11 @@ export interface SpawnOptions {
 }
 
 export interface ChildProcess {
-  pid?: number
-  stdin: { write(data: string): void; end(): void }
-  stdout: { on(event: 'data', cb: (data: string) => void): void }
-  stderr: { on(event: 'data', cb: (data: string) => void): void }
-  kill(signal?: string): void
+  readonly pid: number | undefined
+  readonly stdin: WritableStream<Uint8Array> | null
+  readonly stdout: ReadableStream<Uint8Array> | null
+  readonly stderr: ReadableStream<Uint8Array> | null
+  kill(): void
   wait(): Promise<ExecResult>
 }
 
@@ -82,13 +82,13 @@ export interface PTYOptions {
 }
 
 export interface PTYProcess {
-  pid: number
-  onData(cb: (data: string) => void): void
-  onExit(cb: (exitCode: number) => void): void
+  readonly pid: number
+  onData(callback: (data: string) => void): void
+  onExit(callback: (code: number, signal?: number) => void): void
   write(data: string): void
   resize(cols: number, rows: number): void
   kill(signal?: string): void
-  wait(): Promise<ExecResult>
+  wait(): Promise<{ exitCode: number; signal?: number }>
 }
 
 export interface IPTY {

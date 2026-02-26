@@ -19,6 +19,7 @@ import * as path from 'node:path'
 import { setPlatform } from '@ava/core'
 import { createNodePlatform } from '@ava/platform-node'
 import { runAgentCommand } from './commands/agent.js'
+import { runAgentV2Command } from './commands/agent-v2.js'
 import { runAuthCommand } from './commands/auth.js'
 import { runPluginCommand } from './commands/plugin.js'
 import { runRunCommand } from './commands/run.js'
@@ -49,6 +50,12 @@ async function main() {
   // Agent command
   if (args[0] === 'agent') {
     await runAgentCommand(args.slice(1))
+    return
+  }
+
+  // Agent V2 command (core-v2 + extensions)
+  if (args[0] === 'agent-v2') {
+    await runAgentV2Command(args.slice(1))
     return
   }
 

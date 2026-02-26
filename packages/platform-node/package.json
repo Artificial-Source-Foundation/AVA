@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./v2": {
+      "types": "./dist/v2.d.ts",
+      "import": "./dist/v2.js"
     }
   },
   "scripts": {
@@ -18,6 +22,7 @@
   },
   "dependencies": {
     "@ava/core": "workspace:*",
+    "@ava/core-v2": "workspace:*",
     "better-sqlite3": "^11.0.0",
     "fast-glob": "^3.3.3"
   },

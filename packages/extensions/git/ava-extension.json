@@ -1,0 +1,9 @@
+{
+  "name": "ava-git",
+  "version": "1.0.0",
+  "description": "Git snapshots and auto-commit",
+  "main": "src/index.ts",
+  "builtIn": true,
+  "enabledByDefault": false,
+  "priority": 15
+}

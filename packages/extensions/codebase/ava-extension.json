@@ -1,0 +1,9 @@
+{
+  "name": "ava-codebase",
+  "version": "1.0.0",
+  "description": "Codebase intelligence (repo map, symbols, PageRank)",
+  "main": "src/index.ts",
+  "builtIn": true,
+  "enabledByDefault": false,
+  "priority": 20
+}

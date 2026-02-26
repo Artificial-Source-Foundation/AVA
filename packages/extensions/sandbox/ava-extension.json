@@ -1,0 +1,9 @@
+{
+  "name": "ava-sandbox",
+  "version": "1.0.0",
+  "description": "Docker sandboxed execution",
+  "main": "src/index.ts",
+  "builtIn": true,
+  "enabledByDefault": false,
+  "priority": 15
+}

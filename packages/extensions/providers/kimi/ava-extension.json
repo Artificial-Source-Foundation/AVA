@@ -1,7 +1,7 @@
 {
-  "name": "ava-provider-together",
+  "name": "ava-provider-kimi",
   "version": "1.0.0",
-  "description": "Together AI LLM provider",
+  "description": "Kimi (Moonshot AI) LLM provider",
   "main": "src/index.ts",
   "builtIn": true,
   "enabledByDefault": true,

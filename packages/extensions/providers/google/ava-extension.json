@@ -1,7 +1,7 @@
 {
-  "name": "ava-provider-together",
+  "name": "ava-provider-google",
   "version": "1.0.0",
-  "description": "Together AI LLM provider",
+  "description": "Google Gemini LLM provider",
   "main": "src/index.ts",
   "builtIn": true,
   "enabledByDefault": true,

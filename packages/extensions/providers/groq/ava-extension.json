@@ -1,10 +1,9 @@
 {
   "name": "ava-provider-groq",
   "version": "1.0.0",
-  "description": "Groq LLM provider (fast inference)",
+  "description": "Groq LLM provider",
   "main": "src/index.ts",
   "builtIn": true,
   "enabledByDefault": true,
-  "priority": 0,
-  "capabilities": ["providers"]
+  "priority": 0
 }

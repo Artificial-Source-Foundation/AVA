@@ -48,6 +48,7 @@ Every major subsystem uses the same singleton pattern: a module-level `let _inst
 | Audit Trail | `permissions/audit.ts` | `getAuditTrail()` |
 | Command Validator | `permissions/command-validator.ts` | `getCommandValidator()` |
 | Trusted Folders | `permissions/trusted-folders.ts` | `getTrustedFolderManager()` |
+| Logger | `logger/logger.ts` | `getLogger()` |
 
 ### Key Entry Points
 

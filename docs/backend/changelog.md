@@ -4,6 +4,43 @@
 
 ---
 
+## 2026-02-25
+
+### Session 55 — Logger Refactor + Agent CLI Command + Test Coverage
+
+**Logger refactored from single file to directory module** — Replaced `packages/core/src/logger.ts` (single file, console-only) with `packages/core/src/logger/` directory module (4 files). New module provides: `AvaLogger` singleton class with NDJSON file output (`~/.ava/logs/ava-YYYY-MM-DD.ndjson`), stderr output, custom callbacks, and `fromAgentEvent()` method for structured agent event logging. Retained `createLogger()` for inline source-scoped console logging (used by agent loop constructor and commander modules). Singleton pattern: `getLogger()`/`setLogger()`/`resetLogger()`.
+
+**CLI agent command** — NEW `cli/src/commands/agent.ts` (~295 lines). `ava agent run "goal"` invokes the agent loop from the CLI with `--verbose` (stderr streaming), `--json` (NDJSON stdout), `--provider`, `--model`, `--max-turns`, and `--timeout` options.
+
+**New test files (7):**
+- `packages/core/src/logger/logger.test.ts` — AvaLogger, createLogger, singleton, agent event mapping
+- `packages/core/src/auth/manager.test.ts` — Auth manager operations
+- `packages/core/src/auth/pkce.test.ts` — PKCE challenge/verifier generation
+- `packages/core/src/git/utils.test.ts` — Git utility functions
+- `packages/core/src/validator/pipeline.test.ts` — ValidationPipeline orchestration
+- `packages/core/src/validator/syntax.test.ts` — Syntax validator
+- `packages/core/src/validator/typescript.test.ts` — TypeScript validator
+
+**Import fixes** — Updated `commander/router.ts` and `commander/executor.ts` to import from `../logger/logger.js` (was `../logger.js`). Updated `agent/loop.ts` to import both `createLogger` and `getLogger` from unified module.
+
+**Files changed:**
+- `packages/core/src/logger.ts` — **deleted** (merged into directory module)
+- `packages/core/src/logger/logger.ts` — new (AvaLogger + createLogger, ~380 lines)
+- `packages/core/src/logger/types.ts` — new (LogLevel, LogEntry, LoggerConfig, ~74 lines)
+- `packages/core/src/logger/index.ts` — new (barrel export)
+- `packages/core/src/logger/logger.test.ts` — new
+- `packages/core/src/agent/loop.ts` — import updated
+- `packages/core/src/commander/router.ts` — import updated
+- `packages/core/src/commander/executor.ts` — import updated
+- `packages/core/src/index.ts` — exports from `./logger/index.js`
+- `cli/src/commands/agent.ts` — new
+- `cli/src/index.ts` — agent command wired + help text merged
+- `docs/development/sprints/2026-S3.0-stabilization.md` — new sprint doc
+- 6 new test files (auth, git, validator)
+- **Total: ~2576 tests** across ~110 test files
+
+---
+
 ## 2026-02-21
 
 ### Session 54 — OpenRouter Tool Calling + Completion Tool Naming Fix
@@ -329,4 +366,4 @@
 
 ---
 
-*Last updated: 2026-02-15 — ~2369 tests across ~87 files*
+*Last updated: 2026-02-25 — ~2576 tests across ~110 test files*

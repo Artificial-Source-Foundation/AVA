@@ -1,6 +1,6 @@
 # Backend Test Coverage
 
-> Latest verified baseline: **~2369 tests** across **~87 test files**. Overall file coverage: ~37%.
+> Latest verified baseline: **~2576 tests** across **~110 test files**. Overall file coverage: ~46%.
 >
 > Strategy: Test pure functions and stateful classes. Skip LLM/FS/HTTP-dependent code.
 
@@ -10,13 +10,30 @@
 
 | Metric | Value |
 |--------|-------|
-| Total tests | ~2369 |
-| Test files | ~87 |
+| Total tests | ~2576 |
+| Test files | ~110 |
 | Source files (total) | ~237 |
 | Source lines | ~54,500 |
-| File coverage | ~37% |
+| File coverage | ~46% |
 | TS errors | 0 |
 | Biome errors | 0 |
+
+## Recently Delivered (Session 55)
+
+### Logger Module (refactored)
+- `packages/core/src/logger/logger.test.ts` — AvaLogger singleton, createLogger source-scoped console logger, agent event mapping, NDJSON file output, configuration
+
+### Auth Tests
+- `packages/core/src/auth/manager.test.ts` — Auth manager operations
+- `packages/core/src/auth/pkce.test.ts` — PKCE code challenge and verifier generation
+
+### Git Utils Tests
+- `packages/core/src/git/utils.test.ts` — Git utility functions
+
+### Validator Unit Tests
+- `packages/core/src/validator/pipeline.test.ts` — ValidationPipeline orchestration, sequential execution, error handling
+- `packages/core/src/validator/syntax.test.ts` — Syntax validator (parse error detection)
+- `packages/core/src/validator/typescript.test.ts` — TypeScript validator (type checking)
 
 ## Recently Delivered (Sprint B7-B10)
 
@@ -78,6 +95,9 @@
 | models/ | 1 | 3 | 33% | registry.ts tested (34 tests) |
 | question/ | 1 | 3 | 33% | manager.ts tested (22 tests) |
 | scheduler/ | 1 | 3 | 33% | scheduler.ts tested (22 tests) |
+| auth/ | 2 | 8 | 25% | manager.ts + pkce.ts tested. OAuth flows require real HTTP |
+| validator/ | 3 | 9 | 33% | pipeline.ts + syntax.ts + typescript.ts unit tested. Also integration tested via agent-validation.integration.test.ts |
+| git/ | 1 | 5 | 20% | utils.ts tested. Snapshot/auto-commit require real git repo |
 | mcp/ | 1 | 6 | 17% | oauth.ts tested (27 tests) |
 | bus/ | 1 | 3 | 33% | message-bus tested |
 | tools/ | 14 | 43 | 33% | Utilities + namespacing + task-parallel + sandbox + bash tested |
@@ -87,12 +107,10 @@
 | Module | Files | Why |
 |--------|-------|-----|
 | llm/providers/ | 14 | 2 tested (openai, openai-compat). Rest require real HTTP |
-| auth/ | 8 | OAuth flows require real HTTP |
 | codebase/ | 11 | ranking + graph tested (49 tests). Indexer/symbols require filesystem |
-| validator/ | 9 | Integration tested via agent-validation.integration.test.ts (mocked). Direct unit tests require real filesystem |
 | hooks/ | 4 | executor.ts tested (16 tests). factory/types require real tool execution |
 | lsp/ | 4 | Requires language servers |
-| git/ | 5 | Requires real git repository (includes auto-commit.ts) |
+| git/ | 5 | utils.ts tested. Snapshot/auto-commit require real git repository |
 | skills/ | 4 | Requires filesystem |
 | slash-commands/ | 3 | Requires filesystem |
 | instructions/ | 3 | Requires filesystem |
@@ -101,7 +119,7 @@
 
 ---
 
-## Tested Files (~81 total)
+## Tested Files (~110 total)
 
 ### agent/ (11 test files)
 - `evaluator.test.ts` — 35 tests (progress, goals, tool usage, metrics)
@@ -199,6 +217,21 @@
 - `ranking.test.ts` — 25 tests (calculatePageRank, calculateRelevanceScore, extractKeywords, sortByRank, sortByScore)
 - `graph.test.ts` — 24 tests (getEdges, findRoots, findLeaves, findCircularDependencies, getDependencyDepth, getTransitiveDependencies, getTransitiveDependents, getGraphStats)
 
+### auth/ (2 test files)
+- `manager.test.ts` — auth manager operations
+- `pkce.test.ts` — PKCE code challenge and verifier generation
+
+### git/ (1 test file)
+- `utils.test.ts` — git utility functions
+
+### validator/ (3 test files)
+- `pipeline.test.ts` — ValidationPipeline orchestration, sequential execution, error handling
+- `syntax.test.ts` — syntax validator (parse error detection)
+- `typescript.test.ts` — TypeScript validator (type checking)
+
+### logger/ (1 test file)
+- `logger.test.ts` — AvaLogger singleton, createLogger, agent event mapping, configuration
+
 ### hooks/ (1 test file)
 - `executor.test.ts` — 16 tests (hook discovery, execution, cancellation)
 
@@ -222,4 +255,4 @@
 
 ---
 
-*Last updated: 2026-02-15 — updated after Sprint B7-B10 (validation, minimal mode, provider switch, auto-routing)*
+*Last updated: 2026-02-25 — updated after Session 55 (logger refactor, auth/git/validator tests)*

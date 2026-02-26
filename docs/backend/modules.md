@@ -337,6 +337,20 @@ Shared type definitions. Files: `llm.ts`, `index.ts`
 
 ---
 
+## logger/ (4 files, ~460 lines)
+
+Structured logging with NDJSON file output and console logging.
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `logger.ts` | ~380 | `AvaLogger` — singleton NDJSON file logger + `createLogger()` source-scoped console logger |
+| `types.ts` | ~74 | `LogLevel`, `LogEntry`, `LoggerConfig`, `Logger` interface |
+| `index.ts` | ~8 | Barrel export |
+
+**Key exports:** `AvaLogger`, `getLogger`, `setLogger`, `resetLogger`, `createLogger`, `LogLevel`, `LogEntry`, `LoggerConfig`
+
+---
+
 ## Top-Level Files
 
 | File | Lines | Purpose |
@@ -346,4 +360,4 @@ Shared type definitions. Files: `llm.ts`, `index.ts`
 
 ---
 
-*Last updated: 2026-02-15*
+*Last updated: 2026-02-25*

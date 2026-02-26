@@ -1,6 +1,6 @@
 # Backend — @ava/core
 
-> The brain of AVA. ~237 source files, ~54,500 lines. Test baseline: ~2369 tests across ~87 files (~37% coverage).
+> The brain of AVA. ~237 source files, ~54,500 lines. Test baseline: ~2576 tests across ~110 files (~46% coverage).
 
 **Package:** `packages/core/` | **Entry:** `packages/core/src/index.ts` | **Exports:** 29 modules
 
@@ -85,13 +85,14 @@ User (Desktop/CLI)
 | `git/` | 5 | 969 | Git snapshots, auto-commit, version control utilities |
 | `instructions/` | 3 | 321 | Project/directory instructions loader |
 | `integrations/` | 2 | 351 | External integrations (Exa web search) |
+| `logger/` | 4 | 460 | Structured logging — NDJSON file output + source-scoped console logger |
 | `types/` | 2 | 151 | Shared type definitions |
 
 ### Top-Level Files
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `index.ts` | ~86 | Main barrel export (all 29 modules) |
+| `index.ts` | ~86 | Main barrel export (all modules) |
 | `platform.ts` | 226 | Platform abstraction (Node.js, Tauri, browser) |
 
 ---
@@ -185,4 +186,4 @@ All in `tools/` and auto-registered in `tools/index.ts`:
 
 ---
 
-*Last updated: 2026-02-15 — ~2369 tests across ~87 files (~37% coverage)*
+*Last updated: 2026-02-25 — ~2576 tests across ~110 files (~46% coverage)*

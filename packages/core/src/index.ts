@@ -35,8 +35,8 @@ export * from './instructions/index.js'
 export * from './integrations/index.js'
 // LLM client
 export * from './llm/index.js'
-// Logger (structured logging)
-export * from './logger.js'
+// Logger (structured logging with NDJSON file output)
+export * from './logger/index.js'
 // LSP (Language Server Protocol) integration
 export * from './lsp/index.js'
 // MCP (Model Context Protocol) client

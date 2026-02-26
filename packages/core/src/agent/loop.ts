@@ -13,7 +13,7 @@ import {
   getHookRunner,
 } from '../hooks/index.js'
 import { createClient, getAuth } from '../llm/client.js'
-import { createLogger } from '../logger.js'
+import { createLogger, getLogger } from '../logger/logger.js'
 import {
   executeTool,
   getToolCallCount,
@@ -1042,6 +1042,13 @@ Do not repeat the same action again.`,
    * Emit an event
    */
   private emit(event: AgentEvent): void {
+    // Log event via structured logger
+    try {
+      getLogger().fromAgentEvent(event)
+    } catch {
+      // Logger not available or failed — never crash agent
+    }
+
     if (this.onEvent) {
       try {
         this.onEvent(event)

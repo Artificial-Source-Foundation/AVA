@@ -18,6 +18,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { setPlatform } from '@ava/core'
 import { createNodePlatform } from '@ava/platform-node'
+import { runAgentCommand } from './commands/agent.js'
 import { runAuthCommand } from './commands/auth.js'
 import { runPluginCommand } from './commands/plugin.js'
 import { runRunCommand } from './commands/run.js'
@@ -44,6 +45,12 @@ async function main() {
   const dbPath = path.join(os.homedir(), '.ava', 'data.db')
   const platform = createNodePlatform(dbPath)
   setPlatform(platform)
+
+  // Agent command
+  if (args[0] === 'agent') {
+    await runAgentCommand(args.slice(1))
+    return
+  }
 
   // Auth command
   if (args[0] === 'auth') {
@@ -91,6 +98,7 @@ USAGE:
   ava <command> [args]
 
 COMMANDS:
+  agent           Run the AI agent (invoke the agent loop)
   run "<goal>"    Execute the agent loop
   tool            Execute individual tools
   validate        Run validation pipeline on files
@@ -126,9 +134,31 @@ AUTHENTICATION:
   ava auth logout <provider>  Disconnect a provider
 
 PLUGIN DEVELOPMENT:
-  ava plugin init my-plugin                Create plugin scaffold
-  ava plugin dev my-plugin --dir ./plugins Run plugin dev/watch
-  ava plugin test my-plugin --dir ./plugins Run plugin tests
+<<<<<<< Updated upstream
+  ava plugin init my-plugin                Create plugin scaffold in current directory
+  ava plugin init my-plugin --dir ./plugins  Create scaffold in a custom directory
+  ava plugin init my-plugin --force        Overwrite in non-empty target directory
+  ava plugin dev my-plugin --dir ./plugins Run plugin dev/watch script
+  ava plugin test my-plugin --dir ./plugins Run plugin test suite
+
+AGENT:
+  ava agent run "goal"               Run the agent with a goal
+  ava agent run "goal" --verbose     Stream events to stderr
+  ava agent run "goal" --json        Output NDJSON events to stdout
+  ava agent run "goal" --provider openai --model gpt-4
+
+EXAMPLES:
+  # Run agent with verbose output
+  ava agent run "list files in current directory" --verbose
+
+  # Connect Claude subscription for OAuth
+  ava auth login anthropic
+
+  # Scaffold a plugin
+  ava plugin init my-plugin
+
+  # Check version
+  ava --version
 
 ENVIRONMENT VARIABLES:
   AVA_ANTHROPIC_API_KEY    Anthropic API key (alternative to OAuth)

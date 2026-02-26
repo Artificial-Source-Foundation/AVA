@@ -4,7 +4,7 @@
  * for a given task without requiring LLM phone book lookup.
  */
 
-import { createLogger } from '../logger.js'
+import { createLogger } from '../logger/logger.js'
 import type { WorkerRegistry } from './registry.js'
 import type { WorkerDefinition } from './types.js'
 

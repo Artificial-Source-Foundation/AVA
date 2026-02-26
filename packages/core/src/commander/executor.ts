@@ -9,7 +9,7 @@ import { AgentExecutor } from '../agent/loop.js'
 import type { AgentEvent, AgentEventCallback, AgentResult } from '../agent/types.js'
 import { AgentTerminateMode } from '../agent/types.js'
 import { getEditorModelConfig } from '../llm/client.js'
-import { createLogger } from '../logger.js'
+import { createLogger } from '../logger/logger.js'
 import type { WorkerRegistry } from './registry.js'
 import { analyzeTask, selectWorker } from './router.js'
 

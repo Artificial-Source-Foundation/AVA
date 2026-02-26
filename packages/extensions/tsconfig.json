@@ -36,6 +36,10 @@
     "tools-extended/**/*.ts",
     "prompts/**/*.ts",
     "context/**/*.ts",
+    "agent-modes/**/*.ts",
+    "hooks/**/*.ts",
+    "validator/**/*.ts",
+    "commander/**/*.ts",
     "index.ts"
   ],
   "exclude": ["**/*.test.ts", "dist", "node_modules"],

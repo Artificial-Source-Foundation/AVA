@@ -1,0 +1,10 @@
+{
+  "name": "ava-validator",
+  "version": "1.0.0",
+  "description": "QA pipeline: syntax, types, lint, test validators",
+  "main": "src/index.ts",
+  "builtIn": true,
+  "enabledByDefault": false,
+  "priority": 15,
+  "capabilities": ["validator", "events"]
+}

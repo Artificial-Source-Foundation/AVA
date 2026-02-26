@@ -1,0 +1,10 @@
+{
+  "name": "ava-commander",
+  "version": "1.0.0",
+  "description": "Team Lead → Senior Leads → Junior Devs hierarchy",
+  "main": "src/index.ts",
+  "builtIn": true,
+  "enabledByDefault": false,
+  "priority": 20,
+  "capabilities": ["agent-mode"]
+}

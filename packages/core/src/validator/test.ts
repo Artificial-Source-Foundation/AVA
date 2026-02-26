@@ -355,9 +355,3 @@ function extractTestSummary(output: string): string | null {
 
   return null
 }
-
-// ============================================================================
-// Export
-// ============================================================================
-
-export default testValidator

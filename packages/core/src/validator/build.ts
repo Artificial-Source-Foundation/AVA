@@ -192,9 +192,3 @@ function extractBuildStats(output: string): string | null {
 
   return null
 }
-
-// ============================================================================
-// Export
-// ============================================================================
-
-export default buildValidator

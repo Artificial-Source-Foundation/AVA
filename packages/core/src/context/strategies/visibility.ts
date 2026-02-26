@@ -113,5 +113,3 @@ export function createVisibilityCompaction(
  * Default visibility compaction strategy instance
  */
 export const visibilityCompaction = createVisibilityCompaction()
-
-export default visibilityCompaction

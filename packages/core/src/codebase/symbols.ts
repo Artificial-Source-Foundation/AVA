@@ -451,9 +451,3 @@ function extractRustSymbols(content: string): CodeSymbol[] {
 
   return symbols
 }
-
-// ============================================================================
-// Export
-// ============================================================================
-
-export default extractSymbols

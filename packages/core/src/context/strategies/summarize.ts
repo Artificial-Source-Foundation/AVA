@@ -180,5 +180,3 @@ export function extractSummary(response: string): string {
  * Note: Requires providing summarizeFn in compactor options
  */
 export const summarize = createSummarize()
-
-export default summarize

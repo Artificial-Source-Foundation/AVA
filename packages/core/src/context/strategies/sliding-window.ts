@@ -177,5 +177,3 @@ export function createSlidingWindow(options: SlidingWindowOptions = {}): Compact
     },
   }
 }
-
-export default slidingWindow

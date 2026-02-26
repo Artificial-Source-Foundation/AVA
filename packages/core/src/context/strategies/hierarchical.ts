@@ -299,5 +299,3 @@ export function clearHierarchicalCache(sessionId: string): void {
  * Note: Requires providing summarizeFn in options
  */
 export const hierarchical = createHierarchical()
-
-export default hierarchical

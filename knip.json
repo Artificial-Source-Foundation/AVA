@@ -4,6 +4,10 @@
   "project": ["src/**/*.{ts,tsx}"],
   "ignore": [
     "src-tauri/**",
+    "src/stubs/**",
+    "e2e/**",
+    "docs/reference-code/**",
+    "src/pages/DesignSystemPreview.tsx",
     "**/*.d.ts",
     "**/*.config.{js,ts}",
     "**/*.test.{ts,tsx}",

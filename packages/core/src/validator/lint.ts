@@ -358,9 +358,3 @@ function parseOxlintOutput(output: string): string[] {
 
   return warnings
 }
-
-// ============================================================================
-// Export
-// ============================================================================
-
-export default lintValidator

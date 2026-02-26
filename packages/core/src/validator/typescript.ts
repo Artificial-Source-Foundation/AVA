@@ -148,9 +148,3 @@ function parseTypeScriptWarnings(output: string): string[] {
 
   return warnings
 }
-
-// ============================================================================
-// Export
-// ============================================================================
-
-export default typescriptValidator

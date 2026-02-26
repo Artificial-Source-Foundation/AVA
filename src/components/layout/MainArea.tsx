@@ -7,7 +7,7 @@
 import { Sparkles } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
 import { useSession } from '../../stores/session'
-import { ChatView } from '../chat'
+import { ChatView } from '../chat/ChatView'
 
 export const MainArea: Component = () => {
   const { currentSession } = useSession()

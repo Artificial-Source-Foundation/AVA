@@ -344,9 +344,3 @@ function formatIssue(issue: SelfReviewIssue): string {
 
   return message
 }
-
-// ============================================================================
-// Export
-// ============================================================================
-
-export default selfReviewValidator

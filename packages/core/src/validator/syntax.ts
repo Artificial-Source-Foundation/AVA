@@ -228,9 +228,3 @@ function countBrackets(content: string): {
 
   return { parens, braces, brackets }
 }
-
-// ============================================================================
-// Export
-// ============================================================================
-
-export default syntaxValidator

@@ -1,0 +1,10 @@
+{
+  "name": "ava-context",
+  "version": "1.0.0",
+  "description": "Token tracking and context compaction strategies",
+  "main": "src/index.ts",
+  "builtIn": true,
+  "enabledByDefault": true,
+  "priority": 5,
+  "capabilities": ["context-strategies", "settings"]
+}

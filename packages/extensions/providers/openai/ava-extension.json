@@ -1,0 +1,10 @@
+{
+  "name": "ava-provider-openai",
+  "version": "1.0.0",
+  "description": "OpenAI (GPT) LLM provider",
+  "main": "src/index.ts",
+  "builtIn": true,
+  "enabledByDefault": true,
+  "priority": 0,
+  "capabilities": ["providers"]
+}

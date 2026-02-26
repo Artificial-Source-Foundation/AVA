@@ -1,0 +1,10 @@
+{
+  "name": "ava-provider-openrouter",
+  "version": "1.0.0",
+  "description": "OpenRouter LLM provider (100+ models)",
+  "main": "src/index.ts",
+  "builtIn": true,
+  "enabledByDefault": true,
+  "priority": 0,
+  "capabilities": ["providers"]
+}

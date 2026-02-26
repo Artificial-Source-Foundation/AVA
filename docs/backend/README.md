@@ -1,6 +1,6 @@
 # Backend — @ava/core
 
-> The brain of AVA. ~237 source files, ~54,500 lines. Test baseline: ~2576 tests across ~110 files (~46% coverage).
+> The brain of AVA. ~237 source files, ~54,500 lines. Test baseline: ~3302 tests across ~162 files. Includes dual-stack: original core + core-v2 + extensions.
 
 **Package:** `packages/core/` | **Entry:** `packages/core/src/index.ts` | **Exports:** 29 modules
 
@@ -186,4 +186,4 @@ All in `tools/` and auto-registered in `tools/index.ts`:
 
 ---
 
-*Last updated: 2026-02-25 — ~2576 tests across ~110 files (~46% coverage)*
+*Last updated: 2026-02-26 — ~3302 tests across ~162 files (dual-stack: core + core-v2 + extensions)*

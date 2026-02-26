@@ -79,9 +79,9 @@ Token tracking, compaction, and compression strategies.
 
 ```bash
 pnpm build:all                                    # Build everything
-npx vitest run packages/core-v2/                  # Core-v2 tests (366 tests)
-npx vitest run packages/extensions/               # Extension tests (187 tests)
-npx vitest run                                    # All tests (3,129 tests)
+npx vitest run packages/core-v2/                  # Core-v2 tests (407 tests, 24 files)
+npx vitest run packages/extensions/               # Extension tests (319 tests, 28 files)
+npx vitest run                                    # All tests (3,302 tests, 162 files)
 ```
 
 ## Extension Manifest Format

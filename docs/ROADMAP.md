@@ -32,7 +32,7 @@ Everything needed for a working desktop AI coding app.
 - Spring physics animations, glassmorphism design
 - Code viewer (CodeMirror 6)
 
-### Core Engine (~54,500 lines, latest baseline: ~2369 tests across 87 files)
+### Core Engine (~54,500 lines, latest baseline: ~3302 tests across 162 files)
 | Category | Modules |
 |----------|---------|
 | Agent System | Agent loop, Commander, Parallel execution, Validator |
@@ -73,7 +73,7 @@ All development work is done. Only manual Tauri testing remains.
 - File watcher (AI comments: `// AI!` execute, `// AI?` question — 6 patterns, 30+ extensions, Tauri FS watch)
 - Step-level undo (Undo button in toolbar, git revert of last auto-committed AI edit)
 - Streaming tool preview (live tool call cards with status transitions during streaming)
-- Backend and integration baseline tests (1801 tests across 70 files)
+- Backend and integration baseline tests (3302 tests across 162 files)
 - 0 TS errors, 0 Biome errors, vite build passes, 0 TODOs in src/
 
 ### Manual Testing (Before Phase 2)
@@ -88,7 +88,7 @@ See [Frontend Backlog](frontend/backlog.md) for what's next.
 
 ---
 
-## Sprint 1.6: Testing & Debug (IN PROGRESS)
+## Sprint 1.6: Testing & Debug (COMPLETE)
 
 Hardening sprint focused on tests, logging, and parity with PI Coding Agent.
 This sprint is partially implemented and now tracked as active.
@@ -123,7 +123,7 @@ Active execution docs:
 
 ### Sprint 1.6 Verification Workflow
 - Added `npm run verify:mvp` to run lint + typecheck + full test suite.
-- Current status: verification pipeline is green in the latest readiness run (`verify:mvp` passed, full suite `2369 tests / 87 files`).
+- Current status: verification pipeline is green in the latest readiness run (`verify:mvp` passed, full suite `3302 tests / 162 files`).
 
 ### Next Build Steps (Immediate)
 - [x] Implement automatic session titles from first user message for new chats

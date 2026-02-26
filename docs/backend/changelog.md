@@ -4,6 +4,39 @@
 
 ---
 
+## 2026-02-26
+
+### Sprint 8 — Test Coverage Push (core-v2 + extensions)
+
+**195 new tests across 15 test files** in the new architecture stack (core-v2 + extensions).
+
+**New test files (15):**
+- `packages/core-v2/src/agent/loop.test.ts` — AgentExecutor: run, events, termination modes (22 tests)
+- `packages/core-v2/src/agent/types.test.ts` — AgentTerminateMode enum, DEFAULT_AGENT_CONFIG (6 tests)
+- `packages/core-v2/src/extensions/loader.test.ts` — loadExtensionsFromDirectory, loadBuiltInExtension (13 tests)
+- `packages/extensions/tools-extended/src/batch.test.ts` — Parallel tool execution, nesting prevention (8 tests)
+- `packages/extensions/tools-extended/src/multiedit.test.ts` — Atomic multi-edit, error handling (7 tests)
+- `packages/extensions/tools-extended/src/create.test.ts` — File creation, parent dirs (6 tests)
+- `packages/extensions/tools-extended/src/delete.test.ts` — File deletion, directory rejection (5 tests)
+- `packages/extensions/tools-extended/src/ls.test.ts` — Directory listing, ignore filters (7 tests)
+- `packages/extensions/tools-extended/src/todo.test.ts` — In-memory todo CRUD (7 tests)
+- `packages/extensions/tools-extended/src/completion.test.ts` — Completion signaling (4 tests)
+- `packages/extensions/tools-extended/src/question.test.ts` — Question formatting (5 tests)
+- `packages/extensions/validator/src/validators.test.ts` — syntax, typescript, lint, test validators (35 tests)
+- `packages/extensions/agent-modes/src/minimal-mode.test.ts` — State management, tool filtering (14 tests)
+- `packages/extensions/commander/src/workers.test.ts` — 5 worker definitions validation (23 tests)
+- `packages/extensions/context/src/strategies.test.ts` — truncate + summarize compaction (15 tests)
+
+**Infrastructure:**
+- Added `@ava/core-v2/__test-utils__/mock-platform` alias to `vitest.config.ts`
+
+**Test totals:**
+- core-v2: 344 → 407 tests (24 files)
+- extensions: 187 → 319 tests (28 files)
+- **Total: ~3302 tests** across ~162 test files
+
+---
+
 ## 2026-02-25
 
 ### Session 55 — Logger Refactor + Agent CLI Command + Test Coverage
@@ -366,4 +399,4 @@
 
 ---
 
-*Last updated: 2026-02-25 — ~2576 tests across ~110 test files*
+*Last updated: 2026-02-26 — ~3302 tests across ~162 test files (includes core-v2 + extensions)*

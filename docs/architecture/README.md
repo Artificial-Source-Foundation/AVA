@@ -13,7 +13,9 @@ AVA/
 ├── src/                    # Desktop app (Tauri + SolidJS) ← PRIMARY
 ├── src-tauri/              # Rust backend for Tauri
 ├── packages/
-│   ├── core/               # Shared business logic (~54,200 lines, latest baseline: ~2321 tests)
+│   ├── core/               # Shared business logic (~54,200 lines)
+│   ├── core-v2/            # Minimal core (~28 files, 407 tests)
+│   ├── extensions/         # Built-in extensions (25+ modules, 319 tests)
 │   ├── platform-node/      # Node.js implementations (fs, shell, PTY)
 │   └── platform-tauri/     # Tauri implementations (fs, shell)
 └── cli/                    # CLI interface (secondary)

@@ -35,6 +35,7 @@ export default defineConfig({
       'packages/core-v2/src/**/*.{test,spec}.ts',
       'packages/extensions/**/*.{test,spec}.ts',
       'cli/src/**/*.{test,spec}.ts',
+      'docs/examples/**/*.{test,spec}.ts',
     ],
   },
   resolve: {
@@ -70,6 +71,9 @@ export default defineConfig({
       ),
       '@ava/core-v2/__test-utils__/mock-platform': fileURLToPath(
         new URL('./packages/core-v2/src/__test-utils__/mock-platform.ts', import.meta.url)
+      ),
+      '@ava/core-v2/__test-utils__/mock-extension-api': fileURLToPath(
+        new URL('./packages/core-v2/src/__test-utils__/mock-extension-api.ts', import.meta.url)
       ),
       '@ava/core-v2': fileURLToPath(new URL('./packages/core-v2/src/index.ts', import.meta.url)),
       '@ava/core': fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),

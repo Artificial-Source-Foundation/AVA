@@ -1,0 +1,7 @@
+{
+  "name": "polite-middleware",
+  "version": "0.1.0",
+  "description": "Appends safety reminder to write operations",
+  "main": "dist/index.js",
+  "capabilities": ["tool-middleware"]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "timestamp-tool",
+  "version": "0.1.0",
+  "description": "Returns current date/time in multiple formats",
+  "main": "dist/index.js",
+  "capabilities": ["tools"]
+}

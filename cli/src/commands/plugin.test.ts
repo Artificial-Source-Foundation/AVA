@@ -30,6 +30,38 @@ describe('plugin command', () => {
     await expect(fs.stat(path.join(pluginDir, 'src', 'index.ts'))).resolves.toBeDefined()
   })
 
+  it('generates ava-extension.json manifest', async () => {
+    const root = await createTempRoot()
+    await runPluginCommand(['init', 'My Plugin', '--dir', root])
+    const pluginDir = path.join(root, 'my-plugin')
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(pluginDir, 'ava-extension.json'), 'utf-8')
+    )
+    expect(manifest.name).toBe('my-plugin')
+    expect(manifest.version).toBe('0.1.0')
+    expect(manifest.main).toBe('dist/index.js')
+  })
+
+  it('generates test file using ExtensionAPI pattern', async () => {
+    const root = await createTempRoot()
+    await runPluginCommand(['init', 'My Plugin', '--dir', root])
+    const pluginDir = path.join(root, 'my-plugin')
+    const testSource = await fs.readFile(path.join(pluginDir, 'src', 'index.test.ts'), 'utf-8')
+    expect(testSource).toContain('createMockExtensionAPI')
+    expect(testSource).toContain('activate')
+  })
+
+  it('generates source using ExtensionAPI pattern', async () => {
+    const root = await createTempRoot()
+    await runPluginCommand(['init', 'My Plugin', '--dir', root])
+    const pluginDir = path.join(root, 'my-plugin')
+    const source = await fs.readFile(path.join(pluginDir, 'src', 'index.ts'), 'utf-8')
+    expect(source).toContain('ExtensionAPI')
+    expect(source).toContain('Disposable')
+    expect(source).toContain('export function activate')
+    expect(source).not.toContain('PluginContext')
+  })
+
   it('fails when target directory is non-empty without force', async () => {
     const root = await createTempRoot()
     const pluginDir = path.join(root, 'demo-plugin')

@@ -1,7 +1,12 @@
 import { spawn } from 'node:child_process'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import { createPluginSource, createReadme } from './plugin-templates.js'
+import {
+  createManifest,
+  createPluginSource,
+  createPluginTest,
+  createReadme,
+} from './plugin-templates.js'
 
 interface PluginInitOptions {
   pluginName: string
@@ -183,8 +188,16 @@ async function scaffoldPlugin(options: PluginInitOptions): Promise<void> {
       content: createReadme(options.pluginName, safeName),
     },
     {
+      relativePath: 'ava-extension.json',
+      content: createManifest(options.pluginName, safeName),
+    },
+    {
       relativePath: 'src/index.ts',
       content: createPluginSource(options.pluginName, safeName),
+    },
+    {
+      relativePath: 'src/index.test.ts',
+      content: createPluginTest(options.pluginName, safeName),
     },
   ]
 

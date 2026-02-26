@@ -2,7 +2,13 @@ import type { PluginCatalogItem } from '../types/plugin'
 
 export type PluginCatalogStatus = 'idle' | 'syncing' | 'ready' | 'error'
 
-export const PLUGIN_CATALOG: PluginCatalogItem[] = [
+const CATALOG_URL =
+  'https://raw.githubusercontent.com/anthropic-ava/plugin-catalog/main/catalog.json'
+const CATALOG_CACHE_KEY = 'ava:plugin-catalog'
+const CATALOG_TIMESTAMP_KEY = 'ava:plugin-catalog-ts'
+const CATALOG_TTL_MS = 30 * 60 * 1000 // 30 minutes
+
+export const FALLBACK_CATALOG: PluginCatalogItem[] = [
   {
     id: 'task-planner',
     name: 'Task Planner',
@@ -45,13 +51,73 @@ export const PLUGIN_CATALOG: PluginCatalogItem[] = [
   },
 ]
 
+/** @deprecated Use getPluginCatalog() for live catalog */
+export const PLUGIN_CATALOG = FALLBACK_CATALOG
+
 export const FEATURED_PLUGIN_IDS = ['task-planner', 'test-guard']
 
+let cachedCatalog: PluginCatalogItem[] = FALLBACK_CATALOG
+
+export function getPluginCatalog(): PluginCatalogItem[] {
+  return cachedCatalog
+}
+
+export function getFeaturedPluginIds(): string[] {
+  return FEATURED_PLUGIN_IDS
+}
+
+function isCacheValid(): boolean {
+  if (typeof localStorage === 'undefined') return false
+  const ts = localStorage.getItem(CATALOG_TIMESTAMP_KEY)
+  if (!ts) return false
+  return Date.now() - Number(ts) < CATALOG_TTL_MS
+}
+
+function loadFromCache(): PluginCatalogItem[] | null {
+  if (typeof localStorage === 'undefined') return null
+  const raw = localStorage.getItem(CATALOG_CACHE_KEY)
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as PluginCatalogItem[]
+  } catch {
+    return null
+  }
+}
+
+function saveToCache(catalog: PluginCatalogItem[]): void {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(catalog))
+  localStorage.setItem(CATALOG_TIMESTAMP_KEY, String(Date.now()))
+}
+
 export async function syncPluginCatalog(): Promise<PluginCatalogItem[]> {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-    throw new Error('You appear to be offline. Reconnect to sync plugin metadata.')
+  // Check cache first
+  if (isCacheValid()) {
+    const cached = loadFromCache()
+    if (cached) {
+      cachedCatalog = cached
+      return cached
+    }
   }
 
-  await Promise.resolve()
-  return PLUGIN_CATALOG
+  // Try fetching remote catalog
+  try {
+    const response = await fetch(CATALOG_URL)
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+    const data = (await response.json()) as PluginCatalogItem[]
+    saveToCache(data)
+    cachedCatalog = data
+    return data
+  } catch {
+    // Network error or parse error — fall back
+    const cached = loadFromCache()
+    if (cached) {
+      cachedCatalog = cached
+      return cached
+    }
+    cachedCatalog = FALLBACK_CATALOG
+    return FALLBACK_CATALOG
+  }
 }

@@ -9,9 +9,14 @@ export interface PluginCatalogItem {
   source: 'official' | 'community'
   trust: 'verified' | 'reviewed'
   changelogSummary: string
+  repo?: string
+  downloadUrl?: string
+  readme?: string
 }
 
 export interface PluginState {
   installed: boolean
   enabled: boolean
+  version?: string
+  installedAt?: number
 }

@@ -4,6 +4,7 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   resolve: {
     alias: {
+      '@ava/core-v2/agent': path.resolve(__dirname, '../core-v2/src/agent/index.ts'),
       '@ava/core-v2/llm': path.resolve(__dirname, '../core-v2/src/llm/index.ts'),
       '@ava/core-v2/tools': path.resolve(__dirname, '../core-v2/src/tools/index.ts'),
       '@ava/core-v2/extensions': path.resolve(__dirname, '../core-v2/src/extensions/index.ts'),

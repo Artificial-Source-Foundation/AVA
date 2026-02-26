@@ -19,6 +19,7 @@
     "resolveJsonModule": true,
     "paths": {
       "@ava/core-v2": ["../core-v2/src/index.ts"],
+      "@ava/core-v2/agent": ["../core-v2/src/agent/index.ts"],
       "@ava/core-v2/llm": ["../core-v2/src/llm/index.ts"],
       "@ava/core-v2/tools": ["../core-v2/src/tools/index.ts"],
       "@ava/core-v2/extensions": ["../core-v2/src/extensions/index.ts"],

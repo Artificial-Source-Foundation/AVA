@@ -1,4 +1,5 @@
 export {
+  addToolMiddleware,
   createExtensionAPI,
   emitEvent,
   getAgentModes,

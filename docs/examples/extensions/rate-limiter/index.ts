@@ -17,7 +17,7 @@ export function activate(api: ExtensionAPI): Disposable {
     name: 'rate-limiter',
     priority: 5, // runs after permissions (0) but before hooks (10)
 
-    async before(call) {
+    async before(_call) {
       // Clean up old entries
       const now = Date.now()
       while (callLog.length > 0 && callLog[0]! < now - WINDOW_MS) {

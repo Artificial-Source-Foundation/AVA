@@ -17,7 +17,7 @@ const wordCountTool = defineTool({
     path: z.string().describe('Path to the file to count'),
   }),
 
-  async execute(input, ctx) {
+  async execute(input, _ctx) {
     const content = await getPlatform().fs.readFile(input.path)
 
     const lines = content.split('\n').length

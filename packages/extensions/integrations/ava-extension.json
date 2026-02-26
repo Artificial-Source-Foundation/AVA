@@ -1,0 +1,9 @@
+{
+  "name": "ava-integrations",
+  "version": "1.0.0",
+  "description": "External API integrations (Exa search, etc.)",
+  "main": "src/index.ts",
+  "builtIn": true,
+  "enabledByDefault": false,
+  "priority": 20
+}

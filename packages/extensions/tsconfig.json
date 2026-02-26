@@ -50,6 +50,10 @@
     "models/**/*.ts",
     "scheduler/**/*.ts",
     "sandbox/**/*.ts",
+    "skills/**/*.ts",
+    "custom-commands/**/*.ts",
+    "slash-commands/**/*.ts",
+    "integrations/**/*.ts",
     "index.ts"
   ],
   "exclude": ["**/*.test.ts", "dist", "node_modules"],

@@ -59,20 +59,16 @@ export class MessageBus {
 
     return new Promise<TRes>((resolve, reject) => {
       const timer = setTimeout(() => {
-        this.correlationHandlers.delete(correlationId)
+        unsub()
         reject(new Error(`Bus request timed out after ${timeoutMs}ms for ${responseType}`))
       }, timeoutMs)
 
-      this.correlationHandlers.set(correlationId, (response) => {
-        clearTimeout(timer)
-        resolve(response as TRes)
-      })
-
-      // Subscribe to response type so correlation handler gets triggered
+      // Subscribe to response type and resolve when correlationId matches
       const unsub = this.subscribe(responseType, (msg) => {
         if (msg.correlationId === correlationId) {
           unsub()
-          this.publish(msg) // re-publish to trigger correlation handler
+          clearTimeout(timer)
+          resolve(msg as unknown as TRes)
         }
       })
 

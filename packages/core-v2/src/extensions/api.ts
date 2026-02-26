@@ -64,6 +64,17 @@ export function emitEvent(event: string, data: unknown): void {
   }
 }
 
+/** Add middleware directly to the global registry (for testing / core use). */
+export function addToolMiddleware(middleware: ToolMiddleware): Disposable {
+  toolMiddlewares.push(middleware)
+  return {
+    dispose() {
+      const idx = toolMiddlewares.indexOf(middleware)
+      if (idx !== -1) toolMiddlewares.splice(idx, 1)
+    },
+  }
+}
+
 export function resetRegistries(): void {
   commands.clear()
   agentModes.clear()

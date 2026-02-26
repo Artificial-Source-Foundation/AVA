@@ -1,0 +1,39 @@
+export {
+  createExtensionAPI,
+  emitEvent,
+  getAgentModes,
+  getCommands,
+  getContextStrategies,
+  getToolMiddlewares,
+  getValidators,
+  resetRegistries,
+} from './api.js'
+export {
+  type LoadedExtension,
+  loadBuiltInExtension,
+  loadExtensionsFromDirectory,
+} from './loader.js'
+export { ExtensionManager } from './manager.js'
+export type {
+  AgentMode,
+  ContextStrategy,
+  Disposable,
+  EventHandler,
+  Extension,
+  ExtensionActivator,
+  ExtensionAPI,
+  ExtensionCapability,
+  ExtensionEvent,
+  ExtensionEventListener,
+  ExtensionManifest,
+  ExtensionModule,
+  ExtensionStorage,
+  LLMClientFactory,
+  SettingDefinition,
+  SlashCommand,
+  ToolMiddleware,
+  ToolMiddlewareContext,
+  ToolMiddlewareResult,
+  ValidationResult,
+  Validator,
+} from './types.js'

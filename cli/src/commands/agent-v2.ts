@@ -7,10 +7,15 @@
 
 import * as os from 'node:os'
 import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { AgentExecutor } from '@ava/core-v2/agent'
+import { MessageBus } from '@ava/core-v2/bus'
+import type { ExtensionModule } from '@ava/core-v2/extensions'
+import { ExtensionManager, loadAllBuiltInExtensions } from '@ava/core-v2/extensions'
 import type { LLMProvider } from '@ava/core-v2/llm'
 import { registerProvider } from '@ava/core-v2/llm'
 import { setPlatform } from '@ava/core-v2/platform'
+import { createSessionManager } from '@ava/core-v2/session'
 import { createNodePlatform } from '@ava/platform-node/v2'
 
 interface AgentV2Options {
@@ -74,13 +79,36 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
   const platform = createNodePlatform(dbPath)
   setPlatform(platform)
 
-  // Register a simple mock provider for testing
+  // Always register the mock provider as a fallback
   registerProvider('mock', () => ({
     async *stream() {
       yield { content: 'Mock response — core-v2 agent loop is working!' }
       yield { done: true }
     },
   }))
+
+  // Load built-in extensions (providers, tools, permissions, etc.)
+  const bus = new MessageBus()
+  const sessionManager = createSessionManager()
+  const manager = new ExtensionManager(bus, sessionManager)
+
+  const currentDir = path.dirname(fileURLToPath(import.meta.url))
+  const extensionsDir = path.resolve(currentDir, '../../../packages/extensions')
+
+  let extensionCount = 0
+  try {
+    const loaded = await loadAllBuiltInExtensions(extensionsDir)
+    const modules = new Map<string, ExtensionModule>()
+    for (const ext of loaded) {
+      manager.register(ext.manifest, ext.path)
+      modules.set(ext.manifest.name, ext.module)
+    }
+    await manager.activateAll(modules)
+    extensionCount = manager.getActiveExtensions().length
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    process.stderr.write(`[agent-v2] Warning: Failed to load extensions: ${message}\n`)
+  }
 
   // Set up abort controller
   const abortController = new AbortController()
@@ -102,8 +130,9 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
     if (options.verbose) {
       process.stderr.write(`[agent-v2] Running with goal: ${options.goal}\n`)
       process.stderr.write(
-        `[agent-v2] Provider: ${options.provider}, Max turns: ${options.maxTurns}\n\n`
+        `[agent-v2] Provider: ${options.provider}, Max turns: ${options.maxTurns}\n`
       )
+      process.stderr.write(`[agent-v2] Extensions loaded: ${extensionCount}\n\n`)
     }
 
     const agent = new AgentExecutor({
@@ -115,11 +144,12 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
     const result = await agent.run({ goal: options.goal, cwd: options.cwd }, abortController.signal)
 
     const durationMs = Date.now() - startTime
+    const { input, output } = result.tokensUsed
 
     console.log(`\n--- Agent V2 Summary ---`)
     console.log(`Status:   ${result.success ? 'SUCCESS' : 'FAILED'} (${result.terminateMode})`)
     console.log(`Turns:    ${result.turns}`)
-    console.log(`Tokens:   ${result.tokensUsed}`)
+    console.log(`Tokens:   ${input} in / ${output} out`)
     console.log(`Duration: ${(durationMs / 1000).toFixed(1)}s`)
 
     if (result.output) {
@@ -134,6 +164,7 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
   } finally {
     process.removeListener('SIGINT', onSignal)
     process.removeListener('SIGTERM', onSignal)
+    await manager.dispose()
   }
 }
 

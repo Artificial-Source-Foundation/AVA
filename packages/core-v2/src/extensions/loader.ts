@@ -71,6 +71,47 @@ export async function loadExtensionsFromDirectory(dir: string): Promise<LoadedEx
   return loaded
 }
 
+/** Loader function type — matches loadExtensionsFromDirectory signature. */
+export type ExtensionDirLoader = (dir: string) => Promise<LoadedExtension[]>
+
+/**
+ * Load all built-in extensions from the extensions directory.
+ *
+ * Handles the nested layout: top-level extension dirs + `providers/*` subdirs.
+ * Accepts an optional loader for testability.
+ */
+export async function loadAllBuiltInExtensions(
+  extensionsDir: string,
+  loader: ExtensionDirLoader = loadExtensionsFromDirectory
+): Promise<LoadedExtension[]> {
+  const platform = getPlatform()
+
+  const exists = await platform.fs.exists(extensionsDir)
+  if (!exists) {
+    log.debug(`Built-in extensions directory not found: ${extensionsDir}`)
+    return []
+  }
+
+  // Load top-level extensions (permissions, tools-extended, hooks, etc.)
+  const topLevel = await loader(extensionsDir)
+
+  // Load provider extensions from providers/* subdirectory
+  const providersDir = path.join(extensionsDir, 'providers')
+  const providers = await loader(providersDir)
+
+  const all = [...topLevel, ...providers]
+
+  // Mark all as built-in
+  for (const ext of all) {
+    ext.manifest.builtIn = true
+  }
+
+  log.debug(
+    `Loaded ${all.length} built-in extensions (${topLevel.length} core + ${providers.length} providers)`
+  )
+  return all
+}
+
 /**
  * Load a single extension by manifest and module reference.
  * Used for built-in extensions that are bundled, not loaded from disk.

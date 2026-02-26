@@ -78,8 +78,13 @@ export interface AgentInputs {
 
 // ─── Turn Result ─────────────────────────────────────────────────────────────
 
+export interface TurnUsage {
+  inputTokens: number
+  outputTokens: number
+}
+
 export type AgentTurnResult =
-  | { status: 'continue'; toolCalls: ToolCallInfo[] }
-  | { status: 'stop'; terminateMode: AgentTerminateMode; result: string | null }
+  | { status: 'continue'; toolCalls: ToolCallInfo[]; usage?: TurnUsage }
+  | { status: 'stop'; terminateMode: AgentTerminateMode; result: string | null; usage?: TurnUsage }
 
 export const COMPLETE_TASK_TOOL = 'attempt_completion'

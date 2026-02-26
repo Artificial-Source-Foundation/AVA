@@ -452,6 +452,124 @@ describe('AgentExecutor.run', () => {
   })
 })
 
+// ─── Token Tracking ────────────────────────────────────────────────────────
+
+describe('Token tracking', () => {
+  it('accumulates usage from stream deltas into tokensUsed', async () => {
+    const client = createMockClient([
+      [{ content: 'Hello!', usage: { inputTokens: 100, outputTokens: 50 } }, { done: true }],
+    ])
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([])
+
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    const result = await exec.run({ goal: 'Say hi', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    expect(result.tokensUsed).toEqual({ input: 100, output: 50 })
+  })
+
+  it('accumulates tokens across multiple turns', async () => {
+    const client = createMockClient([
+      // Turn 1: tool call with usage
+      [
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-1',
+            name: 'read_file',
+            input: { path: '/test.txt' },
+          },
+        },
+        { usage: { inputTokens: 100, outputTokens: 50 } },
+      ],
+      // Turn 2: completion with usage
+      [{ content: 'Done reading.', usage: { inputTokens: 200, outputTokens: 80 } }, { done: true }],
+    ])
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+    ])
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockResolvedValue({
+      success: true,
+      output: 'content',
+    })
+
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    const result = await exec.run({ goal: 'Read file', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    expect(result.tokensUsed).toEqual({ input: 300, output: 130 })
+  })
+
+  it('stays at zero when no usage deltas are emitted', async () => {
+    const client = createMockClient([[{ content: 'No usage info', done: true }]])
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([])
+
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    const result = await exec.run({ goal: 'Test', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    expect(result.tokensUsed).toEqual({ input: 0, output: 0 })
+  })
+
+  it('emits llm:usage event per turn', async () => {
+    const usageEvents: unknown[] = []
+    const { resetRegistries } = await import('../extensions/api.js')
+    const apiModule = await import('../extensions/api.js')
+
+    // Register event handler for llm:usage
+    const handlers = new Set<(data: unknown) => void>()
+    const handler = (data: unknown) => usageEvents.push(data)
+    handlers.add(handler)
+
+    // Use the real emitEvent — spy on it to capture calls
+    const emitSpy = vi.spyOn(apiModule, 'emitEvent')
+
+    const client = createMockClient([
+      [
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-1',
+            name: 'read_file',
+            input: { path: '/test.txt' },
+          },
+        },
+        { usage: { inputTokens: 50, outputTokens: 25 } },
+      ],
+      [{ content: 'Done', usage: { inputTokens: 75, outputTokens: 30 } }, { done: true }],
+    ])
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+    ])
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockResolvedValue({
+      success: true,
+      output: 'content',
+    })
+
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    await exec.run({ goal: 'Read', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    // Filter emitEvent calls for 'llm:usage'
+    const llmUsageCalls = emitSpy.mock.calls.filter(([event]) => event === 'llm:usage')
+    expect(llmUsageCalls).toHaveLength(2)
+    expect(llmUsageCalls[0]![1]).toEqual({
+      sessionId: exec.agentId,
+      inputTokens: 50,
+      outputTokens: 25,
+    })
+    expect(llmUsageCalls[1]![1]).toEqual({
+      sessionId: exec.agentId,
+      inputTokens: 75,
+      outputTokens: 30,
+    })
+  })
+})
+
 // ─── runAgent convenience ──────────────────────────────────────────────────
 
 describe('runAgent', () => {

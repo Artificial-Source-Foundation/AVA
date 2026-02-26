@@ -57,8 +57,8 @@ export class AgentExecutor {
     const client = createClient(provider)
 
     const history: ChatMessage[] = []
-    const totalInput = 0
-    const totalOutput = 0
+    let totalInput = 0
+    let totalOutput = 0
     let turn = 0
     let lastOutput = ''
 
@@ -98,6 +98,17 @@ export class AgentExecutor {
           model,
           combinedSignal
         )
+
+        // Accumulate token usage
+        if (turnResult.usage) {
+          totalInput += turnResult.usage.inputTokens
+          totalOutput += turnResult.usage.outputTokens
+          emitEvent('llm:usage', {
+            sessionId: this.agentId,
+            inputTokens: turnResult.usage.inputTokens,
+            outputTokens: turnResult.usage.outputTokens,
+          })
+        }
 
         if (turnResult.status === 'stop') {
           lastOutput = turnResult.result ?? lastOutput
@@ -151,6 +162,8 @@ export class AgentExecutor {
     // Stream LLM response
     let assistantContent = ''
     const toolCalls: ToolUseBlock[] = []
+    let turnInput = 0
+    let turnOutput = 0
 
     const providerConfig: ProviderConfig = {
       provider: this.config.provider ?? 'anthropic',
@@ -173,12 +186,17 @@ export class AgentExecutor {
       if (delta.toolUse) {
         toolCalls.push(delta.toolUse)
       }
+      if (delta.usage) {
+        turnInput += delta.usage.inputTokens ?? 0
+        turnOutput += delta.usage.outputTokens ?? 0
+      }
       if (delta.error) {
         this.emit({ type: 'error', agentId: this.agentId, error: delta.error.message })
         return {
           status: 'stop',
           terminateMode: AgentTerminateMode.ERROR,
           result: delta.error.message,
+          usage: { inputTokens: turnInput, outputTokens: turnOutput },
         }
       }
     }
@@ -191,7 +209,12 @@ export class AgentExecutor {
 
     // No tool calls — assistant is done
     if (toolCalls.length === 0) {
-      return { status: 'stop', terminateMode: AgentTerminateMode.GOAL, result: assistantContent }
+      return {
+        status: 'stop',
+        terminateMode: AgentTerminateMode.GOAL,
+        result: assistantContent,
+        usage: { inputTokens: turnInput, outputTokens: turnOutput },
+      }
     }
 
     // Execute tool calls
@@ -203,7 +226,12 @@ export class AgentExecutor {
       if (call.name === COMPLETE_TASK_TOOL) {
         const result = (call.input as Record<string, string>).result ?? assistantContent
         emitEvent('agent:completing', { agentId: this.agentId, result })
-        return { status: 'stop', terminateMode: AgentTerminateMode.GOAL, result }
+        return {
+          status: 'stop',
+          terminateMode: AgentTerminateMode.GOAL,
+          result,
+          usage: { inputTokens: turnInput, outputTokens: turnOutput },
+        }
       }
 
       this.emit({
@@ -245,7 +273,11 @@ export class AgentExecutor {
     // Add tool results to history as user message
     history.push({ role: 'user', content: toolResults.join('\n\n') })
 
-    return { status: 'continue', toolCalls: callInfos }
+    return {
+      status: 'continue',
+      toolCalls: callInfos,
+      usage: { inputTokens: turnInput, outputTokens: turnOutput },
+    }
   }
 
   private buildSystemPrompt(inputs: AgentInputs): string {

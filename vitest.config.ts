@@ -76,6 +76,9 @@ export default defineConfig({
       '@ava/platform-tauri': fileURLToPath(
         new URL('./packages/platform-tauri/src/index.ts', import.meta.url)
       ),
+      '@ava/platform-node/v2': fileURLToPath(
+        new URL('./packages/platform-node/src/v2.ts', import.meta.url)
+      ),
       '@ava/platform-node': fileURLToPath(
         new URL('./packages/platform-node/src/index.ts', import.meta.url)
       ),

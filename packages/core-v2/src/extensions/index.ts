@@ -11,6 +11,7 @@ export {
 } from './api.js'
 export {
   type LoadedExtension,
+  loadAllBuiltInExtensions,
   loadBuiltInExtension,
   loadExtensionsFromDirectory,
 } from './loader.js'

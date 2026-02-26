@@ -5,7 +5,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installMockPlatform, type MockPlatform } from '../__test-utils__/mock-platform.js'
 import { resetLogger } from '../logger/logger.js'
-import { loadBuiltInExtension, loadExtensionsFromDirectory } from './loader.js'
+import {
+  loadAllBuiltInExtensions,
+  loadBuiltInExtension,
+  loadExtensionsFromDirectory,
+} from './loader.js'
 import type { ExtensionManifest, ExtensionModule } from './types.js'
 
 let platform: MockPlatform
@@ -165,5 +169,82 @@ describe('loadBuiltInExtension', () => {
     const result = loadBuiltInExtension(manifest, module)
     expect(result.module).toBe(module)
     expect(result.module.activate).toBe(activateFn)
+  })
+})
+
+describe('loadAllBuiltInExtensions', () => {
+  it('returns empty array when directory does not exist', async () => {
+    const result = await loadAllBuiltInExtensions('/nonexistent')
+    expect(result).toEqual([])
+  })
+
+  it('combines top-level and providers/* extensions', async () => {
+    const topLevelExt = {
+      manifest: { name: 'permissions', version: '1.0.0', main: 'index.js' },
+      module: { activate: vi.fn() },
+      path: '/extensions/permissions',
+    }
+    const providerExt = {
+      manifest: { name: 'anthropic', version: '1.0.0', main: 'index.js' },
+      module: { activate: vi.fn() },
+      path: '/extensions/providers/anthropic',
+    }
+
+    // Mock loader: first call returns top-level, second returns providers
+    const mockLoader = vi.fn()
+    mockLoader.mockResolvedValueOnce([topLevelExt])
+    mockLoader.mockResolvedValueOnce([providerExt])
+
+    platform.fs.addDir('/extensions')
+
+    const result = await loadAllBuiltInExtensions('/extensions', mockLoader)
+
+    expect(result).toHaveLength(2)
+    expect(result[0]!.manifest.name).toBe('permissions')
+    expect(result[1]!.manifest.name).toBe('anthropic')
+
+    // Verify loader was called for top-level and providers/
+    expect(mockLoader).toHaveBeenCalledTimes(2)
+    expect(mockLoader).toHaveBeenCalledWith('/extensions')
+    expect(mockLoader).toHaveBeenCalledWith('/extensions/providers')
+  })
+
+  it('marks all loaded extensions as builtIn', async () => {
+    const ext = {
+      manifest: { name: 'test', version: '1.0.0', main: 'index.js' },
+      module: { activate: vi.fn() },
+      path: '/extensions/test',
+    }
+
+    const mockLoader = vi.fn()
+    mockLoader.mockResolvedValueOnce([ext])
+    mockLoader.mockResolvedValueOnce([])
+
+    platform.fs.addDir('/extensions')
+
+    const result = await loadAllBuiltInExtensions('/extensions', mockLoader)
+
+    expect(result).toHaveLength(1)
+    expect(result[0]!.manifest.builtIn).toBe(true)
+  })
+
+  it('handles missing providers directory gracefully', async () => {
+    const ext = {
+      manifest: { name: 'hooks', version: '1.0.0', main: 'index.js' },
+      module: { activate: vi.fn() },
+      path: '/extensions/hooks',
+    }
+
+    const mockLoader = vi.fn()
+    // Top-level returns one, providers returns empty (dir doesn't exist)
+    mockLoader.mockResolvedValueOnce([ext])
+    mockLoader.mockResolvedValueOnce([])
+
+    platform.fs.addDir('/extensions')
+
+    const result = await loadAllBuiltInExtensions('/extensions', mockLoader)
+
+    expect(result).toHaveLength(1)
+    expect(result[0]!.manifest.name).toBe('hooks')
   })
 })

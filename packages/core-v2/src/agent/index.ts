@@ -7,6 +7,7 @@ export type {
   AgentResult,
   AgentTurnResult,
   ToolCallInfo,
+  TurnUsage,
 } from './types.js'
 export {
   AgentTerminateMode,

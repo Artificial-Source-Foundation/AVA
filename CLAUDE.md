@@ -9,8 +9,9 @@
 A **desktop-first AI coding app** (Tauri + SolidJS) for developers and vibe coders. Not an IDE replacement — an AI companion with:
 
 - **Dev Team System** — Visible Team Lead → Senior Leads → Junior Devs hierarchy
-- **Multi-Provider** — 12+ LLM providers, use the best model for each task
+- **Multi-Provider** — 14 LLM providers, use the best model for each task
 - **Plugin Ecosystem** — Obsidian-style, easy to create, discover, and install
+- **Extension-First Architecture** — Minimal core, everything else is a built-in extension
 - **Open Source** — Community-first, MIT license
 
 See [`docs/VISION.md`](docs/VISION.md) for the full product vision.
@@ -22,15 +23,16 @@ See [`docs/VISION.md`](docs/VISION.md) for the full product vision.
 ```bash
 # Development
 npm run tauri dev        # Run desktop app
-npm run build:packages   # Build core + platform packages
-npm run build:cli        # Build CLI (secondary interface)
+pnpm build:all           # Build all packages + CLI
+pnpm build:packages      # Build packages only (core, core-v2, extensions, platforms)
+pnpm build:cli           # Build CLI
 npm run lint             # Oxlint + ESLint
 npm run format           # Biome format
-npx tsc --noEmit         # Type check
+npx tsc --noEmit         # Type check (root/desktop app)
 
 # Testing
-npm run test             # Vitest watch
-npm run test:run         # Single run
+npm run test             # Vitest watch (all tests)
+npm run test:run         # Single run (all tests)
 npx vitest run <path>    # Run specific test file
 
 # Code Quality
@@ -46,14 +48,100 @@ npm run analyze          # Bundle size analysis
 
 ```
 AVA/
-├── src/                   # Desktop app (Tauri + SolidJS) ← PRIMARY
-├── src-tauri/             # Rust backend
+├── src/                       # Desktop app (Tauri + SolidJS) ← PRIMARY
+├── src-tauri/                 # Rust backend
 ├── packages/
-│   ├── core/              # Shared business logic (54,000+ lines)
-│   ├── platform-node/     # Node.js implementations
-│   └── platform-tauri/    # Tauri implementations
-└── cli/                   # CLI interface (secondary)
+│   ├── core/                  # Original backend (54K+ lines, being migrated)
+│   ├── core-v2/               # NEW: Minimal core (~28 files, ~5K lines)
+│   ├── extensions/            # NEW: Built-in extensions (25+ modules)
+│   ├── platform-node/         # Node.js platform implementations
+│   └── platform-tauri/        # Tauri platform implementations
+└── cli/                       # CLI interface (secondary)
 ```
+
+### Dual-Stack Architecture
+
+AVA has two backend stacks running in parallel during migration:
+
+**Original (`packages/core/`)** — Used by desktop app and CLI today
+- Monolithic: 235 files, 54K lines, everything baked in
+- Desktop app and CLI import from `@ava/core`
+
+**New (`packages/core-v2/` + `packages/extensions/`)** — Extension-first
+- Minimal core: ~28 files, ~5K lines (agent loop, tool registry, extension API)
+- Everything else is a built-in extension using the same API as community plugins
+- CLI has `ava agent-v2` command for testing the new stack
+
+### Core-v2 Module Map
+
+```
+packages/core-v2/src/
+├── agent/       # Simplified turn-based loop (~350 lines)
+├── llm/         # LLM client interface + provider registry (no implementations)
+├── tools/       # 6 core tools: read, write, edit, bash, glob, grep
+├── extensions/  # ExtensionAPI + manager + loader
+├── config/      # Extensible SettingsManager
+├── session/     # Session CRUD + auto-save
+├── bus/         # Pure pub/sub message bus
+├── logger/      # Unified logger
+└── platform.ts  # Platform abstraction (fs, shell, credentials, database)
+```
+
+### Extensions Module Map
+
+```
+packages/extensions/
+├── providers/       # 14 LLM providers (anthropic, openai, google, etc.)
+├── permissions/     # Safety & permission middleware
+├── tools-extended/  # 18 additional tools (browser, websearch, etc.)
+├── prompts/         # System prompt building
+├── context/         # Token tracking + compaction
+├── agent-modes/     # Plan mode, minimal mode, doom loop, recovery
+├── hooks/           # Lifecycle hooks as middleware
+├── validator/       # QA pipeline (syntax, types, lint, test)
+├── commander/       # Team hierarchy (Team Lead → Senior Leads → Junior Devs)
+├── mcp/             # MCP protocol client
+├── codebase/        # Repo map, symbols, PageRank
+├── git/             # Git snapshots, auto-commit
+├── lsp/             # Language Server Protocol
+├── diff/            # Diff tracking
+├── focus-chain/     # Task progress tracking
+├── instructions/    # Project instruction loading
+├── models/          # Model registry
+├── scheduler/       # Background task scheduler
+├── skills/          # Auto-invoked knowledge modules
+├── custom-commands/ # TOML user commands
+├── slash-commands/  # Built-in /commands
+├── integrations/    # External APIs (Exa search)
+└── sandbox/         # Docker sandboxed execution
+```
+
+### Extension API
+
+Every extension uses the same `ExtensionAPI` interface — built-in and community:
+
+```typescript
+interface ExtensionAPI {
+  registerTool(tool: Tool): Disposable
+  registerCommand(command: SlashCommand): Disposable
+  registerAgentMode(mode: AgentMode): Disposable
+  registerValidator(validator: Validator): Disposable
+  registerProvider(name: string, factory: LLMClientFactory): Disposable
+  addToolMiddleware(middleware: ToolMiddleware): Disposable
+  on(event: string, handler: EventHandler): Disposable
+  emit(event: string, data: unknown): void
+  readonly bus: MessageBus
+  readonly log: SimpleLogger
+  readonly storage: ExtensionStorage  // per-extension private storage
+}
+```
+
+**How extensions hook into the agent loop:**
+- Permissions → `addToolMiddleware()` at priority 0
+- Hooks → `addToolMiddleware()` at priority 10
+- Plan mode → `registerAgentMode()` — filters available tools
+- Team hierarchy → `registerAgentMode()` — replaces loop with delegation
+- Validator → `on('agent:completing')` — blocks completion if validation fails
 
 ### The Dev Team (Agent System)
 
@@ -71,106 +159,92 @@ Team Lead (AgentExecutor + Commander)
     └─→ Validator (QA verification)
 ```
 
-**In the UI:**
-- Main chat shows Team Lead planning and delegating
-- Agent cards show Senior Leads and Junior Devs working
-- Workers auto-report when done; user can click into any agent to chat directly
-- User can intervene, fix issues, and send results back up the chain
-
-**In the code:**
-- `packages/core/src/commander/` — Hierarchical delegation, worker definitions
-- `packages/core/src/agent/` — Agent loop, planning, recovery, subagents
-- `packages/core/src/validator/` — QA pipeline (syntax, types, lint, test, self-review)
-
-### Core Modules (`packages/core/src/`) — [Full docs](docs/backend/)
-
-```
-Agent System:
-├── agent/         # Agent loop, prompts, modes (plan + minimal), subagents, validation gate
-├── commander/     # Team Lead → Senior Leads → Junior Devs, keyword auto-routing
-├── validator/     # QA pipeline — wired into agent completion gate
-
-Tools (24):
-├── tools/         # read, write, edit, glob, grep, bash, browser, etc.
-
-Intelligence:
-├── codebase/      # Repo map, symbols, PageRank
-├── context/       # Token tracking, compaction, compression
-├── lsp/           # Language Server Protocol (5 languages)
-├── diff/          # Diff tracking, unified format
-├── focus-chain/   # Task progress tracking
-
-Extensibility:
-├── extensions/    # Plugin system (install, enable, reload)
-├── custom-commands/ # TOML custom commands
-├── hooks/         # Lifecycle hooks (PreToolUse, PostToolUse, etc.)
-├── mcp/           # MCP protocol client
-├── skills/        # Auto-invoked knowledge modules
-├── slash-commands/ # User-invocable /commands
-
-Safety:
-├── permissions/   # Risk assessment, auto-approval, trusted folders
-├── policy/        # Priority rules, wildcards, regex
-
-Infrastructure:
-├── llm/           # 13 provider clients
-├── config/        # Settings, credentials
-├── session/       # State, checkpoints, forking, resume
-├── auth/          # OAuth + PKCE
-├── bus/           # Message bus (pub/sub)
-├── models/        # Model registry (~16 LLM models)
-├── scheduler/     # Background task scheduler
-├── question/      # LLM-to-user question system
-├── git/           # Git snapshots, auto-commit
-├── instructions/  # Project/directory instructions
-├── integrations/  # External APIs (Exa search)
-├── types/         # Shared type definitions
-
-```
-
 ### Data Flow
 
 ```
 Desktop App / CLI
+    → setPlatform(createNodePlatform())
+    → Load extensions (activate in priority order)
     → Team Lead (AgentExecutor)
-        → Auto-route or delegate to Senior Leads (Workers)
-            → Senior Leads spawn Junior Devs (Sub-workers)
-                → Execute tools → LLM → Results
-            → Auto-report back to Team Lead
-        → Validator gate on completion (syntax → types → lint)
+        → Stream LLM → collect tool calls → run middleware → execute
+        → Extensions intercept via middleware and events
     → Response shown in UI
+```
+
+---
+
+## How To Add...
+
+### A new tool
+```typescript
+// packages/extensions/tools-extended/src/my-tool.ts
+import { defineTool } from '@ava/core-v2/tools'
+export const myTool = defineTool({
+  name: 'my_tool',
+  description: '...',
+  schema: z.object({ ... }),
+  async execute(input, ctx) { return { success: true, output: '...' } },
+})
+
+// In extension activate():
+api.registerTool(myTool)
+```
+
+### A new LLM provider
+```typescript
+// packages/extensions/providers/my-provider/src/index.ts
+import { createOpenAICompatClient } from '../../_shared/src/openai-compat.js'
+const Client = createOpenAICompatClient({
+  provider: 'my-provider', baseUrl: '...', defaultModel: '...',
+})
+export function activate(api) {
+  return api.registerProvider('my-provider', () => new Client())
+}
+```
+
+### A new agent mode
+```typescript
+// packages/extensions/agent-modes/src/my-mode.ts
+export const myMode: AgentMode = {
+  name: 'my-mode',
+  description: '...',
+  filterTools(tools) { return tools.filter(...) },
+  buildPromptSection() { return 'Extra instructions...' },
+}
+// In extension activate():
+api.registerAgentMode(myMode)
 ```
 
 ---
 
 ## Tools (24)
 
-| Tool | Purpose |
-|------|---------|
-| read_file | Read file contents |
-| create_file | Create new file |
-| write_file | Overwrite file |
-| delete_file | Delete file |
-| edit | Fuzzy text edits (8 strategies) |
-| apply_patch | Apply unified diffs to files |
-| multiedit | Edit multiple files at once |
-| glob | Find files by pattern |
-| grep | Search file contents |
-| ls | Directory listing |
-| bash | Shell commands (PTY, requires approval) |
-| batch | Batch execute multiple tools |
-| codesearch | Search codebase with context |
-| question | Ask user clarifying questions |
-| skill | Auto-invoke skills from plugins |
-| todoread | Read session todo list |
-| todowrite | Update session todo list |
-| task | Spawn subagents |
-| websearch | Web search (Tavily, Exa) |
-| webfetch | Fetch + convert web pages |
-| browser | Puppeteer browser automation |
-| attempt_completion | Finish task with summary |
-| plan_enter | Enter plan mode |
-| plan_exit | Exit plan mode |
+| Tool | Location | Purpose |
+|------|----------|---------|
+| read_file | core-v2 | Read file contents |
+| write_file | core-v2 | Overwrite file |
+| edit | core-v2 | Fuzzy text edits (8 strategies) |
+| bash | core-v2 | Shell commands |
+| glob | core-v2 | Find files by pattern |
+| grep | core-v2 | Search file contents |
+| create_file | extensions | Create new file |
+| delete_file | extensions | Delete file |
+| apply_patch | extensions | Apply unified diffs |
+| multiedit | extensions | Edit multiple files |
+| ls | extensions | Directory listing |
+| batch | extensions | Batch execute multiple tools |
+| codesearch | extensions | Search codebase with context |
+| question | extensions | Ask user clarifying questions |
+| skill | extensions | Auto-invoke skills |
+| todoread | extensions | Read session todo list |
+| todowrite | extensions | Update session todo list |
+| task | extensions | Spawn subagents |
+| websearch | extensions | Web search |
+| webfetch | extensions | Fetch + convert web pages |
+| browser | extensions | Puppeteer browser automation |
+| attempt_completion | extensions | Finish task with summary |
+| plan_enter | extensions | Enter plan mode |
+| plan_exit | extensions | Exit plan mode |
 
 ---
 
@@ -187,12 +261,24 @@ Plugins bundle skills + commands + hooks + MCP servers into a single installable
 
 ---
 
+## Key Singletons
+
+| Singleton | Get | Set | Reset |
+|-----------|-----|-----|-------|
+| Platform | `getPlatform()` | `setPlatform()` | — |
+| Message Bus | `getMessageBus()` | `setMessageBus()` | `resetMessageBus()` |
+| Logger | `getLogger()` | `setLogger()` | `resetLogger()` |
+
+---
+
 ## Code Style
 
 - TypeScript strict, no `any`
 - Max 300 lines per file
 - kebab-case files, camelCase functions, PascalCase types
+- ESM with `.js` extensions in imports
 - Tests use Vitest: `npx vitest run <path>`
+- Tests co-located: `foo.test.ts` next to `foo.ts`
 
 ---
 
@@ -201,9 +287,11 @@ Plugins bundle skills + commands + hooks + MCP servers into a single installable
 - **Desktop app is Priority 1** — CLI and protocols are secondary
 - **Never use Puppeteer to test the Tauri app** — Tauri uses native webview
 - The `browser` tool is for web pages only; use `npm run tauri dev` for UI testing
-- Build sequence: `npm run build:packages` → `npm run build:cli`
+- Build order: core → core-v2 → extensions → platform-node → platform-tauri → CLI
+- `pnpm build:all` handles the correct build order automatically
 - Core tsconfig excludes test files from build: `"exclude": ["src/**/*.test.ts"]`
 - `export *` from multiple modules can cause name collisions — use `as` renames
+- Platform abstraction: never use `node:fs` directly — use `getPlatform().fs`
 
 ---
 
@@ -223,14 +311,9 @@ Plugins bundle skills + commands + hooks + MCP servers into a single installable
 | Doc | Purpose |
 |-----|---------|
 | [`docs/VISION.md`](docs/VISION.md) | Product vision |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Phase overview and progress |
-| [`docs/frontend/`](docs/frontend/) | **Desktop app: file map, settings, appearance, data flow, Tauri** |
-| [`docs/frontend/changelog.md`](docs/frontend/changelog.md) | Frontend changelog (session by session) |
-| [`docs/frontend/backlog.md`](docs/frontend/backlog.md) | Frontend backlog (what's missing, prioritized) |
+| [`docs/frontend/`](docs/frontend/) | Desktop app: file map, settings, design system |
 | [`docs/frontend/design-system.md`](docs/frontend/design-system.md) | Design system (colors, glass, typography, motion) |
-| [`docs/backend/`](docs/backend/) | Backend modules, test coverage, backlog, changelog |
-| [`docs/backend/gap-analysis.md`](docs/backend/gap-analysis.md) | Competitive gap analysis (15 features vs 8 codebases) |
-| [`docs/architecture/`](docs/architecture/) | System design |
+| [`docs/backend/`](docs/backend/) | Backend modules, test coverage |
 
 ---
 

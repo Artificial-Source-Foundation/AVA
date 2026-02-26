@@ -28,6 +28,7 @@ vi.mock('../../services/file-watcher', () => ({
 
 vi.mock('../../services/logger', () => ({
   logInfo: vi.fn(),
+  logError: vi.fn(),
 }))
 
 vi.mock('../../stores/project', () => ({

@@ -1,18 +1,72 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "entry": ["src/index.tsx", "src/App.tsx"],
-  "project": ["src/**/*.{ts,tsx}"],
   "ignore": [
     "src-tauri/**",
     "src/stubs/**",
     "e2e/**",
-    "docs/reference-code/**",
-    "src/pages/DesignSystemPreview.tsx",
+    "docs/**",
     "**/*.d.ts",
     "**/*.config.{js,ts}",
     "**/*.test.{ts,tsx}",
     "**/*.spec.{ts,tsx}"
   ],
-  "ignoreDependencies": [],
-  "ignoreBinaries": []
+  "ignoreBinaries": [],
+  "exclude": ["exports", "types", "nsExports", "nsTypes", "duplicates"],
+  "workspaces": {
+    ".": {
+      "entry": ["src/index.tsx", "src/App.tsx"],
+      "project": ["src/**/*.{ts,tsx}"],
+      "ignore": [
+        "src/pages/DesignSystemPreview.tsx",
+        "src/components/chat/DateSeparator.tsx",
+        "src/components/chat/TypingIndicator.tsx",
+        "src/components/dialogs/index.ts",
+        "src/components/dialogs/ModelSelectorDialog.tsx",
+        "src/components/dialogs/PermissionDialog.tsx",
+        "src/components/dialogs/WorkspaceSelectorDialog.tsx",
+        "src/components/panels/**",
+        "src/components/settings/tabs/index.ts",
+        "src/hooks/chat/index.ts",
+        "src/lib/motion.ts"
+      ],
+      "ignoreDependencies": [
+        "@codemirror/lang-javascript",
+        "@codemirror/lang-json",
+        "@codemirror/state",
+        "@codemirror/theme-one-dark",
+        "@codemirror/view",
+        "@tauri-apps/plugin-window-state",
+        "solid-codemirror"
+      ]
+    },
+    "packages/core": {
+      "entry": ["src/*/index.ts!"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/core-v2": {
+      "entry": ["src/*/index.ts!"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/extensions": {
+      "entry": [
+        "index.ts!",
+        "*/src/index.ts!",
+        "providers/*/src/index.ts!",
+        "providers/_shared/src/index.ts!"
+      ],
+      "project": ["**/*.ts"],
+      "ignore": ["*/src/types.ts", "mcp/src/manager.ts"],
+      "ignoreDependencies": []
+    },
+    "packages/platform-node": {
+      "project": ["src/**/*.ts"]
+    },
+    "packages/platform-tauri": {
+      "project": ["src/**/*.ts"]
+    },
+    "cli": {
+      "project": ["src/**/*.ts"],
+      "ignoreDependencies": ["@ava/extensions"]
+    }
+  }
 }

@@ -12,7 +12,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@ava/core-v2": "workspace:*"
+    "@ava/core-v2": "workspace:*",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "^22.19.11",

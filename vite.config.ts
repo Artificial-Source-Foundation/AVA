@@ -114,6 +114,17 @@ export default defineConfig(async () => ({
       }),
   ].filter(Boolean),
 
+  // Resolve workspace packages directly from source (bypasses pnpm junction
+  // issues on Windows where Vite's commonjs-resolver fails to follow junctions)
+  resolve: {
+    alias: {
+      '@ava/core': fileURLToPath(new URL('./packages/core/src/index.ts', import.meta.url)),
+      '@ava/platform-tauri': fileURLToPath(
+        new URL('./packages/platform-tauri/src/index.ts', import.meta.url)
+      ),
+    },
+  },
+
   // Define globals for browser compatibility (Node.js polyfills)
   define: {
     global: 'globalThis',

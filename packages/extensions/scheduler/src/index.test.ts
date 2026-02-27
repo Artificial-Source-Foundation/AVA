@@ -1,24 +1,55 @@
 import { createMockExtensionAPI } from '@ava/core-v2/__test-utils__/mock-extension-api'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { activate } from './index.js'
 
 describe('scheduler extension', () => {
-  it('activates successfully', () => {
-    const { api } = createMockExtensionAPI()
-    const disposable = activate(api)
-    expect(disposable).toBeDefined()
-    expect(disposable.dispose).toBeTypeOf('function')
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
-  it('logs activation message', () => {
+  it('activates and starts interval', () => {
+    vi.useFakeTimers()
     const { api } = createMockExtensionAPI()
-    activate(api)
+    const disposable = activate(api)
     expect(api.log.debug).toHaveBeenCalledWith('Scheduler extension activated')
+    disposable.dispose()
+    vi.useRealTimers()
   })
 
-  it('cleans up on dispose', () => {
+  it('listens for scheduler:register and scheduler:unregister', () => {
+    vi.useFakeTimers()
+    const { api, eventHandlers } = createMockExtensionAPI()
+    const disposable = activate(api)
+    expect(eventHandlers.has('scheduler:register')).toBe(true)
+    expect(eventHandlers.has('scheduler:unregister')).toBe(true)
+    disposable.dispose()
+    vi.useRealTimers()
+  })
+
+  it('registers tasks via event', () => {
+    vi.useFakeTimers()
     const { api } = createMockExtensionAPI()
     const disposable = activate(api)
-    expect(() => disposable.dispose()).not.toThrow()
+
+    api.emit('scheduler:register', {
+      id: 'test',
+      name: 'test-task',
+      interval: 1000,
+      nextRun: 0,
+      handler: async () => {},
+    })
+
+    expect(api.log.debug).toHaveBeenCalledWith('Scheduled task registered: test-task')
+    disposable.dispose()
+    vi.useRealTimers()
+  })
+
+  it('cleans up interval and listeners on dispose', () => {
+    vi.useFakeTimers()
+    const { api, eventHandlers } = createMockExtensionAPI()
+    const disposable = activate(api)
+    disposable.dispose()
+    expect(eventHandlers.has('scheduler:register')).toBe(false)
+    vi.useRealTimers()
   })
 })

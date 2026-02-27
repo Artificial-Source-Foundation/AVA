@@ -21,7 +21,7 @@ export async function loadInstructions(
 
   while (depth < config.maxDepth) {
     for (const fileName of config.fileNames) {
-      const filePath = `${currentDir}/${fileName}`
+      const filePath = currentDir === '/' ? `/${fileName}` : `${currentDir}/${fileName}`
       try {
         const content = await fs.readFile(filePath)
         if (content.length <= config.maxSize) {
@@ -38,8 +38,8 @@ export async function loadInstructions(
     }
 
     // Move up one directory
-    const parentDir = currentDir.replace(/\/[^/]+$/, '')
-    if (parentDir === currentDir || parentDir === '') break
+    if (currentDir === '/') break
+    const parentDir = currentDir.replace(/\/[^/]+$/, '') || '/'
     currentDir = parentDir
     depth++
   }

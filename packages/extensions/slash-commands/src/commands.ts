@@ -5,7 +5,8 @@
  * The agent loop or other extensions listen and act on these events.
  */
 
-import type { SlashCommand, ToolContext } from '@ava/core-v2/extensions'
+import type { SlashCommand } from '@ava/core-v2/extensions'
+import type { ToolContext } from '@ava/core-v2/tools'
 
 function cmd(
   name: string,

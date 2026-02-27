@@ -12,8 +12,10 @@ function matchGlob(pattern: string, filePath: string): boolean {
   // Escape regex special chars except * and **
   const regexStr = pattern
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*\*\//g, '{{GLOBSTAR_SLASH}}')
     .replace(/\*\*/g, '{{GLOBSTAR}}')
     .replace(/\*/g, '[^/]*')
+    .replace(/\{\{GLOBSTAR_SLASH\}\}/g, '(.*/)?')
     .replace(/\{\{GLOBSTAR\}\}/g, '.*')
 
   return new RegExp(`^${regexStr}$`).test(filePath)

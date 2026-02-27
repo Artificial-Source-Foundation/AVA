@@ -56,6 +56,6 @@
     "integrations/**/*.ts",
     "index.ts"
   ],
-  "exclude": ["**/*.test.ts", "dist", "node_modules"],
+  "exclude": ["**/*.test.ts", "**/test-harness.ts", "**/__test-utils__/**", "dist", "node_modules"],
   "references": [{ "path": "../core-v2" }]
 }

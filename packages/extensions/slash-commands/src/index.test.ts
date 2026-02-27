@@ -3,22 +3,37 @@ import { describe, expect, it } from 'vitest'
 import { activate } from './index.js'
 
 describe('slash-commands extension', () => {
-  it('activates successfully', () => {
-    const { api } = createMockExtensionAPI()
-    const disposable = activate(api)
-    expect(disposable).toBeDefined()
-    expect(disposable.dispose).toBeTypeOf('function')
+  it('activates and registers 8 commands', () => {
+    const { api, registeredCommands } = createMockExtensionAPI()
+    activate(api)
+    expect(registeredCommands).toHaveLength(8)
   })
 
-  it('logs activation message', () => {
+  it('registers expected command names', () => {
+    const { api, registeredCommands } = createMockExtensionAPI()
+    activate(api)
+    const names = registeredCommands.map((c) => c.name)
+    expect(names).toContain('help')
+    expect(names).toContain('clear')
+    expect(names).toContain('mode')
+    expect(names).toContain('model')
+    expect(names).toContain('compact')
+    expect(names).toContain('undo')
+    expect(names).toContain('settings')
+    expect(names).toContain('status')
+  })
+
+  it('logs activation with command count', () => {
     const { api } = createMockExtensionAPI()
     activate(api)
-    expect(api.log.debug).toHaveBeenCalledWith('Slash commands extension activated')
+    expect(api.log.debug).toHaveBeenCalledWith('Slash commands extension activated (8 commands)')
   })
 
-  it('cleans up on dispose', () => {
-    const { api } = createMockExtensionAPI()
+  it('cleans up all commands on dispose', () => {
+    const { api, registeredCommands } = createMockExtensionAPI()
     const disposable = activate(api)
-    expect(() => disposable.dispose()).not.toThrow()
+    expect(registeredCommands).toHaveLength(8)
+    disposable.dispose()
+    expect(registeredCommands).toHaveLength(0)
   })
 })

@@ -3,11 +3,10 @@ import { describe, expect, it } from 'vitest'
 import { activate } from './index.js'
 
 describe('instructions extension', () => {
-  it('activates successfully', () => {
-    const { api } = createMockExtensionAPI()
-    const disposable = activate(api)
-    expect(disposable).toBeDefined()
-    expect(disposable.dispose).toBeTypeOf('function')
+  it('activates and listens for session:opened', () => {
+    const { api, eventHandlers } = createMockExtensionAPI()
+    activate(api)
+    expect(eventHandlers.has('session:opened')).toBe(true)
   })
 
   it('logs activation message', () => {
@@ -16,9 +15,25 @@ describe('instructions extension', () => {
     expect(api.log.debug).toHaveBeenCalledWith('Instructions extension activated')
   })
 
+  it('loads instructions when session opens', async () => {
+    const { api, emittedEvents } = createMockExtensionAPI()
+    api.platform.fs.addFile('/project/CLAUDE.md', '# My Instructions')
+    activate(api)
+
+    api.emit('session:opened', { sessionId: 'test', workingDirectory: '/project' })
+
+    // Wait for async loading
+    await new Promise((r) => setTimeout(r, 50))
+
+    const loaded = emittedEvents.find((e) => e.event === 'instructions:loaded')
+    expect(loaded).toBeDefined()
+    expect((loaded!.data as { count: number }).count).toBe(1)
+  })
+
   it('cleans up on dispose', () => {
-    const { api } = createMockExtensionAPI()
+    const { api, eventHandlers } = createMockExtensionAPI()
     const disposable = activate(api)
-    expect(() => disposable.dispose()).not.toThrow()
+    disposable.dispose()
+    expect(eventHandlers.has('session:opened')).toBe(false)
   })
 })

@@ -3,11 +3,10 @@ import { describe, expect, it } from 'vitest'
 import { activate } from './index.js'
 
 describe('custom-commands extension', () => {
-  it('activates successfully', () => {
-    const { api } = createMockExtensionAPI()
-    const disposable = activate(api)
-    expect(disposable).toBeDefined()
-    expect(disposable.dispose).toBeTypeOf('function')
+  it('activates and listens for session:opened', () => {
+    const { api, eventHandlers } = createMockExtensionAPI()
+    activate(api)
+    expect(eventHandlers.has('session:opened')).toBe(true)
   })
 
   it('logs activation message', () => {
@@ -17,8 +16,9 @@ describe('custom-commands extension', () => {
   })
 
   it('cleans up on dispose', () => {
-    const { api } = createMockExtensionAPI()
+    const { api, eventHandlers } = createMockExtensionAPI()
     const disposable = activate(api)
-    expect(() => disposable.dispose()).not.toThrow()
+    disposable.dispose()
+    expect(eventHandlers.has('session:opened')).toBe(false)
   })
 })

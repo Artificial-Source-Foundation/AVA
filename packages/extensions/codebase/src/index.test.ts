@@ -3,22 +3,37 @@ import { describe, expect, it } from 'vitest'
 import { activate } from './index.js'
 
 describe('codebase extension', () => {
-  it('activates successfully', () => {
-    const { api } = createMockExtensionAPI()
-    const disposable = activate(api)
-    expect(disposable).toBeDefined()
-    expect(disposable.dispose).toBeTypeOf('function')
+  it('activates and registers /files command', () => {
+    const { api, registeredCommands } = createMockExtensionAPI()
+    activate(api)
+    const cmd = registeredCommands.find((c) => c.name === 'files')
+    expect(cmd).toBeDefined()
+    expect(cmd!.description).toContain('indexed files')
   })
 
-  it('logs activation message', () => {
-    const { api } = createMockExtensionAPI()
+  it('listens for session:opened', () => {
+    const { api, eventHandlers } = createMockExtensionAPI()
     activate(api)
-    expect(api.log.debug).toHaveBeenCalledWith('Codebase intelligence extension activated')
+    expect(eventHandlers.has('session:opened')).toBe(true)
+  })
+
+  it('/files returns message before indexing', async () => {
+    const { api, registeredCommands } = createMockExtensionAPI()
+    activate(api)
+    const cmd = registeredCommands.find((c) => c.name === 'files')!
+    const result = await cmd.execute('', {
+      sessionId: 'test',
+      workingDirectory: '/tmp',
+      signal: new AbortController().signal,
+    })
+    expect(result).toContain('not indexed yet')
   })
 
   it('cleans up on dispose', () => {
-    const { api } = createMockExtensionAPI()
+    const { api, registeredCommands, eventHandlers } = createMockExtensionAPI()
     const disposable = activate(api)
-    expect(() => disposable.dispose()).not.toThrow()
+    disposable.dispose()
+    expect(registeredCommands).toHaveLength(0)
+    expect(eventHandlers.has('session:opened')).toBe(false)
   })
 })

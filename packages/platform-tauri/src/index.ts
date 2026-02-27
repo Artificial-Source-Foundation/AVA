@@ -3,7 +3,7 @@
  * Tauri platform implementations
  */
 
-import type { IPlatformProvider } from '@ava/core'
+import type { IPlatformProvider } from '@ava/core-v2'
 import { TauriCredentialStore } from './credentials.js'
 import { TauriDatabase } from './database.js'
 import { TauriFileSystem } from './fs.js'

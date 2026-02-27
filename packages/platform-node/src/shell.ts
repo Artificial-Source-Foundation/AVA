@@ -5,7 +5,7 @@
 import type { ChildProcess as NodeChildProcess } from 'node:child_process'
 import { exec, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { ChildProcess, ExecOptions, ExecResult, IShell, SpawnOptions } from '@ava/core'
+import type { ChildProcess, ExecOptions, ExecResult, IShell, SpawnOptions } from '@ava/core-v2'
 
 const execAsync = promisify(exec)
 

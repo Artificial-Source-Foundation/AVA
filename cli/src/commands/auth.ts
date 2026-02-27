@@ -10,9 +10,9 @@ import {
   type OAuthProvider,
   removeStoredAuth,
   startOAuthFlow,
-} from '@ava/core'
+} from '../auth/index.js'
 
-const SUPPORTED_PROVIDERS: OAuthProvider[] = ['anthropic', 'openai', 'google', 'copilot']
+const SUPPORTED_PROVIDERS: OAuthProvider[] = ['openai', 'google', 'copilot']
 
 /**
  * Run the auth command
@@ -168,7 +168,6 @@ NOTE:
  */
 function getProviderName(provider: OAuthProvider): string {
   const names: Record<OAuthProvider, string> = {
-    anthropic: 'Claude (Anthropic)',
     openai: 'ChatGPT (OpenAI)',
     google: 'Gemini (Google Antigravity)',
     copilot: 'GitHub Copilot',

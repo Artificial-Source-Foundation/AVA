@@ -6,7 +6,7 @@
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import type { ICredentialStore } from '@ava/core'
+import type { ICredentialStore } from '@ava/core-v2'
 
 const PRIMARY_CONFIG_DIR = path.join(os.homedir(), '.ava')
 const LEGACY_CONFIG_DIR = path.join(os.homedir(), '.estela')

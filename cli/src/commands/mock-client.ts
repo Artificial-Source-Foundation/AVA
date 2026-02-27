@@ -3,7 +3,7 @@
  * Implements LLMClient with predictable responses (no API key needed)
  */
 
-import type { ChatMessage, LLMClient, ProviderConfig, StreamDelta } from '@ava/core'
+import type { ChatMessage, LLMClient, ProviderConfig, StreamDelta } from '@ava/core-v2'
 
 /**
  * Mock LLM client that yields a single attempt_completion tool call.

@@ -7,7 +7,7 @@
  * - OpenCode: Lazy loading, buffer management, session lifecycle
  */
 
-import type { IPTY, PTYOptions, PTYProcess } from '@ava/core'
+import type { IPTY, PTYOptions, PTYProcess } from '@ava/core-v2'
 
 /** PTY implementation info */
 export interface PTYImplementation {

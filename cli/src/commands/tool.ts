@@ -8,10 +8,13 @@
  *   ava tool <name> --arg value           - Execute a tool
  */
 
-import type { ToolContext, ToolDefinition } from '@ava/core'
-import { executeTool, getToolDefinitions, resetToolCallCount } from '@ava/core'
+import type { ToolContext, ToolDefinition } from '@ava/core-v2'
+import { executeTool, getToolDefinitions, registerCoreTools } from '@ava/core-v2'
 
 export async function runToolCommand(args: string[]): Promise<void> {
+  // Ensure core tools are registered before any tool operations
+  registerCoreTools()
+
   const subcommand = args[0]
 
   if (!subcommand) {
@@ -98,8 +101,6 @@ async function executeToolCommand(toolName: string, args: string[]): Promise<voi
   delete params.cwd
 
   process.on('SIGINT', () => ac.abort())
-
-  resetToolCallCount()
 
   const startTime = Date.now()
   try {

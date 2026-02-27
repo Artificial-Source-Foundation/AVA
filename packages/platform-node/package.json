@@ -21,7 +21,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ava/core": "workspace:*",
     "@ava/core-v2": "workspace:*",
     "better-sqlite3": "^11.0.0",
     "fast-glob": "^3.3.3"

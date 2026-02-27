@@ -3,7 +3,7 @@
  * Uses tauri-plugin-sql for SQLite
  */
 
-import type { IDatabase, Migration } from '@ava/core'
+import type { IDatabase, Migration } from '@ava/core-v2'
 import Database from '@tauri-apps/plugin-sql'
 
 export class TauriDatabase implements IDatabase {

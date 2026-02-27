@@ -14,7 +14,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ava/core": "workspace:*",
     "@ava/core-v2": "workspace:*",
     "@ava/extensions": "workspace:*",
     "@ava/platform-node": "workspace:*"

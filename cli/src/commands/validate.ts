@@ -8,14 +8,17 @@
  */
 
 import * as path from 'node:path'
-import type { ValidatorName } from '@ava/core'
+import {
+  formatReport,
+  registerValidator,
+  runPipeline,
+} from '@ava/extensions/validator/src/pipeline.js'
+import type { ValidatorName } from '@ava/extensions/validator/src/types.js'
 import {
   lintValidator,
-  SimpleValidatorRegistry,
   syntaxValidator,
   typescriptValidator,
-  ValidationPipeline,
-} from '@ava/core'
+} from '@ava/extensions/validator/src/validators.js'
 
 interface ValidateOptions {
   files: string[]
@@ -35,24 +38,22 @@ export async function runValidateCommand(args: string[]): Promise<void> {
   // Resolve file paths to absolute
   const resolvedFiles = options.files.map((f) => path.resolve(options.cwd, f))
 
-  // Set up validator registry
-  const registry = new SimpleValidatorRegistry()
-  registry.register(syntaxValidator)
-  registry.register(typescriptValidator)
-  registry.register(lintValidator)
-
-  const pipeline = new ValidationPipeline(registry)
+  // Register validators
+  registerValidator(syntaxValidator)
+  registerValidator(typescriptValidator)
+  registerValidator(lintValidator)
 
   // Set up abort controller
   const ac = new AbortController()
   process.on('SIGINT', () => ac.abort())
 
   try {
-    const result = await pipeline.run(
+    const result = await runPipeline(
       resolvedFiles,
       {
         enabledValidators: options.validators,
         timeout: options.timeout,
+        failFast: true,
       },
       ac.signal,
       options.cwd
@@ -62,7 +63,7 @@ export async function runValidateCommand(args: string[]): Promise<void> {
       console.log(JSON.stringify(result, null, 2))
     } else {
       console.log('')
-      console.log(pipeline.formatReport(result))
+      console.log(formatReport(result))
       console.log('')
     }
 
@@ -143,7 +144,7 @@ AVAILABLE VALIDATORS:
 
 EXAMPLES:
   ava validate src/index.ts
-  ava validate packages/core/src/agent/loop.ts packages/core/src/agent/types.ts
+  ava validate packages/core-v2/src/agent/loop.ts
   ava validate src/ --validators syntax,typescript
   ava validate src/index.ts --json
 `)

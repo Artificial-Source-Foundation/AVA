@@ -3,15 +3,8 @@
  * Invokes the agent loop from the command line
  */
 
-import type { LLMProvider } from '@ava/core'
-import {
-  type AgentEvent,
-  type AgentResult,
-  AvaLogger,
-  getSettingsManager,
-  runAgent,
-  setLogger,
-} from '@ava/core'
+import type { AgentEvent, AgentResult, LLMProvider } from '@ava/core-v2'
+import { runAgent } from '@ava/core-v2'
 
 // ============================================================================
 // Types
@@ -93,51 +86,38 @@ function parseAgentArgs(args: string[]): AgentCommandOptions | null {
 // ============================================================================
 
 function formatEventVerbose(event: AgentEvent): string {
-  const time = new Date(event.timestamp).toLocaleTimeString()
+  const time = new Date().toLocaleTimeString()
 
   switch (event.type) {
     case 'agent:start':
       return `[${time}] Agent started — goal: ${event.goal}`
-    case 'agent:finish':
-      return `[${time}] Agent finished — ${event.result.success ? 'SUCCESS' : 'FAILED'} (${event.result.terminateMode}, ${event.result.turns} turns, ${event.result.tokensUsed} tokens, ${event.result.durationMs}ms)`
+    case 'agent:finish': {
+      const tokens = event.result.tokensUsed.input + event.result.tokensUsed.output
+      return `[${time}] Agent finished — ${event.result.success ? 'SUCCESS' : 'FAILED'} (${event.result.terminateMode}, ${event.result.turns} turns, ${tokens} tokens, ${event.result.durationMs}ms)`
+    }
     case 'turn:start':
       return `[${time}] Turn ${event.turn} started`
-    case 'turn:finish':
+    case 'turn:end':
       return `[${time}] Turn ${event.turn} finished (${event.toolCalls.length} tool calls)`
     case 'tool:start':
       return `[${time}] Tool ${event.toolName} started`
     case 'tool:finish':
       return `[${time}] Tool ${event.toolName} ${event.success ? 'OK' : 'FAIL'} (${event.durationMs}ms)`
-    case 'tool:error':
-      return `[${time}] Tool ${event.toolName} ERROR: ${event.error}`
-    case 'tool:metadata':
-      return `[${time}] Tool ${event.toolName} metadata${event.title ? `: ${event.title}` : ''}`
     case 'thought':
-      return `[${time}] Thought: ${event.text.slice(0, 120)}${event.text.length > 120 ? '...' : ''}`
-    case 'recovery:start':
-      return `[${time}] Recovery started: ${event.reason}`
-    case 'recovery:finish':
-      return `[${time}] Recovery ${event.success ? 'succeeded' : 'failed'} (${event.durationMs}ms)`
-    case 'validation:start':
-      return `[${time}] Validation started for ${event.files.length} files`
-    case 'validation:result':
-      return `[${time}] Validation ${event.passed ? 'PASSED' : 'FAILED'}: ${event.summary}`
-    case 'validation:finish':
-      return `[${time}] Validation finished: ${event.passed ? 'passed' : 'failed'} (${event.durationMs}ms)`
-    case 'provider:switch':
-      return `[${time}] Provider switched to ${event.provider}/${event.model}`
+      return `[${time}] Thought: ${event.content.slice(0, 120)}${event.content.length > 120 ? '...' : ''}`
     case 'error':
       return `[${time}] ERROR: ${event.error}`
   }
 }
 
 function formatSummary(result: AgentResult, durationMs: number): string {
+  const tokens = result.tokensUsed.input + result.tokensUsed.output
   const lines = [
     '',
     `--- Agent Summary ---`,
     `Status:   ${result.success ? 'SUCCESS' : 'FAILED'} (${result.terminateMode})`,
     `Turns:    ${result.turns}`,
-    `Tokens:   ${result.tokensUsed}`,
+    `Tokens:   ${tokens} (in: ${result.tokensUsed.input}, out: ${result.tokensUsed.output})`,
     `Duration: ${(durationMs / 1000).toFixed(1)}s`,
   ]
 
@@ -160,21 +140,7 @@ export async function runAgentCommand(args: string[]): Promise<void> {
   const options = parseAgentArgs(args)
   if (!options) return
 
-  // Load settings
-  try {
-    await getSettingsManager().load()
-  } catch {
-    // Settings not loaded — continue with defaults
-  }
-
-  // Set up logger
-  const logger = new AvaLogger({
-    file: !!options.logFile,
-    filePath: options.logFile,
-    stderr: false,
-    level: 'debug',
-  })
-  setLogger(logger)
+  // Settings are initialized with defaults via getSettingsManager()
 
   // Set up abort controller for Ctrl+C
   const abortController = new AbortController()
@@ -207,8 +173,7 @@ export async function runAgentCommand(args: string[]): Promise<void> {
       process.stderr.write(`${formatEventVerbose(event)}\n`)
     }
 
-    // Log to file via logger
-    logger.fromAgentEvent(event)
+    // TODO: file logging (AvaLogger removed during core-v1 deletion)
   }
 
   try {

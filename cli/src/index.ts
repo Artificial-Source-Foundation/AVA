@@ -16,7 +16,7 @@
 
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { setPlatform } from '@ava/core'
+import { setPlatform } from '@ava/core-v2'
 import { createNodePlatform } from '@ava/platform-node'
 import { runAgentCommand } from './commands/agent.js'
 import { runAgentV2Command } from './commands/agent-v2.js'

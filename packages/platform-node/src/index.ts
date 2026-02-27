@@ -3,7 +3,7 @@
  * Node.js platform implementations for CLI
  */
 
-import type { IPlatformProvider, IPTY } from '@ava/core'
+import type { IPlatformProvider, IPTY } from '@ava/core-v2'
 import { NodeCredentialStore } from './credentials.js'
 import { NodeDatabase } from './database.js'
 import { NodeFileSystem } from './fs.js'

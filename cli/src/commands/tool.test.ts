@@ -2,7 +2,8 @@
  * Tests for the tool command
  */
 
-import { getToolDefinitions } from '@ava/core'
+import { getToolDefinitions, registerCoreTools } from '@ava/core-v2'
+import { resetTools } from '@ava/core-v2/tools'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Mock platform
@@ -25,11 +26,12 @@ vi.mock('@ava/platform-node', () => ({
 
 describe('tool command', () => {
   beforeEach(() => {
-    vi.resetModules()
+    resetTools()
+    registerCoreTools()
   })
 
   describe('tool registry', () => {
-    it('should have tools registered after importing @ava/core', () => {
+    it('should have tools registered after registerCoreTools()', () => {
       const definitions = getToolDefinitions()
       expect(definitions.length).toBeGreaterThan(0)
     })
@@ -43,7 +45,7 @@ describe('tool command', () => {
       expect(names).toContain('grep')
       expect(names).toContain('bash')
       expect(names).toContain('edit')
-      expect(names).toContain('attempt_completion')
+      expect(names).toContain('write_file')
     })
 
     it('should have valid tool definitions', () => {
@@ -57,10 +59,10 @@ describe('tool command', () => {
       }
     })
 
-    it('should register 22+ tools', () => {
+    it('should register 6 core tools', () => {
       const definitions = getToolDefinitions()
-      // 22 tools registered in tools/index.ts
-      expect(definitions.length).toBeGreaterThanOrEqual(22)
+      // 6 core tools: read_file, write_file, edit, bash, glob, grep
+      expect(definitions.length).toBe(6)
     })
   })
 })

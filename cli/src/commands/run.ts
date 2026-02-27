@@ -8,8 +8,8 @@
  *   ava run "<goal>" --provider anthropic --model claude-sonnet-4-20250514
  */
 
-import type { AgentConfig, AgentEvent, AgentEventCallback, LLMProvider } from '@ava/core'
-import { AgentExecutor, registerClient } from '@ava/core'
+import type { AgentConfig, AgentEvent, AgentEventCallback, LLMProvider } from '@ava/core-v2'
+import { AgentExecutor, registerProvider } from '@ava/core-v2'
 import { MockLLMClient, setupMockEnvironment } from './mock-client.js'
 
 interface RunOptions {
@@ -35,17 +35,13 @@ export async function runRunCommand(args: string[]): Promise<void> {
   // Set up mock if requested
   if (options.mock) {
     setupMockEnvironment()
-    registerClient(
-      'anthropic',
-      MockLLMClient as unknown as new () => InstanceType<typeof MockLLMClient>
-    )
+    registerProvider('anthropic', () => new MockLLMClient())
   }
 
   // Build agent config
   const config: Partial<AgentConfig> = {
     maxTurns: options.maxTurns,
     maxTimeMinutes: options.maxTimeMinutes,
-    validationEnabled: options.validation,
   }
 
   if (options.provider) {
@@ -96,9 +92,8 @@ export async function runRunCommand(args: string[]): Promise<void> {
     } else {
       console.log('')
       const status = result.success ? 'SUCCESS' : `FAILED (${result.terminateMode})`
-      console.log(
-        `[Done] ${status} (${result.turns} turns, ${durationMs}ms, ${result.tokensUsed} tokens)`
-      )
+      const tokens = result.tokensUsed.input + result.tokensUsed.output
+      console.log(`[Done] ${status} (${result.turns} turns, ${durationMs}ms, ${tokens} tokens)`)
       if (result.output) {
         console.log('')
         console.log(result.output)
@@ -140,41 +135,16 @@ function createStreamingCallback(verbose: boolean): AgentEventCallback {
         console.log(
           `[Tool] ${event.toolName}: ${event.success ? 'OK' : 'FAIL'} (${event.durationMs}ms)`
         )
-        if (verbose && event.output) {
-          const truncated =
-            event.output.length > 500 ? `${event.output.slice(0, 500)}...` : event.output
-          console.log(`       ${truncated}`)
-        }
-        break
-
-      case 'tool:error':
-        console.error(`[Tool] ${event.toolName}: ERROR - ${event.error}`)
         break
 
       case 'thought':
         if (verbose) {
-          console.log(`[Thought] ${event.text}`)
+          console.log(`[Thought] ${event.content}`)
         }
-        break
-
-      case 'validation:start':
-        console.log(`[Validation] Starting on ${event.files.length} files`)
-        break
-
-      case 'validation:result':
-        console.log(`[Validation] ${event.passed ? 'PASSED' : 'FAILED'}: ${event.summary}`)
-        break
-
-      case 'recovery:start':
-        console.log(`[Recovery] Attempting recovery: ${event.reason}`)
         break
 
       case 'error':
         console.error(`[Error] ${event.error}`)
-        break
-
-      case 'provider:switch':
-        console.log(`[Provider] Switched to ${event.provider}/${event.model}`)
         break
 
       default:

@@ -5,7 +5,7 @@
 
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import type { IDatabase, Migration } from '@ava/core'
+import type { IDatabase, Migration } from '@ava/core-v2'
 import BetterSqlite3 from 'better-sqlite3'
 
 export class NodeDatabase implements IDatabase {

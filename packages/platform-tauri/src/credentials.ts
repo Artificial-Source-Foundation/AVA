@@ -3,7 +3,7 @@
  * Uses localStorage for now - can be enhanced with secure storage later
  */
 
-import type { ICredentialStore } from '@ava/core'
+import type { ICredentialStore } from '@ava/core-v2'
 
 const STORAGE_PREFIX = 'ava_cred_'
 

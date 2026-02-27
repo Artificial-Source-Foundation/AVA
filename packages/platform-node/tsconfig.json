@@ -18,5 +18,5 @@
     "types": ["node"]
   },
   "include": ["src"],
-  "references": [{ "path": "../core" }, { "path": "../core-v2" }]
+  "references": [{ "path": "../core-v2" }]
 }

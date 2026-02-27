@@ -27,7 +27,7 @@ pnpm run test
 See \`docs/plugins/PLUGIN_SDK.md\` in the AVA repository for full plugin development guide.`
 }
 
-export function createPluginSource(pluginName: string, safeName: string): string {
+export function createPluginSource(_pluginName: string, safeName: string): string {
   return `import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 
 export function activate(api: ExtensionAPI): Disposable {

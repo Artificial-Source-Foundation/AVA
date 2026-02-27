@@ -36,7 +36,6 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@ava/core": "workspace:*",
     "@ava/platform-tauri": "workspace:*",
     "@codemirror/lang-javascript": "^6.2.4",
     "@codemirror/lang-json": "^6.0.2",

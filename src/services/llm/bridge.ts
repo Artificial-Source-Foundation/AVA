@@ -1,9 +1,9 @@
 /**
  * LLM Bridge for Tauri
- * Bridges local model resolution with @ava/core LLM client
+ * Bridges local model resolution with @ava/core-v2 LLM client
  */
 
-import { createClient as coreCreateClient, type LLMClient } from '@ava/core'
+import { createClient as coreCreateClient, type LLMClient } from '@ava/core-v2/llm'
 
 // Re-export LLMClient type for consumers
 export type { LLMClient }
@@ -83,7 +83,7 @@ export function resolveProvider(model: string): LLMProvider {
  * Create LLM client for a model
  * Uses @ava/core client with Tauri platform
  */
-export async function createClient(model: string): Promise<LLMClient> {
+export function createClient(model: string): LLMClient {
   const provider = resolveProvider(model)
   return coreCreateClient(provider)
 }

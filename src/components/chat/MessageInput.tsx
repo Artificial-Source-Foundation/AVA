@@ -8,7 +8,6 @@
  * Sub-components live in ./message-input/ for modularity.
  */
 
-import { formatCost } from '@ava/core'
 import { Activity, MessageSquare } from 'lucide-solid'
 import {
   type Component,
@@ -21,6 +20,7 @@ import {
 } from 'solid-js'
 import { useAgent } from '../../hooks/useAgent'
 import { useChat } from '../../hooks/useChat'
+import { formatCost } from '../../lib/cost'
 import { useLayout } from '../../stores/layout'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'

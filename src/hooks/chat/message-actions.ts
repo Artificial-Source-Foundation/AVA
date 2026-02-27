@@ -3,7 +3,7 @@
  * Queue management, cancel/steer, retry, edit-and-resend, undo.
  */
 
-import { undoLastAutoCommit } from '@ava/core'
+import { getPlatform } from '@ava/core-v2/platform'
 import { updateMessage } from '../../services/database'
 import { logDebug, logInfo } from '../../services/logger'
 import { regenerate, sendMessage } from './send-message'
@@ -144,12 +144,28 @@ export async function undoLastEdit(deps: ChatDeps): Promise<{ success: boolean; 
   if (!cwd) {
     return { success: false, message: 'No project directory' }
   }
-  const result = await undoLastAutoCommit(cwd)
-  logInfo(deps.LOG_SRC, 'Undo last edit', { success: result.success })
-  return {
-    success: result.success,
-    message: result.success
-      ? `Reverted last AI edit: ${result.output}`
-      : result.error || 'No AI edit to undo',
+
+  const shell = getPlatform().shell
+
+  // Check if it's a git repo
+  const gitCheck = await shell.exec('git rev-parse --is-inside-work-tree', { cwd })
+  if (gitCheck.exitCode !== 0) {
+    return { success: false, message: 'Not a git repository' }
   }
+
+  // Find the most recent ava auto-commit
+  const log = await shell.exec('git log --oneline -20', { cwd })
+  const lines = log.stdout.split('\n').filter(Boolean)
+  const avaLine = lines.find((l) => l.includes('[ava]'))
+  if (!avaLine) {
+    return { success: false, message: 'No AI edit to undo' }
+  }
+
+  const sha = avaLine.split(' ')[0]
+  const revert = await shell.exec(`git revert --no-edit ${sha}`, { cwd })
+  logInfo(deps.LOG_SRC, 'Undo last edit', { success: revert.exitCode === 0 })
+
+  return revert.exitCode === 0
+    ? { success: true, message: `Reverted last AI edit: ${avaLine}` }
+    : { success: false, message: revert.stderr || 'Revert failed' }
 }

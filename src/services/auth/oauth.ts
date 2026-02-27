@@ -11,10 +11,10 @@
  * - https://github.com/numman-ali/opencode-openai-codex-auth
  */
 
-import { setStoredAuth } from '@ava/core'
 import { invoke } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { STORAGE_KEYS } from '../../config/constants'
+import { setStoredAuth } from '../../lib/auth-helpers'
 import type { Credentials, LLMProvider } from '../../types/llm'
 import { logDebug, logError, logInfo, logWarn } from '../logger'
 

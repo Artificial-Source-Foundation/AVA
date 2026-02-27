@@ -5,13 +5,13 @@
  * Port of the logic from provider-row-expanded.tsx into the card layout.
  */
 
-import { removeStoredAuth } from '@ava/core'
 import { ExternalLink, Loader2, LogIn, LogOut, RefreshCw, Trash2 } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import type {
   LLMProviderConfig,
   ProviderModel,
 } from '../../../../config/defaults/provider-defaults'
+import { removeStoredAuth } from '../../../../lib/auth-helpers'
 import {
   type DeviceCodeResponse,
   isOAuthSupported,

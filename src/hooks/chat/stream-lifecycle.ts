@@ -3,7 +3,7 @@
  * Core streaming loop: LLM → tool execution → continuation.
  */
 
-import { executeTool, getToolDefinitions, resetToolCallCount } from '@ava/core'
+import { executeTool, getToolDefinitions } from '@ava/core-v2/tools'
 import { checkAutoApproval } from '../../lib/tool-approval'
 import { createClient, getProviderForModel } from '../../services/llm/bridge'
 import { logDebug, logError, logInfo } from '../../services/logger'
@@ -26,10 +26,10 @@ export async function streamResponse(options: StreamOptions, deps: ChatDeps): Pr
     provider,
   })
 
-  // Create client via core (will handle auth internally)
-  let client: Awaited<ReturnType<typeof createClient>>
+  // Create client via core-v2 (synchronous — providers registered by extensions)
+  let client: ReturnType<typeof createClient>
   try {
-    client = await createClient(options.model)
+    client = createClient(options.model)
   } catch (err) {
     options.onError({
       type: 'auth',
@@ -37,9 +37,6 @@ export async function streamResponse(options: StreamOptions, deps: ChatDeps): Pr
     })
     return
   }
-
-  // Reset tool call counter at the start of each message turn
-  resetToolCallCount()
 
   // Build messages array (may include tool results)
   const currentMessages = [...options.messages]

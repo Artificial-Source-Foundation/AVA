@@ -4,7 +4,7 @@
  * Contains side effects (localStorage, IPC, logging) but no SolidJS signals.
  */
 
-import type { LLMProvider } from '@ava/core'
+import type { LLMProvider } from '@ava/core-v2/llm'
 import { invoke } from '@tauri-apps/api/core'
 import { STORAGE_KEYS } from '../../config/constants'
 import type { LLMProviderConfig } from '../../config/defaults/provider-defaults'

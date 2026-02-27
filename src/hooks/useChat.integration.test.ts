@@ -52,12 +52,14 @@ const h = vi.hoisted(() => {
   }
 })
 
-vi.mock('@ava/core', () => ({
-  estimateCost: vi.fn(() => 0),
+vi.mock('@ava/core-v2/tools', () => ({
   executeTool: vi.fn(),
   getToolDefinitions: vi.fn(() => []),
-  resetToolCallCount: vi.fn(),
-  undoLastAutoCommit: vi.fn(async () => ({ success: true, output: 'ok' })),
+}))
+
+vi.mock('../lib/cost', () => ({
+  estimateCost: vi.fn(() => 0),
+  formatCost: vi.fn(() => '$0.00'),
 }))
 
 vi.mock('../lib/tool-approval', () => ({
@@ -69,8 +71,7 @@ vi.mock('../lib/tool-approval', () => ({
 }))
 
 vi.mock('../services/core-bridge', () => ({
-  getCoreCompactor: vi.fn(() => null),
-  getCoreTracker: vi.fn(() => h.tracker),
+  getCoreBudget: vi.fn(() => h.tracker),
 }))
 
 vi.mock('../services/database', () => ({

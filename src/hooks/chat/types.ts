@@ -3,7 +3,7 @@
  * Shared types and dependency interface for the useChat subsystem.
  */
 
-import type { ToolContext } from '@ava/core'
+import type { ToolContext } from '@ava/core-v2/tools'
 import type { Accessor, Setter } from 'solid-js'
 import type { CompletionNotificationSettings } from '../../services/notifications'
 import type { Message, MessageError, ToolCall } from '../../types'

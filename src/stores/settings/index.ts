@@ -4,7 +4,6 @@
  * Re-exports all public types and functions so existing imports keep working.
  */
 
-import type { MCPServerConfig } from '@ava/core'
 import { createSignal } from 'solid-js'
 import type { AgentPreset } from '../../config/defaults/agent-defaults'
 import {
@@ -27,7 +26,7 @@ import {
   syncAllApiKeys as syncAllApiKeysImpl,
   syncProviderCredentials,
 } from './settings-persistence'
-import type { AppSettings } from './settings-types'
+import type { AppSettings, MCPServerConfig } from './settings-types'
 
 export { resolveMode } from './settings-appearance'
 export { syncProviderCredentials } from './settings-persistence'
@@ -43,6 +42,7 @@ export type {
   DarkStyle,
   GenerationSettings,
   GitSettings,
+  MCPServerConfig,
   MonoFont,
   NotificationSettings,
   PermissionMode,

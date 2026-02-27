@@ -3,8 +3,8 @@
  * Handles token tracking sync, auto-compaction, memory recall, and API message building.
  */
 
-import { getToolDefinitions } from '@ava/core'
-import { getCoreCompactor, getCoreTracker } from '../../services/core-bridge'
+import { getToolDefinitions } from '@ava/core-v2/tools'
+import { getCoreBudget } from '../../services/core-bridge'
 import { deleteMessageFromDb } from '../../services/database'
 import { logInfo, logWarn } from '../../services/logger'
 import type { ChatDeps } from './types'
@@ -13,11 +13,11 @@ import type { ChatDeps } from './types'
 // Tracker Stats Sync
 // ============================================================================
 
-/** Sync tracker stats → contextStats signal */
+/** Sync budget stats → contextStats signal */
 export function syncTrackerStats(deps: ChatDeps): void {
-  const tracker = getCoreTracker()
-  if (!tracker) return
-  const s = tracker.getStats()
+  const budget = getCoreBudget()
+  if (!budget) return
+  const s = budget.getStats()
   deps.setContextStats({
     total: s.total,
     limit: s.limit,
@@ -35,40 +35,31 @@ export function syncTrackerStats(deps: ChatDeps): void {
  * Uses sliding window to trim to ~50%, syncs state + DB.
  */
 export async function maybeCompact(deps: ChatDeps): Promise<void> {
-  const tracker = getCoreTracker()
-  const compactor = getCoreCompactor()
-  if (!tracker || !compactor || !compactor.needsCompaction(80)) return
+  const budget = getCoreBudget()
+  if (!budget || !budget.needsCompaction(80)) return
 
   const currentMsgs = deps.session.messages()
   if (currentMsgs.length <= 4) return
 
-  // Convert frontend messages to core Message format
   const coreMessages = currentMsgs.map((m) => ({
     id: m.id,
-    sessionId: m.sessionId,
     role: m.role as 'user' | 'assistant' | 'system',
     content: m.content,
-    createdAt: m.createdAt,
   }))
 
   try {
-    const result = await compactor.compact(coreMessages)
+    const result = await budget.compact(coreMessages)
     if (result.tokensSaved === 0) return
 
-    // Determine which messages were removed
     const keptIds = new Set(result.messages.map((m) => m.id))
     const removedMsgs = currentMsgs.filter((m) => !keptIds.has(m.id))
 
-    // Update frontend state: keep only surviving messages
     deps.session.setMessages(currentMsgs.filter((m) => keptIds.has(m.id)))
-
-    // Sync database: delete removed messages
     await Promise.all(removedMsgs.map((m) => deleteMessageFromDb(m.id)))
 
-    // Rebuild tracker with remaining messages
-    tracker.clear()
+    budget.clear()
     for (const m of result.messages) {
-      tracker.addMessage(m.id, m.content)
+      budget.addMessage(m.id, m.content)
     }
     syncTrackerStats(deps)
 

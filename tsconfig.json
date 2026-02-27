@@ -17,7 +17,6 @@
     "jsxImportSource": "solid-js",
     "baseUrl": ".",
     "paths": {
-      "@ava/core": ["packages/core/src/index.ts"],
       "@ava/core-v2": ["packages/core-v2/src/index.ts"],
       "@ava/core-v2/agent": ["packages/core-v2/src/agent/index.ts"],
       "@ava/core-v2/llm": ["packages/core-v2/src/llm/index.ts"],

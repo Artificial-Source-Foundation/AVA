@@ -1,6 +1,6 @@
 /**
  * useAgent Hook
- * Integrates AgentExecutor from @ava/core with SolidJS reactive state
+ * Integrates AgentExecutor from @ava/core-v2 with SolidJS reactive state
  *
  * Provides:
  * - Full agent loop with hooks, doom loop detection, recovery
@@ -8,22 +8,17 @@
  * - Event streaming for UI updates
  */
 
-import {
-  type AgentConfig,
-  type AgentEvent,
-  type AgentInputs,
-  type AgentResult,
-  BusMessageType,
-  runAgent,
-  type ToolConfirmationRequest,
-  type ToolConfirmationResponse,
-} from '@ava/core'
-import { batch, createSignal, onCleanup } from 'solid-js'
+import type { AgentConfig, AgentEvent, AgentInputs, AgentResult } from '@ava/core-v2/agent'
+import { runAgent } from '@ava/core-v2/agent'
+import { batch, createSignal } from 'solid-js'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
-import { getCoreBus, subscribeToolApproval } from '../services/core-bridge'
 import { saveMessage, updateMessage } from '../services/database'
 import { logError } from '../services/logger'
 import { notifyCompletion } from '../services/notifications'
+import {
+  pendingApproval as pendingApprovalSignal,
+  resolveApproval as resolveApprovalBridge,
+} from '../services/tool-approval-bridge'
 import { useProject } from '../stores/project'
 import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
@@ -69,39 +64,6 @@ export function useAgent() {
     },
     bridgeToTeam
   )
-
-  // ========================================================================
-  // Message Bus → Approval Bridge
-  // ========================================================================
-
-  const unsubscribeBus = subscribeToolApproval((busRequest: ToolConfirmationRequest) => {
-    setPendingApproval({
-      id: busRequest.correlationId,
-      type:
-        busRequest.toolName === 'bash'
-          ? 'command'
-          : busRequest.toolName.startsWith('mcp_')
-            ? 'mcp'
-            : 'file',
-      toolName: busRequest.toolName,
-      args: busRequest.toolArgs,
-      description: busRequest.description ?? `Execute ${busRequest.toolName}`,
-      riskLevel: busRequest.riskLevel,
-      resolve: (approved: boolean) => {
-        const bus = getCoreBus()
-        if (!bus) return
-        bus.publish({
-          type: BusMessageType.TOOL_CONFIRMATION_RESPONSE,
-          correlationId: busRequest.correlationId,
-          timestamp: Date.now(),
-          confirmed: approved,
-          rememberChoice: false,
-        } satisfies ToolConfirmationResponse)
-      },
-    })
-  })
-
-  onCleanup(() => unsubscribeBus())
 
   // ========================================================================
   // Message Helpers
@@ -172,19 +134,20 @@ export function useAgent() {
         handleAgentEvent(event)
 
         if (event.type === 'thought') {
-          accumulatedContent += event.text
+          accumulatedContent += event.content
           session.updateMessageContent(assistantMsg.id, accumulatedContent)
         }
 
         if (event.type === 'agent:finish') {
           const finalContent = event.result.output || accumulatedContent
+          const totalTokens = event.result.tokensUsed.input + event.result.tokensUsed.output
           updateMessage(assistantMsg.id, {
             content: finalContent,
-            tokensUsed: event.result.tokensUsed,
+            tokensUsed: totalTokens,
           })
           session.updateMessage(assistantMsg.id, {
             content: finalContent,
-            tokensUsed: event.result.tokensUsed,
+            tokensUsed: totalTokens,
           })
 
           void notifyCompletion(
@@ -195,6 +158,7 @@ export function useAgent() {
         }
       }
 
+      // core-v2: runAgent(inputs, config, signal, onEvent)
       return await runAgent(inputs, agentConfig, abortRef.current.signal, eventHandler)
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err)
@@ -228,6 +192,9 @@ export function useAgent() {
   }
 
   function resolveApproval(approved: boolean): void {
+    // Use the bridge to resolve the middleware-based approval
+    resolveApprovalBridge(approved)
+    // Also resolve local approval if any
     const request = pendingApproval()
     if (request) {
       request.resolve(approved)
@@ -247,7 +214,7 @@ export function useAgent() {
       tokensUsed: tokensUsed(),
       currentThought: currentThought(),
       toolActivity: toolActivity(),
-      pendingApproval: pendingApproval(),
+      pendingApproval: pendingApprovalSignal() as ApprovalRequest | null,
       doomLoopDetected: doomLoopDetected(),
       lastError: lastError(),
     }
@@ -260,7 +227,7 @@ export function useAgent() {
     tokensUsed,
     currentThought,
     toolActivity,
-    pendingApproval,
+    pendingApproval: pendingApprovalSignal as () => ApprovalRequest | null,
     doomLoopDetected,
     lastError,
     currentAgentId,

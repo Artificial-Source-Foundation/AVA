@@ -1,6 +1,6 @@
-import { formatCost } from '@ava/core'
 import { X } from 'lucide-solid'
 import { type Component, createMemo, For, Show } from 'solid-js'
+import { formatCost } from '../../lib/cost'
 import type { Message, SessionTokenStats } from '../../types'
 
 interface UsageDetailsDialogProps {

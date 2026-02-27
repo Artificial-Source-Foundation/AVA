@@ -4,9 +4,25 @@
  * Pure types — no runtime code, no imports with side effects.
  */
 
-import type { MCPServerConfig } from '@ava/core'
 import type { AgentPreset } from '../../config/defaults/agent-defaults'
 import type { LLMProviderConfig } from '../../config/defaults/provider-defaults'
+
+export type MCPTransportType = 'stdio' | 'sse' | 'http'
+
+export interface MCPServerConfig {
+  name: string
+  type: MCPTransportType
+  command?: string
+  args?: string[]
+  url?: string
+  cwd?: string
+  env?: Record<string, string>
+  headers?: Record<string, string>
+  timeout?: number
+  includeTools?: string[]
+  excludeTools?: string[]
+  trust?: 'full' | 'sandbox' | 'none'
+}
 
 export type PermissionMode = 'ask' | 'auto-approve' | 'bypass'
 

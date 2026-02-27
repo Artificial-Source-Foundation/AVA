@@ -3,10 +3,10 @@
  * Processes AgentEvent stream and updates reactive signals
  */
 
-import type { AgentEvent } from '@ava/core'
+import type { AgentEvent } from '@ava/core-v2/agent'
 import type { Setter } from 'solid-js'
 import { batch } from 'solid-js'
-import { logError, logInfo, logWarn } from '../../services/logger'
+import { logError, logWarn } from '../../services/logger'
 import { addToolActivity, updateToolActivity, updateToolActivityBatch } from './agent-tool-activity'
 import type { ToolActivity } from './agent-types'
 
@@ -58,14 +58,14 @@ export function createAgentEventHandler(
         signals.setCurrentTurn(event.turn)
         break
 
-      case 'turn:finish':
+      case 'turn:end':
         if (event.toolCalls) {
           updateToolActivityBatch(signals.setToolActivity, event.toolCalls)
         }
         break
 
       case 'thought':
-        signals.setCurrentThought((prev) => prev + event.text)
+        signals.setCurrentThought((prev) => prev + event.content)
         break
 
       case 'tool:start':
@@ -74,28 +74,16 @@ export function createAgentEventHandler(
           name: event.toolName,
           args: event.args ?? {},
           status: 'running',
-          startedAt: event.timestamp,
+          startedAt: Date.now(),
         })
         break
 
       case 'tool:finish':
         updateToolActivity(signals.setToolActivity, event.toolName, {
           status: 'success',
-          output: event.output,
-          completedAt: event.timestamp,
+          completedAt: Date.now(),
           durationMs: event.durationMs,
         })
-        break
-
-      case 'tool:error':
-        updateToolActivity(signals.setToolActivity, event.toolName, {
-          status: 'error',
-          error: event.error,
-          completedAt: event.timestamp,
-        })
-        break
-
-      case 'tool:metadata':
         break
 
       case 'error':
@@ -107,14 +95,6 @@ export function createAgentEventHandler(
             logWarn('Agent', 'Doom loop detected')
           }
         })
-        break
-
-      case 'recovery:start':
-        logInfo('Agent', 'Recovery started')
-        break
-
-      case 'recovery:finish':
-        logInfo('Agent', 'Recovery finished')
         break
     }
   }

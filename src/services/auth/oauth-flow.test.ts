@@ -10,8 +10,9 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
 }))
 
-vi.mock('@ava/core', () => ({
+vi.mock('../../lib/auth-helpers', () => ({
   setStoredAuth: (...args: unknown[]) => mockSetStoredAuth(...args),
+  removeStoredAuth: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('../logger', () => ({

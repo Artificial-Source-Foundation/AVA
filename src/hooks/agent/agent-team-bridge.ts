@@ -3,7 +3,7 @@
  * Maps agent events to the team hierarchy store for visualization
  */
 
-import type { AgentEvent } from '@ava/core'
+import type { AgentEvent } from '@ava/core-v2/agent'
 import type { useTeam } from '../../stores/team'
 
 type TeamStore = ReturnType<typeof useTeam>
@@ -17,11 +17,13 @@ export function createTeamBridge(teamStore: TeamStore): {
 } {
   // Track last thought per agent for delegation context
   const lastThought: Record<string, string> = {}
+  // Track tool call IDs for finish events (core-v2 events don't carry timestamps)
+  const runningTools: Record<string, string> = {} // agentId:toolName → toolId
 
   function bridgeToTeam(event: AgentEvent): void {
     switch (event.type) {
       case 'agent:start': {
-        const role = teamStore.agentTypeToRole(event.config?.name ?? 'commander')
+        const role = teamStore.agentTypeToRole('commander')
         const domain = teamStore.inferDomain(event.goal)
         const name = teamStore.generateName(role, domain)
 
@@ -47,12 +49,12 @@ export function createTeamBridge(teamStore: TeamStore): {
           status: 'working',
           parentId,
           domain,
-          model: event.config?.model ?? 'unknown',
+          model: 'unknown',
           task: event.goal,
           toolCalls: [],
           messages: [],
-          createdAt: event.timestamp,
-          delegatedAt: event.timestamp,
+          createdAt: Date.now(),
+          delegatedAt: Date.now(),
           delegationContext,
         })
         break
@@ -73,37 +75,43 @@ export function createTeamBridge(teamStore: TeamStore): {
         delete lastThought[event.agentId]
         break
 
-      case 'thought':
-        lastThought[event.agentId] = event.text
+      case 'thought': {
+        const now = Date.now()
+        lastThought[event.agentId] = event.content
         teamStore.addMessage(event.agentId, {
-          id: `thought-${event.timestamp}`,
+          id: `thought-${now}`,
           role: 'assistant',
-          content: event.text,
-          timestamp: event.timestamp,
+          content: event.content,
+          timestamp: now,
         })
         break
+      }
 
-      case 'tool:start':
+      case 'tool:start': {
+        const ts = Date.now()
+        const toolId = `${event.toolName}-${ts}`
+        runningTools[`${event.agentId}:${event.toolName}`] = toolId
         teamStore.addToolCall(event.agentId, {
-          id: `${event.toolName}-${event.timestamp}`,
+          id: toolId,
           name: event.toolName,
           status: 'running',
-          timestamp: event.timestamp,
+          timestamp: ts,
         })
         break
+      }
 
-      case 'tool:finish':
-        teamStore.updateToolCall(event.agentId, `${event.toolName}-${event.timestamp}`, {
-          status: 'success',
-          durationMs: event.durationMs,
-        })
+      case 'tool:finish': {
+        const key = `${event.agentId}:${event.toolName}`
+        const toolId = runningTools[key]
+        if (toolId) {
+          teamStore.updateToolCall(event.agentId, toolId, {
+            status: event.success ? 'success' : 'error',
+            durationMs: event.durationMs,
+          })
+          delete runningTools[key]
+        }
         break
-
-      case 'tool:error':
-        teamStore.updateToolCall(event.agentId, `${event.toolName}-${event.timestamp}`, {
-          status: 'error',
-        })
-        break
+      }
     }
   }
 

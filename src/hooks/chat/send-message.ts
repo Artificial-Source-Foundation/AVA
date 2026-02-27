@@ -3,9 +3,9 @@
  * Core send-message and regenerate-response functions that drive the stream lifecycle.
  */
 
-import { estimateCost } from '@ava/core'
 import { DEFAULTS, LIMITS } from '../../config/constants'
-import { getCoreTracker } from '../../services/core-bridge'
+import { estimateCost } from '../../lib/cost'
+import { getCoreBudget } from '../../services/core-bridge'
 import { saveMessage, updateMessage } from '../../services/database'
 import { logError, logInfo } from '../../services/logger'
 import { notifyCompletion } from '../../services/notifications'
@@ -78,7 +78,7 @@ export async function sendMessage(
       metadata: images?.length ? { images } : undefined,
     })
     deps.session.addMessage(userMsg)
-    getCoreTracker()?.addMessage(userMsg.id, content)
+    getCoreBudget()?.addMessage(userMsg.id, content)
     syncTrackerStats(deps)
 
     // Auto-title new chats from first user message when enabled.
@@ -157,7 +157,7 @@ export async function sendMessage(
             model: targetModel,
             toolCalls,
           })
-          getCoreTracker()?.addMessage(assistantMsg.id, text)
+          getCoreBudget()?.addMessage(assistantMsg.id, text)
           syncTrackerStats(deps)
           await maybeCompact(deps)
           void notifyCompletion(

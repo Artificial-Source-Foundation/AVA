@@ -1,7 +1,7 @@
-import { formatCost } from '@ava/core'
 import { GitBranch, GitPullRequest, RefreshCw, Upload } from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js'
 import { useChat } from '../../hooks/useChat'
+import { formatCost } from '../../lib/cost'
 import {
   listBranches,
   openCreatePr,

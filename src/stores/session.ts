@@ -5,7 +5,7 @@
 
 import { createMemo, createSignal } from 'solid-js'
 import { DEFAULTS, STORAGE_KEYS } from '../config/constants'
-import { getCoreTracker } from '../services/core-bridge'
+import { getCoreBudget } from '../services/core-bridge'
 import {
   archiveSession as dbArchiveSession,
   clearFileOperations as dbClearFileOperations,
@@ -115,12 +115,12 @@ const sessionTokenStats = createMemo((): SessionTokenStats => {
   )
 })
 
-// Context window usage — uses core tracker when available, falls back to rough estimate
+// Context window usage — uses core budget when available, falls back to rough estimate
 const DEFAULT_CONTEXT_WINDOW = 200000
 const contextUsage = createMemo(() => {
-  const tracker = getCoreTracker()
-  if (tracker) {
-    const s = tracker.getStats()
+  const budget = getCoreBudget()
+  if (budget) {
+    const s = budget.getStats()
     return { used: s.total, total: s.limit, percentage: s.percentUsed }
   }
   // Fallback: rough estimate (~4 chars per token)

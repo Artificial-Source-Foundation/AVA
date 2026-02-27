@@ -6,10 +6,10 @@
  * Click the token icon to toggle the progress bar detail.
  */
 
-import { formatCost } from '@ava/core'
 import { Activity, MessageSquare } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
 import { useChat } from '../../hooks/useChat'
+import { formatCost } from '../../lib/cost'
 import { useProject } from '../../stores/project'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'

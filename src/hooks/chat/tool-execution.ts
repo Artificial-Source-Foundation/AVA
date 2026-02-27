@@ -3,7 +3,7 @@
  * Lint checking and file-path extraction for tool calls.
  */
 
-import { executeTool, type ToolContext } from '@ava/core'
+import { executeTool, type ToolContext } from '@ava/core-v2/tools'
 
 // ============================================================================
 // File Path Extraction

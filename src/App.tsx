@@ -19,7 +19,6 @@ import { initCoreBridge } from './services/core-bridge'
 import { initDatabase } from './services/database'
 import { installConsoleCapture, setLogDirectory } from './services/dev-console'
 import { initLogger, logError, logInfo } from './services/logger'
-import { initializePlatform } from './services/platform'
 import { initSettingsFS } from './services/settings-fs'
 import { useLayout } from './stores/layout'
 import { useProject } from './stores/project'
@@ -54,7 +53,7 @@ function App() {
   } = useLayout()
   const { initializeProjects, currentProject } = useProject()
   const { loadSessionsForCurrentProject, restoreForCurrentProject, createNewSession } = useSession()
-  const { settings, updateSettings, updateProvider } = useSettings()
+  const { settings, updateSettings, updateProvider, isToolAutoApproved } = useSettings()
   const { registerAction, setupShortcutListener } = useShortcuts()
 
   onMount(async () => {
@@ -136,7 +135,6 @@ function App() {
       validateEnv()
 
       setSplashStatus('Initializing platform...')
-      initializePlatform()
       await initSettingsFS()
       await hydrateSettingsFromFS()
       syncAllApiKeys()
@@ -146,6 +144,7 @@ function App() {
       setSplashStatus('Initializing core engine...')
       const cleanupCore = await initCoreBridge({
         contextLimit: 200_000,
+        autoApprovalChecker: isToolAutoApproved,
       })
       onCleanup(cleanupCore)
       pushSettingsToCore()

@@ -7,7 +7,7 @@
 import { getProviderLogo } from '../../components/icons/provider-logo-map'
 import type { AgentPreset } from '../../config/defaults/agent-defaults'
 import { defaultAgentPresets } from '../../config/defaults/agent-defaults'
-import type { LLMProviderConfig } from '../../config/defaults/provider-defaults'
+import type { LLMProviderConfig, ProviderModel } from '../../config/defaults/provider-defaults'
 import { defaultProviders } from '../../config/defaults/provider-defaults'
 import {
   DEFAULT_AGENT_LIMITS,
@@ -23,12 +23,47 @@ import type { AppSettings } from './settings-types'
 
 /** Restore icon references from defaults for persisted providers */
 export function hydrateProviders(saved: LLMProviderConfig[]): LLMProviderConfig[] {
-  return saved.map((sp) => {
+  const savedIds = new Set(saved.map((s) => s.id))
+
+  const hydrated = saved.map((sp) => {
     const def = defaultProviders.find((d) => d.id === sp.id)
-    return def
-      ? { ...def, ...sp, icon: def.icon, models: sp.models.length > 0 ? sp.models : def.models }
-      : { ...sp, icon: getProviderLogo(sp.id) }
+    if (!def) return { ...sp, icon: getProviderLogo(sp.id) }
+
+    // Merge models: persisted models enriched with defaults, plus defaults not in persisted
+    const models = mergeModels(sp.models, def.models)
+    return { ...def, ...sp, icon: def.icon, models }
   })
+
+  // Add any new default providers not present in saved data
+  for (const def of defaultProviders) {
+    if (!savedIds.has(def.id)) hydrated.push(def)
+  }
+
+  return hydrated
+}
+
+/** Merge persisted models with hardcoded defaults so no models are lost */
+function mergeModels(saved: ProviderModel[], defaults: ProviderModel[]): ProviderModel[] {
+  if (saved.length === 0) return defaults
+
+  const merged = new Map<string, ProviderModel>()
+
+  // Start with saved models, enriched with default pricing/capabilities
+  for (const s of saved) {
+    const def = defaults.find((d) => d.id === s.id)
+    merged.set(s.id, {
+      ...s,
+      pricing: s.pricing ?? def?.pricing,
+      capabilities: s.capabilities?.length ? s.capabilities : def?.capabilities,
+    })
+  }
+
+  // Add default models not in saved list
+  for (const d of defaults) {
+    if (!merged.has(d.id)) merged.set(d.id, d)
+  }
+
+  return [...merged.values()]
 }
 
 /** Restore icon references from defaults for persisted agents */

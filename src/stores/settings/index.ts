@@ -7,7 +7,11 @@
 import type { MCPServerConfig } from '@ava/core'
 import { createSignal } from 'solid-js'
 import type { AgentPreset } from '../../config/defaults/agent-defaults'
-import type { LLMProviderConfig, ProviderModel } from '../../config/defaults/provider-defaults'
+import {
+  defaultProviders,
+  type LLMProviderConfig,
+  type ProviderModel,
+} from '../../config/defaults/provider-defaults'
 import { logWarn } from '../../services/logger'
 import { fetchModels } from '../../services/providers/model-fetcher'
 import type { LLMProvider } from '../../types/llm'
@@ -157,7 +161,7 @@ function getProviderCredential(id: string): string | undefined {
   return undefined
 }
 
-/** Fetch models from provider API and update the provider's model list */
+/** Fetch models from provider API and merge with hardcoded defaults */
 function autoFetchModels(id: string): void {
   const credential = getProviderCredential(id)
   if (!credential) return
@@ -167,18 +171,47 @@ function autoFetchModels(id: string): void {
     .then((fetched) => {
       if (fetched.length === 0) return
       const current = settings().providers.find((p) => p.id === id)
-      const models: ProviderModel[] = fetched.map((m, idx) => ({
-        id: m.id,
-        name: m.name,
-        contextWindow: m.contextWindow,
-        isDefault: idx === 0,
-        ...(m.pricing && { pricing: { input: m.pricing.prompt, output: m.pricing.completion } }),
-        ...(m.capabilities?.length && { capabilities: m.capabilities }),
-      }))
+
+      // Build a map of hardcoded defaults for enrichment
+      const defaults = defaultProviders.find((p) => p.id === id)
+      const defaultMap = new Map<string, ProviderModel>()
+      for (const m of defaults?.models ?? []) defaultMap.set(m.id, m)
+
+      // Merge: fetched models enriched with hardcoded pricing/capabilities
+      const fetchedMap = new Map<string, ProviderModel>()
+      for (const m of fetched) {
+        const def = defaultMap.get(m.id)
+        const pricing = m.pricing
+          ? { input: m.pricing.prompt, output: m.pricing.completion }
+          : def?.pricing
+        const capabilities = m.capabilities?.length ? m.capabilities : def?.capabilities
+        fetchedMap.set(m.id, {
+          id: m.id,
+          name: m.name,
+          contextWindow: m.contextWindow,
+          ...(pricing && { pricing }),
+          ...(capabilities?.length && { capabilities }),
+        })
+      }
+
+      // Add hardcoded models not returned by the API (they may still be valid)
+      for (const [defId, def] of defaultMap) {
+        if (!fetchedMap.has(defId)) {
+          fetchedMap.set(defId, def)
+        }
+      }
+
+      // Convert to array, mark the first model or current default
+      const models: ProviderModel[] = [...fetchedMap.values()]
       const keepDefault = current?.defaultModel && models.some((m) => m.id === current.defaultModel)
+      const defaultModelId = keepDefault
+        ? current.defaultModel
+        : (defaults?.defaultModel ?? models[0]?.id)
+      for (const m of models) m.isDefault = m.id === defaultModelId
+
       updateProvider(id, {
         models,
-        defaultModel: keepDefault ? current.defaultModel : models[0]?.id,
+        defaultModel: defaultModelId,
         status: 'connected',
       })
     })

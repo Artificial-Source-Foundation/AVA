@@ -87,7 +87,7 @@ export async function detectEnvApiKeys(
     try {
       const value = await invoke<string | null>('get_env_var', { name: envVar })
       if (value) {
-        onDetected(providerId, { apiKey: value, status: 'connected' })
+        onDetected(providerId, { apiKey: value, status: 'connected', enabled: true })
         detected++
       }
     } catch {

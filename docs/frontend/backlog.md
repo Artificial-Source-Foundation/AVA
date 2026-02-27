@@ -170,6 +170,7 @@ These were identified as gaps but are now fully implemented:
 | Code editor file reading | 45 | readFileContent via Tauri FS, auto-open from explorer |
 | Agent persistence | 45 | DB CRUD (save, get, update), wired in session store |
 | Google models API | 45 | Dynamic fetch with hardcoded fallback |
+| Copilot provider defaults + model fetch | 58 | Github icon, real model IDs (gpt-4.1 default), dynamic fetch with fallback |
 | DiffViewer split view | 45 | buildSplitPairs, two-column rendering |
 | Dark/light/system theme | 41 | With midnight + charcoal dark variants |
 | 6 accent colors + custom hex | 41 | hexToAccentVars computes all accent vars |

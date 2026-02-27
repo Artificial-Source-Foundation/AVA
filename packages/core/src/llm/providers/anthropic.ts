@@ -4,7 +4,6 @@
  * https://docs.anthropic.com/en/api/messages
  */
 
-import { ANTHROPIC_OAUTH_CONFIG } from '../../auth/types.js'
 import type {
   AnthropicStreamEvent,
   ChatMessage,
@@ -38,8 +37,7 @@ class AnthropicClient implements LLMClient {
         done: true,
         error: {
           type: 'auth',
-          message:
-            'No Anthropic authentication configured. Set AVA_ANTHROPIC_API_KEY or use `ava auth anthropic` for OAuth.',
+          message: 'No Anthropic API key configured. Set AVA_ANTHROPIC_API_KEY.',
         },
       }
       return
@@ -84,14 +82,7 @@ class AnthropicClient implements LLMClient {
       'anthropic-dangerous-direct-browser-access': 'true',
     }
 
-    if (auth.type === 'oauth') {
-      // OAuth uses Bearer token and beta header for Claude subscription
-      headers.Authorization = `Bearer ${auth.token}`
-      headers['anthropic-beta'] = ANTHROPIC_OAUTH_CONFIG.betaHeader
-    } else {
-      // API key auth
-      headers['x-api-key'] = auth.token
-    }
+    headers['x-api-key'] = auth.token
 
     // Make request
     let response: Response

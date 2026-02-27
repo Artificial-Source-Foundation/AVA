@@ -23,7 +23,7 @@ export interface DialogProps {
   /** Footer content (buttons, etc.) */
   footer?: JSX.Element
   /** Dialog size */
-  size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | 'full'
   /** Show close button */
   showCloseButton?: boolean
   /** Close on overlay click */
@@ -34,11 +34,12 @@ export interface DialogProps {
   class?: string
 }
 
-const sizeStyles = {
+const sizeStyles: Record<string, string> = {
   sm: 'max-w-sm',
   md: 'max-w-md',
   lg: 'max-w-lg',
   xl: 'max-w-xl',
+  '2xl': 'max-w-[56rem]',
   full: 'max-w-[90vw] max-h-[90vh]',
 }
 

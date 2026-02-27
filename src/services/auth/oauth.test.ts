@@ -8,8 +8,7 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(async (cmd: string) => {
     if (cmd === 'oauth_listen') {
-      // Read the state that storePKCE just wrote to localStorage
-      const state = localStorage.getItem('ava_oauth_state_anthropic') || 'mock-state'
+      const state = localStorage.getItem('ava_oauth_state_openai') || 'mock-state'
       return { code: 'test-auth-code', state }
     }
     if (cmd === 'oauth_copilot_device_start') {
@@ -29,9 +28,6 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 vi.mock('@ava/core', () => ({
   setStoredAuth: vi.fn().mockResolvedValue(undefined),
-}))
-vi.mock('../../stores/settings', () => ({
-  syncProviderCredentials: vi.fn(),
 }))
 vi.mock('../logger', () => ({
   logDebug: vi.fn(),
@@ -57,13 +53,14 @@ import {
 
 describe('isOAuthSupported', () => {
   it('returns true for supported providers', () => {
-    for (const p of ['anthropic', 'openai', 'copilot'] as LLMProvider[]) {
+    for (const p of ['openai', 'copilot'] as LLMProvider[]) {
       expect(isOAuthSupported(p)).toBe(true)
     }
   })
 
   it('returns false for unsupported providers', () => {
     for (const p of [
+      'anthropic',
       'google',
       'xai',
       'mistral',
@@ -86,10 +83,10 @@ describe('isOAuthSupported', () => {
 
 describe('getOAuthConfig', () => {
   it('returns config for supported providers', () => {
-    const anthropic = getOAuthConfig('anthropic')
-    expect(anthropic).not.toBeNull()
-    expect(anthropic!.clientId).toBe('9d1c250a-e61b-44d9-88ed-5944d1962f5e')
-    expect(anthropic!.flow).toBe('pkce')
+    const openai = getOAuthConfig('openai')
+    expect(openai).not.toBeNull()
+    expect(openai!.clientId).toBe('app_EMoamEEZ73f0CkXaXp7hrann')
+    expect(openai!.flow).toBe('pkce')
 
     const copilot = getOAuthConfig('copilot')
     expect(copilot).not.toBeNull()
@@ -111,22 +108,22 @@ describe('storeOAuthCredentials', () => {
   afterEach(() => localStorage.clear())
 
   it('stores credentials in localStorage', () => {
-    storeOAuthCredentials('anthropic', { accessToken: 'tok-abc' })
+    storeOAuthCredentials('openai', { accessToken: 'tok-abc' })
     const raw = localStorage.getItem('ava_credentials')
     expect(raw).not.toBeNull()
     const parsed = JSON.parse(raw!)
-    expect(parsed.anthropic.provider).toBe('anthropic')
-    expect(parsed.anthropic.type).toBe('oauth-token')
-    expect(parsed.anthropic.value).toBe('tok-abc')
+    expect(parsed.openai.provider).toBe('openai')
+    expect(parsed.openai.type).toBe('oauth-token')
+    expect(parsed.openai.value).toBe('tok-abc')
     expect(localStorage.getItem('ava_credentials')).toBe(raw)
   })
 
   it('stores multiple providers without overwriting', () => {
-    storeOAuthCredentials('anthropic', { accessToken: 'tok-a' })
     storeOAuthCredentials('openai', { accessToken: 'tok-o' })
+    storeOAuthCredentials('copilot', { accessToken: 'tok-c' })
     const parsed = JSON.parse(localStorage.getItem('ava_credentials')!)
-    expect(parsed.anthropic.value).toBe('tok-a')
     expect(parsed.openai.value).toBe('tok-o')
+    expect(parsed.copilot.value).toBe('tok-c')
   })
 })
 
@@ -194,38 +191,31 @@ describe('startOAuthFlow', () => {
     await expect(startOAuthFlow('ollama')).rejects.toThrow('OAuth not supported')
   })
 
-  it('opens browser and completes PKCE flow for anthropic', async () => {
-    // Mock fetch: first call = token exchange, second call = API key minting
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            access_token: 'oauth-access-tok',
-            refresh_token: 'oauth-refresh-tok',
-            expires_in: 3600,
-          }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve({ api_key: 'sk-ant-minted-key' }),
-      })
+  it('opens browser and completes PKCE flow for openai', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          access_token: 'oauth-access-tok',
+          refresh_token: 'oauth-refresh-tok',
+          expires_in: 3600,
+        }),
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     const mockOpenUrl = vi.mocked(openUrl)
-    const result = await startOAuthFlow('anthropic')
+    const result = await startOAuthFlow('openai')
 
     // Browser was opened with correct auth URL
     expect(mockOpenUrl).toHaveBeenCalledOnce()
     const url = mockOpenUrl.mock.calls[0][0]
-    expect(url).toContain('claude.ai/oauth/authorize')
+    expect(url).toContain('auth.openai.com/oauth/authorize')
     expect(url).toContain('code_challenge_method=S256')
 
-    // Tokens returned with minted API key (not raw OAuth token)
+    // Tokens returned
     expect('accessToken' in result).toBe(true)
     const tokens = result as import('./oauth').OAuthTokens
-    expect(tokens.accessToken).toBe('sk-ant-minted-key')
+    expect(tokens.accessToken).toBe('oauth-access-tok')
 
     vi.unstubAllGlobals()
   })

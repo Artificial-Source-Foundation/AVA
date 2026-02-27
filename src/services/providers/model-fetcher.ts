@@ -1,17 +1,17 @@
 /**
  * Dynamic Model Fetcher
  *
- * Fetches available models from provider APIs:
- * - OpenAI: GET /v1/models
- * - OpenRouter: GET /api/v1/models
- * - Ollama: GET /api/tags
- * - Anthropic: No public API (uses documented models)
- * - Google: Uses documented models
+ * Fetches available models from provider APIs. All 14 providers now support
+ * dynamic fetching (or return documented models for Anthropic).
  *
- * Sources:
- * - https://platform.openai.com/docs/api-reference/models/list
- * - https://openrouter.ai/docs/api/api-reference/models/get-models
- * - https://docs.ollama.com/api/tags
+ * - OpenAI-compat (GET /v1/models): OpenAI, xAI, Mistral, Groq, DeepSeek, Together, Kimi
+ * - OpenRouter: GET /api/v1/models
+ * - Copilot: GET /models
+ * - Google: GET /v1beta/models
+ * - Cohere: GET /v2/models (custom shape)
+ * - GLM (Zhipu): GET /v4/models (custom shape)
+ * - Ollama: GET /api/tags
+ * - Anthropic: Documented models (no list API)
  */
 
 import type { LLMProvider } from '../../types/llm'
@@ -54,6 +54,15 @@ interface OpenRouterModel {
   }
 }
 
+interface CopilotModel {
+  id: string
+  name: string
+  version: string
+  capabilities?: {
+    type: string
+  }
+}
+
 interface OllamaModel {
   name: string
   modified_at: string
@@ -75,6 +84,7 @@ interface OllamaModel {
 const ENDPOINTS = {
   openai: 'https://api.openai.com/v1/models',
   openrouter: 'https://openrouter.ai/api/v1/models',
+  copilot: 'https://api.githubcopilot.com/models',
   ollama: 'http://localhost:11434/api/tags',
 }
 
@@ -83,23 +93,44 @@ const ENDPOINTS = {
 // ============================================================================
 
 const OPENAI_CONTEXT_WINDOWS: Record<string, number> = {
-  'gpt-5.2': 196000,
-  'gpt-5.1': 196000,
-  'gpt-4.1': 1000000,
-  'gpt-4.1-mini': 1000000,
-  'gpt-4.1-nano': 1000000,
+  // GPT-5 family
+  'gpt-5.2': 400000,
+  'gpt-5.2-chat': 400000,
+  'gpt-5.2-pro': 400000,
+  'gpt-5.1': 400000,
+  'gpt-5.1-chat': 128000,
+  'gpt-5': 400000,
+  'gpt-5-mini': 400000,
+  'gpt-5-nano': 400000,
+  // Codex family
+  'gpt-5.3-codex': 400000,
+  'gpt-5.2-codex': 400000,
+  'gpt-5.1-codex': 400000,
+  // GPT-4.1 family
+  'gpt-4.1': 1047576,
+  'gpt-4.1-mini': 1047576,
+  'gpt-4.1-nano': 1047576,
+  // GPT-4o family (legacy)
   'gpt-4o': 128000,
   'gpt-4o-mini': 128000,
   'gpt-4-turbo': 128000,
-  'gpt-4': 8192,
-  'gpt-3.5-turbo': 16385,
+  // o-series reasoning
   o3: 200000,
   'o3-mini': 200000,
   'o3-pro': 200000,
   'o4-mini': 200000,
-  o1: 200000,
+  // Open-weight
+  'gpt-oss-120b': 128000,
+  'gpt-oss-20b': 128000,
+}
+
+const COPILOT_CONTEXT_WINDOWS: Record<string, number> = {
+  'gpt-4.1': 1000000,
+  'gpt-4o': 128000,
+  'gpt-4o-mini': 128000,
+  'claude-3.5-sonnet': 200000,
+  'o3-mini': 200000,
   'o1-mini': 128000,
-  'o1-preview': 128000,
 }
 
 const OLLAMA_CONTEXT_WINDOWS: Record<string, number> = {
@@ -144,15 +175,19 @@ async function fetchOpenAIModels(apiKey: string): Promise<FetchedModel[]> {
   const data = await response.json()
   const models: OpenAIModel[] = data.data
 
-  // Filter to only chat models (exclude embeddings, whisper, dall-e, etc.)
+  // Filter to only chat/reasoning/coding models
   const chatModels = models.filter((m) => {
     const id = m.id.toLowerCase()
+    if (m.owned_by === 'user') return false // Exclude fine-tuned models
+    if (id.includes('embedding') || id.includes('tts') || id.includes('whisper')) return false
+    if (id.includes('realtime') || id.includes('audio') || id.includes('moderation')) return false
+    if (id.includes('dall') || id.includes('image') || id.includes('sora')) return false
     return (
-      (id.includes('gpt') || id.startsWith('o1') || id.startsWith('o3') || id.startsWith('o4')) &&
-      !id.includes('embedding') &&
-      !id.includes('instruct') &&
-      !id.includes('realtime') &&
-      m.owned_by !== 'user' // Exclude fine-tuned models
+      id.includes('gpt') ||
+      id.startsWith('o3') ||
+      id.startsWith('o4') ||
+      id.startsWith('gpt-oss') ||
+      id.includes('codex')
     )
   })
 
@@ -166,6 +201,33 @@ async function fetchOpenAIModels(apiKey: string): Promise<FetchedModel[]> {
       contextWindow,
     }
   })
+}
+
+/**
+ * Fetch models from GitHub Copilot API
+ */
+async function fetchCopilotModels(token: string): Promise<FetchedModel[]> {
+  const response = await fetch(ENDPOINTS.copilot, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Copilot-Integration-Id': 'vscode-chat',
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Copilot API error: ${response.status} ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  const models: CopilotModel[] = data.data ?? data.models ?? data
+
+  return models
+    .filter((m) => !m.capabilities || m.capabilities.type === 'chat')
+    .map((model) => ({
+      id: model.id,
+      name: model.name || formatModelName(model.id),
+      contextWindow: findContextWindow(model.id, COPILOT_CONTEXT_WINDOWS),
+    }))
 }
 
 /**
@@ -256,15 +318,62 @@ function getAnthropicModels(): FetchedModel[] {
   // Anthropic doesn't have a models list API
   // These are the current documented models as of Feb 2026
   return [
-    { id: 'claude-sonnet-4-5-20250514', name: 'Claude Sonnet 4.5', contextWindow: 200000 },
-    { id: 'claude-opus-4-5-20251124', name: 'Claude Opus 4.5', contextWindow: 200000 },
-    { id: 'claude-haiku-4-5-20251022', name: 'Claude Haiku 4.5', contextWindow: 200000 },
-    { id: 'claude-opus-4-1-20250801', name: 'Claude Opus 4.1', contextWindow: 200000 },
-    { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', contextWindow: 200000 },
-    { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', contextWindow: 200000 },
-    { id: 'claude-3-7-sonnet-20250219', name: 'Claude 3.7 Sonnet', contextWindow: 200000 },
-    { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet v2', contextWindow: 200000 },
-    { id: 'claude-3-5-haiku-20241022', name: 'Claude 3.5 Haiku', contextWindow: 200000 },
+    {
+      id: 'claude-opus-4-6',
+      name: 'Claude Opus 4.6',
+      contextWindow: 200000,
+      pricing: { prompt: 5, completion: 25 },
+      capabilities: ['vision', 'tools', 'reasoning'],
+    },
+    {
+      id: 'claude-sonnet-4-6',
+      name: 'Claude Sonnet 4.6',
+      contextWindow: 200000,
+      pricing: { prompt: 3, completion: 15 },
+      capabilities: ['vision', 'tools', 'reasoning'],
+    },
+    {
+      id: 'claude-haiku-4-5-20251001',
+      name: 'Claude Haiku 4.5',
+      contextWindow: 200000,
+      pricing: { prompt: 1, completion: 5 },
+      capabilities: ['vision', 'tools', 'reasoning'],
+    },
+    {
+      id: 'claude-sonnet-4-5-20250929',
+      name: 'Claude Sonnet 4.5',
+      contextWindow: 200000,
+      pricing: { prompt: 3, completion: 15 },
+      capabilities: ['vision', 'tools', 'reasoning'],
+    },
+    {
+      id: 'claude-opus-4-5-20251101',
+      name: 'Claude Opus 4.5',
+      contextWindow: 200000,
+      pricing: { prompt: 5, completion: 25 },
+      capabilities: ['vision', 'tools', 'reasoning'],
+    },
+    {
+      id: 'claude-opus-4-1-20250805',
+      name: 'Claude Opus 4.1',
+      contextWindow: 200000,
+      pricing: { prompt: 15, completion: 75 },
+      capabilities: ['vision', 'tools', 'reasoning'],
+    },
+    {
+      id: 'claude-sonnet-4-20250514',
+      name: 'Claude Sonnet 4',
+      contextWindow: 200000,
+      pricing: { prompt: 3, completion: 15 },
+      capabilities: ['vision', 'tools', 'reasoning'],
+    },
+    {
+      id: 'claude-opus-4-20250514',
+      name: 'Claude Opus 4',
+      contextWindow: 200000,
+      pricing: { prompt: 15, completion: 75 },
+      capabilities: ['vision', 'tools', 'reasoning'],
+    },
   ]
 }
 
@@ -303,6 +412,139 @@ async function fetchGoogleModels(apiKey: string): Promise<FetchedModel[]> {
 }
 
 // ============================================================================
+// OpenAI-Compatible Fetcher (xAI, Mistral, Groq, DeepSeek, Together, Kimi)
+// ============================================================================
+
+interface OpenAICompatConfig {
+  baseUrl: string
+  providerName: string
+  filterFn?: (model: OpenAIModel) => boolean
+}
+
+const OPENAI_COMPAT_CONFIGS: Record<string, OpenAICompatConfig> = {
+  xai: {
+    baseUrl: 'https://api.x.ai/v1/models',
+    providerName: 'xAI',
+    filterFn: (m) => m.owned_by.includes('xai') || m.id.startsWith('grok'),
+  },
+  mistral: {
+    baseUrl: 'https://api.mistral.ai/v1/models',
+    providerName: 'Mistral',
+  },
+  groq: {
+    baseUrl: 'https://api.groq.com/openai/v1/models',
+    providerName: 'Groq',
+    filterFn: (m) => !m.id.includes('whisper') && !m.id.includes('tool-use'),
+  },
+  deepseek: {
+    baseUrl: 'https://api.deepseek.com/models',
+    providerName: 'DeepSeek',
+  },
+  together: {
+    baseUrl: 'https://api.together.xyz/v1/models',
+    providerName: 'Together',
+    filterFn: (m) => m.id.includes('Instruct') || m.id.includes('chat') || m.id.includes('Chat'),
+  },
+  kimi: {
+    baseUrl: 'https://api.moonshot.cn/v1/models',
+    providerName: 'Kimi',
+  },
+}
+
+/**
+ * Generic fetcher for OpenAI-compatible /v1/models endpoints
+ */
+async function fetchOpenAICompatModels(
+  apiKey: string,
+  config: OpenAICompatConfig
+): Promise<FetchedModel[]> {
+  const response = await fetch(config.baseUrl, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  })
+
+  if (!response.ok) {
+    throw new Error(`${config.providerName} API error: ${response.status} ${response.statusText}`)
+  }
+
+  const data = await response.json()
+  const models: OpenAIModel[] = data.data || []
+  const filtered = config.filterFn ? models.filter(config.filterFn) : models
+
+  return filtered.map((model) => ({
+    id: model.id,
+    name: formatModelName(model.id),
+    contextWindow: 4096, // OpenAI-compat APIs don't return context window
+  }))
+}
+
+// ============================================================================
+// Cohere Fetcher (custom response shape)
+// ============================================================================
+
+/**
+ * Fetch models from Cohere API (v2)
+ */
+async function fetchCohereModels(apiKey: string): Promise<FetchedModel[]> {
+  const response = await fetch('https://api.cohere.com/v2/models', {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  })
+
+  if (!response.ok) {
+    throw new Error(`Cohere API error: ${response.status} ${response.statusText}`)
+  }
+
+  interface CohereModel {
+    name: string
+    endpoints: string[]
+    context_length?: number
+  }
+
+  const data = (await response.json()) as { models: CohereModel[] }
+  const models = data.models || []
+
+  return models
+    .filter((m) => m.endpoints?.includes('chat'))
+    .map((model) => ({
+      id: model.name,
+      name: formatModelName(model.name),
+      contextWindow: model.context_length || 128000,
+    }))
+}
+
+// ============================================================================
+// GLM (Zhipu) Fetcher (custom response shape)
+// ============================================================================
+
+/**
+ * Fetch models from Zhipu (GLM) API
+ */
+async function fetchGLMModels(apiKey: string): Promise<FetchedModel[]> {
+  const response = await fetch('https://open.bigmodel.cn/api/paas/v4/models', {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  })
+
+  if (!response.ok) {
+    throw new Error(`GLM API error: ${response.status} ${response.statusText}`)
+  }
+
+  interface GLMModel {
+    id: string
+    object: string
+  }
+
+  const data = (await response.json()) as { data: GLMModel[] }
+  const models = data.data || []
+
+  return models
+    .filter((m) => m.id.startsWith('glm'))
+    .map((model) => ({
+      id: model.id,
+      name: formatModelName(model.id),
+      contextWindow: 128000,
+    }))
+}
+
+// ============================================================================
 // Main Export
 // ============================================================================
 
@@ -325,6 +567,41 @@ export async function fetchModels(
       }
       return fetchOpenAIModels(options.apiKey)
 
+    case 'copilot':
+      if (options.apiKey) {
+        try {
+          return await fetchCopilotModels(options.apiKey)
+        } catch {
+          logWarn('models', 'Could not fetch Copilot models, using defaults')
+        }
+      }
+      return [
+        {
+          id: 'gpt-4.1',
+          name: 'GPT-4.1',
+          contextWindow: 1000000,
+          capabilities: ['vision', 'tools'],
+        },
+        {
+          id: 'gpt-4o',
+          name: 'GPT-4o',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools'],
+        },
+        {
+          id: 'claude-3.5-sonnet',
+          name: 'Claude 3.5 Sonnet',
+          contextWindow: 200000,
+          capabilities: ['vision', 'tools'],
+        },
+        {
+          id: 'o3-mini',
+          name: 'o3 Mini',
+          contextWindow: 200000,
+          capabilities: ['tools', 'reasoning'],
+        },
+      ]
+
     case 'openrouter':
       return fetchOpenRouterModels(options.apiKey)
 
@@ -340,7 +617,6 @@ export async function fetchModels(
           logWarn('models', 'Could not fetch Google models, using defaults')
         }
       }
-      // Fallback when no API key or fetch fails
       return [
         { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', contextWindow: 2000000 },
         { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', contextWindow: 1000000 },
@@ -348,22 +624,51 @@ export async function fetchModels(
         { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', contextWindow: 1000000 },
       ]
 
-    default:
-      // For Ollama and other local providers
+    case 'xai':
+    case 'mistral':
+    case 'groq':
+    case 'deepseek':
+    case 'together':
+    case 'kimi': {
+      const config = OPENAI_COMPAT_CONFIGS[provider]
+      if (options.apiKey && config) {
+        try {
+          return await fetchOpenAICompatModels(options.apiKey, config)
+        } catch {
+          logWarn('models', `Could not fetch ${config.providerName} models, using defaults`)
+        }
+      }
+      return [] // Fall back to static defaults in provider config
+    }
+
+    case 'cohere':
+      if (options.apiKey) {
+        try {
+          return await fetchCohereModels(options.apiKey)
+        } catch {
+          logWarn('models', 'Could not fetch Cohere models, using defaults')
+        }
+      }
+      return []
+
+    case 'glm':
+      if (options.apiKey) {
+        try {
+          return await fetchGLMModels(options.apiKey)
+        } catch {
+          logWarn('models', 'Could not fetch GLM models, using defaults')
+        }
+      }
+      return []
+
+    case 'ollama':
       try {
         return await fetchOllamaModels(options.baseUrl)
       } catch {
-        logWarn('models', 'Could not fetch models, using defaults', { provider })
+        logWarn('models', 'Could not fetch Ollama models, using defaults')
         return []
       }
   }
-}
-
-/**
- * Check if a provider supports dynamic model fetching
- */
-export function supportsDynamicFetch(provider: LLMProvider): boolean {
-  return ['openai', 'openrouter', 'ollama', 'google'].includes(provider)
 }
 
 // ============================================================================

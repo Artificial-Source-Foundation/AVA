@@ -11,7 +11,7 @@ import { type Keybinding, KeybindingsTab } from './tabs/KeybindingsTab'
 import { LLMTab } from './tabs/LLMTab'
 import { type MCPServer, MCPServersTab } from './tabs/MCPServersTab'
 import { PluginsTab } from './tabs/PluginsTab'
-import { ProvidersTab } from './tabs/ProvidersTab'
+import { ProvidersTab } from './tabs/providers/providers-tab'
 
 interface SettingsModalContentProps {
   activeTab: () => SettingsTab
@@ -60,7 +60,7 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
           providers={props.settings().providers}
           onToggle={(id, enabled) => props.onUpdateProvider(id, { enabled })}
           onSaveApiKey={(id, key) =>
-            props.onUpdateProvider(id, { apiKey: key, status: 'connected' })
+            props.onUpdateProvider(id, { apiKey: key, status: 'connected', enabled: true })
           }
           onClearApiKey={(id) =>
             props.onUpdateProvider(id, { apiKey: undefined, status: 'disconnected' })

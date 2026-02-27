@@ -1,17 +1,39 @@
 import { open } from '@tauri-apps/plugin-dialog'
-import { Clock3, FolderOpen, FolderPlus, Play, Star } from 'lucide-solid'
-import { type Component, For, Show } from 'solid-js'
+import { Clock3, FolderOpen, FolderPlus, Play, Star, Trash2 } from 'lucide-solid'
+import { type Component, createSignal, For, Show } from 'solid-js'
 import { logError } from '../../services/logger'
 import { useLayout } from '../../stores/layout'
 import { useProject } from '../../stores/project'
 import { useSession } from '../../stores/session'
 import type { ProjectId, ProjectWithStats } from '../../types'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
 
 export const ProjectHub: Component = () => {
   const { closeProjectHub } = useLayout()
-  const { currentProject, favoriteProjects, recentProjects, openDirectory, switchProject } =
-    useProject()
+  const {
+    currentProject,
+    favoriteProjects,
+    recentProjects,
+    openDirectory,
+    switchProject,
+    removeProject,
+    toggleFavorite,
+  } = useProject()
   const { loadSessionsForCurrentProject, restoreForCurrentProject } = useSession()
+
+  const [removeTarget, setRemoveTarget] = createSignal<ProjectWithStats | null>(null)
+
+  const handleRemove = (projectId: ProjectId) => {
+    const project = orderedProjects().find((p) => p.id === projectId)
+    if (project) setRemoveTarget(project)
+  }
+
+  const confirmRemove = async () => {
+    const target = removeTarget()
+    if (!target) return
+    setRemoveTarget(null)
+    await removeProject(target.id as ProjectId)
+  }
 
   const orderedProjects = () => {
     const seen = new Set<string>()
@@ -26,31 +48,57 @@ export const ProjectHub: Component = () => {
   const enterProject = async (projectId: ProjectId) => {
     try {
       await switchProject(projectId)
+    } catch (error) {
+      console.error('[ProjectHub] switchProject failed:', error)
+      logError('ProjectHub', 'Failed to switch project', error)
+      return
+    }
+
+    closeProjectHub()
+
+    try {
       await loadSessionsForCurrentProject()
       await restoreForCurrentProject()
-      closeProjectHub()
     } catch (error) {
-      logError('ProjectHub', 'Failed to enter selected project', error)
+      console.error('[ProjectHub] Session restore failed:', error)
+      logError('ProjectHub', 'Failed to restore sessions', error)
     }
   }
 
   const handleOpenProject = async () => {
+    let selected: string | string[] | null = null
     try {
-      const selected = await open({
+      selected = await open({
         directory: true,
         title: 'Select Project Folder',
       })
+    } catch (error) {
+      console.error('[ProjectHub] Dialog failed:', error)
+      logError('ProjectHub', 'Failed to open folder dialog', error)
+      return
+    }
 
-      if (!selected || typeof selected !== 'string') {
-        return
-      }
+    if (!selected || typeof selected !== 'string') {
+      return
+    }
 
+    try {
       await openDirectory(selected)
+    } catch (error) {
+      console.error('[ProjectHub] openDirectory failed:', error)
+      logError('ProjectHub', 'Failed to open directory', error)
+      return
+    }
+
+    // Project is opened — close hub, then load sessions in background
+    closeProjectHub()
+
+    try {
       await loadSessionsForCurrentProject()
       await restoreForCurrentProject()
-      closeProjectHub()
     } catch (error) {
-      logError('ProjectHub', 'Failed to open project from hub', error)
+      console.error('[ProjectHub] Session restore failed:', error)
+      logError('ProjectHub', 'Failed to restore sessions', error)
     }
   }
 
@@ -122,12 +170,32 @@ export const ProjectHub: Component = () => {
           >
             <div class="grid gap-2">
               <For each={orderedProjects()}>
-                {(project) => <ProjectRow project={project} onOpen={enterProject} />}
+                {(project) => (
+                  <ProjectRow
+                    project={project}
+                    onOpen={enterProject}
+                    onRemove={(id) => handleRemove(id)}
+                    onToggleFavorite={(id) => toggleFavorite(id)}
+                  />
+                )}
               </For>
             </div>
           </Show>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={removeTarget() !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoveTarget(null)
+        }}
+        title="Remove project?"
+        message={`"${removeTarget()?.name}" will be removed from your recent projects. Your files and sessions won't be deleted.`}
+        confirmText="Remove"
+        cancelText="Cancel"
+        variant="danger"
+        onConfirm={confirmRemove}
+      />
     </div>
   )
 }
@@ -135,6 +203,8 @@ export const ProjectHub: Component = () => {
 interface ProjectRowProps {
   project: ProjectWithStats
   onOpen: (projectId: ProjectId) => Promise<void>
+  onRemove: (projectId: ProjectId) => void
+  onToggleFavorite: (projectId: ProjectId) => void
 }
 
 const ProjectRow: Component<ProjectRowProps> = (props) => {
@@ -148,12 +218,14 @@ const ProjectRow: Component<ProjectRowProps> = (props) => {
   }
 
   return (
-    <button
-      type="button"
+    <div
+      role="option"
+      tabIndex={0}
       onClick={() => props.onOpen(props.project.id as ProjectId)}
-      class="flex items-center justify-between rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-3 text-left transition-colors hover:border-[var(--border-default)] hover:bg-[var(--surface-sunken)]"
+      onKeyDown={(e) => e.key === 'Enter' && props.onOpen(props.project.id as ProjectId)}
+      class="flex items-center justify-between rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-3 text-left cursor-pointer transition-colors hover:border-[var(--border-default)] hover:bg-[var(--surface-sunken)] group"
     >
-      <div class="min-w-0">
+      <div class="min-w-0 flex-1">
         <div class="flex items-center gap-2">
           <FolderOpen class="h-4 w-4 text-[var(--accent)]" />
           <span class="truncate text-sm font-medium text-[var(--text-primary)]">
@@ -165,9 +237,44 @@ const ProjectRow: Component<ProjectRowProps> = (props) => {
         </div>
         <p class="mt-1 truncate text-xs text-[var(--text-muted)]">{props.project.directory}</p>
       </div>
-      <div class="ml-4 text-xs text-[var(--text-secondary)]">
-        {formatOpened(props.project.lastOpenedAt ?? Date.now())}
+
+      <div class="ml-4 flex items-center gap-2">
+        <span class="text-xs text-[var(--text-secondary)]">
+          {formatOpened(props.project.lastOpenedAt ?? Date.now())}
+        </span>
+
+        <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              props.onToggleFavorite(props.project.id as ProjectId)
+            }}
+            class={`p-1.5 rounded-[var(--radius-sm)] transition-colors ${
+              props.project.isFavorite
+                ? 'text-[var(--warning)]'
+                : 'text-[var(--text-muted)] hover:text-[var(--warning)]'
+            } hover:bg-[var(--alpha-white-8)]`}
+            title={props.project.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            <Star class={`h-3.5 w-3.5 ${props.project.isFavorite ? 'fill-current' : ''}`} />
+          </button>
+
+          <Show when={props.project.id !== 'default-project'}>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation()
+                props.onRemove(props.project.id as ProjectId)
+              }}
+              class="p-1.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)] transition-colors"
+              title="Remove from list"
+            >
+              <Trash2 class="h-3.5 w-3.5" />
+            </button>
+          </Show>
+        </div>
       </div>
-    </button>
+    </div>
   )
 }

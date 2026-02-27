@@ -8,10 +8,7 @@
 // ============================================================================
 
 /** Providers that support OAuth authentication */
-export type OAuthProvider = 'anthropic' | 'openai' | 'google' | 'copilot'
-
-/** OAuth mode for Anthropic - consumer (claude.ai) vs console */
-export type AnthropicOAuthMode = 'consumer' | 'console'
+export type OAuthProvider = 'openai' | 'google' | 'copilot'
 
 // ============================================================================
 // Token Types
@@ -36,16 +33,6 @@ export interface PKCEChallenge {
 // ============================================================================
 // OAuth Configuration
 // ============================================================================
-
-/** Anthropic OAuth configuration */
-export const ANTHROPIC_OAUTH_CONFIG = {
-  clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
-  scopes: 'org:create_api_key user:profile user:inference',
-  authorizeUrl: 'https://claude.ai/oauth/authorize',
-  tokenUrl: 'https://console.anthropic.com/v1/oauth/token',
-  redirectUrl: 'https://console.anthropic.com/oauth/code/callback',
-  betaHeader: 'claude-max-2025-01-31',
-} as const
 
 /** OpenAI OAuth configuration */
 export const OPENAI_OAUTH_CONFIG = {

@@ -5,7 +5,6 @@
 
 import { getPlatform } from '../platform.js'
 import type { LLMProvider } from '../types/llm.js'
-import { authorizeAnthropic, needsRefresh, refreshAnthropicToken } from './anthropic-oauth.js'
 import { authorizeCopilot, refreshCopilotToken } from './copilot-oauth.js'
 import { authorizeGoogle, refreshGoogleToken } from './google-oauth.js'
 import { authorizeOpenAI, refreshOpenAIToken } from './openai-oauth.js'
@@ -14,6 +13,12 @@ import type { OAuthProvider, OAuthTokenResult, StoredAuth } from './types.js'
 // ============================================================================
 // Auth Storage Keys
 // ============================================================================
+
+/** Check if tokens need refresh (1 hour buffer) */
+function needsRefresh(expiresAt: number): boolean {
+  const oneHourMs = 60 * 60 * 1000
+  return Date.now() > expiresAt - oneHourMs
+}
 
 const AUTH_KEY_PREFIX = 'auth-'
 
@@ -65,8 +70,6 @@ export async function removeStoredAuth(provider: LLMProvider): Promise<void> {
  */
 export async function startOAuthFlow(provider: OAuthProvider) {
   switch (provider) {
-    case 'anthropic':
-      return authorizeAnthropic()
     case 'openai':
       return authorizeOpenAI()
     case 'google':
@@ -157,8 +160,6 @@ async function refreshToken(
   refreshTokenValue: string
 ): Promise<OAuthTokenResult> {
   switch (provider) {
-    case 'anthropic':
-      return refreshAnthropicToken(refreshTokenValue)
     case 'openai':
       return refreshOpenAIToken(refreshTokenValue)
     case 'google':

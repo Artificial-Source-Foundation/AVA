@@ -9,6 +9,13 @@ import { getAccountId } from '../../auth/manager.js'
 import { OPENAI_OAUTH_CONFIG } from '../../auth/types.js'
 import type { ChatMessage, LLMProvider, ProviderConfig, StreamDelta } from '../../types/llm.js'
 import { getAuth, type LLMClient, registerClient } from '../client.js'
+import { buildHttpError, parseRetryAfter as parseRetryAfterShared } from '../utils/errors.js'
+import {
+  buildOpenAIRequestBody,
+  type OpenAIStreamEvent as SharedOpenAIStreamEvent,
+  ToolCallBuffer,
+} from '../utils/openai-compat.js'
+import { readSSEStream } from '../utils/sse.js'
 
 const BASE_URL = 'https://api.openai.com/v1'
 const PROVIDER: LLMProvider = 'openai'
@@ -28,17 +35,6 @@ function resolveOAuthEndpoint(): string {
   }
 
   return OPENAI_OAUTH_CONFIG.apiEndpoint
-}
-
-interface OpenAIStreamEvent {
-  choices?: Array<{
-    delta?: { content?: string; role?: string }
-    finish_reason?: string | null
-  }>
-  usage?: {
-    prompt_tokens: number
-    completion_tokens: number
-  }
 }
 
 /**
@@ -251,17 +247,12 @@ class OpenAIClient implements LLMClient {
       }
     }
 
-    // Build request body for API key mode (chat completions)
-    const body = {
-      model: config.model,
-      messages: messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
-      max_tokens: config.maxTokens || 4096,
-      temperature: config.temperature ?? 0.7,
-      stream: true,
-    }
+    // Build request body using shared utility (includes tools automatically)
+    const body = buildOpenAIRequestBody(messages, config, { model: config.model })
+    if (!body.max_tokens) body.max_tokens = config.maxTokens || 4096
+    if (body.temperature === undefined) body.temperature = config.temperature ?? 0.7
+    // Request usage in final streaming chunk
+    body.stream_options = { include_usage: true }
 
     // Make request
     let response: Response
@@ -289,16 +280,9 @@ class OpenAIClient implements LLMClient {
 
     if (!response.ok) {
       const errorBody = await response.text().catch(() => '')
-      yield {
-        content: '',
-        done: true,
-        error: {
-          type: getErrorType(response.status),
-          message: getErrorMessage(response.status, errorBody),
-          status: response.status,
-          retryAfter: parseRetryAfter(response.headers.get('retry-after')),
-        },
-      }
+      const error = buildHttpError(response.status, errorBody, 'OpenAI')
+      error.retryAfter = parseRetryAfterShared(response.headers.get('retry-after'))
+      yield { content: '', done: true, error }
       return
     }
 
@@ -312,61 +296,41 @@ class OpenAIClient implements LLMClient {
       return
     }
 
-    const decoder = new TextDecoder()
-    let buffer = ''
-    let inputTokens = 0
-    let outputTokens = 0
+    const toolCallBuf = new ToolCallBuffer()
 
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
+    for await (const dataLines of readSSEStream(reader)) {
+      for (const data of dataLines) {
+        try {
+          const event = JSON.parse(data) as SharedOpenAIStreamEvent
+          const choice = event.choices?.[0]
 
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
+          if (choice?.delta?.content) {
+            yield { content: choice.delta.content }
+          }
 
-        for (const line of lines) {
-          if (!line.trim() || line.startsWith(':')) continue
-          if (!line.startsWith('data: ')) continue
+          if (choice?.delta?.tool_calls) {
+            toolCallBuf.accumulate(choice.delta.tool_calls)
+          }
 
-          const data = line.slice(6).trim()
-          if (data === '[DONE]') {
+          // Extract usage from final event
+          if (event.usage) {
             yield {
               content: '',
-              done: true,
-              usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+              usage: {
+                inputTokens: event.usage.prompt_tokens,
+                outputTokens: event.usage.completion_tokens,
+              },
             }
-            return
           }
-
-          try {
-            const event = JSON.parse(data) as OpenAIStreamEvent
-
-            const delta = event.choices?.[0]?.delta?.content
-            if (delta) {
-              outputTokens++
-              yield { content: delta, done: false }
-            }
-
-            if (event.choices?.[0]?.finish_reason && event.usage) {
-              inputTokens = event.usage.prompt_tokens
-              outputTokens = event.usage.completion_tokens
-            }
-          } catch {
-            console.warn('Failed to parse SSE data:', data)
-          }
+        } catch {
+          // Skip invalid JSON
         }
       }
-
-      yield {
-        content: '',
-        done: true,
-        usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
-      }
-    } finally {
-      reader.releaseLock()
     }
+
+    // Emit accumulated tool calls before done signal
+    yield* toolCallBuf.flush()
+    yield { content: '', done: true }
   }
 }
 

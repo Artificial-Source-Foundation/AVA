@@ -120,7 +120,7 @@ export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
                     <button
                       type="button"
                       onClick={() => props.onDisconnect?.(server.id)}
-                      class="text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] opacity-0 group-hover:opacity-100 transition-all"
+                      class="text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
                     >
                       Stop
                     </button>
@@ -134,7 +134,7 @@ export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
                     <button
                       type="button"
                       onClick={() => props.onConnect?.(server.id)}
-                      class="text-[10px] text-[var(--text-muted)] hover:text-[var(--success)] opacity-0 group-hover:opacity-100 transition-all"
+                      class="text-[10px] text-[var(--text-muted)] hover:text-[var(--success)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
                     >
                       Start
                     </button>
@@ -143,7 +143,7 @@ export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
                     <button
                       type="button"
                       onClick={() => props.onEdit?.(server.id)}
-                      class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-all"
+                      class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
                     >
                       Edit
                     </button>
@@ -152,7 +152,7 @@ export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
                     <button
                       type="button"
                       onClick={() => props.onRemove?.(server.id)}
-                      class="text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] opacity-0 group-hover:opacity-100 transition-all"
+                      class="text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
                     >
                       Remove
                     </button>

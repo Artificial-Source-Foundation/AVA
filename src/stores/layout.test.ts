@@ -37,8 +37,8 @@ describe('layout store', () => {
       layout.setActiveActivity('sessions')
       layout.setSidebarVisible(true)
 
-      layout.handleActivityClick('plugins')
-      expect(layout.activeActivity()).toBe('plugins')
+      layout.handleActivityClick('explorer')
+      expect(layout.activeActivity()).toBe('explorer')
       expect(layout.sidebarVisible()).toBe(true)
     })
 

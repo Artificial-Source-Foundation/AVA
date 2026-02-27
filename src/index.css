@@ -1046,6 +1046,22 @@ button {
   padding: var(--density-section-py) var(--density-section-px);
 }
 
+/* Tool card entrance */
+@keyframes tool-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-tool-card-in {
+  animation: tool-card-in var(--duration-normal) var(--ease-out);
+}
+
 /* Message appear */
 @keyframes message-in {
   from {
@@ -1148,7 +1164,8 @@ button {
   .feature-card::before,
   .splash-mesh,
   .splash-logo,
-  .splash-dot {
+  .splash-dot,
+  .animate-tool-card-in {
     animation: none;
     transition: none;
   }

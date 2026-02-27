@@ -2,11 +2,12 @@
  * OAuth Service for LLM Providers
  *
  * Implements OAuth 2.0 with PKCE for:
- * - Anthropic Claude Max/Pro subscriptions
  * - OpenAI Codex (ChatGPT Plus/Pro)
  *
+ * And Device Code flow for:
+ * - GitHub Copilot
+ *
  * Based on research from:
- * - https://github.com/querymt/anthropic-auth
  * - https://github.com/numman-ali/opencode-openai-codex-auth
  */
 
@@ -14,7 +15,6 @@ import { setStoredAuth } from '@ava/core'
 import { invoke } from '@tauri-apps/api/core'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { STORAGE_KEYS } from '../../config/constants'
-import { syncProviderCredentials } from '../../stores/settings'
 import type { Credentials, LLMProvider } from '../../types/llm'
 import { logDebug, logError, logInfo, logWarn } from '../logger'
 
@@ -33,8 +33,6 @@ interface OAuthConfig {
   redirectPort: number
   redirectPath?: string // defaults to '/callback'
   extraAuthParams?: Record<string, string>
-  /** Post-OAuth step: mint an API key from the access token */
-  apiKeyUrl?: string
   flow?: 'pkce' | 'device-code'
 }
 
@@ -66,16 +64,6 @@ export interface OAuthTokens {
 // ============================================================================
 
 const OAUTH_CONFIGS: Record<string, OAuthConfig> = {
-  anthropic: {
-    // Claude Max/Pro OAuth — uses same client as querymt/anthropic-auth
-    clientId: '9d1c250a-e61b-44d9-88ed-5944d1962f5e',
-    authorizationUrl: 'https://claude.ai/oauth/authorize',
-    tokenUrl: 'https://console.anthropic.com/v1/oauth/token',
-    scopes: ['org:create_api_key', 'user:profile', 'user:inference'],
-    redirectPort: 1455,
-    apiKeyUrl: 'https://api.anthropic.com/api/oauth/claude_cli/create_api_key',
-    flow: 'pkce',
-  },
   openai: {
     // OpenAI Codex OAuth (ChatGPT Plus/Pro) — same client as openai/codex CLI
     clientId: 'app_EMoamEEZ73f0CkXaXp7hrann',
@@ -174,39 +162,6 @@ export function extractAccountId(idToken: string): string | undefined {
     return orgs[0].id as string | undefined
   }
   return undefined
-}
-
-// ============================================================================
-// API Key Minting (Anthropic)
-// ============================================================================
-
-/**
- * Use an OAuth access token to mint an API key.
- * Anthropic's OAuth flow returns a token that must be exchanged for a real API key
- * via the create_api_key endpoint.
- */
-async function mintApiKey(apiKeyUrl: string, accessToken: string): Promise<string> {
-  const response = await fetch(apiKeyUrl, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ name: 'ava-desktop' }),
-  })
-
-  if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`API key creation failed: ${error}`)
-  }
-
-  const data = (await response.json()) as Record<string, unknown>
-  const apiKey = data.api_key as string | undefined
-  if (!apiKey) {
-    throw new Error('API key creation returned no key')
-  }
-
-  return apiKey
 }
 
 // ============================================================================
@@ -319,14 +274,6 @@ export async function startOAuthFlow(
       hasIdToken: !!tokens.idToken,
       expiresAt: tokens.expiresAt,
     })
-
-    // For providers with apiKeyUrl (Anthropic), mint an API key from the OAuth token
-    if (config.apiKeyUrl) {
-      logDebug(LOG_SRC, `Minting API key for ${provider}`)
-      const apiKey = await mintApiKey(config.apiKeyUrl, tokens.accessToken)
-      tokens.accessToken = apiKey
-      logInfo(LOG_SRC, `API key minted for ${provider}`)
-    }
 
     // Store tokens and bridge to core credential store
     storeOAuthCredentials(provider, tokens)
@@ -549,7 +496,6 @@ export async function refreshOAuthToken(
 /**
  * Store OAuth credentials in both frontend store and core credential store.
  *
- * For Anthropic: OAuth mints a real API key, so store as plain API key.
  * For OpenAI/Copilot: Store as OAuth type in core auth system so provider
  * clients detect `auth.type === 'oauth'` and route to the correct endpoint
  * (e.g. ChatGPT Codex endpoint instead of api.openai.com).
@@ -576,14 +522,7 @@ export function storeOAuthCredentials(provider: LLMProvider, tokens: OAuthTokens
   localStorage.setItem(AVA_CREDENTIALS_KEY, serialized)
   localStorage.setItem(STORAGE_KEYS.CREDENTIALS, serialized)
 
-  // Anthropic: OAuth mints a real API key — store as plain API key
-  if (provider === 'anthropic') {
-    logInfo(LOG_SRC, `Storing minted API key for ${provider}`)
-    syncProviderCredentials(provider, tokens.accessToken)
-    return
-  }
-
-  // OpenAI/Copilot: Store as OAuth in core auth system so provider clients
+  // Store as OAuth in core auth system so provider clients
   // see auth.type === 'oauth' and route to the correct endpoint
   const accountId = tokens.idToken ? extractAccountId(tokens.idToken) : undefined
   logInfo(LOG_SRC, `Storing OAuth credentials for ${provider}`, {

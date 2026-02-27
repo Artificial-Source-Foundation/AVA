@@ -28,11 +28,6 @@ vi.mock('../platform.js', () => ({
 }))
 
 // Mock OAuth modules to prevent import errors
-vi.mock('./anthropic-oauth.js', () => ({
-  authorizeAnthropic: vi.fn(),
-  needsRefresh: vi.fn().mockReturnValue(false),
-  refreshAnthropicToken: vi.fn(),
-}))
 vi.mock('./openai-oauth.js', () => ({
   authorizeOpenAI: vi.fn(),
   refreshOpenAIToken: vi.fn(),
@@ -46,7 +41,6 @@ vi.mock('./copilot-oauth.js', () => ({
   refreshCopilotToken: vi.fn(),
 }))
 
-import { needsRefresh } from './anthropic-oauth.js'
 import {
   getAuthStatus,
   getStoredAuth,
@@ -154,13 +148,11 @@ describe('getValidAccessToken', () => {
   })
 
   it('should return access token when not expired', async () => {
-    vi.mocked(needsRefresh).mockReturnValue(false)
-
     await setStoredAuth('anthropic', {
       type: 'oauth',
       accessToken: 'valid-token',
       refreshToken: 'refresh-token',
-      expiresAt: Date.now() + 3600000,
+      expiresAt: Date.now() + 7200000, // 2 hours from now (well past 1-hour refresh buffer)
     })
 
     const token = await getValidAccessToken('anthropic')

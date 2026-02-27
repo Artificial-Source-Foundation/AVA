@@ -16,7 +16,6 @@ import { useProject } from '../../stores/project'
 import { useSettings } from '../../stores/settings'
 import { ToolApprovalDialog } from '../dialogs/ToolApprovalDialog'
 import { ApprovalStateBar } from './ApprovalStateBar'
-import { ContextBar } from './ContextBar'
 import { GitControlStrip } from './GitControlStrip'
 import { MessageInput } from './MessageInput'
 import { MessageList } from './MessageList'
@@ -96,9 +95,6 @@ export const ChatView: Component = () => {
 
       {/* Input area */}
       <MessageInput />
-
-      {/* Context usage bar */}
-      <ContextBar />
 
       {/* Tool Approval Dialog */}
       <ToolApprovalDialog request={activeApproval()} onResolve={handleApprovalResolve} />

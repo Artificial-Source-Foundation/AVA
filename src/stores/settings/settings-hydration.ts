@@ -4,6 +4,7 @@
  * Pure functions — no signals, no side effects.
  */
 
+import { getProviderLogo } from '../../components/icons/provider-logo-map'
 import type { AgentPreset } from '../../config/defaults/agent-defaults'
 import { defaultAgentPresets } from '../../config/defaults/agent-defaults'
 import type { LLMProviderConfig } from '../../config/defaults/provider-defaults'
@@ -26,7 +27,7 @@ export function hydrateProviders(saved: LLMProviderConfig[]): LLMProviderConfig[
     const def = defaultProviders.find((d) => d.id === sp.id)
     return def
       ? { ...def, ...sp, icon: def.icon, models: sp.models.length > 0 ? sp.models : def.models }
-      : sp
+      : { ...sp, icon: getProviderLogo(sp.id) }
   })
 }
 

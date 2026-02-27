@@ -160,7 +160,7 @@ const AgentRow: Component<AgentRowProps> = (props) => (
         <button
           type="button"
           onClick={() => props.onEdit?.()}
-          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-all"
+          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
         >
           Edit
         </button>
@@ -169,7 +169,7 @@ const AgentRow: Component<AgentRowProps> = (props) => (
         <button
           type="button"
           onClick={() => props.onDelete?.()}
-          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] opacity-0 group-hover:opacity-100 transition-all"
+          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
         >
           Delete
         </button>

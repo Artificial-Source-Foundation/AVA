@@ -9,10 +9,13 @@ import { formatCost } from '@ava/core'
 import { AlertCircle, ChevronDown, ChevronUp, Loader2, RotateCcw } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import type { Message } from '../../types'
+import { ActiveToolIndicator } from './active-tool-indicator'
 import { EditForm } from './EditForm'
 import { MarkdownContent } from './MarkdownContent'
 import { MessageActions } from './MessageActions'
 import { ToolCallGroup } from './ToolCallGroup'
+import { TypingIndicator } from './TypingIndicator'
+import { ToolCallErrorBoundary } from './tool-call-error-boundary'
 
 interface MessageBubbleProps {
   message: Message
@@ -59,7 +62,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
         }
       >
         {/* Normal message display */}
-        <div class="relative group max-w-[80%]">
+        <div class="relative group max-w-[85%]">
           <div
             class={`
               rounded-[var(--radius-lg)] density-section-px density-section-py
@@ -94,10 +97,19 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               )}
             </Show>
 
-            {/* Show typing indicator only while actively streaming */}
+            {/* Show typing indicator while streaming, placeholder otherwise */}
             <Show
               when={props.message.content || isUser()}
-              fallback={<div class={props.isLastMessage && !props.message.error ? 'h-5' : 'h-3'} />}
+              fallback={
+                <Show
+                  when={props.isStreaming}
+                  fallback={
+                    <div class={props.isLastMessage && !props.message.error ? 'h-5' : 'h-3'} />
+                  }
+                >
+                  <TypingIndicator />
+                </Show>
+              }
             >
               <div
                 class={shouldCollapse() ? 'relative overflow-hidden' : ''}
@@ -136,14 +148,6 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                       : 'Show more'}
                 </button>
               </Show>
-            </Show>
-
-            {/* Tool calls for assistant messages */}
-            <Show when={!isUser() && props.message.toolCalls?.length}>
-              <ToolCallGroup
-                toolCalls={props.message.toolCalls!}
-                isStreaming={props.isStreaming && props.isLastMessage}
-              />
             </Show>
 
             {/* Token badge + cost for assistant messages */}
@@ -226,6 +230,26 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               onCopy={props.onCopy}
               onDelete={props.onDelete}
               isLoading={props.isStreaming}
+            />
+          </Show>
+
+          {/* Tool calls — inside wrapper, visually attached to bubble */}
+          <Show when={!isUser() && props.message.toolCalls?.length}>
+            <ToolCallErrorBoundary>
+              <ToolCallGroup
+                toolCalls={props.message.toolCalls!}
+                isStreaming={props.isStreaming && props.isLastMessage}
+              />
+            </ToolCallErrorBoundary>
+          </Show>
+
+          {/* Active tool indicator — replaces generic "Working..." */}
+          <Show
+            when={!isUser() && props.isStreaming && props.isLastMessage && props.message.content}
+          >
+            <ActiveToolIndicator
+              toolCalls={props.message.toolCalls}
+              isStreaming={props.isStreaming}
             />
           </Show>
         </div>

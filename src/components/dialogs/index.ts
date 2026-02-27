@@ -4,8 +4,8 @@
  * Export all dialog components from a single entry point.
  */
 
-export type { ModelInfo, ModelSelectorDialogProps } from './ModelSelectorDialog'
-export { defaultModels, ModelSelectorDialog } from './ModelSelectorDialog'
+export { ModelBrowserDialog } from './model-browser/model-browser-dialog'
+export type { ModelBrowserDialogProps } from './model-browser/model-browser-types'
 export type { OnboardingData, OnboardingDialogProps } from './OnboardingDialog'
 export { OnboardingDialog } from './OnboardingDialog'
 export type {

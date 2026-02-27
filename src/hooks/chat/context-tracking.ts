@@ -3,6 +3,7 @@
  * Handles token tracking sync, auto-compaction, memory recall, and API message building.
  */
 
+import { getToolDefinitions } from '@ava/core'
 import { getCoreCompactor, getCoreTracker } from '../../services/core-bridge'
 import { deleteMessageFromDb } from '../../services/database'
 import { logInfo, logWarn } from '../../services/logger'
@@ -82,6 +83,57 @@ export async function maybeCompact(deps: ChatDeps): Promise<void> {
 }
 
 // ============================================================================
+// Chat System Prompt
+// ============================================================================
+
+/** Build a system prompt for chat mode that tells the LLM about its tools */
+function buildChatSystemPrompt(cwd: string): string {
+  const toolNames = getToolDefinitions().map((t) => t.name)
+  const os = navigator.platform?.includes('Win')
+    ? 'Windows'
+    : navigator.platform?.includes('Mac')
+      ? 'macOS'
+      : 'Linux'
+  const date = new Date().toLocaleDateString()
+
+  return `You are AVA, an AI coding assistant. You have direct access to the user's project files and tools.
+
+## ENVIRONMENT
+- **Working Directory**: ${cwd}
+- **Operating System**: ${os}
+- **Date**: ${date}
+
+## CAPABILITIES
+
+You have access to the following tools: ${toolNames.join(', ')}
+
+### File Operations
+- **glob** — Find files by pattern (e.g., "**/*.ts", "src/**/*.js")
+- **read** — Read file contents with optional line range
+- **grep** — Search file contents with regex patterns
+- **create** — Create new files
+- **write** — Write/overwrite file contents
+- **edit** — Modify specific parts of a file (preferred for changes)
+- **delete** — Remove files
+- **ls** — List directory contents
+
+### Command Execution
+- **bash** — Execute shell commands
+
+### Search
+- **codesearch** — Search codebase with context
+- **websearch** — Search the web
+- **webfetch** — Fetch and parse web pages
+
+## TOOL USAGE
+- Use tools to answer questions — read files, search code, run commands.
+- Read files before modifying them. Use search tools to find relevant code.
+- If a tool fails, analyze the error and try an alternative approach.
+- Be direct and technical. Prefer using tools over asking the user to paste content.
+- Keep changes minimal and focused. Only modify what's necessary.`
+}
+
+// ============================================================================
 // API Message Building
 // ============================================================================
 
@@ -122,6 +174,10 @@ export async function buildApiMessages(
   if (instructions) {
     msgs.unshift({ role: 'system', content: instructions })
   }
+
+  // Prepend chat system prompt (before custom instructions)
+  const cwd = deps.currentProject()?.directory || '.'
+  msgs.unshift({ role: 'system', content: buildChatSystemPrompt(cwd) })
 
   return msgs
 }

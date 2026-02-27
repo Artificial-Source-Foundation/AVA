@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "opener:default",
+    "dialog:default",
     "sql:default",
     "sql:allow-load",
     "sql:allow-execute",
@@ -83,6 +84,8 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
     "core:window:allow-show",
+    "core:window:allow-create",
+    "core:webview:allow-create-webview-window",
     "window-state:default"
   ]
 }

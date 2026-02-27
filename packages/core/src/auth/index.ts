@@ -4,7 +4,6 @@
  */
 
 // OAuth providers
-export { authorizeAnthropic, needsRefresh, refreshAnthropicToken } from './anthropic-oauth.js'
 export { authorizeCopilot, refreshCopilotToken } from './copilot-oauth.js'
 export { authorizeGoogle, refreshGoogleToken } from './google-oauth.js'
 // Auth manager

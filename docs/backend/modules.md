@@ -278,8 +278,8 @@ QA verification pipeline — runs after agent produces results.
 
 ## Remaining Modules (Brief)
 
-### auth/ (8 files, ~1,107 lines)
-OAuth + PKCE flows. Files: `manager.ts`, `anthropic-oauth.ts`, `copilot-oauth.ts`, `google-oauth.ts`, `openai-oauth.ts`, `pkce.ts`, `types.ts`, `index.ts`
+### auth/ (7 files, ~1,000 lines)
+OAuth + PKCE flows. Files: `manager.ts`, `copilot-oauth.ts`, `google-oauth.ts`, `openai-oauth.ts`, `pkce.ts`, `types.ts`, `index.ts`
 
 ### bus/ (3 files, ~524 lines)
 Pub/sub message bus. Files: `message-bus.ts`, `types.ts`, `index.ts`

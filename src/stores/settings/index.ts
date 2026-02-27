@@ -7,7 +7,10 @@
 import type { MCPServerConfig } from '@ava/core'
 import { createSignal } from 'solid-js'
 import type { AgentPreset } from '../../config/defaults/agent-defaults'
-import type { LLMProviderConfig } from '../../config/defaults/provider-defaults'
+import type { LLMProviderConfig, ProviderModel } from '../../config/defaults/provider-defaults'
+import { logWarn } from '../../services/logger'
+import { fetchModels } from '../../services/providers/model-fetcher'
+import type { LLMProvider } from '../../types/llm'
 import { applyAppearanceToDOM, isDarkMode as isDarkModeImpl } from './settings-appearance'
 import { DEFAULT_SETTINGS } from './settings-defaults'
 import { hydrateAgents, hydrateProviders } from './settings-hydration'
@@ -128,7 +131,72 @@ function updateProvider(id: string, patch: Partial<LLMProviderConfig>): void {
     saveSettings(next)
     return next
   })
-  if (patch.apiKey !== undefined) syncProviderCredentials(id, patch.apiKey)
+  if (patch.apiKey !== undefined) {
+    syncProviderCredentials(id, patch.apiKey)
+    // Auto-fetch models when an API key is set
+    if (patch.apiKey) autoFetchModels(id)
+  }
+}
+
+/** Get the effective API key for a provider (from config or OAuth storage) */
+function getProviderCredential(id: string): string | undefined {
+  const provider = settings().providers.find((p) => p.id === id)
+  if (provider?.apiKey) return provider.apiKey
+
+  // Check OAuth token in localStorage (same logic as providers-tab-helpers)
+  try {
+    const raw =
+      localStorage.getItem('ava_credentials') || localStorage.getItem('estela_credentials')
+    if (raw) {
+      const all = JSON.parse(raw) as Record<string, { type?: string; value?: string }>
+      if (all[id]?.type === 'oauth-token' && all[id]?.value) return all[id].value
+    }
+  } catch {
+    // ignore
+  }
+  return undefined
+}
+
+/** Fetch models from provider API and update the provider's model list */
+function autoFetchModels(id: string): void {
+  const credential = getProviderCredential(id)
+  if (!credential) return
+
+  const provider = settings().providers.find((p) => p.id === id)
+  fetchModels(id as LLMProvider, { apiKey: credential, baseUrl: provider?.baseUrl })
+    .then((fetched) => {
+      if (fetched.length === 0) return
+      const current = settings().providers.find((p) => p.id === id)
+      const models: ProviderModel[] = fetched.map((m, idx) => ({
+        id: m.id,
+        name: m.name,
+        contextWindow: m.contextWindow,
+        isDefault: idx === 0,
+        ...(m.pricing && { pricing: { input: m.pricing.prompt, output: m.pricing.completion } }),
+        ...(m.capabilities?.length && { capabilities: m.capabilities }),
+      }))
+      const keepDefault = current?.defaultModel && models.some((m) => m.id === current.defaultModel)
+      updateProvider(id, {
+        models,
+        defaultModel: keepDefault ? current.defaultModel : models[0]?.id,
+        status: 'connected',
+      })
+    })
+    .catch(() => {
+      logWarn('settings', `Auto-fetch models failed for ${id}`)
+    })
+}
+
+/**
+ * Refresh models for all providers that have credentials (API key or OAuth).
+ * Called on app startup so existing keys get fresh model lists + correct status.
+ */
+export function refreshAllProviderModels(): void {
+  for (const provider of settings().providers) {
+    if (getProviderCredential(provider.id)) {
+      autoFetchModels(provider.id)
+    }
+  }
 }
 
 function updateAgent(id: string, patch: Partial<AgentPreset>): void {

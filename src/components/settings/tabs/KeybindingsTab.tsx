@@ -144,7 +144,7 @@ export const KeybindingsTab: Component<KeybindingsTabProps> = (props) => {
                         <button
                           type="button"
                           onClick={() => props.onEdit?.(kb.id)}
-                          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-all"
+                          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
                         >
                           Edit
                         </button>
@@ -153,7 +153,7 @@ export const KeybindingsTab: Component<KeybindingsTabProps> = (props) => {
                         <button
                           type="button"
                           onClick={() => props.onReset?.(kb.id)}
-                          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--warning)] opacity-0 group-hover:opacity-100 transition-all"
+                          class="text-[10px] text-[var(--text-muted)] hover:text-[var(--warning)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
                         >
                           Reset
                         </button>

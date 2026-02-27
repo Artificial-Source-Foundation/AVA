@@ -26,8 +26,6 @@ export const getProviderDocsUrl = (providerId: string): string => {
 
 export const oauthButtonText = (providerId: string): { label: string; description: string } => {
   switch (providerId) {
-    case 'anthropic':
-      return { label: 'Sign in with Claude', description: 'Use your Max/Pro subscription' }
     case 'openai':
       return { label: 'Sign in with ChatGPT', description: 'Use your Plus/Pro subscription' }
     case 'google':

@@ -29,6 +29,7 @@ import {
   detectEnvApiKeys,
   hydrateSettingsFromFS,
   pushSettingsToCore,
+  refreshAllProviderModels,
   setupSystemThemeListener,
   syncAllApiKeys,
   useSettings,
@@ -47,6 +48,7 @@ function App() {
     toggleSidebar,
     toggleSettings,
     toggleBottomPanel,
+    toggleModelBrowser,
     projectHubVisible,
     setProjectHubVisible,
   } = useLayout()
@@ -75,6 +77,7 @@ function App() {
     registerAction('toggle-sidebar', toggleSidebar)
     registerAction('toggle-settings', toggleSettings)
     registerAction('toggle-bottom-panel', toggleBottomPanel)
+    registerAction('model-browser', toggleModelBrowser)
     registerAction('new-chat', async () => {
       if (!currentProject()) {
         setProjectHubVisible(true)
@@ -138,6 +141,7 @@ function App() {
       await hydrateSettingsFromFS()
       syncAllApiKeys()
       await detectEnvApiKeys()
+      refreshAllProviderModels()
 
       setSplashStatus('Initializing core engine...')
       const cleanupCore = await initCoreBridge({

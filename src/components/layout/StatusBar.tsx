@@ -2,29 +2,29 @@
  * Title Bar Component
  *
  * Custom title bar replacing the native window chrome.
- * Shows connection status, model, token usage, and window controls.
+ * Shows app name, menu bar, window title, and window controls.
  * Draggable for window movement via startDragging() API.
  */
 
-import { Minus, Square, X, Zap } from 'lucide-solid'
-import { type Component, Show } from 'solid-js'
-import { useSession } from '../../stores/session'
-import { useSettings } from '../../stores/settings'
+import { AppWindow, Minus, Square, X } from 'lucide-solid'
+import type { Component } from 'solid-js'
+import { useProject } from '../../stores/project'
+import { MenuBar } from './MenuBar'
+
+let windowCounter = 0
 
 export const StatusBar: Component = () => {
-  const { sessionTokenStats, currentSession, selectedModel } = useSession()
-  const { settings } = useSettings()
+  const { currentProject } = useProject()
 
-  const formatTokens = (count: number): string => {
-    if (count >= 1000000) return `${(count / 1000000).toFixed(1)}M`
-    if (count >= 1000) return `${(count / 1000).toFixed(1)}K`
-    return count.toString()
+  const windowTitle = () => {
+    const project = currentProject()
+    if (project && project.name !== 'Default') return `AVA — ${project.name}`
+    return 'AVA'
   }
 
   const startDrag = async (e: MouseEvent) => {
-    // Only drag on left click, not on buttons
     if (e.button !== 0) return
-    if ((e.target as HTMLElement).closest('button')) return
+    if ((e.target as HTMLElement).closest('button, [data-menubar]')) return
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window')
       await getCurrentWindow().startDragging()
@@ -51,6 +51,24 @@ export const StatusBar: Component = () => {
     }
   }
 
+  const handleNewWindow = async () => {
+    try {
+      const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow')
+      windowCounter++
+      new WebviewWindow(`ava-${Date.now()}-${windowCounter}`, {
+        url: '/',
+        title: 'AVA',
+        width: 1200,
+        height: 800,
+        minWidth: 640,
+        minHeight: 480,
+        decorations: false,
+      })
+    } catch {
+      /* ignore in non-Tauri */
+    }
+  }
+
   const handleClose = async () => {
     try {
       const { getCurrentWindow } = await import('@tauri-apps/api/window')
@@ -67,43 +85,43 @@ export const StatusBar: Component = () => {
       onDblClick={handleMaximize}
       class="
         flex items-center justify-between
-        h-8 px-3
+        h-9 px-3
         bg-[var(--gray-1)]
         border-b border-[var(--border-subtle)]
         select-none cursor-default
       "
     >
-      {/* Left - Status */}
-      <div class="flex items-center gap-3 font-[var(--font-ui-mono)] text-[10px] tracking-wide text-[var(--text-muted)] pointer-events-none">
-        <div class="flex items-center gap-1.5">
-          <span class="relative flex h-1.5 w-1.5">
-            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-[var(--success)] opacity-75" />
-            <span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-[var(--success)]" />
-          </span>
-          <span>Ready</span>
-        </div>
+      {/* Left - App name + menus */}
+      <div class="flex items-center gap-3 min-w-0">
+        <span class="text-[11px] font-bold tracking-widest text-[var(--accent)] uppercase font-[var(--font-ui-mono)] pointer-events-none">
+          AVA
+        </span>
 
-        <Show when={settings().ui.showModelInTitleBar}>
-          <span class="text-[var(--border-strong)]">|</span>
-          <span class="text-[var(--accent)]">{selectedModel()}</span>
-        </Show>
+        <span class="h-3 w-px bg-[var(--border-strong)]" />
 
-        <Show
-          when={settings().ui.showTokenCount && currentSession() && sessionTokenStats().total > 0}
-        >
-          <span class="text-[var(--border-strong)]">|</span>
-          <span class="flex items-center gap-1">
-            <Zap class="w-2.5 h-2.5 text-[var(--warning)]" />
-            {formatTokens(sessionTokenStats().total)}
-          </span>
-        </Show>
+        <MenuBar />
       </div>
 
-      {/* Center - drag region (implicit via parent mousedown) */}
-      <div class="flex-1" />
+      {/* Center - window title (project name) */}
+      <div class="absolute left-1/2 -translate-x-1/2 pointer-events-none">
+        <span class="text-[10px] font-medium tracking-wide text-[var(--text-muted)] font-[var(--font-ui-mono)]">
+          {windowTitle()}
+        </span>
+      </div>
 
-      {/* Right - Window controls */}
+      {/* Right - New window + window controls */}
       <div class="flex items-center gap-0.5 -mr-1">
+        <button
+          type="button"
+          onClick={handleNewWindow}
+          class="flex items-center justify-center w-8 h-7 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors rounded-[var(--radius-sm)]"
+          title="New Window"
+        >
+          <AppWindow class="w-3.5 h-3.5" />
+        </button>
+
+        <span class="h-3 w-px bg-[var(--border-subtle)] mx-0.5" />
+
         <button
           type="button"
           onClick={handleMinimize}

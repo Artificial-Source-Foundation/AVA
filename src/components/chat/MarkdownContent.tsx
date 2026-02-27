@@ -22,12 +22,12 @@ export const MarkdownContent: Component<MarkdownContentProps> = (props) => {
   const [renderedHtml, setRenderedHtml] = createSignal('')
   const { settings } = useSettings()
 
-  // Render markdown when content changes
+  // Render markdown when content changes or streaming ends
   createEffect(
     on(
-      () => props.content,
-      (content) => {
-        if (!content || props.role === 'user' || props.isStreaming) {
+      () => [props.content, props.isStreaming] as const,
+      ([content, streaming]) => {
+        if (!content || props.role === 'user' || streaming) {
           setRenderedHtml('')
           return
         }

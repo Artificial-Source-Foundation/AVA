@@ -10,7 +10,7 @@ import { STORAGE_KEYS } from '../config/constants'
 // Types
 // ============================================================================
 
-export type ActivityId = 'sessions' | 'projects' | 'explorer' | 'plugins'
+export type ActivityId = 'sessions' | 'explorer'
 
 // ============================================================================
 // Persistence Helpers
@@ -184,6 +184,24 @@ function closeCodeEditor() {
 const [settingsOpen, setSettingsOpen] = createSignal(false)
 
 // ============================================================================
+// Model Browser Dialog
+// ============================================================================
+
+const [modelBrowserOpen, setModelBrowserOpen] = createSignal(false)
+
+function openModelBrowser() {
+  setModelBrowserOpen(true)
+}
+
+function closeModelBrowser() {
+  setModelBrowserOpen(false)
+}
+
+function toggleModelBrowser() {
+  setModelBrowserOpen(!modelBrowserOpen())
+}
+
+// ============================================================================
 // Project Hub Visibility
 // ============================================================================
 
@@ -269,5 +287,11 @@ export function useLayout() {
     openProjectHub,
     closeProjectHub,
     toggleProjectHub,
+
+    // Model browser
+    modelBrowserOpen,
+    openModelBrowser,
+    closeModelBrowser,
+    toggleModelBrowser,
   }
 }

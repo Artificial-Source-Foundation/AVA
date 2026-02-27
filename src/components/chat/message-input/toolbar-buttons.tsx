@@ -1,21 +1,11 @@
 /**
  * Toolbar Buttons
  *
- * Left-side toolbar: Plan/Act toggle, Agent/Chat toggle,
- * Permission mode, Checkpoint, Undo, Image indicator.
+ * Left-side toolbar sub-groups separated by thin dividers:
+ * [Plan/Act] [Agent/Chat] | [Permission] | [Checkpoint] [Undo]
  */
 
-import {
-  Bookmark,
-  Bot,
-  FileSearch,
-  Image,
-  Shield,
-  ShieldAlert,
-  ShieldOff,
-  Undo2,
-  Zap,
-} from 'lucide-solid'
+import { Bookmark, Bot, FileSearch, Shield, ShieldAlert, ShieldOff, Undo2, Zap } from 'lucide-solid'
 import { type Accessor, type Component, Show } from 'solid-js'
 import type { PermissionMode } from '../../../stores/settings'
 import type { PermissionConfigEntry } from './types'
@@ -47,16 +37,23 @@ export interface ToolbarButtonsProps {
   gitEnabled: Accessor<boolean>
   autoCommit: Accessor<boolean>
   onUndo: () => Promise<void>
-  undoStatus: Accessor<string | null>
   isUndoing: Accessor<boolean>
 }
+
+// ---------------------------------------------------------------------------
+// Tiny divider between sub-groups
+// ---------------------------------------------------------------------------
+
+const Div: Component = () => <span class="w-px h-4 bg-[var(--border-subtle)] shrink-0" />
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export const ToolbarButtons: Component<ToolbarButtonsProps> = (props) => (
-  <div class="flex items-center density-gap">
+  <div class="flex items-center gap-2">
+    {/* ── Mode toggles ── */}
+
     {/* Plan/Act toggle */}
     <button
       type="button"
@@ -102,7 +99,9 @@ export const ToolbarButtons: Component<ToolbarButtonsProps> = (props) => (
       {props.useAgentMode() ? 'Agent' : 'Chat'}
     </button>
 
-    {/* Permission mode toggle */}
+    <Div />
+
+    {/* ── Permission ── */}
     {(() => {
       const cfg = PERMISSION_CONFIG[props.permissionMode()]
       const Icon = cfg.icon
@@ -118,6 +117,10 @@ export const ToolbarButtons: Component<ToolbarButtonsProps> = (props) => (
         </button>
       )
     })()}
+
+    <Div />
+
+    {/* ── Actions ── */}
 
     {/* Checkpoint button */}
     <Show when={props.messageCount() > 0}>
@@ -143,22 +146,6 @@ export const ToolbarButtons: Component<ToolbarButtonsProps> = (props) => (
       >
         <Undo2 class="w-3 h-3" />
       </button>
-    </Show>
-
-    {/* Undo status feedback */}
-    <Show when={props.undoStatus()}>
-      <span
-        class={`text-[10px] font-medium ${props.undoStatus() === 'Reverted!' ? 'text-[var(--success)]' : 'text-[var(--text-muted)]'}`}
-      >
-        {props.undoStatus()}
-      </span>
-    </Show>
-
-    {/* Image paste indicator */}
-    <Show when={!props.useAgentMode()}>
-      <span class="text-[var(--text-muted)]" title="Paste or drop images (Ctrl+V)">
-        <Image class="w-3 h-3" />
-      </span>
     </Show>
   </div>
 )

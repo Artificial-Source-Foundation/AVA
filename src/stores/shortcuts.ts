@@ -66,6 +66,13 @@ const DEFAULT_SHORTCUTS: ShortcutDef[] = [
     description: 'Quick access to all commands',
     category: 'General',
   },
+  {
+    id: 'model-browser',
+    keys: ['ctrl', 'shift', 'm'],
+    label: 'Model Browser',
+    description: 'Open the model browser dialog',
+    category: 'General',
+  },
 ]
 
 // ============================================================================

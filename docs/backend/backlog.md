@@ -128,7 +128,7 @@ This backlog feeds into the project roadmap:
 ### Completed
 - [x] Mock ExtensionAPI test utility (`createMockExtensionAPI()`) — 9 tests
 - [x] Activation tests for all 14 stub extension modules — 43 tests
-- [x] Provider test harness + anthropic/openai/google provider tests — 9 tests
+- [x] Provider test harness + anthropic/openai/google/copilot provider tests — 12 tests
 - [x] MCP manager unit tests (addServer, removeServer, getTools, resetMCP) — 9 tests
 - [x] Plugin catalog fetch/cache/fallback tests — 8 tests
 - [x] CLI scaffold template tests (manifest, ExtensionAPI source, test generation) — 3 tests
@@ -138,7 +138,11 @@ This backlog feeds into the project roadmap:
 - [ ] Wire 14 stub extensions to actually register tools/commands/modes (currently only log)
 - [ ] Create `models/src/registry.ts` and `instructions/src/loader.ts` modules
 - [ ] Connect MCP manager to `activate()` in mcp extension
-- [ ] Provider tests for remaining 11 providers (same harness pattern)
+- [ ] Provider tests for remaining 10 providers (same harness pattern)
 - [ ] Real plugin install/uninstall (currently state-only in frontend)
 
-*Last updated: 2026-02-26*
+### Recently Added
+- [x] **GitHub Copilot provider extension** — `packages/extensions/providers/copilot/` with custom `CopilotClient` (OAuth via `getAuth()`, `Copilot-Integration-Id` header, model prefix stripping), activation, and test harness (3 tests)
+- [x] **Copilot model fetcher** — Dynamic model fetch from `https://api.githubcopilot.com/models` with hardcoded fallback (gpt-4.1, gpt-4o, claude-3.5-sonnet, o3-mini); `supportsDynamicFetch()` updated
+
+*Last updated: 2026-02-27*

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mockSetStoredAuth = vi.fn().mockResolvedValue(undefined)
-const mockSyncProviderCredentials = vi.fn()
 
 vi.mock('@tauri-apps/plugin-opener', () => ({
   openUrl: vi.fn(),
@@ -13,10 +12,6 @@ vi.mock('@tauri-apps/api/core', () => ({
 
 vi.mock('@ava/core', () => ({
   setStoredAuth: (...args: unknown[]) => mockSetStoredAuth(...args),
-}))
-
-vi.mock('../../stores/settings', () => ({
-  syncProviderCredentials: (...args: unknown[]) => mockSyncProviderCredentials(...args),
 }))
 
 vi.mock('../logger', () => ({
@@ -102,15 +97,6 @@ describe('oauth flow reconnect/storage', () => {
 
     expect(checkStoredOAuth('openai')).toBe(true)
     expect(mockSetStoredAuth).toHaveBeenCalledTimes(2)
-  })
-
-  it('stores anthropic minted key without writing oauth core auth object', () => {
-    storeOAuthCredentials('anthropic', {
-      accessToken: 'sk-ant-minted-1',
-    })
-
-    expect(mockSyncProviderCredentials).toHaveBeenCalledWith('anthropic', 'sk-ant-minted-1')
-    expect(mockSetStoredAuth).not.toHaveBeenCalled()
   })
 
   it('extractAccountId returns undefined for malformed organizations claim', () => {

@@ -146,11 +146,20 @@ export const DeveloperTab: Component = () => {
     )
   )
 
+  let scrollRaf: number | undefined
   const handleLogScroll = () => {
-    if (!scrollRef) return
-    const distanceFromBottom = scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight
-    setStickToBottom(distanceFromBottom < 16)
+    if (scrollRaf) return
+    scrollRaf = requestAnimationFrame(() => {
+      scrollRaf = undefined
+      if (!scrollRef) return
+      const distanceFromBottom =
+        scrollRef.scrollHeight - scrollRef.scrollTop - scrollRef.clientHeight
+      setStickToBottom(distanceFromBottom < 16)
+    })
   }
+  onCleanup(() => {
+    if (scrollRaf) cancelAnimationFrame(scrollRaf)
+  })
 
   const handleCopy = async () => {
     const text = filteredLogs()
@@ -271,10 +280,7 @@ export const DeveloperTab: Component = () => {
             ref={scrollRef}
             onScroll={handleLogScroll}
             class="bg-[var(--gray-1)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] overflow-auto font-mono text-[11px] leading-[1.6]"
-            style={{
-              height: '320px',
-              transform: 'translateZ(0)',
-            }}
+            style={{ height: '320px' }}
           >
             <Show
               when={filteredLogs().length > 0}

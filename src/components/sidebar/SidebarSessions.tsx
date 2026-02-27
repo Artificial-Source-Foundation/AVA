@@ -7,6 +7,7 @@
 import { open } from '@tauri-apps/plugin-dialog'
 import {
   Check,
+  ChevronDown,
   Compass,
   Copy,
   FolderOpen,
@@ -18,7 +19,7 @@ import {
   Trash2,
   X,
 } from 'lucide-solid'
-import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
+import { type Component, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { logError } from '../../services/logger'
 import { useLayout } from '../../stores/layout'
 import { useProject } from '../../stores/project'
@@ -53,6 +54,8 @@ export const SidebarSessions: Component = () => {
   const [renamingId, setRenamingId] = createSignal<string | null>(null)
   const [renameValue, setRenameValue] = createSignal('')
   const [confirmDeleteId, setConfirmDeleteId] = createSignal<string | null>(null)
+  const [projectDropdownOpen, setProjectDropdownOpen] = createSignal(false)
+  let projectDropdownRef: HTMLDivElement | undefined
 
   const quickProjects = createMemo(() => {
     const seen = new Set<string>()
@@ -75,6 +78,31 @@ export const SidebarSessions: Component = () => {
     })
   })
 
+  // Close project dropdown on outside click
+  const handleOutsideClick = (e: MouseEvent) => {
+    if (
+      projectDropdownOpen() &&
+      projectDropdownRef &&
+      !projectDropdownRef.contains(e.target as Node)
+    ) {
+      setProjectDropdownOpen(false)
+    }
+  }
+
+  const handleEscapeKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape' && projectDropdownOpen()) {
+      setProjectDropdownOpen(false)
+    }
+  }
+
+  document.addEventListener('mousedown', handleOutsideClick)
+  document.addEventListener('keydown', handleEscapeKey)
+
+  onCleanup(() => {
+    document.removeEventListener('mousedown', handleOutsideClick)
+    document.removeEventListener('keydown', handleEscapeKey)
+  })
+
   const handleNewChat = async () => {
     await createNewSession()
     closeProjectHub()
@@ -82,6 +110,7 @@ export const SidebarSessions: Component = () => {
 
   const handleProjectSwitch = async (projectId: string) => {
     if (!projectId || projectId === currentProject()?.id) {
+      setProjectDropdownOpen(false)
       return
     }
 
@@ -93,9 +122,11 @@ export const SidebarSessions: Component = () => {
     } catch (err) {
       logError('SidebarSessions', 'Failed to switch project from sidebar', err)
     }
+    setProjectDropdownOpen(false)
   }
 
   const handleOpenProject = async () => {
+    setProjectDropdownOpen(false)
     try {
       const selected = await open({
         directory: true,
@@ -113,6 +144,11 @@ export const SidebarSessions: Component = () => {
     } catch (err) {
       logError('SidebarSessions', 'Failed to open project from sidebar', err)
     }
+  }
+
+  const handleBrowseHub = () => {
+    setProjectDropdownOpen(false)
+    openProjectHub()
   }
 
   const filteredSessions = () => {
@@ -196,72 +232,109 @@ export const SidebarSessions: Component = () => {
 
   return (
     <div class="flex flex-col h-full">
-      {/* Header */}
+      {/* Header: title + project switcher + new chat */}
       <div class="flex items-center justify-between density-px h-10 flex-shrink-0 border-b border-[var(--border-subtle)]">
         <span class="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
           Sessions
         </span>
-        <button
-          type="button"
-          onClick={handleNewChat}
-          class="
-            flex items-center justify-center w-6 h-6
-            rounded-[var(--radius-md)]
-            text-[var(--text-muted)] hover:text-[var(--text-primary)]
-            hover:bg-[var(--alpha-white-8)]
-            transition-colors
-          "
-          title="New chat (Ctrl+N)"
-        >
-          <Plus class="w-4 h-4" />
-        </button>
+
+        <div class="flex items-center gap-1">
+          {/* Project switcher dropdown */}
+          <div ref={projectDropdownRef} class="relative">
+            <button
+              type="button"
+              onClick={() => setProjectDropdownOpen(!projectDropdownOpen())}
+              class={`
+                inline-flex items-center gap-1 max-w-[120px]
+                rounded-[var(--radius-sm)] px-1.5 py-1
+                text-[10px] font-medium
+                transition-colors
+                ${
+                  projectDropdownOpen()
+                    ? 'text-[var(--text-primary)] bg-[var(--alpha-white-8)]'
+                    : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)]'
+                }
+              `}
+              title="Switch project"
+            >
+              <span class="truncate">{currentProject()?.name ?? 'No project'}</span>
+              <ChevronDown
+                class={`w-3 h-3 flex-shrink-0 transition-transform ${projectDropdownOpen() ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            <Show when={projectDropdownOpen()}>
+              <div class="absolute right-0 top-full mt-1 min-w-[180px] max-w-[240px] py-1 bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-lg)] shadow-lg z-[var(--z-popover)]">
+                {/* Project list */}
+                <div class="max-h-[200px] overflow-y-auto scrollbar-none">
+                  <For each={quickProjects()}>
+                    {(project) => {
+                      const isCurrent = () => project.id === currentProject()?.id
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => void handleProjectSwitch(project.id)}
+                          class={`
+                            w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors
+                            ${
+                              isCurrent()
+                                ? 'text-[var(--accent)] bg-[var(--alpha-white-5)]'
+                                : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)]'
+                            }
+                          `}
+                        >
+                          <span class="truncate">{project.name}</span>
+                          <Show when={project.isFavorite}>
+                            <span class="text-[9px] text-[var(--text-muted)]">*</span>
+                          </Show>
+                        </button>
+                      )
+                    }}
+                  </For>
+                </div>
+
+                {/* Actions */}
+                <div class="border-t border-[var(--border-subtle)] mt-1 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleBrowseHub}
+                    class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors"
+                  >
+                    <Compass class="w-3 h-3 flex-shrink-0" />
+                    <span>Browse Hub</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleOpenProject()}
+                    class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors"
+                  >
+                    <FolderOpen class="w-3 h-3 flex-shrink-0" />
+                    <span>Open Folder...</span>
+                  </button>
+                </div>
+              </div>
+            </Show>
+          </div>
+
+          {/* New chat button */}
+          <button
+            type="button"
+            onClick={handleNewChat}
+            class="
+              flex items-center justify-center w-6 h-6
+              rounded-[var(--radius-md)]
+              text-[var(--text-muted)] hover:text-[var(--text-primary)]
+              hover:bg-[var(--alpha-white-8)]
+              transition-colors
+            "
+            title="New chat (Ctrl+N)"
+          >
+            <Plus class="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Search */}
-      <div class="density-px density-py flex-shrink-0 border-b border-[var(--border-subtle)] space-y-2">
-        <div class="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={openProjectHub}
-            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-default)]"
-            title="Open project hub"
-          >
-            <Compass class="h-3 w-3" />
-            Hub
-          </button>
-
-          <button
-            type="button"
-            onClick={handleOpenProject}
-            class="inline-flex items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-default)]"
-            title="Open project folder"
-          >
-            <FolderOpen class="h-3 w-3" />
-            Open
-          </button>
-        </div>
-
-        <select
-          value={currentProject()?.id ?? ''}
-          onChange={(e) => {
-            void handleProjectSwitch(e.currentTarget.value)
-          }}
-          class="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-sunken)] px-2 py-1.5 text-xs text-[var(--text-primary)] focus-glow"
-        >
-          <option value="" disabled>
-            Select project
-          </option>
-          <For each={quickProjects()}>
-            {(project) => (
-              <option value={project.id}>
-                {project.name}
-                {project.isFavorite ? ' *' : ''}
-              </option>
-            )}
-          </For>
-        </select>
-      </div>
-
       <div class="density-px density-py flex-shrink-0">
         <div class="relative">
           <Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]" />

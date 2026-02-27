@@ -203,7 +203,7 @@ const AccentSection: Component = () => {
                 onClick={() => updateAppearance({ accentColor: preset.id })}
                 title={preset.label}
                 class={`
-                  w-5 h-5 rounded-full transition-all duration-150
+                  w-5 h-5 rounded-full transition-[transform,opacity] duration-150
                   ${
                     settings().appearance.accentColor === preset.id
                       ? 'scale-110'
@@ -226,7 +226,7 @@ const AccentSection: Component = () => {
             onClick={() => updateAppearance({ accentColor: 'custom' })}
             title="Custom color"
             class={`
-              w-5 h-5 rounded-full transition-all duration-150
+              w-5 h-5 rounded-full transition-[transform,opacity] duration-150
               ${isCustom() ? 'scale-110' : 'hover:scale-110 opacity-70 hover:opacity-100'}
             `}
             style={{

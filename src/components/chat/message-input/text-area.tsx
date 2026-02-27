@@ -3,8 +3,10 @@
  *
  * Drop-zone wrapper around the textarea with attachment previews,
  * drag overlay, auto-resize, paste/drop handling, and keyboard shortcuts.
+ * Send/cancel buttons and streaming stats are rendered inside the textarea.
  */
 
+import { ArrowUp, Square } from 'lucide-solid'
 import { type Accessor, type Component, Show } from 'solid-js'
 import { FileChips, ImagePreviews, PasteChips } from './attachment-previews'
 import type { PendingFile, PendingImage, PendingPaste } from './types'
@@ -33,6 +35,13 @@ export interface InputTextAreaProps {
   expandedPasteIndex: Accessor<number | null>
   onTogglePastePreview: (index: number) => void
   onRemovePaste: (index: number) => void
+  // Send / cancel / streaming
+  isProcessing: Accessor<boolean>
+  isStreaming: Accessor<boolean>
+  elapsedSeconds: Accessor<number>
+  onCancel: () => void
+  inputHasText: Accessor<boolean>
+  useAgentMode: Accessor<boolean>
 }
 
 // ---------------------------------------------------------------------------
@@ -76,7 +85,7 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
       disabled={props.disabled()}
       rows={1}
       class="
-        w-full density-section-px density-section-py
+        w-full density-section-px density-section-py pr-[110px]
         bg-[var(--input-background)] text-[var(--text-primary)]
         placeholder-[var(--input-placeholder)]
         border border-[var(--input-border)] rounded-lg
@@ -86,5 +95,50 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
       "
       style={{ 'min-height': '44px', 'max-height': '200px', 'font-size': 'var(--chat-font-size)' }}
     />
+
+    {/* Send / Cancel / Streaming — inside textarea, vertically centered right */}
+    <div class="absolute right-2 top-0 bottom-0 flex items-center gap-1.5">
+      {/* Streaming elapsed time */}
+      <Show when={props.isStreaming()}>
+        <span class="flex items-center gap-1 text-[10px] text-[var(--text-tertiary)] tabular-nums">
+          <span class="w-1.5 h-1.5 bg-[var(--accent)] rounded-full animate-pulse" />
+          {props.elapsedSeconds()}s
+        </span>
+      </Show>
+
+      {/* Cancel button */}
+      <Show when={props.isProcessing()}>
+        <button
+          type="button"
+          onClick={props.onCancel}
+          class="p-1.5 bg-[var(--error)] hover:brightness-110 text-white rounded-[var(--radius-md)] transition-colors"
+          title="Cancel"
+        >
+          <Square class="w-3.5 h-3.5" />
+        </button>
+      </Show>
+
+      {/* Send button */}
+      <button
+        type="submit"
+        disabled={!props.inputHasText() || (props.useAgentMode() && props.isProcessing())}
+        class={`
+          p-1.5 rounded-[var(--radius-md)] transition-colors
+          disabled:opacity-30 disabled:cursor-not-allowed
+          ${
+            !props.useAgentMode() && props.isProcessing()
+              ? 'bg-[var(--surface-raised)] border border-[var(--accent-border)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
+              : 'bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white'
+          }
+        `}
+        title={
+          !props.useAgentMode() && props.isProcessing()
+            ? 'Queue message (Ctrl+Shift+Enter to steer)'
+            : 'Send message'
+        }
+      >
+        <ArrowUp class="w-3.5 h-3.5" />
+      </button>
+    </div>
   </div>
 )

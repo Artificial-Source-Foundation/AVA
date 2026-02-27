@@ -33,7 +33,6 @@ export const SettingsModal: Component = () => {
   const { shortcuts, updateShortcut, resetShortcut, resetAll: resetAllShortcuts } = useShortcuts()
 
   const [activeTab, setActiveTab] = createSignal<SettingsTab>('general')
-  const [saveStatus, setSaveStatus] = createSignal<'idle' | 'saved'>('idle')
   const [editingAgent, setEditingAgent] = createSignal<AgentPreset | null>(null)
   const [editingKeybinding, setEditingKeybinding] = createSignal<Keybinding | null>(null)
   const [creatingAgent, setCreatingAgent] = createSignal(false)
@@ -56,11 +55,6 @@ export const SettingsModal: Component = () => {
       category: s.category,
       isCustom: s.isCustom,
     }))
-
-  const handleSave = () => {
-    setSaveStatus('saved')
-    setTimeout(() => setSaveStatus('idle'), 1500)
-  }
 
   const handleCreateAgent = () => {
     setCreatingAgent(true)
@@ -143,7 +137,7 @@ export const SettingsModal: Component = () => {
 
   return (
     <Show when={settingsOpen()}>
-      <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50 animate-fade-in">
+      <div class="fixed inset-0 bg-[#000000e6] flex items-center justify-center z-50">
         <button
           type="button"
           aria-label="Close settings"
@@ -151,20 +145,15 @@ export const SettingsModal: Component = () => {
           class="absolute inset-0"
         />
         <div
-          class="relative z-10 bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] w-full max-w-3xl shadow-2xl animate-scale-in flex overflow-hidden"
+          class="relative z-10 bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] w-full max-w-3xl flex overflow-hidden"
           style={{ height: 'min(85vh, 640px)' }}
         >
           <SettingsModalSidebar activeTab={activeTab} onSelectTab={setActiveTab} />
 
           <div class="flex-1 flex flex-col min-w-0">
-            <SettingsModalHeader
-              activeTab={activeTab}
-              saveStatus={saveStatus}
-              onSave={handleSave}
-              onClose={closeSettings}
-            />
+            <SettingsModalHeader activeTab={activeTab} onClose={closeSettings} />
 
-            <div class="flex-1 overflow-y-auto" style={{ transform: 'translateZ(0)' }}>
+            <div class="flex-1 overflow-y-auto">
               <SettingsModalContent
                 activeTab={activeTab}
                 settings={settings}

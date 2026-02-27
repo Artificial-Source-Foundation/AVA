@@ -13,6 +13,7 @@ import { runAgent } from '@ava/core-v2/agent'
 import { batch, createSignal } from 'solid-js'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
 import { saveMessage, updateMessage } from '../services/database'
+import { resolveProvider } from '../services/llm/bridge'
 import { logError } from '../services/logger'
 import { notifyCompletion } from '../services/notifications'
 import {
@@ -120,9 +121,10 @@ export function useAgent() {
       }
 
       const limits = settingsRef.settings().agentLimits
+      const selectedModel = session.selectedModel()
       const agentConfig: Partial<AgentConfig> = {
-        provider: 'anthropic',
-        model: session.selectedModel(),
+        provider: resolveProvider(selectedModel),
+        model: selectedModel,
         maxTurns: limits.agentMaxTurns,
         maxTimeMinutes: limits.agentMaxTimeMinutes,
         ...config,

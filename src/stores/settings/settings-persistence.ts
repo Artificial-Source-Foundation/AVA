@@ -120,9 +120,27 @@ export function pushSettingsToCore(s: AppSettings): void {
   const sm = getCoreSettings()
   if (!sm) return
 
+  // Ensure categories exist (core-v2 only ships 'provider' and 'agent' by default;
+  // extensions may register more, but on first save they might not be loaded yet)
+  const registered = sm.getRegisteredCategories()
+  if (!registered.includes('permissions')) {
+    sm.registerCategory('permissions', { allowBashExecution: false, autoApprovePatterns: [] })
+  }
+  if (!registered.includes('context')) {
+    sm.registerCategory('context', { maxTokens: 4096, compactionThreshold: 80 })
+  }
+  if (!registered.includes('git')) {
+    sm.registerCategory('git', {
+      enabled: true,
+      autoCommit: false,
+      branchPrefix: 'ava/',
+      messagePrefix: '[ava]',
+    })
+  }
+
   const activeProvider = s.providers.find((p) => p.enabled && p.apiKey)
   const providerUpdate: Record<string, unknown> = {
-    defaultProvider: (activeProvider?.id ?? 'anthropic') as LLMProvider,
+    defaultProvider: (activeProvider?.id ?? 'openai') as LLMProvider,
     defaultModel: activeProvider?.defaultModel ?? 'claude-sonnet-4-20250514',
   }
   if (s.generation.weakModel) {

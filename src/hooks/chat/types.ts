@@ -103,6 +103,7 @@ export interface SettingsSlice {
       customInstructions: string
       maxTokens: number
       temperature: number
+      thinkingEnabled: boolean
     }
     behavior: { sessionAutoTitle: boolean }
     agentLimits: { autoFixLint: boolean }

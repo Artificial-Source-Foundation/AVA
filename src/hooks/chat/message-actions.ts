@@ -30,6 +30,7 @@ export async function processQueue(deps: ChatDeps): Promise<void> {
 export function cancel(deps: ChatDeps): void {
   deps.abortRef.current?.abort()
   deps.setMessageQueue([])
+  deps.setActiveToolCalls([])
   deps.setIsStreaming(false)
   logInfo(deps.LOG_SRC, 'Cancel', {})
 }

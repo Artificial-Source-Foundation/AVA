@@ -1,6 +1,7 @@
 /**
  * OpenAI Provider Client
- * Direct integration with OpenAI Chat Completions API.
+ * Direct integration with OpenAI API.
+ * Supports both API key (Chat Completions) and OAuth (Codex/Responses API).
  * https://platform.openai.com/docs/api-reference
  */
 
@@ -15,6 +16,72 @@ import {
 import { readSSEStream } from '../../_shared/src/sse.js'
 
 const BASE_URL = 'https://api.openai.com/v1'
+const CODEX_ENDPOINT = 'https://chatgpt.com/backend-api/codex/responses'
+const DEV_CODEX_PROXY = '/__chatgpt_proxy/backend-api/codex/responses'
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function resolveOAuthEndpoint(): string {
+  const location = (
+    globalThis as { location?: { hostname?: string; port?: string; protocol?: string } }
+  ).location
+
+  if (
+    location?.protocol?.startsWith('http') &&
+    (location.hostname === 'localhost' || location.hostname === '127.0.0.1') &&
+    location.port === '1420'
+  ) {
+    return DEV_CODEX_PROXY
+  }
+
+  return CODEX_ENDPOINT
+}
+
+/** Extract plain text from message content (handles multimodal arrays) */
+function extractText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return (content as Array<{ type?: string; text?: string }>)
+      .filter((c) => c.type === 'text' || c.type === 'input_text' || c.type === 'output_text')
+      .map((c) => c.text ?? '')
+      .join('\n')
+  }
+  return String(content ?? '')
+}
+
+function classifyError(status: number): 'rate_limit' | 'auth' | 'server' | 'unknown' {
+  if (status === 401 || status === 403) return 'auth'
+  if (status === 429) return 'rate_limit'
+  if (status >= 500) return 'server'
+  return 'unknown'
+}
+
+function extractErrorMessage(status: number, body: string): string {
+  try {
+    const parsed = JSON.parse(body)
+    if (parsed.error?.message) return parsed.error.message
+  } catch {
+    // Use default messages
+  }
+  const messages: Record<number, string> = {
+    400: 'Invalid request',
+    401: 'Invalid API key',
+    403: 'Access forbidden',
+    404: 'Model not found',
+    429: 'Rate limit exceeded',
+    500: 'Server error',
+    503: 'Service overloaded',
+  }
+  return messages[status] || `HTTP ${status}`
+}
+
+function parseRetryAfterHeader(header: string | null): number | undefined {
+  if (!header) return undefined
+  const seconds = parseInt(header, 10)
+  return Number.isNaN(seconds) ? undefined : seconds
+}
+
+// ─── Client ─────────────────────────────────────────────────────────────────
 
 export class OpenAIClient implements LLMClient {
   async *stream(
@@ -36,9 +103,24 @@ export class OpenAIClient implements LLMClient {
       return
     }
 
+    if (auth.type === 'oauth') {
+      yield* this.streamOAuth(messages, config, auth.token, auth.accountId, signal)
+    } else {
+      yield* this.streamApiKey(messages, config, auth.token, signal)
+    }
+  }
+
+  // ─── API Key Path (Chat Completions) ────────────────────────────────────
+
+  private async *streamApiKey(
+    messages: ChatMessage[],
+    config: ProviderConfig,
+    apiKey: string,
+    signal?: AbortSignal
+  ): AsyncGenerator<StreamDelta, void, unknown> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${auth.token}`,
+      Authorization: `Bearer ${apiKey}`,
     }
 
     const body = buildOpenAIRequestBody(messages, config, { model: 'gpt-4o' })
@@ -110,5 +192,222 @@ export class OpenAIClient implements LLMClient {
 
     yield* toolCallBuf.flush()
     yield { done: true }
+  }
+
+  // ─── OAuth Path (Codex / Responses API) ─────────────────────────────────
+
+  private async *streamOAuth(
+    messages: ChatMessage[],
+    config: ProviderConfig,
+    token: string,
+    accountId: string | undefined,
+    signal?: AbortSignal
+  ): AsyncGenerator<StreamDelta, void, unknown> {
+    const endpoint = resolveOAuthEndpoint()
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      originator: 'ava',
+    }
+
+    if (accountId) {
+      headers['ChatGPT-Account-Id'] = accountId
+    }
+
+    // Build system instructions
+    const systemInstructions = messages
+      .filter((m) => m.role === 'system')
+      .map((m) => extractText(m.content))
+      .join('\n\n')
+
+    // Convert tools to Responses API format (flat, not nested under `function`)
+    const responsesTools = config.tools?.length
+      ? config.tools.map((t) => ({
+          type: 'function' as const,
+          name: t.name,
+          description: t.description,
+          parameters: t.input_schema,
+        }))
+      : undefined
+
+    const body: Record<string, unknown> = {
+      model: config.model,
+      instructions: systemInstructions || 'You are AVA, a coding assistant.',
+      input: messages
+        .filter((m) => m.role !== 'system')
+        .map((m) => ({
+          role: m.role,
+          content: [
+            {
+              type: m.role === 'assistant' ? 'output_text' : 'input_text',
+              text: extractText(m.content),
+            },
+          ],
+        })),
+      store: false,
+      stream: true,
+    }
+
+    if (responsesTools) {
+      body.tools = responsesTools
+    }
+
+    let response: Response
+    try {
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+        signal,
+      })
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return
+      yield {
+        done: true,
+        error: {
+          type: 'network',
+          message: `Network error: ${err instanceof Error ? err.message : 'Unknown'}`,
+        },
+      }
+      return
+    }
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '')
+      yield {
+        done: true,
+        error: {
+          type: classifyError(response.status),
+          message: extractErrorMessage(response.status, errorBody),
+          status: response.status,
+          retryAfter: parseRetryAfterHeader(response.headers.get('retry-after')),
+        },
+      }
+      return
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      yield { done: true, error: { type: 'unknown', message: 'No response body' } }
+      return
+    }
+
+    yield* this.parseResponsesStream(reader)
+  }
+
+  // ─── Responses API SSE Parser ───────────────────────────────────────────
+
+  private async *parseResponsesStream(
+    reader: ReadableStreamDefaultReader<Uint8Array>
+  ): AsyncGenerator<StreamDelta, void, unknown> {
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let inputTokens = 0
+    let outputTokens = 0
+    const fnCalls = new Map<string, { id: string; name: string; args: string }>()
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.trim() || line.startsWith(':') || !line.startsWith('data: ')) continue
+
+          const data = line.slice(6).trim()
+          if (data === '[DONE]') {
+            yield {
+              done: true,
+              usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+            }
+            return
+          }
+
+          try {
+            const event = JSON.parse(data) as Record<string, unknown>
+            const type = event.type as string
+
+            // Text content delta
+            if (type === 'response.output_text.delta' && event.delta) {
+              yield { content: event.delta as string }
+            }
+
+            // Function call started
+            if (type === 'response.output_item.added') {
+              const item = event.item as Record<string, unknown> | undefined
+              if (item?.type === 'function_call') {
+                const id = (item.call_id as string) || (item.id as string) || `fn_${Date.now()}`
+                fnCalls.set(id, { id, name: (item.name as string) ?? '', args: '' })
+              }
+            }
+
+            // Function call arguments streaming
+            if (type === 'response.function_call_arguments.delta' && event.delta) {
+              const entry = fnCalls.get(event.item_id as string) || [...fnCalls.values()].pop()
+              if (entry) {
+                entry.args += event.delta as string
+              }
+            }
+
+            // Function call arguments complete — yield as toolUse
+            if (type === 'response.function_call_arguments.done') {
+              const entry = fnCalls.get(event.item_id as string) || [...fnCalls.values()].pop()
+              if (entry) {
+                let parsed: Record<string, unknown> = {}
+                try {
+                  parsed = JSON.parse(entry.args || (event.arguments as string) || '{}')
+                } catch {
+                  parsed = { _raw: entry.args || (event.arguments as string) }
+                }
+                yield {
+                  toolUse: {
+                    type: 'tool_use',
+                    id: entry.id,
+                    name: entry.name || 'unknown',
+                    input: parsed,
+                  },
+                }
+              }
+            }
+
+            // Error
+            if (type === 'error' || type === 'response.error') {
+              const err = event.error as Record<string, unknown> | undefined
+              yield {
+                done: true,
+                error: {
+                  type: 'server',
+                  message: (err?.message as string) || 'OpenAI Codex stream error',
+                },
+              }
+              return
+            }
+
+            // Stream complete — extract usage
+            if (type === 'response.completed') {
+              const resp = event.response as Record<string, unknown> | undefined
+              const usage = (resp?.usage ?? event.usage) as Record<string, number> | undefined
+              if (usage) {
+                inputTokens = usage.input_tokens ?? 0
+                outputTokens = usage.output_tokens ?? outputTokens
+              }
+            }
+          } catch {
+            // Ignore malformed SSE chunks
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
+
+    yield {
+      done: true,
+      usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+    }
   }
 }

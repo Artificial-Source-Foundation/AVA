@@ -41,7 +41,6 @@ export interface InputTextAreaProps {
   elapsedSeconds: Accessor<number>
   onCancel: () => void
   inputHasText: Accessor<boolean>
-  useAgentMode: Accessor<boolean>
 }
 
 // ---------------------------------------------------------------------------
@@ -118,24 +117,16 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
         </button>
       </Show>
 
-      {/* Send button */}
+      {/* Send button — always accent-colored */}
       <button
         type="submit"
-        disabled={!props.inputHasText() || (props.useAgentMode() && props.isProcessing())}
-        class={`
+        disabled={!props.inputHasText() || props.isProcessing()}
+        class="
           p-1.5 rounded-[var(--radius-md)] transition-colors
           disabled:opacity-30 disabled:cursor-not-allowed
-          ${
-            !props.useAgentMode() && props.isProcessing()
-              ? 'bg-[var(--surface-raised)] border border-[var(--accent-border)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
-              : 'bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white'
-          }
-        `}
-        title={
-          !props.useAgentMode() && props.isProcessing()
-            ? 'Queue message (Ctrl+Shift+Enter to steer)'
-            : 'Send message'
-        }
+          bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white
+        "
+        title="Send message"
       >
         <ArrowUp class="w-3.5 h-3.5" />
       </button>

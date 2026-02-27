@@ -35,6 +35,16 @@ interface MessageBubbleProps {
 const ASSISTANT_COLLAPSE_CHARS = 1500
 const USER_COLLAPSE_LINES = 8
 
+/** Format raw model ID into a compact display name */
+function formatModelName(modelId: string): string {
+  // Strip date suffixes like -20250514, -20250219
+  let name = modelId.replace(/-\d{8}$/, '')
+  // Strip provider prefixes like "anthropic/", "openai/"
+  const slash = name.lastIndexOf('/')
+  if (slash >= 0) name = name.slice(slash + 1)
+  return name
+}
+
 export const MessageBubble: Component<MessageBubbleProps> = (props) => {
   const isUser = () => props.message.role === 'user'
   const shouldAnimateIn = () => isUser() && !props.isEditing
@@ -150,10 +160,16 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               </Show>
             </Show>
 
-            {/* Token badge + cost for assistant messages */}
-            <Show when={!isUser() && props.message.tokensUsed}>
+            {/* Model label + token badge + cost for assistant messages */}
+            <Show when={!isUser() && (props.message.tokensUsed || props.message.model)}>
               <div class="mt-2 font-[var(--font-ui-mono)] text-[10px] tracking-wide text-[var(--text-muted)] text-right tabular-nums">
-                {props.message.tokensUsed?.toLocaleString()} tokens
+                <Show when={props.message.model}>
+                  <span class="opacity-75">{formatModelName(props.message.model!)}</span>
+                </Show>
+                <Show when={props.message.tokensUsed}>
+                  <Show when={props.message.model}> &middot; </Show>
+                  {props.message.tokensUsed?.toLocaleString()} tokens
+                </Show>
                 <Show when={props.message.costUSD}>
                   {' '}
                   &middot; {formatCost(props.message.costUSD!)}

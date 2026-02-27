@@ -28,7 +28,7 @@ import { ModelBrowserDialog } from '../dialogs/model-browser/model-browser-dialo
 import { buildFullMessage, processImageFile, processTextFile } from './message-input/attachments'
 import { ModelSelector } from './message-input/model-selector'
 import { InputTextArea } from './message-input/text-area'
-import { ToolbarButtons } from './message-input/toolbar-buttons'
+import { PermissionBadge, PlanActSlider, ThinkingToggle } from './message-input/toolbar-buttons'
 import {
   MAX_FILES,
   MAX_IMAGES,
@@ -55,14 +55,12 @@ const StripDivider: Component = () => <span class="w-px h-4 bg-[var(--border-sub
 export const MessageInput: Component = () => {
   // State
   const [input, setInput] = createSignal('')
-  const [useAgentMode, setUseAgentMode] = createSignal(false)
   const [sendCount, setSendCount] = createSignal(0)
   const [pendingImages, setPendingImages] = createSignal<PendingImage[]>([])
   const [pendingFiles, setPendingFiles] = createSignal<PendingFile[]>([])
   const [pendingPastes, setPendingPastes] = createSignal<PendingPaste[]>([])
   const [expandedPasteIndex, setExpandedPasteIndex] = createSignal<number | null>(null)
   const [isDragging, setIsDragging] = createSignal(false)
-  const [undoStatus, setUndoStatus] = createSignal<string | null>(null)
   const [elapsedSeconds, setElapsedSeconds] = createSignal(0)
   let submitting = false
   let textareaRef: HTMLTextAreaElement | undefined
@@ -107,6 +105,25 @@ export const MessageInput: Component = () => {
     if (modelId.length > 30) return `${modelId.slice(0, 27)}...`
     return modelId
   })
+
+  // Thinking mode support
+  const modelSupportsThinking = createMemo(() => {
+    const modelId = selectedModel()
+    for (const provider of settings().providers) {
+      const model = provider.models.find((m) => m.id === modelId)
+      if (model) return model.capabilities?.includes('thinking') ?? false
+    }
+    return false
+  })
+
+  const toggleThinking = () => {
+    updateSettings({
+      generation: {
+        ...settings().generation,
+        thinkingEnabled: !settings().generation.thinkingEnabled,
+      },
+    })
+  }
 
   // Context bar state
   const showTokens = () => settings().ui.showTokenCount
@@ -237,14 +254,13 @@ export const MessageInput: Component = () => {
     e.preventDefault()
     const message = input().trim()
     if (!message || submitting) return
-    if (useAgentMode() && isProcessing()) return
+    if (isProcessing()) return
     submitting = true
     setSendCount((c) => c + 1)
     setInput('')
     if (textareaRef) textareaRef.style.height = 'auto'
     chat.clearError()
     agent.clearError()
-    const images = pendingImages()
     setPendingImages([])
     const files = pendingFiles()
     setPendingFiles([])
@@ -253,24 +269,13 @@ export const MessageInput: Component = () => {
     setExpandedPasteIndex(null)
     const fullMessage = buildFullMessage(message, files, pastes)
     try {
-      if (useAgentMode()) await agent.run(fullMessage, { model: selectedModel() })
-      else
-        await chat.sendMessage(fullMessage, selectedModel(), images.length > 0 ? images : undefined)
+      await agent.run(fullMessage, { model: selectedModel() })
     } finally {
       submitting = false
     }
   }
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Enter' && e.ctrlKey && e.shiftKey && chat.isStreaming() && !useAgentMode()) {
-      e.preventDefault()
-      const msg = input().trim()
-      if (!msg) return
-      chat.steer(msg, selectedModel())
-      setInput('')
-      if (textareaRef) textareaRef.style.height = 'auto'
-      return
-    }
     const sk = settings().behavior.sendKey
     if (sk === 'enter') {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -284,17 +289,12 @@ export const MessageInput: Component = () => {
   }
 
   const handleCancel = () => {
-    if (useAgentMode()) agent.cancel()
-    else chat.cancel()
+    agent.cancel()
   }
 
   const placeholder = () =>
     isProcessing()
-      ? useAgentMode()
-        ? `Working... (turn ${agent.currentTurn()})`
-        : chat.queuedCount() > 0
-          ? `${chat.queuedCount()} queued — type to add more...`
-          : 'Type to queue follow-up...'
+      ? `Working... (turn ${agent.currentTurn()})`
       : agent.isPlanMode()
         ? 'Plan your approach...'
         : 'Ask anything...'
@@ -314,7 +314,7 @@ export const MessageInput: Component = () => {
           onDrop={handleDrop}
           isDragging={isDragging}
           setIsDragging={setIsDragging}
-          disabled={() => useAgentMode() && isProcessing()}
+          disabled={isProcessing}
           placeholder={placeholder}
           textareaRef={(el) => {
             textareaRef = el
@@ -335,40 +335,34 @@ export const MessageInput: Component = () => {
           elapsedSeconds={elapsedSeconds}
           onCancel={handleCancel}
           inputHasText={inputHasText}
-          useAgentMode={useAgentMode}
         />
         <ShortcutHint sendCount={sendCount()} />
 
         {/* ── Unified strip ── */}
         <div class="flex items-center justify-between text-[10px] text-[var(--text-tertiary)] font-[var(--font-ui-mono)] select-none overflow-x-auto">
-          {/* Left: model + toolbar buttons */}
+          {/* Left: model + thinking + plan/act + permission */}
           <div class="flex items-center gap-2">
             <ModelSelector onToggle={openModelBrowser} currentModelDisplay={currentModelDisplay} />
 
+            <ThinkingToggle
+              enabled={() => settings().generation.thinkingEnabled}
+              onToggle={toggleThinking}
+              available={modelSupportsThinking}
+            />
+
             <StripDivider />
 
-            <ToolbarButtons
+            <PlanActSlider
               isPlanMode={agent.isPlanMode}
               togglePlanMode={() => agent.togglePlanMode()}
-              useAgentMode={useAgentMode}
-              onToggleAgentMode={() => setUseAgentMode(!useAgentMode())}
               isProcessing={isProcessing}
+            />
+
+            <StripDivider />
+
+            <PermissionBadge
               permissionMode={() => settings().permissionMode}
               onCyclePermission={cyclePermissionMode}
-              messageCount={() => sessionStore.messages().length}
-              onCreateCheckpoint={async () => {
-                const n = sessionStore.messages().length
-                if (n > 0) await sessionStore.createCheckpoint(`Checkpoint at message #${n}`)
-              }}
-              gitEnabled={() => settings().git.enabled}
-              autoCommit={() => settings().git.autoCommit}
-              onUndo={async () => {
-                setUndoStatus('Undoing...')
-                const r = await chat.undoLastEdit()
-                setUndoStatus(r.success ? 'Reverted!' : r.message)
-                setTimeout(() => setUndoStatus(null), 2500)
-              }}
-              isUndoing={() => undoStatus() === 'Undoing...'}
             />
           </div>
 

@@ -74,6 +74,7 @@ export interface ProviderConfig {
   temperature?: number
   systemPrompt?: string
   tools?: ToolDefinition[]
+  thinking?: { enabled: boolean }
 }
 
 // ============================================================================
@@ -134,11 +135,21 @@ export type AnthropicStreamEvent =
       index: number
       content_block: { type: 'tool_use'; id: string; name: string }
     }
+  | {
+      type: 'content_block_start'
+      index: number
+      content_block: { type: 'thinking'; thinking: string }
+    }
   | { type: 'content_block_delta'; index: number; delta: { type: 'text_delta'; text: string } }
   | {
       type: 'content_block_delta'
       index: number
       delta: { type: 'input_json_delta'; partial_json: string }
+    }
+  | {
+      type: 'content_block_delta'
+      index: number
+      delta: { type: 'thinking_delta'; thinking: string }
     }
   | { type: 'content_block_stop'; index: number }
   | { type: 'message_delta'; delta: { stop_reason: string }; usage: { output_tokens: number } }

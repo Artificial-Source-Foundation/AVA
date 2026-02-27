@@ -98,8 +98,9 @@ export async function sendMessage(
       }
     }
 
-    // Create assistant placeholder
+    // Create assistant placeholder with model set immediately for UI display
     const assistantMsg = await createAssistantMessage(deps, sessionId)
+    deps.session.updateMessage(assistantMsg.id, { model: targetModel })
 
     // Stream response with buffered UI updates
     let latestStreamText = ''

@@ -58,6 +58,7 @@ export interface GenerationSettings {
   customInstructions: string // prepended as system message
   weakModel: string // cheaper model for secondary tasks ('' = use default)
   editorModel: string // cheaper model for file edits by Junior Devs ('' = use primary)
+  thinkingEnabled: boolean // Enable extended thinking / reasoning mode
 }
 
 export interface AgentLimitSettings {

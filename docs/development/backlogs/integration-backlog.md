@@ -31,6 +31,9 @@
 
 ## Done
 
+- All 14 stub extensions wired with real logic (Sprint 11): slash-commands (8 commands), models (registry), focus-chain (tracker), scheduler (task runner), diff (middleware), instructions (loader), skills (matcher), git (snapshots), custom-commands (parser), mcp (manager wired), codebase (indexer), lsp (availability check), integrations (search providers), sandbox (Docker runner). +107 tests, 12 new helper modules.
+- Build fix (Sprint 11): excluded test utils from production builds in core-v2 and extensions tsconfigs.
+- Dead code cleanup (Sprint 11): deleted `anthropic-oauth.ts`, `SidebarPlugins.tsx`, `ProvidersTab.tsx`.
 - GitHub Copilot provider extension wired end-to-end: backend `CopilotClient` (OAuth + custom header), frontend defaults (Github icon, real model IDs), dynamic model fetcher with fallback, test harness (3 tests).
 - Streaming jitter stabilization for chat start/end transitions.
 - Plugin SDK + test utilities (Sprint 10): `createMockExtensionAPI()`, provider test harness, 5 example plugins, `PLUGIN_SDK.md`.

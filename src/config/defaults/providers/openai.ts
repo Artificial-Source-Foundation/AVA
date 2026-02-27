@@ -23,7 +23,7 @@ export const openai: LLMProviderConfig = {
       contextWindow: 400000,
       isDefault: true,
       pricing: { input: 1.75, output: 14 },
-      capabilities: ['vision', 'tools', 'reasoning'],
+      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
     },
     // ── GPT-5.1 ───────────────────────────────────────────
     {
@@ -31,7 +31,7 @@ export const openai: LLMProviderConfig = {
       name: 'GPT-5.1',
       contextWindow: 400000,
       pricing: { input: 1.25, output: 10 },
-      capabilities: ['vision', 'tools', 'reasoning'],
+      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
     },
     // ── GPT-5 Family ──────────────────────────────────────
     {
@@ -39,21 +39,21 @@ export const openai: LLMProviderConfig = {
       name: 'GPT-5',
       contextWindow: 400000,
       pricing: { input: 1.25, output: 10 },
-      capabilities: ['vision', 'tools', 'reasoning'],
+      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
     },
     {
       id: 'gpt-5-mini',
       name: 'GPT-5 Mini',
       contextWindow: 400000,
       pricing: { input: 0.25, output: 2 },
-      capabilities: ['vision', 'tools', 'reasoning'],
+      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
     },
     {
       id: 'gpt-5-nano',
       name: 'GPT-5 Nano',
       contextWindow: 400000,
       pricing: { input: 0.05, output: 0.4 },
-      capabilities: ['vision', 'tools', 'reasoning'],
+      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
     },
     // ── Codex (Agentic Coding) ────────────────────────────
     {
@@ -119,21 +119,21 @@ export const openai: LLMProviderConfig = {
       name: 'o3',
       contextWindow: 200000,
       pricing: { input: 2, output: 8 },
-      capabilities: ['vision', 'tools', 'reasoning'],
+      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
     },
     {
       id: 'o4-mini',
       name: 'o4 Mini',
       contextWindow: 200000,
       pricing: { input: 1.1, output: 4.4 },
-      capabilities: ['vision', 'tools', 'reasoning'],
+      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
     },
     {
       id: 'o3-mini',
       name: 'o3 Mini',
       contextWindow: 200000,
       pricing: { input: 1.1, output: 4.4 },
-      capabilities: ['tools', 'reasoning'],
+      capabilities: ['tools', 'reasoning', 'thinking'],
     },
     // ── Legacy ────────────────────────────────────────────
     {

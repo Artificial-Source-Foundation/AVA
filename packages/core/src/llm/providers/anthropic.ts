@@ -65,8 +65,13 @@ class AnthropicClient implements LLMClient {
       body.system = systemMessage.content
     }
 
-    // Add optional parameters
-    if (config.temperature !== undefined) {
+    // Add thinking support (must come before temperature — thinking disables temperature)
+    if (config.thinking?.enabled) {
+      body.thinking = { type: 'enabled', budget_tokens: 10000 }
+    }
+
+    // Add optional parameters (Anthropic requires omitting temperature when thinking is enabled)
+    if (config.temperature !== undefined && !config.thinking?.enabled) {
       body.temperature = config.temperature
     }
 
@@ -189,6 +194,7 @@ class AnthropicClient implements LLMClient {
                   // Accumulate JSON input for tool
                   toolInputBuffer += event.delta.partial_json
                 }
+                // thinking_delta blocks are silently consumed (extended thinking)
                 break
 
               case 'content_block_stop':

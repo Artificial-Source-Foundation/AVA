@@ -76,8 +76,19 @@ const [terminalExecutions, setTerminalExecutions] = createSignal<TerminalExecuti
 // Memory/context items in current session
 const [memoryItems, setMemoryItems] = createSignal<MemoryItem[]>([])
 
-// Selected model for chat
-const [selectedModel, setSelectedModel] = createSignal<string>(DEFAULTS.MODEL)
+// Selected model for chat — persisted to localStorage
+const SELECTED_MODEL_KEY = 'ava_selected_model'
+const savedModel =
+  typeof localStorage !== 'undefined' ? localStorage.getItem(SELECTED_MODEL_KEY) : null
+const [selectedModel, _setSelectedModel] = createSignal<string>(savedModel || DEFAULTS.MODEL)
+const setSelectedModel = (model: string) => {
+  _setSelectedModel(model)
+  try {
+    localStorage.setItem(SELECTED_MODEL_KEY, model)
+  } catch {
+    /* noop */
+  }
+}
 
 // Checkpoints
 const [checkpoints, setCheckpoints] = createSignal<

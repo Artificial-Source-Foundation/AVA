@@ -49,6 +49,7 @@ export const DEFAULT_GENERATION: GenerationSettings = {
   customInstructions: '',
   weakModel: '',
   editorModel: '',
+  thinkingEnabled: false,
 }
 
 export const DEFAULT_AGENT_LIMITS: AgentLimitSettings = {

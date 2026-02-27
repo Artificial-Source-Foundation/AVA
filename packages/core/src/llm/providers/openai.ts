@@ -89,10 +89,32 @@ class OpenAIClient implements LLMClient {
     if (auth.type === 'oauth') {
       const systemInstructions = messages
         .filter((m) => m.role === 'system')
-        .map((m) => m.content)
+        .map((m) => (typeof m.content === 'string' ? m.content : String(m.content)))
         .join('\n\n')
 
-      const oauthBody = {
+      // Convert tools to Responses API format (flat, not nested under `function`)
+      const responsesTools = config.tools?.length
+        ? config.tools.map((t) => ({
+            type: 'function' as const,
+            name: t.name,
+            description: t.description,
+            parameters: t.input_schema,
+          }))
+        : undefined
+
+      // Extract plain text from message content (handles multimodal arrays from buildApiMessages)
+      const extractText = (content: unknown): string => {
+        if (typeof content === 'string') return content
+        if (Array.isArray(content)) {
+          return (content as Array<{ type?: string; text?: string }>)
+            .filter((c) => c.type === 'text' || c.type === 'input_text' || c.type === 'output_text')
+            .map((c) => c.text ?? '')
+            .join('\n')
+        }
+        return String(content ?? '')
+      }
+
+      const oauthBody: Record<string, unknown> = {
         model: config.model,
         instructions: systemInstructions || 'You are AVA, a coding assistant.',
         input: messages
@@ -102,13 +124,33 @@ class OpenAIClient implements LLMClient {
             content: [
               {
                 type: m.role === 'assistant' ? 'output_text' : 'input_text',
-                text: m.content,
+                text: extractText(m.content),
               },
             ],
           })),
         store: false,
         stream: true,
       }
+
+      if (responsesTools) {
+        oauthBody.tools = responsesTools
+      }
+
+      // Debug: write to window.__avaDebug array + console
+      const _dbg = (msg: string) => {
+        console.log(msg)
+        try {
+          const w = globalThis as unknown as { __avaDebug?: string[] }
+          if (!w.__avaDebug) w.__avaDebug = []
+          w.__avaDebug.push(`${new Date().toISOString()} ${msg}`)
+        } catch {
+          /* noop */
+        }
+      }
+      _dbg(
+        `[OpenAI OAuth] Sending request with ${responsesTools?.length ?? 0} tools to ${endpoint}`
+      )
+      _dbg(`[OpenAI OAuth] Auth type: ${auth.type}, model: ${config.model}`)
 
       try {
         const response = await fetch(endpoint, {
@@ -147,6 +189,7 @@ class OpenAIClient implements LLMClient {
         let buffer = ''
         let inputTokens = 0
         let outputTokens = 0
+        const fnCalls = new Map<string, { id: string; name: string; args: string }>()
 
         try {
           while (true) {
@@ -172,31 +215,65 @@ class OpenAIClient implements LLMClient {
               }
 
               try {
-                const event = JSON.parse(data) as {
-                  type?: string
-                  delta?: string
-                  response?: {
-                    usage?: {
-                      input_tokens?: number
-                      output_tokens?: number
-                      total_tokens?: number
-                    }
-                  }
-                  usage?: {
-                    input_tokens?: number
-                    output_tokens?: number
-                    total_tokens?: number
-                  }
-                  error?: {
-                    message?: string
-                  }
+                // biome-ignore lint/suspicious/noExplicitAny: v1 file pending deletion
+                const event = JSON.parse(data) as Record<string, any>
+
+                // Debug: log event types (remove after confirming tools work)
+                if (event.type && !event.type.includes('delta')) {
+                  console.log('[OpenAI OAuth SSE]', event.type, event.item?.type ?? '')
                 }
 
+                // Text content delta
                 if (event.type === 'response.output_text.delta' && event.delta) {
                   outputTokens++
                   yield { content: event.delta, done: false }
                 }
 
+                // Function call: a new output item is created
+                if (
+                  event.type === 'response.output_item.added' &&
+                  event.item?.type === 'function_call'
+                ) {
+                  const item = event.item
+                  const id = item.call_id || item.id || `fn_${Date.now()}`
+                  fnCalls.set(id, { id, name: item.name ?? '', args: '' })
+                  console.log('[OpenAI OAuth] Function call started:', item.name, id)
+                }
+
+                // Function call arguments streaming
+                if (event.type === 'response.function_call_arguments.delta' && event.delta) {
+                  // Match by item_id or fall back to last active call
+                  const entry = fnCalls.get(event.item_id) || [...fnCalls.values()].pop()
+                  if (entry) {
+                    entry.args += event.delta
+                  }
+                }
+
+                // Function call arguments complete — yield as toolUse
+                if (event.type === 'response.function_call_arguments.done') {
+                  const entry = fnCalls.get(event.item_id) || [...fnCalls.values()].pop()
+                  if (entry) {
+                    let parsed: Record<string, unknown> = {}
+                    try {
+                      parsed = JSON.parse(entry.args || event.arguments || '{}')
+                    } catch {
+                      parsed = { _raw: entry.args || event.arguments }
+                    }
+                    console.log('[OpenAI OAuth] Function call complete:', entry.name, parsed)
+                    yield {
+                      content: '',
+                      done: false,
+                      toolUse: {
+                        type: 'tool_use',
+                        id: entry.id,
+                        name: entry.name || 'unknown',
+                        input: parsed,
+                      },
+                    }
+                  }
+                }
+
+                // Error
                 if (event.type === 'error' || event.type === 'response.error') {
                   yield {
                     content: '',
@@ -209,6 +286,7 @@ class OpenAIClient implements LLMClient {
                   return
                 }
 
+                // Stream complete
                 if (event.type === 'response.completed') {
                   const usage = event.response?.usage || event.usage
                   if (usage) {

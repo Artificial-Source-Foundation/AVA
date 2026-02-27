@@ -20,6 +20,7 @@ interface ModelBrowserFiltersProps {
 
 const ALL_CAPABILITIES: { id: ModelCapability; label: string }[] = [
   { id: 'reasoning', label: 'Reasoning' },
+  { id: 'thinking', label: 'Thinking' },
   { id: 'tools', label: 'Tools' },
   { id: 'vision', label: 'Vision' },
   { id: 'free', label: 'Free' },

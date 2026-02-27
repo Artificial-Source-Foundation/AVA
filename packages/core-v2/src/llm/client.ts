@@ -56,10 +56,13 @@ export async function getApiKey(provider: LLMProvider): Promise<string | null> {
 }
 
 export async function getAuth(provider: LLMProvider): Promise<AuthInfo | null> {
+  const platform = getPlatform()
+
   // Try OAuth first
-  const oauthToken = await getPlatform().credentials.get(`ava:${provider}:oauth_token`)
+  const oauthToken = await platform.credentials.get(`ava:${provider}:oauth_token`)
   if (oauthToken) {
-    return { type: 'oauth', token: oauthToken }
+    const accountId = await platform.credentials.get(`ava:${provider}:account_id`)
+    return { type: 'oauth', token: oauthToken, accountId: accountId ?? undefined }
   }
 
   // Fall back to API key

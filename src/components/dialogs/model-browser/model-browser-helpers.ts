@@ -222,7 +222,13 @@ function mergeCapabilities(
     // Stored capabilities are authoritative — normalize to our ModelCapability type
     const caps = new Set<ModelCapability>()
     for (const c of stored) {
-      if (c === 'reasoning' || c === 'tools' || c === 'vision' || c === 'free') {
+      if (
+        c === 'reasoning' ||
+        c === 'tools' ||
+        c === 'vision' ||
+        c === 'free' ||
+        c === 'thinking'
+      ) {
         caps.add(c)
       } else if (c.includes('reason')) {
         caps.add('reasoning')

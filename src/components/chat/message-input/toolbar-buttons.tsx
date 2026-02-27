@@ -1,11 +1,13 @@
 /**
  * Toolbar Buttons
  *
- * Left-side toolbar sub-groups separated by thin dividers:
- * [Plan/Act] [Agent/Chat] | [Permission] | [Checkpoint] [Undo]
+ * Three strip sub-components:
+ * - ThinkingToggle — brain icon, only for models with 'thinking' capability
+ * - PlanActSlider — Cline-style animated two-segment slider
+ * - PermissionBadge — styled pill cycling through permission modes
  */
 
-import { Bookmark, Bot, FileSearch, Shield, ShieldAlert, ShieldOff, Undo2, Zap } from 'lucide-solid'
+import { Brain, FileSearch, Play, Shield, ShieldAlert, ShieldOff } from 'lucide-solid'
 import { type Accessor, type Component, Show } from 'solid-js'
 import type { PermissionMode } from '../../../stores/settings'
 import type { PermissionConfigEntry } from './types'
@@ -21,131 +23,145 @@ export const PERMISSION_CONFIG: Record<PermissionMode, PermissionConfigEntry> = 
 }
 
 // ---------------------------------------------------------------------------
-// Props
+// ThinkingToggle
 // ---------------------------------------------------------------------------
 
-export interface ToolbarButtonsProps {
-  isPlanMode: Accessor<boolean>
-  togglePlanMode: () => void
-  useAgentMode: Accessor<boolean>
-  onToggleAgentMode: () => void
-  isProcessing: Accessor<boolean>
-  permissionMode: Accessor<PermissionMode>
-  onCyclePermission: () => void
-  messageCount: Accessor<number>
-  onCreateCheckpoint: () => Promise<void>
-  gitEnabled: Accessor<boolean>
-  autoCommit: Accessor<boolean>
-  onUndo: () => Promise<void>
-  isUndoing: Accessor<boolean>
+export interface ThinkingToggleProps {
+  enabled: Accessor<boolean>
+  onToggle: () => void
+  available: Accessor<boolean>
 }
 
-// ---------------------------------------------------------------------------
-// Tiny divider between sub-groups
-// ---------------------------------------------------------------------------
-
-const Div: Component = () => <span class="w-px h-4 bg-[var(--border-subtle)] shrink-0" />
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
-export const ToolbarButtons: Component<ToolbarButtonsProps> = (props) => (
-  <div class="flex items-center gap-2">
-    {/* ── Mode toggles ── */}
-
-    {/* Plan/Act toggle */}
+export const ThinkingToggle: Component<ThinkingToggleProps> = (props) => (
+  <Show when={props.available()}>
     <button
       type="button"
-      onClick={props.togglePlanMode}
-      disabled={props.isProcessing()}
+      onClick={props.onToggle}
       class={`
-        flex items-center gap-1 px-2 py-1
+        flex items-center gap-1 px-1.5 py-1
         text-[11px] font-medium rounded-[var(--radius-md)]
-        transition-colors
+        transition-all duration-200
         ${
-          props.isPlanMode()
-            ? 'bg-[var(--warning-subtle)] text-[var(--warning)] border border-[var(--warning)]'
-            : 'bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--accent-muted)]'
+          props.enabled()
+            ? 'text-[var(--accent)] bg-[var(--accent-subtle)]'
+            : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-transparent hover:bg-[var(--surface-raised)]'
         }
-        disabled:opacity-50 disabled:cursor-not-allowed
       `}
+      title={props.enabled() ? 'Thinking mode on' : 'Enable thinking mode'}
     >
-      <FileSearch class="w-3 h-3" />
-      {props.isPlanMode() ? 'Plan' : 'Act'}
+      <Brain
+        class="w-3.5 h-3.5 transition-all duration-200"
+        style={{
+          filter: props.enabled() ? 'drop-shadow(0 0 4px var(--accent))' : 'none',
+        }}
+      />
     </button>
-
-    {/* Agent/Chat toggle */}
-    <button
-      type="button"
-      onClick={props.onToggleAgentMode}
-      disabled={props.isProcessing()}
-      class={`
-        flex items-center gap-1 px-2 py-1
-        text-[11px] font-medium rounded-[var(--radius-md)]
-        transition-colors
-        ${
-          props.useAgentMode()
-            ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent)]'
-            : 'bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--accent-muted)]'
-        }
-        disabled:opacity-50 disabled:cursor-not-allowed
-      `}
-      title={
-        props.useAgentMode() ? 'Agent mode: Full autonomous loop' : 'Chat mode: Simple responses'
-      }
-    >
-      {props.useAgentMode() ? <Bot class="w-3 h-3" /> : <Zap class="w-3 h-3" />}
-      {props.useAgentMode() ? 'Agent' : 'Chat'}
-    </button>
-
-    <Div />
-
-    {/* ── Permission ── */}
-    {(() => {
-      const cfg = PERMISSION_CONFIG[props.permissionMode()]
-      const Icon = cfg.icon
-      return (
-        <button
-          type="button"
-          onClick={props.onCyclePermission}
-          class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] hover:border-[var(--accent-muted)] transition-colors"
-          title={`Permissions: ${cfg.label} (click to cycle)`}
-        >
-          <Icon class="w-3 h-3" style={{ color: cfg.color }} />
-          <span style={{ color: cfg.color }}>{cfg.label}</span>
-        </button>
-      )
-    })()}
-
-    <Div />
-
-    {/* ── Actions ── */}
-
-    {/* Checkpoint button */}
-    <Show when={props.messageCount() > 0}>
-      <button
-        type="button"
-        onClick={props.onCreateCheckpoint}
-        disabled={props.isProcessing()}
-        class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] hover:border-[var(--accent-muted)] transition-colors text-[var(--text-secondary)] disabled:opacity-50"
-        title="Save checkpoint"
-      >
-        <Bookmark class="w-3 h-3" />
-      </button>
-    </Show>
-
-    {/* Undo button — visible when git auto-commit is enabled */}
-    <Show when={props.gitEnabled() && props.autoCommit()}>
-      <button
-        type="button"
-        onClick={props.onUndo}
-        disabled={props.isProcessing() || props.isUndoing()}
-        class="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] hover:border-[var(--accent-muted)] transition-colors text-[var(--text-secondary)] disabled:opacity-50"
-        title="Undo last AI edit (git revert)"
-      >
-        <Undo2 class="w-3 h-3" />
-      </button>
-    </Show>
-  </div>
+  </Show>
 )
+
+// ---------------------------------------------------------------------------
+// PlanActSlider
+// ---------------------------------------------------------------------------
+
+export interface PlanActSliderProps {
+  isPlanMode: Accessor<boolean>
+  togglePlanMode: () => void
+  isProcessing: Accessor<boolean>
+}
+
+export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
+  <button
+    type="button"
+    onClick={props.togglePlanMode}
+    disabled={props.isProcessing()}
+    class="
+      relative flex items-center
+      h-[22px] w-[88px] rounded-full
+      bg-[var(--surface-raised)] border border-[var(--border-subtle)]
+      text-[10px] font-semibold
+      disabled:opacity-50 disabled:cursor-not-allowed
+      overflow-hidden select-none
+      transition-colors
+    "
+    title={props.isPlanMode() ? 'Plan mode — read-only exploration' : 'Act mode — full execution'}
+  >
+    {/* Sliding highlight */}
+    <div
+      class="
+        absolute top-[1px] bottom-[1px] w-[44px]
+        rounded-full
+        transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]
+      "
+      style={{
+        left: props.isPlanMode() ? '1px' : '42px',
+        'background-color': props.isPlanMode() ? 'var(--warning)' : 'var(--accent)',
+      }}
+    />
+    {/* Labels */}
+    <span
+      class="relative z-10 flex-1 text-center transition-colors duration-200"
+      style={{
+        color: props.isPlanMode() ? 'var(--surface-base)' : 'var(--text-muted)',
+      }}
+    >
+      <span class="flex items-center justify-center gap-0.5">
+        <FileSearch class="w-2.5 h-2.5" />
+        Plan
+      </span>
+    </span>
+    <span
+      class="relative z-10 flex-1 text-center transition-colors duration-200"
+      style={{
+        color: props.isPlanMode() ? 'var(--text-muted)' : 'white',
+      }}
+    >
+      <span class="flex items-center justify-center gap-0.5">
+        <Play class="w-2.5 h-2.5" />
+        Act
+      </span>
+    </span>
+  </button>
+)
+
+// ---------------------------------------------------------------------------
+// PermissionBadge
+// ---------------------------------------------------------------------------
+
+export interface PermissionBadgeProps {
+  permissionMode: Accessor<PermissionMode>
+  onCyclePermission: () => void
+}
+
+export const PermissionBadge: Component<PermissionBadgeProps> = (props) => {
+  const cfg = () => PERMISSION_CONFIG[props.permissionMode()]
+
+  return (
+    <button
+      type="button"
+      onClick={props.onCyclePermission}
+      class="
+        flex items-center gap-1 px-2 py-1
+        text-[11px] font-medium rounded-full
+        transition-all duration-200
+        border
+      "
+      style={{
+        color: cfg().color,
+        'border-color': cfg().color,
+        'background-color':
+          props.permissionMode() === 'ask'
+            ? 'var(--surface-raised)'
+            : props.permissionMode() === 'auto-approve'
+              ? 'color-mix(in srgb, var(--warning) 10%, transparent)'
+              : 'color-mix(in srgb, var(--error) 10%, transparent)',
+      }}
+      title={`Permissions: ${cfg().label} (click to cycle)`}
+    >
+      {(() => {
+        const Icon = cfg().icon
+        return <Icon class="w-3 h-3" />
+      })()}
+      <span>{cfg().label}</span>
+    </button>
+  )
+}

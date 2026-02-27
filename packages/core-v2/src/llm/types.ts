@@ -61,6 +61,7 @@ export interface ProviderConfig {
   temperature?: number
   systemPrompt?: string
   tools?: ToolDefinition[]
+  thinking?: { enabled: boolean }
 }
 
 export interface Credentials {

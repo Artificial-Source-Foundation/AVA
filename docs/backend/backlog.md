@@ -68,7 +68,7 @@
 - [ ] **Edit strategy benchmarks** — No comparison of 8 edit strategies on real diffs
 
 ### Missing in Intelligence
-- [ ] **Codebase indexer tests** — No tests for file discovery or symbol extraction
+- [x] **Codebase indexer tests** — ~~No tests for file discovery or symbol extraction~~ **DONE** (Sprint 11: extension-side indexer with detectLanguage, indexFiles, createRepoMap tests; core-side symbol extraction still untested)
 - [ ] **Context strategy benchmarks** — No comparison of compaction strategies
 
 ### Missing in Safety
@@ -121,28 +121,39 @@ This backlog feeds into the project roadmap:
 
 ---
 
-## Core-v2 / Extensions Test Coverage (Sprint 10)
+## Core-v2 / Extensions Test Coverage
 
-> **Sprint 10** added 102 new tests for the new stack. Total: 3,417 tests / 188 files.
+### Sprint 11 — Wire All 14 Stub Extensions
 
-### Completed
+> **Sprint 11** wired all 14 stub extensions with real logic, added 12 helper modules, rewrote all tests. Total: **3,524 tests / 200 files** (up from 3,417/188).
+
+#### Completed
+- [x] **Build fix** — Excluded `__test-utils__/**` from core-v2 tsconfig, `**/test-harness.ts` from extensions tsconfig
+- [x] **Wire all 14 stub extensions** — Each now has real `activate()` logic with tools, commands, middleware, and event handlers
+- [x] **12 new helper modules** — `commands.ts`, `registry.ts`, `tracker.ts` (focus-chain), `runner.ts` (scheduler), `tracker.ts` (diff), `loader.ts` (instructions), `matcher.ts` (skills), `snapshots.ts` (git), `parser.ts` (custom-commands), `indexer.ts` (codebase), `runner.ts` (sandbox)
+- [x] **24 new/rewritten test files** — 14 updated `index.test.ts` + 10 new helper `*.test.ts`
+- [x] **Dead code cleanup** — Deleted `anthropic-oauth.ts`, `SidebarPlugins.tsx`, `ProvidersTab.tsx`
+- [x] **MCP manager wired** — `activate()` loads servers from settings, registers tools on connect, handles add/remove events
+- [x] **Models registry** — `createModelRegistry()` with Map-based storage, listens for `provider:registered`
+- [x] **Instructions loader** — `loadInstructions()` walks directories upward, finds `.ava-instructions`/`CLAUDE.md`, merges by priority
+
+### Sprint 10 — Test Coverage + Plugin Ecosystem
+
+> **Sprint 10** added 102 new tests. Baseline: 3,417 tests / 188 files.
+
+#### Completed
 - [x] Mock ExtensionAPI test utility (`createMockExtensionAPI()`) — 9 tests
-- [x] Activation tests for all 14 stub extension modules — 43 tests
+- [x] Activation tests for all 14 extension modules — 43 tests
 - [x] Provider test harness + anthropic/openai/google/copilot provider tests — 12 tests
 - [x] MCP manager unit tests (addServer, removeServer, getTools, resetMCP) — 9 tests
 - [x] Plugin catalog fetch/cache/fallback tests — 8 tests
 - [x] CLI scaffold template tests (manifest, ExtensionAPI source, test generation) — 3 tests
 - [x] 5 example plugin tests (timestamp-tool, file-stats, polite-middleware, session-notes, event-logger) — 21 tests
+- [x] **GitHub Copilot provider extension** — `packages/extensions/providers/copilot/` with custom `CopilotClient`
+- [x] **Copilot model fetcher** — Dynamic model fetch with hardcoded fallback
 
 ### Still Needed
-- [ ] Wire 14 stub extensions to actually register tools/commands/modes (currently only log)
-- [ ] Create `models/src/registry.ts` and `instructions/src/loader.ts` modules
-- [ ] Connect MCP manager to `activate()` in mcp extension
 - [ ] Provider tests for remaining 10 providers (same harness pattern)
 - [ ] Real plugin install/uninstall (currently state-only in frontend)
-
-### Recently Added
-- [x] **GitHub Copilot provider extension** — `packages/extensions/providers/copilot/` with custom `CopilotClient` (OAuth via `getAuth()`, `Copilot-Integration-Id` header, model prefix stripping), activation, and test harness (3 tests)
-- [x] **Copilot model fetcher** — Dynamic model fetch from `https://api.githubcopilot.com/models` with hardcoded fallback (gpt-4.1, gpt-4o, claude-3.5-sonnet, o3-mini); `supportsDynamicFetch()` updated
 
 *Last updated: 2026-02-27*

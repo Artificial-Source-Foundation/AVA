@@ -19,9 +19,10 @@ interface ModelBrowserCardProps {
 
 const capabilityColors: Record<string, string> = {
   reasoning: 'text-[var(--warning)] bg-[var(--warning)]/10',
-  tools: 'text-[var(--accent)] bg-[var(--accent)]/10',
+  thinking: 'text-[var(--accent)] bg-[var(--accent)]/10',
+  tools: 'text-[var(--info)] bg-[var(--info)]/10',
   vision: 'text-[var(--success)] bg-[var(--success)]/10',
-  free: 'text-[var(--info)] bg-[var(--info)]/10',
+  free: 'text-[var(--text-muted)] bg-[var(--alpha-white-5)]',
 }
 
 export const ModelBrowserCard: Component<ModelBrowserCardProps> = (props) => (
@@ -30,7 +31,7 @@ export const ModelBrowserCard: Component<ModelBrowserCardProps> = (props) => (
     onClick={props.onSelect}
     class={`
       w-full text-left p-3 rounded-[var(--radius-lg)]
-      border transition-all duration-150
+      border transition-colors duration-150
       hover:bg-[var(--alpha-white-5)]
       ${
         props.isSelected
@@ -38,6 +39,7 @@ export const ModelBrowserCard: Component<ModelBrowserCardProps> = (props) => (
           : 'border-[var(--border-subtle)] bg-[var(--surface-raised)]'
       }
     `}
+    style={{ contain: 'content' }}
   >
     {/* Header: icon + name */}
     <div class="flex items-start gap-2.5 mb-2">

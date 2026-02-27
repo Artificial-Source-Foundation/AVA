@@ -27,7 +27,7 @@ export interface ModelPricing {
   output?: number // per 1M tokens
 }
 
-export type ModelCapability = 'reasoning' | 'tools' | 'vision' | 'free'
+export type ModelCapability = 'reasoning' | 'tools' | 'vision' | 'free' | 'thinking'
 
 // ============================================================================
 // Filter State

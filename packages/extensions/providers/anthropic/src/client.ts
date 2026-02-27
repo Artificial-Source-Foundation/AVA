@@ -63,7 +63,17 @@ export class AnthropicClient implements LLMClient {
     }
 
     if (systemMessage) body.system = systemMessage.content
-    if (config.temperature !== undefined) body.temperature = config.temperature
+
+    // Extended thinking (must come before temperature — thinking disables temperature)
+    if (config.thinking?.enabled) {
+      body.thinking = { type: 'enabled', budget_tokens: 10000 }
+    }
+
+    // Anthropic requires omitting temperature when thinking is enabled
+    if (config.temperature !== undefined && !config.thinking?.enabled) {
+      body.temperature = config.temperature
+    }
+
     if (config.tools && config.tools.length > 0) body.tools = config.tools
 
     // Build headers based on auth type
@@ -163,6 +173,7 @@ export class AnthropicClient implements LLMClient {
                   }
                   toolInputBuffer = ''
                 }
+                // 'thinking' blocks are silently consumed (extended thinking)
                 break
 
               case 'content_block_delta':
@@ -171,6 +182,7 @@ export class AnthropicClient implements LLMClient {
                 } else if (event.delta.type === 'input_json_delta' && event.delta.partial_json) {
                   toolInputBuffer += event.delta.partial_json
                 }
+                // thinking_delta blocks are silently consumed (extended thinking)
                 break
 
               case 'content_block_stop':

@@ -50,6 +50,10 @@ export async function streamResponse(options: StreamOptions, deps: ChatDeps): Pr
 
   // Get tool definitions if tools are enabled
   const tools = options.enableTools !== false ? getToolDefinitions() : undefined
+  logDebug(deps.LOG_SRC, 'Tool definitions', {
+    count: tools?.length ?? 0,
+    names: tools?.map((t) => t.name).slice(0, 5),
+  })
 
   // Accumulate all tool calls across streaming iterations
   const allToolCalls: ToolCall[] = []
@@ -57,6 +61,11 @@ export async function streamResponse(options: StreamOptions, deps: ChatDeps): Pr
   // Stream loop - may iterate multiple times if tools are used
   let continueStreaming = true
   while (continueStreaming) {
+    // Check abort before each streaming iteration
+    if (options.signal.aborted) {
+      logInfo(deps.LOG_SRC, 'Aborted before stream iteration', { sessionId: options.sessionId })
+      return
+    }
     continueStreaming = false
     const pendingToolUses: ToolUseBlock[] = []
 
@@ -75,6 +84,7 @@ export async function streamResponse(options: StreamOptions, deps: ChatDeps): Pr
           maxTokens: gen.maxTokens,
           temperature: gen.temperature,
           tools,
+          thinking: gen.thinkingEnabled ? { enabled: true } : undefined,
         },
         options.signal
       )) {
@@ -119,7 +129,8 @@ export async function streamResponse(options: StreamOptions, deps: ChatDeps): Pr
               deps,
               toolCtx
             )
-            continueStreaming = true
+            // Only continue if not aborted during tool execution
+            continueStreaming = !options.signal.aborted
           } else {
             // No tools, we're done
             logDebug(deps.LOG_SRC, 'Stream done', {
@@ -183,6 +194,19 @@ async function executeToolLoop(
   }> = []
 
   for (const toolUse of pendingToolUses) {
+    // Bail out if abort was signaled (stop button pressed)
+    if (toolCtx.signal.aborted) {
+      logInfo(deps.LOG_SRC, 'Tool loop aborted', { sessionId: options.sessionId })
+      const tc = allToolCalls.find((t) => t.id === toolUse.id)
+      if (tc) {
+        tc.status = 'error'
+        tc.error = 'Cancelled'
+        tc.completedAt = Date.now()
+      }
+      options.onToolUpdate?.([...allToolCalls])
+      break
+    }
+
     const tc = allToolCalls.find((t) => t.id === toolUse.id)
 
     // Check auto-approval before executing

@@ -137,7 +137,12 @@ export const Dialog: Component<DialogProps> = (props) => {
           </Show>
 
           {/* Body */}
-          <div class="p-4 overflow-y-auto max-h-[70vh]">{local.children}</div>
+          <div
+            class="p-4 overflow-y-auto max-h-[70vh]"
+            style={{ 'will-change': 'scroll-position', '-webkit-overflow-scrolling': 'touch' }}
+          >
+            {local.children}
+          </div>
 
           {/* Footer */}
           <Show when={local.footer}>

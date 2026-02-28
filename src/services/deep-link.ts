@@ -179,10 +179,12 @@ export function initDeepLinks(): Disposable {
 // Tauri Plugin Integration
 // ---------------------------------------------------------------------------
 
+// Opaque module name so Vite cannot statically resolve it
+const DEEP_LINK_PKG = ['@tauri-apps', 'plugin-deep-link'].join('/')
+
 async function tryTauriDeepLink(): Promise<(() => void) | null> {
   try {
-    // @ts-expect-error — plugin may not be installed; dynamic import catches the error
-    const { onOpenUrl } = await import('@tauri-apps/plugin-deep-link')
+    const { onOpenUrl } = await import(/* @vite-ignore */ DEEP_LINK_PKG)
     const unlisten = await onOpenUrl((urls: string[]) => {
       for (const url of urls) {
         handleDeepLink(url)

@@ -12,6 +12,10 @@ export interface UpdateInfo {
   notes?: string
 }
 
+// Opaque module names so Vite cannot statically resolve them
+const UPDATER_PKG = ['@tauri-apps', 'plugin-updater'].join('/')
+const PROCESS_PKG = ['@tauri-apps', 'plugin-process'].join('/')
+
 /**
  * Check whether a new version is available.
  * Returns `{ available: false }` outside Tauri or on network errors.
@@ -22,9 +26,7 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
   }
 
   try {
-    // Dynamic import — plugin may not be installed
-    // @ts-expect-error Plugin may not be installed
-    const updater = await import('@tauri-apps/plugin-updater')
+    const updater = await import(/* @vite-ignore */ UPDATER_PKG)
     const update = await updater.check()
 
     if (!update) {
@@ -52,8 +54,7 @@ export async function downloadAndInstallUpdate(): Promise<void> {
   }
 
   try {
-    // @ts-expect-error Plugin may not be installed
-    const updater = await import('@tauri-apps/plugin-updater')
+    const updater = await import(/* @vite-ignore */ UPDATER_PKG)
     const update = await updater.check()
 
     if (!update) {
@@ -88,8 +89,7 @@ export async function downloadAndInstallUpdate(): Promise<void> {
 
     // Attempt to relaunch
     try {
-      // @ts-expect-error Plugin may not be installed
-      const process = await import('@tauri-apps/plugin-process')
+      const process = await import(/* @vite-ignore */ PROCESS_PKG)
       await process.relaunch()
     } catch {
       console.log('[auto-updater] Relaunch not available, manual restart needed')

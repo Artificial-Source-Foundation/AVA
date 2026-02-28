@@ -23,7 +23,7 @@
 ### P1
 - PI Coding Agent parity items (provider switching, session branching tree, minimal tool mode, runtime skill creation)
 - MCP OAuth flows (auth + refresh + storage)
-- Remote browser support baseline
+- ~~Remote browser support baseline~~ Removed — browser tool deleted (Sprint 13), use Puppeteer MCP server
 
 ### P2
 - Reduce oversized frontend files (>300 lines) to meet CLAUDE.md constraints
@@ -43,7 +43,7 @@
 | llm/providers/ (13 files) + utils/ (3 files) | Remaining providers + utils | 6 test files exist; rest require HTTP mocking |
 | auth/ (8 files) | OAuth flows | Requires HTTP + browser mocking |
 | validator/ (9 files) | QA pipeline | Requires filesystem + build tools |
-| mcp/ (6 files) | MCP client | Requires MCP server |
+| mcp/ (6 files) | MCP client | **DONE** (Sprint 13: real transport+client+manager, 33 tests) |
 | hooks/ (4 files) | Lifecycle hooks | Requires tool execution context |
 | git/ (5 files) | Git operations | Requires real git repo |
 | lsp/ (4 files) | LSP integration | Requires language servers |
@@ -97,7 +97,7 @@
 ### Known Issues
 - [ ] **Platform abstraction gaps** — `platform.ts` has different behavior for Node/Tauri/browser but tests only cover Node
 - [ ] **Circular dependency risk** — `tools/index.ts` imports from `agent/modes/` (plan tools), creating a cross-module dependency
-- [ ] **Large barrel export** — `index.ts` exports 29 modules via `export *`, making tree-shaking harder
+- [ ] **Large barrel export** — `index.ts` exports 30 modules via `export *`, making tree-shaking harder
 
 ### Opportunities
 - [ ] **Split tools/ into subcategories** — 43 files in one directory is large; could split into file-tools/, search-tools/, web-tools/
@@ -115,7 +115,7 @@ This backlog feeds into the project roadmap:
 | **1.5 Polish** (complete) | Settings hardening, appearance system, core wiring, backend tests |
 | **2 Plugins** | Plugin SDK shipped (Sprint 10); manifest validation, hot reload, real install remaining |
 | **3 CLI** | CLI-specific session storage, config paths, terminal rendering |
-| **4 Integrations** | MCP server hosting, external tool connectors |
+| **4 Integrations** | MCP client done (Sprint 13); MCP server hosting, OAuth, resources remaining |
 
 ---
 
@@ -125,7 +125,7 @@ This backlog feeds into the project roadmap:
 
 ### Sprint 11 — Wire All 14 Stub Extensions
 
-> **Sprint 11** wired all 14 stub extensions with real logic, added 12 helper modules, rewrote all tests. Total: **3,524 tests / 200 files** (up from 3,417/188).
+> **Sprint 11** wired all 14 stub extensions with real logic, added 12 helper modules, rewrote all tests. Baseline after Sprint 11: **3,524 tests / 200 files** (up from 3,417/188).
 
 #### Completed
 - [x] **Build fix** — Excluded `__test-utils__/**` from core-v2 tsconfig, `**/test-harness.ts` from extensions tsconfig
@@ -152,18 +152,33 @@ This backlog feeds into the project roadmap:
 - [x] **GitHub Copilot provider extension** — `packages/extensions/providers/copilot/` with custom `CopilotClient`
 - [x] **Copilot model fetcher** — Dynamic model fetch with hardcoded fallback
 
-### Sprint 13 — Web Tools Cleanup + Real MCP Client
+### Sprint 12 — Agent V2 E2E
 
-> **Sprint 13** removed the browser tool, added free DuckDuckGo websearch default, and implemented a real MCP client with JSON-RPC 2.0 over stdio/SSE.
+> **Sprint 12** wired the full agent-v2 pipeline end-to-end through the CLI: core tools, system prompt, tool approval, subagent task, retry/doom-loop recovery, context management, and rich CLI output.
 
 #### Completed
-- [x] **Browser tool removed** — Deleted `tools-extended/src/browser/` (4 files), users should use Puppeteer MCP server instead
+- [x] **CLI agent-v2 command** — `ava agent-v2 run "goal" --provider --model --yolo --verbose`
+- [x] **23 extensions loading** — All built-in extensions activate successfully
+- [x] **Output modes** — `--verbose` (tool details), `--json` (NDJSON), default (minimal)
+- [x] **Tool approval** — `--yolo` auto-approves; without it, readline prompts for risky tools
+- [x] **Extension loader** — Tries source `.ts` first (tsx), falls back to `dist/*.js` (compiled CLI)
+- [x] **Platform-tauri build fix** — Missing `@ava/core-v2` symlink + tsconfig paths
+- [x] **Extensions package.json exports** — `"exports": { "./*": "./dist/*" }` for CLI subpath resolution
+
+### Sprint 13 — Web Tools Cleanup + Real MCP Client
+
+> **Sprint 13** removed the browser tool, added free DuckDuckGo websearch, and implemented a real MCP client with JSON-RPC 2.0 over stdio/SSE. Net: −888 lines deleted, +1238 lines added across 19 files. Tool count 24 → 23. Extension tests: 609 passing (67 files).
+
+#### Completed
+- [x] **Browser tool removed** — Deleted `tools-extended/src/browser/` (4 files, −689 lines), users should use Puppeteer MCP server instead
 - [x] **Free websearch** — DuckDuckGo HTML scraping as default (no API key needed), Tavily/Exa as optional fallbacks
-- [x] **MCP transport layer** — `StdioTransport` (newline-delimited JSON via platform shell spawn) + `SSETransport` (Server-Sent Events + POST)
-- [x] **MCP protocol client** — Initialize handshake, tools/list, tools/call with request/response correlation + timeouts
-- [x] **MCP manager rewrite** — Real connection lifecycle: connect → initialize → list tools → ready
-- [x] **MCP extension rewrite** — Tools registered with real execution via `callTool()`, dynamic add/remove via events
+- [x] **MCP transport layer** — `StdioTransport` (newline-delimited JSON via platform shell spawn) + `SSETransport` (Server-Sent Events + POST) — `mcp/src/transport.ts` (~190 lines)
+- [x] **MCP protocol client** — Initialize handshake (`2024-11-05`), tools/list, tools/call with request/response correlation + 30s timeouts — `mcp/src/client.ts` (~130 lines)
+- [x] **MCP manager rewrite** — Real connection lifecycle: connect → initialize → list tools → ready; `callTool()` for execution — `mcp/src/manager.ts` (~120 lines)
+- [x] **MCP extension rewrite** — Tools registered with real execution, dynamic add/remove via events — `mcp/src/index.ts` (~100 lines)
 - [x] **MCP types update** — Added `env` field to `MCPServer` for passing API keys to stdio servers
+- [x] **Tests** — 33 MCP tests (transport 7, client 7, manager 10, extension 9) across 4 test files
+- [x] **Smoke tested** — CLI `agent-v2 run` with DuckDuckGo websearch, no API keys, 23 extensions loaded
 
 #### Still Needed (MCP)
 - [ ] MCP OAuth flows (auth + refresh + storage)
@@ -173,6 +188,17 @@ This backlog feeds into the project roadmap:
 - [ ] Reconnection with exponential backoff
 - [ ] Tool list change notifications (re-discover on `notifications/tools/list_changed`)
 - [ ] Server health monitoring + auto-restart
+
+### Sprint 14 — P1 Competitive Gap Features (Backend)
+
+> **Sprint 14** added live tool progress streaming, undo/redo file changes, and enhanced permissions. +912 lines across 12 backend files. Total: **3,668 tests / 211 files** (up from 3,524/200).
+
+#### Completed
+- [x] **Live tool progress streaming** — Agent loop emits `tool:progress` events during execution; 178 new loop tests — `core-v2/src/agent/loop.ts` + `loop.test.ts`
+- [x] **Undo/redo file changes** — Diff extension tracks file snapshots, supports undo/redo via middleware; 200 new tests — `extensions/diff/src/index.ts` + `index.test.ts`
+- [x] **Enhanced permissions middleware** — Risk level classification, relative path blocking, `PermissionRequest`/`PermissionResponse` types — `extensions/permissions/src/middleware.ts` + `types.ts`
+- [x] **IDE integration slash command** — `/open` command to open files in external editor — `extensions/slash-commands/src/commands.ts`
+- [x] **Bash tool metadata** — Added working directory to bash tool output — `core-v2/src/tools/bash.ts`
 
 ### Still Needed
 - [ ] Provider tests for remaining 10 providers (same harness pattern)

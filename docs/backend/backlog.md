@@ -64,7 +64,7 @@
 ### Missing in Tools
 - [x] **Tool execution tests** — ~~Individual tool `execute()` methods untested~~ **DONE** (write + edit execute tests already comprehensive; 11 + 12 tests respectively)
 - [x] **Browser tool** — ~~Requires Puppeteer mocking~~ Removed (Sprint 13, use Puppeteer MCP server)
-- [ ] **Apply-patch tests** — Parser and applier untested
+- [x] **Apply-patch tests** — ~~Parser and applier untested~~ **DONE** (parser.test.ts, 10 tests)
 - [ ] **Edit strategy benchmarks** — No comparison of 8 edit strategies on real diffs
 
 ### Missing in Intelligence
@@ -100,7 +100,7 @@
 - [ ] **Large barrel export** — `index.ts` exports 30 modules via `export *`, making tree-shaking harder
 
 ### Opportunities
-- [ ] **Split tools/ into subcategories** — 43 files in one directory is large; could split into file-tools/, search-tools/, web-tools/
+- [ ] **Split tools/ into subcategories** — 44 files in one directory is large; could split into file-tools/, search-tools/, web-tools/
 - [ ] **Extract tool utilities** — `utils.ts`, `sanitize.ts`, `truncation.ts`, `locks.ts` could be a separate `tool-utils/` module
 - [x] **Standardize provider interface** — ~~All 14 LLM providers implement `stream()` differently; could add a test harness~~ **DONE** (Sprint 10: `providers/_shared/src/test-harness.ts` + anthropic/openai/google tests)
 

@@ -49,6 +49,7 @@ export type {
   PermissionMode,
   SansFont,
   SendKey,
+  ToolApprovalRule,
   UIDensity,
   UISettings,
 } from './settings-types'

@@ -11,6 +11,7 @@ import { useLayout } from '../../stores/layout'
 import { useSettings } from '../../stores/settings'
 import { useShortcuts } from '../../stores/shortcuts'
 import type { LLMProvider } from '../../types/llm'
+import { AddMCPServerDialog } from '../dialogs/AddMCPServerDialog'
 import { AgentEditModal } from './settings-agent-edit-modal'
 import { KeybindingEditModal } from './settings-keybinding-edit-modal'
 import type { SettingsTab } from './settings-modal-config'
@@ -39,6 +40,7 @@ export const SettingsModal: Component = () => {
   const [editingAgent, setEditingAgent] = createSignal<AgentPreset | null>(null)
   const [editingKeybinding, setEditingKeybinding] = createSignal<Keybinding | null>(null)
   const [creatingAgent, setCreatingAgent] = createSignal(false)
+  const [addMcpDialogOpen, setAddMcpDialogOpen] = createSignal(false)
 
   const mcpServers = (): MCPServer[] =>
     settings().mcpServers.map((s) => ({
@@ -184,10 +186,7 @@ export const SettingsModal: Component = () => {
                 onDeleteAgent={removeAgent}
                 onCreateAgent={handleCreateAgent}
                 onRemoveMcpServer={removeMcpServer}
-                onAddMcpServer={() => {
-                  const name = `server-${Date.now()}`
-                  addMcpServer({ name, type: 'sse', url: 'http://localhost:3001' })
-                }}
+                onAddMcpServer={() => setAddMcpDialogOpen(true)}
               />
             </div>
           </div>
@@ -212,6 +211,15 @@ export const SettingsModal: Component = () => {
             onSave={handleSaveKeybinding}
           />
         </Show>
+
+        <AddMCPServerDialog
+          open={addMcpDialogOpen()}
+          onClose={() => setAddMcpDialogOpen(false)}
+          onSave={(config) => {
+            addMcpServer(config)
+            notification.success('MCP server added', config.name)
+          }}
+        />
       </div>
     </Show>
   )

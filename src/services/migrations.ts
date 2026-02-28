@@ -56,6 +56,11 @@ export async function runMigrations(db: Database): Promise<void> {
     await migrateV4(db)
     await recordMigration(db, 4)
   }
+
+  if (currentVersion < 5) {
+    await migrateV5(db)
+    await recordMigration(db, 5)
+  }
 }
 
 /**
@@ -284,4 +289,27 @@ async function migrateV3(db: Database): Promise<void> {
 async function migrateV4(db: Database): Promise<void> {
   await db.execute('ALTER TABLE messages ADD COLUMN cost_usd REAL')
   await db.execute('ALTER TABLE messages ADD COLUMN model TEXT')
+}
+
+/**
+ * Version 5: Add workflows table
+ * - Reusable workflow recipes extracted from sessions
+ */
+async function migrateV5(db: Database): Promise<void> {
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS workflows (
+      id TEXT PRIMARY KEY,
+      project_id TEXT,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      tags TEXT,
+      prompt TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      usage_count INTEGER DEFAULT 0,
+      source_session_id TEXT,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+    )
+  `)
+  await db.execute('CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_id)')
 }

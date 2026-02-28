@@ -31,6 +31,7 @@ import { useLayout } from '../../stores/layout'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
+import { FocusChainBar } from './FocusChainBar'
 import { ModelChangeIndicator } from './ModelChangeIndicator'
 import { MessageRow } from './message-list/message-row'
 import { MessageListEmpty, MessageListLoading, ScrollToBottomButton } from './message-list/sections'
@@ -52,6 +53,7 @@ export const MessageList: Component = () => {
     messageId: string
     isLast: boolean
   } | null>(null)
+  const [rewindTarget, setRewindTarget] = createSignal<string | null>(null)
   const [searchMatchIds, setSearchMatchIds] = createSignal<Set<string>>(new Set())
   const [currentSearchId, setCurrentSearchId] = createSignal<string | null>(null)
 
@@ -68,6 +70,7 @@ export const MessageList: Component = () => {
     branchAtMessage,
     checkpoints,
     rollbackToCheckpoint,
+    revertFilesAfter,
   } = useSession()
   const agent = useAgent()
   const { isStreaming, retryMessage, editAndResend, regenerateResponse } = useChat()
@@ -244,8 +247,39 @@ export const MessageList: Component = () => {
     await rollbackToMessage(target.messageId)
   }
 
+  // Rewind handlers (Item 5)
+  const handleRewindConversationOnly = async () => {
+    const msgId = rewindTarget()
+    if (!msgId) return
+    setRewindTarget(null)
+    // Keep messages up to and including the target
+    const msgs = messages()
+    const index = msgs.findIndex((m) => m.id === msgId)
+    if (index === -1) return
+    // Delete everything after this message
+    const nextMsg = msgs[index + 1]
+    if (nextMsg) await rollbackToMessage(nextMsg.id)
+    notifySuccess('Conversation rewound')
+  }
+
+  const handleRewindAndRevert = async () => {
+    const msgId = rewindTarget()
+    if (!msgId) return
+    setRewindTarget(null)
+    const reverted = await revertFilesAfter(msgId)
+    const msgs = messages()
+    const index = msgs.findIndex((m) => m.id === msgId)
+    if (index === -1) return
+    const nextMsg = msgs[index + 1]
+    if (nextMsg) await rollbackToMessage(nextMsg.id)
+    notifySuccess(`Rewound${reverted > 0 ? ` and reverted ${reverted} file(s)` : ''}`)
+  }
+
   return (
     <div class="relative flex-1 min-h-0 flex flex-col overflow-hidden">
+      {/* Focus chain progress bar (Item 7) */}
+      <FocusChainBar />
+
       {/* Search bar */}
       <Show when={chatSearchOpen()}>
         <SearchBar
@@ -322,6 +356,7 @@ export const MessageList: Component = () => {
                       onRegenerate={() => regenerateResponse(msg.id)}
                       onDelete={() => handleDeleteRequest(msg.id)}
                       onBranch={() => handleBranch(msg.id)}
+                      onRewind={() => setRewindTarget(msg.id)}
                       onRestoreCheckpoint={rollbackToCheckpoint}
                     />
                   </>
@@ -353,6 +388,41 @@ export const MessageList: Component = () => {
         variant="danger"
         onConfirm={handleDeleteConfirm}
       />
+
+      {/* Rewind dialog (Item 5) */}
+      <Show when={rewindTarget() !== null}>
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div class="bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] p-6 max-w-sm w-full shadow-2xl space-y-4">
+            <h3 class="text-sm font-semibold text-[var(--text-primary)]">Rewind conversation?</h3>
+            <p class="text-xs text-[var(--text-secondary)]">
+              Messages after this point will be removed. Choose whether to also revert file changes.
+            </p>
+            <div class="flex flex-col gap-2">
+              <button
+                type="button"
+                onClick={handleRewindConversationOnly}
+                class="w-full px-3 py-2 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] transition-colors text-left"
+              >
+                Rewind conversation only
+              </button>
+              <button
+                type="button"
+                onClick={handleRewindAndRevert}
+                class="w-full px-3 py-2 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] transition-colors text-left"
+              >
+                Rewind and revert files
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setRewindTarget(null)}
+              class="w-full text-center text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      </Show>
     </div>
   )
 }

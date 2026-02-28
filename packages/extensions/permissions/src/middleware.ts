@@ -90,13 +90,19 @@ export function isInTrustedPath(filePath: string, trusted: string[]): boolean {
 // ─── Path Checks ────────────────────────────────────────────────────────────
 
 function isGitPath(path: string): boolean {
-  return path.includes('/.git/') || path.includes('/.git') || path.endsWith('/.git')
+  return (
+    path.includes('/.git/') ||
+    path.includes('/.git') ||
+    path.endsWith('/.git') ||
+    path.startsWith('.git/') ||
+    path === '.git'
+  )
 }
 
 function isNodeModulesWrite(toolName: string, args: Record<string, unknown>): boolean {
   if (toolName === 'read_file' || toolName === 'glob' || toolName === 'grep') return false
   const path = (args.path ?? args.filePath ?? '') as string
-  return path.includes('/node_modules/')
+  return path.includes('/node_modules/') || path.startsWith('node_modules/')
 }
 
 function isEnvFile(args: Record<string, unknown>): boolean {

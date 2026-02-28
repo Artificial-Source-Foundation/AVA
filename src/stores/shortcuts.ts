@@ -129,6 +129,27 @@ const DEFAULT_SHORTCUTS: ShortcutDef[] = [
     description: 'Re-apply the last undone file change',
     category: 'Chat',
   },
+  {
+    id: 'stash-prompt',
+    keys: ['ctrl', 'shift', 's'],
+    label: 'Stash Prompt',
+    description: 'Save current input to stash and clear',
+    category: 'Chat',
+  },
+  {
+    id: 'restore-prompt',
+    keys: ['ctrl', 'shift', 'r'],
+    label: 'Restore Prompt',
+    description: 'Restore last stashed prompt to input',
+    category: 'Chat',
+  },
+  {
+    id: 'save-checkpoint',
+    keys: ['ctrl', 'shift', 'c'],
+    label: 'Save Checkpoint',
+    description: 'Create a named checkpoint of the current conversation',
+    category: 'Session',
+  },
 ]
 
 // ============================================================================
@@ -273,7 +294,10 @@ function setupShortcutListener(): () => void {
           isInput &&
           shortcut.id !== 'command-palette' &&
           shortcut.id !== 'search-chat' &&
-          shortcut.id !== 'expanded-editor'
+          shortcut.id !== 'expanded-editor' &&
+          shortcut.id !== 'stash-prompt' &&
+          shortcut.id !== 'restore-prompt' &&
+          shortcut.id !== 'save-checkpoint'
         )
           continue
 

@@ -1,6 +1,6 @@
 # Frontend Backlog
 
-> What's missing, prioritized. Updated 2026-02-28.
+> What's missing, prioritized. Updated 2026-02-28 (P2 delivered, P3 gap audit vs 7 competitors).
 
 ---
 
@@ -11,7 +11,7 @@
 | **1: Desktop App** | **Complete** | - |
 | **1.5: Desktop Polish** | **Complete** | Manual testing only |
 | **2: Plugin Ecosystem** | In progress | UX baseline shipped; runtime validation + parity gaps pending |
-| **2+: Competitive Gaps** | **Complete** | All P0 + P1 competitive gaps delivered |
+| **2+: Competitive Gaps** | **Complete** | All P0 + P1 + P2 + P3-A competitive gaps delivered |
 
 ## Ownership Rules
 
@@ -130,12 +130,12 @@ Informed by comprehensive audits of Goose and OpenCode frontends. Ordered by imp
 ### P2 — Lower Impact / Future
 
 - [x] **Theme Live Preview** — Hover over accent colors, dark styles, code themes, border radius, and density options to preview changes instantly. Uses `previewAppearance`/`restoreAppearance` pattern that applies CSS vars without persisting. — **Small** *(done)*
-- [ ] **Workflow/Recipe Creation** — Save a successful session as a reusable workflow. Goose calls these "recipes" and can create them from any completed session. — **Large** *(source: Goose)*
-- [ ] Custom commands UI (manage TOML/MD commands) — **Large**
+- [x] **Workflow/Recipe Creation** — Save session as reusable workflow. DB table + CRUD service + reactive store. WorkflowDialog from command palette, WorkflowCards in empty chat state. Extracts user messages as prompt. Usage tracking + sort by frequency. — **Large** *(done)*
+- [x] **Custom Commands UI** — Settings → Commands tab lists/creates/edits/deletes TOML command files in `~/.config/ava/commands/`. Service layer with inline TOML parser, edit form with name/description/prompt/tools/mode fields, expand to preview prompt. — **Large** *(done)*
 - [x] Faster model picker dialog (Ctrl+O, grouped by provider) — **Small** *(done)*
 - [x] Conversation branching (fork at any message) — **Medium** *(done — moved to P1)*
 - [x] Prompt library / starter templates — **Medium** *(done)*
-- [ ] Voice dictation input — **Medium**
+- [x] **Voice Dictation Input** — Web Speech API wrapper with continuous dictation. MicButton in toolbar strip (red pulse when recording, hidden if unsupported). Auto-restart on browser timeout, error mapping, cleanup on unmount. — **Medium** *(done)*
 - [x] Panel adaptability (draggable/persisted split ratios) — **Medium** *(done)*
 
 ### Legacy Gaps (Still Open)
@@ -143,6 +143,116 @@ Informed by comprehensive audits of Goose and OpenCode frontends. Ordered by imp
 - **FG-004 (partial):** long-session render-window/backfill hardening for very large histories.
 - **INT-001/INT-002/INT-003:** plugin lifecycle runtime validation and failure-path evidence.
 - **Manual QA:** Linux DE matrix and light-mode regression pass.
+
+> All P0-P2 competitive gap items are now delivered. P3-A (high-value) gaps also delivered — see below.
+
+---
+
+## P3 — Remaining Competitive Gaps (7-Tool Audit, 2026-02-28)
+
+Comprehensive audit of Goose, OpenCode, Cline, Gemini CLI, Aider, OpenHands, and Plandex.
+Features below are things **competitors ship that AVA does not yet have**.
+
+### P3-A — High Value (real user-facing gaps)
+
+- [x] **MCP Marketplace UI** — AddMCPServerDialog with preset browser (12 curated servers) + manual config (transport, command, args, URL, env, trust). Wired into SettingsModal. — **Large** *(done)*
+- [x] **Checkpoint / Snapshot Restore** — CheckpointDialog from command palette (Ctrl+Shift+C). Saves named checkpoint via `createCheckpoint()`. Existing checkpoint badges in MessageRow support restore. — **Medium** *(done)*
+- [x] **Rewind Conversation** — Undo2 button on non-last messages. Rewind dialog with two options: "Rewind conversation only" (truncate) and "Rewind and revert files" (truncate + restore original file content). — **Medium** *(done)*
+- [x] **Focus Chain / Task Progress UI** — FocusChainBar above message list. Reactive store bridges todowrite/todoread events to SolidJS signals. Progress bar + "Task N/Total" + expandable checklist. — **Medium** *(done)*
+- [x] **Prompt History Navigation** — ArrowUp/ArrowDown in empty input cycles through past user messages. Saves draft on enter, restores on exit. Resets on manual typing. — **Small** *(done)*
+- [x] **Message Edit & Resubmit** — Pencil button on user messages → EditForm → `editAndResend()` drops messages after + regenerates. — **Medium** *(already implemented)*
+- [x] **Thinking/Reasoning Toggle** — ThinkingBlock collapsible per-message. `ThinkingToggle` in toolbar. Global `ui.hideThinking` toggle (Eye/EyeOff button) hides all thinking blocks. — **Small** *(already implemented, global hide added)*
+- [x] **Granular Auto-Approve Rules** — Permissions settings tab with global mode selector, per-tool rules table (allow/ask/deny with globs), always-approved tools list. Synced to core via `pushSettingsToCore`. — **Medium** *(done)*
+- [x] **Conversation Limit / Manual Compact** — Configurable `compactionThreshold` (50-95%) in Behavior settings. "Compact" button appears in toolbar when threshold exceeded. — **Small** *(done)*
+- [x] **Prompt Stash / Drafts** — Ctrl+Shift+S stashes input, Ctrl+Shift+R restores. localStorage-based (max 20). Badge indicator in toolbar strip when stash non-empty. — **Small** *(done)*
+
+### P3-B — Medium Value (nice-to-have, polish)
+
+- [ ] **Extension Registry (Install from Git)** — Install, update, link, uninstall extensions from git repos or local paths. Gemini CLI has `/extensions install|update|link|uninstall|explore` with per-scope enable/disable (user/workspace/session). AVA has plugin catalog but no install-from-git. — **Large** *(source: Gemini CLI)*
+- [ ] **Plan Sandbox (Apply/Reject)** — All AI changes sandboxed until explicitly applied. Plandex stages cumulative diffs in sandbox, user reviews and applies/rejects. AVA writes changes immediately (undo available but not pre-staged). — **Large** *(source: Plandex)*
+- [ ] **Subagent Status UI** — Show spawned subagent with status (pending/running/completed/failed), token usage, cost, expandable output. Cline has SubagentStatusRow. AVA has subagent backend but no dedicated status UI in chat. — **Medium** *(source: Cline)*
+- [ ] **Workflow Scheduling (Cron)** — Schedule workflows to run on a cron with visual CronPicker, job monitoring, pause/resume, execution logs. AVA workflows are manual-trigger only. — **Large** *(source: Goose)*
+- [ ] **Workflow Import/Export** — Import/export workflows as YAML/JSON files for sharing. AVA workflows are DB-only. — **Medium** *(source: Goose)*
+- [ ] **Session Sharing (URL)** — Generate shareable read-only link for a session. — **Medium** *(source: Goose, OpenCode)*
+- [ ] **Watch Mode for AI Comments** — File watcher auto-triggers when code comments contain `AI!` or `AI?` patterns. Aider uses watchfiles + regex. AVA has file watcher but not triggered by AI comment patterns. — **Medium** *(source: Aider)*
+- [ ] **Session Save/Resume Checkpoints** — Named save points for conversations (save/resume/delete/share). Gemini CLI has `/chat save|resume|delete|share`. — **Medium** *(source: Gemini CLI)*
+- [ ] **Auto-Updater** — Check for and install app updates from within the app. Standard for desktop apps. — **Medium** *(source: Goose)*
+- [ ] **Local Model Download UI (Ollama)** — Browse, download, configure local models via Ollama/HuggingFace. AVA has Ollama provider config but no download/model-management UI. — **Medium** *(source: Goose)*
+- [ ] **Stats / Usage Dashboard** — Session stats, model info, token quota tracking. Gemini CLI has `/stats session|model|tools`. — **Small** *(source: Gemini CLI)*
+- [ ] **Code Block Collapse Toggle** — Collapse/expand code blocks in AI messages for long responses. — **Small** *(source: OpenCode)*
+- [ ] **In-App Changelog / Announcements** — Modal showing release notes after updates. — **Small** *(source: Goose)*
+- [ ] **External Editor for Prompt** — Open prompt in $EDITOR (vim, etc.) for complex editing. AVA has expanded editor modal but not external editor. — **Small** *(source: OpenCode)*
+- [ ] **Copy-Paste Mode** — Clipboard watcher auto-loads LLM responses and copies context on `/add`. For web UI LLM workflows. — **Small** *(source: Aider)*
+- [ ] **Model Aliases / Packs** — User-defined model shortcuts and pre-curated model combos for cost/capability tradeoffs. — **Small** *(source: Aider, Plandex)*
+
+### P3-C — Low Value (niche / cosmetic)
+
+- [ ] MCP rich UI rendering — Render UIResources from MCP tools as interactive widgets. — **Large** *(source: Goose)*
+- [ ] Deep link protocol — `ava://` URL scheme for extensions, workflows, sessions. — **Medium** *(source: Goose)*
+- [ ] More theme presets — 33+ named themes (catppuccin, dracula, nord, gruvbox, etc.). AVA has 2 dark + light + 6 accents + 6 code themes. — **Medium** *(source: OpenCode)*
+- [ ] Sidebar layout customization — Show/hide nav items, position, push vs overlay. — **Small** *(source: Goose)*
+- [ ] Interruption handler (pause/redirect) — Pause running agent and redirect mid-stream (not just cancel). — **Medium** *(source: Goose)*
+- [ ] Working directory switcher — Change working directory without switching projects. — **Small** *(source: Goose)*
+- [ ] Waveform visualizer for voice — Visual audio level feedback during recording. — **Tiny** *(source: Goose)*
+- [ ] Browser automation UI — Screenshot display, action history, session tracking. — **Medium** *(source: Cline, OpenHands)*
+- [ ] Voice device selection — Choose specific audio input device for voice dictation. — **Tiny** *(source: Aider)*
+- [ ] Read-only file context — Mark files as reference-only without editing permission. — **Small** *(source: Aider)*
+- [ ] Plan branch management — Version control for AI plans with branch create/switch/compare. — **Large** *(source: Plandex)*
+- [ ] Background plan execution — Non-blocking plan building with stream subscription. — **Medium** *(source: Plandex)*
+- [ ] Microagent management UI — Domain-specific prompt modules with trigger keywords. — **Medium** *(source: OpenHands)*
+- [ ] Enterprise integrations UI — GitHub/Slack/Jira/Linear integration panels. — **Large** *(source: OpenHands)*
+
+### What competitors have that AVA already matches
+
+| Their feature | Source | AVA equivalent |
+|---------------|--------|----------------|
+| Recipe/workflow creation | Goose | Workflow creation from session (DB + dialog + cards) |
+| Voice dictation | Aider, Goose | Web Speech API + MicButton in toolbar strip |
+| Custom commands | Gemini CLI, Goose | Custom commands UI (Settings tab + TOML CRUD) |
+| Hooks system (pre/post tool) | Cline, Gemini CLI | Hook system in extensions (`addToolMiddleware`) |
+| Skills system | Cline, Gemini CLI | Skills extension (auto-invoked by context) |
+| Architect mode (2-model) | Aider | Architect/editor model split |
+| Repo map with PageRank | Aider | Codebase extension with PageRank + dependency graph |
+| Plan mode | Gemini CLI, Plandex | Plan mode slider in toolbar |
+| Memory system | Gemini CLI | Memory recall (episodic + semantic + procedural + RAG) |
+| Inline tool approval | Cline, Goose | ApprovalDock with Enter/Escape + always-allow |
+| File mention autocomplete | Cline | @ mention popover with fuzzy matching |
+| Message queue / steering | Goose | MessageQueueBar with expand/remove |
+| Cost tracking | Cline, Goose | Per-message + session aggregate cost |
+| Conversation branching | Goose | Fork at any message via Branch button |
+| Session switcher | Goose, OpenCode | Quick session switcher (Ctrl+J) |
+| Expanded editor | OpenCode | Expanded editor modal (Ctrl+E) |
+| Conversation search | OpenCode | Full-text search with highlighting |
+| Export to Markdown | Goose | Command palette + Ctrl+Shift+E |
+| File changes panel | Cline, Goose | Right panel "Files" tab |
+| Diff review panel | Cline, OpenHands, Plandex | Aggregate diff review with DiffViewer |
+| Integrated terminal | OpenHands | xterm.js + Rust PTY in bottom panel |
+| IDE integration ("Open in") | Cline, Gemini CLI | Auto-detect 8 editors, context menu |
+| Live tool streaming | Cline | Bash stdout streams in ToolCallCard |
+| Undo/redo file changes | Goose | Per-session version stacks + shortcuts |
+| Plugin/extension manager | Gemini CLI | Settings tab with search, install, detail |
+| Multi-agent hierarchy | OpenHands | Team Lead → Senior Leads → Junior Devs |
+| Subagent spawning (backend) | Cline | Task tool for spawning subagents |
+| 14 LLM providers | all | 14 providers with API key management |
+| Theme live preview | Goose | Hover to preview without persisting |
+| Starter templates | Goose | 4 template cards in empty chat |
+| Context warning | Cline, OpenCode | Yellow badge at 80% |
+| Auto-compaction notification | OpenCode | Toast on compaction |
+| Model picker | all | Ctrl+O grouped by provider |
+| UI density settings | — | 3 levels, 8 components wired |
+| Keyboard shortcuts | Gemini CLI | Configurable keybindings tab |
+| Settings export/import | Goose | JSON download + upload |
+| LSP diagnostics | — | Error/warning counts in status bar |
+| File tree change indicators | Cline | Color-coded dots on modified files |
+| Git auto-commit | Aider, Plandex | Auto-commit on AI file edits |
+| Permission modes | Cline, Gemini CLI | Ask/Auto/Bypass badge in toolbar |
+| Notification sounds | Aider | Desktop notifications + AudioContext chime |
+| Sandbox execution (backend) | OpenHands, Gemini CLI | Sandbox extension (Docker) |
+| TODO tracking | Cline, OpenHands | todoread/todowrite tools (backend) |
+| Progressive rendering | — | Render window for long sessions |
+| Onboarding wizard | Cline | OnboardingScreen (theme, mode, API keys) |
+| Context token tracking | Cline, Plandex | ContextBar with token counts |
+| Web scraping | Aider | webfetch + browser tools |
 
 ### Sprint 2.4: Plugin Distribution
 - [ ] Publish plugins from GitHub repos
@@ -166,14 +276,22 @@ Informed by comprehensive audits of Goose and OpenCode frontends. Ordered by imp
 
 ## Phase 3+ — Longer Term
 
-| Feature | Effort | Frontend Impact |
-|---------|--------|----------------|
-| Sandbox / container execution | 2-3 weeks | Toggle in settings, status indicator |
-| Tree-sitter for 100+ languages | 2 weeks | Better code highlighting, symbol extraction |
-| Voice input | 2 weeks | Microphone button in MessageInput |
-| CLI polish | 1-2 weeks | None (CLI-only) |
-| ACP editor integration | 2 weeks | Minimal (backend protocol) |
-| A2A agent network | 2 weeks | Agent discovery UI, remote agent cards |
+| Feature | Effort | Frontend Impact | Source |
+|---------|--------|----------------|--------|
+| ~~MCP marketplace UI~~ | ~~2-3 weeks~~ | ~~Browse, install, manage MCP servers~~ | **DONE (P3-A)** |
+| ~~Checkpoint / rewind system~~ | ~~2 weeks~~ | ~~Named snapshots, restore points, rewind UI~~ | **DONE (P3-A)** |
+| ~~Granular auto-approve rules~~ | ~~1-2 weeks~~ | ~~Per-tool policy editor in settings~~ | **DONE (P3-A)** |
+| ~~Focus chain / task progress UI~~ | ~~1 week~~ | ~~Visual todo progress bar in chat header~~ | **DONE (P3-A)** |
+| Extension install from Git | 2 weeks | Install/link/update extensions from repos | Gemini CLI |
+| Plan sandbox (apply/reject) | 2-3 weeks | Staged changes review before applying | Plandex |
+| Sandbox / container execution | 2-3 weeks | Toggle in settings, status indicator | OpenHands, Gemini CLI |
+| Auto-updater | 1 week | Settings section + Tauri updater plugin | Goose |
+| Tree-sitter for 100+ languages | 2 weeks | Better code highlighting, symbol extraction | Plandex |
+| CLI polish | 1-2 weeks | None (CLI-only) | — |
+| ACP editor integration | 2 weeks | Minimal (backend protocol) | — |
+| A2A agent network | 2 weeks | Agent discovery UI, remote agent cards | — |
+| Deep link protocol (ava://) | 1-2 weeks | Extension/workflow install from URLs | Goose |
+| MCP rich UI rendering | 2-3 weeks | Render interactive widgets from MCP tools | Goose |
 
 ---
 
@@ -232,6 +350,9 @@ These were identified as gaps but are now fully implemented:
 | Live tool progress streaming | 65+ | Bash stdout streams via metadata callback, live output in ToolCallCard |
 | Theme live preview | 65+ | Hover to preview accent, dark style, code theme, radius, density |
 | Undo/redo file changes | 65+ | Per-session version stacks, Ctrl+Shift+Z/Y, toast notifications |
+| Custom commands UI | 70+ | Settings tab, TOML CRUD, edit form, prompt preview |
+| Voice dictation input | 70+ | Web Speech API, MicButton in toolbar strip, continuous dictation |
+| Workflow/recipe creation | 70+ | DB table, CRUD, WorkflowDialog, workflow cards in empty chat |
 
 ---
 

@@ -24,6 +24,7 @@ export const DEFAULT_UI: UISettings = {
   showInfoBar: true,
   showTokenCount: true,
   showModelInTitleBar: true,
+  hideThinking: false,
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
@@ -50,6 +51,7 @@ export const DEFAULT_GENERATION: GenerationSettings = {
   weakModel: '',
   editorModel: '',
   thinkingEnabled: false,
+  compactionThreshold: 80,
 }
 
 export const DEFAULT_AGENT_LIMITS: AgentLimitSettings = {
@@ -86,6 +88,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   providers: defaultProviders,
   agents: defaultAgentPresets,
   autoApprovedTools: [],
+  toolRules: [],
   ui: { ...DEFAULT_UI },
   appearance: { ...DEFAULT_APPEARANCE },
   generation: { ...DEFAULT_GENERATION },

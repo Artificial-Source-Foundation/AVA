@@ -9,7 +9,9 @@ import {
   Puzzle,
   Server,
   type Settings,
+  Shield,
   Sliders,
+  Terminal,
   Zap,
 } from 'lucide-solid'
 
@@ -21,8 +23,10 @@ export type SettingsTab =
   | 'providers'
   | 'llm'
   | 'models'
+  | 'permissions'
   | 'mcp'
   | 'plugins'
+  | 'commands'
   | 'developer'
   | 'about'
 
@@ -66,6 +70,12 @@ export const tabGroups: TabGroup[] = [
         icon: Keyboard,
         keywords: ['keyboard', 'hotkey', 'keybinding', 'keys', 'shortcut'],
       },
+      {
+        id: 'permissions',
+        label: 'Permissions',
+        icon: Shield,
+        keywords: ['permission', 'approve', 'deny', 'allow', 'tool', 'rules', 'safety'],
+      },
     ],
   },
   {
@@ -105,6 +115,12 @@ export const tabGroups: TabGroup[] = [
         label: 'Plugins',
         icon: Puzzle,
         keywords: ['extension', 'install', 'community', 'marketplace'],
+      },
+      {
+        id: 'commands',
+        label: 'Commands',
+        icon: Terminal,
+        keywords: ['command', 'slash', 'custom', 'toml'],
       },
     ],
   },

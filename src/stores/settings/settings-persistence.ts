@@ -148,9 +148,17 @@ export function pushSettingsToCore(s: AppSettings): void {
   sm.set('permissions', {
     allowBashExecution: s.permissionMode !== 'ask',
     autoApprovePatterns: s.autoApprovedTools,
+    toolRules: s.toolRules,
+    autoApproveReads: true,
+    autoApproveWrites: s.permissionMode === 'auto-approve' || s.permissionMode === 'bypass',
+    autoApproveCommands: s.permissionMode === 'bypass',
+    smartApprove: s.permissionMode === 'auto-approve',
   })
 
-  sm.set('context', { maxTokens: s.generation.maxTokens, compactionThreshold: 80 })
+  sm.set('context', {
+    maxTokens: s.generation.maxTokens,
+    compactionThreshold: s.generation.compactionThreshold,
+  })
   sm.set('git', {
     enabled: s.git.enabled,
     autoCommit: s.git.autoCommit,

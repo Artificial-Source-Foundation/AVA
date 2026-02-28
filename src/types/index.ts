@@ -163,6 +163,20 @@ export interface MemoryItem {
   source?: string
 }
 
+// Workflows
+export interface Workflow {
+  id: string
+  projectId?: string
+  name: string
+  description: string
+  tags: string[]
+  prompt: string
+  createdAt: number
+  updatedAt: number
+  usageCount: number
+  sourceSessionId?: string
+}
+
 // Plugin types
 export * from './plugin'
 // Project types

@@ -33,6 +33,7 @@ interface MessageBubbleProps {
   onCopy: () => void
   onDelete: () => void
   onBranch: () => void
+  onRewind: () => void
 }
 
 const ASSISTANT_COLLAPSE_CHARS = 1500
@@ -291,6 +292,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               onCopy={props.onCopy}
               onDelete={props.onDelete}
               onBranch={props.onBranch}
+              onRewind={props.onRewind}
               isLoading={props.isStreaming}
             />
           </Show>

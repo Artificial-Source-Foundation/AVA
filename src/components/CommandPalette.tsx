@@ -7,9 +7,12 @@
 
 import { Dialog } from '@kobalte/core/dialog'
 import {
+  BookmarkPlus,
   Command,
   Download,
   FileText,
+  Flag,
+  Library,
   MessageSquare,
   Search,
   Settings,
@@ -353,6 +356,9 @@ export const createDefaultCommands = (handlers: {
   exportChat?: () => void
   initProject?: () => void
   switchTab?: (tab: string) => void
+  saveWorkflow?: () => void
+  browseWorkflows?: () => void
+  saveCheckpoint?: () => void
 }): CommandItem[] => [
   {
     id: 'new-chat',
@@ -428,5 +434,30 @@ export const createDefaultCommands = (handlers: {
     icon: Terminal,
     category: 'Navigation',
     action: () => handlers.switchTab?.('terminal'),
+  },
+  {
+    id: 'save-workflow',
+    label: 'Save Session as Workflow',
+    description: 'Create a reusable workflow from this session',
+    icon: BookmarkPlus,
+    category: 'Workflows',
+    action: handlers.saveWorkflow || (() => {}),
+  },
+  {
+    id: 'browse-workflows',
+    label: 'Browse Workflows',
+    description: 'View and apply saved workflows',
+    icon: Library,
+    category: 'Workflows',
+    action: handlers.browseWorkflows || (() => {}),
+  },
+  {
+    id: 'save-checkpoint',
+    label: 'Save Checkpoint',
+    description: 'Create a named snapshot of the conversation',
+    icon: Flag,
+    category: 'Session',
+    shortcut: '⌘⇧C',
+    action: handlers.saveCheckpoint || (() => {}),
   },
 ]

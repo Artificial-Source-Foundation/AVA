@@ -5,7 +5,7 @@
  * Premium floating toolbar with smooth transitions.
  */
 
-import { Check, Copy, GitFork, Pencil, RefreshCw, Trash2 } from 'lucide-solid'
+import { Check, Copy, GitFork, Pencil, RefreshCw, Trash2, Undo2 } from 'lucide-solid'
 import { type Component, createSignal, Show } from 'solid-js'
 import { useNotification } from '../../contexts/notification'
 import type { Message } from '../../types'
@@ -18,6 +18,7 @@ interface MessageActionsProps {
   onCopy: () => void
   onDelete: () => void
   onBranch: () => void
+  onRewind: () => void
   isLoading: boolean
 }
 
@@ -113,6 +114,20 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
       >
         <GitFork class="w-3.5 h-3.5" />
       </button>
+
+      {/* Rewind button — non-last messages only */}
+      <Show when={!props.isLastMessage}>
+        <button
+          type="button"
+          onClick={() => props.onRewind()}
+          disabled={props.isLoading}
+          class={btnClass}
+          title="Rewind to here"
+          aria-label="Rewind conversation to this point"
+        >
+          <Undo2 class="w-3.5 h-3.5" />
+        </button>
+      </Show>
 
       {/* Delete / Rollback button — all messages */}
       <button

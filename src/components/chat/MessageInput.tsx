@@ -8,7 +8,15 @@
  * Sub-components live in ./message-input/ for modularity.
  */
 
-import { Activity, AlertCircle, AlertTriangle, MessageSquare } from 'lucide-solid'
+import {
+  Activity,
+  AlertCircle,
+  AlertTriangle,
+  Archive,
+  Eye,
+  EyeOff,
+  MessageSquare,
+} from 'lucide-solid'
 import {
   type Component,
   createEffect,
@@ -21,8 +29,11 @@ import {
 import { useAgent } from '../../hooks/useAgent'
 import { useChat } from '../../hooks/useChat'
 import { formatCost } from '../../lib/cost'
+import { getCoreBudget } from '../../services/core-bridge'
 import type { SearchableFile } from '../../services/file-search'
 import { filterFiles, getProjectFiles } from '../../services/file-search'
+import { getStash, popStash, pushStash } from '../../services/prompt-stash'
+import { createDictation, isDictationSupported } from '../../services/voice-dictation'
 import { useDiagnostics } from '../../stores/diagnostics'
 import { useLayout } from '../../stores/layout'
 import { useProject } from '../../stores/project'
@@ -34,7 +45,12 @@ import { buildFullMessage, processImageFile, processTextFile } from './message-i
 import { FileMentionPopover } from './message-input/file-mention-popover'
 import { ModelSelector } from './message-input/model-selector'
 import { InputTextArea } from './message-input/text-area'
-import { PermissionBadge, PlanActSlider, ThinkingToggle } from './message-input/toolbar-buttons'
+import {
+  MicButton,
+  PermissionBadge,
+  PlanActSlider,
+  ThinkingToggle,
+} from './message-input/toolbar-buttons'
 import {
   MAX_FILES,
   MAX_IMAGES,
@@ -72,6 +88,13 @@ export const MessageInput: Component = () => {
   let textareaRef: HTMLTextAreaElement | undefined
   let resizeFrame: number | undefined
 
+  // Prompt history navigation (Item 1)
+  const [historyIndex, setHistoryIndex] = createSignal(-1)
+  const [savedDraft, setSavedDraft] = createSignal('')
+
+  // Prompt stash (Item 3)
+  const [stashSize, setStashSize] = createSignal(getStash().length)
+
   // Hooks / stores
   const chat = useChat()
   const agent = useAgent()
@@ -88,6 +111,26 @@ export const MessageInput: Component = () => {
     setExpandedEditorOpen,
   } = useLayout()
   const { diagnostics, hasDiagnostics } = useDiagnostics()
+
+  // Prompt history: reversed list of past user messages
+  const promptHistory = createMemo(() =>
+    messages()
+      .filter((m) => m.role === 'user')
+      .map((m) => m.content)
+      .reverse()
+  )
+
+  // Voice dictation
+  const [isRecording, setIsRecording] = createSignal(false)
+  const dictationSupported = createMemo(() => isDictationSupported())
+  const dictation = createDictation({
+    onTranscript: (text) => {
+      setInput((prev) => prev + text)
+      queueMicrotask(autoResize)
+    },
+    onStateChange: setIsRecording,
+    onError: (err) => console.warn('Voice dictation:', err),
+  })
 
   // @ mention state
   const [mentionOpen, setMentionOpen] = createSignal(false)
@@ -217,6 +260,26 @@ export const MessageInput: Component = () => {
     )
   )
 
+  // Listen for stash events from global shortcuts (Item 3)
+  const handleStash = () => {
+    const text = input().trim()
+    if (!text) return
+    pushStash(text)
+    setInput('')
+    setStashSize(getStash().length)
+    queueMicrotask(autoResize)
+  }
+  const handleRestore = () => {
+    const text = popStash()
+    if (text) {
+      setInput(text)
+      setStashSize(getStash().length)
+      queueMicrotask(autoResize)
+    }
+  }
+  window.addEventListener('ava:stash-prompt', handleStash)
+  window.addEventListener('ava:restore-prompt', handleRestore)
+
   // Listen for external input setting (from templates, etc.)
   const handleExternalInput = (e: Event) => {
     const text = (e as CustomEvent<{ text: string }>).detail.text
@@ -232,6 +295,9 @@ export const MessageInput: Component = () => {
   onCleanup(() => {
     if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
     window.removeEventListener('ava:set-input', handleExternalInput)
+    window.removeEventListener('ava:stash-prompt', handleStash)
+    window.removeEventListener('ava:restore-prompt', handleRestore)
+    dictation?.stop()
   })
 
   // Attachment handlers
@@ -308,6 +374,7 @@ export const MessageInput: Component = () => {
     submitting = true
     setSendCount((c) => c + 1)
     setInput('')
+    setHistoryIndex(-1)
     if (textareaRef) textareaRef.style.height = 'auto'
     chat.clearError()
     agent.clearError()
@@ -396,6 +463,38 @@ export const MessageInput: Component = () => {
       }
     }
 
+    // Prompt history: ArrowUp when input is empty or navigating
+    if (e.key === 'ArrowUp' && !mentionOpen()) {
+      const history = promptHistory()
+      if (history.length === 0) return
+      if (historyIndex() === -1 && input().trim() === '') {
+        e.preventDefault()
+        setSavedDraft(input())
+        setHistoryIndex(0)
+        setInput(history[0])
+        return
+      }
+      if (historyIndex() >= 0 && historyIndex() < history.length - 1) {
+        e.preventDefault()
+        const newIdx = historyIndex() + 1
+        setHistoryIndex(newIdx)
+        setInput(history[newIdx])
+        return
+      }
+    }
+    if (e.key === 'ArrowDown' && historyIndex() >= 0 && !mentionOpen()) {
+      e.preventDefault()
+      if (historyIndex() === 0) {
+        setHistoryIndex(-1)
+        setInput(savedDraft())
+      } else {
+        const newIdx = historyIndex() - 1
+        setHistoryIndex(newIdx)
+        setInput(promptHistory()[newIdx])
+      }
+      return
+    }
+
     const sk = settings().behavior.sendKey
     if (sk === 'enter') {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -436,6 +535,7 @@ export const MessageInput: Component = () => {
           input={input}
           onInput={(v) => {
             setInput(v)
+            if (historyIndex() >= 0) setHistoryIndex(-1)
             autoResize()
             // Check for @ mention after input changes
             const cursor = textareaRef?.selectionStart ?? v.length
@@ -482,6 +582,26 @@ export const MessageInput: Component = () => {
               available={modelSupportsThinking}
             />
 
+            {/* Thinking visibility toggle (Item 2) */}
+            <Show when={settings().generation.thinkingEnabled}>
+              <button
+                type="button"
+                onClick={() =>
+                  updateSettings({
+                    ui: { ...settings().ui, hideThinking: !settings().ui.hideThinking },
+                  })
+                }
+                class={`p-1 rounded-[var(--radius-md)] transition-colors ${
+                  settings().ui.hideThinking
+                    ? 'text-[var(--text-muted)] bg-transparent hover:bg-[var(--surface-raised)]'
+                    : 'text-[var(--accent)] bg-[var(--accent-subtle)]'
+                }`}
+                title={settings().ui.hideThinking ? 'Show thinking blocks' : 'Hide thinking blocks'}
+              >
+                {settings().ui.hideThinking ? <EyeOff class="w-3 h-3" /> : <Eye class="w-3 h-3" />}
+              </button>
+            </Show>
+
             <StripDivider />
 
             <PlanActSlider
@@ -496,6 +616,15 @@ export const MessageInput: Component = () => {
               permissionMode={() => settings().permissionMode}
               onCyclePermission={cyclePermissionMode}
             />
+
+            <Show when={dictation}>
+              <StripDivider />
+              <MicButton
+                isRecording={isRecording}
+                onToggle={() => dictation!.toggle()}
+                supported={dictationSupported}
+              />
+            </Show>
           </div>
 
           {/* Right: token info */}
@@ -510,11 +639,59 @@ export const MessageInput: Component = () => {
               <span class="tabular-nums">{tokenDisplay()}</span>
             </button>
 
+            {/* Stash indicator (Item 3) */}
+            <Show when={stashSize() > 0}>
+              <span
+                class="inline-flex items-center gap-0.5 text-[var(--accent)]"
+                title={`${stashSize()} stashed prompt(s) — Ctrl+Shift+R to restore`}
+              >
+                <Archive class="w-2.5 h-2.5" />
+                <span class="tabular-nums">{stashSize()}</span>
+              </span>
+              <span class="text-[var(--border-muted)]">&middot;</span>
+            </Show>
+
             {/* Context warning icon at 80%+ */}
             <Show when={percentage() >= 80}>
               <span title={`Context ${percentage().toFixed(0)}% full`}>
                 <AlertTriangle class="w-3 h-3 text-[var(--warning)]" />
               </span>
+            </Show>
+
+            {/* Compact button (Item 4) */}
+            <Show when={percentage() >= settings().generation.compactionThreshold}>
+              <button
+                type="button"
+                onClick={async () => {
+                  const budget = getCoreBudget()
+                  if (!budget) return
+                  const msgs = messages()
+                  if (msgs.length <= 4) return
+                  const coreMessages = msgs.map((m) => ({
+                    id: m.id,
+                    role: m.role as 'user' | 'assistant' | 'system',
+                    content: m.content,
+                  }))
+                  const result = await budget.compact(coreMessages)
+                  if (result.tokensSaved === 0) return
+                  const keptIds = new Set(result.messages.map((m) => m.id))
+                  sessionStore.setMessages(msgs.filter((m) => keptIds.has(m.id)))
+                  budget.clear()
+                  for (const m of result.messages) budget.addMessage(m.id, m.content)
+                  window.dispatchEvent(
+                    new CustomEvent('ava:compacted', {
+                      detail: {
+                        removed: result.originalCount - result.compactedCount,
+                        tokensSaved: result.tokensSaved,
+                      },
+                    })
+                  )
+                }}
+                class="text-[10px] text-[var(--warning)] hover:text-[var(--accent)] transition-colors"
+                title="Compact context now"
+              >
+                Compact
+              </button>
             </Show>
 
             {/* Progress bar + percentage (togglable) */}

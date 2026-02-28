@@ -67,7 +67,7 @@ const ToggleRow: Component<{
 // ============================================================================
 
 export const BehaviorTab: Component = () => {
-  const { settings, updateBehavior, updateNotifications, updateGit } = useSettings()
+  const { settings, updateBehavior, updateNotifications, updateGit, updateSettings } = useSettings()
 
   return (
     <div class="space-y-5">
@@ -166,6 +166,41 @@ export const BehaviorTab: Component = () => {
             </div>
           </div>
         </Show>
+      </div>
+
+      {/* Context Management */}
+      <div class="pt-2 border-t border-[var(--border-subtle)]">
+        <SectionHeader title="Context Management" />
+        <div class="flex items-center justify-between py-1.5 gap-3">
+          <div>
+            <span class="text-xs text-[var(--text-secondary)]">Compaction threshold</span>
+            <p class="text-[10px] text-[var(--text-muted)]">
+              Auto-compact when context reaches this % ({settings().generation.compactionThreshold}
+              %)
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <input
+              type="range"
+              min={50}
+              max={95}
+              step={5}
+              value={settings().generation.compactionThreshold}
+              onInput={(e) =>
+                updateSettings({
+                  generation: {
+                    ...settings().generation,
+                    compactionThreshold: Number(e.currentTarget.value),
+                  },
+                })
+              }
+              class="w-24 accent-[var(--accent)]"
+            />
+            <span class="text-[11px] font-mono text-[var(--text-muted)] w-10 text-right">
+              {settings().generation.compactionThreshold}%
+            </span>
+          </div>
+        </div>
       </div>
 
       {/* File Watcher */}

@@ -43,6 +43,12 @@ describe('Permission Middleware', () => {
     expect(result?.reason).toContain('.git')
   })
 
+  it('blocks .git directory writes with relative path', async () => {
+    const result = await mw.before!(makeCtx('write_file', { path: '.git/config' }))
+    expect(result?.blocked).toBe(true)
+    expect(result?.reason).toContain('.git')
+  })
+
   it('allows .git directory reads', async () => {
     const result = await mw.before!(makeCtx('read_file', { path: '/project/.git/config' }))
     expect(result).toBeUndefined()
@@ -52,6 +58,12 @@ describe('Permission Middleware', () => {
     const result = await mw.before!(
       makeCtx('write_file', { path: '/project/node_modules/foo/index.js' })
     )
+    expect(result?.blocked).toBe(true)
+    expect(result?.reason).toContain('node_modules')
+  })
+
+  it('blocks node_modules writes with relative path', async () => {
+    const result = await mw.before!(makeCtx('write_file', { path: 'node_modules/foo/index.js' }))
     expect(result?.blocked).toBe(true)
     expect(result?.reason).toContain('node_modules')
   })

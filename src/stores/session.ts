@@ -995,6 +995,42 @@ export function useSession() {
       }
     },
 
+    /**
+     * Revert file changes made after a given message.
+     * Looks at file operations after the target message's timestamp
+     * and writes back original content for each.
+     */
+    revertFilesAfter: async (messageId: string): Promise<number> => {
+      const msgs = messages()
+      const index = msgs.findIndex((m) => m.id === messageId)
+      if (index === -1) return 0
+
+      const targetTimestamp = msgs[index].createdAt
+      const ops = fileOperations().filter(
+        (op) => op.timestamp > targetTimestamp && op.originalContent
+      )
+
+      if (ops.length === 0) return 0
+
+      let reverted = 0
+      try {
+        const fs = await import('@tauri-apps/plugin-fs')
+        for (const op of ops) {
+          if (op.originalContent) {
+            try {
+              await fs.writeTextFile(op.filePath, op.originalContent)
+              reverted++
+            } catch (err) {
+              logError('Session', `Failed to revert ${op.filePath}`, err)
+            }
+          }
+        }
+      } catch (err) {
+        logError('Session', 'Failed to import Tauri FS for revert', err)
+      }
+      return reverted
+    },
+
     // ========================================================================
     // UI State Management
     // ========================================================================

@@ -11,8 +11,10 @@ import { createEffect, createSignal, on, onCleanup, onMount, Show } from 'solid-
 import { CommandPalette, createDefaultCommands } from './components/CommandPalette'
 import { QuickModelPicker } from './components/chat/QuickModelPicker'
 import { SessionSwitcher } from './components/chat/SessionSwitcher'
+import { CheckpointDialog } from './components/dialogs/CheckpointDialog'
 import type { OnboardingData } from './components/dialogs/OnboardingDialog'
 import { OnboardingScreen } from './components/dialogs/OnboardingDialog'
+import { WorkflowDialog } from './components/dialogs/WorkflowDialog'
 import { AppShell } from './components/layout'
 import { ProjectHub } from './components/projects'
 import { SplashScreen } from './components/SplashScreen'
@@ -39,6 +41,7 @@ import {
   useSettings,
 } from './stores/settings'
 import { useShortcuts } from './stores/shortcuts'
+import { useWorkflows } from './stores/workflows'
 
 const SPLASH_MIN_MS = 800
 
@@ -76,10 +79,14 @@ function App() {
     currentSession,
     undoFileChange,
     redoFileChange,
+    createCheckpoint,
   } = useSession()
   const { settings, updateSettings, updateProvider, isToolAutoApproved } = useSettings()
   const { registerAction, setupShortcutListener } = useShortcuts()
   const { info } = useNotification()
+  const { loadWorkflows } = useWorkflows()
+  const [workflowDialogOpen, setWorkflowDialogOpen] = createSignal(false)
+  const [checkpointDialogOpen, setCheckpointDialogOpen] = createSignal(false)
 
   // Show toast when env API keys are detected (fires after init completes)
   createEffect(
@@ -158,6 +165,17 @@ function App() {
         const name = filePath.split('/').pop() || filePath
         info('Redone', `Re-applied change to ${name}`)
       }
+    })
+    registerAction('stash-prompt', () => {
+      // Handled via CustomEvent so MessageInput can read its local input signal
+      window.dispatchEvent(new CustomEvent('ava:stash-prompt'))
+    })
+    registerAction('restore-prompt', () => {
+      window.dispatchEvent(new CustomEvent('ava:restore-prompt'))
+    })
+    registerAction('save-checkpoint', () => {
+      if (messages().length === 0) return
+      setCheckpointDialogOpen(true)
     })
     registerAction('new-chat', async () => {
       if (!currentProject()) {
@@ -242,6 +260,7 @@ function App() {
         setProjectHubVisible(false)
         await loadSessionsForCurrentProject()
         await restoreForCurrentProject()
+        await loadWorkflows(currentProject()?.id)
       } else {
         setProjectHubVisible(true)
       }
@@ -382,7 +401,30 @@ function App() {
                     )
                   },
                   openSettings: toggleSettings,
+                  saveWorkflow: () => {
+                    if (messages().length === 0) return
+                    setWorkflowDialogOpen(true)
+                  },
+                  browseWorkflows: () => {
+                    loadWorkflows(currentProject()?.id)
+                  },
+                  saveCheckpoint: () => {
+                    if (messages().length === 0) return
+                    setCheckpointDialogOpen(true)
+                  },
                 })}
+              />
+              <WorkflowDialog
+                open={workflowDialogOpen()}
+                onClose={() => setWorkflowDialogOpen(false)}
+              />
+              <CheckpointDialog
+                open={checkpointDialogOpen()}
+                onClose={() => setCheckpointDialogOpen(false)}
+                onSave={async (desc) => {
+                  const id = await createCheckpoint(desc)
+                  if (id) info('Checkpoint saved', desc)
+                }}
               />
             </Show>
           </Show>

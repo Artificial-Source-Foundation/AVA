@@ -33,6 +33,7 @@ export interface UISettings {
   showInfoBar: boolean
   showTokenCount: boolean
   showModelInTitleBar: boolean
+  hideThinking: boolean
 }
 
 export type AccentColor = 'violet' | 'blue' | 'green' | 'rose' | 'amber' | 'cyan' | 'custom'
@@ -75,6 +76,7 @@ export interface GenerationSettings {
   weakModel: string // cheaper model for secondary tasks ('' = use default)
   editorModel: string // cheaper model for file edits by Junior Devs ('' = use primary)
   thinkingEnabled: boolean // Enable extended thinking / reasoning mode
+  compactionThreshold: number // 50–95, default 80 — context % to trigger compaction
 }
 
 export interface AgentLimitSettings {
@@ -104,6 +106,13 @@ export interface GitSettings {
   commitPrefix: string // Commit message prefix, default '[ava]'
 }
 
+export interface ToolApprovalRule {
+  tool: string // tool name or glob: 'bash', 'write_*', '*'
+  action: 'allow' | 'ask' | 'deny'
+  paths?: string[] // optional path restriction globs
+  reason?: string
+}
+
 export interface AppSettings {
   onboardingComplete: boolean
   theme: string
@@ -111,6 +120,7 @@ export interface AppSettings {
   providers: LLMProviderConfig[]
   agents: AgentPreset[]
   autoApprovedTools: string[]
+  toolRules: ToolApprovalRule[]
   ui: UISettings
   appearance: AppearanceSettings
   generation: GenerationSettings

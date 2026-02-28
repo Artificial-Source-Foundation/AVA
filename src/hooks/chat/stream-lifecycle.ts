@@ -375,6 +375,35 @@ async function executeToolLoop(
       content: toolOutput,
       is_error: !result.success,
     })
+
+    // Emit focus-chain events when todoread/todowrite results come back (Item 7)
+    if ((toolUse.name === 'todowrite' || toolUse.name === 'todoread') && result.success) {
+      try {
+        const parsed = JSON.parse(toolOutput) as {
+          todos?: Array<{ id: string; task: string; status: string }>
+        }
+        if (parsed.todos) {
+          const items = parsed.todos.map((t) => ({
+            id: t.id || String(Math.random()),
+            description: t.task,
+            status:
+              t.status === 'completed'
+                ? ('completed' as const)
+                : t.status === 'in_progress'
+                  ? ('in_progress' as const)
+                  : ('pending' as const),
+          }))
+          const current = items.find((i) => i.status === 'in_progress')
+          window.dispatchEvent(
+            new CustomEvent('ava:focus-updated', {
+              detail: { items, currentFocus: current?.id ?? null },
+            })
+          )
+        }
+      } catch {
+        /* not valid JSON — skip */
+      }
+    }
   }
 
   // Add tool results as user message

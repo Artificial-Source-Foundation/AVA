@@ -20,6 +20,7 @@ interface MessageRowProps {
   onRegenerate: () => void
   onDelete: () => void
   onBranch: () => void
+  onRewind: () => void
   onRestoreCheckpoint: (id: string) => void
 }
 
@@ -48,6 +49,7 @@ export const MessageRow: Component<MessageRowProps> = (props) => (
       onCopy={() => {}}
       onDelete={props.onDelete}
       onBranch={props.onBranch}
+      onRewind={props.onRewind}
     />
     <Show when={props.checkpoint}>
       {(checkpoint) => (

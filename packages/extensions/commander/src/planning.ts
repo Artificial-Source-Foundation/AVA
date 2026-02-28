@@ -64,7 +64,7 @@ export function orderSubtasks(plan: TaskPlan): number[] {
 
   for (const [from, to] of plan.dependencies) {
     if (from >= 0 && from < n && to >= 0 && to < n) {
-      inDegree[to]++
+      inDegree[to] = (inDegree[to] ?? 0) + 1
       const edges = adj.get(from) ?? []
       edges.push(to)
       adj.set(from, edges)
@@ -74,7 +74,7 @@ export function orderSubtasks(plan: TaskPlan): number[] {
   // BFS topological sort
   const queue: number[] = []
   for (let i = 0; i < n; i++) {
-    if (inDegree[i] === 0) queue.push(i)
+    if ((inDegree[i] ?? 0) === 0) queue.push(i)
   }
 
   const order: number[] = []
@@ -82,8 +82,8 @@ export function orderSubtasks(plan: TaskPlan): number[] {
     const node = queue.shift()!
     order.push(node)
     for (const next of adj.get(node) ?? []) {
-      inDegree[next]--
-      if (inDegree[next] === 0) queue.push(next)
+      inDegree[next] = (inDegree[next] ?? 0) - 1
+      if ((inDegree[next] ?? 0) === 0) queue.push(next)
     }
   }
 
@@ -102,7 +102,7 @@ export function formatPlanSummary(plan: TaskPlan): string {
   const lines = [`**Task Plan** (${plan.subtasks.length} subtasks):\n`]
 
   for (let i = 0; i < plan.subtasks.length; i++) {
-    const s = plan.subtasks[i]
+    const s = plan.subtasks[i]!
     const deps = plan.dependencies
       .filter(([_, to]) => to === i)
       .map(([from]) => `#${from + 1}`)

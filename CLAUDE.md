@@ -217,7 +217,7 @@ api.registerAgentMode(myMode)
 
 ---
 
-## Tools (24)
+## Tools (23)
 
 | Tool | Location | Purpose |
 |------|----------|---------|
@@ -239,9 +239,8 @@ api.registerAgentMode(myMode)
 | todoread | extensions | Read session todo list |
 | todowrite | extensions | Update session todo list |
 | task | extensions | Spawn subagents |
-| websearch | extensions | Web search |
+| websearch | extensions | Web search (DuckDuckGo default, Tavily/Exa optional) |
 | webfetch | extensions | Fetch + convert web pages |
-| browser | extensions | Puppeteer browser automation |
 | attempt_completion | extensions | Finish task with summary |
 | plan_enter | extensions | Enter plan mode |
 | plan_exit | extensions | Exit plan mode |

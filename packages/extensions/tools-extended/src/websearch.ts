@@ -1,8 +1,8 @@
 /**
- * WebSearch Tool — search the web via Tavily or Exa APIs.
+ * WebSearch Tool — search the web via DuckDuckGo (free), Tavily, or Exa.
  *
- * Ported from packages/core/src/tools/websearch.ts (380→~120 lines).
- * Uses defineTool() + Zod instead of manual validation.
+ * DuckDuckGo HTML scraping is the default — no API key required.
+ * Tavily and Exa are optional power-user fallbacks when API keys are set.
  */
 
 import { defineTool } from '@ava/core-v2/tools'
@@ -19,6 +19,55 @@ interface SearchResponse {
   results: SearchResult[]
   query: string
   provider: string
+}
+
+async function searchDuckDuckGo(
+  query: string,
+  numResults: number,
+  signal: AbortSignal
+): Promise<SearchResponse> {
+  const response = await fetch('https://html.duckduckgo.com/html/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `q=${encodeURIComponent(query)}`,
+    signal,
+  })
+
+  if (!response.ok) {
+    throw new Error(`DuckDuckGo error (${response.status})`)
+  }
+
+  const html = await response.text()
+  const results: SearchResult[] = []
+
+  // Parse result blocks: each result lives in a <div class="result ...">
+  const resultBlocks = html.split(/class="result\s/)
+  for (let i = 1; i < resultBlocks.length && results.length < numResults; i++) {
+    const block = resultBlocks[i]!
+
+    // Extract URL and title from <a class="result__a" href="...">title</a>
+    const linkMatch = block.match(/class="result__a"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/)
+    if (!linkMatch) continue
+
+    let url = linkMatch[1]!
+    const title = linkMatch[2]!.replace(/<[^>]*>/g, '').trim()
+
+    // DuckDuckGo wraps URLs in a redirect — extract the actual URL
+    const uddgMatch = url.match(/[?&]uddg=([^&]+)/)
+    if (uddgMatch?.[1]) {
+      url = decodeURIComponent(uddgMatch[1])
+    }
+
+    // Extract snippet from <a class="result__snippet" ...>...</a>
+    const snippetMatch = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/)
+    const snippet = snippetMatch?.[1]?.replace(/<[^>]*>/g, '').trim() ?? ''
+
+    if (url && title) {
+      results.push({ title, url, snippet })
+    }
+  }
+
+  return { query, provider: 'duckduckgo', results }
 }
 
 async function searchTavily(
@@ -101,10 +150,10 @@ function getApiKey(provider: 'tavily' | 'exa'): string | undefined {
   return process.env[envKey]
 }
 
-function detectProvider(): 'tavily' | 'exa' | undefined {
+function detectProvider(): 'tavily' | 'exa' | 'duckduckgo' {
   if (getApiKey('tavily')) return 'tavily'
   if (getApiKey('exa')) return 'exa'
-  return undefined
+  return 'duckduckgo'
 }
 
 function formatResults(response: SearchResponse): string {
@@ -137,7 +186,7 @@ Use this tool when you need to:
 - Look up documentation or examples
 
 Returns search results with titles, URLs, and snippets.
-Requires API key: Set TAVILY_API_KEY or EXA_API_KEY environment variable.`,
+Uses DuckDuckGo by default (no API key needed). Set TAVILY_API_KEY or EXA_API_KEY for premium providers.`,
 
   schema: z.object({
     query: z.string().describe('The search query'),
@@ -148,7 +197,7 @@ Requires API key: Set TAVILY_API_KEY or EXA_API_KEY environment variable.`,
       .optional()
       .describe('Number of results to return (default: 8)'),
     provider: z
-      .enum(['tavily', 'exa'])
+      .enum(['duckduckgo', 'tavily', 'exa'])
       .optional()
       .describe('Search provider to use (default: auto-detect)'),
   }),
@@ -161,26 +210,20 @@ Requires API key: Set TAVILY_API_KEY or EXA_API_KEY environment variable.`,
     }
 
     const provider = input.provider ?? detectProvider()
-    if (!provider) {
-      return {
-        success: false,
-        output:
-          'No search provider configured. Set TAVILY_API_KEY or EXA_API_KEY environment variable.',
-        error: 'NO_PROVIDER',
-      }
-    }
-
-    const apiKey = getApiKey(provider)
-    if (!apiKey) {
-      const envKey = provider === 'tavily' ? 'TAVILY_API_KEY' : 'EXA_API_KEY'
-      return {
-        success: false,
-        output: `Missing API key: Set ${envKey} environment variable`,
-        error: 'MISSING_API_KEY',
-      }
-    }
-
     const numResults = input.numResults ?? 8
+
+    // Validate API key for paid providers
+    if (provider !== 'duckduckgo') {
+      const apiKey = getApiKey(provider)
+      if (!apiKey) {
+        const envKey = provider === 'tavily' ? 'TAVILY_API_KEY' : 'EXA_API_KEY'
+        return {
+          success: false,
+          output: `Missing API key: Set ${envKey} environment variable`,
+          error: 'MISSING_API_KEY',
+        }
+      }
+    }
 
     if (ctx.metadata) {
       ctx.metadata({
@@ -190,10 +233,14 @@ Requires API key: Set TAVILY_API_KEY or EXA_API_KEY environment variable.`,
     }
 
     try {
-      const response =
-        provider === 'tavily'
-          ? await searchTavily(input.query, numResults, apiKey, ctx.signal)
-          : await searchExa(input.query, numResults, apiKey, ctx.signal)
+      let response: SearchResponse
+      if (provider === 'tavily') {
+        response = await searchTavily(input.query, numResults, getApiKey('tavily')!, ctx.signal)
+      } else if (provider === 'exa') {
+        response = await searchExa(input.query, numResults, getApiKey('exa')!, ctx.signal)
+      } else {
+        response = await searchDuckDuckGo(input.query, numResults, ctx.signal)
+      }
 
       const output = formatResults(response)
 

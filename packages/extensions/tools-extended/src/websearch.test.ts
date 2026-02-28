@@ -22,10 +22,19 @@ describe('websearchTool', () => {
     expect(websearchTool.definition.name).toBe('websearch')
   })
 
-  it('returns error when no provider configured', async () => {
+  it('defaults to duckduckgo when no API keys are set', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      text: () =>
+        Promise.resolve(
+          '<div class="result "><a class="result__a" href="https://example.com">Test Result</a><a class="result__snippet">A snippet</a></div>'
+        ),
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
     const result = await websearchTool.execute({ query: 'test' }, mockCtx)
-    expect(result.success).toBe(false)
-    expect(result.output).toContain('No search provider configured')
+    expect(result.success).toBe(true)
+    expect(mockFetch).toHaveBeenCalledWith('https://html.duckduckgo.com/html/', expect.anything())
   })
 
   it('auto-detects tavily when key is set', async () => {

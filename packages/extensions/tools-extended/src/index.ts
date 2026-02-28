@@ -1,12 +1,11 @@
 /**
  * Extended tools extension.
- * Registers 18 additional tools beyond the 6 core tools.
+ * Registers 17 additional tools beyond the 6 core tools.
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import { applyPatchTool } from './apply-patch/index.js'
 import { batchTool } from './batch.js'
-import { browserTool } from './browser/index.js'
 import { codesearchTool } from './codesearch.js'
 import { completionTool } from './completion.js'
 import { createFileTool } from './create.js'
@@ -34,7 +33,6 @@ const TOOLS = [
   taskTool,
   websearchTool,
   webfetchTool,
-  browserTool,
   applyPatchTool,
   codesearchTool,
   repoMapTool,

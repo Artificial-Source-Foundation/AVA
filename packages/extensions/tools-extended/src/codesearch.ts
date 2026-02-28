@@ -127,7 +127,7 @@ Requires EXA_API_KEY environment variable.`,
     if (!getExaApiKey()) {
       return {
         success: false,
-        output: `Exa API is not configured. Set the EXA_API_KEY environment variable.\n\nVisit https://exa.ai to get an API key.`,
+        output: `Exa API is not configured. Set the EXA_API_KEY environment variable.\n\nVisit https://exa.ai to get an API key.\nAlternatively, install the Exa MCP server for use via the MCP extension.`,
         error: 'EXA_NOT_CONFIGURED',
       }
     }

@@ -1,96 +1,150 @@
-import { afterEach, describe, expect, it } from 'vitest'
-import { addServer, getConnections, getTools, removeServer, resetMCP } from './manager.js'
-import type { MCPServer, MCPTool } from './types.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { MCPServer } from './types.js'
 
-const server = (name: string): MCPServer => ({
-  name,
-  uri: `stdio://${name}`,
-  transport: 'stdio',
+// Mock client — class that uses plain functions to avoid vi.fn() hoisting issues
+const mockClientInstances: Array<{
+  initialize: ReturnType<typeof vi.fn>
+  listTools: ReturnType<typeof vi.fn>
+  callTool: ReturnType<typeof vi.fn>
+  close: ReturnType<typeof vi.fn>
+}> = []
+
+vi.mock('./client.js', () => {
+  return {
+    MCPClient: class MockMCPClient {
+      initialize: ReturnType<typeof vi.fn>
+      listTools: ReturnType<typeof vi.fn>
+      callTool: ReturnType<typeof vi.fn>
+      close: ReturnType<typeof vi.fn>
+
+      constructor() {
+        this.initialize = vi.fn().mockResolvedValue({ tools: {} })
+        this.listTools = vi
+          .fn()
+          .mockResolvedValue([
+            { name: 'read_file', description: 'Read a file', inputSchema: { type: 'object' } },
+          ])
+        this.callTool = vi.fn().mockResolvedValue({
+          content: [{ type: 'text', text: 'result' }],
+        })
+        this.close = vi.fn().mockResolvedValue(undefined)
+        mockClientInstances.push(this)
+      }
+    },
+  }
 })
 
+vi.mock('./transport.js', () => {
+  return {
+    StdioTransport: class MockStdioTransport {
+      start = vi.fn().mockResolvedValue(undefined)
+      send = vi.fn().mockResolvedValue(undefined)
+      onMessage = vi.fn()
+      close = vi.fn().mockResolvedValue(undefined)
+    },
+    SSETransport: class MockSSETransport {
+      start = vi.fn().mockResolvedValue(undefined)
+      send = vi.fn().mockResolvedValue(undefined)
+      onMessage = vi.fn()
+      close = vi.fn().mockResolvedValue(undefined)
+    },
+  }
+})
+
+const { callTool, connectServer, disconnectServer, getConnections, getTools, resetMCP } =
+  await import('./manager.js')
+
+const mockShell = {
+  exec: vi.fn(),
+  spawn: vi.fn(),
+}
+
+const stdioServer: MCPServer = {
+  name: 'test-stdio',
+  uri: 'stdio://test',
+  transport: 'stdio',
+  command: 'node',
+  args: ['server.js'],
+}
+
+const sseServer: MCPServer = {
+  name: 'test-sse',
+  uri: 'http://localhost:3000/sse',
+  transport: 'sse',
+}
+
 describe('MCP manager', () => {
-  afterEach(() => {
-    resetMCP()
+  afterEach(async () => {
+    await resetMCP()
+    mockClientInstances.length = 0
   })
 
   it('starts with no connections', () => {
     expect(getConnections().size).toBe(0)
   })
 
-  it('adds a server in disconnected state', () => {
-    addServer(server('test-server'))
-    const conn = getConnections().get('test-server')
+  it('connects a stdio server and returns tools', async () => {
+    const tools = await connectServer(stdioServer, mockShell)
+    expect(tools).toHaveLength(1)
+    expect(tools[0].name).toBe('read_file')
+    expect(tools[0].serverName).toBe('test-stdio')
+
+    const conn = getConnections().get('test-stdio')
     expect(conn).toBeDefined()
-    expect(conn!.status).toBe('disconnected')
-    expect(conn!.tools).toEqual([])
-    expect(conn!.server.name).toBe('test-server')
+    expect(conn!.status).toBe('connected')
   })
 
-  it('removes a server', () => {
-    addServer(server('s1'))
-    addServer(server('s2'))
-    expect(getConnections().size).toBe(2)
-    removeServer('s1')
+  it('connects an SSE server', async () => {
+    const tools = await connectServer(sseServer, mockShell)
+    expect(tools).toHaveLength(1)
+
+    const conn = getConnections().get('test-sse')
+    expect(conn!.status).toBe('connected')
+  })
+
+  it('disconnects a server', async () => {
+    await connectServer(stdioServer, mockShell)
     expect(getConnections().size).toBe(1)
-    expect(getConnections().has('s1')).toBe(false)
-    expect(getConnections().has('s2')).toBe(true)
+
+    await disconnectServer('test-stdio')
+    expect(getConnections().size).toBe(0)
   })
 
-  it('removing non-existent server is a no-op', () => {
-    expect(() => removeServer('nope')).not.toThrow()
+  it('disconnecting non-existent server is a no-op', async () => {
+    await expect(disconnectServer('nope')).resolves.toBeUndefined()
   })
 
-  it('getTools returns empty when no servers', () => {
-    expect(getTools()).toEqual([])
-  })
-
-  it('getTools returns empty when all servers disconnected', () => {
-    addServer(server('s1'))
-    expect(getTools()).toEqual([])
-  })
-
-  it('getTools returns tools only from connected servers', () => {
-    addServer(server('s1'))
-    addServer(server('s2'))
-
-    // Simulate connecting s1 with tools
-    const conn1 = getConnections().get('s1')!
-    ;(conn1 as { status: string }).status = 'connected'
-    const tool: MCPTool = {
-      name: 'tool1',
-      description: 'A tool',
-      inputSchema: { type: 'object' },
-      serverName: 's1',
-    }
-    conn1.tools.push(tool)
-
+  it('getTools returns tools from connected servers', async () => {
+    await connectServer(stdioServer, mockShell)
     const tools = getTools()
     expect(tools).toHaveLength(1)
-    expect(tools[0].name).toBe('tool1')
-    expect(tools[0].serverName).toBe('s1')
+    expect(tools[0].name).toBe('read_file')
   })
 
-  it('aggregates tools from multiple connected servers', () => {
-    addServer(server('s1'))
-    addServer(server('s2'))
-
-    const conn1 = getConnections().get('s1')!
-    ;(conn1 as { status: string }).status = 'connected'
-    conn1.tools.push({ name: 't1', description: '', inputSchema: {}, serverName: 's1' })
-
-    const conn2 = getConnections().get('s2')!
-    ;(conn2 as { status: string }).status = 'connected'
-    conn2.tools.push({ name: 't2', description: '', inputSchema: {}, serverName: 's2' })
-
-    expect(getTools()).toHaveLength(2)
+  it('callTool delegates to the MCP client', async () => {
+    await connectServer(stdioServer, mockShell)
+    const result = await callTool('test-stdio', 'read_file', { path: '/foo' })
+    expect(result.success).toBe(true)
+    expect(result.output).toBe('result')
   })
 
-  it('resetMCP clears all connections', () => {
-    addServer(server('s1'))
-    addServer(server('s2'))
+  it('callTool returns error for disconnected server', async () => {
+    const result = await callTool('nonexistent', 'foo', {})
+    expect(result.success).toBe(false)
+    expect(result.output).toContain('not connected')
+  })
+
+  it('resetMCP disconnects all servers', async () => {
+    await connectServer(stdioServer, mockShell)
+    await connectServer(sseServer, mockShell)
     expect(getConnections().size).toBe(2)
-    resetMCP()
+
+    await resetMCP()
     expect(getConnections().size).toBe(0)
-    expect(getTools()).toEqual([])
+  })
+
+  it('throws if stdio server has no command', async () => {
+    const bad: MCPServer = { name: 'bad', uri: 'stdio://bad', transport: 'stdio' }
+    await expect(connectServer(bad, mockShell)).rejects.toThrow('requires a command')
   })
 })

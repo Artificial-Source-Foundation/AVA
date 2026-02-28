@@ -8,6 +8,7 @@ export interface MCPServer {
   transport: 'stdio' | 'sse'
   command?: string
   args?: string[]
+  env?: Record<string, string>
 }
 
 export interface MCPTool {

@@ -63,7 +63,7 @@
 
 ### Missing in Tools
 - [x] **Tool execution tests** — ~~Individual tool `execute()` methods untested~~ **DONE** (write + edit execute tests already comprehensive; 11 + 12 tests respectively)
-- [ ] **Browser tool tests** — Requires Puppeteer mocking
+- [x] **Browser tool** — ~~Requires Puppeteer mocking~~ Removed (Sprint 13, use Puppeteer MCP server)
 - [ ] **Apply-patch tests** — Parser and applier untested
 - [ ] **Edit strategy benchmarks** — No comparison of 8 edit strategies on real diffs
 
@@ -82,7 +82,7 @@
 ### Missing in Infrastructure
 - [x] **Config credential tests** — ~~Credential storage untested~~ **DONE** (20 tests)
 - [x] **Config migration tests** — ~~Version migration untested~~ **DONE** (24 tests)
-- [x] **MCP client tests** — ~~MCP protocol client untested~~ **DONE** (Sprint 10: MCP manager tests — addServer, removeServer, getTools, resetMCP — 9 tests)
+- [x] **MCP client tests** — ~~MCP protocol client untested~~ **DONE** (Sprint 10: manager tests 9; Sprint 13: transport, client, manager, extension — 4 test files)
 - [x] **Hook executor tests** — ~~Hook execution untested~~ **DONE** (executor.ts tested, 16 tests)
 - [ ] **SQLite session storage** — Sessions are file-based JSON; Goose uses SQLite for durability + querying
 - [x] **Visibility metadata** — ~~Compacted messages are fully removed~~ **DONE** (Sprint B3: `MessageVisibility` type, visibility-aware compaction)
@@ -152,8 +152,30 @@ This backlog feeds into the project roadmap:
 - [x] **GitHub Copilot provider extension** — `packages/extensions/providers/copilot/` with custom `CopilotClient`
 - [x] **Copilot model fetcher** — Dynamic model fetch with hardcoded fallback
 
+### Sprint 13 — Web Tools Cleanup + Real MCP Client
+
+> **Sprint 13** removed the browser tool, added free DuckDuckGo websearch default, and implemented a real MCP client with JSON-RPC 2.0 over stdio/SSE.
+
+#### Completed
+- [x] **Browser tool removed** — Deleted `tools-extended/src/browser/` (4 files), users should use Puppeteer MCP server instead
+- [x] **Free websearch** — DuckDuckGo HTML scraping as default (no API key needed), Tavily/Exa as optional fallbacks
+- [x] **MCP transport layer** — `StdioTransport` (newline-delimited JSON via platform shell spawn) + `SSETransport` (Server-Sent Events + POST)
+- [x] **MCP protocol client** — Initialize handshake, tools/list, tools/call with request/response correlation + timeouts
+- [x] **MCP manager rewrite** — Real connection lifecycle: connect → initialize → list tools → ready
+- [x] **MCP extension rewrite** — Tools registered with real execution via `callTool()`, dynamic add/remove via events
+- [x] **MCP types update** — Added `env` field to `MCPServer` for passing API keys to stdio servers
+
+#### Still Needed (MCP)
+- [ ] MCP OAuth flows (auth + refresh + storage)
+- [ ] MCP resources (read/subscribe)
+- [ ] MCP prompts (list/get)
+- [ ] MCP sampling (server-initiated LLM requests)
+- [ ] Reconnection with exponential backoff
+- [ ] Tool list change notifications (re-discover on `notifications/tools/list_changed`)
+- [ ] Server health monitoring + auto-restart
+
 ### Still Needed
 - [ ] Provider tests for remaining 10 providers (same harness pattern)
 - [ ] Real plugin install/uninstall (currently state-only in frontend)
 
-*Last updated: 2026-02-27*
+*Last updated: 2026-02-28*

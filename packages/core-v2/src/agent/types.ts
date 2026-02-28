@@ -76,6 +76,21 @@ export type AgentEvent =
       reason: string
     }
   | { type: 'doom-loop'; agentId: string; tool: string; count: number }
+  | {
+      type: 'delegation:start'
+      agentId: string
+      childAgentId: string
+      workerName: string
+      task: string
+      tier?: string
+    }
+  | {
+      type: 'delegation:complete'
+      agentId: string
+      childAgentId: string
+      success: boolean
+      output: string
+    }
 
 export type AgentEventCallback = (event: AgentEvent) => void
 

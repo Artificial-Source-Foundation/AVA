@@ -5,50 +5,27 @@
  * Child cannot call 'task' (prevents recursion).
  */
 
+import type { AgentEventCallback } from '@ava/core-v2/agent'
 import { AgentExecutor } from '@ava/core-v2/agent'
 import { defineTool } from '@ava/core-v2/tools'
 import * as z from 'zod'
+import { WORKER_AGENTS } from '../../commander/src/workers.js'
 
-const BUILTIN_WORKERS: Record<
+// Convert array to record for lookup
+const BUILTIN_WORKERS = Object.fromEntries(
+  WORKER_AGENTS.map((w) => [
+    w.name,
+    {
+      tools: w.tools,
+      systemPrompt: w.systemPrompt,
+      maxTurns: w.maxTurns ?? 15,
+      maxTimeMinutes: w.maxTimeMinutes ?? 5,
+    },
+  ])
+) as Record<
   string,
   { tools: string[]; systemPrompt: string; maxTurns: number; maxTimeMinutes: number }
-> = {
-  coder: {
-    tools: ['read_file', 'write_file', 'create_file', 'delete_file', 'edit', 'grep', 'glob'],
-    systemPrompt:
-      'You are a senior developer. Write clean, well-structured code. Focus on the task, make minimal changes, and follow existing patterns.',
-    maxTurns: 15,
-    maxTimeMinutes: 5,
-  },
-  tester: {
-    tools: ['read_file', 'write_file', 'create_file', 'bash', 'grep', 'glob'],
-    systemPrompt:
-      'You are a QA engineer. Write comprehensive tests covering happy paths, edge cases, and error cases. Run tests to verify they pass.',
-    maxTurns: 10,
-    maxTimeMinutes: 5,
-  },
-  reviewer: {
-    tools: ['read_file', 'grep', 'glob'],
-    systemPrompt:
-      'You are a code reviewer. Analyze code for bugs, security issues, and quality. You have read-only access.',
-    maxTurns: 10,
-    maxTimeMinutes: 5,
-  },
-  researcher: {
-    tools: ['read_file', 'grep', 'glob', 'ls'],
-    systemPrompt:
-      'You are a codebase researcher. Explore the codebase to gather context and understand architecture. You have read-only access.',
-    maxTurns: 15,
-    maxTimeMinutes: 5,
-  },
-  debugger: {
-    tools: ['read_file', 'write_file', 'edit', 'bash', 'grep', 'glob'],
-    systemPrompt:
-      'You are a debugging specialist. Diagnose issues, trace errors, and apply fixes. Be methodical and verify fixes work.',
-    maxTurns: 15,
-    maxTimeMinutes: 5,
-  },
-}
+>
 
 export const taskTool = defineTool({
   name: 'task',
@@ -58,7 +35,16 @@ export const taskTool = defineTool({
     description: z.string().describe('Short task description (3-5 words)'),
     prompt: z.string().describe('Full instructions for the subagent'),
     worker: z
-      .enum(['coder', 'tester', 'reviewer', 'researcher', 'debugger'])
+      .enum([
+        'coder',
+        'tester',
+        'reviewer',
+        'researcher',
+        'debugger',
+        'architect',
+        'planner',
+        'devops',
+      ])
       .optional()
       .describe('Worker type — determines available tools and system prompt'),
     allowedTools: z
@@ -80,15 +66,18 @@ export const taskTool = defineTool({
     // Filter out 'task' to prevent infinite recursion
     const filtered = allowedTools.filter((t) => t !== 'task')
 
-    const child = new AgentExecutor({
-      provider: ctx.provider as import('@ava/core-v2/llm').LLMProvider | undefined,
-      model: ctx.model,
-      allowedTools: filtered,
-      maxTurns: input.maxTurns ?? workerDef?.maxTurns ?? 15,
-      maxTimeMinutes: workerDef?.maxTimeMinutes ?? 5,
-      systemPrompt: workerDef?.systemPrompt,
-      name: `subagent:${input.description}`,
-    })
+    const child = new AgentExecutor(
+      {
+        provider: ctx.provider as import('@ava/core-v2/llm').LLMProvider | undefined,
+        model: ctx.model,
+        allowedTools: filtered,
+        maxTurns: input.maxTurns ?? workerDef?.maxTurns ?? 15,
+        maxTimeMinutes: workerDef?.maxTimeMinutes ?? 5,
+        systemPrompt: workerDef?.systemPrompt,
+        name: `subagent:${input.description}`,
+      },
+      ctx.onEvent as AgentEventCallback | undefined
+    )
 
     const result = await child.run({ goal: input.prompt, cwd: ctx.workingDirectory }, ctx.signal)
 

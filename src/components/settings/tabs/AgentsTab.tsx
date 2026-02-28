@@ -1,12 +1,12 @@
 /**
  * Agents Settings Tab
  *
- * Flat, minimal design matching GeneralSection.
- * Configure AI agent behavior and presets.
+ * Tier-based grouping: Commander → Leads → Workers → Custom.
+ * Import/Export buttons for sharing agent definitions.
  */
 
 import { type Component, createSignal, For, Show } from 'solid-js'
-import type { AgentPreset } from '../../../config/defaults/agent-defaults'
+import type { AgentPreset, AgentTier } from '../../../config/defaults/agent-defaults'
 
 // Re-export so existing barrel consumers stay happy
 export type { AgentPreset } from '../../../config/defaults/agent-defaults'
@@ -22,6 +22,19 @@ export interface AgentsTabProps {
   onEdit?: (id: string) => void
   onDelete?: (id: string) => void
   onCreate?: () => void
+  onExport?: () => void
+  onImport?: () => void
+}
+
+// ============================================================================
+// Tier metadata
+// ============================================================================
+
+const TIER_ORDER: AgentTier[] = ['commander', 'lead', 'worker']
+const TIER_LABELS: Record<AgentTier, string> = {
+  commander: 'Commander',
+  lead: 'Leads',
+  worker: 'Workers',
 }
 
 // ============================================================================
@@ -40,16 +53,20 @@ export const AgentsTab: Component<AgentsTabProps> = (props) => {
       (a) =>
         a.name.toLowerCase().includes(query) ||
         a.description.toLowerCase().includes(query) ||
-        a.capabilities.some((c) => c.toLowerCase().includes(query))
+        a.capabilities.some((c) => c.toLowerCase().includes(query)) ||
+        a.tier?.toLowerCase().includes(query)
     )
   }
 
+  const agentsByTier = (tier: AgentTier) =>
+    filteredAgents().filter((a) => a.tier === tier && !a.isCustom)
+
   const customAgents = () => filteredAgents().filter((a) => a.isCustom)
-  const builtinAgents = () => filteredAgents().filter((a) => !a.isCustom)
+  const legacyAgents = () => filteredAgents().filter((a) => !a.tier && !a.isCustom)
 
   return (
     <div class="space-y-4">
-      {/* Search + Add */}
+      {/* Search + Actions */}
       <div class="flex items-center gap-2">
         <input
           type="text"
@@ -67,6 +84,24 @@ export const AgentsTab: Component<AgentsTabProps> = (props) => {
             transition-colors
           "
         />
+        <Show when={props.onImport}>
+          <button
+            type="button"
+            onClick={() => props.onImport?.()}
+            class="px-2.5 py-2 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] rounded-[var(--radius-md)] transition-colors"
+          >
+            Import
+          </button>
+        </Show>
+        <Show when={props.onExport}>
+          <button
+            type="button"
+            onClick={() => props.onExport?.()}
+            class="px-2.5 py-2 text-[11px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] rounded-[var(--radius-md)] transition-colors"
+          >
+            Export
+          </button>
+        </Show>
         <Show when={props.onCreate}>
           <button
             type="button"
@@ -82,11 +117,38 @@ export const AgentsTab: Component<AgentsTabProps> = (props) => {
         {enabledCount()} of {props.agents.length} enabled
       </p>
 
+      {/* Tier-based sections */}
+      <For each={TIER_ORDER}>
+        {(tier) => {
+          const agents = () => agentsByTier(tier)
+          return (
+            <Show when={agents().length > 0}>
+              <div>
+                <h3 class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
+                  {TIER_LABELS[tier]} ({agents().length})
+                </h3>
+                <div class="space-y-0.5">
+                  <For each={agents()}>
+                    {(agent) => (
+                      <AgentRow
+                        agent={agent}
+                        onToggle={(enabled) => props.onToggle?.(agent.id, enabled)}
+                        onEdit={() => props.onEdit?.(agent.id)}
+                      />
+                    )}
+                  </For>
+                </div>
+              </div>
+            </Show>
+          )
+        }}
+      </For>
+
       {/* Custom Agents */}
       <Show when={customAgents().length > 0}>
         <div>
           <h3 class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-            Custom
+            Custom ({customAgents().length})
           </h3>
           <div class="space-y-0.5">
             <For each={customAgents()}>
@@ -103,14 +165,14 @@ export const AgentsTab: Component<AgentsTabProps> = (props) => {
         </div>
       </Show>
 
-      {/* Built-in Agents */}
-      <Show when={builtinAgents().length > 0}>
+      {/* Legacy agents (no tier) */}
+      <Show when={legacyAgents().length > 0}>
         <div>
           <h3 class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-            Built-in
+            Other ({legacyAgents().length})
           </h3>
           <div class="space-y-0.5">
-            <For each={builtinAgents()}>
+            <For each={legacyAgents()}>
               {(agent) => (
                 <AgentRow
                   agent={agent}
@@ -141,6 +203,12 @@ interface AgentRowProps {
   onDelete?: () => void
 }
 
+const TIER_BADGE_COLORS: Record<AgentTier, string> = {
+  commander: 'bg-amber-500/20 text-amber-400',
+  lead: 'bg-blue-500/20 text-blue-400',
+  worker: 'bg-emerald-500/20 text-emerald-400',
+}
+
 const AgentRow: Component<AgentRowProps> = (props) => (
   <div class="flex items-center justify-between py-1.5 group">
     <div class="flex-1 min-w-0">
@@ -149,8 +217,18 @@ const AgentRow: Component<AgentRowProps> = (props) => (
         <span
           class={`w-1.5 h-1.5 rounded-full ${props.agent.enabled ? 'bg-[var(--success)]' : 'bg-[var(--border-default)]'}`}
         />
+        <Show when={props.agent.tier}>
+          <span
+            class={`text-[9px] px-1.5 py-0.5 rounded-full font-medium ${TIER_BADGE_COLORS[props.agent.tier!]}`}
+          >
+            {props.agent.tier}
+          </span>
+        </Show>
         <Show when={props.agent.isCustom}>
           <span class="text-[9px] text-[var(--accent)]">custom</span>
+        </Show>
+        <Show when={props.agent.model}>
+          <span class="text-[9px] text-[var(--text-muted)]">{props.agent.model}</span>
         </Show>
       </div>
       <p class="text-[10px] text-[var(--text-muted)] truncate">{props.agent.description}</p>

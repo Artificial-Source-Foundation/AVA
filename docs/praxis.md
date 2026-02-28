@@ -1,0 +1,228 @@
+# Praxis — 3-Tier Agent Hierarchy
+
+Praxis is AVA's agent hierarchy system. Instead of a flat delegation model (one agent delegates to workers), Praxis implements a 3-tier structure:
+
+```
+Commander → Leads → Workers
+```
+
+Each tier has distinct responsibilities and tool access.
+
+---
+
+## The 3 Tiers
+
+### Commander (1 agent)
+- Plans and coordinates — **never writes code directly**
+- Only has `delegate_*` tools, `question`, and `attempt_completion`
+- Delegates to Leads (and the Planner/Architect workers for planning)
+- Uses the most capable model for reasoning
+
+### Leads (4 agents)
+- Domain specialists who manage their area
+- Can delegate to their own subset of Workers
+- Have read-only tools + delegate tools for their workers
+- Each Lead has a domain: frontend, backend, testing, fullstack
+
+### Workers (8 agents)
+- Execute tasks directly — writing code, running tests, debugging
+- Cannot delegate — they do the actual work
+- Each has specific tools for their specialty
+- Can use cheaper/faster models for cost optimization
+
+---
+
+## Built-in Agents (13)
+
+| Tier | Agent | Domain | Description |
+|------|-------|--------|-------------|
+| Commander | `commander` | fullstack | Plans and coordinates the team |
+| Lead | `frontend-lead` | frontend | Manages frontend development |
+| Lead | `backend-lead` | backend | Manages backend development |
+| Lead | `qa-lead` | testing | Manages testing and review |
+| Lead | `fullstack-lead` | fullstack | Manages cross-cutting work |
+| Worker | `coder` | fullstack | Writes and modifies code |
+| Worker | `tester` | testing | Writes and runs tests |
+| Worker | `reviewer` | fullstack | Reviews code quality |
+| Worker | `researcher` | fullstack | Explores codebase |
+| Worker | `debugger` | fullstack | Debugs and fixes errors |
+| Worker | `architect` | fullstack | Reviews architecture |
+| Worker | `planner` | fullstack | Breaks tasks into subtasks |
+| Worker | `devops` | devops | Shell commands, build/deploy |
+
+---
+
+## Delegation Flow
+
+```
+User sends complex task
+    │
+    ▼
+Commander (plans)
+    ├─→ delegate_planner → Planner returns TaskPlan
+    ├─→ delegate_architect → Architect reviews plan (optional)
+    │
+    ├─→ delegate_frontend-lead
+    │       ├─→ delegate_coder → writes components
+    │       └─→ delegate_tester → writes tests
+    │
+    ├─→ delegate_backend-lead
+    │       ├─→ delegate_coder → writes API routes
+    │       └─→ delegate_debugger → fixes issues
+    │
+    └─→ Commander reviews results → attempt_completion
+```
+
+For simple tasks:
+```
+Commander → delegate_fullstack-lead → delegate_coder → done
+```
+
+---
+
+## Per-Agent Model Configuration
+
+Each agent can use a different model and provider. This enables cost optimization:
+
+```typescript
+// In agent-defaults.ts or via Settings UI
+{
+  id: 'researcher',
+  tier: 'worker',
+  model: 'claude-haiku-4-5',     // cheap model for exploration
+  provider: 'anthropic',
+}
+```
+
+Typical cost optimization strategy:
+- **Commander**: Most capable model (Opus/Sonnet) — needs strong reasoning
+- **Leads**: Mid-tier model (Sonnet) — delegation + light analysis
+- **Workers**: Mix based on task:
+  - Coder: Sonnet (code quality matters)
+  - Researcher: Haiku (just reading files)
+  - Tester: Sonnet (test quality matters)
+  - Reviewer: Haiku (analysis, read-only)
+
+---
+
+## AgentDefinition Schema
+
+```typescript
+interface AgentDefinition {
+  id: string           // unique identifier
+  name: string         // machine name
+  displayName: string  // human-readable label
+  description: string
+  tier: 'commander' | 'lead' | 'worker'
+  systemPrompt: string
+  tools: string[]      // concrete tool names
+  delegates?: string[] // agent IDs this can delegate to
+  model?: string       // per-agent model override
+  provider?: string    // per-agent provider override
+  maxTurns?: number
+  maxTimeMinutes?: number
+  icon?: string
+  domain?: string
+  capabilities?: string[]
+  isBuiltIn?: boolean
+}
+```
+
+---
+
+## Creating Custom Agents
+
+### Via Settings UI
+
+1. Open Settings → Agents
+2. Click "+ New"
+3. Fill in:
+   - **Name** and **Description**
+   - **Tier**: Worker, Lead, or Commander
+   - **Tools**: Select which tools this agent can use
+   - **Delegates**: (Leads/Commander only) Which agents it can delegate to
+   - **Model**: Per-agent model selection
+   - **Domain**: frontend, backend, testing, devops, fullstack
+4. Save
+
+### Via JSON Import
+
+```json
+{
+  "praxis_agents": [
+    {
+      "id": "security-auditor",
+      "name": "Security Auditor",
+      "description": "Reviews code for security vulnerabilities",
+      "tier": "worker",
+      "tools": ["read_file", "grep", "glob"],
+      "domain": "fullstack",
+      "capabilities": ["security-analysis"],
+      "model": "claude-sonnet-4",
+      "systemPrompt": "You are a security auditor. Review code for OWASP Top 10 vulnerabilities..."
+    }
+  ],
+  "version": 1
+}
+```
+
+---
+
+## Planning Pipeline
+
+For complex tasks, the Commander uses a planning chain:
+
+1. **Planner** agent breaks the task into subtasks with file assignments
+2. **Architect** agent validates the plan (optional)
+3. Commander delegates subtasks to the appropriate leads
+
+The Planner returns structured JSON:
+
+```json
+{
+  "subtasks": [
+    {
+      "description": "Add login form component",
+      "domain": "frontend",
+      "files": ["src/components/Login.tsx"],
+      "assignTo": "frontend-lead"
+    },
+    {
+      "description": "Add auth API endpoint",
+      "domain": "backend",
+      "files": ["src/api/auth.ts"],
+      "assignTo": "backend-lead"
+    }
+  ],
+  "dependencies": [[1, 0]]
+}
+```
+
+Dependencies are `[blocker, blocked]` pairs — subtask 0 waits for subtask 1.
+
+---
+
+## Extension Integration
+
+Praxis is implemented as the `ava-commander` extension using the same `ExtensionAPI` as community plugins:
+
+- `registerTool()` — registers `delegate_*` tools
+- `registerAgentMode()` — registers the `praxis` mode
+- Agent registry — central store for all `AgentDefinition` objects
+- Settings sync — custom agents from Settings UI are registered on activation
+
+The `praxis` agent mode:
+- `filterTools()` — Commander only gets delegate + meta tools
+- `systemPrompt()` — Appends the Commander prompt with lead/worker docs
+
+---
+
+## Disabling Praxis
+
+To fall back to single-agent mode:
+
+1. **Settings UI**: Disable the Commander agent
+2. **Settings JSON**: Set `commander.enabled: false`
+3. **Programmatically**: The agent loop checks `getAgentModes().has('praxis')` — if absent, runs as a single agent with all tools
+
+When Praxis is disabled, AVA behaves like a standard single-agent coding assistant with direct tool access.

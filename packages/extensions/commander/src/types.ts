@@ -2,6 +2,10 @@
  * Commander types — worker definitions and team hierarchy.
  */
 
+// Re-export the canonical type
+export type { AgentDefinition, AgentTier } from './agent-definition.js'
+
+/** @deprecated Use AgentDefinition instead */
 export interface WorkerDefinition {
   name: string
   displayName: string

@@ -23,6 +23,9 @@ export function createTeamBridge(teamStore: TeamStore): {
   function bridgeToTeam(event: AgentEvent): void {
     switch (event.type) {
       case 'agent:start': {
+        // Skip if this agent was already created by delegation:start
+        if (teamStore.teamMembers().has(event.agentId)) break
+
         const role = teamStore.agentTypeToRole('commander')
         const domain = teamStore.inferDomain(event.goal)
         const name = teamStore.generateName(role, domain)
@@ -56,6 +59,49 @@ export function createTeamBridge(teamStore: TeamStore): {
           createdAt: Date.now(),
           delegatedAt: Date.now(),
           delegationContext,
+        })
+        break
+      }
+
+      case 'delegation:start': {
+        const e = event as {
+          agentId: string
+          childAgentId: string
+          workerName: string
+          task: string
+          tier?: string
+        }
+        const domain = teamStore.inferDomain(e.task)
+        const workerLabel = e.workerName.charAt(0).toUpperCase() + e.workerName.slice(1)
+
+        // Map Praxis tier to team role
+        const role =
+          e.tier === 'lead' ? 'senior-lead' : e.tier === 'worker' ? 'junior-dev' : 'senior-lead'
+
+        teamStore.addMember({
+          id: e.childAgentId,
+          name: workerLabel,
+          role,
+          status: 'working',
+          parentId: e.agentId,
+          domain,
+          model: 'unknown',
+          task: e.task,
+          toolCalls: [],
+          messages: [],
+          createdAt: Date.now(),
+          delegatedAt: Date.now(),
+          delegationContext: lastThought[e.agentId],
+        })
+        break
+      }
+
+      case 'delegation:complete': {
+        const e = event as { childAgentId: string; success: boolean; output: string }
+        teamStore.updateMemberStatus(e.childAgentId, e.success ? 'done' : 'error')
+        teamStore.updateMember(e.childAgentId, {
+          result: e.output,
+          completedAt: Date.now(),
         })
         break
       }

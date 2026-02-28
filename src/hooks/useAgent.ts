@@ -10,6 +10,7 @@
 
 import type { AgentConfig, AgentEvent, AgentInputs, AgentResult } from '@ava/core-v2/agent'
 import { runAgent } from '@ava/core-v2/agent'
+import { getAgentModes } from '@ava/core-v2/extensions'
 import { batch, createSignal } from 'solid-js'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
 import { saveMessage, updateMessage } from '../services/database'
@@ -141,6 +142,11 @@ function createAgentStore() {
         model: selectedModel,
         maxTurns: limits.agentMaxTurns,
         maxTimeMinutes: limits.agentMaxTimeMinutes,
+        toolMode: getAgentModes().has('praxis')
+          ? 'praxis'
+          : getAgentModes().has('team')
+            ? 'team'
+            : undefined,
         ...config,
       }
 

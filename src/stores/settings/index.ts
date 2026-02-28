@@ -5,7 +5,7 @@
  */
 
 import { createSignal } from 'solid-js'
-import type { AgentPreset } from '../../config/defaults/agent-defaults'
+import { type AgentPreset, resolveAgentIcon } from '../../config/defaults/agent-defaults'
 import {
   defaultProviders,
   type LLMProviderConfig,
@@ -367,6 +367,49 @@ function updateMcpServer(name: string, updates: Partial<MCPServerConfig>): void 
   })
 }
 
+// ─── Agent Import/Export ─────────────────────────────────────────────────────
+
+function exportAgents(agentIds?: string[]): string {
+  const agents = agentIds
+    ? settings().agents.filter((a) => agentIds.includes(a.id))
+    : settings().agents.filter((a) => a.isCustom)
+  // Strip icon (Component) — not serializable
+  const serializable = agents.map(({ icon: _icon, ...rest }) => rest)
+  return JSON.stringify({ praxis_agents: serializable, version: 1 }, null, 2)
+}
+
+function importAgents(json: string): { imported: number; skipped: number } {
+  const data = JSON.parse(json) as {
+    praxis_agents?: Array<Omit<AgentPreset, 'icon'>>
+    version?: number
+  }
+  if (!data.praxis_agents || !Array.isArray(data.praxis_agents)) {
+    throw new Error('Invalid agent export format')
+  }
+
+  const existingIds = new Set(settings().agents.map((a) => a.id))
+  let imported = 0
+  let skipped = 0
+
+  for (const raw of data.praxis_agents) {
+    if (existingIds.has(raw.id)) {
+      skipped++
+      continue
+    }
+    const agent: AgentPreset = {
+      ...raw,
+      icon: resolveAgentIcon(undefined),
+      isCustom: true,
+      enabled: raw.enabled ?? true,
+      capabilities: raw.capabilities ?? [],
+    }
+    addAgent(agent)
+    imported++
+  }
+
+  return { imported, skipped }
+}
+
 // Export Hook
 
 export function useSettings() {
@@ -398,6 +441,8 @@ export function useSettings() {
         saveSettings(merged)
         applyAppearance()
       }),
+    exportAgents,
+    importAgents,
     addMcpServer,
     removeMcpServer,
     updateMcpServer,

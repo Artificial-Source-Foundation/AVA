@@ -13,7 +13,7 @@ import { type AgentEvent, type AgentEventCallback, AgentExecutor } from '@ava/co
 import type { BusMessage } from '@ava/core-v2/bus'
 import { MessageBus } from '@ava/core-v2/bus'
 import type { ExtensionModule } from '@ava/core-v2/extensions'
-import { ExtensionManager, loadAllBuiltInExtensions } from '@ava/core-v2/extensions'
+import { ExtensionManager, getAgentModes, loadAllBuiltInExtensions } from '@ava/core-v2/extensions'
 import type { LLMProvider } from '@ava/core-v2/llm'
 import { registerProvider } from '@ava/core-v2/llm'
 import { setPlatform } from '@ava/core-v2/platform'
@@ -239,6 +239,11 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
         maxTurns: options.maxTurns,
         maxTimeMinutes: options.timeout,
         systemPrompt,
+        toolMode: getAgentModes().has('praxis')
+          ? 'praxis'
+          : getAgentModes().has('team')
+            ? 'team'
+            : undefined,
       },
       onEvent
     )

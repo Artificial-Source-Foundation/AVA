@@ -1,6 +1,6 @@
 import { X } from 'lucide-solid'
-import { type Component, createSignal, For } from 'solid-js'
-import type { AgentPreset } from '../../config/defaults/agent-defaults'
+import { type Component, createSignal, For, Show } from 'solid-js'
+import type { AgentPreset, AgentTier } from '../../config/defaults/agent-defaults'
 import { FieldGroup } from './settings-field-group'
 import { ALL_CAPABILITIES, AVAILABLE_MODELS } from './settings-modal-config'
 
@@ -10,6 +10,46 @@ interface AgentEditModalProps {
   onClose: () => void
   onSave: (agent: AgentPreset) => void
 }
+
+const TIER_OPTIONS: Array<{ value: AgentTier; label: string }> = [
+  { value: 'worker', label: 'Worker' },
+  { value: 'lead', label: 'Lead' },
+  { value: 'commander', label: 'Commander' },
+]
+
+const DOMAIN_OPTIONS = ['', 'frontend', 'backend', 'testing', 'devops', 'fullstack']
+
+const AVAILABLE_TOOLS = [
+  'read_file',
+  'write_file',
+  'create_file',
+  'delete_file',
+  'edit',
+  'bash',
+  'grep',
+  'glob',
+  'ls',
+  'question',
+  'attempt_completion',
+  'websearch',
+  'webfetch',
+  'repo_map',
+]
+
+const AVAILABLE_DELEGATES = [
+  'coder',
+  'tester',
+  'reviewer',
+  'researcher',
+  'debugger',
+  'architect',
+  'planner',
+  'devops',
+  'frontend-lead',
+  'backend-lead',
+  'qa-lead',
+  'fullstack-lead',
+]
 
 export const AgentEditModal: Component<AgentEditModalProps> = (props) => {
   // eslint-disable-next-line solid/reactivity -- initial value for editing
@@ -22,9 +62,29 @@ export const AgentEditModal: Component<AgentEditModalProps> = (props) => {
   const [capabilities, setCapabilities] = createSignal<string[]>([...props.agent.capabilities])
   // eslint-disable-next-line solid/reactivity -- initial value for editing
   const [systemPrompt, setSystemPrompt] = createSignal(props.agent.systemPrompt || '')
+  // eslint-disable-next-line solid/reactivity -- initial value for editing
+  const [tier, setTier] = createSignal<AgentTier>(props.agent.tier ?? 'worker')
+  // eslint-disable-next-line solid/reactivity -- initial value for editing
+  const [tools, setTools] = createSignal<string[]>([...(props.agent.tools ?? [])])
+  // eslint-disable-next-line solid/reactivity -- initial value for editing
+  const [delegates, setDelegates] = createSignal<string[]>([...(props.agent.delegates ?? [])])
+  // eslint-disable-next-line solid/reactivity -- initial value for editing
+  const [domain, setDomain] = createSignal(props.agent.domain || '')
+  // eslint-disable-next-line solid/reactivity -- initial value for editing
+  const [provider, setProvider] = createSignal(props.agent.provider || '')
+
+  const isBuiltIn = () => !props.agent.isCustom && !props.isCreating
 
   const toggleCapability = (cap: string) => {
     setCapabilities((prev) => (prev.includes(cap) ? prev.filter((c) => c !== cap) : [...prev, cap]))
+  }
+
+  const toggleTool = (tool: string) => {
+    setTools((prev) => (prev.includes(tool) ? prev.filter((t) => t !== tool) : [...prev, tool]))
+  }
+
+  const toggleDelegate = (id: string) => {
+    setDelegates((prev) => (prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]))
   }
 
   const handleSave = () => {
@@ -36,6 +96,11 @@ export const AgentEditModal: Component<AgentEditModalProps> = (props) => {
       model: model() || undefined,
       capabilities: capabilities(),
       systemPrompt: systemPrompt() || undefined,
+      tier: tier(),
+      tools: tools().length > 0 ? tools() : undefined,
+      delegates: delegates().length > 0 ? delegates() : undefined,
+      domain: domain() || undefined,
+      provider: provider() || undefined,
     })
   }
 
@@ -81,6 +146,30 @@ export const AgentEditModal: Component<AgentEditModalProps> = (props) => {
             />
           </FieldGroup>
 
+          {/* Tier */}
+          <FieldGroup label="Tier">
+            <select
+              value={tier()}
+              onChange={(e) => setTier(e.currentTarget.value as AgentTier)}
+              class="settings-input"
+              disabled={isBuiltIn()}
+            >
+              <For each={TIER_OPTIONS}>{(t) => <option value={t.value}>{t.label}</option>}</For>
+            </select>
+          </FieldGroup>
+
+          {/* Domain */}
+          <FieldGroup label="Domain">
+            <select
+              value={domain()}
+              onChange={(e) => setDomain(e.currentTarget.value)}
+              class="settings-input"
+            >
+              <For each={DOMAIN_OPTIONS}>{(d) => <option value={d}>{d || 'None'}</option>}</For>
+            </select>
+          </FieldGroup>
+
+          {/* Model */}
           <FieldGroup label="Model">
             <select
               value={model()}
@@ -91,6 +180,62 @@ export const AgentEditModal: Component<AgentEditModalProps> = (props) => {
             </select>
           </FieldGroup>
 
+          {/* Provider */}
+          <FieldGroup label="Provider (optional)">
+            <input
+              type="text"
+              value={provider()}
+              onInput={(e) => setProvider(e.currentTarget.value)}
+              placeholder="e.g. openrouter, anthropic"
+              class="settings-input"
+            />
+          </FieldGroup>
+
+          {/* Tools — for workers */}
+          <Show when={tier() === 'worker'}>
+            <FieldGroup label="Tools">
+              <div class="flex flex-wrap gap-1.5">
+                <For each={AVAILABLE_TOOLS}>
+                  {(tool) => {
+                    const isActive = () => tools().includes(tool)
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => toggleTool(tool)}
+                        class={`px-2 py-0.5 text-[10px] rounded-[var(--radius-md)] transition-colors duration-[var(--duration-fast)] ${isActive() ? 'bg-[var(--accent)] text-white' : 'bg-[var(--alpha-white-5)] text-[var(--text-tertiary)] hover:bg-[var(--alpha-white-8)] hover:text-[var(--text-secondary)]'}`}
+                      >
+                        {tool}
+                      </button>
+                    )
+                  }}
+                </For>
+              </div>
+            </FieldGroup>
+          </Show>
+
+          {/* Delegates — for leads and commander */}
+          <Show when={tier() === 'lead' || tier() === 'commander'}>
+            <FieldGroup label="Delegates to">
+              <div class="flex flex-wrap gap-1.5">
+                <For each={AVAILABLE_DELEGATES}>
+                  {(id) => {
+                    const isActive = () => delegates().includes(id)
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => toggleDelegate(id)}
+                        class={`px-2 py-0.5 text-[10px] rounded-[var(--radius-md)] transition-colors duration-[var(--duration-fast)] ${isActive() ? 'bg-[var(--accent)] text-white' : 'bg-[var(--alpha-white-5)] text-[var(--text-tertiary)] hover:bg-[var(--alpha-white-8)] hover:text-[var(--text-secondary)]'}`}
+                      >
+                        {id}
+                      </button>
+                    )
+                  }}
+                </For>
+              </div>
+            </FieldGroup>
+          </Show>
+
+          {/* Capabilities */}
           <FieldGroup label="Capabilities">
             <div class="flex flex-wrap gap-1.5">
               <For each={ALL_CAPABILITIES}>

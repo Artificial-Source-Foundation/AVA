@@ -73,6 +73,8 @@ export interface ToolCall {
   completedAt?: number
   filePath?: string
   diff?: { oldContent: string; newContent: string }
+  /** MCP UI resource for rich rendering (table, form, chart, image, markdown) */
+  uiResource?: { type: 'table' | 'form' | 'chart' | 'image' | 'markdown'; data: unknown }
 }
 
 export interface Agent {
@@ -175,6 +177,10 @@ export interface Workflow {
   updatedAt: number
   usageCount: number
   sourceSessionId?: string
+  /** Cron expression for scheduled execution (e.g. "0 9 * * *") */
+  schedule?: string
+  /** Timestamp of last scheduled run */
+  lastRun?: number
 }
 
 // Plugin types

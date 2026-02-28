@@ -25,6 +25,7 @@ export const DEFAULT_UI: UISettings = {
   showTokenCount: true,
   showModelInTitleBar: true,
   hideThinking: false,
+  sidebarOrder: ['sessions', 'explorer'],
 }
 
 export const DEFAULT_APPEARANCE: AppearanceSettings = {
@@ -67,6 +68,8 @@ export const DEFAULT_BEHAVIOR: BehaviorSettings = {
   lineNumbers: true,
   wordWrap: false,
   fileWatcher: false,
+  voiceDeviceId: '',
+  clipboardWatcher: false,
 }
 
 export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
@@ -98,5 +101,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   git: { ...DEFAULT_GIT },
   permissionMode: 'ask',
   mcpServers: [],
+  modelAliases: {},
   devMode: false,
+  enabledMicroagents: [],
 }

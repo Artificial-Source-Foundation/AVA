@@ -13,6 +13,7 @@ import {
   FolderOpen,
   FolderTree,
   Loader2,
+  Lock,
 } from 'lucide-solid'
 import {
   type Component,
@@ -60,6 +61,8 @@ const FileTreeNode: Component<{
   changedFiles: Map<string, FileOperationType>
   /** Set of directory paths that contain changed files */
   changedDirs: Set<string>
+  /** Set of file paths marked as read-only context */
+  readOnlyFiles: Set<string>
 }> = (props) => {
   const isExpanded = () => props.expanded.has(props.entry.path)
   const children = () => props.childrenMap.get(props.entry.path)
@@ -67,6 +70,7 @@ const FileTreeNode: Component<{
 
   const changeType = () => props.changedFiles.get(props.entry.path)
   const dirHasChanges = () => props.entry.isDir && props.changedDirs.has(props.entry.path)
+  const isReadOnly = () => !props.entry.isDir && props.readOnlyFiles.has(props.entry.path)
 
   return (
     <>
@@ -102,6 +106,13 @@ const FileTreeNode: Component<{
         </Show>
         <span class="truncate flex-1">{props.entry.name}</span>
 
+        {/* Read-only lock icon */}
+        <Show when={isReadOnly()}>
+          <span title="Read-only context" class="flex-shrink-0">
+            <Lock class="w-3 h-3 text-[var(--warning)]" />
+          </span>
+        </Show>
+
         {/* Change indicator dot for files */}
         <Show when={!props.entry.isDir && changeType()}>
           <span
@@ -134,6 +145,7 @@ const FileTreeNode: Component<{
               childrenMap={props.childrenMap}
               changedFiles={props.changedFiles}
               changedDirs={props.changedDirs}
+              readOnlyFiles={props.readOnlyFiles}
             />
           )}
         </For>
@@ -161,6 +173,8 @@ const FileContextMenu: Component<{
   state: ContextMenuState | null
   editors: EditorInfo[]
   onOpenIn: (editorCommand: string, filePath: string) => void
+  onToggleReadOnly: (filePath: string) => void
+  isReadOnly: (filePath: string) => boolean
   onClose: () => void
 }> = (props) => {
   const handleClickOutside = () => props.onClose()
@@ -175,12 +189,32 @@ const FileContextMenu: Component<{
             class="fixed z-50 min-w-[160px] py-1 rounded-md shadow-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)]"
             style={{ left: `${state().x}px`, top: `${state().y}px` }}
           >
+            {/* Read-only toggle (files only) */}
+            <Show when={!state().isDir}>
+              <button
+                type="button"
+                onClick={() => {
+                  props.onToggleReadOnly(state().path)
+                  props.onClose()
+                }}
+                class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--alpha-white-05)] cursor-pointer text-left"
+              >
+                <Lock class="w-3 h-3 flex-shrink-0" />
+                {props.isReadOnly(state().path) ? 'Remove read-only' : 'Mark as read-only'}
+              </button>
+              <Show when={props.editors.length > 0}>
+                <div class="my-0.5 border-t border-[var(--border-subtle)]" />
+              </Show>
+            </Show>
+
             <Show
               when={props.editors.length > 0}
               fallback={
-                <div class="px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
-                  No editors detected
-                </div>
+                <Show when={state().isDir}>
+                  <div class="px-3 py-1.5 text-[10px] text-[var(--text-muted)]">
+                    No editors detected
+                  </div>
+                </Show>
               }
             >
               <div class="px-3 py-1 text-[10px] text-[var(--text-muted)] uppercase tracking-wider">
@@ -264,6 +298,9 @@ export const SidebarExplorer: Component = () => {
     }
     return map
   })
+
+  // Build a set of read-only file paths for quick lookup
+  const readOnlyFilesSet = createMemo(() => new Set(session.readOnlyFiles()))
 
   // Build a set of directory paths that contain changed files
   const changedDirs = createMemo(() => {
@@ -389,6 +426,7 @@ export const SidebarExplorer: Component = () => {
                   childrenMap={childrenMap()}
                   changedFiles={changedFiles()}
                   changedDirs={changedDirs()}
+                  readOnlyFiles={readOnlyFilesSet()}
                 />
               )}
             </For>
@@ -409,6 +447,8 @@ export const SidebarExplorer: Component = () => {
         state={contextMenu()}
         editors={editors()}
         onOpenIn={handleOpenIn}
+        onToggleReadOnly={(path) => session.toggleReadOnly(path)}
+        isReadOnly={(path) => session.isReadOnly(path)}
         onClose={() => setContextMenu(null)}
       />
     </div>

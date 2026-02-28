@@ -69,6 +69,7 @@ const VERB_PAIRS: Record<string, [string, string]> = {
   ls: ['Listing', 'Listed'],
   websearch: ['Searching', 'Searched'],
   webfetch: ['Fetching', 'Fetched'],
+  task: ['Delegating to', 'Delegated to'],
 }
 
 /**
@@ -186,6 +187,11 @@ export function summarizeAction(name: string, args: Record<string, unknown>): st
       return args.query ? `searching web for "${args.query}"` : 'searching the web'
     case 'webfetch':
       return args.url ? `fetching ${args.url}` : 'fetching web page'
+    case 'task': {
+      const goal = String(args.goal ?? args.description ?? args.prompt ?? '')
+      const short = goal.length > 60 ? `${goal.slice(0, 57)}...` : goal
+      return short ? `delegating: ${short}` : 'delegating task'
+    }
     default:
       return shortPath ? `${name} ${shortPath}` : name
   }

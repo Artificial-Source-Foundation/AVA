@@ -5,7 +5,7 @@
  * Port of the logic from provider-row-expanded.tsx into the card layout.
  */
 
-import { ExternalLink, Loader2, LogIn, LogOut, RefreshCw, Trash2 } from 'lucide-solid'
+import { ExternalLink, Loader2, LogIn, LogOut, RefreshCw, Server, Trash2 } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import type {
   LLMProviderConfig,
@@ -21,6 +21,7 @@ import { logError } from '../../../../services/logger'
 import { fetchModels } from '../../../../services/providers/model-fetcher'
 import type { LLMProvider } from '../../../../types/llm'
 import { DeviceCodeDialog } from '../../DeviceCodeDialog'
+import { OllamaModelBrowser } from '../../OllamaModelBrowser'
 import { ProviderRowApiKeyInput } from '../provider-row-api-key-input'
 import { ProviderRowClearConfirm } from '../provider-row-clear-confirm'
 import { checkStoredOAuth, clearProviderCredentials } from '../providers-tab-helpers'
@@ -45,6 +46,7 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
   const [oauthError, setOauthError] = createSignal<string | null>(null)
   const [deviceCode, setDeviceCode] = createSignal<DeviceCodeResponse | null>(null)
   const [showClearConfirm, setShowClearConfirm] = createSignal(false)
+  const [showOllamaBrowser, setShowOllamaBrowser] = createSignal(false)
 
   const hasAnyCredentials = () => !!props.provider.apiKey || isOAuthConnected()
 
@@ -195,6 +197,23 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
           value={props.provider.baseUrl || ''}
           placeholder="http://localhost:11434"
           class="w-full px-3 py-2 bg-[var(--input-background)] text-xs text-[var(--text-primary)] placeholder:text-[var(--input-placeholder)] border border-[var(--input-border)] rounded-[var(--radius-md)] focus:outline-none focus:border-[var(--input-border-focus)] transition-colors"
+        />
+      </Show>
+
+      {/* Ollama model browser */}
+      <Show when={props.provider.id === 'ollama'}>
+        <button
+          type="button"
+          onClick={() => setShowOllamaBrowser(true)}
+          class="flex items-center gap-2 w-full px-3 py-2 text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent)] bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
+        >
+          <Server class="w-3 h-3" />
+          Manage Local Models
+        </button>
+        <OllamaModelBrowser
+          open={showOllamaBrowser()}
+          onClose={() => setShowOllamaBrowser(false)}
+          baseUrl={props.provider.baseUrl}
         />
       </Show>
 

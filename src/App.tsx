@@ -11,21 +11,31 @@ import { createEffect, createSignal, on, onCleanup, onMount, Show } from 'solid-
 import { CommandPalette, createDefaultCommands } from './components/CommandPalette'
 import { QuickModelPicker } from './components/chat/QuickModelPicker'
 import { SessionSwitcher } from './components/chat/SessionSwitcher'
+import {
+  ChangelogDialog,
+  markChangelogSeen,
+  shouldShowChangelog,
+} from './components/dialogs/ChangelogDialog'
 import { CheckpointDialog } from './components/dialogs/CheckpointDialog'
+import { ExportOptionsDialog } from './components/dialogs/ExportOptionsDialog'
 import type { OnboardingData } from './components/dialogs/OnboardingDialog'
 import { OnboardingScreen } from './components/dialogs/OnboardingDialog'
+import { UpdateDialog } from './components/dialogs/UpdateDialog'
 import { WorkflowDialog } from './components/dialogs/WorkflowDialog'
 import { AppShell } from './components/layout'
 import { ProjectHub } from './components/projects'
 import { SplashScreen } from './components/SplashScreen'
 import { validateEnv } from './config/env'
 import { useNotification } from './contexts/notification'
-import { exportConversation } from './lib/export-conversation'
+import { type ExportOptions, exportConversation } from './lib/export-conversation'
+import { checkForUpdate, downloadAndInstallUpdate, type UpdateInfo } from './services/auto-updater'
 import { initCoreBridge } from './services/core-bridge'
 import { initDatabase } from './services/database'
+import { initDeepLinks } from './services/deep-link'
 import { installConsoleCapture, setLogDirectory } from './services/dev-console'
 import { initLogger, logError, logInfo } from './services/logger'
 import { initSettingsFS } from './services/settings-fs'
+import { type ScheduledWorkflow, startScheduler } from './services/workflow-scheduler'
 import { useLayout } from './stores/layout'
 import { useProject } from './stores/project'
 import { useSession } from './stores/session'
@@ -84,9 +94,13 @@ function App() {
   const { settings, updateSettings, updateProvider, isToolAutoApproved } = useSettings()
   const { registerAction, setupShortcutListener } = useShortcuts()
   const { info } = useNotification()
-  const { loadWorkflows } = useWorkflows()
+  const { loadWorkflows, getScheduledWorkflows, markWorkflowRun, workflows } = useWorkflows()
   const [workflowDialogOpen, setWorkflowDialogOpen] = createSignal(false)
   const [checkpointDialogOpen, setCheckpointDialogOpen] = createSignal(false)
+  const [exportDialogOpen, setExportDialogOpen] = createSignal(false)
+  const [updateDialogOpen, setUpdateDialogOpen] = createSignal(false)
+  const [updateInfo, setUpdateInfo] = createSignal<UpdateInfo | null>(null)
+  const [changelogOpen, setChangelogOpen] = createSignal(false)
 
   // Show toast when env API keys are detected (fires after init completes)
   createEffect(
@@ -113,6 +127,35 @@ function App() {
     }
     window.addEventListener('ava:compacted', handleCompacted)
     onCleanup(() => window.removeEventListener('ava:compacted', handleCompacted))
+  })
+
+  // Auto-show changelog after update
+  onMount(() => {
+    if (shouldShowChangelog()) {
+      setChangelogOpen(true)
+    }
+    const handleOpenChangelog = () => setChangelogOpen(true)
+    window.addEventListener('ava:open-changelog', handleOpenChangelog)
+    onCleanup(() => window.removeEventListener('ava:open-changelog', handleOpenChangelog))
+  })
+
+  // Auto-check for updates on startup + manual trigger via custom event
+  onMount(() => {
+    const doCheck = async () => {
+      const result = await checkForUpdate()
+      setUpdateInfo(result)
+      if (result.available) {
+        setUpdateDialogOpen(true)
+      }
+    }
+    // Delay auto-check so it doesn't slow down startup
+    const timer = setTimeout(() => void doCheck(), 5_000)
+    const handleCheckUpdate = () => void doCheck()
+    window.addEventListener('ava:check-update', handleCheckUpdate)
+    onCleanup(() => {
+      clearTimeout(timer)
+      window.removeEventListener('ava:check-update', handleCheckUpdate)
+    })
   })
 
   onMount(async () => {
@@ -150,7 +193,7 @@ function App() {
     registerAction('export-chat', () => {
       const msgs = messages()
       if (msgs.length === 0) return
-      exportConversation(msgs, currentSession()?.name)
+      setExportDialogOpen(true)
     })
     registerAction('undo-file-change', async () => {
       const filePath = await undoFileChange()
@@ -255,12 +298,52 @@ function App() {
       setSplashStatus('Loading projects...')
       await initializeProjects()
 
+      setSplashStatus('Loading plugins...')
+      try {
+        const { loadInstalledPlugins } = await import('./services/extension-loader')
+        const { createExtensionAPI } = await import('../packages/core-v2/src/extensions/api.js')
+        const { getMessageBus } = await import('../packages/core-v2/src/bus/index.js')
+        const { createSessionManager } = await import('../packages/core-v2/src/session/index.js')
+        const sessionMgr = createSessionManager()
+        const pluginResult = await loadInstalledPlugins((name) =>
+          createExtensionAPI(name, getMessageBus(), sessionMgr)
+        )
+        onCleanup(pluginResult.cleanup)
+      } catch (err) {
+        console.warn('[App] Plugin loading skipped:', err)
+      }
+
+      // Initialize deep link handler (ava:// protocol)
+      const deepLinkHandle = initDeepLinks()
+      onCleanup(() => deepLinkHandle.dispose())
+
       setSplashStatus('Restoring project session...')
       if (currentProject()) {
         setProjectHubVisible(false)
         await loadSessionsForCurrentProject()
         await restoreForCurrentProject()
         await loadWorkflows(currentProject()?.id)
+
+        // Start workflow scheduler for cron-based workflows
+        const scheduled = getScheduledWorkflows()
+        if (scheduled.length > 0) {
+          const entries: ScheduledWorkflow[] = scheduled.map((w) => ({
+            id: w.id,
+            cron: w.schedule!,
+            lastRun: w.lastRun,
+          }))
+          const scheduler = startScheduler(entries, (id) => {
+            const wf = workflows().find((w) => w.id === id)
+            if (wf) {
+              markWorkflowRun(id)
+              logInfo('Scheduler', `Triggering workflow: ${wf.name}`)
+              window.dispatchEvent(
+                new CustomEvent('ava:set-input', { detail: { text: wf.prompt } })
+              )
+            }
+          })
+          onCleanup(scheduler.stop)
+        }
       } else {
         setProjectHubVisible(true)
       }
@@ -380,7 +463,7 @@ function App() {
                   exportChat: () => {
                     const msgs = messages()
                     if (msgs.length === 0) return
-                    exportConversation(msgs, currentSession()?.name)
+                    setExportDialogOpen(true)
                   },
                   initProject: () => {
                     const project = currentProject()
@@ -408,6 +491,22 @@ function App() {
                   browseWorkflows: () => {
                     loadWorkflows(currentProject()?.id)
                   },
+                  importWorkflows: async () => {
+                    try {
+                      const { importFromFile } = useWorkflows()
+                      const count = await importFromFile()
+                      info('Imported', `${count} workflow${count !== 1 ? 's' : ''} imported`)
+                    } catch (err) {
+                      info('Import failed', err instanceof Error ? err.message : 'Unknown error')
+                    }
+                  },
+                  exportWorkflows: () => {
+                    const { exportAll } = useWorkflows()
+                    exportAll()
+                  },
+                  openProjectStats: () => {
+                    window.dispatchEvent(new CustomEvent('ava:open-project-stats'))
+                  },
                   saveCheckpoint: () => {
                     if (messages().length === 0) return
                     setCheckpointDialogOpen(true)
@@ -425,6 +524,26 @@ function App() {
                   const id = await createCheckpoint(desc)
                   if (id) info('Checkpoint saved', desc)
                 }}
+              />
+              <ExportOptionsDialog
+                open={exportDialogOpen()}
+                onClose={() => setExportDialogOpen(false)}
+                onExport={(opts: ExportOptions) => {
+                  exportConversation(messages(), currentSession()?.name, opts)
+                }}
+              />
+              <ChangelogDialog
+                open={changelogOpen()}
+                onClose={() => {
+                  setChangelogOpen(false)
+                  markChangelogSeen()
+                }}
+              />
+              <UpdateDialog
+                open={updateDialogOpen()}
+                updateInfo={updateInfo()}
+                onClose={() => setUpdateDialogOpen(false)}
+                onInstall={downloadAndInstallUpdate}
               />
             </Show>
           </Show>

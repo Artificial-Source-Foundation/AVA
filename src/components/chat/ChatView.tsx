@@ -7,8 +7,14 @@
  */
 
 import { type Component, createEffect, createMemo, on, onCleanup } from 'solid-js'
+import { useNotification } from '../../contexts/notification'
 import { useAgent } from '../../hooks/useAgent'
 import { useChat } from '../../hooks/useChat'
+import {
+  type ClipboardWatcher,
+  createClipboardWatcher,
+  looksLikeCode,
+} from '../../services/clipboard-watcher'
 import type { AIComment } from '../../services/file-watcher'
 import { startFileWatcher, stopFileWatcher } from '../../services/file-watcher'
 import { logInfo } from '../../services/logger'
@@ -53,6 +59,33 @@ export const ChatView: Component = () => {
 
   onCleanup(() => {
     void stopFileWatcher()
+  })
+
+  // Clipboard watcher — notify when code is detected in clipboard
+  const { info } = useNotification()
+  let clipboardWatcherInstance: ClipboardWatcher | undefined
+
+  createEffect(
+    on(
+      () => settings().behavior.clipboardWatcher,
+      (enabled) => {
+        if (enabled) {
+          clipboardWatcherInstance = createClipboardWatcher((text) => {
+            if (looksLikeCode(text)) {
+              info('Clipboard code detected', 'Add to context?')
+            }
+          })
+          clipboardWatcherInstance.start()
+        } else {
+          clipboardWatcherInstance?.stop()
+          clipboardWatcherInstance = undefined
+        }
+      }
+    )
+  )
+
+  onCleanup(() => {
+    clipboardWatcherInstance?.stop()
   })
 
   // Merge approval from both agent and chat modes

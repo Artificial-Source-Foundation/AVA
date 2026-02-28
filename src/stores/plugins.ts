@@ -1,11 +1,17 @@
 import { createMemo, createSignal } from 'solid-js'
 import {
+  cloneExtension,
+  linkLocalExtension,
+  listGitExtensions,
+  uninstallGitExtension,
+} from '../services/git-extension'
+import {
   installPlugin,
   loadPluginsState,
   setPluginEnabled,
   uninstallPlugin,
 } from '../services/plugins-fs'
-import type { PluginCatalogItem, PluginState } from '../types/plugin'
+import type { PluginCatalogItem, PluginScope, PluginState } from '../types/plugin'
 import {
   FEATURED_PLUGIN_IDS,
   PLUGIN_CATALOG,
@@ -115,8 +121,12 @@ function createPluginsStore() {
     setPendingAction(id, 'install')
     setState(id, { installed: true, enabled: true })
 
+    // Look up download URL from catalog
+    const catalogItem = PLUGIN_CATALOG.find((p) => p.id === id)
+    const downloadUrl = catalogItem?.downloadUrl
+
     try {
-      const next = await runLifecycle(() => installPlugin(id))
+      const next = await runLifecycle(() => installPlugin(id, downloadUrl))
       setState(id, next)
       setFailedAction(id, null)
     } catch (error) {
@@ -242,6 +252,93 @@ function createPluginsStore() {
     }
   }
 
+  const installFromGit = async (repoUrl: string) => {
+    const tempId = `git:${repoUrl}`
+    if (pendingActions()[tempId]) return
+
+    clearError(tempId)
+    setPendingAction(tempId, 'install')
+
+    try {
+      const result = await runLifecycle(() => cloneExtension(repoUrl))
+      const gitPlugins = await listGitExtensions()
+      const meta = gitPlugins.find((p) => p.name === result.name)
+      setState(result.name, {
+        installed: true,
+        enabled: true,
+        version: meta?.version,
+        installedAt: Date.now(),
+        installPath: result.path,
+        sourceType: 'git',
+        sourceUrl: repoUrl,
+      })
+      setFailedAction(tempId, null)
+      // Clean up temp id
+      setPendingAction(tempId, null)
+      return result.name
+    } catch (error) {
+      setFailedAction(tempId, 'install')
+      setError(tempId, error instanceof Error ? error.message : 'Failed to install from git.')
+      setPendingAction(tempId, null)
+      throw error
+    }
+  }
+
+  const linkLocal = async (localPath: string) => {
+    const tempId = `local:${localPath}`
+    if (pendingActions()[tempId]) return
+
+    clearError(tempId)
+    setPendingAction(tempId, 'install')
+
+    try {
+      const result = await runLifecycle(() => linkLocalExtension(localPath))
+      const gitPlugins = await listGitExtensions()
+      const meta = gitPlugins.find((p) => p.name === result.name)
+      setState(result.name, {
+        installed: true,
+        enabled: true,
+        version: meta?.version,
+        installedAt: Date.now(),
+        installPath: localPath,
+        sourceType: 'local-link',
+        sourceUrl: localPath,
+      })
+      setFailedAction(tempId, null)
+      setPendingAction(tempId, null)
+      return result.name
+    } catch (error) {
+      setFailedAction(tempId, 'install')
+      setError(tempId, error instanceof Error ? error.message : 'Failed to link local extension.')
+      setPendingAction(tempId, null)
+      throw error
+    }
+  }
+
+  const uninstallGit = async (name: string) => {
+    if (pendingActions()[name]) return
+
+    clearError(name)
+    setPendingAction(name, 'uninstall')
+
+    try {
+      await runLifecycle(() => uninstallGitExtension(name))
+      clearState(name)
+      setFailedAction(name, null)
+    } catch (error) {
+      setFailedAction(name, 'uninstall')
+      setError(name, error instanceof Error ? error.message : 'Failed to uninstall.')
+    } finally {
+      setPendingAction(name, null)
+    }
+  }
+
+  const setPluginScope = (id: string, scope: PluginScope) => {
+    const current = pluginState()[id]
+    if (!current?.installed) return
+    setState(id, { ...current, scope })
+  }
+
   void refresh()
 
   return {
@@ -264,6 +361,10 @@ function createPluginsStore() {
     install,
     uninstall,
     toggleEnabled,
+    installFromGit,
+    linkLocal,
+    uninstallGit,
+    setPluginScope,
     pendingAction: (id: string) => pendingActions()[id] ?? null,
     failedAction: (id: string) => failedActionsByPlugin()[id] ?? null,
     errorFor: (id: string) => errorsByPlugin()[id] ?? null,

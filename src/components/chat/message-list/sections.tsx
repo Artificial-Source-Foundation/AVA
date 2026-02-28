@@ -1,4 +1,4 @@
-import { Bug, FlaskConical, Play, Search, Sparkles, Wand2 } from 'lucide-solid'
+import { Bug, Download, FlaskConical, Play, Search, Sparkles, Upload, Wand2 } from 'lucide-solid'
 import { type Component, For, Show } from 'solid-js'
 import { useWorkflows } from '../../../stores/workflows'
 
@@ -37,14 +37,34 @@ export const MessageListLoading: Component = () => (
 )
 
 const WorkflowCards: Component = () => {
-  const { workflows, applyWorkflow } = useWorkflows()
+  const { workflows, applyWorkflow, importFromFile, exportAll } = useWorkflows()
   const topWorkflows = () => workflows().slice(0, 4)
 
   return (
     <Show when={topWorkflows().length > 0}>
       <div class="mt-4 max-w-md w-full">
-        <div class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-          Workflows
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+            Workflows
+          </div>
+          <div class="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => importFromFile()}
+              title="Import workflows"
+              class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--alpha-white-5)] transition-colors"
+            >
+              <Upload class="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => exportAll()}
+              title="Export all workflows"
+              class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--alpha-white-5)] transition-colors"
+            >
+              <Download class="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
         <div class="grid grid-cols-2 gap-2">
           <For each={topWorkflows()}>

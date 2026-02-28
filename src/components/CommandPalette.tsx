@@ -7,17 +7,21 @@
 
 import { Dialog } from '@kobalte/core/dialog'
 import {
+  ArrowDownCircle,
+  BarChart3,
   BookmarkPlus,
   Command,
   Download,
   FileText,
   Flag,
   Library,
+  Megaphone,
   MessageSquare,
   Search,
   Settings,
   Sparkles,
   Terminal,
+  Upload,
 } from 'lucide-solid'
 import {
   type Component,
@@ -358,6 +362,9 @@ export const createDefaultCommands = (handlers: {
   switchTab?: (tab: string) => void
   saveWorkflow?: () => void
   browseWorkflows?: () => void
+  importWorkflows?: () => void
+  exportWorkflows?: () => void
+  openProjectStats?: () => void
   saveCheckpoint?: () => void
 }): CommandItem[] => [
   {
@@ -452,6 +459,30 @@ export const createDefaultCommands = (handlers: {
     action: handlers.browseWorkflows || (() => {}),
   },
   {
+    id: 'import-workflows',
+    label: 'Import Workflows',
+    description: 'Import workflows from a JSON file',
+    icon: Upload,
+    category: 'Workflows',
+    action: handlers.importWorkflows || (() => {}),
+  },
+  {
+    id: 'export-workflows',
+    label: 'Export Workflows',
+    description: 'Export all workflows as JSON',
+    icon: Download,
+    category: 'Workflows',
+    action: handlers.exportWorkflows || (() => {}),
+  },
+  {
+    id: 'project-stats',
+    label: 'Project Stats',
+    description: 'View project-level usage and cost statistics',
+    icon: BarChart3,
+    category: 'Session',
+    action: handlers.openProjectStats || (() => {}),
+  },
+  {
     id: 'save-checkpoint',
     label: 'Save Checkpoint',
     description: 'Create a named snapshot of the conversation',
@@ -459,5 +490,21 @@ export const createDefaultCommands = (handlers: {
     category: 'Session',
     shortcut: '⌘⇧C',
     action: handlers.saveCheckpoint || (() => {}),
+  },
+  {
+    id: 'whats-new',
+    label: "What's New",
+    description: 'View recent changes and release notes',
+    icon: Megaphone,
+    category: 'General',
+    action: () => window.dispatchEvent(new CustomEvent('ava:open-changelog')),
+  },
+  {
+    id: 'check-updates',
+    label: 'Check for Updates',
+    description: 'Check if a new version of AVA is available',
+    icon: ArrowDownCircle,
+    category: 'General',
+    action: () => window.dispatchEvent(new CustomEvent('ava:check-update')),
   },
 ]

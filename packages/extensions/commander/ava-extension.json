@@ -4,7 +4,7 @@
   "description": "Team Lead → Senior Leads → Junior Devs hierarchy",
   "main": "src/index.ts",
   "builtIn": true,
-  "enabledByDefault": false,
+  "enabledByDefault": true,
   "priority": 20,
-  "capabilities": ["agent-mode"]
+  "capabilities": ["agent-mode", "tools"]
 }

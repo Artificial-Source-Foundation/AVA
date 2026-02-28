@@ -14,8 +14,9 @@ import {
   Settings,
   Sparkles,
 } from 'lucide-solid'
-import { type Component, For, Show } from 'solid-js'
+import { type Component, createMemo, For, Show } from 'solid-js'
 import { type ActivityId, useLayout } from '../../stores/layout'
+import { useSettings } from '../../stores/settings'
 
 interface ActivityItem {
   id: ActivityId
@@ -23,10 +24,12 @@ interface ActivityItem {
   label: string
 }
 
-const activities: ActivityItem[] = [
+const ALL_ACTIVITIES: ActivityItem[] = [
   { id: 'sessions', icon: MessageSquare, label: 'Sessions' },
   { id: 'explorer', icon: FolderTree, label: 'Explorer' },
 ]
+
+const DEFAULT_ORDER: ActivityId[] = ['sessions', 'explorer']
 
 export const ActivityBar: Component = () => {
   const {
@@ -37,6 +40,24 @@ export const ActivityBar: Component = () => {
     openSettings,
     settingsOpen,
   } = useLayout()
+  const { settings } = useSettings()
+
+  /** Activities sorted by the user's sidebar order preference */
+  const activities = createMemo(() => {
+    const order = settings().ui.sidebarOrder
+    const validOrder = order?.length ? order : DEFAULT_ORDER
+    const activityMap = new Map(ALL_ACTIVITIES.map((a) => [a.id, a]))
+    const sorted: ActivityItem[] = []
+    for (const id of validOrder) {
+      const item = activityMap.get(id as ActivityId)
+      if (item) sorted.push(item)
+    }
+    // Append any missing activities not in the order
+    for (const item of ALL_ACTIVITIES) {
+      if (!sorted.find((s) => s.id === item.id)) sorted.push(item)
+    }
+    return sorted
+  })
 
   const isActive = (id: ActivityId) => activeActivity() === id && sidebarVisible()
 
@@ -58,7 +79,7 @@ export const ActivityBar: Component = () => {
 
       {/* Activity Icons */}
       <div class="flex flex-col items-center gap-0.5 mt-1 flex-1">
-        <For each={activities}>
+        <For each={activities()}>
           {(item) => {
             const Icon = item.icon
             const active = () => isActive(item.id)

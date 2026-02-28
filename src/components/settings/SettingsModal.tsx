@@ -73,6 +73,10 @@ export const SettingsModal: Component = () => {
       model: '',
       isCustom: true,
       type: 'custom',
+      tier: 'worker',
+      tools: [],
+      delegates: [],
+      domain: '',
     })
   }
 

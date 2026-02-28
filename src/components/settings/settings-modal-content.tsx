@@ -11,6 +11,7 @@ import { DeveloperTab } from './tabs/DeveloperTab'
 import { type Keybinding, KeybindingsTab } from './tabs/KeybindingsTab'
 import { LLMTab } from './tabs/LLMTab'
 import { type MCPServer, MCPServersTab } from './tabs/MCPServersTab'
+import { MicroagentsTab } from './tabs/MicroagentsTab'
 import { PermissionsTab } from './tabs/PermissionsTab'
 import { PluginsTab } from './tabs/PluginsTab'
 import { ProvidersTab } from './tabs/providers/providers-tab'
@@ -108,6 +109,10 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
 
       <Show when={props.activeTab() === 'plugins'}>
         <PluginsTab />
+      </Show>
+
+      <Show when={props.activeTab() === 'microagents'}>
+        <MicroagentsTab />
       </Show>
 
       <Show when={props.activeTab() === 'commands'}>

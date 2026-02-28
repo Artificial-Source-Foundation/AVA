@@ -22,6 +22,8 @@ export interface ToolContext {
   provider?: string
   /** Model ID for subagent inheritance. */
   model?: string
+  /** Event forwarding for subagent tools. Uses Record to avoid circular dep (tools → agent → tools). */
+  onEvent?: (event: Record<string, unknown>) => void
 }
 
 // ─── Tool Location ───────────────────────────────────────────────────────────

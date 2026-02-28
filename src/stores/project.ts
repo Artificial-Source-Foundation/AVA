@@ -319,6 +319,34 @@ export function useProject() {
     },
 
     /**
+     * Set the working directory for the current project.
+     * Re-detects git info and updates the FS scope.
+     */
+    setCurrentDirectory: async (path: string): Promise<void> => {
+      const detected = await detectProject(path)
+      const project = await getOrCreateProject(detected.rootDirectory, detected.suggestedName)
+
+      if (detected.isGitRepo) {
+        await dbUpdateProject(project.id as ProjectId, {
+          git: { branch: detected.branch, rootCommit: detected.rootCommit },
+        })
+      }
+
+      const updatedProject: Project = {
+        ...project,
+        git: detected.isGitRepo
+          ? { branch: detected.branch, rootCommit: detected.rootCommit }
+          : undefined,
+      }
+      setCurrentProject(updatedProject)
+      invoke('allow_project_path', { path: updatedProject.directory }).catch(() => {})
+      localStorage.setItem(STORAGE_KEYS.LAST_PROJECT, project.id)
+
+      const dbProjects = await getProjectsWithStats()
+      setProjects(dbProjects)
+    },
+
+    /**
      * Clear current project selection
      */
     clearCurrentProject: () => {

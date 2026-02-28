@@ -43,7 +43,7 @@ const shortName = (path: string) => {
 const displayPath = (path: string) => {
   const parts = path.split('/')
   if (parts.length <= 3) return path
-  return '.../' + parts.slice(-3).join('/')
+  return `.../${parts.slice(-3).join('/')}`
 }
 
 function buildDiff(change: PendingChange): DiffLine[] {

@@ -6,7 +6,9 @@
  * and accessibility (high contrast + reduce motion).
  */
 
+import { ChevronDown, ChevronUp } from 'lucide-solid'
 import { type Component, createMemo, For, Show } from 'solid-js'
+import { THEME_PRESETS, type ThemePreset } from '../../../config/theme-presets'
 import type {
   AccentColor,
   BorderRadius,
@@ -461,15 +463,126 @@ const AccessibilitySection: Component = () => {
 }
 
 // ============================================================================
+// Sidebar Order Section
+// ============================================================================
+
+const SIDEBAR_LABELS: Record<string, string> = {
+  sessions: 'Sessions',
+  explorer: 'Explorer',
+}
+
+const SidebarOrderSection: Component = () => {
+  const { settings, updateUI } = useSettings()
+
+  const order = () => {
+    const saved = settings().ui.sidebarOrder
+    return saved?.length ? saved : ['sessions', 'explorer']
+  }
+
+  const moveItem = (index: number, direction: -1 | 1) => {
+    const current = [...order()]
+    const target = index + direction
+    if (target < 0 || target >= current.length) return
+    ;[current[index], current[target]] = [current[target], current[index]]
+    updateUI({ sidebarOrder: current })
+  }
+
+  return (
+    <div>
+      <SectionHeader title="Sidebar Order" />
+      <div class="space-y-1">
+        <For each={order()}>
+          {(id, index) => (
+            <div class="flex items-center justify-between py-1 px-2 rounded-[var(--radius-md)] bg-[var(--surface-raised)]">
+              <span class="text-xs text-[var(--text-secondary)]">{SIDEBAR_LABELS[id] ?? id}</span>
+              <div class="flex gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => moveItem(index(), -1)}
+                  disabled={index() === 0}
+                  class="p-0.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-05)] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                  title="Move up"
+                >
+                  <ChevronUp class="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => moveItem(index(), 1)}
+                  disabled={index() === order().length - 1}
+                  class="p-0.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-05)] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                  title="Move down"
+                >
+                  <ChevronDown class="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+        </For>
+      </div>
+    </div>
+  )
+}
+
+// ============================================================================
 // Appearance Tab Component
 // ============================================================================
 
 export const AppearanceTab: Component = () => {
-  const { settings, updateAppearance, previewAppearance, restoreAppearance } = useSettings()
+  const { settings, updateSettings, updateAppearance, previewAppearance, restoreAppearance } =
+    useSettings()
+
+  const applyPreset = (preset: ThemePreset) => {
+    // Apply mode setting
+    updateSettings({ mode: preset.mode })
+    // Apply appearance settings
+    const appearance: Record<string, unknown> = {
+      accentColor: preset.accentColor,
+      codeTheme: preset.codeTheme,
+      borderRadius: preset.borderRadius,
+    }
+    if (preset.customAccentColor) {
+      appearance.customAccentColor = preset.customAccentColor
+    }
+    if (preset.darkStyle) {
+      appearance.darkStyle = preset.darkStyle
+    }
+    updateAppearance(appearance)
+  }
 
   return (
     <div class="space-y-5">
       <ColorModeSection />
+
+      {/* Theme Presets */}
+      <div>
+        <SectionHeader title="Theme Presets" />
+        <div class="grid grid-cols-3 gap-1.5">
+          <For each={THEME_PRESETS}>
+            {(preset) => (
+              <button
+                type="button"
+                onClick={() => applyPreset(preset)}
+                class="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] hover:border-[var(--accent-muted)] transition-colors text-left"
+                title={`${preset.name} (${preset.mode})`}
+              >
+                <div
+                  class="w-5 h-5 rounded-full flex-shrink-0 border border-[var(--border-default)]"
+                  style={{
+                    background: `linear-gradient(135deg, ${preset.swatch} 50%, ${preset.swatchAlt} 50%)`,
+                  }}
+                />
+                <div class="min-w-0">
+                  <p class="text-[10px] font-medium text-[var(--text-primary)] truncate">
+                    {preset.name}
+                  </p>
+                  <p class="text-[9px] text-[var(--text-muted)]">{preset.mode}</p>
+                </div>
+              </button>
+            )}
+          </For>
+        </div>
+      </div>
+
       <AccentSection />
 
       {/* UI Scale */}
@@ -581,6 +694,7 @@ export const AppearanceTab: Component = () => {
       <FontSection />
       <CodeThemeSection />
       <AccessibilitySection />
+      <SidebarOrderSection />
     </div>
   )
 }

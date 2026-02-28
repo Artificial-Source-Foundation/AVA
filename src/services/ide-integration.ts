@@ -5,6 +5,7 @@
  * Uses Tauri shell plugin to check for editor CLIs.
  */
 
+import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs'
 import { Command } from '@tauri-apps/plugin-shell'
 
 export interface EditorInfo {
@@ -104,4 +105,61 @@ export async function openProjectInEditor(
 /** Reset the cached editors (e.g., after user installs a new editor) */
 export function resetEditorCache(): void {
   cachedEditors = null
+}
+
+/**
+ * Open text in an external terminal editor ($EDITOR / $VISUAL).
+ * Writes text to a temp file, spawns the editor, waits for exit, reads back.
+ * Returns the edited text. Falls back to nano, then vi if no env var is set.
+ */
+export async function openInExternalEditor(text: string): Promise<string> {
+  const tmpPath = `/tmp/ava-prompt-${Date.now()}.md`
+  await writeTextFile(tmpPath, text)
+
+  // Determine editor: $VISUAL > $EDITOR > nano > vi
+  let editorCmd = ''
+  for (const envVar of ['VISUAL', 'EDITOR']) {
+    try {
+      const result = await Command.create('printenv', [envVar]).execute()
+      const val = result.stdout.trim()
+      if (val) {
+        editorCmd = val
+        break
+      }
+    } catch {
+      // env var not set
+    }
+  }
+
+  if (!editorCmd) {
+    // Fallback: check for nano, then vi
+    for (const fallback of ['nano', 'vi']) {
+      try {
+        const which = await Command.create('which', [fallback]).execute()
+        if (which.code === 0) {
+          editorCmd = fallback
+          break
+        }
+      } catch {}
+    }
+  }
+
+  if (!editorCmd) {
+    throw new Error('No terminal editor found. Set $EDITOR or $VISUAL.')
+  }
+
+  // Open terminal with editor command
+  // Use a wrapper script to open in a terminal emulator
+  const script = `${editorCmd} "${tmpPath}"`
+  const termCmd = Command.create('bash', ['-c', script])
+  await termCmd.execute()
+
+  const result = await readTextFile(tmpPath)
+  // Clean up temp file
+  try {
+    await Command.create('rm', [tmpPath]).execute()
+  } catch {
+    // ignore cleanup failure
+  }
+  return result
 }

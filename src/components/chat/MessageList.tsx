@@ -48,7 +48,9 @@ export const MessageList: Component = () => {
   let scrollRaf: number | undefined
   const { settings } = useSettings()
   const [shouldAutoScroll, setShouldAutoScroll] = createSignal(true)
-  const [visibleLimit, setVisibleLimit] = createSignal(220)
+  // Adaptive visible limit based on viewport height (~60px per message row)
+  const adaptiveChunk = () => Math.max(50, Math.min(300, Math.floor(window.innerHeight / 60)))
+  const [visibleLimit, setVisibleLimit] = createSignal(adaptiveChunk())
   const [deleteTarget, setDeleteTarget] = createSignal<{
     messageId: string
     isLast: boolean
@@ -187,6 +189,11 @@ export const MessageList: Component = () => {
       if (nextAutoScroll !== shouldAutoScroll()) {
         setShouldAutoScroll(nextAutoScroll)
       }
+
+      // Scroll-up backfill: load older messages when near top
+      if (scrollTop < 200 && hiddenMessageCount() > 0) {
+        loadOlderMessages()
+      }
     })
   }
 
@@ -213,7 +220,8 @@ export const MessageList: Component = () => {
   }
 
   const loadOlderMessages = () => {
-    setVisibleLimit((limit) => limit + 220)
+    const increment = Math.max(100, Math.min(400, Math.floor(window.innerHeight / 60) * 2))
+    setVisibleLimit((limit) => limit + increment)
   }
 
   const scrollToMessage = (messageId: string) => {
@@ -315,8 +323,12 @@ export const MessageList: Component = () => {
                   onClick={loadOlderMessages}
                   class="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2.5 py-1 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                 >
-                  Load {Math.min(220, hiddenMessageCount())} older messages ({hiddenMessageCount()}{' '}
-                  hidden)
+                  Load{' '}
+                  {Math.min(
+                    Math.max(100, Math.min(400, Math.floor(window.innerHeight / 60) * 2)),
+                    hiddenMessageCount()
+                  )}{' '}
+                  older messages ({hiddenMessageCount()} hidden)
                 </button>
               </div>
             </Show>

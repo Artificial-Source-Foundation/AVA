@@ -1,5 +1,6 @@
 import {
   Bot,
+  Brain,
   Code2,
   Cpu,
   Info,
@@ -26,6 +27,7 @@ export type SettingsTab =
   | 'permissions'
   | 'mcp'
   | 'plugins'
+  | 'microagents'
   | 'commands'
   | 'developer'
   | 'about'
@@ -115,6 +117,12 @@ export const tabGroups: TabGroup[] = [
         label: 'Plugins',
         icon: Puzzle,
         keywords: ['extension', 'install', 'community', 'marketplace'],
+      },
+      {
+        id: 'microagents',
+        label: 'Microagents',
+        icon: Brain,
+        keywords: ['skill', 'microagent', 'domain', 'prompt', 'glob', 'pattern'],
       },
       {
         id: 'commands',

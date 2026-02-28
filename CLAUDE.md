@@ -217,7 +217,7 @@ api.registerAgentMode(myMode)
 
 ---
 
-## Tools (23)
+## Tools (28)
 
 | Tool | Location | Purpose |
 |------|----------|---------|
@@ -239,6 +239,11 @@ api.registerAgentMode(myMode)
 | todoread | extensions | Read session todo list |
 | todowrite | extensions | Update session todo list |
 | task | extensions | Spawn subagents |
+| delegate_coder | commander | Delegate coding tasks to Coder worker |
+| delegate_tester | commander | Delegate testing tasks to Tester worker |
+| delegate_reviewer | commander | Delegate review tasks to Reviewer worker |
+| delegate_researcher | commander | Delegate research tasks to Researcher worker |
+| delegate_debugger | commander | Delegate debugging tasks to Debugger worker |
 | websearch | extensions | Web search (DuckDuckGo default, Tavily/Exa optional) |
 | webfetch | extensions | Fetch + convert web pages |
 | attempt_completion | extensions | Finish task with summary |

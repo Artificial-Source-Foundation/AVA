@@ -191,4 +191,184 @@ describe('plugins store', () => {
       })
     })
   })
+
+  describe('rapid toggle sequences', () => {
+    it('ignores concurrent toggles while one is pending', async () => {
+      await new Promise<void>((resolve) => {
+        createRoot((dispose) => {
+          void (async () => {
+            const plugins = usePlugins()
+            await plugins.install('task-planner')
+
+            // Make toggle slow
+            mocks.setPluginEnabledMock.mockImplementation(async (_id: string, enabled: boolean) => {
+              await new Promise((r) => setTimeout(r, 50))
+              return { installed: true, enabled }
+            })
+
+            // Clear call counts after install
+            mocks.setPluginEnabledMock.mockClear()
+
+            // Fire two toggles concurrently — second should be ignored
+            const p1 = plugins.toggleEnabled('task-planner')
+            const p2 = plugins.toggleEnabled('task-planner')
+            await Promise.all([p1, p2])
+
+            // Only one actual call because the second was skipped (pendingAction guard)
+            expect(mocks.setPluginEnabledMock).toHaveBeenCalledTimes(1)
+
+            dispose()
+            resolve()
+          })()
+        })
+      })
+    })
+
+    it('handles sequential enable-disable-enable with correct final state', async () => {
+      await new Promise<void>((resolve) => {
+        createRoot((dispose) => {
+          void (async () => {
+            const plugins = usePlugins()
+            await plugins.install('task-planner')
+
+            // Clear call counts after install
+            mocks.setPluginEnabledMock.mockClear()
+
+            // Toggle 1: disable
+            await plugins.toggleEnabled('task-planner')
+            expect(plugins.pluginState()['task-planner']?.enabled).toBe(false)
+
+            // Toggle 2: re-enable
+            await plugins.toggleEnabled('task-planner')
+            expect(plugins.pluginState()['task-planner']?.enabled).toBe(true)
+
+            // Toggle 3: disable again
+            await plugins.toggleEnabled('task-planner')
+            expect(plugins.pluginState()['task-planner']?.enabled).toBe(false)
+
+            expect(mocks.setPluginEnabledMock).toHaveBeenCalledTimes(3)
+
+            dispose()
+            resolve()
+          })()
+        })
+      })
+    })
+  })
+
+  describe('error recovery for install failures', () => {
+    it('recover after install failure clears error for uninstalled plugin', async () => {
+      await new Promise<void>((resolve) => {
+        createRoot((dispose) => {
+          void (async () => {
+            const plugins = usePlugins()
+            mocks.installPluginMock.mockRejectedValueOnce(new Error('bad manifest'))
+
+            await plugins.install('task-planner')
+            expect(plugins.errorFor('task-planner')).toBe('bad manifest')
+            expect(plugins.failedAction('task-planner')).toBe('install')
+
+            // Recover on uninstalled plugin should clear error
+            await plugins.recover('task-planner')
+            expect(plugins.errorFor('task-planner')).toBeNull()
+            expect(plugins.failedAction('task-planner')).toBeNull()
+
+            dispose()
+            resolve()
+          })()
+        })
+      })
+    })
+
+    it('recover on installed plugin triggers uninstall', async () => {
+      await new Promise<void>((resolve) => {
+        createRoot((dispose) => {
+          void (async () => {
+            const plugins = usePlugins()
+            await plugins.install('task-planner')
+
+            // Toggle fails, leaving plugin in installed state
+            mocks.setPluginEnabledMock.mockRejectedValueOnce(new Error('toggle error'))
+            await plugins.toggleEnabled('task-planner')
+            expect(plugins.errorFor('task-planner')).toBe('toggle error')
+
+            // Recover uninstalls the plugin
+            await plugins.recover('task-planner')
+            expect(plugins.pluginState()['task-planner']).toBeUndefined()
+
+            dispose()
+            resolve()
+          })()
+        })
+      })
+    })
+  })
+
+  describe('error recovery for broken manifests', () => {
+    it('handles uninstall failure with state rollback', async () => {
+      await new Promise<void>((resolve) => {
+        createRoot((dispose) => {
+          void (async () => {
+            const plugins = usePlugins()
+            await plugins.install('task-planner')
+
+            mocks.uninstallPluginMock.mockRejectedValueOnce(new Error('permission denied'))
+            await plugins.uninstall('task-planner')
+
+            // Should revert to installed state
+            expect(plugins.pluginState()['task-planner']?.installed).toBe(true)
+            expect(plugins.errorFor('task-planner')).toBe('permission denied')
+            expect(plugins.failedAction('task-planner')).toBe('uninstall')
+
+            dispose()
+            resolve()
+          })()
+        })
+      })
+    })
+
+    it('handles toggle failure with rollback to original enabled state', async () => {
+      await new Promise<void>((resolve) => {
+        createRoot((dispose) => {
+          void (async () => {
+            const plugins = usePlugins()
+            await plugins.install('task-planner')
+            expect(plugins.pluginState()['task-planner']?.enabled).toBe(true)
+
+            mocks.setPluginEnabledMock.mockRejectedValueOnce(new Error('storage corrupted'))
+            await plugins.toggleEnabled('task-planner')
+
+            // Should revert to enabled=true (original)
+            expect(plugins.pluginState()['task-planner']?.enabled).toBe(true)
+            expect(plugins.errorFor('task-planner')).toBe('storage corrupted')
+            expect(plugins.failedAction('task-planner')).toBe('toggle')
+
+            dispose()
+            resolve()
+          })()
+        })
+      })
+    })
+
+    it('prevents uninstall on non-installed plugin', async () => {
+      await new Promise<void>((resolve) => {
+        createRoot((dispose) => {
+          void (async () => {
+            const plugins = usePlugins()
+
+            // Clear mock to isolate this test
+            mocks.uninstallPluginMock.mockClear()
+
+            await plugins.uninstall('task-planner')
+
+            expect(plugins.errorFor('task-planner')).toContain('not installed')
+            expect(mocks.uninstallPluginMock).not.toHaveBeenCalled()
+
+            dispose()
+            resolve()
+          })()
+        })
+      })
+    })
+  })
 })

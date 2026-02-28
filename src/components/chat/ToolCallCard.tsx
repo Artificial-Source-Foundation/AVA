@@ -11,6 +11,7 @@
 import { ChevronRight } from 'lucide-solid'
 import { type Component, createSignal, onCleanup, Show } from 'solid-js'
 import type { ToolCall } from '../../types'
+import { SubagentCard } from './SubagentCard'
 import { ToolIcon } from './tool-call-icon'
 import { ToolCallOutput } from './tool-call-output'
 import { formatDuration, formatElapsed, summarizeAction } from './tool-call-utils'
@@ -24,6 +25,11 @@ interface ToolCallCardProps {
 }
 
 export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
+  // Render specialized card for subagent task tool
+  if (props.toolCall.name === 'task') {
+    return <SubagentCard toolCall={props.toolCall} />
+  }
+
   const [expanded, setExpanded] = createSignal(false)
   const [elapsed, setElapsed] = createSignal('')
 

@@ -13,15 +13,20 @@ import {
   AlertCircle,
   AlertTriangle,
   Archive,
+  ExternalLink,
   Eye,
   EyeOff,
+  Layers,
   MessageSquare,
+  Pause,
+  Shield,
 } from 'lucide-solid'
 import {
   type Component,
   createEffect,
   createMemo,
   createSignal,
+  For,
   on,
   onCleanup,
   Show,
@@ -32,14 +37,23 @@ import { formatCost } from '../../lib/cost'
 import { getCoreBudget } from '../../services/core-bridge'
 import type { SearchableFile } from '../../services/file-search'
 import { filterFiles, getProjectFiles } from '../../services/file-search'
+import { openInExternalEditor } from '../../services/ide-integration'
 import { getStash, popStash, pushStash } from '../../services/prompt-stash'
-import { createDictation, isDictationSupported } from '../../services/voice-dictation'
+import {
+  type AudioAnalyserHandle,
+  createAudioAnalyser,
+  createDictation,
+  getAudioDevices,
+  isDictationSupported,
+} from '../../services/voice-dictation'
 import { useDiagnostics } from '../../stores/diagnostics'
 import { useLayout } from '../../stores/layout'
 import { useProject } from '../../stores/project'
+import { useSandbox } from '../../stores/sandbox'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
 import { ModelBrowserDialog } from '../dialogs/model-browser/model-browser-dialog'
+import { SandboxReviewDialog } from '../dialogs/SandboxReviewDialog'
 import { ExpandedEditor } from './ExpandedEditor'
 import { buildFullMessage, processImageFile, processTextFile } from './message-input/attachments'
 import { FileMentionPopover } from './message-input/file-mention-popover'
@@ -59,6 +73,7 @@ import {
   type PendingImage,
   type PendingPaste,
 } from './message-input/types'
+import { PlanBranchSelector } from './PlanBranchSelector'
 import { ShortcutHint } from './ShortcutHint'
 
 // ---------------------------------------------------------------------------
@@ -111,6 +126,7 @@ export const MessageInput: Component = () => {
     setExpandedEditorOpen,
   } = useLayout()
   const { diagnostics, hasDiagnostics } = useDiagnostics()
+  const sandbox = useSandbox()
 
   // Prompt history: reversed list of past user messages
   const promptHistory = createMemo(() =>
@@ -131,6 +147,52 @@ export const MessageInput: Component = () => {
     onStateChange: setIsRecording,
     onError: (err) => console.warn('Voice dictation:', err),
   })
+
+  // Audio analyser for waveform visualization (Feature 1.4)
+  const [waveformBars, setWaveformBars] = createSignal<number[]>([0, 0, 0, 0, 0, 0, 0, 0])
+  let analyserHandle: AudioAnalyserHandle | undefined
+  let waveformRaf: number | undefined
+
+  // Audio device list (Feature 1.5)
+  const [audioDevices, setAudioDevices] = createSignal<MediaDeviceInfo[]>([])
+
+  // Load audio devices on mount when dictation is supported
+  if (dictationSupported()) {
+    getAudioDevices()
+      .then(setAudioDevices)
+      .catch(() => {})
+  }
+
+  // Start/stop analyser when recording state changes
+  createEffect(
+    on(isRecording, (rec) => {
+      if (rec) {
+        const deviceId = settings().behavior.voiceDeviceId || undefined
+        createAudioAnalyser(deviceId)
+          .then((handle) => {
+            analyserHandle = handle
+            const tick = () => {
+              const data = handle.getFrequencyData()
+              // Pick 8 evenly-spaced bins, normalize to 0..16
+              const bars: number[] = []
+              const step = Math.floor(data.length / 8)
+              for (let i = 0; i < 8; i++) {
+                bars.push(Math.round((data[i * step] / 255) * 16))
+              }
+              setWaveformBars(bars)
+              waveformRaf = requestAnimationFrame(tick)
+            }
+            waveformRaf = requestAnimationFrame(tick)
+          })
+          .catch(() => {})
+      } else {
+        if (waveformRaf !== undefined) cancelAnimationFrame(waveformRaf)
+        analyserHandle?.stop()
+        analyserHandle = undefined
+        setWaveformBars([0, 0, 0, 0, 0, 0, 0, 0])
+      }
+    })
+  )
 
   // @ mention state
   const [mentionOpen, setMentionOpen] = createSignal(false)
@@ -157,6 +219,8 @@ export const MessageInput: Component = () => {
 
   // Derived state
   const isProcessing = () => chat.isStreaming() || agent.isRunning()
+  const isPaused = () => sessionStore.isPaused()
+  const inputDisabled = () => isProcessing() && !isPaused()
   const inputHasText = createMemo(() => !!input().trim())
 
   const enabledProviders = createMemo(() =>
@@ -298,6 +362,8 @@ export const MessageInput: Component = () => {
     window.removeEventListener('ava:stash-prompt', handleStash)
     window.removeEventListener('ava:restore-prompt', handleRestore)
     dictation?.stop()
+    if (waveformRaf !== undefined) cancelAnimationFrame(waveformRaf)
+    analyserHandle?.stop()
   })
 
   // Attachment handlers
@@ -511,12 +577,34 @@ export const MessageInput: Component = () => {
     agent.cancel()
   }
 
+  const handlePause = () => {
+    sessionStore.pauseAgent()
+  }
+
+  const handleResume = () => {
+    const redirect = input().trim()
+    if (redirect) {
+      // Cancel the current run, then start a new one with the redirect
+      agent.cancel()
+      sessionStore.resumeAgent()
+      setInput('')
+      if (textareaRef) textareaRef.style.height = 'auto'
+      // Send the redirect as the next message
+      agent.run(redirect, { model: selectedModel() })
+    } else {
+      // Just resume without redirect
+      sessionStore.resumeAgent()
+    }
+  }
+
   const placeholder = () =>
-    isProcessing()
-      ? `Working... (turn ${agent.currentTurn()})`
-      : agent.isPlanMode()
-        ? 'Plan your approach...'
-        : 'Ask anything...'
+    isPaused()
+      ? 'Type a redirect message and resume, or just resume...'
+      : isProcessing()
+        ? `Working... (turn ${agent.currentTurn()})`
+        : agent.isPlanMode()
+          ? 'Plan your approach...'
+          : 'Ask anything...'
 
   // Render
   return (
@@ -546,7 +634,7 @@ export const MessageInput: Component = () => {
           onDrop={handleDrop}
           isDragging={isDragging}
           setIsDragging={setIsDragging}
-          disabled={isProcessing}
+          disabled={inputDisabled}
           placeholder={placeholder}
           textareaRef={(el) => {
             textareaRef = el
@@ -567,6 +655,9 @@ export const MessageInput: Component = () => {
           elapsedSeconds={elapsedSeconds}
           onCancel={handleCancel}
           inputHasText={inputHasText}
+          isPaused={isPaused}
+          onPause={handlePause}
+          onResume={handleResume}
         />
         <ShortcutHint sendCount={sendCount()} />
 
@@ -610,12 +701,110 @@ export const MessageInput: Component = () => {
               isProcessing={isProcessing}
             />
 
+            {/* Plan branch management — only visible in plan mode */}
+            <Show when={agent.isPlanMode()}>
+              <PlanBranchSelector
+                isPlanMode={agent.isPlanMode}
+                messages={messages}
+                onMessagesChange={(msgs) => sessionStore.setMessages(msgs)}
+              />
+            </Show>
+
             <StripDivider />
 
             <PermissionBadge
               permissionMode={() => settings().permissionMode}
               onCyclePermission={cyclePermissionMode}
             />
+
+            {/* Sandbox mode toggle */}
+            <StripDivider />
+            <button
+              type="button"
+              onClick={() => sandbox.toggleSandbox()}
+              class={`inline-flex items-center gap-1 p-1 rounded-[var(--radius-md)] transition-colors ${
+                sandbox.sandboxEnabled()
+                  ? 'text-[var(--warning)] bg-[var(--warning-subtle)]'
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]'
+              }`}
+              title={
+                sandbox.sandboxEnabled()
+                  ? 'Sandbox mode ON (changes are queued)'
+                  : 'Enable sandbox mode'
+              }
+            >
+              <Shield class="w-3 h-3" />
+              <Show when={sandbox.sandboxEnabled()}>
+                <span class="text-[10px]">Sandbox</span>
+                <Show when={sandbox.pendingCount() > 0}>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      sandbox.openReview()
+                    }}
+                    class="px-1 py-0.5 text-[9px] font-medium bg-[var(--warning)] text-white rounded-full min-w-[16px] text-center"
+                    title={`${sandbox.pendingCount()} pending change(s) — click to review`}
+                  >
+                    {sandbox.pendingCount()}
+                  </button>
+                </Show>
+              </Show>
+            </button>
+
+            {/* Paused indicator */}
+            <Show when={isPaused()}>
+              <StripDivider />
+              <span class="inline-flex items-center gap-1 text-[var(--warning)] font-medium">
+                <Pause class="w-2.5 h-2.5" />
+                Paused
+              </span>
+            </Show>
+
+            {/* Run in Background button (plan mode + running) */}
+            <Show
+              when={agent.isPlanMode() && isProcessing() && !sessionStore.backgroundPlanActive()}
+            >
+              <StripDivider />
+              <button
+                type="button"
+                onClick={() => sessionStore.startBackgroundPlan()}
+                class="inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+                title="Continue plan execution in background"
+              >
+                <Layers class="w-2.5 h-2.5" />
+                Background
+              </button>
+            </Show>
+
+            {/* Background plan active badge */}
+            <Show when={sessionStore.backgroundPlanActive()}>
+              <StripDivider />
+              <span class="inline-flex items-center gap-1 text-[var(--accent)]">
+                <span class="w-1.5 h-1.5 bg-[var(--accent)] rounded-full animate-pulse" />
+                <span class="text-[10px]">Plan running</span>
+              </span>
+            </Show>
+
+            <Show when={!isRecording()}>
+              <StripDivider />
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const result = await openInExternalEditor(input())
+                    setInput(result)
+                    queueMicrotask(autoResize)
+                  } catch (err) {
+                    console.warn('External editor:', err)
+                  }
+                }}
+                class="p-1 rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-raised)] transition-colors"
+                title="Edit prompt in external editor ($EDITOR)"
+              >
+                <ExternalLink class="w-3 h-3" />
+              </button>
+            </Show>
 
             <Show when={dictation}>
               <StripDivider />
@@ -624,6 +813,43 @@ export const MessageInput: Component = () => {
                 onToggle={() => dictation!.toggle()}
                 supported={dictationSupported}
               />
+
+              {/* Waveform visualizer (Feature 1.4) */}
+              <Show when={isRecording()}>
+                <div class="flex items-center gap-[2px] w-[20px] h-[16px]">
+                  <For each={waveformBars()}>
+                    {(h) => (
+                      <div
+                        class="w-[2px] rounded-full bg-[var(--accent)] transition-[height] duration-75"
+                        style={{ height: `${Math.max(2, h)}px` }}
+                      />
+                    )}
+                  </For>
+                </div>
+              </Show>
+
+              {/* Device picker (Feature 1.5) */}
+              <Show when={audioDevices().length > 1}>
+                <select
+                  class="h-[18px] text-[10px] max-w-[80px] truncate bg-transparent border-none outline-none text-[var(--text-tertiary)] cursor-pointer"
+                  style={{ 'font-family': 'var(--font-ui-mono)' }}
+                  value={settings().behavior.voiceDeviceId}
+                  onChange={(e) => {
+                    updateSettings({
+                      behavior: { ...settings().behavior, voiceDeviceId: e.currentTarget.value },
+                    })
+                  }}
+                >
+                  <option value="">Default mic</option>
+                  <For each={audioDevices()}>
+                    {(dev) => (
+                      <option value={dev.deviceId}>
+                        {dev.label || `Mic ${dev.deviceId.slice(0, 6)}`}
+                      </option>
+                    )}
+                  </For>
+                </select>
+              </Show>
             </Show>
           </div>
 
@@ -780,6 +1006,23 @@ export const MessageInput: Component = () => {
           })
         }}
         onClose={() => setExpandedEditorOpen(false)}
+      />
+      <SandboxReviewDialog
+        open={sandbox.reviewDialogOpen()}
+        changes={sandbox.pendingChanges()}
+        onApplySelected={async (paths) => {
+          await sandbox.applySelectedChanges(paths)
+          if (sandbox.pendingCount() === 0) sandbox.closeReview()
+        }}
+        onApplyAll={async () => {
+          await sandbox.applyAllChanges()
+          sandbox.closeReview()
+        }}
+        onRejectAll={() => {
+          sandbox.rejectAllChanges()
+          sandbox.closeReview()
+        }}
+        onClose={() => sandbox.closeReview()}
       />
     </div>
   )

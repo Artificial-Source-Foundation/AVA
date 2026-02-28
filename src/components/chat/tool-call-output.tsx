@@ -23,6 +23,7 @@ import { Dynamic } from 'solid-js/web'
 import { highlightCode } from '../../lib/syntax-highlight'
 import type { ToolCall } from '../../types'
 import { DiffViewer } from '../ui/DiffViewer'
+import { MCPResourceRenderer } from './MCPResourceRenderer'
 import {
   categorizeToolError,
   detectLanguage,
@@ -94,6 +95,7 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
     )
   const hasError = () => !!props.toolCall.error
   const hasOutput = () => !!props.toolCall.output
+  const hasUIResource = () => !!props.toolCall.uiResource
 
   const errorCategory = () => categorizeToolError(props.toolCall.name, props.toolCall.error)
 
@@ -170,8 +172,13 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
         </div>
       </Show>
 
+      {/* MCP UI resource rendering (table, chart, form, image, markdown) */}
+      <Show when={hasUIResource() && !hasError()}>
+        <MCPResourceRenderer resource={props.toolCall.uiResource!} />
+      </Show>
+
       {/* Regular output with syntax highlighting */}
-      <Show when={hasOutput() && !hasError() && !hasDiff()}>
+      <Show when={hasOutput() && !hasError() && !hasDiff() && !hasUIResource()}>
         <div class="relative max-h-[320px] overflow-auto">
           {/* Copy button (top-right) */}
           <button

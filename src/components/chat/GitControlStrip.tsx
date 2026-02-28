@@ -27,7 +27,18 @@ export const GitControlStrip: Component = () => {
   const [status, setStatus] = createSignal<string | null>(null)
   const [error, setError] = createSignal<string | null>(null)
   const [showUsageDetails, setShowUsageDetails] = createSignal(false)
+  const [initialTab, setInitialTab] = createSignal<'session' | 'project'>('session')
   let statusTimer: ReturnType<typeof setTimeout> | undefined
+
+  // Listen for command palette project stats trigger
+  onMount(() => {
+    const handler = () => {
+      setInitialTab('project')
+      setShowUsageDetails(true)
+    }
+    window.addEventListener('ava:open-project-stats', handler)
+    onCleanup(() => window.removeEventListener('ava:open-project-stats', handler))
+  })
 
   const projectDir = createMemo(() => currentProject()?.directory)
   const branch = createMemo(() => currentProject()?.git?.branch || '')
@@ -231,10 +242,15 @@ export const GitControlStrip: Component = () => {
 
       <UsageDetailsDialog
         open={showUsageDetails()}
-        onClose={() => setShowUsageDetails(false)}
+        onClose={() => {
+          setShowUsageDetails(false)
+          setInitialTab('session')
+        }}
         contextUsage={contextUsage()}
         sessionTokenStats={sessionTokenStats()}
         messages={messages()}
+        projectId={currentProject()?.id}
+        initialTab={initialTab()}
       />
     </Show>
   )

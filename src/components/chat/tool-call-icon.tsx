@@ -17,6 +17,7 @@ import {
   Search,
   Terminal,
   Trash2,
+  Users,
 } from 'lucide-solid'
 import type { Component } from 'solid-js'
 import { Show } from 'solid-js'
@@ -48,6 +49,7 @@ const TOOL_ICONS: Record<string, IconComponent> = {
   ls: FolderSearch,
   websearch: Globe,
   webfetch: Globe,
+  task: Users,
 }
 
 export function getToolIcon(name: string): IconComponent {

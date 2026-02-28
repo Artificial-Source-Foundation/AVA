@@ -6,7 +6,7 @@
  * Send/cancel buttons and streaming stats are rendered inside the textarea.
  */
 
-import { ArrowUp, Square } from 'lucide-solid'
+import { ArrowUp, Pause, Play, Square } from 'lucide-solid'
 import { type Accessor, type Component, Show } from 'solid-js'
 import { FileChips, ImagePreviews, PasteChips } from './attachment-previews'
 import type { PendingFile, PendingImage, PendingPaste } from './types'
@@ -41,6 +41,10 @@ export interface InputTextAreaProps {
   elapsedSeconds: Accessor<number>
   onCancel: () => void
   inputHasText: Accessor<boolean>
+  // Pause / resume
+  isPaused?: Accessor<boolean>
+  onPause?: () => void
+  onResume?: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +107,32 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
           <span class="w-1.5 h-1.5 bg-[var(--accent)] rounded-full animate-pulse" />
           {props.elapsedSeconds()}s
         </span>
+      </Show>
+
+      {/* Pause / Resume button */}
+      <Show when={props.isProcessing() && props.onPause}>
+        <Show
+          when={props.isPaused?.()}
+          fallback={
+            <button
+              type="button"
+              onClick={props.onPause}
+              class="p-1.5 bg-[var(--warning)] hover:brightness-110 text-white rounded-[var(--radius-md)] transition-colors"
+              title="Pause agent"
+            >
+              <Pause class="w-3.5 h-3.5" />
+            </button>
+          }
+        >
+          <button
+            type="button"
+            onClick={props.onResume}
+            class="p-1.5 bg-[var(--success)] hover:brightness-110 text-white rounded-[var(--radius-md)] transition-colors"
+            title="Resume agent"
+          >
+            <Play class="w-3.5 h-3.5" />
+          </button>
+        </Show>
       </Show>
 
       {/* Cancel button */}

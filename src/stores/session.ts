@@ -106,6 +106,17 @@ const [checkpoints, setCheckpoints] = createSignal<
 const [retryingMessageId, setRetryingMessageId] = createSignal<string | null>(null)
 const [editingMessageId, setEditingMessageId] = createSignal<string | null>(null)
 
+// Agent pause state — allows user to pause, type a redirect, and resume
+const [isPaused, setIsPaused] = createSignal(false)
+const [redirectMessage, setRedirectMessage] = createSignal('')
+
+// Background plan execution — plan runs in background while user continues working
+const [backgroundPlanActive, setBackgroundPlanActive] = createSignal(false)
+const [backgroundPlanProgress, setBackgroundPlanProgress] = createSignal('')
+
+// Read-only file context — files attached to context but protected from edits
+const [readOnlyFiles, setReadOnlyFiles] = createSignal<string[]>([])
+
 // ============================================================================
 // Computed Values
 // ============================================================================
@@ -1032,6 +1043,74 @@ export function useSession() {
     },
 
     // ========================================================================
+    // Read-Only File Context
+    // ========================================================================
+
+    /** Files marked as read-only context */
+    readOnlyFiles,
+
+    /** Toggle a file's read-only status */
+    toggleReadOnly: (filePath: string) => {
+      setReadOnlyFiles((prev) =>
+        prev.includes(filePath) ? prev.filter((f) => f !== filePath) : [...prev, filePath]
+      )
+    },
+
+    /** Check if a file is marked as read-only */
+    isReadOnly: (filePath: string): boolean => readOnlyFiles().includes(filePath),
+
+    // ========================================================================
+    // Agent Pause / Redirect
+    // ========================================================================
+
+    /** Whether the agent is currently paused */
+    isPaused,
+
+    /** The redirect message typed while paused */
+    redirectMessage,
+
+    /** Pause the running agent */
+    pauseAgent: () => setIsPaused(true),
+
+    /** Resume the agent, optionally consuming the redirect message */
+    resumeAgent: (): string => {
+      const msg = redirectMessage().trim()
+      setIsPaused(false)
+      setRedirectMessage('')
+      return msg
+    },
+
+    /** Set the redirect message while paused */
+    setRedirectMessage,
+
+    // ========================================================================
+    // Background Plan Execution
+    // ========================================================================
+
+    /** Whether a plan is running in the background */
+    backgroundPlanActive,
+
+    /** Progress text for the background plan */
+    backgroundPlanProgress,
+
+    /** Start background plan execution */
+    startBackgroundPlan: () => {
+      setBackgroundPlanActive(true)
+      setBackgroundPlanProgress('Plan running...')
+    },
+
+    /** Update background plan progress text */
+    updateBackgroundPlanProgress: (text: string) => {
+      setBackgroundPlanProgress(text)
+    },
+
+    /** Stop background plan execution */
+    stopBackgroundPlan: () => {
+      setBackgroundPlanActive(false)
+      setBackgroundPlanProgress('')
+    },
+
+    // ========================================================================
     // UI State Management
     // ========================================================================
 
@@ -1066,6 +1145,10 @@ export function useSession() {
       setMemoryItems([])
       setEditingMessageId(null)
       setRetryingMessageId(null)
+      setIsPaused(false)
+      setRedirectMessage('')
+      setBackgroundPlanActive(false)
+      setBackgroundPlanProgress('')
     },
 
     /**

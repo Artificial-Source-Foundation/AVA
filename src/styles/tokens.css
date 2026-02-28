@@ -535,6 +535,16 @@
 }
 
 /* ========================================
+   LONG-SESSION RENDERING PERFORMANCE
+   ======================================== */
+
+/* Skip rendering off-screen messages; auto-size preserves scroll position */
+[data-message-id] {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 80px;
+}
+
+/* ========================================
    REDUCED MOTION
    ======================================== */
 

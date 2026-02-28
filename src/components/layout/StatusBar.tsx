@@ -6,20 +6,42 @@
  * Draggable for window movement via startDragging() API.
  */
 
-import { AppWindow, Minus, Square, X } from 'lucide-solid'
-import type { Component } from 'solid-js'
+import { AppWindow, FolderOpen, Layers, Minus, Square, X } from 'lucide-solid'
+import { type Component, Show } from 'solid-js'
 import { useProject } from '../../stores/project'
+import { useSession } from '../../stores/session'
 import { MenuBar } from './MenuBar'
 
 let windowCounter = 0
 
 export const StatusBar: Component = () => {
-  const { currentProject } = useProject()
+  const { currentProject, setCurrentDirectory } = useProject()
+  const sessionStore = useSession()
 
   const windowTitle = () => {
     const project = currentProject()
     if (project && project.name !== 'Default') return `AVA — ${project.name}`
     return 'AVA'
+  }
+
+  /** Truncate a directory path to show only the last 2-3 segments */
+  const truncatedDir = () => {
+    const dir = currentProject()?.directory
+    if (!dir) return ''
+    const parts = dir.replace(/\\/g, '/').split('/')
+    return parts.length > 3 ? `.../${parts.slice(-2).join('/')}` : dir
+  }
+
+  const handlePickDirectory = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({ directory: true, title: 'Choose working directory' })
+      if (selected && typeof selected === 'string') {
+        await setCurrentDirectory(selected)
+      }
+    } catch {
+      /* ignore in non-Tauri */
+    }
   }
 
   const startDrag = async (e: MouseEvent) => {
@@ -102,11 +124,31 @@ export const StatusBar: Component = () => {
         <MenuBar />
       </div>
 
-      {/* Center - window title (project name) */}
-      <div class="absolute left-1/2 -translate-x-1/2 pointer-events-none">
-        <span class="text-[10px] font-medium tracking-wide text-[var(--text-muted)] font-[var(--font-ui-mono)]">
+      {/* Center - window title + directory switcher */}
+      <div class="absolute left-1/2 -translate-x-1/2 flex items-center gap-2">
+        <span class="text-[10px] font-medium tracking-wide text-[var(--text-muted)] font-[var(--font-ui-mono)] pointer-events-none">
           {windowTitle()}
         </span>
+        <Show when={currentProject()}>
+          <button
+            type="button"
+            onClick={handlePickDirectory}
+            class="flex items-center gap-1 px-1.5 py-0.5 rounded-[var(--radius-sm)] text-[9px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-05)] transition-colors"
+            title={currentProject()?.directory || 'Change working directory'}
+          >
+            <FolderOpen class="w-3 h-3" />
+            <span class="max-w-[140px] truncate font-[var(--font-ui-mono)]">{truncatedDir()}</span>
+          </button>
+        </Show>
+
+        {/* Background plan indicator */}
+        <Show when={sessionStore.backgroundPlanActive()}>
+          <span class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[var(--accent-subtle)] text-[9px] text-[var(--accent)] font-medium font-[var(--font-ui-mono)]">
+            <span class="w-1.5 h-1.5 bg-[var(--accent)] rounded-full animate-pulse" />
+            <Layers class="w-3 h-3" />
+            {sessionStore.backgroundPlanProgress() || 'Plan running'}
+          </span>
+        </Show>
       </div>
 
       {/* Right - New window + window controls */}

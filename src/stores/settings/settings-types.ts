@@ -34,6 +34,7 @@ export interface UISettings {
   showTokenCount: boolean
   showModelInTitleBar: boolean
   hideThinking: boolean
+  sidebarOrder: string[]
 }
 
 export type AccentColor = 'violet' | 'blue' | 'green' | 'rose' | 'amber' | 'cyan' | 'custom'
@@ -92,6 +93,8 @@ export interface BehaviorSettings {
   lineNumbers: boolean
   wordWrap: boolean
   fileWatcher: boolean // Watch project files for AI comments (// AI!, // AI?)
+  voiceDeviceId: string // Preferred audio input device ('' = system default)
+  clipboardWatcher: boolean // Detect clipboard changes with code or LLM output
 }
 
 export interface NotificationSettings {
@@ -130,5 +133,7 @@ export interface AppSettings {
   git: GitSettings
   permissionMode: PermissionMode
   mcpServers: MCPServerConfig[]
+  modelAliases: Record<string, string>
   devMode: boolean
+  enabledMicroagents: string[]
 }

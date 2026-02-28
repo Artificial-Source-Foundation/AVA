@@ -359,6 +359,7 @@ export class AgentExecutor {
           signal,
           provider: this.config.provider,
           model,
+          onEvent: this.onEvent as ToolContext['onEvent'],
         }
 
         const result = await executeTool(call.name, call.input, ctx)

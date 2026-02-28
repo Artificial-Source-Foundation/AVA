@@ -22,14 +22,19 @@ import {
   onCleanup,
   onMount,
   Show,
+  untrack,
 } from 'solid-js'
+import { useNotification } from '../../contexts/notification'
+import { useAgent } from '../../hooks/useAgent'
 import { useChat } from '../../hooks/useChat'
+import { useLayout } from '../../stores/layout'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { ModelChangeIndicator } from './ModelChangeIndicator'
 import { MessageRow } from './message-list/message-row'
 import { MessageListEmpty, MessageListLoading, ScrollToBottomButton } from './message-list/sections'
+import { SearchBar } from './SearchBar'
 
 // ============================================================================
 // Component
@@ -47,6 +52,10 @@ export const MessageList: Component = () => {
     messageId: string
     isLast: boolean
   } | null>(null)
+  const [searchMatchIds, setSearchMatchIds] = createSignal<Set<string>>(new Set())
+  const [currentSearchId, setCurrentSearchId] = createSignal<string | null>(null)
+
+  const { chatSearchOpen, closeChatSearch } = useLayout()
 
   const {
     messages,
@@ -56,18 +65,29 @@ export const MessageList: Component = () => {
     startEditing,
     stopEditing,
     rollbackToMessage,
+    branchAtMessage,
     checkpoints,
     rollbackToCheckpoint,
   } = useSession()
+  const agent = useAgent()
   const { isStreaming, retryMessage, editAndResend, regenerateResponse } = useChat()
+  const { success: notifySuccess } = useNotification()
+
+  // Track which messages have already animated in (persists across <For> re-creations)
+  const animatedMessageIds = new Set<string>()
+
+  const messageCount = createMemo(() => messages().length)
 
   const messageIndexById = createMemo(() => {
-    const indexMap = new Map<string, number>()
-    const msgs = messages()
-    for (let i = 0; i < msgs.length; i++) {
-      indexMap.set(msgs[i].id, i)
-    }
-    return indexMap
+    messageCount() // tracked: only re-run when count changes
+    return untrack(() => {
+      const indexMap = new Map<string, number>()
+      const msgs = messages()
+      for (let i = 0; i < msgs.length; i++) {
+        indexMap.set(msgs[i].id, i)
+      }
+      return indexMap
+    })
   })
 
   const checkpointByIndex = createMemo(() => {
@@ -156,27 +176,30 @@ export const MessageList: Component = () => {
     if (scrollRaf !== undefined) return
 
     scrollRaf = requestAnimationFrame(() => {
-      if (!containerRef) {
-        scrollRaf = undefined
-        return
-      }
+      scrollRaf = undefined // clear lock first
+      if (!containerRef) return
 
       const { scrollTop, scrollHeight, clientHeight } = containerRef
       const nextAutoScroll = scrollHeight - scrollTop - clientHeight < 100
       if (nextAutoScroll !== shouldAutoScroll()) {
         setShouldAutoScroll(nextAutoScroll)
       }
-
-      scrollRaf = undefined
     })
   }
 
-  onCleanup(() => {
-    if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf)
+  onMount(() => {
+    if (containerRef) {
+      containerRef.scrollTop = containerRef.scrollHeight
+      // Passive listener — critical for smooth scrolling in WebKitGTK.
+      // SolidJS onScroll doesn't set { passive: true }, which blocks the
+      // browser's scroll thread while the JS handler runs.
+      containerRef.addEventListener('scroll', handleScroll, { passive: true })
+    }
   })
 
-  onMount(() => {
-    if (containerRef) containerRef.scrollTop = containerRef.scrollHeight
+  onCleanup(() => {
+    if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf)
+    containerRef?.removeEventListener('scroll', handleScroll)
   })
 
   const scrollToBottom = () => {
@@ -188,6 +211,25 @@ export const MessageList: Component = () => {
 
   const loadOlderMessages = () => {
     setVisibleLimit((limit) => limit + 220)
+  }
+
+  const scrollToMessage = (messageId: string) => {
+    if (!containerRef) return
+    const el = containerRef.querySelector(`[data-message-id="${messageId}"]`)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }
+
+  const handleSearchHighlight = (matchIds: Set<string>, currentId: string | null) => {
+    setSearchMatchIds(matchIds)
+    setCurrentSearchId(currentId)
+  }
+
+  // Branch handler
+  const handleBranch = async (messageId: string) => {
+    await branchAtMessage(messageId)
+    notifySuccess('Conversation branched')
   }
 
   // Delete/rollback handlers
@@ -204,9 +246,18 @@ export const MessageList: Component = () => {
 
   return (
     <div class="relative flex-1 min-h-0 flex flex-col overflow-hidden">
+      {/* Search bar */}
+      <Show when={chatSearchOpen()}>
+        <SearchBar
+          messages={messages()}
+          onClose={closeChatSearch}
+          onNavigate={scrollToMessage}
+          onHighlightChange={handleSearchHighlight}
+        />
+      </Show>
+
       <div
         ref={containerRef}
-        onScroll={handleScroll}
         class="flex-1 overflow-y-auto density-section-px density-section-py"
         style={{ 'overflow-anchor': 'none' }}
       >
@@ -241,6 +292,10 @@ export const MessageList: Component = () => {
                 const msgIndex = () => messageIndexById().get(msg.id) ?? -1
                 const modelChange = () => modelChangeById().get(msg.id)
 
+                // Compute shouldAnimate ONCE per new message (persists across <For> re-creations)
+                const shouldAnimate = !animatedMessageIds.has(msg.id)
+                if (shouldAnimate) animatedMessageIds.add(msg.id)
+
                 return (
                   <>
                     <Show when={modelChange()}>
@@ -248,12 +303,17 @@ export const MessageList: Component = () => {
                     </Show>
                     <MessageRow
                       message={msg}
+                      shouldAnimate={shouldAnimate}
                       isEditing={editingMessageId() === msg.id}
                       isRetrying={retryingMessageId() === msg.id}
                       isStreaming={
-                        isStreaming() && msg.id === lastMessageId() && msg.role === 'assistant'
+                        (isStreaming() || agent.isRunning()) &&
+                        msg.id === lastMessageId() &&
+                        msg.role === 'assistant'
                       }
                       isLastMessage={msg.id === lastMessageId()}
+                      isSearchMatch={searchMatchIds().has(msg.id)}
+                      isCurrentSearchMatch={currentSearchId() === msg.id}
                       checkpoint={checkpointAtIndex(msgIndex()) ?? undefined}
                       onStartEdit={() => startEditing(msg.id)}
                       onCancelEdit={stopEditing}
@@ -261,6 +321,7 @@ export const MessageList: Component = () => {
                       onRetry={() => retryMessage(msg.id)}
                       onRegenerate={() => regenerateResponse(msg.id)}
                       onDelete={() => handleDeleteRequest(msg.id)}
+                      onBranch={() => handleBranch(msg.id)}
                       onRestoreCheckpoint={rollbackToCheckpoint}
                     />
                   </>

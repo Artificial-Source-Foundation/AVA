@@ -54,6 +54,27 @@ export function classifyRisk(toolName: string, _args: Record<string, unknown>): 
 
 // ─── Built-in Safety Rules ──────────────────────────────────────────────────
 
+// ─── Permission Request/Response (Bus Messages) ────────────────────────────
+
+export interface PermissionRequest {
+  type: 'permission:request'
+  correlationId: string
+  timestamp: number
+  toolName: string
+  args: Record<string, unknown>
+  risk: RiskLevel
+}
+
+export interface PermissionResponse {
+  type: 'permission:response'
+  correlationId: string
+  timestamp: number
+  approved: boolean
+  reason?: string
+}
+
+// ─── Built-in Safety Rules ──────────────────────────────────────────────────
+
 export const BUILTIN_RULES: PolicyRule[] = [
   {
     name: 'protect-git',

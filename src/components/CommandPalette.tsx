@@ -8,6 +8,7 @@
 import { Dialog } from '@kobalte/core/dialog'
 import {
   Command,
+  Download,
   FileText,
   MessageSquare,
   Search,
@@ -349,6 +350,8 @@ export const createDefaultCommands = (handlers: {
   newChat?: () => void
   openSettings?: () => void
   clearChat?: () => void
+  exportChat?: () => void
+  initProject?: () => void
   switchTab?: (tab: string) => void
 }): CommandItem[] => [
   {
@@ -367,6 +370,23 @@ export const createDefaultCommands = (handlers: {
     icon: MessageSquare,
     category: 'Chat',
     action: handlers.clearChat || (() => {}),
+  },
+  {
+    id: 'export-chat',
+    label: 'Export Chat',
+    description: 'Download conversation as Markdown',
+    icon: Download,
+    category: 'Chat',
+    shortcut: '⌘⇧E',
+    action: handlers.exportChat || (() => {}),
+  },
+  {
+    id: 'init-project',
+    label: 'Initialize Project',
+    description: 'Analyze codebase and generate project rules',
+    icon: Command,
+    category: 'General',
+    action: handlers.initProject || (() => {}),
   },
   {
     id: 'open-settings',

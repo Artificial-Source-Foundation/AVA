@@ -5,6 +5,7 @@
  */
 
 @import "tailwindcss";
+@import "@xterm/xterm/css/xterm.css";
 @import "./styles/tokens.css";
 
 /* ========================================
@@ -179,7 +180,7 @@ button {
   letter-spacing: 0.02em;
 }
 
-/* Scrollbar (thinner for premium) */
+/* Scrollbar (thin, fades in on hover) */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -190,17 +191,18 @@ button {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--gray-6);
+  background: var(--alpha-white-8);
   border-radius: var(--radius-full);
+  transition: background 150ms ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--gray-7);
+  background: var(--alpha-white-15);
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--gray-6) transparent;
+  scrollbar-color: var(--alpha-white-8) transparent;
 }
 
 /* ========================================
@@ -328,6 +330,11 @@ button {
     opacity: 1;
     transform: scale(1) translateY(0);
   }
+}
+
+/* Smooth touch scrolling for WebKitGTK */
+.scroll-smooth {
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Hidden scrollbar utility */
@@ -731,6 +738,26 @@ button {
   animation: slide-in-right var(--duration-normal) var(--ease-out);
 }
 
+/* xterm.js terminal container */
+.xterm-container .xterm {
+  padding: 4px;
+}
+.xterm-container .xterm-viewport {
+  overflow-y: auto !important;
+}
+
+/* Approval dock slide-up */
+@keyframes approvalSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Panel expand — GPU-friendly (no max-height, uses transform) */
 @keyframes expand-down {
   from {
@@ -931,6 +958,19 @@ button {
 
 .message-content .code-copy-btn.copied {
   color: var(--success);
+  animation: copy-pop 200ms var(--ease-out);
+}
+
+@keyframes copy-pop {
+  0% {
+    transform: scale(0.9);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 .message-content .code-copy-label {
@@ -975,6 +1015,50 @@ button {
 [data-word-wrap] .code-block-wrapper pre code {
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* Code block expand/collapse for long blocks */
+.message-content .code-block-wrapper {
+  position: relative;
+}
+
+.message-content .code-block-wrapper.code-collapsed pre {
+  max-height: 300px;
+  overflow: hidden;
+}
+
+.message-content .code-block-wrapper.code-collapsed::after {
+  content: "";
+  position: absolute;
+  bottom: 28px;
+  left: 0;
+  right: 0;
+  height: 48px;
+  background: linear-gradient(to top, var(--code-background), transparent);
+  pointer-events: none;
+}
+
+.message-content .code-expand-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 4px 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--alpha-white-3);
+  border: none;
+  border-top: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast),
+    background var(--duration-fast);
+}
+
+.message-content .code-expand-btn:hover {
+  color: var(--accent);
+  background: var(--alpha-white-5);
 }
 
 /* Inline code inside message (not in pre) */
@@ -1044,38 +1128,6 @@ button {
 }
 .density-section {
   padding: var(--density-section-py) var(--density-section-px);
-}
-
-/* Tool card entrance */
-@keyframes tool-card-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-tool-card-in {
-  animation: tool-card-in var(--duration-normal) var(--ease-out);
-}
-
-/* Message appear */
-@keyframes message-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.animate-message-in {
-  animation: message-in var(--duration-normal) var(--ease-out);
 }
 
 /* Context menu */
@@ -1165,7 +1217,8 @@ button {
   .splash-mesh,
   .splash-logo,
   .splash-dot,
-  .animate-tool-card-in {
+  .animate-tool-card-in,
+  .animate-message-in {
     animation: none;
     transition: none;
   }

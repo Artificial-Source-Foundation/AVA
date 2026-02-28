@@ -18,6 +18,10 @@ export interface ToolContext {
   workingDirectory: string
   signal: AbortSignal
   metadata?: MetadataCallback
+  /** LLM provider for subagent inheritance. */
+  provider?: string
+  /** Model ID for subagent inheritance. */
+  model?: string
 }
 
 // ─── Tool Location ───────────────────────────────────────────────────────────

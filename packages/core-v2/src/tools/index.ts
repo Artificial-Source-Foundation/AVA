@@ -5,7 +5,7 @@ export type { DefinedTool, ToolConfig, ToolExample, ToolPermission } from './def
 export { defineTool, getToolLocations, getToolPermissions, isDefinedTool } from './define.js'
 export { editTool } from './edit.js'
 export type { Replacer } from './edit-replacers.js'
-export { DEFAULT_REPLACERS, replace } from './edit-replacers.js'
+export { DEFAULT_REPLACERS, replace, similarity } from './edit-replacers.js'
 export { ToolError, ToolErrorType } from './errors.js'
 export { globTool } from './glob.js'
 export { grepTool } from './grep.js'

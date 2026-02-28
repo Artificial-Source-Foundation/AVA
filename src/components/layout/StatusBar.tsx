@@ -116,6 +116,7 @@ export const StatusBar: Component = () => {
           onClick={handleNewWindow}
           class="flex items-center justify-center w-8 h-7 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors rounded-[var(--radius-sm)]"
           title="New Window"
+          aria-label="New Window"
         >
           <AppWindow class="w-3.5 h-3.5" />
         </button>
@@ -126,6 +127,8 @@ export const StatusBar: Component = () => {
           type="button"
           onClick={handleMinimize}
           class="flex items-center justify-center w-8 h-7 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors rounded-[var(--radius-sm)]"
+          title="Minimize"
+          aria-label="Minimize"
         >
           <Minus class="w-3.5 h-3.5" />
         </button>
@@ -133,6 +136,8 @@ export const StatusBar: Component = () => {
           type="button"
           onClick={handleMaximize}
           class="flex items-center justify-center w-8 h-7 text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors rounded-[var(--radius-sm)]"
+          title="Maximize"
+          aria-label="Maximize"
         >
           <Square class="w-3 h-3" />
         </button>
@@ -140,6 +145,8 @@ export const StatusBar: Component = () => {
           type="button"
           onClick={handleClose}
           class="flex items-center justify-center w-8 h-7 text-[var(--text-muted)] hover:text-white hover:bg-[var(--error)] transition-colors rounded-[var(--radius-sm)]"
+          title="Close"
+          aria-label="Close"
         >
           <X class="w-3.5 h-3.5" />
         </button>

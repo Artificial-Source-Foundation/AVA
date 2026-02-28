@@ -5,6 +5,16 @@
  */
 
 import { getContextStrategies } from '@ava/core-v2/extensions'
+import type { MessageContent } from '@ava/core-v2/llm'
+
+/** Extract plain text from MessageContent. */
+function textOf(content: MessageContent): string {
+  if (typeof content === 'string') return content
+  return content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { text: string }).text)
+    .join('\n')
+}
 
 export interface ContextStats {
   total: number
@@ -80,8 +90,9 @@ export class ContextBudget {
       }))
       const compacted = strategy.compact(chatMessages, targetTokens)
       const kept = compacted.map((cm) => {
-        const orig = messages.find((m) => m.content === cm.content)
-        return { id: orig?.id ?? '', content: cm.content }
+        const text = textOf(cm.content)
+        const orig = messages.find((m) => m.content === text)
+        return { id: orig?.id ?? '', content: text }
       })
 
       const newTotal = kept.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0)

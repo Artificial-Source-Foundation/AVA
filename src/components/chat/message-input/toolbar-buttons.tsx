@@ -76,7 +76,7 @@ export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
     disabled={props.isProcessing()}
     class="
       relative flex items-center
-      h-[22px] w-[88px] rounded-full
+      h-[22px] w-[88px] rounded-[var(--radius-md)]
       bg-[var(--surface-raised)] border border-[var(--border-subtle)]
       text-[10px] font-semibold
       disabled:opacity-50 disabled:cursor-not-allowed
@@ -89,19 +89,19 @@ export const PlanActSlider: Component<PlanActSliderProps> = (props) => (
     <div
       class="
         absolute top-[1px] bottom-[1px] w-[44px]
-        rounded-full
+        rounded-[calc(var(--radius-md)-2px)]
         transition-all duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]
       "
       style={{
         left: props.isPlanMode() ? '1px' : '42px',
-        'background-color': props.isPlanMode() ? 'var(--warning)' : 'var(--accent)',
+        'background-color': props.isPlanMode() ? 'var(--accent)' : 'var(--accent)',
       }}
     />
     {/* Labels */}
     <span
       class="relative z-10 flex-1 text-center transition-colors duration-200"
       style={{
-        color: props.isPlanMode() ? 'var(--surface-base)' : 'var(--text-muted)',
+        color: props.isPlanMode() ? 'white' : 'var(--text-muted)',
       }}
     >
       <span class="flex items-center justify-center gap-0.5">
@@ -141,13 +141,13 @@ export const PermissionBadge: Component<PermissionBadgeProps> = (props) => {
       onClick={props.onCyclePermission}
       class="
         flex items-center gap-1 px-2 py-1
-        text-[11px] font-medium rounded-full
+        text-[11px] font-medium rounded-[var(--radius-md)]
         transition-all duration-200
         border
       "
       style={{
         color: cfg().color,
-        'border-color': cfg().color,
+        'border-color': props.permissionMode() === 'ask' ? 'var(--border-subtle)' : cfg().color,
         'background-color':
           props.permissionMode() === 'ask'
             ? 'var(--surface-raised)'

@@ -6,7 +6,7 @@
 import type { ToolContext } from '@ava/core-v2/tools'
 import type { Accessor, Setter } from 'solid-js'
 import type { CompletionNotificationSettings } from '../../services/notifications'
-import type { Message, MessageError, ToolCall } from '../../types'
+import type { FileOperation, Message, MessageError, ToolCall } from '../../types'
 import type { LLMProvider, StreamError } from '../../types/llm'
 
 // ============================================================================
@@ -25,6 +25,7 @@ export interface StreamOptions {
   model: string
   messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }>
   onContent: (content: string) => void
+  onThinking?: (thinking: string) => void
   onComplete: (content: string, tokens?: number, toolCalls?: ToolCall[]) => void
   onError: (error: StreamError) => void
   onToolUpdate?: (toolCalls: ToolCall[]) => void
@@ -94,6 +95,7 @@ export interface SessionSlice {
   deleteMessagesAfter: (id: string) => void
   stopEditing: () => void
   setRetryingMessageId: (id: string | null) => void
+  addFileOperation: (operation: FileOperation) => void
 }
 
 /** Subset of settings store used by chat */

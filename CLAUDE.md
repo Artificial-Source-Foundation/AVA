@@ -52,7 +52,7 @@ AVA/
 ├── src-tauri/                 # Rust backend
 ├── packages/
 │   ├── core/                  # Original backend (54K+ lines, being migrated)
-│   ├── core-v2/               # NEW: Minimal core (~28 files, ~5K lines)
+│   ├── core-v2/               # NEW: Minimal core (~40 files, ~5K lines)
 │   ├── extensions/            # NEW: Built-in extensions (25+ modules)
 │   ├── platform-node/         # Node.js platform implementations
 │   └── platform-tauri/        # Tauri platform implementations
@@ -233,9 +233,9 @@ api.registerAgentMode(myMode)
 | multiedit | extensions | Edit multiple files |
 | ls | extensions | Directory listing |
 | batch | extensions | Batch execute multiple tools |
-| codesearch | extensions | Search codebase with context |
+| codesearch | extensions | Search API docs/code via Exa |
+| repo_map | extensions | Project structure overview |
 | question | extensions | Ask user clarifying questions |
-| skill | extensions | Auto-invoke skills |
 | todoread | extensions | Read session todo list |
 | todowrite | extensions | Update session todo list |
 | task | extensions | Spawn subagents |

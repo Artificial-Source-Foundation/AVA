@@ -5,10 +5,13 @@ import { MessageBubble } from '../MessageBubble'
 
 interface MessageRowProps {
   message: Message
+  shouldAnimate: boolean
   isEditing: boolean
   isRetrying: boolean
   isStreaming: boolean
   isLastMessage: boolean
+  isSearchMatch?: boolean
+  isCurrentSearchMatch?: boolean
   checkpoint?: { id: string; description: string }
   onStartEdit: () => void
   onCancelEdit: () => void
@@ -16,13 +19,23 @@ interface MessageRowProps {
   onRetry: () => void
   onRegenerate: () => void
   onDelete: () => void
+  onBranch: () => void
   onRestoreCheckpoint: (id: string) => void
 }
 
 export const MessageRow: Component<MessageRowProps> = (props) => (
-  <div class="density-py">
+  <div
+    class="density-py transition-colors duration-200"
+    classList={{
+      'bg-[var(--accent-subtle)] rounded-[var(--radius-md)]': props.isCurrentSearchMatch,
+      'bg-[var(--alpha-white-3)] rounded-[var(--radius-md)]':
+        !!props.isSearchMatch && !props.isCurrentSearchMatch,
+    }}
+    data-message-id={props.message.id}
+  >
     <MessageBubble
       message={props.message}
+      shouldAnimate={props.shouldAnimate}
       isEditing={props.isEditing}
       isRetrying={props.isRetrying}
       isStreaming={props.isStreaming}
@@ -34,6 +47,7 @@ export const MessageRow: Component<MessageRowProps> = (props) => (
       onRegenerate={props.onRegenerate}
       onCopy={() => {}}
       onDelete={props.onDelete}
+      onBranch={props.onBranch}
     />
     <Show when={props.checkpoint}>
       {(checkpoint) => (

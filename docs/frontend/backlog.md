@@ -1,6 +1,6 @@
 # Frontend Backlog
 
-> What's missing, prioritized. Updated 2026-02-15.
+> What's missing, prioritized. Updated 2026-02-27.
 
 ---
 
@@ -11,7 +11,7 @@
 | **1: Desktop App** | **Complete** | - |
 | **1.5: Desktop Polish** | **Complete** | Manual testing only |
 | **2: Plugin Ecosystem** | In progress | UX baseline shipped; runtime validation + parity gaps pending |
-| **2+: Competitive Gaps** | Mostly complete | Focus moved to verification + plugin UX |
+| **2+: Competitive Gaps** | In progress | Core UX parity gaps remain (inline approval, terminal, diff review) |
 
 ## Ownership Rules
 
@@ -95,31 +95,54 @@ This is what makes AVA "The Obsidian of AI Coding".
 
 ---
 
-## Frontend Gaps Currently Open
+## Chat & UX Gaps (Goose + OpenCode Comparison — 2026-02-27)
 
-- **FG-004 (partial):** long-session performance still needs render-window/backfill hardening validation for very large histories.
-- **FG-006:** session share/export UX is still not implemented.
-- **FG-007:** panel adaptability (draggable/persisted panel ratios) is still limited.
-- **INT-001/INT-002/INT-003 closeout:** plugin lifecycle wiring exists, but runtime validation and failure-path evidence are still open in sprint docs.
-- **Manual QA closeout:** Linux DE matrix and light-mode regression pass still required.
+Informed by comprehensive audits of Goose and OpenCode frontends. Ordered by impact.
 
-### Goose parity checklist (prioritized)
+### P0 — High Impact (Must Have)
 
-Reference baseline: `docs/reference-code/goose/ui/desktop`.
+- [ ] **Inline Tool Approval** — Replace blocking modal dialog with inline approval dock in the composer area. Both Goose and OpenCode use non-modal inline approval that doesn't interrupt the user's flow. Current `ToolApprovalDialog.tsx` is a full-screen modal that suspends the agent loop. *Rewrite: `ToolApprovalDialog.tsx` → inline dock in `ChatView.tsx`, keep `createApprovalGate` Promise pattern* — **Large** *(source: Goose + OpenCode)*
+- [ ] **Integrated Terminal (xterm.js)** — Real interactive terminal in bottom panel, not just a log viewer. AVA has `node-pty` in the backend (`platform-node/src/pty.ts`) but only surfaces completed tool outputs in `TerminalPanel.tsx`. OpenCode has full xterm.js with live streaming. *Files: new `XTerminal.tsx`, `TerminalPanel.tsx` rewrite, wire to `node-pty`* — **Large** *(source: OpenCode)*
+- [ ] **Aggregate Diff Review Panel** — Session/turn-scoped "review all changes" panel. Currently `DiffViewer` only shows per-tool-call diffs inline. Need aggregated view with Accept/Reject per file. OpenCode has session + turn scope toggle. *Files: new `DiffReviewPanel.tsx`, extend `FileOperationsPanel.tsx` or new tab* — **Large** *(source: OpenCode)*
+- [x] **@ File Mention Autocomplete** — `@` in composer triggers fuzzy file picker popover. — **Medium** *(done)*
+- [x] **File Changes Sidebar** — Right panel "Files" tab shows file operations during session. — **Medium** *(done)*
+- [x] **Conversation Search** — Full-text search with match highlighting and next/prev navigation. — **Medium** *(done)*
+- [x] **Conversation Export (Markdown)** — Export chat as `.md`. Command palette + Ctrl+Shift+E. — **Small** *(done)*
+- [x] **Context Usage Warning Badge** — Yellow warning icon in token strip at 80% context. — **Small** *(done)*
+- [x] **Session Aggregate Cost** — Per-message tokens+cost, session total in ContextBar. — *(done)*
+- [x] **"Finished Without Output" Placeholder** — Italic placeholder when assistant has tool calls but no text. — **Tiny** *(done)*
 
-#### P0 - high impact
-- [ ] Implement conversation/session share UX (create share link, open shared session) and lightweight export path (`FG-006`).
-- [ ] Add explicit user-triggered compaction UX in chat ("compact now" action + clear compaction state feedback).
-- [ ] Add in-chat search UX (find in conversation, next/previous navigation, keyboard path).
+### P1 — Medium Impact
 
-#### P1 - maturity and ergonomics
-- [ ] Expand plugin UX beyond settings manager: per-chat plugin selection + stronger install/load warning/error affordances.
-- [ ] Improve long-session context ergonomics with clearer context-pressure alerts and validation against very large histories (`FG-004` remainder).
-- [ ] Increase panel adaptability (split ratio persistence + richer panel layout controls) (`FG-007`).
+- [ ] **Message Queue UI** — Show queued messages with count indicator, allow reorder/remove. Goose has drag-to-reorder. AVA has a queue (`messageQueue` signal in `hooks/chat/types.ts`) but it's completely invisible to the user. *Files: new `MessageQueueBar.tsx` above composer, `message-actions.ts` for reorder/remove* — **Medium** *(source: Goose)*
+- [ ] **File Tree Change Indicators** — Mark modified/created/deleted files in the file explorer during a session. OpenCode shows dot indicators on changed files. AVA tracks file ops in `FileOperationsPanel` but this doesn't flow back to the tree. *Files: `SidebarExplorer.tsx`, `FileTree.tsx` — add `modified` state, feed from `fileOperations` store* — **Medium** *(source: OpenCode)*
+- [ ] **"Open in" IDE Integration** — Button to open files in VS Code, Cursor, Zed, etc. Auto-detect installed editors via Tauri shell. OpenCode has this with IDE auto-detection. *Files: new `ide-integration.ts`, context menu in `SidebarExplorer.tsx` + `FileOperationsPanel.tsx`* — **Medium** *(source: OpenCode)*
+- [ ] **Live Tool Progress Streaming** — Show stdout/stderr live during bash tool execution instead of waiting for completion. Goose streams log output and shows progress bars in tool cards. *Files: `active-tool-indicator.tsx`, `ToolCallCard.tsx`, wire to PTY stream* — **Large** *(source: Goose)*
+- [ ] **Undo/Redo File Changes** — `/undo` `/redo` backed by file version snapshots per session. *Files: new `file-versions.ts`* — **Large** *(source: OpenCode)*
+- [x] **Conversation Branching** — Fork conversation at any message via Branch button (GitFork icon). — **Medium** *(done)*
+- [x] **Quick Session Switcher (Ctrl+J)** — Keyboard-driven overlay with fuzzy search. — **Medium** *(done)*
+- [x] **Expanded Editor (Ctrl+E)** — Full-screen monospace modal for composing long prompts. — **Medium** *(done)*
+- [x] **Auto-Compact Notification** — Toast when context compaction triggers. — **Small** *(done)*
+- [x] **Smarter Tool Result Truncation** — Line-based (15 lines) with expand button. — **Small** *(done)*
+- [x] **Project Init Command** — Command palette "Initialize Project" sends canned analysis prompt. — **Medium** *(done)*
+- [x] **LSP Diagnostics in Status Bar** — Error/warning counts in MessageInput strip. — **Medium** *(done)*
 
-#### P2 - differentiation opportunities
-- [ ] Evaluate voice dictation input workflow (microphone input in `MessageInput`) as optional UX parity item.
-- [ ] Evaluate recipe/schedule/app-launcher style automation surfaces for user workflows.
+### P2 — Lower Impact / Future
+
+- [ ] **Theme Live Preview** — Preview theme/accent changes on hover before committing. OpenCode shows live preview when hovering over theme options. *Files: `AppearanceTab.tsx`* — **Small** *(source: OpenCode)*
+- [ ] **Workflow/Recipe Creation** — Save a successful session as a reusable workflow. Goose calls these "recipes" and can create them from any completed session. — **Large** *(source: Goose)*
+- [ ] Custom commands UI (manage TOML/MD commands) — **Large**
+- [x] Faster model picker dialog (Ctrl+O, grouped by provider) — **Small** *(done)*
+- [x] Conversation branching (fork at any message) — **Medium** *(done — moved to P1)*
+- [x] Prompt library / starter templates — **Medium** *(done)*
+- [ ] Voice dictation input — **Medium**
+- [x] Panel adaptability (draggable/persisted split ratios) — **Medium** *(done)*
+
+### Legacy Gaps (Still Open)
+
+- **FG-004 (partial):** long-session render-window/backfill hardening for very large histories.
+- **INT-001/INT-002/INT-003:** plugin lifecycle runtime validation and failure-path evidence.
+- **Manual QA:** Linux DE matrix and light-mode regression pass.
 
 ### Sprint 2.4: Plugin Distribution
 - [ ] Publish plugins from GitHub repos
@@ -187,6 +210,19 @@ These were identified as gaps but are now fully implemented:
 | Plugin scaffold CLI foundation | 56 | `ava plugin init` command + generated package template docs |
 | Plugin SDK + test utilities | 57 | `createMockExtensionAPI()`, provider test harness, 5 example plugins |
 | Remote plugin catalog | 57 | Fetch + localStorage cache + fallback, `PluginCatalogItem` extended fields |
+| Conversation branching | 60+ | Fork at any message via GitFork button, creates new session |
+| Quick session switcher (Ctrl+J) | 60+ | Fuzzy search overlay, keyboard-driven |
+| Expanded editor (Ctrl+E) | 60+ | Full-screen monospace modal, Ctrl+Enter to apply |
+| Prompt library / starter templates | 60+ | 4 template cards in empty chat state |
+| Panel adaptability | 60+ | Draggable right panel, persisted width (250-600px) |
+| Conversation search | 60+ | Full-text search, match highlighting, next/prev navigation |
+| Conversation export (Markdown) | 60+ | Command palette + Ctrl+Shift+E |
+| Project init command | 60+ | Command palette "Initialize Project" |
+| LSP diagnostics in status bar | 60+ | Error/warning counts in MessageInput strip |
+| @ file mention autocomplete | 60+ | Fuzzy file picker popover on `@` |
+| File changes sidebar | 60+ | Right panel "Files" tab with file operations |
+| Context usage warning badge | 60+ | Yellow warning at 80% context |
+| Scroll performance (WebKitGTK) | 60+ | Passive scroll listeners, removed bad CSS hacks |
 
 ---
 

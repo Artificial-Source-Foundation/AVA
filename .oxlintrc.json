@@ -1,0 +1,6 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicolo-ribaudo/oxlint-config-generator/refs/heads/main/schema.json",
+  "rules": {
+    "no-unassigned-vars": "off"
+  }
+}

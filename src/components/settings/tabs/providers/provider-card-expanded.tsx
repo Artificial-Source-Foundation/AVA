@@ -135,7 +135,7 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
                 type="button"
                 onClick={handleOAuthClick}
                 disabled={isOAuthLoading()}
-                class="flex items-center gap-2 px-2.5 py-1.5 text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent)] bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors w-full disabled:opacity-50"
+                class="flex items-center gap-2 px-2.5 py-1.5 text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent)] bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors w-full disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Show when={isOAuthLoading()} fallback={<LogIn class="w-3 h-3" />}>
                   <Loader2 class="w-3 h-3 animate-spin" />
@@ -209,7 +209,7 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
               type="button"
               onClick={handleRefreshModels}
               disabled={isLoadingModels()}
-              class="flex items-center gap-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] disabled:opacity-50 transition-colors"
+              class="flex items-center gap-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               title="Refresh models from API"
             >
               <Show when={isLoadingModels()} fallback={<RefreshCw class="w-2.5 h-2.5" />}>

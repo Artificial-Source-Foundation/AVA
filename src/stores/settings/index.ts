@@ -20,6 +20,7 @@ import { hydrateAgents, hydrateProviders } from './settings-hydration'
 import { exportSettingsToFile, hydrateFromFS, importSettingsFromFile } from './settings-io'
 import {
   detectEnvApiKeys as detectEnvApiKeysImpl,
+  type EnvKeyDetectionResult,
   loadSettings,
   pushSettingsToCore as pushSettingsToCoreImpl,
   saveSettings,
@@ -76,8 +77,16 @@ export function syncAllApiKeys(): void {
   syncAllApiKeysImpl(settings())
 }
 
-export async function detectEnvApiKeys(): Promise<number> {
-  return detectEnvApiKeysImpl(settings().providers, (id, patch) => updateProvider(id, patch))
+// Signal to track env key detection results for the toast notification
+const [envKeysDetected, setEnvKeysDetected] = createSignal<EnvKeyDetectionResult | null>(null)
+export { envKeysDetected }
+
+export async function detectEnvApiKeys(): Promise<EnvKeyDetectionResult> {
+  const result = await detectEnvApiKeysImpl(settings().providers, (id, patch) =>
+    updateProvider(id, patch)
+  )
+  if (result.count > 0) setEnvKeysDetected(result)
+  return result
 }
 
 export function setupSystemThemeListener(): () => void {

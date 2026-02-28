@@ -22,8 +22,13 @@ export interface LoadedExtension {
  * Discover and load extensions from a directory.
  *
  * Each subdirectory should contain an `ava-extension.json` manifest.
+ * When `packageRoot` is provided, compiled `.js` files in `<root>/dist/`
+ * are used as a fallback when the source `.ts` import fails (compiled CLI).
  */
-export async function loadExtensionsFromDirectory(dir: string): Promise<LoadedExtension[]> {
+export async function loadExtensionsFromDirectory(
+  dir: string,
+  packageRoot?: string
+): Promise<LoadedExtension[]> {
   const platform = getPlatform()
   const loaded: LoadedExtension[] = []
 
@@ -52,8 +57,7 @@ export async function loadExtensionsFromDirectory(dir: string): Promise<LoadedEx
         continue
       }
 
-      const modulePath = path.join(extDir, manifest.main)
-      const module = (await import(modulePath)) as ExtensionModule
+      const module = await importExtensionModule(extDir, manifest.main, packageRoot)
 
       if (typeof module.activate !== 'function') {
         log.warn(`Extension ${manifest.name} has no activate() export`)
@@ -71,8 +75,31 @@ export async function loadExtensionsFromDirectory(dir: string): Promise<LoadedEx
   return loaded
 }
 
+/**
+ * Import an extension module, falling back to compiled dist output.
+ * tsx can import .ts directly; compiled Node needs the .js from dist/.
+ */
+async function importExtensionModule(
+  extDir: string,
+  main: string,
+  packageRoot?: string
+): Promise<ExtensionModule> {
+  const sourcePath = path.join(extDir, main)
+  try {
+    return (await import(sourcePath)) as ExtensionModule
+  } catch {
+    // Fall back to compiled output in dist/
+    if (packageRoot) {
+      const relativePath = path.relative(packageRoot, sourcePath)
+      const distPath = path.join(packageRoot, 'dist', relativePath.replace(/\.ts$/, '.js'))
+      return (await import(distPath)) as ExtensionModule
+    }
+    throw new Error(`Cannot import extension: ${sourcePath} (no dist fallback available)`)
+  }
+}
+
 /** Loader function type — matches loadExtensionsFromDirectory signature. */
-export type ExtensionDirLoader = (dir: string) => Promise<LoadedExtension[]>
+export type ExtensionDirLoader = (dir: string, packageRoot?: string) => Promise<LoadedExtension[]>
 
 /**
  * Load all built-in extensions from the extensions directory.
@@ -93,11 +120,11 @@ export async function loadAllBuiltInExtensions(
   }
 
   // Load top-level extensions (permissions, tools-extended, hooks, etc.)
-  const topLevel = await loader(extensionsDir)
+  const topLevel = await loader(extensionsDir, extensionsDir)
 
   // Load provider extensions from providers/* subdirectory
   const providersDir = path.join(extensionsDir, 'providers')
-  const providers = await loader(providersDir)
+  const providers = await loader(providersDir, extensionsDir)
 
   const all = [...topLevel, ...providers]
 

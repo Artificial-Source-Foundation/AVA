@@ -26,43 +26,104 @@ export type SettingsTab =
   | 'developer'
   | 'about'
 
+export interface TabConfig {
+  id: SettingsTab
+  label: string
+  icon: typeof Settings
+  keywords: string[]
+}
+
 export interface TabGroup {
   label: string
-  tabs: { id: SettingsTab; label: string; icon: typeof Settings }[]
+  tabs: TabConfig[]
 }
 
 export const tabGroups: TabGroup[] = [
   {
     label: 'Desktop',
     tabs: [
-      { id: 'general', label: 'General', icon: Monitor },
-      { id: 'appearance', label: 'Appearance', icon: Palette },
-      { id: 'behavior', label: 'Behavior', icon: Sliders },
-      { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
+      {
+        id: 'general',
+        label: 'General',
+        icon: Monitor,
+        keywords: ['language', 'updates', 'startup', 'default'],
+      },
+      {
+        id: 'appearance',
+        label: 'Appearance',
+        icon: Palette,
+        keywords: ['theme', 'font', 'color', 'dark', 'light', 'density', 'glass'],
+      },
+      {
+        id: 'behavior',
+        label: 'Behavior',
+        icon: Sliders,
+        keywords: ['auto', 'save', 'scroll', 'confirm', 'notification'],
+      },
+      {
+        id: 'shortcuts',
+        label: 'Shortcuts',
+        icon: Keyboard,
+        keywords: ['keyboard', 'hotkey', 'keybinding', 'keys', 'shortcut'],
+      },
     ],
   },
   {
     label: 'AI',
     tabs: [
-      { id: 'providers', label: 'Providers', icon: Zap },
-      { id: 'llm', label: 'LLM', icon: Cpu },
-      { id: 'models', label: 'Agents', icon: Bot },
+      {
+        id: 'providers',
+        label: 'Providers',
+        icon: Zap,
+        keywords: ['api', 'key', 'openai', 'anthropic', 'google', 'connection'],
+      },
+      {
+        id: 'llm',
+        label: 'LLM',
+        icon: Cpu,
+        keywords: ['model', 'temperature', 'tokens', 'context', 'streaming'],
+      },
+      {
+        id: 'models',
+        label: 'Agents',
+        icon: Bot,
+        keywords: ['agent', 'team', 'worker', 'preset', 'capability'],
+      },
     ],
   },
   {
     label: 'Extensions',
     tabs: [
-      { id: 'mcp', label: 'MCP Servers', icon: Server },
-      { id: 'plugins', label: 'Plugins', icon: Puzzle },
+      {
+        id: 'mcp',
+        label: 'MCP Servers',
+        icon: Server,
+        keywords: ['server', 'protocol', 'stdio', 'transport'],
+      },
+      {
+        id: 'plugins',
+        label: 'Plugins',
+        icon: Puzzle,
+        keywords: ['extension', 'install', 'community', 'marketplace'],
+      },
     ],
   },
   {
     label: 'Advanced',
-    tabs: [{ id: 'developer', label: 'Developer', icon: Code2 }],
+    tabs: [
+      {
+        id: 'developer',
+        label: 'Developer',
+        icon: Code2,
+        keywords: ['debug', 'logs', 'devtools', 'advanced'],
+      },
+    ],
   },
   {
     label: '',
-    tabs: [{ id: 'about', label: 'About', icon: Info }],
+    tabs: [
+      { id: 'about', label: 'About', icon: Info, keywords: ['version', 'license', 'credits'] },
+    ],
   },
 ]
 

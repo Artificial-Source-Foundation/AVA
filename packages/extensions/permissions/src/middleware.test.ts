@@ -1,3 +1,4 @@
+import { MessageBus } from '@ava/core-v2/bus'
 import type { ToolMiddlewareContext } from '@ava/core-v2/extensions'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createPermissionMiddleware, resetSettings, updateSettings } from './middleware.js'
@@ -123,5 +124,95 @@ describe('Permission Middleware', () => {
     const result = await mw.before!(makeCtx('bash', { command: 'sudo apt install foo' }))
     expect(result?.blocked).toBe(true)
     expect(result?.reason).toContain('sudo')
+  })
+})
+
+// ─── Bus-Based Approval ──────────────────────────────────────────────────
+
+describe('Bus-based approval', () => {
+  afterEach(() => {
+    resetSettings()
+  })
+
+  it('requests approval via bus when subscriber exists', async () => {
+    const bus = new MessageBus()
+    const mw = createPermissionMiddleware(bus)
+
+    // Subscriber auto-approves
+    bus.subscribe('permission:request', (msg) => {
+      bus.publish({
+        type: 'permission:response',
+        correlationId: msg.correlationId,
+        timestamp: Date.now(),
+        approved: true,
+      })
+    })
+
+    const result = await mw.before!(makeCtx('write_file', { path: '/project/file.ts' }))
+    expect(result).toBeUndefined()
+  })
+
+  it('blocks when user denies via bus', async () => {
+    const bus = new MessageBus()
+    const mw = createPermissionMiddleware(bus)
+
+    bus.subscribe('permission:request', (msg) => {
+      bus.publish({
+        type: 'permission:response',
+        correlationId: msg.correlationId,
+        timestamp: Date.now(),
+        approved: false,
+        reason: 'Not today',
+      })
+    })
+
+    const result = await mw.before!(makeCtx('write_file', { path: '/project/file.ts' }))
+    expect(result?.blocked).toBe(true)
+    expect(result?.reason).toBe('Not today')
+  })
+
+  it('falls back to default behavior when no bus subscribers', async () => {
+    const bus = new MessageBus()
+    const mw = createPermissionMiddleware(bus)
+    // No subscribers — should use fallback (auto-approve for reads)
+
+    const result = await mw.before!(makeCtx('read_file', { path: '/project/file.ts' }))
+    expect(result).toBeUndefined()
+  })
+
+  it('still auto-approves reads even with bus', async () => {
+    const bus = new MessageBus()
+    const mw = createPermissionMiddleware(bus)
+
+    // Subscriber that would deny (shouldn't be called for reads)
+    let called = false
+    bus.subscribe('permission:request', (msg) => {
+      called = true
+      bus.publish({
+        type: 'permission:response',
+        correlationId: msg.correlationId,
+        timestamp: Date.now(),
+        approved: false,
+      })
+    })
+
+    const result = await mw.before!(makeCtx('read_file', { path: '/project/file.ts' }))
+    expect(result).toBeUndefined()
+    expect(called).toBe(false)
+  })
+
+  it('skips bus approval in yolo mode', async () => {
+    const bus = new MessageBus()
+    const mw = createPermissionMiddleware(bus)
+    updateSettings({ yolo: true })
+
+    let called = false
+    bus.subscribe('permission:request', () => {
+      called = true
+    })
+
+    const result = await mw.before!(makeCtx('write_file', { path: '/project/file.ts' }))
+    expect(result).toBeUndefined()
+    expect(called).toBe(false)
   })
 })

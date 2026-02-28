@@ -49,8 +49,8 @@ export const ActiveToolIndicator: Component<ActiveToolIndicatorProps> = (props) 
 
   return (
     <Show when={props.isStreaming}>
-      <div class="flex items-center gap-2 mt-2 px-1 border-l-2 border-[var(--accent)] pl-2">
-        <Loader2 class="w-3.5 h-3.5 animate-spin text-[var(--accent-text)]" />
+      <div class="inline-flex items-center gap-2 mt-2 px-3 py-1.5 rounded-full bg-[var(--surface-glass)] border border-[var(--border-subtle)]">
+        <Loader2 class="w-3.5 h-3.5 animate-spin text-[var(--accent)]" />
         <span class="text-xs text-[var(--text-muted)] truncate">{label()}</span>
         <Show when={elapsed()}>
           <span class="text-[11px] text-[var(--text-muted)] tabular-nums whitespace-nowrap ml-auto">

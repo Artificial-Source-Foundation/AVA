@@ -14,7 +14,11 @@
     "rootDir": "src",
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noFallthroughCasesInSwitch": true,
+    "paths": {
+      "@ava/core-v2": ["../core-v2/src/index.ts"],
+      "@ava/core-v2/*": ["../core-v2/src/*/index.ts", "../core-v2/src/*.ts"]
+    }
   },
   "include": ["src"],
   "references": [{ "path": "../core-v2" }]

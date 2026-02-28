@@ -19,31 +19,14 @@ import type { AppSettings } from './settings-types'
 // Credential Sync — bridges Settings UI → Core credential store
 // ============================================================================
 
-const CREDENTIAL_PREFIX = 'ava_cred_'
-
-/** Maps provider IDs to the credential key names that core reads via TauriCredentialStore */
-const PROVIDER_KEY_MAP: Record<string, string> = {
-  anthropic: 'anthropic-api-key',
-  openrouter: 'openrouter-api-key',
-  openai: 'openai-api-key',
-  google: 'google-api-key',
-  copilot: 'copilot-api-key',
-  glm: 'glm-api-key',
-  kimi: 'kimi-api-key',
-  mistral: 'mistral-api-key',
-  groq: 'groq-api-key',
-  deepseek: 'deepseek-api-key',
-  xai: 'xai-api-key',
-  cohere: 'cohere-api-key',
-  together: 'together-api-key',
-  ollama: 'ollama-api-key',
-}
-
-/** Write a single provider's API key to the core credential store */
+/**
+ * Write a single provider's API key to the credential store.
+ * Key format matches core-v2 getApiKey(): "ava:{provider}:api_key"
+ * TauriCredentialStore adds "ava_cred_" prefix, so final localStorage
+ * key is "ava_cred_ava:{provider}:api_key".
+ */
 export function syncProviderCredentials(providerId: string, apiKey: string | undefined): void {
-  const credKey = PROVIDER_KEY_MAP[providerId]
-  if (!credKey) return
-  const storageKey = CREDENTIAL_PREFIX + credKey
+  const storageKey = `ava_cred_ava:${providerId}:api_key`
   if (apiKey) {
     localStorage.setItem(storageKey, apiKey)
   } else {
@@ -69,16 +52,21 @@ const ENV_VAR_MAP: Record<string, string> = {
   openrouter: 'OPENROUTER_API_KEY',
 }
 
+export interface EnvKeyDetectionResult {
+  count: number
+  providers: string[]
+}
+
 /**
  * Auto-detect API keys from environment variables via Rust IPC.
  * Calls `onDetected` for each key found so the caller can update the signal.
- * Returns the number of keys detected.
+ * Returns the count and names of detected providers.
  */
 export async function detectEnvApiKeys(
   currentProviders: LLMProviderConfig[],
   onDetected: (providerId: string, patch: Partial<LLMProviderConfig>) => void
-): Promise<number> {
-  let detected = 0
+): Promise<EnvKeyDetectionResult> {
+  const detectedProviders: string[] = []
 
   for (const [providerId, envVar] of Object.entries(ENV_VAR_MAP)) {
     const provider = currentProviders.find((p) => p.id === providerId)
@@ -88,18 +76,18 @@ export async function detectEnvApiKeys(
       const value = await invoke<string | null>('get_env_var', { name: envVar })
       if (value) {
         onDetected(providerId, { apiKey: value, status: 'connected', enabled: true })
-        detected++
+        detectedProviders.push(providerId)
       }
     } catch {
       // Rust command not available (e.g., running in browser) — skip silently
     }
   }
 
-  if (detected > 0) {
-    logInfo('settings', 'Auto-detected API keys', { count: detected })
+  if (detectedProviders.length > 0) {
+    logInfo('settings', 'Auto-detected API keys', { count: detectedProviders.length })
   }
 
-  return detected
+  return { count: detectedProviders.length, providers: detectedProviders }
 }
 
 /** Hydrate all provider API keys from settings into the core credential store */
@@ -138,10 +126,12 @@ export function pushSettingsToCore(s: AppSettings): void {
     })
   }
 
-  const activeProvider = s.providers.find((p) => p.enabled && p.apiKey)
+  const activeProvider = s.providers.find(
+    (p) => p.enabled && (p.apiKey || p.status === 'connected')
+  )
   const providerUpdate: Record<string, unknown> = {
     defaultProvider: (activeProvider?.id ?? 'openai') as LLMProvider,
-    defaultModel: activeProvider?.defaultModel ?? 'claude-sonnet-4-20250514',
+    defaultModel: activeProvider?.defaultModel ?? 'gpt-5.2',
   }
   if (s.generation.weakModel) {
     providerUpdate.weakModel = s.generation.weakModel

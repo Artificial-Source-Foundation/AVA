@@ -2,26 +2,26 @@
  * Typing Indicator Component
  *
  * Animated dots shown while streaming a response.
- * Premium animation with themed colors.
+ * Renders inline within the message bubble — no extra container.
  */
 
 import type { Component } from 'solid-js'
 
-export const TypingIndicator: Component = () => {
+interface TypingIndicatorProps {
+  label?: string
+}
+
+export const TypingIndicator: Component<TypingIndicatorProps> = (props) => {
   return (
-    <div class="flex items-center gap-1.5 py-1">
-      <span
-        class="w-2 h-2 bg-[var(--text-muted)] rounded-full animate-bounce"
-        style={{ 'animation-delay': '0ms' }}
-      />
-      <span
-        class="w-2 h-2 bg-[var(--text-muted)] rounded-full animate-bounce"
-        style={{ 'animation-delay': '150ms' }}
-      />
-      <span
-        class="w-2 h-2 bg-[var(--text-muted)] rounded-full animate-bounce"
-        style={{ 'animation-delay': '300ms' }}
-      />
+    <div class="flex items-center gap-2.5 py-0.5">
+      <div class="flex items-center gap-[5px]">
+        <span class="typing-dot" style={{ 'animation-delay': '0ms' }} />
+        <span class="typing-dot" style={{ 'animation-delay': '160ms' }} />
+        <span class="typing-dot" style={{ 'animation-delay': '320ms' }} />
+      </div>
+      <span class="text-xs text-[var(--text-secondary)] font-[var(--font-ui-mono)] tracking-wide">
+        {props.label ?? 'Thinking'}
+      </span>
     </div>
   )
 }

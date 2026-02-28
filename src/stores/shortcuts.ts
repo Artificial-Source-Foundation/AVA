@@ -73,6 +73,48 @@ const DEFAULT_SHORTCUTS: ShortcutDef[] = [
     description: 'Open the model browser dialog',
     category: 'General',
   },
+  {
+    id: 'quick-model-picker',
+    keys: ['ctrl', 'o'],
+    label: 'Quick Model Picker',
+    description: 'Quick model selection with search',
+    category: 'Chat',
+  },
+  {
+    id: 'session-switcher',
+    keys: ['ctrl', 'j'],
+    label: 'Switch Session',
+    description: 'Quick session switcher with fuzzy search',
+    category: 'Chat',
+  },
+  {
+    id: 'export-chat',
+    keys: ['ctrl', 'shift', 'e'],
+    label: 'Export Chat',
+    description: 'Download conversation as Markdown',
+    category: 'Chat',
+  },
+  {
+    id: 'search-chat',
+    keys: ['ctrl', 'f'],
+    label: 'Search Chat',
+    description: 'Search messages in current conversation',
+    category: 'Chat',
+  },
+  {
+    id: 'expanded-editor',
+    keys: ['ctrl', 'e'],
+    label: 'Expanded Editor',
+    description: 'Open expanded editor for long prompts',
+    category: 'Chat',
+  },
+  {
+    id: 'toggle-terminal',
+    keys: ['ctrl', '`'],
+    label: 'Toggle Terminal',
+    description: 'Show or hide the integrated terminal',
+    category: 'General',
+  },
 ]
 
 // ============================================================================
@@ -212,8 +254,14 @@ function setupShortcutListener(): () => void {
 
     for (const shortcut of getResolvedShortcuts()) {
       if (matchesShortcut(e, shortcut.keys)) {
-        // Allow Ctrl+K even in inputs (command palette convention)
-        if (isInput && shortcut.id !== 'command-palette') continue
+        // Allow Ctrl+K and Ctrl+F even in inputs
+        if (
+          isInput &&
+          shortcut.id !== 'command-palette' &&
+          shortcut.id !== 'search-chat' &&
+          shortcut.id !== 'expanded-editor'
+        )
+          continue
 
         const action = actionMap.get(shortcut.id)
         if (action) {

@@ -7,8 +7,10 @@
 import type {
   ChatMessage,
   LLMClient,
+  MessageContent,
   ProviderConfig,
   StreamDelta,
+  TextBlock,
   ToolUseBlock,
 } from '@ava/core-v2/llm'
 import { getAuth } from '@ava/core-v2/llm'
@@ -22,9 +24,20 @@ interface AnthropicStreamEvent {
   type: string
   message: { usage: { input_tokens: number } }
   content_block: { type: string; id: string; name: string }
-  delta: { type: string; text?: string; partial_json?: string }
+  delta: { type: string; text?: string; partial_json?: string; thinking?: string }
   usage: { output_tokens: number }
   error: { message: string }
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/** Extract plain text from MessageContent (string or ContentBlock[]). */
+function extractTextContent(content: MessageContent): string {
+  if (typeof content === 'string') return content
+  return content
+    .filter((b): b is TextBlock => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n')
 }
 
 // ─── Client Implementation ──────────────────────────────────────────────────
@@ -62,7 +75,7 @@ export class AnthropicClient implements LLMClient {
       stream: true,
     }
 
-    if (systemMessage) body.system = systemMessage.content
+    if (systemMessage) body.system = extractTextContent(systemMessage.content)
 
     // Extended thinking (must come before temperature — thinking disables temperature)
     if (config.thinking?.enabled) {
@@ -173,7 +186,7 @@ export class AnthropicClient implements LLMClient {
                   }
                   toolInputBuffer = ''
                 }
-                // 'thinking' blocks are silently consumed (extended thinking)
+                // 'thinking' block start — deltas handled in content_block_delta
                 break
 
               case 'content_block_delta':
@@ -181,8 +194,9 @@ export class AnthropicClient implements LLMClient {
                   yield { content: event.delta.text }
                 } else if (event.delta.type === 'input_json_delta' && event.delta.partial_json) {
                   toolInputBuffer += event.delta.partial_json
+                } else if (event.delta.type === 'thinking_delta' && event.delta.thinking) {
+                  yield { thinking: event.delta.thinking }
                 }
-                // thinking_delta blocks are silently consumed (extended thinking)
                 break
 
               case 'content_block_stop':

@@ -5,12 +5,26 @@
 
 import { executeTool, getToolDefinitions } from '@ava/core-v2/tools'
 import { checkAutoApproval } from '../../lib/tool-approval'
+import { readFileContent } from '../../services/file-browser'
 import { createClient, getProviderForModel } from '../../services/llm/bridge'
 import { logDebug, logError, logInfo } from '../../services/logger'
-import type { ToolCall } from '../../types'
+import type { FileOperationType, ToolCall } from '../../types'
 import type { ToolUseBlock } from '../../types/llm'
 import { checkLintErrors, getModifiedFilePath } from './tool-execution'
 import { buildToolCtx, type ChatDeps, type StreamOptions } from './types'
+
+/** Tools that modify files and should have diffs captured */
+const DIFF_TOOLS = new Set([
+  'write_file',
+  'create_file',
+  'edit',
+  'delete_file',
+  'delete',
+  'multiedit',
+])
+
+/** Max file size to capture for diff (500KB) */
+const MAX_CAPTURE = 500_000
 
 // ============================================================================
 // Stream Response
@@ -41,6 +55,7 @@ export async function streamResponse(options: StreamOptions, deps: ChatDeps): Pr
   // Build messages array (may include tool results)
   const currentMessages = [...options.messages]
   let fullContent = ''
+  let fullThinking = ''
 
   // Tool execution context
   const toolCtx = buildToolCtx(deps, options.sessionId, options.signal)
@@ -89,6 +104,12 @@ export async function streamResponse(options: StreamOptions, deps: ChatDeps): Pr
           options.onError(delta.error)
           logError(deps.LOG_SRC, 'Stream error', delta.error)
           return
+        }
+
+        // Handle thinking content
+        if (delta.thinking) {
+          fullThinking += delta.thinking
+          options.onThinking?.(fullThinking)
         }
 
         // Handle text content
@@ -243,6 +264,18 @@ async function executeToolLoop(
     if (tc) tc.status = 'running'
     options.onToolUpdate?.([...allToolCalls])
 
+    // Capture original content before tool execution (for diff)
+    const filePath = getModifiedFilePath(toolUse.name, toolUse.input as Record<string, unknown>)
+    let originalContent: string | null = null
+    if (filePath && DIFF_TOOLS.has(toolUse.name)) {
+      try {
+        const content = await readFileContent(filePath)
+        originalContent = content && content.length <= MAX_CAPTURE ? content : null
+      } catch {
+        /* file doesn't exist yet — fine for create_file */
+      }
+    }
+
     const result = await executeTool(toolUse.name, toolUse.input, toolCtx)
     logDebug(deps.LOG_SRC, 'Tool finished', {
       toolName: toolUse.name,
@@ -250,9 +283,23 @@ async function executeToolLoop(
     })
     let toolOutput = result.output
 
+    // Capture new content after tool execution (for diff)
+    let newContent: string | null = null
+    if (filePath && result.success && DIFF_TOOLS.has(toolUse.name)) {
+      if (toolUse.name === 'delete_file' || toolUse.name === 'delete') {
+        newContent = null
+      } else {
+        try {
+          const content = await readFileContent(filePath)
+          newContent = content && content.length <= MAX_CAPTURE ? content : null
+        } catch {
+          /* handle gracefully */
+        }
+      }
+    }
+
     // Lint check: if file was modified and autoFixLint is on, run linter
     if (result.success && deps.settings.settings().agentLimits.autoFixLint) {
-      const filePath = getModifiedFilePath(toolUse.name, toolUse.input as Record<string, unknown>)
       if (filePath) {
         const lintErrors = await checkLintErrors(filePath, toolCtx)
         if (lintErrors) {
@@ -269,6 +316,37 @@ async function executeToolLoop(
       tc.completedAt = Date.now()
     }
     options.onToolUpdate?.([...allToolCalls])
+
+    // Record file operation for the Files panel (with diff content)
+    if (filePath && result.success) {
+      const opType: FileOperationType =
+        toolUse.name === 'edit' || toolUse.name === 'apply_patch' || toolUse.name === 'multiedit'
+          ? 'edit'
+          : toolUse.name === 'create_file'
+            ? 'write'
+            : toolUse.name === 'delete_file' || toolUse.name === 'delete'
+              ? 'delete'
+              : toolUse.name === 'read_file' || toolUse.name === 'read'
+                ? 'read'
+                : 'write'
+
+      // Compute line diff counts
+      const oldLines = originalContent?.split('\n').length ?? 0
+      const newLines = newContent?.split('\n').length ?? 0
+
+      deps.session.addFileOperation({
+        id: toolUse.id,
+        sessionId: options.sessionId,
+        type: opType,
+        filePath,
+        timestamp: Date.now(),
+        originalContent: originalContent ?? undefined,
+        newContent: newContent ?? undefined,
+        linesAdded: newLines > oldLines ? newLines - oldLines : 0,
+        linesRemoved: oldLines > newLines ? oldLines - newLines : 0,
+        isNew: originalContent === null && opType === 'write',
+      })
+    }
 
     toolResults.push({
       type: 'tool_result',

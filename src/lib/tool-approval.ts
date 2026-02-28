@@ -99,10 +99,9 @@ export function createApprovalGate() {
 
   function resolveApproval(approved: boolean): void {
     const request = pendingApproval()
-    if (request) {
-      request.resolve(approved)
-      setPendingApproval(null)
-    }
+    if (!request) return
+    setPendingApproval(null) // clear FIRST
+    request.resolve(approved) // then resolve — prevents next requestApproval from racing
   }
 
   return { pendingApproval, setPendingApproval, requestApproval, resolveApproval }

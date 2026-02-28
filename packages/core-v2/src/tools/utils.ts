@@ -25,17 +25,30 @@ export function resolvePath(filePath: string, cwd: string): string {
 
 /**
  * Resolve a path safely — guards against symlink escape.
- * For file creation, falls back to non-realpath result on ENOENT.
+ *
+ * Absolute paths are trusted as-is (access control is handled by
+ * the permissions middleware). Only relative paths are checked to
+ * ensure symlinks don't escape the working directory.
  */
 export async function resolvePathSafe(filePath: string, cwd: string): Promise<string> {
   const resolved = resolvePath(filePath, cwd)
   const fs = getPlatform().fs
 
+  // Absolute paths are explicit — trust them (permissions middleware handles access)
+  if (nodePath.isAbsolute(filePath)) {
+    try {
+      return await fs.realpath(resolved)
+    } catch {
+      return resolved // ENOENT for new files
+    }
+  }
+
+  // Relative paths — check that symlinks don't escape the working directory
   try {
     const realResolved = await fs.realpath(resolved)
     const realCwd = await fs.realpath(cwd)
     if (!realResolved.startsWith(`${realCwd}/`) && realResolved !== realCwd) {
-      throw new Error(`Path escapes working directory: ${filePath}`)
+      throw new Error(`Path escapes working directory via symlink: ${filePath}`)
     }
     return realResolved
   } catch (err) {

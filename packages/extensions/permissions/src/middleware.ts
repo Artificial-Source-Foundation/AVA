@@ -7,12 +7,19 @@
  * - Emits permission:request events for user confirmation
  */
 
+import type { MessageBus } from '@ava/core-v2/bus'
 import type {
   ToolMiddleware,
   ToolMiddlewareContext,
   ToolMiddlewareResult,
 } from '@ava/core-v2/extensions'
-import { classifyRisk, DEFAULT_SETTINGS, type PermissionSettings } from './types.js'
+import {
+  classifyRisk,
+  DEFAULT_SETTINGS,
+  type PermissionRequest,
+  type PermissionResponse,
+  type PermissionSettings,
+} from './types.js'
 
 let settings: PermissionSettings = { ...DEFAULT_SETTINGS }
 
@@ -64,7 +71,7 @@ function isBlockedByPattern(args: Record<string, unknown>): boolean {
 
 // ─── Middleware ──────────────────────────────────────────────────────────────
 
-export function createPermissionMiddleware(): ToolMiddleware {
+export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
   return {
     name: 'ava-permissions',
     priority: 0, // Runs first — before all other middleware
@@ -114,6 +121,21 @@ export function createPermissionMiddleware(): ToolMiddleware {
         if (!isSudoCommand(args)) return undefined
       }
 
+      // For tools needing approval: use bus if available
+      if (bus?.hasSubscribers('permission:request')) {
+        const response = await bus.request<PermissionRequest, PermissionResponse>(
+          { type: 'permission:request', toolName, args, risk },
+          'permission:response',
+          120_000
+        )
+        if (!response.approved) {
+          return { blocked: true, reason: response.reason ?? 'Denied by user' }
+        }
+        return undefined
+      }
+
+      // No approval handler available — apply fallback blocking rules
+
       // Warn on .env files
       if (isEnvFile(args)) {
         return { blocked: true, reason: 'Accessing .env files requires confirmation' }
@@ -124,9 +146,6 @@ export function createPermissionMiddleware(): ToolMiddleware {
         return { blocked: true, reason: 'sudo requires confirmation' }
       }
 
-      // For high-risk actions in non-yolo mode, block by default
-      // In a full implementation, this would emit a permission:request event
-      // and wait for user confirmation. For now, we only block the most dangerous.
       return undefined
     },
   }

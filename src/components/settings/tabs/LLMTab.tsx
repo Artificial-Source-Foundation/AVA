@@ -115,7 +115,9 @@ export const LLMTab: Component = () => {
 
   // Find the active provider's default model for pair suggestion
   const activeModel = createMemo(() => {
-    const active = settings().providers.find((p) => p.enabled && p.apiKey)
+    const active = settings().providers.find(
+      (p) => p.enabled && (p.apiKey || p.status === 'connected')
+    )
     return active?.defaultModel ?? ''
   })
 

@@ -178,6 +178,11 @@
   --info-subtle: var(--blue-alpha-15);
   --info-border: var(--blue-alpha-20);
 
+  --success-muted: var(--green-3);
+  --warning-muted: var(--amber-3);
+  --error-muted: var(--red-3);
+  --info-muted: var(--blue-3);
+
   /* ========================================
      PROVIDER COLORS (Semantic)
      ======================================== */
@@ -275,6 +280,12 @@
   --button-ghost-text: var(--text-secondary);
   --button-ghost-hover: var(--alpha-white-8);
   --button-ghost-active: var(--alpha-white-10);
+
+  --button-secondary-bg: var(--alpha-white-5);
+  --button-secondary-text: var(--text-primary);
+  --button-secondary-border: var(--border-default);
+  --button-secondary-hover: var(--alpha-white-8);
+  --button-secondary-active: var(--alpha-white-10);
 
   /* Cards */
   --card-background: var(--glass-bg);
@@ -451,6 +462,76 @@
 
 .animate-delegation-flow {
   animation: delegation-flow 0.8s linear infinite;
+}
+
+/* Message entry */
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-message-in {
+  animation: message-in var(--duration-normal) var(--ease-out) forwards;
+}
+
+/* Tool card entry */
+@keyframes tool-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-tool-card-in {
+  animation: tool-card-in var(--duration-normal) var(--ease-out) forwards;
+}
+
+/* Typing indicator dots */
+@keyframes typing-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--accent);
+  animation: typing-pulse 1.4s ease-in-out infinite;
+}
+
+/* Blinking cursor for streaming text */
+@keyframes blink-cursor {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.streaming-cursor {
+  animation: blink-cursor 0.8s step-end infinite;
+  color: var(--accent);
+  font-weight: 300;
 }
 
 /* ========================================

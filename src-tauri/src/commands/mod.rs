@@ -4,6 +4,7 @@ mod fs_scope;
 mod greet;
 mod oauth;
 mod plugin_state;
+pub mod pty;
 
 pub use dev_log::{append_log, cleanup_old_logs, get_cwd};
 pub use env::get_env_var;
@@ -13,3 +14,4 @@ pub use oauth::{oauth_copilot_device_poll, oauth_copilot_device_start, oauth_lis
 pub use plugin_state::{
     get_plugins_state, install_plugin, set_plugin_enabled, set_plugins_state, uninstall_plugin,
 };
+pub use pty::{pty_kill, pty_resize, pty_spawn, pty_write};

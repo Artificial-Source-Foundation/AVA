@@ -163,6 +163,80 @@ describe('summarizeStrategy', () => {
   })
 })
 
+// ─── Pair-aware truncation ──────────────────────────────────────────────────
+
+describe('Pair-aware truncation', () => {
+  it('keeps tool_use/tool_result message pairs together', () => {
+    const messages: ChatMessage[] = [
+      msg('user', 'Find bugs'),
+      // Assistant with tool_use
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Let me check' },
+          { type: 'tool_use', id: 'tc-1', name: 'grep', input: { pattern: 'bug' } },
+        ],
+      },
+      // User with tool_result
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'tc-1', content: 'found bugs', is_error: false },
+        ],
+      },
+      msg('assistant', 'Found some bugs.'),
+    ]
+
+    const result = truncateStrategy.compact(messages, 10000)
+
+    // Check that the tool_use assistant and tool_result user are both present
+    const hasToolUse = result.some(
+      (m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'tool_use')
+    )
+    const hasToolResult = result.some(
+      (m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'tool_result')
+    )
+
+    // If one is present, the other must be too
+    if (hasToolUse || hasToolResult) {
+      expect(hasToolUse).toBe(true)
+      expect(hasToolResult).toBe(true)
+    }
+  })
+
+  it('drops tool pairs as a unit when truncating', () => {
+    const messages: ChatMessage[] = [
+      msg('user', 'A'.repeat(40)),
+      // Tool pair 1
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'tc-1', name: 'read_file', input: { path: '/a.ts' } }],
+      },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'tc-1', content: 'A'.repeat(40), is_error: false },
+        ],
+      },
+      // Final response
+      msg('assistant', 'D'.repeat(40)),
+    ]
+
+    // Very tight budget — only room for ~2 items
+    const result = truncateStrategy.compact(messages, 25)
+
+    // Should not have orphan tool_use without tool_result or vice versa
+    const toolUseCount = result.filter(
+      (m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'tool_use')
+    ).length
+    const toolResultCount = result.filter(
+      (m) => Array.isArray(m.content) && m.content.some((b) => b.type === 'tool_result')
+    ).length
+
+    expect(toolUseCount).toBe(toolResultCount)
+  })
+})
+
 // ─── ALL_STRATEGIES ─────────────────────────────────────────────────────────
 
 describe('ALL_STRATEGIES', () => {

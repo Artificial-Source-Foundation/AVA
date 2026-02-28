@@ -11,57 +11,49 @@ export type { LLMClient }
 import type { LLMProvider } from '../../types/llm'
 
 // ============================================================================
-// Model to Provider Mapping
+// Model to Provider Resolution
 // ============================================================================
 
 /**
- * Model to provider mapping
- * Maps model IDs to their native providers
- */
-const MODEL_PROVIDERS: Record<string, LLMProvider> = {
-  // Anthropic models
-  'claude-opus-4': 'anthropic',
-  'claude-sonnet-4': 'anthropic',
-  'claude-haiku-4': 'anthropic',
-  'claude-3-opus': 'anthropic',
-  'claude-3-sonnet': 'anthropic',
-  'claude-3-haiku': 'anthropic',
-
-  // OpenAI models
-  'gpt-4': 'openai',
-  'gpt-4-turbo': 'openai',
-  'gpt-4o': 'openai',
-  'gpt-3.5-turbo': 'openai',
-  o1: 'openai',
-  'o1-mini': 'openai',
-
-  // GLM models
-  'glm-4': 'glm',
-  'glm-4-plus': 'glm',
-}
-
-/**
- * Find the native provider for a model ID
+ * Find the native provider for a model ID using prefix matching.
+ * Covers all 14 providers' model naming patterns.
  */
 export function findProviderForModel(model: string): LLMProvider | null {
-  // Check exact match
-  if (model in MODEL_PROVIDERS) {
-    return MODEL_PROVIDERS[model]
-  }
-
-  // Check prefix match (e.g., 'claude-sonnet-4-20250514' -> 'claude-sonnet-4')
-  for (const [prefix, provider] of Object.entries(MODEL_PROVIDERS)) {
-    if (model.startsWith(prefix)) {
-      return provider
+  // OpenRouter slash format: "anthropic/claude-sonnet-4.6"
+  if (model.includes('/')) {
+    // Groq and Together also use slash format (meta-llama/, qwen/, moonshotai/)
+    // but those are hosted on those platforms. Check known hosted prefixes first.
+    const hosted = model.split('/')[0].toLowerCase()
+    if (['meta-llama', 'qwen', 'moonshotai'].includes(hosted)) {
+      // Ambiguous — could be Groq or Together. Can't resolve without context.
+      return null
     }
+    return 'openrouter'
   }
 
-  // Check by provider prefix patterns
   if (model.startsWith('claude')) return 'anthropic'
-  if (model.startsWith('gpt') || model.startsWith('o1')) return 'openai'
+  if (
+    model.startsWith('gpt') ||
+    model.startsWith('o1') ||
+    model.startsWith('o3') ||
+    model.startsWith('o4') ||
+    model.startsWith('codex')
+  )
+    return 'openai'
+  if (model.startsWith('gemini')) return 'google'
+  if (model.startsWith('grok')) return 'xai'
+  if (
+    model.startsWith('mistral') ||
+    model.startsWith('magistral') ||
+    model.endsWith('stral-latest')
+  )
+    return 'mistral'
+  if (model.startsWith('llama')) return 'groq'
+  if (model.startsWith('deepseek')) return 'deepseek'
+  if (model.startsWith('command')) return 'cohere'
   if (model.startsWith('glm')) return 'glm'
-  if (model.startsWith('gemini')) return 'google' as LLMProvider
-  if (model.startsWith('moonshot') || model.startsWith('kimi')) return 'kimi' as LLMProvider
+  if (model.startsWith('moonshot') || model.startsWith('kimi')) return 'kimi'
+  if (model.includes(':')) return 'ollama' // ollama uses "model:tag" format
 
   return null
 }

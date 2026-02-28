@@ -17,8 +17,6 @@ export type {
   PermissionType,
 } from './PermissionDialog'
 export { PermissionBadge, PermissionDialog, PermissionList } from './PermissionDialog'
-export type { ToolApprovalDialogProps } from './ToolApprovalDialog'
-export { ToolApprovalDialog } from './ToolApprovalDialog'
 export type {
   QuickWorkspacePickerProps,
   Workspace,

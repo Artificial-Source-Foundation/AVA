@@ -31,7 +31,21 @@ import { createAgentEventHandler, createTeamBridge } from './agent'
 // Re-export types so existing consumers continue working
 export type { AgentState, ApprovalRequest, ToolActivity }
 
-export function useAgent() {
+// ============================================================================
+// Singleton
+// ============================================================================
+
+type AgentStore = ReturnType<typeof createAgentStore>
+let agentStoreSingleton: AgentStore | null = null
+
+export function useAgent(): AgentStore {
+  if (!agentStoreSingleton) {
+    agentStoreSingleton = createAgentStore()
+  }
+  return agentStoreSingleton
+}
+
+function createAgentStore() {
   // Signals for reactive state
   const [isRunning, setIsRunning] = createSignal(false)
   const [isPlanMode, setIsPlanMode] = createSignal(false)

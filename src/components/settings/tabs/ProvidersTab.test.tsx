@@ -25,7 +25,12 @@ describe('ProvidersTab helpers', () => {
     expect(checkStoredOAuth('openai')).toBe(true)
   })
 
-  it('checkStoredOAuth returns true for core oauth auth', () => {
+  it('checkStoredOAuth returns true for core-v2 oauth token key', () => {
+    localStorage.setItem('ava_cred_ava:openai:oauth_token', 'some-token')
+    expect(checkStoredOAuth('openai')).toBe(true)
+  })
+
+  it('checkStoredOAuth returns true for legacy core oauth auth', () => {
     writeCoreAuth('openai', { type: 'oauth' })
     expect(checkStoredOAuth('openai')).toBe(true)
   })
@@ -35,12 +40,17 @@ describe('ProvidersTab helpers', () => {
     expect(checkStoredOAuth('openai')).toBe(false)
   })
 
-  it('clearProviderCredentials removes provider data and core keys', () => {
+  it('clearProviderCredentials removes provider data and all key formats', () => {
     writeCredentials({
       openai: { type: 'oauth-token' },
       anthropic: { type: 'oauth-token' },
     })
-    localStorage.setItem('ava_cred_openai-api-key', 'sk-openai')
+    // Core-v2 keys
+    localStorage.setItem('ava_cred_ava:openai:api_key', 'sk-openai')
+    localStorage.setItem('ava_cred_ava:openai:oauth_token', 'oauth-tok')
+    localStorage.setItem('ava_cred_ava:openai:account_id', 'acct-123')
+    // Legacy keys
+    localStorage.setItem('ava_cred_openai-api-key', 'sk-openai-legacy')
     localStorage.setItem('estela_cred_openai-api-key', 'legacy-openai')
     writeCoreAuth('openai', { type: 'oauth' })
     localStorage.setItem('estela_cred_auth-openai', JSON.stringify({ type: 'oauth' }))
@@ -53,6 +63,11 @@ describe('ProvidersTab helpers', () => {
     >
     expect(stored.openai).toBeUndefined()
     expect(stored.anthropic).toBeDefined()
+    // Core-v2 keys cleared
+    expect(localStorage.getItem('ava_cred_ava:openai:api_key')).toBeNull()
+    expect(localStorage.getItem('ava_cred_ava:openai:oauth_token')).toBeNull()
+    expect(localStorage.getItem('ava_cred_ava:openai:account_id')).toBeNull()
+    // Legacy keys cleared
     expect(localStorage.getItem('ava_cred_openai-api-key')).toBeNull()
     expect(localStorage.getItem('ava_cred_auth-openai')).toBeNull()
     expect(localStorage.getItem('estela_cred_openai-api-key')).toBeNull()

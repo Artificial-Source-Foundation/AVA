@@ -63,11 +63,19 @@ export async function maybeCompact(deps: ChatDeps): Promise<void> {
     }
     syncTrackerStats(deps)
 
+    const removed = result.originalCount - result.compactedCount
     logInfo(deps.LOG_SRC, 'Compaction complete', {
-      removed: result.originalCount - result.compactedCount,
+      removed,
       tokensSaved: result.tokensSaved,
       strategy: result.strategyUsed,
     })
+
+    // Notify the UI so a toast can be shown
+    window.dispatchEvent(
+      new CustomEvent('ava:compacted', {
+        detail: { removed, tokensSaved: result.tokensSaved },
+      })
+    )
   } catch (err) {
     logWarn(deps.LOG_SRC, 'Compaction failed', err)
   }

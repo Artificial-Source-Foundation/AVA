@@ -6,13 +6,14 @@
  */
 
 import { AlertCircle, ChevronDown, ChevronUp, Loader2, RotateCcw } from 'lucide-solid'
-import { type Component, createSignal, For, Show } from 'solid-js'
+import { type Component, createEffect, createSignal, For, on, onCleanup, Show } from 'solid-js'
 import { formatCost } from '../../lib/cost'
 import type { Message } from '../../types'
 import { ActiveToolIndicator } from './active-tool-indicator'
 import { EditForm } from './EditForm'
 import { MarkdownContent } from './MarkdownContent'
 import { MessageActions } from './MessageActions'
+import { ThinkingBlock } from './ThinkingBlock'
 import { ToolCallGroup } from './ToolCallGroup'
 import { TypingIndicator } from './TypingIndicator'
 import { ToolCallErrorBoundary } from './tool-call-error-boundary'
@@ -23,6 +24,7 @@ interface MessageBubbleProps {
   isRetrying: boolean
   isStreaming: boolean
   isLastMessage: boolean
+  shouldAnimate: boolean
   onStartEdit: () => void
   onCancelEdit: () => void
   onSaveEdit: (content: string) => Promise<void>
@@ -30,6 +32,7 @@ interface MessageBubbleProps {
   onRegenerate: () => void
   onCopy: () => void
   onDelete: () => void
+  onBranch: () => void
 }
 
 const ASSISTANT_COLLAPSE_CHARS = 1500
@@ -47,7 +50,7 @@ function formatModelName(modelId: string): string {
 
 export const MessageBubble: Component<MessageBubbleProps> = (props) => {
   const isUser = () => props.message.role === 'user'
-  const shouldAnimateIn = () => isUser() && !props.isEditing
+  const shouldAnimateIn = () => props.shouldAnimate && !props.isEditing
   const lineCount = () => props.message.content.split('\n').length
   const isLong = () => {
     if (isUser()) return lineCount() > USER_COLLAPSE_LINES
@@ -55,6 +58,31 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
   }
   const [expanded, setExpanded] = createSignal(false)
   const shouldCollapse = () => isLong() && !expanded() && !props.isStreaming
+
+  // Retry countdown timer — ticks down from retryAfter to 0
+  const [countdown, setCountdown] = createSignal(0)
+  createEffect(
+    on(
+      () => props.message.error?.retryAfter,
+      (retryAfter) => {
+        if (!retryAfter || retryAfter <= 0) {
+          setCountdown(0)
+          return
+        }
+        setCountdown(retryAfter)
+        const timer = setInterval(() => {
+          setCountdown((prev) => {
+            if (prev <= 1) {
+              clearInterval(timer)
+              return 0
+            }
+            return prev - 1
+          })
+        }, 1000)
+        onCleanup(() => clearInterval(timer))
+      }
+    )
+  )
 
   return (
     <div
@@ -79,8 +107,8 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               transition-colors duration-[var(--duration-fast)]
               ${
                 isUser()
-                  ? 'bg-[var(--chat-user-bg)] text-[var(--chat-user-text)]'
-                  : 'bg-[var(--chat-assistant-bg)] text-[var(--chat-assistant-text)] border border-[var(--chat-assistant-border)]'
+                  ? 'bg-[var(--chat-user-bg)] text-[var(--chat-user-text)] shadow-[var(--shadow-sm)]'
+                  : 'bg-[var(--glass-bg)] text-[var(--chat-assistant-text)] border border-[var(--glass-border)] shadow-[var(--shadow-sm)]'
               }
             `}
           >
@@ -114,13 +142,30 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                 <Show
                   when={props.isStreaming}
                   fallback={
-                    <div class={props.isLastMessage && !props.message.error ? 'h-5' : 'h-3'} />
+                    <Show
+                      when={!isUser() && props.message.toolCalls?.length}
+                      fallback={
+                        <div class={props.isLastMessage && !props.message.error ? 'h-5' : 'h-3'} />
+                      }
+                    >
+                      <p class="text-sm text-[var(--text-muted)] italic">Finished without output</p>
+                    </Show>
                   }
                 >
-                  <TypingIndicator />
+                  <TypingIndicator
+                    label={
+                      (props.message.metadata?.thinking as string) ? 'Reasoning...' : undefined
+                    }
+                  />
                 </Show>
               }
             >
+              <Show when={!isUser() && (props.message.metadata?.thinking as string)}>
+                <ThinkingBlock
+                  thinking={props.message.metadata!.thinking as string}
+                  isStreaming={props.isStreaming}
+                />
+              </Show>
               <div
                 class={shouldCollapse() ? 'relative overflow-hidden' : ''}
                 style={shouldCollapse() ? { 'max-height': '300px' } : {}}
@@ -228,9 +273,9 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                   </Show>
                 </button>
               </div>
-              <Show when={props.message.error!.retryAfter}>
+              <Show when={countdown() > 0}>
                 <p class="text-xs text-[var(--error)] opacity-75 mt-2">
-                  Retry available in {props.message.error!.retryAfter}s
+                  Retry available in {countdown()}s
                 </p>
               </Show>
             </div>
@@ -245,6 +290,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               onRegenerate={props.onRegenerate}
               onCopy={props.onCopy}
               onDelete={props.onDelete}
+              onBranch={props.onBranch}
               isLoading={props.isStreaming}
             />
           </Show>
@@ -259,9 +305,14 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
             </ToolCallErrorBoundary>
           </Show>
 
-          {/* Active tool indicator — replaces generic "Working..." */}
+          {/* Active tool indicator — shows during tool execution */}
           <Show
-            when={!isUser() && props.isStreaming && props.isLastMessage && props.message.content}
+            when={
+              !isUser() &&
+              props.isStreaming &&
+              props.isLastMessage &&
+              props.message.toolCalls?.length
+            }
           >
             <ActiveToolIndicator
               toolCalls={props.message.toolCalls}

@@ -154,13 +154,30 @@ function toggleBottomPanel() {
 }
 
 const [bottomPanelHeight, setBottomPanelHeightRaw] = createSignal(
-  loadNumber(STORAGE_KEYS.LAYOUT_BOTTOM_HEIGHT, 200, 100, 400)
+  loadNumber(STORAGE_KEYS.LAYOUT_BOTTOM_HEIGHT, 200, 100, 600)
 )
 
 function setBottomPanelHeight(h: number) {
-  const clamped = Math.min(400, Math.max(100, h))
+  const clamped = Math.min(600, Math.max(100, h))
   setBottomPanelHeightRaw(clamped)
   save(STORAGE_KEYS.LAYOUT_BOTTOM_HEIGHT, String(clamped))
+}
+
+// ============================================================================
+// Bottom Panel Tab
+// ============================================================================
+
+export type BottomPanelTab = 'memory' | 'terminal' | 'output'
+
+const [bottomPanelTab, setBottomPanelTab] = createSignal<BottomPanelTab>(
+  loadString('ava-bottom-panel-tab', 'memory') as BottomPanelTab
+)
+
+function switchBottomPanelTab(tab: BottomPanelTab) {
+  setBottomPanelTab(tab)
+  save('ava-bottom-panel-tab', tab)
+  // Also ensure the panel is visible
+  if (!bottomPanelVisible()) setBottomPanelVisible(true)
 }
 
 // ============================================================================
@@ -239,6 +256,87 @@ function toggleSettings() {
 }
 
 // ============================================================================
+// Right Panel Tab
+// ============================================================================
+
+export type RightPanelTab = 'activity' | 'files' | 'review'
+
+const [rightPanelTab, setRightPanelTab] = createSignal<RightPanelTab>(
+  loadString('ava-right-panel-tab', 'activity') as RightPanelTab
+)
+
+function switchRightPanelTab(tab: RightPanelTab) {
+  setRightPanelTab(tab)
+  save('ava-right-panel-tab', tab)
+  // Also ensure the panel is visible
+  if (!rightPanelVisible()) setRightPanelVisible(true)
+}
+
+// ============================================================================
+// Expanded Editor
+// ============================================================================
+
+const [expandedEditorOpen, setExpandedEditorOpen] = createSignal(false)
+
+function toggleExpandedEditor() {
+  setExpandedEditorOpen(!expandedEditorOpen())
+}
+
+// ============================================================================
+// Right Panel Width (persisted)
+// ============================================================================
+
+const RIGHT_PANEL_WIDTH_KEY = 'ava-right-panel-width'
+
+const [rightPanelWidth, setRightPanelWidthRaw] = createSignal(
+  loadNumber(RIGHT_PANEL_WIDTH_KEY, 320, 250, 600)
+)
+
+function setRightPanelWidth(w: number) {
+  const clamped = Math.min(600, Math.max(250, w))
+  setRightPanelWidthRaw(clamped)
+  save(RIGHT_PANEL_WIDTH_KEY, String(clamped))
+}
+
+// ============================================================================
+// Quick Model Picker
+// ============================================================================
+
+const [quickModelPickerOpen, setQuickModelPickerOpen] = createSignal(false)
+
+function toggleQuickModelPicker() {
+  setQuickModelPickerOpen(!quickModelPickerOpen())
+}
+
+// ============================================================================
+// Session Switcher
+// ============================================================================
+
+const [sessionSwitcherOpen, setSessionSwitcherOpen] = createSignal(false)
+
+function toggleSessionSwitcher() {
+  setSessionSwitcherOpen(!sessionSwitcherOpen())
+}
+
+// ============================================================================
+// Chat Search
+// ============================================================================
+
+const [chatSearchOpen, setChatSearchOpen] = createSignal(false)
+
+function openChatSearch() {
+  setChatSearchOpen(true)
+}
+
+function closeChatSearch() {
+  setChatSearchOpen(false)
+}
+
+function toggleChatSearch() {
+  setChatSearchOpen(!chatSearchOpen())
+}
+
+// ============================================================================
 // Export Hook
 // ============================================================================
 
@@ -258,17 +356,26 @@ export function useLayout() {
     sidebarWidth,
     setSidebarWidth,
 
+    // Expanded editor
+    expandedEditorOpen,
+    setExpandedEditorOpen,
+    toggleExpandedEditor,
+
     // Right panel (agent activity)
     rightPanelVisible,
     setRightPanelVisible,
     toggleRightPanel,
+    rightPanelWidth,
+    setRightPanelWidth,
 
-    // Bottom panel (memory)
+    // Bottom panel
     bottomPanelVisible,
     setBottomPanelVisible,
     toggleBottomPanel,
     bottomPanelHeight,
     setBottomPanelHeight,
+    bottomPanelTab,
+    switchBottomPanelTab,
 
     // Code editor
     codeEditorFile,
@@ -293,5 +400,25 @@ export function useLayout() {
     openModelBrowser,
     closeModelBrowser,
     toggleModelBrowser,
+
+    // Right panel tab
+    rightPanelTab,
+    switchRightPanelTab,
+
+    // Quick model picker
+    quickModelPickerOpen,
+    setQuickModelPickerOpen,
+    toggleQuickModelPicker,
+
+    // Session switcher
+    sessionSwitcherOpen,
+    setSessionSwitcherOpen,
+    toggleSessionSwitcher,
+
+    // Chat search
+    chatSearchOpen,
+    openChatSearch,
+    closeChatSearch,
+    toggleChatSearch,
   }
 }

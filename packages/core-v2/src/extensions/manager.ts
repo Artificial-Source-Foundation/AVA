@@ -106,7 +106,12 @@ export class ExtensionManager {
     for (const [name] of sorted) {
       const module = modules.get(name)
       if (module) {
-        await this.activate(name, module)
+        try {
+          await this.activate(name, module)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          log.warn(`Skipping extension ${name}: ${message}`)
+        }
       } else {
         log.warn(`No module found for extension: ${name}`)
       }

@@ -17,6 +17,8 @@ export function getModifiedFilePath(
   if (toolName === 'write_file' || toolName === 'create_file') return (input.path as string) || null
   if (toolName === 'edit') return (input.filePath as string) || null
   if (toolName === 'apply_patch') return (input.filePath as string) || null
+  if (toolName === 'multiedit') return (input.filePath as string) || null
+  if (toolName === 'delete_file' || toolName === 'delete') return (input.path as string) || null
   return null
 }
 

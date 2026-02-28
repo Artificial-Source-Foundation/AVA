@@ -21,10 +21,12 @@ export interface AgentConfig {
   name?: string
   maxTimeMinutes: number
   maxTurns: number
+  maxRetries?: number
   provider?: LLMProvider
   model?: string
   toolMode?: string
   systemPrompt?: string
+  allowedTools?: string[]
 }
 
 export const DEFAULT_AGENT_CONFIG: Omit<AgentConfig, 'maxTimeMinutes' | 'maxTurns'> = {
@@ -65,6 +67,15 @@ export type AgentEvent =
   | { type: 'tool:finish'; agentId: string; toolName: string; success: boolean; durationMs: number }
   | { type: 'thought'; agentId: string; content: string }
   | { type: 'error'; agentId: string; error: string }
+  | {
+      type: 'retry'
+      agentId: string
+      attempt: number
+      maxRetries: number
+      delayMs: number
+      reason: string
+    }
+  | { type: 'doom-loop'; agentId: string; tool: string; count: number }
 
 export type AgentEventCallback = (event: AgentEvent) => void
 
@@ -84,7 +95,7 @@ export interface TurnUsage {
 }
 
 export type AgentTurnResult =
-  | { status: 'continue'; toolCalls: ToolCallInfo[]; usage?: TurnUsage }
+  | { status: 'continue'; toolCalls: ToolCallInfo[]; result?: string; usage?: TurnUsage }
   | { status: 'stop'; terminateMode: AgentTerminateMode; result: string | null; usage?: TurnUsage }
 
 export const COMPLETE_TASK_TOOL = 'attempt_completion'

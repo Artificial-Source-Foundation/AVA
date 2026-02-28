@@ -7,8 +7,11 @@ import type {
   ChatMessage,
   LLMClient,
   LLMProvider,
+  MessageContent,
   ProviderConfig,
   StreamDelta,
+  TextBlock,
+  ToolResultBlock,
   ToolUseBlock,
 } from '@ava/core-v2/llm'
 import { getApiKey } from '@ava/core-v2/llm'
@@ -112,6 +115,99 @@ export class ToolCallBuffer {
   }
 }
 
+// ─── Message Conversion ─────────────────────────────────────────────────────
+
+interface OpenAIMessage {
+  role: string
+  content: string | null
+  tool_calls?: Array<{
+    id: string
+    type: 'function'
+    function: { name: string; arguments: string }
+  }>
+  tool_call_id?: string
+}
+
+/** Extract plain text from MessageContent. */
+function extractText(content: MessageContent): string {
+  if (typeof content === 'string') return content
+  return content
+    .filter((b): b is TextBlock => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n')
+}
+
+/**
+ * Convert structured ChatMessages to OpenAI API format.
+ * - Assistant with tool_use blocks → { role: 'assistant', content, tool_calls }
+ * - User with tool_result blocks → separate { role: 'tool', tool_call_id, content } messages
+ * - Plain string messages → pass through unchanged
+ */
+export function convertMessagesToOpenAI(messages: ChatMessage[]): OpenAIMessage[] {
+  const result: OpenAIMessage[] = []
+
+  for (const msg of messages) {
+    // Plain string content — pass through
+    if (typeof msg.content === 'string') {
+      result.push({ role: msg.role, content: msg.content })
+      continue
+    }
+
+    const blocks = msg.content
+
+    // Assistant with tool_use blocks
+    if (msg.role === 'assistant') {
+      const textParts = blocks.filter((b): b is TextBlock => b.type === 'text').map((b) => b.text)
+      const toolUseBlocks = blocks.filter((b): b is ToolUseBlock => b.type === 'tool_use')
+
+      const assistantMsg: OpenAIMessage = {
+        role: 'assistant',
+        content: textParts.length > 0 ? textParts.join('\n') : null,
+      }
+
+      if (toolUseBlocks.length > 0) {
+        assistantMsg.tool_calls = toolUseBlocks.map((tc) => ({
+          id: tc.id,
+          type: 'function' as const,
+          function: {
+            name: tc.name,
+            arguments: JSON.stringify(tc.input),
+          },
+        }))
+      }
+
+      result.push(assistantMsg)
+      continue
+    }
+
+    // User with tool_result blocks → separate tool messages
+    if (msg.role === 'user') {
+      const toolResults = blocks.filter((b): b is ToolResultBlock => b.type === 'tool_result')
+      const textParts = blocks.filter((b): b is TextBlock => b.type === 'text').map((b) => b.text)
+
+      // Emit tool result messages first
+      for (const tr of toolResults) {
+        result.push({
+          role: 'tool',
+          content: tr.content,
+          tool_call_id: tr.tool_use_id,
+        })
+      }
+
+      // If there are also text blocks, emit a user message
+      if (textParts.length > 0) {
+        result.push({ role: 'user', content: textParts.join('\n') })
+      }
+      continue
+    }
+
+    // System or other — extract text
+    result.push({ role: msg.role, content: extractText(msg.content) })
+  }
+
+  return result
+}
+
 // ─── Request Body Builder ───────────────────────────────────────────────────
 
 export function buildOpenAIRequestBody(
@@ -121,7 +217,7 @@ export function buildOpenAIRequestBody(
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: config.model ?? defaults.model,
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
+    messages: convertMessagesToOpenAI(messages),
     stream: true,
   }
 

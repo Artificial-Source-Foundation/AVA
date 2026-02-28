@@ -27,9 +27,9 @@ export type AuthMethod = 'api-key' | 'oauth' | 'gateway'
 
 // ─── Messages ────────────────────────────────────────────────────────────────
 
-export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system'
-  content: string
+export interface TextBlock {
+  type: 'text'
+  text: string
 }
 
 export interface ToolUseBlock {
@@ -37,6 +37,21 @@ export interface ToolUseBlock {
   id: string
   name: string
   input: Record<string, unknown>
+}
+
+export interface ToolResultBlock {
+  type: 'tool_result'
+  tool_use_id: string
+  content: string
+  is_error?: boolean
+}
+
+export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock
+export type MessageContent = string | ContentBlock[]
+
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: MessageContent
 }
 
 // ─── Tool Definitions ────────────────────────────────────────────────────────
@@ -76,6 +91,7 @@ export interface Credentials {
 
 export interface StreamDelta {
   content?: string
+  thinking?: string
   done?: boolean
   usage?: TokenUsage
   error?: StreamError

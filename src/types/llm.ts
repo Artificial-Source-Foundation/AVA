@@ -101,6 +101,7 @@ export interface StoredCredentials {
 /** Unified stream delta across providers */
 export interface StreamDelta {
   content: string
+  thinking?: string
   done: boolean
   usage?: TokenUsage
   error?: StreamError

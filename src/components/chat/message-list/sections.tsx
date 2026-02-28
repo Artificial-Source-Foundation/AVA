@@ -1,5 +1,31 @@
-import { Sparkles } from 'lucide-solid'
-import type { Component } from 'solid-js'
+import { Bug, FlaskConical, Search, Sparkles, Wand2 } from 'lucide-solid'
+import { type Component, For } from 'solid-js'
+
+const STARTER_TEMPLATES = [
+  {
+    icon: Search,
+    title: 'Explore Codebase',
+    prompt:
+      'Give me a high-level overview of this project. What are the key files, architecture patterns, and how does everything fit together?',
+  },
+  {
+    icon: Bug,
+    title: 'Find Bugs',
+    prompt:
+      'Review the codebase for potential bugs, security issues, and error handling gaps. Prioritize by severity.',
+  },
+  {
+    icon: FlaskConical,
+    title: 'Write Tests',
+    prompt:
+      'Generate comprehensive tests for the most critical functions. Focus on edge cases, error handling, and boundary conditions.',
+  },
+  {
+    icon: Wand2,
+    title: 'Add Feature',
+    prompt: 'Help me plan and implement a new feature. I want to add ',
+  },
+]
 
 export const MessageListLoading: Component = () => (
   <div class="space-y-4 animate-pulse">
@@ -23,8 +49,38 @@ export const MessageListEmpty: Component = () => (
     </div>
     <h2 class="text-xl font-semibold text-[var(--text-primary)] font-display">Welcome to AVA</h2>
     <p class="text-sm text-[var(--text-tertiary)] mt-2 max-w-sm text-center">
-      Your AI coding assistant is ready. Start a conversation to begin.
+      Your AI coding assistant is ready. Start a conversation or try a template.
     </p>
+
+    {/* Starter templates */}
+    <div class="mt-6 grid grid-cols-2 gap-2 max-w-md w-full">
+      <For each={STARTER_TEMPLATES}>
+        {(template) => (
+          <button
+            type="button"
+            onClick={() => {
+              window.dispatchEvent(
+                new CustomEvent('ava:set-input', { detail: { text: template.prompt } })
+              )
+            }}
+            class="
+              flex items-start gap-2.5 p-3 text-left
+              rounded-[var(--radius-lg)]
+              border border-[var(--border-subtle)]
+              bg-[var(--surface-raised)]
+              hover:border-[var(--accent-muted)] hover:bg-[var(--alpha-white-3)]
+              transition-colors
+              group
+            "
+          >
+            <template.icon class="w-4 h-4 mt-0.5 flex-shrink-0 text-[var(--text-muted)] group-hover:text-[var(--accent)]" />
+            <span class="text-xs text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">
+              {template.title}
+            </span>
+          </button>
+        )}
+      </For>
+    </div>
   </div>
 )
 

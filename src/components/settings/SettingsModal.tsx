@@ -5,6 +5,7 @@
 import { Wand2 } from 'lucide-solid'
 import { type Component, createEffect, createSignal, onCleanup, Show } from 'solid-js'
 import type { AgentPreset } from '../../config/defaults/agent-defaults'
+import { useNotification } from '../../contexts/notification'
 import { fetchModels } from '../../services/providers/model-fetcher'
 import { useLayout } from '../../stores/layout'
 import { useSettings } from '../../stores/settings'
@@ -31,8 +32,10 @@ export const SettingsModal: Component = () => {
     removeMcpServer,
   } = useSettings()
   const { shortcuts, updateShortcut, resetShortcut, resetAll: resetAllShortcuts } = useShortcuts()
+  const notification = useNotification()
 
   const [activeTab, setActiveTab] = createSignal<SettingsTab>('general')
+  const [settingsSearch, setSettingsSearch] = createSignal('')
   const [editingAgent, setEditingAgent] = createSignal<AgentPreset | null>(null)
   const [editingKeybinding, setEditingKeybinding] = createSignal<Keybinding | null>(null)
   const [creatingAgent, setCreatingAgent] = createSignal(false)
@@ -112,11 +115,14 @@ export const SettingsModal: Component = () => {
         status: models.length > 0 ? 'connected' : 'disconnected',
         error: undefined,
       })
+      notification.success('Provider connected', `${models.length} models available`)
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Connection failed'
       updateProvider(id, {
         status: 'error',
-        error: err instanceof Error ? err.message : 'Connection failed',
+        error: message,
       })
+      notification.error('Connection failed', message)
     }
   }
 
@@ -148,10 +154,19 @@ export const SettingsModal: Component = () => {
           class="relative z-10 bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] w-full max-w-3xl flex overflow-hidden"
           style={{ height: 'min(85vh, 640px)' }}
         >
-          <SettingsModalSidebar activeTab={activeTab} onSelectTab={setActiveTab} />
+          <SettingsModalSidebar
+            activeTab={activeTab}
+            onSelectTab={setActiveTab}
+            search={settingsSearch}
+          />
 
           <div class="flex-1 flex flex-col min-w-0">
-            <SettingsModalHeader activeTab={activeTab} onClose={closeSettings} />
+            <SettingsModalHeader
+              activeTab={activeTab}
+              onClose={closeSettings}
+              search={settingsSearch}
+              onSearchChange={setSettingsSearch}
+            />
 
             <div class="flex-1 overflow-y-auto">
               <SettingsModalContent

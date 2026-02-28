@@ -109,17 +109,25 @@ export const ProviderCard: Component<ProviderCardProps> = (props) => {
         </div>
       </div>
 
-      {/* Expanded configuration */}
-      <Show when={props.isExpanded}>
-        <ProviderCardExpanded
-          provider={props.provider}
-          onSaveApiKey={props.onSaveApiKey}
-          onClearApiKey={props.onClearApiKey}
-          onSetDefaultModel={props.onSetDefaultModel}
-          onTestConnection={props.onTestConnection}
-          onUpdateModels={props.onUpdateModels}
-        />
-      </Show>
+      {/* Expanded configuration — smooth height transition */}
+      <div
+        class="overflow-hidden transition-all duration-200 ease-out"
+        style={{
+          'max-height': props.isExpanded ? '600px' : '0px',
+          opacity: props.isExpanded ? '1' : '0',
+        }}
+      >
+        <Show when={props.isExpanded}>
+          <ProviderCardExpanded
+            provider={props.provider}
+            onSaveApiKey={props.onSaveApiKey}
+            onClearApiKey={props.onClearApiKey}
+            onSetDefaultModel={props.onSetDefaultModel}
+            onTestConnection={props.onTestConnection}
+            onUpdateModels={props.onUpdateModels}
+          />
+        </Show>
+      </div>
     </div>
   )
 }

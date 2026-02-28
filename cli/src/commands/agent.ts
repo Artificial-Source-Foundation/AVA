@@ -107,6 +107,8 @@ function formatEventVerbose(event: AgentEvent): string {
       return `[${time}] Thought: ${event.content.slice(0, 120)}${event.content.length > 120 ? '...' : ''}`
     case 'error':
       return `[${time}] ERROR: ${event.error}`
+    default:
+      return `[${time}] ${(event as { type: string }).type}`
   }
 }
 

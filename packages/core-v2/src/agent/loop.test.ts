@@ -6,7 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installMockPlatform } from '../__test-utils__/mock-platform.js'
 import { resetRegistries } from '../extensions/api.js'
 import { resetProviders } from '../llm/client.js'
-import type { LLMClient, StreamDelta, ToolDefinition } from '../llm/types.js'
+import type {
+  ContentBlock,
+  LLMClient,
+  StreamDelta,
+  ToolDefinition,
+  ToolResultBlock,
+} from '../llm/types.js'
 import { resetLogger } from '../logger/logger.js'
 import { resetTools } from '../tools/registry.js'
 import { AgentExecutor, runAgent } from './loop.js'
@@ -165,10 +171,8 @@ describe('AgentExecutor.run', () => {
     expect(result.output).toBe('All done!')
   })
 
-  it('LLM stream error triggers ERROR terminate', async () => {
-    const client = createMockClient([
-      [{ error: { type: 'server', message: 'Internal server error' } }],
-    ])
+  it('LLM stream error triggers ERROR terminate (non-retryable)', async () => {
+    const client = createMockClient([[{ error: { type: 'auth', message: 'Invalid API key' } }]])
 
     vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
     vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([])
@@ -178,7 +182,7 @@ describe('AgentExecutor.run', () => {
 
     expect(result.terminateMode).toBe(AgentTerminateMode.ERROR)
     expect(result.success).toBe(false)
-    expect(result.output).toBe('Internal server error')
+    expect(result.output).toBe('Invalid API key')
   })
 
   it('abort signal triggers ABORTED terminate', async () => {
@@ -362,7 +366,7 @@ describe('AgentExecutor.run', () => {
   })
 
   it('finish — success=false for non-GOAL modes', async () => {
-    const client = createMockClient([[{ error: { type: 'server', message: 'Error' } }]])
+    const client = createMockClient([[{ error: { type: 'auth', message: 'Unauthorized' } }]])
     vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
     vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([])
 
@@ -416,6 +420,70 @@ describe('AgentExecutor.run', () => {
     expect(result.terminateMode).toBe(AgentTerminateMode.GOAL)
     expect(result.turns).toBe(3)
     expect(result.output).toBe('Found and read the file.')
+  })
+
+  it('builds structured ContentBlock[] in assistant messages and ToolResultBlock[] in user messages', async () => {
+    const capturedHistory: Array<{ role: string; content: unknown }> = []
+
+    const client: LLMClient = {
+      async *stream(messages) {
+        // Capture history on turn 2 to inspect structured messages
+        if (messages.length > 2) {
+          for (const m of messages) {
+            capturedHistory.push({ role: m.role, content: m.content })
+          }
+        }
+        // Turn 1: return a tool call
+        if (messages.length <= 2) {
+          yield { content: 'Let me check' }
+          yield {
+            toolUse: {
+              type: 'tool_use',
+              id: 'tc-1',
+              name: 'read_file',
+              input: { path: '/test.txt' },
+            },
+          }
+        } else {
+          // Turn 2: done
+          yield { content: 'All done.' }
+        }
+        yield { done: true }
+      },
+    }
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+    ])
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockResolvedValue({
+      success: true,
+      output: 'file contents here',
+    })
+
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    await exec.run({ goal: 'Read test.txt', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    // Find the assistant message with structured blocks
+    const assistantMsg = capturedHistory.find((m) => m.role === 'assistant')
+    expect(assistantMsg).toBeDefined()
+    expect(Array.isArray(assistantMsg!.content)).toBe(true)
+
+    const blocks = assistantMsg!.content as ContentBlock[]
+    expect(blocks[0]).toEqual({ type: 'text', text: 'Let me check' })
+    expect(blocks[1]).toMatchObject({ type: 'tool_use', id: 'tc-1', name: 'read_file' })
+
+    // Find the user message with tool_result blocks
+    const toolResultMsg = capturedHistory.find((m) => m.role === 'user' && Array.isArray(m.content))
+    expect(toolResultMsg).toBeDefined()
+
+    const resultBlocks = toolResultMsg!.content as ToolResultBlock[]
+    expect(resultBlocks[0]).toEqual({
+      type: 'tool_result',
+      tool_use_id: 'tc-1',
+      content: 'file contents here',
+      is_error: false,
+    })
   })
 
   it('uses agent mode to filter tools when toolMode is set', async () => {
@@ -516,7 +584,6 @@ describe('Token tracking', () => {
 
   it('emits llm:usage event per turn', async () => {
     const usageEvents: unknown[] = []
-    const { resetRegistries } = await import('../extensions/api.js')
     const apiModule = await import('../extensions/api.js')
 
     // Register event handler for llm:usage
@@ -604,5 +671,160 @@ describe('runAgent', () => {
     )
 
     expect(events.length).toBeGreaterThan(0)
+  })
+})
+
+// ─── allowedTools Filtering ─────────────────────────────────────────────────
+
+describe('allowedTools filtering', () => {
+  it('filters available tools when allowedTools is set', async () => {
+    const client = createMockClient([[{ content: 'Done', done: true }]])
+    const streamSpy = vi.spyOn(client, 'stream')
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+      mockToolDef('write_file'),
+      mockToolDef('bash'),
+      mockToolDef('glob'),
+    ])
+
+    const exec = new AgentExecutor({
+      maxTurns: 5,
+      allowedTools: ['read_file', 'glob'],
+    })
+    await exec.run({ goal: 'Read', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    const tools = streamSpy.mock.calls[0]![1].tools
+    expect(tools).toHaveLength(2)
+    expect(tools!.map((t) => t.name).sort()).toEqual(['glob', 'read_file'])
+  })
+
+  it('does not filter when allowedTools is not set', async () => {
+    const client = createMockClient([[{ content: 'Done', done: true }]])
+    const streamSpy = vi.spyOn(client, 'stream')
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+      mockToolDef('write_file'),
+      mockToolDef('bash'),
+    ])
+
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    await exec.run({ goal: 'Read', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    const tools = streamSpy.mock.calls[0]![1].tools
+    expect(tools).toHaveLength(3)
+  })
+})
+
+// ─── Retry Logic ────────────────────────────────────────────────────────────
+
+describe('Retry logic', () => {
+  it('retries on rate limit error and succeeds on second attempt', async () => {
+    let callCount = 0
+    const client: LLMClient = {
+      async *stream() {
+        callCount++
+        if (callCount === 1) {
+          yield { error: { type: 'rate_limit' as const, message: 'Rate limit exceeded (429)' } }
+        } else {
+          yield { content: 'Success after retry' }
+          yield { done: true }
+        }
+      },
+    }
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([])
+
+    const events: unknown[] = []
+    const exec = new AgentExecutor({ maxTurns: 5, maxRetries: 2 }, (e) => events.push(e))
+    const result = await exec.run({ goal: 'Test retry', cwd: '/tmp' }, AbortSignal.timeout(10000))
+
+    expect(result.terminateMode).toBe(AgentTerminateMode.GOAL)
+    expect(result.success).toBe(true)
+    expect(result.output).toBe('Success after retry')
+
+    const retryEvents = (events as Array<{ type: string }>).filter((e) => e.type === 'retry')
+    expect(retryEvents).toHaveLength(1)
+  })
+
+  it('does not retry on auth error', async () => {
+    const client = createMockClient([[{ error: { type: 'auth', message: 'Invalid API key' } }]])
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([])
+
+    const events: unknown[] = []
+    const exec = new AgentExecutor({ maxTurns: 5, maxRetries: 3 }, (e) => events.push(e))
+    const result = await exec.run({ goal: 'Test no retry', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    expect(result.terminateMode).toBe(AgentTerminateMode.ERROR)
+    expect(result.success).toBe(false)
+
+    const retryEvents = (events as Array<{ type: string }>).filter((e) => e.type === 'retry')
+    expect(retryEvents).toHaveLength(0)
+  })
+})
+
+// ─── Doom Loop Detection ────────────────────────────────────────────────────
+
+describe('Doom loop detection', () => {
+  it('injects corrective message after 3 identical tool calls', async () => {
+    const capturedHistory: Array<{ role: string; content: unknown }> = []
+    let turnCount = 0
+
+    const client: LLMClient = {
+      async *stream(messages) {
+        turnCount++
+        // Capture history on the last turn
+        if (turnCount === 5) {
+          for (const m of messages) {
+            capturedHistory.push({ role: m.role, content: m.content })
+          }
+          yield { content: 'Stopping now.' }
+          yield { done: true }
+          return
+        }
+        // Always make the same tool call
+        yield {
+          toolUse: {
+            type: 'tool_use',
+            id: `call-${turnCount}`,
+            name: 'read_file',
+            input: { path: '/same.txt' },
+          },
+        }
+        yield { done: true }
+      },
+    }
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+    ])
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockResolvedValue({
+      success: true,
+      output: 'content',
+    })
+
+    const events: unknown[] = []
+    const exec = new AgentExecutor({ maxTurns: 10 }, (e) => events.push(e))
+    await exec.run({ goal: 'Read file', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    // Check that doom-loop event was emitted
+    const doomEvents = (events as Array<{ type: string }>).filter((e) => e.type === 'doom-loop')
+    expect(doomEvents.length).toBeGreaterThanOrEqual(1)
+
+    // Check that corrective message was injected into history
+    const corrections = capturedHistory.filter(
+      (m) =>
+        m.role === 'user' &&
+        typeof m.content === 'string' &&
+        (m.content as string).includes('Try a different approach')
+    )
+    expect(corrections.length).toBeGreaterThanOrEqual(1)
   })
 })

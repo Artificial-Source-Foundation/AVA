@@ -5,8 +5,9 @@
  * Premium floating toolbar with smooth transitions.
  */
 
-import { Check, Copy, Pencil, RefreshCw, Trash2 } from 'lucide-solid'
+import { Check, Copy, GitFork, Pencil, RefreshCw, Trash2 } from 'lucide-solid'
 import { type Component, createSignal, Show } from 'solid-js'
+import { useNotification } from '../../contexts/notification'
 import type { Message } from '../../types'
 
 interface MessageActionsProps {
@@ -16,6 +17,7 @@ interface MessageActionsProps {
   onRegenerate: () => void
   onCopy: () => void
   onDelete: () => void
+  onBranch: () => void
   isLoading: boolean
 }
 
@@ -31,11 +33,13 @@ const btnClass = `
 
 export const MessageActions: Component<MessageActionsProps> = (props) => {
   const [copied, setCopied] = createSignal(false)
+  const { success } = useNotification()
 
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(props.message.content)
       setCopied(true)
+      success('Copied to clipboard')
       props.onCopy()
       setTimeout(() => setCopied(false), 2000)
     } catch {
@@ -63,6 +67,7 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
         onClick={handleCopy}
         class={btnClass}
         title={copied() ? 'Copied!' : 'Copy message'}
+        aria-label={copied() ? 'Copied' : 'Copy message'}
       >
         <Show when={copied()} fallback={<Copy class="w-3.5 h-3.5" />}>
           <Check class="w-3.5 h-3.5 text-[var(--success)]" />
@@ -77,6 +82,7 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
           disabled={props.isLoading}
           class={btnClass}
           title="Edit message"
+          aria-label="Edit message"
         >
           <Pencil class="w-3.5 h-3.5" />
         </button>
@@ -90,10 +96,23 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
           disabled={props.isLoading}
           class={btnClass}
           title="Regenerate response"
+          aria-label="Regenerate response"
         >
           <RefreshCw class="w-3.5 h-3.5" />
         </button>
       </Show>
+
+      {/* Branch button — all messages */}
+      <button
+        type="button"
+        onClick={() => props.onBranch()}
+        disabled={props.isLoading}
+        class={btnClass}
+        title="Branch conversation here"
+        aria-label="Branch conversation here"
+      >
+        <GitFork class="w-3.5 h-3.5" />
+      </button>
 
       {/* Delete / Rollback button — all messages */}
       <button
@@ -102,6 +121,7 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
         disabled={props.isLoading}
         class={`${btnClass} hover:text-[var(--error)]`}
         title={props.isLastMessage ? 'Delete message' : 'Delete message and rollback'}
+        aria-label={props.isLastMessage ? 'Delete message' : 'Delete and rollback'}
       >
         <Trash2 class="w-3.5 h-3.5" />
       </button>

@@ -8,7 +8,7 @@
  * Sub-components live in ./message-input/ for modularity.
  */
 
-import { Activity, MessageSquare } from 'lucide-solid'
+import { Activity, AlertCircle, AlertTriangle, MessageSquare } from 'lucide-solid'
 import {
   type Component,
   createEffect,
@@ -21,11 +21,17 @@ import {
 import { useAgent } from '../../hooks/useAgent'
 import { useChat } from '../../hooks/useChat'
 import { formatCost } from '../../lib/cost'
+import type { SearchableFile } from '../../services/file-search'
+import { filterFiles, getProjectFiles } from '../../services/file-search'
+import { useDiagnostics } from '../../stores/diagnostics'
 import { useLayout } from '../../stores/layout'
+import { useProject } from '../../stores/project'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
 import { ModelBrowserDialog } from '../dialogs/model-browser/model-browser-dialog'
+import { ExpandedEditor } from './ExpandedEditor'
 import { buildFullMessage, processImageFile, processTextFile } from './message-input/attachments'
+import { FileMentionPopover } from './message-input/file-mention-popover'
 import { ModelSelector } from './message-input/model-selector'
 import { InputTextArea } from './message-input/text-area'
 import { PermissionBadge, PlanActSlider, ThinkingToggle } from './message-input/toolbar-buttons'
@@ -70,10 +76,41 @@ export const MessageInput: Component = () => {
   const chat = useChat()
   const agent = useAgent()
   const sessionStore = useSession()
+  const { currentProject } = useProject()
   const { selectedModel, setSelectedModel, contextUsage, sessionTokenStats, messages } =
     sessionStore
   const { settings, cyclePermissionMode, updateSettings } = useSettings()
-  const { modelBrowserOpen, openModelBrowser, closeModelBrowser } = useLayout()
+  const {
+    modelBrowserOpen,
+    openModelBrowser,
+    closeModelBrowser,
+    expandedEditorOpen,
+    setExpandedEditorOpen,
+  } = useLayout()
+  const { diagnostics, hasDiagnostics } = useDiagnostics()
+
+  // @ mention state
+  const [mentionOpen, setMentionOpen] = createSignal(false)
+  const [mentionQuery, setMentionQuery] = createSignal('')
+  const [mentionIndex, setMentionIndex] = createSignal(0)
+  const [mentionStart, setMentionStart] = createSignal(-1) // cursor position of @
+  const [mentionFiles, setMentionFiles] = createSignal<SearchableFile[]>([])
+  const mentionFiltered = createMemo(() =>
+    mentionOpen() ? filterFiles(mentionFiles(), mentionQuery(), 12) : []
+  )
+  const projectDir = () => currentProject()?.directory
+
+  // Preload project files when project changes
+  createEffect(
+    on(
+      () => projectDir(),
+      async (dir) => {
+        if (!dir) return
+        const files = await getProjectFiles(dir)
+        setMentionFiles(files)
+      }
+    )
+  )
 
   // Derived state
   const isProcessing = () => chat.isStreaming() || agent.isRunning()
@@ -180,8 +217,21 @@ export const MessageInput: Component = () => {
     )
   )
 
+  // Listen for external input setting (from templates, etc.)
+  const handleExternalInput = (e: Event) => {
+    const text = (e as CustomEvent<{ text: string }>).detail.text
+    setInput(text)
+    queueMicrotask(() => {
+      textareaRef?.focus()
+      textareaRef?.setSelectionRange(text.length, text.length)
+      autoResize()
+    })
+  }
+  window.addEventListener('ava:set-input', handleExternalInput)
+
   onCleanup(() => {
     if (resizeFrame !== undefined) cancelAnimationFrame(resizeFrame)
+    window.removeEventListener('ava:set-input', handleExternalInput)
   })
 
   // Attachment handlers
@@ -275,7 +325,77 @@ export const MessageInput: Component = () => {
     }
   }
 
+  /** Detect @ mentions in the input text around the cursor */
+  const checkMention = (value: string, cursorPos: number) => {
+    // Scan backwards from cursor for @
+    let atPos = -1
+    for (let i = cursorPos - 1; i >= 0; i--) {
+      const ch = value[i]
+      if (ch === '@') {
+        // @ must be at start or preceded by whitespace
+        if (i === 0 || /\s/.test(value[i - 1])) {
+          atPos = i
+        }
+        break
+      }
+      if (/\s/.test(ch)) break // whitespace before finding @ — no mention
+    }
+
+    if (atPos >= 0) {
+      const query = value.slice(atPos + 1, cursorPos)
+      setMentionOpen(true)
+      setMentionQuery(query)
+      setMentionStart(atPos)
+      setMentionIndex(0)
+    } else {
+      setMentionOpen(false)
+    }
+  }
+
+  const handleMentionSelect = (file: SearchableFile) => {
+    const start = mentionStart()
+    if (start < 0) return
+    const value = input()
+    const before = value.slice(0, start)
+    const cursorEnd = start + 1 + mentionQuery().length
+    const after = value.slice(cursorEnd)
+    const inserted = `@${file.relative} `
+    setInput(before + inserted + after)
+    setMentionOpen(false)
+    textareaRef?.focus()
+    // Set cursor position after inserted text
+    const newPos = before.length + inserted.length
+    queueMicrotask(() => {
+      textareaRef?.setSelectionRange(newPos, newPos)
+    })
+  }
+
   const handleKeyDown = (e: KeyboardEvent) => {
+    // @ mention keyboard handling
+    if (mentionOpen() && mentionFiltered().length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setMentionIndex((i) => Math.min(i + 1, mentionFiltered().length - 1))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setMentionIndex((i) => Math.max(i - 1, 0))
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        const file = mentionFiltered()[mentionIndex()]
+        if (file) handleMentionSelect(file)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMentionOpen(false)
+        return
+      }
+    }
+
     const sk = settings().behavior.sendKey
     if (sk === 'enter') {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -303,11 +423,23 @@ export const MessageInput: Component = () => {
   return (
     <div class="density-section-px density-section-py border-t border-[var(--border-subtle)]">
       <form onSubmit={handleSubmit} class="space-y-1.5">
+        {/* @ mention autocomplete popover */}
+        <div class="relative">
+          <FileMentionPopover
+            open={mentionOpen}
+            files={mentionFiltered}
+            onSelect={handleMentionSelect}
+            selectedIndex={mentionIndex}
+          />
+        </div>
         <InputTextArea
           input={input}
           onInput={(v) => {
             setInput(v)
             autoResize()
+            // Check for @ mention after input changes
+            const cursor = textareaRef?.selectionStart ?? v.length
+            checkMention(v, cursor)
           }}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
@@ -378,6 +510,13 @@ export const MessageInput: Component = () => {
               <span class="tabular-nums">{tokenDisplay()}</span>
             </button>
 
+            {/* Context warning icon at 80%+ */}
+            <Show when={percentage() >= 80}>
+              <span title={`Context ${percentage().toFixed(0)}% full`}>
+                <AlertTriangle class="w-3 h-3 text-[var(--warning)]" />
+              </span>
+            </Show>
+
             {/* Progress bar + percentage (togglable) */}
             <Show when={showTokens()}>
               <div class="w-10 h-1 bg-[var(--surface-raised)] rounded-full overflow-hidden">
@@ -389,7 +528,31 @@ export const MessageInput: Component = () => {
                   }}
                 />
               </div>
-              <span class="tabular-nums">{percentage().toFixed(0)}%</span>
+              <span
+                class="tabular-nums"
+                classList={{ 'text-[var(--warning)]': percentage() >= 80 }}
+              >
+                {percentage().toFixed(0)}%
+              </span>
+            </Show>
+
+            {/* LSP diagnostics */}
+            <Show when={hasDiagnostics()}>
+              <span class="text-[var(--border-muted)]">&middot;</span>
+              <span class="inline-flex items-center gap-1">
+                <Show when={diagnostics().errors > 0}>
+                  <span class="inline-flex items-center gap-0.5 text-[var(--error)]">
+                    <AlertCircle class="w-2.5 h-2.5" />
+                    {diagnostics().errors}
+                  </span>
+                </Show>
+                <Show when={diagnostics().warnings > 0}>
+                  <span class="inline-flex items-center gap-0.5 text-[var(--warning)]">
+                    <AlertTriangle class="w-2.5 h-2.5" />
+                    {diagnostics().warnings}
+                  </span>
+                </Show>
+              </span>
             </Show>
 
             {/* Session cost */}
@@ -427,6 +590,19 @@ export const MessageInput: Component = () => {
         selectedModel={selectedModel}
         onSelect={setSelectedModel}
         enabledProviders={enabledProviders}
+      />
+      <ExpandedEditor
+        open={expandedEditorOpen()}
+        initialText={input()}
+        onApply={(text) => {
+          setInput(text)
+          setExpandedEditorOpen(false)
+          queueMicrotask(() => {
+            textareaRef?.focus()
+            autoResize()
+          })
+        }}
+        onClose={() => setExpandedEditorOpen(false)}
       />
     </div>
   )

@@ -7,7 +7,7 @@
  * attaches copy handlers to code blocks.
  */
 
-import { type Component, createEffect, createSignal, on } from 'solid-js'
+import { type Component, createEffect, createSignal, on, Show } from 'solid-js'
 import { renderMarkdown } from '../../lib/markdown'
 import { useSettings } from '../../stores/settings'
 
@@ -37,24 +37,30 @@ export const MarkdownContent: Component<MarkdownContentProps> = (props) => {
     )
   )
 
-  // Apply rendered HTML and attach copy handlers after render
+  // Apply rendered HTML and attach copy/expand handlers after render
   createEffect(
     on(renderedHtml, () => {
       if (!containerRef) return
       containerRef.innerHTML = renderedHtml()
-      queueMicrotask(() => attachCopyHandlers(containerRef))
+      queueMicrotask(() => {
+        attachCopyHandlers(containerRef)
+        attachExpandHandlers(containerRef)
+      })
     })
   )
 
   return (
     <>
-      {/* User messages: plain text */}
+      {/* User messages: plain text; streaming: plain text + cursor */}
       {props.role === 'user' || props.isStreaming ? (
         <p
           class="whitespace-pre-wrap break-words leading-relaxed"
           style={{ 'font-size': 'var(--chat-font-size)' }}
         >
           {props.content}
+          <Show when={props.isStreaming && props.role === 'assistant'}>
+            <span class="streaming-cursor">▍</span>
+          </Show>
         </p>
       ) : (
         /* Assistant messages: rendered markdown */
@@ -73,6 +79,9 @@ export const MarkdownContent: Component<MarkdownContentProps> = (props) => {
 // ============================================================================
 // Copy Handler
 // ============================================================================
+
+const COPY_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>`
+const CHECK_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>`
 
 function attachCopyHandlers(container: HTMLElement) {
   const buttons = container.querySelectorAll<HTMLButtonElement>('[data-copy-code]')
@@ -94,13 +103,50 @@ function attachCopyHandlers(container: HTMLElement) {
         if (label) label.textContent = 'Copied!'
         btn.classList.add('copied')
 
+        // Swap copy icon → check icon
+        const svgEl = btn.querySelector('svg')
+        if (svgEl) svgEl.outerHTML = CHECK_SVG
+
         setTimeout(() => {
           if (label) label.textContent = originalText || 'Copy'
           btn.classList.remove('copied')
+          // Restore copy icon
+          const checkEl = btn.querySelector('svg')
+          if (checkEl) checkEl.outerHTML = COPY_SVG
         }, 2000)
       } catch {
         // Clipboard API may fail in some contexts
       }
     })
+  }
+}
+
+// ============================================================================
+// Expand Handler — collapse long code blocks with "Show all" button
+// ============================================================================
+
+function attachExpandHandlers(container: HTMLElement) {
+  const wrappers = container.querySelectorAll<HTMLElement>('.code-block-wrapper')
+  for (const wrapper of wrappers) {
+    if (wrapper.dataset.expandAttached) continue
+    const pre = wrapper.querySelector('pre')
+    if (!pre) continue
+    const lineCount = (pre.textContent || '').split('\n').length
+    if (lineCount <= 20) continue
+
+    wrapper.dataset.expandAttached = 'true'
+    wrapper.classList.add('code-collapsed')
+
+    const expandBtn = document.createElement('button')
+    expandBtn.type = 'button'
+    expandBtn.className = 'code-expand-btn'
+    expandBtn.textContent = `Show all (${lineCount} lines)`
+    expandBtn.addEventListener('click', () => {
+      wrapper.classList.toggle('code-collapsed')
+      expandBtn.textContent = wrapper.classList.contains('code-collapsed')
+        ? `Show all (${lineCount} lines)`
+        : 'Show less'
+    })
+    wrapper.appendChild(expandBtn)
   }
 }

@@ -1,6 +1,8 @@
+import type { ChatMessage } from '@ava/core-v2/llm'
 import { describe, expect, it } from 'vitest'
 import {
   buildOpenAIRequestBody,
+  convertMessagesToOpenAI,
   convertToolsToOpenAIFormat,
   createOpenAICompatClient,
   ToolCallBuffer,
@@ -104,6 +106,101 @@ describe('ToolCallBuffer', () => {
     buf.accumulate([{ index: 0, id: 'call_1', function: { name: 'test', arguments: '{bad json' } }])
     const results = [...buf.flush()]
     expect(results).toHaveLength(0) // JSON parse fails
+  })
+})
+
+describe('convertMessagesToOpenAI', () => {
+  it('passes plain string messages through', () => {
+    const messages: ChatMessage[] = [
+      { role: 'system', content: 'You are AVA.' },
+      { role: 'user', content: 'Hello' },
+      { role: 'assistant', content: 'Hi there!' },
+    ]
+    const result = convertMessagesToOpenAI(messages)
+    expect(result).toEqual([
+      { role: 'system', content: 'You are AVA.' },
+      { role: 'user', content: 'Hello' },
+      { role: 'assistant', content: 'Hi there!' },
+    ])
+  })
+
+  it('converts assistant tool_use blocks to OpenAI tool_calls format', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Let me read that file' },
+          {
+            type: 'tool_use',
+            id: 'tc-1',
+            name: 'read_file',
+            input: { path: '/test.txt' },
+          },
+        ],
+      },
+    ]
+    const result = convertMessagesToOpenAI(messages)
+    expect(result).toHaveLength(1)
+    expect(result[0]!.role).toBe('assistant')
+    expect(result[0]!.content).toBe('Let me read that file')
+    expect(result[0]!.tool_calls).toEqual([
+      {
+        id: 'tc-1',
+        type: 'function',
+        function: { name: 'read_file', arguments: '{"path":"/test.txt"}' },
+      },
+    ])
+  })
+
+  it('converts user tool_result blocks to role:tool messages', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'tc-1',
+            content: 'file contents here',
+            is_error: false,
+          },
+        ],
+      },
+    ]
+    const result = convertMessagesToOpenAI(messages)
+    expect(result).toHaveLength(1)
+    expect(result[0]).toEqual({
+      role: 'tool',
+      content: 'file contents here',
+      tool_call_id: 'tc-1',
+    })
+  })
+
+  it('handles assistant with only tool_use blocks (no text)', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'tc-1', name: 'glob', input: { pattern: '*.ts' } }],
+      },
+    ]
+    const result = convertMessagesToOpenAI(messages)
+    expect(result[0]!.content).toBeNull()
+    expect(result[0]!.tool_calls).toHaveLength(1)
+  })
+
+  it('handles multiple tool results in one user message', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'tc-1', content: 'result1' },
+          { type: 'tool_result', tool_use_id: 'tc-2', content: 'result2' },
+        ],
+      },
+    ]
+    const result = convertMessagesToOpenAI(messages)
+    expect(result).toHaveLength(2)
+    expect(result[0]!.tool_call_id).toBe('tc-1')
+    expect(result[1]!.tool_call_id).toBe('tc-2')
   })
 })
 

@@ -2,7 +2,7 @@
 
 Condensed module index for `packages/core-v2/` (minimal core) and `packages/extensions/` (built-in extensions).
 
-## Core-v2 (~28 files, ~5K lines)
+## Core-v2 (~40 files, ~5K lines)
 
 ### agent/ — Turn-based agent loop
 - `loop.ts` — `AgentExecutor.run()`: stream LLM → collect tool calls → run middleware → execute
@@ -38,7 +38,7 @@ Condensed module index for `packages/core-v2/` (minimal core) and `packages/exte
 ### platform.ts — Platform abstraction
 - `IPlatformProvider` with `IFileSystem`, `IShell`, `ICredentialStore`, `IDatabase`, `IPTY`
 
-## Extensions (25+ modules)
+## Extensions (22 modules)
 
 ### Provider extensions (14)
 Each in `providers/<name>/`: anthropic, openai, openrouter, google, deepseek, groq, mistral, cohere, together, xai, ollama, glm, kimi, copilot.

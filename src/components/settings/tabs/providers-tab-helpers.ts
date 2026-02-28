@@ -28,7 +28,12 @@ export function clearProviderCredentials(providerId: string): void {
   delete all[providerId]
   writeCredentialsMap(all)
 
-  // Clear both ava_cred_ and estela_cred_ prefixed keys (API key + auth)
+  // Clear core-v2 credential keys (ava:{provider}:* format, with ava_cred_ prefix from TauriCredentialStore)
+  localStorage.removeItem(`${AVA_CREDENTIAL_PREFIX}ava:${providerId}:api_key`)
+  localStorage.removeItem(`${AVA_CREDENTIAL_PREFIX}ava:${providerId}:oauth_token`)
+  localStorage.removeItem(`${AVA_CREDENTIAL_PREFIX}ava:${providerId}:account_id`)
+
+  // Clear legacy keys (old format cleanup)
   localStorage.removeItem(`${AVA_CREDENTIAL_PREFIX}${providerId}-api-key`)
   localStorage.removeItem(`${AVA_CREDENTIAL_PREFIX}auth-${providerId}`)
   localStorage.removeItem(`${LEGACY_CREDENTIAL_PREFIX}${providerId}-api-key`)
@@ -42,6 +47,13 @@ export function checkStoredOAuth(providerId: string): boolean {
       return true
     }
 
+    // Check core-v2 key format (TauriCredentialStore stores at ava_cred_ + key)
+    const oauthToken = localStorage.getItem(`${AVA_CREDENTIAL_PREFIX}ava:${providerId}:oauth_token`)
+    if (oauthToken) {
+      return true
+    }
+
+    // Legacy key format
     const coreAuth =
       localStorage.getItem(`${AVA_CREDENTIAL_PREFIX}auth-${providerId}`) ||
       localStorage.getItem(`${LEGACY_CREDENTIAL_PREFIX}auth-${providerId}`)

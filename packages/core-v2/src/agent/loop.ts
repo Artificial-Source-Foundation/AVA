@@ -6,13 +6,16 @@
  * Emits events; extensions subscribe and intercept via middleware.
  */
 
-import { emitEvent, getAgentModes } from '../extensions/api.js'
+import { emitEvent, getAgentModes, getContextStrategies } from '../extensions/api.js'
 import { createClient } from '../llm/client.js'
 import type {
   ChatMessage,
+  ContentBlock,
   LLMClient,
+  MessageContent,
   ProviderConfig,
   ToolDefinition,
+  ToolResultBlock,
   ToolUseBlock,
 } from '../llm/types.js'
 import { executeTool, getToolDefinitions } from '../tools/registry.js'
@@ -30,12 +33,61 @@ import {
   type ToolCallInfo,
 } from './types.js'
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+function isRetryableError(message: string): boolean {
+  return /rate.limit|overloaded|429|529|server error|too many requests/i.test(message)
+}
+
+function contentLength(content: MessageContent): number {
+  if (typeof content === 'string') return content.length
+  return content.reduce((sum, b) => {
+    if (b.type === 'text') return sum + b.text.length
+    if (b.type === 'tool_result') return sum + b.content.length
+    return sum + b.name.length + JSON.stringify(b.input).length
+  }, 0)
+}
+
+/** Known context window sizes by model prefix. */
+const MODEL_CONTEXT_LIMITS: Record<string, number> = {
+  'claude-opus': 200_000,
+  'claude-sonnet': 200_000,
+  'claude-haiku': 200_000,
+  'gpt-4o': 128_000,
+  'gpt-4': 128_000,
+  'gpt-3.5': 16_000,
+  gemini: 1_000_000,
+  deepseek: 64_000,
+}
+
+function getContextLimit(model: string): number {
+  for (const [prefix, limit] of Object.entries(MODEL_CONTEXT_LIMITS)) {
+    if (model.startsWith(prefix)) return limit
+  }
+  return 200_000 // conservative default
+}
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer)
+        resolve()
+      },
+      { once: true }
+    )
+  })
+}
+
 // ─── Agent Executor ──────────────────────────────────────────────────────────
 
 export class AgentExecutor {
   readonly config: AgentConfig
   readonly agentId: string
   private onEvent?: AgentEventCallback
+  private recentToolCalls: string[] = [] // hashes for doom loop detection
 
   constructor(config: Partial<AgentConfig>, onEvent?: AgentEventCallback) {
     this.config = {
@@ -73,6 +125,8 @@ export class AgentExecutor {
       const systemPrompt = this.buildSystemPrompt(inputs)
       history.push({ role: 'user', content: inputs.goal })
 
+      const maxRetries = this.config.maxRetries ?? 3
+
       while (turn < this.config.maxTurns) {
         if (combinedSignal.aborted) {
           return this.finish(
@@ -85,19 +139,67 @@ export class AgentExecutor {
           )
         }
 
+        // Context window management — compact if >80% of limit
+        const contextLimit = getContextLimit(model)
+        const estimatedTokens = history.reduce((sum, m) => sum + contentLength(m.content), 0) / 4
+        if (estimatedTokens > contextLimit * 0.8) {
+          const strategy = getContextStrategies().get('truncate')
+          if (strategy) {
+            const firstMsg = history[0]
+            const compacted = strategy.compact(history, Math.floor(contextLimit * 0.5))
+            // Ensure we keep first user message
+            if (firstMsg && compacted[0] !== firstMsg) {
+              compacted.unshift(firstMsg)
+            }
+            history.length = 0
+            history.push(...compacted)
+          }
+        }
+
         turn++
         this.emit({ type: 'turn:start', agentId: this.agentId, turn })
 
         const tools = this.getAvailableTools()
-        const turnResult = await this.executeTurn(
-          client,
-          systemPrompt,
-          history,
-          tools,
-          inputs.cwd,
-          model,
-          combinedSignal
-        )
+
+        // Retry loop for transient LLM errors
+        let turnResult: AgentTurnResult | undefined
+        for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
+          turnResult = await this.executeTurn(
+            client,
+            systemPrompt,
+            history,
+            tools,
+            inputs.cwd,
+            model,
+            combinedSignal
+          )
+
+          // Check if this is a retryable error
+          if (
+            turnResult.status === 'stop' &&
+            turnResult.terminateMode === AgentTerminateMode.ERROR &&
+            turnResult.result &&
+            isRetryableError(turnResult.result) &&
+            attempt <= maxRetries
+          ) {
+            const delayMs = Math.min(1000 * 2 ** (attempt - 1), 30_000)
+            this.emit({
+              type: 'retry',
+              agentId: this.agentId,
+              attempt,
+              maxRetries,
+              delayMs,
+              reason: turnResult.result,
+            })
+            await sleep(delayMs, combinedSignal)
+            if (combinedSignal.aborted) break
+            continue
+          }
+
+          break
+        }
+
+        if (!turnResult) break
 
         // Accumulate token usage
         if (turnResult.usage) {
@@ -126,6 +228,11 @@ export class AgentExecutor {
             totalOutput,
             startTime
           )
+        }
+
+        // Capture assistant text even on tool-call turns (for MAX_TURNS output)
+        if (turnResult.result) {
+          lastOutput = turnResult.result
         }
 
         this.emit({
@@ -201,10 +308,15 @@ export class AgentExecutor {
       }
     }
 
-    // Add assistant message to history
-    if (assistantContent) {
-      history.push({ role: 'assistant', content: assistantContent })
-      this.emit({ type: 'thought', agentId: this.agentId, content: assistantContent })
+    // Add assistant message to history (structured content blocks)
+    if (assistantContent || toolCalls.length > 0) {
+      const blocks: ContentBlock[] = []
+      if (assistantContent) blocks.push({ type: 'text', text: assistantContent })
+      for (const call of toolCalls) blocks.push(call)
+      history.push({ role: 'assistant', content: blocks })
+      if (assistantContent) {
+        this.emit({ type: 'thought', agentId: this.agentId, content: assistantContent })
+      }
     }
 
     // No tool calls — assistant is done
@@ -219,7 +331,7 @@ export class AgentExecutor {
 
     // Execute tool calls
     const callInfos: ToolCallInfo[] = []
-    const toolResults: string[] = []
+    const toolResultBlocks: ToolResultBlock[] = []
 
     for (const call of toolCalls) {
       // Check for completion tool
@@ -246,6 +358,8 @@ export class AgentExecutor {
         sessionId: this.agentId,
         workingDirectory: cwd,
         signal,
+        provider: this.config.provider,
+        model,
       }
 
       const result = await executeTool(call.name, call.input, ctx)
@@ -254,7 +368,7 @@ export class AgentExecutor {
       callInfos.push({
         name: call.name,
         args: call.input,
-        result: result.output,
+        result: result.success ? result.output : result.error || result.output || 'Tool failed',
         success: result.success,
         durationMs,
       })
@@ -267,14 +381,40 @@ export class AgentExecutor {
         durationMs,
       })
 
-      toolResults.push(`<tool_result name="${call.name}">\n${result.output}\n</tool_result>`)
+      toolResultBlocks.push({
+        type: 'tool_result',
+        tool_use_id: call.id,
+        content: result.success ? result.output : result.error || result.output || 'Tool failed',
+        is_error: !result.success,
+      })
     }
 
-    // Add tool results to history as user message
-    history.push({ role: 'user', content: toolResults.join('\n\n') })
+    // Add tool results to history as structured user message
+    history.push({ role: 'user', content: toolResultBlocks })
+
+    // Doom loop detection — check for consecutive identical tool calls
+    for (const call of toolCalls) {
+      const hash = `${call.name}:${JSON.stringify(call.input)}`
+      this.recentToolCalls.push(hash)
+      if (this.recentToolCalls.length > 10) this.recentToolCalls.shift()
+
+      // Count consecutive identical calls from end
+      let count = 0
+      for (let i = this.recentToolCalls.length - 1; i >= 0; i--) {
+        if (this.recentToolCalls[i] === hash) count++
+        else break
+      }
+
+      if (count >= 3) {
+        const suggestion = `Tool "${call.name}" has been called ${count} times with the same arguments. Try a different approach or tool.`
+        history.push({ role: 'user', content: suggestion })
+        this.emit({ type: 'doom-loop', agentId: this.agentId, tool: call.name, count })
+      }
+    }
 
     return {
       status: 'continue',
+      result: assistantContent || undefined,
       toolCalls: callInfos,
       usage: { inputTokens: turnInput, outputTokens: turnOutput },
     }
@@ -302,6 +442,12 @@ export class AgentExecutor {
 
   private getAvailableTools(): ToolDefinition[] {
     let tools = getToolDefinitions()
+
+    // Filter by allowedTools if set (for subagents)
+    if (this.config.allowedTools?.length) {
+      const allowed = new Set(this.config.allowedTools)
+      tools = tools.filter((t) => allowed.has(t.name))
+    }
 
     // Let active agent mode filter tools
     if (this.config.toolMode) {

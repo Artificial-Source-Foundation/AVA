@@ -55,6 +55,7 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
       <div
         role="button"
         tabIndex={0}
+        aria-expanded={expanded()}
         class="flex items-center gap-2.5 px-3 py-2 text-[13px] cursor-pointer select-none hover:bg-[var(--alpha-white-3)] transition-colors duration-[var(--duration-fast)]"
         onClick={() => {
           if (hasOutput()) setExpanded((v) => !v)

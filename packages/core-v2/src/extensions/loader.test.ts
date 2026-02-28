@@ -205,8 +205,8 @@ describe('loadAllBuiltInExtensions', () => {
 
     // Verify loader was called for top-level and providers/
     expect(mockLoader).toHaveBeenCalledTimes(2)
-    expect(mockLoader).toHaveBeenCalledWith('/extensions')
-    expect(mockLoader).toHaveBeenCalledWith('/extensions/providers')
+    expect(mockLoader).toHaveBeenCalledWith('/extensions', '/extensions')
+    expect(mockLoader).toHaveBeenCalledWith('/extensions/providers', '/extensions')
   })
 
   it('marks all loaded extensions as builtIn', async () => {

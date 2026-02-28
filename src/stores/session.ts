@@ -522,6 +522,46 @@ export function useSession() {
     },
 
     /**
+     * Branch at a message — creates a new session with messages up to (and including) the target.
+     * Like forkSession but truncated to a specific point.
+     */
+    branchAtMessage: async (messageId: string): Promise<void> => {
+      const session = currentSession()
+      if (!session) return
+
+      const msgs = messages()
+      const index = msgs.findIndex((m) => m.id === messageId)
+      if (index === -1) return
+
+      const { currentProject } = useProject()
+      const projectId = currentProject()?.id
+
+      const messagesToCopy = msgs.slice(0, index + 1)
+      const branchName = `${session.name} (branch)`
+      const newSession = await dbCreateSession(branchName, projectId)
+
+      // Insert only the messages up to the branch point
+      await dbInsertMessages(messagesToCopy.map((m) => ({ ...m, sessionId: newSession.id })))
+
+      const totalTokens = messagesToCopy.reduce((sum, m) => sum + (m.tokensUsed || 0), 0)
+      const sessionWithStats: SessionWithStats = {
+        ...newSession,
+        messageCount: messagesToCopy.length,
+        totalTokens,
+        lastPreview: messagesToCopy[messagesToCopy.length - 1]?.content.slice(0, 100) || '',
+      }
+      setSessions((prev) => [sessionWithStats, ...prev])
+
+      // Switch to the branched session
+      setCurrentSession(newSession)
+      setMessages(messagesToCopy.map((m) => ({ ...m, sessionId: newSession.id })))
+      localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
+      setLastSessionForProject(projectId, newSession.id)
+
+      logInfo('Session', `Branched at message ${index + 1}/${msgs.length} → ${newSession.id}`)
+    },
+
+    /**
      * Update session stats after message changes
      */
     updateSessionStats: (sessionId: string, deltaMessages: number, deltaTokens: number) => {
@@ -592,7 +632,13 @@ export function useSession() {
      * Update a message's properties
      */
     updateMessage: (id: string, updates: Partial<Message>) => {
-      setMessages((prev) => prev.map((msg) => (msg.id === id ? { ...msg, ...updates } : msg)))
+      setMessages((prev) => {
+        const idx = prev.findIndex((msg) => msg.id === id)
+        if (idx === -1) return prev // same ref = no re-render
+        const next = prev.slice()
+        next[idx] = { ...prev[idx], ...updates }
+        return next
+      })
     },
 
     /**

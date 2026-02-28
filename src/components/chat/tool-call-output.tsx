@@ -7,8 +7,18 @@
  * - Copy button, truncation indicator, enhanced error display
  */
 
-import { AlertCircle, Check, Copy, FileX, Lock, ShieldX, Timer } from 'lucide-solid'
-import { type Component, createEffect, createSignal, on, Show } from 'solid-js'
+import {
+  AlertCircle,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Copy,
+  FileX,
+  Lock,
+  ShieldX,
+  Timer,
+} from 'lucide-solid'
+import { type Component, createEffect, createMemo, createSignal, on, Show } from 'solid-js'
 import { Dynamic } from 'solid-js/web'
 import { highlightCode } from '../../lib/syntax-highlight'
 import type { ToolCall } from '../../types'
@@ -64,7 +74,7 @@ const HighlightedPre: Component<{ output: string; html: string; hasLang: boolean
 // Output truncation threshold
 // ============================================================================
 
-const TRUNCATION_THRESHOLD = 2000
+const LINE_LIMIT = 15
 
 // ============================================================================
 // Component
@@ -76,6 +86,7 @@ interface ToolCallOutputProps {
 
 export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
   const [copied, setCopied] = createSignal(false)
+  const [expanded, setExpanded] = createSignal(false)
 
   const hasDiff = () =>
     !!(
@@ -85,12 +96,20 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
   const hasOutput = () => !!props.toolCall.output
 
   const errorCategory = () => categorizeToolError(props.toolCall.name, props.toolCall.error)
-  const isTruncated = () => (props.toolCall.output?.length ?? 0) >= TRUNCATION_THRESHOLD
+
+  const outputLines = createMemo(() => (props.toolCall.output ?? '').split('\n'))
+  const totalLineCount = createMemo(() => outputLines().length)
+  const isLong = () => totalLineCount() > LINE_LIMIT
+
+  const displayOutput = createMemo(() => {
+    if (!isLong() || expanded()) return props.toolCall.output ?? ''
+    return outputLines().slice(0, LINE_LIMIT).join('\n')
+  })
 
   const lang = () => detectLanguage(props.toolCall.name, props.toolCall.filePath)
 
   const highlightedOutput = () => {
-    const output = props.toolCall.output
+    const output = displayOutput()
     if (!output) return ''
     const language = lang()
     if (language) return highlightCode(output, language)
@@ -168,17 +187,30 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
 
           <div class="group/output px-3 py-2">
             <HighlightedPre
-              output={props.toolCall.output ?? ''}
+              output={displayOutput()}
               html={highlightedOutput()}
               hasLang={!!lang()}
             />
           </div>
 
-          {/* Truncation indicator */}
-          <Show when={isTruncated()}>
-            <div class="px-3 py-1.5 text-[10px] text-[var(--text-muted)] bg-[var(--alpha-white-3)] border-t border-[var(--border-subtle)] text-center">
-              Output truncated
-            </div>
+          {/* Expand/collapse for long output */}
+          <Show when={isLong()}>
+            <button
+              type="button"
+              onClick={() => setExpanded((v) => !v)}
+              class="w-full px-3 py-1.5 text-[10px] text-[var(--accent)] bg-[var(--alpha-white-3)] border-t border-[var(--border-subtle)] text-center hover:bg-[var(--alpha-white-5)] transition-colors flex items-center justify-center gap-1"
+            >
+              <Show
+                when={expanded()}
+                fallback={
+                  <>
+                    <ChevronDown class="w-3 h-3" /> Show all ({totalLineCount()} lines)
+                  </>
+                }
+              >
+                <ChevronUp class="w-3 h-3" /> Show less
+              </Show>
+            </button>
           </Show>
         </div>
       </Show>

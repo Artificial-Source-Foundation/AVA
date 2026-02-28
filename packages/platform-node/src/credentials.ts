@@ -59,7 +59,11 @@ export class NodeCredentialStore implements ICredentialStore {
 
   async get(key: string): Promise<string | null> {
     // Check environment variable first (AVA_ prefix, with ESTELA_ legacy fallback)
-    const normalizedKey = key.toUpperCase().replace(/-/g, '_')
+    // Keys like "ava:anthropic:api_key" → "AVA_ANTHROPIC_API_KEY"
+    const normalizedKey = key
+      .replace(/^ava:/i, '') // Strip leading "ava:" prefix (already added back below)
+      .toUpperCase()
+      .replace(/[-:]/g, '_')
     const avaEnvKey = `AVA_${normalizedKey}`
     const legacyEnvKey = `ESTELA_${normalizedKey}`
 

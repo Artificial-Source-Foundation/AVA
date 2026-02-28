@@ -7,14 +7,18 @@
  */
 
 import { invoke, isTauri } from '@tauri-apps/api/core'
-import { createSignal, onCleanup, onMount, Show } from 'solid-js'
+import { createEffect, createSignal, on, onCleanup, onMount, Show } from 'solid-js'
 import { CommandPalette, createDefaultCommands } from './components/CommandPalette'
+import { QuickModelPicker } from './components/chat/QuickModelPicker'
+import { SessionSwitcher } from './components/chat/SessionSwitcher'
 import type { OnboardingData } from './components/dialogs/OnboardingDialog'
 import { OnboardingScreen } from './components/dialogs/OnboardingDialog'
 import { AppShell } from './components/layout'
 import { ProjectHub } from './components/projects'
 import { SplashScreen } from './components/SplashScreen'
 import { validateEnv } from './config/env'
+import { useNotification } from './contexts/notification'
+import { exportConversation } from './lib/export-conversation'
 import { initCoreBridge } from './services/core-bridge'
 import { initDatabase } from './services/database'
 import { installConsoleCapture, setLogDirectory } from './services/dev-console'
@@ -26,6 +30,7 @@ import { useSession } from './stores/session'
 import {
   applyAppearance,
   detectEnvApiKeys,
+  envKeysDetected,
   hydrateSettingsFromFS,
   pushSettingsToCore,
   refreshAllProviderModels,
@@ -48,13 +53,58 @@ function App() {
     toggleSettings,
     toggleBottomPanel,
     toggleModelBrowser,
+    toggleChatSearch,
+    toggleSessionSwitcher,
+    sessionSwitcherOpen,
+    setSessionSwitcherOpen,
+    toggleQuickModelPicker,
+    quickModelPickerOpen,
+    setQuickModelPickerOpen,
+    toggleExpandedEditor,
+    bottomPanelTab,
+    switchBottomPanelTab,
+    bottomPanelVisible,
     projectHubVisible,
     setProjectHubVisible,
   } = useLayout()
   const { initializeProjects, currentProject } = useProject()
-  const { loadSessionsForCurrentProject, restoreForCurrentProject, createNewSession } = useSession()
+  const {
+    loadSessionsForCurrentProject,
+    restoreForCurrentProject,
+    createNewSession,
+    messages,
+    currentSession,
+  } = useSession()
   const { settings, updateSettings, updateProvider, isToolAutoApproved } = useSettings()
   const { registerAction, setupShortcutListener } = useShortcuts()
+  const { info } = useNotification()
+
+  // Show toast when env API keys are detected (fires after init completes)
+  createEffect(
+    on(
+      () => [isInitializing(), envKeysDetected()] as const,
+      ([initializing, result]) => {
+        if (initializing || !result || result.count === 0) return
+        const names = result.providers.map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+        info(
+          `Found ${result.count} API key${result.count > 1 ? 's' : ''} in environment: ${names.join(', ')}`
+        )
+      }
+    )
+  )
+
+  // Show toast when auto-compaction triggers
+  onMount(() => {
+    const handleCompacted = (e: Event) => {
+      const { removed, tokensSaved } = (e as CustomEvent).detail
+      info(
+        'Context compacted',
+        `Removed ${removed} message${removed !== 1 ? 's' : ''}, saved ~${Math.round(tokensSaved / 1000)}k tokens`
+      )
+    }
+    window.addEventListener('ava:compacted', handleCompacted)
+    onCleanup(() => window.removeEventListener('ava:compacted', handleCompacted))
+  })
 
   onMount(async () => {
     // Apply appearance settings (mode, accent, scale, font) to DOM immediately
@@ -77,6 +127,22 @@ function App() {
     registerAction('toggle-settings', toggleSettings)
     registerAction('toggle-bottom-panel', toggleBottomPanel)
     registerAction('model-browser', toggleModelBrowser)
+    registerAction('quick-model-picker', toggleQuickModelPicker)
+    registerAction('session-switcher', toggleSessionSwitcher)
+    registerAction('search-chat', toggleChatSearch)
+    registerAction('expanded-editor', toggleExpandedEditor)
+    registerAction('toggle-terminal', () => {
+      if (bottomPanelVisible() && bottomPanelTab() === 'terminal') {
+        toggleBottomPanel()
+      } else {
+        switchBottomPanelTab('terminal')
+      }
+    })
+    registerAction('export-chat', () => {
+      const msgs = messages()
+      if (msgs.length === 0) return
+      exportConversation(msgs, currentSession()?.name)
+    })
     registerAction('new-chat', async () => {
       if (!currentProject()) {
         setProjectHubVisible(true)
@@ -257,6 +323,14 @@ function App() {
           >
             <Show when={!projectHubVisible()} fallback={<ProjectHub />}>
               <AppShell />
+              <QuickModelPicker
+                open={quickModelPickerOpen()}
+                onClose={() => setQuickModelPickerOpen(false)}
+              />
+              <SessionSwitcher
+                open={sessionSwitcherOpen()}
+                onClose={() => setSessionSwitcherOpen(false)}
+              />
               <CommandPalette
                 commands={createDefaultCommands({
                   newChat: async () => {
@@ -267,6 +341,29 @@ function App() {
 
                     await createNewSession()
                     setProjectHubVisible(false)
+                  },
+                  exportChat: () => {
+                    const msgs = messages()
+                    if (msgs.length === 0) return
+                    exportConversation(msgs, currentSession()?.name)
+                  },
+                  initProject: () => {
+                    const project = currentProject()
+                    if (!project) return
+                    const prompt = [
+                      'Analyze this project and generate a comprehensive `.ava-instructions` file in the project root.',
+                      'Include:',
+                      '- Project overview (what it does, tech stack)',
+                      '- Architecture and key directories',
+                      '- Build, test, and lint commands',
+                      '- Code style conventions (naming, formatting, patterns)',
+                      '- Important rules and gotchas',
+                      '',
+                      `Project directory: ${project.directory}`,
+                    ].join('\n')
+                    window.dispatchEvent(
+                      new CustomEvent('ava:set-input', { detail: { text: prompt } })
+                    )
                   },
                   openSettings: toggleSettings,
                 })}

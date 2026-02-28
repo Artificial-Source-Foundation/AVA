@@ -48,8 +48,8 @@ vi.mock('../../stores/settings', () => ({
   }),
 }))
 
-vi.mock('../dialogs/ToolApprovalDialog', () => ({
-  ToolApprovalDialog: () => null,
+vi.mock('./ApprovalDock', () => ({
+  ApprovalDock: () => null,
 }))
 
 vi.mock('./ContextBar', () => ({

@@ -3,6 +3,7 @@
  * Core send-message and regenerate-response functions that drive the stream lifecycle.
  */
 
+import { batch } from 'solid-js'
 import { DEFAULTS, LIMITS } from '../../config/constants'
 import { estimateCost } from '../../lib/cost'
 import { getCoreBudget } from '../../services/core-bridge'
@@ -61,6 +62,7 @@ export async function sendMessage(
   })
 
   let streamFlushTimer: ReturnType<typeof setTimeout> | null = null
+  let thinkingFlushTimer: ReturnType<typeof setTimeout> | null = null
 
   try {
     // Ensure session exists
@@ -105,6 +107,8 @@ export async function sendMessage(
     // Stream response with buffered UI updates
     let latestStreamText = ''
     let lastFlushedStreamText = ''
+    let latestThinking = ''
+    let lastFlushedThinking = ''
 
     await streamResponse(
       {
@@ -113,6 +117,13 @@ export async function sendMessage(
         messages: await buildApiMessages(deps, assistantMsg.id),
         onContent: (text) => {
           latestStreamText = text
+          // Flush first delta immediately for instant feedback
+          if (lastFlushedStreamText === '' && latestStreamText !== '') {
+            deps.session.updateMessageContent(assistantMsg.id, latestStreamText)
+            deps.setStreamingTokenEstimate(Math.ceil(latestStreamText.length / 4))
+            lastFlushedStreamText = latestStreamText
+            return
+          }
           if (streamFlushTimer !== null) return
 
           streamFlushTimer = setTimeout(() => {
@@ -124,14 +135,47 @@ export async function sendMessage(
             streamFlushTimer = null
           }, 100)
         },
+        onThinking: (thinking) => {
+          latestThinking = thinking
+          // Flush first delta immediately for instant feedback
+          if (lastFlushedThinking === '' && latestThinking !== '') {
+            deps.session.updateMessage(assistantMsg.id, {
+              metadata: { thinking: latestThinking },
+            })
+            lastFlushedThinking = latestThinking
+            return
+          }
+          if (thinkingFlushTimer !== null) return
+          thinkingFlushTimer = setTimeout(() => {
+            if (latestThinking !== lastFlushedThinking) {
+              deps.session.updateMessage(assistantMsg.id, {
+                metadata: { thinking: latestThinking },
+              })
+              lastFlushedThinking = latestThinking
+            }
+            thinkingFlushTimer = null
+          }, 150)
+        },
         onToolUpdate: (toolCalls) => {
-          deps.setActiveToolCalls(toolCalls)
-          deps.session.updateMessage(assistantMsg.id, { toolCalls })
+          batch(() => {
+            deps.setActiveToolCalls(toolCalls)
+            deps.session.updateMessage(assistantMsg.id, { toolCalls })
+          })
         },
         onComplete: async (text, tokens, toolCalls) => {
           if (streamFlushTimer !== null) {
             clearTimeout(streamFlushTimer)
             streamFlushTimer = null
+          }
+          if (thinkingFlushTimer !== null) {
+            clearTimeout(thinkingFlushTimer)
+            thinkingFlushTimer = null
+          }
+          // Flush any pending thinking to reactive state
+          if (latestThinking && latestThinking !== lastFlushedThinking) {
+            deps.session.updateMessage(assistantMsg.id, {
+              metadata: { thinking: latestThinking },
+            })
           }
 
           if (text !== lastFlushedStreamText) {
@@ -147,6 +191,7 @@ export async function sendMessage(
           const cost = estimateCost(targetModel, inputTokens, outputTokens) ?? undefined
           const meta: Record<string, unknown> = { costUSD: cost, model: targetModel }
           if (toolCalls) meta.toolCalls = toolCalls
+          if (latestThinking) meta.thinking = latestThinking
           await updateMessage(assistantMsg.id, {
             content: text,
             tokensUsed: tokens,
@@ -190,6 +235,10 @@ export async function sendMessage(
       clearTimeout(streamFlushTimer)
       streamFlushTimer = null
     }
+    if (thinkingFlushTimer !== null) {
+      clearTimeout(thinkingFlushTimer)
+      thinkingFlushTimer = null
+    }
     deps.setIsStreaming(false)
     deps.setStreamingStartedAt(null)
     deps.abortRef.current = null
@@ -225,8 +274,10 @@ export async function regenerate(deps: ChatDeps): Promise<void> {
         messages: await buildApiMessages(deps, assistantMsg.id),
         onContent: (text) => deps.session.updateMessageContent(assistantMsg.id, text),
         onToolUpdate: (toolCalls) => {
-          deps.setActiveToolCalls(toolCalls)
-          deps.session.updateMessage(assistantMsg.id, { toolCalls })
+          batch(() => {
+            deps.setActiveToolCalls(toolCalls)
+            deps.session.updateMessage(assistantMsg.id, { toolCalls })
+          })
         },
         onComplete: async (text, tokens, toolCalls) => {
           deps.setActiveToolCalls([])

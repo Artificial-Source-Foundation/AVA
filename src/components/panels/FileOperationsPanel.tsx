@@ -8,6 +8,7 @@
 import {
   ChevronDown,
   Clock,
+  ExternalLink,
   Eye,
   FileEdit,
   FilePlus2,
@@ -17,6 +18,7 @@ import {
   Trash2,
 } from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
+import { type EditorInfo, getAvailableEditors, openInEditor } from '../../services/ide-integration'
 import { useSession } from '../../stores/session'
 import type { FileOperationType } from '../../types'
 
@@ -47,6 +49,10 @@ export const FileOperationsPanel: Component<FileOperationsPanelProps> = (props) 
   const [selectedOperation, setSelectedOperation] = createSignal<string | null>(null)
   const [filterType, setFilterType] = createSignal<FileOperationType | 'all'>('all')
   const [showFilterMenu, setShowFilterMenu] = createSignal(false)
+  const [editors, setEditors] = createSignal<EditorInfo[]>([])
+
+  // Detect available editors once on mount
+  void getAvailableEditors().then(setEditors)
 
   const filteredOperations = createMemo(() => {
     const ops = fileOperations()
@@ -303,6 +309,21 @@ export const FileOperationsPanel: Component<FileOperationsPanelProps> = (props) 
                           <div class="text-xs text-[var(--text-secondary)] p-2 bg-[var(--surface-sunken)] rounded-[var(--radius-md)] font-mono break-all">
                             {operation.filePath}
                           </div>
+
+                          {/* Open in editor */}
+                          <Show when={editors().length > 0 && operation.type !== 'delete'}>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                void openInEditor(editors()[0]!.command, operation.filePath)
+                              }}
+                              class="flex items-center gap-1.5 text-xs text-[var(--accent)] hover:underline cursor-pointer"
+                            >
+                              <ExternalLink class="w-3 h-3" />
+                              Open in {editors()[0]!.name}
+                            </button>
+                          </Show>
 
                           {/* New file badge */}
                           <Show when={operation.isNew}>

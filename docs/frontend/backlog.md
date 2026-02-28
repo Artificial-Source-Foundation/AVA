@@ -1,6 +1,6 @@
 # Frontend Backlog
 
-> What's missing, prioritized. Updated 2026-02-27.
+> What's missing, prioritized. Updated 2026-02-28.
 
 ---
 
@@ -11,7 +11,7 @@
 | **1: Desktop App** | **Complete** | - |
 | **1.5: Desktop Polish** | **Complete** | Manual testing only |
 | **2: Plugin Ecosystem** | In progress | UX baseline shipped; runtime validation + parity gaps pending |
-| **2+: Competitive Gaps** | In progress | Core UX parity gaps remain (inline approval, terminal, diff review) |
+| **2+: Competitive Gaps** | **Complete** | All P0 + P1 competitive gaps delivered |
 
 ## Ownership Rules
 
@@ -101,9 +101,9 @@ Informed by comprehensive audits of Goose and OpenCode frontends. Ordered by imp
 
 ### P0 — High Impact (Must Have)
 
-- [ ] **Inline Tool Approval** — Replace blocking modal dialog with inline approval dock in the composer area. Both Goose and OpenCode use non-modal inline approval that doesn't interrupt the user's flow. Current `ToolApprovalDialog.tsx` is a full-screen modal that suspends the agent loop. *Rewrite: `ToolApprovalDialog.tsx` → inline dock in `ChatView.tsx`, keep `createApprovalGate` Promise pattern* — **Large** *(source: Goose + OpenCode)*
-- [ ] **Integrated Terminal (xterm.js)** — Real interactive terminal in bottom panel, not just a log viewer. AVA has `node-pty` in the backend (`platform-node/src/pty.ts`) but only surfaces completed tool outputs in `TerminalPanel.tsx`. OpenCode has full xterm.js with live streaming. *Files: new `XTerminal.tsx`, `TerminalPanel.tsx` rewrite, wire to `node-pty`* — **Large** *(source: OpenCode)*
-- [ ] **Aggregate Diff Review Panel** — Session/turn-scoped "review all changes" panel. Currently `DiffViewer` only shows per-tool-call diffs inline. Need aggregated view with Accept/Reject per file. OpenCode has session + turn scope toggle. *Files: new `DiffReviewPanel.tsx`, extend `FileOperationsPanel.tsx` or new tab* — **Large** *(source: OpenCode)*
+- [x] **Inline Tool Approval** — Replaced modal with inline `ApprovalDock` in composer area. Compact row with expand toggle, keyboard shortcuts (Enter/Escape), auto-expand for high/critical risk, always-allow checkbox. — **Large** *(done)*
+- [x] **Integrated Terminal (xterm.js)** — Full interactive terminal in bottom panel. Rust PTY backend (`portable-pty`) + Tauri IPC + xterm.js frontend. Tabbed bottom panel (Memory/Terminal/Output). Ctrl+\` toggle. — **Large** *(done)*
+- [x] **Aggregate Diff Review Panel** — "Review" tab in right panel aggregates all file changes with DiffViewer. Diff content captured during tool execution (originalContent/newContent). Expand/collapse per file, +/- line counts. — **Large** *(done)*
 - [x] **@ File Mention Autocomplete** — `@` in composer triggers fuzzy file picker popover. — **Medium** *(done)*
 - [x] **File Changes Sidebar** — Right panel "Files" tab shows file operations during session. — **Medium** *(done)*
 - [x] **Conversation Search** — Full-text search with match highlighting and next/prev navigation. — **Medium** *(done)*
@@ -114,11 +114,11 @@ Informed by comprehensive audits of Goose and OpenCode frontends. Ordered by imp
 
 ### P1 — Medium Impact
 
-- [ ] **Message Queue UI** — Show queued messages with count indicator, allow reorder/remove. Goose has drag-to-reorder. AVA has a queue (`messageQueue` signal in `hooks/chat/types.ts`) but it's completely invisible to the user. *Files: new `MessageQueueBar.tsx` above composer, `message-actions.ts` for reorder/remove* — **Medium** *(source: Goose)*
-- [ ] **File Tree Change Indicators** — Mark modified/created/deleted files in the file explorer during a session. OpenCode shows dot indicators on changed files. AVA tracks file ops in `FileOperationsPanel` but this doesn't flow back to the tree. *Files: `SidebarExplorer.tsx`, `FileTree.tsx` — add `modified` state, feed from `fileOperations` store* — **Medium** *(source: OpenCode)*
-- [ ] **"Open in" IDE Integration** — Button to open files in VS Code, Cursor, Zed, etc. Auto-detect installed editors via Tauri shell. OpenCode has this with IDE auto-detection. *Files: new `ide-integration.ts`, context menu in `SidebarExplorer.tsx` + `FileOperationsPanel.tsx`* — **Medium** *(source: OpenCode)*
-- [ ] **Live Tool Progress Streaming** — Show stdout/stderr live during bash tool execution instead of waiting for completion. Goose streams log output and shows progress bars in tool cards. *Files: `active-tool-indicator.tsx`, `ToolCallCard.tsx`, wire to PTY stream* — **Large** *(source: Goose)*
-- [ ] **Undo/Redo File Changes** — `/undo` `/redo` backed by file version snapshots per session. *Files: new `file-versions.ts`* — **Large** *(source: OpenCode)*
+- [x] **Message Queue UI** — `MessageQueueBar.tsx` above composer shows queued message count, expand to view/remove individual messages. Exposed `messageQueue` + `removeFromQueue` from useChat. — **Medium** *(done)*
+- [x] **File Tree Change Indicators** — Color-coded dots on modified/created/deleted files in `SidebarExplorer.tsx`. Directories with changed descendants get subtle accent dot. Fed from `fileOperations` store via reactive memo. — **Medium** *(done)*
+- [x] **"Open in" IDE Integration** — Auto-detects 8 editors (VS Code, Cursor, Zed, etc.) via `which`. Right-click context menu in file explorer, "Open in" buttons in FileOperationsPanel and DiffReviewPanel. Header button to open project. `ide-integration.ts` service. — **Medium** *(done)*
+- [x] **Live Tool Progress Streaming** — Bash tool streams incremental stdout via metadata callback. `streamingOutput` field on ToolCall updated in real-time. `ToolCallCard` shows live output while running. — **Large** *(done)*
+- [x] **Undo/Redo File Changes** — `file-versions.ts` service maintains per-session version stacks. Undo/redo write file content via Tauri FS. Keyboard shortcuts Ctrl+Shift+Z/Y. Toast notifications. Integrated with diff capture from stream-lifecycle. — **Large** *(done)*
 - [x] **Conversation Branching** — Fork conversation at any message via Branch button (GitFork icon). — **Medium** *(done)*
 - [x] **Quick Session Switcher (Ctrl+J)** — Keyboard-driven overlay with fuzzy search. — **Medium** *(done)*
 - [x] **Expanded Editor (Ctrl+E)** — Full-screen monospace modal for composing long prompts. — **Medium** *(done)*
@@ -129,7 +129,7 @@ Informed by comprehensive audits of Goose and OpenCode frontends. Ordered by imp
 
 ### P2 — Lower Impact / Future
 
-- [ ] **Theme Live Preview** — Preview theme/accent changes on hover before committing. OpenCode shows live preview when hovering over theme options. *Files: `AppearanceTab.tsx`* — **Small** *(source: OpenCode)*
+- [x] **Theme Live Preview** — Hover over accent colors, dark styles, code themes, border radius, and density options to preview changes instantly. Uses `previewAppearance`/`restoreAppearance` pattern that applies CSS vars without persisting. — **Small** *(done)*
 - [ ] **Workflow/Recipe Creation** — Save a successful session as a reusable workflow. Goose calls these "recipes" and can create them from any completed session. — **Large** *(source: Goose)*
 - [ ] Custom commands UI (manage TOML/MD commands) — **Large**
 - [x] Faster model picker dialog (Ctrl+O, grouped by provider) — **Small** *(done)*
@@ -223,6 +223,15 @@ These were identified as gaps but are now fully implemented:
 | File changes sidebar | 60+ | Right panel "Files" tab with file operations |
 | Context usage warning badge | 60+ | Yellow warning at 80% context |
 | Scroll performance (WebKitGTK) | 60+ | Passive scroll listeners, removed bad CSS hacks |
+| Inline tool approval dock | 65+ | ApprovalDock replaces modal, keyboard shortcuts, auto-expand |
+| Integrated terminal (xterm.js) | 65+ | Rust PTY + Tauri IPC + xterm.js, tabbed bottom panel, Ctrl+` |
+| Aggregate diff review panel | 65+ | Review tab, diff capture in tool execution, DiffViewer per file |
+| Message queue UI | 65+ | MessageQueueBar with count, expand, remove individual messages |
+| File tree change indicators | 65+ | Color-coded dots on changed files, directory change propagation |
+| "Open in" IDE integration | 65+ | Auto-detect editors, context menu, open file/project in VS Code etc. |
+| Live tool progress streaming | 65+ | Bash stdout streams via metadata callback, live output in ToolCallCard |
+| Theme live preview | 65+ | Hover to preview accent, dark style, code theme, radius, density |
+| Undo/redo file changes | 65+ | Per-session version stacks, Ctrl+Shift+Z/Y, toast notifications |
 
 ---
 

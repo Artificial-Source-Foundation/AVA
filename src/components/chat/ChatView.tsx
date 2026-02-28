@@ -18,6 +18,7 @@ import { ApprovalDock } from './ApprovalDock'
 import { GitControlStrip } from './GitControlStrip'
 import { MessageInput } from './MessageInput'
 import { MessageList } from './MessageList'
+import { MessageQueueBar } from './MessageQueueBar'
 
 export const ChatView: Component = () => {
   const { settings, addAutoApprovedTool } = useSettings()
@@ -85,6 +86,13 @@ export const ChatView: Component = () => {
 
       {/* Inline tool approval dock */}
       <ApprovalDock request={activeApproval()} onResolve={handleApprovalResolve} />
+
+      {/* Queued messages indicator */}
+      <MessageQueueBar
+        messages={chat.messageQueue()}
+        onRemove={(i) => chat.removeFromQueue(i)}
+        onClear={() => chat.clearQueue()}
+      />
 
       {/* Git controls + usage entry point */}
       <GitControlStrip />

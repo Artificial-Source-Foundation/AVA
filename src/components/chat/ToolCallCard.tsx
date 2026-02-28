@@ -30,6 +30,7 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
   const summary = () => summarizeAction(props.toolCall.name, props.toolCall.args)
   const isRunning = () => props.toolCall.status === 'running' || props.toolCall.status === 'pending'
   const hasOutput = () => !!(props.toolCall.output || props.toolCall.error || props.toolCall.diff)
+  const hasStreamingOutput = () => isRunning() && !!props.toolCall.streamingOutput
 
   const duration = () => {
     if (!props.toolCall.completedAt) return null
@@ -92,6 +93,15 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
           />
         </Show>
       </div>
+
+      {/* Live streaming output while running */}
+      <Show when={hasStreamingOutput()}>
+        <div class="px-3 pb-2 border-t border-[var(--border-subtle)]">
+          <pre class="text-[11px] text-[var(--text-muted)] font-mono whitespace-pre-wrap break-all max-h-32 overflow-y-auto scrollbar-none leading-relaxed mt-1.5">
+            {props.toolCall.streamingOutput!.slice(-2000)}
+          </pre>
+        </div>
+      </Show>
 
       {/* Expanded output — rich rendering */}
       <Show when={expanded() && hasOutput()}>

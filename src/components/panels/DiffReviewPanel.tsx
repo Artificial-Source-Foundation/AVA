@@ -11,6 +11,7 @@ import {
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
+  ExternalLink,
   FileEdit,
   FilePlus2,
   FolderOpen,
@@ -19,6 +20,7 @@ import {
   Trash2,
 } from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
+import { type EditorInfo, getAvailableEditors, openInEditor } from '../../services/ide-integration'
 import { useSession } from '../../stores/session'
 import type { FileOperation, FileOperationType } from '../../types'
 import { DiffViewer } from '../ui/DiffViewer'
@@ -67,6 +69,10 @@ interface DiffReviewPanelProps {
 export const DiffReviewPanel: Component<DiffReviewPanelProps> = () => {
   const { fileOperations } = useSession()
   const [expandedFiles, setExpandedFiles] = createSignal<Set<string>>(new Set())
+  const [editors, setEditors] = createSignal<EditorInfo[]>([])
+
+  // Detect available editors once on mount
+  void getAvailableEditors().then(setEditors)
 
   // Aggregate: latest operation per file, filter out reads and ops without content
   const reviewableOps = createMemo(() => {
@@ -220,6 +226,19 @@ export const DiffReviewPanel: Component<DiffReviewPanelProps> = () => {
                       </Show>
                       <Show when={op.linesRemoved}>
                         <span class="text-[var(--error)]">-{op.linesRemoved}</span>
+                      </Show>
+                      <Show when={editors().length > 0 && op.type !== 'delete'}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void openInEditor(editors()[0]!.command, op.filePath)
+                          }}
+                          class="p-0.5 rounded hover:bg-[var(--alpha-white-05)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors cursor-pointer"
+                          title={`Open in ${editors()[0]!.name}`}
+                        >
+                          <ExternalLink class="w-3 h-3" />
+                        </button>
                       </Show>
                     </div>
                   </button>

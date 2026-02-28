@@ -6,6 +6,7 @@
 import { executeTool, getToolDefinitions } from '@ava/core-v2/tools'
 import { checkAutoApproval } from '../../lib/tool-approval'
 import { readFileContent } from '../../services/file-browser'
+import { recordFileChange } from '../../services/file-versions'
 import { createClient, getProviderForModel } from '../../services/llm/bridge'
 import { logDebug, logError, logInfo } from '../../services/logger'
 import type { FileOperationType, ToolCall } from '../../types'
@@ -276,7 +277,22 @@ async function executeToolLoop(
       }
     }
 
-    const result = await executeTool(toolUse.name, toolUse.input, toolCtx)
+    // Create per-tool context with metadata callback for live streaming
+    const perToolCtx = {
+      ...toolCtx,
+      metadata: (update: { metadata: Record<string, unknown> }) => {
+        if (
+          tc &&
+          update.metadata.streamOutput &&
+          typeof update.metadata.streamOutput === 'string'
+        ) {
+          tc.streamingOutput = update.metadata.streamOutput
+          options.onToolUpdate?.([...allToolCalls])
+        }
+      },
+    }
+
+    const result = await executeTool(toolUse.name, toolUse.input, perToolCtx)
     logDebug(deps.LOG_SRC, 'Tool finished', {
       toolName: toolUse.name,
       success: result.success,
@@ -312,6 +328,7 @@ async function executeToolLoop(
     if (tc) {
       tc.status = result.success ? 'success' : 'error'
       tc.output = toolOutput.slice(0, 2000) // Cap stored output
+      tc.streamingOutput = undefined // Clear streaming output on completion
       tc.error = result.error
       tc.completedAt = Date.now()
     }
@@ -334,7 +351,7 @@ async function executeToolLoop(
       const oldLines = originalContent?.split('\n').length ?? 0
       const newLines = newContent?.split('\n').length ?? 0
 
-      deps.session.addFileOperation({
+      const fileOp = {
         id: toolUse.id,
         sessionId: options.sessionId,
         type: opType,
@@ -345,7 +362,11 @@ async function executeToolLoop(
         linesAdded: newLines > oldLines ? newLines - oldLines : 0,
         linesRemoved: oldLines > newLines ? oldLines - newLines : 0,
         isNew: originalContent === null && opType === 'write',
-      })
+      }
+      deps.session.addFileOperation(fileOp)
+
+      // Record version for undo/redo
+      recordFileChange(options.sessionId, fileOp)
     }
 
     toolResults.push({

@@ -123,7 +123,8 @@ const Toggle: Component<{ checked: boolean; onChange: (v: boolean) => void }> = 
 // ============================================================================
 
 const ColorModeSection: Component = () => {
-  const { settings, updateSettings, updateAppearance } = useSettings()
+  const { settings, updateSettings, updateAppearance, previewAppearance, restoreAppearance } =
+    useSettings()
   const showDarkStyle = createMemo(() => isDarkMode())
 
   return (
@@ -164,6 +165,8 @@ const ColorModeSection: Component = () => {
                 <button
                   type="button"
                   onClick={() => updateAppearance({ darkStyle: opt.id })}
+                  onMouseEnter={() => previewAppearance({ darkStyle: opt.id })}
+                  onMouseLeave={restoreAppearance}
                   class={segmentedBtn(settings().appearance.darkStyle === opt.id)}
                 >
                   {opt.label}
@@ -182,7 +185,7 @@ const ColorModeSection: Component = () => {
 // ============================================================================
 
 const AccentSection: Component = () => {
-  const { settings, updateAppearance } = useSettings()
+  const { settings, updateAppearance, previewAppearance, restoreAppearance } = useSettings()
   const isCustom = createMemo(() => settings().appearance.accentColor === 'custom')
 
   const accentLabel = createMemo(() => {
@@ -201,6 +204,8 @@ const AccentSection: Component = () => {
               <button
                 type="button"
                 onClick={() => updateAppearance({ accentColor: preset.id })}
+                onMouseEnter={() => previewAppearance({ accentColor: preset.id })}
+                onMouseLeave={restoreAppearance}
                 title={preset.label}
                 class={`
                   w-5 h-5 rounded-full transition-[transform,opacity] duration-150
@@ -362,7 +367,7 @@ const FontSection: Component = () => {
 // ============================================================================
 
 const CodeThemeSection: Component = () => {
-  const { settings, updateAppearance } = useSettings()
+  const { settings, updateAppearance, previewAppearance, restoreAppearance } = useSettings()
 
   return (
     <div>
@@ -373,6 +378,8 @@ const CodeThemeSection: Component = () => {
             <button
               type="button"
               onClick={() => updateAppearance({ codeTheme: theme.id })}
+              onMouseEnter={() => previewAppearance({ codeTheme: theme.id })}
+              onMouseLeave={restoreAppearance}
               class={segmentedBtn(settings().appearance.codeTheme === theme.id)}
             >
               {theme.label}
@@ -458,7 +465,7 @@ const AccessibilitySection: Component = () => {
 // ============================================================================
 
 export const AppearanceTab: Component = () => {
-  const { settings, updateAppearance } = useSettings()
+  const { settings, updateAppearance, previewAppearance, restoreAppearance } = useSettings()
 
   return (
     <div class="space-y-5">
@@ -530,6 +537,8 @@ export const AppearanceTab: Component = () => {
                 <button
                   type="button"
                   onClick={() => updateAppearance({ borderRadius: opt.id })}
+                  onMouseEnter={() => previewAppearance({ borderRadius: opt.id })}
+                  onMouseLeave={restoreAppearance}
                   class={segmentedBtn(settings().appearance.borderRadius === opt.id)}
                 >
                   {opt.label}
@@ -557,6 +566,8 @@ export const AppearanceTab: Component = () => {
                 <button
                   type="button"
                   onClick={() => updateAppearance({ density: opt.id })}
+                  onMouseEnter={() => previewAppearance({ density: opt.id })}
+                  onMouseLeave={restoreAppearance}
                   class={segmentedBtn(settings().appearance.density === opt.id)}
                 >
                   {opt.label}

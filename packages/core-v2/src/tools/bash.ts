@@ -95,6 +95,11 @@ export const bashTool = defineTool({
         return
       }
       stdout += data
+      // Stream incremental output to UI
+      ctx.metadata?.({
+        title: input.description,
+        metadata: { streamOutput: stdout.slice(-4096) },
+      })
     })
 
     const stderrPromise = readStream(child.stderr, (data) => {

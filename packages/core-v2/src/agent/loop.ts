@@ -329,64 +329,75 @@ export class AgentExecutor {
       }
     }
 
-    // Execute tool calls
+    // Check for completion tool before executing anything
+    const completionCall = toolCalls.find((c) => c.name === COMPLETE_TASK_TOOL)
+    if (completionCall) {
+      const result = (completionCall.input as Record<string, string>).result ?? assistantContent
+      emitEvent('agent:completing', { agentId: this.agentId, result })
+      return {
+        status: 'stop',
+        terminateMode: AgentTerminateMode.GOAL,
+        result,
+        usage: { inputTokens: turnInput, outputTokens: turnOutput },
+      }
+    }
+
+    // Execute all tool calls in parallel (Promise.all preserves order)
+    const results = await Promise.all(
+      toolCalls.map(async (call) => {
+        this.emit({
+          type: 'tool:start',
+          agentId: this.agentId,
+          toolName: call.name,
+          args: call.input,
+        })
+        const toolStart = Date.now()
+
+        const ctx: ToolContext = {
+          sessionId: this.agentId,
+          workingDirectory: cwd,
+          signal,
+          provider: this.config.provider,
+          model,
+        }
+
+        const result = await executeTool(call.name, call.input, ctx)
+        const durationMs = Date.now() - toolStart
+        const output = result.success
+          ? result.output
+          : result.error || result.output || 'Tool failed'
+
+        this.emit({
+          type: 'tool:finish',
+          agentId: this.agentId,
+          toolName: call.name,
+          success: result.success,
+          durationMs,
+        })
+
+        return {
+          callInfo: {
+            name: call.name,
+            args: call.input,
+            result: output,
+            success: result.success,
+            durationMs,
+          } as ToolCallInfo,
+          resultBlock: {
+            type: 'tool_result' as const,
+            tool_use_id: call.id,
+            content: output,
+            is_error: !result.success,
+          } as ToolResultBlock,
+        }
+      })
+    )
+
     const callInfos: ToolCallInfo[] = []
     const toolResultBlocks: ToolResultBlock[] = []
-
-    for (const call of toolCalls) {
-      // Check for completion tool
-      if (call.name === COMPLETE_TASK_TOOL) {
-        const result = (call.input as Record<string, string>).result ?? assistantContent
-        emitEvent('agent:completing', { agentId: this.agentId, result })
-        return {
-          status: 'stop',
-          terminateMode: AgentTerminateMode.GOAL,
-          result,
-          usage: { inputTokens: turnInput, outputTokens: turnOutput },
-        }
-      }
-
-      this.emit({
-        type: 'tool:start',
-        agentId: this.agentId,
-        toolName: call.name,
-        args: call.input,
-      })
-      const toolStart = Date.now()
-
-      const ctx: ToolContext = {
-        sessionId: this.agentId,
-        workingDirectory: cwd,
-        signal,
-        provider: this.config.provider,
-        model,
-      }
-
-      const result = await executeTool(call.name, call.input, ctx)
-      const durationMs = Date.now() - toolStart
-
-      callInfos.push({
-        name: call.name,
-        args: call.input,
-        result: result.success ? result.output : result.error || result.output || 'Tool failed',
-        success: result.success,
-        durationMs,
-      })
-
-      this.emit({
-        type: 'tool:finish',
-        agentId: this.agentId,
-        toolName: call.name,
-        success: result.success,
-        durationMs,
-      })
-
-      toolResultBlocks.push({
-        type: 'tool_result',
-        tool_use_id: call.id,
-        content: result.success ? result.output : result.error || result.output || 'Tool failed',
-        is_error: !result.success,
-      })
+    for (const { callInfo, resultBlock } of results) {
+      callInfos.push(callInfo)
+      toolResultBlocks.push(resultBlock)
     }
 
     // Add tool results to history as structured user message

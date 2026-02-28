@@ -34,6 +34,13 @@ import {
   saveMemoryItem,
   saveTerminalExecution,
 } from '../services/database'
+import { readFileContent } from '../services/file-browser'
+import {
+  clearVersionHistory,
+  getVersionCounts,
+  redoFileChange,
+  undoFileChange,
+} from '../services/file-versions'
 import { logDebug, logError, logInfo, logWarn } from '../services/logger'
 import type {
   Agent,
@@ -765,10 +772,63 @@ export function useSession() {
       if (sessionId) {
         try {
           await dbClearFileOperations(sessionId)
+          clearVersionHistory(sessionId)
         } catch (err) {
           logError('Session', 'Failed to clear file operations', err)
         }
       }
+    },
+
+    /**
+     * Undo the last file change in this session.
+     * Returns the affected file path, or null if nothing to undo.
+     */
+    undoFileChange: async (): Promise<string | null> => {
+      const sessionId = currentSession()?.id
+      if (!sessionId) return null
+
+      try {
+        const result = await undoFileChange(sessionId, readFileContent)
+        if (!result) return null
+
+        // Write the reverted content using Tauri FS
+        const fs = await import('@tauri-apps/plugin-fs')
+        await fs.writeTextFile(result.filePath, result.content)
+        logInfo('Session', 'Undid file change', { filePath: result.filePath })
+        return result.filePath
+      } catch (err) {
+        logError('Session', 'Failed to undo file change', err)
+        return null
+      }
+    },
+
+    /**
+     * Redo the last undone file change.
+     * Returns the affected file path, or null if nothing to redo.
+     */
+    redoFileChange: async (): Promise<string | null> => {
+      const sessionId = currentSession()?.id
+      if (!sessionId) return null
+
+      try {
+        const result = await redoFileChange(sessionId, readFileContent)
+        if (!result) return null
+
+        const fs = await import('@tauri-apps/plugin-fs')
+        await fs.writeTextFile(result.filePath, result.content)
+        logInfo('Session', 'Redid file change', { filePath: result.filePath })
+        return result.filePath
+      } catch (err) {
+        logError('Session', 'Failed to redo file change', err)
+        return null
+      }
+    },
+
+    /** Get undo/redo counts for current session */
+    getVersionCounts: () => {
+      const sessionId = currentSession()?.id
+      if (!sessionId) return { undoCount: 0, redoCount: 0 }
+      return getVersionCounts(sessionId)
     },
 
     // ========================================================================

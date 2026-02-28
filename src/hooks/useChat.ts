@@ -100,7 +100,11 @@ function createChatStore() {
     pendingApproval: approval.pendingApproval,
 
     // Queue
+    messageQueue,
     queuedCount: () => messageQueue().length,
+    removeFromQueue: (index: number) => {
+      setMessageQueue((prev) => prev.filter((_, i) => i !== index))
+    },
     steer: (
       content: string,
       model?: string,

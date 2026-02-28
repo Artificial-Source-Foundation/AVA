@@ -2,7 +2,8 @@
  * Diff extension — tracks file changes during agent sessions.
  *
  * Registers tool middleware at priority 20 to snapshot files before
- * write_file/edit operations and compute diffs afterward.
+ * write_file/edit/delete_file operations and compute diffs afterward.
+ * Provides undo/redo via diff:undo and diff:redo events.
  */
 
 import type {
@@ -14,13 +15,41 @@ import type {
 } from '@ava/core-v2/extensions'
 import type { ToolResult } from '@ava/core-v2/tools'
 import { addDiff, createDiffSession, createFileDiff } from './tracker.js'
-import type { DiffSession } from './types.js'
+import type { DiffSession, FileDiff } from './types.js'
 
-const FILE_WRITE_TOOLS = new Set(['write_file', 'edit', 'create_file', 'apply_patch'])
+const FILE_WRITE_TOOLS = new Set([
+  'write_file',
+  'edit',
+  'create_file',
+  'apply_patch',
+  'delete_file',
+])
 
 export function activate(api: ExtensionAPI): Disposable {
   const sessions = new Map<string, DiffSession>()
   const snapshots = new Map<string, string>()
+
+  // Undo/redo stacks per session (LIFO)
+  const undoStacks = new Map<string, FileDiff[]>()
+  const redoStacks = new Map<string, FileDiff[]>()
+
+  function getUndoStack(sessionId: string): FileDiff[] {
+    let stack = undoStacks.get(sessionId)
+    if (!stack) {
+      stack = []
+      undoStacks.set(sessionId, stack)
+    }
+    return stack
+  }
+
+  function getRedoStack(sessionId: string): FileDiff[] {
+    let stack = redoStacks.get(sessionId)
+    if (!stack) {
+      stack = []
+      redoStacks.set(sessionId, stack)
+    }
+    return stack
+  }
 
   function getOrCreateSession(sessionId: string): DiffSession {
     let session = sessions.get(sessionId)
@@ -69,9 +98,28 @@ export function activate(api: ExtensionAPI): Disposable {
         const diff = createFileDiff(filePath, original, modified)
         const session = getOrCreateSession(ctx.ctx.sessionId)
         addDiff(session, diff)
+
+        // Push to undo stack + clear redo (standard undo/redo semantics)
+        const undoStack = getUndoStack(ctx.ctx.sessionId)
+        undoStack.push(diff)
+        const redoStack = getRedoStack(ctx.ctx.sessionId)
+        redoStack.length = 0
+
         api.emit('diff:changed', { sessionId: ctx.ctx.sessionId, diff })
       } catch {
-        // File was deleted after write — unlikely but possible
+        // File was deleted — record deletion diff if we had a snapshot
+        if (original !== undefined) {
+          const diff: FileDiff = { path: filePath, type: 'deleted', original, hunks: [] }
+          const session = getOrCreateSession(ctx.ctx.sessionId)
+          addDiff(session, diff)
+
+          const undoStack = getUndoStack(ctx.ctx.sessionId)
+          undoStack.push(diff)
+          const redoStack = getRedoStack(ctx.ctx.sessionId)
+          redoStack.length = 0
+
+          api.emit('diff:changed', { sessionId: ctx.ctx.sessionId, diff })
+        }
       }
 
       return undefined
@@ -79,13 +127,64 @@ export function activate(api: ExtensionAPI): Disposable {
   }
 
   const mwDisposable = api.addToolMiddleware(middleware)
+
+  // Wire diff:undo listener
+  const undoDisposable = api.on('diff:undo', async (data: unknown) => {
+    const { sessionId } = data as { sessionId: string }
+    const undoStack = getUndoStack(sessionId)
+    const diff = undoStack.pop()
+
+    if (!diff) {
+      api.emit('diff:undo-failed', { sessionId, reason: 'Nothing to undo' })
+      return
+    }
+
+    // Restore based on diff type
+    if (diff.type === 'modified' || diff.type === 'deleted') {
+      await api.platform.fs.writeFile(diff.path, diff.original!)
+    } else if (diff.type === 'added') {
+      await api.platform.fs.remove(diff.path)
+    }
+
+    const redoStack = getRedoStack(sessionId)
+    redoStack.push(diff)
+    api.emit('diff:undone', { sessionId, diff })
+  })
+
+  // Wire diff:redo listener
+  const redoDisposable = api.on('diff:redo', async (data: unknown) => {
+    const { sessionId } = data as { sessionId: string }
+    const redoStack = getRedoStack(sessionId)
+    const diff = redoStack.pop()
+
+    if (!diff) {
+      api.emit('diff:redo-failed', { sessionId, reason: 'Nothing to redo' })
+      return
+    }
+
+    // Re-apply based on diff type
+    if (diff.type === 'modified' || diff.type === 'added') {
+      await api.platform.fs.writeFile(diff.path, diff.modified!)
+    } else if (diff.type === 'deleted') {
+      await api.platform.fs.remove(diff.path)
+    }
+
+    const undoStack = getUndoStack(sessionId)
+    undoStack.push(diff)
+    api.emit('diff:redone', { sessionId, diff })
+  })
+
   api.log.debug('Diff tracking extension activated')
 
   return {
     dispose() {
       mwDisposable.dispose()
+      undoDisposable.dispose()
+      redoDisposable.dispose()
       sessions.clear()
       snapshots.clear()
+      undoStacks.clear()
+      redoStacks.clear()
     },
   }
 }

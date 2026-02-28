@@ -74,6 +74,8 @@ function App() {
     createNewSession,
     messages,
     currentSession,
+    undoFileChange,
+    redoFileChange,
   } = useSession()
   const { settings, updateSettings, updateProvider, isToolAutoApproved } = useSettings()
   const { registerAction, setupShortcutListener } = useShortcuts()
@@ -142,6 +144,20 @@ function App() {
       const msgs = messages()
       if (msgs.length === 0) return
       exportConversation(msgs, currentSession()?.name)
+    })
+    registerAction('undo-file-change', async () => {
+      const filePath = await undoFileChange()
+      if (filePath) {
+        const name = filePath.split('/').pop() || filePath
+        info('Undone', `Reverted ${name}`)
+      }
+    })
+    registerAction('redo-file-change', async () => {
+      const filePath = await redoFileChange()
+      if (filePath) {
+        const name = filePath.split('/').pop() || filePath
+        info('Redone', `Re-applied change to ${name}`)
+      }
     })
     registerAction('new-chat', async () => {
       if (!currentProject()) {

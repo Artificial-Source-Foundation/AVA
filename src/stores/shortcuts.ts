@@ -115,6 +115,20 @@ const DEFAULT_SHORTCUTS: ShortcutDef[] = [
     description: 'Show or hide the integrated terminal',
     category: 'General',
   },
+  {
+    id: 'undo-file-change',
+    keys: ['ctrl', 'shift', 'z'],
+    label: 'Undo File Change',
+    description: 'Revert the last file modification made by an agent',
+    category: 'Chat',
+  },
+  {
+    id: 'redo-file-change',
+    keys: ['ctrl', 'shift', 'y'],
+    label: 'Redo File Change',
+    description: 'Re-apply the last undone file change',
+    category: 'Chat',
+  },
 ]
 
 // ============================================================================

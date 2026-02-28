@@ -66,6 +66,8 @@ export interface ToolCall {
   args: Record<string, unknown>
   status: ToolCallStatus
   output?: string
+  /** Live streaming output while tool is running (bash commands) */
+  streamingOutput?: string
   error?: string
   startedAt: number
   completedAt?: number

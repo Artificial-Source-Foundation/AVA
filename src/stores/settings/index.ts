@@ -69,6 +69,17 @@ export function applyAppearance(): void {
   applyAppearanceToDOM(settings())
 }
 
+/** Preview appearance changes without persisting. Call restoreAppearance() to revert. */
+export function previewAppearance(patch: Partial<AppSettings['appearance']>): void {
+  const preview = { ...settings(), appearance: { ...settings().appearance, ...patch } }
+  applyAppearanceToDOM(preview)
+}
+
+/** Restore persisted appearance after a preview. */
+export function restoreAppearance(): void {
+  applyAppearanceToDOM(settings())
+}
+
 export function pushSettingsToCore(): void {
   pushSettingsToCoreImpl(settings())
 }
@@ -370,6 +381,8 @@ export function useSettings() {
     isToolAutoApproved,
     updateUI,
     updateAppearance,
+    previewAppearance,
+    restoreAppearance,
     updateGeneration,
     updateAgentLimits,
     updateBehavior,

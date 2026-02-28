@@ -9,9 +9,9 @@ describe('createBuiltinCommands', () => {
     signal: new AbortController().signal,
   }
 
-  it('creates 8 built-in commands', () => {
+  it('creates 9 built-in commands', () => {
     const commands = createBuiltinCommands(emit)
-    expect(commands).toHaveLength(8)
+    expect(commands).toHaveLength(9)
   })
 
   it('includes expected command names', () => {
@@ -23,6 +23,7 @@ describe('createBuiltinCommands', () => {
     expect(names).toContain('model')
     expect(names).toContain('compact')
     expect(names).toContain('undo')
+    expect(names).toContain('redo')
     expect(names).toContain('settings')
     expect(names).toContain('status')
   })

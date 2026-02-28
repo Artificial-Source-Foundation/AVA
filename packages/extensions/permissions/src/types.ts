@@ -11,6 +11,16 @@ export interface PermissionSettings {
   autoApproveCommands: boolean
   blockedPatterns: string[]
   trustedPaths: string[]
+  toolRules: ToolPermissionRule[]
+  smartApprove: boolean
+  alwaysApproved: string[]
+}
+
+export interface ToolPermissionRule {
+  tool: string // Tool name or glob ('bash', 'write_*', '*')
+  action: 'allow' | 'ask' | 'deny'
+  paths?: string[] // Optional path restrictions (glob patterns)
+  reason?: string
 }
 
 export const DEFAULT_SETTINGS: PermissionSettings = {
@@ -20,6 +30,9 @@ export const DEFAULT_SETTINGS: PermissionSettings = {
   autoApproveCommands: false,
   blockedPatterns: [],
   trustedPaths: [],
+  toolRules: [],
+  smartApprove: false,
+  alwaysApproved: [],
 }
 
 export interface PolicyRule {
@@ -71,7 +84,28 @@ export interface PermissionResponse {
   timestamp: number
   approved: boolean
   reason?: string
+  alwaysApprove?: boolean
 }
+
+// ─── Safe Bash Patterns (for smartApprove) ──────────────────────────────────
+
+export const SAFE_BASH_PATTERNS: RegExp[] = [
+  /^ls\b/,
+  /^cat\b/,
+  /^head\b/,
+  /^tail\b/,
+  /^wc\b/,
+  /^echo\b/,
+  /^pwd$/,
+  /^git\s+(status|log|diff|branch|show|rev-parse)\b/,
+  /^npm\s+(test|run\s+test|run\s+lint)\b/,
+  /^pnpm\s+(test|run\s+test|lint)\b/,
+  /^npx\s+(vitest|tsc|biome|oxlint)\b/,
+  /^node\s+--version$/,
+  /^which\b/,
+  /^rg\b/,
+  /^grep\b/,
+]
 
 // ─── Built-in Safety Rules ──────────────────────────────────────────────────
 

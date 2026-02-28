@@ -54,6 +54,11 @@ export function createBuiltinCommands(
       return 'Undoing last change.'
     }),
 
+    cmd('redo', 'Redo the last undone file change', async (_args, ctx) => {
+      emit('diff:redo', { sessionId: ctx.sessionId })
+      return 'Redoing last undone change.'
+    }),
+
     cmd('settings', 'Open settings', async () => {
       emit('ui:open-settings', {})
       return 'Opening settings.'

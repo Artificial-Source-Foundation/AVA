@@ -4,6 +4,9 @@
  * Implements safety checks as a tool middleware:
  * - Blocks dangerous patterns (rm -rf /, .git writes)
  * - Auto-approves reads when configured
+ * - Per-tool rules with glob matching (first match wins)
+ * - Smart-approve for safe bash commands and trusted paths
+ * - Always-approved list from user confirmations
  * - Emits permission:request events for user confirmation
  */
 
@@ -19,6 +22,8 @@ import {
   type PermissionRequest,
   type PermissionResponse,
   type PermissionSettings,
+  SAFE_BASH_PATTERNS,
+  type ToolPermissionRule,
 } from './types.js'
 
 let settings: PermissionSettings = { ...DEFAULT_SETTINGS }
@@ -33,6 +38,53 @@ export function getSettings(): PermissionSettings {
 
 export function resetSettings(): void {
   settings = { ...DEFAULT_SETTINGS }
+}
+
+// ─── Glob Matching ─────────────────────────────────────────────────────────
+
+/** Simple glob matching: supports *, **, and ? */
+export function matchesGlob(value: string, pattern: string): boolean {
+  const regex = pattern
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&') // escape regex special chars
+    .replace(/\*\*/g, '§§') // placeholder for **
+    .replace(/\*/g, '[^/]*') // * matches anything except /
+    .replace(/§§/g, '.*') // ** matches anything
+    .replace(/\?/g, '.') // ? matches single char
+  return new RegExp(`^${regex}$`).test(value)
+}
+
+export function matchesAnyGlob(value: string, patterns: string[]): boolean {
+  return patterns.some((p) => matchesGlob(value, p))
+}
+
+// ─── Per-Tool Rule Evaluation ──────────────────────────────────────────────
+
+/** Evaluate tool rules — first matching rule wins. */
+export function evaluateToolRules(
+  toolName: string,
+  path: string | undefined,
+  rules: ToolPermissionRule[]
+): ToolPermissionRule | undefined {
+  for (const rule of rules) {
+    if (!matchesGlob(toolName, rule.tool)) continue
+    // If rule has path restrictions, check them
+    if (rule.paths && rule.paths.length > 0) {
+      if (!path || !matchesAnyGlob(path, rule.paths)) continue
+    }
+    return rule
+  }
+  return undefined
+}
+
+// ─── Smart-Approve Helpers ─────────────────────────────────────────────────
+
+export function isSafeBashCommand(command: string): boolean {
+  const trimmed = command.trim()
+  return SAFE_BASH_PATTERNS.some((pattern) => pattern.test(trimmed))
+}
+
+export function isInTrustedPath(filePath: string, trusted: string[]): boolean {
+  return matchesAnyGlob(filePath, trusted)
 }
 
 // ─── Path Checks ────────────────────────────────────────────────────────────
@@ -66,7 +118,9 @@ function isSudoCommand(args: Record<string, unknown>): boolean {
 function isBlockedByPattern(args: Record<string, unknown>): boolean {
   if (settings.blockedPatterns.length === 0) return false
   const path = (args.path ?? args.filePath ?? '') as string
-  return settings.blockedPatterns.some((p) => path.includes(p))
+  return settings.blockedPatterns.some(
+    (p) => matchesGlob(path, `**/${p}/**`) || matchesGlob(path, `**/${p}`) || path.includes(p)
+  )
 }
 
 // ─── Middleware ──────────────────────────────────────────────────────────────
@@ -80,7 +134,7 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
       const { toolName, args } = ctx
       const path = (args.path ?? args.filePath ?? '') as string
 
-      // Always block: .git writes
+      // 1. Always block: .git writes
       if (
         isGitPath(path) &&
         toolName !== 'read_file' &&
@@ -90,38 +144,70 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
         return { blocked: true, reason: 'Cannot modify .git directory' }
       }
 
-      // Always block: node_modules writes
+      // 2. Always block: node_modules writes
       if (isNodeModulesWrite(toolName, args)) {
         return { blocked: true, reason: 'Cannot write to node_modules' }
       }
 
-      // Always block: destructive rm -rf
+      // 3. Always block: destructive rm -rf
       if (toolName === 'bash' && isDangerousCommand(args)) {
         return { blocked: true, reason: 'Destructive rm -rf commands are blocked' }
       }
 
-      // Blocked patterns
+      // 4. Blocked patterns (upgraded to glob matching)
       if (isBlockedByPattern(args)) {
         return { blocked: true, reason: 'Path matches a blocked pattern' }
       }
 
-      // YOLO mode: approve everything not blocked above
+      // 5. YOLO mode: approve everything not blocked above
       if (settings.yolo) return undefined
+
+      // 6. Always-approved list check
+      if (settings.alwaysApproved.length > 0 && settings.alwaysApproved.includes(toolName)) {
+        return undefined
+      }
+
+      // 7. Per-tool rules (first match wins)
+      if (settings.toolRules.length > 0) {
+        const rule = evaluateToolRules(toolName, path || undefined, settings.toolRules)
+        if (rule) {
+          if (rule.action === 'allow') return undefined
+          if (rule.action === 'deny') {
+            return { blocked: true, reason: rule.reason ?? `Denied by tool rule for ${rule.tool}` }
+          }
+          // 'ask' falls through to bus approval below
+        }
+      }
 
       const risk = classifyRisk(toolName, args)
 
-      // Auto-approve reads
+      // 8. Auto-approve reads
       if (risk === 'low' && settings.autoApproveReads) return undefined
 
-      // Auto-approve writes if configured
+      // 9. Smart-approve: safe bash commands + trusted paths
+      if (settings.smartApprove) {
+        if (toolName === 'bash') {
+          const command = (args.command ?? '') as string
+          if (isSafeBashCommand(command)) return undefined
+        }
+        if (
+          path &&
+          settings.trustedPaths.length > 0 &&
+          isInTrustedPath(path, settings.trustedPaths)
+        ) {
+          return undefined
+        }
+      }
+
+      // 10. Auto-approve writes if configured
       if (risk === 'medium' && settings.autoApproveWrites) return undefined
 
-      // Auto-approve commands if configured
+      // 11. Auto-approve commands if configured
       if (toolName === 'bash' && settings.autoApproveCommands) {
         if (!isSudoCommand(args)) return undefined
       }
 
-      // For tools needing approval: use bus if available
+      // 12. Bus-based approval with alwaysApprove support
       if (bus?.hasSubscribers('permission:request')) {
         const response = await bus.request<PermissionRequest, PermissionResponse>(
           { type: 'permission:request', toolName, args, risk },
@@ -131,10 +217,17 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
         if (!response.approved) {
           return { blocked: true, reason: response.reason ?? 'Denied by user' }
         }
+        // Handle "always approve" response
+        if (response.alwaysApprove && !settings.alwaysApproved.includes(toolName)) {
+          settings = {
+            ...settings,
+            alwaysApproved: [...settings.alwaysApproved, toolName],
+          }
+        }
         return undefined
       }
 
-      // No approval handler available — apply fallback blocking rules
+      // 13. No approval handler — apply fallback blocking rules
 
       // Warn on .env files
       if (isEnvFile(args)) {

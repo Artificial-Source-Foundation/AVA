@@ -769,6 +769,184 @@ describe('Retry logic', () => {
   })
 })
 
+// ─── Parallel Tool Execution ────────────────────────────────────────────────
+
+describe('Parallel tool execution', () => {
+  it('executes multiple tools concurrently (both start before either finishes)', async () => {
+    const executionLog: string[] = []
+
+    const client = createMockClient([
+      // Turn 1: LLM returns two tool calls
+      [
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-a',
+            name: 'read_file',
+            input: { path: '/a.txt' },
+          },
+        },
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-b',
+            name: 'grep',
+            input: { pattern: 'foo' },
+          },
+        },
+      ],
+      // Turn 2: LLM done
+      [{ content: 'Done', done: true }],
+    ])
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+      mockToolDef('grep'),
+    ])
+
+    // Tool A takes 50ms, Tool B takes 10ms — if sequential, A finishes before B starts
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockImplementation(
+      async (name: string) => {
+        executionLog.push(`start:${name}`)
+        const delay = name === 'read_file' ? 50 : 10
+        await new Promise((r) => setTimeout(r, delay))
+        executionLog.push(`end:${name}`)
+        return { success: true, output: `result-${name}` }
+      }
+    )
+
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    await exec.run({ goal: 'Read and grep', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    // Both tools should start before either finishes (proves parallelism)
+    const startA = executionLog.indexOf('start:read_file')
+    const startB = executionLog.indexOf('start:grep')
+    const endA = executionLog.indexOf('end:read_file')
+    const endB = executionLog.indexOf('end:grep')
+
+    expect(startA).toBeLessThan(endA)
+    expect(startB).toBeLessThan(endB)
+    // Both starts happen before the first end
+    expect(startA).toBeLessThan(endB)
+    expect(startB).toBeLessThan(endA)
+  })
+
+  it('preserves result ordering when tool B finishes before tool A', async () => {
+    const client = createMockClient([
+      [
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-a',
+            name: 'read_file',
+            input: { path: '/a.txt' },
+          },
+        },
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-b',
+            name: 'grep',
+            input: { pattern: 'bar' },
+          },
+        },
+      ],
+      [{ content: 'Done', done: true }],
+    ])
+
+    const capturedHistory: Array<{ role: string; content: unknown }> = []
+    const realClient: LLMClient = {
+      async *stream(messages) {
+        // Capture on second call
+        if (messages.length > 2) {
+          for (const m of messages) capturedHistory.push({ role: m.role, content: m.content })
+          yield { content: 'Done' }
+          yield { done: true }
+          return
+        }
+        // First call: return tool calls
+        yield* client.stream(messages, {} as never, new AbortController().signal)
+      },
+    }
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(realClient)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+      mockToolDef('grep'),
+    ])
+
+    // Tool A takes longer — B finishes first
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockImplementation(
+      async (name: string) => {
+        const delay = name === 'read_file' ? 40 : 5
+        await new Promise((r) => setTimeout(r, delay))
+        return { success: true, output: `result-${name}` }
+      }
+    )
+
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    await exec.run({ goal: 'Parallel', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    // Find tool results message
+    const toolResultMsg = capturedHistory.find((m) => m.role === 'user' && Array.isArray(m.content))
+    expect(toolResultMsg).toBeDefined()
+    const results = toolResultMsg!.content as ToolResultBlock[]
+
+    // Order must match tool call order (A first, B second), not completion order
+    expect(results[0].tool_use_id).toBe('call-a')
+    expect(results[1].tool_use_id).toBe('call-b')
+  })
+
+  it('attempt_completion among other tools stops immediately without executing others', async () => {
+    const client = createMockClient([
+      [
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-a',
+            name: 'read_file',
+            input: { path: '/a.txt' },
+          },
+        },
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-completion',
+            name: COMPLETE_TASK_TOOL,
+            input: { result: 'All done!' },
+          },
+        },
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-b',
+            name: 'grep',
+            input: { pattern: 'baz' },
+          },
+        },
+      ],
+    ])
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+      mockToolDef('grep'),
+    ])
+    const executeToolSpy = vi
+      .spyOn(await import('../tools/registry.js'), 'executeTool')
+      .mockResolvedValue({ success: true, output: 'content' })
+
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    const result = await exec.run({ goal: 'Complete', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    expect(result.terminateMode).toBe(AgentTerminateMode.GOAL)
+    expect(result.output).toBe('All done!')
+    // Neither read_file nor grep should have been executed
+    expect(executeToolSpy).not.toHaveBeenCalled()
+  })
+})
+
 // ─── Doom Loop Detection ────────────────────────────────────────────────────
 
 describe('Doom loop detection', () => {

@@ -1,6 +1,6 @@
 # Competitive Gap Analysis
 
-> AVA vs 8 reference codebases + PI Coding Agent. Updated 2026-02-14.
+> AVA vs 8 reference codebases + PI Coding Agent. Updated 2026-02-28.
 >
 > Sources analyzed: **OpenCode**, **Aider**, **Cline**, **Roo Code**, **Gemini CLI**, **Goose**, **OpenHands**, **Plandex**, **PI Coding Agent**
 
@@ -13,6 +13,8 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 **Closed since last update (Sessions 48-53):** message queue, file watcher, step-level undo, git auto-commit, weak/editor model split, streaming tool preview.
 
 **Closed (Sprint B7-B10):** mid-session provider switching, minimal tool mode, lead-worker auto-routing, iterative lint→fix loop (validator wired into agent completion gate).
+
+**Closed (Sprint 15-16):** flat team delegation (5 delegate tools), Praxis 3-tier hierarchy (Commander → Leads → Workers), per-agent model/provider, agent import/export, planning pipeline, 13 built-in agents.
 
 **Biggest gaps by frequency** (how many codebases have it):
 
@@ -44,13 +46,24 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 | ~~Minimal tool mode (4-tool subset)~~ | PI | ~~Low~~ **DONE** |
 | Runtime skill/tool creation + hot reload | PI | Medium |
 | MCP OAuth flows (auth + refresh + storage) | Cline, Gemini CLI, Goose | Medium |
-| Remote browser support | Cline | Medium |
+| ~~Remote browser support~~ | Cline | ~~Medium~~ **OUT OF SCOPE** (browser tool removed Sprint 13, use MCP Puppeteer) |
+
+### New Gaps Identified (2026-02-28 — Sprint 16 Audit)
+
+| Gap | Who Has It | AVA Status | Priority |
+|-----|-----------|------------|----------|
+| Doom loop detection at registry level | Roo Code (ToolRepetitionDetector) | Agent-level only, not registry-level | Medium |
+| Session resume by ID | Gemini CLI, OpenCode | Not yet — sessions start fresh | Medium |
+| Trusted folder boundaries | Gemini CLI | No folder trust zones | Low |
+| Virtual scrolling for long histories | Cline | Progressive rendering, no virtualization | Low |
+| Session sharing (URL) | Goose, OpenCode | Not yet | Low |
+| Fuzzy edit strategies (9 modes) | OpenCode | 8 strategies — close but not benchmarked | Low |
 
 ### New Gaps Identified (2026-02-14 Deep Audit — Goose, OpenCode, Cline, Roo Code)
 
 | Gap | Who Has It | AVA Status | Priority |
 |-----|-----------|------------|----------|
-| ~~Lead-Worker model auto-routing~~ | Goose | **DONE** (commander/router.ts: keyword analysis + confidence scoring + auto-select) | ~~**High**~~ Done |
+| ~~Lead-Worker model auto-routing~~ | Goose | **DONE** (Sprint 15: flat delegation → Sprint 16: Praxis 3-tier with Commander → Leads → Workers, keyword routing) | ~~**High**~~ Done |
 | ~~Parallel subagents (multi-task)~~ | Cline (5 parallel read-only), OpenCode (batch) | **DONE** (task-parallel.ts: Semaphore concurrency, explore=5, execute=1) | ~~High~~ Done |
 | Resumable subagents | OpenCode (`task_id` param) | **DONE** (task tool has `sessionId`) | Done |
 | ~~Batch tool (parallel tool exec)~~ | OpenCode (25 parallel via Promise.all) | **DONE** (task-parallel.ts: Promise.allSettled + Semaphore) | ~~Medium~~ Done |
@@ -304,7 +317,10 @@ These are AVA's **unique advantages** — features no other codebase implements:
 
 | Feature | AVA | Closest Competitor |
 |---------|--------|-------------------|
-| **Multi-agent hierarchy** (Team Lead → Seniors → Juniors) | Built-in with visible UI | Roo Code (flat parent-child, no typed roles) |
+| **Praxis 3-tier hierarchy** (Commander → Leads → Workers) | 13 built-in agents, tier-aware delegation, planning pipeline | Roo Code (flat parent-child, no typed roles), Goose (2-tier lead-worker) |
+| **Per-agent model/provider** (each agent uses different LLM) | Built-in (Sprint 16) | None — all competitors use single model |
+| **Agent import/export** (share custom agents as JSON) | Built-in (Sprint 16) | None |
+| **Planning pipeline** (Planner → Architect → Lead delegation) | Built-in (Sprint 16) | Plandex (plan-only, no agents) |
 | **Worker scope filtering** (each agent only sees relevant files/tools) | Native | Roo Code (mode-based tool groups, similar) |
 | **Parallel agent execution** (multiple seniors simultaneously) | Built-in | Cline (5 read-only subagents), Plandex (limited) |
 | **Auto-reporting** (workers report up the chain) | Native | Goose (text-only summary return) |
@@ -356,8 +372,12 @@ These are AVA's **unique advantages** — features no other codebase implements:
 | 18 | ~~**Auto-compaction threshold**~~ | ~~3-4 days~~ | ~~Medium~~ **DONE** | Goose (80%), Roo Code (configurable) |
 | 19 | **Tree-sitter integration** | 2 weeks | Medium | Aider |
 | 20 | ~~**Session step-level undo**~~ | ~~1 week~~ | ~~Medium~~ **DONE** | OpenCode, Cline |
-| 21 | **Voice coding** | 2 weeks | Medium | Aider |
+| 21 | ~~**Voice coding**~~ | ~~2 weeks~~ | ~~Medium~~ **DONE** (Web Speech API + MicButton) | Aider |
 | 22 | **RPC/SDK mode** | 2-3 weeks | Low | PI |
+| 23 | ~~**3-tier agent hierarchy**~~ | ~~2-3 weeks~~ | ~~High~~ **DONE** (Sprint 16: Praxis) | Goose (2-tier), Roo Code (modes) |
+| 24 | ~~**Per-agent model config**~~ | ~~1 week~~ | ~~High~~ **DONE** (Sprint 16) | — (unique to AVA) |
+| 25 | ~~**Agent import/export**~~ | ~~3-4 days~~ | ~~Medium~~ **DONE** (Sprint 16) | — (unique to AVA) |
+| 26 | ~~**Planning pipeline**~~ | ~~1 week~~ | ~~Medium~~ **DONE** (Sprint 16) | Plandex |
 
 ---
 
@@ -401,7 +421,7 @@ These are AVA's **unique advantages** — features no other codebase implements:
 - **Agent system**: Lead-worker model with automatic routing — developer → researcher → data-analyst. Three-inspector pipeline: SecurityInspector (pattern-based blocking), PermissionInspector (user approval), RepetitionInspector (stuck detection). Confidence scores on security checks.
 - **Sessions**: SQLite-based session storage. Visibility metadata on messages (user_visible vs agent_visible flags for compaction control). Auto-compaction at 80% context usage.
 - **Extensibility**: YAML recipe system with cron scheduling, success checks, retry logic. Extension malware checking. Tool prefix namespacing (`ext__tool`).
-- **Steal**: ~~Lead-worker auto-routing~~ **DONE**, ~~3-inspector security pipeline~~ **DONE**, ~~visibility metadata~~ **DONE**, SQLite sessions, ~~auto-compaction threshold~~ **DONE**, toolshim for non-tool-calling models
+- **Steal**: ~~Lead-worker auto-routing~~ **DONE** (Sprint 16: Praxis 3-tier surpasses Goose's 2-tier), ~~3-inspector security pipeline~~ **DONE**, ~~visibility metadata~~ **DONE**, SQLite sessions, ~~auto-compaction threshold~~ **DONE**, toolshim for non-tool-calling models
 - **Skip**: MCP-native-only architecture (we support both native + MCP), Rust-specific patterns
 
 ### OpenHands
@@ -416,4 +436,4 @@ These are AVA's **unique advantages** — features no other codebase implements:
 
 ---
 
-*Last updated: 2026-02-15*
+*Last updated: 2026-02-28*

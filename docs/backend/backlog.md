@@ -59,7 +59,7 @@
 - [ ] **Prompt variant tests** — 4 variants (Claude, GPT, Gemini, generic), none tested
 - [x] **Agent metrics** — ~~No persistent metrics collection~~ **DONE** (`agent/metrics.ts` + 15 tests)
 - [x] **Parallel subagents** — ~~Task tool spawns 1 subagent at a time~~ **DONE** (Sprint B4: `tasks` array with semaphore-based concurrency, explore=5, execute=1)
-- [ ] **Lead-worker auto-routing** — Commander requires manual delegation; Goose auto-routes to developer/researcher/data-analyst
+- [x] **Lead-worker auto-routing** — ~~Commander requires manual delegation~~ **DONE** (Sprint 15: flat delegation; Sprint 16: Praxis 3-tier hierarchy with Commander → Leads → Workers, auto-routing via keyword analysis)
 
 ### Missing in Tools
 - [x] **Tool execution tests** — ~~Individual tool `execute()` methods untested~~ **DONE** (write + edit execute tests already comprehensive; 11 + 12 tests respectively)
@@ -200,8 +200,53 @@ This backlog feeds into the project roadmap:
 - [x] **IDE integration slash command** — `/open` command to open files in external editor — `extensions/slash-commands/src/commands.ts`
 - [x] **Bash tool metadata** — Added working directory to bash tool output — `core-v2/src/tools/bash.ts`
 
+### Sprint 15 — Team Delegation Wiring
+
+> **Sprint 15** wired flat delegation: 5 `delegate_*` tools, `ToolContext.onEvent` for child agents, `AgentEvent` union extended with `delegation:start` + `delegation:complete`. Tool count 23 → 28. Extensions active 23 → 24.
+
+#### Completed
+- [x] **5 delegate tools** — `delegate_coder`, `delegate_tester`, `delegate_reviewer`, `delegate_researcher`, `delegate_debugger`
+- [x] **Event forwarding** — `ToolContext.onEvent` callback for child agent events (avoids circular dep)
+- [x] **Commander extension** — Registers delegate tools + `team` agent mode, settings-gated with try/catch
+- [x] **Agent team bridge** — `delegation:start` creates team members, `delegation:complete` updates status
+- [x] **Auto mode detection** — `useAgent.ts` + `agent-v2.ts` auto-set `toolMode: 'team'` when available
+- [x] **Task tool dedup** — Imports `BUILTIN_WORKERS` from commander instead of duplicating
+
+### Sprint 16 — Praxis 3-Tier Agent Hierarchy
+
+> **Sprint 16** upgraded the flat delegation into a real 3-tier hierarchy: Commander → Leads → Workers. 13 built-in agents, per-agent model/provider overrides, agent registry, planning pipeline, settings bridge with import/export, tier-aware UI. +2850 lines across 25 files. 124 tests across 9 test files.
+
+#### Completed
+- [x] **AgentDefinition type** — Unified type bridging frontend `AgentPreset` and backend `WorkerDefinition` — `commander/src/agent-definition.ts`
+- [x] **Agent registry** — Central `Map<string, AgentDefinition>` with register/get/filter — `commander/src/registry.ts`
+- [x] **13 built-in agents** — 1 Commander + 4 Leads (frontend, backend, QA, fullstack) + 8 Workers (coder, tester, reviewer, researcher, debugger, architect, planner, devops) — `commander/src/workers.ts`
+- [x] **Tier-aware delegation** — `resolveTools()` adds delegate tools for leads, strips them from workers — `commander/src/delegate.ts`
+- [x] **Praxis agent mode** — Replaces `'team'` mode, Commander only gets delegate + meta tools — `commander/src/index.ts`
+- [x] **Planning pipeline** — Planner returns structured `TaskPlan` JSON, topological sort for dependencies — `commander/src/planning.ts`
+- [x] **Settings bridge** — `AgentPreset` extended with `tier`, `tools`, `delegates`, `domain`, `provider` — `src/config/defaults/agent-defaults.ts`
+- [x] **Settings sync** — Custom agents from Settings UI registered on activation — `commander/src/settings-sync.ts`
+- [x] **Import/Export agents** — `exportAgents()` / `importAgents()` with JSON format `{ praxis_agents, version }` — `src/stores/settings/index.ts`
+- [x] **Tier-based Settings UI** — AgentsTab groups by Commander/Leads/Workers/Custom with tier badges — `src/components/settings/tabs/AgentsTab.tsx`
+- [x] **Enhanced edit modal** — Tier, tools, delegates, domain, provider fields — `src/components/settings/settings-agent-edit-modal.tsx`
+- [x] **Import/Export UI wiring** — File download/upload handlers in SettingsModal → SettingsModalContent → AgentsTab
+- [x] **Team bridge tier mapping** — `tier: 'lead'` → `'senior-lead'`, `tier: 'worker'` → `'junior-dev'` — `src/hooks/agent/agent-team-bridge.ts`
+- [x] **Per-agent model/provider** — Each agent can use different LLM model and provider
+- [x] **Documentation** — `docs/praxis.md` (229 lines)
+- [x] **Tests** — registry (8), planning (9), settings-sync (5), delegate (16), index (7), workers (51) = 96 new/rewritten tests
+
 ### Still Needed
 - [ ] Provider tests for remaining 10 providers (same harness pattern)
 - [ ] Real plugin install/uninstall (currently state-only in frontend)
+- [ ] Wire LSP client to actual language server communication
+- [ ] Tree-sitter symbol extraction for codebase extension
+- [ ] MCP OAuth flows, resources, prompts, sampling
+- [ ] SQLite session storage (currently file-based JSON)
+- [ ] Background shell management (bash_background, bash_kill)
+- [ ] Tool result truncation (>50K chars)
+- [ ] Image/vision support in agent loop
+- [ ] Wire validator to CLI mode
+- [ ] Wire focus-chain tracking to agent loop
+- [ ] Persistent memory (cross-session)
+- [ ] Tauri bridge for core-v2 (desktop integration)
 
 *Last updated: 2026-02-28*

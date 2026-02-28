@@ -1,6 +1,6 @@
 # Frontend Backlog
 
-> What's missing, prioritized. Updated 2026-02-28 (P2 delivered, P3 gap audit vs 7 competitors).
+> What's missing, prioritized. Updated 2026-02-28 (P2 delivered, P3 gap audit vs 7 competitors, Sprint 16 Praxis 3-tier agents).
 
 ---
 
@@ -12,6 +12,7 @@
 | **1.5: Desktop Polish** | **Complete** | Manual testing only |
 | **2: Plugin Ecosystem** | In progress | Sprint 2.4 remaining (registry API, community ratings) |
 | **2+: Competitive Gaps** | **Complete** | All P0–P3-C delivered (31 items in final sprint) |
+| **Sprint 16: Praxis** | **Complete** | 3-tier agent hierarchy UI (tier grouping, agent edit modal, import/export) |
 
 ## Ownership Rules
 
@@ -231,8 +232,10 @@ Features below are things **competitors ship that AVA does not yet have**.
 | Live tool streaming | Cline | Bash stdout streams in ToolCallCard |
 | Undo/redo file changes | Goose | Per-session version stacks + shortcuts |
 | Plugin/extension manager | Gemini CLI | Settings tab with search, install, detail |
-| Multi-agent hierarchy | OpenHands | Team Lead → Senior Leads → Junior Devs |
-| Subagent spawning (backend) | Cline | Task tool for spawning subagents |
+| Multi-agent hierarchy | OpenHands | Praxis 3-tier: Commander → Leads → Workers (13 agents) |
+| Per-agent model routing | — | Each agent configurable with different model/provider |
+| Agent import/export | — | Share custom agents as JSON files |
+| Subagent spawning (backend) | Cline | Task tool + Praxis delegation chain |
 | 14 LLM providers | all | 14 providers with API key management |
 | Theme live preview | Goose | Hover to preview without persisting |
 | Starter templates | Goose | 4 template cards in empty chat |
@@ -362,7 +365,11 @@ Features no other AI coding tool has:
 
 | Feature | Status |
 |---------|--------|
-| Multi-agent hierarchy (Team Lead + Senior Leads + Junior Devs) | Built, visible in UI |
+| **Praxis 3-tier agent hierarchy** (Commander → Leads → Workers) | Built (Sprint 16), visible in UI |
+| Per-agent model/provider (each agent can use different LLM) | Built (Sprint 16) |
+| Planning pipeline (Planner → Architect → Lead delegation) | Built (Sprint 16) |
+| Agent import/export (share custom agents as JSON) | Built (Sprint 16) |
+| 13 built-in specialized agents with tier-based delegation | Built (Sprint 16) |
 | Worker scope filtering (each agent sees only relevant files/tools) | Built |
 | Parallel agent execution | Built |
 | Auto-reporting (workers report up the chain) | Built |

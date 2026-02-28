@@ -415,7 +415,7 @@ function formatToolStart(toolName: string, args: Record<string, unknown>): strin
     }
   }
 
-  return lines.join('\n') + '\n'
+  return `${lines.join('\n')}\n`
 }
 
 function formatToolFinish(_toolName: string, success: boolean, durationMs: number): string {

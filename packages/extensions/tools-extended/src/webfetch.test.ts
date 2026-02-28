@@ -107,7 +107,7 @@ describe('truncateContent', () => {
   })
 
   it('tries to break at paragraph boundary', () => {
-    const content = 'first paragraph\n\n' + 'a'.repeat(100)
+    const content = `first paragraph\n\n${'a'.repeat(100)}`
     const result = truncateContent(content, 50)
     expect(result.truncated).toBe(true)
   })

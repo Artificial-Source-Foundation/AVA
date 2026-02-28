@@ -86,6 +86,32 @@ export function createAgentEventHandler(
         })
         break
 
+      case 'delegation:start': {
+        const e = event as AgentEvent & { workerName: string; childAgentId: string; task: string }
+        addToolActivity(signals.setToolActivity, {
+          id: `delegate_${e.workerName}-${e.childAgentId}`,
+          name: `delegate_${e.workerName}`,
+          args: { task: e.task, worker: e.workerName },
+          status: 'running',
+          startedAt: Date.now(),
+        })
+        break
+      }
+
+      case 'delegation:complete': {
+        const e = event as AgentEvent & {
+          workerName: string
+          success: boolean
+          durationMs?: number
+        }
+        updateToolActivity(signals.setToolActivity, `delegate_${e.workerName}`, {
+          status: e.success ? 'success' : 'error',
+          completedAt: Date.now(),
+          durationMs: e.durationMs,
+        })
+        break
+      }
+
       case 'error':
         logError('Agent', `Agent error: ${event.error}`)
         batch(() => {

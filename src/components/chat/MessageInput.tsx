@@ -18,7 +18,6 @@ import {
   EyeOff,
   Layers,
   MessageSquare,
-  Pause,
   Shield,
 } from 'lucide-solid'
 import {
@@ -54,6 +53,7 @@ import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
 import { ModelBrowserDialog } from '../dialogs/model-browser/model-browser-dialog'
 import { SandboxReviewDialog } from '../dialogs/SandboxReviewDialog'
+import { DoomLoopBanner } from './DoomLoopBanner'
 import { ExpandedEditor } from './ExpandedEditor'
 import { buildFullMessage, processImageFile, processTextFile } from './message-input/attachments'
 import { FileMentionPopover } from './message-input/file-mention-popover'
@@ -219,8 +219,7 @@ export const MessageInput: Component = () => {
 
   // Derived state
   const isProcessing = () => chat.isStreaming() || agent.isRunning()
-  const isPaused = () => sessionStore.isPaused()
-  const inputDisabled = () => isProcessing() && !isPaused()
+  const inputDisabled = () => isProcessing()
   const inputHasText = createMemo(() => !!input().trim())
 
   const enabledProviders = createMemo(() =>
@@ -577,38 +576,25 @@ export const MessageInput: Component = () => {
     agent.cancel()
   }
 
-  const handlePause = () => {
-    sessionStore.pauseAgent()
-  }
-
-  const handleResume = () => {
-    const redirect = input().trim()
-    if (redirect) {
-      // Cancel the current run, then start a new one with the redirect
-      agent.cancel()
-      sessionStore.resumeAgent()
-      setInput('')
-      if (textareaRef) textareaRef.style.height = 'auto'
-      // Send the redirect as the next message
-      agent.run(redirect, { model: selectedModel() })
-    } else {
-      // Just resume without redirect
-      sessionStore.resumeAgent()
-    }
-  }
-
   const placeholder = () =>
-    isPaused()
-      ? 'Type a redirect message and resume, or just resume...'
-      : isProcessing()
-        ? `Working... (turn ${agent.currentTurn()})`
-        : agent.isPlanMode()
-          ? 'Plan your approach...'
-          : 'Ask anything...'
+    isProcessing()
+      ? `Working... (turn ${agent.currentTurn()})`
+      : agent.isPlanMode()
+        ? 'Plan your approach...'
+        : 'Ask anything...'
 
   // Render
   return (
     <div class="density-section-px density-section-py border-t border-[var(--border-subtle)]">
+      <Show when={agent.doomLoopDetected()}>
+        <DoomLoopBanner
+          onStop={() => agent.cancel()}
+          onRetry={() => {
+            agent.cancel()
+          }}
+          onSwitchModel={() => openModelBrowser()}
+        />
+      </Show>
       <form onSubmit={handleSubmit} class="space-y-1.5">
         {/* @ mention autocomplete popover */}
         <div class="relative">
@@ -655,9 +641,6 @@ export const MessageInput: Component = () => {
           elapsedSeconds={elapsedSeconds}
           onCancel={handleCancel}
           inputHasText={inputHasText}
-          isPaused={isPaused}
-          onPause={handlePause}
-          onResume={handleResume}
         />
         <ShortcutHint sendCount={sendCount()} />
 
@@ -751,15 +734,6 @@ export const MessageInput: Component = () => {
                 </Show>
               </Show>
             </button>
-
-            {/* Paused indicator */}
-            <Show when={isPaused()}>
-              <StripDivider />
-              <span class="inline-flex items-center gap-1 text-[var(--warning)] font-medium">
-                <Pause class="w-2.5 h-2.5" />
-                Paused
-              </span>
-            </Show>
 
             {/* Run in Background button (plan mode + running) */}
             <Show

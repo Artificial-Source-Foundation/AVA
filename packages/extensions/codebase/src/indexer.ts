@@ -6,6 +6,7 @@
  */
 
 import type { IFileSystem } from '@ava/core-v2/platform'
+import { extractSymbols, getSupportedLanguages } from './symbol-extractor.js'
 import type { FileIndex, RepoMap } from './types.js'
 
 const LANGUAGE_MAP: Record<string, string> = {
@@ -51,12 +52,19 @@ export function detectLanguage(filePath: string): string {
  * Index files in a directory using glob.
  * Returns basic file metadata without symbol extraction.
  */
+export interface IndexOptions {
+  extractSymbols?: boolean
+}
+
 export async function indexFiles(
   cwd: string,
   fs: IFileSystem,
-  patterns: string[] = ['**/*.{ts,tsx,js,jsx,py,rs,go,java}']
+  patterns: string[] = ['**/*.{ts,tsx,js,jsx,py,rs,go,java}'],
+  options?: IndexOptions
 ): Promise<FileIndex[]> {
   const indices: FileIndex[] = []
+  const shouldExtractSymbols = options?.extractSymbols ?? true
+  const supportedLangs = new Set(getSupportedLanguages())
 
   for (const pattern of patterns) {
     try {
@@ -66,12 +74,24 @@ export async function indexFiles(
           const stat = await fs.stat(filePath)
           if (!stat.isFile || stat.size > 1_000_000) continue // Skip large files
 
+          const language = detectLanguage(filePath)
+          let symbols = [] as FileIndex['symbols']
+
+          if (shouldExtractSymbols && supportedLangs.has(language) && stat.size <= 500_000) {
+            try {
+              const content = await fs.readFile(filePath)
+              symbols = extractSymbols(content, language, filePath)
+            } catch {
+              // Skip files we can't read
+            }
+          }
+
           indices.push({
             path: filePath,
-            symbols: [], // Symbol extraction requires tree-sitter
+            symbols,
             imports: [],
             exports: [],
-            language: detectLanguage(filePath),
+            language,
             size: stat.size,
           })
         } catch {

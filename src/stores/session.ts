@@ -23,6 +23,7 @@ import {
   updateSession as dbUpdateSession,
   updateTerminalExecution as dbUpdateTerminalExecution,
   getAgents,
+  getAllMemoryItems,
   getCheckpoints,
   getFileOperations,
   getMemoryItems,
@@ -106,10 +107,6 @@ const [checkpoints, setCheckpoints] = createSignal<
 const [retryingMessageId, setRetryingMessageId] = createSignal<string | null>(null)
 const [editingMessageId, setEditingMessageId] = createSignal<string | null>(null)
 
-// Agent pause state — allows user to pause, type a redirect, and resume
-const [isPaused, setIsPaused] = createSignal(false)
-const [redirectMessage, setRedirectMessage] = createSignal('')
-
 // Background plan execution — plan runs in background while user continues working
 const [backgroundPlanActive, setBackgroundPlanActive] = createSignal(false)
 const [backgroundPlanProgress, setBackgroundPlanProgress] = createSignal('')
@@ -192,6 +189,32 @@ export function useSession() {
     sessionTokenStats,
     contextUsage,
     agentStats,
+
+    // ========================================================================
+    // Session Tree (for branching visualization)
+    // ========================================================================
+
+    /**
+     * Build a tree from the flat sessions list using parentSessionId.
+     * Returns root sessions (no parent) with nested children arrays.
+     */
+    getSessionTree: createMemo(() => {
+      const all = sessions()
+      const childMap = new Map<string, SessionWithStats[]>()
+      const roots: SessionWithStats[] = []
+
+      for (const s of all) {
+        if (s.parentSessionId) {
+          const siblings = childMap.get(s.parentSessionId) ?? []
+          siblings.push(s)
+          childMap.set(s.parentSessionId, siblings)
+        } else {
+          roots.push(s)
+        }
+      }
+
+      return { roots, childMap }
+    }),
 
     // ========================================================================
     // Session List Management
@@ -510,7 +533,7 @@ export function useSession() {
       const projectId = currentProject()?.id
 
       const forkName = name || `${source.name} (fork)`
-      const newSession = await dbCreateSession(forkName, projectId)
+      const newSession = await dbCreateSession(forkName, projectId, sourceSessionId)
 
       // Copy all messages up to current point
       await dbDuplicateSessionMessages(sourceSessionId, newSession.id)
@@ -556,7 +579,7 @@ export function useSession() {
 
       const messagesToCopy = msgs.slice(0, index + 1)
       const branchName = `${session.name} (branch)`
-      const newSession = await dbCreateSession(branchName, projectId)
+      const newSession = await dbCreateSession(branchName, projectId, session.id)
 
       // Insert only the messages up to the branch point
       await dbInsertMessages(messagesToCopy.map((m) => ({ ...m, sessionId: newSession.id })))
@@ -930,6 +953,18 @@ export function useSession() {
       }
     },
 
+    /**
+     * Query memory items across all sessions, optionally filtered by project.
+     */
+    queryMemoriesAcrossSessions: async (projectId?: string) => {
+      try {
+        return await getAllMemoryItems(projectId)
+      } catch (err) {
+        logError('Session', 'Failed to query cross-session memories', err)
+        return []
+      }
+    },
+
     // ========================================================================
     // Checkpoints
     // ========================================================================
@@ -1060,30 +1095,6 @@ export function useSession() {
     isReadOnly: (filePath: string): boolean => readOnlyFiles().includes(filePath),
 
     // ========================================================================
-    // Agent Pause / Redirect
-    // ========================================================================
-
-    /** Whether the agent is currently paused */
-    isPaused,
-
-    /** The redirect message typed while paused */
-    redirectMessage,
-
-    /** Pause the running agent */
-    pauseAgent: () => setIsPaused(true),
-
-    /** Resume the agent, optionally consuming the redirect message */
-    resumeAgent: (): string => {
-      const msg = redirectMessage().trim()
-      setIsPaused(false)
-      setRedirectMessage('')
-      return msg
-    },
-
-    /** Set the redirect message while paused */
-    setRedirectMessage,
-
-    // ========================================================================
     // Background Plan Execution
     // ========================================================================
 
@@ -1145,8 +1156,6 @@ export function useSession() {
       setMemoryItems([])
       setEditingMessageId(null)
       setRetryingMessageId(null)
-      setIsPaused(false)
-      setRedirectMessage('')
       setBackgroundPlanActive(false)
       setBackgroundPlanProgress('')
     },

@@ -25,6 +25,7 @@ import { activate as activateInstructions } from '../../packages/extensions/inst
 import { activate as activateIntegrations } from '../../packages/extensions/integrations/src/index.js'
 import { activate as activateLsp } from '../../packages/extensions/lsp/src/index.js'
 import { activate as activateMcp } from '../../packages/extensions/mcp/src/index.js'
+import { activate as activateMemory } from '../../packages/extensions/memory/src/index.js'
 import { activate as activateModels } from '../../packages/extensions/models/src/index.js'
 // Priority 0: Security gate
 import { activate as activatePermissions } from '../../packages/extensions/permissions/src/index.js'
@@ -83,6 +84,7 @@ const EXTENSIONS: ExtensionEntry[] = [
   { name: 'lsp', priority: 10, activate: activateLsp },
   { name: 'git', priority: 10, activate: activateGit },
   { name: 'mcp', priority: 10, activate: activateMcp },
+  { name: 'memory', priority: 15, activate: activateMemory },
   { name: 'integrations', priority: 10, activate: activateIntegrations },
   { name: 'sandbox', priority: 10, activate: activateSandbox },
 
@@ -314,4 +316,50 @@ export async function loadInstalledPlugins(
   }
 
   return { cleanup, pluginDisposables }
+}
+
+/**
+ * Reload a single plugin by name.
+ * Disposes the existing instance, re-reads source, and re-activates.
+ */
+export async function reloadPlugin(
+  name: string,
+  pluginDisposables: Map<string, Disposable>,
+  createApi: (name: string) => ExtensionAPI
+): Promise<void> {
+  // Dispose existing
+  const existing = pluginDisposables.get(name)
+  if (existing) {
+    try {
+      existing.dispose()
+    } catch {
+      // ignore dispose errors
+    }
+    pluginDisposables.delete(name)
+  }
+
+  const { readPluginSource, readPluginManifest } = await import('./plugins-fs')
+  const source = await readPluginSource(name)
+  if (!source) throw new Error(`No source found for plugin: ${name}`)
+
+  const manifest: PluginManifest | null = await readPluginManifest(name)
+  const permissions: PluginPermission[] = manifest?.permissions ?? []
+
+  const blob = new Blob([source], { type: 'application/javascript' })
+  const blobUrl = URL.createObjectURL(blob)
+
+  try {
+    const mod = (await import(/* @vite-ignore */ blobUrl)) as {
+      activate?: (api: ExtensionAPI) => Disposable | undefined | Promise<Disposable | undefined>
+    }
+
+    if (typeof mod.activate === 'function') {
+      const baseApi = createApi(`plugin:${name}`)
+      const api = createSandboxedApi(baseApi, name, permissions)
+      const disposable = await mod.activate(api)
+      if (disposable) pluginDisposables.set(name, disposable)
+    }
+  } finally {
+    URL.revokeObjectURL(blobUrl)
+  }
 }

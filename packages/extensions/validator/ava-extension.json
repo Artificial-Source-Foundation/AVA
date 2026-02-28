@@ -4,7 +4,7 @@
   "description": "QA pipeline: syntax, types, lint, test validators",
   "main": "src/index.ts",
   "builtIn": true,
-  "enabledByDefault": false,
+  "enabledByDefault": true,
   "priority": 15,
   "capabilities": ["validator", "events"]
 }

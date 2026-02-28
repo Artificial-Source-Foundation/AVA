@@ -2,8 +2,7 @@
  * MCP extension — Model Context Protocol client.
  *
  * Connects to MCP servers, discovers their tools, and registers them
- * as AVA tools. Tool execution delegates to the real MCP server via
- * JSON-RPC over stdio or SSE.
+ * as AVA tools. Supports resources, prompts, sampling, and reconnection.
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
@@ -39,7 +38,12 @@ export function activate(api: ExtensionAPI): Disposable {
   const config = api.getSettings<{ servers?: MCPServer[] }>('mcp')
   if (config?.servers) {
     for (const server of config.servers) {
-      connectServer(server, api.platform.shell)
+      connectServer(server, {
+        shell: api.platform.shell,
+        onReconnecting: (name, attempt) => {
+          api.log.debug(`MCP reconnecting to ${name} (attempt ${attempt})`)
+        },
+      })
         .then((tools) => {
           const registered = registerMCPTools(api, server.name, tools)
           toolDisposables.push(...registered)
@@ -58,7 +62,7 @@ export function activate(api: ExtensionAPI): Disposable {
   disposables.push(
     api.on('mcp:add-server', (data) => {
       const server = data as MCPServer
-      connectServer(server, api.platform.shell)
+      connectServer(server, { shell: api.platform.shell })
         .then((tools) => {
           const registered = registerMCPTools(api, server.name, tools)
           toolDisposables.push(...registered)
@@ -100,4 +104,4 @@ export function activate(api: ExtensionAPI): Disposable {
   }
 }
 
-export { callTool, getTools, resetMCP } from './manager.js'
+export { callTool, getPrompts, getResources, getTools, resetMCP } from './manager.js'

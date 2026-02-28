@@ -40,17 +40,21 @@ export async function initDatabase(): Promise<Database> {
 /**
  * Create a new session
  */
-export async function createSession(name: string, projectId?: string): Promise<Session> {
+export async function createSession(
+  name: string,
+  projectId?: string,
+  parentSessionId?: string
+): Promise<Session> {
   const database = await initDatabase()
   const id = crypto.randomUUID()
   const now = Date.now()
 
   await database.execute(
-    'INSERT INTO sessions (id, name, project_id, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, ?)',
-    [id, name, projectId || null, now, now, 'active']
+    'INSERT INTO sessions (id, name, project_id, parent_session_id, created_at, updated_at, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [id, name, projectId || null, parentSessionId || null, now, now, 'active']
   )
 
-  return { id, projectId, name, createdAt: now, updatedAt: now, status: 'active' }
+  return { id, projectId, parentSessionId, name, createdAt: now, updatedAt: now, status: 'active' }
 }
 
 /**
@@ -89,6 +93,7 @@ export async function getSessionsWithStats(projectId?: string): Promise<SessionW
   return rows.map((row) => ({
     id: row.id as string,
     projectId: (row.project_id as string) || undefined,
+    parentSessionId: (row.parent_session_id as string) || undefined,
     name: row.name as string,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
@@ -516,6 +521,32 @@ export async function getMemoryItems(sessionId: string): Promise<MemoryItem[]> {
 export async function deleteMemoryItem(id: string): Promise<void> {
   const database = await initDatabase()
   await database.execute('DELETE FROM memory_items WHERE id = ?', [id])
+}
+
+/**
+ * Get all memory items across sessions, optionally filtered by project.
+ * Returns items sorted by created_at descending.
+ */
+export async function getAllMemoryItems(projectId?: string): Promise<MemoryItem[]> {
+  const database = await initDatabase()
+  const query = projectId
+    ? `SELECT mi.* FROM memory_items mi
+       JOIN sessions s ON mi.session_id = s.id
+       WHERE s.project_id = ?
+       ORDER BY mi.created_at DESC`
+    : 'SELECT * FROM memory_items ORDER BY created_at DESC'
+  const params = projectId ? [projectId] : []
+  const rows = await database.select<Array<Record<string, unknown>>>(query, params)
+  return rows.map((row) => ({
+    id: row.id as string,
+    sessionId: row.session_id as string,
+    type: row.type as MemoryItem['type'],
+    title: row.title as string,
+    preview: row.preview as string,
+    tokens: row.tokens as number,
+    createdAt: row.created_at as number,
+    source: row.source as string | undefined,
+  }))
 }
 
 /**

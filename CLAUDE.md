@@ -217,7 +217,7 @@ api.registerAgentMode(myMode)
 
 ---
 
-## Tools (28)
+## Tools (35)
 
 | Tool | Location | Purpose |
 |------|----------|---------|
@@ -249,6 +249,13 @@ api.registerAgentMode(myMode)
 | attempt_completion | extensions | Finish task with summary |
 | plan_enter | extensions | Enter plan mode |
 | plan_exit | extensions | Exit plan mode |
+| memory_read | memory | Read a persistent memory entry |
+| memory_write | memory | Save a persistent memory entry |
+| memory_list | memory | List all memory entries |
+| memory_delete | memory | Delete a memory entry |
+| lsp_diagnostics | lsp | Get LSP diagnostics for a file |
+| lsp_hover | lsp | Get hover info for a symbol |
+| lsp_definition | lsp | Go to definition of a symbol |
 
 ---
 

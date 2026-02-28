@@ -116,6 +116,19 @@ export interface ToolApprovalRule {
   reason?: string
 }
 
+export interface CustomMicroagent {
+  id: string
+  name: string
+  description: string
+  fileGlobs: string[]
+  instructions: string
+}
+
+export interface TrustedFoldersSettings {
+  allowed: string[]
+  denied: string[]
+}
+
 export interface AppSettings {
   onboardingComplete: boolean
   theme: string
@@ -136,4 +149,6 @@ export interface AppSettings {
   modelAliases: Record<string, string>
   devMode: boolean
   enabledMicroagents: string[]
+  customMicroagents: CustomMicroagent[]
+  trustedFolders: TrustedFoldersSettings
 }

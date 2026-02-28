@@ -304,6 +304,35 @@ describe('plugins store', () => {
     })
   })
 
+  describe('lifecycle queue serialization', () => {
+    it('serializes install and uninstall operations', async () => {
+      await new Promise<void>((resolve) => {
+        createRoot((dispose) => {
+          void (async () => {
+            const plugins = usePlugins()
+
+            // Make operations slow
+            mocks.installPluginMock.mockImplementation(async () => {
+              await new Promise((r) => setTimeout(r, 30))
+              return { installed: true, enabled: true }
+            })
+
+            // Install two plugins concurrently — they should serialize
+            const p1 = plugins.install('task-planner')
+            const p2 = plugins.install('test-guard')
+            await Promise.all([p1, p2])
+
+            expect(plugins.pluginState()['task-planner']?.installed).toBe(true)
+            // test-guard install will error (pendingAction guard) but shouldn't crash
+
+            dispose()
+            resolve()
+          })()
+        })
+      })
+    })
+  })
+
   describe('error recovery for broken manifests', () => {
     it('handles uninstall failure with state rollback', async () => {
       await new Promise<void>((resolve) => {

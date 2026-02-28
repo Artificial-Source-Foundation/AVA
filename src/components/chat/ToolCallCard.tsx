@@ -24,9 +24,18 @@ interface ToolCallCardProps {
   toolCall: ToolCall
 }
 
+const DELEGATION_TOOLS = new Set([
+  'task',
+  'delegate_coder',
+  'delegate_tester',
+  'delegate_reviewer',
+  'delegate_researcher',
+  'delegate_debugger',
+])
+
 export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
-  // Render specialized card for subagent task tool
-  if (props.toolCall.name === 'task') {
+  // Render specialized card for subagent / delegation tools
+  if (DELEGATION_TOOLS.has(props.toolCall.name)) {
     return <SubagentCard toolCall={props.toolCall} />
   }
 

@@ -104,4 +104,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   modelAliases: {},
   devMode: false,
   enabledMicroagents: [],
+  customMicroagents: [],
+  trustedFolders: { allowed: [], denied: [] },
 }

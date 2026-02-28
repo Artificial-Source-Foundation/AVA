@@ -5,7 +5,9 @@
  * Manage Model Context Protocol (MCP) server connections.
  */
 
-import { type Component, For, Show } from 'solid-js'
+import { type Component, createSignal, For, Show } from 'solid-js'
+import { getOAuthStatus, type OAuthStatus, revokeAuth } from '../../../services/mcp-oauth'
+import { MCPOAuthDialog } from '../../dialogs/MCPOAuthDialog'
 
 // ============================================================================
 // Types
@@ -54,8 +56,35 @@ const statusColor: Record<MCPServer['status'], string> = {
 // MCP Servers Tab Component
 // ============================================================================
 
+const oauthStatusLabel: Record<OAuthStatus, string> = {
+  none: '',
+  authorized: 'Authorized',
+  expired: 'Token Expired',
+  error: 'Auth Error',
+}
+
+const oauthStatusColor: Record<OAuthStatus, string> = {
+  none: 'var(--text-muted)',
+  authorized: 'var(--success)',
+  expired: 'var(--warning)',
+  error: 'var(--error)',
+}
+
 export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
   const connectedCount = () => props.servers.filter((s) => s.status === 'connected').length
+  const [oauthTarget, setOauthTarget] = createSignal<string | null>(null)
+  const [, setOauthRefresh] = createSignal(0)
+
+  const serverOAuthStatus = (name: string): OAuthStatus => {
+    // Force reactivity
+    void setOauthRefresh
+    return getOAuthStatus(name)
+  }
+
+  const handleRevoke = (name: string) => {
+    revokeAuth(name)
+    setOauthRefresh((v) => v + 1)
+  }
 
   return (
     <div class="space-y-4">
@@ -116,6 +145,35 @@ export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
                   </Show>
                 </div>
                 <div class="flex items-center gap-1.5">
+                  {/* OAuth status */}
+                  <Show when={serverOAuthStatus(server.name) !== 'none'}>
+                    <span
+                      class="text-[9px]"
+                      style={{ color: oauthStatusColor[serverOAuthStatus(server.name)] }}
+                    >
+                      {oauthStatusLabel[serverOAuthStatus(server.name)]}
+                    </span>
+                  </Show>
+                  <Show
+                    when={serverOAuthStatus(server.name) === 'authorized'}
+                    fallback={
+                      <button
+                        type="button"
+                        onClick={() => setOauthTarget(server.name)}
+                        class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
+                      >
+                        Authorize
+                      </button>
+                    }
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleRevoke(server.name)}
+                      class="text-[10px] text-[var(--text-muted)] hover:text-[var(--warning)] opacity-0 group-hover:opacity-100 transition-[color,opacity]"
+                    >
+                      Revoke
+                    </button>
+                  </Show>
                   <Show when={server.status === 'connected' && props.onDisconnect}>
                     <button
                       type="button"
@@ -163,6 +221,21 @@ export const MCPServersTab: Component<MCPServersTabProps> = (props) => {
           </For>
         </div>
       </Show>
+
+      {/* OAuth Dialog */}
+      <MCPOAuthDialog
+        open={oauthTarget() !== null}
+        serverName={oauthTarget() ?? ''}
+        authUrl=""
+        clientId=""
+        scopes={['read', 'write']}
+        redirectUri="http://localhost:1420/oauth/callback"
+        onClose={() => setOauthTarget(null)}
+        onAuthorized={() => {
+          setOauthTarget(null)
+          setOauthRefresh((v) => v + 1)
+        }}
+      />
     </div>
   )
 }

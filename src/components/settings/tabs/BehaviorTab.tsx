@@ -5,19 +5,25 @@
  * code blocks (lineNumbers, wordWrap), and notifications.
  */
 
+import {
+  Bell,
+  Clipboard,
+  Code2,
+  Eye,
+  GitBranch,
+  Keyboard,
+  MessageCircle,
+  SlidersHorizontal,
+  Tag,
+} from 'lucide-solid'
 import { type Component, For, Show } from 'solid-js'
 import type { SendKey } from '../../../stores/settings'
 import { useSettings } from '../../../stores/settings'
+import { SettingsCard } from '../SettingsCard'
 
 // ============================================================================
 // Shared helpers (same patterns as AppearanceTab)
 // ============================================================================
-
-const SectionHeader: Component<{ title: string }> = (props) => (
-  <h3 class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">
-    {props.title}
-  </h3>
-)
 
 function segmentedBtn(active: boolean): string {
   return `px-2.5 py-1 text-[11px] rounded-[var(--radius-md)] transition-colors ${
@@ -70,10 +76,8 @@ export const BehaviorTab: Component = () => {
   const { settings, updateBehavior, updateNotifications, updateGit, updateSettings } = useSettings()
 
   return (
-    <div class="space-y-5">
-      {/* Input */}
-      <div>
-        <SectionHeader title="Input" />
+    <div class="grid grid-cols-1 gap-4">
+      <SettingsCard icon={Keyboard} title="Input" description="Send key and input behavior">
         <div class="flex items-center justify-between py-1.5">
           <div>
             <span class="text-xs text-[var(--text-secondary)]">Send message with</span>
@@ -100,11 +104,9 @@ export const BehaviorTab: Component = () => {
             </button>
           </div>
         </div>
-      </div>
+      </SettingsCard>
 
-      {/* Chat */}
-      <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <SectionHeader title="Chat" />
+      <SettingsCard icon={MessageCircle} title="Chat" description="Scrolling and session behavior">
         <ToggleRow
           label="Auto-scroll to new messages"
           checked={settings().behavior.autoScroll}
@@ -116,11 +118,9 @@ export const BehaviorTab: Component = () => {
           checked={settings().behavior.sessionAutoTitle}
           onChange={(v) => updateBehavior({ sessionAutoTitle: v })}
         />
-      </div>
+      </SettingsCard>
 
-      {/* Code Blocks */}
-      <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <SectionHeader title="Code Blocks" />
+      <SettingsCard icon={Code2} title="Code Blocks" description="Code rendering preferences">
         <ToggleRow
           label="Line numbers"
           checked={settings().behavior.lineNumbers}
@@ -132,11 +132,9 @@ export const BehaviorTab: Component = () => {
           checked={settings().behavior.wordWrap}
           onChange={(v) => updateBehavior({ wordWrap: v })}
         />
-      </div>
+      </SettingsCard>
 
-      {/* Notifications */}
-      <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <SectionHeader title="Notifications" />
+      <SettingsCard icon={Bell} title="Notifications" description="Desktop and sound alerts">
         <ToggleRow
           label="Desktop notification on completion"
           checked={settings().notifications.notifyOnCompletion}
@@ -166,11 +164,13 @@ export const BehaviorTab: Component = () => {
             </div>
           </div>
         </Show>
-      </div>
+      </SettingsCard>
 
-      {/* Context Management */}
-      <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <SectionHeader title="Context Management" />
+      <SettingsCard
+        icon={SlidersHorizontal}
+        title="Context Management"
+        description="Auto-compaction settings"
+      >
         <div class="flex items-center justify-between py-1.5 gap-3">
           <div>
             <span class="text-xs text-[var(--text-secondary)]">Compaction threshold</span>
@@ -201,33 +201,35 @@ export const BehaviorTab: Component = () => {
             </span>
           </div>
         </div>
-      </div>
+      </SettingsCard>
 
-      {/* File Watcher */}
-      <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <SectionHeader title="File Watcher" />
+      <SettingsCard
+        icon={Eye}
+        title="File Watcher"
+        description="Detect AI comment patterns in files"
+      >
         <ToggleRow
           label="Watch for AI comments"
           description="Detect // AI! and // AI? in project files"
           checked={settings().behavior.fileWatcher}
           onChange={(v) => updateBehavior({ fileWatcher: v })}
         />
-      </div>
+      </SettingsCard>
 
-      {/* Clipboard */}
-      <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <SectionHeader title="Clipboard" />
+      <SettingsCard icon={Clipboard} title="Clipboard" description="Clipboard monitoring">
         <ToggleRow
           label="Copy-paste mode"
           description="Detect clipboard changes with code or LLM output"
           checked={settings().behavior.clipboardWatcher}
           onChange={(v) => updateBehavior({ clipboardWatcher: v })}
         />
-      </div>
+      </SettingsCard>
 
-      {/* Git Integration */}
-      <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <SectionHeader title="Git Integration" />
+      <SettingsCard
+        icon={GitBranch}
+        title="Git Integration"
+        description="Auto-commit and version tracking"
+      >
         <ToggleRow
           label="Enable git integration"
           description="Detect git repos and enable auto-commit features"
@@ -259,11 +261,9 @@ export const BehaviorTab: Component = () => {
             </div>
           </Show>
         </Show>
-      </div>
+      </SettingsCard>
 
-      {/* Model Aliases */}
-      <div class="pt-2 border-t border-[var(--border-subtle)]">
-        <SectionHeader title="Model Aliases" />
+      <SettingsCard icon={Tag} title="Model Aliases" description="Short names for model IDs">
         <p class="text-[10px] text-[var(--text-muted)] mb-2">
           Create short names for model IDs (e.g. "fast" → "openai/gpt-4o-mini")
         </p>
@@ -331,7 +331,7 @@ export const BehaviorTab: Component = () => {
         >
           + Add Alias
         </button>
-      </div>
+      </SettingsCard>
     </div>
   )
 }

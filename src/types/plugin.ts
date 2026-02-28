@@ -33,6 +33,12 @@ export interface PluginCatalogItem {
   screenshots?: string[]
   lastUpdated?: string
   permissions?: PluginPermission[]
+  downloads?: number
+  rating?: number
+  ratingCount?: number
+  author?: string
+  homepage?: string
+  publishedAt?: string
 }
 
 export interface PluginManifest {

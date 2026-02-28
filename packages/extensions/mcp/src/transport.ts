@@ -39,6 +39,8 @@ export interface MCPTransport {
   start(): Promise<void>
   send(message: JSONRPCMessage): Promise<void>
   onMessage(handler: MessageHandler): void
+  onError?(handler: (error: Error) => void): void
+  onClose?(handler: () => void): void
   close(): Promise<void>
 }
 
@@ -47,6 +49,8 @@ export interface MCPTransport {
 export class StdioTransport implements MCPTransport {
   private process: ChildProcess | null = null
   private handler: MessageHandler | null = null
+  private errorHandler: ((error: Error) => void) | null = null
+  private closeHandler: (() => void) | null = null
   private reading = false
 
   constructor(
@@ -69,11 +73,19 @@ export class StdioTransport implements MCPTransport {
     this.handler = handler
   }
 
+  onError(handler: (error: Error) => void): void {
+    this.errorHandler = handler
+  }
+
+  onClose(handler: () => void): void {
+    this.closeHandler = handler
+  }
+
   async send(message: JSONRPCMessage): Promise<void> {
     if (!this.process?.stdin) {
       throw new Error('Transport not started')
     }
-    const data = JSON.stringify(message) + '\n'
+    const data = `${JSON.stringify(message)}\n`
     const writer = this.process.stdin.getWriter()
     try {
       await writer.write(new TextEncoder().encode(data))
@@ -116,10 +128,11 @@ export class StdioTransport implements MCPTransport {
           }
         }
       }
-    } catch {
-      // Stream ended or process killed
+    } catch (err) {
+      this.errorHandler?.(err instanceof Error ? err : new Error(String(err)))
     } finally {
       reader.releaseLock()
+      this.closeHandler?.()
     }
   }
 }
@@ -128,6 +141,8 @@ export class StdioTransport implements MCPTransport {
 
 export class SSETransport implements MCPTransport {
   private handler: MessageHandler | null = null
+  private errorHandler: ((error: Error) => void) | null = null
+  private closeHandler: (() => void) | null = null
   private abortController: AbortController | null = null
   private messageEndpoint: string
 
@@ -142,6 +157,14 @@ export class SSETransport implements MCPTransport {
 
   onMessage(handler: MessageHandler): void {
     this.handler = handler
+  }
+
+  onError(handler: (error: Error) => void): void {
+    this.errorHandler = handler
+  }
+
+  onClose(handler: () => void): void {
+    this.closeHandler = handler
   }
 
   async send(message: JSONRPCMessage): Promise<void> {
@@ -204,8 +227,11 @@ export class SSETransport implements MCPTransport {
           }
         }
       }
-    } catch {
-      // Connection closed or aborted
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      this.errorHandler?.(err instanceof Error ? err : new Error(String(err)))
+    } finally {
+      this.closeHandler?.()
     }
   }
 }

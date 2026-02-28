@@ -1,6 +1,6 @@
 # Frontend Backlog
 
-> What's missing, prioritized. Updated 2026-02-28 (P2 delivered, P3 gap audit vs 7 competitors, Sprint 16 Praxis 3-tier agents).
+> What's missing, prioritized. Updated 2026-02-28 (Gap Analysis Sprint: 20 items across 9 batches).
 
 ---
 
@@ -13,6 +13,7 @@
 | **2: Plugin Ecosystem** | In progress | Sprint 2.4 remaining (registry API, community ratings) |
 | **2+: Competitive Gaps** | **Complete** | All P0–P3-C delivered (31 items in final sprint) |
 | **Sprint 16: Praxis** | **Complete** | 3-tier agent hierarchy UI (tier grouping, agent edit modal, import/export) |
+| **Gap Analysis Sprint** | **Complete** | 20 items: delegation UI, doom loop, bento cards, skill CRUD, session tree, memory browser, trusted folders, marketplace, OAuth, plugin wizard |
 
 ## Ownership Rules
 
@@ -192,7 +193,7 @@ Features below are things **competitors ship that AVA does not yet have**.
 - [x] Deep link protocol — deep-link.ts with ava:// URL parsing. Routes: settings/<tab>, session/<id>, workflow/<id>. @tauri-apps/plugin-deep-link. — **Medium** *(done)*
 - [x] More theme presets — 14 named themes (catppuccin-mocha/latte, dracula, nord, gruvbox-dark/light, solarized-dark/light, tokyo-night, rose-pine, one-dark, github-dark, moonlight, everforest). Gallery in AppearanceTab. — **Medium** *(done)*
 - [x] Sidebar layout customization — sidebarOrder in UISettings. Reorder with up/down arrows in AppearanceTab. ActivityBar reads from settings. — **Small** *(done)*
-- [x] Interruption handler (pause/redirect) — Pause/Resume buttons in toolbar. isPaused state in session store. Redirect message input when paused. — **Medium** *(done)*
+- [x] ~~Interruption handler (pause/redirect)~~ — **Removed** (Gap Analysis Sprint: adds complexity without value). Pause/resume UI, signals, and store methods deleted.
 - [x] Working directory switcher — CWD button in StatusBar with Tauri dialog.open. setCurrentDirectory in project store. — **Small** *(done)*
 - [x] Waveform visualizer for voice — AudioAnalyser + AnalyserNode in voice-dictation.ts. 8 animated bars near MicButton. — **Tiny** *(done)*
 - [ ] Browser automation UI — Screenshot display, action history, session tracking. — **Medium** *(out of scope: browser tool removed)*
@@ -258,11 +259,14 @@ Features below are things **competitors ship that AVA does not yet have**.
 | Web scraping | Aider | webfetch + browser tools |
 
 ### Sprint 2.4: Plugin Distribution
-- [ ] Publish plugins from GitHub repos
-- [ ] Plugin registry API
+- [x] Publish flow stub (PublishDialog.tsx) — **DONE** (Gap Analysis Sprint)
+- [x] Plugin creation wizard (PluginWizard.tsx — 4 templates) — **DONE** (Gap Analysis Sprint)
+- [x] Marketplace sort (popular/rated/recent/name) + download/rating display — **DONE** (Gap Analysis Sprint)
+- [x] Plugin hot reload (reloadPlugin in extension-loader) — **DONE** (Gap Analysis Sprint)
+- [ ] Plugin registry API (backend)
 - [ ] Version management and updates
-- [ ] Community ratings and reviews
-**Frontend**: Publish flow in settings, update notifications
+- [ ] Community ratings backend
+**Frontend**: Publish flow, wizard, sort, ratings UI all shipped. Backend registry API still needed.
 
 ### Sprint 2.5: Starter Plugins
 - [x] 5-10 built-in plugins demonstrating the system — **DONE** (Sprint 10: 5 example plugins with tests in `docs/examples/plugins/`)
@@ -274,6 +278,44 @@ Features below are things **competitors ship that AVA does not yet have**.
 - [x] Example: "React Patterns" skill plugin — **DONE** (triggers on .tsx/.jsx, provides component/hooks/state/performance guidance)
 - [x] Example: "/deploy" command plugin — **DONE** (/deploy with staging/production/preview targets + --dry-run flag)
 **Frontend**: Plugin showcase page
+
+---
+
+## Gap Analysis Sprint (2026-02-28) — All 20 Items
+
+| # | Item | Status | Batch |
+|---|------|--------|-------|
+| NEW-1 | Remove pause/redirect functionality | **Done** | 1 |
+| NEW-3 | Add 'thinking' capability to Codex models | **Done** | 1 |
+| H3 | Tauri bridge for core-v2 | **Verified** | 1 |
+| M3 | Session transcript export (FG-006) | **Verified** | 1 |
+| M5 | Smart tool call grouping | **Verified** | 1 |
+| L2 | Geist Sans font | **Verified** | 1 |
+| NEW-2 | Wire delegation events to chat UI | **Done** | 2 |
+| M4 | Doom loop warning banner | **Done** | 3 |
+| L1 | Settings bento cards | **Done** | 4 |
+| M2 | Custom skill CRUD in MicroagentsTab | **Done** | 5 |
+| H2 | Plugin lifecycle runtime tests | **Done** | 5 |
+| M1 | Visual session branch tree | **Done** | 6 |
+| M6 | Persistent cross-session memory browser | **Done** | 7 |
+| L4 | Trusted folder boundaries | **Done** | 7 |
+| H1 | Plugin marketplace full UX (sort, ratings, downloads) | **Done** | 8 |
+| L5 | Plugin hot reload enhancement (reloadPlugin) | **Done** | 8 |
+| M7 | MCP OAuth flows | **Done** | 9 |
+| L3 | Plugin creation wizard (4 templates) | **Done** | 9 |
+| L6 | Documentation website | Deferred | — |
+| L7 | A2A agent network UI | Deferred | — |
+
+New files created:
+- `src/components/chat/DoomLoopBanner.tsx`
+- `src/components/settings/SettingsCard.tsx`
+- `src/components/sidebar/SessionBranchTree.tsx`
+- `src/components/panels/MemoryBrowserPanel.tsx`
+- `src/components/settings/tabs/TrustedFoldersTab.tsx`
+- `src/components/plugins/PublishDialog.tsx`
+- `src/components/plugins/PluginWizard.tsx`
+- `src/components/dialogs/MCPOAuthDialog.tsx`
+- `src/services/mcp-oauth.ts`
 
 ---
 
@@ -380,5 +422,5 @@ Features no other AI coding tool has:
 | Memory system (episodic + semantic + procedural + RAG) | Built |
 | Permission/policy engine (risk assessment, auto-approval) | Built |
 | Hook system (PreToolUse, PostToolUse, lifecycle) | Built |
-| Plugin marketplace | Phase 2 (planned) |
+| Plugin marketplace | Built (UI complete, registry API pending) |
 | Protocol support (ACP + A2A) | Built (backend) |

@@ -6,6 +6,7 @@
 
 import type { ChatMessage } from '../llm/types.js'
 import { createLogger } from '../logger/logger.js'
+import type { SessionStorage } from './storage.js'
 import type {
   FileState,
   SessionEvent,
@@ -21,13 +22,16 @@ const log = createLogger('Session')
 export class SessionManager {
   private sessions = new Map<string, SessionState>()
   private listeners = new Set<SessionEventListener>()
-  private config: Required<SessionManagerConfig>
+  private config: Required<Omit<SessionManagerConfig, 'storage'>>
+  private storage: SessionStorage | null
+  private autoSaveTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(config?: SessionManagerConfig) {
     this.config = {
       maxSessions: config?.maxSessions ?? 50,
       autoSaveInterval: config?.autoSaveInterval ?? 30_000,
     }
+    this.storage = config?.storage ?? null
   }
 
   // ─── CRUD ──────────────────────────────────────────────────────────────
@@ -173,7 +177,59 @@ export class SessionManager {
     return this.sessions.size
   }
 
+  // ─── Storage ────────────────────────────────────────────────────────────
+
+  /** Persist a session to storage (no-op if no storage configured). */
+  async save(sessionId: string): Promise<void> {
+    if (!this.storage) return
+    const session = this.sessions.get(sessionId)
+    if (!session) return
+    await this.storage.save(session)
+    this.emit({ type: 'session_saved', sessionId })
+    log.debug(`Session saved: ${sessionId}`)
+  }
+
+  /** Load a session from storage into memory. */
+  async loadSession(sessionId: string): Promise<SessionState | null> {
+    if (!this.storage) return null
+    const session = await this.storage.load(sessionId)
+    if (session) {
+      this.sessions.set(session.id, session)
+      this.emit({ type: 'session_loaded', sessionId })
+    }
+    return session
+  }
+
+  /** Load all sessions from storage into memory. */
+  async loadFromStorage(): Promise<number> {
+    if (!this.storage) return 0
+    const sessions = await this.storage.loadAll()
+    for (const session of sessions) {
+      this.sessions.set(session.id, session)
+    }
+    log.debug(`Loaded ${sessions.length} sessions from storage`)
+    return sessions.length
+  }
+
+  /** Start periodic auto-save for all active sessions. */
+  startAutoSave(): void {
+    if (!this.storage || this.autoSaveTimer) return
+    this.autoSaveTimer = setInterval(() => {
+      for (const session of this.sessions.values()) {
+        if (session.status === 'active') {
+          this.storage!.save(session).catch((err) => {
+            log.error(`Auto-save failed for ${session.id}: ${err}`)
+          })
+        }
+      }
+    }, this.config.autoSaveInterval)
+  }
+
   dispose(): void {
+    if (this.autoSaveTimer) {
+      clearInterval(this.autoSaveTimer)
+      this.autoSaveTimer = null
+    }
     this.sessions.clear()
     this.listeners.clear()
   }

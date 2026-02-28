@@ -1,6 +1,8 @@
 import {
   AlertTriangle,
+  ArrowUpDown,
   Code2,
+  Download,
   FolderSymlink,
   GitBranch,
   Globe,
@@ -8,11 +10,14 @@ import {
   RefreshCw,
   Search,
   Shield,
+  Star,
   Trash2,
+  Upload,
 } from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { watchPluginDirectory } from '../../../services/extension-loader'
 import { usePlugins } from '../../../stores/plugins'
+import { type PluginSortBy, sortPlugins } from '../../../stores/plugins-catalog'
 import {
   PLUGIN_PERMISSION_META,
   type PluginPermission,
@@ -20,6 +25,8 @@ import {
   SENSITIVE_PERMISSIONS,
 } from '../../../types/plugin'
 import { PluginDetailPanel } from '../../plugins'
+import { PluginWizard } from '../../plugins/PluginWizard'
+import { PublishDialog } from '../../plugins/PublishDialog'
 
 type DevModeStatus = 'idle' | 'watching' | 'reloading'
 
@@ -42,6 +49,11 @@ export const PluginsTab: Component = () => {
   const [linkPath, setLinkPath] = createSignal('')
   const [linkInstalling, setLinkInstalling] = createSignal(false)
   const [linkError, setLinkError] = createSignal<string | null>(null)
+
+  // Sort and publish state
+  const [sortBy, setSortBy] = createSignal<PluginSortBy>('popular')
+  const [showPublish, setShowPublish] = createSignal(false)
+  const [showWizard, setShowWizard] = createSignal(false)
 
   // Permission confirmation dialog state
   const [permConfirmPluginId, setPermConfirmPluginId] = createSignal<string | null>(null)
@@ -199,6 +211,14 @@ export const PluginsTab: Component = () => {
     return 'No plugins match your filters.'
   })
 
+  const sortedPlugins = createMemo(() => sortPlugins(plugins.filteredPlugins(), sortBy()))
+
+  const formatDownloads = (n?: number) => {
+    if (!n) return '0'
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
+    return String(n)
+  }
+
   const categoryLabel = (category: string) => category.charAt(0).toUpperCase() + category.slice(1)
 
   const formatSyncTime = (timestamp: number | null) => {
@@ -222,6 +242,24 @@ export const PluginsTab: Component = () => {
           </p>
         </div>
         <div class="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setShowWizard(true)}
+            class="flex items-center gap-1.5 px-2 py-1 text-[10px] text-[var(--text-secondary)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] hover:border-[var(--accent-muted)] transition-colors"
+            title="Create a new plugin"
+          >
+            <Puzzle class="w-3 h-3" />
+            Create
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowPublish(true)}
+            class="flex items-center gap-1.5 px-2 py-1 text-[10px] text-[var(--text-secondary)] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] hover:border-[var(--accent-muted)] transition-colors"
+            title="Publish a plugin"
+          >
+            <Upload class="w-3 h-3" />
+            Publish
+          </button>
           <button
             type="button"
             onClick={() => setShowGitDialog(true)}
@@ -460,6 +498,19 @@ export const PluginsTab: Component = () => {
             </button>
           )}
         </For>
+        <div class="ml-auto flex items-center gap-1">
+          <ArrowUpDown class="w-3 h-3 text-[var(--text-muted)]" />
+          <select
+            value={sortBy()}
+            onChange={(e) => setSortBy(e.currentTarget.value as PluginSortBy)}
+            class="text-[10px] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)] px-1.5 py-1 outline-none"
+          >
+            <option value="popular">Popular</option>
+            <option value="rated">Top Rated</option>
+            <option value="recent">Recent</option>
+            <option value="name">Name</option>
+          </select>
+        </div>
       </div>
 
       <Show when={showFeatured()}>
@@ -503,10 +554,10 @@ export const PluginsTab: Component = () => {
 
       <div class="space-y-1.5">
         <Show
-          when={plugins.filteredPlugins().length > 0}
+          when={sortedPlugins().length > 0}
           fallback={<p class="text-[11px] text-[var(--text-muted)]">{emptyStateMessage()}</p>}
         >
-          <For each={plugins.filteredPlugins()}>
+          <For each={sortedPlugins()}>
             {(plugin) => {
               const state = () =>
                 plugins.pluginState()[plugin.id] ?? {
@@ -555,6 +606,20 @@ export const PluginsTab: Component = () => {
                           >
                             {plugin.trust}
                           </span>
+                          <Show when={plugin.downloads}>
+                            <span>&bull;</span>
+                            <span class="inline-flex items-center gap-0.5">
+                              <Download class="w-2.5 h-2.5" />
+                              {formatDownloads(plugin.downloads)}
+                            </span>
+                          </Show>
+                          <Show when={plugin.rating}>
+                            <span>&bull;</span>
+                            <span class="inline-flex items-center gap-0.5 text-[var(--warning)]">
+                              <Star class="w-2.5 h-2.5" />
+                              {plugin.rating?.toFixed(1)}
+                            </span>
+                          </Show>
                         </div>
                         <p class="text-[10px] text-[var(--text-muted)]">{plugin.description}</p>
                         <Show when={state().sourceUrl}>
@@ -791,6 +856,9 @@ export const PluginsTab: Component = () => {
           )
         }}
       </Show>
+
+      <PublishDialog open={showPublish()} onClose={() => setShowPublish(false)} />
+      <PluginWizard open={showWizard()} onClose={() => setShowWizard(false)} />
     </div>
   )
 }

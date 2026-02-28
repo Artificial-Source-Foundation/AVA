@@ -3,6 +3,7 @@ import {
   Brain,
   Code2,
   Cpu,
+  FolderLock,
   Info,
   Keyboard,
   Monitor,
@@ -29,6 +30,7 @@ export type SettingsTab =
   | 'plugins'
   | 'microagents'
   | 'commands'
+  | 'trusted-folders'
   | 'developer'
   | 'about'
 
@@ -77,6 +79,12 @@ export const tabGroups: TabGroup[] = [
         label: 'Permissions',
         icon: Shield,
         keywords: ['permission', 'approve', 'deny', 'allow', 'tool', 'rules', 'safety'],
+      },
+      {
+        id: 'trusted-folders',
+        label: 'Trusted Folders',
+        icon: FolderLock,
+        keywords: ['folder', 'directory', 'trust', 'allow', 'deny', 'path', 'boundary'],
       },
     ],
   },

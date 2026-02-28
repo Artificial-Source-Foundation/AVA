@@ -302,3 +302,69 @@ describe('createSessionManager', () => {
     sm.dispose()
   })
 })
+
+// ─── Storage-backed behavior ─────────────────────────────────────────────
+
+describe('SessionManager with storage', () => {
+  it('saves session to storage', async () => {
+    const { MemorySessionStorage } = await import('./memory-storage.js')
+    const storage = new MemorySessionStorage()
+    const sm = createSessionManager({ storage })
+    const s = sm.create('test', '/tmp')
+    await sm.save(s.id)
+    expect(storage.size).toBe(1)
+    sm.dispose()
+  })
+
+  it('loads session from storage', async () => {
+    const { MemorySessionStorage } = await import('./memory-storage.js')
+    const storage = new MemorySessionStorage()
+    const sm1 = createSessionManager({ storage })
+    const s = sm1.create('test', '/tmp')
+    sm1.addMessage(s.id, { role: 'user', content: 'hello' })
+    await sm1.save(s.id)
+    sm1.dispose()
+
+    const sm2 = createSessionManager({ storage })
+    const loaded = await sm2.loadSession(s.id)
+    expect(loaded).not.toBeNull()
+    expect(loaded!.messages).toHaveLength(1)
+    sm2.dispose()
+  })
+
+  it('loads all sessions from storage', async () => {
+    const { MemorySessionStorage } = await import('./memory-storage.js')
+    const storage = new MemorySessionStorage()
+    const sm1 = createSessionManager({ storage })
+    const s1 = sm1.create('a', '/tmp')
+    const s2 = sm1.create('b', '/tmp')
+    await sm1.save(s1.id)
+    await sm1.save(s2.id)
+    sm1.dispose()
+
+    const sm2 = createSessionManager({ storage })
+    const count = await sm2.loadFromStorage()
+    expect(count).toBe(2)
+    expect(sm2.size).toBe(2)
+    sm2.dispose()
+  })
+
+  it('emits session_saved event', async () => {
+    const { MemorySessionStorage } = await import('./memory-storage.js')
+    const storage = new MemorySessionStorage()
+    const sm = createSessionManager({ storage })
+    const events: SessionEvent[] = []
+    sm.on((e) => events.push(e))
+    const s = sm.create('test', '/tmp')
+    await sm.save(s.id)
+    expect(events.some((e) => e.type === 'session_saved')).toBe(true)
+    sm.dispose()
+  })
+
+  it('save is no-op without storage', async () => {
+    const sm = createSessionManager()
+    const s = sm.create('test', '/tmp')
+    await sm.save(s.id) // should not throw
+    sm.dispose()
+  })
+})

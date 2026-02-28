@@ -15,6 +15,7 @@ import { MicroagentsTab } from './tabs/MicroagentsTab'
 import { PermissionsTab } from './tabs/PermissionsTab'
 import { PluginsTab } from './tabs/PluginsTab'
 import { ProvidersTab } from './tabs/providers/providers-tab'
+import { TrustedFoldersTab } from './tabs/TrustedFoldersTab'
 
 interface SettingsModalContentProps {
   activeTab: () => SettingsTab
@@ -117,6 +118,10 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
 
       <Show when={props.activeTab() === 'commands'}>
         <CommandsTab />
+      </Show>
+
+      <Show when={props.activeTab() === 'trusted-folders'}>
+        <TrustedFoldersTab />
       </Show>
 
       <Show when={props.activeTab() === 'developer'}>

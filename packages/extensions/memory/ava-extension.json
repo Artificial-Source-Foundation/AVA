@@ -1,0 +1,10 @@
+{
+  "name": "ava-memory",
+  "version": "1.0.0",
+  "description": "Persistent cross-session memory for project knowledge",
+  "main": "src/index.ts",
+  "builtIn": true,
+  "enabledByDefault": true,
+  "priority": 15,
+  "capabilities": ["tools", "events"]
+}

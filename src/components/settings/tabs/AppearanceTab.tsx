@@ -6,7 +6,19 @@
  * and accessibility (high contrast + reduce motion).
  */
 
-import { ChevronDown, ChevronUp } from 'lucide-solid'
+import {
+  Accessibility,
+  ChevronDown,
+  ChevronUp,
+  Code2,
+  Maximize2,
+  Moon,
+  Palette,
+  PanelLeft,
+  Radius,
+  SlidersHorizontal,
+  Type,
+} from 'lucide-solid'
 import { type Component, createMemo, For, Show } from 'solid-js'
 import { THEME_PRESETS, type ThemePreset } from '../../../config/theme-presets'
 import type {
@@ -19,6 +31,7 @@ import type {
   UIDensity,
 } from '../../../stores/settings'
 import { isDarkMode, useSettings } from '../../../stores/settings'
+import { SettingsCard } from '../SettingsCard'
 
 // ============================================================================
 // Constants
@@ -550,19 +563,23 @@ export const AppearanceTab: Component = () => {
   }
 
   return (
-    <div class="space-y-5">
-      <ColorModeSection />
+    <div class="grid grid-cols-1 gap-4">
+      <SettingsCard icon={Moon} title="Color Mode" description="Theme and dark style variant">
+        <ColorModeSection />
+      </SettingsCard>
 
-      {/* Theme Presets */}
-      <div>
-        <SectionHeader title="Theme Presets" />
+      <SettingsCard
+        icon={Palette}
+        title="Theme Presets"
+        description="One-click theme configurations"
+      >
         <div class="grid grid-cols-3 gap-1.5">
           <For each={THEME_PRESETS}>
             {(preset) => (
               <button
                 type="button"
                 onClick={() => applyPreset(preset)}
-                class="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] hover:border-[var(--accent-muted)] transition-colors text-left"
+                class="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-base)] hover:border-[var(--accent-muted)] transition-colors text-left"
                 title={`${preset.name} (${preset.mode})`}
               >
                 <div
@@ -581,49 +598,59 @@ export const AppearanceTab: Component = () => {
             )}
           </For>
         </div>
-      </div>
+      </SettingsCard>
 
-      <AccentSection />
+      <SettingsCard
+        icon={Palette}
+        title="Accent Color"
+        description="Primary accent color throughout the UI"
+      >
+        <AccentSection />
+      </SettingsCard>
 
-      {/* UI Scale */}
-      <div>
-        <SectionHeader title="Interface Scale" />
-        <div class="flex items-center justify-between py-1.5">
-          <span class="text-xs text-[var(--text-secondary)]">Scale</span>
-          <span class="text-xs font-mono text-[var(--text-primary)]">
-            {Math.round(settings().appearance.uiScale * 100)}%
-          </span>
-        </div>
-        <div class="flex items-center gap-2 py-1">
-          <span class="text-[10px] text-[var(--text-muted)] w-8">85%</span>
-          <input
-            type="range"
-            min="0"
-            max={SCALE_STEPS.length - 1}
-            step="1"
-            value={SCALE_STEPS.indexOf(
-              SCALE_STEPS.reduce((prev, curr) =>
-                Math.abs(curr - settings().appearance.uiScale) <
-                Math.abs(prev - settings().appearance.uiScale)
-                  ? curr
-                  : prev
-              )
-            )}
-            onInput={(e) => {
-              const idx = Number.parseInt(e.currentTarget.value, 10)
-              updateAppearance({ uiScale: SCALE_STEPS[idx] })
-            }}
-            class="flex-1 h-1 appearance-none bg-[var(--border-default)] rounded-full cursor-pointer accent-[var(--accent)]"
-          />
-          <span class="text-[10px] text-[var(--text-muted)] w-8 text-right">120%</span>
-        </div>
-        <div class="flex gap-1 mt-1.5">
-          <For each={SCALE_STEPS}>
-            {(step) => (
-              <button
-                type="button"
-                onClick={() => updateAppearance({ uiScale: step })}
-                class={`
+      <SettingsCard
+        icon={Maximize2}
+        title="Interface Scale"
+        description="Adjust overall UI zoom level"
+      >
+        <div>
+          <SectionHeader title="Scale" />
+          <div class="flex items-center justify-between py-1.5">
+            <span class="text-xs text-[var(--text-secondary)]">Scale</span>
+            <span class="text-xs font-mono text-[var(--text-primary)]">
+              {Math.round(settings().appearance.uiScale * 100)}%
+            </span>
+          </div>
+          <div class="flex items-center gap-2 py-1">
+            <span class="text-[10px] text-[var(--text-muted)] w-8">85%</span>
+            <input
+              type="range"
+              min="0"
+              max={SCALE_STEPS.length - 1}
+              step="1"
+              value={SCALE_STEPS.indexOf(
+                SCALE_STEPS.reduce((prev, curr) =>
+                  Math.abs(curr - settings().appearance.uiScale) <
+                  Math.abs(prev - settings().appearance.uiScale)
+                    ? curr
+                    : prev
+                )
+              )}
+              onInput={(e) => {
+                const idx = Number.parseInt(e.currentTarget.value, 10)
+                updateAppearance({ uiScale: SCALE_STEPS[idx] })
+              }}
+              class="flex-1 h-1 appearance-none bg-[var(--border-default)] rounded-full cursor-pointer accent-[var(--accent)]"
+            />
+            <span class="text-[10px] text-[var(--text-muted)] w-8 text-right">120%</span>
+          </div>
+          <div class="flex gap-1 mt-1.5">
+            <For each={SCALE_STEPS}>
+              {(step) => (
+                <button
+                  type="button"
+                  onClick={() => updateAppearance({ uiScale: step })}
+                  class={`
                   px-1.5 py-0.5 text-[10px] rounded-[var(--radius-sm)] transition-colors
                   ${
                     Math.abs(settings().appearance.uiScale - step) < 0.01
@@ -631,17 +658,16 @@ export const AppearanceTab: Component = () => {
                       : 'bg-[var(--surface-raised)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)]'
                   }
                 `}
-              >
-                {Math.round(step * 100)}
-              </button>
-            )}
-          </For>
+                >
+                  {Math.round(step * 100)}
+                </button>
+              )}
+            </For>
+          </div>
         </div>
-      </div>
+      </SettingsCard>
 
-      {/* Border Radius */}
-      <div>
-        <SectionHeader title="Border Radius" />
+      <SettingsCard icon={Radius} title="Border Radius" description="Corner rounding style">
         <div class="flex items-center justify-between py-1.5">
           <span class="text-xs text-[var(--text-secondary)]">Corners</span>
           <div class="flex gap-1">
@@ -666,11 +692,13 @@ export const AppearanceTab: Component = () => {
           <div class="w-8 h-8 bg-[var(--accent-subtle)] border border-[var(--accent-border)] rounded-[var(--radius-lg)]" />
           <div class="w-8 h-8 bg-[var(--accent-subtle)] border border-[var(--accent-border)] rounded-[var(--radius-xl)]" />
         </div>
-      </div>
+      </SettingsCard>
 
-      {/* UI Density */}
-      <div>
-        <SectionHeader title="UI Density" />
+      <SettingsCard
+        icon={SlidersHorizontal}
+        title="UI Density"
+        description="Spacing between elements"
+      >
         <div class="flex items-center justify-between py-1.5">
           <span class="text-xs text-[var(--text-secondary)]">Spacing</span>
           <div class="flex gap-1">
@@ -689,12 +717,27 @@ export const AppearanceTab: Component = () => {
             </For>
           </div>
         </div>
-      </div>
+      </SettingsCard>
 
-      <FontSection />
-      <CodeThemeSection />
-      <AccessibilitySection />
-      <SidebarOrderSection />
+      <SettingsCard icon={Type} title="Font" description="UI and monospace font settings">
+        <FontSection />
+      </SettingsCard>
+
+      <SettingsCard icon={Code2} title="Code Theme" description="Syntax highlighting theme">
+        <CodeThemeSection />
+      </SettingsCard>
+
+      <SettingsCard
+        icon={Accessibility}
+        title="Accessibility"
+        description="High contrast and motion preferences"
+      >
+        <AccessibilitySection />
+      </SettingsCard>
+
+      <SettingsCard icon={PanelLeft} title="Sidebar Order" description="Reorder sidebar sections">
+        <SidebarOrderSection />
+      </SettingsCard>
     </div>
   )
 }

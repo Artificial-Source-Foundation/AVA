@@ -4,7 +4,16 @@
 
 export interface FileSymbol {
   name: string
-  kind: 'function' | 'class' | 'interface' | 'type' | 'variable' | 'enum' | 'import' | 'export'
+  kind:
+    | 'function'
+    | 'class'
+    | 'interface'
+    | 'type'
+    | 'variable'
+    | 'enum'
+    | 'method'
+    | 'import'
+    | 'export'
   line: number
   endLine?: number
   filePath: string

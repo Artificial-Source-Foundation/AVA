@@ -16,6 +16,8 @@ vi.mock('./client.js', () => {
       listTools: ReturnType<typeof vi.fn>
       callTool: ReturnType<typeof vi.fn>
       close: ReturnType<typeof vi.fn>
+      onSamplingRequest = vi.fn()
+      serverCapabilities = {}
 
       constructor() {
         this.initialize = vi.fn().mockResolvedValue({ tools: {} })
@@ -40,13 +42,32 @@ vi.mock('./transport.js', () => {
       start = vi.fn().mockResolvedValue(undefined)
       send = vi.fn().mockResolvedValue(undefined)
       onMessage = vi.fn()
+      onError = vi.fn()
+      onClose = vi.fn()
       close = vi.fn().mockResolvedValue(undefined)
     },
     SSETransport: class MockSSETransport {
       start = vi.fn().mockResolvedValue(undefined)
       send = vi.fn().mockResolvedValue(undefined)
       onMessage = vi.fn()
+      onError = vi.fn()
+      onClose = vi.fn()
       close = vi.fn().mockResolvedValue(undefined)
+    },
+  }
+})
+
+vi.mock('./reconnect.js', () => {
+  return {
+    ReconnectStrategy: class MockReconnectStrategy {
+      reset = vi.fn()
+      nextDelay = vi.fn().mockReturnValue(null)
+      get attemptCount() {
+        return 0
+      }
+      get canRetry() {
+        return false
+      }
     },
   }
 })

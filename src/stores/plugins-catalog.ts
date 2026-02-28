@@ -18,6 +18,11 @@ export const FALLBACK_CATALOG: PluginCatalogItem[] = [
     source: 'official',
     trust: 'verified',
     changelogSummary: 'Added milestone templates and dependency hints.',
+    downloads: 12400,
+    rating: 4.7,
+    ratingCount: 238,
+    author: 'AVA Team',
+    publishedAt: '2025-11-15',
   },
   {
     id: 'test-guard',
@@ -28,6 +33,11 @@ export const FALLBACK_CATALOG: PluginCatalogItem[] = [
     source: 'official',
     trust: 'verified',
     changelogSummary: 'Expanded flaky-test diagnostics and retry classification.',
+    downloads: 8900,
+    rating: 4.5,
+    ratingCount: 156,
+    author: 'AVA Team',
+    publishedAt: '2025-12-01',
   },
   {
     id: 'git-helper',
@@ -38,6 +48,11 @@ export const FALLBACK_CATALOG: PluginCatalogItem[] = [
     source: 'community',
     trust: 'reviewed',
     changelogSummary: 'Improved commit message hints and branch naming checks.',
+    downloads: 5200,
+    rating: 4.2,
+    ratingCount: 89,
+    author: 'devtools-contrib',
+    publishedAt: '2026-01-10',
   },
   {
     id: 'mcp-inspector',
@@ -48,8 +63,36 @@ export const FALLBACK_CATALOG: PluginCatalogItem[] = [
     source: 'official',
     trust: 'verified',
     changelogSummary: 'Added auth flow checks and endpoint handshake diagnostics.',
+    downloads: 3100,
+    rating: 4.0,
+    ratingCount: 47,
+    author: 'AVA Team',
+    publishedAt: '2026-02-05',
   },
 ]
+
+export type PluginSortBy = 'popular' | 'rated' | 'recent' | 'name'
+
+export function sortPlugins(
+  plugins: PluginCatalogItem[],
+  sortBy: PluginSortBy
+): PluginCatalogItem[] {
+  const sorted = [...plugins]
+  switch (sortBy) {
+    case 'popular':
+      return sorted.sort((a, b) => (b.downloads ?? 0) - (a.downloads ?? 0))
+    case 'rated':
+      return sorted.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))
+    case 'recent':
+      return sorted.sort(
+        (a, b) => new Date(b.publishedAt ?? 0).getTime() - new Date(a.publishedAt ?? 0).getTime()
+      )
+    case 'name':
+      return sorted.sort((a, b) => a.name.localeCompare(b.name))
+    default:
+      return sorted
+  }
+}
 
 /** @deprecated Use getPluginCatalog() for live catalog */
 export const PLUGIN_CATALOG = FALLBACK_CATALOG

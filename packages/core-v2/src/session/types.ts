@@ -65,4 +65,5 @@ export type SessionEventListener = (event: SessionEvent) => void
 export interface SessionManagerConfig {
   maxSessions?: number
   autoSaveInterval?: number
+  storage?: import('./storage.js').SessionStorage
 }

@@ -9,10 +9,25 @@ describe('lsp extension', () => {
     expect(eventHandlers.has('session:opened')).toBe(true)
   })
 
-  it('listens for lsp:diagnostics events', () => {
-    const { api, eventHandlers } = createMockExtensionAPI()
+  it('registers lsp_diagnostics tool', () => {
+    const { api, registeredTools } = createMockExtensionAPI()
     activate(api)
-    expect(eventHandlers.has('lsp:diagnostics')).toBe(true)
+    const names = registeredTools.map((t) => t.definition.name)
+    expect(names).toContain('lsp_diagnostics')
+  })
+
+  it('registers lsp_hover tool', () => {
+    const { api, registeredTools } = createMockExtensionAPI()
+    activate(api)
+    const names = registeredTools.map((t) => t.definition.name)
+    expect(names).toContain('lsp_hover')
+  })
+
+  it('registers lsp_definition tool', () => {
+    const { api, registeredTools } = createMockExtensionAPI()
+    activate(api)
+    const names = registeredTools.map((t) => t.definition.name)
+    expect(names).toContain('lsp_definition')
   })
 
   it('emits lsp:ready on session open', async () => {
@@ -26,21 +41,11 @@ describe('lsp extension', () => {
     expect(ready).toBeDefined()
   })
 
-  it('responds to lsp:diagnostics with empty result', () => {
-    const { api, emittedEvents } = createMockExtensionAPI()
-    activate(api)
-    api.emit('lsp:diagnostics', { file: '/test.ts' })
-
-    const result = emittedEvents.find((e) => e.event === 'lsp:diagnostics-result')
-    expect(result).toBeDefined()
-    expect((result!.data as { diagnostics: unknown[] }).diagnostics).toEqual([])
-  })
-
   it('cleans up on dispose', () => {
-    const { api, eventHandlers } = createMockExtensionAPI()
+    const { api, eventHandlers, registeredTools } = createMockExtensionAPI()
     const disposable = activate(api)
     disposable.dispose()
     expect(eventHandlers.has('session:opened')).toBe(false)
-    expect(eventHandlers.has('lsp:diagnostics')).toBe(false)
+    expect(registeredTools).toHaveLength(0)
   })
 })

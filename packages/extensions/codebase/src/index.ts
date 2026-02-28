@@ -54,6 +54,34 @@ export function activate(api: ExtensionAPI): Disposable {
     })
   )
 
+  // Register /symbols command
+  disposables.push(
+    api.registerCommand({
+      name: 'symbols',
+      description: 'List extracted symbols with type and location',
+      async execute() {
+        if (!repoMap) return 'Codebase not indexed yet. Open a session first.'
+        if (repoMap.totalSymbols === 0)
+          return 'No symbols extracted. Index may not include supported languages.'
+
+        const kindCounts = new Map<string, number>()
+        for (const file of repoMap.files) {
+          for (const sym of file.symbols) {
+            kindCounts.set(sym.kind, (kindCounts.get(sym.kind) ?? 0) + 1)
+          }
+        }
+
+        const lines = [`**${repoMap.totalSymbols} symbols extracted**\n`]
+        const sorted = [...kindCounts.entries()].sort((a, b) => b[1] - a[1])
+        for (const [kind, count] of sorted) {
+          lines.push(`- ${kind}: ${count}`)
+        }
+
+        return lines.join('\n')
+      },
+    })
+  )
+
   api.log.debug('Codebase intelligence extension activated')
 
   return {

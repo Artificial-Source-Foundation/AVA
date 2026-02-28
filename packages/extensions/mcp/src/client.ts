@@ -9,8 +9,17 @@ import type {
   JSONRPCMessage,
   JSONRPCNotification,
   JSONRPCRequest,
+  JSONRPCResponse,
   MCPTransport,
 } from './transport.js'
+import type {
+  MCPPrompt,
+  MCPPromptMessage,
+  MCPResource,
+  MCPResourceContents,
+  MCPSamplingRequest,
+  MCPSamplingResult,
+} from './types.js'
 
 const PROTOCOL_VERSION = '2024-11-05'
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -39,11 +48,15 @@ export interface MCPToolResult {
   isError?: boolean
 }
 
+export type SamplingHandler = (request: MCPSamplingRequest) => Promise<MCPSamplingResult>
+
 export class MCPClient {
   private nextId = 1
   private pending = new Map<number, PendingRequest>()
   private initialized = false
   private timeoutMs: number
+  private samplingHandler: SamplingHandler | null = null
+  private capabilities: ServerCapabilities = {}
 
   constructor(
     private transport: MCPTransport,
@@ -56,15 +69,22 @@ export class MCPClient {
   async initialize(): Promise<ServerCapabilities> {
     const result = (await this.request('initialize', {
       protocolVersion: PROTOCOL_VERSION,
-      capabilities: {},
+      capabilities: { sampling: {} },
       clientInfo: { name: 'ava', version: '1.0.0' },
     })) as { capabilities: ServerCapabilities; protocolVersion: string }
 
     // Send initialized notification
     await this.notify('notifications/initialized')
     this.initialized = true
+    this.capabilities = result.capabilities
     return result.capabilities
   }
+
+  get serverCapabilities(): ServerCapabilities {
+    return this.capabilities
+  }
+
+  // ─── Tools ────────────────────────────────────────────────────────────
 
   async listTools(): Promise<MCPToolDefinition[]> {
     this.assertInitialized()
@@ -77,6 +97,51 @@ export class MCPClient {
     const result = (await this.request('tools/call', { name, arguments: args })) as MCPToolResult
     return result
   }
+
+  // ─── Resources ────────────────────────────────────────────────────────
+
+  async listResources(): Promise<MCPResource[]> {
+    this.assertInitialized()
+    const result = (await this.request('resources/list')) as { resources: MCPResource[] }
+    return result.resources ?? []
+  }
+
+  async readResource(uri: string): Promise<MCPResourceContents[]> {
+    this.assertInitialized()
+    const result = (await this.request('resources/read', { uri })) as {
+      contents: MCPResourceContents[]
+    }
+    return result.contents ?? []
+  }
+
+  // ─── Prompts ──────────────────────────────────────────────────────────
+
+  async listPrompts(): Promise<MCPPrompt[]> {
+    this.assertInitialized()
+    const result = (await this.request('prompts/list')) as { prompts: MCPPrompt[] }
+    return result.prompts ?? []
+  }
+
+  async getPrompt(
+    name: string,
+    args?: Record<string, string>
+  ): Promise<{ description?: string; messages: MCPPromptMessage[] }> {
+    this.assertInitialized()
+    const result = (await this.request('prompts/get', { name, arguments: args })) as {
+      description?: string
+      messages: MCPPromptMessage[]
+    }
+    return result
+  }
+
+  // ─── Sampling ─────────────────────────────────────────────────────────
+
+  /** Set the handler for server-initiated sampling requests. */
+  onSamplingRequest(handler: SamplingHandler): void {
+    this.samplingHandler = handler
+  }
+
+  // ─── Lifecycle ────────────────────────────────────────────────────────
 
   async close(): Promise<void> {
     // Reject all pending requests
@@ -120,19 +185,56 @@ export class MCPClient {
   }
 
   private handleMessage(message: JSONRPCMessage): void {
-    // Only handle responses (messages with id and no method)
-    if (!('id' in message) || 'method' in message) return
+    // Server-initiated request (e.g. sampling/createMessage)
+    if ('method' in message && 'id' in message) {
+      void this.handleServerRequest(message as JSONRPCRequest)
+      return
+    }
 
-    const pending = this.pending.get(message.id)
-    if (!pending) return
+    // Response to our request (has id, no method)
+    if ('id' in message && !('method' in message)) {
+      const pending = this.pending.get(message.id)
+      if (!pending) return
 
-    clearTimeout(pending.timer)
-    this.pending.delete(message.id)
+      clearTimeout(pending.timer)
+      this.pending.delete(message.id)
 
-    if (message.error) {
-      pending.reject(new Error(`MCP error (${message.error.code}): ${message.error.message}`))
+      if (message.error) {
+        pending.reject(new Error(`MCP error (${message.error.code}): ${message.error.message}`))
+      } else {
+        pending.resolve(message.result)
+      }
+    }
+
+    // Notifications (has method, no id) — ignore for now
+  }
+
+  private async handleServerRequest(request: JSONRPCRequest): Promise<void> {
+    if (request.method === 'sampling/createMessage' && this.samplingHandler) {
+      try {
+        const result = await this.samplingHandler(request.params as unknown as MCPSamplingRequest)
+        const response: JSONRPCResponse = {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: result as unknown,
+        }
+        await this.transport.send(response)
+      } catch (err) {
+        const response: JSONRPCResponse = {
+          jsonrpc: '2.0',
+          id: request.id,
+          error: { code: -32000, message: err instanceof Error ? err.message : String(err) },
+        }
+        await this.transport.send(response)
+      }
     } else {
-      pending.resolve(message.result)
+      // Unsupported server request
+      const response: JSONRPCResponse = {
+        jsonrpc: '2.0',
+        id: request.id,
+        error: { code: -32601, message: `Method not found: ${request.method}` },
+      }
+      await this.transport.send(response)
     }
   }
 }

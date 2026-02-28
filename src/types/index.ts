@@ -19,6 +19,8 @@ export interface Session {
   id: string
   /** Project this session belongs to */
   projectId?: string
+  /** Parent session this was forked/branched from */
+  parentSessionId?: string
   name: string
   createdAt: number
   updatedAt: number

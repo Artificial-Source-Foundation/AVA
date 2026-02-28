@@ -70,6 +70,11 @@ const VERB_PAIRS: Record<string, [string, string]> = {
   websearch: ['Searching', 'Searched'],
   webfetch: ['Fetching', 'Fetched'],
   task: ['Delegating to', 'Delegated to'],
+  delegate_coder: ['Delegating to Coder', 'Delegated to Coder'],
+  delegate_tester: ['Delegating to Tester', 'Delegated to Tester'],
+  delegate_reviewer: ['Delegating to Reviewer', 'Delegated to Reviewer'],
+  delegate_researcher: ['Delegating to Researcher', 'Delegated to Researcher'],
+  delegate_debugger: ['Delegating to Debugger', 'Delegated to Debugger'],
 }
 
 /**
@@ -191,6 +196,15 @@ export function summarizeAction(name: string, args: Record<string, unknown>): st
       const goal = String(args.goal ?? args.description ?? args.prompt ?? '')
       const short = goal.length > 60 ? `${goal.slice(0, 57)}...` : goal
       return short ? `delegating: ${short}` : 'delegating task'
+    }
+    case 'delegate_coder':
+    case 'delegate_tester':
+    case 'delegate_reviewer':
+    case 'delegate_researcher':
+    case 'delegate_debugger': {
+      const worker = name.replace('delegate_', '')
+      const task = String(args.task ?? args.description ?? '')
+      return task ? `delegating to ${worker}: ${task.slice(0, 60)}` : `delegating to ${worker}`
     }
     default:
       return shortPath ? `${name} ${shortPath}` : name

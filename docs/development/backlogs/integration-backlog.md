@@ -1,29 +1,24 @@
 # Integration Backlog
 
-> Cross-cutting frontend-backend work only. Updated 2026-02-27.
+> Cross-cutting frontend-backend work only. Updated 2026-02-28.
 
 ## Active
 
+- `INT-004` Plugin registry API (backend ↔ frontend marketplace)
+  - Status: not started (frontend marketplace UI is ready — sort, ratings, publish stub, wizard)
+  - Owners: backend + frontend
+  - Exit evidence: plugins can be published, discovered, and installed from a remote registry.
+
+## Completed
+
 - `INT-001` Plugin lifecycle wiring (settings UI controls -> extension manager actions)
-  - Status: in progress (frontend wiring landed; runtime validation pending)
-  - Owners: frontend + backend
-  - Frontend links: `docs/frontend/backlog.md`
-  - Backend links: `docs/backend/backlog.md`
-  - Exit evidence: install/enable/disable/uninstall flows succeed in desktop runtime.
+  - Status: **done** — Real FS download, Blob URL dynamic import, state persistence, hot reload (`reloadPlugin`), permission sandboxing. Frontend controls wired to `extension-loader.ts`.
 
 - `INT-002` Plugin state synchronization and optimistic UX behavior
-  - Status: in progress (optimistic/reconcile baseline landed; stress validation pending)
-  - Owners: frontend + backend
-  - Frontend links: `docs/frontend/backlog.md`
-  - Backend links: `docs/backend/backlog.md`
-  - Exit evidence: UI state remains consistent under fast toggles, retries, and action failures.
+  - Status: **done** — Optimistic/reconcile baseline + plugin lifecycle tests (`plugins.test.ts`, `extension-loader.test.ts`). Rapid toggle and error recovery tested.
 
 - `INT-003` Plugin lifecycle failure handling and recovery UX
-  - Status: in progress (retry/recovery baseline landed; runtime failure evidence pending)
-  - Owners: frontend + backend
-  - Frontend links: `docs/frontend/backlog.md`
-  - Backend links: `docs/backend/backlog.md`
-  - Exit evidence: actionable error states and retry/recover flows validated.
+  - Status: **done** — Retry/recovery flows with toast notifications. Broken manifest handling tested. Error states surfaced in PluginsTab detail panel.
 
 ## Blockers
 

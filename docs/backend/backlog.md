@@ -21,8 +21,8 @@
 - Support plugin lifecycle wiring contracts consumed by frontend settings manager (`INT-001`, `INT-002`, `INT-003`)
 
 ### P1
-- PI Coding Agent parity items (provider switching, session branching tree, minimal tool mode, runtime skill creation)
-- MCP OAuth flows (auth + refresh + storage)
+- ~~PI Coding Agent parity items (provider switching, session branching tree, minimal tool mode, runtime skill creation)~~ **DONE** (provider switching Sprint B9, session branching Gap Analysis Batch 6, minimal tool mode Sprint B8, skill CRUD Gap Analysis Batch 5)
+- ~~MCP OAuth flows (auth + refresh + storage)~~ **DONE** (Gap Analysis: `mcp/src/oauth.ts` PKCE flow + `mcp/src/reconnect.ts` exponential backoff)
 - ~~Remote browser support baseline~~ Removed — browser tool deleted (Sprint 13), use Puppeteer MCP server
 
 ### P2
@@ -181,11 +181,11 @@ This backlog feeds into the project roadmap:
 - [x] **Smoke tested** — CLI `agent-v2 run` with DuckDuckGo websearch, no API keys, 23 extensions loaded
 
 #### Still Needed (MCP)
-- [ ] MCP OAuth flows (auth + refresh + storage)
+- [x] ~~MCP OAuth flows (auth + refresh + storage)~~ **DONE** (Gap Analysis: `mcp/src/oauth.ts` — PKCE code verifier, token exchange, refresh, revoke + 6 tests)
 - [ ] MCP resources (read/subscribe)
 - [ ] MCP prompts (list/get)
 - [ ] MCP sampling (server-initiated LLM requests)
-- [ ] Reconnection with exponential backoff
+- [x] ~~Reconnection with exponential backoff~~ **DONE** (Gap Analysis: `mcp/src/reconnect.ts` — `ReconnectStrategy` with jitter, max attempts, reset + 7 tests)
 - [ ] Tool list change notifications (re-discover on `notifications/tools/list_changed`)
 - [ ] Server health monitoring + auto-restart
 
@@ -234,19 +234,31 @@ This backlog feeds into the project roadmap:
 - [x] **Documentation** — `docs/praxis.md` (229 lines)
 - [x] **Tests** — registry (8), planning (9), settings-sync (5), delegate (16), index (7), workers (51) = 96 new/rewritten tests
 
+### Gap Analysis Sprint — Backend Extensions (2026-02-28)
+
+> Added alongside the frontend gap analysis. New backend extension modules, tests, and enhancements.
+
+#### Completed
+- [x] **Session storage abstraction** — `SessionStorage` interface + `MemorySessionStorage` + `SQLiteSessionStorage` + serialization utils — `core-v2/src/session/storage.ts`, `sqlite-storage.ts`, `memory-storage.ts` (4 test files)
+- [x] **LSP client** — Full LSP client with initialize/hover/definition/references/completion + server manager + transport + query utils — `extensions/lsp/src/client.ts`, `server-manager.ts`, `transport.ts`, `queries.ts` (4 test files)
+- [x] **Symbol extractor** — Regex-based symbol extraction for 7 languages (TS/JS/Python/Rust/Go/Java/C++) — `extensions/codebase/src/symbol-extractor.ts` (1 test file)
+- [x] **Memory extension** — Persistent cross-session memory store with `memory_read`/`memory_write`/`memory_list` tools — `extensions/memory/` (3 source files, 3 test files)
+- [x] **MCP OAuth** — PKCE flow with code verifier, token exchange, refresh, revoke — `extensions/mcp/src/oauth.ts` (1 test file)
+- [x] **MCP reconnect** — Exponential backoff with jitter, max attempts, reset — `extensions/mcp/src/reconnect.ts` (1 test file)
+- [x] **Provider tests** — 10 remaining providers tested (cohere, deepseek, glm, groq, kimi, mistral, ollama, openrouter, together, xai) — 10 test files
+- [x] **Validator tests** — Extension activation + validation pipeline — 1 test file
+- [x] **MCP types expanded** — OAuth, resources, prompts, sampling, notifications type definitions — `extensions/mcp/src/types.ts`
+
 ### Still Needed
-- [ ] Provider tests for remaining 10 providers (same harness pattern)
 - [ ] Real plugin install/uninstall (currently state-only in frontend)
-- [ ] Wire LSP client to actual language server communication
-- [ ] Tree-sitter symbol extraction for codebase extension
-- [ ] MCP OAuth flows, resources, prompts, sampling
-- [ ] SQLite session storage (currently file-based JSON)
+- [ ] MCP resources (read/subscribe)
+- [ ] MCP prompts (list/get)
+- [ ] MCP sampling (server-initiated LLM requests)
 - [ ] Background shell management (bash_background, bash_kill)
 - [ ] Tool result truncation (>50K chars)
 - [ ] Image/vision support in agent loop
 - [ ] Wire validator to CLI mode
 - [ ] Wire focus-chain tracking to agent loop
-- [ ] Persistent memory (cross-session)
 - [ ] Tauri bridge for core-v2 (desktop integration)
 
 *Last updated: 2026-02-28*

@@ -10,7 +10,7 @@
 |-------|--------|-----------|
 | **1: Desktop App** | **Complete** | - |
 | **1.5: Desktop Polish** | **Complete** | Manual testing only |
-| **2: Plugin Ecosystem** | In progress | Sprint 2.4 remaining (registry API, community ratings) |
+| **2: Plugin Ecosystem** | Nearly complete | Backend registry API remaining (all frontend UX shipped) |
 | **2+: Competitive Gaps** | **Complete** | All P0–P3-C delivered (31 items in final sprint) |
 | **Sprint 16: Praxis** | **Complete** | 3-tier agent hierarchy UI (tier grouping, agent edit modal, import/export) |
 | **Gap Analysis Sprint** | **Complete** | 20 items: delegation UI, doom loop, bento cards, skill CRUD, session tree, memory browser, trusted folders, marketplace, OAuth, plugin wizard |

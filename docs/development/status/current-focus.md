@@ -1,28 +1,31 @@
 # Current Focus
 
-**Last Updated:** 2026-02-15
-**Active Sprint:** S2.3 Plugin UX Wiring + S1.6 Hardening Closeout + Frontend Gap Follow-through + DX-1 Docs Hardening
+**Last Updated:** 2026-02-28
+**Active Sprint:** Gap Analysis complete. Next: Manual QA + Plugin Registry API + Phase 3 prep.
+
+## Completed Recently
+
+- **Gap Analysis Sprint** — 20 frontend items + backend extensions across 10 batches. All done.
+  - Frontend: pause removal, delegation UI, doom loop banner, bento cards, skill CRUD, session tree, memory browser, trusted folders, marketplace UX, OAuth, plugin wizard
+  - Backend: session storage, LSP client, MCP OAuth/reconnect, symbol extractor, memory extension, 10 provider tests, validator tests
+- **Sprint 16 (Praxis)** — 3-tier agent hierarchy (13 agents, tier-aware delegation, import/export)
+- **Sprint 2.3 (Plugin UX)** — Marketplace sort/ratings/downloads, publish stub, creation wizard, hot reload
+- **All P0-P3-C competitive gaps** — Delivered (31 items from 7-tool audit)
+- **PI Parity** — Provider switching, session branching tree, minimal tool mode, runtime skill creation all done
 
 ## Top Priorities
 
-- Complete manual OAuth runtime matrix (OpenAI, Anthropic, Copilot).
-- Close runtime validation for `INT-001`/`INT-002`/`INT-003` plugin lifecycle wiring and failure recovery.
-- Finish Sprint 1.6 evidence refresh in matrix and readiness docs.
-- Execute remaining benchmark frontend gaps: `FG-004` (remainder), `FG-006`, `FG-007`.
+1. Manual QA pass — Linux DEs (GNOME, KDE, Cosmic), light mode, Tauri desktop runtime
+2. Manual OAuth runtime matrix — OpenAI, Anthropic, Copilot connect/disconnect/send flows
+3. Plugin registry API backend — Frontend UI is ready, backend needed
+4. Phase 3 prep — CLI polish, docs site planning
 
 Active execution docs:
 
-- `docs/development/sprints/2026-S1.6-testing-hardening-closeout.md`
-- `docs/development/sprints/2026-S2.3-plugin-ux-wiring.md`
-- `docs/development/sprints/2026-DX-1-docs-architecture-hardening.md`
-- `docs/development/status/frontend-gap-matrix-2026-02-15.md`
 - `docs/frontend/backlog.md`
+- `docs/backend/backlog.md`
+- `docs/ROADMAP.md`
 
 ## Blockers
 
 - Provider credentials and callback reliability for manual OAuth runtime validation.
-
-## Evidence Refresh Needed
-
-- `docs/development/sprints/mvp-test-matrix.md`
-- `docs/development/status/mvp-readiness-report-2026-02-13.md`

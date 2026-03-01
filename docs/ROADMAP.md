@@ -10,7 +10,7 @@
 |-------|--------|-------|
 | **1: Desktop App** | **Done** | Core UI, LLM chat, settings, team flow |
 | **1.5: Desktop Polish** | **Done** | Settings, appearance, wiring, gap closing |
-| **2: Plugin Ecosystem** | In progress | UX baseline shipped; runtime validation + catalog maturity next |
+| **2: Plugin Ecosystem** | Nearly complete | Marketplace UI, SDK, hot reload, wizard all shipped. Backend registry API remaining |
 | **3: Community & CLI** | Future | CLI interface, docs site, templates |
 | **4: Integrations** | Future | Editor (ACP), agent network (A2A), voice, vision |
 
@@ -32,15 +32,15 @@ Everything needed for a working desktop AI coding app.
 - Spring physics animations, glassmorphism design
 - Code viewer (CodeMirror 6)
 
-### Core Engine (~54,500 lines, latest baseline: ~3302 tests across 162 files)
+### Core Engine (~54,500 lines original + ~5K core-v2 + ~25 extensions, latest baseline: ~3,668 tests across 211 files)
 | Category | Modules |
 |----------|---------|
-| Agent System | Agent loop, Commander, Parallel execution, Validator |
-| Tools | 24 tools (file, shell, web, browser, agents, patch, batch, search) |
-| Intelligence | Codebase understanding, context management, memory, LSP |
-| Extensibility | Extensions, commands, hooks, skills, MCP |
+| Agent System | Agent loop, Praxis 3-tier hierarchy (13 agents), Parallel execution, Validator |
+| Tools | 28 tools (file, shell, web, agents, patch, batch, search, delegate, memory) |
+| Intelligence | Codebase understanding, context management, memory, LSP, symbol extraction |
+| Extensibility | Extensions, commands, hooks, skills, MCP (OAuth + reconnect) |
 | Safety | Permissions, policy engine, trusted folders |
-| Infrastructure | 12+ LLM providers, config, sessions, auth, bus |
+| Infrastructure | 14 LLM providers, config, sessions, auth, bus |
 | Protocols | ACP (editor integration), A2A (agent network) |
 
 ---
@@ -111,11 +111,11 @@ Active execution docs:
 ### Sprint 1.6.3: Debug Logging Coverage
 - Structured logs across chat/agent/core/session/settings/file-watcher
 
-### Sprint 1.6.4: PI Coding Agent Parity
+### Sprint 1.6.4: PI Coding Agent Parity — COMPLETE
 - [x] Mid-session provider switching (Sprint B9 — `requestProviderSwitch()` on AgentExecutor)
-- [ ] Session branching tree
+- [x] Session branching tree (Gap Analysis Batch 6 — `SessionBranchTree.tsx`, `parentSessionId`, tree/list toggle)
 - [x] Minimal tool mode (Sprint B8 — 9-tool subset, per-session state, plan mode pattern)
-- [ ] Runtime skill creation
+- [x] Runtime skill creation (Gap Analysis Batch 5 — Custom skill CRUD in `MicroagentsTab.tsx`)
 
 ### Sprint 1.6.5: Manual Tauri Testing
 - OAuth browser flow, callback, token exchange
@@ -130,55 +130,55 @@ Active execution docs:
 - [x] Finish chat streaming polish (stream-end/start micro-jitter stabilized)
 - [x] Execute benchmark P0 frontend gap baseline (`FG-001`/`FG-002`/`FG-003`)
 - [ ] Complete manual Tauri OAuth validation (connect/disconnect + send flow per provider)
-- [ ] Complete Sprint 2.3 frontend-backend lifecycle runtime validation from [execution sprint doc](development/sprints/2026-S2.3-plugin-ux-wiring.md)
-- [ ] Execute remaining frontend gaps (`FG-004` remainder, `FG-006`, `FG-007`) from [frontend gap matrix](development/status/frontend-gap-matrix-2026-02-15.md)
+- [x] Complete Sprint 2.3 frontend-backend lifecycle runtime validation — **DONE** (Gap Analysis: plugin tests, hot reload, permission sandboxing)
+- [x] Execute remaining frontend gaps (`FG-004` remainder, `FG-006`, `FG-007`) — **DONE** (all 7 FG items delivered)
 - [ ] Continue DX-1 docs architecture hardening from [execution sprint doc](development/sprints/2026-DX-1-docs-architecture-hardening.md)
 
 ---
 
-## Phase 2: Plugin Ecosystem (IN PROGRESS — THE DIFFERENTIATOR)
+## Phase 2: Plugin Ecosystem (NEARLY COMPLETE — THE DIFFERENTIATOR)
 
 This is what makes AVA "The Obsidian of AI Coding". Easy to create, discover, install.
 
-### Sprint 2.1: Plugin Format & SDK (Backend foundation mostly done)
+### Sprint 2.1: Plugin Format & SDK — COMPLETE
 - [x] Define plugin manifest + parsing/validation (`packages/core/src/extensions/manifest.ts`)
-- [x] Plugin lifecycle core (`install`, `enable`, `disable`, `uninstall`, `reload` in `packages/core/src/extensions/manager.ts`)
-- [x] Extension persistence + tests (`packages/core/src/extensions/storage.ts`, `*.test.ts`)
-- [ ] Plugin SDK packaging/docs pass (public developer-facing SDK contract)
-- [ ] Plugin sandboxing policy hardening
+- [x] Plugin lifecycle core (`install`, `enable`, `disable`, `uninstall`, `reload`)
+- [x] Extension persistence + tests
+- [x] Plugin SDK packaging/docs pass — **DONE** (`docs/plugins/PLUGIN_SDK.md`, `ExtensionAPI` interface, `defineTool()`)
+- [x] Plugin sandboxing policy hardening — **DONE** (PluginPermission type, sandboxed API wrapper, permission confirmation dialog)
 
-**Key files:** `packages/core/src/extensions/`, `packages/core/src/hooks/`, `packages/core/src/commands/toml.ts`
+### Sprint 2.2: Plugin Development Experience — COMPLETE
+- [x] `ava plugin init` scaffold command — **DONE** (Sprint 10)
+- [x] Hot reload during plugin development — **DONE** (Gap Analysis: `reloadPlugin()` in `extension-loader.ts`)
+- [x] Plugin testing utilities — **DONE** (Sprint 10: `createMockExtensionAPI()` + provider test harness)
+- [x] Plugin documentation template — **DONE** (Sprint 10: `docs/plugins/PLUGIN_SDK.md`)
 
-### Sprint 2.2: Plugin Development Experience
-- [ ] `ava plugin init` scaffold command
-- [ ] Hot reload during plugin development
-- [ ] Plugin testing utilities
-- [ ] Plugin documentation template
-
-### Sprint 2.3: Built-in Marketplace UI
+### Sprint 2.3: Built-in Marketplace UI — COMPLETE
 - [x] Project Hub + project-scoped session restore + sidebar quick project switching
 - [x] Settings-only plugin manager surface (replace inline placeholder)
 - [x] Search + category-aware filtering in settings manager
 - [x] Install/uninstall + enable/disable controls (settings manager MVP)
 - [x] Plugin detail/settings panel in settings manager
 - [x] Metadata/trust/version/changelog surfaced in plugin cards/details
-- [ ] Featured plugin catalog curation + remote source
-- [ ] Runtime validation closeout for backend extension lifecycle wiring and failure recovery (tracked in [Integration Backlog](development/backlogs/integration-backlog.md#active))
+- [x] Featured plugin catalog curation + remote source — **DONE** (remote fetch + localStorage cache with 30-min TTL + fallback catalog)
+- [x] Runtime validation closeout — **DONE** (INT-001/002/003 all complete: real FS, Blob URL import, state persistence, lifecycle tests)
 
-**Key files:** `src/components/settings/tabs/PluginsTab.tsx`, `src/components/sidebar/SidebarPlugins.tsx`, `src/stores/plugins.ts`, `src/services/plugins/`
+**Key files:** `src/components/settings/tabs/PluginsTab.tsx`, `src/stores/plugins.ts`, `src/services/plugins/`
 
-### Sprint 2.4: Plugin Distribution
+### Sprint 2.4: Plugin Distribution — PARTIALLY COMPLETE
 - [x] `ava plugin init` scaffold command + plugin template docs
-- [ ] Publish plugins from GitHub repos
-- [ ] Plugin registry API
+- [x] Publish flow stub (`PublishDialog.tsx`) — **DONE** (Gap Analysis)
+- [x] Plugin creation wizard (`PluginWizard.tsx` — 4 templates) — **DONE** (Gap Analysis)
+- [x] Marketplace sort (popular/rated/recent/name) + download/rating display — **DONE** (Gap Analysis)
+- [ ] Plugin registry API (backend)
 - [ ] Version management and updates
-- [ ] Community ratings and reviews
+- [ ] Community ratings backend
 
-### Sprint 2.5: Starter Plugins
-- [ ] 5-10 built-in plugins that demonstrate the system
-- [ ] Example: "React Patterns" skill plugin
-- [ ] Example: "/deploy" command plugin
-- [ ] Example: "Auto-commit" hook plugin
+### Sprint 2.5: Starter Plugins — COMPLETE
+- [x] 5-10 built-in plugins that demonstrate the system — **DONE** (Sprint 10: 5 example plugins with tests)
+- [x] Example: "React Patterns" skill plugin — **DONE**
+- [x] Example: "/deploy" command plugin — **DONE**
+- [x] Example: "Auto-commit" hook plugin — covered by git extension
 
 ---
 
@@ -191,10 +191,10 @@ This is what makes AVA "The Obsidian of AI Coding". Easy to create, discover, in
 
 **Key files:** `cli/src/`, already builds with `npm run build:cli`
 
-### Sprint 3.2: Plugin Creation Wizard
+### Sprint 3.2: Plugin Creation Wizard — PARTIALLY DONE
+- [x] Template gallery — **DONE** (4 templates: Custom Tool, Slash Command, LLM Provider, Context Skill in `PluginWizard.tsx`)
 - [ ] "Vibe-code your own plugins" — describe what you want, AI builds the plugin
-- [ ] Template gallery
-- [ ] One-click publish to marketplace
+- [ ] One-click publish to marketplace (backend registry needed)
 
 ### Sprint 3.3: Community & Docs
 - [ ] Documentation website

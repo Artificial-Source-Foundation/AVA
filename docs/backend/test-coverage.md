@@ -1,6 +1,6 @@
 # Backend Test Coverage
 
-> Latest verified baseline: **~3,857 tests** across **~240 test files**. Includes core-v2, extensions (Sprint 17: +271 tests), and frontend tests.
+> Latest verified baseline: **~3,896 tests** across **~250 test files**. Includes core-v2, extensions (Sprint 17: +271 tests), and frontend tests.
 >
 > Strategy: Test pure functions and stateful classes. Skip LLM/FS/HTTP-dependent code.
 
@@ -10,12 +10,49 @@
 
 | Metric | Value |
 |--------|-------|
-| Total tests | ~3,857 |
-| Test files | ~240 |
+| Total tests | ~3,896 |
+| Test files | ~250 |
 | Source files (total) | ~280+ |
 | Source lines | ~60,000+ (core 54.5K + core-v2 5K + extensions) |
 | TS errors | 0 |
 | Biome errors | 0 |
+
+## Recently Delivered (Sprint 17 — Backend Completion)
+
+### Phase A: Validator + Focus-Chain Wiring
+- `packages/extensions/validator/src/index.test.ts` — 3 tests (activation, event handler, cleanup)
+- `packages/extensions/focus-chain/src/index.test.ts` — updated (event names corrected)
+
+### Phase B: Provider Tests (10 new files)
+- `packages/extensions/providers/{deepseek,mistral,groq,xai,cohere,together,ollama,glm,kimi,openrouter}/src/index.test.ts` — 3 tests each via shared harness (30 new tests)
+
+### Phase C: SQLite Session Storage
+- `packages/core-v2/src/session/storage.test.ts` — 7 tests (serialization, interface)
+- `packages/core-v2/src/session/sqlite-storage.test.ts` — 6 tests (mock IDatabase CRUD)
+- `packages/core-v2/src/session/manager.test.ts` — 5 new tests (storage-backed save/load/autoSave)
+
+### Phase D: Persistent Memory Extension
+- `packages/extensions/memory/src/store.test.ts` — 9 tests (CRUD, categories, prompt section)
+- `packages/extensions/memory/src/tools.test.ts` — 7 tests (tool execution, error handling)
+- `packages/extensions/memory/src/index.test.ts` — 3 tests (activation, tools registered, cleanup)
+
+### Phase E: MCP Advanced Features
+- `packages/extensions/mcp/src/reconnect.test.ts` — 7 tests (backoff, jitter, max attempts, reset)
+- `packages/extensions/mcp/src/oauth.test.ts` — 10 tests (token flow, refresh, URL construction)
+- `packages/extensions/mcp/src/client.test.ts` — updated (resources, prompts, sampling)
+- `packages/extensions/mcp/src/manager.test.ts` — updated (reconnection, capabilities)
+
+### Phase F: Symbol Extraction
+- `packages/extensions/codebase/src/symbol-extractor.test.ts` — 12 tests (TS, Python, Rust, Go, edge cases)
+
+### Phase G: Full LSP Client
+- `packages/extensions/lsp/src/transport.test.ts` — 5 tests (Content-Length parsing, partial chunks)
+- `packages/extensions/lsp/src/client.test.ts` — 7 tests (initialize, request/response, timeout, notifications)
+- `packages/extensions/lsp/src/server-manager.test.ts` — 7 tests (URI conversion, lifecycle, crash)
+- `packages/extensions/lsp/src/queries.test.ts` — 10 tests (formatting, grouping, edge cases)
+- `packages/extensions/lsp/src/index.test.ts` — 6 tests (activation, tool registration, cleanup)
+
+---
 
 ## Recently Delivered (Session 55)
 
@@ -254,4 +291,4 @@
 
 ---
 
-*Last updated: 2026-02-26 — updated after Sprint 8 test coverage push (195 new tests in core-v2 + extensions)*
+*Last updated: 2026-02-28 — Sprint 17 backend completion (+271 tests across 39 files, 35 tools, 25 extensions)*

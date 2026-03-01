@@ -33,7 +33,7 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 | ~~Architect + editor model split~~ | Aider, PI | ~~**Medium**~~ **DONE** |
 | ~~Session revert/step-level undo~~ | OpenCode, Cline, Plandex | ~~**Medium**~~ **DONE** |
 | ~~Message queue (steering/follow-up)~~ | PI | ~~**Medium**~~ **DONE** |
-| Tree-sitter (100+ languages) | Aider | **Medium** |
+| ~~Tree-sitter (100+ languages)~~ | Aider | ~~**Medium**~~ **PARTIALLY DONE** (Sprint 17: regex-based symbol extraction for TS/JS, Python, Rust, Go — not tree-sitter WASM but covers main use cases) |
 | RPC/SDK mode for embedding | PI, Aider | **Low** |
 | Telemetry/analytics | Cline, Gemini CLI | **Low** |
 
@@ -45,7 +45,7 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 | Session branching tree (true forks, shared prefix) | PI | **Medium** |
 | ~~Minimal tool mode (4-tool subset)~~ | PI | ~~Low~~ **DONE** |
 | Runtime skill/tool creation + hot reload | PI | Medium |
-| MCP OAuth flows (auth + refresh + storage) | Cline, Gemini CLI, Goose | Medium |
+| ~~MCP OAuth flows (auth + refresh + storage)~~ | Cline, Gemini CLI, Goose | ~~Medium~~ **DONE** (Sprint 17: full OAuth + resources + prompts + sampling + reconnect) |
 | ~~Remote browser support~~ | Cline | ~~Medium~~ **OUT OF SCOPE** (browser tool removed Sprint 13, use MCP Puppeteer) |
 
 ### New Gaps Identified (2026-02-28 — Sprint 16 Audit)

@@ -32,15 +32,15 @@ Everything needed for a working desktop AI coding app.
 - Spring physics animations, glassmorphism design
 - Code viewer (CodeMirror 6)
 
-### Core Engine (~54,500 lines original + ~5K core-v2 + ~25 extensions, latest baseline: ~3,857 tests across ~240 files)
+### Core Engine (~54,500 lines original + ~5K core-v2 + 25 extensions, latest baseline: ~3,896 tests across ~250 files)
 | Category | Modules |
 |----------|---------|
-| Agent System | Agent loop, Praxis 3-tier hierarchy (13 agents), Parallel execution, Validator |
+| Agent System | Agent loop, Praxis 3-tier hierarchy (13 agents), Parallel execution, Validator (wired) |
 | Tools | 35 tools (file, shell, web, agents, patch, batch, search, delegate, memory, LSP) |
-| Intelligence | Codebase understanding, context management, memory, LSP, symbol extraction |
-| Extensibility | Extensions, commands, hooks, skills, MCP (OAuth + reconnect) |
+| Intelligence | Codebase understanding, context management, persistent memory, LSP client, symbol extraction |
+| Extensibility | Extensions, commands, hooks, skills, MCP (tools, resources, prompts, sampling, OAuth, reconnect) |
 | Safety | Permissions, policy engine, trusted folders |
-| Infrastructure | 14 LLM providers, config, sessions, auth, bus |
+| Infrastructure | 14 LLM providers (all tested), config, sessions (SQLite + in-memory), auth, bus |
 | Protocols | ACP (editor integration), A2A (agent network) |
 
 ---
@@ -73,7 +73,7 @@ All development work is done. Only manual Tauri testing remains.
 - File watcher (AI comments: `// AI!` execute, `// AI?` question — 6 patterns, 30+ extensions, Tauri FS watch)
 - Step-level undo (Undo button in toolbar, git revert of last auto-committed AI edit)
 - Streaming tool preview (live tool call cards with status transitions during streaming)
-- Backend and integration baseline tests (~3,857 tests across ~240 files)
+- Backend and integration baseline tests (~3,896 tests across ~250 files)
 - 0 TS errors, 0 Biome errors, vite build passes, 0 TODOs in src/
 
 ### Manual Testing (Before Phase 2)
@@ -123,7 +123,7 @@ Active execution docs:
 
 ### Sprint 1.6 Verification Workflow
 - Added `npm run verify:mvp` to run lint + typecheck + full test suite.
-- Current status: verification pipeline is green in the latest readiness run (`verify:mvp` passed, full suite `3302 tests / 162 files`).
+- Current status: verification pipeline is green in the latest readiness run (`verify:mvp` passed, full suite `~3,896 tests / ~250 files`).
 
 ### Next Build Steps (Immediate)
 - [x] Implement automatic session titles from first user message for new chats

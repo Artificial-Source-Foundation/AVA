@@ -23,8 +23,13 @@ export function activate(api: ExtensionAPI): Disposable {
   disposables.push(
     api.on('agent:completing', (data) => {
       const { agentId } = data as { agentId: string; result: string }
-      const config =
-        api.getSettings<typeof DEFAULT_VALIDATOR_CONFIG>('validator') ?? DEFAULT_VALIDATOR_CONFIG
+      let config = DEFAULT_VALIDATOR_CONFIG
+      try {
+        config =
+          api.getSettings<typeof DEFAULT_VALIDATOR_CONFIG>('validator') ?? DEFAULT_VALIDATOR_CONFIG
+      } catch {
+        // Settings category not registered — use defaults
+      }
       const controller = new AbortController()
 
       void runPipeline([], config, controller.signal, process.cwd())

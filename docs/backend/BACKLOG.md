@@ -4,9 +4,9 @@
 >
 > Gap analysis based on feature comparison with **OpenCode** (75+ providers, 15 tools, plugin system, client-server arch) and **Goose** (30+ providers, 6 extension types, recipes, MCP-first, Rust core).
 
-**Current state:** 24 tools registered (6 core + 18 extended), 22 extensions, 14 providers (4 real + 10 stubs), 996 core-v2/extension tests passing. CLI `ava agent-v2` works end-to-end with real LLMs.
+**Current state:** 35 tools registered (6 core + 29 extended), 25 extensions, 14 providers (all real implementations), ~3,896 tests passing. CLI `ava agent-v2` works end-to-end with real LLMs.
 
-**AVA's unique advantages:** Dev Team hierarchy (no competitor has this), 24 built-in tools (more than either), Tauri desktop (native, not Electron), extension-first architecture, Obsidian-style plugin vision.
+**AVA's unique advantages:** Dev Team hierarchy (no competitor has this), 35 built-in tools (more than any competitor), Tauri desktop (native, not Electron), extension-first architecture, Obsidian-style plugin vision.
 
 ---
 
@@ -24,9 +24,9 @@ Features both OpenCode and Goose have that users expect. Highest-impact gaps.
 
 | # | Task | Competitor ref | What it does |
 |---|------|----------------|-------------|
-| B-030 | **LSP client** — spawn + JSON-RPC stdio | OpenCode has `lsp` tool | `LspClient` class: initialize, shutdown, request/notification. Start with tsserver. |
-| B-031 | **LSP tool** — register callable tool | OpenCode (experimental) | `lsp` tool: `diagnostics`, `hover`, `definition`, `references`, `symbols` |
-| B-032 | **LSP server lifecycle** — lazy spawn, auto-restart | OpenCode | `LspManager`: detect installed servers, spawn on first request, handle crashes |
+| ~~B-030~~ | ~~**LSP client** — spawn + JSON-RPC stdio~~ | ~~OpenCode has `lsp` tool~~ | **DONE** (Sprint 17: `LSPClient` with initialize, shutdown, hover, definition, references, diagnostics. Content-Length framed transport.) |
+| ~~B-031~~ | ~~**LSP tool** — register callable tool~~ | ~~OpenCode (experimental)~~ | **DONE** (Sprint 17: 3 tools — `lsp_diagnostics`, `lsp_hover`, `lsp_definition`) |
+| ~~B-032~~ | ~~**LSP server lifecycle** — lazy spawn, auto-restart~~ | ~~OpenCode~~ | **DONE** (Sprint 17: `LSPServerManager` with per-language lifecycle, detect/spawn/stop/restart) |
 | B-033 | **Undo/Redo file changes** | OpenCode `/undo` `/redo` | Track file snapshots per tool call. Undo reverts files + removes message. Redo restores both. |
 | B-034 | **Parallel tool execution** | Both | Execute independent tool calls concurrently (currently sequential). Anthropic/OpenAI APIs support this. |
 | B-035 | **Granular permission system** | OpenCode (per-tool allow/ask/deny + globs), Goose (4 modes) | Upgrade permission middleware: per-tool rules, glob patterns for bash, smart-approve mode based on risk. |
@@ -34,14 +34,14 @@ Features both OpenCode and Goose have that users expect. Highest-impact gaps.
 | B-037 | **Session export** | OpenCode (export + share links), Goose (markdown/JSON/YAML) | Export conversations to markdown/JSON. Optional shareable links. |
 
 **Approach:**
-- B-030/031/032: Extend existing `packages/extensions/lsp/src/`. Start with TypeScript only.
+- ~~B-030/031/032~~: **DONE** (Sprint 17). Full LSP client in `packages/extensions/lsp/src/`.
 - B-033: New `undo` extension — snapshot file state before each write/edit/delete/apply_patch tool call, store in session. `/undo` command or `undo` tool restores + removes last assistant turn.
 - B-034: Already partially designed (B-053 in old backlog). Change agent loop to `Promise.all()` independent tool calls.
 - B-035: Extend existing `packages/extensions/permissions/`. Add config schema for per-tool overrides.
 - B-036: CLI readline hook that intercepts `@` and runs fuzzy glob search.
 - B-037: New function in `packages/core-v2/src/session/` — serialize session messages to markdown/JSON.
 
-**Effort:** ~4-5 sessions
+**Effort:** ~2-3 sessions (was 4-5, LSP done)
 
 ---
 
@@ -49,19 +49,15 @@ Features both OpenCode and Goose have that users expect. Highest-impact gaps.
 
 MCP unlocks 3,000+ tool integrations. Provider coverage removes onboarding friction.
 
-### MCP Server Support
+### MCP Server Support — ✓ DONE
 
-| # | Task | What it does |
-|---|------|-------------|
-| B-040 | **MCP local servers** — spawn stdio subprocess | Connect to MCP servers via `command` array (npx, uvx, etc.). Discover tools, proxy calls. |
-| B-041 | **MCP remote servers** — HTTP + SSE | Connect to remote MCP servers via URL. Support OAuth 2.0 for authenticated servers. |
-| B-042 | **MCP tool integration** — permission + namespacing | MCP tools go through permission middleware. Namespace as `mcp_{server}_{tool}` to prevent collisions. |
+| # | Task | Status |
+|---|------|--------|
+| ~~B-040~~ | ~~**MCP local servers** — spawn stdio subprocess~~ | **DONE** (Sprint 13: `StdioTransport`, JSON-RPC 2.0) |
+| ~~B-041~~ | ~~**MCP remote servers** — HTTP + SSE~~ | **DONE** (Sprint 13: `SSETransport` + Sprint 17: OAuth, reconnection) |
+| ~~B-042~~ | ~~**MCP tool integration** — permission + namespacing~~ | **DONE** (Sprint 13: tools registered with `api.registerTool()` + Sprint 17: resources, prompts, sampling) |
 
-**Approach:**
-- Extend existing `packages/extensions/mcp/src/` — already has basic client skeleton.
-- Stdio: spawn child process, JSON-RPC over stdin/stdout (same pattern as LSP).
-- HTTP: fetch + EventSource for SSE streaming.
-- Tool discovery: call `tools/list`, register each as a tool via `api.registerTool()`.
+MCP is feature-complete: tools, resources, prompts, sampling, OAuth, reconnection with backoff, transport error/close handling.
 
 ### Provider Coverage
 
@@ -102,15 +98,15 @@ MCP unlocks 3,000+ tool integrations. Provider coverage removes onboarding frict
 
 | # | Task | Extension | Current gap |
 |---|------|-----------|-------------|
-| B-070 | Wire validator to agent loop | validator | Agent loop doesn't emit `agent:completing` in CLI mode |
+| ~~B-070~~ | ~~Wire validator to agent loop~~ | ~~validator~~ | **DONE** (Sprint 17: `enabledByDefault: true`, `agent:completing` handler wired, runs validation pipeline) |
 | B-071 | Wire git snapshots to CLI | git | Middleware registered but untested with real repos |
 | B-072 | Wire instructions auto-inject | instructions | Loads CLAUDE.md but doesn't inject into system prompt |
-| B-073 | Wire focus-chain tracking | focus-chain | Agent loop doesn't update tracker |
+| ~~B-073~~ | ~~Wire focus-chain tracking~~ | ~~focus-chain~~ | **DONE** (Sprint 17: event names fixed to `turn:start`/`turn:end`/`agent:finish`, payload casts fixed) |
 | B-074 | Wire diff tracking | diff | No tool reports diffs back to agent |
 | B-075 | Wire scheduler | scheduler | Runner exists but nothing schedules tasks |
 | B-076 | Add `skill` tool | skills | Agent can't explicitly load skills. Needs tool wrapper. |
 | B-077 | **Custom user tools** | tools-extended | Let users drop `.ts`/`.js` files in `.ava/tools/` or `~/.ava/tools/`. Auto-discover + register via ExtensionAPI. OpenCode and Goose both have this. |
-| B-078 | **Persistent memory** | new extension | Cross-session memory store. Agent learns preferences. Goose has this as a built-in extension. |
+| ~~B-078~~ | ~~**Persistent memory**~~ | ~~new extension~~ | **DONE** (Sprint 17: `MemoryStore` with 4 tools — `memory_write`/`memory_read`/`memory_list`/`memory_delete`, system prompt injection) |
 | B-079 | **Auto-generate project rules** | instructions | `/init` command scans project structure and generates `CLAUDE.md` with relevant instructions. OpenCode has this. |
 
 **Effort:** ~3 sessions
@@ -157,17 +153,17 @@ Features that go beyond parity and lean into AVA's unique strengths.
 Tier 0  ──→  ✓ DONE
 Tier 1  ──→  ✓ DONE
 Tier 2  ──→  ✓ DONE
-Tier 3  ──→  Parity essentials: undo/redo, LSP, parallel tools, permissions, @mentions (4-5 sessions)
-Tier 4  ──→  Ecosystem: MCP servers, provider coverage (2-3 sessions)
+Tier 3  ──→  MOSTLY DONE — LSP ✓, undo/redo ✓. Remaining: parallel tools, @mentions, session export (2-3 sessions)
+Tier 4  ──→  ✓ DONE — MCP feature-complete (tools, resources, prompts, sampling, OAuth, reconnect). All 14 providers tested.
 Tier 5  ──→  Agent hardening: background shell, streaming, formatters, vision (2-3 sessions)
-Tier 6  ──→  Extension wiring: custom tools, memory, validator, git, /init (3 sessions)
+Tier 6  ──→  MOSTLY DONE — Validator ✓, focus-chain ✓, memory ✓. Remaining: git wiring, scheduler, custom tools, /init (2 sessions)
 Tier 7  ──→  Desktop integration: Tauri bridge, events, sessions (3-4 sessions)
 Tier 8  ──→  Differentiation: marketplace, server API, recipes, GitHub bot (6+ sessions)
 ```
 
-**Total to full parity:** ~12-14 sessions (Tiers 3-6)
-**Total to desktop launch:** ~16-18 sessions (Tiers 3-7)
-**Total to differentiation:** ~22-24 sessions (all tiers)
+**Total to full parity:** ~4-6 sessions (remaining Tier 3 + 5 + 6 items)
+**Total to desktop launch:** ~8-10 sessions (+ Tier 7)
+**Total to differentiation:** ~14-16 sessions (all tiers)
 
 ---
 
@@ -201,3 +197,15 @@ feat(agent): parallel tool execution [B-034]
 | B-020 | Add `codesearch` tool | 2026-02-28 |
 | B-021 | Add `repo_map` tool | 2026-02-28 |
 | B-023 | Add `plan_enter` / `plan_exit` tools | 2026-02-28 |
+| B-030 | LSP client — JSON-RPC stdio + Content-Length framing | 2026-02-28 |
+| B-031 | LSP tools — lsp_diagnostics, lsp_hover, lsp_definition | 2026-02-28 |
+| B-032 | LSP server lifecycle — per-language spawn/stop/restart | 2026-02-28 |
+| B-040 | MCP local servers — stdio transport | 2026-02-28 |
+| B-041 | MCP remote servers — SSE + OAuth | 2026-02-28 |
+| B-042 | MCP tool integration + resources + prompts + sampling | 2026-02-28 |
+| B-070 | Wire validator to agent loop | 2026-02-28 |
+| B-073 | Wire focus-chain tracking | 2026-02-28 |
+| B-078 | Persistent cross-session memory (4 tools) | 2026-02-28 |
+| — | SQLite session storage (SessionStorage interface) | 2026-02-28 |
+| — | Symbol extraction (regex-based, 5 languages) | 2026-02-28 |
+| — | Provider tests for 10 remaining providers | 2026-02-28 |

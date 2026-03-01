@@ -569,24 +569,24 @@ describe('Sprint 4 Integration', () => {
       expect(worker!.tools).not.toContain('edit')
     })
 
-    it('team mode registers and modifies system prompt', () => {
+    it('praxis mode registers and modifies system prompt', () => {
       const extApi = makeExtApi()
 
-      // Activate commander (registers team mode)
+      // Activate commander (registers praxis mode)
       const disposable = activateCommander(extApi)
 
-      // Check that team mode is registered
+      // Check that praxis mode is registered
       const modes = getAgentModes()
-      expect(modes.has('team')).toBe(true)
+      expect(modes.has('praxis')).toBe(true)
 
-      const teamMode = modes.get('team')!
+      const teamMode = modes.get('praxis')!
       const prompt = teamMode.systemPrompt!('You are AVA.')
-      expect(prompt).toContain('Team Lead')
+      expect(prompt).toContain('Commander')
       expect(prompt).toContain('Coder')
       expect(prompt).toContain('Tester')
 
       disposable.dispose()
-      expect(getAgentModes().has('team')).toBe(false)
+      expect(getAgentModes().has('praxis')).toBe(false)
     })
   })
 
@@ -722,20 +722,20 @@ describe('Sprint 4 Integration', () => {
       // Register plan mode
       const planDisposable = extApi.registerAgentMode(planAgentMode)
 
-      // Register team mode via commander
+      // Register praxis mode via commander
       const cmdDisposable = activateCommander(extApi)
 
       expect(getAgentModes().has('plan')).toBe(true)
-      expect(getAgentModes().has('team')).toBe(true)
+      expect(getAgentModes().has('praxis')).toBe(true)
 
       // Dispose plan mode
       planDisposable.dispose()
       expect(getAgentModes().has('plan')).toBe(false)
-      expect(getAgentModes().has('team')).toBe(true)
+      expect(getAgentModes().has('praxis')).toBe(true)
 
       // Dispose commander
       cmdDisposable.dispose()
-      expect(getAgentModes().has('team')).toBe(false)
+      expect(getAgentModes().has('praxis')).toBe(false)
     })
   })
 })

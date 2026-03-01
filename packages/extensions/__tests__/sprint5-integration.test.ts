@@ -196,16 +196,16 @@ describe('Sprint 5 Integration', () => {
       disposables.push(activateCommander(api))
 
       expect(getAgentModes().has('plan')).toBe(true)
-      expect(getAgentModes().has('team')).toBe(true)
+      expect(getAgentModes().has('praxis')).toBe(true)
 
       // Dispose first
       disposables[0]!.dispose()
       expect(getAgentModes().has('plan')).toBe(false)
-      expect(getAgentModes().has('team')).toBe(true)
+      expect(getAgentModes().has('praxis')).toBe(true)
 
       // Dispose second
       disposables[1]!.dispose()
-      expect(getAgentModes().has('team')).toBe(false)
+      expect(getAgentModes().has('praxis')).toBe(false)
     })
 
     it('extension API provides isolated storage per extension', async () => {
@@ -314,12 +314,12 @@ describe('Sprint 5 Integration', () => {
   })
 
   describe('Full ecosystem: agent with multiple extensions', () => {
-    it('agent uses team mode from commander with providers', async () => {
+    it('agent uses praxis mode from commander with providers', async () => {
       const api = makeExtApi()
 
       // Activate commander
       const cmdDisposable = activateCommander(api)
-      expect(getAgentModes().has('team')).toBe(true)
+      expect(getAgentModes().has('praxis')).toBe(true)
 
       // Register mock provider
       registerProvider('mock', () => ({
@@ -333,7 +333,7 @@ describe('Sprint 5 Integration', () => {
         provider: 'mock' as LLMProvider,
         maxTurns: 1,
         maxTimeMinutes: 1,
-        toolMode: 'team',
+        toolMode: 'praxis',
       })
 
       const result = await agent.run(

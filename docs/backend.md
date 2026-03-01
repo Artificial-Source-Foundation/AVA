@@ -109,7 +109,7 @@ Token tracking, compaction, and compression strategies.
 pnpm build:all                                    # Build everything
 npx vitest run packages/core-v2/                  # Core-v2 tests
 npx vitest run packages/extensions/               # Extension tests
-npx vitest run                                    # All tests (~3,857 tests, ~240 files)
+npx vitest run                                    # All tests (~3,896 tests, ~250 files)
 ```
 
 ## Extension Manifest Format

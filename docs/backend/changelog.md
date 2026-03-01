@@ -4,6 +4,65 @@
 
 ---
 
+## 2026-02-28
+
+### Sprint 17 — Backend Completion (All 9 "What's Next" Items)
+
+**271 new tests across 39 test files** in the new architecture stack. Tool count 28 → 35. Extensions 24 → 25. Total: ~3,896 tests across ~250 files.
+
+**Phase A: Quick Fixes**
+- Validator `enabledByDefault: true` + `agent:completing` event handler wired
+- Focus-chain event names fixed: `agent:turn-start` → `turn:start`, `agent:turn-end` → `turn:end`, `agent:completed` → `agent:finish`
+- Focus-chain payload casts fixed: `sessionId` → `agentId`
+- Created `validator/src/index.test.ts` (3 tests)
+- Updated `focus-chain/src/index.test.ts` (5 tests updated)
+
+**Phase B: Provider Tests**
+- 10 new test files for providers missing tests: deepseek, mistral, groq, xai, cohere, together, ollama, glm, kimi, openrouter
+- Each uses shared `testProviderActivation()` harness (3 tests per provider = 30 new tests)
+
+**Phase C: SQLite Session Storage**
+- `SessionStorage` interface with save/load/delete/list/loadAll — `core-v2/src/session/storage.ts`
+- `MemorySessionStorage` (Map-based) — `core-v2/src/session/memory-storage.ts`
+- `SqliteSessionStorage` (uses `IDatabase`) — `core-v2/src/session/sqlite-storage.ts`
+- `serializeSession()` / `deserializeSession()` — handles Map↔Object conversion
+- `SessionManager` updated with `save()`, `loadSession()`, `loadFromStorage()`, `startAutoSave()`
+- 18 new tests across 3 files (storage, sqlite-storage, manager)
+
+**Phase D: Persistent Memory Extension**
+- New extension: `packages/extensions/memory/` with manifest, store, tools, entry
+- `MemoryStore` — CRUD over ExtensionStorage, categories (project/preferences/debug/context)
+- 4 tools: `memory_write`, `memory_read`, `memory_list`, `memory_delete`
+- System prompt injection via `prompt:build` event
+- 19 new tests across 3 files
+
+**Phase E: MCP Advanced Features**
+- Resources: `listResources()`, `readResource()` in client + manager
+- Prompts: `listPrompts()`, `getPrompt()` in client + manager
+- Sampling: `onSamplingRequest()` handler, server→client JSON-RPC request routing
+- Reconnection: `ReconnectStrategy` with exponential backoff + jitter — `mcp/src/reconnect.ts`
+- OAuth: authorization code flow, token exchange, refresh — `mcp/src/oauth.ts`
+- Transport: `onError`/`onClose` callbacks on both `StdioTransport` and `SSETransport`
+- 17 new tests across 2 new + 2 updated files
+
+**Phase F: Symbol Extraction**
+- Regex-based extractor for TypeScript/JS, Python, Rust, Go — `codebase/src/symbol-extractor.ts`
+- Extracts functions, classes, interfaces, types, enums, methods, variables
+- `/symbols` command registered
+- 12 new tests
+
+**Phase G: Full LSP Client**
+- `LSPTransport` — Content-Length header framing (NOT newline-delimited) — `lsp/src/transport.ts`
+- `LSPClient` — initialize, shutdown, didOpen/didChange/didClose, hover, definition, references, completion, diagnostics — `lsp/src/client.ts`
+- `LSPServerManager` — per-language server lifecycle (start/stop/restart) — `lsp/src/server-manager.ts`
+- `formatHover()`, `formatLocations()`, `formatDiagnostics()` — `lsp/src/queries.ts`
+- 3 tools: `lsp_diagnostics`, `lsp_hover`, `lsp_definition`
+- 35 new tests across 5 files
+
+**CLAUDE.md updated:** Tools table 28 → 35 (added memory_read/write/list/delete, lsp_diagnostics/hover/definition)
+
+---
+
 ## 2026-02-26
 
 ### Sprint 8 — Test Coverage Push (core-v2 + extensions)
@@ -399,4 +458,4 @@
 
 ---
 
-*Last updated: 2026-02-26 — ~3302 tests across ~162 test files (includes core-v2 + extensions)*
+*Last updated: 2026-02-28 — ~3,896 tests across ~250 test files (includes core-v2 + extensions)*

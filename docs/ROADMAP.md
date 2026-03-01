@@ -32,11 +32,11 @@ Everything needed for a working desktop AI coding app.
 - Spring physics animations, glassmorphism design
 - Code viewer (CodeMirror 6)
 
-### Core Engine (~54,500 lines original + ~5K core-v2 + ~25 extensions, latest baseline: ~3,668 tests across 211 files)
+### Core Engine (~54,500 lines original + ~5K core-v2 + ~25 extensions, latest baseline: ~3,857 tests across ~240 files)
 | Category | Modules |
 |----------|---------|
 | Agent System | Agent loop, Praxis 3-tier hierarchy (13 agents), Parallel execution, Validator |
-| Tools | 28 tools (file, shell, web, agents, patch, batch, search, delegate, memory) |
+| Tools | 35 tools (file, shell, web, agents, patch, batch, search, delegate, memory, LSP) |
 | Intelligence | Codebase understanding, context management, memory, LSP, symbol extraction |
 | Extensibility | Extensions, commands, hooks, skills, MCP (OAuth + reconnect) |
 | Safety | Permissions, policy engine, trusted folders |
@@ -73,7 +73,7 @@ All development work is done. Only manual Tauri testing remains.
 - File watcher (AI comments: `// AI!` execute, `// AI?` question — 6 patterns, 30+ extensions, Tauri FS watch)
 - Step-level undo (Undo button in toolbar, git revert of last auto-committed AI edit)
 - Streaming tool preview (live tool call cards with status transitions during streaming)
-- Backend and integration baseline tests (3302 tests across 162 files)
+- Backend and integration baseline tests (~3,857 tests across ~240 files)
 - 0 TS errors, 0 Biome errors, vite build passes, 0 TODOs in src/
 
 ### Manual Testing (Before Phase 2)

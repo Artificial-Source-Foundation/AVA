@@ -1,6 +1,6 @@
 # Backend Test Coverage
 
-> Latest verified baseline: **~3302 tests** across **~162 test files**. Includes core-v2 (407 tests) + extensions (319 tests) from Sprint 8 coverage push.
+> Latest verified baseline: **~3,857 tests** across **~240 test files**. Includes core-v2, extensions (Sprint 17: +271 tests), and frontend tests.
 >
 > Strategy: Test pure functions and stateful classes. Skip LLM/FS/HTTP-dependent code.
 
@@ -10,11 +10,10 @@
 
 | Metric | Value |
 |--------|-------|
-| Total tests | ~3302 |
-| Test files | ~162 |
-| Source files (total) | ~237 |
-| Source lines | ~54,500 |
-| File coverage | ~46% |
+| Total tests | ~3,857 |
+| Test files | ~240 |
+| Source files (total) | ~280+ |
+| Source lines | ~60,000+ (core 54.5K + core-v2 5K + extensions) |
 | TS errors | 0 |
 | Biome errors | 0 |
 

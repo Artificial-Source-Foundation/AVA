@@ -22,8 +22,9 @@
 
 - **All P0–P3-C competitive gap items delivered** (31 features in final sprint)
 - **Sprint 16 Praxis**: 3-tier agent hierarchy UI (Commander → Leads → Workers)
-- **Phase 2 Plugin Ecosystem**: SDK, marketplace, lifecycle, sandboxing — all done except Sprint 2.4 (registry API)
-- **Remaining**: Manual QA (Linux DE matrix, light mode), Sprint 2.4 (plugin registry API)
+- **Gap Analysis Sprint**: 20 items — delegation UI, doom loop banner, bento cards, skill CRUD, session tree, memory browser, trusted folders, marketplace UX, MCP OAuth, plugin wizard
+- **Phase 2 Plugin Ecosystem**: SDK, marketplace, lifecycle, sandboxing, wizard, hot reload — all done except registry API backend
+- **Remaining**: Manual QA (Linux DE matrix, light mode), plugin registry API backend
 
 ---
 
@@ -100,7 +101,7 @@ src/
 │   │   ├── ChatView.tsx             # Chat orchestrator (messages + input + context + clipboard)
 │   │   ├── MessageList.tsx          # Virtual-scrolled list, adaptive limit, scroll backfill
 │   │   ├── MessageBubble.tsx        # Single message (markdown, tokens, cost)
-│   │   ├── MessageInput.tsx         # Input + toolbar (voice, editor, sandbox, pause/resume)
+│   │   ├── MessageInput.tsx         # Input + toolbar (voice, editor, sandbox, doom loop)
 │   │   ├── MessageActions.tsx       # Copy, edit, fork, rewind, delete per message
 │   │   ├── MarkdownContent.tsx      # Markdown renderer with syntax highlighting
 │   │   ├── ContextBar.tsx           # Token usage progress bar below input
@@ -129,6 +130,7 @@ src/
 │   │   ├── ModelChangeIndicator.tsx # Model switch mid-session indicator
 │   │   ├── ShortcutHint.tsx         # Dynamic Enter/Ctrl+Enter hint
 │   │   ├── EditForm.tsx             # Inline message editing + resubmit
+│   │   ├── DoomLoopBanner.tsx       # Agent stuck-in-loop warning (stop/retry/switch)
 │   │   ├── TypingIndicator.tsx      # LLM typing animation
 │   │   │
 │   │   ├── message-input/           # MessageInput subcomponents
@@ -145,7 +147,8 @@ src/
 │   │       └── sections.tsx         # Date sections + grouping
 │   │
 │   ├── sidebar/
-│   │   ├── SidebarSessions.tsx      # Session list with search, context menu
+│   │   ├── SidebarSessions.tsx      # Session list with search, tree/list toggle, context menu
+│   │   ├── SessionBranchTree.tsx    # Collapsible session tree (parentSessionId hierarchy)
 │   │   ├── SidebarExplorer.tsx      # File tree (read-only lock, context menu)
 │   │   └── SidebarMemory.tsx        # Memory items sidebar
 │   │
@@ -156,7 +159,8 @@ src/
 │   │   ├── TeamPanel.tsx            # Dev team hierarchy tree (3-tier Praxis)
 │   │   ├── TeamMemberChat.tsx       # Scoped chat per team member
 │   │   ├── AgentActivityPanel.tsx   # Right panel: agent status cards
-│   │   └── FileOperationsPanel.tsx  # File change history with undo
+│   │   ├── FileOperationsPanel.tsx  # File change history with undo
+│   │   └── MemoryBrowserPanel.tsx   # Cross-session memory browser (search, filter, delete)
 │   │
 │   ├── settings/
 │   │   ├── SettingsModal.tsx        # Full-page modal with sidebar nav (12 tabs)
@@ -169,6 +173,7 @@ src/
 │   │   ├── settings-agent-edit-modal.tsx # Agent create/edit modal
 │   │   ├── settings-keybinding-edit-modal.tsx # Keybinding editor
 │   │   ├── settings-field-group.tsx      # Reusable field group component
+│   │   ├── SettingsCard.tsx         # Bento card wrapper (icon, title, description, action slot)
 │   │   ├── DeviceCodeDialog.tsx     # OAuth device code flow dialog
 │   │   ├── OllamaModelBrowser.tsx   # Ollama model list/pull/delete
 │   │   └── tabs/
@@ -178,9 +183,10 @@ src/
 │   │       ├── AgentsTab.tsx        # 3-tier agent configuration (Commander/Lead/Worker)
 │   │       ├── PermissionsTab.tsx   # Granular per-tool approval rules
 │   │       ├── CommandsTab.tsx      # Custom TOML commands CRUD
-│   │       ├── MCPServersTab.tsx    # MCP server browser + management
-│   │       ├── MicroagentsTab.tsx   # Built-in skills enable/disable
-│   │       ├── PluginsTab.tsx       # Plugin manager (catalog, git install, sandboxing)
+│   │       ├── MCPServersTab.tsx    # MCP server browser + management + OAuth status
+│   │       ├── MicroagentsTab.tsx   # Built-in skills + custom skill CRUD
+│   │       ├── TrustedFoldersTab.tsx # Allow/deny directory boundaries (glob support)
+│   │       ├── PluginsTab.tsx       # Plugin manager (catalog, sort, ratings, git install)
 │   │       ├── KeybindingsTab.tsx   # Keyboard shortcut customization
 │   │       ├── DeveloperTab.tsx     # Dev console + extension testing
 │   │       └── providers/           # Provider settings subcomponents
@@ -203,8 +209,13 @@ src/
 │   │   ├── ChangelogDialog.tsx      # "What's New" on update
 │   │   ├── UpdateDialog.tsx         # Auto-updater download + install
 │   │   ├── ExportOptionsDialog.tsx  # Export with redaction options
+│   │   ├── MCPOAuthDialog.tsx       # MCP server OAuth consent flow (PKCE)
 │   │   ├── CronPickerDialog.tsx     # Visual cron expression builder
 │   │   └── SandboxReviewDialog.tsx  # Staged changes review (accept/reject)
+│   │
+│   ├── plugins/
+│   │   ├── PluginWizard.tsx         # Multi-step plugin creation (4 templates)
+│   │   └── PublishDialog.tsx        # Plugin publish flow stub (3-step)
 │   │
 │   ├── ui/                          # Design system primitives
 │   │   ├── Button.tsx, Card.tsx, Badge.tsx
@@ -235,7 +246,7 @@ src/
 │   │   ├── settings-hydration.ts    # Merge defaults + persisted
 │   │   ├── settings-appearance.ts   # CSS variable application
 │   │   └── settings-io.ts           # Export/import JSON
-│   ├── session.ts                   # Session CRUD, messages, agents, file ops, checkpoints, pause/resume
+│   ├── session.ts                   # Session CRUD, messages, agents, file ops, checkpoints, branching
 │   ├── layout.ts                    # Panel visibility, resize, code editor file
 │   ├── team.ts                      # Dev team hierarchy (3-tier Praxis)
 │   ├── project.ts                   # Current project directory, CWD switching
@@ -283,6 +294,7 @@ src/
 │   ├── tool-approval-bridge.ts      # Bridge approval UI ↔ core settings
 │   ├── workflows.ts                 # Workflow DB operations
 │   ├── workflow-scheduler.ts        # Cron parser + scheduler (setInterval-based)
+│   ├── mcp-oauth.ts                 # MCP OAuth PKCE (token store, refresh, revoke)
 │   ├── plugins-fs.ts                # Plugin FS operations (install, uninstall, reload)
 │   ├── tarball.ts                   # .tar.gz fetch + extract (for plugin install)
 │   ├── auto-updater.ts              # @tauri-apps/plugin-updater integration
@@ -339,7 +351,7 @@ src/
 
 Settings are stored in `localStorage` and synced to the core engine via `core-bridge.ts`.
 
-### Settings Groups (12 tabs)
+### Settings Groups (13 tabs)
 
 | Tab | Key Settings |
 |-----|-------------|
@@ -351,9 +363,10 @@ Settings are stored in `localStorage` and synced to the core engine via `core-br
 | **Agents** | 3-tier agent config (Commander → Senior Leads → Workers), import/export |
 | **Permissions** | Granular per-tool approval rules (allow/ask/deny with globs) |
 | **Commands** | Custom TOML commands CRUD |
-| **MCP** | MCP server browser (12 presets) + manual config |
-| **Microagents** | Built-in skills enable/disable (8 skills) |
-| **Plugins** | Catalog, git install, link local, sandboxing, dev mode, hot reload |
+| **MCP** | MCP server browser (12 presets) + manual config + OAuth status |
+| **Microagents** | Built-in skills enable/disable (8 skills) + custom skill CRUD |
+| **Trusted Folders** | Allow/deny directory boundaries with glob support |
+| **Plugins** | Catalog, sort, ratings, git install, link local, sandboxing, wizard, publish |
 | **Shortcuts** | Keyboard shortcut customization |
 
 ### Data Management
@@ -426,7 +439,7 @@ All stores use SolidJS `createSignal` / `createMemo` / `createStore`. No externa
 | Store | Responsibility |
 |-------|---------------|
 | `settings/` | All app settings, appearance, provider credentials |
-| `session.ts` | Current session, messages, agents, file ops, checkpoints, pause, read-only files |
+| `session.ts` | Current session, messages, agents, file ops, checkpoints, branching, read-only files |
 | `layout.ts` | Panel visibility, sidebar state, drag-resize, code editor file |
 | `team.ts` | Dev team hierarchy (3-tier Praxis), member status |
 | `project.ts` | Current working directory, CWD switching |

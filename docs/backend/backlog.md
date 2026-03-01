@@ -46,7 +46,7 @@
 | mcp/ (6 files) | MCP client | **DONE** (Sprint 13: real transport+client+manager, 33 tests) |
 | hooks/ (4 files) | Lifecycle hooks | Requires tool execution context |
 | git/ (5 files) | Git operations | Requires real git repo |
-| lsp/ (4 files) | LSP integration | Requires language servers |
+| ~~lsp/ (4 files)~~ | ~~LSP integration~~ | **DONE** (Sprint 17: full client, transport, manager, queries — 35 tests) |
 | tools/ individual (~25 files) | Each tool | Requires filesystem + network |
 
 ---
@@ -84,7 +84,7 @@
 - [x] **Config migration tests** — ~~Version migration untested~~ **DONE** (24 tests)
 - [x] **MCP client tests** — ~~MCP protocol client untested~~ **DONE** (Sprint 10: manager tests 9; Sprint 13: transport, client, manager, extension — 4 test files)
 - [x] **Hook executor tests** — ~~Hook execution untested~~ **DONE** (executor.ts tested, 16 tests)
-- [ ] **SQLite session storage** — Sessions are file-based JSON; Goose uses SQLite for durability + querying
+- [x] **SQLite session storage** — ~~Sessions are file-based JSON; Goose uses SQLite for durability + querying~~ **DONE** (Sprint 17: `SessionStorage` interface, `SqliteSessionStorage`, `MemorySessionStorage`, serialization helpers)
 - [x] **Visibility metadata** — ~~Compacted messages are fully removed~~ **DONE** (Sprint B3: `MessageVisibility` type, visibility-aware compaction)
 - [x] **Auto-compaction threshold** — ~~Fixed strategy~~ **DONE** (Sprint B3: configurable threshold, tested)
 - [x] **Tool prefix namespacing** — ~~Flat tool registry risks name collisions~~ **DONE** (Sprint B4: `tools/namespacing.ts` with `mcp__`/`ext__` prefixes, backward-compat lookupTool)
@@ -182,9 +182,9 @@ This backlog feeds into the project roadmap:
 
 #### Still Needed (MCP)
 - [x] ~~MCP OAuth flows (auth + refresh + storage)~~ **DONE** (Gap Analysis: `mcp/src/oauth.ts` — PKCE code verifier, token exchange, refresh, revoke + 6 tests)
-- [ ] MCP resources (read/subscribe)
-- [ ] MCP prompts (list/get)
-- [ ] MCP sampling (server-initiated LLM requests)
+- [x] ~~MCP resources (read/subscribe)~~ **DONE** (Sprint 17: `listResources()`, `readResource()` in client + manager)
+- [x] ~~MCP prompts (list/get)~~ **DONE** (Sprint 17: `listPrompts()`, `getPrompt()` in client + manager)
+- [x] ~~MCP sampling (server-initiated LLM requests)~~ **DONE** (Sprint 17: `onSamplingRequest()` handler, server→client request routing)
 - [x] ~~Reconnection with exponential backoff~~ **DONE** (Gap Analysis: `mcp/src/reconnect.ts` — `ReconnectStrategy` with jitter, max attempts, reset + 7 tests)
 - [ ] Tool list change notifications (re-discover on `notifications/tools/list_changed`)
 - [ ] Server health monitoring + auto-restart
@@ -249,16 +249,26 @@ This backlog feeds into the project roadmap:
 - [x] **Validator tests** — Extension activation + validation pipeline — 1 test file
 - [x] **MCP types expanded** — OAuth, resources, prompts, sampling, notifications type definitions — `extensions/mcp/src/types.ts`
 
+### Sprint 17 — Backend Completion (All 9 "What's Next" Items)
+
+> **Sprint 17** completed all remaining backend items. 7 phases delivered: validator/focus-chain wiring, provider tests, SQLite session storage, persistent memory extension, MCP advanced features, symbol extraction, full LSP client. +271 tests across 39 files. Tool count 28 → 35. Extensions 24 → 25. Total: **~3,896 tests across ~250 files**.
+
+#### Completed
+- [x] **Phase A: Quick fixes** — Validator `enabledByDefault: true` + `agent:completing` handler wired. Focus-chain event names fixed (`turn:start`/`turn:end`/`agent:finish`). Diff tracking already working.
+- [x] **Phase B: Provider tests** — 10 providers tested (deepseek, mistral, groq, xai, cohere, together, ollama, glm, kimi, openrouter) via shared test harness.
+- [x] **Phase C: SQLite session storage** — `SessionStorage` interface, `MemorySessionStorage`, `SqliteSessionStorage`, serialization helpers, auto-save timer. 18 new tests.
+- [x] **Phase D: Persistent memory extension** — `MemoryStore` (CRUD + categories), 4 tools (`memory_write`/`memory_read`/`memory_list`/`memory_delete`), system prompt injection via `prompt:build`. 19 new tests.
+- [x] **Phase E: MCP advanced** — Resources (`listResources`/`readResource`), prompts (`listPrompts`/`getPrompt`), sampling (server→client), reconnection (exponential backoff + jitter), OAuth (auth code flow + token refresh), transport `onError`/`onClose`. 17 new tests.
+- [x] **Phase F: Symbol extraction** — Regex-based extractor for TS/JS, Python, Rust, Go. `/symbols` command. 12 new tests.
+- [x] **Phase G: Full LSP client** — Content-Length framed transport, `LSPClient` (initialize/hover/definition/references/diagnostics), `LSPServerManager` (per-language lifecycle), `formatHover`/`formatLocations`/`formatDiagnostics`. 3 tools (`lsp_diagnostics`/`lsp_hover`/`lsp_definition`). 35 new tests.
+
 ### Still Needed
 - [ ] Real plugin install/uninstall (currently state-only in frontend)
-- [ ] MCP resources (read/subscribe)
-- [ ] MCP prompts (list/get)
-- [ ] MCP sampling (server-initiated LLM requests)
+- [ ] Tool list change notifications (re-discover on `notifications/tools/list_changed`)
+- [ ] Server health monitoring + auto-restart
 - [ ] Background shell management (bash_background, bash_kill)
 - [ ] Tool result truncation (>50K chars)
 - [ ] Image/vision support in agent loop
-- [ ] Wire validator to CLI mode
-- [ ] Wire focus-chain tracking to agent loop
 - [ ] Tauri bridge for core-v2 (desktop integration)
 
-*Last updated: 2026-02-28*
+*Last updated: 2026-02-28 — Sprint 17 completion (271 new tests, 35 tools, 25 extensions)*

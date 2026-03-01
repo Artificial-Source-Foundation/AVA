@@ -29,8 +29,11 @@ Condensed module index for `packages/core-v2/` (minimal core) and `packages/exte
 ### config/ — Extensible settings
 - `manager.ts` — `SettingsManager.registerCategory(namespace, schema, defaults)`
 
-### session/ — Session management
-- `manager.ts` — CRUD, auto-save, in-memory storage
+### session/ — Session storage
+- `manager.ts` — CRUD, auto-save, pluggable storage backend
+- `storage.ts` — `SessionStorage` interface + serialization helpers
+- `memory-storage.ts` — In-memory storage (default)
+- `sqlite-storage.ts` — SQLite-backed storage (persistent)
 
 ### bus/ — Message bus
 - `message-bus.ts` — Pure pub/sub + request/response (no policy dependency)
@@ -38,7 +41,7 @@ Condensed module index for `packages/core-v2/` (minimal core) and `packages/exte
 ### platform.ts — Platform abstraction
 - `IPlatformProvider` with `IFileSystem`, `IShell`, `ICredentialStore`, `IDatabase`, `IPTY`
 
-## Extensions (22 modules)
+## Extensions (25 modules)
 
 ### Provider extensions (14)
 Each in `providers/<name>/`: anthropic, openai, openrouter, google, deepseek, groq, mistral, cohere, together, xai, ollama, glm, kimi, copilot.
@@ -60,14 +63,18 @@ Shared utilities in `providers/_shared/`: `openai-compat.ts` (factory for OpenAI
 - Validators: syntax, typescript, lint, test, self-review
 
 ### Team: commander/
-- `router.ts` — Task routing to specialized workers
-- `workers.ts` — 5 worker definitions (coder, tester, reviewer, researcher, debugger)
+- `agent-definition.ts` — Unified `AgentDefinition` type for all tiers
+- `registry.ts` — Central agent registry (register/get/filter)
+- `workers.ts` — 13 built-in agents (1 commander, 4 leads, 8 workers)
+- `delegate.ts` — Per-worker delegate tools, spawns child `AgentExecutor`
+- `planning.ts` — Task decomposition with topological sort
+- `settings-sync.ts` — Settings → registry bridge
 
 ### Hooks: hooks/
 - `runner.ts` — `HookRunner` executes PreToolUse/PostToolUse scripts
 
 ### Tools: tools-extended/
-18 additional tools beyond core 6 (create_file, delete_file, browser, websearch, etc.)
+18 additional tools beyond core 6 (create_file, delete_file, websearch, webfetch, etc.)
 
 ### Prompts: prompts/
 System prompt building with model-specific variants.
@@ -75,13 +82,34 @@ System prompt building with model-specific variants.
 ### Context: context/
 Token tracking, compaction, and compression strategies.
 
+### Memory: memory/
+- `store.ts` — `MemoryStore` CRUD with categories (project, user, session, debug)
+- `tools.ts` — `memory_read`, `memory_write`, `memory_list`, `memory_delete` tools
+
+### Codebase: codebase/
+- `indexer.ts` — File discovery + dependency graph
+- `symbol-extractor.ts` — Regex-based symbol extraction (TS/JS, Python, Rust, Go, Java, C++)
+
+### LSP: lsp/
+- `client.ts` — Full LSP client (initialize, hover, definition, references, diagnostics)
+- `server-manager.ts` — Per-language server lifecycle management
+- `transport.ts` — Content-Length framed JSON-RPC transport
+- `queries.ts` — Hover/location/diagnostic formatting helpers
+
+### MCP: mcp/
+- `client.ts` — JSON-RPC 2.0 client (initialize, tools, resources, prompts, sampling)
+- `manager.ts` — Connection lifecycle (connect → initialize → ready)
+- `transport.ts` — Stdio + SSE transports
+- `oauth.ts` — PKCE auth code flow + token refresh/revoke
+- `reconnect.ts` — Exponential backoff with jitter
+
 ## Build & Test
 
 ```bash
 pnpm build:all                                    # Build everything
-npx vitest run packages/core-v2/                  # Core-v2 tests (407 tests, 24 files)
-npx vitest run packages/extensions/               # Extension tests (319 tests, 28 files)
-npx vitest run                                    # All tests (3,302 tests, 162 files)
+npx vitest run packages/core-v2/                  # Core-v2 tests
+npx vitest run packages/extensions/               # Extension tests
+npx vitest run                                    # All tests (~3,857 tests, ~240 files)
 ```
 
 ## Extension Manifest Format

@@ -1,6 +1,6 @@
 # Frontend Backlog
 
-> What's missing, prioritized. Updated 2026-02-28 (Gap Analysis Sprint: 20 items across 9 batches).
+> What's missing, prioritized. Updated 2026-03-02 (Sprint 23 frontend completion).
 
 ---
 
@@ -14,6 +14,51 @@
 | **2+: Competitive Gaps** | **Complete** | All P0–P3-C delivered (31 items in final sprint) |
 | **Sprint 16: Praxis** | **Complete** | 3-tier agent hierarchy UI (tier grouping, agent edit modal, import/export) |
 | **Gap Analysis Sprint** | **Complete** | 20 items: delegation UI, doom loop, bento cards, skill CRUD, session tree, memory browser, trusted folders, marketplace, OAuth, plugin wizard |
+| **Sprint 21: Frontend ↔ Core-v2** | **Complete** | Settings sync, event hooks, budget sync, chat→AgentExecutor |
+| **Sprint 22: Backend Parity** | Backend complete | Frontend wiring mostly done (Sprint 23) |
+| **Sprint 23: Frontend Completion** | **Complete** | Launch-ready: DB migration, session bridge, archive/busy/slug UI, structured output, Explorer agent, plugin version tracking, smoke tests + QA checklist |
+
+## Sprint 21 — Frontend ↔ Core-v2 Integration (DONE)
+
+All integration gaps between desktop app and core-v2 closed:
+- [x] Plugin SessionManager dedup (shared `getCoreSessionManager()`)
+- [x] Bidirectional settings sync (`settings-sync.ts`, loop prevention)
+- [x] Extension event bridge hooks (`useExtensionEvent`, `useExtensionEvents`, `useExtensionEventLog`)
+- [x] Model status hook (`useModelStatus`)
+- [x] Context budget sync (reactive `budgetTick` on `context:compacting`/`agent:finish`)
+- [x] Chat → AgentExecutor unification (full middleware chain: permissions, hooks, sandbox, checkpoints)
+
+## Sprint 23 — Frontend Completion (DONE)
+
+Launch-ready sprint closing all remaining desktop↔core-v2 gaps:
+
+- [x] **DB Migration V6** — `parent_session_id`, `slug`, `busy_since` columns (fixes session fork crash bug)
+- [x] **DB Migration V7** — `plugin_installs` table for persistent plugin tracking
+- [x] **DesktopSessionStorage** — Adapter bridging core-v2 SessionManager with desktop SQLite (`desktop-session-storage.ts`)
+- [x] **Session status bridge** — `session:status` events sync busy/idle state to desktop DB via `core-bridge.ts`
+- [x] **Archive/Unarchive UI** — Context menu "Archive" option, collapsible archived section in sidebar
+- [x] **Busy indicator** — `Loader2` spinner replaces `MessageSquare` icon when agent is executing
+- [x] **Slug display** — Human-readable slug shown as subtitle below session name
+- [x] **Structured output renderer** — `StructuredOutputView.tsx` — collapsible JSON tree for `__structured_output` tool
+- [x] **Explorer agent preset** — Read-only worker with 7 tools (read_file, glob, grep, ls, repo_map, websearch, webfetch), Compass icon
+- [x] **B-084 wontfix** — Dual-stack toggle unnecessary (desktop already uses core-v2 exclusively)
+- [x] **Plugin version tracking** — `refreshCatalog()` (force bypass), `getPluginVersion()`, `hasUpdate()`, `pluginsWithUpdates`
+- [x] **Smoke tests** — 17 automated tests covering migrations, session types, slug, structured output, plugins, agent presets
+- [x] **QA checklist** — `docs/qa-checklist.md` with 40+ manual test items
+
+New files: `desktop-session-storage.ts`, `StructuredOutputView.tsx`, `smoke.test.ts`, `qa-checklist.md`
+
+## Sprint 22 Backend Features — Frontend Wiring Status
+
+| Backend Feature | Frontend Work | Status |
+|----------------|---------------|--------|
+| ~~Session archival + busy state + slug~~ | ~~Archive/unarchive in session list, busy indicator, auto-slug titles~~ | **DONE** (Sprint 23: context menu archive, collapsible archived section, Loader2 spinner, slug subtitle) |
+| 6 new LSP tools (documentSymbols, workspaceSymbols, codeActions, rename, refs, completions) | Code viewer context menus, symbol outline panel | OPEN |
+| ~~PTY tool (core-v2)~~ | ~~Verify xterm.js terminal uses core-v2 PTY~~ | **DONE** (TauriPTY already wired in platform-tauri) |
+| File watcher extension (core-v2) | Wire to existing `file-watcher.ts` or replace with core-v2 version | LOW |
+| ~~Structured output tool~~ | ~~Render validated JSON responses differently in chat~~ | **DONE** (Sprint 23: StructuredOutputView.tsx — collapsible JSON tree in tool-call-output) |
+| ~~Explore subagent (15th agent)~~ | ~~Add to AgentsTab, delegation UI~~ | **DONE** (Sprint 23: Explorer preset with Compass icon, 7 read-only tools) |
+| Prompt caching / model-family prompts | Transparent — no UI needed | — |
 
 ## Ownership Rules
 
@@ -263,10 +308,10 @@ Features below are things **competitors ship that AVA does not yet have**.
 - [x] Plugin creation wizard (PluginWizard.tsx — 4 templates) — **DONE** (Gap Analysis Sprint)
 - [x] Marketplace sort (popular/rated/recent/name) + download/rating display — **DONE** (Gap Analysis Sprint)
 - [x] Plugin hot reload (reloadPlugin in extension-loader) — **DONE** (Gap Analysis Sprint)
-- [ ] Plugin registry API (backend)
-- [ ] Version management and updates
+- [x] Local version tracking + update detection — **DONE** (Sprint 23: `plugin_installs` DB table, `hasUpdate()`, `pluginsWithUpdates`, `refreshCatalog()`)
+- [ ] Plugin registry API (backend) — real remote publishing
 - [ ] Community ratings backend
-**Frontend**: Publish flow, wizard, sort, ratings UI all shipped. Backend registry API still needed.
+**Frontend**: Publish flow, wizard, sort, ratings, version tracking all shipped. Remote registry API still needed.
 
 ### Sprint 2.5: Starter Plugins
 - [x] 5-10 built-in plugins demonstrating the system — **DONE** (Sprint 10: 5 example plugins with tests in `docs/examples/plugins/`)
@@ -398,6 +443,11 @@ These were identified as gaps but are now fully implemented:
 | Custom commands UI | 70+ | Settings tab, TOML CRUD, edit form, prompt preview |
 | Voice dictation input | 70+ | Web Speech API, MicButton in toolbar strip, continuous dictation |
 | Workflow/recipe creation | 70+ | DB table, CRUD, WorkflowDialog, workflow cards in empty chat |
+| Bidirectional settings sync | Sprint 21 | core-v2 SettingsManager ↔ frontend via CustomEvent bridge |
+| Extension event bridge hooks | Sprint 21 | `useExtensionEvent`, `useExtensionEvents`, `useExtensionEventLog` |
+| Model status hook | Sprint 21 | `useModelStatus` — reactive modelCount, lastUpdate, refresh |
+| Context budget sync | Sprint 21 | Reactive budgetTick on context:compacting + agent:finish events |
+| Chat → AgentExecutor unification | Sprint 21 | Full middleware chain (permissions, hooks, sandbox, checkpoints) |
 
 ---
 
@@ -411,7 +461,7 @@ Features no other AI coding tool has:
 | Per-agent model/provider (each agent can use different LLM) | Built (Sprint 16) |
 | Planning pipeline (Planner → Architect → Lead delegation) | Built (Sprint 16) |
 | Agent import/export (share custom agents as JSON) | Built (Sprint 16) |
-| 13 built-in specialized agents with tier-based delegation | Built (Sprint 16) |
+| 15 built-in specialized agents with tier-based delegation | Built (Sprint 16+22) |
 | Worker scope filtering (each agent sees only relevant files/tools) | Built |
 | Parallel agent execution | Built |
 | Auto-reporting (workers report up the chain) | Built |

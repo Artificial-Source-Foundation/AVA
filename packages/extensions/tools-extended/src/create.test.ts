@@ -67,6 +67,34 @@ describe('createFileTool', () => {
     expect(result.output).toContain(`(${content.length} chars)`)
   })
 
+  it('resolves relative path against workingDirectory', async () => {
+    const result = await createFileTool.execute(
+      { path: 'src/hello.ts', content: 'console.log("hi")' },
+      {
+        sessionId: 'test',
+        workingDirectory: '/project',
+        signal: AbortSignal.timeout(5000),
+      }
+    )
+    expect(result.success).toBe(true)
+    expect(result.output).toContain('/project/src/hello.ts')
+    const content = await platform.fs.readFile('/project/src/hello.ts')
+    expect(content).toBe('console.log("hi")')
+  })
+
+  it('keeps absolute paths as-is', async () => {
+    const result = await createFileTool.execute(
+      { path: '/abs/file.ts', content: 'hello' },
+      {
+        sessionId: 'test',
+        workingDirectory: '/project',
+        signal: AbortSignal.timeout(5000),
+      }
+    )
+    expect(result.success).toBe(true)
+    expect(result.output).toContain('/abs/file.ts')
+  })
+
   it('returns error when aborted', async () => {
     const controller = new AbortController()
     controller.abort()

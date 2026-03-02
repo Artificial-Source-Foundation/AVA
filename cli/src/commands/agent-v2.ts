@@ -38,6 +38,7 @@ interface AgentV2Options {
   yolo: boolean
   json: boolean
   resume: string | null
+  praxis: boolean
 }
 
 function parseArgs(args: string[]): AgentV2Options | null {
@@ -56,6 +57,7 @@ function parseArgs(args: string[]): AgentV2Options | null {
   let yolo = false
   let json = false
   let resume: string | null = null
+  let praxis = false
 
   let i = 1
   while (i < args.length) {
@@ -81,6 +83,8 @@ function parseArgs(args: string[]): AgentV2Options | null {
       yolo = true
     } else if (arg === '--json') {
       json = true
+    } else if (arg === '--praxis') {
+      praxis = true
     } else if (!arg!.startsWith('--') && !goal) {
       goal = arg!
     }
@@ -94,7 +98,7 @@ function parseArgs(args: string[]): AgentV2Options | null {
     return null
   }
 
-  return { goal, provider, model, maxTurns, timeout, cwd, verbose, yolo, json, resume }
+  return { goal, provider, model, maxTurns, timeout, cwd, verbose, yolo, json, resume, praxis }
 }
 
 export async function runAgentV2Command(args: string[]): Promise<void> {
@@ -321,11 +325,7 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
         maxTurns: options.maxTurns,
         maxTimeMinutes: options.timeout,
         systemPrompt,
-        toolMode: getAgentModes().has('praxis')
-          ? 'praxis'
-          : getAgentModes().has('team')
-            ? 'team'
-            : undefined,
+        toolMode: options.praxis ? 'praxis' : selectAgentMode(options.goal, getAgentModes()),
       },
       onEvent
     )
@@ -534,6 +534,33 @@ async function importWithDistFallback(
   }
 }
 
+/** Decide whether a goal warrants the full Praxis hierarchy or flat mode. */
+function selectAgentMode(
+  goal: string,
+  availableModes: ReadonlyMap<string, { name: string }>
+): string | undefined {
+  if (!availableModes.has('praxis')) return undefined
+  const g = goal.toLowerCase()
+  const complexPatterns = [
+    'refactor',
+    'migrate',
+    'redesign',
+    'architect',
+    'full-stack',
+    'frontend and backend',
+    'multiple files',
+    'across the codebase',
+    'comprehensive',
+    'end-to-end',
+    'audit',
+    'review the entire',
+    'overhaul',
+  ]
+  if (complexPatterns.some((p) => g.includes(p))) return 'praxis'
+  if (goal.length > 300) return 'praxis'
+  return undefined
+}
+
 function printHelp(): void {
   console.log(`
 AVA Agent V2 - Core-v2 agent loop with extension system
@@ -548,6 +575,7 @@ OPTIONS:
   --timeout <minutes>   Timeout in minutes (default: 10)
   --cwd <path>          Working directory (default: current)
   --resume [id]         Resume a previous session (latest if no ID given)
+  --praxis              Force Praxis 3-tier delegation (auto-detected by default)
   --verbose             Verbose output with tool details
   --yolo                Auto-approve all tool calls (skip confirmation)
   --json                NDJSON output for scripting

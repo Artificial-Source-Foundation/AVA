@@ -3,14 +3,14 @@
  */
 
 import { getPlatform } from '@ava/core-v2/platform'
-import { defineTool } from '@ava/core-v2/tools'
+import { defineTool, resolvePathSafe } from '@ava/core-v2/tools'
 import * as z from 'zod'
 
 export const multieditTool = defineTool({
   name: 'multiedit',
   description: 'Apply multiple text replacements to a single file atomically. Max 50 edits.',
   schema: z.object({
-    filePath: z.string().describe('Absolute path to the file'),
+    filePath: z.string().describe('Path to the file (absolute or relative to working directory)'),
     edits: z
       .array(
         z.object({
@@ -26,11 +26,12 @@ export const multieditTool = defineTool({
     if (ctx.signal?.aborted) return { success: false, output: '', error: 'Aborted' }
 
     const fs = getPlatform().fs
+    const filePath = await resolvePathSafe(input.filePath, ctx.workingDirectory)
     let content: string
     try {
-      content = await fs.readFile(input.filePath)
+      content = await fs.readFile(filePath)
     } catch {
-      return { success: false, output: '', error: `File not found: ${input.filePath}` }
+      return { success: false, output: '', error: `File not found: ${filePath}` }
     }
 
     let modified = content
@@ -42,10 +43,10 @@ export const multieditTool = defineTool({
       modified = modified.replace(edit.oldString, edit.newString)
     }
 
-    await fs.writeFile(input.filePath, modified)
+    await fs.writeFile(filePath, modified)
     return {
       success: true,
-      output: `Applied ${input.edits.length} edit(s) to ${input.filePath}`,
+      output: `Applied ${input.edits.length} edit(s) to ${filePath}`,
     }
   },
 })

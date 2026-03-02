@@ -3,7 +3,7 @@
  */
 
 import { getPlatform } from '@ava/core-v2/platform'
-import { defineTool } from '@ava/core-v2/tools'
+import { defineTool, resolvePath } from '@ava/core-v2/tools'
 import * as z from 'zod'
 
 const DEFAULT_IGNORES = new Set([
@@ -39,7 +39,9 @@ export const lsTool = defineTool({
     }
 
     const fs = getPlatform().fs
-    const dirPath = input.path || ctx.workingDirectory
+    const dirPath = input.path
+      ? resolvePath(input.path, ctx.workingDirectory)
+      : ctx.workingDirectory
     const maxFiles = input.maxFiles ?? 100
 
     try {

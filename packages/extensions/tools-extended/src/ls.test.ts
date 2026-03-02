@@ -74,6 +74,36 @@ describe('lsTool', () => {
     expect(result.output).toContain('and 7 more')
   })
 
+  it('resolves relative path against workingDirectory', async () => {
+    platform.fs.addFile('/project/src/index.ts', 'x')
+    platform.fs.addFile('/project/src/utils.ts', 'x')
+    const result = await lsTool.execute(
+      { path: 'src' },
+      {
+        sessionId: 'test',
+        workingDirectory: '/project',
+        signal: AbortSignal.timeout(5000),
+      }
+    )
+    expect(result.success).toBe(true)
+    expect(result.output).toContain('index.ts')
+    expect(result.output).toContain('utils.ts')
+  })
+
+  it('keeps absolute paths as-is', async () => {
+    platform.fs.addFile('/other/dir/file.ts', 'x')
+    const result = await lsTool.execute(
+      { path: '/other/dir' },
+      {
+        sessionId: 'test',
+        workingDirectory: '/project',
+        signal: AbortSignal.timeout(5000),
+      }
+    )
+    expect(result.success).toBe(true)
+    expect(result.output).toContain('file.ts')
+  })
+
   it('returns error for nonexistent directory', async () => {
     const result = await lsTool.execute({ path: '/nonexistent' }, makeCtx())
     expect(result.success).toBe(false)

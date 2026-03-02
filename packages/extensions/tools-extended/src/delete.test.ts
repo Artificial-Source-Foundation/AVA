@@ -52,6 +52,36 @@ describe('deleteFileTool', () => {
     expect(result.error).toContain('is a directory')
   })
 
+  it('resolves relative path against workingDirectory', async () => {
+    platform.fs.addFile('/project/src/target.ts', 'delete me')
+    const result = await deleteFileTool.execute(
+      { path: 'src/target.ts' },
+      {
+        sessionId: 'test',
+        workingDirectory: '/project',
+        signal: AbortSignal.timeout(5000),
+      }
+    )
+    expect(result.success).toBe(true)
+    expect(result.output).toContain('/project/src/target.ts')
+    const exists = await platform.fs.exists('/project/src/target.ts')
+    expect(exists).toBe(false)
+  })
+
+  it('keeps absolute paths as-is', async () => {
+    platform.fs.addFile('/abs/file.ts', 'content')
+    const result = await deleteFileTool.execute(
+      { path: '/abs/file.ts' },
+      {
+        sessionId: 'test',
+        workingDirectory: '/project',
+        signal: AbortSignal.timeout(5000),
+      }
+    )
+    expect(result.success).toBe(true)
+    expect(result.output).toContain('/abs/file.ts')
+  })
+
   it('returns error when aborted', async () => {
     const controller = new AbortController()
     controller.abort()

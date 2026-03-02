@@ -93,6 +93,42 @@ describe('multieditTool', () => {
     expect(result.error).toContain('Edit 2: oldString not found')
   })
 
+  it('resolves relative path against workingDirectory', async () => {
+    platform.fs.addFile('/project/src/app.ts', 'const x = 1;\n')
+    const result = await multieditTool.execute(
+      {
+        filePath: 'src/app.ts',
+        edits: [{ oldString: 'const x = 1;', newString: 'const x = 42;' }],
+      },
+      {
+        sessionId: 'test',
+        workingDirectory: '/project',
+        signal: AbortSignal.timeout(5000),
+      }
+    )
+    expect(result.success).toBe(true)
+    expect(result.output).toContain('/project/src/app.ts')
+    const content = await platform.fs.readFile('/project/src/app.ts')
+    expect(content).toBe('const x = 42;\n')
+  })
+
+  it('keeps absolute paths as-is', async () => {
+    platform.fs.addFile('/abs/file.ts', 'aaa\n')
+    const result = await multieditTool.execute(
+      {
+        filePath: '/abs/file.ts',
+        edits: [{ oldString: 'aaa', newString: 'bbb' }],
+      },
+      {
+        sessionId: 'test',
+        workingDirectory: '/project',
+        signal: AbortSignal.timeout(5000),
+      }
+    )
+    expect(result.success).toBe(true)
+    expect(result.output).toContain('/abs/file.ts')
+  })
+
   it('returns error when file does not exist', async () => {
     const result = await multieditTool.execute(
       {

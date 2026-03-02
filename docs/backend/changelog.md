@@ -4,6 +4,54 @@
 
 ---
 
+## 2026-03-02
+
+### Sprint 19 — Backend Completion Sprint (28 Items, 4 Phases)
+
+**~360 new tests across 40+ test files** in the new architecture stack. Tool count 35 → 43. Extensions 26 → 28. Total: ~4,280 tests across ~270 files.
+
+**Phase 1: Core Agent Loop Hardening (8 items)**
+- Parallel tool execution — `parallelToolExecution` config, `Promise.all()` for independent tools, `--sequential` CLI flag. Detects dependencies by checking if tool B's input references tool A's output.
+- Image/vision support — `ImageBlock` type added to `ContentBlock` union, agent loop handles image content in messages, OpenAI-compat image block conversion for providers.
+- Tool result truncation — `truncateToolResults()` enforces 50KB per result and 200KB total context max with `[...truncated N chars]` marker.
+- Background shell management — 3 new tools: `bash_background` (spawn process, return PID), `bash_output` (read stdout/stderr from PID), `bash_kill` (terminate by PID). `ProcessRegistry` singleton tracks all PIDs with stdout/stderr buffers and exit codes.
+- Tool list change notifications — `tools:registered` and `tools:unregistered` events emitted via message bus on register/unregister. Agent loop subscribes to refresh available tools.
+- MCP health monitoring — `MCPHealthMonitor` class with configurable ping interval (default 30s), stuck process detection (10s timeout), auto-restart on failure, `mcp:health` events.
+- Auto-compaction improvements — Strategy selection: `summarize` for long sessions, `truncate` for short. `context:compacted` event with before/after token counts.
+- Steering interrupt improvements — `steer()` method on agent loop, `agent:steered` event. New user messages during tool execution abort remaining tools and inject immediately.
+
+**Phase 2: Praxis End-to-End (6 items)**
+- Auto-planning orchestrator — `executeOrchestration()` groups subtasks into dependency-ordered batches, executes independent subtasks via `Promise.all()`, respects `maxParallelDelegations` (default 3), emits `orchestration:batch-start`/`orchestration:batch-complete` events. Deadlock detection for dependency cycles.
+- Task routing integration — `analyzeDomain()` keyword matching maps task descriptions to 4 domains (frontend/backend/testing/devops), `selectWorker()` picks best lead agent.
+- Per-domain tool filtering — Frontend Lead: read-only + web tools. Backend Lead: all tools + LSP. QA Lead: read-only + test runner. Fullstack Lead: all tools.
+- Result aggregation — `aggregateResults()` combines multi-lead results into structured summary: files changed, tests run, issues found, total duration.
+- Error recovery in delegation — Retry with more specific prompt on first failure, escalate to parent on second failure, `delegation:retry` event, configurable `maxRetries` (default 1).
+- Parallel agent execution — Independent subtasks (no dependency edges in TaskPlan) run via `Promise.all()`. Each parallel agent gets own working context. Results collected and aggregated.
+
+**Phase 3: Competitive Feature Gaps (8 items)**
+- Git tools — 4 new tools using `gh` CLI: `create_pr` (create GitHub PR), `create_branch` (create + switch), `switch_branch` (switch existing), `read_issue` (read GitHub issue with comments/labels/state).
+- Per-tool-call checkpoints — Git stash middleware at priority 20. After every file-modifying tool call (write, edit, create, delete, bash), auto-creates lightweight checkpoint. `CheckpointStore` tracks checkpoints for instant rollback.
+- Granular permission modes — 5 levels: `suggest` (never execute), `ask` (ask every call), `auto-edit` (auto-approve edits, ask for bash/delete), `auto-safe` (auto read+edit, ask bash/delete/network), `yolo` (approve everything). 6 tool categories: read/edit/execute/delete/network/agent.
+- MCP streamable HTTP transport — `HttpStreamTransport` class implementing newest MCP standard. HTTP POST for requests, SSE for streaming responses, bidirectional on single connection, session ID management.
+- Auto-learning memory — Pattern detectors for tech-stack (8 frameworks), test-framework (4 runners), primary language (4 languages). Hooks into `agent:completing` event, filters by confidence ≥ 0.7, emits `memory:auto-learned`.
+- Model availability + fallback — EMA latency tracking, provider/model status (available/degraded/unavailable), per-provider fallback chains (e.g., Opus → Sonnet → GPT-4o), `getAvailableModel()` auto-selects.
+- Global doom loop detection — `trackGlobalToolCall()` and `detectGlobalDoomLoop()` track patterns across all concurrent agents at registry level. Extends per-agent detection.
+- Toolshim for non-tool-calling models — `parseToolCallsFromText()` parses XML-based `<tool_call>` blocks from text responses. `buildToolSchemaXML()` injects tool descriptions into system prompt. `needsToolShim()` detects models without native tool_use.
+
+**Phase 4: Plugin Infrastructure (2 items)**
+- Plugin install/uninstall backend — `installPlugin()` from local path, GitHub URL, or registry. `uninstallPlugin()` with cleanup. Signature verification stub. Installs to `~/.ava/plugins/`.
+- Plugin catalog API — `fetchCatalog()` from remote JSON, `searchCatalog()` with keyword + category filtering, `getCatalogEntry()` by ID, 30-minute cache TTL.
+
+**Phase 5: Smoke Test (2026-03-02)**
+- Full E2E CLI smoke test with Sonnet 4.6 via OpenRouter — 12 turns, 569 seconds, SUCCESS
+- Praxis hierarchy activated: Commander → fullstack-lead → backend-lead + qa-lead
+- Built calculator project in /tmp: 5 functions, 39 tests, all passing
+- 28 extensions loaded, all tools functional
+
+**CLAUDE.md updated:** Tools table 35 → 43 (added bash_background/output/kill, create_pr, create_branch, switch_branch, read_issue). Extensions module map updated.
+
+---
+
 ## 2026-02-28
 
 ### Sprint 17 — Backend Completion (All 9 "What's Next" Items)

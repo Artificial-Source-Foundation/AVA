@@ -1,6 +1,6 @@
 # Backend — @ava/core
 
-> The brain of AVA. ~280+ source files, ~60,000+ lines. Test baseline: ~3,896 tests across ~250 files. Includes dual-stack: original core + core-v2 + extensions.
+> The brain of AVA. ~280+ source files, ~60,000+ lines. Test baseline: ~4,280 tests across ~270 files. Includes dual-stack: original core + core-v2 + extensions.
 
 **Package:** `packages/core/` | **Entry:** `packages/core/src/index.ts` | **Exports:** 29 modules
 
@@ -28,14 +28,14 @@ User (Desktop/CLI)
 | Module | Files | Lines | Purpose |
 |--------|-------|-------|---------|
 | `agent/` | 22 | 5,530 | Autonomous loop, planning, recovery, subagents, modes (plan + minimal), metrics, validation gate |
-| `commander/` | 13 | 2,870 | Team Lead → Senior Leads → Junior Devs delegation, keyword auto-routing |
+| `commander/` | 17 | 3,800 | Team Lead → Senior Leads → Junior Devs delegation, keyword auto-routing, orchestrator, aggregation |
 | `validator/` | 9 | 2,256 | QA pipeline (syntax, lint, build, test, self-review) — wired into agent loop completion gate |
 
-### Tools (24 registered tools)
+### Tools (43 registered tools)
 
 | Module | Files | Lines | Purpose |
 |--------|-------|-------|---------|
-| `tools/` | 43 | 12,123 | read, write, edit, bash, glob, grep, browser, websearch, sandbox, etc. |
+| `tools/` | 43 | 12,123 | read, write, edit, bash, glob, grep, websearch, sandbox, etc. |
 
 ### Intelligence
 
@@ -52,7 +52,7 @@ User (Desktop/CLI)
 | `extensions/` | 5 | 947 | Plugin system (manifest, storage, manager) |
 | `custom-commands/` | 6 | 993 | TOML-based user commands (discovery, parsing, templating) |
 | `hooks/` | 4 | 1,147 | Lifecycle hooks (PreToolUse, PostToolUse, etc.) |
-| `mcp/` | 6 | 1,495 | Model Context Protocol client (OAuth, bridge, discovery) |
+| `mcp/` | 10 | 2,500 | Model Context Protocol client (stdio, SSE, HTTP streaming, OAuth, health, reconnect) |
 | `skills/` | 4 | 629 | Auto-invoked knowledge modules |
 | `slash-commands/` | 4 | 854 | User-invocable `/commands` |
 
@@ -60,7 +60,7 @@ User (Desktop/CLI)
 
 | Module | Files | Lines | Purpose |
 |--------|-------|-------|---------|
-| `permissions/` | 13 | 3,924 | Risk assessment, auto-approval, security inspector pipeline, audit trail |
+| `permissions/` | 15 | 4,400 | Risk assessment, auto-approval, security inspector pipeline, audit trail, 5 granular permission modes |
 | `policy/` | 5 | 1,071 | Policy engine (tool approval rules, wildcards, regex) |
 
 ### Infrastructure
@@ -72,7 +72,7 @@ User (Desktop/CLI)
 | `session/` | 6 | 2,024 | Session management, resume, forking, doom-loop detection |
 | `auth/` | 8 | 1,107 | OAuth + PKCE (Anthropic, Copilot, Google, OpenAI) |
 | `bus/` | 3 | 524 | Message bus (pub/sub event system) |
-| `models/` | 3 | 674 | Model registry (~16 LLM models) |
+| `models/` | 5 | 1,100 | Model registry (~16 LLM models), availability tracking, fallback chains |
 | `scheduler/` | 3 | 337 | Background task scheduler |
 | `question/` | 3 | 361 | LLM-to-user question system |
 
@@ -82,7 +82,7 @@ User (Desktop/CLI)
 |--------|-------|-------|---------|
 | `diff/` | 4 | 657 | Diff tracking, unified format |
 | `focus-chain/` | 4 | 825 | Task progress tracking |
-| `git/` | 5 | 969 | Git snapshots, auto-commit, version control utilities |
+| `git/` | 11 | 2,200 | Git snapshots, auto-commit, per-tool checkpoints, PR/branch/issue tools |
 | `instructions/` | 3 | 321 | Project/directory instructions loader |
 | `integrations/` | 2 | 351 | External integrations (Exa web search) |
 | `logger/` | 4 | 460 | Structured logging — NDJSON file output + source-scoped console logger |
@@ -140,36 +140,54 @@ All in `llm/providers/`:
 
 ---
 
-## Registered Tools (24)
+## Registered Tools (43)
 
-All in `tools/` and auto-registered in `tools/index.ts`:
+Tools span core-v2 (6 core tools) and extensions (37 extended tools):
 
-| Tool Name | File | Category |
-|-----------|------|----------|
-| read_file | read.ts | File I/O |
-| create_file | create.ts | File I/O |
-| write_file | write.ts | File I/O |
-| delete_file | delete.ts | File I/O |
-| edit | edit.ts | File I/O |
-| apply_patch | apply-patch/ | File I/O |
-| multiedit | multiedit.ts | File I/O |
-| glob | glob.ts | Search |
-| grep | grep.ts | Search |
-| ls | ls.ts | Search |
-| codesearch | codesearch.ts | Search |
-| bash | bash.ts | Shell |
-| batch | batch.ts | Orchestration |
-| task | task.ts | Orchestration |
-| question | question.ts | User interaction |
-| skill | skill.ts | Extensibility |
-| todo_read | todo.ts | State |
-| todo_write | todo.ts | State |
-| websearch | websearch.ts | Web |
-| webfetch | webfetch.ts | Web |
-| browser | browser/ | Web |
-| attempt_completion | completion.ts | Flow control |
-| plan_enter | agent/modes/plan.ts | Flow control |
-| plan_exit | agent/modes/plan.ts | Flow control |
+| Tool Name | Package | Category |
+|-----------|---------|----------|
+| read_file | core-v2 | File I/O |
+| write_file | core-v2 | File I/O |
+| edit | core-v2 | File I/O |
+| bash | core-v2 | Shell |
+| glob | core-v2 | Search |
+| grep | core-v2 | Search |
+| create_file | tools-extended | File I/O |
+| delete_file | tools-extended | File I/O |
+| apply_patch | tools-extended | File I/O |
+| multiedit | tools-extended | File I/O |
+| ls | tools-extended | Search |
+| codesearch | tools-extended | Search |
+| batch | tools-extended | Orchestration |
+| bash_background | tools-extended | Shell |
+| bash_output | tools-extended | Shell |
+| bash_kill | tools-extended | Shell |
+| task | tools-extended | Orchestration |
+| question | tools-extended | User interaction |
+| todoread | tools-extended | State |
+| todowrite | tools-extended | State |
+| repo_map | codebase | Intelligence |
+| websearch | tools-extended | Web |
+| webfetch | tools-extended | Web |
+| attempt_completion | tools-extended | Flow control |
+| plan_enter | agent-modes | Flow control |
+| plan_exit | agent-modes | Flow control |
+| delegate_coder | commander | Delegation |
+| delegate_tester | commander | Delegation |
+| delegate_reviewer | commander | Delegation |
+| delegate_researcher | commander | Delegation |
+| delegate_debugger | commander | Delegation |
+| memory_read | memory | Memory |
+| memory_write | memory | Memory |
+| memory_list | memory | Memory |
+| memory_delete | memory | Memory |
+| lsp_diagnostics | lsp | Intelligence |
+| lsp_hover | lsp | Intelligence |
+| lsp_definition | lsp | Intelligence |
+| create_pr | git | Git/GitHub |
+| create_branch | git | Git/GitHub |
+| switch_branch | git | Git/GitHub |
+| read_issue | git | Git/GitHub |
 
 ---
 
@@ -186,4 +204,4 @@ All in `tools/` and auto-registered in `tools/index.ts`:
 
 ---
 
-*Last updated: 2026-02-28 — ~3,896 tests across ~250 files (dual-stack: core + core-v2 + extensions)*
+*Last updated: 2026-03-02 — ~4,280 tests across ~270 files (dual-stack: core + core-v2 + extensions)*

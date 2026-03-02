@@ -202,6 +202,97 @@ Dependencies are `[blocker, blocked]` pairs — subtask 0 waits for subtask 1.
 
 ---
 
+## Orchestrator (Parallel Execution)
+
+The orchestrator (`commander/src/orchestrator.ts`) automates the planning → execution → aggregation pipeline:
+
+1. **Parse** the TaskPlan into dependency-ordered batches
+2. **Execute** independent subtasks in parallel via `Promise.all()`
+3. **Retry** failed subtasks with more specific prompts
+4. **Aggregate** results into a structured summary
+
+### Configuration
+
+```typescript
+interface OrchestratorConfig {
+  maxParallelDelegations: number  // Default: 3
+  retryFailedSubtasks: boolean    // Default: true
+  maxRetries: number              // Default: 1
+}
+```
+
+### Batch Execution
+
+Subtasks are grouped into batches based on their dependency graph. Within each batch, independent subtasks run in parallel (up to `maxParallelDelegations`). Batches execute sequentially — batch N+1 starts only after batch N completes.
+
+```
+Batch 0: [subtask-0, subtask-1]  ← parallel (no deps)
+Batch 1: [subtask-2]             ← depends on subtask-0
+Batch 2: [subtask-3, subtask-4]  ← depend on subtask-1
+```
+
+Deadlock detection: if no subtasks are ready but not all are complete, the orchestrator breaks the cycle by force-completing remaining subtasks.
+
+### Events
+
+- `orchestration:batch-start` — fired before each batch with subtask indices
+- `orchestration:batch-complete` — fired after each batch with success/fail counts
+
+---
+
+## Per-Domain Tool Filtering
+
+Each Lead agent gets a specialized tool set matching their domain:
+
+| Lead | Tools |
+|------|-------|
+| **Frontend Lead** | read_file, write_file, edit, bash, glob, grep, create_file, ls, websearch |
+| **Backend Lead** | All tools + lsp_diagnostics, lsp_hover, lsp_definition |
+| **QA Lead** | read_file, bash, grep, glob, lsp_diagnostics (read-only + test runner) |
+| **Fullstack Lead** | All tools |
+
+Workers inherit their Lead's tool set minus delegation tools.
+
+---
+
+## Task Routing
+
+The router (`commander/src/router.ts`) analyzes task descriptions and maps them to domains using keyword matching:
+
+```
+"build a React form"        → frontend  → frontend-lead
+"add REST API endpoint"     → backend   → backend-lead
+"write unit tests"          → testing   → qa-lead
+"set up CI/CD pipeline"     → devops    → fullstack-lead
+```
+
+The `analyzeDomain()` function scores keywords across 4 domains (frontend, backend, testing, devops) and picks the highest-scoring match.
+
+---
+
+## Error Recovery
+
+When a worker or lead fails:
+
+1. **Retry** — re-execute with a more specific prompt that includes the error context
+2. **Escalate** — if retry fails, escalate to the parent agent with error details
+3. **Re-delegate** — parent can assign to a different agent
+
+Configurable via `maxRetries` (default: 1). Emits `delegation:retry` events for monitoring.
+
+---
+
+## Result Aggregation
+
+After multi-lead execution, the aggregator (`commander/src/aggregator.ts`) combines results:
+
+- **Files changed** — deduplicated list across all workers
+- **Tests run** — count of tests executed and pass/fail breakdown
+- **Issues found** — any errors, warnings, or review findings
+- **Duration** — total and per-subtask timing
+
+---
+
 ## Extension Integration
 
 Praxis is implemented as the `ava-commander` extension using the same `ExtensionAPI` as community plugins:

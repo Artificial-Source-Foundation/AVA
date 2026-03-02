@@ -1,6 +1,6 @@
 # Competitive Gap Analysis
 
-> AVA vs 8 reference codebases + PI Coding Agent. Updated 2026-02-28.
+> AVA vs 8 reference codebases + PI Coding Agent. Updated 2026-03-02.
 >
 > Sources analyzed: **OpenCode**, **Aider**, **Cline**, **Roo Code**, **Gemini CLI**, **Goose**, **OpenHands**, **Plandex**, **PI Coding Agent**
 
@@ -15,6 +15,8 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 **Closed (Sprint B7-B10):** mid-session provider switching, minimal tool mode, lead-worker auto-routing, iterative lint→fix loop (validator wired into agent completion gate).
 
 **Closed (Sprint 15-16):** flat team delegation (5 delegate tools), Praxis 3-tier hierarchy (Commander → Leads → Workers), per-agent model/provider, agent import/export, planning pipeline, 13 built-in agents.
+
+**Closed (Sprint 19):** parallel tool execution, vision/image support, background shell management, tool result truncation, granular permission modes (5 levels), MCP HTTP streaming + health monitoring, auto-learning memory, model availability + fallback, global doom loop detection, toolshim for non-tool-calling models, git tools (PR/branch/issue), per-tool-call checkpoints, Praxis orchestrator (parallel agents, error recovery, result aggregation), plugin install/uninstall backend + catalog API.
 
 **Biggest gaps by frequency** (how many codebases have it):
 
@@ -52,7 +54,7 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 
 | Gap | Who Has It | AVA Status | Priority |
 |-----|-----------|------------|----------|
-| Doom loop detection at registry level | Roo Code (ToolRepetitionDetector) | Agent-level only, not registry-level | Medium |
+| ~~Doom loop detection at registry level~~ | Roo Code (ToolRepetitionDetector) | **DONE** (Sprint 19: `trackGlobalToolCall()`, `detectGlobalDoomLoop()` across all concurrent agents) | ~~Medium~~ Done |
 | Session resume by ID | Gemini CLI, OpenCode | Not yet — sessions start fresh | Medium |
 | Trusted folder boundaries | Gemini CLI | No folder trust zones | Low |
 | Virtual scrolling for long histories | Cline | Progressive rendering, no virtualization | Low |
@@ -73,15 +75,15 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 | ~~Security inspector pipeline~~ | Goose (pattern-based, confidence scores, audit trail) | **DONE** (SecurityInspector + RepetitionInspector + InspectorPipeline + AuditTrail) | ~~Medium~~ Done |
 | Mode system with tool restrictions | Roo Code (4 modes + custom) | Workers have filtered tools (same concept) | Done (via workers) |
 | Boomerang task delegation | Roo Code (parent-child tree, mode-per-subtask) | Team hierarchy (same concept, more structured) | Done (via commander) |
-| Toolshim for non-tool-calling models | Goose (prompt-based tool extraction) | No — requires native tool calling | Low |
+| ~~Toolshim for non-tool-calling models~~ | Goose (prompt-based tool extraction) | **DONE** (Sprint 19: `parseToolCallsFromText()`, `buildToolSchemaXML()`, `needsToolShim()`) | ~~Low~~ Done |
 | ~~Context visibility layering~~ | Goose (compacted = agent-visible only) | **DONE** (visibility.ts strategy) | ~~Medium~~ Done |
 | ~~Auto-compaction threshold~~ | Goose (80%), Roo Code (configurable %) | **DONE** (createAutoCompactor + compactionThreshold setting, default 80%) | ~~Medium~~ Done |
 | Recipe system (YAML task automation) | Goose (cron scheduling, success checks, retry) | Custom commands (TOML, no scheduling) | Low |
 | ~~Container/sandbox execution~~ | Goose (Docker), Gemini CLI, OpenHands | **DONE** (DockerSandbox + NoopSandbox, opt-in mode, graceful fallback) | ~~High~~ Done |
 | Extension malware checking | Goose | No — plugins trusted by default | Low |
-| SQLite session storage | Goose | File-based JSON | **Medium** |
+| ~~SQLite session storage~~ | Goose | **DONE** (Sprint 17: `SqliteSessionStorage`, `MemorySessionStorage`, `SessionStorage` interface) | ~~Medium~~ Done |
 | Client/server architecture | OpenCode (Hono HTTP + SSE) | Tauri IPC (desktop-only) | Low |
-| Tool repetition detection in registry | Roo Code (ToolRepetitionDetector) | Doom loop in agent loop only (not registry) | Low |
+| ~~Tool repetition detection in registry~~ | Roo Code (ToolRepetitionDetector) | **DONE** (Sprint 19: global doom loop detection across all concurrent agents) | ~~Low~~ Done |
 
 ---
 
@@ -123,7 +125,7 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 
 ---
 
-### 3. Vision / Image Support (HIGH)
+### ~~3. Vision / Image Support (HIGH)~~ — DONE
 
 **What**: Accept image uploads in chat (paste, drag-drop, file picker). Send to vision-capable models. Display inline.
 
@@ -132,11 +134,9 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 - **Aider**: `/add image.png`, `/paste` from clipboard, auto-detects vision models.
 - **PI**: Image input support in chat.
 
-**AVA status**: Browser tool takes screenshots but images can't be input to chat. No vision model detection.
+**AVA status**: **DONE**. Frontend: paste/drop/base64 image support (Phase 1.5). Backend: `ImageBlock` type in `ContentBlock` union, agent loop handles image content in messages, OpenAI-compat provider conversion (Sprint 19).
 
 **Impact**: Visual debugging (screenshot → fix), mockup → code, diagram → implementation.
-
-**Implementation**: Add image handling to `MessageInput.tsx`, detect vision-capable models, base64 encode for API.
 
 ---
 

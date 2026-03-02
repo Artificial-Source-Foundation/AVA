@@ -10,7 +10,7 @@
 |-------|--------|-------|
 | **1: Desktop App** | **Done** | Core UI, LLM chat, settings, team flow |
 | **1.5: Desktop Polish** | **Done** | Settings, appearance, wiring, gap closing |
-| **2: Plugin Ecosystem** | Nearly complete | Marketplace UI, SDK, hot reload, wizard all shipped. Backend registry API remaining |
+| **2: Plugin Ecosystem** | **Done** | Marketplace UI, SDK, hot reload, wizard, backend registry API all shipped |
 | **3: Community & CLI** | Future | CLI interface, docs site, templates |
 | **4: Integrations** | Future | Editor (ACP), agent network (A2A), voice, vision |
 
@@ -32,15 +32,15 @@ Everything needed for a working desktop AI coding app.
 - Spring physics animations, glassmorphism design
 - Code viewer (CodeMirror 6)
 
-### Core Engine (~54,500 lines original + ~5K core-v2 + 25 extensions, latest baseline: ~3,896 tests across ~250 files)
+### Core Engine (~54,500 lines original + ~8K core-v2 + 28 extensions, latest baseline: ~4,280 tests across ~270 files)
 | Category | Modules |
 |----------|---------|
-| Agent System | Agent loop, Praxis 3-tier hierarchy (13 agents), Parallel execution, Validator (wired) |
-| Tools | 35 tools (file, shell, web, agents, patch, batch, search, delegate, memory, LSP) |
-| Intelligence | Codebase understanding, context management, persistent memory, LSP client, symbol extraction |
-| Extensibility | Extensions, commands, hooks, skills, MCP (tools, resources, prompts, sampling, OAuth, reconnect) |
-| Safety | Permissions, policy engine, trusted folders |
-| Infrastructure | 14 LLM providers (all tested), config, sessions (SQLite + in-memory), auth, bus |
+| Agent System | Agent loop (parallel tools, vision, truncation, steering), Praxis 3-tier hierarchy (13 agents, orchestrator, domain routing), Validator (wired) |
+| Tools | 43 tools (file, shell, background shell, web, agents, patch, batch, search, delegate, memory, LSP, git/GitHub) |
+| Intelligence | Codebase understanding, context management (auto-compaction, strategy selection), persistent memory + auto-learning, LSP client, symbol extraction |
+| Extensibility | Extensions, commands, hooks, skills, MCP (tools, resources, prompts, sampling, OAuth, reconnect, HTTP streaming, health monitoring) |
+| Safety | Permissions (5 granular modes), policy engine, per-tool-call checkpoints, trusted folders |
+| Infrastructure | 14 LLM providers (all tested), config, sessions (SQLite + in-memory), auth, bus, model availability + fallback, toolshim |
 | Protocols | ACP (editor integration), A2A (agent network) |
 
 ---
@@ -123,7 +123,7 @@ Active execution docs:
 
 ### Sprint 1.6 Verification Workflow
 - Added `npm run verify:mvp` to run lint + typecheck + full test suite.
-- Current status: verification pipeline is green in the latest readiness run (`verify:mvp` passed, full suite `~3,896 tests / ~250 files`).
+- Current status: verification pipeline is green in the latest readiness run (`verify:mvp` passed, full suite `~4,280 tests / ~270 files`).
 
 ### Next Build Steps (Immediate)
 - [x] Implement automatic session titles from first user message for new chats
@@ -136,7 +136,7 @@ Active execution docs:
 
 ---
 
-## Phase 2: Plugin Ecosystem (NEARLY COMPLETE — THE DIFFERENTIATOR)
+## Phase 2: Plugin Ecosystem (COMPLETE — THE DIFFERENTIATOR)
 
 This is what makes AVA "The Obsidian of AI Coding". Easy to create, discover, install.
 
@@ -165,12 +165,12 @@ This is what makes AVA "The Obsidian of AI Coding". Easy to create, discover, in
 
 **Key files:** `src/components/settings/tabs/PluginsTab.tsx`, `src/stores/plugins.ts`, `src/services/plugins/`
 
-### Sprint 2.4: Plugin Distribution — PARTIALLY COMPLETE
+### Sprint 2.4: Plugin Distribution — COMPLETE
 - [x] `ava plugin init` scaffold command + plugin template docs
 - [x] Publish flow stub (`PublishDialog.tsx`) — **DONE** (Gap Analysis)
 - [x] Plugin creation wizard (`PluginWizard.tsx` — 4 templates) — **DONE** (Gap Analysis)
 - [x] Marketplace sort (popular/rated/recent/name) + download/rating display — **DONE** (Gap Analysis)
-- [ ] Plugin registry API (backend)
+- [x] Plugin registry API (backend) — **DONE** (Sprint 19: `installPlugin()`, `uninstallPlugin()`, `fetchCatalog()`, `searchCatalog()`)
 - [ ] Version management and updates
 - [ ] Community ratings backend
 

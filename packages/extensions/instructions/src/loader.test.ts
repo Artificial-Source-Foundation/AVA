@@ -1,6 +1,7 @@
 import { MockFileSystem } from '@ava/core-v2/__test-utils__/mock-platform'
 import { describe, expect, it } from 'vitest'
 import { loadInstructions, mergeInstructions } from './loader.js'
+import { DEFAULT_INSTRUCTION_CONFIG } from './types.js'
 
 describe('loadInstructions', () => {
   it('returns empty array when no instruction files exist', async () => {
@@ -56,6 +57,42 @@ describe('loadInstructions', () => {
     fs.addFile('/CLAUDE.md', '# Root')
     const result = await loadInstructions('/project', fs)
     expect(result[0].priority).toBeGreaterThan(result[1].priority)
+  })
+})
+
+describe('AGENTS.md support', () => {
+  it('includes AGENTS.md as first entry in default config', () => {
+    expect(DEFAULT_INSTRUCTION_CONFIG.fileNames[0]).toBe('AGENTS.md')
+  })
+
+  it('includes all expected instruction file names', () => {
+    expect(DEFAULT_INSTRUCTION_CONFIG.fileNames).toEqual([
+      'AGENTS.md',
+      'CLAUDE.md',
+      '.ava-instructions',
+      '.ava-instructions.md',
+    ])
+  })
+
+  it('discovers AGENTS.md files', async () => {
+    const fs = new MockFileSystem()
+    fs.addFile('/project/AGENTS.md', '# Agent Instructions')
+    const result = await loadInstructions('/project', fs)
+    expect(result).toHaveLength(1)
+    expect(result[0].path).toBe('/project/AGENTS.md')
+    expect(result[0].content).toBe('# Agent Instructions')
+    expect(result[0].scope).toBe('project')
+  })
+
+  it('discovers both AGENTS.md and CLAUDE.md in the same directory', async () => {
+    const fs = new MockFileSystem()
+    fs.addFile('/project/AGENTS.md', '# Agents')
+    fs.addFile('/project/CLAUDE.md', '# Claude')
+    const result = await loadInstructions('/project', fs)
+    expect(result).toHaveLength(2)
+    // Both should have same priority (same depth), AGENTS.md found first
+    expect(result[0].path).toBe('/project/AGENTS.md')
+    expect(result[1].path).toBe('/project/CLAUDE.md')
   })
 })
 

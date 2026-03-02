@@ -41,10 +41,14 @@ All business logic lives here. Platform-agnostic — works in both Tauri and Nod
 | `commander/` | ~2,400 | Team Lead → Senior Leads → Junior Devs delegation |
 | `validator/` | ~1,000 | QA pipeline (syntax, types, lint, test, self-review) |
 
-**Tools** (24 total):
+**Tools** (35 total — 6 core + 29 extended):
 | Module | Lines | Purpose |
 |--------|-------|---------|
-| `tools/` | ~4,500 | read, write, edit, glob, grep, bash, browser, task, etc. |
+| `tools/` (core-v2) | ~2,500 | read_file, write_file, edit, glob, grep, bash |
+| `tools-extended/` (extensions) | ~3,000 | create_file, delete_file, apply_patch, multiedit, ls, batch, codesearch, repo_map, question, todoread, todowrite, task, websearch, webfetch, attempt_completion, plan_enter, plan_exit |
+| `commander/` (extensions) | ~1,500 | delegate_coder, delegate_tester, delegate_reviewer, delegate_researcher, delegate_debugger |
+| `memory/` (extensions) | ~500 | memory_read, memory_write, memory_list, memory_delete |
+| `lsp/` (extensions) | ~800 | lsp_diagnostics, lsp_hover, lsp_definition |
 
 **Intelligence**:
 | Module | Lines | Purpose |
@@ -72,7 +76,7 @@ All business logic lives here. Platform-agnostic — works in both Tauri and Nod
 **Infrastructure**:
 | Module | Lines | Purpose |
 |--------|-------|---------|
-| `llm/` | ~2,600 | 13 provider clients |
+| `llm/` | ~2,600 | 14 provider clients (Anthropic, OpenAI, Google, OpenRouter, DeepSeek, Mistral, Groq, xAI, Cohere, Together, Ollama, GLM, Kimi, Copilot) |
 | `config/` | ~1,150 | Settings, credentials, Zod validation |
 | `session/` | ~800 | State, checkpoints, forking, resume |
 | `auth/` | ~500 | OAuth + PKCE |

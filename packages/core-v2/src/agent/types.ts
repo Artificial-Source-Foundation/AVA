@@ -27,6 +27,8 @@ export interface AgentConfig {
   toolMode?: string
   systemPrompt?: string
   allowedTools?: string[]
+  /** Context compaction threshold (0-1). Compact when usage exceeds this fraction. Default: 0.8 */
+  compactionThreshold?: number
 }
 
 export const DEFAULT_AGENT_CONFIG: Omit<AgentConfig, 'maxTimeMinutes' | 'maxTurns'> = {
@@ -76,6 +78,14 @@ export type AgentEvent =
       reason: string
     }
   | { type: 'doom-loop'; agentId: string; tool: string; count: number }
+  | {
+      type: 'context:compacting'
+      agentId: string
+      estimatedTokens: number
+      contextLimit: number
+      messagesBefore: number
+      messagesAfter: number
+    }
   | {
       type: 'delegation:start'
       agentId: string

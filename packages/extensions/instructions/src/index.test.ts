@@ -30,6 +30,21 @@ describe('instructions extension', () => {
     expect((loaded!.data as { count: number }).count).toBe(1)
   })
 
+  it('loads AGENTS.md instructions when session opens', async () => {
+    const { api, emittedEvents } = createMockExtensionAPI()
+    api.platform.fs.addFile('/project/AGENTS.md', '# Agent Instructions\nAlways be helpful.')
+    activate(api)
+
+    api.emit('session:opened', { sessionId: 'test', workingDirectory: '/project' })
+
+    await new Promise((r) => setTimeout(r, 50))
+
+    const loaded = emittedEvents.find((e) => e.event === 'instructions:loaded')
+    expect(loaded).toBeDefined()
+    expect((loaded!.data as { count: number }).count).toBe(1)
+    expect((loaded!.data as { merged: string }).merged).toContain('Agent Instructions')
+  })
+
   it('cleans up on dispose', () => {
     const { api, eventHandlers } = createMockExtensionAPI()
     const disposable = activate(api)

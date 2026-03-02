@@ -2,6 +2,8 @@
 
 > Comprehensive comparison based on full codebase analysis of Gemini CLI
 
+> **Status (2026-03-01): ALL GAPS RESOLVED.** Every critical and important gap listed below has been implemented in AVA as of Sprint 17 (2026-02-28): Policy engine (`policy/`), message bus (`bus/`), extension system (`core-v2/extensions/` + `packages/extensions/`), session resume, chat compression/compaction, PTY shell (`xterm.js`), TOML commands (`custom-commands/`), trusted folders, doom loop detection. This document is preserved as historical reference.
+
 ---
 
 ## Executive Summary

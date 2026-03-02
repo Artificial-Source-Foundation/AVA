@@ -41,7 +41,7 @@
 |-----|----------|
 | [**Overview**](backend/README.md) | Core package stats, module listing |
 | [**Modules**](backend/modules.md) | Per-file module documentation |
-| [**Test Coverage**](backend/test-coverage.md) | Latest baseline: ~3302 tests across 162 files |
+| [**Test Coverage**](backend/test-coverage.md) | Latest baseline: ~3,900 tests across 250+ files |
 | [**Gap Analysis**](backend/gap-analysis.md) | Competitive comparison |
 | [**Changelog**](backend/changelog.md) | Backend development history |
 | [**Backlog**](backend/backlog.md) | Test gaps, feature gaps, debt |
@@ -67,6 +67,7 @@
 
 | Doc | Contents |
 |-----|----------|
+| [**Competitive Analysis (2026-03)**](research/competitive-analysis-2026-03.md) | 8-tool comparison matrix, AVA positioning, gaps |
 | [**Overview**](research/README.md) | Codebase analyses index |
 | [**Cline**](research/cline/) | 8 reports — hooks, approvals, browser |
 | [**OpenCode**](research/opencode/) | 7 reports — fuzzy edits, batch tools |

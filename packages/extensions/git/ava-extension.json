@@ -4,6 +4,6 @@
   "description": "Git snapshots and auto-commit",
   "main": "src/index.ts",
   "builtIn": true,
-  "enabledByDefault": false,
+  "enabledByDefault": true,
   "priority": 15
 }

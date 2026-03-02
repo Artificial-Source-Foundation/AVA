@@ -769,10 +769,10 @@ describe('Retry logic', () => {
   })
 })
 
-// ─── Parallel Tool Execution ────────────────────────────────────────────────
+// ─── Sequential Tool Execution (with Steering Interrupt Support) ────────────
 
-describe('Parallel tool execution', () => {
-  it('executes multiple tools concurrently (both start before either finishes)', async () => {
+describe('Sequential tool execution', () => {
+  it('executes multiple tools sequentially (A finishes before B starts)', async () => {
     const executionLog: string[] = []
 
     const client = createMockClient([
@@ -819,17 +819,17 @@ describe('Parallel tool execution', () => {
     const exec = new AgentExecutor({ maxTurns: 5 })
     await exec.run({ goal: 'Read and grep', cwd: '/tmp' }, AbortSignal.timeout(5000))
 
-    // Both tools should start before either finishes (proves parallelism)
+    // Tools execute sequentially (for steering interrupt support)
     const startA = executionLog.indexOf('start:read_file')
-    const startB = executionLog.indexOf('start:grep')
     const endA = executionLog.indexOf('end:read_file')
+    const startB = executionLog.indexOf('start:grep')
     const endB = executionLog.indexOf('end:grep')
 
     expect(startA).toBeLessThan(endA)
     expect(startB).toBeLessThan(endB)
-    // Both starts happen before the first end
-    expect(startA).toBeLessThan(endB)
-    expect(startB).toBeLessThan(endA)
+    // Sequential: A finishes before B starts
+    expect(endA).toBeLessThan(startB)
+    expect(endB).toBeGreaterThan(startB)
   })
 
   it('preserves result ordering when tool B finishes before tool A', async () => {

@@ -2,7 +2,8 @@
  * Instructions extension — loads project/directory instructions.
  *
  * Listens for session:opened events and loads instruction files
- * from the working directory upward.
+ * from the working directory upward. Emits `instructions:loaded` with
+ * the merged content so the CLI/app can inject it into the system prompt.
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
@@ -11,10 +12,13 @@ import type { InstructionConfig } from './types.js'
 import { DEFAULT_INSTRUCTION_CONFIG } from './types.js'
 
 export function activate(api: ExtensionAPI): Disposable {
-  const config = {
-    ...DEFAULT_INSTRUCTION_CONFIG,
-    ...api.getSettings<Partial<InstructionConfig>>('instructions'),
+  let userConfig: Partial<InstructionConfig> = {}
+  try {
+    userConfig = api.getSettings<Partial<InstructionConfig>>('instructions')
+  } catch {
+    // Settings category not registered — use defaults
   }
+  const config = { ...DEFAULT_INSTRUCTION_CONFIG, ...userConfig }
   const disposables: Disposable[] = []
 
   disposables.push(
@@ -34,7 +38,7 @@ export function activate(api: ExtensionAPI): Disposable {
             merged,
             count: files.length,
           })
-          api.log.debug(`Loaded ${files.length} instruction file(s)`)
+          api.log.info(`Loaded ${files.length} instruction file(s)`)
         }
       })
     })

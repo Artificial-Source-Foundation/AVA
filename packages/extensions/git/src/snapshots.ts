@@ -8,6 +8,8 @@ import { DEFAULT_GIT_CONFIG } from './types.js'
 
 export interface SnapshotManager {
   createSnapshot(cwd: string, message: string, files: string[]): Promise<GitSnapshot | null>
+  restoreSnapshot(cwd: string, hash: string): Promise<boolean>
+  getLatestSnapshot(): GitSnapshot | null
   getSnapshots(): GitSnapshot[]
   clear(): void
 }
@@ -47,6 +49,20 @@ export function createSnapshotManager(
       } catch {
         return null
       }
+    },
+
+    async restoreSnapshot(cwd: string, hash: string): Promise<boolean> {
+      try {
+        // Apply the stash snapshot to restore files
+        await shell.exec(`cd "${cwd}" && git stash apply "${hash}"`)
+        return true
+      } catch {
+        return false
+      }
+    },
+
+    getLatestSnapshot(): GitSnapshot | null {
+      return snapshots.length > 0 ? snapshots[snapshots.length - 1]! : null
     },
 
     getSnapshots(): GitSnapshot[] {

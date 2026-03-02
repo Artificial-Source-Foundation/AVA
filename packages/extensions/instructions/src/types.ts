@@ -16,7 +16,7 @@ export interface InstructionConfig {
 }
 
 export const DEFAULT_INSTRUCTION_CONFIG: InstructionConfig = {
-  fileNames: ['.ava-instructions', '.ava-instructions.md', 'CLAUDE.md'],
+  fileNames: ['AGENTS.md', 'CLAUDE.md', '.ava-instructions', '.ava-instructions.md'],
   maxDepth: 5,
   maxSize: 10_000,
 }

@@ -8,6 +8,7 @@
 
 import { emitEvent, getAgentModes, getContextStrategies } from '../extensions/api.js'
 import { createClient } from '../llm/client.js'
+import { normalizeMessages } from '../llm/normalize.js'
 import type {
   ChatMessage,
   ContentBlock,
@@ -46,6 +47,11 @@ function contentLength(content: MessageContent): number {
     if (b.type === 'tool_result') return sum + b.content.length
     return sum + b.name.length + JSON.stringify(b.input).length
   }, 0)
+}
+
+/** Estimate tokens from character count. ~1.3 tokens per word, ~5 chars per word. */
+function estimateTokens(charCount: number): number {
+  return Math.ceil((charCount / 5) * 1.3)
 }
 
 /** Known context window sizes by model prefix. */
@@ -139,11 +145,15 @@ export class AgentExecutor {
           )
         }
 
-        // Context window management — compact if >80% of limit
+        // Context window management — compact when usage exceeds threshold
         const contextLimit = getContextLimit(model)
-        const estimatedTokens = history.reduce((sum, m) => sum + contentLength(m.content), 0) / 4
-        if (estimatedTokens > contextLimit * 0.8) {
-          const strategy = getContextStrategies().get('truncate')
+        const threshold = this.config.compactionThreshold ?? 0.8
+        const charCount = history.reduce((sum, m) => sum + contentLength(m.content), 0)
+        const estimatedTokens = estimateTokens(charCount)
+        if (estimatedTokens > contextLimit * threshold) {
+          const messagesBefore = history.length
+          const strategy =
+            getContextStrategies().get('summarize') ?? getContextStrategies().get('truncate')
           if (strategy) {
             const firstMsg = history[0]
             const compacted = strategy.compact(history, Math.floor(contextLimit * 0.5))
@@ -154,6 +164,14 @@ export class AgentExecutor {
             history.length = 0
             history.push(...compacted)
           }
+          this.emit({
+            type: 'context:compacting',
+            agentId: this.agentId,
+            estimatedTokens,
+            contextLimit,
+            messagesBefore,
+            messagesAfter: history.length,
+          })
         }
 
         turn++
@@ -278,8 +296,11 @@ export class AgentExecutor {
       tools,
     }
 
+    // Normalize messages for cross-provider compatibility
+    const normalizedHistory = normalizeMessages(history)
+
     const stream = client.stream(
-      [{ role: 'system', content: systemPrompt }, ...history],
+      [{ role: 'system', content: systemPrompt }, ...normalizedHistory],
       providerConfig,
       signal
     )
@@ -342,57 +363,78 @@ export class AgentExecutor {
       }
     }
 
-    // Execute all tool calls in parallel (Promise.all preserves order)
-    const results = await Promise.all(
-      toolCalls.map(async (call) => {
-        this.emit({
-          type: 'tool:start',
-          agentId: this.agentId,
-          toolName: call.name,
-          args: call.input,
-        })
-        const toolStart = Date.now()
+    // Execute tool calls — skip remaining if signal aborts mid-execution
+    const results: {
+      callInfo: ToolCallInfo
+      resultBlock: ToolResultBlock
+    }[] = []
 
-        const ctx: ToolContext = {
-          sessionId: this.agentId,
-          workingDirectory: cwd,
-          signal,
-          provider: this.config.provider,
-          model,
-          onEvent: this.onEvent as ToolContext['onEvent'],
-        }
-
-        const result = await executeTool(call.name, call.input, ctx)
-        const durationMs = Date.now() - toolStart
-        const output = result.success
-          ? result.output
-          : result.error || result.output || 'Tool failed'
-
-        this.emit({
-          type: 'tool:finish',
-          agentId: this.agentId,
-          toolName: call.name,
-          success: result.success,
-          durationMs,
-        })
-
-        return {
+    for (const call of toolCalls) {
+      // Skip remaining tool calls if aborted (steering interrupt)
+      if (signal.aborted) {
+        results.push({
           callInfo: {
             name: call.name,
             args: call.input,
-            result: output,
-            success: result.success,
-            durationMs,
-          } as ToolCallInfo,
+            result: 'Tool call skipped — user interrupted',
+            success: false,
+            durationMs: 0,
+          },
           resultBlock: {
             type: 'tool_result' as const,
             tool_use_id: call.id,
-            content: output,
-            is_error: !result.success,
-          } as ToolResultBlock,
-        }
+            content: 'Tool call skipped — user interrupted',
+            is_error: true,
+          },
+        })
+        continue
+      }
+
+      this.emit({
+        type: 'tool:start',
+        agentId: this.agentId,
+        toolName: call.name,
+        args: call.input,
       })
-    )
+      const toolStart = Date.now()
+
+      const ctx: ToolContext = {
+        sessionId: this.agentId,
+        workingDirectory: cwd,
+        signal,
+        provider: this.config.provider,
+        model,
+        onEvent: this.onEvent as ToolContext['onEvent'],
+      }
+
+      const result = await executeTool(call.name, call.input, ctx)
+      const durationMs = Date.now() - toolStart
+      const output = result.success ? result.output : result.error || result.output || 'Tool failed'
+
+      this.emit({
+        type: 'tool:finish',
+        agentId: this.agentId,
+        toolName: call.name,
+        success: result.success,
+        durationMs,
+      })
+
+      results.push({
+        callInfo: {
+          name: call.name,
+          args: call.input,
+          result: output,
+          success: result.success,
+          durationMs,
+        },
+        resultBlock: {
+          type: 'tool_result' as const,
+          tool_use_id: call.id,
+          content: output,
+          is_error: !result.success,
+        },
+      })
+    }
 
     const callInfos: ToolCallInfo[] = []
     const toolResultBlocks: ToolResultBlock[] = []

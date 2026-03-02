@@ -9,6 +9,12 @@ export {
   unregisterProvider,
 } from './client.js'
 
+export {
+  normalizeMessages,
+  normalizeSystemPosition,
+  stripThinkingBlocks,
+} from './normalize.js'
+
 export type {
   AuthInfo,
   AuthMethod,

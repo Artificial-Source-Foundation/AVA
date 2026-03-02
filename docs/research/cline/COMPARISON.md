@@ -2,6 +2,8 @@
 
 > Comprehensive feature matrix identifying gaps and opportunities
 
+> **Status (2026-03-01): MOST GAPS RESOLVED.** Key gaps filled since this analysis (2026-02-04): Hook system (8 lifecycle hooks in `packages/extensions/hooks/`), checkpoint system (`git/snapshots.ts`), MCP OAuth (`mcp/src/oauth.ts`), chained command validation (`quote-parser.ts` + `command-validator.ts`), virtual scrolling (`@tanstack/solid-virtual`). Remaining intentionally out-of-scope: standalone gRPC service, remote browser (users use Puppeteer MCP server). This document is preserved as historical reference.
+
 ---
 
 ## Executive Summary

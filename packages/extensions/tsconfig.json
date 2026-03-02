@@ -40,6 +40,7 @@
     "hooks/**/*.ts",
     "validator/**/*.ts",
     "commander/**/*.ts",
+    "memory/**/*.ts",
     "mcp/**/*.ts",
     "codebase/**/*.ts",
     "git/**/*.ts",

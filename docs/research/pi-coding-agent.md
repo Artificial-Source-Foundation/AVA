@@ -124,15 +124,18 @@ PI's approach works well for individual developers on focused tasks. AVA's multi
 
 ## Lessons for AVA
 
-1. **Mid-conversation provider switching** — High-value, medium-effort feature. Users could switch from Opus (expensive, smart) to Haiku (cheap, fast) mid-task.
+1. ~~**Mid-conversation provider switching**~~ — **DONE** (Sprint 1.6.4: `requestProviderSwitch()`)
+2. ~~**Session branching UI**~~ — **PARTIALLY DONE** (`SessionBranchTree.tsx` exists in frontend; full DAG storage not yet implemented)
+3. ~~**Minimal mode**~~ — **DONE** (Sprint B8: 9-tool minimal subset via agent modes)
+4. ~~**Runtime skill creation**~~ — **DONE** (Gap Analysis Sprint: MicroagentsTab CRUD in settings)
+5. ~~**Provider-agnostic session state**~~ — **DONE** (messages stored in universal format)
 
-2. **Session branching UI** — The tree visualization for session forks would be a compelling differentiator. Show branches visually in the sidebar.
-
-3. **Minimal mode** — Offer a "4-tool mode" for simple tasks that reduces token overhead and cost. Power users could toggle between full and minimal tool sets.
-
-4. **Runtime skill creation** — Let the agent create temporary tools during a session. Bridges PI's self-extension with AVA's plugin system.
-
-5. **Provider-agnostic session state** — Ensure messages are stored in a format that doesn't assume a specific provider. This is mostly already done.
+### Remaining Pi-inspired gaps (2026-03-01)
+- **Session DAG storage** — Pi uses JSONL with parent IDs forming a tree. AVA has flat session storage. Needed for non-destructive branching, branch summaries, and tree navigation.
+- **Auto-compaction** — Pi triggers compaction automatically when tokens > contextWindow - reserveTokens. AVA has manual compaction but no auto-trigger.
+- **Steering interrupts** — Pi skips remaining tool calls when user sends a steering message mid-execution. AVA doesn't skip pending tools.
+- **Cross-provider message normalization** — Pi's `transform-messages.ts` normalizes tool call IDs, thinking blocks, and provider-specific artifacts when switching models. AVA lacks this.
+- **Bash spawn hook** — Pi's `BashSpawnHook` lets extensions modify command, cwd, and env before execution. AVA's bash tool doesn't expose this.
 
 ---
 

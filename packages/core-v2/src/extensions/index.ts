@@ -7,6 +7,7 @@ export {
   getContextStrategies,
   getToolMiddlewares,
   getValidators,
+  onEvent,
   resetRegistries,
 } from './api.js'
 export {

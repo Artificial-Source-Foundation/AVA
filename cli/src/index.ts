@@ -141,31 +141,37 @@ AUTHENTICATION:
   ava auth logout <provider>  Disconnect a provider
 
 PLUGIN DEVELOPMENT:
-<<<<<<< Updated upstream
   ava plugin init my-plugin                Create plugin scaffold in current directory
   ava plugin init my-plugin --dir ./plugins  Create scaffold in a custom directory
   ava plugin init my-plugin --force        Overwrite in non-empty target directory
   ava plugin dev my-plugin --dir ./plugins Run plugin dev/watch script
   ava plugin test my-plugin --dir ./plugins Run plugin test suite
 
-AGENT:
+AGENT V2 (core-v2 + extensions):
+  ava agent-v2 run "goal"                  Run agent-v2 with a goal
+  ava agent-v2 run "goal" --verbose        Stream events to stderr
+  ava agent-v2 run "goal" --json           Output NDJSON events to stdout
+  ava agent-v2 run "goal" --yolo           Auto-approve all tools
+  ava agent-v2 run "goal" --provider openrouter --model "anthropic/claude-sonnet-4"
+
+AGENT (legacy):
   ava agent run "goal"               Run the agent with a goal
   ava agent run "goal" --verbose     Stream events to stderr
   ava agent run "goal" --json        Output NDJSON events to stdout
   ava agent run "goal" --provider openai --model gpt-4
 
 EXAMPLES:
-  # Run agent with verbose output
-  ava agent run "list files in current directory" --verbose
+  # Run agent-v2 with verbose output
+  ava agent-v2 run "list files in current directory" --verbose --yolo
+
+  # Run legacy agent
+  ava agent run "list files" --verbose
 
   # Connect Claude subscription for OAuth
   ava auth login anthropic
 
   # Scaffold a plugin
   ava plugin init my-plugin
-
-  # Check version
-  ava --version
 
 ENVIRONMENT VARIABLES:
   AVA_ANTHROPIC_API_KEY    Anthropic API key (alternative to OAuth)

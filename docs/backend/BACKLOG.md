@@ -2,11 +2,11 @@
 
 > Systematic work plan for core-v2 + extensions — organized by priority tier.
 >
-> Gap analysis based on feature comparison with **OpenCode** (75+ providers, 15 tools, plugin system, client-server arch) and **Goose** (30+ providers, 6 extension types, recipes, MCP-first, Rust core).
+> Gap analysis based on feature comparison with **8 competitors** (OpenCode, Gemini CLI, Aider, Goose, OpenHands, Plandex, Cline, Pi). Full competitive analysis: [`docs/research/competitive-analysis-2026-03.md`](../research/competitive-analysis-2026-03.md)
 
-**Current state:** 35 tools registered (6 core + 29 extended), 25 extensions, 14 providers (all real implementations), ~3,896 tests passing. CLI `ava agent-v2` works end-to-end with real LLMs.
+**Current state:** 35 tools registered (6 core + 29 extended), 25 extensions, 14 providers (all real implementations), ~3,900 tests passing. CLI `ava agent-v2` works end-to-end with real LLMs.
 
-**AVA's unique advantages:** Dev Team hierarchy (no competitor has this), 35 built-in tools (more than any competitor), Tauri desktop (native, not Electron), extension-first architecture, Obsidian-style plugin vision.
+**AVA's unique advantages:** 3-tier Praxis hierarchy (no competitor has this), 35 built-in tools (more than any competitor), Tauri desktop (native, not Electron), extension-first architecture, Obsidian-style plugin ecosystem.
 
 ---
 
@@ -126,6 +126,32 @@ Connect core-v2 to the desktop app (currently uses legacy `packages/core/`).
 | B-084 | Dual-stack toggle | Allow switching between core and core-v2 in settings (for gradual migration) |
 
 **Effort:** ~3-4 sessions (big integration milestone)
+
+---
+
+## Tier 7.5: Competitive Gaps (2026-03 Analysis)
+
+Gaps identified from comprehensive analysis of 8 competitors + Pi baseline. See [`docs/research/competitive-analysis-2026-03.md`](../research/competitive-analysis-2026-03.md).
+
+| # | Task | Source | Priority | What it does |
+|---|------|--------|----------|-------------|
+| CG-01 | **Auto-compaction** | Pi, OpenCode, Gemini, Cline | HIGH | Trigger context compaction automatically when tokens > contextWindow - reserveTokens. Currently manual only. |
+| CG-02 | **Parallel tool execution** | Gemini CLI scheduler | HIGH | Execute independent tool calls concurrently. Gemini CLI's scheduler runs reads/searches in parallel. Same as B-034. |
+| CG-03 | **Git snapshot/undo** | OpenCode, Aider | HIGH | Periodic git-based undo snapshots with `revert` command. Auto-create restore points before file changes. Same as B-033. |
+| CG-04 | **Cross-provider message normalization** | Pi `transform-messages.ts` | MEDIUM | Normalize tool call IDs (OpenAI 450+ char → 64 char), strip/convert thinking blocks, handle provider-specific artifacts when switching models mid-session. |
+| CG-05 | **Steering interrupts** | Pi agent loop | MEDIUM | When user sends message mid-execution, skip remaining queued tool calls. Currently AVA doesn't skip pending tools. |
+| CG-06 | **Session DAG/tree** | Pi session manager | MEDIUM | Store sessions as DAG (parent IDs per entry) instead of flat list. Enables non-destructive branching, tree navigation, branch summaries. |
+| CG-07 | **Plugin tool hooks** | OpenCode | MEDIUM | `plugin.tool.definition` event lets plugins mutate tool descriptions/parameters before execution. Small addition to ExtensionAPI. |
+| CG-08 | **Cross-tool SKILL.md compat** | OpenCode, Gemini CLI | MEDIUM | Load `.claude/skills/**/SKILL.md` and `.agents/skills/**/SKILL.md` alongside AVA's own skill convention. Instant ecosystem bridge. |
+| CG-09 | **Git worktree isolation** | OpenCode | MEDIUM | Per-session git worktrees so agents work on isolated branches. Critical for "yolo" autonomous mode safety. |
+| CG-10 | **Model packs** | Plandex | LOW | Named model combinations per agent tier (e.g., "budget": Haiku workers, Sonnet leads, Opus commander). |
+
+**Approach:**
+- CG-01/04/05: Small changes to agent loop — can be done in 1 session
+- CG-02/03: Same as existing B-034/B-033 items — medium effort
+- CG-06: Large architectural change to session storage — deferred
+- CG-07/08: Small extension API additions — quick wins
+- CG-09/10: Medium effort, not blocking
 
 ---
 

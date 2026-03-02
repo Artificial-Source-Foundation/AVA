@@ -64,6 +64,22 @@ export function emitEvent(event: string, data: unknown): void {
   }
 }
 
+/** Subscribe to events from outside the extension API (for CLI/app integration). */
+export function onEvent(event: string, handler: EventHandler): Disposable {
+  let handlers = eventHandlers.get(event)
+  if (!handlers) {
+    handlers = new Set()
+    eventHandlers.set(event, handlers)
+  }
+  handlers.add(handler)
+  return {
+    dispose() {
+      handlers!.delete(handler)
+      if (handlers!.size === 0) eventHandlers.delete(event)
+    },
+  }
+}
+
 /** Add middleware directly to the global registry (for testing / core use). */
 export function addToolMiddleware(middleware: ToolMiddleware): Disposable {
   toolMiddlewares.push(middleware)

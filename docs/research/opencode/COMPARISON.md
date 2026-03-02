@@ -2,6 +2,8 @@
 
 > Comprehensive comparison based on thorough OpenCode codebase analysis
 
+> **Status (2026-03-01): ALL ACTION ITEMS RESOLVED.** Every tool and feature gap identified below has been implemented in AVA as of Sprint 17 (2026-02-28). Batch tool, fuzzy edits (8 strategies), skill system, codesearch, apply_patch, multiedit, doom loop detection, MCP (tools/resources/prompts/sampling/OAuth/reconnect) — all done. This document is preserved as historical reference. See `docs/backend/BACKLOG.md` for current work.
+
 ---
 
 ## Executive Summary

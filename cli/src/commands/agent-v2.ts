@@ -13,7 +13,13 @@ import { type AgentEvent, type AgentEventCallback, AgentExecutor } from '@ava/co
 import type { BusMessage } from '@ava/core-v2/bus'
 import { MessageBus } from '@ava/core-v2/bus'
 import type { ExtensionModule } from '@ava/core-v2/extensions'
-import { ExtensionManager, getAgentModes, loadAllBuiltInExtensions } from '@ava/core-v2/extensions'
+import {
+  ExtensionManager,
+  emitEvent,
+  getAgentModes,
+  loadAllBuiltInExtensions,
+  onEvent,
+} from '@ava/core-v2/extensions'
 import type { LLMProvider } from '@ava/core-v2/llm'
 import { registerProvider } from '@ava/core-v2/llm'
 import { setPlatform } from '@ava/core-v2/platform'
@@ -31,6 +37,7 @@ interface AgentV2Options {
   verbose: boolean
   yolo: boolean
   json: boolean
+  resume: string | null
 }
 
 function parseArgs(args: string[]): AgentV2Options | null {
@@ -48,6 +55,7 @@ function parseArgs(args: string[]): AgentV2Options | null {
   let verbose = false
   let yolo = false
   let json = false
+  let resume: string | null = null
 
   let i = 1
   while (i < args.length) {
@@ -63,6 +71,10 @@ function parseArgs(args: string[]): AgentV2Options | null {
       timeout = parseInt(args[++i]!, 10)
     } else if (arg === '--cwd' && i + 1 < args.length) {
       cwd = args[++i]!
+    } else if (arg === '--resume' && i + 1 < args.length) {
+      resume = args[++i]!
+    } else if (arg === '--resume') {
+      resume = 'latest'
     } else if (arg === '--verbose') {
       verbose = true
     } else if (arg === '--yolo') {
@@ -76,13 +88,13 @@ function parseArgs(args: string[]): AgentV2Options | null {
     i++
   }
 
-  if (!goal) {
+  if (!goal && !resume) {
     console.error('Error: No goal provided.')
     console.error('Usage: ava agent-v2 run "your goal here"')
     return null
   }
 
-  return { goal, provider, model, maxTurns, timeout, cwd, verbose, yolo, json }
+  return { goal, provider, model, maxTurns, timeout, cwd, verbose, yolo, json, resume }
 }
 
 export async function runAgentV2Command(args: string[]): Promise<void> {
@@ -108,6 +120,34 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
   // Load built-in extensions (providers, tools, permissions, etc.)
   const bus = new MessageBus()
   const sessionManager = createSessionManager()
+
+  // Resume session if requested
+  if (options.resume) {
+    await sessionManager.loadFromStorage()
+    if (options.resume === 'latest') {
+      const sessions = sessionManager.list()
+      const latest = sessions.sort((a, b) => b.updatedAt - a.updatedAt)[0]
+      if (latest) {
+        if (options.verbose) {
+          process.stderr.write(
+            `[agent-v2] Resuming session: ${latest.id} (${latest.name ?? 'unnamed'})\n`
+          )
+        }
+      } else {
+        process.stderr.write('[agent-v2] No previous sessions found to resume. Starting fresh.\n')
+      }
+    } else {
+      const session = await sessionManager.loadSession(options.resume)
+      if (session) {
+        if (options.verbose) {
+          process.stderr.write(`[agent-v2] Resuming session: ${session.id}\n`)
+        }
+      } else {
+        process.stderr.write(`[agent-v2] Session ${options.resume} not found. Starting fresh.\n`)
+      }
+    }
+  }
+
   const manager = new ExtensionManager(bus, sessionManager)
 
   const currentDir = path.dirname(fileURLToPath(import.meta.url))
@@ -128,24 +168,51 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
     process.stderr.write(`[agent-v2] Warning: Failed to load extensions: ${message}\n`)
   }
 
-  // Build system prompt from prompts extension sections
-  let systemPrompt: string | undefined
+  // Import prompts module for building system prompt (deferred until after session:opened)
+  interface PromptsModule {
+    addPromptSection: (s: { name: string; priority: number; content: string }) => () => void
+    buildSystemPrompt: (model?: string) => string
+  }
+  let promptsModule: PromptsModule | null = null
   try {
-    const promptsModule = (await importWithDistFallback(
+    promptsModule = (await importWithDistFallback(
       path.resolve(extensionsDir, 'prompts/src/builder.ts'),
       path.resolve(extensionsDir, 'dist/prompts/src/builder.js')
-    )) as {
-      addPromptSection: (s: { name: string; priority: number; content: string }) => void
-      buildSystemPrompt: (model?: string) => string
-    }
+    )) as unknown as PromptsModule
     promptsModule.addPromptSection({
       name: 'cwd',
       priority: 100,
       content: `Working directory: ${options.cwd}`,
     })
-    systemPrompt = promptsModule.buildSystemPrompt(options.model || undefined)
   } catch {
-    // Prompts extension not available — use default
+    // Prompts extension not available
+  }
+
+  // Listen for instructions:loaded to inject project instructions into the system prompt.
+  // Uses a promise that resolves when instructions load or times out at 1s (no files found).
+  let instructionsReady: Promise<void> = Promise.resolve()
+  if (promptsModule) {
+    const pm = promptsModule
+    instructionsReady = new Promise<void>((resolve) => {
+      const timeout = setTimeout(resolve, 1000)
+      onEvent('instructions:loaded', (data) => {
+        clearTimeout(timeout)
+        const { merged, count } = data as { merged: string; count: number }
+        if (merged) {
+          pm.addPromptSection({
+            name: 'project-instructions',
+            content: `# Project Instructions\n\n${merged}`,
+            priority: 5,
+          })
+          if (options.verbose) {
+            process.stderr.write(
+              `[agent-v2] Loaded ${count} instruction file(s) into system prompt\n`
+            )
+          }
+        }
+        resolve()
+      })
+    })
   }
 
   // Set up tool approval via bus (Phase 2)
@@ -230,6 +297,21 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
       )
       process.stderr.write(`[agent-v2] Extensions loaded: ${extensionCount}\n`)
       process.stderr.write(`[agent-v2] Yolo: ${options.yolo}\n\n`)
+    }
+
+    // Create session and emit session:opened so extensions can load instructions, skills, etc.
+    const session = sessionManager.create(options.goal.slice(0, 50), options.cwd)
+    emitEvent('session:opened', {
+      sessionId: session.id,
+      workingDirectory: options.cwd,
+    })
+    // Wait for instructions to load (resolves on event or 1s timeout)
+    await instructionsReady
+
+    // Build system prompt AFTER instructions are loaded
+    let systemPrompt: string | undefined
+    if (promptsModule) {
+      systemPrompt = promptsModule.buildSystemPrompt(options.model || undefined)
     }
 
     const agent = new AgentExecutor(
@@ -322,6 +404,13 @@ function createEventHandler(options: AgentV2Options): AgentEventCallback | undef
             `\x1b[33m[retry] Attempt ${(event as RetryEvent).attempt}/${(event as RetryEvent).maxRetries} — waiting ${((event as RetryEvent).delayMs / 1000).toFixed(1)}s\x1b[0m\n`
           )
           break
+        case 'context:compacting': {
+          const ce = event as CompactingEvent
+          process.stderr.write(
+            `\x1b[33m[compaction] ${ce.messagesBefore} → ${ce.messagesAfter} messages (${ce.estimatedTokens} tokens / ${ce.contextLimit} limit)\x1b[0m\n`
+          )
+          break
+        }
         case 'doom-loop':
           process.stderr.write(
             `\x1b[31m[doom-loop] ${(event as DoomLoopEvent).tool} called ${(event as DoomLoopEvent).count}x with same args\x1b[0m\n`
@@ -431,6 +520,7 @@ function formatToolFinish(_toolName: string, success: boolean, durationMs: numbe
 // Extended event type narrowing helpers
 type RetryEvent = Extract<AgentEvent, { type: 'retry' }>
 type DoomLoopEvent = Extract<AgentEvent, { type: 'doom-loop' }>
+type CompactingEvent = Extract<AgentEvent, { type: 'context:compacting' }>
 
 /** Import a module with fallback from .ts source to compiled .js in dist. */
 async function importWithDistFallback(
@@ -457,6 +547,7 @@ OPTIONS:
   --max-turns <n>       Maximum turns (default: 20)
   --timeout <minutes>   Timeout in minutes (default: 10)
   --cwd <path>          Working directory (default: current)
+  --resume [id]         Resume a previous session (latest if no ID given)
   --verbose             Verbose output with tool details
   --yolo                Auto-approve all tool calls (skip confirmation)
   --json                NDJSON output for scripting
@@ -466,5 +557,6 @@ EXAMPLES:
   ava agent-v2 run "create hello.txt" --provider anthropic
   ava agent-v2 run "find TODOs" --provider anthropic --model claude-sonnet-4-20250514 --yolo
   ava agent-v2 run "refactor utils" --provider anthropic --json
+  ava agent-v2 run "continue working" --resume
 `)
 }

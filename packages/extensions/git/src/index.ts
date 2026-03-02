@@ -94,6 +94,24 @@ export function activate(api: ExtensionAPI): Disposable {
     })
   )
 
+  // Register /undo command — restores the most recent snapshot
+  disposables.push(
+    api.registerCommand({
+      name: 'undo',
+      description: 'Undo the most recent file change by restoring the latest git snapshot',
+      async execute(_args, ctx) {
+        if (!gitAvailable) return 'Not in a git repository.'
+        const latest = manager.getLatestSnapshot()
+        if (!latest) return 'No snapshots available to restore.'
+        const dir = cwd || ctx.workingDirectory
+        const restored = await manager.restoreSnapshot(dir, latest.hash)
+        return restored
+          ? `Restored snapshot ${latest.hash.slice(0, 8)}: ${latest.message}`
+          : `Failed to restore snapshot ${latest.hash.slice(0, 8)}.`
+      },
+    })
+  )
+
   api.log.debug('Git extension activated')
 
   return {

@@ -38,18 +38,6 @@ function resolveOAuthEndpoint(): string {
   return CODEX_ENDPOINT
 }
 
-/** Extract plain text from message content (handles multimodal arrays) */
-function extractText(content: unknown): string {
-  if (typeof content === 'string') return content
-  if (Array.isArray(content)) {
-    return (content as Array<{ type?: string; text?: string }>)
-      .filter((c) => c.type === 'text' || c.type === 'input_text' || c.type === 'output_text')
-      .map((c) => c.text ?? '')
-      .join('\n')
-  }
-  return String(content ?? '')
-}
-
 function classifyError(status: number): 'rate_limit' | 'auth' | 'server' | 'unknown' {
   if (status === 401 || status === 403) return 'auth'
   if (status === 429) return 'rate_limit'
@@ -143,7 +131,11 @@ export class OpenAIClient implements LLMClient {
 
     let bodyJson: string
     if (useResponses) {
-      bodyJson = JSON.stringify(buildResponsesRequestBody(messages, { ...config, model }))
+      const respBody = buildResponsesRequestBody(messages, { ...config, model })
+      console.debug(
+        `[AVA:OpenAI] API Key Responses API — model=${model}, tools=${respBody.tools?.length ?? 0}, tool_choice=${respBody.tool_choice ?? 'default'}`
+      )
+      bodyJson = JSON.stringify(respBody)
     } else {
       const chatBody = buildOpenAIRequestBody(messages, config, { model: 'gpt-4o' })
       if (!chatBody.max_tokens) chatBody.max_tokens = 4096
@@ -249,43 +241,14 @@ export class OpenAIClient implements LLMClient {
       headers['ChatGPT-Account-Id'] = accountId
     }
 
-    // Build system instructions
-    const systemInstructions = messages
-      .filter((m) => m.role === 'system')
-      .map((m) => extractText(m.content))
-      .join('\n\n')
+    // Use shared builder for consistent tool/message handling
+    const body = buildResponsesRequestBody(messages, config) as unknown as Record<string, unknown>
 
-    // Convert tools to Responses API format (flat, not nested under `function`)
-    const responsesTools = config.tools?.length
-      ? config.tools.map((t) => ({
-          type: 'function' as const,
-          name: t.name,
-          description: t.description,
-          parameters: t.input_schema,
-        }))
-      : undefined
-
-    const body: Record<string, unknown> = {
-      model: config.model,
-      instructions: systemInstructions || 'You are AVA, a coding assistant.',
-      input: messages
-        .filter((m) => m.role !== 'system')
-        .map((m) => ({
-          role: m.role,
-          content: [
-            {
-              type: m.role === 'assistant' ? 'output_text' : 'input_text',
-              text: extractText(m.content),
-            },
-          ],
-        })),
-      store: false,
-      stream: true,
-    }
-
-    if (responsesTools) {
-      body.tools = responsesTools
-    }
+    // Debug: log tool count so we can verify tools are being sent
+    const toolCount = (body.tools as unknown[] | undefined)?.length ?? 0
+    console.debug(
+      `[AVA:OpenAI] OAuth Responses API — model=${config.model}, tools=${toolCount}, tool_choice=${body.tool_choice ?? 'default'}`
+    )
 
     let response: Response
     try {

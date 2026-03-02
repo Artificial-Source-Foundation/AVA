@@ -7,14 +7,43 @@
  * https://platform.openai.com/docs/api-reference/responses
  */
 
-import type { ChatMessage, MessageContent, ProviderConfig, TextBlock } from '@ava/core-v2/llm'
+import type {
+  ChatMessage,
+  ContentBlock,
+  MessageContent,
+  ProviderConfig,
+  TextBlock,
+  ToolResultBlock,
+  ToolUseBlock,
+} from '@ava/core-v2/llm'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-interface ResponsesInputItem {
+/** Text message item (user or assistant). */
+interface ResponsesTextItem {
   role: string
   content: Array<{ type: string; text: string }>
 }
+
+/** Function call item — emitted by assistant when calling a tool. */
+interface ResponsesFunctionCallItem {
+  type: 'function_call'
+  call_id: string
+  name: string
+  arguments: string
+}
+
+/** Function call output — the result returned to the model. */
+interface ResponsesFunctionCallOutputItem {
+  type: 'function_call_output'
+  call_id: string
+  output: string
+}
+
+type ResponsesInputItem =
+  | ResponsesTextItem
+  | ResponsesFunctionCallItem
+  | ResponsesFunctionCallOutputItem
 
 interface ResponsesTool {
   type: 'function'
@@ -28,6 +57,7 @@ interface ResponsesRequestBody {
   instructions: string
   input: ResponsesInputItem[]
   tools?: ResponsesTool[]
+  tool_choice?: string
   store: boolean
   stream: boolean
   max_output_tokens?: number
@@ -45,14 +75,31 @@ function extractText(content: MessageContent): string {
     .join('\n')
 }
 
+/** Check if content blocks contain tool_use or tool_result entries. */
+function hasToolBlocks(content: MessageContent): boolean {
+  if (typeof content === 'string') return false
+  return content.some((b) => b.type === 'tool_use' || b.type === 'tool_result')
+}
+
+/** Extract ToolUseBlock entries from content blocks. */
+function getToolUseBlocks(content: ContentBlock[]): ToolUseBlock[] {
+  return content.filter((b): b is ToolUseBlock => b.type === 'tool_use')
+}
+
+/** Extract ToolResultBlock entries from content blocks. */
+function getToolResultBlocks(content: ContentBlock[]): ToolResultBlock[] {
+  return content.filter((b): b is ToolResultBlock => b.type === 'tool_result')
+}
+
 // ─── Builder ────────────────────────────────────────────────────────────────
 
 /**
  * Build a Responses API request body from ChatMessages.
  *
  * System messages are extracted into the `instructions` field.
- * User/assistant messages become `input` items with `input_text`/`output_text`.
- * Tools use the flat format (no nested `function` wrapper).
+ * User/assistant text → `input_text`/`output_text` items.
+ * ToolUseBlock → `function_call` items.
+ * ToolResultBlock → `function_call_output` items.
  */
 export function buildResponsesRequestBody(
   messages: ChatMessage[],
@@ -74,6 +121,39 @@ export function buildResponsesRequestBody(
   for (const msg of messages) {
     if (msg.role === 'system') continue
 
+    // Assistant message with tool calls → emit text + function_call items
+    if (msg.role === 'assistant' && typeof msg.content !== 'string' && hasToolBlocks(msg.content)) {
+      const text = extractText(msg.content)
+      if (text) {
+        input.push({
+          role: 'assistant',
+          content: [{ type: 'output_text', text }],
+        })
+      }
+      for (const tc of getToolUseBlocks(msg.content)) {
+        input.push({
+          type: 'function_call',
+          call_id: tc.id,
+          name: tc.name,
+          arguments: JSON.stringify(tc.input),
+        })
+      }
+      continue
+    }
+
+    // User message with tool results → emit function_call_output items
+    if (msg.role === 'user' && typeof msg.content !== 'string' && hasToolBlocks(msg.content)) {
+      for (const tr of getToolResultBlocks(msg.content)) {
+        input.push({
+          type: 'function_call_output',
+          call_id: tr.tool_use_id,
+          output: tr.content,
+        })
+      }
+      continue
+    }
+
+    // Plain text message
     const text = extractText(msg.content)
     if (!text) continue
 
@@ -102,7 +182,13 @@ export function buildResponsesRequestBody(
     stream: true,
   }
 
-  if (tools) body.tools = tools
+  if (tools) {
+    body.tools = tools
+    // Pass tool_choice — Responses API supports "auto" | "required" | "none"
+    if (config.toolChoice) {
+      body.tool_choice = config.toolChoice.type === 'tool' ? 'required' : config.toolChoice.type
+    }
+  }
   if (config.maxTokens) body.max_output_tokens = config.maxTokens
   if (config.temperature !== undefined) body.temperature = config.temperature
 

@@ -24,7 +24,9 @@ import {
 let settings: PermissionSettings = { ...DEFAULT_SETTINGS }
 
 export function updateSettings(partial: Partial<PermissionSettings>): void {
-  settings = { ...settings, ...partial }
+  // Filter out undefined values to avoid overwriting defaults (e.g. blockedPatterns: [])
+  const defined = Object.fromEntries(Object.entries(partial).filter(([, v]) => v !== undefined))
+  settings = { ...settings, ...defined }
 }
 
 export function getSettings(): PermissionSettings {
@@ -117,7 +119,7 @@ function isSudoCommand(args: Record<string, unknown>): boolean {
 }
 
 function isBlockedByPattern(args: Record<string, unknown>): boolean {
-  if (settings.blockedPatterns.length === 0) return false
+  if (!settings.blockedPatterns?.length) return false
   const path = (args.path ?? args.filePath ?? '') as string
   return settings.blockedPatterns.some(
     (p) => matchesGlob(path, `**/${p}/**`) || matchesGlob(path, `**/${p}`) || path.includes(p)
@@ -148,7 +150,7 @@ export function buildApprovalKey(toolName: string, args: Record<string, unknown>
  * Compares the fingerprint key against stored keys.
  */
 function isAlwaysApproved(toolName: string, args: Record<string, unknown>): boolean {
-  if (settings.alwaysApproved.length === 0) return false
+  if (!settings.alwaysApproved?.length) return false
 
   const key = buildApprovalKey(toolName, args)
 
@@ -217,7 +219,7 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
       }
 
       // 8. Per-tool rules (first match wins)
-      if (settings.toolRules.length > 0) {
+      if (settings.toolRules?.length) {
         const rule = evaluateToolRules(toolName, path || undefined, settings.toolRules)
         if (rule) {
           if (rule.action === 'allow') return undefined

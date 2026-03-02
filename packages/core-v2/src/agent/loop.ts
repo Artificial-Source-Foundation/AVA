@@ -291,6 +291,11 @@ export class AgentExecutor {
 
         // If step limit was reached last turn, pass empty tools to force text-only response
         const tools = this.stepLimitReached ? [] : this.getAvailableTools()
+        if (turn === 1) {
+          console.debug(
+            `[AVA:Agent] Turn 1 — ${tools.length} tools available, model=${model}, provider=${this.config.provider}`
+          )
+        }
 
         // If step limit was reached, inject a system message telling the agent to wrap up
         if (this.stepLimitReached) {
@@ -702,6 +707,7 @@ export class AgentExecutor {
       toolName: resolvedName,
       success: result.success,
       durationMs,
+      output,
     })
 
     return {

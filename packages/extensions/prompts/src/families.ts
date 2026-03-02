@@ -1,6 +1,9 @@
 /**
  * Model-family detection and family-specific prompt sections.
  * Maps model ID strings to known families and provides tailored instructions.
+ *
+ * Each family gets directives optimized for that model's behavior patterns.
+ * Based on research from OpenCode, Pi, and Gemini CLI prompt engineering.
  */
 
 export type ModelFamily = 'claude' | 'gpt' | 'gemini' | 'llama' | 'deepseek' | 'mistral' | 'unknown'
@@ -12,11 +15,11 @@ interface FamilyPattern {
 
 const FAMILY_PATTERNS: FamilyPattern[] = [
   { family: 'claude', patterns: /claude|sonnet|haiku|opus/i },
-  { family: 'gpt', patterns: /gpt|o1|o3|o4|chatgpt/i },
+  { family: 'gpt', patterns: /gpt|o1|o3|o4|chatgpt|codex/i },
   { family: 'gemini', patterns: /gemini|gemma/i },
   { family: 'llama', patterns: /llama|codellama/i },
   { family: 'deepseek', patterns: /deepseek/i },
-  { family: 'mistral', patterns: /mistral|mixtral|codestral/i },
+  { family: 'mistral', patterns: /mistral|mixtral|codestral|magistral/i },
 ]
 
 /**
@@ -34,16 +37,32 @@ export function detectModelFamily(model: string): ModelFamily {
 }
 
 /**
- * Family-specific prompt sections that provide tailored instructions
- * for each model family's strengths and capabilities.
+ * Family-specific prompt sections that provide tailored autonomy and
+ * tool-use instructions for each model family.
  */
 export const FAMILY_PROMPT_SECTIONS: Record<ModelFamily, string> = {
-  claude: 'Use XML tags for structured output. Prefer thinking blocks for complex reasoning.',
-  gpt: 'Use markdown formatting. Prefer function calling over text-based tool use.',
-  gemini: 'Supports large context windows. Use structured output when available.',
-  llama: 'Keep responses concise. May not support all tool calling features.',
-  deepseek: 'Supports code completion natively. Use fill-in-the-middle when appropriate.',
-  mistral: 'Supports function calling. Keep tool schemas simple.',
+  gpt: `## Model-Specific Directives
+Prefer function calling over text-based tool use. When you decide to take an action, ACTUALLY call the tool — do not just describe what you would do.
+You are an agent — keep going until the task is completely resolved. Do not end your turn to ask the user what to do next. You have everything you need.
+NEVER say "I can't invoke tools" or ask the user to run commands manually. You have direct tool access — use it.`,
+
+  claude: `## Model-Specific Directives
+Use thinking blocks for complex reasoning before acting. Prefer structured XML output when returning data.
+You are an autonomous agent — solve problems end-to-end without asking for permission or clarification.`,
+
+  gemini: `## Model-Specific Directives
+Do NOT ask permission before using a tool. The interface provides confirmation if needed — your job is to act.
+You can process large amounts of context. Read multiple files in parallel when exploring a codebase.`,
+
+  llama: `## Model-Specific Directives
+Keep responses concise. Focus on using the available tools to complete tasks rather than explaining what you would do.`,
+
+  deepseek: `## Model-Specific Directives
+You have strong code understanding. Use tools to read and modify files directly. Do not ask the user to perform actions you can do yourself.`,
+
+  mistral: `## Model-Specific Directives
+Use function calling for all file and command operations. Act autonomously — do the work, then report results.`,
+
   unknown: '',
 }
 

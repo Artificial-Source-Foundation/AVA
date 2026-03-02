@@ -45,16 +45,16 @@ describe('Prompt Builder', () => {
     resetPromptSections()
     addPromptSection({ name: 'base', priority: 0, content: 'Base prompt' })
     const prompt = buildSystemPrompt('claude-3-opus')
-    expect(prompt).toContain('XML tags')
     expect(prompt).toContain('thinking blocks')
+    expect(prompt).toContain('autonomous agent')
   })
 
   it('appends model-family section for gpt', () => {
     resetPromptSections()
     addPromptSection({ name: 'base', priority: 0, content: 'Base prompt' })
     const prompt = buildSystemPrompt('gpt-4o')
-    expect(prompt).toContain('markdown')
     expect(prompt).toContain('function calling')
+    expect(prompt).toContain('ACTUALLY call the tool')
   })
 
   it('does not append family section for unknown models', () => {

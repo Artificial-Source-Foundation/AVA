@@ -77,11 +77,11 @@ describe('detectModelFamily', () => {
 
 describe('FAMILY_PROMPT_SECTIONS', () => {
   it('has entries for all families', () => {
-    expect(FAMILY_PROMPT_SECTIONS.claude).toContain('XML tags')
-    expect(FAMILY_PROMPT_SECTIONS.gpt).toContain('markdown')
-    expect(FAMILY_PROMPT_SECTIONS.gemini).toContain('context windows')
+    expect(FAMILY_PROMPT_SECTIONS.claude).toContain('thinking blocks')
+    expect(FAMILY_PROMPT_SECTIONS.gpt).toContain('function calling')
+    expect(FAMILY_PROMPT_SECTIONS.gemini).toContain('permission')
     expect(FAMILY_PROMPT_SECTIONS.llama).toContain('concise')
-    expect(FAMILY_PROMPT_SECTIONS.deepseek).toContain('fill-in-the-middle')
+    expect(FAMILY_PROMPT_SECTIONS.deepseek).toContain('code understanding')
     expect(FAMILY_PROMPT_SECTIONS.mistral).toContain('function calling')
     expect(FAMILY_PROMPT_SECTIONS.unknown).toBe('')
   })
@@ -90,19 +90,19 @@ describe('FAMILY_PROMPT_SECTIONS', () => {
 describe('getModelFamilyPromptSection', () => {
   it('returns claude section for claude models', () => {
     const section = getModelFamilyPromptSection('claude-3-opus')
-    expect(section).toContain('XML tags')
     expect(section).toContain('thinking blocks')
+    expect(section).toContain('autonomous agent')
   })
 
   it('returns gpt section for gpt models', () => {
     const section = getModelFamilyPromptSection('gpt-4o')
-    expect(section).toContain('markdown')
     expect(section).toContain('function calling')
+    expect(section).toContain('ACTUALLY call the tool')
   })
 
   it('returns gemini section for gemini models', () => {
     const section = getModelFamilyPromptSection('gemini-1.5-pro')
-    expect(section).toContain('context windows')
+    expect(section).toContain('permission')
   })
 
   it('returns llama section for llama models', () => {
@@ -112,7 +112,7 @@ describe('getModelFamilyPromptSection', () => {
 
   it('returns deepseek section for deepseek models', () => {
     const section = getModelFamilyPromptSection('deepseek-coder')
-    expect(section).toContain('fill-in-the-middle')
+    expect(section).toContain('code understanding')
   })
 
   it('returns mistral section for mistral models', () => {

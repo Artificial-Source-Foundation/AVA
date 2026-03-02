@@ -73,7 +73,14 @@ export type AgentEvent =
   | { type: 'turn:start'; agentId: string; turn: number }
   | { type: 'turn:end'; agentId: string; turn: number; toolCalls: ToolCallInfo[] }
   | { type: 'tool:start'; agentId: string; toolName: string; args: Record<string, unknown> }
-  | { type: 'tool:finish'; agentId: string; toolName: string; success: boolean; durationMs: number }
+  | {
+      type: 'tool:finish'
+      agentId: string
+      toolName: string
+      success: boolean
+      durationMs: number
+      output?: string
+    }
   | { type: 'thought'; agentId: string; content: string }
   | { type: 'thinking'; agentId: string; content: string }
   | { type: 'error'; agentId: string; error: string }

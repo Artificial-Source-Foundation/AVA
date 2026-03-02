@@ -47,6 +47,31 @@ export async function streamResponse(options: StreamOptions, deps: ChatDeps): Pr
   let fullContent = ''
   let fullThinking = ''
 
+  // Buffered tool call updates — prevents UI flickering on every progress chunk
+  let toolFlushTimer: ReturnType<typeof setTimeout> | null = null
+  let toolUpdatePending = false
+  const flushToolUpdates = () => {
+    if (!toolUpdatePending) return
+    toolUpdatePending = false
+    options.onToolUpdate?.([...allToolCalls])
+  }
+  const scheduleToolFlush = () => {
+    toolUpdatePending = true
+    if (toolFlushTimer !== null) return
+    toolFlushTimer = setTimeout(() => {
+      toolFlushTimer = null
+      flushToolUpdates()
+    }, 150)
+  }
+  const immediateToolFlush = () => {
+    if (toolFlushTimer !== null) {
+      clearTimeout(toolFlushTimer)
+      toolFlushTimer = null
+    }
+    toolUpdatePending = true
+    flushToolUpdates()
+  }
+
   // Register temporary diff-capture middleware for file operations
   const diffMiddleware = createDiffCaptureMiddleware(deps, options.sessionId)
   const diffDisposable = addToolMiddleware(diffMiddleware)
@@ -63,20 +88,27 @@ export async function streamResponse(options: StreamOptions, deps: ChatDeps): Pr
       allowedTools: options.enableTools === false ? [] : undefined,
     },
     (event: AgentEvent) => {
-      handleChatEvent(event, options, deps, allToolCalls, {
-        get content() {
-          return fullContent
+      handleChatEvent(
+        event,
+        options,
+        deps,
+        allToolCalls,
+        {
+          get content() {
+            return fullContent
+          },
+          set content(v: string) {
+            fullContent = v
+          },
+          get thinking() {
+            return fullThinking
+          },
+          set thinking(v: string) {
+            fullThinking = v
+          },
         },
-        set content(v: string) {
-          fullContent = v
-        },
-        get thinking() {
-          return fullThinking
-        },
-        set thinking(v: string) {
-          fullThinking = v
-        },
-      })
+        { scheduleToolFlush, immediateToolFlush }
+      )
     }
   )
 
@@ -129,6 +161,10 @@ export async function streamResponse(options: StreamOptions, deps: ChatDeps): Pr
     logError(deps.LOG_SRC, 'Stream failed', err)
     options.onError({ type: 'unknown', message: errorMsg })
   } finally {
+    if (toolFlushTimer !== null) {
+      clearTimeout(toolFlushTimer)
+      toolFlushTimer = null
+    }
     diffDisposable.dispose()
   }
 }
@@ -142,12 +178,18 @@ interface ContentState {
   thinking: string
 }
 
+interface ToolFlushControls {
+  scheduleToolFlush: () => void
+  immediateToolFlush: () => void
+}
+
 function handleChatEvent(
   event: AgentEvent,
   options: StreamOptions,
   deps: ChatDeps,
   allToolCalls: ToolCall[],
-  state: ContentState
+  state: ContentState,
+  toolFlush?: ToolFlushControls
 ): void {
   switch (event.type) {
     case 'thought': {
@@ -172,7 +214,9 @@ function handleChatEvent(
         filePath: getModifiedFilePath(event.toolName, event.args) ?? undefined,
       }
       allToolCalls.push(tc)
-      options.onToolUpdate?.([...allToolCalls])
+      // Flush immediately on start so the UI shows the tool card right away
+      if (toolFlush) toolFlush.immediateToolFlush()
+      else options.onToolUpdate?.([...allToolCalls])
       break
     }
 
@@ -184,8 +228,14 @@ function handleChatEvent(
         tc.status = event.success ? 'success' : 'error'
         tc.completedAt = Date.now()
         tc.streamingOutput = undefined
+        // Capture tool output for expandable detail view
+        if (event.output) {
+          tc.output = event.output
+        }
       }
-      options.onToolUpdate?.([...allToolCalls])
+      // Flush immediately on finish so status updates are instant
+      if (toolFlush) toolFlush.immediateToolFlush()
+      else options.onToolUpdate?.([...allToolCalls])
       break
     }
 
@@ -195,7 +245,9 @@ function handleChatEvent(
         .find((t: ToolCall) => t.name === event.toolName && t.status === 'running')
       if (tc) {
         tc.streamingOutput = (tc.streamingOutput ?? '') + event.chunk
-        options.onToolUpdate?.([...allToolCalls])
+        // Buffer progress updates to prevent flickering
+        if (toolFlush) toolFlush.scheduleToolFlush()
+        else options.onToolUpdate?.([...allToolCalls])
       }
       break
     }

@@ -19,6 +19,8 @@ let mockRunBehavior:
   | 'always-fail'
   | 'throw-then-succeed'
   | 'always-throw' = 'success'
+let lastRunGoal = ''
+let lastRunConfig: Record<string, unknown> = {}
 
 // Mock AgentExecutor
 vi.mock('@ava/core-v2/agent', () => ({
@@ -29,10 +31,12 @@ vi.mock('@ava/core-v2/agent', () => ({
     constructor(config: Record<string, unknown>, onEvent?: (event: unknown) => void) {
       this.config = config
       this.onEvent = onEvent
+      lastRunConfig = config
     }
 
     async run(inputs: { goal: string; cwd: string }, _signal: AbortSignal) {
       mockRunCallCount++
+      lastRunGoal = inputs.goal
       this.onEvent?.({
         type: 'tool:start',
         agentId: this.config.id,
@@ -82,6 +86,15 @@ vi.mock('@ava/core-v2/agent', () => ({
   },
 }))
 
+// Mock worktree module
+vi.mock('../../git/src/worktree.js', () => ({
+  createWorktree: vi.fn().mockResolvedValue({
+    path: '/test/project/.ava-worktrees/ava-session-mock1234',
+    branch: 'ava-session-mock1234',
+  }),
+  removeWorktree: vi.fn().mockResolvedValue(undefined),
+}))
+
 const CODER = WORKER_AGENTS.find((a) => a.id === 'coder')!
 const REVIEWER = WORKER_AGENTS.find((a) => a.id === 'reviewer')!
 
@@ -89,6 +102,8 @@ const REVIEWER = WORKER_AGENTS.find((a) => a.id === 'reviewer')!
 function resetMockState(): void {
   mockRunCallCount = 0
   mockRunBehavior = 'success'
+  lastRunGoal = ''
+  lastRunConfig = {}
   resetDelegationConfig()
 }
 
@@ -180,9 +195,39 @@ describe('createDelegateTool', () => {
       expect(tool.definition.input_schema.properties).toHaveProperty('context')
       expect(tool.definition.input_schema.required).not.toContain('context')
     })
+
+    it('has optional files parameter', () => {
+      const tool = createDelegateTool(CODER)
+      expect(tool.definition.input_schema.properties).toHaveProperty('files')
+      expect(tool.definition.input_schema.required).not.toContain('files')
+    })
   })
 
   describe('execution', () => {
+    it('emits session:child-opened after delegation:start', async () => {
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      await tool.execute({ task: 'Write a function' }, ctx)
+
+      const onEvent = ctx.onEvent as ReturnType<typeof vi.fn>
+      const childOpenedEvent = onEvent.mock.calls.find(
+        (c: unknown[]) => (c[0] as Record<string, unknown>).type === 'session:child-opened'
+      )
+      expect(childOpenedEvent).toBeDefined()
+      expect(childOpenedEvent![0]).toMatchObject({
+        type: 'session:child-opened',
+        parentSessionId: 'parent-agent-id',
+        workingDirectory: '/test/project',
+      })
+      // delegation:start fires first, then session:child-opened after child is created
+      const childOpenedIdx = onEvent.mock.calls.indexOf(childOpenedEvent!)
+      const startIdx = onEvent.mock.calls.findIndex(
+        (c: unknown[]) => (c[0] as Record<string, unknown>).type === 'delegation:start'
+      )
+      expect(startIdx).toBeLessThan(childOpenedIdx)
+    })
+
     it('emits delegation:start with tier', async () => {
       const tool = createDelegateTool(CODER)
       const ctx = createMockContext()
@@ -265,6 +310,153 @@ describe('createDelegateTool', () => {
 
       const result = await tool.execute({ task: 'Write a function' }, ctx)
       expect(result.success).toBe(true)
+    })
+  })
+
+  describe('shared file cache (P-04)', () => {
+    afterEach(() => resetMockState())
+
+    it('prepends file blocks to the goal when files are provided', async () => {
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      await tool.execute(
+        {
+          task: 'Fix the bug',
+          files: { '/src/app.ts': 'const x = 1', '/src/util.ts': 'export {}' },
+        },
+        ctx
+      )
+
+      expect(lastRunGoal).toContain('<file path="/src/app.ts">')
+      expect(lastRunGoal).toContain('const x = 1')
+      expect(lastRunGoal).toContain('<file path="/src/util.ts">')
+      expect(lastRunGoal).toContain('export {}')
+      expect(lastRunGoal).toContain('Fix the bug')
+    })
+
+    it('file blocks appear before the task text', async () => {
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      await tool.execute({ task: 'Do something', files: { '/a.ts': 'content' } }, ctx)
+
+      const fileIdx = lastRunGoal.indexOf('<file path="/a.ts">')
+      const taskIdx = lastRunGoal.indexOf('Do something')
+      expect(fileIdx).toBeLessThan(taskIdx)
+    })
+
+    it('works without files (backward compat)', async () => {
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      await tool.execute({ task: 'No files here' }, ctx)
+
+      expect(lastRunGoal).not.toContain('<file')
+      expect(lastRunGoal).toContain('No files here')
+    })
+
+    it('includes context after task when both files and context provided', async () => {
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      await tool.execute(
+        { task: 'Fix it', context: 'Use TypeScript', files: { '/f.ts': 'code' } },
+        ctx
+      )
+
+      expect(lastRunGoal).toContain('<file path="/f.ts">')
+      expect(lastRunGoal).toContain('Fix it')
+      expect(lastRunGoal).toContain('Context:\nUse TypeScript')
+    })
+  })
+
+  describe('budget awareness (P-05)', () => {
+    afterEach(() => resetMockState())
+
+    it('includes budget instruction in system prompt', async () => {
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      await tool.execute({ task: 'Write a function' }, ctx)
+
+      const sp = lastRunConfig.systemPrompt as string
+      expect(sp).toContain('You have 15 turns maximum')
+      expect(sp).toContain('50%')
+      expect(sp).toContain('attempt_completion')
+    })
+
+    it('uses agent maxTurns in budget instruction', async () => {
+      const customAgent: AgentDefinition = { ...CODER, maxTurns: 10 }
+      const tool = createDelegateTool(customAgent)
+      const ctx = createMockContext()
+
+      await tool.execute({ task: 'Write code' }, ctx)
+
+      const sp = lastRunConfig.systemPrompt as string
+      expect(sp).toContain('You have 10 turns maximum')
+    })
+
+    it('includes both agent system prompt and budget instruction', async () => {
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      await tool.execute({ task: 'Write code' }, ctx)
+
+      const sp = lastRunConfig.systemPrompt as string
+      // Agent system prompt from CODER
+      expect(sp).toContain('senior developer')
+      // Budget instruction
+      expect(sp).toContain('turns maximum')
+    })
+  })
+
+  describe('worktree isolation (CG-09)', () => {
+    afterEach(() => resetMockState())
+
+    it('does not create worktree when isolation is false', async () => {
+      const { createWorktree: mockCreate } = await import('../../git/src/worktree.js')
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      await tool.execute({ task: 'Write code' }, ctx)
+
+      expect(mockCreate).not.toHaveBeenCalled()
+    })
+
+    it('creates worktree when isolation is true', async () => {
+      configureDelegation({ isolation: true })
+      const { createWorktree: mockCreate, removeWorktree: mockRemove } = await import(
+        '../../git/src/worktree.js'
+      )
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      await tool.execute({ task: 'Write code' }, ctx)
+
+      expect(mockCreate).toHaveBeenCalledWith('/test/project', expect.any(String))
+      expect(mockRemove).toHaveBeenCalledWith(
+        '/test/project',
+        '/test/project/.ava-worktrees/ava-session-mock1234'
+      )
+    })
+
+    it('cleans up worktree even on failure', async () => {
+      configureDelegation({ isolation: true, maxRetries: 0 })
+      mockRunBehavior = 'always-fail'
+      const { removeWorktree: mockRemove } = await import('../../git/src/worktree.js')
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      await tool.execute({ task: 'Fail' }, ctx)
+
+      expect(mockRemove).toHaveBeenCalled()
+    })
+
+    it('getDelegationConfig includes isolation field', () => {
+      expect(getDelegationConfig().isolation).toBe(false)
+      configureDelegation({ isolation: true })
+      expect(getDelegationConfig().isolation).toBe(true)
     })
   })
 

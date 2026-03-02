@@ -100,6 +100,8 @@ export const bashTool = defineTool({
         title: input.description,
         metadata: { streamOutput: stdout.slice(-4096) },
       })
+      // Stream progress via onProgress callback
+      ctx.onProgress?.({ chunk: data })
     })
 
     const stderrPromise = readStream(child.stderr, (data) => {

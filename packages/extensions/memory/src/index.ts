@@ -33,6 +33,14 @@ export function activate(api: ExtensionAPI): Disposable {
   // Register auto-learning from agent sessions
   registerAutoLearn(api)
 
+  // Register periodic memory persistence via scheduler
+  api.emit('scheduler:register', {
+    id: 'memory-persist',
+    interval: 5 * 60 * 1000,
+    handler: () => store.flush(),
+  })
+  api.log.debug('Memory persistence scheduled (every 5 minutes)')
+
   api.log.debug(`Memory extension activated (${tools.length} tools, auto-learn enabled)`)
 
   return {

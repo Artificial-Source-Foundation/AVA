@@ -1,12 +1,14 @@
 /**
  * LSP extension — Language Server Protocol integration.
  *
- * Starts available LSP servers and registers diagnostic/hover tools.
+ * Starts available LSP servers and registers 9 tools:
+ * diagnostics, hover, definition, references, document_symbols,
+ * workspace_symbols, code_actions, rename, completions.
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
-import { formatDiagnostics, formatHover, formatLocations } from './queries.js'
 import { LSPServerManager, pathToUri } from './server-manager.js'
+import { createAllLspTools } from './tools.js'
 import type { LSPDiagnostic, SupportedLanguage } from './types.js'
 
 const LSP_SERVERS: Record<SupportedLanguage, { command: string; args: string[] }> = {
@@ -21,6 +23,15 @@ export function activate(api: ExtensionAPI): Disposable {
   const disposables: Disposable[] = []
   let serverManager: LSPServerManager | null = null
   const diagnosticsStore = new Map<string, LSPDiagnostic[]>()
+
+  // Register all 9 LSP tools
+  const tools = createAllLspTools({
+    getServerManager: () => serverManager,
+    getDiagnosticsStore: () => diagnosticsStore,
+  })
+  for (const tool of tools) {
+    disposables.push(api.registerTool(tool))
+  }
 
   // Start available servers on session open
   disposables.push(
@@ -75,124 +86,6 @@ export function activate(api: ExtensionAPI): Disposable {
           api.log.debug('No LSP servers found')
         }
       })()
-    })
-  )
-
-  // Register lsp_diagnostics tool
-  disposables.push(
-    api.registerTool({
-      definition: {
-        name: 'lsp_diagnostics',
-        description: 'Get LSP diagnostics (errors, warnings) for a file.',
-        input_schema: {
-          type: 'object' as const,
-          properties: {
-            file: { type: 'string', description: 'File path to get diagnostics for' },
-          },
-          required: ['file'],
-        },
-      },
-      async execute(input) {
-        const { file } = input as { file: string }
-        const diags = diagnosticsStore.get(file) ?? []
-        return { success: true, output: formatDiagnostics(diags) }
-      },
-    })
-  )
-
-  // Register lsp_hover tool
-  disposables.push(
-    api.registerTool({
-      definition: {
-        name: 'lsp_hover',
-        description: 'Get hover information (type info, docs) for a symbol at a position.',
-        input_schema: {
-          type: 'object' as const,
-          properties: {
-            file: { type: 'string', description: 'File path' },
-            line: { type: 'number', description: 'Line number (1-based)' },
-            column: { type: 'number', description: 'Column number (1-based)' },
-            language: {
-              type: 'string',
-              description: 'Language: typescript, python, rust, go, java',
-            },
-          },
-          required: ['file', 'line', 'column', 'language'],
-        },
-      },
-      async execute(input) {
-        const { file, line, column, language } = input as {
-          file: string
-          line: number
-          column: number
-          language: SupportedLanguage
-        }
-
-        if (!serverManager) {
-          return { success: false, output: 'LSP not initialized. Open a session first.' }
-        }
-
-        const client = serverManager.getClient(language)
-        if (!client) {
-          return { success: false, output: `No LSP server running for ${language}` }
-        }
-
-        try {
-          const uri = pathToUri(file)
-          const hover = await client.hover(uri, { line: line - 1, character: column - 1 })
-          return { success: true, output: formatHover(hover) }
-        } catch (err) {
-          return { success: false, output: `LSP hover failed: ${err}` }
-        }
-      },
-    })
-  )
-
-  // Register lsp_definition tool
-  disposables.push(
-    api.registerTool({
-      definition: {
-        name: 'lsp_definition',
-        description: 'Go to definition of a symbol at a position.',
-        input_schema: {
-          type: 'object' as const,
-          properties: {
-            file: { type: 'string', description: 'File path' },
-            line: { type: 'number', description: 'Line number (1-based)' },
-            column: { type: 'number', description: 'Column number (1-based)' },
-            language: {
-              type: 'string',
-              description: 'Language: typescript, python, rust, go, java',
-            },
-          },
-          required: ['file', 'line', 'column', 'language'],
-        },
-      },
-      async execute(input) {
-        const { file, line, column, language } = input as {
-          file: string
-          line: number
-          column: number
-          language: SupportedLanguage
-        }
-
-        if (!serverManager) {
-          return { success: false, output: 'LSP not initialized. Open a session first.' }
-        }
-
-        const client = serverManager.getClient(language)
-        if (!client) {
-          return { success: false, output: `No LSP server running for ${language}` }
-        }
-
-        try {
-          const uri = pathToUri(file)
-          const locations = await client.definition(uri, { line: line - 1, character: column - 1 })
-          return { success: true, output: formatLocations(locations) }
-        } catch (err) {
-          return { success: false, output: `LSP definition failed: ${err}` }
-        }
-      },
     })
   )
 

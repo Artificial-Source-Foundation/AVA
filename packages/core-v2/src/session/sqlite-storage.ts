@@ -12,13 +12,23 @@ const CREATE_TABLE = `
     id TEXT PRIMARY KEY,
     name TEXT,
     data TEXT NOT NULL,
-    updated_at INTEGER NOT NULL
+    updated_at INTEGER NOT NULL,
+    parent_session_id TEXT,
+    branch_name TEXT
   )
 `
 
 const CREATE_INDEX = `
   CREATE INDEX IF NOT EXISTS idx_sessions_v2_updated
   ON sessions_v2(updated_at DESC)
+`
+
+const ADD_PARENT_COLUMN = `
+  ALTER TABLE sessions_v2 ADD COLUMN parent_session_id TEXT
+`
+
+const ADD_BRANCH_COLUMN = `
+  ALTER TABLE sessions_v2 ADD COLUMN branch_name TEXT
 `
 
 export class SqliteSessionStorage implements SessionStorage {
@@ -30,6 +40,17 @@ export class SqliteSessionStorage implements SessionStorage {
     if (this.initialized) return
     await this.db.execute(CREATE_TABLE)
     await this.db.execute(CREATE_INDEX)
+    // Migration: add DAG columns if missing (existing tables)
+    try {
+      await this.db.execute(ADD_PARENT_COLUMN)
+    } catch {
+      /* column already exists */
+    }
+    try {
+      await this.db.execute(ADD_BRANCH_COLUMN)
+    } catch {
+      /* column already exists */
+    }
     this.initialized = true
   }
 
@@ -38,8 +59,15 @@ export class SqliteSessionStorage implements SessionStorage {
     const serialized = serializeSession(session)
     const data = JSON.stringify(serialized)
     await this.db.execute(
-      `INSERT OR REPLACE INTO sessions_v2 (id, name, data, updated_at) VALUES (?, ?, ?, ?)`,
-      [session.id, session.name ?? null, data, session.updatedAt]
+      `INSERT OR REPLACE INTO sessions_v2 (id, name, data, updated_at, parent_session_id, branch_name) VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        session.id,
+        session.name ?? null,
+        data,
+        session.updatedAt,
+        session.parentSessionId ?? null,
+        session.branchName ?? null,
+      ]
     )
   }
 

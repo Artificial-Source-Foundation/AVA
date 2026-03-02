@@ -41,6 +41,8 @@ export type {
   BehaviorSettings,
   BorderRadius,
   CodeTheme,
+  CustomMicroagent,
+  CustomSkill,
   DarkStyle,
   GenerationSettings,
   GitSettings,

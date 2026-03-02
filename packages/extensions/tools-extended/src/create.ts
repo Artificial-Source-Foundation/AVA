@@ -38,8 +38,16 @@ export const createFileTool = defineTool({
     if (parentDir) {
       try {
         await fs.mkdir(parentDir)
-      } catch {
-        // Directory might already exist
+      } catch (err) {
+        // Only ignore if directory already exists
+        const code = (err as NodeJS.ErrnoException)?.code
+        if (code && code !== 'EEXIST' && code !== 'EISDIR') {
+          return {
+            success: false,
+            output: '',
+            error: `Failed to create directory ${parentDir}: ${(err as Error).message}`,
+          }
+        }
       }
     }
 

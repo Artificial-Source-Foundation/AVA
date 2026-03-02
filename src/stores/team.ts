@@ -17,6 +17,7 @@
 
 import { createMemo, createSignal } from 'solid-js'
 import {
+  type DelegationEvent,
   TEAM_DOMAINS,
   type TeamDomain,
   type TeamGroup,
@@ -36,6 +37,9 @@ const [teamMembers, setTeamMembers] = createSignal<Map<string, TeamMember>>(new 
 
 /** Currently selected member (for viewing their chat) */
 const [selectedMemberId, setSelectedMemberId] = createSignal<string | null>(null)
+
+/** Chronological log of all delegation events */
+const [delegationLog, setDelegationLog] = createSignal<DelegationEvent[]>([])
 
 // ============================================================================
 // Computed
@@ -150,6 +154,32 @@ const teamStats = createMemo(() => {
   }
 })
 
+/** Aggregate token usage across all team members */
+const teamTokenUsage = createMemo(() => {
+  let input = 0
+  let output = 0
+  for (const member of allMembers()) {
+    if (member.tokenUsage) {
+      input += member.tokenUsage.input
+      output += member.tokenUsage.output
+    }
+  }
+  return { input, output }
+})
+
+/** Unique files changed across all team members */
+const teamFilesChanged = createMemo(() => {
+  const files = new Set<string>()
+  for (const member of allMembers()) {
+    if (member.filesChanged) {
+      for (const file of member.filesChanged) {
+        files.add(file)
+      }
+    }
+  }
+  return Array.from(files)
+})
+
 // ============================================================================
 // Actions
 // ============================================================================
@@ -223,10 +253,16 @@ function addMessage(memberId: string, message: TeamMessage): void {
   })
 }
 
+/** Add a delegation event to the log */
+function addDelegation(event: DelegationEvent): void {
+  setDelegationLog((prev) => [...prev, event])
+}
+
 /** Clear entire team (e.g., new session) */
 function clearTeam(): void {
   setTeamMembers(new Map())
   setSelectedMemberId(null)
+  setDelegationLog([])
 }
 
 // ============================================================================
@@ -313,6 +349,7 @@ export function useTeam() {
     teamMembers,
     selectedMemberId,
     setSelectedMemberId,
+    delegationLog,
 
     // Computed
     teamLead,
@@ -323,6 +360,8 @@ export function useTeam() {
     selectedMember,
     getMemberTeam,
     teamStats,
+    teamTokenUsage,
+    teamFilesChanged,
 
     // Actions
     addMember,
@@ -332,6 +371,7 @@ export function useTeam() {
     addToolCall,
     updateToolCall,
     addMessage,
+    addDelegation,
     clearTeam,
 
     // Helpers

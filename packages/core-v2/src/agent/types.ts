@@ -11,6 +11,7 @@ export enum AgentTerminateMode {
   TIMEOUT = 'TIMEOUT',
   GOAL = 'GOAL',
   MAX_TURNS = 'MAX_TURNS',
+  MAX_STEPS = 'MAX_STEPS',
   ABORTED = 'ABORTED',
 }
 
@@ -31,6 +32,10 @@ export interface AgentConfig {
   compactionThreshold?: number
   /** Execute tool calls in parallel via Promise.all(). Default: true */
   parallelToolExecution?: boolean
+  /** Max total tool calls before forced stop. Differs from maxTurns (LLM round-trips). */
+  maxSteps?: number
+  /** When set, forces the agent to produce JSON output matching the given schema. */
+  responseFormat?: { type: 'json_object'; schema: Record<string, unknown> }
 }
 
 export const DEFAULT_AGENT_CONFIG: Omit<AgentConfig, 'maxTimeMinutes' | 'maxTurns'> = {
@@ -104,6 +109,7 @@ export type AgentEvent =
       success: boolean
       output: string
     }
+  | { type: 'tool:progress'; agentId: string; toolName: string; chunk: string }
 
 export type AgentEventCallback = (event: AgentEvent) => void
 
@@ -113,6 +119,8 @@ export interface AgentInputs {
   goal: string
   context?: string
   cwd: string
+  /** Resume an existing session by loading its conversation history. */
+  sessionId?: string
 }
 
 // ─── Turn Result ─────────────────────────────────────────────────────────────

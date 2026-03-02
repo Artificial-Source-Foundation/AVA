@@ -3,6 +3,7 @@
  *
  * Synchronous: parent blocks until child completes.
  * Child cannot call 'task' (prevents recursion).
+ * Supports resumption via task_id (loads existing session history).
  */
 
 import type { AgentEventCallback } from '@ava/core-v2/agent'
@@ -30,7 +31,7 @@ const BUILTIN_WORKERS = Object.fromEntries(
 export const taskTool = defineTool({
   name: 'task',
   description:
-    'Spawn a subagent for a focused subtask. The subagent runs with its own conversation history and a filtered set of tools. Use this to delegate work like research, code review, or focused edits.',
+    'Spawn a subagent for a focused subtask. The subagent runs with its own conversation history and a filtered set of tools. Use this to delegate work like research, code review, or focused edits. Pass task_id to resume a previous subagent session.',
   schema: z.object({
     description: z.string().describe('Short task description (3-5 words)'),
     prompt: z.string().describe('Full instructions for the subagent'),
@@ -44,6 +45,7 @@ export const taskTool = defineTool({
         'architect',
         'planner',
         'devops',
+        'explorer',
       ])
       .optional()
       .describe('Worker type — determines available tools and system prompt'),
@@ -58,6 +60,12 @@ export const taskTool = defineTool({
       .max(30)
       .optional()
       .describe('Maximum turns for subagent (default: 15)'),
+    task_id: z
+      .string()
+      .optional()
+      .describe(
+        'Resume an existing subagent session by its ID. The prompt becomes a follow-up message.'
+      ),
   }),
   async execute(input, ctx) {
     const workerDef = input.worker ? BUILTIN_WORKERS[input.worker] : undefined
@@ -79,11 +87,23 @@ export const taskTool = defineTool({
       ctx.onEvent as AgentEventCallback | undefined
     )
 
-    const result = await child.run({ goal: input.prompt, cwd: ctx.workingDirectory }, ctx.signal)
+    const result = await child.run(
+      {
+        goal: input.prompt,
+        cwd: ctx.workingDirectory,
+        sessionId: input.task_id,
+      },
+      ctx.signal
+    )
 
     return {
       success: result.success,
       output: result.output || `Subagent finished (${result.terminateMode})`,
+      metadata: {
+        taskId: child.agentId,
+        terminateMode: result.terminateMode,
+        turns: result.turns,
+      },
     }
   },
 })

@@ -1,0 +1,10 @@
+{
+  "name": "ava-file-watcher",
+  "version": "1.0.0",
+  "description": "File system watcher with polling fallback for change detection",
+  "main": "src/index.ts",
+  "builtIn": true,
+  "enabledByDefault": false,
+  "priority": 20,
+  "capabilities": ["events"]
+}

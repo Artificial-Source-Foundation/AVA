@@ -14,6 +14,7 @@ import {
   ToolCallBuffer,
 } from '../../_shared/src/openai-compat.js'
 import { readSSEStream } from '../../_shared/src/sse.js'
+import { buildResponsesRequestBody } from './responses-body.js'
 
 const BASE_URL = 'https://api.openai.com/v1'
 const CODEX_ENDPOINT = 'https://chatgpt.com/backend-api/codex/responses'
@@ -81,6 +82,18 @@ function parseRetryAfterHeader(header: string | null): number | undefined {
   return Number.isNaN(seconds) ? undefined : seconds
 }
 
+/** Models that should use the Responses API instead of Chat Completions. */
+const RESPONSES_API_PATTERNS = ['gpt-5', 'o3-', 'o4-', 'codex']
+
+/**
+ * Check if a model should be routed to the Responses API.
+ * Returns true for GPT-5+, o3, o4, and Codex models.
+ */
+export function shouldUseResponsesAPI(model: string): boolean {
+  const lower = model.toLowerCase()
+  return RESPONSES_API_PATTERNS.some((p) => lower.includes(p))
+}
+
 // ─── Client ─────────────────────────────────────────────────────────────────
 
 export class OpenAIClient implements LLMClient {
@@ -110,7 +123,7 @@ export class OpenAIClient implements LLMClient {
     }
   }
 
-  // ─── API Key Path (Chat Completions) ────────────────────────────────────
+  // ─── API Key Path (Chat Completions or Responses API) ──────────────────
 
   private async *streamApiKey(
     messages: ChatMessage[],
@@ -118,20 +131,31 @@ export class OpenAIClient implements LLMClient {
     apiKey: string,
     signal?: AbortSignal
   ): AsyncGenerator<StreamDelta, void, unknown> {
+    const model = config.model ?? 'gpt-4o'
+    const useResponses = shouldUseResponsesAPI(model)
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,
     }
 
-    const body = buildOpenAIRequestBody(messages, config, { model: 'gpt-4o' })
-    if (!body.max_tokens) body.max_tokens = 4096
+    const endpoint = useResponses ? `${BASE_URL}/responses` : `${BASE_URL}/chat/completions`
+
+    let bodyJson: string
+    if (useResponses) {
+      bodyJson = JSON.stringify(buildResponsesRequestBody(messages, { ...config, model }))
+    } else {
+      const chatBody = buildOpenAIRequestBody(messages, config, { model: 'gpt-4o' })
+      if (!chatBody.max_tokens) chatBody.max_tokens = 4096
+      bodyJson = JSON.stringify(chatBody)
+    }
 
     let response: Response
     try {
-      response = await fetch(`${BASE_URL}/chat/completions`, {
+      response = await fetch(endpoint, {
         method: 'POST',
         headers,
-        body: JSON.stringify(body),
+        body: bodyJson,
         signal,
       })
     } catch (err) {
@@ -151,6 +175,17 @@ export class OpenAIClient implements LLMClient {
       const error = buildHttpError(response.status, errorBody, 'OpenAI')
       error.retryAfter = parseRetryAfter(response.headers.get('retry-after'))
       yield { done: true, error }
+      return
+    }
+
+    // Route to Responses API SSE parser for newer models
+    if (useResponses) {
+      const reader = response.body?.getReader()
+      if (!reader) {
+        yield { done: true, error: { type: 'unknown', message: 'No response body' } }
+        return
+      }
+      yield* this.parseResponsesStream(reader)
       return
     }
 

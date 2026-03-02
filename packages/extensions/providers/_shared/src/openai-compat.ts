@@ -244,6 +244,10 @@ export function convertMessagesToOpenAI(messages: ChatMessage[]): OpenAIMessage[
   return result
 }
 
+// ─── Message Transforms (re-exported from transforms.ts) ────────────────────
+
+export { enforceAlternatingRoles, filterEmptyContentBlocks } from './transforms.js'
+
 // ─── Request Body Builder ───────────────────────────────────────────────────
 
 export function buildOpenAIRequestBody(
@@ -278,6 +282,10 @@ export interface OpenAICompatProviderConfig {
   extractUsage?: (
     event: Record<string, unknown>
   ) => { inputTokens: number; outputTokens: number } | null
+  /** Transform messages before they are converted to OpenAI format. */
+  transformMessages?: (messages: ChatMessage[]) => ChatMessage[]
+  /** Transform the request body before it is sent to the API. */
+  transformRequestBody?: (body: Record<string, unknown>) => Record<string, unknown>
 }
 
 // ─── Client Factory ─────────────────────────────────────────────────────────
@@ -297,6 +305,8 @@ export function createOpenAICompatClient(
     apiKeyHint,
     endpoint = '/chat/completions',
     extractUsage,
+    transformMessages,
+    transformRequestBody,
   } = providerConfig
 
   class OpenAICompatClient implements LLMClient {
@@ -318,7 +328,9 @@ export function createOpenAICompatClient(
         return
       }
 
-      const body = buildOpenAIRequestBody(messages, config, { model: defaultModel })
+      const transformedMessages = transformMessages ? transformMessages(messages) : messages
+      let body = buildOpenAIRequestBody(transformedMessages, config, { model: defaultModel })
+      if (transformRequestBody) body = transformRequestBody(body)
 
       let response: Response
       try {

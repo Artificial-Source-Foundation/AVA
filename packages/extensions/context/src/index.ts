@@ -2,9 +2,14 @@
  * Context extension.
  * Provides token tracking and context compaction strategies.
  *
+ * Compaction pipeline order (agent loop should apply in this sequence):
+ * 1. **prune** — Clears old tool result content (preserves message structure)
+ * 2. **summarize** or **truncate** — Drops/summarizes entire messages
+ *
  * Strategy selection logic:
  * - Sessions > 20 messages use "summarize" (preserves more context)
  * - Shorter sessions use "truncate" (simple and fast)
+ * - "prune" always runs first as a pre-pass (reduces payload without losing messages)
  *
  * Emits `context:compacted` event with before/after token counts after compaction.
  */
@@ -50,15 +55,29 @@ export function activate(api: ExtensionAPI): Disposable {
     )
   })
 
+  // Forward session:status events for observability
+  const statusDisposable = api.on('session:status', (data) => {
+    const event = data as { sessionId: string; status: 'idle' | 'busy' | 'retry' }
+    api.log.debug(`Session status: ${event.sessionId} → ${event.status}`)
+  })
+
   return {
     dispose() {
       for (const d of strategyDisposables) d.dispose()
       tokenDisposable.dispose()
       compactedDisposable.dispose()
+      statusDisposable.dispose()
     },
   }
 }
 
-export { summarizeStrategy, truncateStrategy } from './strategies.js'
+export {
+  estimateTokens,
+  PROTECTED_TOOLS,
+  PRUNE_TOKEN_BUDGET,
+  pruneStrategy,
+  summarizeStrategy,
+  truncateStrategy,
+} from './strategies.js'
 export type { TokenStats } from './tracker.js'
 export { getTokenStats, resetTokenStats, trackTokens } from './tracker.js'

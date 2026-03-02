@@ -7,13 +7,12 @@
 import type {
   ChatMessage,
   LLMClient,
-  MessageContent,
   ProviderConfig,
   StreamDelta,
-  TextBlock,
   ToolUseBlock,
 } from '@ava/core-v2/llm'
 import { getAuth } from '@ava/core-v2/llm'
+import { addCacheControlMarkers } from './cache.js'
 
 const BASE_URL = 'https://api.anthropic.com/v1'
 const API_VERSION = '2023-06-01'
@@ -27,17 +26,6 @@ interface AnthropicStreamEvent {
   delta: { type: string; text?: string; partial_json?: string; thinking?: string }
   usage: { output_tokens: number }
   error: { message: string }
-}
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/** Extract plain text from MessageContent (string or ContentBlock[]). */
-function extractTextContent(content: MessageContent): string {
-  if (typeof content === 'string') return content
-  return content
-    .filter((b): b is TextBlock => b.type === 'text')
-    .map((b) => b.text)
-    .join('\n')
 }
 
 // ─── Client Implementation ──────────────────────────────────────────────────
@@ -62,9 +50,12 @@ export class AnthropicClient implements LLMClient {
       return
     }
 
+    // Apply prompt caching markers before processing
+    const cachedMessages = addCacheControlMarkers(messages)
+
     // Separate system message from conversation
-    const systemMessage = messages.find((m) => m.role === 'system')
-    const conversationMessages = messages
+    const systemMessage = cachedMessages.find((m) => m.role === 'system')
+    const conversationMessages = cachedMessages
       .filter((m) => m.role !== 'system')
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
 
@@ -75,7 +66,10 @@ export class AnthropicClient implements LLMClient {
       stream: true,
     }
 
-    if (systemMessage) body.system = extractTextContent(systemMessage.content)
+    // Pass system content as-is (preserves cache_control markers on blocks)
+    if (systemMessage) {
+      body.system = systemMessage.content
+    }
 
     // Extended thinking (must come before temperature — thinking disables temperature)
     if (config.thinking?.enabled) {
@@ -98,9 +92,10 @@ export class AnthropicClient implements LLMClient {
 
     if (auth.type === 'oauth') {
       headers.Authorization = `Bearer ${auth.token}`
-      headers['anthropic-beta'] = 'claude-pro-2025-01-01'
+      headers['anthropic-beta'] = 'prompt-caching-2024-07-31,claude-pro-2025-01-01'
     } else {
       headers['x-api-key'] = auth.token
+      headers['anthropic-beta'] = 'prompt-caching-2024-07-31'
     }
 
     let response: Response

@@ -1,26 +1,26 @@
 /**
  * Delegate tool factory — creates per-agent delegate tools.
- *
- * Tier-aware: Leads get delegate tools for their workers.
- * Workers never get delegate tools. Commander only has delegate tools.
- * Each agent can use its own model/provider.
- * Supports automatic retry with enhanced prompt on failure.
+ * Supports file cache, budget awareness, retries, and worktree isolation.
  */
 
 import type { AgentEventCallback } from '@ava/core-v2/agent'
 import { AgentExecutor } from '@ava/core-v2/agent'
 import type { LLMProvider } from '@ava/core-v2/llm'
 import type { AnyTool, ToolContext, ToolResult } from '@ava/core-v2/tools'
+import { createWorktree, removeWorktree } from '../../git/src/worktree.js'
 import type { AgentDefinition } from './agent-definition.js'
 import { getAgent } from './registry.js'
 
 export interface DelegationConfig {
   /** Maximum retries on delegation failure. Default: 1 */
   maxRetries: number
+  /** Run workers in isolated git worktrees. Default: false */
+  isolation: boolean
 }
 
 const DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
   maxRetries: 1,
+  isolation: false,
 }
 
 let delegationConfig: DelegationConfig = { ...DEFAULT_DELEGATION_CONFIG }
@@ -43,31 +43,33 @@ export function resetDelegationConfig(): void {
 interface DelegateParams {
   task: string
   context?: string
+  files?: Record<string, string>
 }
 
-/**
- * Resolve the full tool list for an agent, including delegate tools for leads.
- * Workers: own tools minus any delegate_* (safety filter).
- * Leads: own tools + delegate_<worker> for each worker in delegates[].
- * Commander: delegate_* tools only (added externally).
- */
+/** Resolve full tool list for an agent, adding delegate tools for leads. */
 export function resolveTools(agent: AgentDefinition): string[] {
+  const denied = agent.deniedTools ? new Set(agent.deniedTools) : null
+  let tools: string[]
+
   if (agent.tier === 'worker') {
-    return agent.tools.filter((t) => !t.startsWith('delegate_'))
-  }
-  if (agent.tier === 'lead') {
+    tools = agent.tools.filter((t) => !t.startsWith('delegate_'))
+  } else if (agent.tier === 'lead') {
     const delegateTools = (agent.delegates ?? []).map((id) => `delegate_${id}`)
-    return [...agent.tools, ...delegateTools]
+    tools = [...agent.tools, ...delegateTools]
+  } else {
+    // Commander: tools are set externally (delegate_<lead> + meta tools)
+    tools = agent.tools
   }
-  // Commander: tools are set externally (delegate_<lead> + meta tools)
-  return agent.tools
+
+  // Apply deniedTools filter if present
+  if (denied) {
+    tools = tools.filter((t) => !denied.has(t))
+  }
+
+  return tools
 }
 
-/**
- * Create a delegate tool for a target agent.
- * When invoked, spawns a child AgentExecutor running as that agent.
- * If the target is a lead, it gets delegate tools for its own workers.
- */
+/** Create a delegate tool that spawns a child AgentExecutor for the target agent. */
 export function createDelegateTool(agent: AgentDefinition): AnyTool {
   return {
     definition: {
@@ -81,6 +83,11 @@ export function createDelegateTool(agent: AgentDefinition): AnyTool {
             type: 'string',
             description: 'Relevant context (file paths, requirements, constraints)',
           },
+          files: {
+            type: 'object',
+            description: 'Pre-read file contents to share (path -> content map)',
+            additionalProperties: { type: 'string' },
+          },
         },
         required: ['task'],
       },
@@ -92,10 +99,7 @@ export function createDelegateTool(agent: AgentDefinition): AnyTool {
   }
 }
 
-/**
- * Create delegate tools for all agents in a delegates[] list.
- * Used by leads to get their worker delegation tools, and by commander for leads.
- */
+/** Create delegate tools for all agents in a delegates[] list. */
 export function createDelegateToolsForAgent(parent: AgentDefinition): AnyTool[] {
   if (!parent.delegates?.length) return []
 
@@ -108,16 +112,78 @@ export function createDelegateToolsForAgent(parent: AgentDefinition): AnyTool[] 
     .filter((t): t is AnyTool => t !== null)
 }
 
+/** Build file cache prefix from shared files map. */
+function buildFilePrefix(files: Record<string, string>): string {
+  let prefix = ''
+  for (const [path, content] of Object.entries(files)) {
+    prefix += `<file path="${path}">\n${content}\n</file>\n\n`
+  }
+  return prefix
+}
+
 async function executeDelegation(
   agent: AgentDefinition,
   params: DelegateParams,
   ctx: ToolContext
 ): Promise<ToolResult> {
-  const baseGoal = params.context ? `${params.task}\n\nContext:\n${params.context}` : params.task
-  const { maxRetries } = delegationConfig
-  let attempt = 0
+  // Build goal with optional file cache prefix
+  let goalPrefix = ''
+  if (params.files) {
+    goalPrefix = buildFilePrefix(params.files)
+  }
+  const baseGoal =
+    goalPrefix + (params.context ? `${params.task}\n\nContext:\n${params.context}` : params.task)
+
+  const { maxRetries, isolation } = delegationConfig
+  const attempt = 0
   let lastResult: ToolResult | undefined
 
+  // Worktree isolation: create a worktree if configured
+  let worktreePath: string | undefined
+  let effectiveCwd = ctx.workingDirectory
+  if (isolation) {
+    try {
+      const wt = await createWorktree(ctx.workingDirectory, crypto.randomUUID())
+      worktreePath = wt.path
+      effectiveCwd = wt.path
+    } catch {
+      // Worktree creation failed (not a git repo, etc.) — continue without isolation
+    }
+  }
+
+  try {
+    return await runDelegationLoop(
+      agent,
+      baseGoal,
+      params,
+      ctx,
+      effectiveCwd,
+      maxRetries,
+      attempt,
+      lastResult
+    )
+  } finally {
+    // Clean up worktree if we created one
+    if (worktreePath) {
+      try {
+        await removeWorktree(ctx.workingDirectory, worktreePath)
+      } catch {
+        // Best-effort cleanup
+      }
+    }
+  }
+}
+
+async function runDelegationLoop(
+  agent: AgentDefinition,
+  baseGoal: string,
+  params: DelegateParams,
+  ctx: ToolContext,
+  effectiveCwd: string,
+  maxRetries: number,
+  attempt: number,
+  lastResult: ToolResult | undefined
+): Promise<ToolResult> {
   while (attempt <= maxRetries) {
     const childId = crypto.randomUUID()
     const goal =
@@ -148,6 +214,10 @@ async function executeDelegation(
     })
 
     const childTools = resolveTools(agent)
+    const maxTurns = agent.maxTurns ?? 15
+    const budgetInstruction = `You have ${maxTurns} turns maximum. If you've used more than 50% without meaningful progress, call attempt_completion with a partial result rather than continuing to spin.`
+    const systemPrompt =
+      [agent.systemPrompt, budgetInstruction].filter(Boolean).join('\n\n') || undefined
 
     const child = new AgentExecutor(
       {
@@ -156,15 +226,23 @@ async function executeDelegation(
         provider: (agent.provider ?? ctx.provider) as LLMProvider | undefined,
         model: agent.model ?? ctx.model,
         allowedTools: childTools,
-        maxTurns: agent.maxTurns ?? 15,
+        maxTurns,
         maxTimeMinutes: agent.maxTimeMinutes ?? 5,
-        systemPrompt: agent.systemPrompt || undefined,
+        systemPrompt,
       },
       ctx.onEvent as AgentEventCallback | undefined
     )
 
+    // Notify extensions that a child agent session is starting
+    ctx.onEvent?.({
+      type: 'session:child-opened',
+      sessionId: childId,
+      parentSessionId: ctx.sessionId,
+      workingDirectory: effectiveCwd,
+    })
+
     try {
-      const result = await child.run({ goal, cwd: ctx.workingDirectory }, ctx.signal)
+      const result = await child.run({ goal, cwd: effectiveCwd }, ctx.signal)
 
       if (result.success || attempt >= maxRetries) {
         ctx.onEvent?.({

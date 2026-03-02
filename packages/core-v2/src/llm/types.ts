@@ -13,6 +13,7 @@ export type LLMProvider =
   | 'openrouter'
   | 'google'
   | 'copilot'
+  | 'azure'
   | 'glm'
   | 'kimi'
   | 'mistral'
@@ -22,6 +23,7 @@ export type LLMProvider =
   | 'cohere'
   | 'together'
   | 'ollama'
+  | 'litellm'
 
 export type AuthMethod = 'api-key' | 'oauth' | 'gateway'
 
@@ -61,6 +63,12 @@ export type MessageContent = string | ContentBlock[]
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system'
   content: MessageContent
+  /** Per-message system prompt override (prepended to system prompt for this turn). */
+  _system?: string
+  /** Per-message response format override ('json' to switch to JSON mode). */
+  _format?: string
+  /** Per-message model variant hint (e.g. 'fast', 'thinking', 'cheap'). */
+  _variant?: string
 }
 
 // ─── Tool Definitions ────────────────────────────────────────────────────────
@@ -86,6 +94,8 @@ export interface ProviderConfig {
   systemPrompt?: string
   tools?: ToolDefinition[]
   thinking?: { enabled: boolean }
+  /** Force the model to call a specific tool. */
+  toolChoice?: { type: 'tool'; name: string } | { type: 'auto' } | { type: 'none' }
 }
 
 export interface Credentials {

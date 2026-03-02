@@ -14,8 +14,9 @@ import type { OAuthProvider, OAuthTokenResult, StoredAuth } from './types.js'
 // Auth Storage Keys
 // ============================================================================
 
-/** Check if tokens need refresh (1 hour buffer) */
+/** Check if tokens need refresh (1 hour buffer). expiresAt=0 means no expiry. */
 function needsRefresh(expiresAt: number): boolean {
+  if (expiresAt === 0) return false
   const oneHourMs = 60 * 60 * 1000
   return Date.now() > expiresAt - oneHourMs
 }
@@ -24,6 +25,32 @@ const AUTH_KEY_PREFIX = 'auth-'
 
 function getAuthKey(provider: LLMProvider): string {
   return `${AUTH_KEY_PREFIX}${provider}`
+}
+
+/** Core-v2 credential keys — these are what getAuth() reads */
+function getCoreTokenKey(provider: LLMProvider): string {
+  return `ava:${provider}:oauth_token`
+}
+
+function getCoreAccountKey(provider: LLMProvider): string {
+  return `ava:${provider}:account_id`
+}
+
+/** Sync OAuth token to core-v2 format so getAuth() can find it */
+async function syncAuthToCore(provider: LLMProvider, auth: StoredAuth): Promise<void> {
+  if (auth.type !== 'oauth') return
+  const platform = getPlatform()
+  await platform.credentials.set(getCoreTokenKey(provider), auth.accessToken)
+  if (auth.accountId) {
+    await platform.credentials.set(getCoreAccountKey(provider), auth.accountId)
+  }
+}
+
+/** Remove core-v2 format keys */
+async function removeCoreAuth(provider: LLMProvider): Promise<void> {
+  const platform = getPlatform()
+  await platform.credentials.delete(getCoreTokenKey(provider))
+  await platform.credentials.delete(getCoreAccountKey(provider))
 }
 
 // ============================================================================
@@ -54,11 +81,12 @@ export async function setStoredAuth(provider: LLMProvider, auth: StoredAuth): Pr
 }
 
 /**
- * Remove stored auth for a provider
+ * Remove stored auth for a provider (both CLI and core-v2 keys)
  */
 export async function removeStoredAuth(provider: LLMProvider): Promise<void> {
   const platform = getPlatform()
   await platform.credentials.delete(getAuthKey(provider))
+  await removeCoreAuth(provider)
 }
 
 // ============================================================================
@@ -101,6 +129,7 @@ export async function completeOAuthFlow(
   }
 
   await setStoredAuth(provider, auth)
+  await syncAuthToCore(provider, auth)
   return true
 }
 
@@ -123,7 +152,7 @@ export async function getValidAccessToken(provider: LLMProvider): Promise<string
   if (needsRefresh(auth.expiresAt)) {
     const refreshResult = await refreshToken(provider as OAuthProvider, auth.refreshToken)
     if (refreshResult.type === 'success') {
-      // Update stored auth with new tokens
+      // Update stored auth with new tokens (both CLI and core-v2 formats)
       const newAuth: StoredAuth = {
         type: 'oauth',
         accessToken: refreshResult.accessToken,
@@ -132,6 +161,7 @@ export async function getValidAccessToken(provider: LLMProvider): Promise<string
         accountId: refreshResult.accountId || auth.accountId,
       }
       await setStoredAuth(provider, newAuth)
+      await syncAuthToCore(provider, newAuth)
       return refreshResult.accessToken
     }
     // Refresh failed - return current token anyway (might still work)
@@ -220,4 +250,30 @@ export async function getAuthStatus(provider: LLMProvider): Promise<AuthStatus> 
 export async function isAuthenticated(provider: LLMProvider): Promise<boolean> {
   const status = await getAuthStatus(provider)
   return status.isAuthenticated
+}
+
+// ============================================================================
+// Migration
+// ============================================================================
+
+const OAUTH_PROVIDERS: OAuthProvider[] = ['openai', 'google', 'copilot']
+
+/**
+ * Migrate existing CLI OAuth tokens to core-v2 format.
+ * For users who ran `ava auth login <provider>` before the dual-write fix:
+ * copies the access token from auth-{provider} to ava:{provider}:oauth_token.
+ * Safe to call multiple times — skips if core-v2 key already exists.
+ */
+export async function migrateOAuthCredentials(): Promise<void> {
+  const platform = getPlatform()
+  for (const provider of OAUTH_PROVIDERS) {
+    const coreKey = getCoreTokenKey(provider)
+    const existing = await platform.credentials.get(coreKey)
+    if (existing) continue
+
+    const stored = await getStoredAuth(provider)
+    if (stored && stored.type === 'oauth') {
+      await syncAuthToCore(provider, stored)
+    }
+  }
 }

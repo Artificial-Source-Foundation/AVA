@@ -3,6 +3,8 @@
  * Constructs the system prompt from sections and model-specific variants.
  */
 
+import { getModelFamilyPromptSection } from './families.js'
+
 export interface PromptSection {
   name: string
   priority: number
@@ -29,11 +31,12 @@ export function buildSystemPrompt(model?: string): string {
 
   let prompt = parts.join('\n\n')
 
-  // Model-specific adjustments
-  if (model?.includes('claude')) {
-    prompt = `${prompt}\n\nYou are AVA, an AI coding assistant.`
-  } else if (model?.includes('gpt')) {
-    prompt = `${prompt}\n\nYou are AVA, an AI coding assistant. Be concise and precise.`
+  // Model-family-specific adjustments
+  if (model) {
+    const familySection = getModelFamilyPromptSection(model)
+    if (familySection) {
+      prompt = `${prompt}\n\n${familySection}`
+    }
   }
 
   return prompt

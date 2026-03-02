@@ -2,9 +2,7 @@
  * Settings Modal — OpenCode-inspired Design
  */
 
-import { Wand2 } from 'lucide-solid'
 import { type Component, createEffect, createSignal, onCleanup, Show } from 'solid-js'
-import type { AgentPreset } from '../../config/defaults/agent-defaults'
 import { useNotification } from '../../contexts/notification'
 import { fetchModels } from '../../services/providers/model-fetcher'
 import { useLayout } from '../../stores/layout'
@@ -12,7 +10,6 @@ import { useSettings } from '../../stores/settings'
 import { useShortcuts } from '../../stores/shortcuts'
 import type { LLMProvider } from '../../types/llm'
 import { AddMCPServerDialog } from '../dialogs/AddMCPServerDialog'
-import { AgentEditModal } from './settings-agent-edit-modal'
 import { KeybindingEditModal } from './settings-keybinding-edit-modal'
 import type { SettingsTab } from './settings-modal-config'
 import { SettingsModalContent } from './settings-modal-content'
@@ -23,23 +20,13 @@ import type { MCPServer } from './tabs/MCPServersTab'
 
 export const SettingsModal: Component = () => {
   const { settingsOpen, closeSettings } = useLayout()
-  const {
-    settings,
-    updateProvider,
-    updateAgent,
-    addAgent,
-    removeAgent,
-    addMcpServer,
-    removeMcpServer,
-  } = useSettings()
+  const { settings, updateProvider, updateAgent, addMcpServer, removeMcpServer } = useSettings()
   const { shortcuts, updateShortcut, resetShortcut, resetAll: resetAllShortcuts } = useShortcuts()
   const notification = useNotification()
 
   const [activeTab, setActiveTab] = createSignal<SettingsTab>('general')
   const [settingsSearch, setSettingsSearch] = createSignal('')
-  const [editingAgent, setEditingAgent] = createSignal<AgentPreset | null>(null)
   const [editingKeybinding, setEditingKeybinding] = createSignal<Keybinding | null>(null)
-  const [creatingAgent, setCreatingAgent] = createSignal(false)
   const [addMcpDialogOpen, setAddMcpDialogOpen] = createSignal(false)
 
   const mcpServers = (): MCPServer[] =>
@@ -60,42 +47,6 @@ export const SettingsModal: Component = () => {
       category: s.category,
       isCustom: s.isCustom,
     }))
-
-  const handleCreateAgent = () => {
-    setCreatingAgent(true)
-    setEditingAgent({
-      id: `custom-${Date.now()}`,
-      name: '',
-      description: '',
-      icon: Wand2,
-      enabled: true,
-      capabilities: [],
-      model: '',
-      isCustom: true,
-      type: 'custom',
-      tier: 'worker',
-      tools: [],
-      delegates: [],
-      domain: '',
-    })
-  }
-
-  const handleSaveAgent = (agent: AgentPreset) => {
-    if (creatingAgent()) {
-      addAgent(agent)
-      setCreatingAgent(false)
-    } else {
-      updateAgent(agent.id, agent)
-    }
-    setEditingAgent(null)
-  }
-
-  const handleEditAgent = (id: string) => {
-    const agent = settings().agents.find((a) => a.id === id)
-    if (!agent) return
-    setCreatingAgent(false)
-    setEditingAgent(agent)
-  }
 
   const handleEditKeybinding = (id: string) => {
     const kb = keybindings().find((k) => k.id === id)
@@ -186,27 +137,12 @@ export const SettingsModal: Component = () => {
                 onUpdateProvider={updateProvider}
                 onUpdateAgent={updateAgent}
                 onTestProvider={handleTestProvider}
-                onEditAgent={handleEditAgent}
-                onDeleteAgent={removeAgent}
-                onCreateAgent={handleCreateAgent}
                 onRemoveMcpServer={removeMcpServer}
                 onAddMcpServer={() => setAddMcpDialogOpen(true)}
               />
             </div>
           </div>
         </div>
-
-        <Show when={editingAgent()}>
-          <AgentEditModal
-            agent={editingAgent()!}
-            isCreating={creatingAgent()}
-            onClose={() => {
-              setEditingAgent(null)
-              setCreatingAgent(false)
-            }}
-            onSave={handleSaveAgent}
-          />
-        </Show>
 
         <Show when={editingKeybinding()}>
           <KeybindingEditModal

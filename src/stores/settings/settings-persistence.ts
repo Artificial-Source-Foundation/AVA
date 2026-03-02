@@ -11,6 +11,7 @@ import type { LLMProviderConfig } from '../../config/defaults/provider-defaults'
 import { getCoreSettings } from '../../services/core-bridge'
 import { logDebug, logInfo, logWarn } from '../../services/logger'
 import { writeSettingsToFS } from '../../services/settings-fs'
+import { markPushing } from '../../services/settings-sync'
 import { DEFAULT_SETTINGS } from './settings-defaults'
 import { mergeWithDefaults } from './settings-hydration'
 import type { AppSettings } from './settings-types'
@@ -108,6 +109,8 @@ export function pushSettingsToCore(s: AppSettings): void {
   const sm = getCoreSettings()
   if (!sm) return
 
+  markPushing() // prevents feedback loop with settings-sync
+
   // Ensure categories exist (core-v2 only ships 'provider' and 'agent' by default;
   // extensions may register more, but on first save they might not be loaded yet)
   const registered = sm.getRegisteredCategories()
@@ -198,6 +201,11 @@ export function serializeSettings(s: AppSettings): Record<string, unknown> {
       model: a.model,
       isCustom: a.isCustom,
       type: a.type,
+      tier: a.tier,
+      tools: a.tools,
+      delegates: a.delegates,
+      domain: a.domain,
+      provider: a.provider,
     })),
   }
 }

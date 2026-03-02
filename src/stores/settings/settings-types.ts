@@ -116,7 +116,7 @@ export interface ToolApprovalRule {
   reason?: string
 }
 
-export interface CustomMicroagent {
+export interface CustomSkill {
   id: string
   name: string
   description: string
@@ -124,10 +124,16 @@ export interface CustomMicroagent {
   instructions: string
 }
 
+/** @deprecated Use CustomSkill instead */
+export type CustomMicroagent = CustomSkill
+
 export interface TrustedFoldersSettings {
   allowed: string[]
   denied: string[]
 }
+
+/** Which backend stack to use for the agent loop */
+export type AgentBackend = 'core' | 'core-v2'
 
 export interface AppSettings {
   onboardingComplete: boolean
@@ -148,7 +154,9 @@ export interface AppSettings {
   mcpServers: MCPServerConfig[]
   modelAliases: Record<string, string>
   devMode: boolean
-  enabledMicroagents: string[]
-  customMicroagents: CustomMicroagent[]
+  enabledSkills: string[]
+  customSkills: CustomSkill[]
   trustedFolders: TrustedFoldersSettings
+  /** Which backend stack powers the agent loop (default: 'core-v2') */
+  agentBackend: AgentBackend
 }

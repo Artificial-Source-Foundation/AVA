@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { resetLogger } from '../logger/logger.js'
 import { createSessionManager, SessionManager } from './manager.js'
-import type { SessionEvent } from './types.js'
+import { SessionBusyError, type SessionEvent } from './types.js'
 
 describe('SessionManager', () => {
   let sm: SessionManager
@@ -272,6 +272,246 @@ describe('SessionManager', () => {
       const s2 = sm.create('test2', '/tmp')
       sm.delete(s2.id)
       expect(handler).toHaveBeenCalledOnce()
+    })
+  })
+
+  // ─── slug generation ─────────────────────────────────────────────────
+
+  describe('slug generation', () => {
+    it('auto-generates slug from name on create', () => {
+      const s = sm.create('Fix the login bug', '/tmp')
+      expect(s.slug).toBe('fix-login-bug')
+    })
+
+    it('does not generate slug when name is undefined', () => {
+      const s = sm.create(undefined, '/tmp')
+      expect(s.slug).toBeUndefined()
+    })
+
+    it('includes slug in list() metadata', () => {
+      sm.create('Add user auth', '/tmp')
+      const metas = sm.list()
+      expect(metas[0].slug).toBe('add-user-auth')
+    })
+  })
+
+  // ─── archive ────────────────────────────────────────────────────────
+
+  describe('archive', () => {
+    it('sets session status to archived', () => {
+      const s = sm.create('test', '/tmp')
+      sm.archive(s.id)
+      expect(s.status).toBe('archived')
+    })
+
+    it('updates updatedAt timestamp', () => {
+      const s = sm.create('test', '/tmp')
+      const before = s.updatedAt
+      sm.archive(s.id)
+      expect(s.updatedAt).toBeGreaterThanOrEqual(before)
+    })
+
+    it('emits status_changed event with archived status', () => {
+      const events: SessionEvent[] = []
+      sm.on((e) => events.push(e))
+      const s = sm.create('test', '/tmp')
+      sm.archive(s.id)
+      expect(events).toContainEqual({
+        type: 'status_changed',
+        status: 'archived',
+        sessionId: s.id,
+      })
+    })
+
+    it('emits session:status idle event', () => {
+      const events: SessionEvent[] = []
+      sm.on((e) => events.push(e))
+      const s = sm.create('test', '/tmp')
+      sm.archive(s.id)
+      expect(events).toContainEqual({
+        type: 'session:status',
+        sessionId: s.id,
+        status: 'idle',
+      })
+    })
+
+    it('archived sessions are excluded from list()', () => {
+      const s1 = sm.create('active', '/tmp')
+      const s2 = sm.create('to archive', '/tmp')
+      sm.archive(s2.id)
+      const metas = sm.list()
+      expect(metas).toHaveLength(1)
+      expect(metas[0].id).toBe(s1.id)
+    })
+
+    it('throws for unknown session', () => {
+      expect(() => sm.archive('nonexistent')).toThrow('Session not found')
+    })
+  })
+
+  // ─── setBusy ────────────────────────────────────────────────────────
+
+  describe('setBusy', () => {
+    it('sets session status to busy', () => {
+      const s = sm.create('test', '/tmp')
+      sm.setBusy(s.id)
+      expect(s.status).toBe('busy')
+    })
+
+    it('throws SessionBusyError if already busy', () => {
+      const s = sm.create('test', '/tmp')
+      sm.setBusy(s.id)
+      expect(() => sm.setBusy(s.id)).toThrow(SessionBusyError)
+    })
+
+    it('thrown error has correct name and message', () => {
+      const s = sm.create('test', '/tmp')
+      sm.setBusy(s.id)
+      try {
+        sm.setBusy(s.id)
+        expect.fail('should have thrown')
+      } catch (err) {
+        expect(err).toBeInstanceOf(SessionBusyError)
+        expect((err as SessionBusyError).name).toBe('SessionBusyError')
+        expect((err as SessionBusyError).message).toBe(`Session ${s.id} is busy`)
+      }
+    })
+
+    it('emits status_changed and session:status events', () => {
+      const events: SessionEvent[] = []
+      sm.on((e) => events.push(e))
+      const s = sm.create('test', '/tmp')
+      sm.setBusy(s.id)
+      expect(events).toContainEqual({
+        type: 'status_changed',
+        status: 'busy',
+        sessionId: s.id,
+      })
+      expect(events).toContainEqual({
+        type: 'session:status',
+        sessionId: s.id,
+        status: 'busy',
+      })
+    })
+
+    it('updates updatedAt timestamp', () => {
+      const s = sm.create('test', '/tmp')
+      const before = s.updatedAt
+      sm.setBusy(s.id)
+      expect(s.updatedAt).toBeGreaterThanOrEqual(before)
+    })
+
+    it('throws for unknown session', () => {
+      expect(() => sm.setBusy('nonexistent')).toThrow('Session not found')
+    })
+  })
+
+  // ─── listGlobal ─────────────────────────────────────────────────────
+
+  describe('listGlobal', () => {
+    it('returns all sessions including archived', () => {
+      sm.create('active', '/tmp')
+      const s2 = sm.create('to archive', '/tmp')
+      sm.archive(s2.id)
+      const result = sm.listGlobal()
+      expect(result.sessions).toHaveLength(2)
+    })
+
+    it('sorts by updatedAt descending', () => {
+      const s1 = sm.create('first', '/tmp')
+      const s2 = sm.create('second', '/tmp')
+      // Make s1 more recent
+      sm.addMessage(s1.id, { role: 'user', content: 'hello' })
+      const result = sm.listGlobal()
+      expect(result.sessions[0].id).toBe(s1.id)
+      expect(result.sessions[1].id).toBe(s2.id)
+    })
+
+    it('returns empty when no sessions', () => {
+      const result = sm.listGlobal()
+      expect(result.sessions).toEqual([])
+      expect(result.nextCursor).toBeNull()
+    })
+
+    it('paginates with limit', () => {
+      sm.create('a', '/tmp')
+      sm.create('b', '/tmp')
+      sm.create('c', '/tmp')
+      const result = sm.listGlobal(undefined, 2)
+      expect(result.sessions).toHaveLength(2)
+      expect(result.nextCursor).not.toBeNull()
+    })
+
+    it('returns nextCursor null when no more pages', () => {
+      sm.create('a', '/tmp')
+      sm.create('b', '/tmp')
+      const result = sm.listGlobal(undefined, 10)
+      expect(result.sessions).toHaveLength(2)
+      expect(result.nextCursor).toBeNull()
+    })
+
+    it('uses cursor to fetch next page', () => {
+      sm.create('a', '/tmp')
+      sm.create('b', '/tmp')
+      sm.create('c', '/tmp')
+      const page1 = sm.listGlobal(undefined, 2)
+      expect(page1.sessions).toHaveLength(2)
+      expect(page1.nextCursor).not.toBeNull()
+
+      const page2 = sm.listGlobal(page1.nextCursor!, 2)
+      expect(page2.sessions).toHaveLength(1)
+      expect(page2.nextCursor).toBeNull()
+    })
+
+    it('returns all sessions when cursor is invalid', () => {
+      sm.create('a', '/tmp')
+      sm.create('b', '/tmp')
+      const result = sm.listGlobal('nonexistent-cursor', 10)
+      // Invalid cursor resets to start
+      expect(result.sessions).toHaveLength(2)
+    })
+
+    it('includes slug in paginated results', () => {
+      sm.create('Fix login page', '/tmp')
+      const result = sm.listGlobal()
+      expect(result.sessions[0].slug).toBe('fix-login-page')
+    })
+  })
+
+  // ─── setStatus session:status events ────────────────────────────────
+
+  describe('setStatus session:status events', () => {
+    it('emits session:status busy when setting status to busy', () => {
+      const events: SessionEvent[] = []
+      sm.on((e) => events.push(e))
+      const s = sm.create('test', '/tmp')
+      sm.setStatus(s.id, 'busy')
+      expect(events).toContainEqual({
+        type: 'session:status',
+        sessionId: s.id,
+        status: 'busy',
+      })
+    })
+
+    it('emits session:status idle when setting status to active', () => {
+      const events: SessionEvent[] = []
+      sm.on((e) => events.push(e))
+      const s = sm.create('test', '/tmp')
+      sm.setStatus(s.id, 'completed')
+      expect(events).toContainEqual({
+        type: 'session:status',
+        sessionId: s.id,
+        status: 'idle',
+      })
+    })
+
+    it('does not emit session:status for error status', () => {
+      const events: SessionEvent[] = []
+      sm.on((e) => events.push(e))
+      const s = sm.create('test', '/tmp')
+      sm.setStatus(s.id, 'error', 'something went wrong')
+      const statusEvents = events.filter((e) => e.type === 'session:status')
+      expect(statusEvents).toHaveLength(0)
     })
   })
 

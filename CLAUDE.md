@@ -9,7 +9,7 @@
 A **desktop-first AI coding app** (Tauri + SolidJS) for developers and vibe coders. Not an IDE replacement — an AI companion with:
 
 - **Dev Team System** — Visible Team Lead → Senior Leads → Junior Devs hierarchy
-- **Multi-Provider** — 14 LLM providers, use the best model for each task
+- **Multi-Provider** — 16 LLM providers, use the best model for each task
 - **Plugin Ecosystem** — Obsidian-style, easy to create, discover, and install
 - **Extension-First Architecture** — Minimal core, everything else is a built-in extension
 - **Open Source** — Community-first, MIT license
@@ -38,6 +38,15 @@ npx vitest run <path>    # Run specific test file
 # Code Quality
 npm run knip             # Dead code detection
 npm run analyze          # Bundle size analysis
+
+# CLI (after pnpm build:all)
+node cli/dist/index.js run "goal" --mock             # Run agent with mock LLM
+node cli/dist/index.js run "goal" --provider openrouter --model "anthropic/claude-sonnet-4" --verbose
+node cli/dist/index.js tool list                      # List all 43+ tools
+node cli/dist/index.js tool read_file --path README.md
+node cli/dist/index.js validate src/index.ts          # Run validation pipeline
+node cli/dist/index.js auth status                    # Show OAuth status
+node cli/dist/index.js plugin init my-plugin          # Scaffold a plugin
 ```
 
 ---
@@ -53,7 +62,7 @@ AVA/
 ├── packages/
 │   ├── core/                  # Original backend (54K+ lines, being migrated)
 │   ├── core-v2/               # NEW: Minimal core (~40 files, ~5K lines)
-│   ├── extensions/            # NEW: Built-in extensions (25+ modules)
+│   ├── extensions/            # NEW: Built-in extensions (30+ modules)
 │   ├── platform-node/         # Node.js platform implementations
 │   └── platform-tauri/        # Tauri platform implementations
 └── cli/                       # CLI interface (secondary)
@@ -68,55 +77,60 @@ AVA has two backend stacks running in parallel during migration:
 - Desktop app and CLI import from `@ava/core`
 
 **New (`packages/core-v2/` + `packages/extensions/`)** — Extension-first
-- Minimal core: ~28 files, ~5K lines (agent loop, tool registry, extension API)
+- Minimal core: ~40 files, ~7K lines (agent loop, tool registry, extension API, session DAG)
 - Everything else is a built-in extension using the same API as community plugins
-- CLI has `ava agent-v2` command for testing the new stack
+- CLI: `ava run` (unified, default), `ava agent-v2 run` (full-featured), `ava tool` (individual tools) — all load 31 extensions
 
 ### Core-v2 Module Map
 
 ```
 packages/core-v2/src/
-├── agent/       # Simplified turn-based loop (~350 lines)
+├── agent/       # Turn-based loop (~730 lines) + repair, output-files, structured-output, efficient-results
 ├── llm/         # LLM client interface + provider registry (no implementations)
-├── tools/       # 6 core tools: read, write, edit, bash, glob, grep
-├── extensions/  # ExtensionAPI + manager + loader
+├── tools/       # 7 core tools: read, write, edit, bash, glob, grep, pty
+├── extensions/  # ExtensionAPI + manager + loader + hook system
 ├── config/      # Extensible SettingsManager
-├── session/     # Session CRUD + auto-save
+├── session/     # Session CRUD + auto-save + archival + slug + busy state + DAG/branching
 ├── bus/         # Pure pub/sub message bus
 ├── logger/      # Unified logger
-└── platform.ts  # Platform abstraction (fs, shell, credentials, database)
+└── platform.ts  # Platform abstraction (fs, shell, credentials, database, pty)
 ```
 
 ### Extensions Module Map
 
 ```
 packages/extensions/
-├── providers/       # 14 LLM providers (anthropic, openai, google, etc.)
-├── permissions/     # Safety & permission middleware
-├── tools-extended/  # 20 additional tools (websearch, background shell, etc.)
-├── prompts/         # System prompt building
-├── context/         # Token tracking + compaction + strategy selection
-├── agent-modes/     # Plan mode, minimal mode, doom loop (local + global), recovery
-├── hooks/           # Lifecycle hooks as middleware
+├── providers/       # 16 LLM providers (anthropic, openai, google, azure, litellm, etc.)
+├── permissions/     # Safety middleware + bash parsing + arity fingerprinting
+├── tools-extended/  # 20+ additional tools (websearch, background shell, etc.)
+├── prompts/         # System prompt building + model-family variants
+├── context/         # Token tracking + compaction + prune strategy
+├── agent-modes/     # Plan mode, minimal mode, doom loop, recovery, plan saves
+├── hooks/           # Lifecycle hooks as middleware + auto-formatter
 ├── validator/       # QA pipeline (syntax, types, lint, test)
-├── commander/       # Praxis hierarchy (Commander → Leads → Workers) + orchestrator
-├── mcp/             # MCP protocol client (stdio, SSE, HTTP streaming)
+├── commander/       # Praxis hierarchy (Commander → Leads → Workers) + explore subagent
+├── mcp/             # MCP protocol client (stdio, SSE, HTTP streaming) + ACP protocol
 ├── codebase/        # Repo map, symbols, PageRank
-├── git/             # Git snapshots, checkpoints, PR/branch/issue tools
-├── lsp/             # Language Server Protocol
-├── diff/            # Diff tracking
+├── git/             # Git snapshots, checkpoints, PR/branch/issue tools, worktrees
+├── lsp/             # Language Server Protocol (9 tools)
+├── diff/            # Diff tracking + session summary + revert-to + undo message removal
+├── file-watcher/    # File system polling (.git/HEAD, configurable paths)
+├── sharing/         # Session sharing (stub)
 ├── focus-chain/     # Task progress tracking
-├── instructions/    # Project instruction loading
+├── instructions/    # Project instruction loading + subdirectory AGENTS.md + URL loader
 ├── memory/          # Persistent cross-session memory + auto-learning
-├── models/          # Model registry + availability tracking + fallback
-├── plugins/         # Plugin install/uninstall backend + catalog API
-├── permissions/     # Safety middleware + 5 granular permission modes
+├── models/          # Model registry + availability tracking + fallback + packs
+├── plugins/         # Plugin install/uninstall backend + catalog API + reviews/ratings
 ├── scheduler/       # Background task scheduler
 ├── skills/          # Auto-invoked knowledge modules
 ├── custom-commands/ # TOML user commands
 ├── slash-commands/  # Built-in /commands
-├── integrations/    # External APIs (Exa search)
-└── sandbox/         # Docker sandboxed execution
+├── integrations/    # External APIs (Exa search) + well-known config
+├── sandbox/         # Docker sandboxed execution
+├── server/          # HTTP server for remote agent control (ACP REST API)
+├── recipes/         # YAML/JSON composable workflows with param substitution
+├── recall/          # Chat recall — FTS5 full-text search across sessions
+└── github-bot/      # GitHub webhook bot — @ava mention handling
 ```
 
 ### Extension API
@@ -131,6 +145,8 @@ interface ExtensionAPI {
   registerValidator(validator: Validator): Disposable
   registerProvider(name: string, factory: LLMClientFactory): Disposable
   addToolMiddleware(middleware: ToolMiddleware): Disposable
+  registerHook<TInput, TOutput>(name: HookName, handler: HookHandler<TInput, TOutput>): Disposable
+  callHook<TInput, TOutput>(name: HookName, input: TInput, output: TOutput): Promise<HookResult<TOutput>>
   on(event: string, handler: EventHandler): Disposable
   emit(event: string, data: unknown): void
   readonly bus: MessageBus
@@ -142,6 +158,7 @@ interface ExtensionAPI {
 **How extensions hook into the agent loop:**
 - Permissions → `addToolMiddleware()` at priority 0
 - Hooks → `addToolMiddleware()` at priority 10
+- Plugin hooks → `registerHook()` / `callHook()` for sequential chaining pipelines
 - Plan mode → `registerAgentMode()` — filters available tools
 - Team hierarchy → `registerAgentMode()` — replaces loop with delegation
 - Validator → `on('agent:completing')` — blocks completion if validation fails
@@ -220,7 +237,7 @@ api.registerAgentMode(myMode)
 
 ---
 
-## Tools (43)
+## Tools (55+)
 
 | Tool | Location | Purpose |
 |------|----------|---------|
@@ -230,6 +247,7 @@ api.registerAgentMode(myMode)
 | bash | core-v2 | Shell commands |
 | glob | core-v2 | Find files by pattern |
 | grep | core-v2 | Search file contents |
+| pty | core-v2 | PTY terminal (interactive commands) |
 | create_file | extensions | Create new file |
 | delete_file | extensions | Delete file |
 | apply_patch | extensions | Apply unified diffs |
@@ -241,17 +259,18 @@ api.registerAgentMode(myMode)
 | question | extensions | Ask user clarifying questions |
 | todoread | extensions | Read session todo list |
 | todowrite | extensions | Update session todo list |
-| task | extensions | Spawn subagents |
+| task | extensions | Spawn subagents (+ task resumption) |
 | delegate_coder | commander | Delegate coding tasks to Coder worker |
 | delegate_tester | commander | Delegate testing tasks to Tester worker |
 | delegate_reviewer | commander | Delegate review tasks to Reviewer worker |
 | delegate_researcher | commander | Delegate research tasks to Researcher worker |
 | delegate_debugger | commander | Delegate debugging tasks to Debugger worker |
+| delegate_explorer | commander | Delegate read-only exploration tasks |
 | websearch | extensions | Web search (DuckDuckGo default, Tavily/Exa optional) |
 | webfetch | extensions | Fetch + convert web pages |
 | attempt_completion | extensions | Finish task with summary |
 | plan_enter | extensions | Enter plan mode |
-| plan_exit | extensions | Exit plan mode |
+| plan_exit | extensions | Exit plan mode (+ save to file) |
 | bash_background | extensions | Spawn background process, return PID |
 | bash_output | extensions | Read stdout/stderr from background PID |
 | bash_kill | extensions | Kill background process by PID |
@@ -262,10 +281,18 @@ api.registerAgentMode(myMode)
 | lsp_diagnostics | lsp | Get LSP diagnostics for a file |
 | lsp_hover | lsp | Get hover info for a symbol |
 | lsp_definition | lsp | Go to definition of a symbol |
+| lsp_document_symbols | lsp | List symbols in a document |
+| lsp_workspace_symbols | lsp | Search symbols across workspace |
+| lsp_code_actions | lsp | Get available code actions |
+| lsp_rename | lsp | Rename a symbol across files |
+| lsp_references | lsp | Find all references to a symbol |
+| lsp_completions | lsp | Get completion suggestions |
 | create_pr | git | Create GitHub pull request via `gh` |
 | create_branch | git | Create and switch to new git branch |
 | switch_branch | git | Switch to existing git branch |
 | read_issue | git | Read GitHub issue details via `gh` |
+| load_skill | skills | Load a skill by name for the agent |
+| recall | recall | Full-text search across past sessions |
 
 ---
 

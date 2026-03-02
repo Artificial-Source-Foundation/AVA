@@ -41,11 +41,34 @@ describe('Prompt Builder', () => {
     expect(buildSystemPrompt()).not.toContain('temporary')
   })
 
-  it('adds model-specific suffix for claude', () => {
+  it('appends model-family section for claude', () => {
     resetPromptSections()
     addPromptSection({ name: 'base', priority: 0, content: 'Base prompt' })
     const prompt = buildSystemPrompt('claude-3-opus')
-    expect(prompt).toContain('AVA')
+    expect(prompt).toContain('XML tags')
+    expect(prompt).toContain('thinking blocks')
+  })
+
+  it('appends model-family section for gpt', () => {
+    resetPromptSections()
+    addPromptSection({ name: 'base', priority: 0, content: 'Base prompt' })
+    const prompt = buildSystemPrompt('gpt-4o')
+    expect(prompt).toContain('markdown')
+    expect(prompt).toContain('function calling')
+  })
+
+  it('does not append family section for unknown models', () => {
+    resetPromptSections()
+    addPromptSection({ name: 'base', priority: 0, content: 'Base prompt' })
+    const prompt = buildSystemPrompt('qwen-72b')
+    expect(prompt).toBe('Base prompt')
+  })
+
+  it('does not append family section when no model is provided', () => {
+    resetPromptSections()
+    addPromptSection({ name: 'base', priority: 0, content: 'Base prompt' })
+    const prompt = buildSystemPrompt()
+    expect(prompt).toBe('Base prompt')
   })
 
   it('lists sections', () => {

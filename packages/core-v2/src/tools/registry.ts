@@ -19,6 +19,7 @@ const log = createLogger('ToolRegistry')
 const tools = new Map<string, AnyTool>()
 
 export function registerTool(tool: AnyTool): void {
+  emitEvent('tool:before-register', { name: tool.definition.name, definition: tool.definition })
   tools.set(tool.definition.name, tool)
   emitEvent('tools:registered', { name: tool.definition.name, definition: tool.definition })
   log.debug(`Tool registered: ${tool.definition.name}`)

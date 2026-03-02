@@ -11,10 +11,10 @@ import { DeveloperTab } from './tabs/DeveloperTab'
 import { type Keybinding, KeybindingsTab } from './tabs/KeybindingsTab'
 import { LLMTab } from './tabs/LLMTab'
 import { type MCPServer, MCPServersTab } from './tabs/MCPServersTab'
-import { MicroagentsTab } from './tabs/MicroagentsTab'
 import { PermissionsTab } from './tabs/PermissionsTab'
 import { PluginsTab } from './tabs/PluginsTab'
 import { ProvidersTab } from './tabs/providers/providers-tab'
+import { SkillsTab } from './tabs/SkillsTab'
 import { TrustedFoldersTab } from './tabs/TrustedFoldersTab'
 
 interface SettingsModalContentProps {
@@ -28,16 +28,13 @@ interface SettingsModalContentProps {
   onUpdateProvider: (id: string, patch: Partial<AppSettings['providers'][number]>) => void
   onUpdateAgent: (id: string, patch: Partial<AppSettings['agents'][number]>) => void
   onTestProvider: (id: string) => Promise<void>
-  onEditAgent: (id: string) => void
-  onDeleteAgent: (id: string) => void
-  onCreateAgent: () => void
   onRemoveMcpServer: (id: string) => void
   onAddMcpServer: () => void
 }
 
 export const SettingsModalContent: Component<SettingsModalContentProps> = (props) => {
   return (
-    <div class="max-w-2xl mx-auto px-6 py-6">
+    <div class={`mx-auto px-6 py-6 ${props.activeTab() === 'agents' ? 'max-w-full' : 'max-w-2xl'}`}>
       <Show when={props.activeTab() === 'general'}>
         <GeneralSection />
       </Show>
@@ -86,18 +83,12 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
         <PermissionsTab />
       </Show>
 
-      <Show when={props.activeTab() === 'llm'}>
+      <Show when={props.activeTab() === 'models'}>
         <LLMTab />
       </Show>
 
-      <Show when={props.activeTab() === 'models'}>
-        <AgentsTab
-          agents={props.settings().agents}
-          onToggle={(id, enabled) => props.onUpdateAgent(id, { enabled })}
-          onEdit={props.onEditAgent}
-          onDelete={props.onDeleteAgent}
-          onCreate={props.onCreateAgent}
-        />
+      <Show when={props.activeTab() === 'agents'}>
+        <AgentsTab />
       </Show>
 
       <Show when={props.activeTab() === 'mcp'}>
@@ -112,8 +103,8 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
         <PluginsTab />
       </Show>
 
-      <Show when={props.activeTab() === 'microagents'}>
-        <MicroagentsTab />
+      <Show when={props.activeTab() === 'skills'}>
+        <SkillsTab />
       </Show>
 
       <Show when={props.activeTab() === 'commands'}>

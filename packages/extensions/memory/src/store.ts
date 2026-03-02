@@ -40,6 +40,12 @@ export class MemoryStore {
     await this.storage.set(STORAGE_KEY, Object.fromEntries(this.entries))
   }
 
+  /** Public flush — persists all in-memory entries to storage. */
+  async flush(): Promise<void> {
+    await this.ensureLoaded()
+    await this.persist()
+  }
+
   async write(
     key: string,
     value: string,

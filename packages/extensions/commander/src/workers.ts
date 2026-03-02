@@ -6,6 +6,7 @@
  */
 
 import type { AgentDefinition } from './agent-definition.js'
+import { EXPLORE_WORKER } from './explore.js'
 import type { WorkerDefinition } from './types.js'
 
 // ─── Tool sets by domain ────────────────────────────────────────────────────
@@ -208,6 +209,7 @@ Dependencies are [blocker, blocked] index pairs — subtask 1 waits for subtask 
     capabilities: ['shell-commands', 'build-management'],
     isBuiltIn: true,
   },
+  EXPLORE_WORKER,
 ]
 
 // ─── Lead Agents (tier: lead) ───────────────────────────────────────────────

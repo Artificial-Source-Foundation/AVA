@@ -24,6 +24,11 @@ export interface SerializedSession {
   updatedAt: number
   status: string
   errorMessage?: string
+  // DAG/branching fields
+  parentSessionId?: string
+  branchName?: string
+  branchPoint?: number
+  children?: string[]
 }
 
 export interface SessionStorage {
@@ -53,6 +58,10 @@ export function serializeSession(session: SessionState): SerializedSession {
     updatedAt: session.updatedAt,
     status: session.status,
     errorMessage: session.errorMessage,
+    parentSessionId: session.parentSessionId,
+    branchName: session.branchName,
+    branchPoint: session.branchPoint,
+    children: session.children,
   }
 }
 
@@ -75,5 +84,9 @@ export function deserializeSession(data: SerializedSession): SessionState {
     updatedAt: data.updatedAt,
     status: data.status as SessionState['status'],
     errorMessage: data.errorMessage,
+    parentSessionId: data.parentSessionId,
+    branchName: data.branchName,
+    branchPoint: data.branchPoint,
+    children: data.children,
   }
 }

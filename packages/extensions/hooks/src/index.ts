@@ -3,6 +3,7 @@
  *
  * Integrates PreToolUse and PostToolUse hooks into the tool middleware chain
  * at priority 10 (after permissions at priority 0).
+ * Also registers a formatter middleware (priority 50) on session:opened.
  */
 
 import type {
@@ -13,6 +14,7 @@ import type {
   ToolMiddlewareResult,
 } from '@ava/core-v2/extensions'
 import type { ToolResult } from '@ava/core-v2/tools'
+import { createFormatterMiddleware } from './formatter.js'
 import { runHooks } from './runner.js'
 import type { PostToolUseContext, PreToolUseContext } from './types.js'
 
@@ -59,11 +61,22 @@ export function createHooksMiddleware(): ToolMiddleware {
 }
 
 export function activate(api: ExtensionAPI): Disposable {
-  const mwDisposable = api.addToolMiddleware(createHooksMiddleware())
+  const disposables: Disposable[] = []
+
+  disposables.push(api.addToolMiddleware(createHooksMiddleware()))
+
+  // Register formatter middleware when a session opens
+  disposables.push(
+    api.on('session:opened', () => {
+      const fmtMiddleware = createFormatterMiddleware(api.platform, api.log)
+      disposables.push(api.addToolMiddleware(fmtMiddleware))
+      api.log.debug('Formatter middleware registered')
+    })
+  )
 
   return {
     dispose() {
-      mwDisposable.dispose()
+      for (const d of disposables) d.dispose()
     },
   }
 }

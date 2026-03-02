@@ -9,6 +9,7 @@
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import { discoverSkills } from './loader.js'
 import { matchSkills } from './matcher.js'
+import { createLoadSkillTool } from './tool.js'
 import type { Skill, SkillConfig } from './types.js'
 import { DEFAULT_SKILL_CONFIG } from './types.js'
 
@@ -19,6 +20,9 @@ export function activate(api: ExtensionAPI): Disposable {
   }
   const skills: Skill[] = []
   const disposables: Disposable[] = []
+
+  // Register load_skill tool (shares the skills array reference)
+  disposables.push(api.registerTool(createLoadSkillTool(skills)))
 
   // Listen for skill registration from plugins
   disposables.push(

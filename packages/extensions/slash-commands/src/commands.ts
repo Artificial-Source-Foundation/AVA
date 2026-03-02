@@ -6,6 +6,9 @@
  */
 
 import type { SlashCommand } from '@ava/core-v2/extensions'
+import type { ChatMessage } from '@ava/core-v2/llm'
+import { getPlatform } from '@ava/core-v2/platform'
+import { exportSessionToMarkdown } from '@ava/core-v2/session'
 import type { ToolContext } from '@ava/core-v2/tools'
 
 function cmd(
@@ -68,5 +71,41 @@ export function createBuiltinCommands(
       emit('session:status-requested', { sessionId: ctx.sessionId })
       return 'Fetching session status.'
     }),
+
+    cmd('export', 'Export session conversation to markdown', async (_args, ctx) => {
+      emit('session:export-requested', { sessionId: ctx.sessionId })
+      // Retrieve messages from the event data (listeners will provide them)
+      const messages: ChatMessage[] = []
+      const md = exportSessionToMarkdown(messages)
+      emit('session:exported', { sessionId: ctx.sessionId, format: 'markdown', content: md })
+      return `Session exported to markdown (${md.length} chars).`
+    }),
+
+    cmd(
+      'init',
+      'Generate CLAUDE.md project instructions from detected config',
+      async (_args, ctx) => {
+        const cwd = ctx.workingDirectory
+        const platform = getPlatform()
+        const fs = platform.fs
+
+        // Lazy-import to avoid circular dependency at module load time
+        const { generateProjectRules } = await import(
+          /* webpackIgnore: true */ '../../instructions/src/init.js'
+        )
+        const content = await generateProjectRules(cwd, fs)
+        const outputPath = cwd.endsWith('/') ? `${cwd}CLAUDE.md` : `${cwd}/CLAUDE.md`
+
+        const exists = await fs.exists(outputPath)
+        if (exists) {
+          emit('init:skipped', { path: outputPath, reason: 'CLAUDE.md already exists' })
+          return `CLAUDE.md already exists at ${outputPath}. Delete it first to regenerate.`
+        }
+
+        await fs.writeFile(outputPath, content)
+        emit('init:completed', { path: outputPath })
+        return `Generated CLAUDE.md at ${outputPath} (${content.length} chars).`
+      }
+    ),
   ]
 }

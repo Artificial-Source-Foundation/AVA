@@ -9,6 +9,8 @@ import { registerDoomLoop } from './doom-loop.js'
 import { registerMinimalMode } from './minimal-mode.js'
 import { registerPlanMode } from './plan-mode.js'
 
+export { selectAgentMode } from './selector.js'
+
 export function activate(api: ExtensionAPI): Disposable {
   const disposables = [registerPlanMode(api), registerMinimalMode(api), registerDoomLoop(api)]
 

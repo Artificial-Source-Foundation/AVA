@@ -37,7 +37,33 @@ const h = vi.hoisted(() => {
     deleteMessagesAfter: vi.fn(),
     stopEditing: vi.fn(),
     setRetryingMessageId: vi.fn(),
+    addFileOperation: vi.fn(),
   }
+
+  // AgentExecutor mock — creates a pending promise that never resolves
+  // so the test can check streaming/queue state
+  let pendingResolve: (() => void) | null = null
+  const agentRunMock = vi.fn(
+    () =>
+      new Promise<{
+        success: boolean
+        output: string
+        turns: number
+        tokensUsed: { input: number; output: number }
+        terminateMode: string
+        durationMs: number
+      }>((resolve) => {
+        pendingResolve = () =>
+          resolve({
+            success: true,
+            output: 'done',
+            turns: 1,
+            tokensUsed: { input: 100, output: 50 },
+            terminateMode: 'GOAL',
+            durationMs: 100,
+          })
+      })
+  )
 
   return {
     sessionMessages,
@@ -45,12 +71,24 @@ const h = vi.hoisted(() => {
     settingsState,
     tracker,
     sessionMock,
-    createClient: vi.fn(),
-    getProviderForModel: vi.fn(() => 'openai'),
+    agentRunMock,
+    getPendingResolve: () => pendingResolve,
+    resolveProvider: vi.fn(() => 'openai'),
     saveMessage: vi.fn(),
     updateMessage: vi.fn().mockResolvedValue(undefined),
   }
 })
+
+vi.mock('@ava/core-v2/agent', () => ({
+  AgentExecutor: class {
+    run = h.agentRunMock
+  },
+}))
+
+vi.mock('@ava/core-v2/extensions', () => ({
+  addToolMiddleware: vi.fn(() => ({ dispose: vi.fn() })),
+  onEvent: vi.fn(() => ({ dispose: vi.fn() })),
+}))
 
 vi.mock('@ava/core-v2/tools', () => ({
   executeTool: vi.fn(),
@@ -81,8 +119,17 @@ vi.mock('../services/database', () => ({
 }))
 
 vi.mock('../services/llm/bridge', () => ({
-  createClient: h.createClient,
-  getProviderForModel: h.getProviderForModel,
+  resolveProvider: h.resolveProvider,
+  createClient: vi.fn(),
+  getProviderForModel: h.resolveProvider,
+}))
+
+vi.mock('../services/file-browser', () => ({
+  readFileContent: vi.fn(),
+}))
+
+vi.mock('../services/file-versions', () => ({
+  recordFileChange: vi.fn(),
 }))
 
 vi.mock('../services/logger', () => ({
@@ -109,19 +156,11 @@ vi.mock('../stores/session', () => ({
 vi.mock('../stores/settings', () => ({
   useSettings: () => ({
     settings: () => h.settingsState,
+    isToolAutoApproved: () => false,
   }),
 }))
 
 import { useChat } from './useChat'
-
-function createPendingClient() {
-  return {
-    stream: async function* () {
-      await new Promise(() => {})
-      yield { type: 'content', content: 'never' } as const
-    },
-  }
-}
 
 describe('useChat integration queue/steer/cancel', () => {
   beforeEach(() => {
@@ -137,7 +176,6 @@ describe('useChat integration queue/steer/cancel', () => {
       metadata: input.metadata,
     }))
 
-    h.createClient.mockResolvedValue(createPendingClient())
     h.currentSession.id = 'session-1'
     h.currentSession.name = 'New Chat'
     h.settingsState.behavior.sessionAutoTitle = true

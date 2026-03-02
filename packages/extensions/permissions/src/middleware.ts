@@ -1,13 +1,5 @@
 /**
- * Permission middleware — hooks into the tool execution pipeline.
- *
- * Implements safety checks as a tool middleware:
- * - Blocks dangerous patterns (rm -rf /, .git writes)
- * - Auto-approves reads when configured
- * - Per-tool rules with glob matching (first match wins)
- * - Smart-approve for safe bash commands and trusted paths
- * - Always-approved list from user confirmations
- * - Emits permission:request events for user confirmation
+ * Permission middleware — safety checks, auto-approve, arity fingerprinting.
  */
 
 import type { MessageBus } from '@ava/core-v2/bus'
@@ -16,6 +8,8 @@ import type {
   ToolMiddlewareContext,
   ToolMiddlewareResult,
 } from '@ava/core-v2/extensions'
+import { extractCommandPrefix } from './arity.js'
+import { parseBashTokens } from './bash-parser.js'
 import { isToolAutoApproved, type PermissionMode } from './modes.js'
 import {
   classifyRisk,
@@ -130,6 +124,43 @@ function isBlockedByPattern(args: Record<string, unknown>): boolean {
   )
 }
 
+/**
+ * Build a fingerprint key for a tool call.
+ * For bash commands, uses the command prefix (e.g., "bash:git:status").
+ * For other tools, returns the tool name as-is.
+ */
+export function buildApprovalKey(toolName: string, args: Record<string, unknown>): string {
+  if (toolName === 'bash' || toolName === 'bash_background') {
+    const command = (args.command ?? '') as string
+    if (command) {
+      const tokens = parseBashTokens(command)
+      const prefix = extractCommandPrefix(tokens)
+      if (prefix.length > 0) {
+        return `${toolName}:${prefix.join(':')}`
+      }
+    }
+  }
+  return toolName
+}
+
+/**
+ * Check if a tool call matches any entry in the always-approved list.
+ * Compares the fingerprint key against stored keys.
+ */
+function isAlwaysApproved(toolName: string, args: Record<string, unknown>): boolean {
+  if (settings.alwaysApproved.length === 0) return false
+
+  const key = buildApprovalKey(toolName, args)
+
+  // Direct match (exact key or plain tool name)
+  if (settings.alwaysApproved.includes(key)) return true
+
+  // Backward compat: plain tool name also matches (e.g., "write_file" still works)
+  if (key !== toolName && settings.alwaysApproved.includes(toolName)) return true
+
+  return false
+}
+
 // ─── Middleware ──────────────────────────────────────────────────────────────
 
 export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
@@ -180,8 +211,8 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
         if (settings.yolo) return undefined
       }
 
-      // 7. Always-approved list check
-      if (settings.alwaysApproved.length > 0 && settings.alwaysApproved.includes(toolName)) {
+      // 7. Always-approved list check (with arity fingerprinting for bash)
+      if (isAlwaysApproved(toolName, args)) {
         return undefined
       }
 
@@ -238,11 +269,14 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
         if (!response.approved) {
           return { blocked: true, reason: response.reason ?? 'Denied by user' }
         }
-        // Handle "always approve" response
-        if (response.alwaysApprove && !settings.alwaysApproved.includes(toolName)) {
-          settings = {
-            ...settings,
-            alwaysApproved: [...settings.alwaysApproved, toolName],
+        // Handle "always approve" — store arity-based fingerprint for bash commands
+        if (response.alwaysApprove) {
+          const key = buildApprovalKey(toolName, args)
+          if (!settings.alwaysApproved.includes(key)) {
+            settings = {
+              ...settings,
+              alwaysApproved: [...settings.alwaysApproved, key],
+            }
           }
         }
         return undefined

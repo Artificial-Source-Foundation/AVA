@@ -9,9 +9,9 @@ describe('createBuiltinCommands', () => {
     signal: new AbortController().signal,
   }
 
-  it('creates 9 built-in commands', () => {
+  it('creates 11 built-in commands', () => {
     const commands = createBuiltinCommands(emit)
-    expect(commands).toHaveLength(9)
+    expect(commands).toHaveLength(11)
   })
 
   it('includes expected command names', () => {

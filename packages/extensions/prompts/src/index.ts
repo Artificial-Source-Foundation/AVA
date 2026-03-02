@@ -24,3 +24,9 @@ export {
   getPromptSections,
   resetPromptSections,
 } from './builder.js'
+export type { ModelFamily } from './families.js'
+export {
+  detectModelFamily,
+  FAMILY_PROMPT_SECTIONS,
+  getModelFamilyPromptSection,
+} from './families.js'

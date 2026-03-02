@@ -13,12 +13,21 @@ export function activate(api: ExtensionAPI): Disposable {
   return { dispose() {} }
 }
 
-export type { CatalogEntry, CatalogSearchResult } from './catalog.js'
+export type {
+  CatalogEntry,
+  CatalogFilterOptions,
+  CatalogSearchResult,
+  CatalogSortBy,
+} from './catalog.js'
 export {
   clearCatalogCache,
   fetchCatalog,
+  filterCatalog,
   getCatalogEntry,
   searchCatalog,
+  sortCatalog,
 } from './catalog.js'
 export type { InstalledPlugin, InstallResult } from './installer.js'
 export { getInstalledPlugins, installPlugin, uninstallPlugin } from './installer.js'
+export type { PluginReview, PluginReviewInput } from './reviews.js'
+export { ReviewStore } from './reviews.js'

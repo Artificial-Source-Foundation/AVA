@@ -66,11 +66,55 @@ export interface LSPPublishDiagnosticsParams {
   diagnostics: LSPProtocolDiagnostic[]
 }
 
+// ─── Document Symbols ─────────────────────────────────────────────────────
+
+export interface LSPDocumentSymbol {
+  name: string
+  kind: number
+  range: LSPRange
+  children?: LSPDocumentSymbol[]
+  detail?: string
+  containerName?: string
+}
+
+// ─── Workspace Symbols ────────────────────────────────────────────────────
+
+export interface LSPWorkspaceSymbol {
+  name: string
+  kind: number
+  location: { uri: string; range: LSPRange }
+}
+
+// ─── Code Actions ─────────────────────────────────────────────────────────
+
+export interface LSPTextEdit {
+  range: LSPRange
+  newText: string
+}
+
+export interface LSPWorkspaceEdit {
+  changes: Record<string, LSPTextEdit[]>
+}
+
+export interface LSPCodeAction {
+  title: string
+  kind?: string
+  diagnostics?: LSPProtocolDiagnostic[]
+  edit?: LSPWorkspaceEdit
+  command?: { title: string; command: string; arguments?: unknown[] }
+}
+
+// ─── Server Capabilities ──────────────────────────────────────────────────
+
 export interface LSPServerCapabilities {
   completionProvider?: Record<string, unknown>
   hoverProvider?: boolean | Record<string, unknown>
   definitionProvider?: boolean | Record<string, unknown>
   referencesProvider?: boolean | Record<string, unknown>
+  documentSymbolProvider?: boolean | Record<string, unknown>
+  workspaceSymbolProvider?: boolean | Record<string, unknown>
+  codeActionProvider?: boolean | Record<string, unknown>
+  renameProvider?: boolean | Record<string, unknown>
   diagnosticProvider?: Record<string, unknown>
   textDocumentSync?: number | { openClose?: boolean; change?: number }
   [key: string]: unknown

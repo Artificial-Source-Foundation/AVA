@@ -18,6 +18,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { setPlatform } from '@ava/core-v2'
 import { createNodePlatform } from '@ava/platform-node'
+import { installAmbient, uninstallAmbient } from './ambient/install.js'
 import { runAgentCommand } from './commands/agent.js'
 import { runAgentV2Command } from './commands/agent-v2.js'
 import { runAuthCommand } from './commands/auth.js'
@@ -89,6 +90,23 @@ async function main() {
     return
   }
 
+  // Ambient terminal command
+  if (args[0] === 'ambient') {
+    const sub = args[1]
+    if (sub === 'install') {
+      const shellArg = args[2] as 'bash' | 'zsh' | 'fish' | undefined
+      installAmbient(shellArg)
+      return
+    }
+    if (sub === 'uninstall') {
+      uninstallAmbient()
+      return
+    }
+    console.log('Usage: ava ambient install [bash|zsh|fish]')
+    console.log('       ava ambient uninstall')
+    return
+  }
+
   // Default: Show help (TUI not implemented yet)
   console.log('AVA CLI')
   console.log('')
@@ -111,16 +129,19 @@ COMMANDS:
   validate        Run validation pipeline on files
   auth            Manage authentication (OAuth login/logout)
   plugin          Plugin development commands
+  ambient         Install/uninstall shell integration
 
 OPTIONS:
   --version, -v   Show version
   --help, -h      Show this help
 
 AGENT:
-  ava run "Fix the bug in auth.ts"                  Run agent with default settings
+  ava run "Fix the bug in auth.ts"                  Run agent with default settings (core-v2)
   ava run "Read the README" --mock                  Use mock LLM (no API key)
   ava run "Refactor module" --provider anthropic    Specify provider
   ava run "List files" --max-turns 5 --verbose      Limit turns, verbose output
+  ava run "Fix bug" --backend core                  Use legacy core backend
+  ava run "Fix bug" --backend core-v2               Use core-v2 backend (default)
 
 TOOLS:
   ava tool list                                     List all registered tools
@@ -173,10 +194,19 @@ EXAMPLES:
   # Scaffold a plugin
   ava plugin init my-plugin
 
+AMBIENT TERMINAL:
+  ava ambient install           Install shell function (auto-detects shell)
+  ava ambient install zsh       Install for a specific shell
+  ava ambient uninstall         Remove shell integration
+  After install, use: ava @"your goal here"
+
 ENVIRONMENT VARIABLES:
   AVA_ANTHROPIC_API_KEY    Anthropic API key (alternative to OAuth)
   AVA_OPENROUTER_API_KEY   OpenRouter API key
   AVA_OPENAI_API_KEY       OpenAI API key (alternative to OAuth)
+  AZURE_OPENAI_ENDPOINT    Azure OpenAI resource endpoint
+  AZURE_OPENAI_API_KEY     Azure OpenAI API key
+  AZURE_OPENAI_DEPLOYMENT_ID  Azure OpenAI deployment name
 
 For more information, visit: https://github.com/g0dxn4/AVA
 `)

@@ -7,13 +7,19 @@
 
 import type { LSPMessage, LSPTransport } from './transport.js'
 import type {
+  LSPCodeAction,
   LSPCompletionItem,
+  LSPDocumentSymbol,
   LSPHoverResult,
   LSPInitializeResult,
   LSPLocation,
   LSPPosition,
+  LSPProtocolDiagnostic,
   LSPPublishDiagnosticsParams,
+  LSPRange,
   LSPServerCapabilities,
+  LSPWorkspaceEdit,
+  LSPWorkspaceSymbol,
 } from './types.js'
 
 const DEFAULT_TIMEOUT_MS = 10_000
@@ -147,6 +153,54 @@ export class LSPClient {
     })) as LSPLocation[] | null
 
     return result ?? []
+  }
+
+  async documentSymbols(uri: string): Promise<LSPDocumentSymbol[]> {
+    this.assertInitialized()
+    const result = (await this.request('textDocument/documentSymbol', {
+      textDocument: { uri },
+    })) as LSPDocumentSymbol[] | null
+
+    return result ?? []
+  }
+
+  async workspaceSymbols(query: string): Promise<LSPWorkspaceSymbol[]> {
+    this.assertInitialized()
+    const result = (await this.request('workspace/symbol', {
+      query,
+    })) as LSPWorkspaceSymbol[] | null
+
+    return result ?? []
+  }
+
+  async codeActions(
+    uri: string,
+    range: LSPRange,
+    diagnostics?: LSPProtocolDiagnostic[]
+  ): Promise<LSPCodeAction[]> {
+    this.assertInitialized()
+    const result = (await this.request('textDocument/codeAction', {
+      textDocument: { uri },
+      range,
+      context: { diagnostics: diagnostics ?? [] },
+    })) as LSPCodeAction[] | null
+
+    return result ?? []
+  }
+
+  async rename(
+    uri: string,
+    position: LSPPosition,
+    newName: string
+  ): Promise<LSPWorkspaceEdit | null> {
+    this.assertInitialized()
+    const result = (await this.request('textDocument/rename', {
+      textDocument: { uri },
+      position,
+      newName,
+    })) as LSPWorkspaceEdit | null
+
+    return result
   }
 
   // ─── Diagnostics ──────────────────────────────────────────────────────

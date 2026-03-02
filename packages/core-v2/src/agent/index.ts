@@ -1,4 +1,10 @@
 export { AgentExecutor, runAgent } from './loop.js'
+export {
+  buildStructuredOutputTool,
+  buildStructuredOutputToolDefinition,
+  STRUCTURED_OUTPUT_TOOL_NAME,
+  validateStructuredOutput,
+} from './structured-output.js'
 export type {
   AgentConfig,
   AgentEvent,

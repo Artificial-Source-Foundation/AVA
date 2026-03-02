@@ -1,6 +1,7 @@
 /**
  * Extended tools extension.
  * Registers 20 additional tools beyond the 6 core tools.
+ * Also loads custom user tools from `.ava/tools/` on session open.
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
@@ -12,6 +13,7 @@ import { batchTool } from './batch.js'
 import { codesearchTool } from './codesearch.js'
 import { completionTool } from './completion.js'
 import { createFileTool } from './create.js'
+import { loadCustomTools } from './custom-tools.js'
 import { deleteFileTool } from './delete.js'
 import { lsTool } from './ls.js'
 import { multieditTool } from './multiedit.js'
@@ -47,7 +49,20 @@ const TOOLS = [
 ]
 
 export function activate(api: ExtensionAPI): Disposable {
-  const disposables = TOOLS.map((tool) => api.registerTool(tool))
+  const disposables: Disposable[] = TOOLS.map((tool) => api.registerTool(tool))
+
+  // Load custom user tools when a session opens
+  disposables.push(
+    api.on('session:opened', (data) => {
+      const { workingDirectory } = data as { workingDirectory: string }
+      void loadCustomTools(workingDirectory, api).then((customDisposables) => {
+        disposables.push(...customDisposables)
+        if (customDisposables.length > 0) {
+          api.log.info(`Loaded ${customDisposables.length} custom tool(s)`)
+        }
+      })
+    })
+  )
 
   return {
     dispose() {

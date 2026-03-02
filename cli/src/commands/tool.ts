@@ -8,12 +8,54 @@
  *   ava tool <name> --arg value           - Execute a tool
  */
 
+import * as os from 'node:os'
+import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { ToolContext, ToolDefinition } from '@ava/core-v2'
 import { executeTool, getToolDefinitions, registerCoreTools } from '@ava/core-v2'
+import { MessageBus } from '@ava/core-v2/bus'
+import type { ExtensionModule } from '@ava/core-v2/extensions'
+import { ExtensionManager, loadAllBuiltInExtensions } from '@ava/core-v2/extensions'
+import { setPlatform } from '@ava/core-v2/platform'
+import { createSessionManager } from '@ava/core-v2/session'
+import { createNodePlatform } from '@ava/platform-node/v2'
+
+let initialized = false
+
+async function ensureInitialized(): Promise<void> {
+  if (initialized) return
+  initialized = true
+
+  // Set up platform
+  const dbPath = path.join(os.homedir(), '.ava', 'data.db')
+  setPlatform(createNodePlatform(dbPath))
+
+  // Register core tools
+  registerCoreTools()
+
+  // Load extensions to get all tools
+  const bus = new MessageBus()
+  const sessionManager = createSessionManager()
+  const manager = new ExtensionManager(bus, sessionManager)
+
+  const currentDir = path.dirname(fileURLToPath(import.meta.url))
+  const extensionsDir = path.resolve(currentDir, '../../../packages/extensions')
+
+  try {
+    const loaded = await loadAllBuiltInExtensions(extensionsDir)
+    const modules = new Map<string, ExtensionModule>()
+    for (const ext of loaded) {
+      manager.register(ext.manifest, ext.path)
+      modules.set(ext.manifest.name, ext.module)
+    }
+    await manager.activateAll(modules)
+  } catch {
+    // Extensions optional for tool command — core tools still work
+  }
+}
 
 export async function runToolCommand(args: string[]): Promise<void> {
-  // Ensure core tools are registered before any tool operations
-  registerCoreTools()
+  await ensureInitialized()
 
   const subcommand = args[0]
 

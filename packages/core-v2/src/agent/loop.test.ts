@@ -1368,40 +1368,40 @@ describe('Doom loop detection', () => {
 // ─── Tool Result Truncation ──────────────────────────────────────────────────
 
 describe('truncateToolResults', () => {
-  it('does not truncate small results', () => {
+  it('does not truncate small results', async () => {
     const blocks: ToolResultBlock[] = [
       { type: 'tool_result', tool_use_id: 'tc-1', content: 'small result', is_error: false },
       { type: 'tool_result', tool_use_id: 'tc-2', content: 'another small', is_error: false },
     ]
-    truncateToolResults(blocks)
+    await truncateToolResults(blocks)
     expect(blocks[0].content).toBe('small result')
     expect(blocks[1].content).toBe('another small')
   })
 
-  it('truncates a single result exceeding MAX_RESULT_BYTES (50KB)', () => {
+  it('truncates a single result exceeding MAX_RESULT_BYTES (50KB)', async () => {
     const largeContent = 'x'.repeat(60 * 1024) // 60KB
     const blocks: ToolResultBlock[] = [
       { type: 'tool_result', tool_use_id: 'tc-1', content: largeContent, is_error: false },
     ]
-    truncateToolResults(blocks)
+    await truncateToolResults(blocks)
     expect(blocks[0].content.length).toBeLessThan(largeContent.length)
     expect(blocks[0].content).toContain('[...truncated')
     // Should start with the first 50KB of content
     expect(blocks[0].content.startsWith('x'.repeat(50 * 1024))).toBe(true)
   })
 
-  it('adds truncation marker with byte count', () => {
+  it('adds truncation marker with byte count', async () => {
     const size = 60 * 1024
     const largeContent = 'a'.repeat(size)
     const blocks: ToolResultBlock[] = [
       { type: 'tool_result', tool_use_id: 'tc-1', content: largeContent, is_error: false },
     ]
-    truncateToolResults(blocks)
+    await truncateToolResults(blocks)
     const expectedTruncated = size - 50 * 1024
     expect(blocks[0].content).toContain(`[...truncated ${expectedTruncated} bytes]`)
   })
 
-  it('proportionally truncates when total exceeds MAX_TOTAL_RESULT_BYTES (200KB)', () => {
+  it('proportionally truncates when total exceeds MAX_TOTAL_RESULT_BYTES (200KB)', async () => {
     // Create 5 results, each 50KB = 250KB total, exceeds 200KB limit
     const blocks: ToolResultBlock[] = []
     for (let i = 0; i < 5; i++) {
@@ -1412,7 +1412,7 @@ describe('truncateToolResults', () => {
         is_error: false,
       })
     }
-    truncateToolResults(blocks)
+    await truncateToolResults(blocks)
     // Each block should be proportionally smaller
     const totalAfter = blocks.reduce((sum, b) => sum + Buffer.byteLength(b.content, 'utf8'), 0)
     // Total should be around 200KB (may exceed slightly due to truncation markers)
@@ -1423,7 +1423,7 @@ describe('truncateToolResults', () => {
     }
   })
 
-  it('does not truncate results <= 1KB during proportional truncation', () => {
+  it('does not truncate results <= 1KB during proportional truncation', async () => {
     // One large result + one tiny result
     const blocks: ToolResultBlock[] = [
       {
@@ -1439,22 +1439,22 @@ describe('truncateToolResults', () => {
         is_error: false,
       },
     ]
-    truncateToolResults(blocks)
+    await truncateToolResults(blocks)
     // The tiny result should be preserved
     expect(blocks[1].content).toBe('small')
   })
 
-  it('handles empty blocks array', () => {
+  it('handles empty blocks array', async () => {
     const blocks: ToolResultBlock[] = []
-    truncateToolResults(blocks)
+    await truncateToolResults(blocks)
     expect(blocks).toEqual([])
   })
 
-  it('handles blocks with empty content', () => {
+  it('handles blocks with empty content', async () => {
     const blocks: ToolResultBlock[] = [
       { type: 'tool_result', tool_use_id: 'tc-1', content: '', is_error: false },
     ]
-    truncateToolResults(blocks)
+    await truncateToolResults(blocks)
     expect(blocks[0].content).toBe('')
   })
 

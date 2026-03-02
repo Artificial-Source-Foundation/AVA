@@ -6,15 +6,17 @@
 
 import type { ChatMessage } from '../llm/types.js'
 import { createLogger } from '../logger/logger.js'
+import { generateSlug } from './slug.js'
 import type { SessionStorage } from './storage.js'
-import type {
-  FileState,
-  SessionEvent,
-  SessionEventListener,
-  SessionManagerConfig,
-  SessionMeta,
-  SessionState,
-  TokenStats,
+import {
+  type FileState,
+  SessionBusyError,
+  type SessionEvent,
+  type SessionEventListener,
+  type SessionManagerConfig,
+  type SessionMeta,
+  type SessionState,
+  type TokenStats,
 } from './types.js'
 
 const log = createLogger('Session')
@@ -39,9 +41,11 @@ export class SessionManager {
   create(name: string | undefined, workingDirectory: string): SessionState {
     const id = crypto.randomUUID()
     const now = Date.now()
+    const slug = name ? generateSlug(name) : undefined
     const session: SessionState = {
       id,
       name,
+      slug: slug || undefined,
       messages: [],
       workingDirectory,
       toolCallCount: 0,
@@ -77,15 +81,35 @@ export class SessionManager {
   }
 
   list(): SessionMeta[] {
-    return [...this.sessions.values()].map((s) => ({
-      id: s.id,
-      name: s.name,
-      messageCount: s.messages.length,
-      workingDirectory: s.workingDirectory,
-      createdAt: s.createdAt,
-      updatedAt: s.updatedAt,
-      status: s.status,
-    }))
+    return [...this.sessions.values()]
+      .filter((s) => s.status !== 'archived')
+      .map((s) => this.toMeta(s))
+  }
+
+  listGlobal(
+    cursor?: string,
+    limit: number = 20
+  ): { sessions: SessionMeta[]; nextCursor: string | null } {
+    // Sort all sessions by updatedAt descending
+    const sorted = [...this.sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+
+    // Find start index from cursor (cursor is a session id)
+    let startIndex = 0
+    if (cursor) {
+      const cursorIndex = sorted.findIndex((s) => s.id === cursor)
+      if (cursorIndex !== -1) {
+        startIndex = cursorIndex + 1
+      }
+    }
+
+    const page = sorted.slice(startIndex, startIndex + limit)
+    const hasMore = startIndex + limit < sorted.length
+    const nextCursor = hasMore ? page[page.length - 1].id : null
+
+    return {
+      sessions: page.map((s) => this.toMeta(s)),
+      nextCursor,
+    }
   }
 
   // ─── Messages ──────────────────────────────────────────────────────────
@@ -133,11 +157,114 @@ export class SessionManager {
     session.errorMessage = errorMessage
     session.updatedAt = Date.now()
     this.emit({ type: 'status_changed', status, sessionId })
+
+    // Also emit session:status for busy/idle tracking
+    if (status === 'busy') {
+      this.emit({ type: 'session:status', sessionId, status: 'busy' })
+    } else if (
+      status === 'active' ||
+      status === 'completed' ||
+      status === 'paused' ||
+      status === 'archived'
+    ) {
+      this.emit({ type: 'session:status', sessionId, status: 'idle' })
+    }
   }
 
   setEnv(sessionId: string, key: string, value: string): void {
     const session = this.getOrThrow(sessionId)
     session.env[key] = value
+  }
+
+  archive(sessionId: string): void {
+    const session = this.getOrThrow(sessionId)
+    session.status = 'archived'
+    session.updatedAt = Date.now()
+    this.emit({ type: 'status_changed', status: 'archived', sessionId })
+    this.emit({ type: 'session:status', sessionId, status: 'idle' })
+  }
+
+  setBusy(sessionId: string): void {
+    const session = this.getOrThrow(sessionId)
+    if (session.status === 'busy') {
+      throw new SessionBusyError(sessionId)
+    }
+    session.status = 'busy'
+    session.updatedAt = Date.now()
+    this.emit({ type: 'status_changed', status: 'busy', sessionId })
+    this.emit({ type: 'session:status', sessionId, status: 'busy' })
+  }
+
+  // ─── Branching / DAG ──────────────────────────────────────────────────────
+
+  /**
+   * Fork a session at a given message index, creating a child session
+   * with messages up to (but not including) `fromMessage`.
+   */
+  fork(parentId: string, branchName: string, fromMessage?: number): SessionState {
+    const parent = this.getOrThrow(parentId)
+    const branchPoint = fromMessage ?? parent.messages.length
+    const forkedMessages = parent.messages.slice(0, branchPoint)
+
+    const id = crypto.randomUUID()
+    const now = Date.now()
+    const slug = branchName ? generateSlug(branchName) : undefined
+    const child: SessionState = {
+      id,
+      name: branchName,
+      slug: slug || undefined,
+      messages: forkedMessages,
+      workingDirectory: parent.workingDirectory,
+      toolCallCount: 0,
+      tokenStats: { inputTokens: 0, outputTokens: 0, messages: new Map() },
+      openFiles: new Map(),
+      env: { ...parent.env },
+      createdAt: now,
+      updatedAt: now,
+      status: 'active',
+      parentSessionId: parentId,
+      branchName,
+      branchPoint,
+    }
+
+    // Track child in parent
+    if (!parent.children) parent.children = []
+    parent.children.push(id)
+    parent.updatedAt = now
+
+    // Evict oldest if at capacity
+    if (this.sessions.size >= this.config.maxSessions) {
+      const oldest = this.getOldestSessionId()
+      if (oldest) this.sessions.delete(oldest)
+    }
+
+    this.sessions.set(id, child)
+    log.debug(`Session forked: ${id} from ${parentId} at message ${branchPoint}`)
+    this.emit({ type: 'session_loaded', sessionId: id })
+    return child
+  }
+
+  /** Get the full tree starting from a root session ID. */
+  getTree(rootId: string): SessionMeta[] {
+    const root = this.sessions.get(rootId)
+    if (!root) return []
+    const result: SessionMeta[] = [this.toMeta(root)]
+    const queue = root.children ?? []
+    for (const childId of queue) {
+      const descendants = this.getTree(childId)
+      result.push(...descendants)
+    }
+    return result
+  }
+
+  /** Get direct branches (children) of a session. */
+  getBranches(parentId: string): SessionMeta[] {
+    const parent = this.sessions.get(parentId)
+    if (!parent || !parent.children) return []
+    return parent.children
+      .map((id) => this.sessions.get(id))
+      .filter((s): s is SessionState => s !== undefined)
+      .map((s) => this.toMeta(s))
   }
 
   // ─── Events ──────────────────────────────────────────────────────────────
@@ -148,6 +275,22 @@ export class SessionManager {
   }
 
   // ─── Internal ──────────────────────────────────────────────────────────
+
+  private toMeta(s: SessionState): SessionMeta {
+    return {
+      id: s.id,
+      name: s.name,
+      slug: s.slug,
+      messageCount: s.messages.length,
+      workingDirectory: s.workingDirectory,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      status: s.status,
+      parentSessionId: s.parentSessionId,
+      branchName: s.branchName,
+      childCount: s.children?.length ?? 0,
+    }
+  }
 
   private getOrThrow(sessionId: string): SessionState {
     const session = this.sessions.get(sessionId)

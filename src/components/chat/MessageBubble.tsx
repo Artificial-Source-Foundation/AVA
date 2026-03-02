@@ -51,6 +51,7 @@ function formatModelName(modelId: string): string {
 
 export const MessageBubble: Component<MessageBubbleProps> = (props) => {
   const isUser = () => props.message.role === 'user'
+  const hasToolCalls = () => !isUser() && (props.message.toolCalls?.length ?? 0) > 0
   const shouldAnimateIn = () => props.shouldAnimate && !props.isEditing
   const lineCount = () => props.message.content.split('\n').length
   const isLong = () => {
@@ -136,21 +137,14 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               )}
             </Show>
 
-            {/* Show typing indicator while streaming, placeholder otherwise */}
+            {/* Show typing indicator while streaming with no content and no tool calls */}
             <Show
-              when={props.message.content || isUser()}
+              when={props.message.content || isUser() || hasToolCalls()}
               fallback={
                 <Show
                   when={props.isStreaming}
                   fallback={
-                    <Show
-                      when={!isUser() && props.message.toolCalls?.length}
-                      fallback={
-                        <div class={props.isLastMessage && !props.message.error ? 'h-5' : 'h-3'} />
-                      }
-                    >
-                      <p class="text-sm text-[var(--text-muted)] italic">Finished without output</p>
-                    </Show>
+                    <div class={props.isLastMessage && !props.message.error ? 'h-5' : 'h-3'} />
                   }
                 >
                   <TypingIndicator
@@ -161,48 +155,88 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                 </Show>
               }
             >
+              {/* Thinking block */}
               <Show when={!isUser() && (props.message.metadata?.thinking as string)}>
                 <ThinkingBlock
                   thinking={props.message.metadata!.thinking as string}
                   isStreaming={props.isStreaming}
                 />
               </Show>
-              <div
-                class={shouldCollapse() ? 'relative overflow-hidden' : ''}
-                style={shouldCollapse() ? { 'max-height': '300px' } : {}}
-              >
-                <MarkdownContent
-                  content={props.message.content}
-                  role={props.message.role}
+
+              {/* Text content */}
+              <Show when={props.message.content}>
+                <div
+                  class={shouldCollapse() ? 'relative overflow-hidden' : ''}
+                  style={shouldCollapse() ? { 'max-height': '300px' } : {}}
+                >
+                  <MarkdownContent
+                    content={props.message.content}
+                    role={props.message.role}
+                    isStreaming={props.isStreaming}
+                  />
+                  {/* Fade gradient for collapsed long messages */}
+                  <Show when={shouldCollapse()}>
+                    <div
+                      class="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t to-transparent pointer-events-none"
+                      classList={{
+                        'from-[var(--chat-user-bg)]': isUser(),
+                        'from-[var(--chat-assistant-bg)]': !isUser(),
+                      }}
+                    />
+                  </Show>
+                </div>
+                {/* Show more/less toggle */}
+                <Show when={isLong()}>
+                  <button
+                    type="button"
+                    onClick={() => setExpanded((v) => !v)}
+                    class="flex items-center gap-1 mt-1 text-xs text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
+                  >
+                    <Show when={expanded()} fallback={<ChevronDown class="w-3 h-3" />}>
+                      <ChevronUp class="w-3 h-3" />
+                    </Show>
+                    {expanded()
+                      ? 'Show less'
+                      : isUser()
+                        ? `Show ${lineCount() - USER_COLLAPSE_LINES} more lines`
+                        : 'Show more'}
+                  </button>
+                </Show>
+              </Show>
+
+              {/* Tool calls — rendered inside the bubble as primary content */}
+              <Show when={hasToolCalls()}>
+                <div classList={{ 'mt-2': !!props.message.content }}>
+                  <ToolCallErrorBoundary>
+                    <ToolCallGroup
+                      toolCalls={props.message.toolCalls!}
+                      isStreaming={props.isStreaming && props.isLastMessage}
+                    />
+                  </ToolCallErrorBoundary>
+                </div>
+              </Show>
+
+              {/* Active tool indicator — shows during tool execution */}
+              <Show when={props.isStreaming && props.isLastMessage && hasToolCalls()}>
+                <ActiveToolIndicator
+                  toolCalls={props.message.toolCalls}
                   isStreaming={props.isStreaming}
                 />
-                {/* Fade gradient for collapsed long messages */}
-                <Show when={shouldCollapse()}>
-                  <div
-                    class="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t to-transparent pointer-events-none"
-                    classList={{
-                      'from-[var(--chat-user-bg)]': isUser(),
-                      'from-[var(--chat-assistant-bg)]': !isUser(),
-                    }}
-                  />
-                </Show>
-              </div>
-              {/* Show more/less toggle */}
-              <Show when={isLong()}>
-                <button
-                  type="button"
-                  onClick={() => setExpanded((v) => !v)}
-                  class="flex items-center gap-1 mt-1 text-xs text-[var(--accent)] hover:text-[var(--accent-hover)] transition-colors"
-                >
-                  <Show when={expanded()} fallback={<ChevronDown class="w-3 h-3" />}>
-                    <ChevronUp class="w-3 h-3" />
-                  </Show>
-                  {expanded()
-                    ? 'Show less'
-                    : isUser()
-                      ? `Show ${lineCount() - USER_COLLAPSE_LINES} more lines`
-                      : 'Show more'}
-                </button>
+              </Show>
+
+              {/* Typing indicator when streaming with tool calls but waiting for more */}
+              <Show
+                when={
+                  props.isStreaming &&
+                  props.isLastMessage &&
+                  !props.message.content &&
+                  hasToolCalls() &&
+                  !props.message.toolCalls!.some((tc) => tc.status === 'running')
+                }
+              >
+                <div class="mt-2">
+                  <TypingIndicator />
+                </div>
               </Show>
             </Show>
 
@@ -294,31 +328,6 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
               onBranch={props.onBranch}
               onRewind={props.onRewind}
               isLoading={props.isStreaming}
-            />
-          </Show>
-
-          {/* Tool calls — inside wrapper, visually attached to bubble */}
-          <Show when={!isUser() && props.message.toolCalls?.length}>
-            <ToolCallErrorBoundary>
-              <ToolCallGroup
-                toolCalls={props.message.toolCalls!}
-                isStreaming={props.isStreaming && props.isLastMessage}
-              />
-            </ToolCallErrorBoundary>
-          </Show>
-
-          {/* Active tool indicator — shows during tool execution */}
-          <Show
-            when={
-              !isUser() &&
-              props.isStreaming &&
-              props.isLastMessage &&
-              props.message.toolCalls?.length
-            }
-          >
-            <ActiveToolIndicator
-              toolCalls={props.message.toolCalls}
-              isStreaming={props.isStreaming}
             />
           </Show>
         </div>

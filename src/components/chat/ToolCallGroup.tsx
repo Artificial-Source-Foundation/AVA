@@ -33,16 +33,21 @@ import {
 
 interface GroupHeaderProps {
   group: ToolCallGroupData
+  isStreaming?: boolean
 }
 
 const GroupHeader: Component<GroupHeaderProps> = (props) => {
   const [expanded, setExpanded] = createSignal(props.group.isActive)
 
-  // Auto-expand when active, auto-collapse when complete
+  // Auto-expand when active, auto-collapse when complete (but not while streaming)
   createEffect(() => {
     if (props.group.isActive) {
       setExpanded(true)
-    } else if (!props.group.isActive && props.group.calls.every((c) => c.status === 'success')) {
+    } else if (
+      !props.isStreaming &&
+      !props.group.isActive &&
+      props.group.calls.every((c) => c.status === 'success')
+    ) {
       setExpanded(false)
     }
   })
@@ -135,7 +140,7 @@ export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
       <For each={groups()}>
         {(group) => (
           <Show when={group.calls.length > 1} fallback={<ToolCallCard toolCall={group.calls[0]} />}>
-            <GroupHeader group={group} />
+            <GroupHeader group={group} isStreaming={props.isStreaming} />
           </Show>
         )}
       </For>

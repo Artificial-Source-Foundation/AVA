@@ -54,6 +54,11 @@ export class ContextBudget {
     }
   }
 
+  /** Set the total token usage directly (used for external sync from agent events) */
+  setUsed(tokens: number): void {
+    this.total = tokens
+  }
+
   /** Clear all tracked messages */
   clear(): void {
     this.messages.clear()

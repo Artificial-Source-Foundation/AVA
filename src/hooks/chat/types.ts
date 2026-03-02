@@ -23,7 +23,9 @@ export interface ContextStats {
 export interface StreamOptions {
   sessionId: string
   model: string
-  messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string | unknown[] }>
+  goal: string
+  systemPrompt?: string
+  conversationContext?: string
   onContent: (content: string) => void
   onThinking?: (thinking: string) => void
   onComplete: (content: string, tokens?: number, toolCalls?: ToolCall[]) => void

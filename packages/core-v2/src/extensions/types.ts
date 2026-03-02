@@ -153,6 +153,31 @@ export interface SlashCommand {
   execute(args: string, ctx: ToolContext): Promise<string>
 }
 
+// ─── Hooks ──────────────────────────────────────────────────────────────────
+
+/** Well-known hook names (extensible via string). */
+export type HookName =
+  | 'prompt:transform'
+  | 'tool:beforeExecute'
+  | 'tool:afterExecute'
+  | 'message:preProcess'
+  | 'message:postProcess'
+  | 'completion:validate'
+  | (string & {})
+
+/** A hook handler receives input and current output, returns modified output. */
+export type HookHandler<TInput = unknown, TOutput = unknown> = (
+  input: TInput,
+  output: TOutput
+) => TOutput | Promise<TOutput>
+
+/** Result of calling a hook chain. */
+export interface HookResult<TOutput = unknown> {
+  output: TOutput
+  /** Number of handlers that ran. */
+  handlerCount: number
+}
+
 // ─── Extension Storage ───────────────────────────────────────────────────────
 
 export interface ExtensionStorage {
@@ -193,6 +218,17 @@ export interface ExtensionAPI {
 
   // Tool middleware (intercept tool execution pipeline)
   addToolMiddleware(middleware: ToolMiddleware): Disposable
+
+  // Hooks (sequential chaining pipeline)
+  registerHook<TInput = unknown, TOutput = unknown>(
+    name: HookName,
+    handler: HookHandler<TInput, TOutput>
+  ): Disposable
+  callHook<TInput = unknown, TOutput = unknown>(
+    name: HookName,
+    input: TInput,
+    output: TOutput
+  ): Promise<HookResult<TOutput>>
 
   // Events
   on(event: string, handler: EventHandler): Disposable

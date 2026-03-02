@@ -125,6 +125,18 @@ export const TEAM_DOMAINS: Record<TeamDomain, TeamDomainConfig> = {
   },
 }
 
+/** A delegation event between team members */
+export interface DelegationEvent {
+  id: string
+  timestamp: number
+  fromMember: string
+  toMember: string
+  task: string
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+  result?: string
+  duration?: number
+}
+
 /** A single member in the team hierarchy */
 export interface TeamMember {
   id: string
@@ -154,6 +166,12 @@ export interface TeamMember {
   delegatedAt?: number
   /** Context from parent when delegating (e.g., "Handle the frontend components") */
   delegationContext?: string
+  /** Token usage for this member */
+  tokenUsage?: { input: number; output: number }
+  /** Files changed by this member */
+  filesChanged?: string[]
+  /** History of delegation events involving this member */
+  delegationHistory?: DelegationEvent[]
 }
 
 /** A tool call associated with a team member */

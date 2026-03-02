@@ -260,6 +260,51 @@ describe('ExtensionAPI', () => {
     })
   })
 
+  // ─── Hooks ────────────────────────────────────────────────────────────
+
+  describe('registerHook / callHook', () => {
+    it('registers and calls a hook handler', async () => {
+      api.registerHook<{ text: string }, string>('prompt:transform', (_input, output) => {
+        return `${output} [modified]`
+      })
+      const result = await api.callHook('prompt:transform', { text: 'hello' }, 'base prompt')
+      expect(result.output).toBe('base prompt [modified]')
+      expect(result.handlerCount).toBe(1)
+    })
+
+    it('chains multiple handlers sequentially', async () => {
+      api.registerHook<string, string>('prompt:transform', (_input, output) => `${output} [A]`)
+      api.registerHook<string, string>('prompt:transform', (_input, output) => `${output} [B]`)
+      const result = await api.callHook('prompt:transform', 'ctx', 'start')
+      expect(result.output).toBe('start [A] [B]')
+      expect(result.handlerCount).toBe(2)
+    })
+
+    it('returns original output when no handlers registered', async () => {
+      const result = await api.callHook('nonexistent', {}, 'original')
+      expect(result.output).toBe('original')
+      expect(result.handlerCount).toBe(0)
+    })
+
+    it('supports async handlers', async () => {
+      api.registerHook<string, number>('tool:beforeExecute', async (_input, output) => {
+        return output * 2
+      })
+      const result = await api.callHook('tool:beforeExecute', 'ctx', 5)
+      expect(result.output).toBe(10)
+    })
+
+    it('disposes hook handler', async () => {
+      const d = api.registerHook<string, string>('prompt:transform', (_input, output) => {
+        return `${output} [hook]`
+      })
+      d.dispose()
+      const result = await api.callHook('prompt:transform', 'ctx', 'base')
+      expect(result.output).toBe('base')
+      expect(result.handlerCount).toBe(0)
+    })
+  })
+
   // ─── Storage ──────────────────────────────────────────────────────────
 
   describe('storage', () => {

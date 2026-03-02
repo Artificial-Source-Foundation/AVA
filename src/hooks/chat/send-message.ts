@@ -11,7 +11,11 @@ import { saveMessage, updateMessage } from '../../services/database'
 import { logError, logInfo } from '../../services/logger'
 import { notifyCompletion } from '../../services/notifications'
 import type { Message } from '../../types'
-import { buildApiMessages, maybeCompact, syncTrackerStats } from './context-tracking'
+import {
+  buildChatSystemPrompt,
+  buildConversationContext,
+  syncTrackerStats,
+} from './context-tracking'
 import { streamResponse } from './stream-lifecycle'
 import type { ChatDeps } from './types'
 
@@ -104,6 +108,11 @@ export async function sendMessage(
     const assistantMsg = await createAssistantMessage(deps, sessionId)
     deps.session.updateMessage(assistantMsg.id, { model: targetModel })
 
+    // Build conversation context from previous messages (excluding new assistant placeholder)
+    const conversationContext = buildConversationContext(deps, assistantMsg.id)
+    const cwd = deps.currentProject()?.directory || '.'
+    const systemPrompt = buildChatSystemPrompt(cwd, deps)
+
     // Stream response with buffered UI updates
     let latestStreamText = ''
     let lastFlushedStreamText = ''
@@ -114,7 +123,9 @@ export async function sendMessage(
       {
         sessionId,
         model: targetModel,
-        messages: await buildApiMessages(deps, assistantMsg.id),
+        goal: content,
+        systemPrompt,
+        conversationContext,
         onContent: (text) => {
           latestStreamText = text
           // Flush first delta immediately for instant feedback
@@ -204,7 +215,6 @@ export async function sendMessage(
           })
           getCoreBudget()?.addMessage(assistantMsg.id, text)
           syncTrackerStats(deps)
-          await maybeCompact(deps)
           void notifyCompletion(
             'Chat complete',
             text.slice(0, 100),
@@ -267,11 +277,25 @@ export async function regenerate(deps: ChatDeps): Promise<void> {
   try {
     const assistantMsg = await createAssistantMessage(deps, sessionId)
 
+    // Find the last user message as the goal
+    const msgs = deps.session.messages()
+    const lastUserMsg = [...msgs]
+      .reverse()
+      .find((m) => m.role === 'user' && m.id !== assistantMsg.id)
+    const goal = lastUserMsg?.content || 'Continue.'
+
+    // Build context from messages before the last user message
+    const conversationContext = buildConversationContext(deps, assistantMsg.id)
+    const cwd = deps.currentProject()?.directory || '.'
+    const systemPrompt = buildChatSystemPrompt(cwd, deps)
+
     await streamResponse(
       {
         sessionId,
         model: targetModel,
-        messages: await buildApiMessages(deps, assistantMsg.id),
+        goal,
+        systemPrompt,
+        conversationContext,
         onContent: (text) => deps.session.updateMessageContent(assistantMsg.id, text),
         onToolUpdate: (toolCalls) => {
           batch(() => {
@@ -289,7 +313,6 @@ export async function regenerate(deps: ChatDeps): Promise<void> {
             metadata: Object.keys(meta).length > 0 ? meta : undefined,
           })
           syncTrackerStats(deps)
-          await maybeCompact(deps)
           void notifyCompletion(
             'Regeneration complete',
             text.slice(0, 100),

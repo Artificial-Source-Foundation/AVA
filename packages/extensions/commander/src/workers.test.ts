@@ -12,24 +12,24 @@ import {
 } from './workers.js'
 
 describe('BUILTIN_AGENTS', () => {
-  it('contains 13 agents total (1 commander + 4 leads + 8 workers)', () => {
-    expect(BUILTIN_AGENTS).toHaveLength(13)
+  it('contains 14 agents total (1 commander + 4 leads + 9 workers)', () => {
+    expect(BUILTIN_AGENTS).toHaveLength(14)
   })
 
-  it('has 1 commander, 4 leads, and 8 workers', () => {
+  it('has 1 commander, 4 leads, and 9 workers', () => {
     const commanders = BUILTIN_AGENTS.filter((a) => a.tier === 'commander')
     const leads = BUILTIN_AGENTS.filter((a) => a.tier === 'lead')
     const workers = BUILTIN_AGENTS.filter((a) => a.tier === 'worker')
 
     expect(commanders).toHaveLength(1)
     expect(leads).toHaveLength(4)
-    expect(workers).toHaveLength(8)
+    expect(workers).toHaveLength(9)
   })
 })
 
 describe('WORKER_AGENTS', () => {
-  it('contains 8 workers', () => {
-    expect(WORKER_AGENTS).toHaveLength(8)
+  it('contains 9 workers', () => {
+    expect(WORKER_AGENTS).toHaveLength(9)
   })
 
   it('includes all expected workers', () => {
@@ -42,6 +42,7 @@ describe('WORKER_AGENTS', () => {
     expect(names).toContain('architect')
     expect(names).toContain('planner')
     expect(names).toContain('devops')
+    expect(names).toContain('explorer')
   })
 
   for (const worker of WORKER_AGENTS) {

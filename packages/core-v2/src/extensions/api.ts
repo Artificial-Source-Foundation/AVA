@@ -20,6 +20,9 @@ import type {
   EventHandler,
   ExtensionAPI,
   ExtensionStorage,
+  HookHandler,
+  HookName,
+  HookResult,
   LLMClientFactory,
   SlashCommand,
   ToolMiddleware,
@@ -34,6 +37,7 @@ const validators = new Map<string, Validator>()
 const contextStrategies = new Map<string, ContextStrategy>()
 const toolMiddlewares: ToolMiddleware[] = []
 const eventHandlers = new Map<string, Set<EventHandler>>()
+const hookHandlers = new Map<string, Set<HookHandler>>()
 
 export function getCommands(): ReadonlyMap<string, SlashCommand> {
   return commands
@@ -62,6 +66,25 @@ export function emitEvent(event: string, data: unknown): void {
       handler(data)
     }
   }
+}
+
+/** Call a hook chain from outside the extension API (for core use). */
+export async function callHook<TInput = unknown, TOutput = unknown>(
+  name: HookName,
+  input: TInput,
+  output: TOutput
+): Promise<HookResult<TOutput>> {
+  const handlers = hookHandlers.get(name)
+  if (!handlers || handlers.size === 0) {
+    return { output, handlerCount: 0 }
+  }
+  let current = output
+  let count = 0
+  for (const handler of handlers) {
+    current = (await (handler as HookHandler<TInput, TOutput>)(input, current)) as TOutput
+    count++
+  }
+  return { output: current, handlerCount: count }
 }
 
 /** Subscribe to events from outside the extension API (for CLI/app integration). */
@@ -98,6 +121,7 @@ export function resetRegistries(): void {
   contextStrategies.clear()
   toolMiddlewares.length = 0
   eventHandlers.clear()
+  hookHandlers.clear()
 }
 
 // ─── API Factory ─────────────────────────────────────────────────────────────
@@ -187,6 +211,34 @@ export function createExtensionAPI(
           if (idx !== -1) toolMiddlewares.splice(idx, 1)
         },
       })
+    },
+
+    registerHook<TInput = unknown, TOutput = unknown>(
+      name: HookName,
+      handler: HookHandler<TInput, TOutput>
+    ): Disposable {
+      let handlers = hookHandlers.get(name)
+      if (!handlers) {
+        handlers = new Set()
+        hookHandlers.set(name, handlers)
+      }
+      const h = handler as HookHandler
+      handlers.add(h)
+      log.debug(`Hook registered: ${name}`)
+      return track({
+        dispose() {
+          handlers!.delete(h)
+          if (handlers!.size === 0) hookHandlers.delete(name)
+        },
+      })
+    },
+
+    async callHook<TInput = unknown, TOutput = unknown>(
+      name: HookName,
+      input: TInput,
+      output: TOutput
+    ): Promise<HookResult<TOutput>> {
+      return callHook(name, input, output)
     },
 
     on(event: string, handler: EventHandler): Disposable {

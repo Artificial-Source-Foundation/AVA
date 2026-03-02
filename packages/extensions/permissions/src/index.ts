@@ -58,7 +58,11 @@ export function activate(api: ExtensionAPI): Disposable {
   }
 }
 
+export { ARITY_MAP, extractCommandPrefix } from './arity.js'
+export type { BashTokens } from './bash-parser.js'
+export { parseBashTokens } from './bash-parser.js'
 export {
+  buildApprovalKey,
   createPermissionMiddleware,
   evaluateToolRules,
   getSettings,

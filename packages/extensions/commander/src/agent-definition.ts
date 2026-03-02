@@ -34,6 +34,8 @@ export interface AgentDefinition {
   capabilities?: string[]
   /** true for built-in agents, false/undefined for user-created */
   isBuiltIn?: boolean
+  /** Tools explicitly denied for this agent — filtered out by resolveTools(). */
+  deniedTools?: string[]
 }
 
 /** Convert a legacy WorkerDefinition to an AgentDefinition */

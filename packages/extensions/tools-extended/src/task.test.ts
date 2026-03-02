@@ -45,6 +45,11 @@ describe('taskTool', () => {
   it('has correct definition', () => {
     expect(taskTool.definition.name).toBe('task')
     expect(taskTool.definition.description).toContain('subagent')
+    expect(taskTool.definition.description).toContain('task_id')
+  })
+
+  it('has task_id in schema', () => {
+    expect(taskTool.definition.input_schema.properties).toHaveProperty('task_id')
   })
 
   it('runs subagent to completion with mock provider', async () => {
@@ -123,5 +128,46 @@ describe('taskTool', () => {
     expect(receivedTools).toContain('grep')
     expect(receivedTools).toContain('glob')
     expect(receivedTools).not.toContain('bash')
+  })
+
+  it('accepts explorer as worker type', async () => {
+    const result = await taskTool.execute(
+      {
+        description: 'explore code',
+        prompt: 'Explore the codebase structure',
+        worker: 'explorer',
+      },
+      ctx
+    )
+
+    expect(result.success).toBe(true)
+  })
+
+  it('returns metadata with taskId', async () => {
+    const result = await taskTool.execute(
+      {
+        description: 'test task',
+        prompt: 'Do something',
+      },
+      ctx
+    )
+
+    expect(result.metadata).toBeDefined()
+    expect(result.metadata!.taskId).toBeDefined()
+    expect(typeof result.metadata!.taskId).toBe('string')
+  })
+
+  it('passes task_id as sessionId to agent inputs', async () => {
+    const result = await taskTool.execute(
+      {
+        description: 'resume task',
+        prompt: 'Continue the work',
+        task_id: 'existing-session-123',
+      },
+      ctx
+    )
+
+    // The subagent should still run to completion
+    expect(result.success).toBe(true)
   })
 })

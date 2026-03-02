@@ -6,6 +6,155 @@
 
 ## 2026-03-02
 
+### Sprint 23 — Complete Backend + Differentiation (15 Items, 5 Phases)
+
+**~460 new tests across 30+ new files** in the new architecture stack. Tool count 50+ → 55+. Extensions 30+ → 34+. Providers 15 → 16 (Azure). Total: ~5,350+ tests across ~340+ files. `pnpm build:all` + `npx tsc --noEmit` + `npm run lint` all clean.
+
+**Phase 1: Session DAG (CG-06)**
+- `parentSessionId`, `branchName`, `branchPoint`, `children` on SessionState/SessionMeta. `fork()`, `getTree()`, `getBranches()` on SessionManager. `dag.ts` — `getAncestors()`, `getDescendants()`, `flattenTree()`, `findRoot()`, `getDepth()`. SQLite migration for new columns. 26 tests.
+
+**Phase 2: Quick Wins (4 parallel)**
+- **B-033 Undo Message Removal**: `diff:undo` removes assistant message, `diff:redo` restores it. `removedMessages` map keyed by sessionId:messageIndex. 5 new tests.
+- **B-063 Token-Efficient Results**: `efficient-results.ts` — `normalizeWhitespace()`, `stripAnsi()`, `smartSummarize()`, `groupGrepResults()`, `summarizeLsOutput()`, `efficientToolResult()` dispatcher. Applied in agent loop before building ToolResultBlock. 33 tests.
+- **B-053 Azure OpenAI Provider**: `providers/azure/` — Custom client with `api-key` header and deployment endpoint format. Reuses shared `ToolCallBuffer`, `readSSEStream`. `'azure'` added to `LLMProvider` union. 3 tests.
+- **B-095 Ambient Terminal**: `cli/src/ambient/install.ts` — Shell function for `@ava "goal"` one-shot. Bash/zsh/fish support. `ava ambient install/uninstall` CLI commands. 13 tests.
+- **B-080 Tauri Bridge Full**: `TauriPTY` via `@tauri-apps/plugin-shell`, `TauriFileWatcher` via `@tauri-apps/plugin-fs`. Wired into `createTauriPlatform()`.
+- **B-084 Dual-Stack Toggle**: `agentBackend: 'core' | 'core-v2'` in settings (default core-v2). `ava run --backend` CLI command.
+- **B-096 Dev Team Delegation UI**: `WorkerDetail.tsx`, `DelegationLog.tsx`, `TeamMetrics.tsx` components. `DelegationEvent` type, `delegationLog` signal, `teamTokenUsage`/`teamFilesChanged` memos.
+
+**Phase 3: Large Features (4 parallel)**
+- **B-091 Client-Server API**: `server/` extension — `node:http` server with REST routes (POST /run, GET /stream, POST /steer, GET /status, DELETE, GET /health). Token auth, SSE streaming, session router. ACP stub implemented. 25 tests.
+- **B-090 Plugin Marketplace**: `ReviewStore` with submit/get/average/delete. `sortCatalog()`, `filterCatalog()`. `PluginCard.tsx`, `ReviewModal.tsx` UI. 23 tests.
+- **B-092 Recipe/Workflow**: `recipes/` extension — JSON/YAML recipes with `{{param}}` and `{{steps.X.result}}` substitution. Sequential + parallel steps, conditions. `.ava/recipes/` auto-discovery. 41 tests.
+- **B-094 Chat Recall (FTS5)**: `recall/` extension — FTS5 indexer, BM25 search, cross-branch search via `getAncestors()`. `recall` tool + `/recall` command. 20 tests.
+
+**Phase 4: GitHub Bot (B-093)**
+- `github-bot/` extension — Webhook handler with HMAC-SHA256 verification. @ava mention extraction, user/repo ACL. PR/issue context building. Result posting as markdown comments. 29 tests.
+
+**Phase 5: Cleanup + CLI Hardening**
+- Activation smoke test updated to 31 extensions (was 27). Extensions tsconfig updated. ACP stub delegates to server SessionRouter. Docs updated.
+- `ava tool list` now loads extensions (was core-only, showing 6 tools; now shows 43).
+- `ava run` unified command wired with full extension loading: platform, core tools, 31 extensions, instructions, system prompt, session lifecycle, abort handling, `manager.dispose()`. Mock provider auto-selects when `--mock` used.
+- CLI smoke tested end-to-end: tool list, tool execution (read/glob/grep/ls/repo_map/todoread), agent-v2 mock + real LLM (OpenRouter), ava run mock + real LLM, validation pipeline, plugin scaffold, auth status. All passing.
+
+---
+
+### Sprint 22 — Full Competitive Parity (35 Items, 5 Phases)
+
+**~337 new tests across 25+ test files** in the new architecture stack. Tool count 44 → 50+. Extensions 28 → 30+. Agents 14 → 15. Total: ~4,859 tests across ~310 files. `pnpm build:all` + `npx tsc --noEmit` + `npm run lint` all clean.
+
+**Phase 1: Plugin Hook System (item 23)**
+- `registerHook`/`callHook` on `ExtensionAPI` — sequential chaining pipeline. Types: `HookName`, `HookHandler<TInput, TOutput>`, `HookResult<TOutput>`. Global `callHook()` + `hookHandlers` Map in api.ts, `resetRegistries()` clears hooks. 5 tests.
+
+**Phase 2: Parallel Block A (4 agents)**
+- **Prompt Caching (item 1)**: `addCacheControlMarkers()` in `anthropic/src/cache.ts` + `openrouter/src/cache.ts` — marks system block + last 2 user messages with `cache_control: { type: 'ephemeral' }`. `anthropic-beta: prompt-caching-2024-07-31` header. `transformMessages`/`transformRequestBody` hooks in `openai-compat.ts`. 27 tests.
+- **LSP 6 Operations (item 2)**: 4 new client methods (`documentSymbols`, `workspaceSymbols`, `codeActions`, `rename`). 6 new tools extracted to `lsp/src/tools.ts` (9 total). New types: `LSPDocumentSymbol`, `LSPWorkspaceSymbol`, `LSPCodeAction`, etc. 62 tests.
+- **Model-Family Prompts (item 5)**: `families.ts` — `detectModelFamily()`, `FAMILY_PROMPT_SECTIONS` for Claude/GPT/Gemini/Llama. Builder replaced inline conditionals with family-based approach. 28 tests.
+- **Session Types (items 17, 26, 27, 28)**: Session archival (`archive()`), busy state (`setBusy()`), cursor pagination (`listGlobal()`). `SessionBusyError` class, `session:status` event. `slug.ts` — `generateSlug()` with stop word filtering. 103 tests.
+
+**Phase 3: Parallel Block B (4 agents)**
+- **Agent Loop Changes (items 6, 12, 22)**: Tool output saved to file on truncation (`output-files.ts`, 7-day cleanup). Tool call repair (`repair.ts`, 4 strategies). Agent step limits (`maxSteps` in AgentConfig, `MAX_STEPS` terminate mode). 80 tests.
+- **Instructions (items 7, 16)**: Subdirectory AGENTS.md walking (`subdirectory.ts`, 3-layer dedup). URL instructions (`url-loader.ts`, 5s timeout). `'remote'` scope, `urls?` config. 51 tests.
+- **Compaction + Session Events (items 8, 33)**: `pruneStrategy` — 40K token budget, protected tools. `session:status` events on status changes. 113 tests.
+- **Permissions + Providers (items 10, 11, 13, 25)**: Bash parser (`bash-parser.ts`, lightweight tokenizer). Arity fingerprinting (`arity.ts`, 100+ commands). `buildApprovalKey()` uses arity. Provider transforms: `filterEmptyContentBlocks()`, `enforceAlternatingRoles()`, `truncateMistralIds()`. LiteLLM provider. 305 tests (37 new).
+
+**Phase 4: Parallel Block C (3 agents)**
+- **File Watcher + Structured Output + Per-Message Overrides (items 4, 9, 14)**: `FileWatcher` class (polling), watches `.git/HEAD`, emits `git:branch-changed`. `__structured_output` tool, `validateStructuredOutput()`, forced `tool_choice`. Per-message `_system`, `_format`, `_variant` overrides. 32 tests.
+- **PTY + Task Resumption + Explore Subagent (items 3, 15, 24)**: PTY tool using `getPlatform().pty`, ANSI stripping, progress streaming. `task_id` param for session resumption. Explorer worker with `deniedTools` (7 allowed + 15 denied tools). 39 tests.
+- **Diff Enhancements + Session Sharing + Plan Saves (items 18, 19, 20, 21, 35)**: `toolCallIndex`/`messageIndex` on FileDiff. `diff:revert-to` handler. `summarizeDiffSession()`. `savePlanToFile()`. Sharing extension stub. 55 tests.
+
+**Phase 5: Low Priority (2 agents)**
+- **Protocol Features (items 29, 30, 31, 32)**: `parseRetryAfterMs()` for 3 formats. `fetchWellKnownConfig(domain)`. OpenAI Responses API body builder + `shouldUseResponsesAPI()` auto-routing. ACP protocol stub. 73 tests.
+- **Cleanup + Integration Tests**: Activation smoke test updated to 25 extensions. Full suite: 4,859 tests across 310 files. Build, typecheck, lint all clean.
+
+**CLAUDE.md updated:** Tools table 44 → 50+ (added pty, 6 new LSP tools, delegate_explorer). Extensions module map updated. Extension API updated with `registerHook`/`callHook`.
+
+---
+
+### Sprint 21 — Frontend ↔ Core-v2 Full Integration (7 Phases)
+
+**13 new tests across 3 test files.** Total: ~4,744 tests across ~288 files. Closed all integration gaps between desktop app (`src/`) and core-v2 backend.
+
+**Phase 1: Plugin SessionManager Dedup**
+- `App.tsx` replaced duplicate `createSessionManager()` with shared `getCoreSessionManager()` from core-bridge.
+
+**Phase 2: Export onEvent from Barrel**
+- `packages/core-v2/src/index.ts` now exports `onEvent` (runtime) and `EventHandler` (type) from extensions barrel.
+
+**Phase 3: Bidirectional Settings Sync**
+- NEW: `src/services/settings-sync.ts` — bridges core SettingsManager `category_changed`/`category_registered` events → `CustomEvent('ava:core-settings-changed')`.
+- `markPushing()` + `queueMicrotask()` pattern prevents feedback loops when frontend pushes to core.
+- `settings-persistence.ts` calls `markPushing()` before `pushSettingsToCore()`.
+- Settings store listens for `ava:core-settings-changed` and maps `permissions`/`context`/`git` categories back to AppSettings.
+- 3 tests in `settings-sync.test.ts`.
+
+**Phase 4: Extension Event Bridge Hook**
+- NEW: `src/hooks/useExtensionEvents.ts` — 3 reactive SolidJS hooks bridging `onEvent()` → signals:
+  - `useExtensionEvent<T>(name)` → latest value signal
+  - `useExtensionEvents(names)` → record of signals
+  - `useExtensionEventLog<T>(name, max)` → accumulated array
+- All auto-dispose via `onCleanup()`. 5 tests.
+
+**Phase 5: Model Status Hook**
+- NEW: `src/hooks/useModelStatus.ts` — subscribes to `models:updated` + `models:ready` events.
+- Exposes `modelCount`, `lastUpdate`, `refresh()`. 5 tests.
+
+**Phase 6: Context Budget Sync**
+- `core-bridge.ts` subscribes to `context:compacting` and `agent:finish` events, syncs to `ContextBudget`.
+- `ContextBudget` gained `setUsed(tokens)` method for external sync.
+- `session.ts` contextUsage memo uses reactive `budgetTick` signal for re-evaluation on agent events.
+
+**Phase 7: Chat → AgentExecutor Unification**
+- **Major refactor**: `stream-lifecycle.ts` now uses `AgentExecutor` instead of direct `client.stream()`.
+- All chat tool execution goes through full middleware chain (permissions, hooks, sandbox, checkpoints, doom loop detection).
+- `StreamOptions.goal` replaces `StreamOptions.messages` — conversation context passed via `AgentInputs.context`.
+- `context-tracking.ts` refactored: `buildApiMessages` → `buildConversationContext`, `maybeCompact` removed (AgentExecutor handles compaction internally). Added `buildChatSystemPrompt()`.
+- Diff capture moved to temporary `ToolMiddleware` at priority 25 — captures before/after file content, records FileOperation, runs lint check.
+- `send-message.ts` rewritten to build `goal` + `systemPrompt` + `conversationContext` instead of messages array.
+- Integration test updated with `AgentExecutor` mock, `addToolMiddleware` mock, `onEvent` mock.
+
+**Files:** 6 new (3 source + 3 tests), 12 edited, 0 deleted.
+
+---
+
+### Sprint 20 — Backend Completion Sprint (26 Items, 5 Phases)
+
+**~245 new tests across 20+ test files** in the new architecture stack. Tool count 43 → 44. Total: ~4,522 tests across ~285 files. 5 E2E CLI smoke tests passing.
+
+**Phase 1: Critical Praxis Fixes (3 items)**
+- P-01/P-02: Child agent CWD scoping — git/diff extensions now prefer `ctx.workingDirectory` over cached cwd in snapshot middleware, `/undo`, `/snapshot`. Delegate emits `session:child-opened` event before `child.run()`. `create_file` catch block only ignores EEXIST/EISDIR (was swallowing all errors).
+- P-03: Auto-detect flat vs hierarchy — `selectAgentMode()` heuristic wired from `agent-modes/src/selector.ts` into CLI via dynamic import (replaces inline duplicate).
+
+**Phase 2: Extension Wiring Quick Wins (6 items)**
+- B-071: Git snapshots integration test — 10 tests verifying snapshot middleware captures file state.
+- B-074/CG-08: Verified already done (diff tracking, SKILL.md compat), marked complete.
+- B-075: Scheduler consumer — memory extension emits `scheduler:register` for periodic flush, added `store.flush()`.
+- B-076: `load_skill` tool — `createLoadSkillTool()` in skills extension, loads skill by name from shared array.
+- CG-07: Plugin tool hooks — `tool:before-register` event emitted in `registry.ts` before `tools.set()`.
+
+**Phase 3: New Features (6 items)**
+- B-036: File @mentions — `expandAtMentions(goal, cwd)` replaces `@path/to/file` with `<file>` content blocks in CLI input. Handles absolute/relative/`./` paths, deduplication, non-existent files left as-is.
+- B-037: Session export — `exportSessionToMarkdown()` + `exportSessionToJSON()`, `/export` slash command.
+- B-061: Streaming tool output — `onProgress` callback in `ToolContext`, `tool:progress` event in `AgentEvent` union, bash stdout wired to progress callback.
+- B-064: Auto-formatter after edits — middleware at priority 50, detects biome.json/.prettierrc/deno.json, runs formatter after write_file/edit/create_file/apply_patch. Per-directory caching.
+- B-077: Custom user tools — `loadCustomTools()` discovers `.ts`/`.js` from `.ava/tools/` + `~/.ava/tools/`, dynamic imports, registers via `api.registerTool()`.
+- B-079: `/init` command — `generateProjectRules()` scans for config files, generates `CLAUDE.md` with detected stack.
+
+**Phase 4: Praxis Quality + Competitive Gaps (5 items)**
+- P-04: Shared file cache — `files` param on delegate tools injects `<file path="...">` content blocks into child goal.
+- P-05: Budget awareness — budget instruction appended to child agent system prompt: "You have N turns maximum."
+- CG-03: /undo integration verified — 8 integration tests covering write→undo→restore→redo, cross-file, dispose.
+- CG-09: Git worktree isolation — `createWorktree(cwd, sessionId)`, `removeWorktree()`, `isolation` config in delegation.
+- CG-10: Model packs — 3 built-in packs (budget/balanced/premium), `applyModelPack()` in commander, `resolveModelForTier()`.
+
+**Phase 5: Comprehensive Smoke Tests**
+- 8 unit smoke test files: core tools (6), extended tools (20), commander delegates (5), memory tools (4), git tools (4), LSP tools (3), skills tool (1), activation (23 extensions), permissions (5 modes × 6 categories).
+- 5 real E2E CLI smoke tests via Sonnet 4.6/OpenRouter: flat mode (6 turns, 31s), Praxis mode (5 commander turns + workers, 382s), memory tools (3 turns, 8s), git tools (5 turns, 13s), background shell (4 turns, 10s).
+
+**CLAUDE.md updated:** Tools table 43 → 44 (added load_skill).
+
+---
+
 ### Sprint 19 — Backend Completion Sprint (28 Items, 4 Phases)
 
 **~360 new tests across 40+ test files** in the new architecture stack. Tool count 35 → 43. Extensions 26 → 28. Total: ~4,280 tests across ~270 files.
@@ -506,4 +655,4 @@
 
 ---
 
-*Last updated: 2026-02-28 — ~3,896 tests across ~250 test files (includes core-v2 + extensions)*
+*Last updated: 2026-03-02 — ~4,859 tests across ~310 test files (includes core-v2 + extensions + frontend integration)*

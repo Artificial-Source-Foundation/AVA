@@ -6,7 +6,7 @@
 
 export type { LLMProviderConfig, ProviderModel } from '../../../config/defaults/provider-defaults'
 export { defaultProviders } from '../../../config/defaults/provider-defaults'
-export type { AgentPreset, AgentsTabProps } from './AgentsTab'
+export type { AgentPreset } from './AgentsTab'
 export { AgentsTab, defaultAgentPresets } from './AgentsTab'
 export type { Keybinding, KeybindingsTabProps } from './KeybindingsTab'
 export { defaultKeybindings, KeybindingsTab } from './KeybindingsTab'

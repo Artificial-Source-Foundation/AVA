@@ -103,7 +103,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   mcpServers: [],
   modelAliases: {},
   devMode: false,
-  enabledMicroagents: [],
-  customMicroagents: [],
+  enabledSkills: [],
+  customSkills: [],
   trustedFolders: { allowed: [], denied: [] },
+  agentBackend: 'core-v2',
 }

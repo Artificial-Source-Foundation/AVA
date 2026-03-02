@@ -1,5 +1,5 @@
 /**
- * Microagents Tab — Manage domain-specific prompt modules (skills)
+ * Skills Tab — Manage domain-specific prompt modules
  *
  * Lists built-in skills with file glob triggers, toggle enable/disable,
  * and allows creating/editing/deleting custom skills.
@@ -8,16 +8,16 @@
 import { Brain, Pencil, Plus, Trash2, X } from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
 import { useSettings } from '../../../stores/settings'
-import type { CustomMicroagent } from '../../../stores/settings/settings-types'
+import type { CustomSkill } from '../../../stores/settings/settings-types'
 
-interface MicroagentSkill {
+interface BuiltInSkill {
   id: string
   name: string
   description: string
   fileGlobs: string[]
 }
 
-const BUILT_IN_SKILLS: MicroagentSkill[] = [
+const BUILT_IN_SKILLS: BuiltInSkill[] = [
   {
     id: 'react-patterns',
     name: 'React Patterns',
@@ -156,8 +156,8 @@ const SkillCard: Component<{
 // ============================================================================
 
 const CustomSkillForm: Component<{
-  initial?: CustomMicroagent
-  onSave: (skill: CustomMicroagent) => void
+  initial?: CustomSkill
+  onSave: (skill: CustomSkill) => void
   onCancel: () => void
 }> = (props) => {
   const [name, setName] = createSignal(props.initial?.name ?? '')
@@ -254,32 +254,32 @@ const CustomSkillForm: Component<{
 // Main Tab
 // ============================================================================
 
-export const MicroagentsTab: Component = () => {
+export const SkillsTab: Component = () => {
   const { settings, updateSettings } = useSettings()
 
-  const enabledSet = createMemo(() => new Set(settings().enabledMicroagents))
+  const enabledSet = createMemo(() => new Set(settings().enabledSkills))
   const activeCount = createMemo(() => enabledSet().size)
 
   const [showForm, setShowForm] = createSignal(false)
-  const [editingSkill, setEditingSkill] = createSignal<CustomMicroagent | null>(null)
+  const [editingSkill, setEditingSkill] = createSignal<CustomSkill | null>(null)
 
   const toggleSkill = (id: string) => {
-    const current = settings().enabledMicroagents
+    const current = settings().enabledSkills
     const next = current.includes(id) ? current.filter((s) => s !== id) : [...current, id]
-    updateSettings({ enabledMicroagents: next })
+    updateSettings({ enabledSkills: next })
   }
 
-  const saveCustomSkill = (skill: CustomMicroagent) => {
-    const existing = settings().customMicroagents ?? []
+  const saveCustomSkill = (skill: CustomSkill) => {
+    const existing = settings().customSkills ?? []
     const idx = existing.findIndex((s) => s.id === skill.id)
     const updated =
       idx >= 0 ? existing.map((s) => (s.id === skill.id ? skill : s)) : [...existing, skill]
-    updateSettings({ customMicroagents: updated })
+    updateSettings({ customSkills: updated })
     // Auto-enable new skills
     if (idx < 0) {
-      const enabled = settings().enabledMicroagents
+      const enabled = settings().enabledSkills
       if (!enabled.includes(skill.id)) {
-        updateSettings({ enabledMicroagents: [...enabled, skill.id] })
+        updateSettings({ enabledSkills: [...enabled, skill.id] })
       }
     }
     setShowForm(false)
@@ -287,10 +287,10 @@ export const MicroagentsTab: Component = () => {
   }
 
   const deleteCustomSkill = (id: string) => {
-    const existing = settings().customMicroagents ?? []
+    const existing = settings().customSkills ?? []
     updateSettings({
-      customMicroagents: existing.filter((s) => s.id !== id),
-      enabledMicroagents: settings().enabledMicroagents.filter((s) => s !== id),
+      customSkills: existing.filter((s) => s.id !== id),
+      enabledSkills: settings().enabledSkills.filter((s) => s !== id),
     })
   }
 
@@ -298,7 +298,7 @@ export const MicroagentsTab: Component = () => {
     <div class="space-y-4">
       <div class="flex items-center justify-between">
         <div>
-          <h3 class="text-sm font-semibold text-[var(--text-primary)]">Microagents</h3>
+          <h3 class="text-sm font-semibold text-[var(--text-primary)]">Skills</h3>
           <p class="text-[10px] text-[var(--text-muted)] mt-0.5">
             Domain-specific prompt modules that activate based on file types.
           </p>
@@ -333,12 +333,12 @@ export const MicroagentsTab: Component = () => {
       </Show>
 
       {/* Custom skills */}
-      <Show when={(settings().customMicroagents ?? []).length > 0}>
+      <Show when={(settings().customSkills ?? []).length > 0}>
         <div class="space-y-1.5">
           <h4 class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
             Custom Skills
           </h4>
-          <For each={settings().customMicroagents ?? []}>
+          <For each={settings().customSkills ?? []}>
             {(skill) => (
               <SkillCard
                 name={skill.name}

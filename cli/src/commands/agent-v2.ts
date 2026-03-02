@@ -26,6 +26,8 @@ import { setPlatform } from '@ava/core-v2/platform'
 import { createSessionManager } from '@ava/core-v2/session'
 import { registerCoreTools } from '@ava/core-v2/tools'
 import { createNodePlatform } from '@ava/platform-node/v2'
+import { migrateOAuthCredentials } from '../auth/manager.js'
+import { expandAtMentions } from './at-mentions.js'
 
 interface AgentV2Options {
   goal: string
@@ -105,10 +107,18 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
   const options = parseArgs(args)
   if (!options) return
 
+  // Expand @file mentions in goal
+  if (options.goal) {
+    options.goal = await expandAtMentions(options.goal, options.cwd)
+  }
+
   // Initialize core-v2 platform
   const dbPath = path.join(os.homedir(), '.ava', 'data.db')
   const platform = createNodePlatform(dbPath)
   setPlatform(platform)
+
+  // Migrate any existing CLI OAuth tokens to core-v2 format
+  await migrateOAuthCredentials()
 
   // Register the 6 core tools (read, write, edit, bash, glob, grep)
   registerCoreTools()
@@ -171,6 +181,9 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
     const message = err instanceof Error ? err.message : String(err)
     process.stderr.write(`[agent-v2] Warning: Failed to load extensions: ${message}\n`)
   }
+
+  // Load agent mode selector from extensions
+  await loadAgentModeSelector(extensionsDir)
 
   // Import prompts module for building system prompt (deferred until after session:opened)
   interface PromptsModule {
@@ -534,31 +547,27 @@ async function importWithDistFallback(
   }
 }
 
-/** Decide whether a goal warrants the full Praxis hierarchy or flat mode. */
-function selectAgentMode(
-  goal: string,
+// selectAgentMode imported from agent-modes extension at runtime via importWithDistFallback
+let selectAgentMode = (
+  _goal: string,
   availableModes: ReadonlyMap<string, { name: string }>
-): string | undefined {
-  if (!availableModes.has('praxis')) return undefined
-  const g = goal.toLowerCase()
-  const complexPatterns = [
-    'refactor',
-    'migrate',
-    'redesign',
-    'architect',
-    'full-stack',
-    'frontend and backend',
-    'multiple files',
-    'across the codebase',
-    'comprehensive',
-    'end-to-end',
-    'audit',
-    'review the entire',
-    'overhaul',
-  ]
-  if (complexPatterns.some((p) => g.includes(p))) return 'praxis'
-  if (goal.length > 300) return 'praxis'
-  return undefined
+): string | undefined => {
+  // Fallback: no auto-select if agent-modes extension not available
+  return availableModes.has('praxis') ? undefined : undefined
+}
+
+async function loadAgentModeSelector(extensionsDir: string): Promise<void> {
+  try {
+    const mod = (await importWithDistFallback(
+      path.resolve(extensionsDir, 'agent-modes/src/selector.ts'),
+      path.resolve(extensionsDir, 'dist/agent-modes/src/selector.js')
+    )) as { selectAgentMode?: typeof selectAgentMode }
+    if (mod.selectAgentMode) {
+      selectAgentMode = mod.selectAgentMode
+    }
+  } catch {
+    // Use fallback — no auto-select
+  }
 }
 
 function printHelp(): void {

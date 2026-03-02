@@ -1,8 +1,19 @@
+/** @deprecated Replaced by agents-tab-detail.tsx (Obsidian-style inline editing) */
+
 import { X } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import type { AgentPreset, AgentTier } from '../../config/defaults/agent-defaults'
 import { FieldGroup } from './settings-field-group'
-import { ALL_CAPABILITIES, AVAILABLE_MODELS } from './settings-modal-config'
+import { ALL_CAPABILITIES } from './settings-modal-config'
+
+/** @deprecated Hardcoded list — use aggregateModels() from model-browser-helpers instead */
+const AVAILABLE_MODELS = [
+  { id: '', label: 'Use default' },
+  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+  { id: 'gpt-4.1', label: 'GPT-4.1' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+]
 
 interface AgentEditModalProps {
   agent: AgentPreset

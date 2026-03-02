@@ -8,6 +8,10 @@ export interface FileDiff {
   original?: string
   modified?: string
   hunks: DiffHunk[]
+  /** Index of the tool call that produced this diff. */
+  toolCallIndex?: number
+  /** Index of the message that produced this diff. */
+  messageIndex?: number
 }
 
 export interface DiffHunk {

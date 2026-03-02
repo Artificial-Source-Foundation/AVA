@@ -5,18 +5,8 @@
  * code blocks (lineNumbers, wordWrap), and notifications.
  */
 
-import {
-  Bell,
-  Clipboard,
-  Code2,
-  Eye,
-  GitBranch,
-  Keyboard,
-  MessageCircle,
-  SlidersHorizontal,
-  Tag,
-} from 'lucide-solid'
-import { type Component, For, Show } from 'solid-js'
+import { Bell, Code2, Keyboard, MessageCircle } from 'lucide-solid'
+import { type Component, Show } from 'solid-js'
 import type { SendKey } from '../../../stores/settings'
 import { useSettings } from '../../../stores/settings'
 import { SettingsCard } from '../SettingsCard'
@@ -73,7 +63,7 @@ const ToggleRow: Component<{
 // ============================================================================
 
 export const BehaviorTab: Component = () => {
-  const { settings, updateBehavior, updateNotifications, updateGit, updateSettings } = useSettings()
+  const { settings, updateBehavior, updateNotifications } = useSettings()
 
   return (
     <div class="grid grid-cols-1 gap-4">
@@ -164,173 +154,6 @@ export const BehaviorTab: Component = () => {
             </div>
           </div>
         </Show>
-      </SettingsCard>
-
-      <SettingsCard
-        icon={SlidersHorizontal}
-        title="Context Management"
-        description="Auto-compaction settings"
-      >
-        <div class="flex items-center justify-between py-1.5 gap-3">
-          <div>
-            <span class="text-xs text-[var(--text-secondary)]">Compaction threshold</span>
-            <p class="text-[10px] text-[var(--text-muted)]">
-              Auto-compact when context reaches this % ({settings().generation.compactionThreshold}
-              %)
-            </p>
-          </div>
-          <div class="flex items-center gap-2">
-            <input
-              type="range"
-              min={50}
-              max={95}
-              step={5}
-              value={settings().generation.compactionThreshold}
-              onInput={(e) =>
-                updateSettings({
-                  generation: {
-                    ...settings().generation,
-                    compactionThreshold: Number(e.currentTarget.value),
-                  },
-                })
-              }
-              class="w-24 accent-[var(--accent)]"
-            />
-            <span class="text-[11px] font-mono text-[var(--text-muted)] w-10 text-right">
-              {settings().generation.compactionThreshold}%
-            </span>
-          </div>
-        </div>
-      </SettingsCard>
-
-      <SettingsCard
-        icon={Eye}
-        title="File Watcher"
-        description="Detect AI comment patterns in files"
-      >
-        <ToggleRow
-          label="Watch for AI comments"
-          description="Detect // AI! and // AI? in project files"
-          checked={settings().behavior.fileWatcher}
-          onChange={(v) => updateBehavior({ fileWatcher: v })}
-        />
-      </SettingsCard>
-
-      <SettingsCard icon={Clipboard} title="Clipboard" description="Clipboard monitoring">
-        <ToggleRow
-          label="Copy-paste mode"
-          description="Detect clipboard changes with code or LLM output"
-          checked={settings().behavior.clipboardWatcher}
-          onChange={(v) => updateBehavior({ clipboardWatcher: v })}
-        />
-      </SettingsCard>
-
-      <SettingsCard
-        icon={GitBranch}
-        title="Git Integration"
-        description="Auto-commit and version tracking"
-      >
-        <ToggleRow
-          label="Enable git integration"
-          description="Detect git repos and enable auto-commit features"
-          checked={settings().git.enabled}
-          onChange={(v) => updateGit({ enabled: v })}
-        />
-        <Show when={settings().git.enabled}>
-          <ToggleRow
-            label="Auto-commit AI edits"
-            description="Commit file changes after each successful AI edit. Enables undo."
-            checked={settings().git.autoCommit}
-            onChange={(v) => updateGit({ autoCommit: v })}
-          />
-          <Show when={settings().git.autoCommit}>
-            <div class="flex items-center justify-between py-1.5 gap-3">
-              <div>
-                <span class="text-xs text-[var(--text-secondary)]">Commit prefix</span>
-                <p class="text-[10px] text-[var(--text-muted)]">
-                  Prepended to auto-commit messages
-                </p>
-              </div>
-              <input
-                type="text"
-                value={settings().git.commitPrefix}
-                onInput={(e) => updateGit({ commitPrefix: e.currentTarget.value })}
-                class="w-28 px-2 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
-                placeholder="[ava]"
-              />
-            </div>
-          </Show>
-        </Show>
-      </SettingsCard>
-
-      <SettingsCard icon={Tag} title="Model Aliases" description="Short names for model IDs">
-        <p class="text-[10px] text-[var(--text-muted)] mb-2">
-          Create short names for model IDs (e.g. "fast" → "openai/gpt-4o-mini")
-        </p>
-        <div class="space-y-1.5">
-          <For each={Object.entries(settings().modelAliases)}>
-            {([alias, modelId]) => (
-              <div class="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={alias}
-                  onBlur={(e) => {
-                    const newAlias = e.currentTarget.value.trim()
-                    if (!newAlias || newAlias === alias) return
-                    const aliases = { ...settings().modelAliases }
-                    delete aliases[alias]
-                    aliases[newAlias] = modelId
-                    updateSettings({ modelAliases: aliases })
-                  }}
-                  class="w-24 px-2 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
-                  placeholder="alias"
-                />
-                <span class="text-[10px] text-[var(--text-muted)]">→</span>
-                <input
-                  type="text"
-                  value={modelId}
-                  onBlur={(e) => {
-                    const newModelId = e.currentTarget.value.trim()
-                    if (!newModelId) return
-                    updateSettings({
-                      modelAliases: { ...settings().modelAliases, [alias]: newModelId },
-                    })
-                  }}
-                  class="flex-1 px-2 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
-                  placeholder="provider/model-id"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const aliases = { ...settings().modelAliases }
-                    delete aliases[alias]
-                    updateSettings({ modelAliases: aliases })
-                  }}
-                  class="px-1.5 py-1 text-[10px] text-[var(--error)] hover:bg-[var(--alpha-white-05)] rounded-[var(--radius-sm)] transition-colors"
-                  title="Remove alias"
-                >
-                  ✕
-                </button>
-              </div>
-            )}
-          </For>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            const aliases = { ...settings().modelAliases }
-            let name = 'alias'
-            let i = 1
-            while (aliases[name]) {
-              name = `alias-${i++}`
-            }
-            aliases[name] = ''
-            updateSettings({ modelAliases: aliases })
-          }}
-          class="mt-2 px-3 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)] transition-colors"
-        >
-          + Add Alias
-        </button>
       </SettingsCard>
     </div>
   )

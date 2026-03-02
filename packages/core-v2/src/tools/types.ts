@@ -24,6 +24,8 @@ export interface ToolContext {
   model?: string
   /** Event forwarding for subagent tools. Uses Record to avoid circular dep (tools → agent → tools). */
   onEvent?: (event: Record<string, unknown>) => void
+  /** Streaming progress callback for incremental tool output. */
+  onProgress?: (data: { chunk: string }) => void
 }
 
 // ─── Tool Location ───────────────────────────────────────────────────────────

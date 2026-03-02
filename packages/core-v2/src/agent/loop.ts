@@ -21,6 +21,14 @@ import type {
 } from '../llm/types.js'
 import { executeTool, getToolDefinitions } from '../tools/registry.js'
 import type { ToolContext } from '../tools/types.js'
+import { efficientToolResult } from './efficient-results.js'
+import { saveOverflowOutput } from './output-files.js'
+import { repairToolName } from './repair.js'
+import {
+  buildStructuredOutputToolDefinition,
+  STRUCTURED_OUTPUT_TOOL_NAME,
+  validateStructuredOutput,
+} from './structured-output.js'
 import {
   type AgentConfig,
   type AgentEvent,
@@ -109,13 +117,15 @@ const MAX_RESULT_BYTES = 50 * 1024 // 50KB per result
 const MAX_TOTAL_RESULT_BYTES = 200 * 1024 // 200KB total
 
 /** Truncate tool result blocks that exceed byte limits. Mutates in-place. */
-export function truncateToolResults(blocks: ToolResultBlock[]): void {
+export async function truncateToolResults(blocks: ToolResultBlock[]): Promise<void> {
   let totalBytes = 0
   for (const block of blocks) {
     const bytes = Buffer.byteLength(block.content, 'utf8')
     if (bytes > MAX_RESULT_BYTES) {
+      const savedPath = await saveOverflowOutput(block.content)
       const truncated = block.content.slice(0, MAX_RESULT_BYTES)
-      block.content = `${truncated}\n\n[...truncated ${bytes - MAX_RESULT_BYTES} bytes]`
+      const hint = savedPath ? `\n\n[Full output saved to: ${savedPath}]` : ''
+      block.content = `${truncated}\n\n[...truncated ${bytes - MAX_RESULT_BYTES} bytes]${hint}`
     }
     totalBytes += Buffer.byteLength(block.content, 'utf8')
   }
@@ -135,6 +145,16 @@ export function truncateToolResults(blocks: ToolResultBlock[]): void {
   }
 }
 
+// ─── Per-Message Override Helpers ─────────────────────────────────────────────
+
+/** Find the last user message in the history (for per-message overrides). */
+function findLastUserMessage(history: ChatMessage[]): ChatMessage | undefined {
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i]?.role === 'user') return history[i]
+  }
+  return undefined
+}
+
 // ─── Agent Executor ──────────────────────────────────────────────────────────
 
 export class AgentExecutor {
@@ -144,6 +164,8 @@ export class AgentExecutor {
   private recentToolCalls: string[] = [] // hashes for doom loop detection
   private steeringMessage: string | null = null
   private steeringController: AbortController | null = null
+  private stepCount = 0
+  private stepLimitReached = false
 
   constructor(config: Partial<AgentConfig>, onEvent?: AgentEventCallback) {
     this.config = {
@@ -257,7 +279,19 @@ export class AgentExecutor {
         turn++
         this.emit({ type: 'turn:start', agentId: this.agentId, turn })
 
-        const tools = this.getAvailableTools()
+        // If step limit was reached last turn, pass empty tools to force text-only response
+        const tools = this.stepLimitReached ? [] : this.getAvailableTools()
+
+        // If step limit was reached, inject a system message telling the agent to wrap up
+        if (this.stepLimitReached) {
+          history.push({
+            role: 'user',
+            content:
+              'You have reached the maximum number of tool call steps. ' +
+              'You must now provide a final text response summarizing what you accomplished. ' +
+              'Do not attempt any more tool calls.',
+          })
+        }
 
         // Retry loop for transient LLM errors
         let turnResult: AgentTurnResult | undefined
@@ -315,25 +349,33 @@ export class AgentExecutor {
 
         if (turnResult.status === 'stop') {
           lastOutput = turnResult.result ?? lastOutput
+          // If step limit forced this stop, use MAX_STEPS terminate mode
+          const mode = this.stepLimitReached
+            ? AgentTerminateMode.MAX_STEPS
+            : turnResult.terminateMode
           this.emit({
             type: 'turn:end',
             agentId: this.agentId,
             turn,
             toolCalls: [],
           })
-          return this.finish(
-            turnResult.terminateMode,
-            lastOutput,
-            turn,
-            totalInput,
-            totalOutput,
-            startTime
-          )
+          return this.finish(mode, lastOutput, turn, totalInput, totalOutput, startTime)
         }
 
         // Capture assistant text even on tool-call turns (for MAX_TURNS output)
         if (turnResult.result) {
           lastOutput = turnResult.result
+        }
+
+        // Increment step counter by number of tool calls executed this turn
+        if (turnResult.toolCalls) {
+          this.stepCount += turnResult.toolCalls.length
+        }
+
+        // Check if step limit has been reached
+        const maxSteps = this.config.maxSteps
+        if (maxSteps !== undefined && this.stepCount >= maxSteps) {
+          this.stepLimitReached = true
         }
 
         this.emit({
@@ -373,17 +415,35 @@ export class AgentExecutor {
     let turnInput = 0
     let turnOutput = 0
 
+    // Per-message overrides — check the last user message for metadata
+    let effectiveSystemPrompt = systemPrompt
+    const lastUserMsg = findLastUserMessage(history)
+    if (lastUserMsg?._system) {
+      effectiveSystemPrompt = `${lastUserMsg._system}\n\n${effectiveSystemPrompt}`
+    }
+
+    // Build provider config with structured output support
+    let effectiveTools = tools
     const providerConfig: ProviderConfig = {
       provider: this.config.provider ?? 'anthropic',
       model,
       tools,
     }
 
+    // Structured output — add __structured_output tool and force tool_choice
+    const responseFormat = this.getEffectiveResponseFormat(lastUserMsg)
+    if (responseFormat) {
+      const structuredDef = buildStructuredOutputToolDefinition(responseFormat.schema)
+      effectiveTools = [...tools, structuredDef]
+      providerConfig.tools = effectiveTools
+      providerConfig.toolChoice = { type: 'tool', name: STRUCTURED_OUTPUT_TOOL_NAME }
+    }
+
     // Normalize messages for cross-provider compatibility
     const normalizedHistory = normalizeMessages(history)
 
     const stream = client.stream(
-      [{ role: 'system', content: systemPrompt }, ...normalizedHistory],
+      [{ role: 'system', content: effectiveSystemPrompt }, ...normalizedHistory],
       providerConfig,
       signal
     )
@@ -446,6 +506,49 @@ export class AgentExecutor {
       }
     }
 
+    // Check for structured output tool — extract and validate the result
+    const structuredCall = toolCalls.find((c) => c.name === STRUCTURED_OUTPUT_TOOL_NAME)
+    if (structuredCall && responseFormat) {
+      const errors = validateStructuredOutput(structuredCall.input, responseFormat.schema)
+      if (errors.length > 0) {
+        // Validation failed — add error as tool result and continue
+        history.push({
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result' as const,
+              tool_use_id: structuredCall.id,
+              content: `Structured output validation failed:\n${errors.join('\n')}\n\nPlease fix and try again.`,
+              is_error: true,
+            },
+          ],
+        })
+        return {
+          status: 'continue',
+          result: assistantContent || undefined,
+          toolCalls: [
+            {
+              name: STRUCTURED_OUTPUT_TOOL_NAME,
+              args: structuredCall.input,
+              result: `Validation failed: ${errors.join(', ')}`,
+              success: false,
+              durationMs: 0,
+            },
+          ],
+          usage: { inputTokens: turnInput, outputTokens: turnOutput },
+        }
+      }
+
+      const jsonResult = JSON.stringify(structuredCall.input)
+      emitEvent('agent:completing', { agentId: this.agentId, result: jsonResult })
+      return {
+        status: 'stop',
+        terminateMode: AgentTerminateMode.GOAL,
+        result: jsonResult,
+        usage: { inputTokens: turnInput, outputTokens: turnOutput },
+      }
+    }
+
     // Execute tool calls — parallel or sequential based on config
     const results =
       (this.config.parallelToolExecution ?? true)
@@ -460,7 +563,7 @@ export class AgentExecutor {
     }
 
     // Truncate tool results that exceed byte limits before adding to history
-    truncateToolResults(toolResultBlocks)
+    await truncateToolResults(toolResultBlocks)
 
     // Add tool results to history as structured user message
     history.push({ role: 'user', content: toolResultBlocks })
@@ -518,13 +621,50 @@ export class AgentExecutor {
       }
     }
 
+    // Repair tool name if it doesn't exist in available tools
+    const availableNames = getToolDefinitions().map((t) => t.name)
+    let resolvedName = call.name
+    if (!availableNames.includes(call.name)) {
+      const repaired = repairToolName(call.name, availableNames)
+      if (repaired) {
+        resolvedName = repaired
+      } else {
+        const available = availableNames.slice(0, 20).join(', ')
+        const errorMsg = `Unknown tool "${call.name}". Available tools: ${available}${availableNames.length > 20 ? ` (and ${availableNames.length - 20} more)` : ''}`
+        return {
+          callInfo: {
+            name: call.name,
+            args: call.input,
+            result: errorMsg,
+            success: false,
+            durationMs: 0,
+          },
+          resultBlock: {
+            type: 'tool_result' as const,
+            tool_use_id: call.id,
+            content: errorMsg,
+            is_error: true,
+          },
+        }
+      }
+    }
+
     this.emit({
       type: 'tool:start',
       agentId: this.agentId,
-      toolName: call.name,
+      toolName: resolvedName,
       args: call.input,
     })
     const toolStart = Date.now()
+
+    const onProgress = (data: { chunk: string }) => {
+      this.emit({
+        type: 'tool:progress',
+        agentId: this.agentId,
+        toolName: resolvedName,
+        chunk: data.chunk,
+      })
+    }
 
     const ctx: ToolContext = {
       sessionId: this.agentId,
@@ -533,23 +673,27 @@ export class AgentExecutor {
       provider: this.config.provider,
       model,
       onEvent: this.onEvent as ToolContext['onEvent'],
+      onProgress,
     }
 
-    const result = await executeTool(call.name, call.input, ctx)
+    const result = await executeTool(resolvedName, call.input, ctx)
     const durationMs = Date.now() - toolStart
     const output = result.success ? result.output : result.error || result.output || 'Tool failed'
+
+    // Apply token-efficient compression for the LLM-facing content
+    const efficientOutput = result.success ? efficientToolResult(resolvedName, output) : output
 
     this.emit({
       type: 'tool:finish',
       agentId: this.agentId,
-      toolName: call.name,
+      toolName: resolvedName,
       success: result.success,
       durationMs,
     })
 
     return {
       callInfo: {
-        name: call.name,
+        name: resolvedName,
         args: call.input,
         result: output,
         success: result.success,
@@ -558,7 +702,7 @@ export class AgentExecutor {
       resultBlock: {
         type: 'tool_result' as const,
         tool_use_id: call.id,
-        content: output,
+        content: efficientOutput,
         is_error: !result.success,
       },
     }
@@ -647,6 +791,24 @@ export class AgentExecutor {
 
     this.emit({ type: 'agent:finish', agentId: this.agentId, result })
     return result
+  }
+
+  /**
+   * Determine the effective response format for this turn.
+   * Checks per-message _format override first, then falls back to config.
+   */
+  private getEffectiveResponseFormat(
+    lastUserMsg: ChatMessage | undefined
+  ): { type: 'json_object'; schema: Record<string, unknown> } | undefined {
+    // Per-message _format override: 'json' activates structured output if schema exists
+    if (lastUserMsg?._format === 'json' && this.config.responseFormat) {
+      return this.config.responseFormat
+    }
+    // Per-message _format of 'text' disables structured output for this turn
+    if (lastUserMsg?._format === 'text') {
+      return undefined
+    }
+    return this.config.responseFormat
   }
 
   private emit(event: AgentEvent): void {

@@ -83,7 +83,7 @@ export function activate(api: ExtensionAPI): Disposable {
         if (!filePath) return undefined
 
         await manager.createSnapshot(
-          cwd || ctx.ctx.workingDirectory,
+          ctx.ctx.workingDirectory || cwd,
           `Before ${ctx.toolName}: ${filePath}`,
           [filePath]
         )
@@ -101,7 +101,7 @@ export function activate(api: ExtensionAPI): Disposable {
       async execute(_args, ctx) {
         if (!gitAvailable) return 'Not in a git repository.'
         const snapshot = await manager.createSnapshot(
-          cwd || ctx.workingDirectory,
+          ctx.workingDirectory || cwd,
           'Manual snapshot',
           []
         )
@@ -121,7 +121,7 @@ export function activate(api: ExtensionAPI): Disposable {
         if (!gitAvailable) return 'Not in a git repository.'
         const latest = manager.getLatestSnapshot()
         if (!latest) return 'No snapshots available to restore.'
-        const dir = cwd || ctx.workingDirectory
+        const dir = ctx.workingDirectory || cwd
         const restored = await manager.restoreSnapshot(dir, latest.hash)
         return restored
           ? `Restored snapshot ${latest.hash.slice(0, 8)}: ${latest.message}`

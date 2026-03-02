@@ -6,7 +6,7 @@ import type { ChatMessage } from '../llm/types.js'
 
 // ─── Session State ───────────────────────────────────────────────────────────
 
-export type SessionStatus = 'active' | 'paused' | 'completed' | 'error'
+export type SessionStatus = 'active' | 'paused' | 'completed' | 'error' | 'busy' | 'archived'
 
 export interface TokenStats {
   inputTokens: number
@@ -26,6 +26,7 @@ export interface FileState {
 export interface SessionState {
   id: string
   name?: string
+  slug?: string
   messages: ChatMessage[]
   workingDirectory: string
   toolCallCount: number
@@ -36,16 +37,34 @@ export interface SessionState {
   updatedAt: number
   status: SessionStatus
   errorMessage?: string
+  // DAG/branching fields
+  parentSessionId?: string
+  branchName?: string
+  branchPoint?: number // message index where branch was created
+  children?: string[]
 }
 
 export interface SessionMeta {
   id: string
   name?: string
+  slug?: string
   messageCount: number
   workingDirectory: string
   createdAt: number
   updatedAt: number
   status: SessionStatus
+  parentSessionId?: string
+  branchName?: string
+  childCount?: number
+}
+
+// ─── Errors ─────────────────────────────────────────────────────────────────
+
+export class SessionBusyError extends Error {
+  constructor(sessionId: string) {
+    super(`Session ${sessionId} is busy`)
+    this.name = 'SessionBusyError'
+  }
 }
 
 // ─── Events ──────────────────────────────────────────────────────────────────
@@ -57,6 +76,7 @@ export type SessionEvent =
   | { type: 'session_loaded'; sessionId: string }
   | { type: 'session_cleared'; sessionId: string }
   | { type: 'status_changed'; status: SessionStatus; sessionId: string }
+  | { type: 'session:status'; sessionId: string; status: 'idle' | 'busy' | 'retry' }
 
 export type SessionEventListener = (event: SessionEvent) => void
 

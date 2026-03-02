@@ -7,6 +7,7 @@
 
 import { type Component, createMemo, For, Show } from 'solid-js'
 import { useSettings } from '../../../stores/settings'
+import { ModelAliasesSection } from './model-aliases-section'
 
 // ============================================================================
 // Model pair presets — auto-suggest cheap model for common primary models
@@ -111,7 +112,7 @@ const SliderRow: Component<{
 // ============================================================================
 
 export const LLMTab: Component = () => {
-  const { settings, updateGeneration, updateAgentLimits } = useSettings()
+  const { settings, updateSettings, updateGeneration, updateAgentLimits } = useSettings()
 
   // Find the active provider's default model for pair suggestion
   const activeModel = createMemo(() => {
@@ -314,6 +315,33 @@ export const LLMTab: Component = () => {
             {settings().generation.customInstructions.length} chars
           </span>
         </Show>
+      </div>
+
+      {/* Compaction Threshold */}
+      <div class="pt-2 border-t border-[var(--border-subtle)]">
+        <SectionHeader title="Context Compaction" />
+        <SliderRow
+          label="Compaction threshold"
+          value={settings().generation.compactionThreshold}
+          min={50}
+          max={95}
+          step={5}
+          format={(v) => `${v}%`}
+          onChange={(v) =>
+            updateSettings({
+              generation: { ...settings().generation, compactionThreshold: v },
+            })
+          }
+        />
+        <p class="text-[10px] text-[var(--text-muted)] mt-1">
+          Auto-compact conversation when context reaches this percentage of the token limit.
+        </p>
+      </div>
+
+      {/* Model Aliases */}
+      <div class="pt-2 border-t border-[var(--border-subtle)]">
+        <SectionHeader title="Model Aliases" />
+        <ModelAliasesSection />
       </div>
     </div>
   )

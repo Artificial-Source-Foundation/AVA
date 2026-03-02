@@ -30,6 +30,7 @@ export type {
   AgentMode,
   ContextStrategy,
   Disposable,
+  EventHandler,
   Extension,
   ExtensionAPI,
   ExtensionManifest,
@@ -55,6 +56,7 @@ export {
   getValidators,
   loadBuiltInExtension,
   loadExtensionsFromDirectory,
+  onEvent,
   resetRegistries,
 } from './extensions/index.js'
 export type {

@@ -76,9 +76,20 @@ export function hydrateAgents(saved: AgentPreset[]): AgentPreset[] {
 
 /** Deep-merge partial settings with defaults (preserves new keys in sub-objects) */
 export function mergeWithDefaults(parsed: Partial<AppSettings>): AppSettings {
+  // Migrate legacy "microagents" keys → "skills" (localStorage may have old names)
+  const legacy = parsed as Record<string, unknown>
+  const enabledSkills =
+    parsed.enabledSkills ?? (legacy.enabledMicroagents as string[] | undefined) ?? []
+  const customSkills =
+    parsed.customSkills ??
+    (legacy.customMicroagents as AppSettings['customSkills'] | undefined) ??
+    []
+
   return {
     ...DEFAULT_SETTINGS,
     ...parsed,
+    enabledSkills,
+    customSkills,
     ui: { ...DEFAULT_UI, ...(parsed.ui ?? {}) },
     appearance: { ...DEFAULT_APPEARANCE, ...(parsed.appearance ?? {}) },
     generation: { ...DEFAULT_GENERATION, ...(parsed.generation ?? {}) },

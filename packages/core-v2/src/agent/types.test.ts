@@ -11,12 +11,13 @@ describe('AgentTerminateMode', () => {
     expect(AgentTerminateMode.TIMEOUT).toBe('TIMEOUT')
     expect(AgentTerminateMode.GOAL).toBe('GOAL')
     expect(AgentTerminateMode.MAX_TURNS).toBe('MAX_TURNS')
+    expect(AgentTerminateMode.MAX_STEPS).toBe('MAX_STEPS')
     expect(AgentTerminateMode.ABORTED).toBe('ABORTED')
   })
 
-  it('has exactly 5 members', () => {
+  it('has exactly 6 members', () => {
     const values = Object.values(AgentTerminateMode)
-    expect(values).toHaveLength(5)
+    expect(values).toHaveLength(6)
   })
 })
 

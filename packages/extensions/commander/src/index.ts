@@ -9,10 +9,11 @@
 
 import type { AgentMode, Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import type { ToolDefinition } from '@ava/core-v2/llm'
+import { getModelPack, resolveModelForTier } from '../../models/src/packs.js'
 import type { AgentDefinition } from './agent-definition.js'
-import { createDelegateTool } from './delegate.js'
+import { configureDelegation, createDelegateTool } from './delegate.js'
 import { getAgent, getAgentsByTier, registerAgents } from './registry.js'
-import { BUILTIN_AGENTS, LEAD_AGENTS, WORKER_AGENTS } from './workers.js'
+import { BUILTIN_AGENTS } from './workers.js'
 
 export function activate(api: ExtensionAPI): Disposable {
   const disposables: Disposable[] = []
@@ -28,17 +29,40 @@ export function activate(api: ExtensionAPI): Disposable {
     // Settings category not registered — default to enabled
   }
 
+  // Apply delegation settings (isolation, etc.)
+  try {
+    const delegateConfig = api.getSettings<{ isolation?: boolean; maxRetries?: number }>(
+      'commander'
+    )
+    if (delegateConfig?.isolation !== undefined || delegateConfig?.maxRetries !== undefined) {
+      configureDelegation({
+        ...(delegateConfig.isolation !== undefined ? { isolation: delegateConfig.isolation } : {}),
+        ...(delegateConfig.maxRetries !== undefined
+          ? { maxRetries: delegateConfig.maxRetries }
+          : {}),
+      })
+    }
+  } catch {
+    // Settings category not registered — use defaults
+  }
+
+  // Apply model pack to agents if configured
+  const agentsToRegister = applyModelPack(api, BUILTIN_AGENTS)
+
   // Register all built-in agents in the registry
-  disposables.push(registerAgents(BUILTIN_AGENTS))
+  disposables.push(registerAgents(agentsToRegister))
 
   // Register delegate tools for leads (commander delegates to leads)
-  for (const lead of LEAD_AGENTS) {
+  const leads = agentsToRegister.filter((a) => a.tier === 'lead')
+  const workers = agentsToRegister.filter((a) => a.tier === 'worker')
+
+  for (const lead of leads) {
     const tool = createDelegateTool(lead)
     disposables.push(api.registerTool(tool))
   }
 
   // Register delegate tools for workers (leads delegate to workers)
-  for (const worker of WORKER_AGENTS) {
+  for (const worker of workers) {
     const tool = createDelegateTool(worker)
     disposables.push(api.registerTool(tool))
   }
@@ -69,10 +93,8 @@ export function activate(api: ExtensionAPI): Disposable {
 
   disposables.push(api.registerAgentMode(praxisMode))
 
-  const leadCount = LEAD_AGENTS.length
-  const workerCount = WORKER_AGENTS.length
   api.log.debug(
-    `Commander: registered ${leadCount} leads + ${workerCount} workers + praxis mode (${BUILTIN_AGENTS.length} agents total)`
+    `Commander: registered ${leads.length} leads + ${workers.length} workers + praxis mode (${agentsToRegister.length} agents total)`
   )
 
   return {
@@ -144,4 +166,34 @@ function formatAgentTable(agents: AgentDefinition[]): string {
   return agents
     .map((a) => `| ${a.displayName} | ${a.domain ?? '—'} | ${a.tools.join(', ')} |`)
     .join('\n')
+}
+
+/** Apply model pack settings to agent definitions (returns new array, does not mutate). */
+function applyModelPack(api: ExtensionAPI, agents: AgentDefinition[]): AgentDefinition[] {
+  let packName: string | undefined
+  try {
+    const config = api.getSettings<{ modelPack?: string }>('commander')
+    packName = config?.modelPack
+  } catch {
+    // Settings not registered
+  }
+
+  if (!packName) return agents
+
+  const pack = getModelPack(packName)
+  if (!pack) {
+    api.log.warn(`Model pack '${packName}' not found, using default models`)
+    return agents
+  }
+
+  api.log.debug(`Applying model pack '${packName}' to agents`)
+  return agents.map((agent) => {
+    // Only override if the agent doesn't already have a model set
+    if (agent.model) return agent
+
+    const resolved = resolveModelForTier(pack, agent.tier)
+    if (!resolved) return agent
+
+    return { ...agent, model: resolved.model, provider: resolved.provider }
+  })
 }

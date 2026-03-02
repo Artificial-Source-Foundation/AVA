@@ -7,10 +7,11 @@ import { describe, expect, it } from 'vitest'
 import { activate, SUMMARIZE_THRESHOLD, selectStrategyName } from './index.js'
 
 describe('context extension activation', () => {
-  it('registers both compaction strategies', () => {
+  it('registers all three compaction strategies', () => {
     const { api, registeredContextStrategies } = createMockExtensionAPI()
     activate(api)
     const names = registeredContextStrategies.map((s) => s.name)
+    expect(names).toContain('prune')
     expect(names).toContain('truncate')
     expect(names).toContain('summarize')
   })
@@ -27,10 +28,23 @@ describe('context extension activation', () => {
     expect(eventHandlers.has('context:compacted')).toBe(true)
   })
 
+  it('listens for session:status events', () => {
+    const { api, eventHandlers } = createMockExtensionAPI()
+    activate(api)
+    expect(eventHandlers.has('session:status')).toBe(true)
+  })
+
+  it('logs session:status events', () => {
+    const { api } = createMockExtensionAPI()
+    activate(api)
+    api.emit('session:status', { sessionId: 'sess-1', status: 'busy' })
+    expect(api.log.debug).toHaveBeenCalledWith('Session status: sess-1 → busy')
+  })
+
   it('cleans up on dispose', () => {
     const { api, eventHandlers, registeredContextStrategies } = createMockExtensionAPI()
     const disposable = activate(api)
-    expect(registeredContextStrategies.length).toBe(2)
+    expect(registeredContextStrategies.length).toBe(3)
     expect(eventHandlers.size).toBeGreaterThan(0)
 
     disposable!.dispose()

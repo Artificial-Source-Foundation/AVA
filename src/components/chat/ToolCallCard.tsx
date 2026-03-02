@@ -63,8 +63,12 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
 
   return (
     <div
-      class="animate-tool-card-in rounded-[var(--radius-md)] border border-[var(--border-subtle)] overflow-hidden transition-colors duration-[var(--duration-fast)]"
-      classList={{ 'border-[var(--error)]/30': props.toolCall.status === 'error' }}
+      class="animate-tool-card-in rounded-[var(--radius-md)] border overflow-hidden transition-colors duration-[var(--duration-fast)]"
+      classList={{
+        'border-[var(--error)]/30': props.toolCall.status === 'error',
+        'border-[var(--accent)]/30': isRunning(),
+        'border-[var(--border-subtle)]': !isRunning() && props.toolCall.status !== 'error',
+      }}
     >
       {/* Single-line header */}
       {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */}

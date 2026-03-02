@@ -8,6 +8,7 @@
 import { defineTool } from '@ava/core-v2/tools'
 import { z } from 'zod'
 import { enterPlanMode, exitPlanMode, isPlanModeEnabled } from '../../agent-modes/src/plan-mode.js'
+import { savePlanToFile } from '../../agent-modes/src/plan-save.js'
 
 export const planEnterTool = defineTool({
   name: 'plan_enter',
@@ -38,13 +39,17 @@ export const planEnterTool = defineTool({
 
 export const planExitTool = defineTool({
   name: 'plan_exit',
-  description: 'Exit plan mode — restores full tool access.',
+  description:
+    'Exit plan mode — restores full tool access. Optionally saves plan content to a file.',
 
-  schema: z.object({}),
+  schema: z.object({
+    plan: z.string().optional().describe('Plan content to save to .ava/plans/'),
+    slug: z.string().optional().describe('Short name for the plan file'),
+  }),
 
   permissions: ['read'],
 
-  async execute(_input, ctx) {
+  async execute(input, ctx) {
     if (!isPlanModeEnabled(ctx.sessionId)) {
       return {
         success: false,
@@ -54,6 +59,23 @@ export const planExitTool = defineTool({
     }
 
     exitPlanMode(ctx.sessionId)
+
+    // Save plan to file if content was provided
+    if (input.plan) {
+      try {
+        const path = await savePlanToFile(input.plan, input.slug)
+        return {
+          success: true,
+          output: `Exited plan mode. Plan saved to ${path}. All tools now available.`,
+        }
+      } catch {
+        return {
+          success: true,
+          output: 'Exited plan mode. Failed to save plan file. All tools now available.',
+        }
+      }
+    }
+
     return {
       success: true,
       output: 'Exited plan mode. All tools now available.',

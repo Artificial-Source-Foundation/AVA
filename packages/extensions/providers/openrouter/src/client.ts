@@ -13,6 +13,7 @@ import {
   ToolCallBuffer,
 } from '../../_shared/src/openai-compat.js'
 import { readSSEStream } from '../../_shared/src/sse.js'
+import { addCacheControlMarkers } from './cache.js'
 
 const BASE_URL = 'https://openrouter.ai/api/v1'
 
@@ -36,6 +37,16 @@ export class OpenRouterClient implements LLMClient {
     }
 
     const body = buildOpenAIRequestBody(messages, config, { model: config.model })
+
+    // Apply prompt cache markers to the converted body messages.
+    // OpenRouter passes cache_control through to Anthropic models.
+    body.messages = addCacheControlMarkers(
+      body.messages as Array<{
+        role: string
+        content: string | Array<Record<string, unknown>> | null
+      }>
+    )
+
     if (!body.max_tokens) body.max_tokens = 4096
     if (body.temperature === undefined) body.temperature = 0.7
 

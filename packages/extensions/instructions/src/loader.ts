@@ -2,18 +2,22 @@
  * Instruction file loader — discovers and merges instruction files.
  */
 
+import type { SimpleLogger } from '@ava/core-v2/logger'
 import type { IFileSystem } from '@ava/core-v2/platform'
 import type { InstructionConfig, InstructionFile } from './types.js'
 import { DEFAULT_INSTRUCTION_CONFIG } from './types.js'
+import { fetchUrlInstruction } from './url-loader.js'
 
 /**
  * Load instruction files from the working directory upward.
  * Files closer to the working directory have higher priority.
+ * Also loads URL instructions if configured.
  */
 export async function loadInstructions(
   cwd: string,
   fs: IFileSystem,
-  config: InstructionConfig = DEFAULT_INSTRUCTION_CONFIG
+  config: InstructionConfig = DEFAULT_INSTRUCTION_CONFIG,
+  log?: SimpleLogger
 ): Promise<InstructionFile[]> {
   const results: InstructionFile[] = []
   let currentDir = cwd
@@ -42,6 +46,16 @@ export async function loadInstructions(
     const parentDir = currentDir.replace(/\/[^/]+$/, '') || '/'
     currentDir = parentDir
     depth++
+  }
+
+  // Load URL instructions if configured
+  if (config.urls && config.urls.length > 0) {
+    const urlResults = await Promise.all(config.urls.map((url) => fetchUrlInstruction(url, log)))
+    for (const urlFile of urlResults) {
+      if (urlFile) {
+        results.push(urlFile)
+      }
+    }
   }
 
   // Sort by priority descending (highest first)

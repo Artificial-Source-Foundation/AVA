@@ -91,6 +91,54 @@ describe('Tool Registry', () => {
       expect(getAllTools()).toHaveLength(0)
     })
 
+    it('emits tool:before-register event before registration', () => {
+      const order: string[] = []
+      const beforeSub = onEvent('tool:before-register', () => {
+        order.push('before')
+        // Tool should NOT be in the registry yet
+        expect(getTool('echo')).toBeUndefined()
+      })
+      const afterSub = onEvent('tools:registered', () => {
+        order.push('after')
+      })
+
+      registerTool(echoTool)
+
+      expect(order).toEqual(['before', 'after'])
+      beforeSub.dispose()
+      afterSub.dispose()
+    })
+
+    it('emits tool:before-register with name and definition', () => {
+      const handler = vi.fn()
+      const sub = onEvent('tool:before-register', handler)
+
+      registerTool(echoTool)
+
+      expect(handler).toHaveBeenCalledOnce()
+      expect(handler).toHaveBeenCalledWith({
+        name: 'echo',
+        definition: echoTool.definition,
+      })
+      sub.dispose()
+    })
+
+    it('allows plugins to mutate tool description via tool:before-register', () => {
+      const sub = onEvent('tool:before-register', (data) => {
+        const event = data as { name: string; definition: { description: string } }
+        if (event.name === 'echo') {
+          event.definition.description = 'Modified description'
+        }
+      })
+
+      registerTool(echoTool)
+
+      const tool = getTool('echo')
+      expect(tool).toBeDefined()
+      expect(tool!.definition.description).toBe('Modified description')
+      sub.dispose()
+    })
+
     it('emits tools:registered event on register', () => {
       const handler = vi.fn()
       const sub = onEvent('tools:registered', handler)

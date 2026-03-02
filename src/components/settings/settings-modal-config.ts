@@ -23,12 +23,12 @@ export type SettingsTab =
   | 'behavior'
   | 'shortcuts'
   | 'providers'
-  | 'llm'
   | 'models'
+  | 'agents'
   | 'permissions'
   | 'mcp'
   | 'plugins'
-  | 'microagents'
+  | 'skills'
   | 'commands'
   | 'trusted-folders'
   | 'developer'
@@ -98,13 +98,13 @@ export const tabGroups: TabGroup[] = [
         keywords: ['api', 'key', 'openai', 'anthropic', 'google', 'connection'],
       },
       {
-        id: 'llm',
-        label: 'LLM',
+        id: 'models',
+        label: 'Models',
         icon: Cpu,
-        keywords: ['model', 'temperature', 'tokens', 'context', 'streaming'],
+        keywords: ['model', 'temperature', 'tokens', 'context', 'streaming', 'llm'],
       },
       {
-        id: 'models',
+        id: 'agents',
         label: 'Agents',
         icon: Bot,
         keywords: ['agent', 'team', 'worker', 'preset', 'capability'],
@@ -127,10 +127,10 @@ export const tabGroups: TabGroup[] = [
         keywords: ['extension', 'install', 'community', 'marketplace'],
       },
       {
-        id: 'microagents',
-        label: 'Microagents',
+        id: 'skills',
+        label: 'Skills',
         icon: Brain,
-        keywords: ['skill', 'microagent', 'domain', 'prompt', 'glob', 'pattern'],
+        keywords: ['skill', 'domain', 'prompt', 'glob', 'pattern', 'microagent'],
       },
       {
         id: 'commands',
@@ -157,23 +157,6 @@ export const tabGroups: TabGroup[] = [
       { id: 'about', label: 'About', icon: Info, keywords: ['version', 'license', 'credits'] },
     ],
   },
-]
-
-export const AVAILABLE_MODELS = [
-  { id: '', label: 'Use default' },
-  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
-  { id: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
-  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
-  { id: 'gpt-4.1', label: 'GPT-4.1' },
-  { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
-  { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano' },
-  { id: 'o3', label: 'o3' },
-  { id: 'o4-mini', label: 'o4-mini' },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
-  { id: 'deepseek-r1', label: 'DeepSeek R1' },
-  { id: 'deepseek-v3', label: 'DeepSeek V3' },
-  { id: 'qwen-2.5-coder', label: 'Qwen 2.5 Coder' },
 ]
 
 export const ALL_CAPABILITIES = [

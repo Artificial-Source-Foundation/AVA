@@ -5,7 +5,7 @@
 export interface InstructionFile {
   path: string
   content: string
-  scope: 'project' | 'directory' | 'user'
+  scope: 'project' | 'directory' | 'user' | 'remote'
   priority: number
 }
 
@@ -13,6 +13,7 @@ export interface InstructionConfig {
   fileNames: string[]
   maxDepth: number
   maxSize: number
+  urls?: string[]
 }
 
 export const DEFAULT_INSTRUCTION_CONFIG: InstructionConfig = {

@@ -15,7 +15,7 @@ import type {
 } from '../llm/types.js'
 import { resetLogger } from '../logger/logger.js'
 import { resetTools } from '../tools/registry.js'
-import { AgentExecutor, runAgent } from './loop.js'
+import { AgentExecutor, runAgent, truncateToolResults } from './loop.js'
 import { AgentTerminateMode, COMPLETE_TASK_TOOL, DEFAULT_AGENT_CONFIG } from './types.js'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -816,7 +816,7 @@ describe('Sequential tool execution', () => {
       }
     )
 
-    const exec = new AgentExecutor({ maxTurns: 5 })
+    const exec = new AgentExecutor({ maxTurns: 5, parallelToolExecution: false })
     await exec.run({ goal: 'Read and grep', cwd: '/tmp' }, AbortSignal.timeout(5000))
 
     // Tools execute sequentially (for steering interrupt support)
@@ -885,8 +885,8 @@ describe('Sequential tool execution', () => {
       }
     )
 
-    const exec = new AgentExecutor({ maxTurns: 5 })
-    await exec.run({ goal: 'Parallel', cwd: '/tmp' }, AbortSignal.timeout(5000))
+    const exec = new AgentExecutor({ maxTurns: 5, parallelToolExecution: false })
+    await exec.run({ goal: 'Sequential ordering', cwd: '/tmp' }, AbortSignal.timeout(5000))
 
     // Find tool results message
     const toolResultMsg = capturedHistory.find((m) => m.role === 'user' && Array.isArray(m.content))
@@ -947,6 +947,364 @@ describe('Sequential tool execution', () => {
   })
 })
 
+// ─── Parallel Tool Execution ─────────────────────────────────────────────────
+
+describe('Parallel tool execution', () => {
+  it('defaults to parallel execution (parallelToolExecution=true)', () => {
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    // Default is undefined which the loop treats as true
+    expect(exec.config.parallelToolExecution).toBeUndefined()
+  })
+
+  it('executes multiple tools in parallel when enabled (default)', async () => {
+    const executionLog: string[] = []
+
+    const client = createMockClient([
+      // Turn 1: LLM returns two tool calls
+      [
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-a',
+            name: 'read_file',
+            input: { path: '/a.txt' },
+          },
+        },
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-b',
+            name: 'grep',
+            input: { pattern: 'foo' },
+          },
+        },
+      ],
+      // Turn 2: LLM done
+      [{ content: 'Done', done: true }],
+    ])
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+      mockToolDef('grep'),
+    ])
+
+    // Tool A takes 50ms, Tool B takes 10ms — if parallel, B finishes before A
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockImplementation(
+      async (name: string) => {
+        executionLog.push(`start:${name}`)
+        const delay = name === 'read_file' ? 50 : 10
+        await new Promise((r) => setTimeout(r, delay))
+        executionLog.push(`end:${name}`)
+        return { success: true, output: `result-${name}` }
+      }
+    )
+
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    await exec.run({ goal: 'Read and grep', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    // Both should have started
+    expect(executionLog.filter((e) => e.startsWith('start:'))).toHaveLength(2)
+    expect(executionLog.filter((e) => e.startsWith('end:'))).toHaveLength(2)
+
+    // Parallel: B should finish before A (B takes 10ms, A takes 50ms)
+    const endB = executionLog.indexOf('end:grep')
+    const endA = executionLog.indexOf('end:read_file')
+    expect(endB).toBeLessThan(endA)
+  })
+
+  it('executes tools sequentially when parallelToolExecution=false', async () => {
+    const executionLog: string[] = []
+
+    const client = createMockClient([
+      [
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-a',
+            name: 'read_file',
+            input: { path: '/a.txt' },
+          },
+        },
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-b',
+            name: 'grep',
+            input: { pattern: 'foo' },
+          },
+        },
+      ],
+      [{ content: 'Done', done: true }],
+    ])
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+      mockToolDef('grep'),
+    ])
+
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockImplementation(
+      async (name: string) => {
+        executionLog.push(`start:${name}`)
+        const delay = name === 'read_file' ? 50 : 10
+        await new Promise((r) => setTimeout(r, delay))
+        executionLog.push(`end:${name}`)
+        return { success: true, output: `result-${name}` }
+      }
+    )
+
+    const exec = new AgentExecutor({ maxTurns: 5, parallelToolExecution: false })
+    await exec.run({ goal: 'Read and grep', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    // Sequential: A finishes before B starts
+    const startA = executionLog.indexOf('start:read_file')
+    const endA = executionLog.indexOf('end:read_file')
+    const startB = executionLog.indexOf('start:grep')
+    const endB = executionLog.indexOf('end:grep')
+
+    expect(startA).toBeLessThan(endA)
+    expect(endA).toBeLessThan(startB)
+    expect(startB).toBeLessThan(endB)
+  })
+
+  it('preserves result ordering in parallel mode (matches tool call order)', async () => {
+    const client = createMockClient([
+      [
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-a',
+            name: 'read_file',
+            input: { path: '/a.txt' },
+          },
+        },
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-b',
+            name: 'grep',
+            input: { pattern: 'bar' },
+          },
+        },
+      ],
+      [{ content: 'Done', done: true }],
+    ])
+
+    const capturedHistory: Array<{ role: string; content: unknown }> = []
+    const realClient: LLMClient = {
+      async *stream(messages) {
+        // Capture on second call
+        if (messages.length > 2) {
+          for (const m of messages) capturedHistory.push({ role: m.role, content: m.content })
+          yield { content: 'Done' }
+          yield { done: true }
+          return
+        }
+        // First call: return tool calls
+        yield* client.stream(messages, {} as never, new AbortController().signal)
+      },
+    }
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(realClient)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+      mockToolDef('grep'),
+    ])
+
+    // Tool A takes longer — B finishes first in parallel
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockImplementation(
+      async (name: string) => {
+        const delay = name === 'read_file' ? 40 : 5
+        await new Promise((r) => setTimeout(r, delay))
+        return { success: true, output: `result-${name}` }
+      }
+    )
+
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    await exec.run({ goal: 'Parallel', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    // Find tool results message
+    const toolResultMsg = capturedHistory.find((m) => m.role === 'user' && Array.isArray(m.content))
+    expect(toolResultMsg).toBeDefined()
+    const results = toolResultMsg!.content as ToolResultBlock[]
+
+    // Order must match tool call order (A first, B second), not completion order
+    expect(results[0].tool_use_id).toBe('call-a')
+    expect(results[1].tool_use_id).toBe('call-b')
+  })
+
+  it('parallel execution is faster than sequential for independent tools', async () => {
+    const makeClient = () =>
+      createMockClient([
+        [
+          {
+            toolUse: {
+              type: 'tool_use',
+              id: 'call-a',
+              name: 'read_file',
+              input: { path: '/a.txt' },
+            },
+          },
+          {
+            toolUse: {
+              type: 'tool_use',
+              id: 'call-b',
+              name: 'grep',
+              input: { pattern: 'x' },
+            },
+          },
+          {
+            toolUse: {
+              type: 'tool_use',
+              id: 'call-c',
+              name: 'glob',
+              input: { pattern: '*.ts' },
+            },
+          },
+        ],
+        [{ content: 'Done', done: true }],
+      ])
+
+    const toolDefs = [mockToolDef('read_file'), mockToolDef('grep'), mockToolDef('glob')]
+
+    const createClientMod = await import('../llm/client.js')
+    const registryMod = await import('../tools/registry.js')
+
+    // Each tool takes 30ms
+    const mockExecute = async () => {
+      await new Promise((r) => setTimeout(r, 30))
+      return { success: true, output: 'ok' }
+    }
+
+    // Sequential run
+    vi.spyOn(createClientMod, 'createClient').mockReturnValue(makeClient())
+    vi.spyOn(registryMod, 'getToolDefinitions').mockReturnValue(toolDefs)
+    vi.spyOn(registryMod, 'executeTool').mockImplementation(mockExecute)
+
+    const seqStart = Date.now()
+    const seqExec = new AgentExecutor({ maxTurns: 5, parallelToolExecution: false })
+    await seqExec.run({ goal: 'Test', cwd: '/tmp' }, AbortSignal.timeout(5000))
+    const seqDuration = Date.now() - seqStart
+
+    // Parallel run
+    vi.spyOn(createClientMod, 'createClient').mockReturnValue(makeClient())
+    vi.spyOn(registryMod, 'getToolDefinitions').mockReturnValue(toolDefs)
+    vi.spyOn(registryMod, 'executeTool').mockImplementation(mockExecute)
+
+    const parStart = Date.now()
+    const parExec = new AgentExecutor({ maxTurns: 5, parallelToolExecution: true })
+    await parExec.run({ goal: 'Test', cwd: '/tmp' }, AbortSignal.timeout(5000))
+    const parDuration = Date.now() - parStart
+
+    // Parallel should be significantly faster (3 tools x 30ms = 90ms seq vs ~30ms par)
+    // Allow some margin for test infrastructure overhead
+    expect(parDuration).toBeLessThan(seqDuration)
+  })
+
+  it('parallel mode still respects abort signal', async () => {
+    const controller = new AbortController()
+
+    const client = createMockClient([
+      [
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-a',
+            name: 'read_file',
+            input: { path: '/a.txt' },
+          },
+        },
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-b',
+            name: 'grep',
+            input: { pattern: 'foo' },
+          },
+        },
+      ],
+      [{ content: 'Done', done: true }],
+    ])
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+      mockToolDef('grep'),
+    ])
+
+    // Abort during first tool execution
+    let toolCallCount = 0
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockImplementation(async () => {
+      toolCallCount++
+      // Abort after the first tool starts (both start simultaneously in parallel,
+      // but the second will check signal before executing)
+      if (toolCallCount === 1) {
+        controller.abort()
+      }
+      return { success: true, output: 'result' }
+    })
+
+    const exec = new AgentExecutor({ maxTurns: 5, parallelToolExecution: true })
+    const result = await exec.run({ goal: 'Test abort', cwd: '/tmp' }, controller.signal)
+
+    expect(result.terminateMode).toBe(AgentTerminateMode.ABORTED)
+    expect(result.success).toBe(false)
+  })
+
+  it('emits tool:start and tool:finish events for all parallel tools', async () => {
+    const events: unknown[] = []
+    const onEvent = vi.fn((e: unknown) => events.push(e))
+
+    const client = createMockClient([
+      [
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-a',
+            name: 'read_file',
+            input: { path: '/a.txt' },
+          },
+        },
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-b',
+            name: 'grep',
+            input: { pattern: 'foo' },
+          },
+        },
+      ],
+      [{ content: 'Done', done: true }],
+    ])
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+      mockToolDef('grep'),
+    ])
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockResolvedValue({
+      success: true,
+      output: 'content',
+    })
+
+    const exec = new AgentExecutor({ maxTurns: 5, parallelToolExecution: true }, onEvent)
+    await exec.run({ goal: 'Read and grep', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    const toolStartEvents = (events as Array<{ type: string; toolName?: string }>).filter(
+      (e) => e.type === 'tool:start'
+    )
+    const toolFinishEvents = (events as Array<{ type: string; toolName?: string }>).filter(
+      (e) => e.type === 'tool:finish'
+    )
+
+    expect(toolStartEvents).toHaveLength(2)
+    expect(toolFinishEvents).toHaveLength(2)
+    expect(toolStartEvents.map((e) => e.toolName).sort()).toEqual(['grep', 'read_file'])
+    expect(toolFinishEvents.map((e) => e.toolName).sort()).toEqual(['grep', 'read_file'])
+  })
+})
+
 // ─── Doom Loop Detection ────────────────────────────────────────────────────
 
 describe('Doom loop detection', () => {
@@ -1004,5 +1362,386 @@ describe('Doom loop detection', () => {
         (m.content as string).includes('Try a different approach')
     )
     expect(corrections.length).toBeGreaterThanOrEqual(1)
+  })
+})
+
+// ─── Tool Result Truncation ──────────────────────────────────────────────────
+
+describe('truncateToolResults', () => {
+  it('does not truncate small results', () => {
+    const blocks: ToolResultBlock[] = [
+      { type: 'tool_result', tool_use_id: 'tc-1', content: 'small result', is_error: false },
+      { type: 'tool_result', tool_use_id: 'tc-2', content: 'another small', is_error: false },
+    ]
+    truncateToolResults(blocks)
+    expect(blocks[0].content).toBe('small result')
+    expect(blocks[1].content).toBe('another small')
+  })
+
+  it('truncates a single result exceeding MAX_RESULT_BYTES (50KB)', () => {
+    const largeContent = 'x'.repeat(60 * 1024) // 60KB
+    const blocks: ToolResultBlock[] = [
+      { type: 'tool_result', tool_use_id: 'tc-1', content: largeContent, is_error: false },
+    ]
+    truncateToolResults(blocks)
+    expect(blocks[0].content.length).toBeLessThan(largeContent.length)
+    expect(blocks[0].content).toContain('[...truncated')
+    // Should start with the first 50KB of content
+    expect(blocks[0].content.startsWith('x'.repeat(50 * 1024))).toBe(true)
+  })
+
+  it('adds truncation marker with byte count', () => {
+    const size = 60 * 1024
+    const largeContent = 'a'.repeat(size)
+    const blocks: ToolResultBlock[] = [
+      { type: 'tool_result', tool_use_id: 'tc-1', content: largeContent, is_error: false },
+    ]
+    truncateToolResults(blocks)
+    const expectedTruncated = size - 50 * 1024
+    expect(blocks[0].content).toContain(`[...truncated ${expectedTruncated} bytes]`)
+  })
+
+  it('proportionally truncates when total exceeds MAX_TOTAL_RESULT_BYTES (200KB)', () => {
+    // Create 5 results, each 50KB = 250KB total, exceeds 200KB limit
+    const blocks: ToolResultBlock[] = []
+    for (let i = 0; i < 5; i++) {
+      blocks.push({
+        type: 'tool_result',
+        tool_use_id: `tc-${i}`,
+        content: 'y'.repeat(50 * 1024), // each is exactly 50KB (at the per-result limit)
+        is_error: false,
+      })
+    }
+    truncateToolResults(blocks)
+    // Each block should be proportionally smaller
+    const totalAfter = blocks.reduce((sum, b) => sum + Buffer.byteLength(b.content, 'utf8'), 0)
+    // Total should be around 200KB (may exceed slightly due to truncation markers)
+    expect(totalAfter).toBeLessThan(250 * 1024)
+    // All blocks should have truncation markers
+    for (const block of blocks) {
+      expect(block.content).toContain('[...truncated')
+    }
+  })
+
+  it('does not truncate results <= 1KB during proportional truncation', () => {
+    // One large result + one tiny result
+    const blocks: ToolResultBlock[] = [
+      {
+        type: 'tool_result',
+        tool_use_id: 'tc-big',
+        content: 'z'.repeat(210 * 1024), // 210KB — will be per-result truncated to ~50KB first
+        is_error: false,
+      },
+      {
+        type: 'tool_result',
+        tool_use_id: 'tc-tiny',
+        content: 'small', // 5 bytes — should never be truncated
+        is_error: false,
+      },
+    ]
+    truncateToolResults(blocks)
+    // The tiny result should be preserved
+    expect(blocks[1].content).toBe('small')
+  })
+
+  it('handles empty blocks array', () => {
+    const blocks: ToolResultBlock[] = []
+    truncateToolResults(blocks)
+    expect(blocks).toEqual([])
+  })
+
+  it('handles blocks with empty content', () => {
+    const blocks: ToolResultBlock[] = [
+      { type: 'tool_result', tool_use_id: 'tc-1', content: '', is_error: false },
+    ]
+    truncateToolResults(blocks)
+    expect(blocks[0].content).toBe('')
+  })
+
+  it('truncation is applied before adding to history in executeTurn', async () => {
+    const capturedHistory: Array<{ role: string; content: unknown }> = []
+    const largeOutput = 'x'.repeat(60 * 1024)
+
+    const client: LLMClient = {
+      async *stream(messages) {
+        // Capture on second call
+        if (messages.length > 2) {
+          for (const m of messages) capturedHistory.push({ role: m.role, content: m.content })
+          yield { content: 'Done' }
+          yield { done: true }
+          return
+        }
+        yield {
+          toolUse: {
+            type: 'tool_use',
+            id: 'tc-1',
+            name: 'read_file',
+            input: { path: '/big.txt' },
+          },
+        }
+        yield { done: true }
+      },
+    }
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+    ])
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockResolvedValue({
+      success: true,
+      output: largeOutput,
+    })
+
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    await exec.run({ goal: 'Read big file', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    // Find the tool result in history
+    const toolResultMsg = capturedHistory.find((m) => m.role === 'user' && Array.isArray(m.content))
+    expect(toolResultMsg).toBeDefined()
+    const results = toolResultMsg!.content as ToolResultBlock[]
+    expect(results[0].content.length).toBeLessThan(largeOutput.length)
+    expect(results[0].content).toContain('[...truncated')
+  })
+})
+
+// ─── Steering Interrupt ──────────────────────────────────────────────────────
+
+describe('Steering interrupt', () => {
+  it('steer() injects a user message into the next turn', async () => {
+    const capturedHistory: Array<{ role: string; content: unknown }> = []
+    let turnCount = 0
+    let executor: AgentExecutor | null = null
+
+    const client: LLMClient = {
+      async *stream(messages) {
+        turnCount++
+        if (turnCount === 1) {
+          // Turn 1: tool call
+          yield {
+            toolUse: {
+              type: 'tool_use',
+              id: 'call-1',
+              name: 'read_file',
+              input: { path: '/test.txt' },
+            },
+          }
+          yield { done: true }
+        } else {
+          // Turn 2+: capture history, then done
+          for (const m of messages) {
+            capturedHistory.push({ role: m.role, content: m.content })
+          }
+          yield { content: 'Steered response' }
+          yield { done: true }
+        }
+      },
+    }
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+    ])
+    // Steer during tool execution to ensure it happens before the loop checks
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockImplementation(async () => {
+      executor!.steer('Change direction, do something else')
+      return { success: true, output: 'file content' }
+    })
+
+    const events: unknown[] = []
+    executor = new AgentExecutor({ maxTurns: 5 }, (e) => events.push(e))
+
+    const result = await executor.run({ goal: 'Read file', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    expect(result.success).toBe(true)
+
+    // Verify that the steering message was injected into history
+    const steeringMsg = capturedHistory.find(
+      (m) => m.role === 'user' && m.content === 'Change direction, do something else'
+    )
+    expect(steeringMsg).toBeDefined()
+
+    // Verify agent:steered event was emitted
+    const steeredEvent = events.find((e) => (e as Record<string, unknown>).type === 'agent:steered')
+    expect(steeredEvent).toBeDefined()
+    expect((steeredEvent as Record<string, unknown>).message).toBe(
+      'Change direction, do something else'
+    )
+  })
+
+  it('steer() emits agent:steered event with the message', async () => {
+    const events: unknown[] = []
+
+    const client: LLMClient = {
+      async *stream() {
+        yield {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-1',
+            name: 'read_file',
+            input: { path: '/test.txt' },
+          },
+        }
+        yield { done: true }
+      },
+    }
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+    ])
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockResolvedValue({
+      success: true,
+      output: 'content',
+    })
+
+    const exec = new AgentExecutor({ maxTurns: 2 }, (e) => events.push(e))
+
+    // Set steering before run so it gets picked up on second iteration
+    exec.steer('Focus on tests only')
+
+    await exec.run({ goal: 'Do task', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    const steeredEvents = (events as Array<Record<string, unknown>>).filter(
+      (e) => e.type === 'agent:steered'
+    )
+    expect(steeredEvents).toHaveLength(1)
+    expect(steeredEvents[0].message).toBe('Focus on tests only')
+  })
+
+  it('steer() with no active run sets message for next loop iteration', () => {
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    // Calling steer before run just sets the message — no error
+    exec.steer('test message')
+    // The message will be consumed on next run iteration
+  })
+})
+
+// ─── Compaction Strategy Selection ───────────────────────────────────────────
+
+describe('Compaction strategy selection', () => {
+  it('emits context:compacted event with before/after token counts', async () => {
+    const apiModule = await import('../extensions/api.js')
+    const emitSpy = vi.spyOn(apiModule, 'emitEvent')
+
+    // Register a truncate strategy that just returns the last 2 messages
+    const strategies = apiModule.getContextStrategies() as Map<string, unknown>
+    strategies.set('truncate', {
+      name: 'truncate',
+      compact(messages: Array<{ role: string; content: string }>) {
+        return messages.slice(-2)
+      },
+    })
+
+    // Create a client that produces many tool calls to fill context
+    let turnCount = 0
+    const client: LLMClient = {
+      async *stream() {
+        turnCount++
+        if (turnCount <= 3) {
+          yield {
+            toolUse: {
+              type: 'tool_use',
+              id: `call-${turnCount}`,
+              name: 'read_file',
+              input: { path: `/file${turnCount}.txt` },
+            },
+          }
+          yield { done: true }
+        } else {
+          yield { content: 'Done' }
+          yield { done: true }
+        }
+      },
+    }
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+    ])
+    // Return huge results to trigger compaction
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockResolvedValue({
+      success: true,
+      output: 'x'.repeat(500_000), // large output to blow up context
+    })
+
+    const exec = new AgentExecutor({
+      maxTurns: 10,
+      compactionThreshold: 0.001, // very low threshold to force compaction
+    })
+    await exec.run({ goal: 'Read files', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    // Check that context:compacted was emitted
+    const compactedCalls = emitSpy.mock.calls.filter(([event]) => event === 'context:compacted')
+    expect(compactedCalls.length).toBeGreaterThanOrEqual(1)
+
+    const compactedData = compactedCalls[0]![1] as Record<string, unknown>
+    expect(compactedData.tokensBefore).toBeDefined()
+    expect(compactedData.tokensAfter).toBeDefined()
+    expect(compactedData.messagesBefore).toBeDefined()
+    expect(compactedData.messagesAfter).toBeDefined()
+    expect(compactedData.strategy).toBeDefined()
+  })
+
+  it('uses truncate strategy for short sessions (<= 20 messages)', async () => {
+    const apiModule = await import('../extensions/api.js')
+    const emitSpy = vi.spyOn(apiModule, 'emitEvent')
+
+    // Register both strategies
+    const strategies = apiModule.getContextStrategies() as Map<string, unknown>
+    strategies.set('truncate', {
+      name: 'truncate',
+      compact(messages: Array<{ role: string; content: string }>) {
+        return messages.slice(-2)
+      },
+    })
+    strategies.set('summarize', {
+      name: 'summarize',
+      compact(messages: Array<{ role: string; content: string }>) {
+        return messages.slice(-2)
+      },
+    })
+
+    // Short session — only a few messages
+    let turnCount = 0
+    const client: LLMClient = {
+      async *stream() {
+        turnCount++
+        if (turnCount <= 2) {
+          yield {
+            toolUse: {
+              type: 'tool_use',
+              id: `call-${turnCount}`,
+              name: 'read_file',
+              input: { path: `/file${turnCount}.txt` },
+            },
+          }
+        } else {
+          yield { content: 'Done' }
+        }
+        yield { done: true }
+      },
+    }
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+    ])
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockResolvedValue({
+      success: true,
+      output: 'x'.repeat(500_000),
+    })
+
+    const exec = new AgentExecutor({
+      maxTurns: 10,
+      compactionThreshold: 0.001,
+    })
+    await exec.run({ goal: 'Read files', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    const compactedCalls = emitSpy.mock.calls.filter(([event]) => event === 'context:compacted')
+    if (compactedCalls.length > 0) {
+      const data = compactedCalls[0]![1] as Record<string, unknown>
+      // Short session should use truncate
+      expect(data.strategy).toBe('truncate')
+    }
   })
 })

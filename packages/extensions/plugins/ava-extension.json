@@ -1,0 +1,10 @@
+{
+  "name": "ava-plugins",
+  "version": "1.0.0",
+  "description": "Plugin install/uninstall backend and registry API",
+  "main": "src/index.ts",
+  "builtIn": true,
+  "enabledByDefault": true,
+  "priority": 5,
+  "capabilities": ["plugins"]
+}

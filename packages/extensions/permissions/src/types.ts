@@ -14,6 +14,8 @@ export interface PermissionSettings {
   toolRules: ToolPermissionRule[]
   smartApprove: boolean
   alwaysApproved: string[]
+  /** Granular permission mode — overrides yolo/autoApproveReads/autoApproveWrites when set */
+  permissionMode?: string
 }
 
 export interface ToolPermissionRule {

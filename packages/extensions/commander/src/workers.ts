@@ -8,10 +8,59 @@
 import type { AgentDefinition } from './agent-definition.js'
 import type { WorkerDefinition } from './types.js'
 
-// ─── Read-only tool sets ────────────────────────────────────────────────────
+// ─── Tool sets by domain ────────────────────────────────────────────────────
 
 const READ_TOOLS = ['read_file', 'grep', 'glob'] as const
 const READ_TOOLS_PLUS = ['read_file', 'grep', 'glob', 'ls'] as const
+
+/** Frontend Lead: core file tools + search, no DB/LSP tools */
+const FRONTEND_LEAD_TOOLS = [
+  'read_file',
+  'write_file',
+  'edit',
+  'bash',
+  'glob',
+  'grep',
+  'create_file',
+  'ls',
+  'websearch',
+] as const
+
+/** Backend Lead: all core tools + LSP tools */
+const BACKEND_LEAD_TOOLS = [
+  'read_file',
+  'write_file',
+  'edit',
+  'bash',
+  'glob',
+  'grep',
+  'create_file',
+  'delete_file',
+  'ls',
+  'lsp_diagnostics',
+  'lsp_hover',
+  'lsp_definition',
+] as const
+
+/** QA Lead: read-only + test runner + diagnostics */
+const QA_LEAD_TOOLS = ['read_file', 'bash', 'grep', 'glob', 'lsp_diagnostics'] as const
+
+/** Fullstack Lead: all available tools */
+const FULLSTACK_LEAD_TOOLS = [
+  'read_file',
+  'write_file',
+  'edit',
+  'bash',
+  'glob',
+  'grep',
+  'create_file',
+  'delete_file',
+  'ls',
+  'websearch',
+  'lsp_diagnostics',
+  'lsp_hover',
+  'lsp_definition',
+] as const
 
 // ─── Worker Agents (tier: worker) ───────────────────────────────────────────
 
@@ -178,7 +227,7 @@ You can delegate to your workers:
 
 For simple tasks, handle them yourself. For complex tasks, delegate to the right worker.
 Always review worker results before reporting back to the commander.`,
-    tools: [...READ_TOOLS_PLUS],
+    tools: [...FRONTEND_LEAD_TOOLS],
     delegates: ['coder', 'tester'],
     maxTurns: 12,
     maxTimeMinutes: 8,
@@ -202,7 +251,7 @@ You can delegate to your workers:
 
 For simple tasks, handle them yourself. For complex tasks, delegate to the right worker.
 Always review worker results before reporting back to the commander.`,
-    tools: [...READ_TOOLS_PLUS],
+    tools: [...BACKEND_LEAD_TOOLS],
     delegates: ['coder', 'tester', 'debugger'],
     maxTurns: 12,
     maxTimeMinutes: 8,
@@ -224,7 +273,7 @@ You can delegate to your workers:
 - **Reviewer** for code quality and security review
 
 Ensure comprehensive test coverage and code quality before reporting back.`,
-    tools: [...READ_TOOLS_PLUS],
+    tools: [...QA_LEAD_TOOLS],
     delegates: ['tester', 'reviewer'],
     maxTurns: 10,
     maxTimeMinutes: 8,
@@ -249,7 +298,7 @@ You can delegate to any worker:
 - **DevOps** for shell commands and build tasks
 
 For simple tasks, handle them yourself. For complex tasks, delegate appropriately.`,
-    tools: [...READ_TOOLS_PLUS],
+    tools: [...FULLSTACK_LEAD_TOOLS],
     delegates: ['coder', 'tester', 'debugger', 'reviewer', 'devops'],
     maxTurns: 12,
     maxTimeMinutes: 10,

@@ -5,7 +5,7 @@
 export interface MCPServer {
   name: string
   uri: string
-  transport: 'stdio' | 'sse'
+  transport: 'stdio' | 'sse' | 'http-stream'
   command?: string
   args?: string[]
   env?: Record<string, string>

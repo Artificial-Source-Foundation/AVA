@@ -1,11 +1,28 @@
 /**
  * Context extension.
  * Provides token tracking and context compaction strategies.
+ *
+ * Strategy selection logic:
+ * - Sessions > 20 messages use "summarize" (preserves more context)
+ * - Shorter sessions use "truncate" (simple and fast)
+ *
+ * Emits `context:compacted` event with before/after token counts after compaction.
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import { ALL_STRATEGIES } from './strategies.js'
 import { trackTokens } from './tracker.js'
+
+/** Strategy selection threshold — sessions above this use summarize. */
+export const SUMMARIZE_THRESHOLD = 20
+
+/**
+ * Select the best compaction strategy name based on session message count.
+ * Returns 'summarize' for longer sessions, 'truncate' for shorter ones.
+ */
+export function selectStrategyName(messageCount: number): 'summarize' | 'truncate' {
+  return messageCount > SUMMARIZE_THRESHOLD ? 'summarize' : 'truncate'
+}
 
 export function activate(api: ExtensionAPI): Disposable {
   // Register all compaction strategies
@@ -17,10 +34,27 @@ export function activate(api: ExtensionAPI): Disposable {
     trackTokens(usage.sessionId, usage.inputTokens, usage.outputTokens)
   })
 
+  // Log compaction events for observability
+  const compactedDisposable = api.on('context:compacted', (data) => {
+    const event = data as {
+      agentId: string
+      tokensBefore: number
+      tokensAfter: number
+      messagesBefore: number
+      messagesAfter: number
+      strategy: string
+    }
+    api.log.info(
+      `Context compacted: ${event.tokensBefore} → ${event.tokensAfter} tokens ` +
+        `(${event.messagesBefore} → ${event.messagesAfter} messages, strategy: ${event.strategy})`
+    )
+  })
+
   return {
     dispose() {
       for (const d of strategyDisposables) d.dispose()
       tokenDisposable.dispose()
+      compactedDisposable.dispose()
     },
   }
 }

@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as z from 'zod'
 import { installMockPlatform } from '../__test-utils__/mock-platform.js'
-import { addToolMiddleware, resetRegistries } from '../extensions/api.js'
+import { addToolMiddleware, onEvent, resetRegistries } from '../extensions/api.js'
 import { resetLogger } from '../logger/logger.js'
 import { defineTool } from './define.js'
 import {
@@ -89,6 +89,33 @@ describe('Tool Registry', () => {
       registerTool(echoTool)
       resetTools()
       expect(getAllTools()).toHaveLength(0)
+    })
+
+    it('emits tools:registered event on register', () => {
+      const handler = vi.fn()
+      const sub = onEvent('tools:registered', handler)
+
+      registerTool(echoTool)
+
+      expect(handler).toHaveBeenCalledOnce()
+      expect(handler).toHaveBeenCalledWith({
+        name: 'echo',
+        definition: echoTool.definition,
+      })
+      sub.dispose()
+    })
+
+    it('emits tools:unregistered event on unregister', () => {
+      registerTool(echoTool)
+
+      const handler = vi.fn()
+      const sub = onEvent('tools:unregistered', handler)
+
+      unregisterTool('echo')
+
+      expect(handler).toHaveBeenCalledOnce()
+      expect(handler).toHaveBeenCalledWith({ name: 'echo' })
+      sub.dispose()
     })
   })
 

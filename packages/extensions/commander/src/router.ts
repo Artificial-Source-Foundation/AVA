@@ -93,3 +93,131 @@ export function selectWorker(
 export function getFilteredTools(allowedToolNames: string[]): string[] {
   return allowedToolNames.filter((t) => !t.startsWith('delegate_'))
 }
+
+// ─── Domain analysis ──────────────────────────────────────────────────────
+
+export type TaskDomain = 'frontend' | 'backend' | 'testing' | 'devops' | 'fullstack'
+
+interface DomainPattern {
+  domain: TaskDomain
+  keywords: string[]
+  weight: number
+}
+
+const DOMAIN_PATTERNS: DomainPattern[] = [
+  {
+    domain: 'frontend',
+    keywords: [
+      'component',
+      'ui',
+      'css',
+      'style',
+      'layout',
+      'button',
+      'form',
+      'page',
+      'react',
+      'solid',
+      'vue',
+      'svelte',
+      'html',
+      'tsx',
+      'jsx',
+      'tailwind',
+      'responsive',
+      'animation',
+      'modal',
+      'sidebar',
+      'header',
+      'footer',
+    ],
+    weight: 0.85,
+  },
+  {
+    domain: 'backend',
+    keywords: [
+      'api',
+      'endpoint',
+      'database',
+      'schema',
+      'migration',
+      'server',
+      'route',
+      'middleware',
+      'auth',
+      'session',
+      'query',
+      'sql',
+      'rest',
+      'graphql',
+      'websocket',
+      'controller',
+      'service',
+      'model',
+    ],
+    weight: 0.85,
+  },
+  {
+    domain: 'testing',
+    keywords: [
+      'test',
+      'spec',
+      'coverage',
+      'assert',
+      'mock',
+      'stub',
+      'fixture',
+      'integration test',
+      'e2e',
+      'snapshot',
+      'vitest',
+      'jest',
+    ],
+    weight: 0.9,
+  },
+  {
+    domain: 'devops',
+    keywords: [
+      'deploy',
+      'ci',
+      'cd',
+      'pipeline',
+      'docker',
+      'build',
+      'release',
+      'config',
+      'env',
+      'infrastructure',
+      'nginx',
+      'kubernetes',
+    ],
+    weight: 0.8,
+  },
+]
+
+/**
+ * Analyze a task description and return the most likely domain.
+ * Falls back to 'fullstack' when no strong signal is found.
+ */
+export function analyzeDomain(description: string): TaskDomain {
+  const lower = description.toLowerCase()
+  let bestDomain: TaskDomain = 'fullstack'
+  let bestScore = 0
+
+  for (const pattern of DOMAIN_PATTERNS) {
+    let matchCount = 0
+    for (const kw of pattern.keywords) {
+      if (lower.includes(kw)) matchCount++
+    }
+
+    if (matchCount > 0) {
+      const score = pattern.weight * (1 + (matchCount - 1) * 0.15)
+      if (score > bestScore) {
+        bestScore = score
+        bestDomain = pattern.domain
+      }
+    }
+  }
+
+  return bestDomain
+}

@@ -46,7 +46,16 @@ export interface ToolResultBlock {
   is_error?: boolean
 }
 
-export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock
+export interface ImageBlock {
+  type: 'image'
+  source: {
+    type: 'base64' | 'url'
+    media_type: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+    data: string // base64 data or URL
+  }
+}
+
+export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ImageBlock
 export type MessageContent = string | ContentBlock[]
 
 export interface ChatMessage {

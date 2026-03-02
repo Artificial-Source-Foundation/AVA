@@ -6,6 +6,7 @@
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
+import { recordFailure, recordSuccess } from './availability.js'
 import { addModelsToRegistry, createModelRegistry } from './registry.js'
 import type { ModelInfo } from './types.js'
 
@@ -33,11 +34,30 @@ export function activate(api: ExtensionAPI): Disposable {
     })
   )
 
+  // Track model availability via LLM events
+  disposables.push(
+    api.on('llm:response', (data) => {
+      const event = data as { provider: string; model: string; latencyMs: number }
+      if (event.provider && event.model) {
+        recordSuccess(event.provider, event.model, event.latencyMs)
+      }
+    })
+  )
+
+  disposables.push(
+    api.on('llm:error', (data) => {
+      const event = data as { provider: string; model: string; error: string }
+      if (event.provider && event.model) {
+        recordFailure(event.provider, event.model, event.error)
+      }
+    })
+  )
+
   // Store registry for other extensions to query
   void api.storage.set('registry', Object.fromEntries(registry.models))
 
   api.emit('models:ready', { count: registry.models.size })
-  api.log.debug('Models extension activated')
+  api.log.debug('Models extension activated (availability tracking enabled)')
 
   return {
     dispose() {

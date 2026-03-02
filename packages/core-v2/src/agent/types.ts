@@ -29,6 +29,8 @@ export interface AgentConfig {
   allowedTools?: string[]
   /** Context compaction threshold (0-1). Compact when usage exceeds this fraction. Default: 0.8 */
   compactionThreshold?: number
+  /** Execute tool calls in parallel via Promise.all(). Default: true */
+  parallelToolExecution?: boolean
 }
 
 export const DEFAULT_AGENT_CONFIG: Omit<AgentConfig, 'maxTimeMinutes' | 'maxTurns'> = {
@@ -86,6 +88,7 @@ export type AgentEvent =
       messagesBefore: number
       messagesAfter: number
     }
+  | { type: 'agent:steered'; agentId: string; message: string }
   | {
       type: 'delegation:start'
       agentId: string

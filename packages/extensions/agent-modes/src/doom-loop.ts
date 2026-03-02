@@ -110,6 +110,56 @@ export function getHistory(sessionId: string): readonly RecordedToolCall[] {
   return sessions.get(sessionId) ?? []
 }
 
+// ─── Global (Registry-Level) Doom Loop Detection ─────────────────────────────
+
+const globalToolCallLog: Array<{ agentId: string; hash: string; timestamp: number }> = []
+const MAX_GLOBAL_LOG = 100
+
+export function trackGlobalToolCall(
+  agentId: string,
+  toolName: string,
+  args: Record<string, unknown>
+): void {
+  const hash = `${toolName}:${JSON.stringify(args)}`
+  globalToolCallLog.push({ agentId, hash, timestamp: Date.now() })
+  if (globalToolCallLog.length > MAX_GLOBAL_LOG) globalToolCallLog.shift()
+}
+
+export function detectGlobalDoomLoop(windowMs: number = 60_000): {
+  detected: boolean
+  pattern?: string
+  count?: number
+} {
+  const cutoff = Date.now() - windowMs
+  const recent = globalToolCallLog.filter((e) => e.timestamp > cutoff)
+
+  // Count frequency of each hash across all agents
+  const counts = new Map<string, number>()
+  for (const entry of recent) {
+    counts.set(entry.hash, (counts.get(entry.hash) ?? 0) + 1)
+  }
+
+  for (const [hash, count] of counts) {
+    if (count >= 5) {
+      return { detected: true, pattern: hash, count }
+    }
+  }
+
+  return { detected: false }
+}
+
+export function resetGlobalDoomLoop(): void {
+  globalToolCallLog.length = 0
+}
+
+export function getGlobalToolCallLog(): ReadonlyArray<{
+  agentId: string
+  hash: string
+  timestamp: number
+}> {
+  return globalToolCallLog
+}
+
 export function registerDoomLoop(api: ExtensionAPI): Disposable {
   const disposable = api.on('tool:finish', (data: unknown) => {
     const event = data as { name: string; args?: Record<string, unknown>; sessionId?: string }

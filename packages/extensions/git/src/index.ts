@@ -1,8 +1,10 @@
 /**
- * Git extension — snapshots and auto-commit.
+ * Git extension — snapshots, auto-commit, git tools, and checkpoints.
  *
  * Takes snapshots before file modifications for easy rollback.
  * Registers middleware at priority 30 and a /snapshot command.
+ * Provides git tools: create_pr, create_branch, switch_branch, read_issue.
+ * Per-tool-call checkpoints via stash for rollback safety.
  * Graceful no-op if not in a git repository.
  */
 
@@ -13,6 +15,10 @@ import type {
   ToolMiddlewareContext,
   ToolMiddlewareResult,
 } from '@ava/core-v2/extensions'
+import { createBranchTool, switchBranchTool } from './branch.js'
+import { createCheckpointMiddleware } from './checkpoints.js'
+import { readIssueTool } from './issue.js'
+import { createPrTool } from './pr.js'
 import { createSnapshotManager, isGitRepo } from './snapshots.js'
 import type { GitConfig } from './types.js'
 import { DEFAULT_GIT_CONFIG } from './types.js'
@@ -34,6 +40,18 @@ export function activate(api: ExtensionAPI): Disposable {
   const manager = createSnapshotManager(api.platform.shell, config)
   let gitAvailable = false
   let cwd = ''
+
+  // ── Git tools ───────────────────────────────────────────────────────────────
+  disposables.push(api.registerTool(createPrTool))
+  disposables.push(api.registerTool(createBranchTool))
+  disposables.push(api.registerTool(switchBranchTool))
+  disposables.push(api.registerTool(readIssueTool))
+
+  // ── Per-tool-call checkpoints ───────────────────────────────────────────────
+  const { middleware: checkpointMiddleware, store: checkpointStore } = createCheckpointMiddleware(
+    api.platform.shell
+  )
+  disposables.push(api.addToolMiddleware(checkpointMiddleware))
 
   // Check git availability on session open
   disposables.push(
@@ -118,6 +136,7 @@ export function activate(api: ExtensionAPI): Disposable {
     dispose() {
       for (const d of disposables) d.dispose()
       manager.clear()
+      checkpointStore.reset()
     },
   }
 }

@@ -5,6 +5,7 @@
 
 import type {
   ChatMessage,
+  ImageBlock,
   LLMClient,
   LLMProvider,
   MessageContent,
@@ -117,15 +118,36 @@ export class ToolCallBuffer {
 
 // ─── Message Conversion ─────────────────────────────────────────────────────
 
+interface OpenAIImageContent {
+  type: 'image_url'
+  image_url: { url: string }
+}
+
+interface OpenAITextContent {
+  type: 'text'
+  text: string
+}
+
+type OpenAIContentPart = OpenAITextContent | OpenAIImageContent
+
 interface OpenAIMessage {
   role: string
-  content: string | null
+  content: string | OpenAIContentPart[] | null
   tool_calls?: Array<{
     id: string
     type: 'function'
     function: { name: string; arguments: string }
   }>
   tool_call_id?: string
+}
+
+/** Convert an ImageBlock to OpenAI image_url content part. */
+function convertImageBlock(block: ImageBlock): OpenAIImageContent {
+  const url =
+    block.source.type === 'url'
+      ? block.source.data
+      : `data:${block.source.media_type};base64,${block.source.data}`
+  return { type: 'image_url', image_url: { url } }
 }
 
 /** Extract plain text from MessageContent. */
@@ -180,10 +202,11 @@ export function convertMessagesToOpenAI(messages: ChatMessage[]): OpenAIMessage[
       continue
     }
 
-    // User with tool_result blocks → separate tool messages
+    // User with tool_result, text, and/or image blocks
     if (msg.role === 'user') {
       const toolResults = blocks.filter((b): b is ToolResultBlock => b.type === 'tool_result')
-      const textParts = blocks.filter((b): b is TextBlock => b.type === 'text').map((b) => b.text)
+      const textParts = blocks.filter((b): b is TextBlock => b.type === 'text')
+      const imageBlocks = blocks.filter((b): b is ImageBlock => b.type === 'image')
 
       // Emit tool result messages first
       for (const tr of toolResults) {
@@ -194,9 +217,22 @@ export function convertMessagesToOpenAI(messages: ChatMessage[]): OpenAIMessage[
         })
       }
 
-      // If there are also text blocks, emit a user message
-      if (textParts.length > 0) {
-        result.push({ role: 'user', content: textParts.join('\n') })
+      // Build user message with text and/or images
+      const contentParts: OpenAIContentPart[] = []
+      for (const tp of textParts) {
+        contentParts.push({ type: 'text', text: tp.text })
+      }
+      for (const img of imageBlocks) {
+        contentParts.push(convertImageBlock(img))
+      }
+
+      if (contentParts.length > 0) {
+        // Use simple string when only text parts, array when images present
+        if (imageBlocks.length === 0 && textParts.length > 0) {
+          result.push({ role: 'user', content: textParts.map((b) => b.text).join('\n') })
+        } else {
+          result.push({ role: 'user', content: contentParts })
+        }
       }
       continue
     }

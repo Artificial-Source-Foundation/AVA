@@ -16,6 +16,7 @@ import type {
   ToolMiddlewareContext,
   ToolMiddlewareResult,
 } from '@ava/core-v2/extensions'
+import { isToolAutoApproved, type PermissionMode } from './modes.js'
 import {
   classifyRisk,
   DEFAULT_SETTINGS,
@@ -165,15 +166,26 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
         return { blocked: true, reason: 'Path matches a blocked pattern' }
       }
 
-      // 5. YOLO mode: approve everything not blocked above
-      if (settings.yolo) return undefined
+      // 5. Permission mode check (when set, takes priority over individual booleans)
+      if (settings.permissionMode) {
+        const mode = settings.permissionMode as PermissionMode
+        if (mode === 'suggest') {
+          // Suggest mode blocks all tool execution
+          return { blocked: true, reason: 'Suggest mode — tool execution disabled' }
+        }
+        if (isToolAutoApproved(toolName, mode)) return undefined
+        // Not auto-approved by mode — fall through to bus/fallback approval
+      } else {
+        // 6. YOLO mode (legacy boolean): approve everything not blocked above
+        if (settings.yolo) return undefined
+      }
 
-      // 6. Always-approved list check
+      // 7. Always-approved list check
       if (settings.alwaysApproved.length > 0 && settings.alwaysApproved.includes(toolName)) {
         return undefined
       }
 
-      // 7. Per-tool rules (first match wins)
+      // 8. Per-tool rules (first match wins)
       if (settings.toolRules.length > 0) {
         const rule = evaluateToolRules(toolName, path || undefined, settings.toolRules)
         if (rule) {
@@ -187,33 +199,36 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
 
       const risk = classifyRisk(toolName, args)
 
-      // 8. Auto-approve reads
-      if (risk === 'low' && settings.autoApproveReads) return undefined
+      // Skip legacy boolean checks when permission mode is set
+      if (!settings.permissionMode) {
+        // 9. Auto-approve reads
+        if (risk === 'low' && settings.autoApproveReads) return undefined
 
-      // 9. Smart-approve: safe bash commands + trusted paths
-      if (settings.smartApprove) {
-        if (toolName === 'bash') {
-          const command = (args.command ?? '') as string
-          if (isSafeBashCommand(command)) return undefined
+        // 10. Smart-approve: safe bash commands + trusted paths
+        if (settings.smartApprove) {
+          if (toolName === 'bash') {
+            const command = (args.command ?? '') as string
+            if (isSafeBashCommand(command)) return undefined
+          }
+          if (
+            path &&
+            settings.trustedPaths.length > 0 &&
+            isInTrustedPath(path, settings.trustedPaths)
+          ) {
+            return undefined
+          }
         }
-        if (
-          path &&
-          settings.trustedPaths.length > 0 &&
-          isInTrustedPath(path, settings.trustedPaths)
-        ) {
-          return undefined
+
+        // 11. Auto-approve writes if configured
+        if (risk === 'medium' && settings.autoApproveWrites) return undefined
+
+        // 12. Auto-approve commands if configured
+        if (toolName === 'bash' && settings.autoApproveCommands) {
+          if (!isSudoCommand(args)) return undefined
         }
       }
 
-      // 10. Auto-approve writes if configured
-      if (risk === 'medium' && settings.autoApproveWrites) return undefined
-
-      // 11. Auto-approve commands if configured
-      if (toolName === 'bash' && settings.autoApproveCommands) {
-        if (!isSudoCommand(args)) return undefined
-      }
-
-      // 12. Bus-based approval with alwaysApprove support
+      // 13. Bus-based approval with alwaysApprove support
       if (bus?.hasSubscribers('permission:request')) {
         const response = await bus.request<PermissionRequest, PermissionResponse>(
           { type: 'permission:request', toolName, args, risk },
@@ -233,7 +248,7 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
         return undefined
       }
 
-      // 13. No approval handler — apply fallback blocking rules
+      // 14. No approval handler — apply fallback blocking rules
 
       // Warn on .env files
       if (isEnvFile(args)) {

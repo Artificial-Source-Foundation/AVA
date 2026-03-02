@@ -20,11 +20,13 @@ const tools = new Map<string, AnyTool>()
 
 export function registerTool(tool: AnyTool): void {
   tools.set(tool.definition.name, tool)
+  emitEvent('tools:registered', { name: tool.definition.name, definition: tool.definition })
   log.debug(`Tool registered: ${tool.definition.name}`)
 }
 
 export function unregisterTool(name: string): void {
   tools.delete(name)
+  emitEvent('tools:unregistered', { name })
 }
 
 export function getTool(name: string): Tool | undefined {

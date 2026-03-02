@@ -6,6 +6,7 @@
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
+import { registerAutoLearn } from './auto-learn.js'
 import { MemoryStore } from './store.js'
 import { createMemoryTools } from './tools.js'
 
@@ -29,7 +30,10 @@ export function activate(api: ExtensionAPI): Disposable {
     })
   )
 
-  api.log.debug(`Memory extension activated (${tools.length} tools)`)
+  // Register auto-learning from agent sessions
+  registerAutoLearn(api)
+
+  api.log.debug(`Memory extension activated (${tools.length} tools, auto-learn enabled)`)
 
   return {
     dispose() {

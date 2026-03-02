@@ -134,6 +134,56 @@ describe('BUILTIN_WORKERS (legacy compat)', () => {
   })
 })
 
+describe('lead domain tool filtering', () => {
+  const frontendLead = LEAD_AGENTS.find((a) => a.id === 'frontend-lead')!
+  const backendLead = LEAD_AGENTS.find((a) => a.id === 'backend-lead')!
+  const qaLead = LEAD_AGENTS.find((a) => a.id === 'qa-lead')!
+  const fullstackLead = LEAD_AGENTS.find((a) => a.id === 'fullstack-lead')!
+
+  it('frontend lead has core file tools and websearch but no LSP', () => {
+    expect(frontendLead.tools).toContain('read_file')
+    expect(frontendLead.tools).toContain('write_file')
+    expect(frontendLead.tools).toContain('edit')
+    expect(frontendLead.tools).toContain('bash')
+    expect(frontendLead.tools).toContain('websearch')
+    expect(frontendLead.tools).not.toContain('lsp_diagnostics')
+    expect(frontendLead.tools).not.toContain('lsp_hover')
+    expect(frontendLead.tools).not.toContain('lsp_definition')
+  })
+
+  it('backend lead has all core tools plus LSP tools', () => {
+    expect(backendLead.tools).toContain('read_file')
+    expect(backendLead.tools).toContain('write_file')
+    expect(backendLead.tools).toContain('edit')
+    expect(backendLead.tools).toContain('bash')
+    expect(backendLead.tools).toContain('lsp_diagnostics')
+    expect(backendLead.tools).toContain('lsp_hover')
+    expect(backendLead.tools).toContain('lsp_definition')
+  })
+
+  it('qa lead has read-only tools plus bash and diagnostics', () => {
+    expect(qaLead.tools).toContain('read_file')
+    expect(qaLead.tools).toContain('bash')
+    expect(qaLead.tools).toContain('grep')
+    expect(qaLead.tools).toContain('glob')
+    expect(qaLead.tools).toContain('lsp_diagnostics')
+    expect(qaLead.tools).not.toContain('write_file')
+    expect(qaLead.tools).not.toContain('edit')
+    expect(qaLead.tools).not.toContain('create_file')
+  })
+
+  it('fullstack lead has all tools', () => {
+    expect(fullstackLead.tools).toContain('read_file')
+    expect(fullstackLead.tools).toContain('write_file')
+    expect(fullstackLead.tools).toContain('edit')
+    expect(fullstackLead.tools).toContain('bash')
+    expect(fullstackLead.tools).toContain('websearch')
+    expect(fullstackLead.tools).toContain('lsp_diagnostics')
+    expect(fullstackLead.tools).toContain('lsp_hover')
+    expect(fullstackLead.tools).toContain('lsp_definition')
+  })
+})
+
 describe('specific workers', () => {
   const coder = WORKER_AGENTS.find((a) => a.id === 'coder')!
   const reviewer = WORKER_AGENTS.find((a) => a.id === 'reviewer')!

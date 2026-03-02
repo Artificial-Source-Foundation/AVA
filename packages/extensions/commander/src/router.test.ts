@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analyzeTask, getFilteredTools, selectWorker } from './router.js'
+import { analyzeDomain, analyzeTask, getFilteredTools, selectWorker } from './router.js'
 import { BUILTIN_WORKERS } from './workers.js'
 
 describe('Task Router', () => {
@@ -88,6 +88,43 @@ describe('Task Router', () => {
     it('keeps all tools when no delegates', () => {
       const tools = ['read_file', 'write_file', 'bash']
       expect(getFilteredTools(tools)).toEqual(tools)
+    })
+  })
+
+  describe('analyzeDomain', () => {
+    it('identifies frontend tasks', () => {
+      expect(analyzeDomain('Build a new UI component with CSS styling')).toBe('frontend')
+    })
+
+    it('identifies backend tasks', () => {
+      expect(analyzeDomain('Add a new API endpoint for authentication')).toBe('backend')
+    })
+
+    it('identifies testing tasks', () => {
+      expect(analyzeDomain('Write integration test with mock fixtures')).toBe('testing')
+    })
+
+    it('identifies devops tasks', () => {
+      expect(analyzeDomain('Set up Docker container for deployment pipeline')).toBe('devops')
+    })
+
+    it('returns fullstack for ambiguous tasks', () => {
+      expect(analyzeDomain('Do the work now')).toBe('fullstack')
+    })
+
+    it('uses strongest signal when multiple domains match', () => {
+      // "api" + "endpoint" gives backend 2 keyword matches -> higher boosted score
+      // than a single "test" match for testing domain
+      const result = analyzeDomain('Write a test for the API endpoint')
+      expect(result).toBe('backend')
+    })
+
+    it('increases score for multiple keyword matches', () => {
+      // Multiple frontend keywords should boost confidence
+      const result = analyzeDomain(
+        'Build a responsive layout with CSS and animation for the modal component'
+      )
+      expect(result).toBe('frontend')
     })
   })
 })

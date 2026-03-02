@@ -104,4 +104,15 @@ export function activate(api: ExtensionAPI): Disposable {
   }
 }
 
-export { callTool, getPrompts, getResources, getTools, resetMCP } from './manager.js'
+export type { HealthCheckConfig, HealthStatus, MCPManager } from './health.js'
+export { MCPHealthMonitor } from './health.js'
+export {
+  callTool,
+  getConnectedServers,
+  getPrompts,
+  getResources,
+  getTools,
+  ping,
+  resetMCP,
+  restart,
+} from './manager.js'

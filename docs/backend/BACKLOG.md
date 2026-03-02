@@ -4,7 +4,7 @@
 >
 > Gap analysis based on feature comparison with **8 competitors** (OpenCode, Gemini CLI, Aider, Goose, OpenHands, Plandex, Cline, Pi). Full competitive analysis: [`docs/research/competitive-analysis-2026-03.md`](../research/competitive-analysis-2026-03.md)
 
-**Current state:** 35 tools registered (6 core + 29 extended), 25 extensions, 14 providers (all real implementations), ~3,900 tests passing. CLI `ava agent-v2` works end-to-end with real LLMs.
+**Current state:** 43 tools registered (6 core + 37 extended), 28 extensions active, 14 providers (all real implementations), ~4,280 tests passing. CLI `ava agent-v2` works end-to-end with real LLMs. AGENTS.md + CLAUDE.md instruction injection confirmed working via smoke test. Parallel tool execution, image/vision, MCP HTTP streaming, auto-learning memory, model availability/fallback, plugin install backend all implemented.
 
 **AVA's unique advantages:** 3-tier Praxis hierarchy (no competitor has this), 35 built-in tools (more than any competitor), Tauri desktop (native, not Electron), extension-first architecture, Obsidian-style plugin ecosystem.
 
@@ -28,8 +28,8 @@ Features both OpenCode and Goose have that users expect. Highest-impact gaps.
 | ~~B-031~~ | ~~**LSP tool** — register callable tool~~ | ~~OpenCode (experimental)~~ | **DONE** (Sprint 17: 3 tools — `lsp_diagnostics`, `lsp_hover`, `lsp_definition`) |
 | ~~B-032~~ | ~~**LSP server lifecycle** — lazy spawn, auto-restart~~ | ~~OpenCode~~ | **DONE** (Sprint 17: `LSPServerManager` with per-language lifecycle, detect/spawn/stop/restart) |
 | B-033 | **Undo/Redo file changes** | OpenCode `/undo` `/redo` | Track file snapshots per tool call. Undo reverts files + removes message. Redo restores both. |
-| B-034 | **Parallel tool execution** | Both | Execute independent tool calls concurrently (currently sequential). Anthropic/OpenAI APIs support this. |
-| B-035 | **Granular permission system** | OpenCode (per-tool allow/ask/deny + globs), Goose (4 modes) | Upgrade permission middleware: per-tool rules, glob patterns for bash, smart-approve mode based on risk. |
+| ~~B-034~~ | ~~**Parallel tool execution**~~ | ~~Both~~ | **DONE** (Sprint 19: `parallelToolExecution` config, `Promise.all()` for independent tools, `--sequential` flag) |
+| ~~B-035~~ | ~~**Granular permission system**~~ | ~~OpenCode (per-tool allow/ask/deny + globs), Goose (4 modes)~~ | **DONE** (Sprint 19: 5 modes — suggest/ask/auto-edit/auto-safe/yolo, 6 tool categories, `isToolAutoApproved()`) |
 | B-036 | **File @mentions in input** | OpenCode (`@` fuzzy file search) | Fuzzy file picker in CLI input. Selected file contents injected into context. |
 | B-037 | **Session export** | OpenCode (export + share links), Goose (markdown/JSON/YAML) | Export conversations to markdown/JSON. Optional shareable links. |
 
@@ -83,12 +83,12 @@ MCP is feature-complete: tools, resources, prompts, sampling, OAuth, reconnectio
 
 | # | Task | Competitor ref | What it does |
 |---|------|----------------|-------------|
-| B-060 | **Background shell management** | Neither fully | `bash_background` / `bash_output` / `bash_kill` tools for long-running processes (dev servers, builds). |
+| ~~B-060~~ | ~~**Background shell management**~~ | ~~Neither fully~~ | **DONE** (Sprint 19: `bash_background`, `bash_output`, `bash_kill` tools + `ProcessRegistry` singleton) |
 | B-061 | **Streaming tool output** | Both stream | Stream bash output to UI as it happens. Needs `onProgress` callback in ToolContext. |
-| B-062 | **Tool result truncation** | Both do this | Standardize >50K char truncation with `[truncated]` marker across all tools. |
+| ~~B-062~~ | ~~**Tool result truncation**~~ | ~~Both do this~~ | **DONE** (Sprint 19: `truncateToolResults()` — 50KB per result, 200KB total, `[...truncated]` marker) |
 | B-063 | **Token-efficient tool results** | Both optimize | Strip redundant whitespace, structured summaries for large outputs. |
 | B-064 | **Auto-formatter after edits** | OpenCode (per-extension formatters) | Hook into tool middleware `afterExecute`. Run configured formatter on written files. |
-| B-065 | **Image/vision support** | Both | Pass image content blocks through to multimodal providers. Desktop: paste/drag images. CLI: file path references. |
+| ~~B-065~~ | ~~**Image/vision support**~~ | ~~Both~~ | **DONE** (Sprint 19: `ImageBlock` type, vision in agent loop, OpenAI-compat image conversion) |
 
 **Effort:** ~2-3 sessions
 
@@ -100,7 +100,7 @@ MCP is feature-complete: tools, resources, prompts, sampling, OAuth, reconnectio
 |---|------|-----------|-------------|
 | ~~B-070~~ | ~~Wire validator to agent loop~~ | ~~validator~~ | **DONE** (Sprint 17: `enabledByDefault: true`, `agent:completing` handler wired, runs validation pipeline) |
 | B-071 | Wire git snapshots to CLI | git | Middleware registered but untested with real repos |
-| B-072 | Wire instructions auto-inject | instructions | Loads CLAUDE.md but doesn't inject into system prompt |
+| ~~B-072~~ | ~~Wire instructions auto-inject~~ | ~~instructions~~ | **DONE** (Sprint 19: AGENTS.md + CLAUDE.md discovery, Promise-based wait, getSettings crash fix) |
 | ~~B-073~~ | ~~Wire focus-chain tracking~~ | ~~focus-chain~~ | **DONE** (Sprint 17: event names fixed to `turn:start`/`turn:end`/`agent:finish`, payload casts fixed) |
 | B-074 | Wire diff tracking | diff | No tool reports diffs back to agent |
 | B-075 | Wire scheduler | scheduler | Runner exists but nothing schedules tasks |
@@ -110,6 +110,28 @@ MCP is feature-complete: tools, resources, prompts, sampling, OAuth, reconnectio
 | B-079 | **Auto-generate project rules** | instructions | `/init` command scans project structure and generates `CLAUDE.md` with relevant instructions. OpenCode has this. |
 
 **Effort:** ~3 sessions
+
+---
+
+## Tier 6.5: Praxis Agent Quality (E2E Smoke Test Findings)
+
+Issues discovered during full E2E smoke test (2026-03-01). The 3-tier Praxis hierarchy works but has rough edges.
+
+| # | Task | Severity | What's wrong |
+|---|------|----------|-------------|
+| P-01 | **Child agent cwd scoping** | HIGH | `ls`, `glob`, and `read_file` in child agents sometimes resolve paths against AVA's project root instead of the `--cwd` passed to the CLI. Causes phantom files (e.g. `vitest.config.ts` appearing in a bare project). |
+| P-02 | **`create_file` fails in workers** | HIGH | Worker agents can't use `create_file` (silently fails). Falls back to `write_file` which works. Likely same cwd/path resolution issue as P-01. |
+| P-03 | **Auto-detect flat vs hierarchy** | MEDIUM | Simple tasks (single file edit, "say hello") shouldn't use 3-tier delegation. Add heuristic: if goal is short + few files, use flat agent mode. Reserve Praxis for multi-file/multi-domain tasks. Avoids the 414s-for-a-simple-task problem. |
+| P-04 | **Redundant file reads across tiers** | MEDIUM | Every tier re-reads the same files independently (math.ts was read 10+ times). Parent→child context passing should include already-read file contents or a shared file cache. |
+| P-05 | **Worker tool failures cascade** | LOW | When tester worker can't find `package.json`/`vitest.config.ts`, it burns through turns trying alternatives. Workers should have a "no test framework found, create minimal setup" fallback or report back quickly. |
+
+**Approach:**
+- P-01/P-02: Root cause is likely in `AgentExecutor` child agent creation — `cwd` not propagated to child's `ToolContext`. Fix in `commander/src/delegate.ts`.
+- P-03: Add complexity heuristic in commander's `filterTools()` — if goal tokens < threshold and no multi-domain keywords, bypass delegation and run flat.
+- P-04: Add `parentContext.files` map to delegation payload. Workers check cache before reading.
+- P-05: Add turn budget awareness to workers — if >50% turns used without progress, `attempt_completion` with partial result.
+
+**Effort:** ~1-2 sessions
 
 ---
 
@@ -135,11 +157,11 @@ Gaps identified from comprehensive analysis of 8 competitors + Pi baseline. See 
 
 | # | Task | Source | Priority | What it does |
 |---|------|--------|----------|-------------|
-| CG-01 | **Auto-compaction** | Pi, OpenCode, Gemini, Cline | HIGH | Trigger context compaction automatically when tokens > contextWindow - reserveTokens. Currently manual only. |
-| CG-02 | **Parallel tool execution** | Gemini CLI scheduler | HIGH | Execute independent tool calls concurrently. Gemini CLI's scheduler runs reads/searches in parallel. Same as B-034. |
-| CG-03 | **Git snapshot/undo** | OpenCode, Aider | HIGH | Periodic git-based undo snapshots with `revert` command. Auto-create restore points before file changes. Same as B-033. |
-| CG-04 | **Cross-provider message normalization** | Pi `transform-messages.ts` | MEDIUM | Normalize tool call IDs (OpenAI 450+ char → 64 char), strip/convert thinking blocks, handle provider-specific artifacts when switching models mid-session. |
-| CG-05 | **Steering interrupts** | Pi agent loop | MEDIUM | When user sends message mid-execution, skip remaining queued tool calls. Currently AVA doesn't skip pending tools. |
+| ~~CG-01~~ | ~~**Auto-compaction**~~ | ~~Pi, OpenCode, Gemini, Cline~~ | ~~HIGH~~ | **DONE** (Sprint 18+19: threshold-based compaction, strategy selection summarize/truncate, `context:compacted` event) |
+| ~~CG-02~~ | ~~**Parallel tool execution**~~ | ~~Gemini CLI scheduler~~ | ~~HIGH~~ | **DONE** (Sprint 19: same as B-034) |
+| CG-03 | **Git snapshot/undo** | OpenCode, Aider | HIGH | **PARTIAL** (Sprint 19: per-tool-call checkpoint middleware via `git stash create`. Full `/undo` command still needed.) |
+| ~~CG-04~~ | ~~**Cross-provider message normalization**~~ | ~~Pi `transform-messages.ts`~~ | ~~MEDIUM~~ | **DONE** (Sprint 18: `normalize.ts` message normalizer) |
+| ~~CG-05~~ | ~~**Steering interrupts**~~ | ~~Pi agent loop~~ | ~~MEDIUM~~ | **DONE** (Sprint 18+19: `steer()` method, `agent:steered` event, abort remaining tools on interrupt) |
 | CG-06 | **Session DAG/tree** | Pi session manager | MEDIUM | Store sessions as DAG (parent IDs per entry) instead of flat list. Enables non-destructive branching, tree navigation, branch summaries. |
 | CG-07 | **Plugin tool hooks** | OpenCode | MEDIUM | `plugin.tool.definition` event lets plugins mutate tool descriptions/parameters before execution. Small addition to ExtensionAPI. |
 | CG-08 | **Cross-tool SKILL.md compat** | OpenCode, Gemini CLI | MEDIUM | Load `.claude/skills/**/SKILL.md` and `.agents/skills/**/SKILL.md` alongside AVA's own skill convention. Instant ecosystem bridge. |
@@ -179,10 +201,11 @@ Features that go beyond parity and lean into AVA's unique strengths.
 Tier 0  ──→  ✓ DONE
 Tier 1  ──→  ✓ DONE
 Tier 2  ──→  ✓ DONE
-Tier 3  ──→  MOSTLY DONE — LSP ✓, undo/redo ✓. Remaining: parallel tools, @mentions, session export (2-3 sessions)
-Tier 4  ──→  ✓ DONE — MCP feature-complete (tools, resources, prompts, sampling, OAuth, reconnect). All 14 providers tested.
-Tier 5  ──→  Agent hardening: background shell, streaming, formatters, vision (2-3 sessions)
-Tier 6  ──→  MOSTLY DONE — Validator ✓, focus-chain ✓, memory ✓. Remaining: git wiring, scheduler, custom tools, /init (2 sessions)
+Tier 3  ──→  MOSTLY DONE — LSP ✓, parallel ✓, permissions ✓. Remaining: @mentions, session export (1 session)
+Tier 4  ──→  ✓ DONE — MCP feature-complete (tools, resources, prompts, sampling, OAuth, reconnect, HTTP streaming). All 14 providers tested.
+Tier 5  ──→  MOSTLY DONE — Background shell ✓, truncation ✓, vision ✓. Remaining: streaming output, formatters (1 session)
+Tier 6  ──→  MOSTLY DONE — Validator ✓, focus-chain ✓, memory ✓, instructions ✓, auto-learn ✓. Remaining: scheduler, custom tools, /init (1-2 sessions)
+Tier 6.5──→  Praxis agent quality: cwd scoping, flat mode fallback, shared context (1-2 sessions)
 Tier 7  ──→  Desktop integration: Tauri bridge, events, sessions (3-4 sessions)
 Tier 8  ──→  Differentiation: marketplace, server API, recipes, GitHub bot (6+ sessions)
 ```
@@ -235,3 +258,31 @@ feat(agent): parallel tool execution [B-034]
 | — | SQLite session storage (SessionStorage interface) | 2026-02-28 |
 | — | Symbol extraction (regex-based, 5 languages) | 2026-02-28 |
 | — | Provider tests for 10 remaining providers | 2026-02-28 |
+| B-072 | Wire instructions auto-inject (AGENTS.md + CLAUDE.md) | 2026-03-01 |
+| — | Fix instructions extension getSettings crash | 2026-03-01 |
+| — | Replace 200ms setTimeout race with Promise-based wait | 2026-03-01 |
+| — | Full E2E smoke test with Praxis hierarchy | 2026-03-01 |
+| B-034 | Parallel tool execution (Promise.all, configurable) | 2026-03-02 |
+| B-035 | Granular permission modes (5 modes, 6 categories) | 2026-03-02 |
+| B-060 | Background shell tools (bash_background/output/kill) | 2026-03-02 |
+| B-062 | Tool result truncation (50KB/result, 200KB total) | 2026-03-02 |
+| B-065 | Image/vision support (ImageBlock, agent loop, OpenAI compat) | 2026-03-02 |
+| CG-01 | Auto-compaction improvements (strategy selection) | 2026-03-02 |
+| CG-02 | Parallel tool execution (same as B-034) | 2026-03-02 |
+| CG-05 | Steering interrupts (steer method, agent:steered event) | 2026-03-02 |
+| — | Tool registry change notifications (tools:registered/unregistered events) | 2026-03-02 |
+| — | MCP health monitoring (configurable ping, auto-restart) | 2026-03-02 |
+| — | MCP streamable HTTP transport (bidirectional, session mgmt) | 2026-03-02 |
+| — | Praxis orchestrator (auto-planning, batch parallel execution) | 2026-03-02 |
+| — | Task routing integration (analyzeDomain, auto-select worker) | 2026-03-02 |
+| — | Per-domain tool filtering (frontend/backend/QA/fullstack leads) | 2026-03-02 |
+| — | Result aggregation (files changed, tests run, issues found) | 2026-03-02 |
+| — | Error recovery in delegation (retry with context, escalation) | 2026-03-02 |
+| — | Parallel agent execution in Praxis (independent subtasks) | 2026-03-02 |
+| — | Git tools: create_pr, create_branch, switch_branch, read_issue | 2026-03-02 |
+| — | Per-tool-call checkpoints (git stash middleware, rollback) | 2026-03-02 |
+| — | Toolshim for non-tool-calling models (XML parse/inject) | 2026-03-02 |
+| — | Auto-learning memory (tech-stack, test-framework, language detect) | 2026-03-02 |
+| — | Model availability tracking + fallback chains | 2026-03-02 |
+| — | Global doom loop detection (cross-agent, registry-level) | 2026-03-02 |
+| — | Plugin install/uninstall backend (local, GitHub, catalog API) | 2026-03-02 |

@@ -15,12 +15,19 @@ export {
   stripThinkingBlocks,
 } from './normalize.js'
 
+export {
+  buildToolSchemaXML,
+  needsToolShim,
+  parseToolCallsFromText,
+} from './toolshim.js'
+
 export type {
   AuthInfo,
   AuthMethod,
   ChatMessage,
   ContentBlock,
   Credentials,
+  ImageBlock,
   LLMClient,
   LLMProvider,
   MessageContent,

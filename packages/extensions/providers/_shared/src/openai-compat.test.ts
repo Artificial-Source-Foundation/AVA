@@ -202,6 +202,114 @@ describe('convertMessagesToOpenAI', () => {
     expect(result[0]!.tool_call_id).toBe('tc-1')
     expect(result[1]!.tool_call_id).toBe('tc-2')
   })
+
+  it('converts base64 image blocks to OpenAI image_url format', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'What is in this image?' },
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/png',
+              data: 'iVBORw0KGgoAAAANSUhEUg==',
+            },
+          },
+        ],
+      },
+    ]
+    const result = convertMessagesToOpenAI(messages)
+    expect(result).toHaveLength(1)
+    expect(result[0]!.role).toBe('user')
+
+    const content = result[0]!.content as Array<Record<string, unknown>>
+    expect(content).toHaveLength(2)
+    expect(content[0]).toEqual({ type: 'text', text: 'What is in this image?' })
+    expect(content[1]).toEqual({
+      type: 'image_url',
+      image_url: { url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==' },
+    })
+  })
+
+  it('converts url image blocks to OpenAI image_url format', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'url',
+              media_type: 'image/jpeg',
+              data: 'https://example.com/photo.jpg',
+            },
+          },
+          { type: 'text', text: 'Describe this' },
+        ],
+      },
+    ]
+    const result = convertMessagesToOpenAI(messages)
+    expect(result).toHaveLength(1)
+
+    const content = result[0]!.content as Array<Record<string, unknown>>
+    expect(content).toHaveLength(2)
+    expect(content[0]).toEqual({ type: 'text', text: 'Describe this' })
+    expect(content[1]).toEqual({
+      type: 'image_url',
+      image_url: { url: 'https://example.com/photo.jpg' },
+    })
+  })
+
+  it('keeps plain string format when user message has only text blocks', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Hello' },
+          { type: 'text', text: 'World' },
+        ],
+      },
+    ]
+    const result = convertMessagesToOpenAI(messages)
+    expect(result).toHaveLength(1)
+    expect(result[0]!.content).toBe('Hello\nWorld')
+  })
+
+  it('handles user message with tool results and image blocks', () => {
+    const messages: ChatMessage[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'tc-1', content: 'done' },
+          { type: 'text', text: 'Now analyze this screenshot' },
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/webp',
+              data: 'UklGR...',
+            },
+          },
+        ],
+      },
+    ]
+    const result = convertMessagesToOpenAI(messages)
+    // tool result becomes separate message, then user message with text+image
+    expect(result).toHaveLength(2)
+    expect(result[0]!.role).toBe('tool')
+    expect(result[0]!.tool_call_id).toBe('tc-1')
+    expect(result[1]!.role).toBe('user')
+
+    const content = result[1]!.content as Array<Record<string, unknown>>
+    expect(content).toHaveLength(2)
+    expect(content[0]).toEqual({ type: 'text', text: 'Now analyze this screenshot' })
+    expect(content[1]).toEqual({
+      type: 'image_url',
+      image_url: { url: 'data:image/webp;base64,UklGR...' },
+    })
+  })
 })
 
 describe('createOpenAICompatClient', () => {

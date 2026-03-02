@@ -8,6 +8,7 @@
 import type { IShell } from '@ava/core-v2/platform'
 import type { SamplingHandler } from './client.js'
 import { MCPClient } from './client.js'
+import { HttpStreamTransport } from './http-stream-transport.js'
 import { ReconnectStrategy } from './reconnect.js'
 import type { MCPTransport } from './transport.js'
 import { SSETransport, StdioTransport } from './transport.js'
@@ -18,6 +19,7 @@ interface ActiveConnection {
   client: MCPClient
   transport: MCPTransport
   reconnect?: ReconnectStrategy
+  connectOptions?: ConnectOptions
 }
 
 const connections = new Map<string, ActiveConnection>()
@@ -63,6 +65,8 @@ export async function connectServer(
     transport = new StdioTransport(options.shell, server.command, server.args ?? [], {
       env: server.env,
     })
+  } else if (server.transport === 'http-stream') {
+    transport = new HttpStreamTransport({ url: server.uri, headers: server.env })
   } else {
     transport = new SSETransport(server.uri)
   }
@@ -81,7 +85,7 @@ export async function connectServer(
       })
     : undefined
 
-  connections.set(server.name, { state, client, transport, reconnect })
+  connections.set(server.name, { state, client, transport, reconnect, connectOptions: options })
 
   // Set up reconnection on transport close
   if (reconnect) {
@@ -269,6 +273,41 @@ export async function getPrompt(
     const message = err instanceof Error ? err.message : String(err)
     return { success: false, output: `Failed to get prompt: ${message}` }
   }
+}
+
+/** Get the names of all currently connected servers. */
+export function getConnectedServers(): string[] {
+  const result: string[] = []
+  for (const [name, conn] of connections) {
+    if (conn.state.status === 'connected') {
+      result.push(name)
+    }
+  }
+  return result
+}
+
+/** Ping a server by listing its tools. Throws if not connected or on failure. */
+export async function ping(serverId: string): Promise<void> {
+  const conn = connections.get(serverId)
+  if (!conn || conn.state.status !== 'connected') {
+    throw new Error(`Server "${serverId}" is not connected`)
+  }
+  await conn.client.listTools()
+}
+
+/** Restart a server by disconnecting and reconnecting. */
+export async function restart(serverId: string): Promise<MCPTool[]> {
+  const conn = connections.get(serverId)
+  if (!conn) {
+    throw new Error(`Server "${serverId}" not found`)
+  }
+  const server = conn.state.server
+  const options = conn.connectOptions
+  if (!options) {
+    throw new Error(`No connect options stored for "${serverId}"`)
+  }
+  await disconnectServer(serverId)
+  return connectServer(server, options)
 }
 
 export async function resetMCP(): Promise<void> {

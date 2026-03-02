@@ -1,9 +1,24 @@
 import type { ToolContext } from '@ava/core-v2/tools'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentDefinition } from './agent-definition.js'
-import { createDelegateTool, resolveTools } from './delegate.js'
+import {
+  configureDelegation,
+  createDelegateTool,
+  getDelegationConfig,
+  resetDelegationConfig,
+  resolveTools,
+} from './delegate.js'
 import { clearRegistry, registerAgent } from './registry.js'
 import { WORKER_AGENTS } from './workers.js'
+
+// Track mock call count for conditional behavior
+let mockRunCallCount = 0
+let mockRunBehavior:
+  | 'success'
+  | 'fail-then-succeed'
+  | 'always-fail'
+  | 'throw-then-succeed'
+  | 'always-throw' = 'success'
 
 // Mock AgentExecutor
 vi.mock('@ava/core-v2/agent', () => ({
@@ -17,12 +32,43 @@ vi.mock('@ava/core-v2/agent', () => ({
     }
 
     async run(inputs: { goal: string; cwd: string }, _signal: AbortSignal) {
+      mockRunCallCount++
       this.onEvent?.({
         type: 'tool:start',
         agentId: this.config.id,
         toolName: 'read_file',
         args: {},
       })
+
+      if (mockRunBehavior === 'always-fail') {
+        return {
+          success: false,
+          output: `Failed: ${inputs.goal.slice(0, 50)}`,
+          terminateMode: 'ERROR',
+          turns: 1,
+          tokensUsed: { input: 50, output: 25 },
+          durationMs: 500,
+        }
+      }
+
+      if (mockRunBehavior === 'fail-then-succeed' && mockRunCallCount === 1) {
+        return {
+          success: false,
+          output: 'First attempt failed: syntax error in generated code',
+          terminateMode: 'ERROR',
+          turns: 2,
+          tokensUsed: { input: 80, output: 40 },
+          durationMs: 800,
+        }
+      }
+
+      if (mockRunBehavior === 'always-throw') {
+        throw new Error('Agent crashed unexpectedly')
+      }
+
+      if (mockRunBehavior === 'throw-then-succeed' && mockRunCallCount === 1) {
+        throw new Error('Transient agent crash')
+      }
 
       return {
         success: true,
@@ -38,6 +84,13 @@ vi.mock('@ava/core-v2/agent', () => ({
 
 const CODER = WORKER_AGENTS.find((a) => a.id === 'coder')!
 const REVIEWER = WORKER_AGENTS.find((a) => a.id === 'reviewer')!
+
+// Reset mock state before each test
+function resetMockState(): void {
+  mockRunCallCount = 0
+  mockRunBehavior = 'success'
+  resetDelegationConfig()
+}
 
 function createMockContext(overrides?: Partial<ToolContext>): ToolContext {
   return {
@@ -94,7 +147,10 @@ describe('resolveTools', () => {
 })
 
 describe('createDelegateTool', () => {
-  afterEach(() => clearRegistry())
+  afterEach(() => {
+    clearRegistry()
+    resetMockState()
+  })
 
   describe('tool definition', () => {
     it('creates tool with correct name', () => {
@@ -237,6 +293,142 @@ describe('createDelegateTool', () => {
       expect(tool.definition.name).toBe('delegate_frontend-lead')
       expect(tool.definition.description).toContain('delegate_coder')
       expect(tool.definition.description).toContain('delegate_tester')
+    })
+  })
+
+  describe('error recovery', () => {
+    afterEach(() => resetMockState())
+
+    it('retries once by default when delegation fails', async () => {
+      mockRunBehavior = 'fail-then-succeed'
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      const result = await tool.execute({ task: 'Write a function' }, ctx)
+
+      expect(result.success).toBe(true)
+      expect(result.output).toContain('Completed')
+      // Should have been called twice: first attempt fails, retry succeeds
+      expect(mockRunCallCount).toBe(2)
+    })
+
+    it('emits delegation:retry event on retry', async () => {
+      mockRunBehavior = 'fail-then-succeed'
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      await tool.execute({ task: 'Write a function' }, ctx)
+
+      const onEvent = ctx.onEvent as ReturnType<typeof vi.fn>
+      const retryEvent = onEvent.mock.calls.find(
+        (c: unknown[]) => (c[0] as Record<string, unknown>).type === 'delegation:retry'
+      )
+      expect(retryEvent).toBeDefined()
+      expect(retryEvent![0]).toMatchObject({
+        type: 'delegation:retry',
+        agentId: 'parent-agent-id',
+        workerName: 'coder',
+        attempt: 1,
+        maxRetries: 1,
+      })
+    })
+
+    it('returns failure after exhausting retries', async () => {
+      mockRunBehavior = 'always-fail'
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      const result = await tool.execute({ task: 'Write a function' }, ctx)
+
+      expect(result.success).toBe(false)
+      // Default maxRetries = 1, so 2 total attempts
+      expect(mockRunCallCount).toBe(2)
+    })
+
+    it('respects custom maxRetries configuration', async () => {
+      configureDelegation({ maxRetries: 3 })
+      mockRunBehavior = 'always-fail'
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      const result = await tool.execute({ task: 'Write a function' }, ctx)
+
+      expect(result.success).toBe(false)
+      // maxRetries = 3 means 4 total attempts (initial + 3 retries)
+      expect(mockRunCallCount).toBe(4)
+    })
+
+    it('does not retry when maxRetries is 0', async () => {
+      configureDelegation({ maxRetries: 0 })
+      mockRunBehavior = 'always-fail'
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      const result = await tool.execute({ task: 'Write a function' }, ctx)
+
+      expect(result.success).toBe(false)
+      expect(mockRunCallCount).toBe(1)
+    })
+
+    it('retries on thrown exceptions', async () => {
+      mockRunBehavior = 'throw-then-succeed'
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      const result = await tool.execute({ task: 'Write a function' }, ctx)
+
+      expect(result.success).toBe(true)
+      expect(mockRunCallCount).toBe(2)
+    })
+
+    it('returns detailed error after exception exhausts retries', async () => {
+      mockRunBehavior = 'always-throw'
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      const result = await tool.execute({ task: 'Write a function' }, ctx)
+
+      expect(result.success).toBe(false)
+      expect(result.output).toContain('Coder failed:')
+      expect(result.output).toContain('Agent crashed unexpectedly')
+    })
+
+    it('appends failure context to retry goal', async () => {
+      mockRunBehavior = 'fail-then-succeed'
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      await tool.execute({ task: 'Write a function' }, ctx)
+
+      // The retry should have emitted a delegation:start with the original task
+      const onEvent = ctx.onEvent as ReturnType<typeof vi.fn>
+      const startEvents = onEvent.mock.calls.filter(
+        (c: unknown[]) => (c[0] as Record<string, unknown>).type === 'delegation:start'
+      )
+      // Two delegation:start events (initial + retry)
+      expect(startEvents).toHaveLength(2)
+    })
+
+    it('getDelegationConfig returns current config', () => {
+      expect(getDelegationConfig().maxRetries).toBe(1)
+      configureDelegation({ maxRetries: 5 })
+      expect(getDelegationConfig().maxRetries).toBe(5)
+    })
+
+    it('emits delegation:complete only once on successful retry', async () => {
+      mockRunBehavior = 'fail-then-succeed'
+      const tool = createDelegateTool(CODER)
+      const ctx = createMockContext()
+
+      await tool.execute({ task: 'Write a function' }, ctx)
+
+      const onEvent = ctx.onEvent as ReturnType<typeof vi.fn>
+      const completeEvents = onEvent.mock.calls.filter(
+        (c: unknown[]) => (c[0] as Record<string, unknown>).type === 'delegation:complete'
+      )
+      // Only the final successful result emits delegation:complete
+      expect(completeEvents).toHaveLength(1)
+      expect(completeEvents[0]![0]).toMatchObject({ success: true })
     })
   })
 })

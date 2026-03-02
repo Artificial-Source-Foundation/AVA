@@ -93,21 +93,24 @@ packages/core-v2/src/
 packages/extensions/
 ├── providers/       # 14 LLM providers (anthropic, openai, google, etc.)
 ├── permissions/     # Safety & permission middleware
-├── tools-extended/  # 18 additional tools (browser, websearch, etc.)
+├── tools-extended/  # 20 additional tools (websearch, background shell, etc.)
 ├── prompts/         # System prompt building
-├── context/         # Token tracking + compaction
-├── agent-modes/     # Plan mode, minimal mode, doom loop, recovery
+├── context/         # Token tracking + compaction + strategy selection
+├── agent-modes/     # Plan mode, minimal mode, doom loop (local + global), recovery
 ├── hooks/           # Lifecycle hooks as middleware
 ├── validator/       # QA pipeline (syntax, types, lint, test)
-├── commander/       # Team hierarchy (Team Lead → Senior Leads → Junior Devs)
-├── mcp/             # MCP protocol client
+├── commander/       # Praxis hierarchy (Commander → Leads → Workers) + orchestrator
+├── mcp/             # MCP protocol client (stdio, SSE, HTTP streaming)
 ├── codebase/        # Repo map, symbols, PageRank
-├── git/             # Git snapshots, auto-commit
+├── git/             # Git snapshots, checkpoints, PR/branch/issue tools
 ├── lsp/             # Language Server Protocol
 ├── diff/            # Diff tracking
 ├── focus-chain/     # Task progress tracking
 ├── instructions/    # Project instruction loading
-├── models/          # Model registry
+├── memory/          # Persistent cross-session memory + auto-learning
+├── models/          # Model registry + availability tracking + fallback
+├── plugins/         # Plugin install/uninstall backend + catalog API
+├── permissions/     # Safety middleware + 5 granular permission modes
 ├── scheduler/       # Background task scheduler
 ├── skills/          # Auto-invoked knowledge modules
 ├── custom-commands/ # TOML user commands
@@ -217,7 +220,7 @@ api.registerAgentMode(myMode)
 
 ---
 
-## Tools (35)
+## Tools (43)
 
 | Tool | Location | Purpose |
 |------|----------|---------|
@@ -249,6 +252,9 @@ api.registerAgentMode(myMode)
 | attempt_completion | extensions | Finish task with summary |
 | plan_enter | extensions | Enter plan mode |
 | plan_exit | extensions | Exit plan mode |
+| bash_background | extensions | Spawn background process, return PID |
+| bash_output | extensions | Read stdout/stderr from background PID |
+| bash_kill | extensions | Kill background process by PID |
 | memory_read | memory | Read a persistent memory entry |
 | memory_write | memory | Save a persistent memory entry |
 | memory_list | memory | List all memory entries |
@@ -256,6 +262,10 @@ api.registerAgentMode(myMode)
 | lsp_diagnostics | lsp | Get LSP diagnostics for a file |
 | lsp_hover | lsp | Get hover info for a symbol |
 | lsp_definition | lsp | Go to definition of a symbol |
+| create_pr | git | Create GitHub pull request via `gh` |
+| create_branch | git | Create and switch to new git branch |
+| switch_branch | git | Switch to existing git branch |
+| read_issue | git | Read GitHub issue details via `gh` |
 
 ---
 

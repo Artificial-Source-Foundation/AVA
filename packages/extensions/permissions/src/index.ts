@@ -26,6 +26,7 @@ export function activate(api: ExtensionAPI): Disposable {
         toolRules: settings.toolRules as ToolPermissionRule[] | undefined,
         smartApprove: settings.smartApprove as boolean | undefined,
         alwaysApproved: settings.alwaysApproved as string[] | undefined,
+        permissionMode: settings.permissionMode as string | undefined,
       })
     }
   } catch {
@@ -45,6 +46,7 @@ export function activate(api: ExtensionAPI): Disposable {
       toolRules: ps.toolRules as ToolPermissionRule[] | undefined,
       smartApprove: ps.smartApprove as boolean | undefined,
       alwaysApproved: ps.alwaysApproved as string[] | undefined,
+      permissionMode: ps.permissionMode as string | undefined,
     })
   })
 
@@ -67,6 +69,13 @@ export {
   resetSettings,
   updateSettings,
 } from './middleware.js'
+export type { PermissionMode, PermissionModeConfig } from './modes.js'
+export {
+  getAllPermissionModes,
+  getPermissionMode,
+  isToolAutoApproved,
+  PERMISSION_MODES,
+} from './modes.js'
 export type {
   PermissionRequest,
   PermissionResponse,

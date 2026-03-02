@@ -1,11 +1,16 @@
 /**
- * MCP transport layer — stdio and SSE transports.
+ * MCP transport layer — stdio, SSE, and streamable HTTP transports.
  *
- * Handles JSON-RPC 2.0 message framing over stdio (newline-delimited JSON)
- * and SSE (Server-Sent Events with POST for sending).
+ * Handles JSON-RPC 2.0 message framing over stdio (newline-delimited JSON),
+ * SSE (Server-Sent Events with POST for sending), and streamable HTTP
+ * (bidirectional HTTP POST + SSE with session management).
  */
 
 import type { ChildProcess, IShell, SpawnOptions } from '@ava/core-v2/platform'
+
+export type { HttpStreamConfig } from './http-stream-transport.js'
+// Re-export HttpStreamTransport from its own file (keeps transport.ts under 300 lines)
+export { HttpStreamTransport } from './http-stream-transport.js'
 
 // ---- JSON-RPC 2.0 types ----
 

@@ -12,6 +12,7 @@ function contentLength(content: MessageContent): number {
   return content.reduce((sum, b) => {
     if (b.type === 'text') return sum + b.text.length
     if (b.type === 'tool_result') return sum + b.content.length
+    if (b.type === 'image') return sum + 1000 // rough estimate for images
     // tool_use: count name + serialized input
     return sum + b.name.length + JSON.stringify(b.input).length
   }, 0)

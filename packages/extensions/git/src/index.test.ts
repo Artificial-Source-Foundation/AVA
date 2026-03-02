@@ -3,12 +3,26 @@ import { describe, expect, it } from 'vitest'
 import { activate } from './index.js'
 
 describe('git extension', () => {
-  it('activates and registers middleware', () => {
+  it('activates and registers middleware (snapshots + checkpoints)', () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
     activate(api)
-    expect(registeredMiddleware).toHaveLength(1)
-    expect(registeredMiddleware[0].name).toBe('ava-git-snapshots')
-    expect(registeredMiddleware[0].priority).toBe(30)
+    expect(registeredMiddleware).toHaveLength(2)
+    const snapshots = registeredMiddleware.find((m) => m.name === 'ava-git-snapshots')
+    const checkpoints = registeredMiddleware.find((m) => m.name === 'ava-checkpoints')
+    expect(snapshots).toBeDefined()
+    expect(snapshots!.priority).toBe(30)
+    expect(checkpoints).toBeDefined()
+    expect(checkpoints!.priority).toBe(20)
+  })
+
+  it('registers git tools', () => {
+    const { api, registeredTools } = createMockExtensionAPI()
+    activate(api)
+    const toolNames = registeredTools.map((t) => t.definition.name)
+    expect(toolNames).toContain('create_pr')
+    expect(toolNames).toContain('create_branch')
+    expect(toolNames).toContain('switch_branch')
+    expect(toolNames).toContain('read_issue')
   })
 
   it('registers /snapshot command', () => {
@@ -42,12 +56,13 @@ describe('git extension', () => {
   })
 
   it('cleans up on dispose', () => {
-    const { api, registeredMiddleware, registeredCommands, eventHandlers } =
+    const { api, registeredMiddleware, registeredCommands, registeredTools, eventHandlers } =
       createMockExtensionAPI()
     const disposable = activate(api)
     disposable.dispose()
     expect(registeredMiddleware).toHaveLength(0)
     expect(registeredCommands).toHaveLength(0)
+    expect(registeredTools).toHaveLength(0)
     expect(eventHandlers.has('session:opened')).toBe(false)
   })
 })

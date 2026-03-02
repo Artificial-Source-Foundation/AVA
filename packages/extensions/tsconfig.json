@@ -55,6 +55,7 @@
     "custom-commands/**/*.ts",
     "slash-commands/**/*.ts",
     "integrations/**/*.ts",
+    "plugins/**/*.ts",
     "index.ts"
   ],
   "exclude": ["**/*.test.ts", "**/test-harness.ts", "**/__test-utils__/**", "dist", "node_modules"],

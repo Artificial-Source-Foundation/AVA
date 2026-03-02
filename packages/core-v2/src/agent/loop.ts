@@ -45,6 +45,7 @@ function contentLength(content: MessageContent): number {
   return content.reduce((sum, b) => {
     if (b.type === 'text') return sum + b.text.length
     if (b.type === 'tool_result') return sum + b.content.length
+    if (b.type === 'image') return sum + 1000 // rough estimate for images
     return sum + b.name.length + JSON.stringify(b.input).length
   }, 0)
 }
@@ -73,6 +74,21 @@ function getContextLimit(model: string): number {
   return 200_000 // conservative default
 }
 
+/**
+ * Select the best compaction strategy based on session length.
+ * Uses "summarize" for longer sessions (>20 messages) to preserve context,
+ * and "truncate" for shorter ones where simple trimming is sufficient.
+ */
+function selectCompactionStrategy(
+  history: ChatMessage[]
+): { name: string; compact: (messages: ChatMessage[], target: number) => ChatMessage[] } | null {
+  const strategies = getContextStrategies()
+  if (history.length > 20) {
+    return strategies.get('summarize') ?? strategies.get('truncate') ?? null
+  }
+  return strategies.get('truncate') ?? strategies.get('summarize') ?? null
+}
+
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms)
@@ -87,6 +103,38 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   })
 }
 
+// ─── Tool Result Truncation ──────────────────────────────────────────────────
+
+const MAX_RESULT_BYTES = 50 * 1024 // 50KB per result
+const MAX_TOTAL_RESULT_BYTES = 200 * 1024 // 200KB total
+
+/** Truncate tool result blocks that exceed byte limits. Mutates in-place. */
+export function truncateToolResults(blocks: ToolResultBlock[]): void {
+  let totalBytes = 0
+  for (const block of blocks) {
+    const bytes = Buffer.byteLength(block.content, 'utf8')
+    if (bytes > MAX_RESULT_BYTES) {
+      const truncated = block.content.slice(0, MAX_RESULT_BYTES)
+      block.content = `${truncated}\n\n[...truncated ${bytes - MAX_RESULT_BYTES} bytes]`
+    }
+    totalBytes += Buffer.byteLength(block.content, 'utf8')
+  }
+
+  // If total exceeds limit, proportionally truncate the largest results
+  if (totalBytes > MAX_TOTAL_RESULT_BYTES) {
+    const ratio = MAX_TOTAL_RESULT_BYTES / totalBytes
+    for (const block of blocks) {
+      const bytes = Buffer.byteLength(block.content, 'utf8')
+      if (bytes > 1024) {
+        // only truncate results > 1KB
+        const newLength = Math.floor(bytes * ratio)
+        const truncated = block.content.slice(0, newLength)
+        block.content = `${truncated}\n\n[...truncated ${bytes - newLength} bytes]`
+      }
+    }
+  }
+}
+
 // ─── Agent Executor ──────────────────────────────────────────────────────────
 
 export class AgentExecutor {
@@ -94,6 +142,8 @@ export class AgentExecutor {
   readonly agentId: string
   private onEvent?: AgentEventCallback
   private recentToolCalls: string[] = [] // hashes for doom loop detection
+  private steeringMessage: string | null = null
+  private steeringController: AbortController | null = null
 
   constructor(config: Partial<AgentConfig>, onEvent?: AgentEventCallback) {
     this.config = {
@@ -104,6 +154,15 @@ export class AgentExecutor {
     }
     this.agentId = this.config.id ?? crypto.randomUUID()
     this.onEvent = onEvent
+  }
+
+  /**
+   * Steer the agent with a new user message. Aborts the current tool execution
+   * and injects the message into the conversation on the next loop iteration.
+   */
+  steer(message: string): void {
+    this.steeringMessage = message
+    this.steeringController?.abort()
   }
 
   async run(inputs: AgentInputs, signal: AbortSignal): Promise<AgentResult> {
@@ -145,6 +204,14 @@ export class AgentExecutor {
           )
         }
 
+        // Check for steering message injected between turns
+        if (this.steeringMessage) {
+          const msg = this.steeringMessage
+          this.steeringMessage = null
+          history.push({ role: 'user', content: msg })
+          this.emit({ type: 'agent:steered', agentId: this.agentId, message: msg })
+        }
+
         // Context window management — compact when usage exceeds threshold
         const contextLimit = getContextLimit(model)
         const threshold = this.config.compactionThreshold ?? 0.8
@@ -152,8 +219,7 @@ export class AgentExecutor {
         const estimatedTokens = estimateTokens(charCount)
         if (estimatedTokens > contextLimit * threshold) {
           const messagesBefore = history.length
-          const strategy =
-            getContextStrategies().get('summarize') ?? getContextStrategies().get('truncate')
+          const strategy = selectCompactionStrategy(history)
           if (strategy) {
             const firstMsg = history[0]
             const compacted = strategy.compact(history, Math.floor(contextLimit * 0.5))
@@ -172,7 +238,21 @@ export class AgentExecutor {
             messagesBefore,
             messagesAfter: history.length,
           })
+          emitEvent('context:compacted', {
+            agentId: this.agentId,
+            tokensBefore: estimatedTokens,
+            tokensAfter: estimateTokens(
+              history.reduce((sum, m) => sum + contentLength(m.content), 0)
+            ),
+            messagesBefore,
+            messagesAfter: history.length,
+            strategy: strategy?.name ?? 'none',
+          })
         }
+
+        // Create a per-turn steering controller so steer() can abort the current turn
+        this.steeringController = new AbortController()
+        const turnSignal = AbortSignal.any([combinedSignal, this.steeringController.signal])
 
         turn++
         this.emit({ type: 'turn:start', agentId: this.agentId, turn })
@@ -189,7 +269,7 @@ export class AgentExecutor {
             tools,
             inputs.cwd,
             model,
-            combinedSignal
+            turnSignal
           )
 
           // Check if this is a retryable error
@@ -216,6 +296,9 @@ export class AgentExecutor {
 
           break
         }
+
+        // Clean up per-turn steering controller
+        this.steeringController = null
 
         if (!turnResult) break
 
@@ -363,78 +446,11 @@ export class AgentExecutor {
       }
     }
 
-    // Execute tool calls — skip remaining if signal aborts mid-execution
-    const results: {
-      callInfo: ToolCallInfo
-      resultBlock: ToolResultBlock
-    }[] = []
-
-    for (const call of toolCalls) {
-      // Skip remaining tool calls if aborted (steering interrupt)
-      if (signal.aborted) {
-        results.push({
-          callInfo: {
-            name: call.name,
-            args: call.input,
-            result: 'Tool call skipped — user interrupted',
-            success: false,
-            durationMs: 0,
-          },
-          resultBlock: {
-            type: 'tool_result' as const,
-            tool_use_id: call.id,
-            content: 'Tool call skipped — user interrupted',
-            is_error: true,
-          },
-        })
-        continue
-      }
-
-      this.emit({
-        type: 'tool:start',
-        agentId: this.agentId,
-        toolName: call.name,
-        args: call.input,
-      })
-      const toolStart = Date.now()
-
-      const ctx: ToolContext = {
-        sessionId: this.agentId,
-        workingDirectory: cwd,
-        signal,
-        provider: this.config.provider,
-        model,
-        onEvent: this.onEvent as ToolContext['onEvent'],
-      }
-
-      const result = await executeTool(call.name, call.input, ctx)
-      const durationMs = Date.now() - toolStart
-      const output = result.success ? result.output : result.error || result.output || 'Tool failed'
-
-      this.emit({
-        type: 'tool:finish',
-        agentId: this.agentId,
-        toolName: call.name,
-        success: result.success,
-        durationMs,
-      })
-
-      results.push({
-        callInfo: {
-          name: call.name,
-          args: call.input,
-          result: output,
-          success: result.success,
-          durationMs,
-        },
-        resultBlock: {
-          type: 'tool_result' as const,
-          tool_use_id: call.id,
-          content: output,
-          is_error: !result.success,
-        },
-      })
-    }
+    // Execute tool calls — parallel or sequential based on config
+    const results =
+      (this.config.parallelToolExecution ?? true)
+        ? await this.executeToolCallsParallel(toolCalls, cwd, model, signal)
+        : await this.executeToolCallsSequential(toolCalls, cwd, model, signal)
 
     const callInfos: ToolCallInfo[] = []
     const toolResultBlocks: ToolResultBlock[] = []
@@ -442,6 +458,9 @@ export class AgentExecutor {
       callInfos.push(callInfo)
       toolResultBlocks.push(resultBlock)
     }
+
+    // Truncate tool results that exceed byte limits before adding to history
+    truncateToolResults(toolResultBlocks)
 
     // Add tool results to history as structured user message
     history.push({ role: 'user', content: toolResultBlocks })
@@ -472,6 +491,101 @@ export class AgentExecutor {
       toolCalls: callInfos,
       usage: { inputTokens: turnInput, outputTokens: turnOutput },
     }
+  }
+
+  /** Execute a single tool call, emitting events and building result objects. */
+  private async executeOneToolCall(
+    call: ToolUseBlock,
+    cwd: string,
+    model: string,
+    signal: AbortSignal
+  ): Promise<{ callInfo: ToolCallInfo; resultBlock: ToolResultBlock }> {
+    if (signal.aborted) {
+      return {
+        callInfo: {
+          name: call.name,
+          args: call.input,
+          result: 'Tool call skipped — user interrupted',
+          success: false,
+          durationMs: 0,
+        },
+        resultBlock: {
+          type: 'tool_result' as const,
+          tool_use_id: call.id,
+          content: 'Tool call skipped — user interrupted',
+          is_error: true,
+        },
+      }
+    }
+
+    this.emit({
+      type: 'tool:start',
+      agentId: this.agentId,
+      toolName: call.name,
+      args: call.input,
+    })
+    const toolStart = Date.now()
+
+    const ctx: ToolContext = {
+      sessionId: this.agentId,
+      workingDirectory: cwd,
+      signal,
+      provider: this.config.provider,
+      model,
+      onEvent: this.onEvent as ToolContext['onEvent'],
+    }
+
+    const result = await executeTool(call.name, call.input, ctx)
+    const durationMs = Date.now() - toolStart
+    const output = result.success ? result.output : result.error || result.output || 'Tool failed'
+
+    this.emit({
+      type: 'tool:finish',
+      agentId: this.agentId,
+      toolName: call.name,
+      success: result.success,
+      durationMs,
+    })
+
+    return {
+      callInfo: {
+        name: call.name,
+        args: call.input,
+        result: output,
+        success: result.success,
+        durationMs,
+      },
+      resultBlock: {
+        type: 'tool_result' as const,
+        tool_use_id: call.id,
+        content: output,
+        is_error: !result.success,
+      },
+    }
+  }
+
+  /** Execute all tool calls in parallel via Promise.all(). */
+  private async executeToolCallsParallel(
+    toolCalls: ToolUseBlock[],
+    cwd: string,
+    model: string,
+    signal: AbortSignal
+  ): Promise<{ callInfo: ToolCallInfo; resultBlock: ToolResultBlock }[]> {
+    return Promise.all(toolCalls.map((call) => this.executeOneToolCall(call, cwd, model, signal)))
+  }
+
+  /** Execute tool calls sequentially, skipping remaining on abort. */
+  private async executeToolCallsSequential(
+    toolCalls: ToolUseBlock[],
+    cwd: string,
+    model: string,
+    signal: AbortSignal
+  ): Promise<{ callInfo: ToolCallInfo; resultBlock: ToolResultBlock }[]> {
+    const results: { callInfo: ToolCallInfo; resultBlock: ToolResultBlock }[] = []
+    for (const call of toolCalls) {
+      results.push(await this.executeOneToolCall(call, cwd, model, signal))
+    }
+    return results
   }
 
   private buildSystemPrompt(inputs: AgentInputs): string {

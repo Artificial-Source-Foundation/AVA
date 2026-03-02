@@ -6,14 +6,18 @@
 
 import { open } from '@tauri-apps/plugin-dialog'
 import {
+  Archive,
+  ArchiveRestore,
   Check,
   ChevronDown,
+  ChevronRight,
   Compass,
   Copy,
   FolderOpen,
   GitBranch,
   GitFork,
   List,
+  Loader2,
   MessageSquare,
   Pencil,
   Plus,
@@ -46,6 +50,11 @@ export const SidebarSessions: Component = () => {
     renameSession,
     duplicateSession,
     forkSession,
+    archiveSession,
+    unarchiveSession,
+    archivedSessions,
+    loadArchivedSessions,
+    isSessionBusy,
     loadSessionsForCurrentProject,
     restoreForCurrentProject,
     getSessionTree,
@@ -60,6 +69,7 @@ export const SidebarSessions: Component = () => {
   const [confirmDeleteId, setConfirmDeleteId] = createSignal<string | null>(null)
   const [projectDropdownOpen, setProjectDropdownOpen] = createSignal(false)
   const [viewMode, setViewMode] = createSignal<'list' | 'tree'>('list')
+  const [showArchived, setShowArchived] = createSignal(false)
   let projectDropdownRef: HTMLDivElement | undefined
 
   const quickProjects = createMemo(() => {
@@ -250,6 +260,13 @@ export const SidebarSessions: Component = () => {
         },
       },
       { label: '', action: () => {}, separator: true },
+      {
+        label: 'Archive',
+        icon: Archive,
+        action: () => {
+          void archiveSession(sessionId)
+        },
+      },
       {
         label: 'Delete',
         icon: Trash2,
@@ -519,14 +536,27 @@ export const SidebarSessions: Component = () => {
                               }
                             `}
                             >
-                              <MessageSquare
-                                class={`w-3.5 h-3.5 flex-shrink-0 ${isActive() ? 'text-[var(--accent)]' : ''}`}
-                              />
+                              <Show
+                                when={isSessionBusy(session.id)}
+                                fallback={
+                                  <MessageSquare
+                                    class={`w-3.5 h-3.5 flex-shrink-0 ${isActive() ? 'text-[var(--accent)]' : ''}`}
+                                  />
+                                }
+                              >
+                                <Loader2 class="w-3.5 h-3.5 flex-shrink-0 text-[var(--accent)] animate-spin" />
+                              </Show>
                               <div class="flex-1 min-w-0">
                                 <div class="text-xs truncate">
                                   {formatSessionName(session.name)}
                                 </div>
                                 <div class="text-[10px] text-[var(--text-muted)] truncate flex items-center gap-1.5">
+                                  <Show when={session.slug}>
+                                    <span class="text-[var(--text-muted)] opacity-70">
+                                      {session.slug}
+                                    </span>
+                                    <span class="text-[var(--text-muted)] opacity-30">|</span>
+                                  </Show>
                                   <span>{formatDate(session.updatedAt)}</span>
                                   <Show when={session.messageCount > 0}>
                                     <span class="text-[var(--text-muted)]">
@@ -581,6 +611,53 @@ export const SidebarSessions: Component = () => {
                   <p class="text-[10px] mt-1">Start a new conversation</p>
                 </Show>
               </div>
+            </Show>
+          </div>
+        </Show>
+      </div>
+
+      {/* Archived Sessions Section */}
+      <div class="flex-shrink-0 border-t border-[var(--border-subtle)]">
+        <button
+          type="button"
+          onClick={() => {
+            const next = !showArchived()
+            setShowArchived(next)
+            if (next) void loadArchivedSessions()
+          }}
+          class="w-full flex items-center gap-1.5 px-3 py-2 text-[10px] font-semibold tracking-wider text-[var(--text-muted)] uppercase hover:text-[var(--text-secondary)] transition-colors"
+        >
+          <ChevronRight
+            class={`w-3 h-3 transition-transform ${showArchived() ? 'rotate-90' : ''}`}
+          />
+          <Archive class="w-3 h-3" />
+          <span>Archived</span>
+          <Show when={archivedSessions().length > 0}>
+            <span class="text-[9px] ml-auto opacity-60">{archivedSessions().length}</span>
+          </Show>
+        </button>
+        <Show when={showArchived()}>
+          <div class="px-1.5 pb-2 max-h-[200px] overflow-y-auto scrollbar-none">
+            <For each={archivedSessions()}>
+              {(session) => (
+                <div class="flex items-center gap-2 density-px density-py rounded-[var(--radius-md)] text-[var(--text-muted)] hover:bg-[var(--sidebar-item-hover)] hover:text-[var(--text-secondary)] transition-colors">
+                  <Archive class="w-3 h-3 flex-shrink-0 opacity-50" />
+                  <span class="flex-1 text-xs truncate">{formatSessionName(session.name)}</span>
+                  <button
+                    type="button"
+                    onClick={() => void unarchiveSession(session.id)}
+                    class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]"
+                    title="Unarchive"
+                  >
+                    <ArchiveRestore class="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+            </For>
+            <Show when={archivedSessions().length === 0}>
+              <p class="text-[10px] text-[var(--text-muted)] px-2 py-1 text-center">
+                No archived sessions
+              </p>
             </Show>
           </div>
         </Show>

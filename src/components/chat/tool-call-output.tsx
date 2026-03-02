@@ -24,6 +24,7 @@ import { highlightCode } from '../../lib/syntax-highlight'
 import type { ToolCall } from '../../types'
 import { DiffViewer } from '../ui/DiffViewer'
 import { MCPResourceRenderer } from './MCPResourceRenderer'
+import { StructuredOutputView } from './StructuredOutputView'
 import {
   categorizeToolError,
   detectLanguage,
@@ -86,6 +87,16 @@ interface ToolCallOutputProps {
 }
 
 export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
+  // Structured output: render as JSON tree
+  const structuredData = createMemo(() => {
+    if (props.toolCall.name !== '__structured_output' || !props.toolCall.output) return null
+    try {
+      return JSON.parse(props.toolCall.output) as unknown
+    } catch {
+      return null
+    }
+  })
+
   const [copied, setCopied] = createSignal(false)
   const [expanded, setExpanded] = createSignal(false)
 
@@ -124,6 +135,15 @@ export const ToolCallOutput: Component<ToolCallOutputProps> = (props) => {
     await navigator.clipboard.writeText(text)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  // Render structured output as JSON tree if applicable
+  if (structuredData() !== null) {
+    return (
+      <div class="border-t border-[var(--border-subtle)]">
+        <StructuredOutputView data={structuredData()!} />
+      </div>
+    )
   }
 
   return (

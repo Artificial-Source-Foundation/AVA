@@ -12,7 +12,7 @@ import {
   type ProviderModel,
 } from '../../config/defaults/provider-defaults'
 import { logWarn } from '../../services/logger'
-import { fetchModels } from '../../services/providers/model-fetcher'
+import { enrichWithCatalog, fetchModels } from '../../services/providers/model-fetcher'
 import type { LLMProvider } from '../../types/llm'
 import { applyAppearanceToDOM, isDarkMode as isDarkModeImpl } from './settings-appearance'
 import { DEFAULT_SETTINGS } from './settings-defaults'
@@ -34,6 +34,7 @@ export { syncProviderCredentials } from './settings-persistence'
 // Re-exports — keep existing import paths stable
 export type {
   AccentColor,
+  AgentBackend,
   AgentLimitSettings,
   AppearanceSettings,
   AppSettings,
@@ -59,6 +60,47 @@ const initial = loadSettings()
 initial.providers = hydrateProviders(initial.providers)
 initial.agents = hydrateAgents(initial.agents)
 const [settings, setSettingsRaw] = createSignal<AppSettings>(initial)
+
+// Listen for settings changes from core-v2 extensions (bidirectional sync)
+window.addEventListener('ava:core-settings-changed', ((e: CustomEvent) => {
+  const { category, value } = e.detail as { category: string; value: unknown }
+  if (!value || typeof value !== 'object') return
+
+  const patch = value as Record<string, unknown>
+  setSettingsRaw((prev) => {
+    // Map known core categories back to AppSettings fields
+    if (category === 'permissions') {
+      return {
+        ...prev,
+        autoApprovedTools: (patch.autoApprovePatterns as string[]) ?? prev.autoApprovedTools,
+      }
+    }
+    if (category === 'context') {
+      return {
+        ...prev,
+        generation: {
+          ...prev.generation,
+          maxTokens: (patch.maxTokens as number) ?? prev.generation.maxTokens,
+          compactionThreshold:
+            (patch.compactionThreshold as number) ?? prev.generation.compactionThreshold,
+        },
+      }
+    }
+    if (category === 'git') {
+      return {
+        ...prev,
+        git: {
+          ...prev.git,
+          enabled: (patch.enabled as boolean) ?? prev.git.enabled,
+          autoCommit: (patch.autoCommit as boolean) ?? prev.git.autoCommit,
+          commitPrefix: (patch.messagePrefix as string) ?? prev.git.commitPrefix,
+        },
+      }
+    }
+    // Unknown categories (extension-specific) — ignore
+    return prev
+  })
+}) as EventListener)
 
 // Thin wrappers — adapt pure functions to read/write the module signal
 
@@ -189,7 +231,9 @@ function autoFetchModels(id: string): void {
 
   const provider = settings().providers.find((p) => p.id === id)
   fetchModels(id as LLMProvider, { apiKey: credential, baseUrl: provider?.baseUrl })
-    .then((fetched) => {
+    .then((rawFetched) => {
+      // Enrich with models.dev catalog (fills pricing, context windows, capabilities)
+      const fetched = enrichWithCatalog(id as LLMProvider, rawFetched)
       if (fetched.length === 0) return
       const current = settings().providers.find((p) => p.id === id)
 
@@ -343,6 +387,10 @@ function updateGit(patch: Partial<AppSettings['git']>): void {
   updateSubKey('git', patch)
 }
 
+function updateAgentBackend(backend: AppSettings['agentBackend']): void {
+  updateSettings({ agentBackend: backend })
+}
+
 function resetSettings(): void {
   const fresh = { ...DEFAULT_SETTINGS }
   setSettingsRaw(fresh)
@@ -446,5 +494,6 @@ export function useSettings() {
     addMcpServer,
     removeMcpServer,
     updateMcpServer,
+    updateAgentBackend,
   }
 }

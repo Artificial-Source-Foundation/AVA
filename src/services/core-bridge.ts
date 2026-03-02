@@ -9,6 +9,7 @@ import { getMessageBus, type MessageBus } from '@ava/core-v2/bus'
 import { getSettingsManager, type SettingsManager } from '@ava/core-v2/config'
 import {
   createExtensionAPI,
+  onEvent,
   type ToolMiddleware,
   type ToolMiddlewareContext,
   type ToolMiddlewareResult,
@@ -19,8 +20,11 @@ import { registerCoreTools } from '@ava/core-v2/tools'
 import { createTauriPlatform } from '@ava/platform-tauri'
 import { ContextBudget } from '../lib/context-budget'
 import { useSandbox } from '../stores/sandbox'
+import { updateSession as dbUpdateSession } from './database'
+import { DesktopSessionStorage } from './desktop-session-storage'
 import { loadAllExtensions } from './extension-loader'
 import { logInfo } from './logger'
+import { startSettingsSync } from './settings-sync'
 import { createApprovalMiddleware, setAutoApprovalChecker } from './tool-approval-bridge'
 
 // ─── Singleton State ────────────────────────────────────────────────────────
@@ -71,7 +75,7 @@ export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() =
   // 2. Singletons
   _settings = getSettingsManager()
   _bus = getMessageBus()
-  _sessionMgr = createSessionManager()
+  _sessionMgr = createSessionManager({ storage: new DesktopSessionStorage() })
   _budget = new ContextBudget(opts.contextLimit ?? 200_000)
 
   // 3. Register core tools (read, write, edit, bash, glob, grep)
@@ -98,7 +102,37 @@ export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() =
   const sandboxApi = createExtensionAPI('sandbox-intercept', _bus!, _sessionMgr!)
   const sandboxDisposable = sandboxApi.addToolMiddleware(sandboxMiddleware)
 
+  // 8. Start bidirectional settings sync (core → frontend events)
+  const disposeSettingsSync = startSettingsSync()
+
+  // 9. Sync context budget from agent events
+  const contextSubs = [
+    onEvent('context:compacting', (data) => {
+      const { estimatedTokens } = data as { estimatedTokens: number }
+      if (_budget) _budget.setUsed(estimatedTokens)
+    }),
+    onEvent('agent:finish', () => {
+      // Trigger reactive re-read of budget stats
+      if (_budget) {
+        window.dispatchEvent(new CustomEvent('ava:budget-updated'))
+      }
+    }),
+  ]
+
+  // 10. Bridge session busy/idle status to desktop DB
+  const sessionStatusSub = onEvent('session:status', (data) => {
+    const { sessionId, status } = data as { sessionId: string; status: string }
+    if (status === 'busy') {
+      void dbUpdateSession(sessionId, { busySince: Date.now() })
+    } else if (status === 'idle') {
+      void dbUpdateSession(sessionId, { busySince: null })
+    }
+  })
+
   _cleanup = () => {
+    sessionStatusSub.dispose()
+    for (const sub of contextSubs) sub.dispose()
+    disposeSettingsSync()
     sandboxDisposable.dispose()
     approvalDisposable.dispose()
     disposeExtensions()

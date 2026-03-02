@@ -339,6 +339,37 @@ function createPluginsStore() {
     setState(id, { ...current, scope })
   }
 
+  /** Force re-fetch catalog bypassing the 30-min cache */
+  const refreshCatalog = async () => {
+    setCatalogStatus('syncing')
+    setCatalogError(null)
+    try {
+      await syncPluginCatalog(true)
+      setCatalogStatus('ready')
+      setLastCatalogSyncAt(Date.now())
+    } catch (error) {
+      setCatalogStatus('error')
+      setCatalogError(error instanceof Error ? error.message : 'Failed to refresh plugin catalog.')
+    }
+  }
+
+  /** Get installed version for a plugin */
+  const getPluginVersion = (id: string): string | undefined => {
+    return pluginState()[id]?.version
+  }
+
+  /** Check if a plugin has an update available */
+  const hasUpdate = (id: string): boolean => {
+    const installed = pluginState()[id]
+    if (!installed?.installed || !installed.version) return false
+    const catalogItem = PLUGIN_CATALOG.find((p) => p.id === id)
+    if (!catalogItem?.version) return false
+    return catalogItem.version !== installed.version
+  }
+
+  /** Get list of plugins with updates available */
+  const pluginsWithUpdates = createMemo(() => PLUGIN_CATALOG.filter((p) => hasUpdate(p.id)))
+
   void refresh()
 
   return {
@@ -354,10 +385,12 @@ function createPluginsStore() {
     installedCount,
     categories,
     featuredPlugins,
+    pluginsWithUpdates,
     setSearch,
     setShowInstalledOnly,
     setCategoryFilter,
     syncCatalog,
+    refreshCatalog,
     install,
     uninstall,
     toggleEnabled,
@@ -365,6 +398,8 @@ function createPluginsStore() {
     linkLocal,
     uninstallGit,
     setPluginScope,
+    getPluginVersion,
+    hasUpdate,
     pendingAction: (id: string) => pendingActions()[id] ?? null,
     failedAction: (id: string) => failedActionsByPlugin()[id] ?? null,
     errorFor: (id: string) => errorsByPlugin()[id] ?? null,

@@ -2,12 +2,13 @@
  * Model Browser Helpers
  *
  * Aggregation, filtering, sorting, and formatting for the model browser.
- * Pricing and capabilities now come primarily from per-provider files
- * (src/config/defaults/providers/*.ts). The KNOWN_PRICING map here is
- * a fallback for dynamically-fetched models that don't carry pricing.
+ * Pricing and capabilities now come primarily from models.dev catalog
+ * (src/services/providers/models-dev-catalog.ts). Hardcoded maps are kept
+ * as offline fallbacks for when the catalog hasn't loaded.
  */
 
 import type { LLMProviderConfig } from '../../../config/defaults/provider-defaults'
+import { getModelFromCatalog } from '../../../services/providers/models-dev-catalog'
 import type {
   BrowsableModel,
   FilterState,
@@ -17,158 +18,87 @@ import type {
 } from './model-browser-types'
 
 // ============================================================================
-// Fallback Pricing (per 1M tokens) — for dynamically-fetched models only
+// Catalog-Backed Lookups (with hardcoded fallbacks)
 // ============================================================================
 
-const KNOWN_PRICING: Record<string, ModelPricing> = {
+/**
+ * Look up pricing for a model. Tries models.dev catalog first, then hardcoded fallback.
+ */
+function lookupPricing(modelId: string): ModelPricing | undefined {
+  const entry = getModelFromCatalog(modelId)
+  if (entry?.cost?.input !== undefined && entry?.cost?.output !== undefined) {
+    return { input: entry.cost.input, output: entry.cost.output }
+  }
+  return FALLBACK_PRICING[modelId]
+}
+
+/**
+ * Check if a model has reasoning capability. Catalog first, then fallback set.
+ */
+function hasReasoning(modelId: string): boolean {
+  const entry = getModelFromCatalog(modelId)
+  if (entry) return entry.reasoning === true
+  return FALLBACK_REASONING.has(modelId)
+}
+
+/**
+ * Check if a model has vision capability. Catalog first, then fallback set.
+ */
+function hasVision(modelId: string): boolean {
+  const entry = getModelFromCatalog(modelId)
+  if (entry) return entry.attachment === true || (entry.modalities?.input?.includes('image') ?? false)
+  return FALLBACK_VISION.has(modelId)
+}
+
+// ============================================================================
+// Fallback Maps (offline / pre-catalog-load)
+// ============================================================================
+
+const FALLBACK_PRICING: Record<string, ModelPricing> = {
   // Anthropic
   'claude-opus-4-6': { input: 5, output: 25 },
   'claude-sonnet-4-6': { input: 3, output: 15 },
   'claude-haiku-4-5-20251001': { input: 1, output: 5 },
-  'claude-sonnet-4-5-20250929': { input: 3, output: 15 },
-  'claude-opus-4-5-20251101': { input: 5, output: 25 },
-  'claude-opus-4-1-20250805': { input: 15, output: 75 },
-  'claude-opus-4-20250514': { input: 15, output: 75 },
-  'claude-sonnet-4-20250514': { input: 3, output: 15 },
   // OpenAI
   'gpt-5.2': { input: 1.75, output: 14 },
-  'gpt-5.1': { input: 1.25, output: 10 },
-  'gpt-5': { input: 1.25, output: 10 },
   'gpt-5-mini': { input: 0.25, output: 2 },
-  'gpt-5-nano': { input: 0.05, output: 0.4 },
-  'gpt-5.3-codex': { input: 1.75, output: 14 },
-  'gpt-5.2-codex': { input: 1.75, output: 14 },
-  'gpt-5.1-codex': { input: 1.25, output: 10 },
-  'gpt-5.1-codex-mini': { input: 0.25, output: 2 },
-  'codex-mini-latest': { input: 1.5, output: 6 },
   'gpt-4.1': { input: 2, output: 8 },
-  'gpt-4.1-mini': { input: 0.4, output: 1.6 },
-  'gpt-4.1-nano': { input: 0.1, output: 0.4 },
   o3: { input: 2, output: 8 },
   'o4-mini': { input: 1.1, output: 4.4 },
-  'o3-mini': { input: 1.1, output: 4.4 },
-  'gpt-4o': { input: 2.5, output: 10 },
-  'gpt-4o-mini': { input: 0.15, output: 0.6 },
   // Google
-  'gemini-3.1-pro-preview': { input: 2, output: 12 },
-  'gemini-3-flash-preview': { input: 0.5, output: 3 },
   'gemini-2.5-pro': { input: 1.25, output: 10 },
   'gemini-2.5-flash': { input: 0.3, output: 2.5 },
-  'gemini-2.5-flash-lite': { input: 0.1, output: 0.4 },
   // xAI
   'grok-4-1-fast-reasoning': { input: 0.2, output: 0.5 },
-  'grok-4-1-fast-non-reasoning': { input: 0.2, output: 0.5 },
-  'grok-4-0709': { input: 3, output: 15 },
-  'grok-code-fast-1': { input: 0.2, output: 1.5 },
-  'grok-3': { input: 3, output: 15 },
-  'grok-3-mini': { input: 0.3, output: 0.5 },
   // Mistral
   'mistral-large-latest': { input: 0.5, output: 1.5 },
-  'mistral-medium-latest': { input: 0.4, output: 2 },
-  'mistral-small-latest': { input: 0.1, output: 0.3 },
-  'magistral-medium-latest': { input: 2, output: 5 },
-  'magistral-small-latest': { input: 0.5, output: 1.5 },
   'devstral-latest': { input: 0.4, output: 2 },
-  'codestral-latest': { input: 0.3, output: 0.9 },
   // DeepSeek
   'deepseek-chat': { input: 0.28, output: 0.42 },
   'deepseek-reasoner': { input: 0.28, output: 0.42 },
   // Cohere
   'command-a': { input: 2.5, output: 10 },
-  'command-a-vision': { input: 2.5, output: 10 },
-  'command-r-plus': { input: 2.5, output: 10 },
-  'command-r': { input: 0.15, output: 0.6 },
-  'command-r7b-12-2024': { input: 0.0375, output: 0.15 },
 }
 
-// Fallback sets — used by inferCapabilities() for models without stored caps
-const REASONING_MODELS = new Set([
-  // OpenAI
-  'o3',
-  'o3-pro',
-  'o4-mini',
-  'o3-mini',
-  'gpt-5.2',
-  'gpt-5.1',
-  'gpt-5',
-  'gpt-5-mini',
-  'gpt-5-nano',
-  'gpt-5.3-codex',
-  'gpt-5.2-codex',
-  'gpt-5.1-codex',
-  'codex-mini-latest',
-  // Anthropic
-  'claude-opus-4-6',
-  'claude-sonnet-4-6',
-  'claude-sonnet-4-5-20250929',
-  'claude-opus-4-5-20251101',
-  'claude-opus-4-1-20250805',
-  'claude-opus-4-20250514',
-  'claude-sonnet-4-20250514',
-  'claude-haiku-4-5-20251001',
-  // Google
-  'gemini-3.1-pro-preview',
-  'gemini-3-flash-preview',
-  'gemini-2.5-pro',
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-  // xAI
-  'grok-4-1-fast-reasoning',
-  'grok-4-0709',
-  'grok-code-fast-1',
-  'grok-3-mini',
-  // Others
+const FALLBACK_REASONING = new Set([
+  'o3', 'o3-pro', 'o4-mini', 'o3-mini',
+  'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-5-mini', 'gpt-5-nano',
+  'gpt-5.3-codex', 'gpt-5.2-codex', 'gpt-5.1-codex',
+  'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001',
+  'gemini-2.5-pro', 'gemini-2.5-flash',
+  'grok-4-1-fast-reasoning', 'grok-code-fast-1',
   'deepseek-reasoner',
-  'magistral-medium-latest',
-  'magistral-small-latest',
-  'qwen/qwen3-32b',
+  'magistral-medium-latest', 'magistral-small-latest',
 ])
 
-const VISION_MODELS = new Set([
-  // OpenAI
-  'gpt-5.2',
-  'gpt-5.1',
-  'gpt-5',
-  'gpt-5-mini',
-  'gpt-5-nano',
-  'gpt-5.3-codex',
-  'gpt-5.2-codex',
-  'gpt-5.1-codex',
-  'gpt-4.1',
-  'gpt-4.1-mini',
-  'gpt-4.1-nano',
-  'o3',
-  'o4-mini',
-  'gpt-4o',
-  'gpt-4o-mini',
-  // Anthropic
-  'claude-opus-4-6',
-  'claude-sonnet-4-6',
-  'claude-sonnet-4-5-20250929',
-  'claude-opus-4-5-20251101',
-  'claude-haiku-4-5-20251001',
-  'claude-sonnet-4-20250514',
-  'claude-opus-4-20250514',
-  'claude-opus-4-1-20250805',
-  // Google
-  'gemini-3.1-pro-preview',
-  'gemini-3-flash-preview',
-  'gemini-2.5-pro',
-  'gemini-2.5-flash',
-  'gemini-2.5-flash-lite',
-  // xAI
-  'grok-4-1-fast-reasoning',
-  'grok-4-1-fast-non-reasoning',
-  'grok-4-0709',
-  // Others
-  'mistral-large-latest',
-  'mistral-medium-latest',
-  'mistral-small-latest',
-  'magistral-medium-latest',
-  'magistral-small-latest',
+const FALLBACK_VISION = new Set([
+  'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-5-mini',
+  'gpt-4.1', 'gpt-4.1-mini', 'o3', 'o4-mini', 'gpt-4o',
+  'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001',
+  'gemini-2.5-pro', 'gemini-2.5-flash',
+  'grok-4-1-fast-reasoning', 'grok-4-1-fast-non-reasoning',
+  'mistral-large-latest', 'mistral-medium-latest',
   'command-a-vision',
-  'meta-llama/llama-4-maverick-17b-128e-instruct',
-  'meta-llama/llama-4-scout-17b-16e-instruct',
 ])
 
 const FREE_MODELS = new Set([
@@ -197,7 +127,7 @@ export function aggregateModels(providers: LLMProviderConfig[]): BrowsableModel[
         providerName: provider.name,
         contextWindow: model.contextWindow,
         isDefault: model.isDefault,
-        pricing: model.pricing ?? KNOWN_PRICING[model.id],
+        pricing: model.pricing ?? lookupPricing(model.id),
         capabilities: mergeCapabilities(model.id, provider.id, model.capabilities),
       })
     }
@@ -248,14 +178,14 @@ function mergeCapabilities(
   return inferCapabilities(modelId, providerId)
 }
 
-/** Infer capabilities from model ID patterns and hardcoded sets */
+/** Infer capabilities from catalog lookups, then fallback sets */
 export function inferCapabilities(modelId: string, providerId: string): ModelCapability[] {
   const caps: ModelCapability[] = []
 
   caps.push('tools')
 
-  if (REASONING_MODELS.has(modelId)) caps.push('reasoning')
-  if (VISION_MODELS.has(modelId)) caps.push('vision')
+  if (hasReasoning(modelId)) caps.push('reasoning')
+  if (hasVision(modelId)) caps.push('vision')
 
   if (FREE_MODELS.has(modelId) || providerId === 'groq' || providerId === 'ollama') {
     caps.push('free')

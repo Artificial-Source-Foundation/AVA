@@ -61,6 +61,16 @@ export async function runMigrations(db: Database): Promise<void> {
     await migrateV5(db)
     await recordMigration(db, 5)
   }
+
+  if (currentVersion < 6) {
+    await migrateV6(db)
+    await recordMigration(db, 6)
+  }
+
+  if (currentVersion < 7) {
+    await migrateV7(db)
+    await recordMigration(db, 7)
+  }
 }
 
 /**
@@ -312,4 +322,40 @@ async function migrateV5(db: Database): Promise<void> {
     )
   `)
   await db.execute('CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_id)')
+}
+
+/**
+ * Version 6: Add session columns for core-v2 integration
+ * - parent_session_id for session forking/branching (fixes crash bug)
+ * - slug for human-readable session identifiers
+ * - busy_since for tracking active agent execution
+ */
+async function migrateV6(db: Database): Promise<void> {
+  // parent_session_id may already exist if createSession() was called before migration
+  // Use try/catch since ALTER TABLE ADD COLUMN fails if column exists
+  try {
+    await db.execute('ALTER TABLE sessions ADD COLUMN parent_session_id TEXT')
+  } catch {
+    // Column already exists — safe to ignore
+  }
+  await db.execute('ALTER TABLE sessions ADD COLUMN slug TEXT')
+  await db.execute('ALTER TABLE sessions ADD COLUMN busy_since INTEGER')
+  await db.execute('CREATE INDEX IF NOT EXISTS idx_sessions_slug ON sessions(slug)')
+  await db.execute('CREATE INDEX IF NOT EXISTS idx_sessions_parent ON sessions(parent_session_id)')
+}
+
+/**
+ * Version 7: Plugin tracking table
+ * - Persistent plugin install state (replaces localStorage-only approach)
+ */
+async function migrateV7(db: Database): Promise<void> {
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS plugin_installs (
+      name TEXT PRIMARY KEY,
+      version TEXT NOT NULL,
+      installed_at INTEGER NOT NULL,
+      source TEXT,
+      enabled INTEGER DEFAULT 1
+    )
+  `)
 }

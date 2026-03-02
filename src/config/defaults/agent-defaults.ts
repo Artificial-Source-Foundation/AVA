@@ -9,6 +9,7 @@ import {
   Bug,
   Building,
   Code,
+  Compass,
   Crown,
   Eye,
   FileText,
@@ -63,6 +64,7 @@ export interface AgentPreset {
 
 export const AGENT_ICONS: Record<string, IconComponent> = {
   Code: Code as IconComponent,
+  Compass: Compass as IconComponent,
   Crown: Crown as IconComponent,
   Layout: Layout as IconComponent,
   Server: Server as IconComponent,
@@ -299,6 +301,17 @@ export const praxisAgentPresets: AgentPreset[] = [
     tools: ['bash', 'read_file', 'glob', 'grep'],
     domain: 'devops',
     capabilities: ['shell-commands', 'build-management'],
+  },
+  {
+    id: 'explorer',
+    name: 'Explorer',
+    description: 'Read-only codebase exploration and analysis',
+    icon: Compass as IconComponent,
+    enabled: true,
+    tier: 'worker',
+    tools: ['read_file', 'glob', 'grep', 'ls', 'repo_map', 'websearch', 'webfetch'],
+    domain: 'fullstack',
+    capabilities: ['codebase-exploration', 'analysis'],
   },
 ]
 

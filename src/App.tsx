@@ -34,6 +34,7 @@ import { initDatabase } from './services/database'
 import { initDeepLinks } from './services/deep-link'
 import { installConsoleCapture, setLogDirectory } from './services/dev-console'
 import { initLogger, logError, logInfo } from './services/logger'
+import { syncModelsCatalog } from './services/providers/models-dev-catalog'
 import { initSettingsFS } from './services/settings-fs'
 import { type ScheduledWorkflow, startScheduler } from './services/workflow-scheduler'
 import { useLayout } from './stores/layout'
@@ -282,6 +283,7 @@ function App() {
       await hydrateSettingsFromFS()
       syncAllApiKeys()
       await detectEnvApiKeys()
+      syncModelsCatalog().catch(() => {}) // Non-blocking — fallback to cache/hardcoded
       refreshAllProviderModels()
 
       setSplashStatus('Initializing core engine...')
@@ -303,8 +305,8 @@ function App() {
         const { loadInstalledPlugins } = await import('./services/extension-loader')
         const { createExtensionAPI } = await import('../packages/core-v2/src/extensions/api.js')
         const { getMessageBus } = await import('../packages/core-v2/src/bus/index.js')
-        const { createSessionManager } = await import('../packages/core-v2/src/session/index.js')
-        const sessionMgr = createSessionManager()
+        const { getCoreSessionManager } = await import('./services/core-bridge')
+        const sessionMgr = getCoreSessionManager()!
         const pluginResult = await loadInstalledPlugins((name) =>
           createExtensionAPI(name, getMessageBus(), sessionMgr)
         )

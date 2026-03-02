@@ -18,6 +18,7 @@ import {
   deleteSession as dbDeleteSession,
   deleteSessionMessages as dbDeleteSessionMessages,
   duplicateSessionMessages as dbDuplicateSessionMessages,
+  getArchivedSessions as dbGetArchivedSessions,
   insertMessages as dbInsertMessages,
   updateAgentInDb as dbUpdateAgent,
   updateSession as dbUpdateSession,
@@ -84,6 +85,28 @@ const [terminalExecutions, setTerminalExecutions] = createSignal<TerminalExecuti
 // Memory/context items in current session
 const [memoryItems, setMemoryItems] = createSignal<MemoryItem[]>([])
 
+// Archived sessions (lazy-loaded)
+const [archivedSessions, setArchivedSessions] = createSignal<SessionWithStats[]>([])
+
+// Busy session IDs (tracked from session:status events)
+const [busySessionIds, setBusySessionIds] = createSignal<Set<string>>(new Set())
+
+// Listen for session busy/idle events from core-v2
+if (typeof window !== 'undefined') {
+  window.addEventListener('ava:session-status', (e) => {
+    const { sessionId, status } = (e as CustomEvent).detail as {
+      sessionId: string
+      status: string
+    }
+    setBusySessionIds((prev) => {
+      const next = new Set(prev)
+      if (status === 'busy') next.add(sessionId)
+      else next.delete(sessionId)
+      return next
+    })
+  })
+}
+
 // Selected model for chat — persisted to localStorage
 const SELECTED_MODEL_KEY = 'ava_selected_model'
 const savedModel =
@@ -130,9 +153,20 @@ const sessionTokenStats = createMemo((): SessionTokenStats => {
   )
 })
 
+// Reactive trigger for context budget updates (from agent events + manual sync)
+const [budgetTick, setBudgetTick] = createSignal(0)
+// Listen for budget updates dispatched by core-bridge context sync
+if (typeof window !== 'undefined') {
+  window.addEventListener('ava:budget-updated', () => setBudgetTick((n) => n + 1))
+  window.addEventListener('ava:core-settings-changed', (e) => {
+    if ((e as CustomEvent).detail?.category === 'context') setBudgetTick((n) => n + 1)
+  })
+}
+
 // Context window usage — uses core budget when available, falls back to rough estimate
 const DEFAULT_CONTEXT_WINDOW = 200000
 const contextUsage = createMemo(() => {
+  budgetTick() // reactive dependency — triggers recalc on budget/context events
   const budget = getCoreBudget()
   if (budget) {
     const s = budget.getStats()
@@ -435,6 +469,58 @@ export function useSession() {
           localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
           setLastSessionForProject(projectId, newSession.id)
         }
+      }
+    },
+
+    /**
+     * Unarchive a session — restore it to active list
+     */
+    unarchiveSession: async (id: string): Promise<void> => {
+      await dbUpdateSession(id, { status: 'active' })
+
+      // Move from archived to active list
+      const archived = archivedSessions().find((s) => s.id === id)
+      if (archived) {
+        const restored = { ...archived, status: 'active' as const }
+        setArchivedSessions((prev) => prev.filter((s) => s.id !== id))
+        setSessions((prev) => [restored, ...prev])
+      }
+    },
+
+    /**
+     * Load archived sessions
+     */
+    loadArchivedSessions: async (): Promise<void> => {
+      const { currentProject } = useProject()
+      const projectId = currentProject()?.id
+      try {
+        const archived = await dbGetArchivedSessions(projectId)
+        setArchivedSessions(archived)
+      } catch (err) {
+        logError('Session', 'Failed to load archived sessions', err)
+        setArchivedSessions([])
+      }
+    },
+
+    /** Archived sessions list */
+    archivedSessions,
+
+    /** Set of session IDs currently busy */
+    busySessionIds,
+
+    /** Check if a session is busy */
+    isSessionBusy: (id: string): boolean => busySessionIds().has(id),
+
+    /**
+     * Update a session's slug
+     */
+    updateSessionSlug: async (id: string, slug: string): Promise<void> => {
+      await dbUpdateSession(id, { slug })
+
+      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, slug } : s)))
+
+      if (currentSession()?.id === id) {
+        setCurrentSession((prev) => (prev ? { ...prev, slug } : null))
       }
     },
 

@@ -21,6 +21,10 @@ export interface Session {
   projectId?: string
   /** Parent session this was forked/branched from */
   parentSessionId?: string
+  /** Human-readable slug generated from session goal */
+  slug?: string
+  /** Timestamp when agent started executing (null = idle) */
+  busySince?: number | null
   name: string
   createdAt: number
   updatedAt: number

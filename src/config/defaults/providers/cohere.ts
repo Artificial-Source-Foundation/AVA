@@ -15,8 +15,8 @@ export const cohere: LLMProviderConfig = {
   enabled: false,
   status: 'disconnected',
   defaultModel: 'command-a',
+  // Offline fallback — models.dev catalog provides the full list when online
   models: [
-    // ── Command A (Latest) ───────────────────────────────
     {
       id: 'command-a',
       name: 'Command A',
@@ -26,32 +26,10 @@ export const cohere: LLMProviderConfig = {
       capabilities: ['tools'],
     },
     {
-      id: 'command-a-vision',
-      name: 'Command A Vision',
-      contextWindow: 128000,
-      pricing: { input: 2.5, output: 10 },
-      capabilities: ['vision', 'tools'],
-    },
-    // ── Command R Family ─────────────────────────────────
-    {
-      id: 'command-r-plus',
-      name: 'Command R+',
-      contextWindow: 128000,
-      pricing: { input: 2.5, output: 10 },
-      capabilities: ['tools'],
-    },
-    {
       id: 'command-r',
       name: 'Command R',
       contextWindow: 128000,
       pricing: { input: 0.15, output: 0.6 },
-      capabilities: ['tools'],
-    },
-    {
-      id: 'command-r7b-12-2024',
-      name: 'Command R 7B',
-      contextWindow: 128000,
-      pricing: { input: 0.0375, output: 0.15 },
       capabilities: ['tools'],
     },
   ],

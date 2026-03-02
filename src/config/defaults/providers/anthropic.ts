@@ -15,8 +15,8 @@ export const anthropic: LLMProviderConfig = {
   enabled: true,
   status: 'disconnected',
   defaultModel: 'claude-sonnet-4-6',
+  // Offline fallback — models.dev catalog provides the full list when online
   models: [
-    // ── Latest (Current Generation) ────────────────────────
     {
       id: 'claude-opus-4-6',
       name: 'Claude Opus 4.6',
@@ -37,42 +37,6 @@ export const anthropic: LLMProviderConfig = {
       name: 'Claude Haiku 4.5',
       contextWindow: 200000,
       pricing: { input: 1, output: 5 },
-      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
-    },
-    // ── Legacy (still available) ───────────────────────────
-    {
-      id: 'claude-sonnet-4-5-20250929',
-      name: 'Claude Sonnet 4.5',
-      contextWindow: 200000,
-      pricing: { input: 3, output: 15 },
-      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
-    },
-    {
-      id: 'claude-opus-4-5-20251101',
-      name: 'Claude Opus 4.5',
-      contextWindow: 200000,
-      pricing: { input: 5, output: 25 },
-      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
-    },
-    {
-      id: 'claude-opus-4-1-20250805',
-      name: 'Claude Opus 4.1',
-      contextWindow: 200000,
-      pricing: { input: 15, output: 75 },
-      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
-    },
-    {
-      id: 'claude-sonnet-4-20250514',
-      name: 'Claude Sonnet 4',
-      contextWindow: 200000,
-      pricing: { input: 3, output: 15 },
-      capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
-    },
-    {
-      id: 'claude-opus-4-20250514',
-      name: 'Claude Opus 4',
-      contextWindow: 200000,
-      pricing: { input: 15, output: 75 },
       capabilities: ['vision', 'tools', 'reasoning', 'thinking'],
     },
   ],

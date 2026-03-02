@@ -15,8 +15,8 @@ export const xai: LLMProviderConfig = {
   enabled: false,
   status: 'disconnected',
   defaultModel: 'grok-4-1-fast-reasoning',
+  // Offline fallback — models.dev catalog provides the full list when online
   models: [
-    // ── Grok 4 Series ────────────────────────────────────
     {
       id: 'grok-4-1-fast-reasoning',
       name: 'Grok 4.1 Fast (Reasoning)',
@@ -26,11 +26,11 @@ export const xai: LLMProviderConfig = {
       capabilities: ['vision', 'tools', 'reasoning'],
     },
     {
-      id: 'grok-4-1-fast-non-reasoning',
-      name: 'Grok 4.1 Fast',
-      contextWindow: 2000000,
-      pricing: { input: 0.2, output: 0.5 },
-      capabilities: ['vision', 'tools'],
+      id: 'grok-code-fast-1',
+      name: 'Grok Code Fast',
+      contextWindow: 256000,
+      pricing: { input: 0.2, output: 1.5 },
+      capabilities: ['tools', 'reasoning'],
     },
     {
       id: 'grok-4-0709',
@@ -38,29 +38,6 @@ export const xai: LLMProviderConfig = {
       contextWindow: 256000,
       pricing: { input: 3, output: 15 },
       capabilities: ['vision', 'tools', 'reasoning'],
-    },
-    // ── Code ──────────────────────────────────────────────
-    {
-      id: 'grok-code-fast-1',
-      name: 'Grok Code Fast',
-      contextWindow: 256000,
-      pricing: { input: 0.2, output: 1.5 },
-      capabilities: ['tools', 'reasoning'],
-    },
-    // ── Grok 3 (Legacy) ──────────────────────────────────
-    {
-      id: 'grok-3',
-      name: 'Grok 3',
-      contextWindow: 131072,
-      pricing: { input: 3, output: 15 },
-      capabilities: ['tools'],
-    },
-    {
-      id: 'grok-3-mini',
-      name: 'Grok 3 Mini',
-      contextWindow: 131072,
-      pricing: { input: 0.3, output: 0.5 },
-      capabilities: ['tools', 'reasoning'],
     },
   ],
 }

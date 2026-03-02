@@ -133,9 +133,9 @@ function saveToCache(catalog: PluginCatalogItem[]): void {
   localStorage.setItem(CATALOG_TIMESTAMP_KEY, String(Date.now()))
 }
 
-export async function syncPluginCatalog(): Promise<PluginCatalogItem[]> {
-  // Check cache first
-  if (isCacheValid()) {
+export async function syncPluginCatalog(force?: boolean): Promise<PluginCatalogItem[]> {
+  // Check cache first (skip if force refresh)
+  if (!force && isCacheValid()) {
     const cached = loadFromCache()
     if (cached) {
       cachedCatalog = cached

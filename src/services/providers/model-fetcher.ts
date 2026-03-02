@@ -14,8 +14,10 @@
  * - Anthropic: Documented models (no list API)
  */
 
+import type { ProviderModel } from '../../config/defaults/provider-defaults'
 import type { LLMProvider } from '../../types/llm'
 import { logWarn } from '../logger'
+import { getModelFromCatalog, getModelsDevModels } from './models-dev-catalog'
 
 // ============================================================================
 // Types
@@ -104,8 +106,14 @@ const OPENAI_CONTEXT_WINDOWS: Record<string, number> = {
   'gpt-5-nano': 400000,
   // Codex family
   'gpt-5.3-codex': 400000,
+  'gpt-5.3-codex-spark': 128000,
   'gpt-5.2-codex': 400000,
   'gpt-5.1-codex': 400000,
+  'gpt-5.1-codex-max': 400000,
+  'gpt-5-codex': 400000,
+  // Pro family
+  'gpt-5-pro': 400000,
+  'o3-pro': 200000,
   // GPT-4.1 family
   'gpt-4.1': 1047576,
   'gpt-4.1-mini': 1047576,
@@ -117,20 +125,40 @@ const OPENAI_CONTEXT_WINDOWS: Record<string, number> = {
   // o-series reasoning
   o3: 200000,
   'o3-mini': 200000,
-  'o3-pro': 200000,
   'o4-mini': 200000,
   // Open-weight
   'gpt-oss-120b': 128000,
   'gpt-oss-20b': 128000,
 }
 
+// Copilot enforces its own context limits (lower than native provider limits)
 const COPILOT_CONTEXT_WINDOWS: Record<string, number> = {
-  'gpt-4.1': 1000000,
-  'gpt-4o': 128000,
-  'gpt-4o-mini': 128000,
-  'claude-3.5-sonnet': 200000,
-  'o3-mini': 200000,
-  'o1-mini': 128000,
+  // OpenAI
+  'gpt-4.1': 64000,
+  'gpt-4o': 64000,
+  'gpt-5': 128000,
+  'gpt-5-mini': 128000,
+  'gpt-5.1': 128000,
+  'gpt-5.1-codex': 128000,
+  'gpt-5.1-codex-max': 128000,
+  'gpt-5.1-codex-mini': 128000,
+  'gpt-5.2': 128000,
+  'gpt-5.2-codex': 272000,
+  // Anthropic
+  'claude-haiku-4.5': 128000,
+  'claude-sonnet-4': 128000,
+  'claude-sonnet-4.5': 128000,
+  'claude-sonnet-4.6': 128000,
+  'claude-opus-41': 80000,
+  'claude-opus-4.5': 128000,
+  'claude-opus-4.6': 128000,
+  // Google
+  'gemini-2.5-pro': 128000,
+  'gemini-3-flash-preview': 128000,
+  'gemini-3-pro-preview': 128000,
+  'gemini-3.1-pro-preview': 128000,
+  // xAI
+  'grok-code-fast-1': 128000,
 }
 
 const OLLAMA_CONTEXT_WINDOWS: Record<string, number> = {
@@ -470,11 +498,15 @@ async function fetchOpenAICompatModels(
   const models: OpenAIModel[] = data.data || []
   const filtered = config.filterFn ? models.filter(config.filterFn) : models
 
-  return filtered.map((model) => ({
+  const results = filtered.map((model) => ({
     id: model.id,
     name: formatModelName(model.id),
     contextWindow: 4096, // OpenAI-compat APIs don't return context window
   }))
+
+  // Enrich with models.dev catalog (fills context windows, pricing, capabilities)
+  // Provider name is on the config but we need the LLMProvider id — caller passes it
+  return results
 }
 
 // ============================================================================
@@ -565,7 +597,7 @@ export async function fetchModels(
       if (!options.apiKey) {
         throw new Error('OpenAI API key required to fetch models')
       }
-      return fetchOpenAIModels(options.apiKey)
+      return enrichWithCatalog('openai', await fetchOpenAIModels(options.apiKey))
 
     case 'copilot':
       if (options.apiKey) {
@@ -576,38 +608,42 @@ export async function fetchModels(
         }
       }
       return [
-        {
-          id: 'gpt-4.1',
-          name: 'GPT-4.1',
-          contextWindow: 1000000,
-          capabilities: ['vision', 'tools'],
-        },
-        {
-          id: 'gpt-4o',
-          name: 'GPT-4o',
-          contextWindow: 128000,
-          capabilities: ['vision', 'tools'],
-        },
-        {
-          id: 'claude-3.5-sonnet',
-          name: 'Claude 3.5 Sonnet',
-          contextWindow: 200000,
-          capabilities: ['vision', 'tools'],
-        },
-        {
-          id: 'o3-mini',
-          name: 'o3 Mini',
-          contextWindow: 200000,
-          capabilities: ['tools', 'reasoning'],
-        },
+        // OpenAI
+        { id: 'gpt-4.1', name: 'GPT-4.1', contextWindow: 64000, capabilities: ['vision', 'tools'] },
+        { id: 'gpt-4o', name: 'GPT-4o', contextWindow: 64000, capabilities: ['vision', 'tools'] },
+        { id: 'gpt-5', name: 'GPT-5', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        { id: 'gpt-5-mini', name: 'GPT-5 Mini', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        { id: 'gpt-5.1', name: 'GPT-5.1', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex', contextWindow: 128000, capabilities: ['tools', 'reasoning'] },
+        { id: 'gpt-5.1-codex-max', name: 'GPT-5.1 Codex Max', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini', contextWindow: 128000, capabilities: ['tools', 'reasoning'] },
+        { id: 'gpt-5.2', name: 'GPT-5.2', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', contextWindow: 272000, capabilities: ['tools', 'reasoning'] },
+        // Anthropic
+        { id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        { id: 'claude-sonnet-4', name: 'Claude Sonnet 4', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        { id: 'claude-opus-41', name: 'Claude Opus 4.1', contextWindow: 80000, capabilities: ['vision', 'reasoning'] },
+        { id: 'claude-opus-4.5', name: 'Claude Opus 4.5', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        { id: 'claude-opus-4.6', name: 'Claude Opus 4.6', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        // Google
+        { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', contextWindow: 128000, capabilities: ['vision', 'tools'] },
+        { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        // xAI
+        { id: 'grok-code-fast-1', name: 'Grok Code Fast 1', contextWindow: 128000, capabilities: ['tools', 'reasoning'] },
       ]
 
     case 'openrouter':
       return fetchOpenRouterModels(options.apiKey)
 
-    case 'anthropic':
-      // No API, return documented models
-      return getAnthropicModels()
+    case 'anthropic': {
+      // No list API — try models.dev first, fall back to hardcoded
+      const catalogModels = getModelsDevModels('anthropic')
+      return catalogModels.length > 0 ? catalogModelsToFetched(catalogModels) : getAnthropicModels()
+    }
 
     case 'google':
       if (options.apiKey) {
@@ -633,12 +669,14 @@ export async function fetchModels(
       const config = OPENAI_COMPAT_CONFIGS[provider]
       if (options.apiKey && config) {
         try {
-          return await fetchOpenAICompatModels(options.apiKey, config)
+          const models = await fetchOpenAICompatModels(options.apiKey, config)
+          return enrichWithCatalog(provider, models)
         } catch {
-          logWarn('models', `Could not fetch ${config.providerName} models, using defaults`)
+          logWarn('models', `Could not fetch ${config.providerName} models, trying catalog`)
         }
       }
-      return [] // Fall back to static defaults in provider config
+      // Try models.dev catalog before falling back to empty
+      return catalogModelsToFetched(getModelsDevModels(provider))
     }
 
     case 'cohere':
@@ -646,20 +684,20 @@ export async function fetchModels(
         try {
           return await fetchCohereModels(options.apiKey)
         } catch {
-          logWarn('models', 'Could not fetch Cohere models, using defaults')
+          logWarn('models', 'Could not fetch Cohere models, trying catalog')
         }
       }
-      return []
+      return catalogModelsToFetched(getModelsDevModels('cohere'))
 
     case 'glm':
       if (options.apiKey) {
         try {
           return await fetchGLMModels(options.apiKey)
         } catch {
-          logWarn('models', 'Could not fetch GLM models, using defaults')
+          logWarn('models', 'Could not fetch GLM models, trying catalog')
         }
       }
-      return []
+      return catalogModelsToFetched(getModelsDevModels('glm'))
 
     case 'ollama':
       try {
@@ -669,6 +707,68 @@ export async function fetchModels(
         return []
       }
   }
+}
+
+// ============================================================================
+// Catalog Helpers
+// ============================================================================
+
+/** Convert ProviderModel[] from models.dev → FetchedModel[] */
+function catalogModelsToFetched(models: ProviderModel[]): FetchedModel[] {
+  return models.map((m) => ({
+    id: m.id,
+    name: m.name,
+    contextWindow: m.contextWindow,
+    ...(m.pricing && { pricing: { prompt: m.pricing.input ?? 0, completion: m.pricing.output ?? 0 } }),
+    ...(m.capabilities?.length && { capabilities: m.capabilities }),
+  }))
+}
+
+// ============================================================================
+// Catalog Enrichment
+// ============================================================================
+
+/**
+ * Enrich fetched models with metadata from models.dev catalog.
+ * Fills gaps (contextWindow=4096, missing pricing/capabilities) without
+ * overriding values the provider API already provides.
+ */
+export function enrichWithCatalog(
+  provider: LLMProvider,
+  fetched: FetchedModel[]
+): FetchedModel[] {
+  return fetched.map((model) => {
+    const catalogEntry = getModelFromCatalog(model.id, provider)
+    if (!catalogEntry) return model
+
+    const enriched = { ...model }
+
+    // Fill context window if it's the default placeholder (4096)
+    if (enriched.contextWindow <= 4096 && catalogEntry.limit?.context) {
+      enriched.contextWindow = catalogEntry.limit.context
+    }
+
+    // Fill pricing if missing
+    if (!enriched.pricing && catalogEntry.cost?.input !== undefined) {
+      enriched.pricing = {
+        prompt: catalogEntry.cost.input,
+        completion: catalogEntry.cost.output ?? 0,
+      }
+    }
+
+    // Fill capabilities if missing
+    if (!enriched.capabilities?.length) {
+      const caps: string[] = []
+      if (catalogEntry.tool_call) caps.push('tools')
+      if (catalogEntry.reasoning) caps.push('reasoning')
+      if (catalogEntry.attachment || catalogEntry.modalities?.input?.includes('image')) {
+        caps.push('vision')
+      }
+      if (caps.length > 0) enriched.capabilities = caps
+    }
+
+    return enriched
+  })
 }
 
 // ============================================================================

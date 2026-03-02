@@ -33,6 +33,14 @@ export async function initDatabase(): Promise<Database> {
   return db
 }
 
+/**
+ * Get the raw database instance (for adapters like DesktopSessionStorage).
+ * Initializes if not already done.
+ */
+export async function getDb(): Promise<Database> {
+  return initDatabase()
+}
+
 // ============================================================================
 // Session Operations
 // ============================================================================
@@ -94,6 +102,8 @@ export async function getSessionsWithStats(projectId?: string): Promise<SessionW
     id: row.id as string,
     projectId: (row.project_id as string) || undefined,
     parentSessionId: (row.parent_session_id as string) || undefined,
+    slug: (row.slug as string) || undefined,
+    busySince: (row.busy_since as number | null) ?? undefined,
     name: row.name as string,
     createdAt: row.created_at as number,
     updatedAt: row.updated_at as number,
@@ -110,7 +120,7 @@ export async function getSessionsWithStats(projectId?: string): Promise<SessionW
  */
 export async function updateSession(
   id: string,
-  updates: Partial<Pick<Session, 'name' | 'status' | 'metadata'>>
+  updates: Partial<Pick<Session, 'name' | 'status' | 'metadata' | 'slug' | 'busySince'>>
 ): Promise<void> {
   const database = await initDatabase()
   const setClauses: string[] = ['updated_at = ?']
@@ -128,9 +138,65 @@ export async function updateSession(
     setClauses.push('metadata = ?')
     values.push(JSON.stringify(updates.metadata))
   }
+  if (updates.slug !== undefined) {
+    setClauses.push('slug = ?')
+    values.push(updates.slug)
+  }
+  if ('busySince' in updates) {
+    setClauses.push('busy_since = ?')
+    values.push(updates.busySince ?? null)
+  }
 
   values.push(id)
   await database.execute(`UPDATE sessions SET ${setClauses.join(', ')} WHERE id = ?`, values)
+}
+
+/**
+ * Get archived sessions with stats
+ */
+export async function getArchivedSessions(projectId?: string): Promise<SessionWithStats[]> {
+  const database = await initDatabase()
+
+  let whereClause = "WHERE s.status = 'archived'"
+  const params: unknown[] = []
+
+  if (projectId) {
+    whereClause += ' AND s.project_id = ?'
+    params.push(projectId)
+  }
+
+  const rows = await database.select<Array<Record<string, unknown>>>(
+    `
+    SELECT
+      s.*,
+      COUNT(m.id) as message_count,
+      COALESCE(SUM(m.tokens_used), 0) as total_tokens,
+      COALESCE(SUM(m.cost_usd), 0) as total_cost,
+      (SELECT content FROM messages WHERE session_id = s.id ORDER BY created_at DESC LIMIT 1) as last_preview
+    FROM sessions s
+    LEFT JOIN messages m ON m.session_id = s.id
+    ${whereClause}
+    GROUP BY s.id
+    ORDER BY s.updated_at DESC
+  `,
+    params
+  )
+
+  return rows.map((row) => ({
+    id: row.id as string,
+    projectId: (row.project_id as string) || undefined,
+    parentSessionId: (row.parent_session_id as string) || undefined,
+    slug: (row.slug as string) || undefined,
+    busySince: (row.busy_since as number | null) ?? undefined,
+    name: row.name as string,
+    createdAt: row.created_at as number,
+    updatedAt: row.updated_at as number,
+    status: row.status as Session['status'],
+    metadata: row.metadata ? JSON.parse(row.metadata as string) : undefined,
+    messageCount: (row.message_count as number) || 0,
+    totalTokens: (row.total_tokens as number) || 0,
+    lastPreview: row.last_preview as string | undefined,
+  }))
 }
 
 /**

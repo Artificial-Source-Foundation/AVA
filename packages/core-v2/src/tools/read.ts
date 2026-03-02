@@ -62,7 +62,10 @@ export const readFileTool = defineTool({
     for (let i = 0; i < lines.length; i++) {
       const lineNum = offset + i + 1
       const line = truncate(lines[i], LIMITS.MAX_LINE_LENGTH)
-      const lineBytes = Buffer.byteLength(line, 'utf8')
+      const lineBytes =
+        typeof Buffer !== 'undefined'
+          ? Buffer.byteLength(line, 'utf8')
+          : new TextEncoder().encode(line).byteLength
 
       if (byteCount + lineBytes > LIMITS.MAX_BYTES) {
         bytesTruncated = true

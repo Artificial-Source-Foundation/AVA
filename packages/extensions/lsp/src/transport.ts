@@ -58,7 +58,11 @@ export class LSPTransport {
       throw new Error('Transport not started')
     }
     const body = JSON.stringify(message)
-    const header = `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n`
+    const bodyBytes =
+      typeof Buffer !== 'undefined'
+        ? Buffer.byteLength(body)
+        : new TextEncoder().encode(body).byteLength
+    const header = `Content-Length: ${bodyBytes}\r\n\r\n`
     const data = header + body
 
     const writer = this.process.stdin.getWriter()

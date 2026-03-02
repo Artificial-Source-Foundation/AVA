@@ -5,7 +5,7 @@
 
 import { createMemo, createSignal } from 'solid-js'
 import { DEFAULTS, STORAGE_KEYS } from '../config/constants'
-import { getCoreBudget } from '../services/core-bridge'
+import { getCoreBudget, notifySessionOpened } from '../services/core-bridge'
 import {
   archiveSession as dbArchiveSession,
   clearFileOperations as dbClearFileOperations,
@@ -335,6 +335,11 @@ export function useSession() {
 
       logInfo('session', 'Session created', { id: session.id })
 
+      // Notify core-v2 extensions (loads CLAUDE.md, codebase, skills, etc.)
+      const { currentProject: getProject } = useProject()
+      const cwd = getProject()?.directory || '.'
+      notifySessionOpened(session.id, cwd)
+
       // Persist last session
       localStorage.setItem(STORAGE_KEYS.LAST_SESSION, session.id)
       setLastSessionForProject(projectId, session.id)
@@ -396,6 +401,11 @@ export function useSession() {
         setMemoryItems([])
         setCheckpoints([])
       }
+
+      // Notify core-v2 extensions (loads CLAUDE.md, codebase, skills, etc.)
+      const { currentProject: getProject } = useProject()
+      const cwd = getProject()?.directory || '.'
+      notifySessionOpened(id, cwd)
 
       // Persist last session
       localStorage.setItem(STORAGE_KEYS.LAST_SESSION, id)

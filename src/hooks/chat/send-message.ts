@@ -111,7 +111,7 @@ export async function sendMessage(
     // Build conversation context from previous messages (excluding new assistant placeholder)
     const conversationContext = buildConversationContext(deps, assistantMsg.id)
     const cwd = deps.currentProject()?.directory || '.'
-    const systemPrompt = buildChatSystemPrompt(cwd, deps)
+    const systemPrompt = buildChatSystemPrompt(cwd, targetModel, deps)
 
     // Stream response with buffered UI updates
     let latestStreamText = ''
@@ -208,11 +208,9 @@ export async function sendMessage(
             tokensUsed: tokens,
             metadata: meta,
           })
-          deps.session.updateMessage(assistantMsg.id, {
-            costUSD: cost,
-            model: targetModel,
-            toolCalls,
-          })
+          const completionPatch: Partial<Message> = { costUSD: cost, model: targetModel }
+          if (toolCalls) completionPatch.toolCalls = toolCalls
+          deps.session.updateMessage(assistantMsg.id, completionPatch)
           getCoreBudget()?.addMessage(assistantMsg.id, text)
           syncTrackerStats(deps)
           void notifyCompletion(
@@ -287,7 +285,7 @@ export async function regenerate(deps: ChatDeps): Promise<void> {
     // Build context from messages before the last user message
     const conversationContext = buildConversationContext(deps, assistantMsg.id)
     const cwd = deps.currentProject()?.directory || '.'
-    const systemPrompt = buildChatSystemPrompt(cwd, deps)
+    const systemPrompt = buildChatSystemPrompt(cwd, targetModel, deps)
 
     await streamResponse(
       {

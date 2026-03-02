@@ -57,7 +57,11 @@ const DEFAULT_MAX_BYTES = 5 * 1024 // 5KB threshold
  * Outputs under the threshold are returned unchanged.
  */
 export function smartSummarize(output: string, maxBytes: number = DEFAULT_MAX_BYTES): string {
-  if (Buffer.byteLength(output, 'utf8') <= maxBytes) {
+  const outputBytes =
+    typeof Buffer !== 'undefined'
+      ? Buffer.byteLength(output, 'utf8')
+      : new TextEncoder().encode(output).byteLength
+  if (outputBytes <= maxBytes) {
     return output
   }
 

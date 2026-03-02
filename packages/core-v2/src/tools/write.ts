@@ -24,7 +24,11 @@ export const writeFileTool = defineTool({
 
   validate(params) {
     const parsed = z.parse(schema, params)
-    if (Buffer.byteLength(parsed.content, 'utf8') > LIMITS.MAX_BYTES) {
+    const contentBytes =
+      typeof Buffer !== 'undefined'
+        ? Buffer.byteLength(parsed.content, 'utf8')
+        : new TextEncoder().encode(parsed.content).byteLength
+    if (contentBytes > LIMITS.MAX_BYTES) {
       throw new ToolError(
         `Content exceeds ${LIMITS.MAX_BYTES} bytes`,
         ToolErrorType.CONTENT_TOO_LARGE,
@@ -75,7 +79,10 @@ export const writeFileTool = defineTool({
     await fs.writeFile(filePath, sanitized)
 
     const lines = sanitized.split('\n').length
-    const bytes = Buffer.byteLength(sanitized, 'utf8')
+    const bytes =
+      typeof Buffer !== 'undefined'
+        ? Buffer.byteLength(sanitized, 'utf8')
+        : new TextEncoder().encode(sanitized).byteLength
     const action = fileExisted ? 'Updated' : 'Created'
 
     return {

@@ -116,25 +116,35 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 const MAX_RESULT_BYTES = 50 * 1024 // 50KB per result
 const MAX_TOTAL_RESULT_BYTES = 200 * 1024 // 200KB total
 
+/** Platform-safe byte length — works in both browser (TextEncoder) and Node (Buffer). */
+function byteLength(str: string): number {
+  if (typeof Buffer !== 'undefined') return Buffer.byteLength(str, 'utf8')
+  if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(str).byteLength
+  // Rough fallback
+  let bytes = 0
+  for (let i = 0; i < str.length; i++) bytes += str.charCodeAt(i) > 0x7f ? 3 : 1
+  return bytes
+}
+
 /** Truncate tool result blocks that exceed byte limits. Mutates in-place. */
 export async function truncateToolResults(blocks: ToolResultBlock[]): Promise<void> {
   let totalBytes = 0
   for (const block of blocks) {
-    const bytes = Buffer.byteLength(block.content, 'utf8')
+    const bytes = byteLength(block.content)
     if (bytes > MAX_RESULT_BYTES) {
       const savedPath = await saveOverflowOutput(block.content)
       const truncated = block.content.slice(0, MAX_RESULT_BYTES)
       const hint = savedPath ? `\n\n[Full output saved to: ${savedPath}]` : ''
       block.content = `${truncated}\n\n[...truncated ${bytes - MAX_RESULT_BYTES} bytes]${hint}`
     }
-    totalBytes += Buffer.byteLength(block.content, 'utf8')
+    totalBytes += byteLength(block.content)
   }
 
   // If total exceeds limit, proportionally truncate the largest results
   if (totalBytes > MAX_TOTAL_RESULT_BYTES) {
     const ratio = MAX_TOTAL_RESULT_BYTES / totalBytes
     for (const block of blocks) {
-      const bytes = Buffer.byteLength(block.content, 'utf8')
+      const bytes = byteLength(block.content)
       if (bytes > 1024) {
         // only truncate results > 1KB
         const newLength = Math.floor(bytes * ratio)
@@ -428,6 +438,7 @@ export class AgentExecutor {
       provider: this.config.provider ?? 'anthropic',
       model,
       tools,
+      toolChoice: tools.length > 0 ? { type: 'auto' } : undefined,
     }
 
     // Structured output — add __structured_output tool and force tool_choice
@@ -453,6 +464,11 @@ export class AgentExecutor {
 
       if (delta.content) {
         assistantContent += delta.content
+        // Emit incremental content so the UI can stream tokens in real time
+        this.emit({ type: 'thought', agentId: this.agentId, content: delta.content })
+      }
+      if (delta.thinking) {
+        this.emit({ type: 'thinking', agentId: this.agentId, content: delta.thinking })
       }
       if (delta.toolUse) {
         toolCalls.push(delta.toolUse)
@@ -478,9 +494,6 @@ export class AgentExecutor {
       if (assistantContent) blocks.push({ type: 'text', text: assistantContent })
       for (const call of toolCalls) blocks.push(call)
       history.push({ role: 'assistant', content: blocks })
-      if (assistantContent) {
-        this.emit({ type: 'thought', agentId: this.agentId, content: assistantContent })
-      }
     }
 
     // No tool calls — assistant is done

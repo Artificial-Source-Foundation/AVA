@@ -5,6 +5,10 @@
  */
 
 import { getToolDefinitions } from '@ava/core-v2/tools'
+import {
+  addPromptSection,
+  buildSystemPrompt,
+} from '../../../packages/extensions/prompts/src/builder.js'
 import { getCoreBudget } from '../../services/core-bridge'
 import type { ChatDeps } from './types'
 
@@ -54,8 +58,15 @@ export function buildConversationContext(deps: ChatDeps, excludeId?: string): st
 // Chat System Prompt
 // ============================================================================
 
-/** Build a system prompt for chat mode that tells the LLM about its tools */
-export function buildChatSystemPrompt(cwd: string, deps?: ChatDeps): string {
+/**
+ * Build a system prompt using the shared prompts extension pipeline.
+ * Same builder the CLI uses — ensures identity, tool guidelines, model-family
+ * adjustments, and project instructions (CLAUDE.md) are all included.
+ *
+ * Dynamic per-request context (cwd, OS, tools, custom instructions) is added
+ * as temporary sections, built, then cleaned up.
+ */
+export function buildChatSystemPrompt(cwd: string, model?: string, deps?: ChatDeps): string {
   const toolNames = getToolDefinitions().map((t) => t.name)
   const os = navigator.platform?.includes('Win')
     ? 'Windows'
@@ -64,49 +75,54 @@ export function buildChatSystemPrompt(cwd: string, deps?: ChatDeps): string {
       : 'Linux'
   const date = new Date().toLocaleDateString()
 
-  let prompt = `You are AVA, an AI coding assistant. You have direct access to the user's project files and tools.
+  // Add temporary sections for per-request dynamic context
+  const removers: Array<() => void> = []
 
-## ENVIRONMENT
-- **Working Directory**: ${cwd}
-- **Operating System**: ${os}
-- **Date**: ${date}
+  removers.push(
+    addPromptSection({
+      name: 'environment',
+      priority: 50,
+      content: `## Environment\n- Working directory: ${cwd}\n- OS: ${os}\n- Date: ${date}`,
+    })
+  )
 
-## CAPABILITIES
+  removers.push(
+    addPromptSection({
+      name: 'behavior',
+      priority: 20,
+      content:
+        'Do the work without asking questions. Infer missing details from the codebase.\n' +
+        'If a task is ambiguous, pick the most reasonable interpretation and execute.',
+    })
+  )
 
-You have access to the following tools: ${toolNames.join(', ')}
+  removers.push(
+    addPromptSection({
+      name: 'tool-list',
+      priority: 60,
+      content: `Available tools: ${toolNames.join(', ')}`,
+    })
+  )
 
-### File Operations
-- **glob** — Find files by pattern (e.g., "**/*.ts", "src/**/*.js")
-- **read** — Read file contents with optional line range
-- **grep** — Search file contents with regex patterns
-- **create** — Create new files
-- **write** — Write/overwrite file contents
-- **edit** — Modify specific parts of a file (preferred for changes)
-- **delete** — Remove files
-- **ls** — List directory contents
-
-### Command Execution
-- **bash** — Execute shell commands
-
-### Search
-- **codesearch** — Search codebase with context
-- **websearch** — Search the web
-- **webfetch** — Fetch and parse web pages
-
-## TOOL USAGE
-- Use tools to answer questions — read files, search code, run commands.
-- Read files before modifying them. Use search tools to find relevant code.
-- If a tool fails, analyze the error and try an alternative approach.
-- Be direct and technical. Prefer using tools over asking the user to paste content.
-- Keep changes minimal and focused. Only modify what's necessary.`
-
-  // Append custom instructions
   if (deps) {
     const instructions = deps.settings.settings().generation.customInstructions.trim()
     if (instructions) {
-      prompt += `\n\n## CUSTOM INSTRUCTIONS\n${instructions}`
+      removers.push(
+        addPromptSection({
+          name: 'custom-instructions',
+          priority: 200,
+          content: `## Custom Instructions\n${instructions}`,
+        })
+      )
     }
   }
+
+  // Build using the shared pipeline (includes identity, tool-guidelines,
+  // project instructions from session:opened, and model-family adjustments)
+  const prompt = buildSystemPrompt(model)
+
+  // Clean up temporary sections
+  for (const remove of removers) remove()
 
   return prompt
 }

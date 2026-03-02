@@ -94,22 +94,40 @@ export async function streamResponse(options: StreamOptions, deps: ChatDeps): Pr
     if (result) {
       const output = fullContent || result.output
       const totalTokens = result.tokensUsed.input + result.tokensUsed.output
+      if (!output && allToolCalls.length === 0) {
+        logInfo(deps.LOG_SRC, 'Stream completed with empty output', {
+          terminateMode: result.terminateMode,
+          turns: result.turns,
+          success: result.success,
+          tokensUsed: result.tokensUsed,
+          error: result.error,
+        })
+      }
       options.onComplete(
-        output,
+        output || (result.error ? `Error: ${result.error}` : ''),
         totalTokens > 0 ? totalTokens : undefined,
         allToolCalls.length > 0 ? allToolCalls : undefined
       )
+    } else {
+      logInfo(deps.LOG_SRC, 'Stream returned null result')
+      options.onComplete('(No response received)')
     }
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       logInfo(deps.LOG_SRC, 'Stream aborted', { sessionId: options.sessionId })
+      // Still complete with whatever content we have so the bubble isn't blank
+      if (fullContent || allToolCalls.length > 0) {
+        options.onComplete(
+          fullContent || '',
+          undefined,
+          allToolCalls.length > 0 ? allToolCalls : undefined
+        )
+      }
       return
     }
-    options.onError({
-      type: 'unknown',
-      message: err instanceof Error ? err.message : 'Unknown error',
-    })
+    const errorMsg = err instanceof Error ? err.message : 'Unknown error'
     logError(deps.LOG_SRC, 'Stream failed', err)
+    options.onError({ type: 'unknown', message: errorMsg })
   } finally {
     diffDisposable.dispose()
   }
@@ -135,6 +153,12 @@ function handleChatEvent(
     case 'thought': {
       state.content += event.content
       options.onContent(state.content)
+      break
+    }
+
+    case 'thinking': {
+      state.thinking += event.content
+      options.onThinking?.(state.thinking)
       break
     }
 

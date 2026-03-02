@@ -75,6 +75,7 @@ export type AgentEvent =
   | { type: 'tool:start'; agentId: string; toolName: string; args: Record<string, unknown> }
   | { type: 'tool:finish'; agentId: string; toolName: string; success: boolean; durationMs: number }
   | { type: 'thought'; agentId: string; content: string }
+  | { type: 'thinking'; agentId: string; content: string }
   | { type: 'error'; agentId: string; error: string }
   | {
       type: 'retry'

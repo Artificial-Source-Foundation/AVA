@@ -175,15 +175,20 @@ export function truncateOutput(
   let byteCount = 0
   let lineCount = 0
 
+  const _byteLen = (s: string) =>
+    typeof Buffer !== 'undefined'
+      ? Buffer.byteLength(s, 'utf8')
+      : new TextEncoder().encode(s).byteLength
+
   for (const line of lines) {
-    const lineBytes = Buffer.byteLength(line, 'utf8') + 1
+    const lineBytes = _byteLen(line) + 1
     if (lineCount >= maxLines || byteCount + lineBytes > maxBytes) {
       const kept = lines.slice(0, lineCount).join('\n')
       return {
         content: kept,
         truncated: true,
         removedLines: lines.length - lineCount,
-        removedBytes: Buffer.byteLength(output, 'utf8') - Buffer.byteLength(kept, 'utf8'),
+        removedBytes: _byteLen(output) - _byteLen(kept),
       }
     }
     byteCount += lineBytes

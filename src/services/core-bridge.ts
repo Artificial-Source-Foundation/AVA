@@ -9,6 +9,7 @@ import { getMessageBus, type MessageBus } from '@ava/core-v2/bus'
 import { getSettingsManager, type SettingsManager } from '@ava/core-v2/config'
 import {
   createExtensionAPI,
+  emitEvent,
   onEvent,
   type ToolMiddleware,
   type ToolMiddlewareContext,
@@ -129,7 +130,27 @@ export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() =
     }
   })
 
+  // 11. Wire instructions:loaded → prompt builder (same as CLI)
+  //     When the instructions extension loads CLAUDE.md/AGENTS.md, it emits
+  //     this event. We add the content as a prompt section so buildSystemPrompt()
+  //     includes it — just like the CLI does in agent-v2.ts.
+  const instructionsSub = onEvent('instructions:loaded', (data) => {
+    const { merged, count } = data as { merged: string; count: number }
+    if (merged) {
+      // Dynamic import to avoid circular deps — builder.ts is a pure module
+      void import('../../packages/extensions/prompts/src/builder.js').then((pm) => {
+        pm.addPromptSection({
+          name: 'project-instructions',
+          content: `# Project Instructions\n\n${merged}`,
+          priority: 5,
+        })
+        logInfo('core', `Loaded ${count} project instruction file(s)`)
+      })
+    }
+  })
+
   _cleanup = () => {
+    instructionsSub.dispose()
     sessionStatusSub.dispose()
     for (const sub of contextSubs) sub.dispose()
     disposeSettingsSync()
@@ -144,6 +165,17 @@ export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() =
   }
 
   return _cleanup
+}
+
+// ─── Session Lifecycle ──────────────────────────────────────────────────
+
+/**
+ * Notify core-v2 extensions that a session is open.
+ * Triggers instructions loading (CLAUDE.md), codebase scanning, skills, etc.
+ * Must be called when creating or switching sessions — mirrors what the CLI does.
+ */
+export function notifySessionOpened(sessionId: string, workingDirectory: string): void {
+  emitEvent('session:opened', { sessionId, workingDirectory })
 }
 
 // ─── Sandbox Middleware ──────────────────────────────────────────────────────

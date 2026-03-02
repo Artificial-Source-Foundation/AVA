@@ -34,13 +34,9 @@ export const AgentsTab: Component = () => {
         icon: Wand2,
         enabled: true,
         capabilities: [],
-        model: '',
         isCustom: true,
-        type: 'custom' as const,
         tier: 'worker' as const,
         tools: [],
-        delegates: [],
-        domain: '',
       }
     }
     const id = selectedId()

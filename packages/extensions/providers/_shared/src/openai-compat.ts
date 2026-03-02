@@ -267,6 +267,15 @@ export function buildOpenAIRequestBody(
   const tools = convertToolsToOpenAIFormat(config.tools)
   if (tools) body.tools = tools
 
+  // Pass tool_choice through — some models/providers require explicit "auto" to activate tool calling
+  if (config.toolChoice && tools) {
+    if (config.toolChoice.type === 'tool') {
+      body.tool_choice = { type: 'function', function: { name: config.toolChoice.name } }
+    } else {
+      body.tool_choice = config.toolChoice.type // "auto" | "none"
+    }
+  }
+
   return body
 }
 

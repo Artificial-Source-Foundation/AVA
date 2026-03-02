@@ -81,7 +81,17 @@ export class AnthropicClient implements LLMClient {
       body.temperature = config.temperature
     }
 
-    if (config.tools && config.tools.length > 0) body.tools = config.tools
+    if (config.tools && config.tools.length > 0) {
+      body.tools = config.tools
+      // Pass tool_choice through — Anthropic uses { type: "auto" | "any" | "tool", name?: string }
+      if (config.toolChoice) {
+        if (config.toolChoice.type === 'tool') {
+          body.tool_choice = { type: 'tool', name: config.toolChoice.name }
+        } else {
+          body.tool_choice = { type: config.toolChoice.type }
+        }
+      }
+    }
 
     // Build headers based on auth type
     const headers: Record<string, string> = {

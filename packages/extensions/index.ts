@@ -9,6 +9,8 @@
 export { activate as activateContext } from './context/src/index.js'
 // Safety & permissions
 export { activate as activatePermissions } from './permissions/src/index.js'
+// Profiles
+export { activate as activateProfiles } from './profiles/src/index.js'
 // Prompts
 export { activate as activatePrompts } from './prompts/src/index.js'
 // Shared provider utilities

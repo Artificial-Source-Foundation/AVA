@@ -1,8 +1,13 @@
 /**
- * Git snapshot manager — creates and tracks git stash snapshots.
+ * Git snapshot manager backed by a separate .ava/snapshots repository.
  */
 
 import type { IShell } from '@ava/core-v2/platform'
+import {
+  createSnapshot,
+  listSnapshots,
+  restoreSnapshot as restoreSnapshotCommit,
+} from './snapshot-repo.js'
 import type { GitConfig, GitSnapshot } from './types.js'
 import { DEFAULT_GIT_CONFIG } from './types.js'
 
@@ -27,14 +32,15 @@ export function createSnapshotManager(
       files: string[]
     ): Promise<GitSnapshot | null> {
       try {
-        const result = await shell.exec(`cd "${cwd}" && git stash create "${message}"`)
-        const hash = result.stdout.trim()
-        if (!hash) return null
+        const commit = await createSnapshot(shell, cwd, message)
+        if (!commit) {
+          return null
+        }
 
         const snapshot: GitSnapshot = {
-          hash,
+          hash: commit.id,
           message,
-          timestamp: Date.now(),
+          timestamp: commit.timestamp,
           files,
         }
 
@@ -53,9 +59,7 @@ export function createSnapshotManager(
 
     async restoreSnapshot(cwd: string, hash: string): Promise<boolean> {
       try {
-        // Apply the stash snapshot to restore files
-        await shell.exec(`cd "${cwd}" && git stash apply "${hash}"`)
-        return true
+        return await restoreSnapshotCommit(shell, cwd, hash)
       } catch {
         return false
       }
@@ -80,9 +84,19 @@ export function createSnapshotManager(
  */
 export async function isGitRepo(shell: IShell, cwd: string): Promise<boolean> {
   try {
-    const result = await shell.exec(`cd "${cwd}" && git rev-parse --is-inside-work-tree`)
+    const result = await shell.exec(`git -C "${cwd}" rev-parse --is-inside-work-tree`)
     return result.stdout.trim() === 'true'
   } catch {
     return false
   }
+}
+
+export async function getSnapshotCommits(shell: IShell, cwd: string): Promise<GitSnapshot[]> {
+  const commits = await listSnapshots(shell, cwd)
+  return commits.map((commit) => ({
+    hash: commit.id,
+    message: commit.message,
+    timestamp: commit.timestamp,
+    files: [],
+  }))
 }

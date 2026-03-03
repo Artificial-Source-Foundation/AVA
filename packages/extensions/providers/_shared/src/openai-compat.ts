@@ -152,6 +152,29 @@ interface OpenAIMessage {
   tool_call_id?: string
 }
 
+const VISION_MODEL_PATTERNS = [
+  'gpt-4o',
+  'gpt-4.1',
+  'o1',
+  'o3',
+  'claude-3',
+  'gemini-1.5',
+  'gemini-2',
+  'llava',
+] as const
+
+const NON_VISION_MODEL_PATTERNS = ['embedding', 'whisper', 'tts', 'gpt-3.5'] as const
+
+export function isVisionCapable(model: string): boolean {
+  const normalized = model.toLowerCase()
+
+  if (NON_VISION_MODEL_PATTERNS.some((pattern) => normalized.includes(pattern))) {
+    return false
+  }
+
+  return VISION_MODEL_PATTERNS.some((pattern) => normalized.includes(pattern))
+}
+
 /** Convert an ImageBlock to OpenAI image_url content part. */
 function convertImageBlock(block: ImageBlock): OpenAIImageContent {
   const url =

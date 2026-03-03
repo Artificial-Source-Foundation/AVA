@@ -5,6 +5,7 @@ import {
   convertMessagesToOpenAI,
   convertToolsToOpenAIFormat,
   createOpenAICompatClient,
+  isVisionCapable,
   ToolCallBuffer,
 } from './openai-compat.js'
 
@@ -63,6 +64,21 @@ describe('buildOpenAIRequestBody', () => {
     const body = buildOpenAIRequestBody(messages, config, { model: 'gpt-4o' })
 
     expect(body.model).toBe('gpt-4o-mini')
+  })
+})
+
+describe('isVisionCapable', () => {
+  it('returns true for multimodal model families', () => {
+    expect(isVisionCapable('gpt-4o')).toBe(true)
+    expect(isVisionCapable('gpt-4.1')).toBe(true)
+    expect(isVisionCapable('claude-3-5-sonnet')).toBe(true)
+    expect(isVisionCapable('gemini-1.5-pro')).toBe(true)
+  })
+
+  it('returns false for text-only model families', () => {
+    expect(isVisionCapable('gpt-3.5-turbo')).toBe(false)
+    expect(isVisionCapable('text-embedding-3-large')).toBe(false)
+    expect(isVisionCapable('unknown-model')).toBe(false)
   })
 })
 

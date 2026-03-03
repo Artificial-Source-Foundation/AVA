@@ -21,8 +21,13 @@ function parseYaml(content: string): Record<string, unknown> {
     // Array item start: "  - key: value"
     const arrayItemMatch = /^\s+-\s+(\w[\w.-]*):\s*(.+)$/.exec(line)
     if (arrayItemMatch && currentArrayKey) {
+      const key = arrayItemMatch[1]
+      const value = arrayItemMatch[2]
+      if (!key || value === undefined) {
+        continue
+      }
       // Start new object in current array
-      currentObj = { [arrayItemMatch[1]]: parseScalar(arrayItemMatch[2].trim()) }
+      currentObj = { [key]: parseScalar(value.trim()) }
       currentArray.push(currentObj)
       continue
     }
@@ -30,14 +35,23 @@ function parseYaml(content: string): Record<string, unknown> {
     // Continuation of array object: "    key: value" (indented, no dash)
     const contMatch = /^\s{4,}(\w[\w.-]*):\s*(.+)$/.exec(line)
     if (contMatch && currentObj) {
-      currentObj[contMatch[1]] = parseScalar(contMatch[2].trim())
+      const key = contMatch[1]
+      const value = contMatch[2]
+      if (!key || value === undefined) {
+        continue
+      }
+      currentObj[key] = parseScalar(value.trim())
       continue
     }
 
     // Top-level key with no value (start of array block): "rules:"
     const blockMatch = /^(\w[\w.-]*):\s*$/.exec(line)
     if (blockMatch) {
-      currentArrayKey = blockMatch[1]
+      const key = blockMatch[1]
+      if (!key) {
+        continue
+      }
+      currentArrayKey = key
       currentArray = []
       currentObj = null
       result[currentArrayKey] = currentArray
@@ -47,7 +61,11 @@ function parseYaml(content: string): Record<string, unknown> {
     // Top-level key with inline empty array: "rules: []"
     const emptyArrayMatch = /^(\w[\w.-]*):\s*\[\]\s*$/.exec(line)
     if (emptyArrayMatch) {
-      result[emptyArrayMatch[1]] = []
+      const key = emptyArrayMatch[1]
+      if (!key) {
+        continue
+      }
+      result[key] = []
       currentArrayKey = ''
       currentObj = null
       continue
@@ -56,7 +74,12 @@ function parseYaml(content: string): Record<string, unknown> {
     // Top-level key-value: "version: 1"
     const kvMatch = /^(\w[\w.-]*):\s+(.+)$/.exec(line)
     if (kvMatch) {
-      result[kvMatch[1]] = parseScalar(kvMatch[2].trim())
+      const key = kvMatch[1]
+      const value = kvMatch[2]
+      if (!key || value === undefined) {
+        continue
+      }
+      result[key] = parseScalar(value.trim())
       currentArrayKey = ''
       currentObj = null
     }
@@ -82,7 +105,11 @@ function parseToml(content: string): Record<string, unknown> {
     // Array of tables: [[rules]]
     const arraySection = /^\[\[(\w+)\]\]$/.exec(line)
     if (arraySection) {
-      currentSection = arraySection[1]
+      const section = arraySection[1]
+      if (!section) {
+        continue
+      }
+      currentSection = section
       currentObj = {}
       if (!Array.isArray(result[currentSection])) {
         result[currentSection] = []
@@ -94,8 +121,13 @@ function parseToml(content: string): Record<string, unknown> {
     // Key = value
     const kvMatch = /^(\w[\w.-]*)\s*=\s*(.+)$/.exec(line)
     if (kvMatch) {
+      const key = kvMatch[1]
+      const value = kvMatch[2]
+      if (!key || value === undefined) {
+        continue
+      }
       const target = currentObj ?? result
-      target[kvMatch[1]] = parseScalar(kvMatch[2].trim())
+      target[key] = parseScalar(value.trim())
     }
   }
 

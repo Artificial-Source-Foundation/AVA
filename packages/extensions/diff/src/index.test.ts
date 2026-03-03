@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { ToolMiddlewareContext } from '@ava/core-v2/extensions'
 import { describe, expect, it } from 'vitest'
 import { createMockExtensionAPI } from '../../../core-v2/src/__test-utils__/mock-extension-api.js'
@@ -44,6 +47,73 @@ describe('diff extension', () => {
     const { api, registeredTools } = createMockExtensionAPI()
     activateDiff(api)
     expect(registeredTools.some((t) => t.definition?.name === 'diff_review')).toBe(true)
+  })
+
+  it('diff_review can list, accept/reject, and apply pending hunks', async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'diff-ext-'))
+    const fileA = join(temp, 'a.ts')
+    const fileB = join(temp, 'b.ts')
+    await writeFile(fileA, 'alpha\n', 'utf-8')
+    await writeFile(fileB, 'beta\n', 'utf-8')
+
+    try {
+      const { api, registeredMiddleware, registeredTools } = createMockExtensionAPI()
+      ;(
+        api.platform.fs as unknown as {
+          addFile: (path: string, content: string) => void
+          writeFile: (path: string, content: string) => Promise<void>
+        }
+      ).addFile(fileA, 'alpha\n')
+      ;(
+        api.platform.fs as unknown as {
+          addFile: (path: string, content: string) => void
+          writeFile: (path: string, content: string) => Promise<void>
+        }
+      ).addFile(fileB, 'beta\n')
+
+      activateDiff(api)
+
+      const mw = registeredMiddleware[0]
+      const diffReview = registeredTools.find((t) => t.definition?.name === 'diff_review')
+      expect(diffReview).toBeDefined()
+
+      const ctx = () => ({
+        sessionId: 'test',
+        workingDirectory: temp,
+        signal: new AbortController().signal,
+      })
+
+      const aWrite = makeCtx('write_file', { path: fileA })
+      await mw.before!(aWrite)
+      await api.platform.fs.writeFile(fileA, 'ALPHA\n')
+      await mw.after!(aWrite, { success: true, output: 'ok' })
+
+      const bWrite = makeCtx('write_file', { path: fileB })
+      await mw.before!(bWrite)
+      await api.platform.fs.writeFile(fileB, 'BETA\n')
+      await mw.after!(bWrite, { success: true, output: 'ok' })
+
+      const listed = await diffReview!.execute({ action: 'list' }, ctx())
+      expect(listed.success).toBe(true)
+      const items = listed.metadata?.items as Array<{ id: string; path: string }>
+      expect(items).toHaveLength(2)
+
+      const aItem = items.find((item) => item.path === fileA)
+      const bItem = items.find((item) => item.path === fileB)
+      expect(aItem).toBeDefined()
+      expect(bItem).toBeDefined()
+
+      await diffReview!.execute({ action: 'accept', hunkId: aItem!.id }, ctx())
+      await diffReview!.execute({ action: 'reject', hunkId: bItem!.id }, ctx())
+
+      const applied = await diffReview!.execute({ action: 'apply' } as never, ctx())
+      expect(applied.success).toBe(true)
+
+      expect(await readFile(fileA, 'utf-8')).toBe('ALPHA\n')
+      expect(await readFile(fileB, 'utf-8')).toBe('beta\n')
+    } finally {
+      await rm(temp, { recursive: true, force: true })
+    }
   })
 
   it('before hook snapshots file content for write tools', async () => {

@@ -62,6 +62,7 @@
     "recipes/**/*.ts",
     "server/**/*.ts",
     "recall/**/*.ts",
+    "profiles/**/*.ts",
     "github-bot/**/*.ts",
     "index.ts"
   ],

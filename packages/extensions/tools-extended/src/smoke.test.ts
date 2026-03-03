@@ -18,6 +18,7 @@ import { completionTool } from './completion.js'
 import { createFileTool } from './create.js'
 import { deleteFileTool } from './delete.js'
 import { editBenchmarkTool } from './edit-benchmark/index.js'
+import { inlineSuggestTool } from './inline-suggest.js'
 import { lsTool } from './ls.js'
 import { multieditTool } from './multiedit.js'
 import { planEnterTool, planExitTool } from './plan-mode-tools.js'
@@ -26,6 +27,8 @@ import { repoMapTool } from './repo-map.js'
 import { sessionCostTool } from './session-cost.js'
 import { taskTool } from './task.js'
 import { todoReadTool, todoWriteTool } from './todo.js'
+import { viewImageTool } from './view-image.js'
+import { voiceTranscribeTool } from './voice-transcribe.js'
 import { webfetchTool } from './webfetch.js'
 import { websearchTool } from './websearch.js'
 
@@ -34,12 +37,15 @@ const ALL_TOOLS = [
   deleteFileTool,
   lsTool,
   completionTool,
+  inlineSuggestTool,
   todoReadTool,
   todoWriteTool,
   batchTool,
   questionTool,
   multieditTool,
   taskTool,
+  viewImageTool,
+  voiceTranscribeTool,
   websearchTool,
   webfetchTool,
   applyPatchTool,
@@ -73,8 +79,8 @@ describe('Extended tools smoke test', () => {
     platform.fs.addFile('/project/src/app.ts', 'const app = true\n')
   })
 
-  it('has 22 tools', () => {
-    expect(ALL_TOOLS).toHaveLength(22)
+  it('has 25 tools', () => {
+    expect(ALL_TOOLS).toHaveLength(25)
   })
 
   describe('tool definitions', () => {

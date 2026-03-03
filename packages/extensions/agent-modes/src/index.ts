@@ -5,6 +5,7 @@
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
+import { registerBestOfNMode } from './best-of-n-mode.js'
 import { registerDoomLoop } from './doom-loop.js'
 import { registerMinimalMode } from './minimal-mode.js'
 import { registerPlanMode } from './plan-mode.js'
@@ -12,7 +13,12 @@ import { registerPlanMode } from './plan-mode.js'
 export { selectAgentMode } from './selector.js'
 
 export function activate(api: ExtensionAPI): Disposable {
-  const disposables = [registerPlanMode(api), registerMinimalMode(api), registerDoomLoop(api)]
+  const disposables = [
+    registerPlanMode(api),
+    registerMinimalMode(api),
+    registerBestOfNMode(api),
+    registerDoomLoop(api),
+  ]
 
   return {
     dispose() {

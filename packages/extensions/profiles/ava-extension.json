@@ -1,0 +1,10 @@
+{
+  "name": "ava-profiles",
+  "version": "1.0.0",
+  "description": "Agent profile bundles for model/tools/instructions",
+  "main": "src/index.ts",
+  "builtIn": true,
+  "enabledByDefault": true,
+  "priority": 18,
+  "capabilities": ["tools", "agent-mode", "settings"]
+}

@@ -25,3 +25,8 @@ export interface SandboxResult {
   durationMs: number
   timedOut: boolean
 }
+
+export interface Sandbox {
+  name: 'native' | 'docker' | 'noop'
+  run(config: SandboxConfig, code: string): Promise<SandboxResult>
+}

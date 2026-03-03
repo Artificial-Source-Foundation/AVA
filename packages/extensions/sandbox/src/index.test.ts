@@ -9,10 +9,10 @@ describe('sandbox extension', () => {
     expect(api.log.debug).toHaveBeenCalledWith('Sandbox extension activated')
   })
 
-  it('registers sandbox_run tool when docker is available', async () => {
+  it('registers sandbox_run tool when native linux runtime is available', async () => {
     const { api, registeredTools } = createMockExtensionAPI()
-    api.platform.shell.setResult('docker --version', {
-      stdout: 'Docker version 24.0.0',
+    api.platform.shell.setResult('bwrap --version', {
+      stdout: 'bwrap 0.8',
       stderr: '',
       exitCode: 0,
     })
@@ -24,10 +24,10 @@ describe('sandbox extension', () => {
     expect(registeredTools[0].definition.name).toBe('sandbox_run')
   })
 
-  it('emits sandbox:ready with available=true when docker is available', async () => {
+  it('emits sandbox:ready with runtime details', async () => {
     const { api, emittedEvents } = createMockExtensionAPI()
-    api.platform.shell.setResult('docker --version', {
-      stdout: 'Docker version 24.0.0',
+    api.platform.shell.setResult('bwrap --version', {
+      stdout: 'bwrap 0.8',
       stderr: '',
       exitCode: 0,
     })
@@ -38,10 +38,16 @@ describe('sandbox extension', () => {
     const ready = emittedEvents.find((e) => e.event === 'sandbox:ready')
     expect(ready).toBeDefined()
     expect((ready!.data as { available: boolean }).available).toBe(true)
+    expect((ready!.data as { runtime: string }).runtime).toBe('native')
   })
 
-  it('does not register tool when docker is unavailable', async () => {
+  it('registers tool with noop runtime when native and docker are unavailable', async () => {
     const { api, registeredTools } = createMockExtensionAPI()
+    api.platform.shell.setResult('bwrap --version', {
+      stdout: '',
+      stderr: 'not found',
+      exitCode: 127,
+    })
     api.platform.shell.setResult('docker --version', {
       stdout: '',
       stderr: 'not found',
@@ -51,13 +57,18 @@ describe('sandbox extension', () => {
 
     await new Promise((r) => setTimeout(r, 50))
 
-    expect(registeredTools).toHaveLength(0)
+    expect(registeredTools).toHaveLength(1)
+    expect(registeredTools[0].definition.name).toBe('sandbox_run')
+
+    const result = await registeredTools[0].execute({ code: 'echo hi' })
+    expect(result.success).toBe(false)
+    expect(result.metadata?.runtime).toBe('noop')
   })
 
   it('cleans up on dispose', async () => {
     const { api, registeredTools } = createMockExtensionAPI()
-    api.platform.shell.setResult('docker --version', {
-      stdout: 'Docker version 24.0.0',
+    api.platform.shell.setResult('bwrap --version', {
+      stdout: 'bwrap 0.8',
       stderr: '',
       exitCode: 0,
     })

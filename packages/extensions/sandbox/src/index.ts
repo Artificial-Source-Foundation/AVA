@@ -1,12 +1,9 @@
 /**
- * Sandbox extension — Docker sandboxed execution.
- *
- * Checks for Docker availability and registers a sandbox_run tool.
- * Graceful no-op if Docker is not installed.
+ * Sandbox extension — runtime-selected sandboxed execution.
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
-import { isDockerAvailable, runInSandbox } from './runner.js'
+import { createSandboxRuntime } from './runner.js'
 import type { SandboxConfig } from './types.js'
 import { DEFAULT_SANDBOX_CONFIG } from './types.js'
 
@@ -17,24 +14,20 @@ export function activate(api: ExtensionAPI): Disposable {
   }
   const disposables: Disposable[] = []
 
-  void isDockerAvailable(api.platform.shell).then((available) => {
-    if (!available) {
-      api.log.debug('Sandbox extension: Docker not available, tool not registered')
-      api.emit('sandbox:ready', { available: false })
-      return
-    }
-
-    // Register sandbox_run tool
+  void createSandboxRuntime(api.platform.shell).then((runtime) => {
     disposables.push(
       api.registerTool({
         definition: {
           name: 'sandbox_run',
-          description: 'Execute code in an isolated Docker container',
+          description: 'Execute code in an isolated sandbox runtime',
           input_schema: {
             type: 'object',
             properties: {
               code: { type: 'string', description: 'Code to execute in the sandbox' },
-              image: { type: 'string', description: 'Docker image to use (optional)' },
+              image: {
+                type: 'string',
+                description: 'Container image for docker runtime (optional)',
+              },
               timeout: { type: 'number', description: 'Timeout in ms (optional)' },
             },
             required: ['code'],
@@ -47,11 +40,7 @@ export function activate(api: ExtensionAPI): Disposable {
             ...(params.timeout ? { timeout: params.timeout as number } : {}),
           }
 
-          const result = await runInSandbox(
-            api.platform.shell,
-            sandboxConfig,
-            params.code as string
-          )
+          const result = await runtime.run(sandboxConfig, params.code as string)
 
           return {
             success: result.exitCode === 0,
@@ -60,14 +49,17 @@ export function activate(api: ExtensionAPI): Disposable {
               exitCode: result.exitCode,
               durationMs: result.durationMs,
               timedOut: result.timedOut,
+              runtime: runtime.name,
             },
           }
         },
       })
     )
 
-    api.log.debug('Sandbox extension: Docker available, sandbox_run tool registered')
-    api.emit('sandbox:ready', { available: true })
+    api.log.debug(
+      `Sandbox extension: ${runtime.name} runtime selected, sandbox_run tool registered`
+    )
+    api.emit('sandbox:ready', { available: runtime.name !== 'noop', runtime: runtime.name })
   })
 
   api.log.debug('Sandbox extension activated')

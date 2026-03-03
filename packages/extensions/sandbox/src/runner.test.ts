@@ -1,6 +1,12 @@
 import { MockShell } from '@ava/core-v2/__test-utils__/mock-platform'
 import { describe, expect, it } from 'vitest'
-import { buildDockerCommand, isDockerAvailable, runInSandbox } from './runner.js'
+import { buildNativeCommand } from './native-sandbox.js'
+import {
+  buildDockerCommand,
+  createSandboxRuntime,
+  isDockerAvailable,
+  runInSandbox,
+} from './runner.js'
 import { DEFAULT_SANDBOX_CONFIG } from './types.js'
 
 describe('buildDockerCommand', () => {
@@ -48,6 +54,21 @@ describe('runInSandbox', () => {
   })
 })
 
+describe('buildNativeCommand', () => {
+  it('builds linux bwrap command', () => {
+    const cmd = buildNativeCommand('linux', DEFAULT_SANDBOX_CONFIG, 'echo hi')
+    expect(cmd).toContain('bwrap')
+    expect(cmd).toContain('--unshare-all')
+    expect(cmd).toContain('AVA_LANDLOCK=1')
+  })
+
+  it('builds macOS sandbox-exec command', () => {
+    const cmd = buildNativeCommand('darwin', DEFAULT_SANDBOX_CONFIG, 'echo hi')
+    expect(cmd).toContain('sandbox-exec')
+    expect(cmd).toContain('(deny default)')
+  })
+})
+
 describe('isDockerAvailable', () => {
   it('returns true when docker is installed', async () => {
     const shell = new MockShell()
@@ -67,5 +88,45 @@ describe('isDockerAvailable', () => {
       exitCode: 127,
     })
     expect(await isDockerAvailable(shell)).toBe(false)
+  })
+})
+
+describe('createSandboxRuntime', () => {
+  it('prefers native sandbox on linux with bwrap', async () => {
+    const shell = new MockShell()
+    shell.setResult('bwrap --version', { stdout: 'bwrap 0.8', stderr: '', exitCode: 0 })
+
+    const runtime = await createSandboxRuntime(shell, 'linux')
+    expect(runtime.name).toBe('native')
+  })
+
+  it('prefers native sandbox on macOS with sandbox-exec', async () => {
+    const shell = new MockShell()
+    shell.setResult('sandbox-exec -h', { stdout: 'sandbox-exec', stderr: '', exitCode: 0 })
+
+    const runtime = await createSandboxRuntime(shell, 'darwin')
+    expect(runtime.name).toBe('native')
+  })
+
+  it('falls back to docker when native is unavailable', async () => {
+    const shell = new MockShell()
+    shell.setResult('bwrap --version', { stdout: '', stderr: 'not found', exitCode: 127 })
+    shell.setResult('docker --version', {
+      stdout: 'Docker version 24.0.0',
+      stderr: '',
+      exitCode: 0,
+    })
+
+    const runtime = await createSandboxRuntime(shell, 'linux')
+    expect(runtime.name).toBe('docker')
+  })
+
+  it('falls back to noop when native and docker are unavailable', async () => {
+    const shell = new MockShell()
+    shell.setResult('bwrap --version', { stdout: '', stderr: 'not found', exitCode: 127 })
+    shell.setResult('docker --version', { stdout: '', stderr: 'not found', exitCode: 127 })
+
+    const runtime = await createSandboxRuntime(shell, 'linux')
+    expect(runtime.name).toBe('noop')
   })
 })

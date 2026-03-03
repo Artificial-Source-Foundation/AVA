@@ -65,7 +65,7 @@
 
 **Phase 5: Low Priority (2 agents)**
 - **Protocol Features (items 29, 30, 31, 32)**: `parseRetryAfterMs()` for 3 formats. `fetchWellKnownConfig(domain)`. OpenAI Responses API body builder + `shouldUseResponsesAPI()` auto-routing. ACP protocol stub. 73 tests.
-- **Cleanup + Integration Tests**: Activation smoke test updated to 25 extensions. Full suite: 4,859 tests across 310 files. Build, typecheck, lint all clean.
+- **Cleanup + Integration Tests**: Activation smoke test updated to 25 extensions (session snapshot at that time). Full suite: 4,859 tests across 310 files. Build, typecheck, lint all clean.
 
 **CLAUDE.md updated:** Tools table 44 → 50+ (added pty, 6 new LSP tools, delegate_explorer). Extensions module map updated. Extension API updated with `registerHook`/`callHook`.
 
@@ -570,7 +570,7 @@
 ## 2026-02-07
 
 ### Session 37 — Phase 1 Completion
-- Provider expansion: 14 providers in Settings UI (was 4)
+- Provider expansion: 14 providers in Settings UI at that time (was 4). Current snapshot: 16 providers.
 - Google + Copilot OAuth (device code flow)
 - Team delegation flow visualization (SVG animated lines)
 - Session fork ("Fork from here" context menu)

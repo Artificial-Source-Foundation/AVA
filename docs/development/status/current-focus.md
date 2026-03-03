@@ -14,15 +14,15 @@
 - **Sprint 18 — CLI Reliability** — compaction threshold, message normalization, session resume, instructions wiring
 - **Sprint 17 — Backend Completion** — LSP, memory, MCP advanced, SQLite sessions, symbol extraction
 - **Sprint 16 (Praxis)** — 3-tier agent hierarchy (13 agents, tier-aware delegation, import/export)
-- **All competitive gaps closed** — 43 tools, 28 extensions, 14 providers, ~4,280 tests
+- **All competitive gaps closed** — Current snapshot: 55+ tools, 30+ extensions, 16 providers, ~4,280 tests
 
 ## Current Stats
 
 | Metric | Count |
 |--------|-------|
-| Tools | 43 (6 core + 37 extended) |
-| Extensions | 28 active |
-| LLM Providers | 14 (all tested) |
+| Tools | 55+ (core-v2 + extensions + desktop/CLI integrations) |
+| Extensions | 30+ active |
+| LLM Providers | 16 (all tested) |
 | Tests | ~4,280 passing across ~270 files |
 | Agents | 13 built-in (1 commander, 4 leads, 8 workers) |
 

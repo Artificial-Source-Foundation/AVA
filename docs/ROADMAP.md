@@ -1,6 +1,6 @@
 # Roadmap
 
-> Desktop-first AI coding app with dev team and community plugins
+> Desktop-first AI coding app with dev team and community plugins, now in dual-stack backend migration
 
 ---
 
@@ -10,9 +10,13 @@
 |-------|--------|-------|
 | **1: Desktop App** | **Done** | Core UI, LLM chat, settings, team flow |
 | **1.5: Desktop Polish** | **Done** | Settings, appearance, wiring, gap closing |
-| **2: Plugin Ecosystem** | **Done** | Marketplace UI, SDK, hot reload, wizard, backend registry API all shipped |
+| **2: Plugin Ecosystem** | **Done** | Marketplace UI, SDK, hot reload, wizard, backend registry API shipped |
 | **3: Community & CLI** | Future | CLI interface, docs site, templates |
 | **4: Integrations** | Future | Editor (ACP), agent network (A2A), voice, vision |
+
+Migration status:
+- `packages/core` remains the production baseline.
+- `packages/core-v2` + `packages/extensions` are feature-rich and continue to absorb responsibilities from legacy core.
 
 ---
 
@@ -24,7 +28,7 @@ Everything needed for a working desktop AI coding app.
 - IDE-inspired layout (Activity Bar, Sidebar, Main Area, Bottom Panel)
 - Chat UI with streaming + virtual scrolling, connected to LLM
 - Credential sync bridge (Settings UI -> core credential store)
-- Settings page: 14 LLM providers (4 OAuth flows), agents, MCP servers, keybindings
+- Settings page: 16 LLM providers (OAuth + API key mix), agents, MCP servers, keybindings
 - Session management: create, switch, fork, duplicate, message count
 - Team delegation flow visualization (SVG lines, parallel badge, phase timeline)
 - Plugin browser shell (placeholder for Phase 2)
@@ -32,15 +36,15 @@ Everything needed for a working desktop AI coding app.
 - Spring physics animations, glassmorphism design
 - Code viewer (CodeMirror 6)
 
-### Core Engine (~54,500 lines original + ~8K core-v2 + 28 extensions, latest baseline: ~4,280 tests across ~270 files)
+### Core Engine (~54,500 lines original + ~7K core-v2 + 30+ extensions, latest baseline: ~4,280 tests across ~270 files)
 | Category | Modules |
 |----------|---------|
 | Agent System | Agent loop (parallel tools, vision, truncation, steering), Praxis 3-tier hierarchy (13 agents, orchestrator, domain routing), Validator (wired) |
-| Tools | 43 tools (file, shell, background shell, web, agents, patch, batch, search, delegate, memory, LSP, git/GitHub) |
+| Tools | 55+ tools (file, shell, background shell, web, agents, patch, batch, search, delegate, memory, LSP, git/GitHub) |
 | Intelligence | Codebase understanding, context management (auto-compaction, strategy selection), persistent memory + auto-learning, LSP client, symbol extraction |
 | Extensibility | Extensions, commands, hooks, skills, MCP (tools, resources, prompts, sampling, OAuth, reconnect, HTTP streaming, health monitoring) |
 | Safety | Permissions (5 granular modes), policy engine, per-tool-call checkpoints, trusted folders |
-| Infrastructure | 14 LLM providers (all tested), config, sessions (SQLite + in-memory), auth, bus, model availability + fallback, toolshim |
+| Infrastructure | 16 LLM providers (all tested), config, sessions (SQLite + in-memory), auth, bus, model availability + fallback, toolshim |
 | Protocols | ACP (editor integration), A2A (agent network) |
 
 ---

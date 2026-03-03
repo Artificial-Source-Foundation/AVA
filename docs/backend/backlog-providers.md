@@ -2,7 +2,7 @@
 
 > Tracking which LLM providers work, which need testing, and what's missing.
 >
-> **14 providers** implemented. All have unit tests (shared harness). Real-world E2E status varies.
+> **16 providers** implemented. All have unit tests (shared harness). Real-world E2E status varies.
 
 ---
 
@@ -10,8 +10,8 @@
 
 **Two implementation patterns:**
 
-1. **Custom `client.ts`** (4 providers) — Anthropic, OpenAI, OpenRouter, Copilot
-2. **`createOpenAICompatClient()` factory** (10 providers) — Everything else
+1. **Custom `client.ts`** — Anthropic, OpenAI, OpenRouter, Copilot
+2. **`createOpenAICompatClient()` factory** — most API-key providers
 
 All providers share: SSE streaming, tool call buffering, message conversion, error classification, abort signal support.
 
@@ -57,7 +57,6 @@ These all use the shared `createOpenAICompatClient()` factory. If OpenAI works, 
 | Provider | Priority | Effort | Notes |
 |----------|----------|--------|-------|
 | **AWS Bedrock** | MEDIUM | ~1 session | SigV4 auth, regional endpoints. Goose + OpenCode both have it. Would need custom client. |
-| **Azure OpenAI** | MEDIUM | ~0.5 session | Custom auth + deployment IDs. Basically OpenAI-compat with different URL structure. |
 | **Fireworks AI** | LOW | Quick | OpenAI-compat. Fast inference, popular for open-source models. |
 | **Perplexity** | LOW | Quick | OpenAI-compat. Good for search-augmented generation. |
 | **Cerebras** | LOW | Quick | OpenAI-compat. Extremely fast inference. |

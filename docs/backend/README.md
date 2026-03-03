@@ -67,7 +67,7 @@ User (Desktop/CLI)
 
 | Module | Files | Lines | Purpose |
 |--------|-------|-------|---------|
-| `llm/` | 19 | 2,596 | LLM client factory + 14 providers + utils (SSE, OpenAI-compat) |
+| `llm/` | 19 | 2,596 | LLM client factory + 16 providers + utils (SSE, OpenAI-compat) |
 | `config/` | 9 | 2,172 | Settings, credentials, schema, storage, migration, sandbox settings |
 | `session/` | 6 | 2,024 | Session management, resume, forking, doom-loop detection |
 | `auth/` | 8 | 1,107 | OAuth + PKCE (Anthropic, Copilot, Google, OpenAI) |
@@ -117,7 +117,7 @@ User (Desktop/CLI)
 | `ContextTracker` | context/tracker.ts | Token counting + budget management |
 ---
 
-## LLM Providers (14)
+## LLM Providers (16)
 
 All in `llm/providers/`:
 
@@ -136,6 +136,9 @@ All in `llm/providers/`:
 | Ollama | ollama.ts | Local (no key) |
 | GLM | glm.ts | API key |
 | Kimi | kimi.ts | API key |
+| Azure OpenAI | azure-openai.ts | API key |
+| LiteLLM | litellm.ts | API key |
+| Vertex | vertex.ts | API key |
 | Copilot | (via OpenAI) | OAuth device code |
 
 ---

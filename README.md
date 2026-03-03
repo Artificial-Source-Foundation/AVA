@@ -2,46 +2,40 @@
 
 > The Obsidian of AI Coding — Desktop AI coding app with a virtual dev team and community plugins
 
-A Tauri 2.0 + SolidJS desktop application for AI-assisted software development. Features autonomous agent loop, hierarchical **Team Lead + Senior Leads + Junior Devs + Validator** architecture, 24 tools, multi-provider LLM support (14 providers), and context management.
+A Tauri 2.0 + SolidJS desktop application for AI-assisted software development. AVA now runs a dual-stack backend during migration: the original `packages/core` monolith and the new extension-first `packages/core-v2` + `packages/extensions` stack. It includes autonomous agent execution, hierarchical **Team Lead + Senior Leads + Junior Devs + Validator** coordination, 55+ tools, and 16 LLM providers.
 
 ## Quick Start
 
 ```bash
-# Prerequisites: Node.js 20+, Rust 1.70+
+# Prerequisites: Node.js 20+, pnpm 10+, Rust toolchain
 
 # Clone and install
 git clone https://github.com/g0dxn4/AVA.git
 cd AVA
-npm install
+pnpm install
 
-# Set up environment (optional - can also configure in Settings UI)
+# Optional: configure providers via .env
 cp .env.example .env
-# Edit .env with your API keys
 
 # Run desktop app
 npm run tauri dev
 
-# Or build CLI
-npm run build:packages && npm run build:cli
+# Build all packages + CLI
+pnpm build:all
+
+# Run CLI
 node cli/dist/index.js --help
 ```
 
 ## Current Status
 
-**Phase 1 (Desktop App) and Phase 1.5 (Polish) complete.** Ready for Phase 2 (Plugin Ecosystem).
+AVA is in active migration from the original core to an extension-first architecture.
 
-| Phase | Status |
-|-------|--------|
-| Foundation (Epics 1-3) | Done |
-| Infrastructure (Epics 4-7) | Done |
-| Agent System (Epics 8-14) | Done |
-| Enhancement (Epics 15-21) | Done |
-| ACP/A2A Protocols (Epics 25-26) | Done |
-| **Phase 1: Desktop App** | **Done** |
-| **Phase 1.5: Polish** | **Done** |
-| Phase 2: Plugin Ecosystem | Next |
+- `packages/core` remains the production baseline for desktop and CLI workflows.
+- `packages/core-v2` provides the new minimal core runtime.
+- `packages/extensions` contains built-in features (providers, tools, permissions, prompts, context, validator, commander, git, memory, and more) implemented as extensions.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for full roadmap.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the current execution plan.
 
 ## Architecture
 
@@ -75,29 +69,23 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for full roadmap.
 ## Project Structure
 
 ```
+src/                       # Tauri + SolidJS desktop app (primary)
+src-tauri/                 # Rust backend
+cli/                       # CLI interface (secondary)
 packages/
-├── core/              # Business logic (~54,200 lines, baseline: ~2321 tests / 81 files)
-│   └── src/
-│       ├── agent/     # Autonomous loop, subagents, recovery
-│       ├── commander/ # Team Lead → Senior Leads → Junior Devs
-│       │   └── parallel/  # Concurrent execution, DAG scheduler
-│       ├── tools/     # 24 tools (file, web, task, browser, plan)
-│       ├── context/   # Token tracking, compaction
-│       ├── memory/    # Episodic, semantic, procedural
-│       ├── validator/ # QA pipeline (syntax, types, lint)
-│       ├── codebase/  # Indexer, PageRank, repo map
-│       ├── config/    # Settings, credentials
-│       ├── permissions/   # Safety, risk assessment
-│       ├── session/   # State, checkpoints, forking
-│       ├── mcp/       # MCP protocol client
-│       └── ...        # diff, git, hooks, extensions, bus, auth, llm
-├── platform-tauri/    # Tauri implementations
-└── platform-node/     # Node.js implementations
-
-cli/                   # CLI interface (secondary)
-src/                   # Tauri SolidJS frontend (~16,000+ lines)
-docs/                  # Documentation & memory bank
+├── core/                  # Original backend (current baseline)
+├── core-v2/               # New minimal core (agent loop, tools, session, extension API)
+├── extensions/            # Built-in extensions (providers, tools, modes, validator, etc.)
+├── platform-node/         # Node.js platform implementations
+└── platform-tauri/        # Tauri platform implementations
+docs/                      # Product, architecture, and implementation docs
 ```
+
+### Backend Architecture (Dual Stack)
+
+- `packages/core`: legacy monolith currently powering most production behavior.
+- `packages/core-v2`: minimal runtime core (agent, tools, extensions, session, config).
+- `packages/extensions`: extension modules that provide most features previously embedded in core.
 
 ## Development Commands
 
@@ -105,11 +93,11 @@ docs/                  # Documentation & memory bank
 # Desktop app
 npm run tauri dev
 
-# Build packages (required before CLI)
-npm run build:packages
+# Build packages only
+pnpm build:packages
 
 # Build + run CLI
-npm run build:cli
+pnpm build:cli
 node cli/dist/index.js --help
 
 # Code quality
@@ -133,14 +121,21 @@ API keys can be set via:
 2. **Environment variables** (see `.env.example`)
 3. **~/.ava/credentials.json** for CLI mode
 
-Supported providers:
+Supported providers (16):
 - **Anthropic** — Direct API or OAuth
 - **OpenAI** — Direct API or OAuth
 - **Google** — Direct API or OAuth
 - **OpenRouter** — Gateway to multiple models
-- **Mistral, Groq, DeepSeek, xAI, Cohere, Together** — Direct APIs
-- **GLM, Kimi** — Direct APIs
+- **Azure OpenAI** — Direct API
+- **Mistral, Groq, DeepSeek, xAI, Cohere, Together, LiteLLM** — Direct APIs
+- **GLM, Kimi, Vertex** — Direct APIs
 - **Ollama** — Local models
+
+## Tooling Snapshot
+
+- Core-v2 ships the foundational tool set (`read`, `write`, `edit`, `bash`, `glob`, `grep`, `pty`).
+- Extensions add 40+ more capabilities (create/delete/apply_patch/multiedit, web tools, task/subagents, git/PR, memory, LSP, planning, and more).
+- Combined tool surface is 55+ tools across desktop + CLI agent workflows.
 
 ## Contributing
 

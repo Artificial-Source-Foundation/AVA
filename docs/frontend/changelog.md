@@ -245,7 +245,7 @@
 
 **Desktop app feature-complete.**
 
-- **Provider expansion** — 14 providers in Settings UI (was 4), Google + Copilot OAuth, DeviceCodeDialog
+- **Provider expansion** — 14 providers in Settings UI at that time (was 4), Google + Copilot OAuth, DeviceCodeDialog. Current snapshot: 16 providers.
 - **Team delegation flow** — SVG animated lines, ParallelBadge, PhaseTimeline
 - **Session fork** — "Fork from here" context menu, message count in session rows
 - **Plugin browser shell** — Plugins tab in ActivityBar (placeholder for Phase 2)

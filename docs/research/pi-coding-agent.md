@@ -45,7 +45,7 @@ PI's most innovative feature is **mid-session provider switching**. Users can ch
 
 ### Implications for AVA
 
-AVA already has multi-provider support (14 providers) but provider switching is session-level. Adding mid-conversation provider switching would be a differentiator. Implementation path:
+AVA already has multi-provider support (16 providers) but provider switching is session-level. Adding mid-conversation provider switching would be a differentiator. Implementation path:
 - Store messages in provider-agnostic format (already done in database)
 - Add "Switch model" command in chat
 - Format history for new provider's API on next turn

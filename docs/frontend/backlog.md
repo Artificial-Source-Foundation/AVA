@@ -282,7 +282,7 @@ Features below are things **competitors ship that AVA does not yet have**.
 | Per-agent model routing | — | Each agent configurable with different model/provider |
 | Agent import/export | — | Share custom agents as JSON files |
 | Subagent spawning (backend) | Cline | Task tool + Praxis delegation chain |
-| 14 LLM providers | all | 14 providers with API key management |
+| 16 LLM providers | all | 16 providers with API key/OAuth management |
 | Theme live preview | Goose | Hover to preview without persisting |
 | Starter templates | Goose | 4 template cards in empty chat |
 | Context warning | Cline, OpenCode | Yellow badge at 80% |

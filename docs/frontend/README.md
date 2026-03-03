@@ -356,7 +356,7 @@ Settings are stored in `localStorage` and synced to the core engine via `core-br
 | Tab | Key Settings |
 |-----|-------------|
 | **General** | App name, version, about |
-| **Providers** | 14 LLM providers, API keys, OAuth tokens, base URLs |
+| **Providers** | 16 LLM providers, API keys, OAuth tokens, base URLs |
 | **Appearance** | Mode, dark variant, accent, 14 theme presets, fonts, density, sidebar order |
 | **LLM** | Max tokens, temperature, topP, custom instructions, agent limits |
 | **Behavior** | Send key, auto-scroll, notifications, clipboard watcher, model aliases, watch mode |

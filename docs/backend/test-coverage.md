@@ -291,4 +291,4 @@
 
 ---
 
-*Last updated: 2026-02-28 — Sprint 17 backend completion (+271 tests across 39 files, 35 tools, 25 extensions)*
+*Last updated: 2026-03-02 — historical Sprint 17 backend completion metrics (+271 tests across 39 files). Current snapshot: 55+ tools, 30+ extensions, 16 providers.*

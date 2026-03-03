@@ -78,7 +78,7 @@ Not locked into one AI vendor. Use the best model for each job.
 | Privacy | Ollama (local) | Never leaves your machine |
 | Speed | Groq | Fastest inference |
 
-12+ providers built in: Anthropic, OpenAI, Google, Mistral, Groq, DeepSeek, xAI, Cohere, Together, Ollama, OpenRouter, and more.
+16+ providers built in: Anthropic, OpenAI, Google, OpenRouter, Azure OpenAI, Mistral, Groq, DeepSeek, xAI, Cohere, Together, LiteLLM, GLM, Kimi, Vertex, and Ollama.
 
 ### 3. Obsidian-Style Plugins
 
@@ -162,12 +162,12 @@ Priority 5: Agent Network           ← Remote agent calls (A2A)
 - [x] Core frontend wiring (context tracking, checkpoints, agent memory)
 - [x] WebKitGTK fixes (ghost rendering, nested buttons, cargo linker)
 
-### Phase 2: Plugin Ecosystem — IN PROGRESS
-- [ ] Unified plugin format (skills + commands + hooks)
-- [ ] Plugin SDK — dead simple to create
-- [ ] Built-in marketplace UI
-- [ ] Publish from GitHub repos
-- [ ] Community ratings, search, categories
+### Phase 2: Plugin Ecosystem — COMPLETE
+- [x] Unified plugin format (skills + commands + hooks)
+- [x] Plugin SDK — dead simple to create
+- [x] Built-in marketplace UI
+- [x] Publish flow and creation wizard shipped
+- [ ] Community ratings backend (next-stage enhancement)
 
 ### Phase 3: Polish & Community
 - [ ] CLI interface (secondary)

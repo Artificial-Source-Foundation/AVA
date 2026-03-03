@@ -9,7 +9,7 @@
 
 AVA's unique position: the only tool with a **3-tier agent hierarchy (Praxis)** paired with an **Obsidian-style plugin ecosystem** and a **desktop-first Tauri app**. No competitor combines all three.
 
-**Current state:** 35 tools, 25 extensions, 14 providers, ~3,900 tests. CLI `ava agent-v2` works end-to-end.
+**Current snapshot:** 55+ tools, 30+ extensions, 16 providers, ~4,280 tests. CLI `ava agent-v2` works end-to-end.
 
 ---
 
@@ -35,8 +35,8 @@ AVA's unique position: the only tool with a **3-tier agent hierarchy (Praxis)** 
 | **Multi-Agent Hierarchy** | **3-tier Praxis** | Subagents | A2A | ❌ | Subagents | Delegate | ❌ | Partial |
 | **Plugin System** | **Full npm** | npm hooks | MCP only | ❌ | MCP only | Microagents | ❌ | MCP only |
 | **Desktop App** | **Tauri** | Electron | ❌ | Gradio | Electron | Web | ❌ | ❌ |
-| **Provider Count** | 14 | 75+ | 1+MCP | 100+ | 20+ | Many | Many | Many |
-| **Tool Count** | 35 | ~20 | ~15 | ~5 | MCP | ~10 | ~10 | ~15 |
+| **Provider Count** | 16 | 75+ | 1+MCP | 100+ | 20+ | Many | Many | Many |
+| **Tool Count** | 55+ | ~20 | ~15 | ~5 | MCP | ~10 | ~10 | ~15 |
 | **MCP Support** | Full | Full | Full | ❌ | MCP-first | Partial | ❌ | Full |
 | **LSP Integration** | 3 tools | Experimental | ❌ | ❌ | ❌ | Partial | ❌ | tree-sitter |
 | **Persistent Memory** | SQLite | SQLite | GEMINI.md | ❌ | MCP | Partial | ❌ | ❌ |
@@ -63,7 +63,7 @@ AVA's unique position: the only tool with a **3-tier agent hierarchy (Praxis)** 
 
 1. **3-tier Praxis hierarchy** — Commander → 4 Leads → 8 Workers (13 agents). No competitor has a visible, configurable team hierarchy.
 2. **Obsidian-style plugin ecosystem** — Full `activate(api)` pattern with registerTool, registerCommand, registerAgentMode, registerProvider, addToolMiddleware. Richer than any competitor's extension API.
-3. **35 built-in tools** — Most tools of any competitor (OpenCode has ~20, others have 5-15).
+3. **55+ built-in tools** — Most tools of any competitor (OpenCode has ~20, others have 5-15).
 4. **Desktop-first with Tauri** — Native performance, not Electron overhead.
 5. **Skills + Custom Commands** — Two distinct plugin types (auto-triggered vs explicit).
 6. **Per-agent model selection** — Each agent in the hierarchy can use a different provider/model.

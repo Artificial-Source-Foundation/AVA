@@ -102,7 +102,7 @@
 ### Opportunities
 - [ ] **Split tools/ into subcategories** — 44 files in one directory is large; could split into file-tools/, search-tools/, web-tools/
 - [ ] **Extract tool utilities** — `utils.ts`, `sanitize.ts`, `truncation.ts`, `locks.ts` could be a separate `tool-utils/` module
-- [x] **Standardize provider interface** — ~~All 14 LLM providers implement `stream()` differently; could add a test harness~~ **DONE** (Sprint 10: `providers/_shared/src/test-harness.ts` + anthropic/openai/google tests)
+- [x] **Standardize provider interface** — ~~Providers implement `stream()` differently; could add a test harness~~ **DONE** (Sprint 10: `providers/_shared/src/test-harness.ts` + anthropic/openai/google tests)
 
 ---
 
@@ -271,4 +271,4 @@ This backlog feeds into the project roadmap:
 - [ ] Image/vision support in agent loop
 - [ ] Tauri bridge for core-v2 (desktop integration)
 
-*Last updated: 2026-02-28 — Sprint 17 completion (271 new tests, 35 tools, 25 extensions)*
+*Last updated: 2026-03-02 — historical Sprint 17 completion metrics (271 new tests). Current snapshot: 55+ tools, 30+ extensions, 16 providers.*

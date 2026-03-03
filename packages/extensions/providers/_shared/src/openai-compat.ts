@@ -47,25 +47,36 @@ export interface OpenAIStreamEvent {
     prompt_tokens: number
     completion_tokens: number
     total_tokens: number
+    prompt_tokens_details?: { cached_tokens?: number }
   }
 }
 
 // ─── Tool Conversion ────────────────────────────────────────────────────────
 
+/**
+ * Convert tool definitions to OpenAI function-calling format.
+ * Adds `cache_control: { type: 'ephemeral' }` on the last tool so providers
+ * that support prompt caching (Anthropic via OpenRouter, OpenAI, Azure, etc.)
+ * can cache the full tool prefix across turns. Providers that don't recognize
+ * the field simply ignore it.
+ */
 export function convertToolsToOpenAIFormat(tools: ProviderConfig['tools']):
   | Array<{
       type: 'function'
       function: { name: string; description: string; parameters: unknown }
+      cache_control?: { type: 'ephemeral' }
     }>
   | undefined {
   if (!tools || tools.length === 0) return undefined
-  return tools.map((t) => ({
+  const lastIndex = tools.length - 1
+  return tools.map((t, i) => ({
     type: 'function' as const,
     function: {
       name: t.name,
       description: t.description,
       parameters: t.input_schema,
     },
+    ...(i === lastIndex ? { cache_control: { type: 'ephemeral' as const } } : {}),
   }))
 }
 
@@ -276,6 +287,11 @@ export function buildOpenAIRequestBody(
     }
   }
 
+  // Reasoning effort for o-series, DeepSeek-R1, and other reasoning models
+  if (config.thinking?.enabled && config.thinking.effort) {
+    body.reasoning_effort = config.thinking.effort
+  }
+
   return body
 }
 
@@ -398,6 +414,7 @@ export function createOpenAICompatClient(
                 usage: {
                   inputTokens: event.usage.prompt_tokens,
                   outputTokens: event.usage.completion_tokens,
+                  cacheReadTokens: event.usage.prompt_tokens_details?.cached_tokens || undefined,
                 },
               }
             }

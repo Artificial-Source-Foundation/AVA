@@ -42,6 +42,20 @@ function markLastBlock(content: Array<Record<string, unknown>>): Array<Record<st
  *
  * Returns a new array — does not mutate the input.
  */
+/**
+ * Add cache_control marker to the last tool in OpenAI-format tool array.
+ * OpenRouter passes cache_control through to Anthropic models.
+ * Returns a new array — does not mutate the input.
+ */
+export function addToolCacheMarkers(
+  tools: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  if (tools.length === 0) return tools
+  const result = tools.map((t) => ({ ...t }))
+  result[result.length - 1]!.cache_control = { type: 'ephemeral' } as CacheControl
+  return result
+}
+
 export function addCacheControlMarkers(messages: OpenAIBodyMessage[]): OpenAIBodyMessage[] {
   if (messages.length === 0) return []
 

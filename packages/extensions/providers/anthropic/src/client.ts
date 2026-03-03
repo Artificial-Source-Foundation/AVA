@@ -12,7 +12,7 @@ import type {
   ToolUseBlock,
 } from '@ava/core-v2/llm'
 import { getAuth } from '@ava/core-v2/llm'
-import { addCacheControlMarkers } from './cache.js'
+import { addCacheControlMarkers, addToolCacheMarker } from './cache.js'
 
 const BASE_URL = 'https://api.anthropic.com/v1'
 const API_VERSION = '2023-06-01'
@@ -21,7 +21,13 @@ const API_VERSION = '2023-06-01'
 
 interface AnthropicStreamEvent {
   type: string
-  message: { usage: { input_tokens: number } }
+  message: {
+    usage: {
+      input_tokens: number
+      cache_read_input_tokens?: number
+      cache_creation_input_tokens?: number
+    }
+  }
   content_block: { type: string; id: string; name: string }
   delta: { type: string; text?: string; partial_json?: string; thinking?: string }
   usage: { output_tokens: number }
@@ -73,7 +79,14 @@ export class AnthropicClient implements LLMClient {
 
     // Extended thinking (must come before temperature — thinking disables temperature)
     if (config.thinking?.enabled) {
-      body.thinking = { type: 'enabled', budget_tokens: 10000 }
+      const EFFORT_BUDGET: Record<string, number> = {
+        low: 5000,
+        medium: 10000,
+        high: 16000,
+        max: 32000,
+      }
+      const budgetTokens = EFFORT_BUDGET[config.thinking.effort ?? 'medium'] ?? 10000
+      body.thinking = { type: 'enabled', budget_tokens: budgetTokens }
     }
 
     // Anthropic requires omitting temperature when thinking is enabled
@@ -82,7 +95,7 @@ export class AnthropicClient implements LLMClient {
     }
 
     if (config.tools && config.tools.length > 0) {
-      body.tools = config.tools
+      body.tools = addToolCacheMarker(config.tools as unknown as Array<Record<string, unknown>>)
       // Pass tool_choice through — Anthropic uses { type: "auto" | "any" | "tool", name?: string }
       if (config.toolChoice) {
         if (config.toolChoice.type === 'tool') {
@@ -158,6 +171,8 @@ export class AnthropicClient implements LLMClient {
     let buffer = ''
     let inputTokens = 0
     let outputTokens = 0
+    let cacheReadTokens = 0
+    let cacheCreationTokens = 0
     let currentToolUse: Partial<ToolUseBlock> | null = null
     let toolInputBuffer = ''
 
@@ -180,6 +195,8 @@ export class AnthropicClient implements LLMClient {
             switch (event.type) {
               case 'message_start':
                 inputTokens = event.message.usage.input_tokens
+                cacheReadTokens = event.message.usage.cache_read_input_tokens ?? 0
+                cacheCreationTokens = event.message.usage.cache_creation_input_tokens ?? 0
                 break
 
               case 'content_block_start':
@@ -235,6 +252,8 @@ export class AnthropicClient implements LLMClient {
                     inputTokens,
                     outputTokens,
                     totalTokens: inputTokens + outputTokens,
+                    cacheReadTokens: cacheReadTokens || undefined,
+                    cacheCreationTokens: cacheCreationTokens || undefined,
                   },
                 }
                 return
@@ -254,7 +273,13 @@ export class AnthropicClient implements LLMClient {
 
       yield {
         done: true,
-        usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+        usage: {
+          inputTokens,
+          outputTokens,
+          totalTokens: inputTokens + outputTokens,
+          cacheReadTokens: cacheReadTokens || undefined,
+          cacheCreationTokens: cacheCreationTokens || undefined,
+        },
       }
     } finally {
       reader.releaseLock()

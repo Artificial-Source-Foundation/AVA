@@ -70,6 +70,13 @@ function parseRetryAfterHeader(header: string | null): number | undefined {
   return Number.isNaN(seconds) ? undefined : seconds
 }
 
+/** Models that support extended (24h) prompt cache retention. */
+const EXTENDED_CACHE_PATTERNS = ['gpt-4.1', 'gpt-5', 'o3', 'o4']
+
+function supportsExtendedCacheRetention(model: string): boolean {
+  return EXTENDED_CACHE_PATTERNS.some((p) => model.toLowerCase().includes(p))
+}
+
 /** Models that should use the Responses API instead of Chat Completions. */
 const RESPONSES_API_PATTERNS = ['gpt-5', 'o3-', 'o4-', 'codex']
 
@@ -135,10 +142,16 @@ export class OpenAIClient implements LLMClient {
       console.debug(
         `[AVA:OpenAI] API Key Responses API — model=${model}, tools=${respBody.tools?.length ?? 0}, tool_choice=${respBody.tool_choice ?? 'default'}`
       )
+      if (supportsExtendedCacheRetention(model)) {
+        ;(respBody as unknown as Record<string, unknown>).prompt_cache_retention = '24h'
+      }
       bodyJson = JSON.stringify(respBody)
     } else {
       const chatBody = buildOpenAIRequestBody(messages, config, { model: 'gpt-4o' })
       if (!chatBody.max_tokens) chatBody.max_tokens = 4096
+      if (supportsExtendedCacheRetention(model)) {
+        chatBody.prompt_cache_retention = '24h'
+      }
       bodyJson = JSON.stringify(chatBody)
     }
 
@@ -204,10 +217,16 @@ export class OpenAIClient implements LLMClient {
           }
 
           if (event.usage) {
+            const cachedTokens = (
+              event.usage as {
+                prompt_tokens_details?: { cached_tokens?: number }
+              }
+            ).prompt_tokens_details?.cached_tokens
             yield {
               usage: {
                 inputTokens: event.usage.prompt_tokens,
                 outputTokens: event.usage.completion_tokens,
+                cacheReadTokens: cachedTokens || undefined,
               },
             }
           }
@@ -302,6 +321,7 @@ export class OpenAIClient implements LLMClient {
     let buffer = ''
     let inputTokens = 0
     let outputTokens = 0
+    let cacheReadTokens = 0
     const fnCalls = new Map<string, { id: string; name: string; args: string }>()
 
     try {
@@ -320,7 +340,12 @@ export class OpenAIClient implements LLMClient {
           if (data === '[DONE]') {
             yield {
               done: true,
-              usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+              usage: {
+                inputTokens,
+                outputTokens,
+                totalTokens: inputTokens + outputTokens,
+                cacheReadTokens: cacheReadTokens || undefined,
+              },
             }
             return
           }
@@ -388,10 +413,12 @@ export class OpenAIClient implements LLMClient {
             // Stream complete — extract usage
             if (type === 'response.completed') {
               const resp = event.response as Record<string, unknown> | undefined
-              const usage = (resp?.usage ?? event.usage) as Record<string, number> | undefined
+              const usage = (resp?.usage ?? event.usage) as Record<string, unknown> | undefined
               if (usage) {
-                inputTokens = usage.input_tokens ?? 0
-                outputTokens = usage.output_tokens ?? outputTokens
+                inputTokens = (usage.input_tokens as number) ?? 0
+                outputTokens = (usage.output_tokens as number) ?? outputTokens
+                const details = usage.input_tokens_details as { cached_tokens?: number } | undefined
+                cacheReadTokens = details?.cached_tokens ?? 0
               }
             }
           } catch {
@@ -405,7 +432,12 @@ export class OpenAIClient implements LLMClient {
 
     yield {
       done: true,
-      usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+      usage: {
+        inputTokens,
+        outputTokens,
+        totalTokens: inputTokens + outputTokens,
+        cacheReadTokens: cacheReadTokens || undefined,
+      },
     }
   }
 }

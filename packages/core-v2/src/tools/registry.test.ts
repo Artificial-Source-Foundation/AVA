@@ -91,6 +91,31 @@ describe('Tool Registry', () => {
       expect(getAllTools()).toHaveLength(0)
     })
 
+    it('memoizes getToolDefinitions and invalidates on register', () => {
+      registerTool(echoTool)
+      const defs1 = getToolDefinitions()
+      const defs2 = getToolDefinitions()
+      // Same reference = memoized
+      expect(defs1).toBe(defs2)
+
+      // Register new tool invalidates cache
+      registerTool(failTool)
+      const defs3 = getToolDefinitions()
+      expect(defs3).not.toBe(defs1)
+      expect(defs3).toHaveLength(2)
+    })
+
+    it('memoizes getToolDefinitions and invalidates on unregister', () => {
+      registerTool(echoTool)
+      registerTool(failTool)
+      const defs1 = getToolDefinitions()
+
+      unregisterTool('fail')
+      const defs2 = getToolDefinitions()
+      expect(defs2).not.toBe(defs1)
+      expect(defs2).toHaveLength(1)
+    })
+
     it('emits tool:before-register event before registration', () => {
       const order: string[] = []
       const beforeSub = onEvent('tool:before-register', () => {

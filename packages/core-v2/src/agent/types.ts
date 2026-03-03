@@ -36,6 +36,11 @@ export interface AgentConfig {
   maxSteps?: number
   /** When set, forces the agent to produce JSON output matching the given schema. */
   responseFormat?: { type: 'json_object'; schema: Record<string, unknown> }
+  /** Extended thinking / reasoning configuration. */
+  thinking?: {
+    enabled: boolean
+    effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+  }
 }
 
 export const DEFAULT_AGENT_CONFIG: Omit<AgentConfig, 'maxTimeMinutes' | 'maxTurns'> = {
@@ -136,6 +141,8 @@ export interface AgentInputs {
 export interface TurnUsage {
   inputTokens: number
   outputTokens: number
+  cacheReadTokens?: number
+  cacheCreationTokens?: number
 }
 
 export type AgentTurnResult =

@@ -130,6 +130,7 @@ export class AzureOpenAIClient implements LLMClient {
               usage: {
                 inputTokens: event.usage.prompt_tokens,
                 outputTokens: event.usage.completion_tokens,
+                cacheReadTokens: event.usage.prompt_tokens_details?.cached_tokens || undefined,
               },
             }
           }

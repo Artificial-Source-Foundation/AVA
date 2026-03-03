@@ -106,10 +106,16 @@ export class OpenRouterClient implements LLMClient {
           }
 
           if (event.usage) {
+            const cachedTokens = (
+              event.usage as {
+                prompt_tokens_details?: { cached_tokens?: number }
+              }
+            ).prompt_tokens_details?.cached_tokens
             yield {
               usage: {
                 inputTokens: event.usage.prompt_tokens,
                 outputTokens: event.usage.completion_tokens,
+                cacheReadTokens: cachedTokens || undefined,
               },
             }
           }

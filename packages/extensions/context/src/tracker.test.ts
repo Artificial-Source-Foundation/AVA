@@ -14,6 +14,8 @@ describe('Token Tracker', () => {
       outputTokens: 50,
       totalTokens: 150,
       turnCount: 1,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
     })
   })
 
@@ -26,6 +28,8 @@ describe('Token Tracker', () => {
       outputTokens: 150,
       totalTokens: 450,
       turnCount: 2,
+      cacheReadTokens: 0,
+      cacheCreationTokens: 0,
     })
   })
 

@@ -17,16 +17,19 @@ const log = createLogger('ToolRegistry')
 // ─── Registry ────────────────────────────────────────────────────────────────
 
 const tools = new Map<string, AnyTool>()
+let cachedDefinitions: ToolDefinition[] | null = null
 
 export function registerTool(tool: AnyTool): void {
   emitEvent('tool:before-register', { name: tool.definition.name, definition: tool.definition })
   tools.set(tool.definition.name, tool)
+  cachedDefinitions = null
   emitEvent('tools:registered', { name: tool.definition.name, definition: tool.definition })
   log.debug(`Tool registered: ${tool.definition.name}`)
 }
 
 export function unregisterTool(name: string): void {
   tools.delete(name)
+  cachedDefinitions = null
   emitEvent('tools:unregistered', { name })
 }
 
@@ -39,11 +42,14 @@ export function getAllTools(): Tool[] {
 }
 
 export function getToolDefinitions(): ToolDefinition[] {
-  return [...tools.values()].map((t) => t.definition)
+  if (cachedDefinitions) return cachedDefinitions
+  cachedDefinitions = [...tools.values()].map((t) => t.definition)
+  return cachedDefinitions
 }
 
 export function resetTools(): void {
   tools.clear()
+  cachedDefinitions = null
 }
 
 // ─── Execution ───────────────────────────────────────────────────────────────

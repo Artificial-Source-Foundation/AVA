@@ -359,6 +359,8 @@ export class AgentExecutor {
             sessionId: this.agentId,
             inputTokens: turnResult.usage.inputTokens,
             outputTokens: turnResult.usage.outputTokens,
+            cacheReadTokens: turnResult.usage.cacheReadTokens,
+            cacheCreationTokens: turnResult.usage.cacheCreationTokens,
           })
         }
 
@@ -429,6 +431,8 @@ export class AgentExecutor {
     const toolCalls: ToolUseBlock[] = []
     let turnInput = 0
     let turnOutput = 0
+    let turnCacheRead = 0
+    let turnCacheCreation = 0
 
     // Per-message overrides — check the last user message for metadata
     let effectiveSystemPrompt = systemPrompt
@@ -444,6 +448,7 @@ export class AgentExecutor {
       model,
       tools,
       toolChoice: tools.length > 0 ? { type: 'auto' } : undefined,
+      thinking: this.config.thinking,
     }
 
     // Structured output — add __structured_output tool and force tool_choice
@@ -481,6 +486,8 @@ export class AgentExecutor {
       if (delta.usage) {
         turnInput += delta.usage.inputTokens ?? 0
         turnOutput += delta.usage.outputTokens ?? 0
+        turnCacheRead += delta.usage.cacheReadTokens ?? 0
+        turnCacheCreation += delta.usage.cacheCreationTokens ?? 0
       }
       if (delta.error) {
         this.emit({ type: 'error', agentId: this.agentId, error: delta.error.message })
@@ -488,7 +495,12 @@ export class AgentExecutor {
           status: 'stop',
           terminateMode: AgentTerminateMode.ERROR,
           result: delta.error.message,
-          usage: { inputTokens: turnInput, outputTokens: turnOutput },
+          usage: {
+            inputTokens: turnInput,
+            outputTokens: turnOutput,
+            cacheReadTokens: turnCacheRead || undefined,
+            cacheCreationTokens: turnCacheCreation || undefined,
+          },
         }
       }
     }
@@ -507,7 +519,12 @@ export class AgentExecutor {
         status: 'stop',
         terminateMode: AgentTerminateMode.GOAL,
         result: assistantContent,
-        usage: { inputTokens: turnInput, outputTokens: turnOutput },
+        usage: {
+          inputTokens: turnInput,
+          outputTokens: turnOutput,
+          cacheReadTokens: turnCacheRead || undefined,
+          cacheCreationTokens: turnCacheCreation || undefined,
+        },
       }
     }
 
@@ -520,7 +537,12 @@ export class AgentExecutor {
         status: 'stop',
         terminateMode: AgentTerminateMode.GOAL,
         result,
-        usage: { inputTokens: turnInput, outputTokens: turnOutput },
+        usage: {
+          inputTokens: turnInput,
+          outputTokens: turnOutput,
+          cacheReadTokens: turnCacheRead || undefined,
+          cacheCreationTokens: turnCacheCreation || undefined,
+        },
       }
     }
 
@@ -553,7 +575,12 @@ export class AgentExecutor {
               durationMs: 0,
             },
           ],
-          usage: { inputTokens: turnInput, outputTokens: turnOutput },
+          usage: {
+            inputTokens: turnInput,
+            outputTokens: turnOutput,
+            cacheReadTokens: turnCacheRead || undefined,
+            cacheCreationTokens: turnCacheCreation || undefined,
+          },
         }
       }
 
@@ -563,7 +590,12 @@ export class AgentExecutor {
         status: 'stop',
         terminateMode: AgentTerminateMode.GOAL,
         result: jsonResult,
-        usage: { inputTokens: turnInput, outputTokens: turnOutput },
+        usage: {
+          inputTokens: turnInput,
+          outputTokens: turnOutput,
+          cacheReadTokens: turnCacheRead || undefined,
+          cacheCreationTokens: turnCacheCreation || undefined,
+        },
       }
     }
 
@@ -610,7 +642,12 @@ export class AgentExecutor {
       status: 'continue',
       result: assistantContent || undefined,
       toolCalls: callInfos,
-      usage: { inputTokens: turnInput, outputTokens: turnOutput },
+      usage: {
+        inputTokens: turnInput,
+        outputTokens: turnOutput,
+        cacheReadTokens: turnCacheRead || undefined,
+        cacheCreationTokens: turnCacheCreation || undefined,
+      },
     }
   }
 

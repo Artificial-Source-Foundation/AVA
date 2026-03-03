@@ -93,7 +93,10 @@ export interface ProviderConfig {
   temperature?: number
   systemPrompt?: string
   tools?: ToolDefinition[]
-  thinking?: { enabled: boolean }
+  thinking?: {
+    enabled: boolean
+    effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+  }
   /** Force the model to call a specific tool. */
   toolChoice?: { type: 'tool'; name: string } | { type: 'auto' } | { type: 'none' }
 }
@@ -121,6 +124,8 @@ export interface TokenUsage {
   inputTokens: number
   outputTokens: number
   totalTokens?: number
+  cacheReadTokens?: number
+  cacheCreationTokens?: number
 }
 
 export interface StreamError {

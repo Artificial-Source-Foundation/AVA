@@ -56,6 +56,20 @@ function markContent(content: MessageContent): CacheableContentBlock[] {
  *
  * Returns a new array — does not mutate the input.
  */
+/**
+ * Add cache_control marker to the last tool definition.
+ * Anthropic's cache hierarchy caches all tools as a prefix when the last is marked.
+ * Returns a new array — does not mutate the input.
+ */
+export function addToolCacheMarker(
+  tools: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  if (tools.length === 0) return tools
+  const result = tools.map((t) => ({ ...t }))
+  result[result.length - 1]!.cache_control = { type: 'ephemeral' } as CacheControl
+  return result
+}
+
 export function addCacheControlMarkers(messages: ChatMessage[]): CacheableChatMessage[] {
   if (messages.length === 0) return []
 

@@ -33,10 +33,28 @@ export function activate(api: ExtensionAPI): Disposable {
   // Register all compaction strategies
   const strategyDisposables = ALL_STRATEGIES.map((s) => api.registerContextStrategy(s))
 
-  // Track token usage via events
+  // Track token usage via events (including cache metrics)
   const tokenDisposable = api.on('llm:usage', (data) => {
-    const usage = data as { sessionId: string; inputTokens: number; outputTokens: number }
-    trackTokens(usage.sessionId, usage.inputTokens, usage.outputTokens)
+    const usage = data as {
+      sessionId: string
+      inputTokens: number
+      outputTokens: number
+      cacheReadTokens?: number
+      cacheCreationTokens?: number
+    }
+    trackTokens(
+      usage.sessionId,
+      usage.inputTokens,
+      usage.outputTokens,
+      usage.cacheReadTokens,
+      usage.cacheCreationTokens
+    )
+    const cacheRead = usage.cacheReadTokens ?? 0
+    const cacheCreation = usage.cacheCreationTokens ?? 0
+    if (cacheRead > 0 || cacheCreation > 0) {
+      const hitRate = usage.inputTokens > 0 ? Math.round((cacheRead / usage.inputTokens) * 100) : 0
+      api.log.debug(`Cache: read=${cacheRead}, created=${cacheCreation}, hit_rate=${hitRate}%`)
+    }
   })
 
   // Log compaction events for observability

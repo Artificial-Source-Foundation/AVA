@@ -160,6 +160,7 @@ export type HookName =
   | 'prompt:transform'
   | 'tool:beforeExecute'
   | 'tool:afterExecute'
+  | 'history:process'
   | 'message:preProcess'
   | 'message:postProcess'
   | 'completion:validate'

@@ -39,7 +39,7 @@ export async function executeRecipe(
   for (const group of groups) {
     if (group.parallel) {
       const batchResults = await Promise.all(
-        group.steps.map((step) => executeSingleStep(step, stepResults, api))
+        group.steps.map((step) => executeStepWithRetry(step, stepResults, api))
       )
       for (const r of batchResults) {
         results.push(r)
@@ -47,12 +47,37 @@ export async function executeRecipe(
           stepResults.set(r.name, r.result)
         }
       }
+
+      const shouldAbort = group.steps.some((step, idx) => {
+        const r = batchResults[idx]
+        return step.onError === 'abort' && r && !r.success
+      })
+      if (shouldAbort) {
+        const completedAt = Date.now()
+        return {
+          recipe: recipe.name,
+          startedAt,
+          completedAt,
+          steps: results,
+          success: false,
+        }
+      }
     } else {
       for (const step of group.steps) {
-        const r = await executeSingleStep(step, stepResults, api)
+        const r = await executeStepWithRetry(step, stepResults, api)
         results.push(r)
         if (r.success && r.result) {
           stepResults.set(r.name, r.result)
+        }
+        if (!r.success && step.onError === 'abort') {
+          const completedAt = Date.now()
+          return {
+            recipe: recipe.name,
+            startedAt,
+            completedAt,
+            steps: results,
+            success: false,
+          }
         }
       }
     }
@@ -77,8 +102,14 @@ interface StepGroup {
     tool?: string
     command?: string
     goal?: string
+    recipe?: string
     args?: Record<string, string>
     condition?: string
+    retry?: {
+      maxAttempts: number
+      delayMs?: number
+    }
+    onError?: 'continue' | 'abort'
   }>
 }
 
@@ -88,9 +119,15 @@ function groupSteps(
     tool?: string
     command?: string
     goal?: string
+    recipe?: string
     args?: Record<string, string>
     parallel?: boolean
     condition?: string
+    retry?: {
+      maxAttempts: number
+      delayMs?: number
+    }
+    onError?: 'continue' | 'abort'
   }>
 ): StepGroup[] {
   const groups: StepGroup[] = []
@@ -116,8 +153,14 @@ async function executeSingleStep(
     tool?: string
     command?: string
     goal?: string
+    recipe?: string
     args?: Record<string, string>
     condition?: string
+    retry?: {
+      maxAttempts: number
+      delayMs?: number
+    }
+    onError?: 'continue' | 'abort'
   },
   stepResults: Map<string, string>,
   api: ExtensionAPI
@@ -163,6 +206,12 @@ async function executeSingleStep(
         args: resolvedArgs,
         step: step.name,
       })
+    } else if (step.recipe) {
+      result = await emitAndWaitForResult(api, 'recipe:execute-recipe', {
+        recipe: step.recipe,
+        args: resolvedArgs,
+        step: step.name,
+      })
     }
 
     return {
@@ -180,6 +229,48 @@ async function executeSingleStep(
       duration: Date.now() - stepStart,
     }
   }
+}
+
+async function executeStepWithRetry(
+  step: {
+    name: string
+    tool?: string
+    command?: string
+    goal?: string
+    recipe?: string
+    args?: Record<string, string>
+    condition?: string
+    retry?: {
+      maxAttempts: number
+      delayMs?: number
+    }
+    onError?: 'continue' | 'abort'
+  },
+  stepResults: Map<string, string>,
+  api: ExtensionAPI
+): Promise<StepResult> {
+  const attempts = Math.max(1, step.retry?.maxAttempts ?? 1)
+  const delayMs = Math.max(0, step.retry?.delayMs ?? 0)
+
+  let last: StepResult | null = null
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const result = await executeSingleStep(step, stepResults, api)
+    if (result.success) return result
+    last = result
+
+    if (attempt < attempts && delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs))
+    }
+  }
+
+  return (
+    last ?? {
+      name: step.name,
+      success: false,
+      error: 'Step failed',
+      duration: 0,
+    }
+  )
 }
 
 // ─── Condition Evaluation ────────────────────────────────────────────────────

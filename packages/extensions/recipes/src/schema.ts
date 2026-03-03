@@ -16,9 +16,17 @@ export const recipeStepSchema = z.object({
   tool: z.string().optional(),
   command: z.string().optional(),
   goal: z.string().optional(),
+  recipe: z.string().optional(),
   args: z.record(z.string(), z.string()).optional(),
   parallel: z.boolean().optional(),
   condition: z.string().optional(),
+  retry: z
+    .object({
+      maxAttempts: z.number().int().min(1),
+      delayMs: z.number().int().min(0).optional(),
+    })
+    .optional(),
+  onError: z.enum(['continue', 'abort']).optional(),
 })
 
 export const recipeSchema = z.object({

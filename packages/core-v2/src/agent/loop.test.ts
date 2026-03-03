@@ -624,13 +624,17 @@ describe('Token tracking', () => {
     // Filter emitEvent calls for 'llm:usage'
     const llmUsageCalls = emitSpy.mock.calls.filter(([event]) => event === 'llm:usage')
     expect(llmUsageCalls).toHaveLength(2)
-    expect(llmUsageCalls[0]![1]).toEqual({
+    expect(llmUsageCalls[0]![1]).toMatchObject({
       sessionId: exec.agentId,
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-20250514',
       inputTokens: 50,
       outputTokens: 25,
     })
-    expect(llmUsageCalls[1]![1]).toEqual({
+    expect(llmUsageCalls[1]![1]).toMatchObject({
       sessionId: exec.agentId,
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-20250514',
       inputTokens: 75,
       outputTokens: 30,
     })
@@ -1614,6 +1618,77 @@ describe('Steering interrupt', () => {
     exec.steer('test message')
     // The message will be consumed on next run iteration
   })
+
+  it('queueFollowUp() injects message after current turn completes', async () => {
+    const capturedHistory: Array<{ role: string; content: unknown }> = []
+    let turnCount = 0
+    let executor: AgentExecutor | null = null
+
+    const client: LLMClient = {
+      async *stream(messages) {
+        turnCount++
+        if (turnCount === 1) {
+          yield {
+            toolUse: {
+              type: 'tool_use',
+              id: 'call-1',
+              name: 'read_file',
+              input: { path: '/tmp/file.txt' },
+            },
+          }
+          yield { done: true }
+          return
+        }
+
+        for (const m of messages) capturedHistory.push({ role: m.role, content: m.content })
+        yield { content: 'done' }
+        yield { done: true }
+      },
+    }
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+    ])
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockImplementation(async () => {
+      executor!.queueFollowUp('follow-up guidance')
+      return { success: true, output: 'ok' }
+    })
+
+    executor = new AgentExecutor({ maxTurns: 5 })
+    const result = await executor.run({ goal: 'do thing', cwd: '/tmp' }, AbortSignal.timeout(5000))
+    expect(result.success).toBe(true)
+
+    const followUp = capturedHistory.find(
+      (m) => m.role === 'user' && m.content === 'follow-up guidance'
+    )
+    expect(followUp).toBeDefined()
+  })
+
+  it('steeringDeliveryMode=all injects all queued steering messages at once', async () => {
+    const capturedHistory: Array<{ role: string; content: unknown }> = []
+
+    const client: LLMClient = {
+      async *stream(messages) {
+        for (const m of messages) capturedHistory.push({ role: m.role, content: m.content })
+        yield { content: 'done' }
+        yield { done: true }
+      },
+    }
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([])
+
+    const exec = new AgentExecutor({ maxTurns: 2, steeringDeliveryMode: 'all' })
+    exec.steer('first steer')
+    exec.steer('second steer')
+
+    await exec.run({ goal: 'goal', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    const steers = capturedHistory.filter((m) => m.role === 'user' && typeof m.content === 'string')
+    expect(steers.some((m) => m.content === 'first steer')).toBe(true)
+    expect(steers.some((m) => m.content === 'second steer')).toBe(true)
+  })
 })
 
 // ─── Compaction Strategy Selection ───────────────────────────────────────────
@@ -1743,5 +1818,73 @@ describe('Compaction strategy selection', () => {
       // Short session should use truncate
       expect(data.strategy).toBe('truncate')
     }
+  })
+
+  it('uses configured compaction strategy when provided', async () => {
+    const apiModule = await import('../extensions/api.js')
+    const emitSpy = vi.spyOn(apiModule, 'emitEvent')
+
+    const strategies = apiModule.getContextStrategies() as Map<string, unknown>
+    strategies.set('backward-fifo', {
+      name: 'backward-fifo',
+      compact(messages: Array<{ role: string; content: string }>) {
+        return messages.slice(-2)
+      },
+    })
+
+    let turnCount = 0
+    const client: LLMClient = {
+      async *stream() {
+        turnCount++
+        if (turnCount <= 2) {
+          yield {
+            toolUse: {
+              type: 'tool_use',
+              id: `call-${turnCount}`,
+              name: 'read_file',
+              input: { path: `/file${turnCount}.txt` },
+            },
+          }
+        } else {
+          yield { content: 'Done' }
+        }
+        yield { done: true }
+      },
+    }
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+    ])
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockResolvedValue({
+      success: true,
+      output: 'x'.repeat(500_000),
+    })
+
+    const exec = new AgentExecutor({
+      maxTurns: 10,
+      compactionThreshold: 0.001,
+      compactionStrategy: 'backward-fifo',
+    })
+    await exec.run({ goal: 'Read files', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    const compactedCalls = emitSpy.mock.calls.filter(([event]) => event === 'context:compacted')
+    expect(compactedCalls.length).toBeGreaterThanOrEqual(1)
+    const data = compactedCalls[0]![1] as Record<string, unknown>
+    expect(data.strategy).toBe('backward-fifo')
+  })
+
+  it('runs history:process hook before llm stream call', async () => {
+    const apiModule = await import('../extensions/api.js')
+    const hookSpy = vi.spyOn(apiModule, 'callHook')
+
+    const client = createMockClient([[{ content: 'Done!', done: true }]])
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([])
+
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    await exec.run({ goal: 'Say hello', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    expect(hookSpy).toHaveBeenCalledWith('history:process', expect.any(Array), expect.any(Array))
   })
 })

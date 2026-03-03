@@ -36,6 +36,22 @@ export interface ConnectOptions {
   shell: IShell
   onReconnecting?: (serverName: string, attempt: number) => void
   onSampling?: SamplingHandler
+  onToolsListChanged?: (serverName: string, tools: MCPTool[]) => void
+}
+
+async function refreshToolsForConnection(
+  serverName: string,
+  conn: ActiveConnection
+): Promise<MCPTool[]> {
+  const toolDefs = await conn.client.listTools()
+  const tools: MCPTool[] = toolDefs.map((t) => ({
+    name: t.name,
+    description: t.description,
+    inputSchema: t.inputSchema,
+    serverName,
+  }))
+  conn.state.tools = tools
+  return tools
 }
 
 export async function connectServer(
@@ -78,6 +94,17 @@ export async function connectServer(
     client.onSamplingRequest(options.onSampling)
   }
 
+  client.onNotification('notifications/tools/list_changed', async () => {
+    const active = connections.get(server.name)
+    if (!active) return
+    try {
+      const tools = await refreshToolsForConnection(server.name, active)
+      options.onToolsListChanged?.(server.name, tools)
+    } catch {
+      // Ignore refresh failure
+    }
+  })
+
   const reconnect = server.reconnect
     ? new ReconnectStrategy({
         maxAttempts: server.reconnect.maxAttempts,
@@ -100,14 +127,9 @@ export async function connectServer(
   try {
     await transport.start()
     await client.initialize()
-    const toolDefs = await client.listTools()
-
-    const tools: MCPTool[] = toolDefs.map((t) => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: t.inputSchema,
-      serverName: server.name,
-    }))
+    const active = connections.get(server.name)
+    if (!active) throw new Error(`Connection for ${server.name} missing`)
+    const tools = await refreshToolsForConnection(server.name, active)
 
     state.status = 'connected'
     state.tools = tools
@@ -315,4 +337,12 @@ export async function resetMCP(): Promise<void> {
   for (const name of names) {
     await disconnectServer(name)
   }
+}
+
+export async function refreshServerTools(serverName: string): Promise<MCPTool[]> {
+  const conn = connections.get(serverName)
+  if (!conn) {
+    throw new Error(`MCP server "${serverName}" is not connected`)
+  }
+  return refreshToolsForConnection(serverName, conn)
 }

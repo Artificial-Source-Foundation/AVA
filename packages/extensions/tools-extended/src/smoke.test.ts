@@ -1,10 +1,13 @@
 /**
- * Extended tools smoke test — verifies all 20 extended tools load and have valid definitions.
+ * Extended tools smoke test — verifies all extended tools load and have valid definitions.
  */
 
-import { installMockPlatform, type MockPlatform } from '@ava/core-v2/__test-utils__/mock-platform'
 import type { ToolContext } from '@ava/core-v2/tools'
 import { beforeEach, describe, expect, it } from 'vitest'
+import {
+  installMockPlatform,
+  type MockPlatform,
+} from '../../../core-v2/src/__test-utils__/mock-platform.js'
 import { applyPatchTool } from './apply-patch/index.js'
 import { bashBackgroundTool } from './bash-background.js'
 import { bashKillTool } from './bash-kill.js'
@@ -14,11 +17,13 @@ import { codesearchTool } from './codesearch.js'
 import { completionTool } from './completion.js'
 import { createFileTool } from './create.js'
 import { deleteFileTool } from './delete.js'
+import { editBenchmarkTool } from './edit-benchmark/index.js'
 import { lsTool } from './ls.js'
 import { multieditTool } from './multiedit.js'
 import { planEnterTool, planExitTool } from './plan-mode-tools.js'
 import { questionTool } from './question.js'
 import { repoMapTool } from './repo-map.js'
+import { sessionCostTool } from './session-cost.js'
 import { taskTool } from './task.js'
 import { todoReadTool, todoWriteTool } from './todo.js'
 import { webfetchTool } from './webfetch.js'
@@ -45,6 +50,8 @@ const ALL_TOOLS = [
   bashBackgroundTool,
   bashOutputTool,
   bashKillTool,
+  editBenchmarkTool,
+  sessionCostTool,
 ]
 
 function createCtx(overrides?: Partial<ToolContext>): ToolContext {
@@ -66,8 +73,8 @@ describe('Extended tools smoke test', () => {
     platform.fs.addFile('/project/src/app.ts', 'const app = true\n')
   })
 
-  it('has 20 tools', () => {
-    expect(ALL_TOOLS).toHaveLength(20)
+  it('has 22 tools', () => {
+    expect(ALL_TOOLS).toHaveLength(22)
   })
 
   describe('tool definitions', () => {
@@ -116,7 +123,7 @@ describe('Extended tools smoke test', () => {
 
     it('todowrite updates the todo list', async () => {
       const result = await todoWriteTool.execute(
-        { todos: [{ id: '1', task: 'test', status: 'pending' }] },
+        { todos: [{ id: '1', content: 'test', status: 'pending' }] },
         createCtx()
       )
       expect(result.success).toBe(true)

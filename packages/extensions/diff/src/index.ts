@@ -15,6 +15,8 @@ import type {
 } from '@ava/core-v2/extensions'
 import type { ChatMessage } from '@ava/core-v2/llm'
 import type { ToolResult } from '@ava/core-v2/tools'
+import { createDiffReviewTool } from './diff-review-tool.js'
+import { HunkReviewState } from './hunk-review/state.js'
 import { summarizeDiffSession } from './summary.js'
 import { addDiff, createDiffSession, createFileDiff } from './tracker.js'
 import type { DiffSession, FileDiff } from './types.js'
@@ -29,6 +31,7 @@ const FILE_WRITE_TOOLS = new Set([
 
 export function activate(api: ExtensionAPI): Disposable {
   const sessions = new Map<string, DiffSession>()
+  const hunkReviewState = new HunkReviewState()
   const snapshots = new Map<string, string>()
   const toolCallCounters = new Map<string, number>()
 
@@ -122,6 +125,7 @@ export function activate(api: ExtensionAPI): Disposable {
         diff.messageIndex = messageIndex
         const session = getOrCreateSession(ctx.ctx.sessionId)
         addDiff(session, diff)
+        hunkReviewState.ingest(ctx.ctx.sessionId, diff)
 
         // Push to undo stack + clear redo (standard undo/redo semantics)
         const undoStack = getUndoStack(ctx.ctx.sessionId)
@@ -143,6 +147,7 @@ export function activate(api: ExtensionAPI): Disposable {
           }
           const session = getOrCreateSession(ctx.ctx.sessionId)
           addDiff(session, diff)
+          hunkReviewState.ingest(ctx.ctx.sessionId, diff)
 
           const undoStack = getUndoStack(ctx.ctx.sessionId)
           undoStack.push(diff)
@@ -158,6 +163,7 @@ export function activate(api: ExtensionAPI): Disposable {
   }
 
   const mwDisposable = api.addToolMiddleware(middleware)
+  const diffReviewToolDisposable = api.registerTool(createDiffReviewTool(hunkReviewState))
 
   // Wire diff:undo listener
   const undoDisposable = api.on('diff:undo', async (data: unknown) => {
@@ -288,6 +294,7 @@ export function activate(api: ExtensionAPI): Disposable {
   return {
     dispose() {
       mwDisposable.dispose()
+      diffReviewToolDisposable.dispose()
       undoDisposable.dispose()
       redoDisposable.dispose()
       revertToDisposable.dispose()
@@ -298,6 +305,7 @@ export function activate(api: ExtensionAPI): Disposable {
       redoStacks.clear()
       toolCallCounters.clear()
       removedMessages.clear()
+      hunkReviewState.clear()
     },
   }
 }

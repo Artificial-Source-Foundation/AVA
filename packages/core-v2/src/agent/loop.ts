@@ -6,7 +6,7 @@
  * Emits events; extensions subscribe and intercept via middleware.
  */
 
-import { emitEvent, getAgentModes, getContextStrategies } from '../extensions/api.js'
+import { callHook, emitEvent, getAgentModes, getContextStrategies } from '../extensions/api.js'
 import { createClient } from '../llm/client.js'
 import { normalizeMessages } from '../llm/normalize.js'
 import type {
@@ -88,9 +88,45 @@ function getContextLimit(model: string): number {
  * and "truncate" for shorter ones where simple trimming is sufficient.
  */
 function selectCompactionStrategy(
-  history: ChatMessage[]
+  history: ChatMessage[],
+  configured: string | string[] | undefined
 ): { name: string; compact: (messages: ChatMessage[], target: number) => ChatMessage[] } | null {
   const strategies = getContextStrategies()
+
+  if (Array.isArray(configured) && configured.length > 0) {
+    const selected = configured
+      .map((name) => strategies.get(name))
+      .filter(
+        (
+          strategy
+        ): strategy is {
+          name: string
+          description: string
+          compact: (messages: ChatMessage[], target: number) => ChatMessage[]
+        } => strategy !== undefined
+      )
+
+    if (selected.length > 0) {
+      return {
+        name: `pipeline:${selected.map((s) => s.name).join(',')}`,
+        compact(messages: ChatMessage[], target: number): ChatMessage[] {
+          let current = messages
+          for (const strategy of selected) {
+            current = strategy.compact(current, target)
+            const chars = current.reduce((sum, msg) => sum + contentLength(msg.content), 0)
+            if (estimateTokens(chars) <= target) break
+          }
+          return current
+        },
+      }
+    }
+  }
+
+  if (typeof configured === 'string') {
+    const configuredStrategy = strategies.get(configured)
+    if (configuredStrategy) return configuredStrategy
+  }
+
   if (history.length > 20) {
     return strategies.get('summarize') ?? strategies.get('truncate') ?? null
   }
@@ -172,7 +208,8 @@ export class AgentExecutor {
   readonly agentId: string
   private onEvent?: AgentEventCallback
   private recentToolCalls: string[] = [] // hashes for doom loop detection
-  private steeringMessage: string | null = null
+  private steeringQueue: string[] = []
+  private followUpQueue: string[] = []
   private steeringController: AbortController | null = null
   private stepCount = 0
   private stepLimitReached = false
@@ -182,6 +219,7 @@ export class AgentExecutor {
       ...DEFAULT_AGENT_CONFIG,
       maxTimeMinutes: config.maxTimeMinutes ?? 30,
       maxTurns: config.maxTurns ?? 50,
+      steeringDeliveryMode: config.steeringDeliveryMode ?? 'one-at-a-time',
       ...config,
     }
     this.agentId = this.config.id ?? crypto.randomUUID()
@@ -193,8 +231,25 @@ export class AgentExecutor {
    * and injects the message into the conversation on the next loop iteration.
    */
   steer(message: string): void {
-    this.steeringMessage = message
+    this.steeringQueue.push(message)
     this.steeringController?.abort()
+  }
+
+  /** Queue a follow-up message to be injected after current turn completes. */
+  queueFollowUp(message: string): void {
+    this.followUpQueue.push(message)
+    this.emit({ type: 'agent:follow-up-queued', agentId: this.agentId, message })
+  }
+
+  private popQueuedMessages(queue: string[]): string[] {
+    if (queue.length === 0) return []
+    if (this.config.steeringDeliveryMode === 'all') {
+      const next = [...queue]
+      queue.length = 0
+      return next
+    }
+    const first = queue.shift()
+    return first ? [first] : []
   }
 
   async run(inputs: AgentInputs, signal: AbortSignal): Promise<AgentResult> {
@@ -236,10 +291,8 @@ export class AgentExecutor {
           )
         }
 
-        // Check for steering message injected between turns
-        if (this.steeringMessage) {
-          const msg = this.steeringMessage
-          this.steeringMessage = null
+        // Check for steering messages injected between turns
+        for (const msg of this.popQueuedMessages(this.steeringQueue)) {
           history.push({ role: 'user', content: msg })
           this.emit({ type: 'agent:steered', agentId: this.agentId, message: msg })
         }
@@ -251,7 +304,7 @@ export class AgentExecutor {
         const estimatedTokens = estimateTokens(charCount)
         if (estimatedTokens > contextLimit * threshold) {
           const messagesBefore = history.length
-          const strategy = selectCompactionStrategy(history)
+          const strategy = selectCompactionStrategy(history, this.config.compactionStrategy)
           if (strategy) {
             const firstMsg = history[0]
             const compacted = strategy.compact(history, Math.floor(contextLimit * 0.5))
@@ -357,6 +410,8 @@ export class AgentExecutor {
           totalOutput += turnResult.usage.outputTokens
           emitEvent('llm:usage', {
             sessionId: this.agentId,
+            provider,
+            model,
             inputTokens: turnResult.usage.inputTokens,
             outputTokens: turnResult.usage.outputTokens,
             cacheReadTokens: turnResult.usage.cacheReadTokens,
@@ -401,6 +456,12 @@ export class AgentExecutor {
           turn,
           toolCalls: turnResult.toolCalls,
         })
+
+        // Inject follow-up queue after turn has fully completed
+        for (const msg of this.popQueuedMessages(this.followUpQueue)) {
+          history.push({ role: 'user', content: msg })
+          this.emit({ type: 'agent:steered', agentId: this.agentId, message: msg })
+        }
       }
 
       // Max turns reached
@@ -460,8 +521,21 @@ export class AgentExecutor {
       providerConfig.toolChoice = { type: 'tool', name: STRUCTURED_OUTPUT_TOOL_NAME }
     }
 
+    // Let extensions process/transform history before normalization
+    let historyForLLM = history
+    try {
+      const processed = await callHook<ChatMessage[], ChatMessage[]>(
+        'history:process',
+        history,
+        history
+      )
+      historyForLLM = processed.output
+    } catch (error) {
+      console.warn('[AVA:Agent] history:process hook failed:', error)
+    }
+
     // Normalize messages for cross-provider compatibility
-    const normalizedHistory = normalizeMessages(history)
+    const normalizedHistory = normalizeMessages(historyForLLM)
 
     const stream = client.stream(
       [{ role: 'system', content: effectiveSystemPrompt }, ...normalizedHistory],

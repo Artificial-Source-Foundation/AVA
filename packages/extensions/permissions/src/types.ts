@@ -16,6 +16,8 @@ export interface PermissionSettings {
   alwaysApproved: string[]
   /** Granular permission mode — overrides yolo/autoApproveReads/autoApproveWrites when set */
   permissionMode?: string
+  /** Declarative policy rules loaded from policy files. */
+  declarativePolicyRules?: DeclarativePolicyRule[]
 }
 
 export interface ToolPermissionRule {
@@ -43,6 +45,26 @@ export interface PolicyRule {
   decision: 'allow' | 'deny' | 'ask'
   priority: number
   reason?: string
+}
+
+export type PolicyDecision = 'allow' | 'deny' | 'ask'
+export type PolicySource = 'builtin' | 'project' | 'user' | 'runtime'
+
+export interface DeclarativePolicyRule {
+  name: string
+  tool: string
+  decision: PolicyDecision
+  priority: number
+  source: PolicySource
+  reason?: string
+  argsPattern?: string
+  paths?: string[]
+  modes?: string[]
+}
+
+export interface DeclarativePolicyFile {
+  version: number
+  rules: Omit<DeclarativePolicyRule, 'source'>[]
 }
 
 // ─── Risk Classification ────────────────────────────────────────────────────

@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { BUILTIN_PACKS, getModelPack, listModelPacks, resolveModelForTier } from './packs.js'
+import {
+  BUILTIN_PACKS,
+  getModelPack,
+  listModelPacks,
+  MODEL_ROLES,
+  type ModelPack,
+  resolveModelForRole,
+  resolveModelForRouting,
+  resolveModelForTier,
+} from './packs.js'
 
 describe('BUILTIN_PACKS', () => {
   it('has three built-in packs', () => {
@@ -18,6 +27,11 @@ describe('BUILTIN_PACKS', () => {
       expect(pack.models).toHaveProperty('commander')
       expect(pack.models).toHaveProperty('lead')
       expect(pack.models).toHaveProperty('worker')
+      expect(pack.models).toHaveProperty('summarizer')
+      expect(pack.models).toHaveProperty('committer')
+      expect(pack.models).toHaveProperty('namer')
+      expect(pack.models).toHaveProperty('verifier')
+      expect(pack.models).toHaveProperty('compactor')
     }
   })
 
@@ -103,5 +117,62 @@ describe('resolveModelForTier', () => {
     const pack = getModelPack('balanced')!
     const result = resolveModelForTier(pack, 'unknown-tier')
     expect(result).toEqual({ provider: 'anthropic', model: 'claude-haiku-4-5' })
+  })
+})
+
+describe('role routing', () => {
+  it('exports all expected model roles', () => {
+    expect(MODEL_ROLES).toEqual(['summarizer', 'committer', 'namer', 'verifier', 'compactor'])
+  })
+
+  it('resolves explicit role assignment', () => {
+    const pack = getModelPack('premium')!
+    const result = resolveModelForRole(pack, 'committer')
+    expect(result).toEqual({ provider: 'anthropic', model: 'claude-opus-4' })
+  })
+
+  it('falls back to praxis tier when role is missing', () => {
+    const custom: ModelPack = {
+      name: 'custom',
+      description: 'custom',
+      models: {
+        commander: { provider: 'x', model: 'commander-model' },
+        worker: { provider: 'x', model: 'worker-model' },
+      },
+    }
+    const result = resolveModelForRole(custom, 'summarizer', 'commander')
+    expect(result).toEqual({ provider: 'x', model: 'commander-model' })
+  })
+
+  it('falls back to worker when role and tier are missing', () => {
+    const custom: ModelPack = {
+      name: 'custom',
+      description: 'custom',
+      models: {
+        worker: { provider: 'x', model: 'worker-model' },
+      },
+    }
+    const result = resolveModelForRole(custom, 'verifier', 'lead')
+    expect(result).toEqual({ provider: 'x', model: 'worker-model' })
+  })
+
+  it('resolveModelForRouting prioritizes role over tier', () => {
+    const custom: ModelPack = {
+      name: 'custom',
+      description: 'custom',
+      models: {
+        worker: { provider: 'x', model: 'worker-model' },
+        commander: { provider: 'x', model: 'commander-model' },
+        summarizer: { provider: 'x', model: 'summary-model' },
+      },
+    }
+    const result = resolveModelForRouting(custom, { tier: 'commander', role: 'summarizer' })
+    expect(result).toEqual({ provider: 'x', model: 'summary-model' })
+  })
+
+  it('resolveModelForRouting supports tier-only route', () => {
+    const pack = getModelPack('balanced')!
+    const result = resolveModelForRouting(pack, { tier: 'lead' })
+    expect(result).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4' })
   })
 })

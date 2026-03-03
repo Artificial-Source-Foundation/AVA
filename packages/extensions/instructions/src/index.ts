@@ -17,13 +17,12 @@ import type {
   ToolMiddlewareResult,
 } from '@ava/core-v2/extensions'
 import type { ToolResult } from '@ava/core-v2/tools'
+import { DiscoveryCache } from './discovery-cache.js'
 import { loadInstructions, mergeInstructions } from './loader.js'
+import { extractPaths, toDirectoryKey } from './path-extractor.js'
 import { resolveSubdirectoryInstructions } from './subdirectory.js'
 import type { InstructionConfig } from './types.js'
 import { DEFAULT_INSTRUCTION_CONFIG } from './types.js'
-
-/** Tool names that trigger subdirectory instruction walking. */
-const WATCHED_TOOLS = new Set(['read_file', 'edit'])
 
 export function activate(api: ExtensionAPI): Disposable {
   let userConfig: Partial<InstructionConfig> = {}
@@ -34,6 +33,8 @@ export function activate(api: ExtensionAPI): Disposable {
   }
   const config = { ...DEFAULT_INSTRUCTION_CONFIG, ...userConfig }
   const disposables: Disposable[] = []
+  const watchedTools = new Set(config.watchedTools)
+  const cache = new DiscoveryCache(config.discoveryCacheTtlMs)
 
   /** Session-scoped set of instruction paths already loaded. */
   const alreadyLoaded = new Set<string>()
@@ -50,6 +51,7 @@ export function activate(api: ExtensionAPI): Disposable {
 
       sessionCwd = workingDirectory
       alreadyLoaded.clear()
+      cache.clear()
 
       void loadInstructions(workingDirectory, api.platform.fs, config, api.log).then((files) => {
         if (files.length > 0) {
@@ -69,7 +71,7 @@ export function activate(api: ExtensionAPI): Disposable {
     })
   )
 
-  // Tool middleware to intercept read_file and edit, then walk subdirectories
+  // Tool middleware to discover subdirectory instructions from file-access tools
   const subdirMiddleware: ToolMiddleware = {
     name: 'instructions-subdirectory',
     priority: 90, // Low priority — runs after most other middleware
@@ -78,34 +80,51 @@ export function activate(api: ExtensionAPI): Disposable {
       ctx: ToolMiddlewareContext,
       _result: ToolResult
     ): Promise<ToolMiddlewareResult | undefined> {
-      if (!WATCHED_TOOLS.has(ctx.toolName)) return undefined
+      if (!watchedTools.has(ctx.toolName)) return undefined
       if (!sessionCwd) return undefined
 
-      // Extract file path from tool args
-      const filePath = extractFilePath(ctx.toolName, ctx.args)
-      if (!filePath) return undefined
+      const paths = extractPaths(ctx.toolName, ctx.args, sessionCwd)
+      if (paths.length === 0) return undefined
 
       try {
-        const newFiles = await resolveSubdirectoryInstructions(
-          filePath,
-          sessionCwd,
-          api.platform.fs,
-          config,
-          alreadyLoaded
-        )
+        const allNewFiles = [] as Awaited<ReturnType<typeof resolveSubdirectoryInstructions>>
 
-        if (newFiles.length > 0) {
-          // Track newly loaded paths for future dedup
-          for (const f of newFiles) alreadyLoaded.add(f.path)
+        for (const path of paths) {
+          const key = toDirectoryKey(path)
+          const cached = cache.get(key)
 
-          const merged = mergeInstructions(newFiles)
+          if (cached) {
+            const unseen = cached.filter((file) => !alreadyLoaded.has(file.path))
+            for (const file of unseen) alreadyLoaded.add(file.path)
+            if (unseen.length > 0) allNewFiles.push(...unseen)
+            continue
+          }
+
+          const newFiles = await resolveSubdirectoryInstructions(
+            path,
+            sessionCwd,
+            api.platform.fs,
+            config,
+            alreadyLoaded
+          )
+          cache.set(key, newFiles)
+          if (newFiles.length > 0) {
+            for (const file of newFiles) alreadyLoaded.add(file.path)
+            allNewFiles.push(...newFiles)
+          }
+        }
+
+        if (allNewFiles.length > 0) {
+          const merged = mergeInstructions(allNewFiles)
           api.emit('instructions:subdirectory-loaded', {
-            filePath,
-            files: newFiles,
+            filePath: paths[0],
+            files: allNewFiles,
             merged,
-            count: newFiles.length,
+            count: allNewFiles.length,
           })
-          api.log.debug(`Subdirectory instructions: ${newFiles.length} file(s) from ${filePath}`)
+          api.log.debug(
+            `Subdirectory instructions: ${allNewFiles.length} file(s) from ${paths.join(', ')}`
+          )
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -124,27 +143,5 @@ export function activate(api: ExtensionAPI): Disposable {
     dispose() {
       for (const d of disposables) d.dispose()
     },
-  }
-}
-
-/**
- * Extract the file path from tool arguments.
- */
-function extractFilePath(toolName: string, args: Record<string, unknown>): string | null {
-  switch (toolName) {
-    case 'read_file':
-      return typeof args.path === 'string'
-        ? args.path
-        : typeof args.file_path === 'string'
-          ? args.file_path
-          : null
-    case 'edit':
-      return typeof args.file_path === 'string'
-        ? args.file_path
-        : typeof args.path === 'string'
-          ? args.path
-          : null
-    default:
-      return null
   }
 }

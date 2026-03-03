@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MCPClient } from './client.js'
 import type { JSONRPCMessage, MCPTransport } from './transport.js'
 
@@ -164,5 +164,19 @@ describe('MCPClient', () => {
   it('throws if not initialized', async () => {
     await expect(client.listTools()).rejects.toThrow('Client not initialized')
     await expect(client.callTool('foo', {})).rejects.toThrow('Client not initialized')
+  })
+
+  it('dispatches method-only notifications to subscribers', async () => {
+    const handler = vi.fn()
+    client.onNotification('notifications/tools/list_changed', handler)
+
+    transport.simulateResponse({
+      jsonrpc: '2.0',
+      method: 'notifications/tools/list_changed',
+      params: { reason: 'updated' },
+    })
+
+    await new Promise((r) => setTimeout(r, 5))
+    expect(handler).toHaveBeenCalledWith({ reason: 'updated' })
   })
 })

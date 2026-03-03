@@ -2,14 +2,26 @@
  * Activation test for file-watcher extension.
  */
 
-import { createMockExtensionAPI } from '@ava/core-v2/__test-utils__/mock-extension-api'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createMockExtensionAPI } from '../../../core-v2/src/__test-utils__/mock-extension-api.js'
 import { activate } from './index.js'
+
+function activateWatcher(api: unknown) {
+  return activate(api as never)
+}
+
+function wait(ms = 20): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 describe('file-watcher extension', () => {
   it('activates and listens for session:opened', () => {
     const { api, eventHandlers } = createMockExtensionAPI()
-    const disposable = activate(api)
+    const disposable = activateWatcher(api)
 
     expect(eventHandlers.has('session:opened')).toBe(true)
     disposable.dispose()
@@ -17,7 +29,7 @@ describe('file-watcher extension', () => {
 
   it('cleans up on dispose', () => {
     const { api, eventHandlers } = createMockExtensionAPI()
-    const disposable = activate(api)
+    const disposable = activateWatcher(api)
 
     expect(eventHandlers.has('session:opened')).toBe(true)
     disposable.dispose()
@@ -26,7 +38,7 @@ describe('file-watcher extension', () => {
 
   it('creates watcher on session:opened event', () => {
     const { api, eventHandlers } = createMockExtensionAPI()
-    const disposable = activate(api)
+    const disposable = activateWatcher(api)
 
     // Simulate session:opened event
     const handlers = eventHandlers.get('session:opened')
@@ -44,9 +56,88 @@ describe('file-watcher extension', () => {
 
   it('logs activation message', () => {
     const { api } = createMockExtensionAPI()
-    const disposable = activate(api)
+    const disposable = activateWatcher(api)
 
     expect(api.log.debug).toHaveBeenCalledWith('File watcher extension activated')
+    disposable.dispose()
+  })
+
+  it('emits ava:comment-detected for // AVA directives', async () => {
+    const { api, emittedEvents } = createMockExtensionAPI()
+    const fs = api.platform.fs as unknown as {
+      addFile: (path: string, content: string) => void
+      addDir: (path: string) => void
+    }
+    fs.addDir('/project/.git')
+    fs.addFile('/project/.git/HEAD', 'ref: refs/heads/main\n')
+    fs.addFile('/project/src/a.ts', 'const a = 1\n// AVA: refactor a\n')
+
+    const disposable = activateWatcher(api)
+    api.emit('session:opened', { sessionId: 's1', workingDirectory: '/project' })
+    await wait()
+
+    const evt = emittedEvents.find((e) => e.event === 'ava:comment-detected')
+    expect(evt).toBeDefined()
+    expect((evt!.data as { marker: string }).marker).toBe('// AVA:')
+    disposable.dispose()
+  })
+
+  it('emits ava:comment-detected for # AVA directives', async () => {
+    const { api, emittedEvents } = createMockExtensionAPI()
+    const fs = api.platform.fs as unknown as {
+      addFile: (path: string, content: string) => void
+      addDir: (path: string) => void
+    }
+    fs.addDir('/project/.git')
+    fs.addFile('/project/.git/HEAD', 'ref: refs/heads/main\n')
+    fs.addFile('/project/scripts/tool.py', '# AVA: improve parser\nprint(1)\n')
+
+    const disposable = activateWatcher(api)
+    api.emit('session:opened', { sessionId: 's1', workingDirectory: '/project' })
+    await wait()
+
+    const evt = emittedEvents.find((e) => e.event === 'ava:comment-detected')
+    expect(evt).toBeDefined()
+    expect((evt!.data as { marker: string }).marker).toBe('# AVA:')
+    disposable.dispose()
+  })
+
+  it('does not emit for inline pseudo-directives', async () => {
+    const { api, emittedEvents } = createMockExtensionAPI()
+    const fs = api.platform.fs as unknown as {
+      addFile: (path: string, content: string) => void
+      addDir: (path: string) => void
+    }
+    fs.addDir('/project/.git')
+    fs.addFile('/project/.git/HEAD', 'ref: refs/heads/main\n')
+    fs.addFile('/project/src/noise.ts', 'const s = "// AVA: not a directive"\n')
+
+    const disposable = activateWatcher(api)
+    api.emit('session:opened', { sessionId: 's1', workingDirectory: '/project' })
+    await wait()
+
+    const directiveEvents = emittedEvents.filter((e) => e.event === 'ava:comment-detected')
+    expect(directiveEvents).toHaveLength(0)
+    disposable.dispose()
+  })
+
+  it('deduplicates unchanged directives across polling cycles', async () => {
+    vi.useFakeTimers()
+    const { api, emittedEvents } = createMockExtensionAPI()
+    const fs = api.platform.fs as unknown as {
+      addFile: (path: string, content: string) => void
+      addDir: (path: string) => void
+    }
+    fs.addDir('/project/.git')
+    fs.addFile('/project/.git/HEAD', 'ref: refs/heads/main\n')
+    fs.addFile('/project/src/a.ts', '// AVA: stable\n')
+
+    const disposable = activateWatcher(api)
+    api.emit('session:opened', { sessionId: 's1', workingDirectory: '/project' })
+    await vi.advanceTimersByTimeAsync(7000)
+
+    const directiveEvents = emittedEvents.filter((e) => e.event === 'ava:comment-detected')
+    expect(directiveEvents).toHaveLength(1)
     disposable.dispose()
   })
 })

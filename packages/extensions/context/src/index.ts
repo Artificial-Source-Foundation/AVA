@@ -1,42 +1,81 @@
-/**
- * Context extension.
- * Provides token tracking and context compaction strategies.
- *
- * Compaction pipeline order (agent loop should apply in this sequence):
- * 1. **prune** — Clears old tool result content (preserves message structure)
- * 2. **summarize** or **truncate** — Drops/summarizes entire messages
- *
- * Strategy selection logic:
- * - Sessions > 20 messages use "summarize" (preserves more context)
- * - Shorter sessions use "truncate" (simple and fast)
- * - "prune" always runs first as a pre-pass (reduces payload without losing messages)
- *
- * Emits `context:compacted` event with before/after token counts after compaction.
- */
-
+import { getSettingsManager } from '@ava/core-v2/config'
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
-import { ALL_STRATEGIES } from './strategies.js'
+import type { ChatMessage } from '@ava/core-v2/llm'
+import { registerModelPricing, trackSessionCost } from './cost-tracker.js'
+import {
+  createHistoryProcessorByName,
+  type HistoryProcessor,
+  runHistoryProcessors,
+} from './processors/index.js'
+import { ALL_STRATEGIES, summarizeStrategy, truncateStrategy } from './strategies.js'
 import { trackTokens } from './tracker.js'
 
-/** Strategy selection threshold — sessions above this use summarize. */
+export interface ContextExtensionSettings {
+  strategy: string | string[]
+  historyProcessors: string[]
+}
+
+export const DEFAULT_CONTEXT_SETTINGS: ContextExtensionSettings = {
+  strategy: 'auto',
+  historyProcessors: ['last-n-observations', 'tag-tool-calls'],
+}
+
 export const SUMMARIZE_THRESHOLD = 20
 
-/**
- * Select the best compaction strategy name based on session message count.
- * Returns 'summarize' for longer sessions, 'truncate' for shorter ones.
- */
-export function selectStrategyName(messageCount: number): 'summarize' | 'truncate' {
-  return messageCount > SUMMARIZE_THRESHOLD ? 'summarize' : 'truncate'
+export function selectStrategyName(
+  messageCount: number,
+  settings: ContextExtensionSettings = DEFAULT_CONTEXT_SETTINGS
+): string | string[] {
+  if (Array.isArray(settings.strategy)) return settings.strategy
+  if (settings.strategy !== 'auto') return settings.strategy
+  return messageCount > SUMMARIZE_THRESHOLD ? summarizeStrategy.name : truncateStrategy.name
+}
+
+function createProcessors(settings: ContextExtensionSettings): HistoryProcessor[] {
+  const result: HistoryProcessor[] = []
+  for (const name of settings.historyProcessors) {
+    const processor = createHistoryProcessorByName(name, { provider: 'anthropic' })
+    if (processor) result.push(processor)
+  }
+  return result
+}
+
+function mergeSettings(value: unknown): ContextExtensionSettings {
+  const partial = (value ?? {}) as Partial<ContextExtensionSettings>
+  return {
+    strategy: partial.strategy ?? DEFAULT_CONTEXT_SETTINGS.strategy,
+    historyProcessors: partial.historyProcessors ?? DEFAULT_CONTEXT_SETTINGS.historyProcessors,
+  }
 }
 
 export function activate(api: ExtensionAPI): Disposable {
-  // Register all compaction strategies
-  const strategyDisposables = ALL_STRATEGIES.map((s) => api.registerContextStrategy(s))
+  const manager = getSettingsManager()
+  manager.registerCategory('context', DEFAULT_CONTEXT_SETTINGS)
 
-  // Track token usage via events (including cache metrics)
+  const strategyDisposables = ALL_STRATEGIES.map((strategy) =>
+    api.registerContextStrategy(strategy)
+  )
+
+  let settings = mergeSettings(api.getSettings('context'))
+  let processors = createProcessors(settings)
+
+  const settingsDisposable = api.onSettingsChanged('context', (next) => {
+    settings = mergeSettings(next)
+    processors = createProcessors(settings)
+  })
+
+  const hookDisposable =
+    typeof api.registerHook === 'function'
+      ? api.registerHook('history:process', (_input: ChatMessage[], current: ChatMessage[]) =>
+          runHistoryProcessors(current, processors)
+        )
+      : { dispose() {} }
+
   const tokenDisposable = api.on('llm:usage', (data) => {
     const usage = data as {
       sessionId: string
+      provider?: string
+      model?: string
       inputTokens: number
       outputTokens: number
       cacheReadTokens?: number
@@ -49,18 +88,45 @@ export function activate(api: ExtensionAPI): Disposable {
       usage.cacheReadTokens,
       usage.cacheCreationTokens
     )
-    const cacheRead = usage.cacheReadTokens ?? 0
-    const cacheCreation = usage.cacheCreationTokens ?? 0
-    if (cacheRead > 0 || cacheCreation > 0) {
-      const hitRate = usage.inputTokens > 0 ? Math.round((cacheRead / usage.inputTokens) * 100) : 0
-      api.log.debug(`Cache: read=${cacheRead}, created=${cacheCreation}, hit_rate=${hitRate}%`)
+
+    if (usage.provider && usage.model) {
+      const costStats = trackSessionCost(
+        usage.sessionId,
+        usage.provider,
+        usage.model,
+        usage.inputTokens,
+        usage.outputTokens
+      )
+      api.emit('session:cost', costStats)
     }
   })
 
-  // Log compaction events for observability
+  const providerDisposable = api.on('provider:registered', (data) => {
+    const payload = data as {
+      provider?: string
+      models?: Array<{ id: string; pricing?: { inputPer1M: number; outputPer1M: number } }>
+    }
+    if (!payload.provider || !payload.models) return
+    for (const model of payload.models) {
+      if (!model.pricing) continue
+      registerModelPricing(payload.provider, model.id, model.pricing)
+    }
+  })
+
+  const modelsDisposable = api.on('models:register', (data) => {
+    const models = data as Array<{
+      provider: string
+      id: string
+      pricing?: { inputPer1M: number; outputPer1M: number }
+    }>
+    for (const model of models) {
+      if (!model.pricing) continue
+      registerModelPricing(model.provider, model.id, model.pricing)
+    }
+  })
+
   const compactedDisposable = api.on('context:compacted', (data) => {
     const event = data as {
-      agentId: string
       tokensBefore: number
       tokensAfter: number
       messagesBefore: number
@@ -68,21 +134,23 @@ export function activate(api: ExtensionAPI): Disposable {
       strategy: string
     }
     api.log.info(
-      `Context compacted: ${event.tokensBefore} → ${event.tokensAfter} tokens ` +
-        `(${event.messagesBefore} → ${event.messagesAfter} messages, strategy: ${event.strategy})`
+      `Context compacted: ${event.tokensBefore} -> ${event.tokensAfter} tokens (${event.messagesBefore} -> ${event.messagesAfter} messages, strategy: ${event.strategy})`
     )
   })
 
-  // Forward session:status events for observability
   const statusDisposable = api.on('session:status', (data) => {
     const event = data as { sessionId: string; status: 'idle' | 'busy' | 'retry' }
-    api.log.debug(`Session status: ${event.sessionId} → ${event.status}`)
+    api.log.debug(`Session status: ${event.sessionId} -> ${event.status}`)
   })
 
   return {
     dispose() {
-      for (const d of strategyDisposables) d.dispose()
+      for (const disposable of strategyDisposables) disposable.dispose()
+      hookDisposable.dispose()
+      settingsDisposable.dispose()
       tokenDisposable.dispose()
+      providerDisposable.dispose()
+      modelsDisposable.dispose()
       compactedDisposable.dispose()
       statusDisposable.dispose()
     },
@@ -90,10 +158,17 @@ export function activate(api: ExtensionAPI): Disposable {
 }
 
 export {
+  getModelPricing,
+  getSessionCost,
+  registerModelPricing,
+  resetPricingRegistry,
+  resetSessionCost,
+  trackSessionCost,
+} from './cost-tracker.js'
+export {
   estimateTokens,
   PROTECTED_TOOLS,
   PRUNE_TOKEN_BUDGET,
-  pruneStrategy,
   summarizeStrategy,
   truncateStrategy,
 } from './strategies.js'

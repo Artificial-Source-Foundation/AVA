@@ -16,9 +16,15 @@ export interface RecipeStep {
   tool?: string
   command?: string
   goal?: string
+  recipe?: string
   args?: Record<string, string>
   parallel?: boolean
   condition?: string
+  retry?: {
+    maxAttempts: number
+    delayMs?: number
+  }
+  onError?: 'continue' | 'abort'
 }
 
 export interface Recipe {

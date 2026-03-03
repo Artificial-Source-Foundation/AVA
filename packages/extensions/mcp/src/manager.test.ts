@@ -7,6 +7,8 @@ const mockClientInstances: Array<{
   listTools: ReturnType<typeof vi.fn>
   callTool: ReturnType<typeof vi.fn>
   close: ReturnType<typeof vi.fn>
+  onNotification: ReturnType<typeof vi.fn>
+  notificationHandlers: Map<string, (params?: Record<string, unknown>) => void | Promise<void>>
 }> = []
 
 vi.mock('./client.js', () => {
@@ -17,6 +19,11 @@ vi.mock('./client.js', () => {
       callTool: ReturnType<typeof vi.fn>
       close: ReturnType<typeof vi.fn>
       onSamplingRequest = vi.fn()
+      onNotification: ReturnType<typeof vi.fn>
+      notificationHandlers = new Map<
+        string,
+        (params?: Record<string, unknown>) => void | Promise<void>
+      >()
       serverCapabilities = {}
 
       constructor() {
@@ -30,6 +37,11 @@ vi.mock('./client.js', () => {
           content: [{ type: 'text', text: 'result' }],
         })
         this.close = vi.fn().mockResolvedValue(undefined)
+        this.onNotification = vi.fn(
+          (method: string, handler: (params?: Record<string, unknown>) => void | Promise<void>) => {
+            this.notificationHandlers.set(method, handler)
+          }
+        )
         mockClientInstances.push(this)
       }
     },
@@ -72,8 +84,15 @@ vi.mock('./reconnect.js', () => {
   }
 })
 
-const { callTool, connectServer, disconnectServer, getConnections, getTools, resetMCP } =
-  await import('./manager.js')
+const {
+  callTool,
+  connectServer,
+  disconnectServer,
+  getConnections,
+  getTools,
+  refreshServerTools,
+  resetMCP,
+} = await import('./manager.js')
 
 const mockShell = {
   exec: vi.fn(),
@@ -167,5 +186,42 @@ describe('MCP manager', () => {
   it('throws if stdio server has no command', async () => {
     const bad: MCPServer = { name: 'bad', uri: 'stdio://bad', transport: 'stdio' }
     await expect(connectServer(bad, mockShell)).rejects.toThrow('requires a command')
+  })
+
+  it('refreshes tools when server sends tools/list_changed notification', async () => {
+    const onToolsListChanged = vi.fn()
+    await connectServer(stdioServer, { shell: mockShell, onToolsListChanged })
+
+    const instance = mockClientInstances[0]
+    expect(instance).toBeDefined()
+    instance!.listTools.mockResolvedValueOnce([
+      { name: 'new_tool', description: 'New', inputSchema: { type: 'object' } },
+    ])
+
+    const handler = instance!.notificationHandlers.get('notifications/tools/list_changed')
+    expect(handler).toBeDefined()
+    await handler?.()
+
+    expect(onToolsListChanged).toHaveBeenCalledWith('test-stdio', [
+      {
+        name: 'new_tool',
+        description: 'New',
+        inputSchema: { type: 'object' },
+        serverName: 'test-stdio',
+      },
+    ])
+  })
+
+  it('refreshServerTools refreshes cached server tools', async () => {
+    await connectServer(stdioServer, mockShell)
+
+    const instance = mockClientInstances[0]
+    instance!.listTools.mockResolvedValueOnce([
+      { name: 'other_tool', description: 'Other', inputSchema: { type: 'object' } },
+    ])
+
+    const tools = await refreshServerTools('test-stdio')
+    expect(tools).toHaveLength(1)
+    expect(tools[0]?.name).toBe('other_tool')
   })
 })

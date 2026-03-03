@@ -5,7 +5,31 @@
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import { createPermissionMiddleware, updateSettings } from './middleware.js'
+import { loadDeclarativePolicies } from './policy/index.js'
 import type { ToolPermissionRule } from './types.js'
+
+function applySettings(raw: Record<string, unknown>): void {
+  updateSettings({
+    yolo: raw.yolo as boolean | undefined,
+    autoApproveReads: raw.autoApproveReads as boolean | undefined,
+    autoApproveWrites: raw.autoApproveWrites as boolean | undefined,
+    autoApproveCommands: raw.autoApproveCommands as boolean | undefined,
+    blockedPatterns: raw.blockedPatterns as string[] | undefined,
+    trustedPaths: raw.trustedPaths as string[] | undefined,
+    toolRules: raw.toolRules as ToolPermissionRule[] | undefined,
+    smartApprove: raw.smartApprove as boolean | undefined,
+    alwaysApproved: raw.alwaysApproved as string[] | undefined,
+    permissionMode: raw.permissionMode as string | undefined,
+  })
+}
+
+async function reloadPolicies(api: ExtensionAPI, cwd: string): Promise<void> {
+  const loaded = await loadDeclarativePolicies(api.platform.fs, cwd)
+  updateSettings({ declarativePolicyRules: loaded.rules })
+  for (const warning of loaded.warnings) {
+    api.log.warn(warning)
+  }
+}
 
 export function activate(api: ExtensionAPI): Disposable {
   // Register the permission middleware (pass bus for interactive approval)
@@ -16,18 +40,7 @@ export function activate(api: ExtensionAPI): Disposable {
     const settings = api.getSettings<Record<string, unknown>>('permissions')
 
     if (settings) {
-      updateSettings({
-        yolo: settings.yolo as boolean | undefined,
-        autoApproveReads: settings.autoApproveReads as boolean | undefined,
-        autoApproveWrites: settings.autoApproveWrites as boolean | undefined,
-        autoApproveCommands: settings.autoApproveCommands as boolean | undefined,
-        blockedPatterns: settings.blockedPatterns as string[] | undefined,
-        trustedPaths: settings.trustedPaths as string[] | undefined,
-        toolRules: settings.toolRules as ToolPermissionRule[] | undefined,
-        smartApprove: settings.smartApprove as boolean | undefined,
-        alwaysApproved: settings.alwaysApproved as string[] | undefined,
-        permissionMode: settings.permissionMode as string | undefined,
-      })
+      applySettings(settings)
     }
   } catch {
     // Settings category not registered yet — use defaults
@@ -35,25 +48,20 @@ export function activate(api: ExtensionAPI): Disposable {
 
   // Listen for settings changes
   const settingsDisposable = api.onSettingsChanged('permissions', (s) => {
-    const ps = s as Record<string, unknown>
-    updateSettings({
-      yolo: ps.yolo as boolean | undefined,
-      autoApproveReads: ps.autoApproveReads as boolean | undefined,
-      autoApproveWrites: ps.autoApproveWrites as boolean | undefined,
-      autoApproveCommands: ps.autoApproveCommands as boolean | undefined,
-      blockedPatterns: ps.blockedPatterns as string[] | undefined,
-      trustedPaths: ps.trustedPaths as string[] | undefined,
-      toolRules: ps.toolRules as ToolPermissionRule[] | undefined,
-      smartApprove: ps.smartApprove as boolean | undefined,
-      alwaysApproved: ps.alwaysApproved as string[] | undefined,
-      permissionMode: ps.permissionMode as string | undefined,
-    })
+    applySettings(s as Record<string, unknown>)
+  })
+
+  const sessionDisposable = api.on('session:opened', (event) => {
+    const payload = event as { workingDirectory?: string }
+    const cwd = payload.workingDirectory ?? process.cwd()
+    void reloadPolicies(api, cwd)
   })
 
   return {
     dispose() {
       mwDisposable.dispose()
       settingsDisposable.dispose()
+      sessionDisposable.dispose()
     },
   }
 }

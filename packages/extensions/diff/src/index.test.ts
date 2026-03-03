@@ -1,8 +1,11 @@
-import { createMockExtensionAPI } from '@ava/core-v2/__test-utils__/mock-extension-api'
-import type { MockPlatform } from '@ava/core-v2/__test-utils__/mock-platform'
 import type { ToolMiddlewareContext } from '@ava/core-v2/extensions'
 import { describe, expect, it } from 'vitest'
+import { createMockExtensionAPI } from '../../../core-v2/src/__test-utils__/mock-extension-api.js'
 import { activate } from './index.js'
+
+function activateDiff(api: unknown) {
+  return activate(api as never)
+}
 
 function makeCtx(
   toolName: string,
@@ -24,7 +27,7 @@ function makeCtx(
 describe('diff extension', () => {
   it('activates and registers middleware', () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
-    activate(api)
+    activateDiff(api)
     expect(registeredMiddleware).toHaveLength(1)
     expect(registeredMiddleware[0].name).toBe('ava-diff-tracker')
     expect(registeredMiddleware[0].priority).toBe(20)
@@ -32,15 +35,21 @@ describe('diff extension', () => {
 
   it('middleware has before and after hooks', () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
-    activate(api)
+    activateDiff(api)
     expect(registeredMiddleware[0].before).toBeTypeOf('function')
     expect(registeredMiddleware[0].after).toBeTypeOf('function')
+  })
+
+  it('registers diff_review tool', () => {
+    const { api, registeredTools } = createMockExtensionAPI()
+    activateDiff(api)
+    expect(registeredTools.some((t) => t.definition?.name === 'diff_review')).toBe(true)
   })
 
   it('before hook snapshots file content for write tools', async () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
     api.platform.fs.addFile('/test.ts', 'original content')
-    activate(api)
+    activateDiff(api)
 
     const mw = registeredMiddleware[0]
     const result = await mw.before!(makeCtx('write_file', { path: '/test.ts' }))
@@ -51,7 +60,7 @@ describe('diff extension', () => {
 
   it('before hook skips non-write tools', async () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
-    activate(api)
+    activateDiff(api)
 
     const mw = registeredMiddleware[0]
     const result = await mw.before!(makeCtx('read_file', { path: '/test.ts' }))
@@ -62,7 +71,7 @@ describe('diff extension', () => {
   it('tracks delete_file tool', async () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
     api.platform.fs.addFile('/to-delete.ts', 'content to delete')
-    activate(api)
+    activateDiff(api)
 
     const mw = registeredMiddleware[0]
     // Before should snapshot the file
@@ -72,7 +81,7 @@ describe('diff extension', () => {
 
   it('cleans up on dispose', () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
-    const disposable = activate(api)
+    const disposable = activateDiff(api)
     expect(registeredMiddleware).toHaveLength(1)
     disposable.dispose()
     expect(registeredMiddleware).toHaveLength(0)
@@ -83,7 +92,10 @@ describe('diff extension', () => {
 
 describe('undo/redo', () => {
   async function simulateWrite(
-    api: { platform: MockPlatform; emit: (event: string, data: unknown) => void },
+    api: {
+      platform: { fs: { writeFile: (path: string, content: string) => Promise<void> } }
+      emit: (event: string, data: unknown) => void
+    },
     mw: {
       before?: (ctx: ToolMiddlewareContext) => Promise<unknown>
       after?: (ctx: ToolMiddlewareContext, result: unknown) => Promise<unknown>
@@ -100,7 +112,10 @@ describe('undo/redo', () => {
   }
 
   async function simulateCreate(
-    api: { platform: MockPlatform; emit: (event: string, data: unknown) => void },
+    api: {
+      platform: { fs: { writeFile: (path: string, content: string) => Promise<void> } }
+      emit: (event: string, data: unknown) => void
+    },
     mw: {
       before?: (ctx: ToolMiddlewareContext) => Promise<unknown>
       after?: (ctx: ToolMiddlewareContext, result: unknown) => Promise<unknown>
@@ -116,7 +131,10 @@ describe('undo/redo', () => {
   }
 
   async function simulateDelete(
-    api: { platform: MockPlatform; emit: (event: string, data: unknown) => void },
+    api: {
+      platform: { fs: { remove: (path: string) => Promise<void> } }
+      emit: (event: string, data: unknown) => void
+    },
     mw: {
       before?: (ctx: ToolMiddlewareContext) => Promise<unknown>
       after?: (ctx: ToolMiddlewareContext, result: unknown) => Promise<unknown>
@@ -132,8 +150,11 @@ describe('undo/redo', () => {
 
   it('undo modified file restores original content', async () => {
     const { api, registeredMiddleware, emittedEvents } = createMockExtensionAPI()
-    api.platform.fs.addFile('/file.ts', 'original')
-    activate(api)
+    ;(api.platform.fs as unknown as { addFile: (path: string, content: string) => void }).addFile(
+      '/file.ts',
+      'original'
+    )
+    activateDiff(api)
     const mw = registeredMiddleware[0]
 
     await simulateWrite(api, mw, '/file.ts', 'modified')
@@ -150,7 +171,7 @@ describe('undo/redo', () => {
 
   it('undo created file deletes it', async () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
-    activate(api)
+    activateDiff(api)
     const mw = registeredMiddleware[0]
 
     await simulateCreate(api, mw, '/new.ts', 'new content')
@@ -164,8 +185,11 @@ describe('undo/redo', () => {
 
   it('undo deleted file recreates it with original content', async () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
-    api.platform.fs.addFile('/doomed.ts', 'precious content')
-    activate(api)
+    ;(api.platform.fs as unknown as { addFile: (path: string, content: string) => void }).addFile(
+      '/doomed.ts',
+      'precious content'
+    )
+    activateDiff(api)
     const mw = registeredMiddleware[0]
 
     await simulateDelete(api, mw, '/doomed.ts')
@@ -179,8 +203,11 @@ describe('undo/redo', () => {
 
   it('redo after undo re-applies the change', async () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
-    api.platform.fs.addFile('/file.ts', 'original')
-    activate(api)
+    ;(api.platform.fs as unknown as { addFile: (path: string, content: string) => void }).addFile(
+      '/file.ts',
+      'original'
+    )
+    activateDiff(api)
     const mw = registeredMiddleware[0]
 
     await simulateWrite(api, mw, '/file.ts', 'modified')
@@ -195,8 +222,11 @@ describe('undo/redo', () => {
 
   it('new write after undo clears redo stack', async () => {
     const { api, registeredMiddleware, emittedEvents } = createMockExtensionAPI()
-    api.platform.fs.addFile('/file.ts', 'v1')
-    activate(api)
+    ;(api.platform.fs as unknown as { addFile: (path: string, content: string) => void }).addFile(
+      '/file.ts',
+      'v1'
+    )
+    activateDiff(api)
     const mw = registeredMiddleware[0]
 
     await simulateWrite(api, mw, '/file.ts', 'v2')
@@ -216,7 +246,7 @@ describe('undo/redo', () => {
 
   it('undo with nothing to undo emits diff:undo-failed', async () => {
     const { api, emittedEvents } = createMockExtensionAPI()
-    activate(api)
+    activateDiff(api)
 
     api.emit('diff:undo', { sessionId: 'test' })
     await new Promise((r) => setTimeout(r, 10))
@@ -226,7 +256,7 @@ describe('undo/redo', () => {
 
   it('redo with nothing to redo emits diff:redo-failed', async () => {
     const { api, emittedEvents } = createMockExtensionAPI()
-    activate(api)
+    activateDiff(api)
 
     api.emit('diff:redo', { sessionId: 'test' })
     await new Promise((r) => setTimeout(r, 10))

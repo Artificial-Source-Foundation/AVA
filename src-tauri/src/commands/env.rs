@@ -1,6 +1,7 @@
 /// Allowed environment variable prefixes for security.
-/// Only provider API key env vars can be read.
+/// Only specific env vars can be read to prevent information leakage.
 const ALLOWED_PREFIXES: &[&str] = &[
+    // LLM Provider API keys
     "ANTHROPIC_",
     "OPENAI_",
     "GOOGLE_",
@@ -11,6 +12,20 @@ const ALLOWED_PREFIXES: &[&str] = &[
     "COHERE_",
     "TOGETHER_",
     "OPENROUTER_",
+    // Search/Research tools
+    "TAVILY_",
+    "EXA_",
+    "SERP_",
+    "BING_",
+    // AVA/Estela specific
+    "AVA_",
+    "ESTELA_",
+    // Git
+    "GIT_",
+    // General (for HOME, PATH, etc. if needed)
+    "HOME",
+    "USER",
+    "PATH",
 ];
 
 /// Read an environment variable by name.

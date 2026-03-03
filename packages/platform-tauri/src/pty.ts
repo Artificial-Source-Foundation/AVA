@@ -46,10 +46,21 @@ class TauriPTYProcess implements PTYProcess {
   async start(command: string, args: string[], options?: PTYOptions): Promise<void> {
     const { Command } = await import('@tauri-apps/plugin-shell')
 
-    const shellArgs = ['-c', `${command} ${args.join(' ')}`]
+    // Use login shell for better compatibility with interactive commands
+    const shellArgs = ['-l', '-c', `${command} ${args.join(' ')}`]
+
+    // Set up environment with terminal markers
+    const env = {
+      ...options?.env,
+      TERM: 'xterm-256color',
+      AVA_TERMINAL: '1',
+      COLUMNS: String(options?.cols ?? DEFAULT_COLS),
+      LINES: String(options?.rows ?? DEFAULT_ROWS),
+    }
+
     const cmd = Command.create('sh', shellArgs, {
       cwd: options?.cwd,
-      env: options?.env,
+      env,
     })
 
     // Wire stdout/stderr into dataCallbacks (Tauri emits line events)

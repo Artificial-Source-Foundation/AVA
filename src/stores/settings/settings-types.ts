@@ -116,12 +116,27 @@ export interface ToolApprovalRule {
   reason?: string
 }
 
+export type SkillActivationMode = 'auto' | 'agent' | 'always' | 'manual'
+
 export interface CustomSkill {
   id: string
   name: string
   description: string
   fileGlobs: string[]
   instructions: string
+  activation?: SkillActivationMode
+}
+
+export type RuleActivationMode = 'always' | 'auto' | 'manual'
+
+export interface CustomRule {
+  id: string
+  name: string
+  description: string
+  globs: string[]
+  activation: RuleActivationMode
+  content: string
+  enabled: boolean
 }
 
 /** @deprecated Use CustomSkill instead */
@@ -156,6 +171,8 @@ export interface AppSettings {
   devMode: boolean
   enabledSkills: string[]
   customSkills: CustomSkill[]
+  customRules: CustomRule[]
+  hiddenBuiltInSkills: string[]
   trustedFolders: TrustedFoldersSettings
   /** Which backend stack powers the agent loop (default: 'core-v2') */
   agentBackend: AgentBackend

@@ -2,7 +2,6 @@ import {
   Bot,
   Brain,
   Code2,
-  Cpu,
   FolderLock,
   Info,
   Keyboard,
@@ -23,7 +22,6 @@ export type SettingsTab =
   | 'behavior'
   | 'shortcuts'
   | 'providers'
-  | 'models'
   | 'agents'
   | 'permissions'
   | 'mcp'
@@ -98,12 +96,6 @@ export const tabGroups: TabGroup[] = [
         keywords: ['api', 'key', 'openai', 'anthropic', 'google', 'connection'],
       },
       {
-        id: 'models',
-        label: 'Models',
-        icon: Cpu,
-        keywords: ['model', 'temperature', 'tokens', 'context', 'streaming', 'llm'],
-      },
-      {
         id: 'agents',
         label: 'Agents',
         icon: Bot,
@@ -128,9 +120,21 @@ export const tabGroups: TabGroup[] = [
       },
       {
         id: 'skills',
-        label: 'Skills',
+        label: 'Skills & Rules',
         icon: Brain,
-        keywords: ['skill', 'domain', 'prompt', 'glob', 'pattern', 'microagent'],
+        keywords: [
+          'skill',
+          'domain',
+          'prompt',
+          'glob',
+          'pattern',
+          'microagent',
+          'rule',
+          'coding-rule',
+          'always',
+          'auto',
+          'activation',
+        ],
       },
       {
         id: 'commands',

@@ -90,6 +90,8 @@ export function mergeWithDefaults(parsed: Partial<AppSettings>): AppSettings {
     ...parsed,
     enabledSkills,
     customSkills,
+    customRules: parsed.customRules ?? [],
+    hiddenBuiltInSkills: parsed.hiddenBuiltInSkills ?? [],
     ui: { ...DEFAULT_UI, ...(parsed.ui ?? {}) },
     appearance: { ...DEFAULT_APPEARANCE, ...(parsed.appearance ?? {}) },
     generation: { ...DEFAULT_GENERATION, ...(parsed.generation ?? {}) },

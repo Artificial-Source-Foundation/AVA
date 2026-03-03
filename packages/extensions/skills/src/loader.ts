@@ -6,7 +6,10 @@
  */
 
 import type { IFileSystem } from '@ava/core-v2/platform'
-import type { Skill } from './types.js'
+import { parseFrontmatter, parseGlobs, parseStringArray } from './frontmatter.js'
+import type { Skill, SkillActivation } from './types.js'
+
+const VALID_ACTIVATIONS = new Set<SkillActivation>(['auto', 'agent', 'always', 'manual'])
 
 /** Directories to scan for SKILL.md files (relative to project root). */
 const SKILL_DIRS = ['.ava/skills', '.claude/skills', '.agents/skills']
@@ -71,72 +74,19 @@ export function parseSkillFile(rawContent: string, sourcePath: string): Skill | 
   const globs = parseGlobs(frontmatter.globs)
   if (globs.length === 0) return null
 
+  // Parse activation mode (default: 'auto' for backward compat)
+  let activation: SkillActivation = 'auto'
+  if (frontmatter.activation && VALID_ACTIVATIONS.has(frontmatter.activation as SkillActivation)) {
+    activation = frontmatter.activation as SkillActivation
+  }
+
   return {
     name: String(frontmatter.name),
     description: String(frontmatter.description ?? ''),
     globs,
+    activation,
     projectTypes: parseStringArray(frontmatter.projectTypes),
     content: content.trim(),
     source: sourcePath,
   }
-}
-
-// ─── Frontmatter Parser ──────────────────────────────────────────────────────
-
-interface Frontmatter {
-  [key: string]: string | string[] | undefined
-}
-
-function parseFrontmatter(raw: string): { frontmatter: Frontmatter; content: string } {
-  const match = raw.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/)
-  if (!match) return { frontmatter: {}, content: raw }
-
-  const yamlBlock = match[1]!
-  const content = match[2]!
-  const frontmatter: Frontmatter = {}
-
-  let currentKey = ''
-  for (const line of yamlBlock.split('\n')) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith('#')) continue
-
-    // Array item: "  - value"
-    if (trimmed.startsWith('- ') && currentKey) {
-      const value = trimmed.slice(2).replace(/^["']|["']$/g, '')
-      const existing = frontmatter[currentKey]
-      if (Array.isArray(existing)) {
-        existing.push(value)
-      } else {
-        frontmatter[currentKey] = [value]
-      }
-      continue
-    }
-
-    // Key-value: "key: value"
-    const kvMatch = trimmed.match(/^(\w+)\s*:\s*(.*)$/)
-    if (kvMatch) {
-      currentKey = kvMatch[1]!
-      const value = kvMatch[2]!.replace(/^["']|["']$/g, '')
-      if (value) {
-        frontmatter[currentKey] = value
-      } else {
-        // Empty value — likely an array follows
-        frontmatter[currentKey] = []
-      }
-    }
-  }
-
-  return { frontmatter, content }
-}
-
-function parseGlobs(value: string | string[] | undefined): string[] {
-  if (!value) return []
-  if (typeof value === 'string') return [value]
-  return value.filter(Boolean)
-}
-
-function parseStringArray(value: string | string[] | undefined): string[] | undefined {
-  if (!value) return undefined
-  if (typeof value === 'string') return [value]
-  return value.length > 0 ? value : undefined
 }

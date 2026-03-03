@@ -192,5 +192,11 @@ export function buildResponsesRequestBody(
   if (config.maxTokens) body.max_output_tokens = config.maxTokens
   if (config.temperature !== undefined) body.temperature = config.temperature
 
+  // Reasoning effort for o-series and GPT-5+ models
+  const thinking = config.thinking as { enabled: boolean; effort?: string } | undefined
+  if (thinking?.enabled && thinking.effort) {
+    ;(body as unknown as Record<string, unknown>).reasoning = { effort: thinking.effort }
+  }
+
   return body
 }

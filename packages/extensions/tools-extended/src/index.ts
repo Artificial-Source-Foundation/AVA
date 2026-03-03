@@ -13,6 +13,8 @@ import { batchTool } from './batch.js'
 import { codesearchTool } from './codesearch.js'
 import { completionTool } from './completion.js'
 import { createFileTool } from './create.js'
+import { createRuleTool } from './create-rule.js'
+import { createSkillTool } from './create-skill.js'
 import { loadCustomTools } from './custom-tools.js'
 import { deleteFileTool } from './delete.js'
 import { lsTool } from './ls.js'
@@ -46,6 +48,8 @@ const TOOLS = [
   bashBackgroundTool,
   bashOutputTool,
   bashKillTool,
+  createRuleTool,
+  createSkillTool,
 ]
 
 export function activate(api: ExtensionAPI): Disposable {

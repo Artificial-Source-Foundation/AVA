@@ -105,6 +105,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   devMode: false,
   enabledSkills: [],
   customSkills: [],
+  customRules: [],
+  hiddenBuiltInSkills: [],
   trustedFolders: { allowed: [], denied: [] },
   agentBackend: 'core-v2',
 }

@@ -24,9 +24,10 @@ describe('load_skill tool', () => {
     expect(tool.definition.description).toContain('Load a skill')
   })
 
-  it('loads a skill by exact name', async () => {
+  it('loads a manual skill by exact name', async () => {
     const skill = makeSkill({
       name: 'react-patterns',
+      activation: 'manual',
       content: 'Use hooks and functional components.',
     })
     const tool = createLoadSkillTool([skill])
@@ -36,8 +37,44 @@ describe('load_skill tool', () => {
     expect(result.output).toBe('Use hooks and functional components.')
   })
 
+  it('loads an agent skill by name', async () => {
+    const skill = makeSkill({
+      name: 'testing',
+      activation: 'agent',
+      content: 'Testing best practices.',
+    })
+    const tool = createLoadSkillTool([skill])
+
+    const result = await tool.execute({ name: 'testing' })
+    expect(result.success).toBe(true)
+    expect(result.output).toBe('Testing best practices.')
+  })
+
+  it('returns already-active message for auto skills', async () => {
+    const skill = makeSkill({ name: 'react', activation: 'auto', content: 'React content' })
+    const tool = createLoadSkillTool([skill])
+
+    const result = await tool.execute({ name: 'react' })
+    expect(result.success).toBe(true)
+    expect(result.output).toContain('already active')
+    expect(result.output).toContain('React content')
+  })
+
+  it('returns already-active message for always skills', async () => {
+    const skill = makeSkill({ name: 'global', activation: 'always', content: 'Global rules' })
+    const tool = createLoadSkillTool([skill])
+
+    const result = await tool.execute({ name: 'global' })
+    expect(result.success).toBe(true)
+    expect(result.output).toContain('already active')
+  })
+
   it('loads a skill by case-insensitive name', async () => {
-    const skill = makeSkill({ name: 'React-Patterns', content: 'Hooks are great.' })
+    const skill = makeSkill({
+      name: 'React-Patterns',
+      activation: 'agent',
+      content: 'Hooks are great.',
+    })
     const tool = createLoadSkillTool([skill])
 
     const result = await tool.execute({ name: 'react-patterns' })
@@ -79,24 +116,6 @@ describe('load_skill tool', () => {
     expect(result.error).toContain('none')
   })
 
-  it('finds first match (exact or case-insensitive)', async () => {
-    const skills = [
-      makeSkill({ name: 'React', content: 'uppercase React' }),
-      makeSkill({ name: 'react', content: 'lowercase react' }),
-    ]
-    const tool = createLoadSkillTool(skills)
-
-    // 'react' matches 'React' via case-insensitive check first (array order)
-    const result = await tool.execute({ name: 'react' })
-    expect(result.success).toBe(true)
-    expect(result.output).toBe('uppercase React')
-
-    // Exact case match
-    const result2 = await tool.execute({ name: 'React' })
-    expect(result2.success).toBe(true)
-    expect(result2.output).toBe('uppercase React')
-  })
-
   it('reflects skills added after tool creation (shared array)', async () => {
     const skills: Skill[] = []
     const tool = createLoadSkillTool(skills)
@@ -105,8 +124,10 @@ describe('load_skill tool', () => {
     const result1 = await tool.execute({ name: 'new-skill' })
     expect(result1.success).toBe(false)
 
-    // Add a skill after creation
-    skills.push(makeSkill({ name: 'new-skill', content: 'dynamically added' }))
+    // Add a manual skill after creation
+    skills.push(
+      makeSkill({ name: 'new-skill', activation: 'manual', content: 'dynamically added' })
+    )
 
     const result2 = await tool.execute({ name: 'new-skill' })
     expect(result2.success).toBe(true)

@@ -51,6 +51,7 @@
     "models/**/*.ts",
     "scheduler/**/*.ts",
     "sandbox/**/*.ts",
+    "rules/**/*.ts",
     "skills/**/*.ts",
     "custom-commands/**/*.ts",
     "slash-commands/**/*.ts",

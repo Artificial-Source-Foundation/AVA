@@ -45,6 +45,7 @@ import { activate as activateOpenai } from '../../packages/extensions/providers/
 import { activate as activateOpenrouter } from '../../packages/extensions/providers/openrouter/src/index.js'
 import { activate as activateTogether } from '../../packages/extensions/providers/together/src/index.js'
 import { activate as activateXai } from '../../packages/extensions/providers/xai/src/index.js'
+import { activate as activateRules } from '../../packages/extensions/rules/src/index.js'
 import { activate as activateSandbox } from '../../packages/extensions/sandbox/src/index.js'
 import { activate as activateScheduler } from '../../packages/extensions/scheduler/src/index.js'
 import { activate as activateSkills } from '../../packages/extensions/skills/src/index.js'
@@ -76,6 +77,7 @@ const EXTENSIONS: ExtensionEntry[] = [
   { name: 'commander', priority: 10, activate: activateCommander },
   { name: 'slash-commands', priority: 10, activate: activateSlashCommands },
   { name: 'instructions', priority: 10, activate: activateInstructions },
+  { name: 'rules', priority: 8, activate: activateRules },
   { name: 'skills', priority: 10, activate: activateSkills },
   { name: 'focus-chain', priority: 10, activate: activateFocusChain },
   { name: 'custom-commands', priority: 10, activate: activateCustomCommands },

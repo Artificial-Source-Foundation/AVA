@@ -49,6 +49,9 @@ export interface MCPToolResult {
 }
 
 export type SamplingHandler = (request: MCPSamplingRequest) => Promise<MCPSamplingResult>
+export type NotificationHandler = (
+  params: Record<string, unknown> | undefined
+) => void | Promise<void>
 
 export class MCPClient {
   private nextId = 1
@@ -57,6 +60,7 @@ export class MCPClient {
   private timeoutMs: number
   private samplingHandler: SamplingHandler | null = null
   private capabilities: ServerCapabilities = {}
+  private notificationHandlers = new Map<string, Set<NotificationHandler>>()
 
   constructor(
     private transport: MCPTransport,
@@ -141,6 +145,15 @@ export class MCPClient {
     this.samplingHandler = handler
   }
 
+  onNotification(method: string, handler: NotificationHandler): void {
+    let handlers = this.notificationHandlers.get(method)
+    if (!handlers) {
+      handlers = new Set<NotificationHandler>()
+      this.notificationHandlers.set(method, handlers)
+    }
+    handlers.add(handler)
+  }
+
   // ─── Lifecycle ────────────────────────────────────────────────────────
 
   async close(): Promise<void> {
@@ -206,7 +219,15 @@ export class MCPClient {
       }
     }
 
-    // Notifications (has method, no id) — ignore for now
+    // Notifications (has method, no id)
+    if ('method' in message && !('id' in message)) {
+      const notification = message as JSONRPCNotification
+      const handlers = this.notificationHandlers.get(notification.method)
+      if (!handlers) return
+      for (const handler of handlers) {
+        void handler(notification.params)
+      }
+    }
   }
 
   private async handleServerRequest(request: JSONRPCRequest): Promise<void> {

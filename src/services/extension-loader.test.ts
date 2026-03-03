@@ -5,7 +5,12 @@
  * and watch debouncing.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+let loadInstalledPlugins: (
+  createApi: (name: string) => ExtensionAPI
+) => Promise<{ cleanup: () => void; pluginDisposables: Map<string, Disposable> }>
 
 // Mock plugins-fs module
 const mockPluginsFsMod = {
@@ -18,13 +23,17 @@ const mockPluginsFsMod = {
 vi.mock('./plugins-fs', () => mockPluginsFsMod)
 
 describe('extension-loader', () => {
+  beforeAll(async () => {
+    const mod = await import('./extension-loader')
+    loadInstalledPlugins = mod.loadInstalledPlugins
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
   describe('loadInstalledPlugins', () => {
     it('returns empty cleanup for no installed plugins', async () => {
-      const { loadInstalledPlugins } = await import('./extension-loader')
       const createApi = vi.fn()
 
       const result = await loadInstalledPlugins(createApi)
@@ -40,7 +49,6 @@ describe('extension-loader', () => {
         'my-plugin': { installed: true, enabled: false },
       })
 
-      const { loadInstalledPlugins } = await import('./extension-loader')
       const createApi = vi.fn()
 
       const result = await loadInstalledPlugins(createApi)
@@ -56,7 +64,6 @@ describe('extension-loader', () => {
       })
       mockPluginsFsMod.readPluginSource.mockResolvedValueOnce(null)
 
-      const { loadInstalledPlugins } = await import('./extension-loader')
       const createApi = vi.fn()
 
       const result = await loadInstalledPlugins(createApi)
@@ -67,7 +74,6 @@ describe('extension-loader', () => {
     it('handles scan failure gracefully', async () => {
       mockPluginsFsMod.listInstalledPlugins.mockRejectedValueOnce(new Error('fs error'))
 
-      const { loadInstalledPlugins } = await import('./extension-loader')
       const createApi = vi.fn()
 
       // Should not throw

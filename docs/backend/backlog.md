@@ -262,6 +262,33 @@ This backlog feeds into the project roadmap:
 - [x] **Phase F: Symbol extraction** — Regex-based extractor for TS/JS, Python, Rust, Go. `/symbols` command. 12 new tests.
 - [x] **Phase G: Full LSP client** — Content-Length framed transport, `LSPClient` (initialize/hover/definition/references/diagnostics), `LSPServerManager` (per-language lifecycle), `formatHover`/`formatLocations`/`formatDiagnostics`. 3 tools (`lsp_diagnostics`/`lsp_hover`/`lsp_definition`). 35 new tests.
 
+### Competitor-Informed Gaps (2026-03-03)
+
+#### Batch 1 — Context & Intelligence
+- [x] **Multiple context compaction strategies** — Added `sliding-window`, `observation-masking`, `amortized-forgetting`, and `backward-fifo` (plus pipeline-capable compaction selection) in `packages/extensions/context/src/strategies/`.
+- [x] **History processor pipeline** — Added `history:process` hook wiring in `packages/core-v2/src/agent/loop.ts` and processors in `packages/extensions/context/src/processors/` (`last-n-observations`, `cache-control`, `tag-tool-calls`).
+- [x] **Tool output pruning (backward-scanned FIFO)** — Replaced prune behavior with backward FIFO masking strategy that protects recent tool output window and skips protected tools.
+- [x] **JIT context discovery** — Extended instruction middleware with multi-tool path extraction, directory cache, and broader watched tools in `packages/extensions/instructions/src/`.
+
+#### Remaining
+- [x] **Declarative safety policy framework** — Added file-based YAML/TOML policy loading (`.ava-policy.*`, `.ava/policies/`, `~/.ava/policies/`), parsing/merging, and middleware enforcement (`allow`/`deny`/`ask`) in `packages/extensions/permissions/src/policy/`.
+- [x] **Enhanced loop/stuck detection** — Upgraded doom-loop registration to emit `stuck:detected` for repeated-call, error-cycling, empty-response, monologue, token-waste, and periodic self-assessment scenarios in `packages/extensions/agent-modes/src/doom-loop.ts`.
+- [x] **Edit strategy benchmark harness** — Added `packages/extensions/tools-extended/src/edit-benchmark/` with corpus, 8-strategy runner, report formatter, and `edit_benchmark` tool integration/tests.
+- [x] **Streaming diff application** — Added `StreamingDiffApplier` with chunk parser and wired streamed patch chunks through `apply_patch` (`streamChunks`) for incremental application with tests.
+- [x] **Model packs / expanded role routing** — Extended `packages/extensions/models/src/packs.ts` with role assignments/resolvers (`resolveModelForRole`, `resolveModelForRouting`) and fallback inheritance from role → praxis tier → worker.
+- [x] **Concurrent multi-file edits** — Added `multiedit-executor` with semaphore + `Promise.allSettled`, and upgraded `multiedit` to support multi-file jobs with partial-failure reporting while keeping single-file compatibility.
+- [x] **Steering queues** — Replaced single steering slot with interrupt queue + follow-up queue in `packages/core-v2/src/agent/loop.ts` and added configurable delivery mode (`all` / `one-at-a-time`).
+- [x] **Cost tracking per session** — Added `packages/extensions/context/src/cost-tracker.ts`, wired pricing registration and `session:cost` emissions, and added `session_cost` tool in tools-extended.
+- [x] **MCP server mode** — Added local MCP server runtime (`packages/extensions/mcp/src/server.ts`) and protocol bridge (`server-protocol.ts`) exposing AVA tools over stdio and Unix socket JSON-RPC.
+- [x] **MCP tool list change notifications** — Added client notification subscriptions and manager refresh flow for `notifications/tools/list_changed`, with extension-level tool re-registration + `mcp:tools-updated` event.
+- [x] **Wire MCPHealthMonitor** — Instantiated `MCPHealthMonitor` in MCP extension activation, started/stopped with extension lifecycle, and covered with activation tests.
+- [x] **AI comment watcher** — Extended `packages/extensions/file-watcher/` with project scanning + directive detection (`// AVA:` / `# AVA:`) and `ava:comment-detected` event emission with dedup.
+- [x] **Recipe/workflow system** — Extended recipes with step workflow fields (`recipe`, `retry`, `onError`), parser/schema support, retry execution, sub-recipe event execution, and abort/continue error policies.
+- [ ] **Per-hunk diff review backend** — Hunk-level accept/reject state + `diff_review` tool.
+- [ ] **Action samplers (best-of-N)** — Candidate generation + scoring selection mode.
+- [ ] **Separate snapshot repo** — `.ava/snapshots` isolated git snapshot storage.
+- [ ] **Image/vision E2E** — `view_image` tool, vision detection, image block normalization.
+
 ### Still Needed
 - [ ] Real plugin install/uninstall (currently state-only in frontend)
 - [ ] Tool list change notifications (re-discover on `notifications/tools/list_changed`)

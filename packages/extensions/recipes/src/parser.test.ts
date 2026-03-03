@@ -88,6 +88,26 @@ describe('parseRecipe', () => {
     expect(step.condition).toBe('steps.prev.success')
   })
 
+  it('parses workflow fields on steps', () => {
+    const json = JSON.stringify({
+      name: 'workflow',
+      steps: [
+        {
+          name: 'run-sub',
+          recipe: 'bootstrap',
+          retry: { maxAttempts: 3, delayMs: 20 },
+          onError: 'abort',
+        },
+      ],
+    })
+
+    const recipe = parseRecipe(json)
+    const step = recipe.steps[0]!
+    expect(step.recipe).toBe('bootstrap')
+    expect(step.retry).toEqual({ maxAttempts: 3, delayMs: 20 })
+    expect(step.onError).toBe('abort')
+  })
+
   it('parses simple YAML-like format', () => {
     const yaml = `name: deploy
 description: Deploy the app
@@ -172,6 +192,19 @@ describe('substituteParams', () => {
 
     const result = substituteParams(recipe, { feature: 'auth' })
     expect(result.steps[0]!.goal).toBe('Implement auth feature')
+  })
+
+  it('substitutes params in recipe step reference', () => {
+    const recipe = parseRecipe(
+      JSON.stringify({
+        name: 'test',
+        params: [{ name: 'flow' }],
+        steps: [{ name: 'dispatch', recipe: '{{flow}}' }],
+      })
+    )
+
+    const result = substituteParams(recipe, { flow: 'bootstrap-flow' })
+    expect(result.steps[0]!.recipe).toBe('bootstrap-flow')
   })
 
   it('replaces unknown params with empty string', () => {

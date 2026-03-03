@@ -17,11 +17,13 @@ import { createRuleTool } from './create-rule.js'
 import { createSkillTool } from './create-skill.js'
 import { loadCustomTools } from './custom-tools.js'
 import { deleteFileTool } from './delete.js'
+import { editBenchmarkTool } from './edit-benchmark/index.js'
 import { lsTool } from './ls.js'
 import { multieditTool } from './multiedit.js'
 import { planEnterTool, planExitTool } from './plan-mode-tools.js'
 import { questionTool } from './question.js'
 import { repoMapTool } from './repo-map.js'
+import { sessionCostTool } from './session-cost.js'
 import { taskTool } from './task.js'
 import { todoReadTool, todoWriteTool } from './todo.js'
 import { webfetchTool } from './webfetch.js'
@@ -50,6 +52,8 @@ const TOOLS = [
   bashKillTool,
   createRuleTool,
   createSkillTool,
+  editBenchmarkTool,
+  sessionCostTool,
 ]
 
 export function activate(api: ExtensionAPI): Disposable {

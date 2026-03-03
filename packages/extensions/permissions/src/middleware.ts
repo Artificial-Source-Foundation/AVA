@@ -14,6 +14,7 @@ import { isToolAutoApproved, type PermissionMode } from './modes.js'
 import {
   classifyRisk,
   DEFAULT_SETTINGS,
+  type DeclarativePolicyRule,
   type PermissionRequest,
   type PermissionResponse,
   type PermissionSettings,
@@ -70,6 +71,39 @@ export function evaluateToolRules(
     }
     return rule
   }
+  return undefined
+}
+
+function evaluateDeclarativeRules(
+  toolName: string,
+  args: Record<string, unknown>,
+  path: string | undefined,
+  permissionMode: string | undefined,
+  rules: DeclarativePolicyRule[]
+): DeclarativePolicyRule | undefined {
+  for (const rule of rules) {
+    if (!matchesGlob(toolName, rule.tool)) continue
+
+    if (rule.modes && rule.modes.length > 0) {
+      if (!permissionMode || !rule.modes.includes(permissionMode)) continue
+    }
+
+    if (rule.paths && rule.paths.length > 0) {
+      if (!path || !matchesAnyGlob(path, rule.paths)) continue
+    }
+
+    if (rule.argsPattern) {
+      const target =
+        typeof args.command === 'string'
+          ? args.command
+          : JSON.stringify(args, Object.keys(args).sort())
+      const re = new RegExp(rule.argsPattern)
+      if (!re.test(target)) continue
+    }
+
+    return rule
+  }
+
   return undefined
 }
 
@@ -219,6 +253,27 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
       }
 
       // 8. Per-tool rules (first match wins)
+      if (settings.declarativePolicyRules?.length) {
+        const rule = evaluateDeclarativeRules(
+          toolName,
+          args,
+          path || undefined,
+          settings.permissionMode,
+          settings.declarativePolicyRules
+        )
+        if (rule) {
+          if (rule.decision === 'allow') return undefined
+          if (rule.decision === 'deny') {
+            return {
+              blocked: true,
+              reason: rule.reason ?? `Denied by policy rule ${rule.name}`,
+            }
+          }
+          // 'ask' falls through to approval flow
+        }
+      }
+
+      // 9. Legacy per-tool rules (first match wins)
       if (settings.toolRules?.length) {
         const rule = evaluateToolRules(toolName, path || undefined, settings.toolRules)
         if (rule) {
@@ -234,10 +289,10 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
 
       // Skip legacy boolean checks when permission mode is set
       if (!settings.permissionMode) {
-        // 9. Auto-approve reads
+        // 10. Auto-approve reads
         if (risk === 'low' && settings.autoApproveReads) return undefined
 
-        // 10. Smart-approve: safe bash commands + trusted paths
+        // 11. Smart-approve: safe bash commands + trusted paths
         if (settings.smartApprove) {
           if (toolName === 'bash') {
             const command = (args.command ?? '') as string
@@ -252,16 +307,16 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
           }
         }
 
-        // 11. Auto-approve writes if configured
+        // 12. Auto-approve writes if configured
         if (risk === 'medium' && settings.autoApproveWrites) return undefined
 
-        // 12. Auto-approve commands if configured
+        // 13. Auto-approve commands if configured
         if (toolName === 'bash' && settings.autoApproveCommands) {
           if (!isSudoCommand(args)) return undefined
         }
       }
 
-      // 13. Bus-based approval with alwaysApprove support
+      // 14. Bus-based approval with alwaysApprove support
       if (bus?.hasSubscribers('permission:request')) {
         const response = await bus.request<PermissionRequest, PermissionResponse>(
           { type: 'permission:request', toolName, args, risk },
@@ -284,7 +339,7 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
         return undefined
       }
 
-      // 14. No approval handler — apply fallback blocking rules
+      // 15. No approval handler — apply fallback blocking rules
 
       // Warn on .env files
       if (isEnvFile(args)) {

@@ -30,6 +30,8 @@ export interface AgentConfig {
   allowedTools?: string[]
   /** Context compaction threshold (0-1). Compact when usage exceeds this fraction. Default: 0.8 */
   compactionThreshold?: number
+  /** Preferred context compaction strategy name or pipeline sequence. */
+  compactionStrategy?: string | string[]
   /** Execute tool calls in parallel via Promise.all(). Default: true */
   parallelToolExecution?: boolean
   /** Max total tool calls before forced stop. Differs from maxTurns (LLM round-trips). */
@@ -41,6 +43,8 @@ export interface AgentConfig {
     enabled: boolean
     effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   }
+  /** How queued steering messages are injected into history. */
+  steeringDeliveryMode?: 'all' | 'one-at-a-time'
 }
 
 export const DEFAULT_AGENT_CONFIG: Omit<AgentConfig, 'maxTimeMinutes' | 'maxTurns'> = {
@@ -107,6 +111,7 @@ export type AgentEvent =
       messagesAfter: number
     }
   | { type: 'agent:steered'; agentId: string; message: string }
+  | { type: 'agent:follow-up-queued'; agentId: string; message: string }
   | {
       type: 'delegation:start'
       agentId: string

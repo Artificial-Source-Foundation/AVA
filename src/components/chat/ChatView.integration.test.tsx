@@ -13,6 +13,12 @@ vi.mock('../../hooks/useAgent', () => ({
   }),
 }))
 
+vi.mock('../../contexts/notification', () => ({
+  useNotification: () => ({
+    info: vi.fn(),
+  }),
+}))
+
 vi.mock('../../hooks/useChat', () => ({
   useChat: () => ({
     pendingApproval: () => null,
@@ -62,6 +68,14 @@ vi.mock('./MessageInput', () => ({
 
 vi.mock('./MessageList', () => ({
   MessageList: () => null,
+}))
+
+vi.mock('./GitControlStrip', () => ({
+  GitControlStrip: () => null,
+}))
+
+vi.mock('./MessageQueueBar', () => ({
+  MessageQueueBar: () => null,
 }))
 
 describe('ChatView integration', () => {

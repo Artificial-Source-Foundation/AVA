@@ -6,6 +6,7 @@
 
 import { defineTool } from '@ava/core-v2/tools'
 import { z } from 'zod'
+import { StreamingDiffApplier } from '../streaming-diff/streaming-diff-applier.js'
 import { applyPatch, type PatchApplyResult } from './applier.js'
 import { parsePatch, validatePatch } from './parser.js'
 
@@ -17,9 +18,33 @@ export { parsePatch, validatePatch } from './parser.js'
 const ApplyPatchSchema = z.object({
   patch: z.string().describe('The patch content in unified diff format'),
   dryRun: z.boolean().optional().describe('If true, validate without applying changes'),
+  streamChunks: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Optional streamed patch chunks. When provided, patch can be empty and chunks are applied incrementally'
+    ),
 })
 
 type ApplyPatchParams = z.infer<typeof ApplyPatchSchema>
+
+function formatStreamingResult(result: {
+  success: boolean
+  appliedCount: number
+  pendingCount: number
+  errors: string[]
+}): string {
+  const lines = ['## Streaming Patch Results', '']
+  lines.push(`**Applied operations:** ${result.appliedCount}`)
+  lines.push(`**Pending operations:** ${result.pendingCount}`)
+  if (result.errors.length > 0) {
+    lines.push(`**Errors:** ${result.errors.length}`)
+    for (const error of result.errors.slice(0, 10)) {
+      lines.push(`- ${error}`)
+    }
+  }
+  return lines.join('\n')
+}
 
 function formatPatchResult(result: PatchApplyResult, dryRun: boolean): string {
   const lines: string[] = []
@@ -93,6 +118,26 @@ Features:
   async execute(params: ApplyPatchParams, ctx) {
     if (ctx.signal.aborted) {
       return { success: false, output: 'Operation was cancelled', error: 'EXECUTION_ABORTED' }
+    }
+
+    if (params.streamChunks && params.streamChunks.length > 0) {
+      const applier = new StreamingDiffApplier(ctx.workingDirectory, params.dryRun === true)
+      for (const chunk of params.streamChunks) {
+        await applier.pushChunk(chunk)
+      }
+      const final = await applier.finalize()
+      return {
+        success: final.success,
+        output: formatStreamingResult(final),
+        error: final.success ? undefined : 'STREAMING_PATCH_FAILED',
+        metadata: {
+          streaming: true,
+          appliedCount: final.appliedCount,
+          pendingCount: final.pendingCount,
+          errors: final.errors,
+          dryRun: params.dryRun === true,
+        },
+      }
     }
 
     const parsed = parsePatch(params.patch)

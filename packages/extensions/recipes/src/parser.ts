@@ -45,6 +45,7 @@ export function substituteParams(recipe: Recipe, params: Record<string, string>)
       ...step,
       args: step.args ? substituteRecord(step.args, resolved) : step.args,
       goal: step.goal ? substituteString(step.goal, resolved) : step.goal,
+      recipe: step.recipe ? substituteString(step.recipe, resolved) : step.recipe,
     })),
   }
 }

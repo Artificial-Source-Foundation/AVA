@@ -110,8 +110,53 @@ export class TauriFileSystem implements IFileSystem {
   }
 
   async realpath(path: string): Promise<string> {
-    // Tauri doesn't expose realpath — return as-is for now
-    return path
+    // Resolve symlinks by reading the file/directory and checking for symlink
+    // Tauri's stat() can identify symlinks via isSymlink property
+    try {
+      const info = await tauriStat(path)
+
+      // If it's a symlink, resolve it
+      if ('isSymlink' in info && info.isSymlink) {
+        // In Tauri, we can't easily resolve symlinks to their targets
+        // without additional APIs. For now, return the path with a warning.
+        console.warn(`Symlink detected at ${path} but cannot resolve target in Tauri`)
+      }
+
+      // Normalize the path: remove redundant separators and resolve . and ..
+      return this.normalizePath(path)
+    } catch {
+      // If stat fails, return normalized path anyway
+      return this.normalizePath(path)
+    }
+  }
+
+  /**
+   * Normalize a path by removing redundant separators and resolving . and ..
+   * This is a basic normalization - not as complete as Node's path.normalize
+   */
+  private normalizePath(path: string): string {
+    // Split into components
+    const parts = path.split('/')
+    const normalized: string[] = []
+
+    for (const part of parts) {
+      if (part === '' || part === '.') {
+      } else if (part === '..') {
+        // Go up one directory
+        if (normalized.length > 0 && normalized[normalized.length - 1] !== '..') {
+          normalized.pop()
+        } else if (!path.startsWith('/')) {
+          // Relative path with .. at start
+          normalized.push('..')
+        }
+      } else {
+        normalized.push(part)
+      }
+    }
+
+    // Preserve leading slash for absolute paths
+    const prefix = path.startsWith('/') ? '/' : ''
+    return prefix + normalized.join('/')
   }
 
   async glob(pattern: string, cwd: string): Promise<string[]> {

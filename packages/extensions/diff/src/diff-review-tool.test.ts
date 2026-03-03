@@ -1,15 +1,23 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { installMockPlatform, type MockPlatform } from '@ava/core-v2/__test-utils__/mock-platform'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createDiffReviewTool } from './diff-review-tool.js'
 import { HunkReviewState } from './hunk-review/state.js'
 import { createFileDiff } from './tracker.js'
 
+let mockPlatform: MockPlatform
+
+beforeEach(() => {
+  mockPlatform = installMockPlatform()
+})
+
+afterEach(() => {
+  // Platform singleton resets between tests via installMockPlatform
+})
+
 function ctx() {
   return {
     sessionId: 's1',
-    workingDirectory: '/tmp',
+    workingDirectory: '/project',
     signal: AbortSignal.timeout(5000),
   }
 }
@@ -67,46 +75,36 @@ describe('diff_review tool', () => {
   })
 
   it('applies accepted hunks to disk', async () => {
-    const temp = await mkdtemp(join(tmpdir(), 'diff-review-'))
-    const filePath = join(temp, 'example.ts')
-    await writeFile(filePath, 'a\nb\n', 'utf-8')
+    const filePath = '/project/example.ts'
+    mockPlatform.fs.addFile(filePath, 'a\nb\n')
 
-    try {
-      const state = new HunkReviewState()
-      state.ingest('s1', createFileDiff(filePath, 'a\nb\n', 'x\nb\n'))
-      const id = state.list('s1')[0]?.id
-      const tool = createDiffReviewTool(state)
+    const state = new HunkReviewState()
+    state.ingest('s1', createFileDiff(filePath, 'a\nb\n', 'x\nb\n'))
+    const id = state.list('s1')[0]?.id
+    const tool = createDiffReviewTool(state)
 
-      await tool.execute({ action: 'accept', hunkId: id }, ctx())
-      const result = await tool.execute({ action: 'apply' } as never, ctx())
+    await tool.execute({ action: 'accept', hunkId: id }, ctx())
+    const result = await tool.execute({ action: 'apply' } as never, ctx())
 
-      expect(result.success).toBe(true)
-      const next = await readFile(filePath, 'utf-8')
-      expect(next).toBe('x\nb\n')
-    } finally {
-      await rm(temp, { recursive: true, force: true })
-    }
+    expect(result.success).toBe(true)
+    const next = await mockPlatform.fs.readFile(filePath)
+    expect(next.trim()).toBe('x\nb')
   })
 
   it('does not apply pending or rejected hunks', async () => {
-    const temp = await mkdtemp(join(tmpdir(), 'diff-review-'))
-    const filePath = join(temp, 'example.ts')
-    await writeFile(filePath, 'a\nb\n', 'utf-8')
+    const filePath = '/project/example.ts'
+    mockPlatform.fs.addFile(filePath, 'a\nb\n')
 
-    try {
-      const state = new HunkReviewState()
-      state.ingest('s1', createFileDiff(filePath, 'a\nb\n', 'x\nb\n'))
-      const id = state.list('s1')[0]?.id
-      const tool = createDiffReviewTool(state)
+    const state = new HunkReviewState()
+    state.ingest('s1', createFileDiff(filePath, 'a\nb\n', 'x\nb\n'))
+    const id = state.list('s1')[0]?.id
+    const tool = createDiffReviewTool(state)
 
-      await tool.execute({ action: 'reject', hunkId: id }, ctx())
-      const result = await tool.execute({ action: 'apply' } as never, ctx())
+    await tool.execute({ action: 'reject', hunkId: id }, ctx())
+    const result = await tool.execute({ action: 'apply' } as never, ctx())
 
-      expect(result.success).toBe(true)
-      const next = await readFile(filePath, 'utf-8')
-      expect(next).toBe('a\nb\n')
-    } finally {
-      await rm(temp, { recursive: true, force: true })
-    }
+    expect(result.success).toBe(true)
+    const next = await mockPlatform.fs.readFile(filePath)
+    expect(next).toBe('a\nb\n')
   })
 })

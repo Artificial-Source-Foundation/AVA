@@ -1,6 +1,7 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import * as nodeFs from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { setPlatform } from '@ava/core-v2/platform'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createMockExtensionAPI } from '../../../core-v2/src/__test-utils__/mock-extension-api.js'
 import { activate } from './index.js'
@@ -8,16 +9,69 @@ import { activate } from './index.js'
 let tempHome = ''
 let originalHome = ''
 
+/**
+ * Profiles storage uses `getPlatform().fs` with real file I/O.
+ * We install a lightweight platform that delegates to node:fs.
+ */
+function installNodePlatform(): void {
+  setPlatform({
+    fs: {
+      readFile: (path: string) => nodeFs.readFile(path, 'utf-8'),
+      readBinary: (path: string) => nodeFs.readFile(path).then((b) => new Uint8Array(b)),
+      writeFile: (path: string, content: string) => nodeFs.writeFile(path, content, 'utf-8'),
+      writeBinary: (path: string, content: Uint8Array) => nodeFs.writeFile(path, content),
+      readDir: (path: string) => nodeFs.readdir(path),
+      readDirWithTypes: async (path: string) => {
+        const entries = await nodeFs.readdir(path, { withFileTypes: true })
+        return entries.map((e) => ({
+          name: e.name,
+          isFile: e.isFile(),
+          isDirectory: e.isDirectory(),
+        }))
+      },
+      stat: async (path: string) => {
+        const s = await nodeFs.stat(path)
+        return { isFile: s.isFile(), isDirectory: s.isDirectory(), size: s.size, mtime: s.mtimeMs }
+      },
+      exists: (path: string) =>
+        nodeFs
+          .access(path)
+          .then(() => true)
+          .catch(() => false),
+      isFile: (path: string) =>
+        nodeFs
+          .stat(path)
+          .then((s) => s.isFile())
+          .catch(() => false),
+      isDirectory: (path: string) =>
+        nodeFs
+          .stat(path)
+          .then((s) => s.isDirectory())
+          .catch(() => false),
+      mkdir: (path: string) => nodeFs.mkdir(path, { recursive: true }).then(() => undefined),
+      remove: (path: string) => nodeFs.rm(path, { recursive: true, force: true }),
+      glob: async () => [],
+      realpath: (path: string) => nodeFs.realpath(path),
+    },
+    shell: { exec: async () => ({ stdout: '', stderr: '', exitCode: 0 }) },
+    credentials: { get: async () => null, set: async () => {}, delete: async () => {} },
+    database: { open: async () => ({}) as never },
+    pty: undefined,
+    meta: { runtime: 'node', arch: 'x64', os: 'linux' },
+  } as never)
+}
+
 beforeEach(async () => {
   originalHome = process.env.HOME ?? ''
-  tempHome = await mkdtemp(join(tmpdir(), 'ava-profiles-'))
+  tempHome = await nodeFs.mkdtemp(join(tmpdir(), 'ava-profiles-'))
   process.env.HOME = tempHome
+  installNodePlatform()
 })
 
 afterEach(async () => {
   process.env.HOME = originalHome
   if (tempHome) {
-    await rm(tempHome, { recursive: true, force: true })
+    await nodeFs.rm(tempHome, { recursive: true, force: true })
   }
 })
 

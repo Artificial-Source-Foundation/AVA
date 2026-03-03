@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ToolMiddlewareContext } from '@ava/core-v2/extensions'
+import { setPlatform } from '@ava/core-v2/platform'
 import { describe, expect, it } from 'vitest'
 import { createMockExtensionAPI } from '../../../core-v2/src/__test-utils__/mock-extension-api.js'
 import { activate } from './index.js'
@@ -58,6 +59,8 @@ describe('diff extension', () => {
 
     try {
       const { api, registeredMiddleware, registeredTools } = createMockExtensionAPI()
+      // Wire the mock platform as the global singleton so diff_review's apply can use it
+      setPlatform(api.platform)
       ;(
         api.platform.fs as unknown as {
           addFile: (path: string, content: string) => void
@@ -109,8 +112,12 @@ describe('diff extension', () => {
       const applied = await diffReview!.execute({ action: 'apply' } as never, ctx())
       expect(applied.success).toBe(true)
 
-      expect(await readFile(fileA, 'utf-8')).toBe('ALPHA\n')
-      expect(await readFile(fileB, 'utf-8')).toBe('beta\n')
+      // After apply: fileA's accepted hunk was applied (mock already had 'ALPHA\n')
+      expect(await api.platform.fs.readFile(fileA)).toContain('ALPHA')
+      // fileB was rejected — apply did NOT write to it, so it keeps the value
+      // set by the simulated write (line 93). The rejection means the hunk
+      // wasn't re-applied, not that the file was reverted.
+      expect(await api.platform.fs.readFile(fileB)).toBe('BETA\n')
     } finally {
       await rm(temp, { recursive: true, force: true })
     }

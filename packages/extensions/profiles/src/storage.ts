@@ -1,6 +1,6 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { getPlatform } from '@ava/core-v2/platform'
 import type { AgentProfile } from './types.js'
 
 function sanitizeName(name: string): string {
@@ -19,13 +19,14 @@ function profilePath(name: string): string {
 }
 
 export async function saveProfile(profile: AgentProfile): Promise<void> {
-  await mkdir(profilesDir(), { recursive: true })
-  await writeFile(profilePath(profile.name), JSON.stringify(profile, null, 2), 'utf-8')
+  const fs = getPlatform().fs
+  await fs.mkdir(profilesDir())
+  await fs.writeFile(profilePath(profile.name), JSON.stringify(profile, null, 2))
 }
 
 export async function loadProfile(name: string): Promise<AgentProfile | null> {
   try {
-    const data = await readFile(profilePath(name), 'utf-8')
+    const data = await getPlatform().fs.readFile(profilePath(name))
     return JSON.parse(data) as AgentProfile
   } catch {
     return null
@@ -34,10 +35,11 @@ export async function loadProfile(name: string): Promise<AgentProfile | null> {
 
 export async function listProfiles(): Promise<string[]> {
   try {
-    await mkdir(profilesDir(), { recursive: true })
-    const entries = await readdir(profilesDir(), { withFileTypes: true })
+    const fs = getPlatform().fs
+    await fs.mkdir(profilesDir())
+    const entries = await fs.readDirWithTypes(profilesDir())
     return entries
-      .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
+      .filter((entry) => entry.isFile && entry.name.endsWith('.json'))
       .map((entry) => entry.name.replace(/\.json$/, ''))
       .sort((a, b) => a.localeCompare(b))
   } catch {

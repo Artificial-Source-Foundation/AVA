@@ -1,5 +1,5 @@
-import { readFile, writeFile } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
+import { getPlatform } from '@ava/core-v2/platform'
 import { defineTool } from '@ava/core-v2/tools'
 import { z } from 'zod'
 
@@ -100,11 +100,12 @@ export function createDiffReviewTool(state: HunkReviewState) {
           hunksByPath.set(item.path, list)
         }
 
+        const fs = getPlatform().fs
         for (const [path, hunks] of hunksByPath) {
           const absolutePath = isAbsolute(path) ? path : resolve(ctx.workingDirectory, path)
-          const current = await readFile(absolutePath, 'utf-8')
+          const current = await fs.readFile(absolutePath)
           const updated = applyHunks(current, hunks)
-          await writeFile(absolutePath, updated, 'utf-8')
+          await fs.writeFile(absolutePath, updated)
         }
 
         return {

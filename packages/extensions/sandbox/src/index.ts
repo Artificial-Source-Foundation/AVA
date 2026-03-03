@@ -3,9 +3,17 @@
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
+import { defineTool } from '@ava/core-v2/tools'
+import { z } from 'zod'
 import { createSandboxRuntime } from './runner.js'
 import type { SandboxConfig } from './types.js'
 import { DEFAULT_SANDBOX_CONFIG } from './types.js'
+
+const SandboxRunSchema = z.object({
+  code: z.string().describe('Code to execute in the sandbox'),
+  image: z.string().optional().describe('Container image for docker runtime'),
+  timeout: z.number().optional().describe('Timeout in ms'),
+})
 
 export function activate(api: ExtensionAPI): Disposable {
   const config = {
@@ -15,46 +23,33 @@ export function activate(api: ExtensionAPI): Disposable {
   const disposables: Disposable[] = []
 
   void createSandboxRuntime(api.platform.shell).then((runtime) => {
-    disposables.push(
-      api.registerTool({
-        definition: {
-          name: 'sandbox_run',
-          description: 'Execute code in an isolated sandbox runtime',
-          input_schema: {
-            type: 'object',
-            properties: {
-              code: { type: 'string', description: 'Code to execute in the sandbox' },
-              image: {
-                type: 'string',
-                description: 'Container image for docker runtime (optional)',
-              },
-              timeout: { type: 'number', description: 'Timeout in ms (optional)' },
-            },
-            required: ['code'],
+    const sandboxRunTool = defineTool({
+      name: 'sandbox_run',
+      description: 'Execute code in an isolated sandbox runtime',
+      schema: SandboxRunSchema,
+      async execute(params) {
+        const sandboxConfig = {
+          ...config,
+          ...(params.image ? { image: params.image } : {}),
+          ...(params.timeout ? { timeout: params.timeout } : {}),
+        }
+
+        const result = await runtime.run(sandboxConfig, params.code)
+
+        return {
+          success: result.exitCode === 0,
+          output: result.stdout || result.stderr,
+          metadata: {
+            exitCode: result.exitCode,
+            durationMs: result.durationMs,
+            timedOut: result.timedOut,
+            runtime: runtime.name,
           },
-        },
-        async execute(params) {
-          const sandboxConfig = {
-            ...config,
-            ...(params.image ? { image: params.image as string } : {}),
-            ...(params.timeout ? { timeout: params.timeout as number } : {}),
-          }
+        }
+      },
+    })
 
-          const result = await runtime.run(sandboxConfig, params.code as string)
-
-          return {
-            success: result.exitCode === 0,
-            output: result.stdout || result.stderr,
-            metadata: {
-              exitCode: result.exitCode,
-              durationMs: result.durationMs,
-              timedOut: result.timedOut,
-              runtime: runtime.name,
-            },
-          }
-        },
-      })
-    )
+    disposables.push(api.registerTool(sandboxRunTool))
 
     api.log.debug(
       `Sandbox extension: ${runtime.name} runtime selected, sandbox_run tool registered`

@@ -4,9 +4,10 @@ import type {
   ExtensionAPI,
   ToolMiddlewareContext,
 } from '@ava/core-v2/extensions'
+import type { ToolResult } from '@ava/core-v2/tools'
+import { type SamplingCandidate, scoreCandidate, selectBestCandidate } from './sampler.js'
 
 const DEFAULT_N = 1
-const QUALITY_N = 3
 
 function getConfiguredN(api: ExtensionAPI): number {
   const settings = api.getSettings('agentModes') as { bestOfN?: number } | undefined
@@ -17,15 +18,24 @@ function getConfiguredN(api: ExtensionAPI): number {
   return Math.max(1, Math.floor(value))
 }
 
+function resultToCandidate(id: string, result: ToolResult): SamplingCandidate {
+  return {
+    id,
+    success: result.success !== false,
+    output: typeof result.output === 'string' ? result.output : JSON.stringify(result.output),
+    estimatedCost: 0,
+  }
+}
+
 export const bestOfNAgentMode: AgentMode = {
   name: 'best-of-n',
   description: 'Samples multiple candidate actions and selects the highest scoring one.',
-  systemPrompt: (base) => {
-    const n = base.includes('quality') ? QUALITY_N : DEFAULT_N
-    if (n <= 1) {
-      return 'Use default single-sample behavior unless best-of-n is enabled by settings.'
-    }
-    return `Generate ${n} candidate actions, score for success quality and cost, and execute only the best candidate.`
+  systemPrompt: () => {
+    return [
+      'You are operating in best-of-N sampling mode.',
+      'For each action, the system may run multiple candidates and select the best one.',
+      'Focus on producing high-quality, correct outputs on each attempt.',
+    ].join(' ')
   },
 }
 
@@ -38,26 +48,47 @@ export function registerBestOfNMode(api: ExtensionAPI): Disposable {
     api.addToolMiddleware({
       name: 'best-of-n-sampler',
       priority: 15,
-      async before(context: ToolMiddlewareContext) {
+      async after(context: ToolMiddlewareContext, result: ToolResult) {
         const n = getConfiguredN(api)
-        if (n <= 1) {
-          return undefined
-        }
+        if (n <= 1) return undefined
 
-        context.ctx.metadata?.({
-          title: 'Best of N',
-          metadata: {
-            enabled: true,
-            n,
-            tool: context.toolName,
-          },
+        // Score the result using the sampler
+        const candidate = resultToCandidate('result-0', result)
+        const score = scoreCandidate(candidate)
+
+        // Emit sampling event for observability
+        api.emit('bestOfN:scored', {
+          tool: context.toolName,
+          n,
+          score,
+          success: candidate.success,
         })
 
-        return undefined
+        // Annotate the result with scoring metadata.
+        // When the agent loop supports multi-execution, the middleware
+        // will collect N results here and use selectBestCandidate().
+        return {
+          result: {
+            ...result,
+            metadata: {
+              ...result.metadata,
+              bestOfN: {
+                enabled: true,
+                configuredN: n,
+                sampled: 1,
+                score,
+                selected: candidate.id,
+              },
+            },
+          },
+        }
       },
     })
   )
 
+  // Register hook for agent loop integration.
+  // When the loop calls tool:beforeExecute with multiple candidates,
+  // use the sampler to select the best one.
   disposables.push(
     api.registerHook('tool:beforeExecute', async (payload) => {
       const n = getConfiguredN(api)
@@ -65,10 +96,22 @@ export function registerBestOfNMode(api: ExtensionAPI): Disposable {
         return payload
       }
 
-      return {
-        ...(payload as Record<string, unknown>),
-        bestOfN: { enabled: true, n },
+      const p = payload as Record<string, unknown>
+      const candidates = p.candidates as SamplingCandidate[] | undefined
+
+      // If the loop provides multiple candidates, select the best
+      if (Array.isArray(candidates) && candidates.length > 1) {
+        const best = selectBestCandidate(candidates)
+        api.emit('bestOfN:selected', {
+          n,
+          total: candidates.length,
+          selectedId: best.id,
+          score: scoreCandidate(best),
+        })
+        return { ...p, selectedCandidate: best }
       }
+
+      return { ...p, bestOfN: { enabled: true, n } }
     })
   )
 

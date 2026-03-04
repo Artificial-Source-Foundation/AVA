@@ -7,6 +7,7 @@
 
 import { defineTool } from '@ava/core-v2/tools'
 import { z } from 'zod'
+import { getEnv } from './env.js'
 
 const DEFAULT_NUM_RESULTS = 5
 const DEFAULT_TOKENS = 5000
@@ -21,7 +22,7 @@ interface ExaResult {
 }
 
 function getExaApiKey(): string | undefined {
-  return process.env.EXA_API_KEY
+  return getEnv('EXA_API_KEY')
 }
 
 async function searchExa(
@@ -95,18 +96,8 @@ function formatSearchResults(results: ExaResult[], query: string, searchType: st
 
 export const codesearchTool = defineTool({
   name: 'codesearch',
-  description: `Search API documentation and code examples using Exa.
-
-Search modes:
-- general: Search across all relevant sources
-- docs: Focus on official documentation and API references
-- code: Focus on code examples and implementations
-
-Usage examples:
-- Documentation: { "query": "React useEffect cleanup", "searchType": "docs" }
-- Code examples: { "query": "express middleware", "searchType": "code" }
-
-Requires EXA_API_KEY environment variable.`,
+  description:
+    'Search API docs and code examples via Exa. Modes: general, docs, code. Requires EXA_API_KEY.',
 
   schema: z.object({
     query: z.string().min(1).describe('Code or documentation search query'),

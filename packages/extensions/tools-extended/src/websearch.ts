@@ -7,6 +7,7 @@
 
 import { defineTool } from '@ava/core-v2/tools'
 import { z } from 'zod'
+import { getEnv } from './env.js'
 
 interface SearchResult {
   title: string
@@ -147,7 +148,7 @@ async function searchExa(
 
 function getApiKey(provider: 'tavily' | 'exa'): string | undefined {
   const envKey = provider === 'tavily' ? 'TAVILY_API_KEY' : 'EXA_API_KEY'
-  return process.env[envKey]
+  return getEnv(envKey)
 }
 
 function detectProvider(): 'tavily' | 'exa' | 'duckduckgo' {
@@ -178,15 +179,8 @@ function formatResults(response: SearchResponse): string {
 
 export const websearchTool = defineTool({
   name: 'websearch',
-  description: `Search the web for information.
-
-Use this tool when you need to:
-- Find current information beyond your knowledge cutoff
-- Research libraries, frameworks, or APIs
-- Look up documentation or examples
-
-Returns search results with titles, URLs, and snippets.
-Uses DuckDuckGo by default (no API key needed). Set TAVILY_API_KEY or EXA_API_KEY for premium providers.`,
+  description:
+    'Search the web. Returns titles, URLs, and snippets. DuckDuckGo by default (no API key needed).',
 
   schema: z.object({
     query: z.string().describe('The search query'),

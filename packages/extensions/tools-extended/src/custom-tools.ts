@@ -63,7 +63,11 @@ export async function loadCustomTools(cwd: string, api: ExtensionAPI): Promise<D
     for (const fileName of toolFiles) {
       const filePath = path.join(dir, fileName)
       try {
-        const mod = (await import(filePath)) as Record<string, unknown>
+        // Dynamic import required: tool files are discovered at runtime from user
+        // configuration directories. Vite cannot statically analyze these paths.
+        // Safe because: files are filtered by isToolFile() and validated by
+        // isToolDefinition() before registration.
+        const mod = (await import(/* @vite-ignore */ filePath)) as Record<string, unknown>
         let tool: unknown = mod.default
 
         // If default export is a function, call it to get the tool

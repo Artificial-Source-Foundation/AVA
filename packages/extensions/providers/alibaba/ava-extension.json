@@ -1,0 +1,9 @@
+{
+  "name": "ava-provider-alibaba",
+  "version": "1.0.0",
+  "description": "Alibaba Cloud Model Studio (DashScope) LLM provider — Qwen models",
+  "main": "src/index.ts",
+  "builtIn": true,
+  "enabledByDefault": true,
+  "priority": 0
+}

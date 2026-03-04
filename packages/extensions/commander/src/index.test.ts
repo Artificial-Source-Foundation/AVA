@@ -11,6 +11,8 @@ vi.mock('@ava/core-v2/agent', () => ({
       return { success: true, output: 'done', terminateMode: 'GOAL' }
     }
   },
+  registerExecutor: vi.fn(),
+  unregisterExecutor: vi.fn(),
 }))
 
 describe('Commander Extension (Praxis)', () => {
@@ -51,7 +53,7 @@ describe('Commander Extension (Praxis)', () => {
     expect(registeredModes[0].description).toContain('3-tier')
   })
 
-  it('praxis mode filterTools strips coding tools, keeps delegate tools', () => {
+  it('praxis mode filterTools keeps all tools (tiered delegation)', () => {
     const { api, registeredModes } = createMockExtensionAPI('commander')
 
     activate(api)
@@ -94,13 +96,14 @@ describe('Commander Extension (Praxis)', () => {
     const filtered = praxisMode.filterTools!(tools)
 
     const names = filtered.map((t) => t.name)
+    // Tiered delegation: commander keeps ALL tools
     expect(names).toContain('delegate_frontend-lead')
     expect(names).toContain('delegate_backend-lead')
     expect(names).toContain('question')
     expect(names).toContain('attempt_completion')
-    expect(names).not.toContain('read_file')
-    expect(names).not.toContain('write_file')
-    expect(names).not.toContain('bash')
+    expect(names).toContain('read_file')
+    expect(names).toContain('write_file')
+    expect(names).toContain('bash')
   })
 
   it('praxis mode systemPrompt includes lead descriptions', () => {
@@ -117,7 +120,7 @@ describe('Commander Extension (Praxis)', () => {
     expect(prompt).toContain('Frontend Lead')
     expect(prompt).toContain('Backend Lead')
     expect(prompt).toContain('delegate_frontend-lead')
-    expect(prompt).toContain('Planning Protocol')
+    expect(prompt).toContain('Task Complexity Assessment')
   })
 
   it('does not register when disabled via settings', () => {

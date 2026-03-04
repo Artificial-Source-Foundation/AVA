@@ -17,7 +17,8 @@
       "allow": [
         { "path": "$APPDATA/**" },
         { "path": "$HOME/.ava/**" },
-        { "path": "$HOME/.estela/**" }
+        { "path": "$HOME/.estela/**" },
+        { "path": "$HOME/.config/ava/**" }
       ]
     },
     {
@@ -25,7 +26,8 @@
       "allow": [
         { "path": "$APPDATA/**" },
         { "path": "$HOME/.ava/**" },
-        { "path": "$HOME/.estela/**" }
+        { "path": "$HOME/.estela/**" },
+        { "path": "$HOME/.config/ava/**" }
       ]
     },
     {
@@ -33,7 +35,8 @@
       "allow": [
         { "path": "$APPDATA/**" },
         { "path": "$HOME/.ava/**" },
-        { "path": "$HOME/.estela/**" }
+        { "path": "$HOME/.estela/**" },
+        { "path": "$HOME/.config/ava/**" }
       ]
     },
     {
@@ -41,7 +44,8 @@
       "allow": [
         { "path": "$APPDATA/**" },
         { "path": "$HOME/.ava/**" },
-        { "path": "$HOME/.estela/**" }
+        { "path": "$HOME/.estela/**" },
+        { "path": "$HOME/.config/ava/**" }
       ]
     },
     {
@@ -65,7 +69,8 @@
       "allow": [
         { "path": "$APPDATA/**" },
         { "path": "$HOME/.ava/**" },
-        { "path": "$HOME/.estela/**" }
+        { "path": "$HOME/.estela/**" },
+        { "path": "$HOME/.config/ava/**" }
       ]
     },
     {
@@ -73,12 +78,38 @@
       "allow": [
         { "path": "$APPDATA/**" },
         { "path": "$HOME/.ava/**" },
-        { "path": "$HOME/.estela/**" }
+        { "path": "$HOME/.estela/**" },
+        { "path": "$HOME/.config/ava/**" }
       ]
     },
     "fs:allow-watch",
     "fs:allow-unwatch",
-    "shell:allow-execute",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        { "name": "sh", "cmd": "sh", "args": true },
+        { "name": "bash", "cmd": "bash", "args": true },
+        { "name": "git", "cmd": "git", "args": true },
+        { "name": "rust-analyzer", "cmd": "rust-analyzer", "args": true },
+        { "name": "typescript-language-server", "cmd": "typescript-language-server", "args": true },
+        { "name": "pylsp", "cmd": "pylsp", "args": true },
+        { "name": "gopls", "cmd": "gopls", "args": true },
+        { "name": "jdtls", "cmd": "jdtls", "args": true }
+      ]
+    },
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        { "name": "sh", "cmd": "sh", "args": true },
+        { "name": "bash", "cmd": "bash", "args": true },
+        { "name": "git", "cmd": "git", "args": true },
+        { "name": "rust-analyzer", "cmd": "rust-analyzer", "args": true },
+        { "name": "typescript-language-server", "cmd": "typescript-language-server", "args": true },
+        { "name": "pylsp", "cmd": "pylsp", "args": true },
+        { "name": "gopls", "cmd": "gopls", "args": true },
+        { "name": "jdtls", "cmd": "jdtls", "args": true }
+      ]
+    },
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",

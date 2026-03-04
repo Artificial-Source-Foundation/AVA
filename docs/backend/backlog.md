@@ -284,18 +284,27 @@ This backlog feeds into the project roadmap:
 - [x] **Wire MCPHealthMonitor** — Instantiated `MCPHealthMonitor` in MCP extension activation, started/stopped with extension lifecycle, and covered with activation tests.
 - [x] **AI comment watcher** — Extended `packages/extensions/file-watcher/` with project scanning + directive detection (`// AVA:` / `# AVA:`) and `ava:comment-detected` event emission with dedup.
 - [x] **Recipe/workflow system** — Extended recipes with step workflow fields (`recipe`, `retry`, `onError`), parser/schema support, retry execution, sub-recipe event execution, and abort/continue error policies.
-- [ ] **Per-hunk diff review backend** — Hunk-level accept/reject state + `diff_review` tool.
-- [ ] **Action samplers (best-of-N)** — Candidate generation + scoring selection mode.
-- [ ] **Separate snapshot repo** — `.ava/snapshots` isolated git snapshot storage.
-- [ ] **Image/vision E2E** — `view_image` tool, vision detection, image block normalization.
+- [x] **Per-hunk diff review backend** — **DONE** (`diff/src/hunk-review/state.ts` HunkReviewState, `diff-review-tool.ts` diff_review tool with list/accept/reject/apply/status actions, platform-backed apply)
+- [x] **Action samplers (best-of-N)** — **DONE** (`agent-modes/src/sampler.ts` scoreCandidate/selectBestCandidate, `best-of-n-mode.ts` middleware scoring + hook candidate selection)
+- [x] **Separate snapshot repo** — **DONE** (`git/src/snapshot-repo.ts` bare git repo at `.ava/snapshots`, init/snapshot/restore/list/diff operations)
+- [x] **Image/vision E2E** — **DONE** (`tools-extended/src/view-image.ts` view_image tool with base64 encoding, `vision-capability.ts` model detection, vision-capability-guard middleware strips ImageBlock for non-vision models)
+- [x] **OS-level sandboxing** — **DONE** (`sandbox/src/native-sandbox.ts` bwrap Linux + sandbox-exec macOS, `sandbox/src/index.ts` refactored with defineTool + Zod schema)
+- [x] **Voice input transcription** — **DONE** (`tools-extended/src/voice-transcribe.ts` OpenAI Whisper API + local whisper fallback, `voice-settings.ts` configurable defaults)
+- [x] **Inline suggest / autocomplete** — **DONE** (`tools-extended/src/inline-suggest.ts` FIM-based completions with LRU cache, `inline-suggest-cache.ts` 30s TTL cache)
+- [x] **Agent profiles** — **DONE** (`profiles/` extension with profile_save/profile_list/profile_load tools, profile-tool-filter middleware, history hook for system prompt injection, 3 built-in profiles)
+
+### Completed Since Sprint 17
+- [x] **Plugin install/uninstall** — **DONE** (`plugins/src/installer.ts`: local path + GitHub clone + manifest validation + dependency install + 11 tests)
+- [x] **Background shell management** — **DONE** (`bash_background`, `bash_output`, `bash_kill` tools in `tools-extended/`)
+- [x] **Tool result truncation** — **DONE** (`loop.ts`: 50KB/result, 200KB total, proportional truncation, overflow files)
+- [x] **Tauri bridge for core-v2** — **DONE** (`src/services/core-bridge.ts`: full platform setup, 34 extensions, tools, approval middleware)
+- [x] **Server health monitoring** — **DONE** (`mcp/src/health.ts`: `MCPHealthMonitor` with 30s ping, auto-restart, latency tracking)
+- [x] **Unified logging** — **DONE** (`logger.ts`: `invoke('append_log')` Rust IPC, daily files, 7-day retention)
+- [x] **Settings store SolidJS fix** — **DONE** (module-level signals wrapped in `createRoot()`)
 
 ### Still Needed
-- [ ] Real plugin install/uninstall (currently state-only in frontend)
-- [ ] Tool list change notifications (re-discover on `notifications/tools/list_changed`)
-- [ ] Server health monitoring + auto-restart
-- [ ] Background shell management (bash_background, bash_kill)
-- [ ] Tool result truncation (>50K chars)
-- [ ] Image/vision support in agent loop
-- [ ] Tauri bridge for core-v2 (desktop integration)
+- [x] ~~Image/vision end-to-end~~ **DONE** (view_image tool, vision-capability guard middleware, base64 encoding)
+- [ ] Plugin install from URL (`installFromUrl()` returns "not yet implemented")
+- [ ] Plugin registry API (remote publishing — catalog fetch works, no publish endpoint)
 
-*Last updated: 2026-03-02 — historical Sprint 17 completion metrics (271 new tests). Current snapshot: 55+ tools, 30+ extensions, 16 providers.*
+*Last updated: 2026-03-03 — all competitor-informed backend gaps complete (23 items). Current snapshot: 60+ tools, 36+ extensions, 16 providers.*

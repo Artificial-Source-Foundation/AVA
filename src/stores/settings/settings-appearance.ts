@@ -46,10 +46,10 @@ export const RADIUS_SCALES: Record<BorderRadius, Record<string, string>> = {
     '--radius-2xl': '20px',
   },
   pill: {
-    '--radius-sm': '9999px',
-    '--radius-md': '9999px',
-    '--radius-lg': '9999px',
-    '--radius-xl': '9999px',
+    '--radius-sm': '10px',
+    '--radius-md': '14px',
+    '--radius-lg': '18px',
+    '--radius-xl': '24px',
     '--radius-2xl': '9999px',
   },
 }

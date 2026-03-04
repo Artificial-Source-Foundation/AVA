@@ -275,6 +275,12 @@ export class AgentExecutor {
     try {
       // Build initial messages
       const systemPrompt = this.buildSystemPrompt(inputs)
+
+      // Prepend structured conversation history if provided (desktop app multi-turn)
+      if (inputs.messages?.length) {
+        history.push(...inputs.messages)
+      }
+
       history.push({ role: 'user', content: inputs.goal })
 
       const maxRetries = this.config.maxRetries ?? 3
@@ -371,7 +377,8 @@ export class AgentExecutor {
             tools,
             inputs.cwd,
             model,
-            turnSignal
+            turnSignal,
+            turn
           )
 
           // Check if this is a retryable error
@@ -430,6 +437,7 @@ export class AgentExecutor {
             agentId: this.agentId,
             turn,
             toolCalls: [],
+            usage: turnResult.usage,
           })
           return this.finish(mode, lastOutput, turn, totalInput, totalOutput, startTime)
         }
@@ -455,6 +463,7 @@ export class AgentExecutor {
           agentId: this.agentId,
           turn,
           toolCalls: turnResult.toolCalls,
+          usage: turnResult.usage,
         })
 
         // Inject follow-up queue after turn has fully completed
@@ -485,7 +494,8 @@ export class AgentExecutor {
     tools: ToolDefinition[],
     cwd: string,
     model: string,
-    signal: AbortSignal
+    signal: AbortSignal,
+    turn?: number
   ): Promise<AgentTurnResult> {
     // Stream LLM response
     let assistantContent = ''
@@ -508,7 +518,7 @@ export class AgentExecutor {
       provider: this.config.provider ?? 'anthropic',
       model,
       tools,
-      toolChoice: tools.length > 0 ? { type: 'auto' } : undefined,
+      toolChoice: tools.length > 0 ? this.resolveToolChoice(turn) : undefined,
       thinking: this.config.thinking,
     }
 
@@ -803,6 +813,7 @@ export class AgentExecutor {
       model,
       onEvent: this.onEvent as ToolContext['onEvent'],
       onProgress,
+      delegationDepth: this.config.delegationDepth,
     }
 
     const result = await executeTool(resolvedName, call.input, ctx)
@@ -860,6 +871,19 @@ export class AgentExecutor {
       results.push(await this.executeOneToolCall(call, cwd, model, signal))
     }
     return results
+  }
+
+  /**
+   * Resolve tool_choice based on the configured strategy and current turn.
+   * - 'auto': always { type: 'auto' } (default)
+   * - 'required': always { type: 'required' }
+   * - 'required-first': { type: 'required' } on turn 1, { type: 'auto' } after
+   */
+  private resolveToolChoice(turn?: number): { type: 'auto' } | { type: 'required' } {
+    const strategy = this.config.toolChoiceStrategy ?? 'auto'
+    if (strategy === 'required') return { type: 'required' }
+    if (strategy === 'required-first' && turn === 1) return { type: 'required' }
+    return { type: 'auto' }
   }
 
   private buildSystemPrompt(inputs: AgentInputs): string {

@@ -78,7 +78,7 @@ Not locked into one AI vendor. Use the best model for each job.
 | Privacy | Ollama (local) | Never leaves your machine |
 | Speed | Groq | Fastest inference |
 
-16+ providers built in: Anthropic, OpenAI, Google, OpenRouter, Azure OpenAI, Mistral, Groq, DeepSeek, xAI, Cohere, Together, LiteLLM, GLM, Kimi, Vertex, and Ollama.
+16+ providers built in: Anthropic, OpenAI, Google, OpenRouter, Azure OpenAI, Mistral, Groq, DeepSeek, xAI, Cohere, Together, LiteLLM, GLM, Kimi, Alibaba, and Ollama.
 
 ### 3. Obsidian-Style Plugins
 
@@ -178,8 +178,8 @@ Priority 5: Agent Network           ← Remote agent calls (A2A)
 ### Phase 4: Integrations
 - [ ] Editor integration (ACP — use AVA as VS Code backend)
 - [ ] Agent network (A2A — connect to remote agents)
-- [ ] Voice input
-- [ ] Vision models (image understanding)
+- [x] Voice input (voice_transcribe tool — OpenAI Whisper + local whisper)
+- [x] Vision models (view_image tool + vision-capability-guard middleware)
 
 ---
 

@@ -14,6 +14,7 @@ import type {
   EventHandler,
   ExtensionAPI,
   ExtensionStorage,
+  HookName,
   LLMClientFactory,
   SlashCommand,
   ToolMiddleware,
@@ -54,7 +55,7 @@ function createInMemoryStorage(): ExtensionStorage {
   }
 }
 
-export function createMockExtensionAPI(name = 'test-extension'): MockExtensionAPIResult {
+export function createMockExtensionAPI(_name = 'test-extension'): MockExtensionAPIResult {
   const bus = new MessageBus()
   const platform = createMockPlatform()
   const storage = createInMemoryStorage()
@@ -69,6 +70,10 @@ export function createMockExtensionAPI(name = 'test-extension'): MockExtensionAP
   const registeredMiddleware: ToolMiddleware[] = []
   const eventHandlers = new Map<string, Set<EventHandler>>()
   const emittedEvents: Array<{ event: string; data: unknown }> = []
+  const hookHandlers = new Map<
+    HookName,
+    Set<(input: unknown, output: unknown) => Promise<unknown> | unknown>
+  >()
 
   const track = (d: Disposable): Disposable => {
     disposables.push(d)
@@ -80,6 +85,11 @@ export function createMockExtensionAPI(name = 'test-extension'): MockExtensionAP
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
+    timing: vi.fn(),
+    child: vi.fn((subsource: string) => {
+      void subsource
+      return log
+    }),
   }
 
   const api: ExtensionAPI = {
@@ -152,6 +162,43 @@ export function createMockExtensionAPI(name = 'test-extension'): MockExtensionAP
           if (idx !== -1) registeredMiddleware.splice(idx, 1)
         },
       })
+    },
+
+    registerHook(name, handler): Disposable {
+      let handlers = hookHandlers.get(name)
+      if (!handlers) {
+        handlers = new Set()
+        hookHandlers.set(name, handlers)
+      }
+      handlers.add(handler as (input: unknown, output: unknown) => Promise<unknown> | unknown)
+
+      return track({
+        dispose() {
+          handlers!.delete(
+            handler as (input: unknown, output: unknown) => Promise<unknown> | unknown
+          )
+          if (handlers!.size === 0) hookHandlers.delete(name)
+        },
+      })
+    },
+
+    async callHook(name, input, output) {
+      const handlers = hookHandlers.get(name)
+      if (!handlers || handlers.size === 0) {
+        return { output, handlerCount: 0 }
+      }
+
+      let currentOutput: unknown = output
+      let handlerCount = 0
+
+      for (const handler of handlers) {
+        // eslint-disable-next-line no-await-in-loop
+        const nextOutput = await handler(input, currentOutput)
+        currentOutput = nextOutput
+        handlerCount += 1
+      }
+
+      return { output: currentOutput as never, handlerCount }
     },
 
     on(event: string, handler: EventHandler): Disposable {

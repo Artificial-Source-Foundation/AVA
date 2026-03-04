@@ -69,6 +69,16 @@ export interface AppearanceSettings {
 
 export type SendKey = 'enter' | 'ctrl+enter'
 
+export type ReasoningEffort =
+  | 'off'
+  | 'none'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max'
+
 export interface GenerationSettings {
   maxTokens: number // 256–32000, default 4096
   temperature: number // 0.0–2.0, default 0.7
@@ -76,8 +86,10 @@ export interface GenerationSettings {
   customInstructions: string // prepended as system message
   weakModel: string // cheaper model for secondary tasks ('' = use default)
   editorModel: string // cheaper model for file edits by Junior Devs ('' = use primary)
-  thinkingEnabled: boolean // Enable extended thinking / reasoning mode
-  compactionThreshold: number // 50–95, default 80 — context % to trigger compaction
+  thinkingEnabled: boolean // Enable extended thinking / reasoning mode (derived from reasoningEffort)
+  reasoningEffort: ReasoningEffort // Reasoning intensity: off, low, medium, high
+  compactionThreshold: number // 50–95, default 80
+  delegationEnabled: boolean // Enable team delegation (Praxis hierarchy) — context % to trigger compaction
 }
 
 export interface AgentLimitSettings {

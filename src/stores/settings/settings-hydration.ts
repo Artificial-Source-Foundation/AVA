@@ -85,6 +85,12 @@ export function mergeWithDefaults(parsed: Partial<AppSettings>): AppSettings {
     (legacy.customMicroagents as AppSettings['customSkills'] | undefined) ??
     []
 
+  // Migrate thinkingEnabled → reasoningEffort (old boolean → new effort level)
+  const gen = { ...DEFAULT_GENERATION, ...(parsed.generation ?? {}) }
+  if (!('reasoningEffort' in (parsed.generation ?? {}))) {
+    gen.reasoningEffort = gen.thinkingEnabled ? 'medium' : 'off'
+  }
+
   return {
     ...DEFAULT_SETTINGS,
     ...parsed,
@@ -94,7 +100,7 @@ export function mergeWithDefaults(parsed: Partial<AppSettings>): AppSettings {
     hiddenBuiltInSkills: parsed.hiddenBuiltInSkills ?? [],
     ui: { ...DEFAULT_UI, ...(parsed.ui ?? {}) },
     appearance: { ...DEFAULT_APPEARANCE, ...(parsed.appearance ?? {}) },
-    generation: { ...DEFAULT_GENERATION, ...(parsed.generation ?? {}) },
+    generation: gen,
     agentLimits: { ...DEFAULT_AGENT_LIMITS, ...(parsed.agentLimits ?? {}) },
     behavior: { ...DEFAULT_BEHAVIOR, ...(parsed.behavior ?? {}) },
     notifications: { ...DEFAULT_NOTIFICATIONS, ...(parsed.notifications ?? {}) },

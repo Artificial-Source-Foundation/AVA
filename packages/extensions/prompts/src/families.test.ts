@@ -78,12 +78,12 @@ describe('detectModelFamily', () => {
 describe('FAMILY_PROMPT_SECTIONS', () => {
   it('has entries for all families', () => {
     expect(FAMILY_PROMPT_SECTIONS.claude).toContain('thinking blocks')
-    expect(FAMILY_PROMPT_SECTIONS.gpt).toContain('function calling')
+    expect(FAMILY_PROMPT_SECTIONS.gpt).toContain('CALL THE TOOLS')
     expect(FAMILY_PROMPT_SECTIONS.gemini).toContain('permission')
     expect(FAMILY_PROMPT_SECTIONS.llama).toContain('concise')
     expect(FAMILY_PROMPT_SECTIONS.deepseek).toContain('code understanding')
     expect(FAMILY_PROMPT_SECTIONS.mistral).toContain('function calling')
-    expect(FAMILY_PROMPT_SECTIONS.unknown).toBe('')
+    expect(FAMILY_PROMPT_SECTIONS.unknown).toContain('Use your tools')
   })
 })
 
@@ -96,8 +96,8 @@ describe('getModelFamilyPromptSection', () => {
 
   it('returns gpt section for gpt models', () => {
     const section = getModelFamilyPromptSection('gpt-4o')
-    expect(section).toContain('function calling')
-    expect(section).toContain('ACTUALLY call the tool')
+    expect(section).toContain('CALL THE TOOLS')
+    expect(section).toContain('ACTUALLY make the tool call')
   })
 
   it('returns gemini section for gemini models', () => {
@@ -120,8 +120,8 @@ describe('getModelFamilyPromptSection', () => {
     expect(section).toContain('function calling')
   })
 
-  it('returns empty string for unknown models', () => {
-    expect(getModelFamilyPromptSection('some-random-model')).toBe('')
-    expect(getModelFamilyPromptSection('qwen-72b')).toBe('')
+  it('returns fallback directives for unknown models', () => {
+    expect(getModelFamilyPromptSection('some-random-model')).toContain('Use your tools')
+    expect(getModelFamilyPromptSection('qwen-72b')).toContain('Use your tools')
   })
 })

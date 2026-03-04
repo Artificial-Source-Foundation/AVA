@@ -4,7 +4,7 @@
  */
 
 import type { AgentEventCallback } from '@ava/core-v2/agent'
-import { AgentExecutor } from '@ava/core-v2/agent'
+import { AgentExecutor, registerExecutor, unregisterExecutor } from '@ava/core-v2/agent'
 import type { LLMProvider } from '@ava/core-v2/llm'
 import type { AnyTool, ToolContext, ToolResult } from '@ava/core-v2/tools'
 import { createWorktree, removeWorktree } from '../../git/src/worktree.js'
@@ -16,11 +16,14 @@ export interface DelegationConfig {
   maxRetries: number
   /** Run workers in isolated git worktrees. Default: false */
   isolation: boolean
+  /** Maximum delegation nesting depth. Default: 3 */
+  maxDelegationDepth: number
 }
 
 const DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
   maxRetries: 1,
   isolation: false,
+  maxDelegationDepth: 3,
 }
 
 let delegationConfig: DelegationConfig = { ...DEFAULT_DELEGATION_CONFIG }
@@ -46,19 +49,22 @@ interface DelegateParams {
   files?: Record<string, string>
 }
 
-/** Resolve full tool list for an agent, adding delegate tools for leads. */
-export function resolveTools(agent: AgentDefinition): string[] {
+/** Resolve full tool list for an agent, adding delegate tools when within depth limit. */
+export function resolveTools(agent: AgentDefinition, depth = 0): string[] {
   const denied = agent.deniedTools ? new Set(agent.deniedTools) : null
+  const maxDepth = delegationConfig.maxDelegationDepth
   let tools: string[]
 
-  if (agent.tier === 'worker') {
+  if (depth >= maxDepth) {
+    // At max depth: strip all delegate tools regardless of tier
     tools = agent.tools.filter((t) => !t.startsWith('delegate_'))
-  } else if (agent.tier === 'lead') {
-    const delegateTools = (agent.delegates ?? []).map((id) => `delegate_${id}`)
-    tools = [...agent.tools, ...delegateTools]
-  } else {
+  } else if (agent.tier === 'commander') {
     // Commander: tools are set externally (delegate_<lead> + meta tools)
     tools = agent.tools
+  } else {
+    // Leads AND workers: add delegate tools from delegates list
+    const delegateTools = (agent.delegates ?? []).map((id) => `delegate_${id}`)
+    tools = [...agent.tools, ...delegateTools]
   }
 
   // Apply deniedTools filter if present
@@ -213,7 +219,8 @@ async function runDelegationLoop(
       tier: agent.tier,
     })
 
-    const childTools = resolveTools(agent)
+    const currentDepth = ctx.delegationDepth ?? 0
+    const childTools = resolveTools(agent, currentDepth + 1)
     const maxTurns = agent.maxTurns ?? 15
     const budgetInstruction = `You have ${maxTurns} turns maximum. If you've used more than 50% without meaningful progress, call attempt_completion with a partial result rather than continuing to spin.`
     const systemPrompt =
@@ -229,6 +236,7 @@ async function runDelegationLoop(
         maxTurns,
         maxTimeMinutes: agent.maxTimeMinutes ?? 5,
         systemPrompt,
+        delegationDepth: currentDepth + 1,
       },
       ctx.onEvent as AgentEventCallback | undefined
     )
@@ -241,8 +249,16 @@ async function runDelegationLoop(
       workingDirectory: effectiveCwd,
     })
 
+    // Register child executor for UI stop/message operations
+    const childAbort = new AbortController()
+    registerExecutor(childId, child, childAbort, ctx.sessionId, agent.name)
+
     try {
-      const result = await child.run({ goal, cwd: effectiveCwd }, ctx.signal)
+      // Use combined signal: abort if parent OR child-specific abort fires
+      const combinedSignal = ctx.signal
+        ? AbortSignal.any([ctx.signal, childAbort.signal])
+        : childAbort.signal
+      const result = await child.run({ goal, cwd: effectiveCwd }, combinedSignal)
 
       if (result.success || attempt >= maxRetries) {
         ctx.onEvent?.({
@@ -286,6 +302,8 @@ async function runDelegationLoop(
       // Failed with exception but can retry
       lastResult = { success: false, output: errorMsg }
       attempt++
+    } finally {
+      unregisterExecutor(childId)
     }
   }
 

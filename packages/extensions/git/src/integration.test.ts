@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { activate } from './index.js'
 
 function setupGitRepo(platform: MockPlatform, cwd: string): void {
-  platform.shell.setResult(`cd "${cwd}" && git rev-parse --is-inside-work-tree`, {
+  platform.shell.setResult(`git -C "${cwd}" rev-parse --is-inside-work-tree`, {
     stdout: 'true\n',
     stderr: '',
     exitCode: 0,
@@ -17,7 +17,7 @@ function setupGitRepo(platform: MockPlatform, cwd: string): void {
 }
 
 function setupNonGitDir(platform: MockPlatform, cwd: string): void {
-  platform.shell.setResult(`cd "${cwd}" && git rev-parse --is-inside-work-tree`, {
+  platform.shell.setResult(`git -C "${cwd}" rev-parse --is-inside-work-tree`, {
     stdout: '',
     stderr: 'fatal: not a git repository',
     exitCode: 128,
@@ -80,7 +80,7 @@ describe('git extension integration', () => {
 
     const platform = api.platform as MockPlatform
     platform.shell.setResult(
-      `cd "${cwd}" && git stash create "Before write_file: /my/project/file.ts"`,
+      `git -C "${cwd}" stash create "Before write_file: /my/project/file.ts"`,
       {
         stdout: 'abc123\n',
         stderr: '',

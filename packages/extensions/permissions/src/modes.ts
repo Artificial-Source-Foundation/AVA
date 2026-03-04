@@ -86,8 +86,16 @@ export const PERMISSION_MODES: Record<PermissionMode, PermissionModeConfig> = {
   },
 }
 
-export function isToolAutoApproved(toolName: string, mode: PermissionMode): boolean {
-  const config = PERMISSION_MODES[mode]
+/** Map frontend permission mode names to backend modes. */
+const MODE_ALIASES: Record<string, PermissionMode> = {
+  bypass: 'yolo',
+  'auto-approve': 'auto-edit',
+}
+
+export function isToolAutoApproved(toolName: string, mode: PermissionMode | string): boolean {
+  const resolvedMode = MODE_ALIASES[mode] ?? mode
+  const config = PERMISSION_MODES[resolvedMode as PermissionMode]
+  if (!config) return true // Unknown mode — fail open (bypass behavior)
   if (config.autoApprove.has('*')) return true
   if (config.requireApproval.has('*') && !config.autoApprove.has(toolName)) return false
   return config.autoApprove.has(toolName) && !config.requireApproval.has(toolName)

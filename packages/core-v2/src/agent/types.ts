@@ -2,7 +2,7 @@
  * Agent types — config, events, results.
  */
 
-import type { LLMProvider } from '../llm/types.js'
+import type { ChatMessage, LLMProvider } from '../llm/types.js'
 
 // ─── Termination ─────────────────────────────────────────────────────────────
 
@@ -38,6 +38,8 @@ export interface AgentConfig {
   maxSteps?: number
   /** When set, forces the agent to produce JSON output matching the given schema. */
   responseFormat?: { type: 'json_object'; schema: Record<string, unknown> }
+  /** Current delegation nesting depth (0 = top-level). Used to limit sub-delegation. */
+  delegationDepth?: number
   /** Extended thinking / reasoning configuration. */
   thinking?: {
     enabled: boolean
@@ -45,6 +47,13 @@ export interface AgentConfig {
   }
   /** How queued steering messages are injected into history. */
   steeringDeliveryMode?: 'all' | 'one-at-a-time'
+  /**
+   * Tool choice strategy for non-Anthropic models.
+   * - 'auto': model decides (default for Claude)
+   * - 'required': force tool use every turn
+   * - 'required-first': force on turn 1, auto after (good for GPT models)
+   */
+  toolChoiceStrategy?: 'auto' | 'required' | 'required-first'
 }
 
 export const DEFAULT_AGENT_CONFIG: Omit<AgentConfig, 'maxTimeMinutes' | 'maxTurns'> = {
@@ -80,7 +89,13 @@ export type AgentEvent =
   | { type: 'agent:start'; agentId: string; goal: string }
   | { type: 'agent:finish'; agentId: string; result: AgentResult }
   | { type: 'turn:start'; agentId: string; turn: number }
-  | { type: 'turn:end'; agentId: string; turn: number; toolCalls: ToolCallInfo[] }
+  | {
+      type: 'turn:end'
+      agentId: string
+      turn: number
+      toolCalls: ToolCallInfo[]
+      usage?: TurnUsage
+    }
   | { type: 'tool:start'; agentId: string; toolName: string; args: Record<string, unknown> }
   | {
       type: 'tool:finish'
@@ -139,6 +154,8 @@ export interface AgentInputs {
   cwd: string
   /** Resume an existing session by loading its conversation history. */
   sessionId?: string
+  /** Structured conversation history to prepend before the current goal. */
+  messages?: ChatMessage[]
 }
 
 // ─── Turn Result ─────────────────────────────────────────────────────────────

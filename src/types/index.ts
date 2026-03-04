@@ -81,6 +81,8 @@ export interface ToolCall {
   diff?: { oldContent: string; newContent: string }
   /** MCP UI resource for rich rendering (table, form, chart, image, markdown) */
   uiResource?: { type: 'table' | 'form' | 'chart' | 'image' | 'markdown'; data: unknown }
+  /** Position in accumulated content where this tool was called (for inline rendering) */
+  contentOffset?: number
 }
 
 export interface Agent {

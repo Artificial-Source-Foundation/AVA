@@ -35,6 +35,6 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => (
     "
   >
     <ChevronDown class="w-3 h-3" />
-    <span class="truncate max-w-[140px]">{props.currentModelDisplay()}</span>
+    <span class="truncate max-w-[200px]">{props.currentModelDisplay()}</span>
   </button>
 )

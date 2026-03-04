@@ -39,7 +39,11 @@ export async function checkForUpdate(): Promise<UpdateInfo> {
       notes: (update.body as string) ?? undefined,
     }
   } catch (err) {
-    console.warn('[auto-updater] Failed to check for updates:', err)
+    // Expected in dev mode — updater plugin only available in release builds
+    console.debug(
+      '[auto-updater] Update check skipped:',
+      err instanceof Error ? err.message : String(err)
+    )
     return { available: false }
   }
 }

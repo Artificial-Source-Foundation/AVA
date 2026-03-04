@@ -60,10 +60,12 @@ import { FileMentionPopover } from './message-input/file-mention-popover'
 import { ModelSelector } from './message-input/model-selector'
 import { InputTextArea } from './message-input/text-area'
 import {
+  cycleReasoningEffort,
+  DelegationToggle,
   MicButton,
   PermissionBadge,
   PlanActSlider,
-  ThinkingToggle,
+  ReasoningDropdown,
 } from './message-input/toolbar-buttons'
 import {
   MAX_FILES,
@@ -115,8 +117,14 @@ export const MessageInput: Component = () => {
   const agent = useAgent()
   const sessionStore = useSession()
   const { currentProject } = useProject()
-  const { selectedModel, setSelectedModel, contextUsage, sessionTokenStats, messages } =
-    sessionStore
+  const {
+    selectedModel,
+    selectedProvider,
+    setSelectedModel,
+    contextUsage,
+    sessionTokenStats,
+    messages,
+  } = sessionStore
   const { settings, cyclePermissionMode, updateSettings } = useSettings()
   const {
     modelBrowserOpen,
@@ -241,29 +249,66 @@ export const MessageInput: Component = () => {
 
   const currentModelDisplay = createMemo(() => {
     const modelId = selectedModel()
+    const provId = selectedProvider()
+    // Prefer the exact provider match when available
+    if (provId) {
+      const provider = settings().providers.find((p) => p.id === provId)
+      const model = provider?.models.find((m) => m.id === modelId)
+      if (provider && model) return `${provider.name} | ${model.name}`
+    }
     for (const provider of settings().providers) {
       const model = provider.models.find((m) => m.id === modelId)
-      if (model) return model.name
+      if (model) return `${provider.name} | ${model.name}`
     }
     if (modelId.length > 30) return `${modelId.slice(0, 27)}...`
     return modelId
   })
 
-  // Thinking mode support
-  const modelSupportsThinking = createMemo(() => {
+  // Reasoning mode support — find the active provider for effort level cycling
+  const activeProviderId = createMemo(() => {
+    const provId = selectedProvider()
+    if (provId) return provId
     const modelId = selectedModel()
     for (const provider of settings().providers) {
-      const model = provider.models.find((m) => m.id === modelId)
-      if (model) return model.capabilities?.includes('thinking') ?? false
+      if (provider.models.some((m) => m.id === modelId)) return provider.id
     }
-    return false
+    return null
   })
 
-  const toggleThinking = () => {
+  const modelSupportsReasoning = createMemo(() => {
+    const modelId = selectedModel()
+    const provId = activeProviderId()
+    if (provId) {
+      const provider = settings().providers.find((p) => p.id === provId)
+      const model = provider?.models.find((m) => m.id === modelId)
+      if (model)
+        return model.capabilities?.some((c) => c === 'thinking' || c === 'reasoning') ?? false
+    }
+    for (const provider of settings().providers) {
+      const model = provider.models.find((m) => m.id === modelId)
+      if (model)
+        return model.capabilities?.some((c) => c === 'thinking' || c === 'reasoning') ?? false
+    }
+    return /claude|sonnet|opus|gpt-5|o3-|o4-|codex|gemini|deepseek-r/i.test(modelId)
+  })
+
+  const handleCycleReasoning = () => {
+    const current = settings().generation.reasoningEffort
+    const next = cycleReasoningEffort(current, activeProviderId() ?? undefined)
     updateSettings({
       generation: {
         ...settings().generation,
-        thinkingEnabled: !settings().generation.thinkingEnabled,
+        reasoningEffort: next,
+        thinkingEnabled: next !== 'off',
+      },
+    })
+  }
+
+  const toggleDelegation = () => {
+    updateSettings({
+      generation: {
+        ...settings().generation,
+        delegationEnabled: !settings().generation.delegationEnabled,
       },
     })
   }
@@ -650,14 +695,14 @@ export const MessageInput: Component = () => {
           <div class="flex items-center gap-2">
             <ModelSelector onToggle={openModelBrowser} currentModelDisplay={currentModelDisplay} />
 
-            <ThinkingToggle
-              enabled={() => settings().generation.thinkingEnabled}
-              onToggle={toggleThinking}
-              available={modelSupportsThinking}
+            <ReasoningDropdown
+              effort={() => settings().generation.reasoningEffort}
+              onCycle={handleCycleReasoning}
+              available={modelSupportsReasoning}
             />
 
-            {/* Thinking visibility toggle (Item 2) */}
-            <Show when={settings().generation.thinkingEnabled}>
+            {/* Thinking visibility toggle */}
+            <Show when={settings().generation.reasoningEffort !== 'off'}>
               <button
                 type="button"
                 onClick={() =>
@@ -692,6 +737,11 @@ export const MessageInput: Component = () => {
                 onMessagesChange={(msgs) => sessionStore.setMessages(msgs)}
               />
             </Show>
+
+            <DelegationToggle
+              enabled={() => settings().generation.delegationEnabled}
+              onToggle={toggleDelegation}
+            />
 
             <StripDivider />
 
@@ -965,7 +1015,8 @@ export const MessageInput: Component = () => {
           if (!open) closeModelBrowser()
         }}
         selectedModel={selectedModel}
-        onSelect={setSelectedModel}
+        selectedProvider={selectedProvider}
+        onSelect={(modelId, providerId) => setSelectedModel(modelId, providerId)}
         enabledProviders={enabledProviders}
       />
       <ExpandedEditor

@@ -46,6 +46,8 @@ function classifyError(status: number): 'rate_limit' | 'auth' | 'server' | 'unkn
 }
 
 function extractErrorMessage(status: number, body: string): string {
+  // Log full error body for debugging
+  if (body) console.error(`[AVA:OpenAI] HTTP ${status} error body:`, body.slice(0, 1000))
   try {
     const parsed = JSON.parse(body)
     if (parsed.error?.message) return parsed.error.message

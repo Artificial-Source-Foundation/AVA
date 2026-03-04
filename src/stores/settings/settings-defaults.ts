@@ -52,7 +52,9 @@ export const DEFAULT_GENERATION: GenerationSettings = {
   weakModel: '',
   editorModel: '',
   thinkingEnabled: false,
+  reasoningEffort: 'off',
   compactionThreshold: 80,
+  delegationEnabled: false,
 }
 
 export const DEFAULT_AGENT_LIMITS: AgentLimitSettings = {

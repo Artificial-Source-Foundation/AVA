@@ -33,6 +33,7 @@ export default defineConfig({
       'src/**/*.{test,spec}.{ts,tsx}',
       'packages/core/src/**/*.{test,spec}.ts',
       'packages/core-v2/src/**/*.{test,spec}.ts',
+      'packages/platform-*/src/**/*.{test,spec}.ts',
       'packages/extensions/**/*.{test,spec}.ts',
       'cli/src/**/*.{test,spec}.ts',
       'docs/examples/**/*.{test,spec}.ts',

@@ -20,6 +20,7 @@ export const getProviderDocsUrl = (providerId: string): string => {
     kimi: 'https://platform.moonshot.cn/docs',
     glm: 'https://open.bigmodel.cn/dev/api',
     ollama: 'https://ollama.ai/docs',
+    alibaba: 'https://www.alibabacloud.com/help/en/model-studio/opencode-coding-plan',
   }
   return urls[providerId] || '#'
 }

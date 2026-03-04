@@ -293,6 +293,7 @@ export function buildOpenAIRequestBody(
     model: config.model ?? defaults.model,
     messages: convertMessagesToOpenAI(messages),
     stream: true,
+    stream_options: { include_usage: true },
   }
 
   if (config.maxTokens) body.max_tokens = config.maxTokens

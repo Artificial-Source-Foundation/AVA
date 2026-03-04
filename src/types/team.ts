@@ -179,8 +179,12 @@ export interface TeamToolCall {
   id: string
   name: string
   status: 'running' | 'success' | 'error'
+  args?: Record<string, unknown>
+  output?: string
+  error?: string
   durationMs?: number
-  timestamp: number
+  startedAt: number
+  completedAt?: number
 }
 
 /** A message in a team member's chat */

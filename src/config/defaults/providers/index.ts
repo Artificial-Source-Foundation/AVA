@@ -6,6 +6,7 @@
  */
 
 import type { LLMProviderConfig } from '../provider-defaults'
+import { alibaba } from './alibaba'
 import { anthropic } from './anthropic'
 import { cohere } from './cohere'
 import { copilot } from './copilot'
@@ -27,6 +28,7 @@ export const defaultProviders: LLMProviderConfig[] = [
   google,
   copilot,
   openrouter,
+  alibaba,
   xai,
   mistral,
   groq,

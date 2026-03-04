@@ -79,37 +79,8 @@ function formatPatchResult(result: PatchApplyResult, dryRun: boolean): string {
 
 export const applyPatchTool = defineTool({
   name: 'apply_patch',
-  description: `Apply a unified diff patch to files.
-
-Supports multiple operations:
-- Add File: Create a new file
-- Update File: Modify existing file with diff
-- Delete File: Remove a file
-- Move File: Move/rename a file
-
-Patch format:
-\`\`\`
-*** Begin Patch
-*** Add File: path/to/new.txt
-+new line 1
-+new line 2
-
-*** Update File: path/to/existing.txt
-@@ function_name @@
--old line
-+new line
- context line
-
-*** Delete File: path/to/remove.txt
-
-*** Move File: old/path.txt -> new/path.txt
-*** End Patch
-\`\`\`
-
-Features:
-- Fuzzy context matching for reliable application
-- Atomic operations (validates before applying)
-- Dry-run mode for validation without changes`,
+  description:
+    'Apply a unified diff patch. Supports Add/Update/Delete/Move file operations with fuzzy matching. Use *** Begin Patch / *** End Patch delimiters.',
 
   schema: ApplyPatchSchema,
 

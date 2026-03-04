@@ -1,6 +1,6 @@
 import { Bookmark } from 'lucide-solid'
-import { type Component, Show } from 'solid-js'
-import type { Message } from '../../../types'
+import { type Accessor, type Component, Show } from 'solid-js'
+import type { Message, ToolCall } from '../../../types'
 import { MessageBubble } from '../MessageBubble'
 
 interface MessageRowProps {
@@ -13,6 +13,9 @@ interface MessageRowProps {
   isSearchMatch?: boolean
   isCurrentSearchMatch?: boolean
   checkpoint?: { id: string; description: string }
+  streamingToolCalls?: ToolCall[]
+  /** Live content signal — avoids store updates during streaming */
+  streamingContent?: Accessor<string>
   onStartEdit: () => void
   onCancelEdit: () => void
   onSaveEdit: (content: string) => Promise<void>
@@ -41,6 +44,8 @@ export const MessageRow: Component<MessageRowProps> = (props) => (
       isRetrying={props.isRetrying}
       isStreaming={props.isStreaming}
       isLastMessage={props.isLastMessage}
+      streamingToolCalls={props.streamingToolCalls}
+      streamingContent={props.streamingContent}
       onStartEdit={props.onStartEdit}
       onCancelEdit={props.onCancelEdit}
       onSaveEdit={props.onSaveEdit}

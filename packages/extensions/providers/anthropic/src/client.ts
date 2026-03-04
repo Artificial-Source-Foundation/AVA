@@ -100,6 +100,9 @@ export class AnthropicClient implements LLMClient {
       if (config.toolChoice) {
         if (config.toolChoice.type === 'tool') {
           body.tool_choice = { type: 'tool', name: config.toolChoice.name }
+        } else if (config.toolChoice.type === 'required') {
+          // Anthropic uses "any" instead of "required" to force tool use
+          body.tool_choice = { type: 'any' }
         } else {
           body.tool_choice = { type: config.toolChoice.type }
         }

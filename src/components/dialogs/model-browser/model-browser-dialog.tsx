@@ -33,16 +33,21 @@ export const ModelBrowserDialog: Component<ModelBrowserDialogProps> = (props) =>
     return sortModels(filterModels(allModels(), f), f.sort)
   })
 
-  const selectedBrowsable = createMemo(() =>
-    allModels().find((m) => m.id === props.selectedModel())
-  )
+  const selectedBrowsable = createMemo(() => {
+    const provId = props.selectedProvider?.()
+    return (
+      allModels().find(
+        (m) => m.id === props.selectedModel() && (!provId || m.providerId === provId)
+      ) ?? allModels().find((m) => m.id === props.selectedModel())
+    )
+  })
 
   const selectedProvider = createMemo(() =>
     props.enabledProviders().find((p) => p.id === selectedBrowsable()?.providerId)
   )
 
-  const handleSelect = (modelId: string) => {
-    props.onSelect(modelId)
+  const handleSelect = (modelId: string, providerId: string) => {
+    props.onSelect(modelId, providerId)
     props.onOpenChange(false)
   }
 
@@ -79,6 +84,7 @@ export const ModelBrowserDialog: Component<ModelBrowserDialogProps> = (props) =>
       <ModelBrowserGrid
         models={filteredModels()}
         selectedModelId={props.selectedModel()}
+        selectedProviderId={props.selectedProvider?.() ?? undefined}
         providers={props.enabledProviders()}
         onSelect={handleSelect}
       />

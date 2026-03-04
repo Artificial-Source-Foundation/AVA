@@ -84,7 +84,7 @@ describe('pty tool', () => {
   describe('definition', () => {
     it('has correct name and description', () => {
       expect(ptyTool.definition.name).toBe('pty')
-      expect(ptyTool.definition.description).toContain('pseudo-terminal')
+      expect(ptyTool.definition.description).toContain('PTY')
     })
 
     it('has command as required param', () => {

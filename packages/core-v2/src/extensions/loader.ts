@@ -86,13 +86,18 @@ async function importExtensionModule(
 ): Promise<ExtensionModule> {
   const sourcePath = path.join(extDir, main)
   try {
-    return (await import(sourcePath)) as ExtensionModule
+    // Dynamic import required: extension paths are discovered at runtime from
+    // user-installed plugin directories. Vite cannot statically analyze these.
+    // Safe because: only loads extensions from validated manifest paths.
+    return (await import(/* @vite-ignore */ sourcePath)) as ExtensionModule
   } catch {
     // Fall back to compiled output in dist/
     if (packageRoot) {
       const relativePath = path.relative(packageRoot, sourcePath)
       const distPath = path.join(packageRoot, 'dist', relativePath.replace(/\.ts$/, '.js'))
-      return (await import(distPath)) as ExtensionModule
+      // Dynamic import required: fallback path derived from runtime source path.
+      // Safe because: path is computed from known packageRoot and validated source.
+      return (await import(/* @vite-ignore */ distPath)) as ExtensionModule
     }
     throw new Error(`Cannot import extension: ${sourcePath} (no dist fallback available)`)
   }

@@ -127,6 +127,18 @@ export const extname = (p: string) => {
 export const relative = (_from: string, to: string) => to
 export const isAbsolute = (p: string) => p.startsWith('/')
 export const normalize = (p: string) => p
+export const parse = (p: string) => {
+  const base = p.split('/').pop() || ''
+  const dotIndex = base.lastIndexOf('.')
+  const ext = dotIndex > 0 ? base.slice(dotIndex) : ''
+  const name = dotIndex > 0 ? base.slice(0, dotIndex) : base
+  const dir = p.split('/').slice(0, -1).join('/')
+  return { root: p.startsWith('/') ? '/' : '', dir, base, ext, name }
+}
+export const format = (obj: { dir?: string; base?: string; name?: string; ext?: string }) => {
+  const base = obj.base || `${obj.name || ''}${obj.ext || ''}`
+  return obj.dir ? `${obj.dir}/${base}` : base
+}
 export const sep = '/'
 
 // ============================================================================
@@ -252,6 +264,8 @@ export default {
   relative,
   isAbsolute,
   normalize,
+  parse,
+  format,
   sep,
   // os
   homedir,

@@ -261,13 +261,23 @@ export function createExtensionAPI(
     },
 
     getSettings<T>(namespace: string): T {
-      return getSettingsManager().get<T>(namespace)
+      try {
+        return getSettingsManager().get<T>(namespace)
+      } catch {
+        // Category not registered yet — return empty object as default.
+        // Extensions type this as Partial<Config> so {} is safe.
+        return {} as T
+      }
     },
 
     onSettingsChanged(namespace: string, cb: (settings: unknown) => void): Disposable {
       const unsub = getSettingsManager().on((event) => {
         if (event.type === 'category_changed' && event.category === namespace) {
-          cb(getSettingsManager().get(namespace))
+          try {
+            cb(getSettingsManager().get(namespace))
+          } catch {
+            // Category may have been unregistered
+          }
         }
       })
       return track({ dispose: unsub })

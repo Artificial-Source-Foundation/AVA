@@ -12,8 +12,9 @@ import type { BrowsableModel } from './model-browser-types'
 interface ModelBrowserGridProps {
   models: BrowsableModel[]
   selectedModelId: string
+  selectedProviderId?: string
   providers: LLMProviderConfig[]
-  onSelect: (modelId: string) => void
+  onSelect: (modelId: string, providerId: string) => void
 }
 
 export const ModelBrowserGrid: Component<ModelBrowserGridProps> = (props) => {
@@ -21,6 +22,14 @@ export const ModelBrowserGrid: Component<ModelBrowserGridProps> = (props) => {
     const map = new Map<string, LLMProviderConfig>()
     for (const p of props.providers) map.set(p.id, p)
     return map
+  }
+
+  /** Check if a model card should be highlighted as selected. */
+  const isModelSelected = (model: BrowsableModel) => {
+    if (model.id !== props.selectedModelId) return false
+    // When a provider is tracked, disambiguate models with the same ID
+    if (props.selectedProviderId) return model.providerId === props.selectedProviderId
+    return true
   }
 
   return (
@@ -37,9 +46,9 @@ export const ModelBrowserGrid: Component<ModelBrowserGridProps> = (props) => {
           {(model) => (
             <ModelBrowserCard
               model={model}
-              isSelected={props.selectedModelId === model.id}
+              isSelected={isModelSelected(model)}
               provider={providerMap().get(model.providerId)}
-              onSelect={() => props.onSelect(model.id)}
+              onSelect={() => props.onSelect(model.id, model.providerId)}
             />
           )}
         </For>

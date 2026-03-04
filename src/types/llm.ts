@@ -23,6 +23,7 @@ export type LLMProvider =
   | 'glm'
   | 'kimi'
   | 'ollama'
+  | 'alibaba'
 
 /** Authentication methods */
 export type AuthMethod = 'api-key' | 'oauth' | 'gateway'

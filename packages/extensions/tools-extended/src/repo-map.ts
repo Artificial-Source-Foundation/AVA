@@ -17,14 +17,7 @@ function formatSize(bytes: number): string {
 
 export const repoMapTool = defineTool({
   name: 'repo_map',
-  description: `Generate a project structure overview with language breakdown.
-
-Shows:
-- Total file count
-- Language breakdown (typescript, python, etc.)
-- File listing with sizes
-
-Use this to understand project structure at a glance.`,
+  description: 'Generate project structure overview with file count and language breakdown.',
 
   schema: z.object({
     language: z.string().optional().describe('Filter by language (e.g., "typescript")'),

@@ -4,7 +4,7 @@
  * Re-exports all public types and functions so existing imports keep working.
  */
 
-import { createSignal } from 'solid-js'
+import { createRoot, createSignal } from 'solid-js'
 import { type AgentPreset, resolveAgentIcon } from '../../config/defaults/agent-defaults'
 import {
   defaultProviders,
@@ -57,52 +57,56 @@ export type {
   UISettings,
 } from './settings-types'
 
-// Module-level signal
-const initial = loadSettings()
-initial.providers = hydrateProviders(initial.providers)
-initial.agents = hydrateAgents(initial.agents)
-const [settings, setSettingsRaw] = createSignal<AppSettings>(initial)
+// Module-level signal — wrapped in createRoot to avoid "cleanups outside createRoot" warnings
+const { settings, setSettingsRaw } = createRoot(() => {
+  const initial = loadSettings()
+  initial.providers = hydrateProviders(initial.providers)
+  initial.agents = hydrateAgents(initial.agents)
+  const [settings, setSettingsRaw] = createSignal<AppSettings>(initial)
 
-// Listen for settings changes from core-v2 extensions (bidirectional sync)
-window.addEventListener('ava:core-settings-changed', ((e: CustomEvent) => {
-  const { category, value } = e.detail as { category: string; value: unknown }
-  if (!value || typeof value !== 'object') return
+  // Listen for settings changes from core-v2 extensions (bidirectional sync)
+  window.addEventListener('ava:core-settings-changed', ((e: CustomEvent) => {
+    const { category, value } = e.detail as { category: string; value: unknown }
+    if (!value || typeof value !== 'object') return
 
-  const patch = value as Record<string, unknown>
-  setSettingsRaw((prev) => {
-    // Map known core categories back to AppSettings fields
-    if (category === 'permissions') {
-      return {
-        ...prev,
-        autoApprovedTools: (patch.autoApprovePatterns as string[]) ?? prev.autoApprovedTools,
+    const patch = value as Record<string, unknown>
+    setSettingsRaw((prev) => {
+      // Map known core categories back to AppSettings fields
+      if (category === 'permissions') {
+        return {
+          ...prev,
+          autoApprovedTools: (patch.autoApprovePatterns as string[]) ?? prev.autoApprovedTools,
+        }
       }
-    }
-    if (category === 'context') {
-      return {
-        ...prev,
-        generation: {
-          ...prev.generation,
-          maxTokens: (patch.maxTokens as number) ?? prev.generation.maxTokens,
-          compactionThreshold:
-            (patch.compactionThreshold as number) ?? prev.generation.compactionThreshold,
-        },
+      if (category === 'context') {
+        return {
+          ...prev,
+          generation: {
+            ...prev.generation,
+            maxTokens: (patch.maxTokens as number) ?? prev.generation.maxTokens,
+            compactionThreshold:
+              (patch.compactionThreshold as number) ?? prev.generation.compactionThreshold,
+          },
+        }
       }
-    }
-    if (category === 'git') {
-      return {
-        ...prev,
-        git: {
-          ...prev.git,
-          enabled: (patch.enabled as boolean) ?? prev.git.enabled,
-          autoCommit: (patch.autoCommit as boolean) ?? prev.git.autoCommit,
-          commitPrefix: (patch.messagePrefix as string) ?? prev.git.commitPrefix,
-        },
+      if (category === 'git') {
+        return {
+          ...prev,
+          git: {
+            ...prev.git,
+            enabled: (patch.enabled as boolean) ?? prev.git.enabled,
+            autoCommit: (patch.autoCommit as boolean) ?? prev.git.autoCommit,
+            commitPrefix: (patch.messagePrefix as string) ?? prev.git.commitPrefix,
+          },
+        }
       }
-    }
-    // Unknown categories (extension-specific) — ignore
-    return prev
-  })
-}) as EventListener)
+      // Unknown categories (extension-specific) — ignore
+      return prev
+    })
+  }) as EventListener)
+
+  return { settings, setSettingsRaw }
+})
 
 // Thin wrappers — adapt pure functions to read/write the module signal
 
@@ -133,8 +137,24 @@ export function syncAllApiKeys(): void {
   syncAllApiKeysImpl(settings())
 }
 
+/**
+ * Bulk-sync all localStorage credentials to ~/.ava/credentials.json.
+ * Call after platform is initialized to share credentials with the CLI.
+ */
+export function syncCredentialsToDisk(): void {
+  import('@ava/platform-tauri')
+    .then(({ TauriCredentialStore }) => {
+      const store = new TauriCredentialStore()
+      store.syncAllToDisk().catch(() => {})
+    })
+    .catch(() => {})
+}
+
 // Signal to track env key detection results for the toast notification
-const [envKeysDetected, setEnvKeysDetected] = createSignal<EnvKeyDetectionResult | null>(null)
+const { envKeysDetected, setEnvKeysDetected } = createRoot(() => {
+  const [envKeysDetected, setEnvKeysDetected] = createSignal<EnvKeyDetectionResult | null>(null)
+  return { envKeysDetected, setEnvKeysDetected }
+})
 export { envKeysDetected }
 
 export async function detectEnvApiKeys(): Promise<EnvKeyDetectionResult> {

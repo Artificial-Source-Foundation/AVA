@@ -50,6 +50,13 @@ export class OpenRouterClient implements LLMClient {
     if (!body.max_tokens) body.max_tokens = 4096
     if (body.temperature === undefined) body.temperature = 0.7
 
+    console.debug('[OpenRouter] Request:', {
+      model: body.model,
+      toolCount: Array.isArray(body.tools) ? body.tools.length : 0,
+      toolChoice: body.tool_choice,
+      messageCount: Array.isArray(body.messages) ? body.messages.length : 0,
+    })
+
     let response: Response
     try {
       response = await fetch(`${BASE_URL}/chat/completions`, {

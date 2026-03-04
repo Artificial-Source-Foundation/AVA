@@ -41,7 +41,7 @@ describe('git extension', () => {
 
   it('emits git:ready when in a git repo', async () => {
     const { api, emittedEvents } = createMockExtensionAPI()
-    api.platform.shell.setResult('cd "/project" && git rev-parse --is-inside-work-tree', {
+    api.platform.shell.setResult('git -C "/project" rev-parse --is-inside-work-tree', {
       stdout: 'true\n',
       stderr: '',
       exitCode: 0,

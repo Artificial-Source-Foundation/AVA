@@ -334,6 +334,16 @@ async function executeShell(
     clearTimeout(timeoutId)
     ctx.signal.removeEventListener('abort', abortHandler)
 
+    // If streams were null (e.g., Tauri platform), use output from wait()
+    // This handles platforms where spawn() returns null streams but wait() provides output
+    // We check each stream independently to handle mixed scenarios
+    if (!child.stdout && !stdout) {
+      stdout = result.stdout || ''
+    }
+    if (!child.stderr && !stderr) {
+      stderr = result.stderr || ''
+    }
+
     // Handle timeout
     if (timedOut) {
       return {

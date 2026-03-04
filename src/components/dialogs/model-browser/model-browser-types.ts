@@ -50,6 +50,7 @@ export interface ModelBrowserDialogProps {
   open: Accessor<boolean>
   onOpenChange: (open: boolean) => void
   selectedModel: Accessor<string>
-  onSelect: (modelId: string) => void
+  selectedProvider?: Accessor<string | null>
+  onSelect: (modelId: string, providerId: string) => void
   enabledProviders: Accessor<LLMProviderConfig[]>
 }

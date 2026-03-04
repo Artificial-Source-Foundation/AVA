@@ -12,6 +12,7 @@ import { getCoreSettings } from '../../services/core-bridge'
 import { logDebug, logInfo, logWarn } from '../../services/logger'
 import { writeSettingsToFS } from '../../services/settings-fs'
 import { markPushing } from '../../services/settings-sync'
+import { setPermissionMode } from '../../services/tool-approval-bridge'
 import { DEFAULT_SETTINGS } from './settings-defaults'
 import { mergeWithDefaults } from './settings-hydration'
 import type { AppSettings } from './settings-types'
@@ -148,7 +149,11 @@ export function pushSettingsToCore(s: AppSettings): void {
     defaultModel: providerUpdate.defaultModel,
   })
 
+  // Sync permission mode to the desktop approval middleware
+  setPermissionMode(s.permissionMode)
+
   sm.set('permissions', {
+    permissionMode: s.permissionMode,
     allowBashExecution: s.permissionMode !== 'ask',
     autoApprovePatterns: s.autoApprovedTools,
     toolRules: s.toolRules,

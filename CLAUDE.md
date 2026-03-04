@@ -42,7 +42,7 @@ npm run analyze          # Bundle size analysis
 # CLI (after pnpm build:all)
 node cli/dist/index.js run "goal" --mock             # Run agent with mock LLM
 node cli/dist/index.js run "goal" --provider openrouter --model "anthropic/claude-sonnet-4" --verbose
-node cli/dist/index.js tool list                      # List all 43+ tools
+node cli/dist/index.js tool list                      # List all 70+ tools
 node cli/dist/index.js tool read_file --path README.md
 node cli/dist/index.js validate src/index.ts          # Run validation pipeline
 node cli/dist/index.js auth status                    # Show OAuth status
@@ -62,7 +62,7 @@ AVA/
 ├── packages/
 │   ├── core/                  # Original backend (54K+ lines, being migrated)
 │   ├── core-v2/               # NEW: Minimal core (~40 files, ~5K lines)
-│   ├── extensions/            # NEW: Built-in extensions (30+ modules)
+│   ├── extensions/            # NEW: Built-in extensions (35+ modules)
 │   ├── platform-node/         # Node.js platform implementations
 │   └── platform-tauri/        # Tauri platform implementations
 └── cli/                       # CLI interface (secondary)
@@ -79,7 +79,7 @@ AVA has two backend stacks running in parallel during migration:
 **New (`packages/core-v2/` + `packages/extensions/`)** — Extension-first
 - Minimal core: ~40 files, ~7K lines (agent loop, tool registry, extension API, session DAG)
 - Everything else is a built-in extension using the same API as community plugins
-- CLI: `ava run` (unified, default), `ava agent-v2 run` (full-featured), `ava tool` (individual tools) — all load 31 extensions
+- CLI: `ava run` (unified, default), `ava agent-v2 run` (full-featured), `ava tool` (individual tools) — all load 48 extensions
 
 ### Core-v2 Module Map
 
@@ -102,10 +102,10 @@ packages/core-v2/src/
 packages/extensions/
 ├── providers/       # 16 LLM providers (anthropic, openai, google, azure, litellm, etc.)
 ├── permissions/     # Safety middleware + bash parsing + arity fingerprinting
-├── tools-extended/  # 20+ additional tools (websearch, background shell, etc.)
+├── tools-extended/  # 27 additional tools (websearch, vision, voice, inline suggest, etc.)
 ├── prompts/         # System prompt building + model-family variants
 ├── context/         # Token tracking + compaction + prune strategy
-├── agent-modes/     # Plan mode, minimal mode, doom loop, recovery, plan saves
+├── agent-modes/     # Plan mode, minimal mode, doom loop, recovery, best-of-N sampling
 ├── hooks/           # Lifecycle hooks as middleware + auto-formatter
 ├── validator/       # QA pipeline (syntax, types, lint, test)
 ├── commander/       # Praxis hierarchy (Commander → Leads → Workers) + explore subagent
@@ -113,7 +113,7 @@ packages/extensions/
 ├── codebase/        # Repo map, symbols, PageRank
 ├── git/             # Git snapshots, checkpoints, PR/branch/issue tools, worktrees
 ├── lsp/             # Language Server Protocol (9 tools)
-├── diff/            # Diff tracking + session summary + revert-to + undo message removal
+├── diff/            # Diff tracking + per-hunk review + undo/redo + session summary
 ├── file-watcher/    # File system polling (.git/HEAD, configurable paths)
 ├── sharing/         # Session sharing (stub)
 ├── focus-chain/     # Task progress tracking
@@ -126,10 +126,11 @@ packages/extensions/
 ├── custom-commands/ # TOML user commands
 ├── slash-commands/  # Built-in /commands
 ├── integrations/    # External APIs (Exa search) + well-known config
-├── sandbox/         # Docker sandboxed execution
+├── sandbox/         # Docker + OS-level sandboxed execution (bwrap, sandbox-exec)
 ├── server/          # HTTP server for remote agent control (ACP REST API)
 ├── recipes/         # YAML/JSON composable workflows with param substitution
 ├── recall/          # Chat recall — FTS5 full-text search across sessions
+├── profiles/        # Agent profiles — save/load/list, tool filtering, built-in presets
 └── github-bot/      # GitHub webhook bot — @ava mention handling
 ```
 
@@ -237,10 +238,11 @@ api.registerAgentMode(myMode)
 
 ---
 
-## Tools (55+)
+## Tools (70+)
 
 | Tool | Location | Purpose |
 |------|----------|---------|
+| **Core (7)** | | |
 | read_file | core-v2 | Read file contents |
 | write_file | core-v2 | Overwrite file |
 | edit | core-v2 | Fuzzy text edits (8 strategies) |
@@ -248,36 +250,54 @@ api.registerAgentMode(myMode)
 | glob | core-v2 | Find files by pattern |
 | grep | core-v2 | Search file contents |
 | pty | core-v2 | PTY terminal (interactive commands) |
-| create_file | extensions | Create new file |
-| delete_file | extensions | Delete file |
-| apply_patch | extensions | Apply unified diffs |
-| multiedit | extensions | Edit multiple files |
-| ls | extensions | Directory listing |
-| batch | extensions | Batch execute multiple tools |
-| codesearch | extensions | Search API docs/code via Exa |
-| repo_map | extensions | Project structure overview |
-| question | extensions | Ask user clarifying questions |
-| todoread | extensions | Read session todo list |
-| todowrite | extensions | Update session todo list |
-| task | extensions | Spawn subagents (+ task resumption) |
+| **Extended (27)** | | |
+| create_file | tools-extended | Create new file |
+| delete_file | tools-extended | Delete file |
+| apply_patch | tools-extended | Apply unified diffs (streaming) |
+| multiedit | tools-extended | Edit multiple files concurrently |
+| ls | tools-extended | Directory listing |
+| batch | tools-extended | Batch execute multiple tools |
+| codesearch | tools-extended | Search API docs/code via Exa |
+| repo_map | tools-extended | Project structure overview |
+| question | tools-extended | Ask user clarifying questions |
+| todoread | tools-extended | Read session todo list |
+| todowrite | tools-extended | Update session todo list |
+| task | tools-extended | Spawn subagents (+ task resumption) |
+| websearch | tools-extended | Web search (DuckDuckGo default, Tavily/Exa optional) |
+| webfetch | tools-extended | Fetch + convert web pages |
+| attempt_completion | tools-extended | Finish task with summary |
+| plan_enter | tools-extended | Enter plan mode |
+| plan_exit | tools-extended | Exit plan mode (+ save to file) |
+| bash_background | tools-extended | Spawn background process, return PID |
+| bash_output | tools-extended | Read stdout/stderr from background PID |
+| bash_kill | tools-extended | Kill background process by PID |
+| view_image | tools-extended | View image with base64 encoding for vision models |
+| voice_transcribe | tools-extended | Transcribe audio via Whisper API or local whisper |
+| inline_suggest | tools-extended | FIM-based inline code autocomplete with LRU cache |
+| edit_benchmark | tools-extended | Benchmark all 8 edit strategies on real diffs |
+| session_cost | tools-extended | Get cost tracking for current session |
+| create_rule | tools-extended | Create a new safety/policy rule |
+| create_skill | tools-extended | Create a new auto-invoked skill |
+| **Delegation (13)** | | |
+| delegate_frontend-lead | commander | Delegate to Frontend Senior Lead |
+| delegate_backend-lead | commander | Delegate to Backend Senior Lead |
+| delegate_qa-lead | commander | Delegate to QA Senior Lead |
+| delegate_fullstack-lead | commander | Delegate to Fullstack Senior Lead |
 | delegate_coder | commander | Delegate coding tasks to Coder worker |
 | delegate_tester | commander | Delegate testing tasks to Tester worker |
 | delegate_reviewer | commander | Delegate review tasks to Reviewer worker |
 | delegate_researcher | commander | Delegate research tasks to Researcher worker |
 | delegate_debugger | commander | Delegate debugging tasks to Debugger worker |
+| delegate_architect | commander | Delegate architecture tasks to Architect worker |
+| delegate_planner | commander | Delegate planning tasks to Planner worker |
+| delegate_devops | commander | Delegate DevOps tasks to DevOps worker |
 | delegate_explorer | commander | Delegate read-only exploration tasks |
-| websearch | extensions | Web search (DuckDuckGo default, Tavily/Exa optional) |
-| webfetch | extensions | Fetch + convert web pages |
-| attempt_completion | extensions | Finish task with summary |
-| plan_enter | extensions | Enter plan mode |
-| plan_exit | extensions | Exit plan mode (+ save to file) |
-| bash_background | extensions | Spawn background process, return PID |
-| bash_output | extensions | Read stdout/stderr from background PID |
-| bash_kill | extensions | Kill background process by PID |
+| **Memory (4)** | | |
 | memory_read | memory | Read a persistent memory entry |
 | memory_write | memory | Save a persistent memory entry |
 | memory_list | memory | List all memory entries |
 | memory_delete | memory | Delete a memory entry |
+| **LSP (9)** | | |
 | lsp_diagnostics | lsp | Get LSP diagnostics for a file |
 | lsp_hover | lsp | Get hover info for a symbol |
 | lsp_definition | lsp | Go to definition of a symbol |
@@ -287,10 +307,17 @@ api.registerAgentMode(myMode)
 | lsp_rename | lsp | Rename a symbol across files |
 | lsp_references | lsp | Find all references to a symbol |
 | lsp_completions | lsp | Get completion suggestions |
+| **Git (4)** | | |
 | create_pr | git | Create GitHub pull request via `gh` |
 | create_branch | git | Create and switch to new git branch |
 | switch_branch | git | Switch to existing git branch |
 | read_issue | git | Read GitHub issue details via `gh` |
+| **Other (7)** | | |
+| diff_review | diff | Per-hunk diff review (list/accept/reject/apply) |
+| sandbox_run | sandbox | Execute code in OS-level sandbox (bwrap/docker) |
+| profile_save | profiles | Save or update an agent profile |
+| profile_load | profiles | Load and activate an agent profile |
+| profile_list | profiles | List built-in and saved agent profiles |
 | load_skill | skills | Load a skill by name for the agent |
 | recall | recall | Full-text search across past sessions |
 
@@ -340,6 +367,7 @@ Plugins bundle skills + commands + hooks + MCP servers into a single installable
 - Core tsconfig excludes test files from build: `"exclude": ["src/**/*.test.ts"]`
 - `export *` from multiple modules can cause name collisions — use `as` renames
 - Platform abstraction: never use `node:fs` directly — use `getPlatform().fs`
+- **Reference code is local** — When the user asks to look at another codebase or how other tools handle features (OpenCode, Cline, Gemini CLI, etc.), ALWAYS check `docs/reference-code/` and `docs/research/` first. Do NOT search the internet for source code unless the user specifically asks. The local copies are the authoritative reference
 
 ---
 
@@ -376,3 +404,9 @@ Plugins bundle skills + commands + hooks + MCP servers into a single installable
 | commitlint | Conventional commit validation |
 | Vitest | Test runner |
 | Knip | Dead code finder |
+
+---
+
+## SOTA Models for Testing
+
+See [`docs/testing-models.md`](docs/testing-models.md) for the full model table with IDs for OpenRouter testing.

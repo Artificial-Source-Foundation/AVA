@@ -40,6 +40,15 @@ export function resolveApproval(approved: boolean): void {
   }
 }
 
+// ─── Permission Mode ─────────────────────────────────────────────────────────
+
+let _permissionMode: 'ask' | 'auto-approve' | 'bypass' = 'ask'
+
+/** Set the current permission mode (called from settings sync) */
+export function setPermissionMode(mode: 'ask' | 'auto-approve' | 'bypass'): void {
+  _permissionMode = mode
+}
+
 // ─── Auto-Approval Check ────────────────────────────────────────────────────
 
 let _isToolAutoApproved: (name: string) => boolean = () => false
@@ -62,6 +71,14 @@ export function createApprovalMiddleware(): ToolMiddleware {
     name: 'desktop-approval',
     priority: 5,
     async before(ctx: ToolMiddlewareContext): Promise<ToolMiddlewareResult | undefined> {
+      // Bypass mode skips ALL approval checks
+      if (_permissionMode === 'bypass') return undefined
+
+      // Auto-approve mode: allow reads + writes + known tools, only prompt for bash
+      if (_permissionMode === 'auto-approve') {
+        if (ctx.toolName !== 'bash') return undefined
+      }
+
       // Check auto-approval first
       const autoResult = checkAutoApproval(ctx.toolName, ctx.args, _isToolAutoApproved)
       if (autoResult.approved) return undefined

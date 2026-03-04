@@ -6,7 +6,7 @@
  * Includes tool approval dialog for agent mode.
  */
 
-import { type Component, createEffect, createMemo, on, onCleanup } from 'solid-js'
+import { type Component, createEffect, createMemo, on, onCleanup, Show } from 'solid-js'
 import { useNotification } from '../../contexts/notification'
 import { useAgent } from '../../hooks/useAgent'
 import { useChat } from '../../hooks/useChat'
@@ -20,17 +20,21 @@ import { startFileWatcher, stopFileWatcher } from '../../services/file-watcher'
 import { logInfo } from '../../services/logger'
 import { useProject } from '../../stores/project'
 import { useSettings } from '../../stores/settings'
+import { useTeam } from '../../stores/team'
 import { ApprovalDock } from './ApprovalDock'
 import { GitControlStrip } from './GitControlStrip'
 import { MessageInput } from './MessageInput'
 import { MessageList } from './MessageList'
 import { MessageQueueBar } from './MessageQueueBar'
+import { TeamChatView } from './TeamChatView'
+import { TeamStatusStrip } from './TeamStatusStrip'
 
 export const ChatView: Component = () => {
   const { settings, addAutoApprovedTool } = useSettings()
   const { currentProject } = useProject()
   const agent = useAgent()
   const chat = useChat()
+  const team = useTeam()
 
   // File watcher — start/stop based on settings + project directory
   const handleAIComment = (comment: AIComment) => {
@@ -113,25 +117,38 @@ export const ChatView: Component = () => {
   }
 
   return (
-    <div class="flex flex-col h-full min-h-0 bg-[var(--surface)]">
-      {/* Messages area */}
-      <MessageList />
+    <Show
+      when={!team.selectedMemberId()}
+      fallback={
+        <TeamChatView
+          onStopAgent={(id) => agent.stopAgent(id)}
+          onSendMessage={(id, msg) => agent.sendTeamMessage(id, msg)}
+        />
+      }
+    >
+      <div class="flex flex-col h-full min-h-0 bg-[var(--surface)]">
+        {/* Messages area */}
+        <MessageList />
 
-      {/* Inline tool approval dock */}
-      <ApprovalDock request={activeApproval()} onResolve={handleApprovalResolve} />
+        {/* Inline tool approval dock */}
+        <ApprovalDock request={activeApproval()} onResolve={handleApprovalResolve} />
 
-      {/* Queued messages indicator */}
-      <MessageQueueBar
-        messages={chat.messageQueue()}
-        onRemove={(i) => chat.removeFromQueue(i)}
-        onClear={() => chat.clearQueue()}
-      />
+        {/* Queued messages indicator */}
+        <MessageQueueBar
+          messages={chat.messageQueue()}
+          onRemove={(i) => chat.removeFromQueue(i)}
+          onClear={() => chat.clearQueue()}
+        />
 
-      {/* Git controls + usage entry point */}
-      <GitControlStrip />
+        {/* Team status strip (visible when team is active) */}
+        <TeamStatusStrip />
 
-      {/* Input area */}
-      <MessageInput />
-    </div>
+        {/* Git controls + usage entry point */}
+        <GitControlStrip />
+
+        {/* Input area */}
+        <MessageInput />
+      </div>
+    </Show>
   )
 }

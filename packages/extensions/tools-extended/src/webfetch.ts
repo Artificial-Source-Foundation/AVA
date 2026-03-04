@@ -135,15 +135,7 @@ export function truncateContent(
 
 export const webfetchTool = defineTool({
   name: 'webfetch',
-  description: `Fetch and extract content from a web page.
-
-Use this tool when you need to:
-- Read documentation from a URL
-- Extract content from a specific web page
-- Get information from a known URL
-
-The tool fetches the page, converts HTML to readable markdown, and returns the content.
-Note: Some sites may block automated requests or require authentication.`,
+  description: 'Fetch a web page and extract content as markdown.',
 
   schema: z.object({
     url: z.string().describe('The URL to fetch'),

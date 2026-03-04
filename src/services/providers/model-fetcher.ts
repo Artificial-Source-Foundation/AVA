@@ -406,6 +406,52 @@ function getAnthropicModels(): FetchedModel[] {
 }
 
 /**
+ * Get Alibaba Cloud Model Studio coding plan models (documented, no API)
+ */
+function getAlibabaModels(): FetchedModel[] {
+  return [
+    {
+      id: 'qwen3.5-plus',
+      name: 'Qwen3.5 Plus',
+      contextWindow: 1000000,
+      capabilities: ['tools', 'reasoning', 'vision'],
+    },
+    {
+      id: 'qwen3-max-2026-01-23',
+      name: 'Qwen3 Max',
+      contextWindow: 1000000,
+      capabilities: ['tools', 'reasoning'],
+    },
+    {
+      id: 'qwen3-coder-next',
+      name: 'Qwen3 Coder Next',
+      contextWindow: 262144,
+      capabilities: ['tools'],
+    },
+    {
+      id: 'qwen3-coder-plus',
+      name: 'Qwen3 Coder Plus',
+      contextWindow: 1000000,
+      capabilities: ['tools'],
+    },
+    { id: 'glm-5', name: 'GLM-5', contextWindow: 128000, capabilities: ['tools', 'reasoning'] },
+    { id: 'glm-4.7', name: 'GLM-4.7', contextWindow: 128000, capabilities: ['tools', 'reasoning'] },
+    {
+      id: 'kimi-k2.5',
+      name: 'Kimi K2.5',
+      contextWindow: 131072,
+      capabilities: ['tools', 'reasoning', 'vision'],
+    },
+    {
+      id: 'MiniMax-M2.5',
+      name: 'MiniMax M2.5',
+      contextWindow: 1000000,
+      capabilities: ['tools', 'reasoning'],
+    },
+  ]
+}
+
+/**
  * Fetch models from Google AI (Generative Language API)
  */
 async function fetchGoogleModels(apiKey: string): Promise<FetchedModel[]> {
@@ -611,29 +657,129 @@ export async function fetchModels(
         // OpenAI
         { id: 'gpt-4.1', name: 'GPT-4.1', contextWindow: 64000, capabilities: ['vision', 'tools'] },
         { id: 'gpt-4o', name: 'GPT-4o', contextWindow: 64000, capabilities: ['vision', 'tools'] },
-        { id: 'gpt-5', name: 'GPT-5', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
-        { id: 'gpt-5-mini', name: 'GPT-5 Mini', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
-        { id: 'gpt-5.1', name: 'GPT-5.1', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
-        { id: 'gpt-5.1-codex', name: 'GPT-5.1 Codex', contextWindow: 128000, capabilities: ['tools', 'reasoning'] },
-        { id: 'gpt-5.1-codex-max', name: 'GPT-5.1 Codex Max', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
-        { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini', contextWindow: 128000, capabilities: ['tools', 'reasoning'] },
-        { id: 'gpt-5.2', name: 'GPT-5.2', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
-        { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex', contextWindow: 272000, capabilities: ['tools', 'reasoning'] },
+        {
+          id: 'gpt-5',
+          name: 'GPT-5',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools', 'reasoning'],
+        },
+        {
+          id: 'gpt-5-mini',
+          name: 'GPT-5 Mini',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools', 'reasoning'],
+        },
+        {
+          id: 'gpt-5.1',
+          name: 'GPT-5.1',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools', 'reasoning'],
+        },
+        {
+          id: 'gpt-5.1-codex',
+          name: 'GPT-5.1 Codex',
+          contextWindow: 128000,
+          capabilities: ['tools', 'reasoning'],
+        },
+        {
+          id: 'gpt-5.1-codex-max',
+          name: 'GPT-5.1 Codex Max',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools', 'reasoning'],
+        },
+        {
+          id: 'gpt-5.1-codex-mini',
+          name: 'GPT-5.1 Codex Mini',
+          contextWindow: 128000,
+          capabilities: ['tools', 'reasoning'],
+        },
+        {
+          id: 'gpt-5.2',
+          name: 'GPT-5.2',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools', 'reasoning'],
+        },
+        {
+          id: 'gpt-5.2-codex',
+          name: 'GPT-5.2 Codex',
+          contextWindow: 272000,
+          capabilities: ['tools', 'reasoning'],
+        },
         // Anthropic
-        { id: 'claude-haiku-4.5', name: 'Claude Haiku 4.5', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
-        { id: 'claude-sonnet-4', name: 'Claude Sonnet 4', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
-        { id: 'claude-sonnet-4.5', name: 'Claude Sonnet 4.5', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
-        { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
-        { id: 'claude-opus-41', name: 'Claude Opus 4.1', contextWindow: 80000, capabilities: ['vision', 'reasoning'] },
-        { id: 'claude-opus-4.5', name: 'Claude Opus 4.5', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
-        { id: 'claude-opus-4.6', name: 'Claude Opus 4.6', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        {
+          id: 'claude-haiku-4.5',
+          name: 'Claude Haiku 4.5',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools', 'reasoning'],
+        },
+        {
+          id: 'claude-sonnet-4',
+          name: 'Claude Sonnet 4',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools', 'reasoning'],
+        },
+        {
+          id: 'claude-sonnet-4.5',
+          name: 'Claude Sonnet 4.5',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools', 'reasoning'],
+        },
+        {
+          id: 'claude-sonnet-4.6',
+          name: 'Claude Sonnet 4.6',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools', 'reasoning'],
+        },
+        {
+          id: 'claude-opus-41',
+          name: 'Claude Opus 4.1',
+          contextWindow: 80000,
+          capabilities: ['vision', 'reasoning'],
+        },
+        {
+          id: 'claude-opus-4.5',
+          name: 'Claude Opus 4.5',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools', 'reasoning'],
+        },
+        {
+          id: 'claude-opus-4.6',
+          name: 'Claude Opus 4.6',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools', 'reasoning'],
+        },
         // Google
-        { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', contextWindow: 128000, capabilities: ['vision', 'tools'] },
-        { id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
-        { id: 'gemini-3-pro-preview', name: 'Gemini 3 Pro', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
-        { id: 'gemini-3.1-pro-preview', name: 'Gemini 3.1 Pro', contextWindow: 128000, capabilities: ['vision', 'tools', 'reasoning'] },
+        {
+          id: 'gemini-2.5-pro',
+          name: 'Gemini 2.5 Pro',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools'],
+        },
+        {
+          id: 'gemini-3-flash-preview',
+          name: 'Gemini 3 Flash',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools', 'reasoning'],
+        },
+        {
+          id: 'gemini-3-pro-preview',
+          name: 'Gemini 3 Pro',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools', 'reasoning'],
+        },
+        {
+          id: 'gemini-3.1-pro-preview',
+          name: 'Gemini 3.1 Pro',
+          contextWindow: 128000,
+          capabilities: ['vision', 'tools', 'reasoning'],
+        },
         // xAI
-        { id: 'grok-code-fast-1', name: 'Grok Code Fast 1', contextWindow: 128000, capabilities: ['tools', 'reasoning'] },
+        {
+          id: 'grok-code-fast-1',
+          name: 'Grok Code Fast 1',
+          contextWindow: 128000,
+          capabilities: ['tools', 'reasoning'],
+        },
       ]
 
     case 'openrouter':
@@ -699,6 +845,11 @@ export async function fetchModels(
       }
       return catalogModelsToFetched(getModelsDevModels('glm'))
 
+    case 'alibaba':
+      // Alibaba coding plan uses Anthropic-compatible API — no model list endpoint.
+      // Return documented models from the coding plan.
+      return getAlibabaModels()
+
     case 'ollama':
       try {
         return await fetchOllamaModels(options.baseUrl)
@@ -719,7 +870,9 @@ function catalogModelsToFetched(models: ProviderModel[]): FetchedModel[] {
     id: m.id,
     name: m.name,
     contextWindow: m.contextWindow,
-    ...(m.pricing && { pricing: { prompt: m.pricing.input ?? 0, completion: m.pricing.output ?? 0 } }),
+    ...(m.pricing && {
+      pricing: { prompt: m.pricing.input ?? 0, completion: m.pricing.output ?? 0 },
+    }),
     ...(m.capabilities?.length && { capabilities: m.capabilities }),
   }))
 }
@@ -733,10 +886,7 @@ function catalogModelsToFetched(models: ProviderModel[]): FetchedModel[] {
  * Fills gaps (contextWindow=4096, missing pricing/capabilities) without
  * overriding values the provider API already provides.
  */
-export function enrichWithCatalog(
-  provider: LLMProvider,
-  fetched: FetchedModel[]
-): FetchedModel[] {
+export function enrichWithCatalog(provider: LLMProvider, fetched: FetchedModel[]): FetchedModel[] {
   return fetched.map((model) => {
     const catalogEntry = getModelFromCatalog(model.id, provider)
     if (!catalogEntry) return model

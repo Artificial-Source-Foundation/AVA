@@ -583,11 +583,11 @@ export const AppearanceTab: Component = () => {
                 title={`${preset.name} (${preset.mode})`}
               >
                 <div
-                  class="w-5 h-5 rounded-full flex-shrink-0 border border-[var(--border-default)]"
-                  style={{
-                    background: `linear-gradient(135deg, ${preset.swatch} 50%, ${preset.swatchAlt} 50%)`,
-                  }}
-                />
+                  class="w-5 h-5 rounded-full flex-shrink-0 border border-[var(--border-subtle)] flex items-center justify-center"
+                  style={{ background: preset.swatchAlt }}
+                >
+                  <div class="w-2.5 h-2.5 rounded-full" style={{ background: preset.swatch }} />
+                </div>
                 <div class="min-w-0">
                   <p class="text-[10px] font-medium text-[var(--text-primary)] truncate">
                     {preset.name}

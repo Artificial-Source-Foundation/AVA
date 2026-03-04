@@ -3,7 +3,7 @@
  * Global state management for sessions, messages, and agents
  */
 
-import { createMemo, createSignal } from 'solid-js'
+import { createMemo, createRoot, createSignal } from 'solid-js'
 import { DEFAULTS, STORAGE_KEYS } from '../config/constants'
 import { getCoreBudget, notifySessionOpened } from '../services/core-bridge'
 import {
@@ -59,136 +59,227 @@ import { useProject } from './project'
 import { getLastSessionForProject, setLastSessionForProject } from './session-persistence'
 
 // ============================================================================
-// Session State
+// Session State — wrapped in createRoot to avoid "cleanups outside createRoot" warnings
 // ============================================================================
 
-// Current active session
-const [currentSession, setCurrentSession] = createSignal<Session | null>(null)
-
-// All sessions (for sidebar)
-const [sessions, setSessions] = createSignal<SessionWithStats[]>([])
-const [isLoadingSessions, setIsLoadingSessions] = createSignal(false)
-
-// Messages in current session
-const [messages, setMessages] = createSignal<Message[]>([])
-const [isLoadingMessages, setIsLoadingMessages] = createSignal(false)
-
-// Agents in current session
-const [agents, setAgents] = createSignal<Agent[]>([])
-
-// File operations in current session
-const [fileOperations, setFileOperations] = createSignal<FileOperation[]>([])
-
-// Terminal executions in current session
-const [terminalExecutions, setTerminalExecutions] = createSignal<TerminalExecution[]>([])
-
-// Memory/context items in current session
-const [memoryItems, setMemoryItems] = createSignal<MemoryItem[]>([])
-
-// Archived sessions (lazy-loaded)
-const [archivedSessions, setArchivedSessions] = createSignal<SessionWithStats[]>([])
-
-// Busy session IDs (tracked from session:status events)
-const [busySessionIds, setBusySessionIds] = createSignal<Set<string>>(new Set())
-
-// Listen for session busy/idle events from core-v2
-if (typeof window !== 'undefined') {
-  window.addEventListener('ava:session-status', (e) => {
-    const { sessionId, status } = (e as CustomEvent).detail as {
-      sessionId: string
-      status: string
-    }
-    setBusySessionIds((prev) => {
-      const next = new Set(prev)
-      if (status === 'busy') next.add(sessionId)
-      else next.delete(sessionId)
-      return next
-    })
-  })
-}
-
-// Selected model for chat — persisted to localStorage
 const SELECTED_MODEL_KEY = 'ava_selected_model'
-const savedModel =
-  typeof localStorage !== 'undefined' ? localStorage.getItem(SELECTED_MODEL_KEY) : null
-const [selectedModel, _setSelectedModel] = createSignal<string>(savedModel || DEFAULTS.MODEL)
-const setSelectedModel = (model: string) => {
-  _setSelectedModel(model)
-  try {
-    localStorage.setItem(SELECTED_MODEL_KEY, model)
-  } catch {
-    /* noop */
-  }
-}
-
-// Checkpoints
-const [checkpoints, setCheckpoints] = createSignal<
-  Array<{ id: string; timestamp: number; description: string; messageCount: number }>
->([])
-
-// UI state
-const [retryingMessageId, setRetryingMessageId] = createSignal<string | null>(null)
-const [editingMessageId, setEditingMessageId] = createSignal<string | null>(null)
-
-// Background plan execution — plan runs in background while user continues working
-const [backgroundPlanActive, setBackgroundPlanActive] = createSignal(false)
-const [backgroundPlanProgress, setBackgroundPlanProgress] = createSignal('')
-
-// Read-only file context — files attached to context but protected from edits
-const [readOnlyFiles, setReadOnlyFiles] = createSignal<string[]>([])
-
-// ============================================================================
-// Computed Values
-// ============================================================================
-
-// Session token statistics
-const sessionTokenStats = createMemo((): SessionTokenStats => {
-  return messages().reduce(
-    (stats, msg) => ({
-      total: stats.total + (msg.tokensUsed || 0),
-      count: stats.count + (msg.tokensUsed ? 1 : 0),
-      totalCost: stats.totalCost + (msg.costUSD || 0),
-    }),
-    { total: 0, count: 0, totalCost: 0 }
-  )
-})
-
-// Reactive trigger for context budget updates (from agent events + manual sync)
-const [budgetTick, setBudgetTick] = createSignal(0)
-// Listen for budget updates dispatched by core-bridge context sync
-if (typeof window !== 'undefined') {
-  window.addEventListener('ava:budget-updated', () => setBudgetTick((n) => n + 1))
-  window.addEventListener('ava:core-settings-changed', (e) => {
-    if ((e as CustomEvent).detail?.category === 'context') setBudgetTick((n) => n + 1)
-  })
-}
-
-// Context window usage — uses core budget when available, falls back to rough estimate
+const SELECTED_PROVIDER_KEY = 'ava_selected_provider'
 const DEFAULT_CONTEXT_WINDOW = 200000
-const contextUsage = createMemo(() => {
-  budgetTick() // reactive dependency — triggers recalc on budget/context events
-  const budget = getCoreBudget()
-  if (budget) {
-    const s = budget.getStats()
-    return { used: s.total, total: s.limit, percentage: s.percentUsed }
-  }
-  // Fallback: rough estimate (~4 chars per token)
-  const estimated = messages().reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0)
-  return {
-    used: estimated,
-    total: DEFAULT_CONTEXT_WINDOW,
-    percentage: Math.min(100, (estimated / DEFAULT_CONTEXT_WINDOW) * 100),
-  }
-})
 
-// Agent statistics
-const agentStats = createMemo(() => {
-  const all = agents()
+const {
+  currentSession,
+  setCurrentSession,
+  sessions,
+  setSessions,
+  isLoadingSessions,
+  setIsLoadingSessions,
+  messages,
+  setMessages,
+  isLoadingMessages,
+  setIsLoadingMessages,
+  agents,
+  setAgents,
+  fileOperations,
+  setFileOperations,
+  terminalExecutions,
+  setTerminalExecutions,
+  memoryItems,
+  setMemoryItems,
+  archivedSessions,
+  setArchivedSessions,
+  busySessionIds,
+  selectedModel,
+  selectedProvider,
+  setSelectedModel,
+  checkpoints,
+  setCheckpoints,
+  retryingMessageId,
+  setRetryingMessageId,
+  editingMessageId,
+  setEditingMessageId,
+  backgroundPlanActive,
+  setBackgroundPlanActive,
+  backgroundPlanProgress,
+  setBackgroundPlanProgress,
+  readOnlyFiles,
+  setReadOnlyFiles,
+  sessionTokenStats,
+  contextUsage,
+  agentStats,
+} = createRoot(() => {
+  // Current active session
+  const [currentSession, setCurrentSession] = createSignal<Session | null>(null)
+
+  // All sessions (for sidebar)
+  const [sessions, setSessions] = createSignal<SessionWithStats[]>([])
+  const [isLoadingSessions, setIsLoadingSessions] = createSignal(false)
+
+  // Messages in current session
+  const [messages, setMessages] = createSignal<Message[]>([])
+  const [isLoadingMessages, setIsLoadingMessages] = createSignal(false)
+
+  // Agents in current session
+  const [agents, setAgents] = createSignal<Agent[]>([])
+
+  // File operations in current session
+  const [fileOperations, setFileOperations] = createSignal<FileOperation[]>([])
+
+  // Terminal executions in current session
+  const [terminalExecutions, setTerminalExecutions] = createSignal<TerminalExecution[]>([])
+
+  // Memory/context items in current session
+  const [memoryItems, setMemoryItems] = createSignal<MemoryItem[]>([])
+
+  // Archived sessions (lazy-loaded)
+  const [archivedSessions, setArchivedSessions] = createSignal<SessionWithStats[]>([])
+
+  // Busy session IDs (tracked from session:status events)
+  const [busySessionIds, setBusySessionIds] = createSignal<Set<string>>(new Set())
+
+  // Listen for session busy/idle events from core-v2
+  if (typeof window !== 'undefined') {
+    window.addEventListener('ava:session-status', (e) => {
+      const { sessionId, status } = (e as CustomEvent).detail as {
+        sessionId: string
+        status: string
+      }
+      setBusySessionIds((prev) => {
+        const next = new Set(prev)
+        if (status === 'busy') next.add(sessionId)
+        else next.delete(sessionId)
+        return next
+      })
+    })
+  }
+
+  // Selected model for chat — persisted to localStorage
+  const savedModel =
+    typeof localStorage !== 'undefined' ? localStorage.getItem(SELECTED_MODEL_KEY) : null
+  const savedProvider =
+    typeof localStorage !== 'undefined' ? localStorage.getItem(SELECTED_PROVIDER_KEY) : null
+  const [selectedModel, _setSelectedModel] = createSignal<string>(savedModel || DEFAULTS.MODEL)
+  const [selectedProvider, _setSelectedProvider] = createSignal<string | null>(savedProvider)
+  const setSelectedModel = (model: string, providerId?: string) => {
+    _setSelectedModel(model)
+    _setSelectedProvider(providerId ?? null)
+    try {
+      localStorage.setItem(SELECTED_MODEL_KEY, model)
+      if (providerId) localStorage.setItem(SELECTED_PROVIDER_KEY, providerId)
+      else localStorage.removeItem(SELECTED_PROVIDER_KEY)
+    } catch {
+      /* noop */
+    }
+  }
+
+  // Checkpoints
+  const [checkpoints, setCheckpoints] = createSignal<
+    Array<{ id: string; timestamp: number; description: string; messageCount: number }>
+  >([])
+
+  // UI state
+  const [retryingMessageId, setRetryingMessageId] = createSignal<string | null>(null)
+  const [editingMessageId, setEditingMessageId] = createSignal<string | null>(null)
+
+  // Background plan execution — plan runs in background while user continues working
+  const [backgroundPlanActive, setBackgroundPlanActive] = createSignal(false)
+  const [backgroundPlanProgress, setBackgroundPlanProgress] = createSignal('')
+
+  // Read-only file context — files attached to context but protected from edits
+  const [readOnlyFiles, setReadOnlyFiles] = createSignal<string[]>([])
+
+  // Computed Values
+  const sessionTokenStats = createMemo((): SessionTokenStats => {
+    return messages().reduce(
+      (stats, msg) => ({
+        total: stats.total + (msg.tokensUsed || 0),
+        count: stats.count + (msg.tokensUsed ? 1 : 0),
+        totalCost: stats.totalCost + (msg.costUSD || 0),
+      }),
+      { total: 0, count: 0, totalCost: 0 }
+    )
+  })
+
+  // Reactive trigger for context budget updates (from agent events + manual sync)
+  const [budgetTick, setBudgetTick] = createSignal(0)
+  // Listen for budget updates dispatched by core-bridge context sync
+  if (typeof window !== 'undefined') {
+    window.addEventListener('ava:budget-updated', () => setBudgetTick((n) => n + 1))
+    window.addEventListener('ava:core-settings-changed', (e) => {
+      if ((e as CustomEvent).detail?.category === 'context') setBudgetTick((n) => n + 1)
+    })
+  }
+
+  // Context window usage — uses core budget when available, falls back to rough estimate
+  const contextUsage = createMemo(() => {
+    budgetTick() // reactive dependency — triggers recalc on budget/context events
+    const budget = getCoreBudget()
+    if (budget) {
+      const s = budget.getStats()
+      return { used: s.total, total: s.limit, percentage: s.percentUsed }
+    }
+    // Fallback: rough estimate (~4 chars per token)
+    const estimated = messages().reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0)
+    return {
+      used: estimated,
+      total: DEFAULT_CONTEXT_WINDOW,
+      percentage: Math.min(100, (estimated / DEFAULT_CONTEXT_WINDOW) * 100),
+    }
+  })
+
+  // Agent statistics
+  const agentStats = createMemo(() => {
+    const all = agents()
+    return {
+      running: all.filter((a) => a.status === 'thinking' || a.status === 'executing').length,
+      completed: all.filter((a) => a.status === 'completed').length,
+      error: all.filter((a) => a.status === 'error').length,
+      total: all.length,
+    }
+  })
+
   return {
-    running: all.filter((a) => a.status === 'thinking' || a.status === 'executing').length,
-    completed: all.filter((a) => a.status === 'completed').length,
-    error: all.filter((a) => a.status === 'error').length,
-    total: all.length,
+    currentSession,
+    setCurrentSession,
+    sessions,
+    setSessions,
+    isLoadingSessions,
+    setIsLoadingSessions,
+    messages,
+    setMessages,
+    isLoadingMessages,
+    setIsLoadingMessages,
+    agents,
+    setAgents,
+    fileOperations,
+    setFileOperations,
+    terminalExecutions,
+    setTerminalExecutions,
+    memoryItems,
+    setMemoryItems,
+    archivedSessions,
+    setArchivedSessions,
+    busySessionIds,
+    setBusySessionIds,
+    selectedModel,
+    selectedProvider,
+    setSelectedModel,
+    checkpoints,
+    setCheckpoints,
+    retryingMessageId,
+    setRetryingMessageId,
+    editingMessageId,
+    setEditingMessageId,
+    backgroundPlanActive,
+    setBackgroundPlanActive,
+    backgroundPlanProgress,
+    setBackgroundPlanProgress,
+    readOnlyFiles,
+    setReadOnlyFiles,
+    sessionTokenStats,
+    budgetTick,
+    setBudgetTick,
+    contextUsage,
+    agentStats,
   }
 })
 
@@ -217,6 +308,7 @@ export function useSession() {
     memoryItems,
     setMemoryItems,
     selectedModel,
+    selectedProvider,
     setSelectedModel,
     retryingMessageId,
     editingMessageId,

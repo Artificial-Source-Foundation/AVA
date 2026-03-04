@@ -84,6 +84,8 @@ vi.mock('@ava/core-v2/agent', () => ({
       }
     }
   },
+  registerExecutor: vi.fn(),
+  unregisterExecutor: vi.fn(),
 }))
 
 // Mock worktree module
@@ -120,12 +122,24 @@ function createMockContext(overrides?: Partial<ToolContext>): ToolContext {
 }
 
 describe('resolveTools', () => {
-  it('strips delegate_ tools from workers', () => {
+  it('allows delegate_ tools for workers within depth limit', () => {
     const worker: AgentDefinition = {
       ...CODER,
       tools: [...CODER.tools, 'delegate_tester'],
     }
-    const tools = resolveTools(worker)
+    // At default depth (0), workers keep delegate_ tools
+    const tools = resolveTools(worker, 0)
+    expect(tools).toContain('delegate_tester')
+    expect(tools).toContain('read_file')
+  })
+
+  it('strips delegate_ tools at max depth', () => {
+    const worker: AgentDefinition = {
+      ...CODER,
+      tools: [...CODER.tools, 'delegate_tester'],
+    }
+    // At max depth (3), delegate_ tools are stripped
+    const tools = resolveTools(worker, 3)
     expect(tools).not.toContain('delegate_tester')
     expect(tools).toContain('read_file')
   })

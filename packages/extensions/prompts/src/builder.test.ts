@@ -53,15 +53,16 @@ describe('Prompt Builder', () => {
     resetPromptSections()
     addPromptSection({ name: 'base', priority: 0, content: 'Base prompt' })
     const prompt = buildSystemPrompt('gpt-4o')
-    expect(prompt).toContain('function calling')
-    expect(prompt).toContain('ACTUALLY call the tool')
+    expect(prompt).toContain('CALL THE TOOLS')
+    expect(prompt).toContain('ACTUALLY make the tool call')
   })
 
-  it('does not append family section for unknown models', () => {
+  it('appends fallback directives for unknown models', () => {
     resetPromptSections()
     addPromptSection({ name: 'base', priority: 0, content: 'Base prompt' })
     const prompt = buildSystemPrompt('qwen-72b')
-    expect(prompt).toBe('Base prompt')
+    expect(prompt).toContain('Base prompt')
+    expect(prompt).toContain('Use your tools')
   })
 
   it('does not append family section when no model is provided', () => {
@@ -78,5 +79,17 @@ describe('Prompt Builder', () => {
     const sections = getPromptSections()
     expect(sections).toHaveLength(2)
     expect(sections[0]!.name).toBe('b') // Lower priority first
+  })
+
+  it('deduplicates sections with same name', () => {
+    resetPromptSections()
+    addPromptSection({ name: 'instructions', priority: 5, content: 'Version 1' })
+    addPromptSection({ name: 'instructions', priority: 5, content: 'Version 2' })
+    addPromptSection({ name: 'instructions', priority: 5, content: 'Version 3' })
+    const sections = getPromptSections()
+    expect(sections).toHaveLength(1)
+    expect(sections[0]!.content).toBe('Version 3')
+    expect(buildSystemPrompt()).not.toContain('Version 1')
+    expect(buildSystemPrompt()).toContain('Version 3')
   })
 })

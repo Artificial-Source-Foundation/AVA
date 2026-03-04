@@ -2,10 +2,11 @@
  * glob tool — find files by pattern.
  */
 
+import * as nodePath from 'node:path'
 import * as z from 'zod'
 import { getPlatform } from '../platform.js'
 import { defineTool } from './define.js'
-import { LIMITS, resolvePath } from './utils.js'
+import { LIMITS, resolvePath, shouldSkipDirectory } from './utils.js'
 
 const schema = z.object({
   pattern: z.string().describe('Glob pattern (e.g., "**/*.ts", "src/**/*.tsx")'),
@@ -26,8 +27,18 @@ export const globTool = defineTool({
       : ctx.workingDirectory
 
     const paths = await fs.glob(input.pattern, searchDir)
-    const truncated = paths.length > LIMITS.MAX_RESULTS
-    const limited = paths.slice(0, LIMITS.MAX_RESULTS)
+    const filteredPaths = paths.filter((absolutePath) => {
+      const relativePath = nodePath.relative(searchDir, absolutePath)
+      if (!relativePath || relativePath.startsWith('..')) {
+        return false
+      }
+
+      const segments = relativePath.split(nodePath.sep).filter(Boolean)
+      return !segments.some((segment) => shouldSkipDirectory(segment))
+    })
+
+    const truncated = filteredPaths.length > LIMITS.MAX_RESULTS
+    const limited = filteredPaths.slice(0, LIMITS.MAX_RESULTS)
     const matches: Array<{ path: string; mtime: number }> = []
 
     for (const path of limited) {

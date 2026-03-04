@@ -9,7 +9,7 @@ import {
   pushCurrentBranch,
   switchBranch,
 } from '../../services/git-actions'
-import { logError, logInfo } from '../../services/logger'
+import { logInfo, logWarn } from '../../services/logger'
 import { useProject } from '../../stores/project'
 import { useSession } from '../../stores/session'
 import { UsageDetailsDialog } from './UsageDetailsDialog'
@@ -63,7 +63,7 @@ export const GitControlStrip: Component = () => {
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Git action failed'
       setError(message)
-      logError('git-strip', 'Git action failed', { action, message })
+      logWarn('git-strip', `Git ${action} failed: ${message}`)
     } finally {
       setActiveAction(null)
       statusTimer = setTimeout(() => {
@@ -75,7 +75,7 @@ export const GitControlStrip: Component = () => {
 
   const loadBranches = async () => {
     const dir = projectDir()
-    if (!dir || dir === '~') {
+    if (!dir || dir === '~' || !isGitProject()) {
       setBranches([])
       return
     }

@@ -73,17 +73,9 @@ export function activate(api: ExtensionAPI): Disposable {
     description: 'Praxis mode: 3-tier hierarchy (Commander → Leads → Workers)',
 
     filterTools(tools: ToolDefinition[]): ToolDefinition[] {
-      // Commander only gets delegate tools + meta tools (question, attempt_completion)
-      const delegateToolNames = new Set<string>()
-      const commander = getAgent('commander')
-      if (commander?.delegates) {
-        for (const id of commander.delegates) {
-          delegateToolNames.add(`delegate_${id}`)
-        }
-      }
-      const metaTools = new Set(['question', 'attempt_completion', 'todoread', 'todowrite'])
-
-      return tools.filter((t) => delegateToolNames.has(t.name) || metaTools.has(t.name))
+      // Keep ALL tools — commander handles simple tasks directly.
+      // Delegate tools (delegate_*) are already registered and included in `tools`.
+      return tools
     },
 
     systemPrompt(base: string): string {
@@ -122,10 +114,22 @@ function buildCommanderPrompt(): string {
 
   const workerSummary = formatAgentTable(workers)
 
-  return `## Praxis — 3-Tier Agent Hierarchy
+  return `## Praxis — Tiered Agent Hierarchy
 
-You are the **Commander**. You plan and coordinate — you never write code directly.
-Your only tools are delegate tools, question, and attempt_completion.
+You are the **Commander**. You have full tool access AND can delegate to specialized leads/workers.
+
+### Task Complexity Assessment
+
+**Simple tasks** (read a file, answer a question, small edit, 1-2 files):
+- Handle directly with your tools. Do NOT delegate.
+
+**Medium tasks** (multi-file changes in a single domain, 3-5 files):
+- Delegate to the appropriate lead (\`delegate_frontend-lead\`, \`delegate_backend-lead\`, etc.)
+
+**Complex tasks** (multi-domain, architectural, 5+ files):
+- Use \`delegate_planner\` first, then delegate to multiple leads.
+
+**Default to handling it yourself** unless the task clearly needs delegation.
 
 ### Available Leads
 
@@ -135,31 +139,13 @@ ${leadList}
 
 ${workerSummary}
 
-### Planning Protocol
-
-For complex tasks (3+ files, multiple domains):
-1. Call \`delegate_planner\` with the full task description
-2. Review the returned plan
-3. Call \`delegate_architect\` to validate the plan (optional)
-4. Delegate subtasks to the appropriate leads
-
-For simple tasks (1-2 files, single domain):
-- Delegate directly to the appropriate lead
-
 ### Delegation Rules
 
-- **Commander** → delegates to **Leads** (and planner/architect for planning)
-- **Leads** → delegate to their **Workers**
+- **Commander** → handles simple tasks directly, delegates medium/complex to **Leads**
+- **Leads** → delegate to their **Workers** for subtasks
 - **Workers** → execute tasks directly (no delegation)
 - Each agent may use a different model for cost optimization
-- Review results from leads before completing
-
-### Tips
-
-- Use \`delegate_planner\` to break complex tasks into subtasks
-- Use \`delegate_architect\` to validate architectural decisions
-- Prefer \`delegate_fullstack-lead\` for cross-cutting tasks
-- Prefer specific leads (\`delegate_frontend-lead\`, \`delegate_backend-lead\`) when the domain is clear`
+- Review results from leads before completing`
 }
 
 function formatAgentTable(agents: AgentDefinition[]): string {

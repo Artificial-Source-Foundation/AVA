@@ -7,11 +7,19 @@ const h = vi.hoisted(() => {
   const settingsState = {
     generation: {
       customInstructions: '',
+      delegationEnabled: false,
+      reasoningEffort: 'off' as const,
     },
     behavior: {
-      autoFixLint: false,
       sessionAutoTitle: true,
     },
+    agentLimits: {
+      agentMaxTurns: 20,
+      agentMaxTimeMinutes: 10,
+      autoFixLint: false,
+    },
+    notifications: {},
+    permissionMode: 'normal',
   }
   const tracker = {
     addMessage: vi.fn(),
@@ -23,7 +31,7 @@ const h = vi.hoisted(() => {
     messages: () => sessionMessages,
     selectedModel: () => 'openai/gpt-4o',
     currentSession: () => currentSession,
-    createSession: vi.fn(async () => ({ id: 'session-2' })),
+    createNewSession: vi.fn(async () => ({ id: 'session-2' })),
     setCurrentSession: vi.fn(),
     renameSession: vi.fn(),
     addMessage: vi.fn((message: Record<string, unknown>) => {
@@ -82,17 +90,29 @@ const h = vi.hoisted(() => {
 vi.mock('@ava/core-v2/agent', () => ({
   AgentExecutor: class {
     run = h.agentRunMock
+    steer = vi.fn()
   },
+  abortExecutor: vi.fn(),
+  registerExecutor: vi.fn(),
+  unregisterExecutor: vi.fn(),
+  generateTitle: vi.fn(async () => 'OAuth Flow Implementation'),
 }))
 
 vi.mock('@ava/core-v2/extensions', () => ({
   addToolMiddleware: vi.fn(() => ({ dispose: vi.fn() })),
+  getAgentModes: vi.fn(() => new Map()),
   onEvent: vi.fn(() => ({ dispose: vi.fn() })),
 }))
 
 vi.mock('@ava/core-v2/tools', () => ({
   executeTool: vi.fn(),
   getToolDefinitions: vi.fn(() => []),
+}))
+
+vi.mock('@ava/core-v2/platform', () => ({
+  getPlatform: vi.fn(() => ({
+    shell: { exec: vi.fn(async () => ({ exitCode: 1, stdout: '', stderr: '' })) },
+  })),
 }))
 
 vi.mock('../lib/cost', () => ({
@@ -137,10 +157,18 @@ vi.mock('../services/logger', () => ({
   logInfo: vi.fn(),
   logWarn: vi.fn(),
   logError: vi.fn(),
+  flushLogs: vi.fn(),
 }))
 
 vi.mock('../services/notifications', () => ({
   notifyCompletion: vi.fn(),
+}))
+
+vi.mock('../services/tool-approval-bridge', () => ({
+  pendingApproval: () => null,
+  resolveApproval: vi.fn(),
+  createApprovalMiddleware: vi.fn(() => ({ name: 'test', priority: 5 })),
+  setAutoApprovalChecker: vi.fn(),
 }))
 
 vi.mock('../stores/project', () => ({
@@ -160,11 +188,64 @@ vi.mock('../stores/settings', () => ({
   }),
 }))
 
+vi.mock('../stores/team', () => ({
+  useTeam: () => ({
+    clearTeam: vi.fn(),
+    teamMembers: vi.fn(() => new Map()),
+    teamLead: vi.fn(() => null),
+    seniorLeads: vi.fn(() => []),
+    selectedMemberId: vi.fn(() => null),
+    addMember: vi.fn(),
+    updateMemberStatus: vi.fn(),
+    updateMember: vi.fn(),
+    addToolCall: vi.fn(),
+    updateToolCall: vi.fn(),
+    addMessage: vi.fn(),
+    updateMessage: vi.fn(),
+    agentTypeToRole: vi.fn(() => 'team-lead'),
+    inferDomain: vi.fn(() => 'general'),
+    generateName: vi.fn(() => 'Test Agent'),
+  }),
+}))
+
+// Mock the prompt builder to avoid the 1.5s timer
+vi.mock('@ava/core-v2/config', () => ({
+  getSettingsManager: vi.fn(() => ({
+    get: vi.fn((key: string) => {
+      if (key === 'provider') {
+        return {
+          defaultProvider: 'openai',
+          defaultModel: 'gpt-4o',
+        }
+      }
+      return undefined
+    }),
+  })),
+}))
+
+vi.mock('@ava/core-v2/llm', () => ({
+  createClient: vi.fn(() => ({
+    stream: vi.fn(async function* () {
+      // Simulate streaming title generation
+      yield { content: 'OAuth Flow Implementation' }
+    }),
+  })),
+}))
+
+import { _resetAgentSingleton } from './useAgent'
 import { useChat } from './useChat'
+
+/** Flush multiple microtasks to let async code advance */
+async function flushMicrotasks(count = 10): Promise<void> {
+  for (let i = 0; i < count; i++) {
+    await Promise.resolve()
+  }
+}
 
 describe('useChat integration queue/steer/cancel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    _resetAgentSingleton()
     h.sessionMessages.length = 0
 
     h.saveMessage.mockImplementation(async (input: Record<string, unknown>) => ({
@@ -190,7 +271,7 @@ describe('useChat integration queue/steer/cancel', () => {
     const ctx = createRoot((dispose) => ({ chat: useChat(), dispose }))
 
     void ctx.chat.sendMessage('first message')
-    await Promise.resolve()
+    await flushMicrotasks()
 
     expect(ctx.chat.isStreaming()).toBe(true)
 
@@ -204,33 +285,37 @@ describe('useChat integration queue/steer/cancel', () => {
     ctx.dispose()
   })
 
-  it('steer replaces queue with a single priority message', async () => {
+  it('steer uses executor when running, falls back to queue when idle', async () => {
     const ctx = createRoot((dispose) => ({ chat: useChat(), dispose }))
 
     void ctx.chat.sendMessage('stream in progress')
-    await Promise.resolve()
+    await flushMicrotasks()
 
+    // Queue a follow-up while running
     void ctx.chat.sendMessage('queued message')
     expect(ctx.chat.queuedCount()).toBe(1)
 
+    // Steer while executor is running — uses executor.steer(), doesn't touch queue
     ctx.chat.steer('priority steer')
+    // Queue still has the queued message (steer went via executor)
     expect(ctx.chat.queuedCount()).toBe(1)
 
-    ctx.chat.clearQueue()
+    ctx.chat.cancel()
     expect(ctx.chat.queuedCount()).toBe(0)
 
     ctx.dispose()
   })
 
-  it('auto-titles a new chat from first user message', async () => {
+  it('auto-titles a new chat from first user message using AI', async () => {
     const ctx = createRoot((dispose) => ({ chat: useChat(), dispose }))
 
     void ctx.chat.sendMessage('Build OAuth flow for OpenAI codex endpoint')
-    await Promise.resolve()
+    await flushMicrotasks()
 
+    // The title should be AI-generated (mocked to return 'OAuth Flow Implementation')
     expect(h.sessionMock.renameSession).toHaveBeenCalledWith(
       'session-1',
-      'Build OAuth flow for OpenAI codex endpoint'
+      'OAuth Flow Implementation'
     )
 
     ctx.chat.cancel()

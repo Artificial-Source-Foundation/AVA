@@ -24,6 +24,7 @@ export type LLMProvider =
   | 'together'
   | 'ollama'
   | 'litellm'
+  | 'alibaba'
 
 export type AuthMethod = 'api-key' | 'oauth' | 'gateway'
 
@@ -98,7 +99,11 @@ export interface ProviderConfig {
     effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
   }
   /** Force the model to call a specific tool. */
-  toolChoice?: { type: 'tool'; name: string } | { type: 'auto' } | { type: 'none' }
+  toolChoice?:
+    | { type: 'tool'; name: string }
+    | { type: 'auto' }
+    | { type: 'none' }
+    | { type: 'required' }
 }
 
 export interface Credentials {

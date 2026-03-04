@@ -17,12 +17,7 @@ import {
   onCleanup,
   Show,
 } from 'solid-js'
-import {
-  clearDevLogs,
-  getDevLogs,
-  installConsoleCapture,
-  uninstallConsoleCapture,
-} from '../../../services/dev-console'
+import { clearDevLogs, getDevLogs } from '../../../services/dev-console'
 import { useSettings } from '../../../stores/settings'
 
 // ============================================================================
@@ -113,26 +108,8 @@ export const DeveloperTab: Component = () => {
     })
   })
 
-  // Install/uninstall capture when devMode changes
-  createEffect(
-    on(
-      () => settings().devMode,
-      (enabled) => {
-        if (enabled) {
-          installConsoleCapture()
-        } else {
-          uninstallConsoleCapture()
-        }
-      }
-    )
-  )
-
-  // Cleanup on unmount
-  onCleanup(() => {
-    if (!settings().devMode) {
-      uninstallConsoleCapture()
-    }
-  })
+  // Console capture is always active (installed in App.tsx).
+  // devMode toggle only controls visibility of this tab.
 
   // Auto-scroll to bottom when new entries arrive
   createEffect(
@@ -191,7 +168,7 @@ export const DeveloperTab: Component = () => {
           <div>
             <span class="text-xs text-[var(--text-secondary)]">Enable developer console</span>
             <p class="text-[10px] text-[var(--text-muted)]">
-              Captures console output for debugging providers, OAuth, and agent issues
+              Console capture is always active. This toggle controls Developer tab visibility.
             </p>
           </div>
           <Toggle

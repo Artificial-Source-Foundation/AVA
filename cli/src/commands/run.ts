@@ -42,6 +42,7 @@ interface RunOptions {
   mock: boolean
   validation: boolean
   backend: AgentBackend
+  yolo: boolean
 }
 
 export async function runRunCommand(args: string[]): Promise<void> {
@@ -153,6 +154,20 @@ export async function runRunCommand(args: string[]): Promise<void> {
     })
   }
 
+  // Set yolo mode — bypass all permission checks
+  if (options.yolo) {
+    try {
+      const permissionsPath = path.resolve(extensionsDir, 'permissions/src/middleware.ts')
+      const permissionsDistPath = path.resolve(extensionsDir, 'dist/permissions/src/middleware.js')
+      const perms = (await importWithFallback(permissionsPath, permissionsDistPath)) as {
+        updateSettings: (s: Record<string, unknown>) => void
+      }
+      perms.updateSettings({ permissionMode: 'yolo' })
+    } catch {
+      // Permissions extension not available — no-op
+    }
+  }
+
   // Build agent config
   const config: Partial<AgentConfig> = {
     maxTurns: options.maxTurns,
@@ -165,6 +180,61 @@ export async function runRunCommand(args: string[]): Promise<void> {
   if (options.model) {
     config.model = options.model
   }
+
+  // For non-Anthropic providers, use required-first strategy to ensure tool use
+  if (options.yolo && config.provider && config.provider !== 'anthropic') {
+    config.toolChoiceStrategy = 'required-first'
+  }
+
+  // Filter tools to ~20 core tools (like OpenCode/Claude Code) to reduce token overhead.
+  // Full 53-tool set wastes ~4,500 tokens/turn. Filtered set: ~1,500-2,000 tokens/turn.
+  const { getToolDefinitions } = await import('@ava/core-v2/tools')
+  const CLI_EXCLUDED = new Set([
+    // LSP tools — need running LSP server, not available in CLI
+    'lsp_diagnostics',
+    'lsp_hover',
+    'lsp_definition',
+    'lsp_references',
+    'lsp_document_symbols',
+    'lsp_workspace_symbols',
+    'lsp_code_actions',
+    'lsp_rename',
+    'lsp_completions',
+    // Delegation/subagent tools — CLI runs single agent
+    'task',
+    'sandbox_run',
+    // Meta-tools rarely used autonomously
+    'session_cost',
+    'diff_review',
+    'edit_benchmark',
+    'create_rule',
+    'create_skill',
+    'load_skill',
+    // Exa-based tools — require API key most users don't have
+    'codesearch',
+    // Redundant with core tools or rarely needed
+    'pty',
+    'batch',
+    'multiedit',
+    'apply_patch',
+    // Memory — useful but adds 4 tool definitions (~140 tokens)
+    'memory_read',
+    'memory_write',
+    'memory_list',
+    'memory_delete',
+    // Background shell — rarely needed for simple tasks
+    'bash_background',
+    'bash_output',
+    'bash_kill',
+    // Session management — handled by CLI itself
+    'plan_enter',
+    'plan_exit',
+    'recall',
+  ])
+  const allToolNames = getToolDefinitions().map((t) => t.name)
+  config.allowedTools = allToolNames.filter(
+    (n) => !n.startsWith('delegate_') && !CLI_EXCLUDED.has(n)
+  )
 
   // Set up abort controller
   const ac = new AbortController()
@@ -205,7 +275,14 @@ export async function runRunCommand(args: string[]): Promise<void> {
       process.stderr.write(
         `[run] Provider: ${options.provider ?? 'default'}, Model: ${options.model ?? 'default'}, Max turns: ${options.maxTurns}\n`
       )
-      process.stderr.write(`[run] Extensions loaded: ${extensionCount}\n\n`)
+      process.stderr.write(`[run] Extensions loaded: ${extensionCount}\n`)
+      if (systemPrompt) {
+        const promptTokens = Math.ceil(systemPrompt.length / 4)
+        process.stderr.write(
+          `[run] System prompt: ${systemPrompt.length} chars (~${promptTokens} tokens)\n`
+        )
+      }
+      process.stderr.write('\n')
     }
 
     // Create and run agent
@@ -229,7 +306,7 @@ export async function runRunCommand(args: string[]): Promise<void> {
       const { input, output } = result.tokensUsed
       console.log(`\n[Done] ${result.success ? 'SUCCESS' : `FAILED (${result.terminateMode})`}`)
       console.log(
-        `  Turns: ${result.turns}, Tokens: ${input} in / ${output} out, Duration: ${(result.durationMs / 1000).toFixed(1)}s`
+        `  Turns: ${result.turns}, Tokens: ${input} in / ${output} out (total: ${input + output}), Duration: ${(result.durationMs / 1000).toFixed(1)}s`
       )
       if (result.output) {
         console.log('')
@@ -274,8 +351,18 @@ function createStreamingCallback(verbose: boolean): AgentEventCallback {
         break
 
       case 'turn:start':
-        console.log(`[Turn ${event.turn}] ---`)
+        console.log(`\n[Turn ${event.turn}] ---`)
         break
+
+      case 'turn:end': {
+        const u = event.usage
+        if (u) {
+          const parts = [`  tokens: ${u.inputTokens} in / ${u.outputTokens} out`]
+          if (u.cacheReadTokens) parts.push(`(${u.cacheReadTokens} cached)`)
+          console.log(parts.join(' '))
+        }
+        break
+      }
 
       case 'tool:start':
         console.log(`[Tool] ${event.toolName}(${JSON.stringify(event.args)})`)
@@ -317,6 +404,7 @@ function parseRunOptions(args: string[]): RunOptions | null {
   let verbose = false
   let mock = false
   let validation = false
+  let yolo = false
   let backend: AgentBackend = 'core-v2'
 
   for (let i = 0; i < args.length; i += 1) {
@@ -368,6 +456,10 @@ function parseRunOptions(args: string[]): RunOptions | null {
       validation = true
       continue
     }
+    if (arg === '--yolo') {
+      yolo = true
+      continue
+    }
 
     // First non-flag argument is the goal
     if (!goal && !arg.startsWith('--')) {
@@ -390,6 +482,7 @@ function parseRunOptions(args: string[]): RunOptions | null {
     verbose,
     mock,
     validation,
+    yolo,
     backend,
   }
 }
@@ -411,12 +504,14 @@ OPTIONS:
   --json                Machine-readable JSON output
   --verbose             Show debug-level output (thoughts, tool output)
   --mock                Use mock LLM (no API key needed)
+  --yolo                Bypass all permission checks (auto-approve everything)
   --validation          Enable QA validation gate
 
 EXAMPLES:
   ava run "List all TypeScript files in src/"
   ava run "Fix the bug in auth.ts" --provider anthropic --max-turns 10
   ava run "Read the README" --mock --max-turns 3
+  ava run "Read the codebase" --provider openai --model gpt-4o --yolo
   ava run "Refactor the database module" --backend core --verbose
   ava run "Refactor the database module" --json --verbose
 `)

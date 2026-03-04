@@ -8,7 +8,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core'
-import { createSignal } from 'solid-js'
+import { createRoot, createSignal } from 'solid-js'
 
 // ============================================================================
 // Types
@@ -35,7 +35,10 @@ let flushTimer: ReturnType<typeof setInterval> | null = null
 let fileBuffer: string[] = []
 let logDir = ''
 
-const [entries, setEntries] = createSignal<DevLogEntry[]>([])
+const { entries, setEntries } = createRoot(() => {
+  const [entries, setEntries] = createSignal<DevLogEntry[]>([])
+  return { entries, setEntries }
+})
 
 // Store original console methods
 const originals = {
@@ -150,11 +153,11 @@ function capture(level: DevLogEntry['level'], args: unknown[]): void {
 // ============================================================================
 
 /**
- * Set the logs directory path. Call once during init with the project root.
- * Logs will be written to `{dir}/logs/`.
+ * Set the logs directory path. Call once during init.
+ * Logs will be written directly to this directory.
  */
-export function setLogDirectory(projectDir: string): void {
-  logDir = `${projectDir}/logs`
+export function setLogDirectory(dir: string): void {
+  logDir = dir
 }
 
 /** Start capturing console output. Idempotent. */

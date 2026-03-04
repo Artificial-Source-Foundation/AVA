@@ -44,7 +44,6 @@ import { SearchBar } from './SearchBar'
 export const MessageList: Component = () => {
   // oxlint-disable-next-line no-unassigned-vars -- SolidJS ref pattern: assigned via ref={} in JSX
   let containerRef: HTMLDivElement | undefined
-  let lastAutoScrollAt = 0
   let scrollRaf: number | undefined
   const { settings } = useSettings()
   const [shouldAutoScroll, setShouldAutoScroll] = createSignal(true)
@@ -144,50 +143,63 @@ export const MessageList: Component = () => {
     return msgs.length > 0 ? msgs[msgs.length - 1].id : null
   })
 
-  // Auto-scroll to bottom when new content arrives
+  // ── ResizeObserver-based auto-scroll (like OpenCode) ──────────────────
+  // Fires after layout, before paint — keeps bottom locked without jumps.
+  // Much more reliable than tracking content changes via reactive effects.
+  let resizeObserver: ResizeObserver | undefined
+  let userScrolledUp = false
+
+  // Reset when streaming starts
   createEffect(
     on(
-      () => {
-        const msgs = messages()
-        const lastMsg = msgs[msgs.length - 1]
-        return lastMsg ? `${lastMsg.id}:${lastMsg.content.length}` : 'none'
-      },
-      () => {
-        const msgs = messages()
-        const streaming = isStreaming()
-
-        if (
-          msgs.length > 0 &&
-          containerRef &&
-          shouldAutoScroll() &&
-          settings().behavior.autoScroll
-        ) {
-          const now = performance.now()
-          if (streaming && now - lastAutoScrollAt < 180) return
-          lastAutoScrollAt = now
-
-          requestAnimationFrame(() => {
-            if (containerRef) {
-              containerRef.scrollTop = containerRef.scrollHeight
-            }
-          })
+      () => isStreaming() || agent.isRunning(),
+      (streaming) => {
+        if (streaming) {
+          userScrolledUp = false
+          setShouldAutoScroll(true)
         }
       }
     )
   )
+
+  const setupResizeObserver = () => {
+    if (!containerRef) return
+    resizeObserver = new ResizeObserver(() => {
+      if (!containerRef || !settings().behavior.autoScroll) return
+      if (userScrolledUp) return
+      if (!shouldAutoScroll()) return
+      // Direct assignment (bypasses smooth scroll CSS)
+      containerRef.scrollTop = containerRef.scrollHeight
+    })
+    // Observe the scrollable content (first child) — its resize = content growth
+    const content = containerRef.firstElementChild
+    if (content) resizeObserver.observe(content)
+    // Also observe the container itself (viewport resize)
+    resizeObserver.observe(containerRef)
+  }
 
   const handleScroll = () => {
     if (!containerRef) return
     if (scrollRaf !== undefined) return
 
     scrollRaf = requestAnimationFrame(() => {
-      scrollRaf = undefined // clear lock first
+      scrollRaf = undefined
       if (!containerRef) return
 
       const { scrollTop, scrollHeight, clientHeight } = containerRef
-      const nextAutoScroll = scrollHeight - scrollTop - clientHeight < 100
-      if (nextAutoScroll !== shouldAutoScroll()) {
-        setShouldAutoScroll(nextAutoScroll)
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
+
+      const streaming = isStreaming() || agent.isRunning()
+
+      if (streaming) {
+        // During streaming: detect if user scrolled up (away from bottom)
+        userScrolledUp = distanceFromBottom > 300
+        if (!userScrolledUp) setShouldAutoScroll(true)
+      } else {
+        const nextAutoScroll = distanceFromBottom < 100
+        if (nextAutoScroll !== shouldAutoScroll()) {
+          setShouldAutoScroll(nextAutoScroll)
+        }
       }
 
       // Scroll-up backfill: load older messages when near top
@@ -204,12 +216,14 @@ export const MessageList: Component = () => {
       // SolidJS onScroll doesn't set { passive: true }, which blocks the
       // browser's scroll thread while the JS handler runs.
       containerRef.addEventListener('scroll', handleScroll, { passive: true })
+      setupResizeObserver()
     }
   })
 
   onCleanup(() => {
     if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf)
     containerRef?.removeEventListener('scroll', handleScroll)
+    resizeObserver?.disconnect()
   })
 
   const scrollToBottom = () => {
@@ -361,6 +375,20 @@ export const MessageList: Component = () => {
                       isSearchMatch={searchMatchIds().has(msg.id)}
                       isCurrentSearchMatch={currentSearchId() === msg.id}
                       checkpoint={checkpointAtIndex(msgIndex()) ?? undefined}
+                      streamingToolCalls={
+                        msg.id === lastMessageId() &&
+                        msg.role === 'assistant' &&
+                        (isStreaming() || agent.isRunning())
+                          ? agent.activeToolCalls()
+                          : undefined
+                      }
+                      streamingContent={
+                        msg.id === lastMessageId() &&
+                        msg.role === 'assistant' &&
+                        (isStreaming() || agent.isRunning())
+                          ? agent.streamingContent
+                          : undefined
+                      }
                       onStartEdit={() => startEditing(msg.id)}
                       onCancelEdit={stopEditing}
                       onSaveEdit={(content) => editAndResend(msg.id, content)}
@@ -375,6 +403,26 @@ export const MessageList: Component = () => {
                 )
               }}
             </For>
+
+            {/* "ava is working on it..." indicator (Goose-style) */}
+            <Show when={isStreaming() || agent.isRunning()}>
+              <div class="w-full animate-fade-in py-2">
+                <div class="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+                  <div class="flex items-center gap-[5px]">
+                    <span class="typing-dot" style={{ 'animation-delay': '0ms' }} />
+                    <span class="typing-dot" style={{ 'animation-delay': '160ms' }} />
+                    <span class="typing-dot" style={{ 'animation-delay': '320ms' }} />
+                  </div>
+                  <span class="font-[var(--font-ui-mono)] tracking-wide">
+                    {agent.currentThought()
+                      ? 'ava is working on it...'
+                      : agent.toolActivity().some((t) => t.status === 'running')
+                        ? 'ava is working on it...'
+                        : 'ava is thinking...'}
+                  </span>
+                </div>
+              </div>
+            </Show>
           </div>
         </Show>
       </div>

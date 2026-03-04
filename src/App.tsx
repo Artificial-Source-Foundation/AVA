@@ -6,7 +6,7 @@
  * Access the design system preview at: http://localhost:1420/?preview=true
  */
 
-import { invoke, isTauri } from '@tauri-apps/api/core'
+import { isTauri } from '@tauri-apps/api/core'
 import { createEffect, createSignal, on, onCleanup, onMount, Show } from 'solid-js'
 import { CommandPalette, createDefaultCommands } from './components/CommandPalette'
 import { QuickModelPicker } from './components/chat/QuickModelPicker'
@@ -33,7 +33,7 @@ import { initCoreBridge } from './services/core-bridge'
 import { initDatabase } from './services/database'
 import { initDeepLinks } from './services/deep-link'
 import { installConsoleCapture, setLogDirectory } from './services/dev-console'
-import { initLogger, logError, logInfo } from './services/logger'
+import { getLogDirectory, initLogger, logError, logInfo } from './services/logger'
 import { syncModelsCatalog } from './services/providers/models-dev-catalog'
 import { initSettingsFS } from './services/settings-fs'
 import { type ScheduledWorkflow, startScheduler } from './services/workflow-scheduler'
@@ -49,6 +49,7 @@ import {
   refreshAllProviderModels,
   setupSystemThemeListener,
   syncAllApiKeys,
+  syncCredentialsToDisk,
   useSettings,
 } from './stores/settings'
 import { useShortcuts } from './stores/shortcuts'
@@ -163,13 +164,8 @@ function App() {
     // Apply appearance settings (mode, accent, scale, font) to DOM immediately
     applyAppearance()
 
-    // Set up dev console log directory and install capture if enabled
-    invoke<string>('get_cwd')
-      .then((cwd) => setLogDirectory(cwd))
-      .catch(() => {})
-    if (settings().devMode) {
-      installConsoleCapture()
-    }
+    // Always capture console output for debugging — uses $APPDATA/ava/logs/
+    installConsoleCapture()
 
     // Listen for OS theme changes when mode is 'system'
     const cleanupTheme = setupSystemThemeListener()
@@ -274,6 +270,9 @@ function App() {
 
       setSplashStatus('Starting logger...')
       await initLogger()
+      // Point dev-console file output to the same $APPDATA/ava/logs/ directory
+      const logDir = getLogDirectory()
+      if (logDir) setLogDirectory(logDir)
       logInfo('App', 'Initializing AVA...')
 
       validateEnv()
@@ -293,6 +292,8 @@ function App() {
       })
       onCleanup(cleanupCore)
       pushSettingsToCore()
+      // Sync all localStorage credentials to ~/.ava/credentials.json for CLI sharing
+      syncCredentialsToDisk()
 
       setSplashStatus('Loading database...')
       await initDatabase()

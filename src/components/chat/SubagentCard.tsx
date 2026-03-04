@@ -3,10 +3,22 @@
  *
  * Specialized card for `task` tool calls showing subagent delegation.
  * Shows agent goal, status badge, elapsed time, and nested tool calls.
+ * Click the card body to enter the agent's chat view.
+ * Stop button to abort a running agent.
  */
 
-import { CheckCircle, ChevronRight, Loader2, Users, XCircle } from 'lucide-solid'
+import { abortExecutor } from '@ava/core-v2/agent'
+import {
+  CheckCircle,
+  ChevronRight,
+  ExternalLink,
+  Loader2,
+  Octagon,
+  Users,
+  XCircle,
+} from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
+import { useTeam } from '../../stores/team'
 import type { ToolCall } from '../../types'
 import { formatDuration, formatElapsed } from './tool-call-utils'
 
@@ -24,7 +36,6 @@ function parseNestedToolCalls(output: string): NestedToolCall[] {
   const calls: NestedToolCall[] = []
   const lines = output.split('\n')
   for (const line of lines) {
-    // Match common patterns like "✓ read_file src/foo.ts" or "✗ bash failed"
     const successMatch = line.match(/[✓✔☑]\s*(\w+)\s*(.*)/)
     const errorMatch = line.match(/[✗✘☒]\s*(\w+)\s*(.*)/)
     if (successMatch) {
@@ -39,6 +50,7 @@ function parseNestedToolCalls(output: string): NestedToolCall[] {
 export const SubagentCard: Component<SubagentCardProps> = (props) => {
   const [expanded, setExpanded] = createSignal(false)
   const [elapsed, setElapsed] = createSignal('')
+  const team = useTeam()
 
   const isRunning = () => props.toolCall.status === 'running' || props.toolCall.status === 'pending'
   const isError = () => props.toolCall.status === 'error'
@@ -50,6 +62,21 @@ export const SubagentCard: Component<SubagentCardProps> = (props) => {
     const g = String(args.goal ?? args.description ?? args.prompt ?? '')
     return g.length > 80 ? `${g.slice(0, 77)}...` : g || 'subagent task'
   }
+
+  /** Find the matching team member for this tool call. */
+  const matchedMember = createMemo(() => {
+    const args = props.toolCall.args
+    const taskText = String(args.task ?? args.prompt ?? args.goal ?? '')
+    if (!taskText) return null
+
+    // Search team members whose task starts with the same text
+    for (const member of team.allMembers()) {
+      if (member.task && taskText.startsWith(member.task.slice(0, 40))) {
+        return member
+      }
+    }
+    return null
+  })
 
   const duration = () => {
     if (!props.toolCall.completedAt) return null
@@ -68,6 +95,26 @@ export const SubagentCard: Component<SubagentCardProps> = (props) => {
   }, 1000)
 
   onCleanup(() => clearInterval(timer))
+
+  const handleEnterChat = (e: Event) => {
+    e.stopPropagation()
+    const member = matchedMember()
+    if (member) {
+      team.setSelectedMemberId(member.id)
+    }
+  }
+
+  const handleStop = (e: Event) => {
+    e.stopPropagation()
+    const member = matchedMember()
+    if (member) {
+      const aborted = abortExecutor(member.id)
+      if (aborted) {
+        team.updateMemberStatus(member.id, 'error')
+        team.updateMember(member.id, { error: 'Stopped by user' })
+      }
+    }
+  }
 
   return (
     <div
@@ -113,6 +160,30 @@ export const SubagentCard: Component<SubagentCardProps> = (props) => {
         </span>
 
         <span class="flex-1" />
+
+        {/* Enter chat button */}
+        <Show when={matchedMember()}>
+          <button
+            type="button"
+            onClick={handleEnterChat}
+            class="p-1 rounded text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--alpha-white-5)] transition-colors duration-[var(--duration-fast)]"
+            title="View agent chat"
+          >
+            <ExternalLink class="w-3.5 h-3.5" />
+          </button>
+        </Show>
+
+        {/* Stop button */}
+        <Show when={isRunning() && matchedMember()}>
+          <button
+            type="button"
+            onClick={handleStop}
+            class="p-1 rounded text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error)]/10 transition-colors duration-[var(--duration-fast)]"
+            title="Stop agent"
+          >
+            <Octagon class="w-3.5 h-3.5" />
+          </button>
+        </Show>
 
         {/* Status badge */}
         <Show when={isRunning()}>

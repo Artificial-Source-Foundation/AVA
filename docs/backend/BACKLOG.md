@@ -209,9 +209,51 @@ Tier 6.5──→  ✓ DONE — All 5 Praxis quality items complete
 Tier 7  ──→  ✓ DONE — B-080 Tauri bridge + B-084 dual-stack toggle (Sprint 23)
 Tier 7.5──→  ✓ DONE — CG-06 session DAG completed (Sprint 23)
 Tier 8  ──→  ✓ DONE — All 7 differentiation items completed (Sprint 23)
+Tier 9  ──→  IN PROGRESS — 6 P0 gaps from competitor analysis (Sprint 24-26)
 ```
 
-**ALL BACKEND TIERS COMPLETE.** Only remaining work is frontend polish.
+**Status**: All parity work complete (Sprint 23). Now closing competitive gaps (Tier 9 P0 items).
+
+---
+
+## Tier 9: Competitive Gap Analysis (from 12-tool comparison)
+
+New gaps identified from comprehensive analysis of Goose, OpenCode, Cline, Aider, Codex CLI, Gemini CLI, Continue, OpenHands, SWE-agent, Zed, Pi Mono, Plandex.
+See: [`docs/research/backend-analysis/AVA-SYNTHESIS-VISION.md`](../research/backend-analysis/AVA-SYNTHESIS-VISION.md)
+
+### P0 — Critical Gaps (Must Close)
+
+| # | Task | Competitor | Priority | What it does |
+|---|------|------------|----------|--------------|
+| B-100 | **Streaming diff application** | Zed | HIGH | Apply edits AS LLM streams tokens, not after completion. Reduces perceived latency. |
+| B-101 | **Per-hunk diff review UI** | Zed | HIGH | Let users accept/reject individual diff hunks, not all-or-nothing. Standard for power users. |
+| B-102 | **Enhanced loop/stuck detection** | Gemini, OpenHands | HIGH | Multi-signal detection: repeated tools, error cycling, token waste. Heuristic + LLM check. |
+| B-103 | **Edit strategy benchmark harness** | OpenCode, Aider | MEDIUM | Test 8 edit strategies against real diff corpus to find optimal per-model. |
+| B-104 | **Declarative safety policy framework** | Gemini, Continue | MEDIUM | YAML-based tool policies beyond code middleware. Composable checkers. |
+| B-105 | **OS-level sandboxing** | Codex CLI | MEDIUM | Seatbelt (macOS), bwrap/Landlock (Linux) as Docker alternative. Lighter weight. |
+
+### P1 — Competitive Parity (Should Match)
+
+| # | Task | Competitor | Priority | What it does |
+|---|------|------------|----------|--------------|
+| B-110 | **Multiple context compaction strategies** | OpenHands (9) | MEDIUM | Add LLM-summarize, observation-masking, amortized compaction. Currently 1 strategy. |
+| B-111 | **History processor pipeline** | SWE-agent | MEDIUM | Hook-based transforms that filter what LLM sees before each call. |
+| B-112 | **MCP server mode** | Zed | MEDIUM | Expose AVA's 55+ tools as MCP server for other tools to consume. |
+| B-113 | **Concurrent multi-file builds** | Plandex | LOW | Build multiple files simultaneously. Currently sequential in multiedit. |
+| B-114 | **Voice coding** | Aider | LOW | Voice-to-text input for chat. Whisper integration. |
+| B-115 | **AI comment watcher** | Aider | LOW | Watch files for `# AVA: do X` comments and auto-trigger. |
+
+### P2 — Differentiation Opportunities
+
+| # | Task | Competitor | What it does |
+|---|------|------------|--------------|
+| B-120 | **Action samplers (best-of-N)** | SWE-agent | Generate N responses, evaluate, pick best. Quality at compute cost. |
+| B-121 | **Lead-Worker per-turn routing** | Goose | Auto-switch between lead (smart) and worker (cheap) models each turn. |
+| B-122 | **Recipe system enhancements** | Goose | Multi-agent recipes, cron scheduling, structured output schemas. |
+| B-123 | **1M+ context support** | Gemini | Full support for massive context windows (Gemini 1.5 Pro). |
+| B-124 | **Event-sourced replay** | OpenHands | Full event log for time-travel debugging of agent decisions. |
+
+**Effort**: 6-9 months to full differentiation
 
 ---
 

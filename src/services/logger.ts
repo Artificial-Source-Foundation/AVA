@@ -1,22 +1,13 @@
 /**
  * File Logger Service
  *
- * Writes errors and debug info to a log file in the app data directory.
- * Uses Tauri's FS plugin for file access.
- *
- * Log file location: $APPDATA/ava/logs/ava.log
- * Rotates when file exceeds ~500KB.
+ * Writes errors and debug info to daily log files in $APPDATA/ava/logs/.
+ * Uses Rust IPC (`invoke('append_log')`) for proper O(1) append.
+ * Daily files: ava-YYYY-MM-DD.log with 7-day retention.
  */
 
-import {
-  BaseDirectory,
-  exists,
-  mkdir,
-  readTextFile,
-  remove,
-  rename,
-  writeTextFile,
-} from '@tauri-apps/plugin-fs'
+import { invoke } from '@tauri-apps/api/core'
+import { appDataDir } from '@tauri-apps/api/path'
 
 // ============================================================================
 // Types
@@ -36,11 +27,8 @@ interface LogEntry {
 // Constants
 // ============================================================================
 
-const LOG_DIR = 'logs'
-const LOG_FILE = 'logs/ava.log'
-const LOG_FILE_PREV = 'logs/ava.prev.log'
-const MAX_LOG_SIZE = 512 * 1024 // 512KB before rotation
 const FLUSH_INTERVAL_MS = 2000
+const LOG_RETENTION_DAYS = 7
 
 // ============================================================================
 // State
@@ -49,11 +37,17 @@ const FLUSH_INTERVAL_MS = 2000
 let buffer: string[] = []
 let flushTimer: ReturnType<typeof setInterval> | null = null
 let initialized = false
-let currentSize = 0
+let logFilePath = ''
+let logDirPath = ''
 
 // ============================================================================
 // Internal
 // ============================================================================
+
+function todayDateString(): string {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 
 function formatEntry(entry: LogEntry): string {
   const dataStr =
@@ -63,52 +57,14 @@ function formatEntry(entry: LogEntry): string {
   return `[${entry.timestamp}] ${entry.level.toUpperCase().padEnd(5)} [${entry.source}] ${entry.message}${dataStr}`
 }
 
-async function ensureLogDir(): Promise<void> {
-  const dirExists = await exists(LOG_DIR, { baseDir: BaseDirectory.AppData })
-  if (!dirExists) {
-    await mkdir(LOG_DIR, { baseDir: BaseDirectory.AppData, recursive: true })
-  }
-}
-
-async function rotateIfNeeded(): Promise<void> {
-  if (currentSize < MAX_LOG_SIZE) return
-
-  try {
-    // Rename current → prev (overwrite prev if it exists)
-    const prevExists = await exists(LOG_FILE_PREV, { baseDir: BaseDirectory.AppData })
-    if (prevExists) {
-      await remove(LOG_FILE_PREV, { baseDir: BaseDirectory.AppData })
-    }
-    await rename(LOG_FILE, LOG_FILE_PREV, {
-      oldPathBaseDir: BaseDirectory.AppData,
-      newPathBaseDir: BaseDirectory.AppData,
-    })
-    currentSize = 0
-  } catch {
-    // If rotation fails, just truncate
-    currentSize = 0
-  }
-}
-
 async function flushBuffer(): Promise<void> {
-  if (buffer.length === 0) return
+  if (buffer.length === 0 || !logFilePath) return
 
   const lines = `${buffer.join('\n')}\n`
   buffer = []
 
   try {
-    await rotateIfNeeded()
-
-    // Append to log file
-    let existing = ''
-    const fileExists = await exists(LOG_FILE, { baseDir: BaseDirectory.AppData })
-    if (fileExists) {
-      existing = await readTextFile(LOG_FILE, { baseDir: BaseDirectory.AppData })
-    }
-
-    const content = existing + lines
-    await writeTextFile(LOG_FILE, content, { baseDir: BaseDirectory.AppData })
-    currentSize = content.length
+    await invoke('append_log', { path: logFilePath, content: lines })
   } catch (err) {
     // Last resort: dump to console so we don't lose info
     console.warn('[Logger] Failed to write log file:', err)
@@ -145,20 +101,15 @@ function pushEntry(level: LogLevel, source: string, message: string, data?: unkn
 
 /**
  * Initialize the logger. Call once at app startup (after Tauri is ready).
- * Sets up the log directory and periodic flush.
+ * Resolves $APPDATA, sets up daily log file path, and starts periodic flush.
  */
 export async function initLogger(): Promise<void> {
   if (initialized) return
 
   try {
-    await ensureLogDir()
-
-    // Get current file size
-    const fileExists = await exists(LOG_FILE, { baseDir: BaseDirectory.AppData })
-    if (fileExists) {
-      const content = await readTextFile(LOG_FILE, { baseDir: BaseDirectory.AppData })
-      currentSize = content.length
-    }
+    const appData = await appDataDir()
+    logDirPath = `${appData}logs`
+    logFilePath = `${logDirPath}/ava-${todayDateString()}.log`
 
     // Periodic flush for non-error entries
     flushTimer = setInterval(flushBuffer, FLUSH_INTERVAL_MS)
@@ -167,10 +118,18 @@ export async function initLogger(): Promise<void> {
 
     // Write startup marker
     pushEntry('info', 'Logger', '--- AVA session started ---')
-    pushEntry('info', 'Logger', `Log file: $APPDATA/${LOG_FILE}`)
+    pushEntry('info', 'Logger', `Log file: ${logFilePath}`)
+
+    // Cleanup old logs (non-blocking)
+    invoke('cleanup_old_logs', { dir: logDirPath, maxAgeDays: LOG_RETENTION_DAYS }).catch(() => {})
   } catch (err) {
     console.warn('[Logger] Failed to initialize file logger:', err)
   }
+}
+
+/** Get the resolved log directory path (available after initLogger) */
+export function getLogDirectory(): string {
+  return logDirPath
 }
 
 /** Log a debug message */
@@ -205,10 +164,10 @@ export async function flushLogs(): Promise<void> {
 
 /** Read the current log file contents (for in-app debug view) */
 export async function readLogFile(): Promise<string> {
+  if (!logFilePath) return '(logger not initialized)'
   try {
-    const fileExists = await exists(LOG_FILE, { baseDir: BaseDirectory.AppData })
-    if (!fileExists) return '(no log file yet)'
-    return await readTextFile(LOG_FILE, { baseDir: BaseDirectory.AppData })
+    const { readTextFile } = await import('@tauri-apps/plugin-fs')
+    return await readTextFile(logFilePath)
   } catch {
     return '(failed to read log file)'
   }

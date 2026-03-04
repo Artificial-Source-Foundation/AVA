@@ -7,7 +7,7 @@ import type { AgentDefinition } from './agent-definition.js'
 import { createDelegateTool, resolveTools } from './delegate.js'
 import { WORKER_AGENTS } from './workers.js'
 
-// Mock AgentExecutor
+// Mock AgentExecutor + executor registry
 vi.mock('@ava/core-v2/agent', () => ({
   AgentExecutor: class {
     constructor(
@@ -25,6 +25,8 @@ vi.mock('@ava/core-v2/agent', () => ({
       }
     }
   },
+  registerExecutor: vi.fn(),
+  unregisterExecutor: vi.fn(),
 }))
 
 const DELEGATE_AGENTS = WORKER_AGENTS.filter((a) =>
@@ -71,10 +73,13 @@ describe('Commander delegate tools smoke test', () => {
   })
 
   describe('resolveTools', () => {
-    it('workers get their tools without delegate_ prefix', () => {
+    it('workers without delegates get no delegate_ tools', () => {
       for (const agent of DELEGATE_AGENTS) {
         const tools = resolveTools(agent)
-        expect(tools.every((t) => !t.startsWith('delegate_'))).toBe(true)
+        // Workers without a delegates array get no delegate_ tools
+        if (!agent.delegates?.length) {
+          expect(tools.every((t) => !t.startsWith('delegate_'))).toBe(true)
+        }
       }
     })
 

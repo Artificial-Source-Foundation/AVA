@@ -26,6 +26,8 @@ export interface ToolContext {
   onEvent?: (event: Record<string, unknown>) => void
   /** Streaming progress callback for incremental tool output. */
   onProgress?: (data: { chunk: string }) => void
+  /** Current delegation depth for sub-delegation limiting. */
+  delegationDepth?: number
 }
 
 // ─── Tool Location ───────────────────────────────────────────────────────────

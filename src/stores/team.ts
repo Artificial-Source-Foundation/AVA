@@ -36,7 +36,30 @@ import {
 const [teamMembers, setTeamMembers] = createSignal<Map<string, TeamMember>>(new Map())
 
 /** Currently selected member (for viewing their chat) */
-const [selectedMemberId, setSelectedMemberId] = createSignal<string | null>(null)
+const [selectedMemberId, _setSelectedMemberId] = createSignal<string | null>(null)
+
+/** Navigation history stack for back-navigation in team chat */
+const [viewStack, setViewStack] = createSignal<Array<string | null>>([])
+
+/** Navigate to a member's chat (pushes current view onto stack) */
+function setSelectedMemberId(id: string | null): void {
+  const current = selectedMemberId()
+  if (current !== id) {
+    setViewStack((prev) => [...prev, current])
+    _setSelectedMemberId(id)
+  }
+}
+
+/** Navigate back in the view stack */
+function navigateBack(): void {
+  setViewStack((prev) => {
+    if (prev.length === 0) return prev
+    const next = [...prev]
+    const target = next.pop()!
+    _setSelectedMemberId(target)
+    return next
+  })
+}
 
 /** Chronological log of all delegation events */
 const [delegationLog, setDelegationLog] = createSignal<DelegationEvent[]>([])
@@ -253,6 +276,20 @@ function addMessage(memberId: string, message: TeamMessage): void {
   })
 }
 
+/** Update an existing message's content in-place (used for thought accumulation). */
+function updateMessage(memberId: string, messageId: string, content: string): void {
+  setTeamMembers((prev) => {
+    const existing = prev.get(memberId)
+    if (!existing) return prev
+    const next = new Map(prev)
+    next.set(memberId, {
+      ...existing,
+      messages: existing.messages.map((m) => (m.id === messageId ? { ...m, content } : m)),
+    })
+    return next
+  })
+}
+
 /** Add a delegation event to the log */
 function addDelegation(event: DelegationEvent): void {
   setDelegationLog((prev) => [...prev, event])
@@ -261,7 +298,8 @@ function addDelegation(event: DelegationEvent): void {
 /** Clear entire team (e.g., new session) */
 function clearTeam(): void {
   setTeamMembers(new Map())
-  setSelectedMemberId(null)
+  _setSelectedMemberId(null)
+  setViewStack([])
   setDelegationLog([])
 }
 
@@ -349,6 +387,8 @@ export function useTeam() {
     teamMembers,
     selectedMemberId,
     setSelectedMemberId,
+    viewStack,
+    navigateBack,
     delegationLog,
 
     // Computed
@@ -371,6 +411,7 @@ export function useTeam() {
     addToolCall,
     updateToolCall,
     addMessage,
+    updateMessage,
     addDelegation,
     clearTeam,
 

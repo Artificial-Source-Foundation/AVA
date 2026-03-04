@@ -151,8 +151,19 @@ export class MockFileSystem implements IFileSystem {
     this.dirs.delete(path)
   }
 
-  async glob(pattern: string, _cwd: string): Promise<string[]> {
-    return [...this.files.keys()].filter((f) => f.includes(pattern.replace(/\*/g, '')))
+  async glob(pattern: string, cwd: string): Promise<string[]> {
+    const prefix = cwd.endsWith('/') ? cwd : `${cwd}/`
+    const escapedPattern = pattern
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*\*/g, '___DOUBLE_STAR___')
+      .replace(/\*/g, '[^/]*')
+      .replace(/___DOUBLE_STAR___/g, '.*')
+      .replace(/\?/g, '.')
+    const matcher = new RegExp(`^${escapedPattern}$`)
+
+    return [...this.files.keys()]
+      .filter((filePath) => filePath.startsWith(prefix))
+      .filter((filePath) => matcher.test(filePath.slice(prefix.length)))
   }
 
   async realpath(path: string): Promise<string> {

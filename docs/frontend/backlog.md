@@ -1,6 +1,6 @@
 # Frontend Backlog
 
-> What's missing, prioritized. Updated 2026-03-02 (Sprint 23 frontend completion).
+> What's missing, prioritized. Updated 2026-03-03 (dev console cleanup + unified logging).
 
 ---
 
@@ -17,6 +17,59 @@
 | **Sprint 21: Frontend ↔ Core-v2** | **Complete** | Settings sync, event hooks, budget sync, chat→AgentExecutor |
 | **Sprint 22: Backend Parity** | Backend complete | Frontend wiring mostly done (Sprint 23) |
 | **Sprint 23: Frontend Completion** | **Complete** | Launch-ready: DB migration, session bridge, archive/busy/slug UI, structured output, Explorer agent, plugin version tracking, smoke tests + QA checklist |
+| **Skills & Rules** | **Complete** (backend + settings UI) | Slash command popover not yet wired into MessageInput |
+| **Prompt Caching** | Backend complete | Frontend: cache metrics display, reasoning effort selector |
+| **Dev Console Cleanup** | **Complete** | Zero console errors on startup, unified logging, always-on capture |
+
+## Dev Console Cleanup (2026-03-03) — DONE
+
+Zero warnings/errors on clean startup. Unified logging to `$APPDATA/ava/logs/`.
+
+- [x] **SolidJS "cleanups outside createRoot"** — Wrapped module-level signals in `createRoot()` in `settings/index.ts` (2 signal groups), `session.ts` (18 signals + 3 memos + 2 event listeners), `dev-console.ts` (1 signal)
+- [x] **Git strip error → warning** — Added `isGitProject()` guard to `loadBranches()`, downgraded `logError` → `logWarn` in `GitControlStrip.tsx`
+- [x] **Auto-updater warning → debug** — `console.warn` → `console.debug` in `auto-updater.ts` (expected in dev mode)
+- [x] **Forbidden path fix** — Changed custom commands default from `~/.config/ava/commands` → `~/.ava/commands`, added `$HOME/.config/ava/**` to Tauri FS scope (6 identifiers)
+- [x] **Unified logging** — Rewrote `logger.ts` to use `invoke('append_log')` (O(1) append via Rust IPC) + daily files `ava-YYYY-MM-DD.log` + 7-day retention via `appDataDir()`
+- [x] **Always-on console capture** — `installConsoleCapture()` no longer gated on `devMode` toggle; dev-console file output unified to `$APPDATA/ava/logs/`
+- [x] **DeveloperTab simplified** — Removed capture toggle `createEffect`; devMode toggle now only controls tab visibility
+
+Files changed: `settings/index.ts`, `session.ts`, `dev-console.ts`, `GitControlStrip.tsx`, `auto-updater.ts`, `logger.ts`, `App.tsx`, `DeveloperTab.tsx`, `default.json` (Tauri capabilities)
+
+## Skills & Rules Sprint (2026-03-03) — DONE (Backend + Settings UI)
+
+Full rules system + AI-assisted creation + slash command infrastructure.
+
+- [x] **Rules extension** — `packages/extensions/rules/` with loader, glob matcher, prompt injection at priority 140, scans `.ava/rules/`, `.claude/rules/`, `.cursor/rules/`
+- [x] **Rules Settings UI** — `rules-section.tsx` (355 lines): list, create, edit, delete rules with activation mode selector
+- [x] **Skills tab refactor** — Split `SkillsTab.tsx` into `skills-tab-card.tsx`, `skills-tab-data.ts`, `rules-section.tsx`
+- [x] **Skill activation modes** — `auto`, `always`, `manual` selectors in skill edit form
+- [x] **`create_skill` tool** — AI generates skills from conversation context (backend)
+- [x] **`create_rule` tool** — AI generates rules mid-conversation (backend)
+- [x] **Shared frontmatter parser** — `frontmatter.ts` extracted for skills + rules
+- [x] **Slash command popover** — `slash-command-popover.tsx`: `/` autocomplete with keyboard nav, grouped by built-in vs custom
+- [x] **Command resolver service** — `command-resolver.ts`: bridges core-v2 slash command registry to desktop app
+- [x] **CLI integration test** — 11 built-in commands verified (help, clear, mode, model, compact, etc.)
+
+Details: `docs/backend/backlog-skills-rules.md`
+
+## Prompt Caching & Extended Thinking (2026-03-03) — Backend DONE, Frontend OPEN
+
+Backend ships cache metrics and thinking effort across all providers. No frontend UI yet.
+
+**Backend (delivered):**
+- [x] Prompt cache metrics: `cacheReadTokens` + `cacheCreationTokens` in `TurnUsage` type
+- [x] Anthropic: parses `cache_read_input_tokens`, `cache_creation_input_tokens`
+- [x] OpenAI/Azure/OpenRouter: parses `prompt_tokens_details.cached_tokens`
+- [x] Tool cache markers: `cache_control: { type: 'ephemeral' }` on last tool in request
+- [x] Extended thinking effort: `thinking.effort` field (none/minimal/low/medium/high/xhigh/max)
+- [x] Anthropic: effort → budget tokens (low→5K, medium→10K, high→16K, max→32K)
+- [x] OpenAI-compat: passes `reasoning_effort` for o-series/DeepSeek-R1 models
+- [x] Memoized `getToolDefinitions()` in tool registry (perf optimization)
+
+**Frontend (open):**
+- [ ] Display cache hit rate / tokens saved per message in chat UI
+- [ ] Reasoning effort selector in model settings or per-message controls
+- [ ] Cache metrics in UsageDetailsDialog (session-level cache savings)
 
 ## Sprint 21 — Frontend ↔ Core-v2 Integration (DONE)
 
@@ -53,9 +106,9 @@ New files: `desktop-session-storage.ts`, `StructuredOutputView.tsx`, `smoke.test
 | Backend Feature | Frontend Work | Status |
 |----------------|---------------|--------|
 | ~~Session archival + busy state + slug~~ | ~~Archive/unarchive in session list, busy indicator, auto-slug titles~~ | **DONE** (Sprint 23: context menu archive, collapsible archived section, Loader2 spinner, slug subtitle) |
-| 6 new LSP tools (documentSymbols, workspaceSymbols, codeActions, rename, refs, completions) | Code viewer context menus, symbol outline panel | OPEN |
+| ~~6 new LSP tools~~ → 9 LSP tools (all backend-complete) | Code viewer context menus, symbol outline panel | OPEN (backend ships 9 tools; zero frontend UI) |
 | ~~PTY tool (core-v2)~~ | ~~Verify xterm.js terminal uses core-v2 PTY~~ | **DONE** (TauriPTY already wired in platform-tauri) |
-| File watcher extension (core-v2) | Wire to existing `file-watcher.ts` or replace with core-v2 version | LOW |
+| File watcher extension (core-v2) | Two implementations coexist: frontend watches AI comments, core-v2 watches `.git/HEAD` | LOW (both serve different purposes, no conflict) |
 | ~~Structured output tool~~ | ~~Render validated JSON responses differently in chat~~ | **DONE** (Sprint 23: StructuredOutputView.tsx — collapsible JSON tree in tool-call-output) |
 | ~~Explore subagent (15th agent)~~ | ~~Add to AgentsTab, delegation UI~~ | **DONE** (Sprint 23: Explorer preset with Compass icon, 7 read-only tools) |
 | Prompt caching / model-family prompts | Transparent — no UI needed | — |
@@ -220,7 +273,7 @@ Features below are things **competitors ship that AVA does not yet have**.
 - [x] **Subagent Status UI** — SubagentCard.tsx replaces generic ToolCallCard for `task` tool. Shows agent goal, status badge (running/completed/failed), elapsed time, nested tool calls timeline. — **Medium** *(done)*
 - [x] **Workflow Scheduling (Cron)** — CronPickerDialog with presets + custom builder. workflow-scheduler.ts with parseCron/getNextRun/startScheduler. Schedule/unschedule methods in workflow store. — **Large** *(done)*
 - [x] **Workflow Import/Export** — Export single/all workflows as JSON, import from file picker. Buttons in WorkflowCards header + command palette entries. — **Medium** *(done)*
-- [ ] **Session Sharing (URL)** — Generate shareable read-only link for a session. — **Medium** *(source: Goose, OpenCode)*
+- [ ] **Session Sharing (URL)** — Generate shareable read-only link for a session. Backend stub only (`/share` command requires external endpoint). — **Medium** *(source: Goose, OpenCode)*
 - [x] **Watch Mode for AI Comments** — file-watcher.ts scans for `// AI!`, `// AI?` patterns in 23 file types. Toggle in BehaviorTab settings. — **Medium** *(verified existing)*
 - [x] **Session Save/Resume Checkpoints** — CheckpointDialog + createCheckpoint/rollbackToCheckpoint in session store. Checkpoint badges in MessageRow. — **Medium** *(verified existing)*
 - [x] **Auto-Updater** — auto-updater.ts service + UpdateDialog. Check on startup + "Check for Updates" command. @tauri-apps/plugin-updater integration. — **Medium** *(done)*
@@ -247,7 +300,7 @@ Features below are things **competitors ship that AVA does not yet have**.
 - [x] Plan branch management — plan-branches.ts store + PlanBranchSelector.tsx. Create/switch/compare/merge/delete branches. Inline in plan mode strip. — **Large** *(done)*
 - [x] Background plan execution — backgroundPlanActive/progress signals in session store. "Run in Background" button + StatusBar indicator. — **Medium** *(done)*
 - [x] Microagent management UI — MicroagentsTab.tsx in settings. 8 built-in skills with toggle enable/disable. Wired into SettingsModal. — **Medium** *(done)*
-- [ ] Enterprise integrations UI — GitHub/Slack/Jira/Linear integration panels. — **Large** *(enterprise scope, deferred)*
+- [ ] Enterprise integrations UI — GitHub/Slack/Jira/Linear integration panels. Zero code exists. — **Large** *(enterprise scope, deferred)*
 
 ### What competitors have that AVA already matches
 

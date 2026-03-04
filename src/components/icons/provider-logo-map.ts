@@ -8,6 +8,7 @@
 import { Bot } from 'lucide-solid'
 import type { Component } from 'solid-js'
 import {
+  AlibabaCloudLogo,
   AnthropicLogo,
   CohereLogo,
   CopilotLogo,
@@ -41,6 +42,7 @@ export const PROVIDER_LOGOS: Record<string, IconComponent> = {
   kimi: KimiLogo,
   glm: GLMLogo,
   ollama: OllamaLogo,
+  alibaba: AlibabaCloudLogo,
 }
 
 /** Get the logo component for a provider, falling back to Bot icon */

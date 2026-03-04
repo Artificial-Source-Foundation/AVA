@@ -122,10 +122,10 @@ describe('resolveTools with deniedTools', () => {
       tools: ['read_file', 'write_file', 'edit', 'delegate_tester'],
     }
     const tools = resolveTools(agent)
-    // Workers strip delegate_ prefix tools but keep the rest
+    // Workers within depth limit keep all tools including delegate_
     expect(tools).toContain('read_file')
     expect(tools).toContain('write_file')
     expect(tools).toContain('edit')
-    expect(tools).not.toContain('delegate_tester')
+    expect(tools).toContain('delegate_tester')
   })
 })

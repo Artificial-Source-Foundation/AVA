@@ -17,6 +17,6 @@ export interface CustomCommandConfig {
 }
 
 export const DEFAULT_CUSTOM_COMMAND_CONFIG: CustomCommandConfig = {
-  searchPaths: ['.ava/commands', '~/.config/ava/commands'],
+  searchPaths: ['.ava/commands', '~/.ava/commands'],
   fileNames: ['*.toml'],
 }

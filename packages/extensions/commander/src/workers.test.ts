@@ -104,13 +104,16 @@ describe('COMMANDER_AGENT', () => {
     expect(COMMANDER_AGENT.tier).toBe('commander')
   })
 
-  it('has no coding tools', () => {
-    expect(COMMANDER_AGENT.tools).not.toContain('read_file')
-    expect(COMMANDER_AGENT.tools).not.toContain('write_file')
-    expect(COMMANDER_AGENT.tools).not.toContain('bash')
+  it('has direct coding tools for tiered delegation', () => {
+    expect(COMMANDER_AGENT.tools).toContain('read_file')
+    expect(COMMANDER_AGENT.tools).toContain('write_file')
+    expect(COMMANDER_AGENT.tools).toContain('edit')
+    expect(COMMANDER_AGENT.tools).toContain('bash')
+    expect(COMMANDER_AGENT.tools).toContain('glob')
+    expect(COMMANDER_AGENT.tools).toContain('grep')
   })
 
-  it('has meta tools only', () => {
+  it('has meta tools', () => {
     expect(COMMANDER_AGENT.tools).toContain('question')
     expect(COMMANDER_AGENT.tools).toContain('attempt_completion')
   })

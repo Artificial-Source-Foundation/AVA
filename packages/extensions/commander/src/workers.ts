@@ -317,10 +317,22 @@ export const COMMANDER_AGENT: AgentDefinition = {
   id: 'commander',
   name: 'commander',
   displayName: 'Commander',
-  description: 'Plans and coordinates the team — never writes code directly',
+  description:
+    'Plans and coordinates the team — handles simple tasks directly, delegates complex ones',
   tier: 'commander',
   systemPrompt: '', // Set dynamically in index.ts with available leads
-  tools: ['question', 'attempt_completion'], // Only meta tools — delegate tools added dynamically
+  tools: [
+    'read_file',
+    'write_file',
+    'edit',
+    'bash',
+    'glob',
+    'grep',
+    'create_file',
+    'ls',
+    'question',
+    'attempt_completion',
+  ],
   delegates: ['frontend-lead', 'backend-lead', 'qa-lead', 'fullstack-lead', 'planner', 'architect'],
   maxTurns: 20,
   maxTimeMinutes: 15,

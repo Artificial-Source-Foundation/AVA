@@ -29,8 +29,7 @@ const schema = z.object({
 
 export const ptyTool = defineTool({
   name: 'pty',
-  description:
-    'Execute a command in a pseudo-terminal (PTY). Use for commands that require TTY features like colored output, interactive prompts, or progress bars. Falls back gracefully if PTY is not supported.',
+  description: 'Execute a command in a PTY. Use for interactive/TTY commands.',
   schema,
   permissions: ['execute'],
   locations: (input) => [{ path: input.workdir ?? '.', type: 'exec' as const }],

@@ -1,15 +1,17 @@
 /**
  * Toolbar Buttons
  *
- * Three strip sub-components:
- * - ThinkingToggle — brain icon, only for models with 'thinking' capability
+ * Strip sub-components:
+ * - ReasoningDropdown — brain icon + effort level, cycles Off→Low→Med→High
+ * - DelegationToggle — users icon, toggles team delegation on/off
  * - PlanActSlider — Cline-style animated two-segment slider
  * - PermissionBadge — styled pill cycling through permission modes
  */
 
-import { Brain, FileSearch, Mic, Play, Shield, ShieldAlert, ShieldOff } from 'lucide-solid'
+import { Brain, FileSearch, Mic, Play, Shield, ShieldAlert, ShieldOff, Users } from 'lucide-solid'
 import { type Accessor, type Component, Show } from 'solid-js'
 import type { PermissionMode } from '../../../stores/settings'
+import type { ReasoningEffort } from '../../../stores/settings/settings-types'
 import type { PermissionConfigEntry } from './types'
 
 // ---------------------------------------------------------------------------
@@ -23,7 +25,132 @@ export const PERMISSION_CONFIG: Record<PermissionMode, PermissionConfigEntry> = 
 }
 
 // ---------------------------------------------------------------------------
-// ThinkingToggle
+// ReasoningDropdown (replaces ThinkingToggle)
+// ---------------------------------------------------------------------------
+
+const EFFORT_LABELS: Record<ReasoningEffort, string> = {
+  off: '',
+  none: 'None',
+  minimal: 'Min',
+  low: 'Low',
+  medium: 'Med',
+  high: 'High',
+  xhigh: 'XHigh',
+  max: 'Max',
+}
+
+/** Per-provider supported effort levels (excluding 'off' which is always available). */
+const PROVIDER_EFFORTS: Record<string, ReasoningEffort[]> = {
+  anthropic: ['low', 'medium', 'high', 'max'],
+  openai: ['low', 'medium', 'high', 'xhigh'],
+  openrouter: ['low', 'medium', 'high'],
+  google: ['low', 'medium', 'high'],
+  copilot: ['low', 'medium', 'high', 'xhigh'],
+  azure: ['low', 'medium', 'high'],
+  groq: ['none', 'low', 'medium', 'high'],
+  xai: ['low', 'medium', 'high'],
+  deepseek: ['low', 'medium', 'high'],
+  together: ['low', 'medium', 'high'],
+  mistral: ['low', 'medium', 'high'],
+  cohere: ['low', 'medium', 'high'],
+  ollama: ['low', 'medium', 'high'],
+  litellm: ['low', 'medium', 'high'],
+  glm: ['low', 'medium', 'high'],
+  kimi: ['low', 'medium', 'high'],
+}
+
+const DEFAULT_EFFORTS: ReasoningEffort[] = ['low', 'medium', 'high']
+
+/** Get the supported effort levels for a provider. */
+export function getProviderEffortLevels(providerId: string): ReasoningEffort[] {
+  return PROVIDER_EFFORTS[providerId] ?? DEFAULT_EFFORTS
+}
+
+export interface ReasoningDropdownProps {
+  effort: Accessor<ReasoningEffort>
+  onCycle: () => void
+  available: Accessor<boolean>
+}
+
+export const ReasoningDropdown: Component<ReasoningDropdownProps> = (props) => {
+  const isActive = () => props.effort() !== 'off'
+
+  return (
+    <Show when={props.available()}>
+      <button
+        type="button"
+        onClick={props.onCycle}
+        class={`
+          flex items-center gap-1 px-1.5 py-1
+          text-[11px] font-medium rounded-[var(--radius-md)]
+          transition-all duration-200
+          ${
+            isActive()
+              ? 'text-[var(--accent)] bg-[var(--accent-subtle)]'
+              : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-transparent hover:bg-[var(--surface-raised)]'
+          }
+        `}
+        title={isActive() ? `Reasoning: ${EFFORT_LABELS[props.effort()]}` : 'Enable reasoning'}
+      >
+        <Brain
+          class="w-3.5 h-3.5 transition-all duration-200"
+          style={{
+            filter: isActive() ? 'drop-shadow(0 0 4px var(--accent))' : 'none',
+          }}
+        />
+        <Show when={isActive()}>
+          <span>{EFFORT_LABELS[props.effort()]}</span>
+        </Show>
+      </button>
+    </Show>
+  )
+}
+
+/** Cycle to the next reasoning effort level based on provider-specific levels. */
+export function cycleReasoningEffort(
+  current: ReasoningEffort,
+  providerId?: string
+): ReasoningEffort {
+  const levels = getProviderEffortLevels(providerId ?? '')
+  const cycle: ReasoningEffort[] = ['off', ...levels]
+  const idx = cycle.indexOf(current)
+  // If current level isn't in this provider's cycle, reset to off
+  if (idx === -1) return cycle[1] ?? 'low'
+  return cycle[(idx + 1) % cycle.length]!
+}
+
+// ---------------------------------------------------------------------------
+// DelegationToggle
+// ---------------------------------------------------------------------------
+
+export interface DelegationToggleProps {
+  enabled: Accessor<boolean>
+  onToggle: () => void
+}
+
+export const DelegationToggle: Component<DelegationToggleProps> = (props) => (
+  <button
+    type="button"
+    onClick={props.onToggle}
+    class={`
+      flex items-center gap-1 px-1.5 py-1
+      text-[11px] font-medium rounded-[var(--radius-md)]
+      transition-all duration-200
+      ${
+        props.enabled()
+          ? 'text-[var(--accent)] bg-[var(--accent-subtle)]'
+          : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-transparent hover:bg-[var(--surface-raised)]'
+      }
+    `}
+    title={props.enabled() ? 'Team delegation on' : 'Enable team delegation'}
+  >
+    <Users class="w-3.5 h-3.5" />
+    <span>{props.enabled() ? 'Team' : 'Solo'}</span>
+  </button>
+)
+
+// ---------------------------------------------------------------------------
+// ThinkingToggle (kept for backward compat)
 // ---------------------------------------------------------------------------
 
 export interface ThinkingToggleProps {

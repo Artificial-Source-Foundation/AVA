@@ -1,3 +1,5 @@
+mod compute_fuzzy;
+mod compute_grep;
 mod dev_log;
 mod env;
 mod fs_scope;
@@ -6,6 +8,8 @@ mod oauth;
 mod plugin_state;
 pub mod pty;
 
+pub use compute_fuzzy::compute_fuzzy_replace;
+pub use compute_grep::compute_grep;
 pub use dev_log::{append_log, cleanup_old_logs, get_cwd};
 pub use env::get_env_var;
 pub use fs_scope::allow_project_path;

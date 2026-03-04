@@ -121,6 +121,43 @@ export interface IDatabase {
   close(): Promise<void>
 }
 
+// ─── Optional Native Compute ─────────────────────────────────────────────────
+
+export interface NativeGrepMatch {
+  file: string
+  line: number
+  content: string
+}
+
+export interface NativeGrepInput {
+  path: string
+  pattern: string
+  include?: string
+  maxResults?: number
+}
+
+export interface NativeGrepOutput {
+  matches: NativeGrepMatch[]
+  truncated: boolean
+}
+
+export interface NativeFuzzyReplaceInput {
+  content: string
+  oldString: string
+  newString: string
+  replaceAll?: boolean
+}
+
+export interface NativeFuzzyReplaceOutput {
+  content: string
+  strategy: string
+}
+
+export interface INativeCompute {
+  grep(input: NativeGrepInput): Promise<NativeGrepOutput>
+  fuzzyReplace(input: NativeFuzzyReplaceInput): Promise<NativeFuzzyReplaceOutput>
+}
+
 // ─── Platform Provider ───────────────────────────────────────────────────────
 
 export interface IPlatformProvider {
@@ -129,6 +166,7 @@ export interface IPlatformProvider {
   readonly credentials: ICredentialStore
   readonly database: IDatabase
   readonly pty?: IPTY
+  readonly compute?: INativeCompute
 }
 
 // ─── Singleton ───────────────────────────────────────────────────────────────

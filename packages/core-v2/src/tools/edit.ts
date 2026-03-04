@@ -8,7 +8,7 @@ import { defineTool } from './define.js'
 import { replace } from './edit-replacers.js'
 import { ToolError, ToolErrorType } from './errors.js'
 import { sanitizeContent } from './sanitize.js'
-import { resolvePath } from './utils.js'
+import { isFeatureEnabled, resolvePath } from './utils.js'
 
 const schema = z.object({
   filePath: z.string().describe('Absolute path to the file to edit'),
@@ -37,7 +37,8 @@ export const editTool = defineTool({
   },
 
   async execute(input, ctx) {
-    const fs = getPlatform().fs
+    const platform = getPlatform()
+    const fs = platform.fs
     const filePath = resolvePath(input.filePath, ctx.workingDirectory)
 
     if (ctx.signal.aborted) {
@@ -83,7 +84,26 @@ export const editTool = defineTool({
 
     // Perform replacement
     const sanitizedNew = sanitizeContent(input.newString, { ensureTrailingNewline: false })
-    const newContent = replace(content, input.oldString, sanitizedNew, input.replaceAll ?? false)
+    const replaceAll = input.replaceAll ?? false
+
+    let newContent = ''
+    let engine: 'rust' | 'typescript' = 'typescript'
+    if (platform.compute && isFeatureEnabled('AVA_RUST_FUZZY_EDIT', true)) {
+      try {
+        const nativeResult = await platform.compute.fuzzyReplace({
+          content,
+          oldString: input.oldString,
+          newString: sanitizedNew,
+          replaceAll,
+        })
+        newContent = nativeResult.content
+        engine = 'rust'
+      } catch {
+        newContent = replace(content, input.oldString, sanitizedNew, replaceAll)
+      }
+    } else {
+      newContent = replace(content, input.oldString, sanitizedNew, replaceAll)
+    }
 
     if (ctx.signal.aborted) {
       throw new ToolError('Aborted', ToolErrorType.EXECUTION_ABORTED, 'edit')
@@ -101,10 +121,11 @@ export const editTool = defineTool({
       output: `Edit applied successfully. (${deltaStr} lines)\nFile: ${filePath}`,
       metadata: {
         filePath,
-        mode: input.replaceAll ? 'replaceAll' : 'replace',
+        mode: replaceAll ? 'replaceAll' : 'replace',
         oldLines,
         newLines,
         linesDelta: delta,
+        engine,
       },
       locations: [{ path: filePath, type: 'write' }],
     }

@@ -13,6 +13,22 @@ export const LIMITS = {
   MAX_BYTES: 50 * 1024, // 50KB
 } as const
 
+export function isFeatureEnabled(flagName: string, defaultValue = false): boolean {
+  const envValue =
+    typeof process !== 'undefined' && process?.env ? process.env[flagName] : undefined
+
+  if (typeof envValue !== 'string') {
+    return defaultValue
+  }
+
+  const normalized = envValue.trim().toLowerCase()
+  if (!normalized) {
+    return defaultValue
+  }
+
+  return !['0', 'false', 'off', 'no'].includes(normalized)
+}
+
 // ─── Path Resolution ─────────────────────────────────────────────────────────
 
 import * as nodePath from 'node:path'

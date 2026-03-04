@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@ava/core-v2": "workspace:*",
+    "@tauri-apps/api": "^2.8.0",
     "@tauri-apps/plugin-fs": "^2.4.5",
     "@tauri-apps/plugin-shell": "^2.3.4",
     "@tauri-apps/plugin-sql": "^2.3.1"

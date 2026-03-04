@@ -4,6 +4,7 @@ mod pty;
 use commands::{
     allow_project_path, append_log, cleanup_old_logs, get_cwd, get_env_var, get_plugins_state,
     greet, install_plugin, oauth_copilot_device_poll, oauth_copilot_device_start, oauth_listen,
+    compute_fuzzy_replace, compute_grep,
     pty_kill, pty_resize, pty_spawn, pty_write, set_plugin_enabled, set_plugins_state,
     uninstall_plugin,
 };
@@ -37,7 +38,9 @@ pub fn run() {
             pty_spawn,
             pty_write,
             pty_resize,
-            pty_kill
+            pty_kill,
+            compute_grep,
+            compute_fuzzy_replace
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

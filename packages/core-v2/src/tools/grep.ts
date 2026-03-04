@@ -9,6 +9,7 @@ import { defineTool } from './define.js'
 import { ToolError, ToolErrorType } from './errors.js'
 import {
   isBinaryFile,
+  isFeatureEnabled,
   LIMITS,
   matchesGlob,
   resolvePath,
@@ -26,6 +27,57 @@ interface Match {
   file: string
   line: number
   content: string
+}
+
+function formatGrepOutput(
+  matches: Match[],
+  truncated: boolean,
+  pattern: string,
+  searchDir: string
+) {
+  if (matches.length === 0) {
+    return {
+      success: true as const,
+      output: `No matches found for "${pattern}" in ${searchDir}`,
+      metadata: { count: 0, fileCount: 0, truncated: false, pattern, searchDir },
+    }
+  }
+
+  const byFile = new Map<string, Match[]>()
+  for (const match of matches) {
+    const existing = byFile.get(match.file)
+    if (existing) {
+      existing.push(match)
+    } else {
+      byFile.set(match.file, [match])
+    }
+  }
+
+  const lines: string[] = [
+    `Found ${matches.length} match(es) in ${byFile.size} file(s)${truncated ? ' (truncated)' : ''}:`,
+    '',
+  ]
+
+  for (const [file, fileMatches] of byFile) {
+    lines.push(`${file}:`)
+    for (const m of fileMatches) {
+      lines.push(`  Line ${m.line}: ${m.content}`)
+    }
+    lines.push('')
+  }
+
+  return {
+    success: true as const,
+    output: lines.join('\n'),
+    metadata: {
+      count: matches.length,
+      fileCount: byFile.size,
+      truncated,
+      pattern,
+      searchDir,
+    },
+    locations: [...byFile.keys()].map((f) => ({ path: f, type: 'read' as const })),
+  }
 }
 
 export const grepTool = defineTool({
@@ -51,12 +103,44 @@ export const grepTool = defineTool({
   },
 
   async execute(input, ctx) {
-    const fs = getPlatform().fs
+    const platform = getPlatform()
+    const fs = platform.fs
     const searchDir = input.path
       ? resolvePath(input.path, ctx.workingDirectory)
       : ctx.workingDirectory
 
-    const regex = new RegExp(input.pattern, 'g')
+    if (platform.compute && isFeatureEnabled('AVA_RUST_GREP', true)) {
+      try {
+        const nativeResult = await platform.compute.grep({
+          path: searchDir,
+          pattern: input.pattern,
+          include: input.include,
+          maxResults: LIMITS.MAX_RESULTS,
+        })
+
+        return {
+          ...formatGrepOutput(
+            nativeResult.matches,
+            nativeResult.truncated,
+            input.pattern,
+            searchDir
+          ),
+          metadata: {
+            count: nativeResult.matches.length,
+            fileCount: new Set(nativeResult.matches.map((m) => m.file)).size,
+            truncated: nativeResult.truncated,
+            pattern: input.pattern,
+            searchDir,
+            include: input.include,
+            engine: 'rust',
+          },
+        }
+      } catch {
+        // Fall back to TypeScript implementation for parity and safety.
+      }
+    }
+
+    const regex = new RegExp(input.pattern)
     const matches: Match[] = []
     let truncated = false
 
@@ -76,7 +160,6 @@ export const grepTool = defineTool({
           truncated = true
           return
         }
-        regex.lastIndex = 0
         if (regex.test(lines[i])) {
           matches.push({
             file: filePath,
@@ -87,7 +170,7 @@ export const grepTool = defineTool({
       }
     }
 
-    async function searchDirectory(dir: string): Promise<void> {
+    async function searchDirectory(dir: string, dirRelative: string): Promise<void> {
       if (ctx.signal.aborted || truncated) return
 
       let entries: Awaited<ReturnType<typeof fs.readDirWithTypes>>
@@ -101,66 +184,38 @@ export const grepTool = defineTool({
         if (ctx.signal.aborted || truncated) return
 
         const entryPath = nodePath.join(dir, entry.name)
+        const entryRelative = dirRelative ? `${dirRelative}/${entry.name}` : entry.name
 
         if (entry.isDirectory) {
           if (!shouldSkipDirectory(entry.name)) {
-            await searchDirectory(entryPath)
+            await searchDirectory(entryPath, entryRelative)
           }
         } else if (entry.isFile) {
-          if (input.include && !matchesGlob(entry.name, input.include)) {
-            continue
+          if (input.include) {
+            const matchesRelative = matchesGlob(entryRelative, input.include)
+            const matchesName = matchesGlob(entry.name, input.include)
+            if (!matchesRelative && !matchesName) {
+              continue
+            }
           }
           await searchFile(entryPath)
         }
       }
     }
 
-    await searchDirectory(searchDir)
-
-    if (matches.length === 0) {
-      return {
-        success: true,
-        output: `No matches found for "${input.pattern}" in ${searchDir}`,
-        metadata: { count: 0, fileCount: 0, truncated: false, pattern: input.pattern, searchDir },
-      }
-    }
-
-    // Group by file
-    const byFile = new Map<string, Match[]>()
-    for (const match of matches) {
-      const existing = byFile.get(match.file)
-      if (existing) {
-        existing.push(match)
-      } else {
-        byFile.set(match.file, [match])
-      }
-    }
-
-    const lines: string[] = [
-      `Found ${matches.length} match(es) in ${byFile.size} file(s)${truncated ? ' (truncated)' : ''}:`,
-      '',
-    ]
-
-    for (const [file, fileMatches] of byFile) {
-      lines.push(`${file}:`)
-      for (const m of fileMatches) {
-        lines.push(`  Line ${m.line}: ${m.content}`)
-      }
-      lines.push('')
-    }
+    await searchDirectory(searchDir, '')
 
     return {
-      success: true,
-      output: lines.join('\n'),
+      ...formatGrepOutput(matches, truncated, input.pattern, searchDir),
       metadata: {
         count: matches.length,
-        fileCount: byFile.size,
+        fileCount: new Set(matches.map((m) => m.file)).size,
         truncated,
         pattern: input.pattern,
         searchDir,
         include: input.include,
+        engine: 'typescript',
       },
-      locations: [...byFile.keys()].map((f) => ({ path: f, type: 'read' as const })),
     }
   },
 })

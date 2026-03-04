@@ -4,12 +4,14 @@
  */
 
 import type { IPlatformProvider, IPTY } from '@ava/core-v2'
+import { TauriNativeCompute } from './compute.js'
 import { TauriCredentialStore } from './credentials.js'
 import { TauriDatabase } from './database.js'
 import { TauriFileSystem } from './fs.js'
 import { TauriPTY } from './pty.js'
 import { TauriShell } from './shell.js'
 
+export { TauriNativeCompute } from './compute.js'
 export { TauriCredentialStore } from './credentials.js'
 export { TauriDatabase } from './database.js'
 export { TauriFileSystem } from './fs.js'
@@ -37,6 +39,7 @@ export function createTauriPlatform(dbPath: string): IPlatformProvider {
     credentials: new TauriCredentialStore(),
     database: new TauriDatabase(dbPath),
     pty: ptySupported ? pty : undefined,
+    compute: new TauriNativeCompute(),
   }
 }
 
@@ -56,5 +59,6 @@ export function createTauriPlatformWithOptions(options: TauriPlatformOptions): I
     credentials: new TauriCredentialStore(),
     database: new TauriDatabase(options.dbPath),
     pty,
+    compute: new TauriNativeCompute(),
   }
 }

@@ -2,11 +2,10 @@
  * glob tool — find files by pattern.
  */
 
-import * as nodePath from 'node:path'
 import * as z from 'zod'
 import { getPlatform } from '../platform.js'
 import { defineTool } from './define.js'
-import { LIMITS, matchesGlob, resolvePath, shouldSkipDirectory } from './utils.js'
+import { LIMITS, resolvePath } from './utils.js'
 
 const schema = z.object({
   pattern: z.string().describe('Glob pattern (e.g., "**/*.ts", "src/**/*.tsx")'),
@@ -26,51 +25,25 @@ export const globTool = defineTool({
       ? resolvePath(input.path, ctx.workingDirectory)
       : ctx.workingDirectory
 
+    const paths = await fs.glob(input.pattern, searchDir)
+    const truncated = paths.length > LIMITS.MAX_RESULTS
+    const limited = paths.slice(0, LIMITS.MAX_RESULTS)
     const matches: Array<{ path: string; mtime: number }> = []
-    let truncated = false
 
-    async function search(dir: string, relativePath: string): Promise<void> {
-      if (ctx.signal.aborted || matches.length >= LIMITS.MAX_RESULTS) {
-        truncated = matches.length >= LIMITS.MAX_RESULTS
-        return
+    for (const path of limited) {
+      if (ctx.signal.aborted) {
+        break
       }
 
-      let entries: Awaited<ReturnType<typeof fs.readDirWithTypes>>
+      let mtime = 0
       try {
-        entries = await fs.readDirWithTypes(dir)
+        const stat = await fs.stat(path)
+        mtime = stat.mtime
       } catch {
-        return // Skip unreadable directories
+        // Use 0 if stat fails
       }
-
-      for (const entry of entries) {
-        if (ctx.signal.aborted || matches.length >= LIMITS.MAX_RESULTS) {
-          truncated = matches.length >= LIMITS.MAX_RESULTS
-          return
-        }
-
-        const entryRelative = relativePath ? `${relativePath}/${entry.name}` : entry.name
-        const entryAbsolute = nodePath.join(dir, entry.name)
-
-        if (entry.isDirectory) {
-          if (!shouldSkipDirectory(entry.name)) {
-            await search(entryAbsolute, entryRelative)
-          }
-        } else if (entry.isFile) {
-          if (matchesGlob(entryRelative, input.pattern)) {
-            let mtime = 0
-            try {
-              const stat = await fs.stat(entryAbsolute)
-              mtime = stat.mtime
-            } catch {
-              // Use 0 if stat fails
-            }
-            matches.push({ path: entryAbsolute, mtime })
-          }
-        }
-      }
+      matches.push({ path, mtime })
     }
-
-    await search(searchDir, '')
 
     // Sort by modification time, newest first
     matches.sort((a, b) => b.mtime - a.mtime)
@@ -83,8 +56,8 @@ export const globTool = defineTool({
       }
     }
 
-    const paths = matches.map((m) => m.path)
-    const output = `Found ${matches.length} file(s)${truncated ? ' (truncated)' : ''}:\n${paths.join('\n')}`
+    const matchPaths = matches.map((m) => m.path)
+    const output = `Found ${matches.length} file(s)${truncated ? ' (truncated)' : ''}:\n${matchPaths.join('\n')}`
 
     return {
       success: true,

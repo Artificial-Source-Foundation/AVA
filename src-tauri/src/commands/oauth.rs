@@ -126,7 +126,9 @@ pub async fn oauth_copilot_device_start(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(format!("Copilot device code request failed ({status}): {body}"));
+        return Err(format!(
+            "Copilot device code request failed ({status}): {body}"
+        ));
     }
 
     response

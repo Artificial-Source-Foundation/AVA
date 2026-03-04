@@ -34,8 +34,8 @@ pub fn cleanup_old_logs(dir: String, max_age_days: u64) -> Result<u32, String> {
         return Ok(0);
     }
 
-    let cutoff = std::time::SystemTime::now()
-        - std::time::Duration::from_secs(max_age_days * 86400);
+    let cutoff =
+        std::time::SystemTime::now() - std::time::Duration::from_secs(max_age_days * 86400);
     let mut deleted = 0u32;
 
     let entries = fs::read_dir(dir_path).map_err(|e| e.to_string())?;

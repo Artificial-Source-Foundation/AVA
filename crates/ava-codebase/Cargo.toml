@@ -1,0 +1,11 @@
+[package]
+name = "ava-codebase"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+tantivy = "0.22"
+petgraph = "0.6"

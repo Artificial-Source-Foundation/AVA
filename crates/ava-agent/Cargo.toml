@@ -1,0 +1,15 @@
+[package]
+name = "ava-agent"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "reflection_hotpaths"
+harness = false

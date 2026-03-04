@@ -21,7 +21,6 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2.10", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
-libsqlite3-sys = { version = "0.30", features = ["bundled"] }
 tauri-plugin-shell = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
@@ -31,10 +30,17 @@ uuid = { version = "1", features = ["v4"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 regex = "1"
 walkdir = "2"
 globset = "0.4"
+ava-tools = { path = "../crates/ava-tools" }
+ava-memory = { path = "../crates/ava-memory" }
+ava-permissions = { path = "../crates/ava-permissions" }
+ava-extensions = { path = "../crates/ava-extensions" }
+ava-validator = { path = "../crates/ava-validator" }
+ava-agent = { path = "../crates/ava-agent" }
 
 [profile.release]
 lto = true

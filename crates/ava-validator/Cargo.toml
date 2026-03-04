@@ -1,0 +1,15 @@
+[package]
+name = "ava-validator"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "validation_hotpaths"
+harness = false

@@ -1,0 +1,13 @@
+[package]
+name = "ava-context"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+ava-types = { path = "../ava-types" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }

@@ -1,0 +1,17 @@
+[package]
+name = "ava-platform"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+tokio.workspace = true
+futures.workspace = true
+tokio-stream.workspace = true
+chrono.workspace = true
+ava-types = { path = "../ava-types" }
+
+[dev-dependencies]
+tempfile = "3.0"

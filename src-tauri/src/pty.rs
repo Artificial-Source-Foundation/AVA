@@ -94,11 +94,7 @@ impl PtyManager {
             let code = {
                 let mut sessions = sessions_ref.lock().unwrap();
                 if let Some(session) = sessions.get_mut(&id_clone) {
-                    session
-                        .child
-                        .wait()
-                        .ok()
-                        .map(|s| s.exit_code() as i32)
+                    session.child.wait().ok().map(|s| s.exit_code() as i32)
                 } else {
                     None
                 }

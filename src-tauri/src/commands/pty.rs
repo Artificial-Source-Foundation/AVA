@@ -14,7 +14,11 @@ pub async fn pty_spawn(
 }
 
 #[tauri::command]
-pub async fn pty_write(id: String, data: String, state: State<'_, PtyManager>) -> Result<(), String> {
+pub async fn pty_write(
+    id: String,
+    data: String,
+    state: State<'_, PtyManager>,
+) -> Result<(), String> {
     state.write(&id, &data)
 }
 

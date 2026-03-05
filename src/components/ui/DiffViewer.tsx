@@ -43,7 +43,7 @@ export interface DiffViewerProps {
 // Diff Calculation
 // ============================================================================
 
-const computeDiff = (oldText: string, newText: string): DiffLine[] => {
+export const computeDiff = (oldText: string, newText: string): DiffLine[] => {
   const oldLines = oldText.split('\n')
   const newLines = newText.split('\n')
   const result: DiffLine[] = []
@@ -148,7 +148,7 @@ interface SplitPair {
   right: DiffLine | null
 }
 
-function buildSplitPairs(lines: DiffLine[]): SplitPair[] {
+export function buildSplitPairs(lines: DiffLine[]): SplitPair[] {
   const pairs: SplitPair[] = []
   let i = 0
 

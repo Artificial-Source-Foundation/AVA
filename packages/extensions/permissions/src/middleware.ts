@@ -9,8 +9,7 @@ import type {
   ToolMiddlewareContext,
   ToolMiddlewareResult,
 } from '@ava/core-v2/extensions'
-import { extractCommandPrefix } from './arity.js'
-import { parseBashTokens } from './bash-parser.js'
+import { buildApprovalKey, createDynamicRuleStore } from './dynamic-rules.js'
 import { isToolAutoApproved, type PermissionMode } from './modes.js'
 import {
   classifyRisk,
@@ -24,7 +23,7 @@ import {
 } from './types.js'
 
 let settings: PermissionSettings = { ...DEFAULT_SETTINGS }
-let activeSessionId: string | null = null
+const dynamicRuleStore = createDynamicRuleStore()
 
 interface NativePermissionPattern {
   type: 'any' | 'glob' | 'regex' | 'path'
@@ -115,6 +114,7 @@ export function getSettings(): PermissionSettings {
 
 export function resetSettings(): void {
   settings = { ...DEFAULT_SETTINGS }
+  dynamicRuleStore.clear()
 }
 
 // ─── Glob Matching ─────────────────────────────────────────────────────────
@@ -245,25 +245,6 @@ function isBlockedByPattern(args: Record<string, unknown>): boolean {
 }
 
 /**
- * Build a fingerprint key for a tool call.
- * For bash commands, uses the command prefix (e.g., "bash:git:status").
- * For other tools, returns the tool name as-is.
- */
-export function buildApprovalKey(toolName: string, args: Record<string, unknown>): string {
-  if (toolName === 'bash') {
-    const command = (args.command ?? '') as string
-    if (command) {
-      const tokens = parseBashTokens(command)
-      const prefix = extractCommandPrefix(tokens)
-      if (prefix.length > 0) {
-        return `${toolName}:${prefix.join(':')}`
-      }
-    }
-  }
-  return toolName
-}
-
-/**
  * Check if a tool call matches any entry in the always-approved list.
  * Compares the fingerprint key against stored keys.
  */
@@ -287,26 +268,6 @@ function isAlwaysApproved(toolName: string, args: Record<string, unknown>): bool
   return false
 }
 
-function generalizedApprovalKeys(toolName: string, args: Record<string, unknown>): string[] {
-  const exact = buildApprovalKey(toolName, args)
-  if (toolName !== 'bash') return [exact]
-  if (isDangerousCommand(args) || isSudoCommand(args)) return [exact]
-
-  const command = ((args.command ?? '') as string).trim()
-  const tokens = parseBashTokens(command)
-  const prefix = extractCommandPrefix(tokens)
-  if (prefix.length < 2) return [exact]
-
-  if (prefix[0] === 'git') {
-    const safeSubcommands = new Set(['status', 'log', 'diff', 'show'])
-    if (safeSubcommands.has(prefix[1] ?? '')) {
-      return ['bash:git:*', exact]
-    }
-  }
-
-  return [exact]
-}
-
 // ─── Middleware ──────────────────────────────────────────────────────────────
 
 export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
@@ -318,14 +279,7 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
       const { toolName, args } = ctx
       const path = (args.path ?? args.filePath ?? '') as string
 
-      // Reset learned approvals per session.
-      if (activeSessionId !== ctx.ctx.sessionId) {
-        activeSessionId = ctx.ctx.sessionId
-        settings = {
-          ...settings,
-          alwaysApproved: [],
-        }
-      }
+      dynamicRuleStore.startSession(ctx.ctx.sessionId)
 
       // 1. Always block: .git writes
       if (
@@ -368,6 +322,11 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
 
       // 7. Always-approved list check (with arity fingerprinting for bash)
       if (isAlwaysApproved(toolName, args)) {
+        return undefined
+      }
+
+      // 7b. Session-scoped dynamic rules learned from prior explicit approvals.
+      if (dynamicRuleStore.allows(ctx.ctx.sessionId, toolName, args)) {
         return undefined
       }
 
@@ -458,13 +417,7 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
         }
         // Handle "always approve" — store arity-based fingerprint for bash commands
         if (response.alwaysApprove) {
-          const keys = generalizedApprovalKeys(toolName, args)
-          const unique = new Set(settings.alwaysApproved)
-          for (const key of keys) unique.add(key)
-          settings = {
-            ...settings,
-            alwaysApproved: [...unique],
-          }
+          dynamicRuleStore.learn(ctx.ctx.sessionId, toolName, args)
         }
         return undefined
       }

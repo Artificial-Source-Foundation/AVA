@@ -2,8 +2,8 @@
  * Per-tool-call checkpoints — creates git stash snapshots after modifying tools.
  *
  * Registers as middleware at priority 20 (after permissions at 0, hooks at 10).
- * Each successful modifying tool call creates a lightweight checkpoint via
- * `git stash create` + `git stash store` for potential rollback.
+ * Each successful modifying tool call creates a detached checkpoint commit via
+ * `git commit-tree` and stores it under `refs/ava/checkpoints/<sha>`.
  */
 
 import type {
@@ -56,15 +56,39 @@ export function createCheckpointMiddleware(shell: IShell): {
 
     const nextCounter = counter + 1
     const label = `ava-checkpoint-${nextCounter}-${toolName}`
-    const ref = `refs/ava/checkpoints/${nextCounter}`
 
-    // TODO(sprint-6): Replace stash path with detached commit-tree snapshot using temp index.
     await shell.exec(`cd "${cwd}" && git add -A`)
-    const stashCreate = await shell.exec(`cd "${cwd}" && git stash create "${label}"`)
-    const commit = stashCreate.stdout.trim()
+
+    const parentCommitResult = await shell.exec(`cd "${cwd}" && git rev-parse --verify HEAD`)
+    const parentCommit = parentCommitResult.exitCode === 0 ? parentCommitResult.stdout.trim() : ''
+
+    const treeResult = await shell.exec(`cd "${cwd}" && git write-tree`)
+    const tree = treeResult.stdout.trim()
+    if (!tree) {
+      return
+    }
+
+    if (parentCommit) {
+      const parentTreeResult = await shell.exec(
+        `cd "${cwd}" && git rev-parse "${parentCommit}^{tree}"`
+      )
+      const parentTree = parentTreeResult.stdout.trim()
+      if (parentTree && parentTree === tree) {
+        return
+      }
+    }
+
+    const commitTreeCmd = parentCommit
+      ? `cd "${cwd}" && git commit-tree "${tree}" -p "${parentCommit}" -m "${label}"`
+      : `cd "${cwd}" && git commit-tree "${tree}" -m "${label}"`
+
+    const commitResult = await shell.exec(commitTreeCmd)
+    const commit = commitResult.stdout.trim()
     if (!commit) {
       return
     }
+
+    const ref = `refs/ava/checkpoints/${commit}`
 
     await shell.exec(`cd "${cwd}" && git update-ref "${ref}" "${commit}"`)
 

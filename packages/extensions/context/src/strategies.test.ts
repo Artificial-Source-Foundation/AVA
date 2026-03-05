@@ -1,5 +1,5 @@
 import type { ChatMessage } from '@ava/core-v2/llm'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   ALL_STRATEGIES,
@@ -154,6 +154,10 @@ describe('ALL_STRATEGIES', () => {
 })
 
 describe('tieredCompactionStrategy', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('uses expected Cline-derived thresholds', () => {
     expect(targetForWindow(64_000)).toBe(37_000)
     expect(targetForWindow(128_000)).toBe(98_000)
@@ -172,5 +176,43 @@ describe('tieredCompactionStrategy', () => {
     const block = resultMessage.content[0]
     if (!block || block.type !== 'tool_result') throw new Error('invalid fixture')
     expect(block.content).toContain('[tool output truncated by tiered compaction]')
+  })
+
+  it('applies sliding-window tier before summary fallback when below threshold', () => {
+    const truncateSpy = vi.spyOn(truncateStrategy, 'compact')
+    const summarizeSpy = vi.spyOn(summarizeStrategy, 'compact')
+    const messages: ChatMessage[] = [msg('system', 'sys'), msg('user', 'small-change')]
+
+    const compacted = tieredCompactionStrategy.compact(messages, 64_000)
+
+    expect(truncateSpy).toHaveBeenCalledWith(expect.any(Array), 37_000)
+    expect(summarizeSpy).not.toHaveBeenCalled()
+    expect(compacted).toEqual(messages)
+  })
+
+  it('falls back to summarize tier when still above threshold after sliding', () => {
+    const oversized: ChatMessage[] = [msg('user', 'x'.repeat(500_000))]
+    vi.spyOn(truncateStrategy, 'compact').mockReturnValue(oversized)
+    const summarizeSpy = vi
+      .spyOn(summarizeStrategy, 'compact')
+      .mockReturnValue([msg('system', 'Summary of earlier conversation (fallback)')])
+
+    const compacted = tieredCompactionStrategy.compact([msg('system', 'sys')], 64_000)
+
+    expect(summarizeSpy).toHaveBeenCalledWith(oversized, 37_000)
+    expect(String(compacted[0]?.content)).toContain('Summary of earlier conversation')
+  })
+
+  it('uses summarize fallback when model-level summarization is unavailable', () => {
+    const oversized: ChatMessage[] = [msg('assistant', 'y'.repeat(650_000))]
+    vi.spyOn(truncateStrategy, 'compact').mockReturnValue(oversized)
+    const summarizeSpy = vi
+      .spyOn(summarizeStrategy, 'compact')
+      .mockReturnValue([msg('system', 'Summary of earlier conversation (llm unavailable)')])
+
+    const compacted = tieredCompactionStrategy.compact([msg('system', 'sys')], 128_000)
+
+    expect(summarizeSpy).toHaveBeenCalledWith(oversized, 98_000)
+    expect(String(compacted[0]?.content)).toContain('Summary of earlier conversation')
   })
 })

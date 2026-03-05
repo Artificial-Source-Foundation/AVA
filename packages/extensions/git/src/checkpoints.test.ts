@@ -29,28 +29,83 @@ function makeResult(success = true): ToolResult {
   return { success, output: 'ok' }
 }
 
+function mockGitRepo(shell: MockShell): void {
+  shell.setResult('cd "/project" && git rev-parse --is-inside-work-tree', {
+    stdout: 'true\n',
+    stderr: '',
+    exitCode: 0,
+  })
+}
+
+function mockCommitTreeCheckpoint(
+  shell: MockShell,
+  {
+    id,
+    tool,
+    commit,
+    tree,
+    parent,
+    parentTree,
+  }: {
+    id: number
+    tool: string
+    commit: string
+    tree: string
+    parent: string
+    parentTree: string
+  }
+): void {
+  shell.setResult('cd "/project" && git add -A', {
+    stdout: '',
+    stderr: '',
+    exitCode: 0,
+  })
+  shell.setResult('cd "/project" && git rev-parse --verify HEAD', {
+    stdout: `${parent}\n`,
+    stderr: '',
+    exitCode: 0,
+  })
+  shell.setResult('cd "/project" && git write-tree', {
+    stdout: `${tree}\n`,
+    stderr: '',
+    exitCode: 0,
+  })
+  shell.setResult(`cd "/project" && git rev-parse "${parent}^{tree}"`, {
+    stdout: `${parentTree}\n`,
+    stderr: '',
+    exitCode: 0,
+  })
+
+  if (tree === parentTree) {
+    return
+  }
+
+  shell.setResult(
+    `cd "/project" && git commit-tree "${tree}" -p "${parent}" -m "ava-checkpoint-${id}-${tool}"`,
+    {
+      stdout: `${commit}\n`,
+      stderr: '',
+      exitCode: 0,
+    }
+  )
+  shell.setResult(`cd "/project" && git update-ref "refs/ava/checkpoints/${commit}" "${commit}"`, {
+    stdout: '',
+    stderr: '',
+    exitCode: 0,
+  })
+}
+
 describe('createCheckpointMiddleware', () => {
   it('creates a checkpoint after a modifying tool', async () => {
     const shell = new MockShell()
-    shell.setResult('cd "/project" && git rev-parse --is-inside-work-tree', {
-      stdout: 'true\n',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/project" && git add -A', {
-      stdout: '',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/project" && git stash create "ava-checkpoint-1-write_file"', {
-      stdout: 'abc123\n',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/project" && git update-ref "refs/ava/checkpoints/1" abc123', {
-      stdout: '',
-      stderr: '',
-      exitCode: 0,
+    mockGitRepo(shell)
+    mockCommitTreeCheckpoint(shell, {
+      id: 1,
+      tool: 'write_file',
+      commit: 'abc123',
+      tree: 'tree1',
+      parent: 'head1',
+      parentTree: 'head-tree',
     })
 
     const { middleware, store } = createCheckpointMiddleware(shell)
@@ -102,22 +157,16 @@ describe('createCheckpointMiddleware', () => {
     expect(store.getCheckpoints()).toHaveLength(0)
   })
 
-  it('skips when stash create returns empty (no changes)', async () => {
+  it('skips when tree matches HEAD tree (no changes)', async () => {
     const shell = new MockShell()
-    shell.setResult('cd "/project" && git rev-parse --is-inside-work-tree', {
-      stdout: 'true\n',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/project" && git add -A', {
-      stdout: '',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/project" && git stash create "ava-checkpoint-1-bash"', {
-      stdout: '\n',
-      stderr: '',
-      exitCode: 0,
+    mockGitRepo(shell)
+    mockCommitTreeCheckpoint(shell, {
+      id: 1,
+      tool: 'bash',
+      commit: 'unused',
+      tree: 'same-tree',
+      parent: 'head1',
+      parentTree: 'same-tree',
     })
 
     const { middleware, store } = createCheckpointMiddleware(shell)
@@ -130,34 +179,45 @@ describe('createCheckpointMiddleware', () => {
 
   it('increments checkpoint IDs', async () => {
     const shell = new MockShell()
-    shell.setResult('cd "/project" && git rev-parse --is-inside-work-tree', {
-      stdout: 'true\n',
+    mockGitRepo(shell)
+    shell.setResult('cd "/project" && git add -A', { stdout: '', stderr: '', exitCode: 0 })
+    shell.setResult('cd "/project" && git rev-parse --verify HEAD', {
+      stdout: 'head1\n',
       stderr: '',
       exitCode: 0,
     })
-    shell.setResult('cd "/project" && git add -A', {
+    shell.setResult('cd "/project" && git write-tree', {
+      stdout: 'tree1\n',
+      stderr: '',
+      exitCode: 0,
+    })
+    shell.setResult('cd "/project" && git rev-parse "head1^{tree}"', {
+      stdout: 'head-tree\n',
+      stderr: '',
+      exitCode: 0,
+    })
+    shell.setResult(
+      'cd "/project" && git commit-tree "tree1" -p "head1" -m "ava-checkpoint-1-edit"',
+      {
+        stdout: 'hash1\n',
+        stderr: '',
+        exitCode: 0,
+      }
+    )
+    shell.setResult(
+      'cd "/project" && git commit-tree "tree1" -p "head1" -m "ava-checkpoint-2-create_file"',
+      {
+        stdout: 'hash2\n',
+        stderr: '',
+        exitCode: 0,
+      }
+    )
+    shell.setResult('cd "/project" && git update-ref "refs/ava/checkpoints/hash1" "hash1"', {
       stdout: '',
       stderr: '',
       exitCode: 0,
     })
-
-    shell.setResult('cd "/project" && git stash create "ava-checkpoint-1-edit"', {
-      stdout: 'hash1\n',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/project" && git update-ref "refs/ava/checkpoints/1" hash1', {
-      stdout: '',
-      stderr: '',
-      exitCode: 0,
-    })
-
-    shell.setResult('cd "/project" && git stash create "ava-checkpoint-2-create_file"', {
-      stdout: 'hash2\n',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/project" && git update-ref "refs/ava/checkpoints/2" hash2', {
+    shell.setResult('cd "/project" && git update-ref "refs/ava/checkpoints/hash2" "hash2"', {
       stdout: '',
       stderr: '',
       exitCode: 0,
@@ -187,25 +247,14 @@ describe('createCheckpointMiddleware', () => {
 
     for (let i = 0; i < modifyingTools.length; i++) {
       const shell = new MockShell()
-      shell.setResult('cd "/project" && git rev-parse --is-inside-work-tree', {
-        stdout: 'true\n',
-        stderr: '',
-        exitCode: 0,
-      })
-      shell.setResult('cd "/project" && git add -A', {
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
-      })
-      shell.setResult(`cd "/project" && git stash create "ava-checkpoint-1-${modifyingTools[i]}"`, {
-        stdout: `hash-${i}\n`,
-        stderr: '',
-        exitCode: 0,
-      })
-      shell.setResult(`cd "/project" && git update-ref "refs/ava/checkpoints/1" hash-${i}`, {
-        stdout: '',
-        stderr: '',
-        exitCode: 0,
+      mockGitRepo(shell)
+      mockCommitTreeCheckpoint(shell, {
+        id: 1,
+        tool: modifyingTools[i]!,
+        commit: `hash-${i}`,
+        tree: `tree-${i}`,
+        parent: 'head1',
+        parentTree: 'head-tree',
       })
 
       const { middleware, store } = createCheckpointMiddleware(shell)
@@ -216,25 +265,14 @@ describe('createCheckpointMiddleware', () => {
 
   it('resets checkpoints via store', async () => {
     const shell = new MockShell()
-    shell.setResult('cd "/project" && git rev-parse --is-inside-work-tree', {
-      stdout: 'true\n',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/project" && git add -A', {
-      stdout: '',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/project" && git stash create "ava-checkpoint-1-edit"', {
-      stdout: 'hash1\n',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/project" && git update-ref "refs/ava/checkpoints/1" hash1', {
-      stdout: '',
-      stderr: '',
-      exitCode: 0,
+    mockGitRepo(shell)
+    mockCommitTreeCheckpoint(shell, {
+      id: 1,
+      tool: 'edit',
+      commit: 'hash1',
+      tree: 'tree1',
+      parent: 'head1',
+      parentTree: 'head-tree',
     })
 
     const { middleware, store } = createCheckpointMiddleware(shell)
@@ -254,22 +292,11 @@ describe('createCheckpointMiddleware', () => {
 
   it('handles git errors gracefully (non-critical)', async () => {
     const shell = new MockShell()
-    shell.setResult('cd "/project" && git rev-parse --is-inside-work-tree', {
-      stdout: 'true\n',
-      stderr: '',
-      exitCode: 0,
-    })
-    // git add -A is not mocked, so it will return the default empty result
-    // but git stash create will return nothing since there are no staged changes
+    mockGitRepo(shell)
     shell.setResult('cd "/project" && git add -A', {
       stdout: '',
       stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/project" && git stash create "ava-checkpoint-1-edit"', {
-      stdout: '',
-      stderr: '',
-      exitCode: 0,
+      exitCode: 1,
     })
 
     const { middleware, store } = createCheckpointMiddleware(shell)
@@ -282,25 +309,14 @@ describe('createCheckpointMiddleware', () => {
 
   it('returns a copy of checkpoints (not the internal array)', async () => {
     const shell = new MockShell()
-    shell.setResult('cd "/project" && git rev-parse --is-inside-work-tree', {
-      stdout: 'true\n',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/project" && git add -A', {
-      stdout: '',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/project" && git stash create "ava-checkpoint-1-edit"', {
-      stdout: 'hash1\n',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/project" && git update-ref "refs/ava/checkpoints/1" hash1', {
-      stdout: '',
-      stderr: '',
-      exitCode: 0,
+    mockGitRepo(shell)
+    mockCommitTreeCheckpoint(shell, {
+      id: 1,
+      tool: 'edit',
+      commit: 'hash1',
+      tree: 'tree1',
+      parent: 'head1',
+      parentTree: 'head-tree',
     })
 
     const { middleware, store } = createCheckpointMiddleware(shell)

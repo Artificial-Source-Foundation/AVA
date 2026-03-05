@@ -52,6 +52,7 @@ export const tieredCompactionStrategy: ContextStrategy = {
     }
 
     // TODO(sprint-4): Replace static summarize fallback with cheapest-model summary call.
+    // Tracking: issue #0.
     return summarizeStrategy.compact(slid, threshold)
   },
 }

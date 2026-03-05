@@ -114,6 +114,7 @@ export const DiffReview: Component<DiffReviewProps> = (props) => {
           <button
             type="button"
             onClick={resetAll}
+            title="Reset decisions"
             class="px-2 py-1 text-[10px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-muted)] border border-[var(--border-subtle)]"
           >
             <RotateCcw class="w-3 h-3" />

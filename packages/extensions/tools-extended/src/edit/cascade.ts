@@ -172,6 +172,7 @@ async function runTier(
     )
   } catch {
     // TODO(sprint-3): replace fallback-only behavior once dedicated rust tier commands exist.
+    // Tracking: issue #0.
     return tsFallback()
   }
 }

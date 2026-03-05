@@ -78,6 +78,10 @@ export type { BashTokens } from './bash-parser.js'
 export { parseBashTokens } from './bash-parser.js'
 export {
   buildApprovalKey,
+  createDynamicRuleStore,
+  isDangerousToGeneralize,
+} from './dynamic-rules.js'
+export {
   createPermissionMiddleware,
   evaluateToolRules,
   getSettings,

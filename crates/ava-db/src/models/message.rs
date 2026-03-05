@@ -1,74 +1,66 @@
-//! Message repository operations
+//! Message model and repository operations.
 
-use ava_types::Result;
-use sqlx::{Executor, Sqlite};
+use sqlx::{FromRow, SqlitePool};
 
-use crate::models::MessageRecord;
+#[derive(Debug, Clone, PartialEq, Eq, FromRow)]
+pub struct MessageRecord {
+    pub id: String,
+    pub session_id: String,
+    pub role: String,
+    pub content: String,
+    pub tool_calls_json: Option<String>,
+    pub created_at: String,
+}
 
-/// Repository for message operations
-pub struct MessageRepository;
+#[derive(Debug, Clone)]
+pub struct MessageRepository {
+    pool: SqlitePool,
+}
 
 impl MessageRepository {
-    /// Save a message to the database
-    pub async fn save<'e, E>(executor: E, message: &MessageRecord) -> Result<()>
-    where
-        E: Executor<'e, Database = Sqlite>,
-    {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn insert(&self, record: &MessageRecord) -> Result<(), sqlx::Error> {
         sqlx::query(
-            r#"
-            INSERT INTO messages (id, session_id, role, content, timestamp, tool_calls, tool_results)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-            ON CONFLICT(id) DO UPDATE SET
-                content = excluded.content,
-                tool_calls = excluded.tool_calls,
-                tool_results = excluded.tool_results
-            "#,
+            "INSERT INTO messages (id, session_id, role, content, tool_calls_json, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )
-        .bind(&message.id)
-        .bind(&message.session_id)
-        .bind(&message.role)
-        .bind(&message.content)
-        .bind(message.timestamp)
-        .bind(&message.tool_calls)
-        .bind(&message.tool_results)
-        .execute(executor)
-        .await
-        .map_err(|e| ava_types::AvaError::DatabaseError(e.to_string()))?;
+        .bind(&record.id)
+        .bind(&record.session_id)
+        .bind(&record.role)
+        .bind(&record.content)
+        .bind(&record.tool_calls_json)
+        .bind(&record.created_at)
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }
 
-    /// Load messages for a session
-    pub async fn load_by_session<'e, E>(executor: E, session_id: &str) -> Result<Vec<MessageRecord>>
-    where
-        E: Executor<'e, Database = Sqlite>,
-    {
-        let messages = sqlx::query_as::<_, MessageRecord>(
-            r#"
-            SELECT id, session_id, role, content, timestamp, tool_calls, tool_results
-            FROM messages
-            WHERE session_id = ?1
-            ORDER BY timestamp ASC
-            "#,
+    pub async fn get_by_id(&self, id: &str) -> Result<Option<MessageRecord>, sqlx::Error> {
+        sqlx::query_as::<_, MessageRecord>(
+            "SELECT id, session_id, role, content, tool_calls_json, created_at FROM messages WHERE id = ?1",
         )
-        .bind(session_id)
-        .fetch_all(executor)
+        .bind(id)
+        .fetch_optional(&self.pool)
         .await
-        .map_err(|e| ava_types::AvaError::DatabaseError(e.to_string()))?;
-
-        Ok(messages)
     }
 
-    /// Delete messages for a session
-    pub async fn delete_by_session<'e, E>(executor: E, session_id: &str) -> Result<u64>
-    where
-        E: Executor<'e, Database = Sqlite>,
-    {
+    pub async fn list_by_session(&self, session_id: &str) -> Result<Vec<MessageRecord>, sqlx::Error> {
+        sqlx::query_as::<_, MessageRecord>(
+            "SELECT id, session_id, role, content, tool_calls_json, created_at FROM messages WHERE session_id = ?1 ORDER BY created_at ASC",
+        )
+        .bind(session_id)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn delete_by_session(&self, session_id: &str) -> Result<u64, sqlx::Error> {
         let result = sqlx::query("DELETE FROM messages WHERE session_id = ?1")
             .bind(session_id)
-            .execute(executor)
-            .await
-            .map_err(|e| ava_types::AvaError::DatabaseError(e.to_string()))?;
+            .execute(&self.pool)
+            .await?;
 
         Ok(result.rows_affected())
     }
@@ -78,54 +70,93 @@ impl MessageRepository {
 mod tests {
     use super::*;
     use crate::create_test_db;
-    use crate::models::session::SessionRepository;
-    use crate::models::SessionRecord;
+    use crate::models::session::{SessionRecord, SessionRepository};
 
     #[tokio::test]
-    async fn test_save_and_load_messages() {
-        let db = create_test_db().await.unwrap();
+    async fn test_insert_get_and_list_by_session() {
+        let db = create_test_db().await.expect("test db should initialize");
+        let sessions = SessionRepository::new(db.pool().clone());
+        let messages = MessageRepository::new(db.pool().clone());
 
-        // Create a session first
-        let session = SessionRecord::new("test-session");
-        SessionRepository::save(db.pool(), &session).await.unwrap();
-
-        // Add messages
-        for i in 0..3 {
-            let msg = MessageRecord::new(
-                format!("msg-{}", i),
-                "test-session",
-                if i % 2 == 0 { "user" } else { "assistant" },
-                format!("Message {}", i),
-            );
-            MessageRepository::save(db.pool(), &msg).await.unwrap();
-        }
-
-        let messages = MessageRepository::load_by_session(db.pool(), "test-session")
+        let session = SessionRecord {
+            id: "test-session".to_string(),
+            title: "test".to_string(),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+            metadata_json: None,
+        };
+        sessions
+            .create(&session)
             .await
-            .unwrap();
+            .expect("session should be inserted");
 
-        assert_eq!(messages.len(), 3);
+        let first = MessageRecord {
+            id: "m-1".to_string(),
+            session_id: session.id.clone(),
+            role: "user".to_string(),
+            content: "hello".to_string(),
+            tool_calls_json: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        };
+        messages
+            .insert(&first)
+            .await
+            .expect("message should be inserted");
+
+        let loaded = messages
+            .get_by_id("m-1")
+            .await
+            .expect("query should succeed")
+            .expect("message should exist");
+        assert_eq!(loaded.content, "hello");
+
+        let listed = messages
+            .list_by_session("test-session")
+            .await
+            .expect("list should succeed");
+        assert_eq!(listed.len(), 1);
     }
 
     #[tokio::test]
     async fn test_delete_messages_by_session() {
-        let db = create_test_db().await.unwrap();
+        let db = create_test_db().await.expect("test db should initialize");
+        let sessions = SessionRepository::new(db.pool().clone());
+        let messages = MessageRepository::new(db.pool().clone());
 
-        let session = SessionRecord::new("delete-session");
-        SessionRepository::save(db.pool(), &session).await.unwrap();
-
-        let msg = MessageRecord::new("msg-1", "delete-session", "user", "Hello");
-        MessageRepository::save(db.pool(), &msg).await.unwrap();
-
-        let deleted = MessageRepository::delete_by_session(db.pool(), "delete-session")
+        sessions
+            .create(&SessionRecord {
+                id: "delete-session".to_string(),
+                title: "delete test".to_string(),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+                metadata_json: None,
+            })
             .await
-            .unwrap();
+            .expect("session should be inserted");
+
+        messages
+            .insert(&MessageRecord {
+                id: "msg-1".to_string(),
+                session_id: "delete-session".to_string(),
+                role: "user".to_string(),
+                content: "Hello".to_string(),
+                tool_calls_json: None,
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+            })
+            .await
+            .expect("message should be inserted");
+
+        let deleted = messages
+            .delete_by_session("delete-session")
+            .await
+            .expect("delete should succeed");
 
         assert_eq!(deleted, 1);
 
-        let messages = MessageRepository::load_by_session(db.pool(), "delete-session")
+        let remaining = messages
+            .list_by_session("delete-session")
             .await
-            .unwrap();
-        assert!(messages.is_empty());
+            .expect("list should succeed");
+        assert!(remaining.is_empty());
     }
 }

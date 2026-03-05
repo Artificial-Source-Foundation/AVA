@@ -1,6 +1,9 @@
 use ava_tools::browser::{BrowserDriver, BrowserEngine, BrowserError, BrowserResult};
 use serde::Serialize;
 
+const MCP_BROWSER_MESSAGE: &str =
+    "Browser automation requires an MCP server. Configure a Puppeteer or Playwright MCP server in settings.";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BrowserCommandOutput {
     pub output: String,
@@ -9,24 +12,24 @@ pub struct BrowserCommandOutput {
 struct AdapterBrowserDriver;
 
 impl BrowserDriver for AdapterBrowserDriver {
-    fn navigate(&self, url: &str) -> Result<BrowserResult, BrowserError> {
-        Ok(BrowserResult::new(format!("navigated:{url}")))
+    fn navigate(&self, _url: &str) -> Result<BrowserResult, BrowserError> {
+        Err(BrowserError::Driver(MCP_BROWSER_MESSAGE.to_string()))
     }
 
-    fn click(&self, selector: &str) -> Result<BrowserResult, BrowserError> {
-        Ok(BrowserResult::new(format!("clicked:{selector}")))
+    fn click(&self, _selector: &str) -> Result<BrowserResult, BrowserError> {
+        Err(BrowserError::Driver(MCP_BROWSER_MESSAGE.to_string()))
     }
 
-    fn type_text(&self, selector: &str, text: &str) -> Result<BrowserResult, BrowserError> {
-        Ok(BrowserResult::new(format!("typed:{selector}:{text}")))
+    fn type_text(&self, _selector: &str, _text: &str) -> Result<BrowserResult, BrowserError> {
+        Err(BrowserError::Driver(MCP_BROWSER_MESSAGE.to_string()))
     }
 
-    fn extract_text(&self, selector: &str) -> Result<BrowserResult, BrowserError> {
-        Ok(BrowserResult::new(format!("extracted:{selector}")))
+    fn extract_text(&self, _selector: &str) -> Result<BrowserResult, BrowserError> {
+        Err(BrowserError::Driver(MCP_BROWSER_MESSAGE.to_string()))
     }
 
-    fn screenshot(&self, path: &str) -> Result<BrowserResult, BrowserError> {
-        Ok(BrowserResult::new(format!("screenshot:{path}")))
+    fn screenshot(&self, _path: &str) -> Result<BrowserResult, BrowserError> {
+        Err(BrowserError::Driver(MCP_BROWSER_MESSAGE.to_string()))
     }
 }
 
@@ -56,14 +59,13 @@ mod tests {
     use super::{execute_browser_tool, run_browser_payload};
 
     #[test]
-    fn execute_browser_tool_maps_json_and_returns_serializable_output() {
-        let result = execute_browser_tool(
+    fn execute_browser_tool_returns_mcp_error() {
+        let error = execute_browser_tool(
             r#"{"action":"navigate","url":"https://example.com"}"#.to_string(),
-        );
-        let output = result.expect("browser command should execute");
-        let json_value = serde_json::to_value(&output).expect("output should serialize");
+        )
+        .expect_err("browser command should fail without MCP server");
 
-        assert_eq!(json_value["output"], "navigated:https://example.com");
+        assert!(error.contains("requires an MCP server"));
     }
 
     #[test]

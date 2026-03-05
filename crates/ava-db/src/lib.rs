@@ -41,17 +41,22 @@ impl Database {
                 .map_err(|e| ava_types::AvaError::IoError(e.to_string()))?;
         }
 
-        let database_url = format!("sqlite:{}", path.display());
+        let database_url = format!("sqlite:{}?mode=rwc", path.display());
         Self::new(&database_url).await
     }
 
     /// Run database migrations
-    pub async fn migrate(&self) -> Result<()> {
+    pub async fn run_migrations(&self) -> Result<()> {
         sqlx::migrate!("./src/migrations")
             .run(&self.pool)
             .await
             .map_err(|e| ava_types::AvaError::DatabaseError(e.to_string()))?;
         Ok(())
+    }
+
+    /// Backward compatible migration helper.
+    pub async fn migrate(&self) -> Result<()> {
+        self.run_migrations().await
     }
 
     /// Get a reference to the connection pool
@@ -69,7 +74,7 @@ impl Database {
 #[cfg(test)]
 pub async fn create_test_db() -> Result<Database> {
     let db = Database::new("sqlite::memory:").await?;
-    db.migrate().await?;
+    db.run_migrations().await?;
     Ok(db)
 }
 

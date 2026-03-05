@@ -17,7 +17,7 @@ mod tool_browser;
 mod tool_git;
 
 pub use agent_integration::{
-    agent_run, agent_stream, execute_tool, list_tools, MockAgent, MockToolRegistry, ToolInfo,
+    agent_run, agent_stream, execute_tool, list_tools, ToolInfo,
 };
 pub use compute_fuzzy::compute_fuzzy_replace;
 pub use compute_grep::compute_grep;

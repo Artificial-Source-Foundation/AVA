@@ -1,140 +1,65 @@
-# AVA Backend Sprint Backlog 2026 - Modular
+# Sprint Plan v2: Cut & Deepen (Hybrid Rust + TS)
 
-> 9-month direct-to-Rust sprint plan, organized by epic
+> Replaces the 41-sprint full-Rust rewrite with a 10-sprint hybrid approach.
+> Rust for compute hotpaths. TypeScript for orchestration. Delete everything else.
 
-## Structure
+## Epics
+
+| Epic | Sprints | Goal | Duration |
+|------|---------|------|----------|
+| **A: Cut & Clean** | 1-2 | Delete 60K LOC, merge extensions, wire Rust hotpaths | 2 weeks |
+| **B: Deepen** | 3-6 | Best-in-class edit, context, reliability, safety | 4 weeks (2 parallel pairs) |
+| **C: Ship** | 7-10 | UX polish, plugins, testing, docs + release | 4 weeks (2 parallel pairs) |
+
+## Competitive "Best of Breed" Map
+
+Each sprint bases its implementation on the best competitor for that capability.
+All reference code is local at `docs/reference-code/`.
+
+| Capability | Inspire from | Key reference file |
+|---|---|---|
+| Streaming edit + fuzzy | **Zed** | `zed/crates/agent/src/tools/streaming_edit_file_tool.rs` |
+| 4-tier edit cascade | **Gemini CLI** | `gemini-cli/packages/core/src/tools/edit.ts` |
+| LLM self-correction | **Gemini CLI** | `gemini-cli/packages/core/src/tools/edit.ts` (line 445) |
+| Relative indentation | **Aider** | `aider/aider/coders/search_replace.py` (RelativeIndenter) |
+| Unicode normalization | **Pi-Mono** | `pi-mono/packages/coding-agent/src/core/tools/edit-diff.ts` |
+| 9 edit replacers | **OpenCode** | `opencode/packages/opencode/src/tool/edit.ts` |
+| PageRank repo map | **Aider** | `aider/aider/repomap.py` |
+| OS-level sandbox | **Codex CLI** | `codex-cli/codex-rs/core/src/landlock.rs` |
+| Ghost checkpoints | **Codex CLI** | `codex-cli/codex-rs/utils/git/src/ghost_commits.rs` |
+| Permission rules | **Codex CLI** | `codex-cli/codex-rs/core/src/exec_policy.rs` |
+| Stuck/loop detection | **Goose** | `goose/crates/goose/src/agents/tool_inspection.rs` |
+| Context compaction | **Cline** | `cline/src/core/context/context-management/ContextManager.ts` |
+| MCP auto-approval | **Cline** | `cline/src/core/task/tools/handlers/` |
+| LSP in tool output | **OpenCode** | `opencode/packages/opencode/src/lsp/` |
+| Agent loop (batched) | **Zed** | `zed/crates/agent/src/thread.rs` (line 1723) |
+| MCP-first extensions | **Goose** | `goose/crates/goose/src/agents/extension_manager.rs` |
+| Browser sessions | **Cline** | `cline/src/core/task/tools/handlers/` (BrowserToolHandler) |
+| Subagent spawning | **OpenCode** | `opencode/packages/opencode/src/tool/task.ts` |
+
+## Timeline (with parallelization: ~7 weeks)
 
 ```
-docs/planning/sprints/
-├── epic-1/                    # Foundation (Sprints 24-26)
-│   ├── sprint-24.md          # Workspace & Types
-│   ├── sprint-25.md          # Infrastructure
-│   └── sprint-26.md          # Core Foundation
-├── epic-2/                    # Essential Tools (Sprints 27-29)
-│   ├── sprint-27.md          # Edit Tool Excellence
-│   ├── sprint-28.md          # Search & Context
-│   └── sprint-29.md          # LSP & Sandboxing
-├── epic-3/                    # Agent Core (Sprints 30-32)
-│   ├── sprint-30.md          # Agent Loop
-│   ├── sprint-31.md          # Commander & LLM
-│   └── sprint-32.md          # MCP & Integration
-├── epic-4/                    # Complete Backend (Sprints 33-35)
-│   ├── sprint-33.md          # Remaining Tools
-│   ├── sprint-34.md          # Extensions & Validation
-│   └── sprint-35.md          # Performance & Polish
-├── epic-5/                    # Frontend Integration (Sprints 36-38)
-│   ├── sprint-36.md          # Tauri Integration
-│   ├── sprint-37.md          # Frontend Updates
-│   └── sprint-38.md          # Testing & Migration
-└── epic-6/                    # Ship It (Sprints 39-41)
-    ├── sprint-39.md          # Bug Fixes
-    ├── sprint-40.md          # Performance
-    └── sprint-41.md          # Release
+Week 1:  Sprint 1 (The Great Deletion)
+Week 2:  Sprint 2 (Wire Rust Hotpaths)
+Week 3:  Sprint 3 (Edit Excellence)    ─┐ parallel
+Week 4:  Sprint 4 (Context Intel)      ─┘
+Week 5:  Sprint 5 (Agent Reliability)  ─┐ parallel
+Week 6:  Sprint 6 (Sandbox & Safety)   ─┘
+Week 7:  Sprint 7 (Desktop UX)        ─┐ parallel
+Week 8:  Sprint 8 (Plugins)           ─┘
+Week 9:  Sprint 9 (Testing & QA)
+Week 10: Sprint 10 (Docs & Ship)
 ```
 
-## Quick Reference
+## Architecture After v2
 
-| Sprint | Epic | Focus | Stories | Points |
-|--------|------|-------|---------|--------|
-| 24 | 1 | Workspace & Types | 3 | 20 |
-| 25 | 1 | Infrastructure | 3 | 32 |
-| 26 | 1 | Core Foundation | 3 | 24 |
-| 27 | 2 | Edit Tool Excellence | 3 | 44 |
-| 28 | 2 | Search & Context | 3 | 44 |
-| 29 | 2 | LSP & Sandboxing | 3 | 44 |
-| 30 | 3 | Agent Loop | 3 | 40 |
-| 31 | 3 | Commander & LLM | 3 | 40 |
-| 32 | 3 | MCP & Integration | 3 | 40 |
-| 33 | 4 | Remaining Tools | 4 | 44 |
-| 34 | 4 | Extensions & Validation | 3 | 36 |
-| 35 | 4 | Performance & Polish | 3 | 36 |
-| 36 | 5 | Tauri Integration | 3 | 32 |
-| 37 | 5 | Frontend Updates | 3 | 32 |
-| 38 | 5 | Testing & Migration | 3 | 24 |
-| 39 | 6 | Bug Fixes | 2 | 30 |
-| 40 | 6 | Performance | 2 | 30 |
-| 41 | 6 | Release | 2 | 30 |
-| **Total** | **6 Epics** | **18 Sprints** | **51 Stories** | **642 Points** |
+```
+SolidJS Frontend (src/)
+    ├── invoke() ──→ Rust crates (compute, storage, validation)
+    └── import ──→ core-v2 + 18 extensions (orchestration, LLM, MCP)
+```
 
-## Current Status (2026-03-04)
-
-- Epic 1 (Sprints 24-26): COMPLETE
-- Epic 2 (Sprints 27-29): COMPLETE
-- Latest full gate: `cargo build --all-targets`, `cargo test --workspace`, and `cargo clippy --workspace -- -D warnings` all passing
-- Next active sprint: Sprint 30 (`epic-3/sprint-30.md`)
-
-## Epic Summary
-
-### Epic 1: Foundation (Sprints 24-26)
-- **Goal:** Core Rust infrastructure
-- **Deliverables:** Workspace, types, platform, DB, shell, FS
-- **Points:** 76
-
-### Epic 2: Essential Tools (Sprints 27-29)
-- **Goal:** Best-in-class tools
-- **Deliverables:** Edit strategies, BM25, PageRank, condensers, LSP, sandboxing
-- **Points:** 132
-
-### Epic 3: Agent Core (Sprints 30-32)
-- **Goal:** Agent loop and orchestration
-- **Deliverables:** Agent loop, tool registry, commander, LLM providers, MCP
-- **Points:** 120
-
-### Epic 4: Complete Backend (Sprints 33-35)
-- **Goal:** All remaining tools and polish
-- **Deliverables:** Git, browser, memory, permissions, extensions, validation
-- **Points:** 116
-
-### Epic 5: Frontend Integration (Sprints 36-38)
-- **Goal:** Wire TypeScript frontend to Rust
-- **Deliverables:** Tauri commands, event streaming, TS hooks, E2E tests
-- **Points:** 88
-
-### Epic 6: Ship It (Sprints 39-41)
-- **Goal:** Production release
-- **Deliverables:** Bug fixes, performance optimization, release builds
-- **Points:** 90
-
-## Timeline
-
-| Phase | Sprints | Duration | Start | End |
-|-------|---------|----------|-------|-----|
-| Foundation | 24-26 | 6 weeks | Now | +6w |
-| Tools | 27-29 | 6 weeks | +6w | +12w |
-| Agent | 30-32 | 6 weeks | +12w | +18w |
-| Backend | 33-35 | 6 weeks | +18w | +24w |
-| Integration | 36-38 | 6 weeks | +24w | +30w |
-| Ship | 39-41 | 6 weeks | +30w | +36w |
-
-**Total: 36 weeks (9 months)**
-
-## Next Steps
-
-1. **Start Sprint 30**: `epic-3/sprint-30.md`
-2. Keep sprint-end code-reviewer checkpoint
-3. Run quality gates before each sprint handoff
-4. Track follow-up items from Sprint 29 review during Epic 3 integration
-
-## Success Metrics
-
-### Performance
-- Startup: 3s → 0.1s (30x faster)
-- Edit latency: 3s → 0.5s (6x faster)
-- Memory: 300MB → 50MB (6x less)
-- Binary: ~10MB (vs hundreds with Node)
-
-### Quality
-- Edit success rate: 70% → 90%
-- Recovery rate: 85%
-- Context relevance: +30%
-- Sandbox startup: 5s → 0.1s (50x faster)
-
-### Coverage
-- 35 high-quality tools (down from 55)
-- 100% Rust backend
-- TypeScript frontend only
-- 18 sprints, 51 stories
-
----
-
-**Ready to continue?** Open `epic-3/sprint-30.md` and begin Story 3.1!
+**Total backend: ~18.5K LOC** (down from ~79K)
+**Tools: ~30** (down from 55+)
+**Extensions: 18** (down from 37)

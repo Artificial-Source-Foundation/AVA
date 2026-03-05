@@ -13,6 +13,14 @@ pub enum ExtensionError {
     EmptyVersion,
     /// Extension path is empty.
     InvalidPath,
+    /// Extension binary does not exist on disk.
+    FileNotFound(PathBuf),
+    /// Extension binary could not be loaded.
+    LoadFailure(String),
+    /// Required symbol was not found in extension binary.
+    MissingSymbol(String),
+    /// Feature is intentionally unimplemented.
+    Unsupported(String),
 }
 
 impl Display for ExtensionError {
@@ -21,6 +29,14 @@ impl Display for ExtensionError {
             Self::EmptyName => write!(f, "extension name cannot be empty"),
             Self::EmptyVersion => write!(f, "extension version cannot be empty"),
             Self::InvalidPath => write!(f, "extension path cannot be empty"),
+            Self::FileNotFound(path) => {
+                write!(f, "extension file not found: {}", path.display())
+            }
+            Self::LoadFailure(message) => write!(f, "extension load failure: {message}"),
+            Self::MissingSymbol(symbol) => {
+                write!(f, "extension missing required symbol: {symbol}")
+            }
+            Self::Unsupported(message) => write!(f, "{message}"),
         }
     }
 }
@@ -81,6 +97,7 @@ pub trait Extension {
 /// In-memory registry for extension descriptors and hooks.
 pub struct ExtensionManager {
     descriptors: HashMap<String, ExtensionDescriptor>,
+    tool_dispatch: HashMap<String, String>,
     hooks: HookRegistry,
 }
 
@@ -88,6 +105,7 @@ impl Default for ExtensionManager {
     fn default() -> Self {
         Self {
             descriptors: HashMap::new(),
+            tool_dispatch: HashMap::new(),
             hooks: HookRegistry::new(),
         }
     }
@@ -106,6 +124,9 @@ impl ExtensionManager {
 
         self.hooks
             .replace_extension(&descriptor.name, &descriptor.hooks);
+        for tool_name in &descriptor.tools {
+            self.register_tool(&descriptor.name, tool_name);
+        }
         self.descriptors.insert(
             descriptor.name.clone(),
             ExtensionDescriptor::Native(descriptor),
@@ -122,6 +143,9 @@ impl ExtensionManager {
         validate_descriptor(&descriptor.name, &descriptor.version, &descriptor.path)?;
 
         self.hooks.remove_extension(&descriptor.name);
+        for tool_name in &descriptor.tools {
+            self.register_tool(&descriptor.name, tool_name);
+        }
         self.descriptors.insert(
             descriptor.name.clone(),
             ExtensionDescriptor::Wasm(descriptor),
@@ -138,6 +162,17 @@ impl ExtensionManager {
     /// Invokes hooks for the specified point.
     pub fn invoke_hooks(&self, point: HookPoint, context: &HookContext) -> Vec<String> {
         self.hooks.invoke(point, context)
+    }
+
+    /// Registers a single tool ownership mapping.
+    pub fn register_tool(&mut self, extension_name: &str, tool_name: &str) {
+        self.tool_dispatch
+            .insert(tool_name.to_string(), extension_name.to_string());
+    }
+
+    /// Resolves the extension currently owning a tool.
+    pub fn get_extension_for_tool(&self, tool_name: &str) -> Option<&str> {
+        self.tool_dispatch.get(tool_name).map(String::as_str)
     }
 }
 
@@ -156,4 +191,50 @@ fn validate_descriptor(
         return Err(ExtensionError::InvalidPath);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn test_register_tool_dispatch_lookup() {
+        let mut manager = ExtensionManager::new();
+        manager.register_tool("git_ext", "git.status");
+
+        let owner = manager
+            .get_extension_for_tool("git.status")
+            .expect("tool should be registered");
+        assert_eq!(owner, "git_ext");
+    }
+
+    #[test]
+    fn test_native_registration_populates_tool_dispatch() {
+        struct DemoExtension;
+
+        impl Extension for DemoExtension {
+            fn descriptor(&self) -> NativeExtensionDescriptor {
+                NativeExtensionDescriptor {
+                    name: "demo".to_string(),
+                    version: "1.0.0".to_string(),
+                    path: PathBuf::from("demo.so"),
+                    tools: vec!["demo.run".to_string()],
+                    hooks: Vec::new(),
+                    validators: Vec::new(),
+                }
+            }
+        }
+
+        let mut manager = ExtensionManager::new();
+        manager
+            .register_native(DemoExtension)
+            .expect("registration should succeed");
+
+        let owner = manager
+            .get_extension_for_tool("demo.run")
+            .expect("tool should be mapped");
+        assert_eq!(owner, "demo");
+    }
 }

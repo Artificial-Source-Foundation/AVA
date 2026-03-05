@@ -15,9 +15,12 @@ use commands::{
     validation_validate_edit, validation_validate_with_retry,
 };
 use pty::PtyManager;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -26,7 +29,18 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .manage(PtyManager::new())
-        .manage(AppState::new())
+        .setup(|app| {
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|error| format!("failed to resolve app data directory: {error}"))?;
+
+            let state = tauri::async_runtime::block_on(AppState::new(app_data_dir))
+                .map_err(|error| format!("failed to initialize app state: {error}"))?;
+
+            app.manage(state);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             oauth_listen,
@@ -65,6 +79,6 @@ pub fn run() {
             validation_validate_with_retry,
             reflection_reflect_and_fix
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }

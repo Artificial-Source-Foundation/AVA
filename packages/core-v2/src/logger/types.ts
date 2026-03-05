@@ -4,6 +4,8 @@
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error'
 
+export type LogFieldValue = string | number | boolean | null | undefined
+
 export const LOG_LEVEL_PRIORITY: Record<LogLevel, number> = {
   debug: 0,
   info: 1,
@@ -16,7 +18,7 @@ export interface LogEntry {
   level: LogLevel
   source: string
   message: string
-  data?: Record<string, unknown>
+  data?: Record<string, LogFieldValue>
 }
 
 export interface LoggerConfig {
@@ -34,10 +36,11 @@ export const DEFAULT_LOGGER_CONFIG: LoggerConfig = {
 }
 
 export interface SimpleLogger {
-  debug(message: string, data?: Record<string, unknown>): void
-  info(message: string, data?: Record<string, unknown>): void
-  warn(message: string, data?: Record<string, unknown>): void
-  error(message: string, data?: Record<string, unknown>): void
-  timing(label: string, startMs: number, data?: Record<string, unknown>): void
+  debug(message: string, data?: Record<string, LogFieldValue>): void
+  info(message: string, data?: Record<string, LogFieldValue>): void
+  warn(message: string, data?: Record<string, LogFieldValue>): void
+  error(message: string, data?: Record<string, LogFieldValue>): void
+  timing(label: string, startMs: number, data?: Record<string, LogFieldValue>): void
+  time(label: string): { end(data?: Record<string, LogFieldValue>): void }
   child(subsource: string): SimpleLogger
 }

@@ -140,6 +140,7 @@ export interface CustomSkill {
 }
 
 export type RuleActivationMode = 'always' | 'auto' | 'manual'
+export type AppLogLevel = 'debug' | 'info' | 'warn' | 'error'
 
 export interface CustomRule {
   id: string
@@ -181,6 +182,7 @@ export interface AppSettings {
   mcpServers: MCPServerConfig[]
   modelAliases: Record<string, string>
   devMode: boolean
+  logLevel: AppLogLevel
   enabledSkills: string[]
   customSkills: CustomSkill[]
   customRules: CustomRule[]

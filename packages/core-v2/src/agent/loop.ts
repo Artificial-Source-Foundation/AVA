@@ -19,6 +19,7 @@ import type {
   ToolResultBlock,
   ToolUseBlock,
 } from '../llm/types.js'
+import { createLogger } from '../logger/logger.js'
 import { executeTool, getToolDefinitions } from '../tools/registry.js'
 import type { ToolContext } from '../tools/types.js'
 import { efficientToolResult } from './efficient-results.js'
@@ -43,6 +44,11 @@ import {
 } from './types.js'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+const agentLog = createLogger('agent')
+const loopLog = createLogger('agent:loop')
+const llmLog = createLogger('llm')
+const toolLog = createLogger('agent:tool')
 
 function isRetryableError(message: string): boolean {
   return /rate.limit|overloaded|429|529|server error|too many requests/i.test(message)
@@ -258,6 +264,12 @@ export class AgentExecutor {
 
     const provider = this.config.provider ?? 'anthropic'
     const model = this.config.model ?? 'claude-sonnet-4-20250514'
+    agentLog.info('Run started', {
+      goal_length: inputs.goal.length,
+      session: this.agentId,
+      model,
+      provider,
+    })
     const client = createClient(provider)
 
     const history: ChatMessage[] = []
@@ -346,7 +358,9 @@ export class AgentExecutor {
         const turnSignal = AbortSignal.any([combinedSignal, this.steeringController.signal])
 
         turn++
+        const turnStartedAt = Date.now()
         this.emit({ type: 'turn:start', agentId: this.agentId, turn })
+        loopLog.info(`Turn ${turn} started`, { model, provider })
 
         // If step limit was reached last turn, pass empty tools to force text-only response
         const tools = this.stepLimitReached ? [] : this.getAvailableTools()
@@ -439,6 +453,13 @@ export class AgentExecutor {
             toolCalls: [],
             usage: turnResult.usage,
           })
+          loopLog.info(`Turn ${turn} complete`, {
+            tokens_in: turnResult.usage?.inputTokens ?? 0,
+            tokens_out: turnResult.usage?.outputTokens ?? 0,
+            duration_ms: Date.now() - turnStartedAt,
+            tools_called: 0,
+            completion: true,
+          })
           return this.finish(mode, lastOutput, turn, totalInput, totalOutput, startTime)
         }
 
@@ -464,6 +485,13 @@ export class AgentExecutor {
           turn,
           toolCalls: turnResult.toolCalls,
           usage: turnResult.usage,
+        })
+        loopLog.info(`Turn ${turn} complete`, {
+          tokens_in: turnResult.usage?.inputTokens ?? 0,
+          tokens_out: turnResult.usage?.outputTokens ?? 0,
+          duration_ms: Date.now() - turnStartedAt,
+          tools_called: turnResult.toolCalls?.length ?? 0,
+          completion: false,
         })
 
         // Inject follow-up queue after turn has fully completed
@@ -552,6 +580,17 @@ export class AgentExecutor {
       providerConfig,
       signal
     )
+    const llmStartedAt = Date.now()
+    const estimatedTokens = estimateTokens(
+      effectiveSystemPrompt.length +
+        normalizedHistory.reduce((sum, item) => sum + contentLength(item.content), 0)
+    )
+    llmLog.info('Sending to LLM', {
+      provider: providerConfig.provider,
+      model,
+      messages: normalizedHistory.length + 1,
+      tokens_est: estimatedTokens,
+    })
 
     for await (const delta of stream) {
       if (signal.aborted) break
@@ -574,6 +613,12 @@ export class AgentExecutor {
         turnCacheCreation += delta.usage.cacheCreationTokens ?? 0
       }
       if (delta.error) {
+        llmLog.error('LLM call failed', {
+          provider: providerConfig.provider,
+          model,
+          error: delta.error.message,
+          retry: isRetryableError(delta.error.message),
+        })
         this.emit({ type: 'error', agentId: this.agentId, error: delta.error.message })
         return {
           status: 'stop',
@@ -599,6 +644,14 @@ export class AgentExecutor {
 
     // No tool calls — assistant is done
     if (toolCalls.length === 0) {
+      llmLog.info('LLM responded', {
+        provider: providerConfig.provider,
+        model,
+        tokens_in: turnInput,
+        tokens_out: turnOutput,
+        duration_ms: Date.now() - llmStartedAt,
+        tool_calls: 0,
+      })
       return {
         status: 'stop',
         terminateMode: AgentTerminateMode.GOAL,
@@ -615,6 +668,14 @@ export class AgentExecutor {
     // Check for completion tool before executing anything
     const completionCall = toolCalls.find((c) => c.name === COMPLETE_TASK_TOOL)
     if (completionCall) {
+      llmLog.info('LLM responded', {
+        provider: providerConfig.provider,
+        model,
+        tokens_in: turnInput,
+        tokens_out: turnOutput,
+        duration_ms: Date.now() - llmStartedAt,
+        tool_calls: toolCalls.length,
+      })
       const result = (completionCall.input as Record<string, string>).result ?? assistantContent
       emitEvent('agent:completing', { agentId: this.agentId, result })
       return {
@@ -669,6 +730,14 @@ export class AgentExecutor {
       }
 
       const jsonResult = JSON.stringify(structuredCall.input)
+      llmLog.info('LLM responded', {
+        provider: providerConfig.provider,
+        model,
+        tokens_in: turnInput,
+        tokens_out: turnOutput,
+        duration_ms: Date.now() - llmStartedAt,
+        tool_calls: toolCalls.length,
+      })
       emitEvent('agent:completing', { agentId: this.agentId, result: jsonResult })
       return {
         status: 'stop',
@@ -684,6 +753,14 @@ export class AgentExecutor {
     }
 
     // Execute tool calls — parallel or sequential based on config
+    llmLog.info('LLM responded', {
+      provider: providerConfig.provider,
+      model,
+      tokens_in: turnInput,
+      tokens_out: turnOutput,
+      duration_ms: Date.now() - llmStartedAt,
+      tool_calls: toolCalls.length,
+    })
     const results =
       (this.config.parallelToolExecution ?? true)
         ? await this.executeToolCallsParallel(toolCalls, cwd, model, signal)
@@ -716,6 +793,10 @@ export class AgentExecutor {
       }
 
       if (count >= 3) {
+        loopLog.warn('Possible loop detected', {
+          tool: call.name,
+          same_tool_count: count,
+        })
         const suggestion = `Tool "${call.name}" has been called ${count} times with the same arguments. Try a different approach or tool.`
         history.push({ role: 'user', content: suggestion })
         this.emit({ type: 'doom-loop', agentId: this.agentId, tool: call.name, count })
@@ -794,6 +875,10 @@ export class AgentExecutor {
       toolName: resolvedName,
       args: call.input,
     })
+    toolLog.info('Tool called', {
+      tool: resolvedName,
+      arg_keys: Object.keys((call.input as Record<string, unknown>) ?? {}).join(','),
+    })
     const toolStart = Date.now()
 
     const onProgress = (data: { chunk: string }) => {
@@ -830,6 +915,11 @@ export class AgentExecutor {
       success: result.success,
       durationMs,
       output,
+    })
+    toolLog.info('Tool finished', {
+      tool: resolvedName,
+      status: result.success ? 'ok' : 'error',
+      duration_ms: durationMs,
     })
 
     return {
@@ -934,14 +1024,22 @@ export class AgentExecutor {
     outputTokens: number,
     startTime: number
   ): AgentResult {
+    const durationMs = Date.now() - startTime
     const result: AgentResult = {
       success: terminateMode === AgentTerminateMode.GOAL,
       terminateMode,
       output,
       turns,
       tokensUsed: { input: inputTokens, output: outputTokens },
-      durationMs: Date.now() - startTime,
+      durationMs,
     }
+
+    agentLog.info('Run complete', {
+      turns,
+      total_tokens: inputTokens + outputTokens,
+      duration_ms: durationMs,
+      status: result.success ? 'success' : terminateMode,
+    })
 
     this.emit({ type: 'agent:finish', agentId: this.agentId, result })
     return result

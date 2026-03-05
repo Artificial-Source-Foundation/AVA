@@ -32,8 +32,12 @@ import { checkForUpdate, downloadAndInstallUpdate, type UpdateInfo } from './ser
 import { initCoreBridge } from './services/core-bridge'
 import { initDatabase } from './services/database'
 import { initDeepLinks } from './services/deep-link'
-import { installConsoleCapture, setLogDirectory } from './services/dev-console'
-import { getLogDirectory, initLogger, logError, logInfo } from './services/logger'
+import {
+  installConsoleCapture,
+  setDevConsoleLogLevel,
+  setLogDirectory,
+} from './services/dev-console'
+import { getLogDirectory, initLogger, logError, logInfo, setLogLevel } from './services/logger'
 import { syncModelsCatalog } from './services/providers/models-dev-catalog'
 import { initSettingsFS } from './services/settings-fs'
 import { type ScheduledWorkflow, startScheduler } from './services/workflow-scheduler'
@@ -56,6 +60,8 @@ import { useShortcuts } from './stores/shortcuts'
 import { useWorkflows } from './stores/workflows'
 
 const SPLASH_MIN_MS = 800
+const BUILT_IN_EXTENSION_COUNT = 20
+const BUILT_IN_TOOL_COUNT = 39
 
 function App() {
   const [isInitializing, setIsInitializing] = createSignal(true)
@@ -117,6 +123,12 @@ function App() {
       }
     )
   )
+
+  createEffect(() => {
+    const level = settings().logLevel
+    setLogLevel(level)
+    setDevConsoleLogLevel(level)
+  })
 
   // Show toast when auto-compaction triggers
   onMount(() => {
@@ -269,7 +281,13 @@ function App() {
       }
 
       setSplashStatus('Starting logger...')
-      await initLogger()
+      await initLogger({
+        version: 'AVA v2.0.0',
+        platform: navigator.platform?.toLowerCase() ?? 'unknown',
+        runtime: 'tauri',
+        extensions: BUILT_IN_EXTENSION_COUNT,
+        tools: BUILT_IN_TOOL_COUNT,
+      })
       // Point dev-console file output to the same $APPDATA/ava/logs/ directory
       const logDir = getLogDirectory()
       if (logDir) setLogDirectory(logDir)
@@ -280,6 +298,8 @@ function App() {
       setSplashStatus('Initializing platform...')
       await initSettingsFS()
       await hydrateSettingsFromFS()
+      setLogLevel(settings().logLevel)
+      setDevConsoleLogLevel(settings().logLevel)
       syncAllApiKeys()
       await detectEnvApiKeys()
       syncModelsCatalog().catch(() => {}) // Non-blocking — fallback to cache/hardcoded

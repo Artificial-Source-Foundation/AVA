@@ -9,6 +9,7 @@ import type {
   ToolMiddlewareContext,
   ToolMiddlewareResult,
 } from '@ava/core-v2/extensions'
+import { createLogger } from '@ava/core-v2/logger'
 import { buildApprovalKey, createDynamicRuleStore } from './dynamic-rules.js'
 import { isToolAutoApproved, type PermissionMode } from './modes.js'
 import {
@@ -24,6 +25,7 @@ import {
 
 let settings: PermissionSettings = { ...DEFAULT_SETTINGS }
 const dynamicRuleStore = createDynamicRuleStore()
+const log = createLogger('permissions')
 
 interface NativePermissionPattern {
   type: 'any' | 'glob' | 'regex' | 'path'
@@ -278,6 +280,26 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
     async before(ctx: ToolMiddlewareContext): Promise<ToolMiddlewareResult | undefined> {
       const { toolName, args } = ctx
       const path = (args.path ?? args.filePath ?? '') as string
+      const command = typeof args.command === 'string' ? args.command : undefined
+
+      const allow = (reason: string): undefined => {
+        log.info('Decision', {
+          tool: toolName,
+          action: 'allow',
+          reason,
+          ...(command ? { command } : {}),
+        })
+        return undefined
+      }
+
+      const block = (reason: string, message: string): ToolMiddlewareResult => {
+        log.warn('Blocked', {
+          tool: toolName,
+          reason,
+          ...(command ? { command } : {}),
+        })
+        return { blocked: true, reason: message }
+      }
 
       dynamicRuleStore.startSession(ctx.ctx.sessionId)
 
@@ -288,22 +310,22 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
         toolName !== 'glob' &&
         toolName !== 'grep'
       ) {
-        return { blocked: true, reason: 'Cannot modify .git directory' }
+        return block('git_path_protected', 'Cannot modify .git directory')
       }
 
       // 2. Always block: node_modules writes
       if (isNodeModulesWrite(toolName, args)) {
-        return { blocked: true, reason: 'Cannot write to node_modules' }
+        return block('node_modules_protected', 'Cannot write to node_modules')
       }
 
       // 3. Always block: destructive rm -rf
       if (toolName === 'bash' && isDangerousCommand(args)) {
-        return { blocked: true, reason: 'Destructive rm -rf commands are blocked' }
+        return block('dangerous_command', 'Destructive rm -rf commands are blocked')
       }
 
       // 4. Blocked patterns (upgraded to glob matching)
       if (isBlockedByPattern(args)) {
-        return { blocked: true, reason: 'Path matches a blocked pattern' }
+        return block('blocked_pattern', 'Path matches a blocked pattern')
       }
 
       // 5. Permission mode check (when set, takes priority over individual booleans)
@@ -311,23 +333,23 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
         const mode = settings.permissionMode as PermissionMode
         if (mode === 'suggest') {
           // Suggest mode blocks all tool execution
-          return { blocked: true, reason: 'Suggest mode — tool execution disabled' }
+          return block('suggest_mode', 'Suggest mode — tool execution disabled')
         }
-        if (isToolAutoApproved(toolName, mode)) return undefined
+        if (isToolAutoApproved(toolName, mode)) return allow(`permission_mode_${mode}`)
         // Not auto-approved by mode — fall through to bus/fallback approval
       } else {
         // 6. YOLO mode (legacy boolean): approve everything not blocked above
-        if (settings.yolo) return undefined
+        if (settings.yolo) return allow('yolo_mode')
       }
 
       // 7. Always-approved list check (with arity fingerprinting for bash)
       if (isAlwaysApproved(toolName, args)) {
-        return undefined
+        return allow('always_approved')
       }
 
       // 7b. Session-scoped dynamic rules learned from prior explicit approvals.
       if (dynamicRuleStore.allows(ctx.ctx.sessionId, toolName, args)) {
-        return undefined
+        return allow('session_dynamic_rule')
       }
 
       // 8. Per-tool rules (first match wins)
@@ -340,12 +362,12 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
           settings.declarativePolicyRules
         )
         if (rule) {
-          if (rule.decision === 'allow') return undefined
+          if (rule.decision === 'allow') return allow(`policy_allow:${rule.name}`)
           if (rule.decision === 'deny') {
-            return {
-              blocked: true,
-              reason: rule.reason ?? `Denied by policy rule ${rule.name}`,
-            }
+            return block(
+              `policy_deny:${rule.name}`,
+              rule.reason ?? `Denied by policy rule ${rule.name}`
+            )
           }
           // 'ask' falls through to approval flow
         }
@@ -359,16 +381,19 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
           args,
           settings.toolRules
         )
-        if (native?.action === 'allow') return undefined
+        if (native?.action === 'allow') return allow('rust_permission_allow')
         if (native?.action === 'deny') {
-          return { blocked: true, reason: 'Denied by Rust permission policy' }
+          return block('rust_permission_deny', 'Denied by Rust permission policy')
         }
 
         const rule = evaluateToolRules(toolName, path || undefined, settings.toolRules)
         if (rule) {
-          if (rule.action === 'allow') return undefined
+          if (rule.action === 'allow') return allow(`tool_rule_allow:${rule.tool}`)
           if (rule.action === 'deny') {
-            return { blocked: true, reason: rule.reason ?? `Denied by tool rule for ${rule.tool}` }
+            return block(
+              `tool_rule_deny:${rule.tool}`,
+              rule.reason ?? `Denied by tool rule for ${rule.tool}`
+            )
           }
           // 'ask' falls through to bus approval below
         }
@@ -379,29 +404,29 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
       // Skip legacy boolean checks when permission mode is set
       if (!settings.permissionMode) {
         // 10. Auto-approve reads
-        if (risk === 'low' && settings.autoApproveReads) return undefined
+        if (risk === 'low' && settings.autoApproveReads) return allow('auto_approve_reads')
 
         // 11. Smart-approve: safe bash commands + trusted paths
         if (settings.smartApprove) {
           if (toolName === 'bash') {
             const command = (args.command ?? '') as string
-            if (isSafeBashCommand(command)) return undefined
+            if (isSafeBashCommand(command)) return allow('smart_approve_safe_bash')
           }
           if (
             path &&
             settings.trustedPaths.length > 0 &&
             isInTrustedPath(path, settings.trustedPaths)
           ) {
-            return undefined
+            return allow('smart_approve_trusted_path')
           }
         }
 
         // 12. Auto-approve writes if configured
-        if (risk === 'medium' && settings.autoApproveWrites) return undefined
+        if (risk === 'medium' && settings.autoApproveWrites) return allow('auto_approve_writes')
 
         // 13. Auto-approve commands if configured
         if (toolName === 'bash' && settings.autoApproveCommands) {
-          if (!isSudoCommand(args)) return undefined
+          if (!isSudoCommand(args)) return allow('auto_approve_commands')
         }
       }
 
@@ -413,12 +438,19 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
           120_000
         )
         if (!response.approved) {
-          return { blocked: true, reason: response.reason ?? 'Denied by user' }
+          return block('user_denied', response.reason ?? 'Denied by user')
         }
         // Handle "always approve" — store arity-based fingerprint for bash commands
         if (response.alwaysApprove) {
           dynamicRuleStore.learn(ctx.ctx.sessionId, toolName, args)
         }
+        log.info('User approved', {
+          tool: toolName,
+          action: 'allow',
+          reason: 'user_approved',
+          always: Boolean(response.alwaysApprove),
+          ...(command ? { command } : {}),
+        })
         return undefined
       }
 
@@ -426,12 +458,12 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
 
       // Warn on .env files
       if (isEnvFile(args)) {
-        return { blocked: true, reason: 'Accessing .env files requires confirmation' }
+        return block('env_file_requires_confirmation', 'Accessing .env files requires confirmation')
       }
 
       // Warn on sudo
       if (toolName === 'bash' && isSudoCommand(args)) {
-        return { blocked: true, reason: 'sudo requires confirmation' }
+        return block('sudo_requires_confirmation', 'sudo requires confirmation')
       }
 
       return undefined

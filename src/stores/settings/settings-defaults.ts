@@ -105,6 +105,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   mcpServers: [],
   modelAliases: {},
   devMode: false,
+  logLevel: 'info',
   enabledSkills: [],
   customSkills: [],
   customRules: [],

@@ -4,10 +4,12 @@
  * Structured logging via callback — extensions can route to files, services, etc.
  */
 
+import { formatLogEntry } from './format.js'
 import {
   DEFAULT_LOGGER_CONFIG,
   LOG_LEVEL_PRIORITY,
   type LogEntry,
+  type LogFieldValue,
   type LoggerConfig,
   type LogLevel,
   type SimpleLogger,
@@ -35,15 +37,13 @@ function emit(entry: LogEntry): void {
   if (_config.callback) {
     _config.callback(entry)
   }
-  if (_config.stderr) {
-    const prefix = `[${entry.level.toUpperCase()}] ${entry.source}`
-    const dataStr = entry.data ? ` ${JSON.stringify(entry.data)}` : ''
-    process.stderr.write(`${prefix}: ${entry.message}${dataStr}\n`)
+  if (_config.stderr && typeof process !== 'undefined' && process.stderr) {
+    process.stderr.write(`${formatLogEntry(entry)}\n`)
   }
 }
 
 function makeLogger(source: string): SimpleLogger {
-  const log = (level: LogLevel, message: string, data?: Record<string, unknown>): void => {
+  const log = (level: LogLevel, message: string, data?: Record<string, LogFieldValue>): void => {
     if (!shouldLog(level)) return
     emit({
       timestamp: new Date().toISOString(),
@@ -60,7 +60,15 @@ function makeLogger(source: string): SimpleLogger {
     warn: (msg, data) => log('warn', msg, data),
     error: (msg, data) => log('error', msg, data),
     timing: (label, startMs, data) => {
-      log('debug', `${label} completed in ${Date.now() - startMs}ms`, data)
+      log('debug', label, { duration_ms: Date.now() - startMs, ...data })
+    },
+    time: (label) => {
+      const startMs = Date.now()
+      return {
+        end: (data) => {
+          log('info', label, { duration_ms: Date.now() - startMs, ...data })
+        },
+      }
     },
     child: (subsource) => makeLogger(`${source}:${subsource}`),
   }

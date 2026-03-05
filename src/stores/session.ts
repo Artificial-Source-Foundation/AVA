@@ -408,7 +408,8 @@ export function useSession() {
      */
     createNewSession: async (name?: string): Promise<Session> => {
       const { currentProject } = useProject()
-      const projectId = currentProject()?.id
+      const project = currentProject()
+      const projectId = project?.id
 
       const session = await dbCreateSession(name || DEFAULTS.SESSION_NAME, projectId)
       const sessionWithStats: SessionWithStats = {
@@ -425,7 +426,11 @@ export function useSession() {
       setMessages([])
       setAgents([])
 
-      logInfo('session', 'Session created', { id: session.id })
+      logInfo('session', 'Session created', {
+        id: session.id,
+        name: session.name,
+        project: project?.name ?? 'unknown',
+      })
 
       // Notify core-v2 extensions (loads CLAUDE.md, codebase, skills, etc.)
       const { currentProject: getProject } = useProject()
@@ -443,6 +448,7 @@ export function useSession() {
      * Switch to a different session
      */
     switchSession: async (id: string): Promise<void> => {
+      const fromSessionId = currentSession()?.id
       const session = sessions().find((s) => s.id === id)
       if (!session) {
         logWarn('session', 'Session not found', { id })
@@ -461,7 +467,11 @@ export function useSession() {
       try {
         const dbMessages = await getMessages(id)
         setMessages(dbMessages)
-        logInfo('session', 'Session switched', { id, messageCount: dbMessages.length })
+        logInfo('session', 'Session switched', {
+          from: fromSessionId ?? 'none',
+          to: id,
+          messageCount: dbMessages.length,
+        })
       } catch (err) {
         logError('Session', 'Failed to load messages', err)
         setMessages([])
@@ -525,6 +535,8 @@ export function useSession() {
           prev ? { ...prev, name: trimmedName, updatedAt: Date.now() } : null
         )
       }
+
+      logInfo('session', 'Session renamed', { id, name: trimmedName })
     },
 
     /**

@@ -96,10 +96,20 @@ export async function executeTool(
     // Run before-middlewares
     let currentArgs = args
     const middlewares = getToolMiddlewares()
+    log.debug('Running pipeline', { tool: name, middlewares: middlewares.length })
 
     for (const mw of middlewares) {
       if (mw.before) {
+        const beforeStart = Date.now()
         const result = await mw.before({ ...middlewareCtx, args: currentArgs })
+        const action = result?.blocked ? 'blocked' : result?.args ? 'args_modified' : 'ok'
+        log.debug('Before middleware', {
+          tool: name,
+          name: mw.name,
+          priority: mw.priority,
+          duration_ms: Date.now() - beforeStart,
+          action,
+        })
         if (result?.blocked) {
           log.debug(`Tool blocked by middleware ${mw.name}: ${result.reason}`)
           emitEvent('tool:blocked', { name, middleware: mw.name, reason: result.reason })
@@ -132,7 +142,16 @@ export async function executeTool(
     // Run after-middlewares
     for (const mw of middlewares) {
       if (mw.after) {
+        const afterStart = Date.now()
         const modified = await mw.after({ ...middlewareCtx, args: currentArgs }, result)
+        const action = modified?.result ? 'result_modified' : 'pass'
+        log.debug('After middleware', {
+          tool: name,
+          name: mw.name,
+          priority: mw.priority,
+          duration_ms: Date.now() - afterStart,
+          action,
+        })
         if (modified?.result) {
           result = modified.result
         }

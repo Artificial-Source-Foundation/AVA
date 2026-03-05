@@ -176,6 +176,28 @@ export const DeveloperTab: Component = () => {
             onChange={(v) => updateSettings({ devMode: v })}
           />
         </div>
+        <div class="flex items-center justify-between py-1.5">
+          <div>
+            <span class="text-xs text-[var(--text-secondary)]">Log level</span>
+            <p class="text-[10px] text-[var(--text-muted)]">
+              DEBUG shows middleware + verbose internals. INFO is the default.
+            </p>
+          </div>
+          <select
+            value={settings().logLevel}
+            onChange={(e) =>
+              updateSettings({
+                logLevel: e.currentTarget.value as 'debug' | 'info' | 'warn' | 'error',
+              })
+            }
+            class="px-2 py-1 text-[10px] bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] text-[var(--text-secondary)]"
+          >
+            <option value="debug">DEBUG</option>
+            <option value="info">INFO</option>
+            <option value="warn">WARN</option>
+            <option value="error">ERROR</option>
+          </select>
+        </div>
       </div>
 
       {/* Console viewer */}

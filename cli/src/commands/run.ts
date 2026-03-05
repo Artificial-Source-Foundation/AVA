@@ -26,6 +26,7 @@ import { setPlatform } from '@ava/core-v2/platform'
 import { createSessionManager } from '@ava/core-v2/session'
 import { registerCoreTools } from '@ava/core-v2/tools'
 import { createNodePlatform } from '@ava/platform-node/v2'
+import { getCliLogger } from '../logger.js'
 import { MockLLMClient, setupMockEnvironment } from './mock-client.js'
 
 type AgentBackend = 'core' | 'core-v2'
@@ -46,14 +47,25 @@ interface RunOptions {
 }
 
 export async function runRunCommand(args: string[]): Promise<void> {
+  const log = getCliLogger('cli:run')
   const options = parseRunOptions(args)
   if (!options) {
+    log.warn('Invalid run options', { args: args.join(' ') })
     printRunHelp()
     return
   }
 
+  log.info('Run command started', {
+    backend: options.backend,
+    provider: options.provider ?? 'default',
+    model: options.model ?? 'default',
+    max_turns: options.maxTurns,
+    yolo: options.yolo,
+  })
+
   // Route to legacy agent command for 'core' backend
   if (options.backend === 'core') {
+    log.info('Routing to legacy core backend')
     if (options.verbose) {
       process.stderr.write('[run] Using legacy core backend\n')
     }
@@ -104,8 +116,10 @@ export async function runRunCommand(args: string[]): Promise<void> {
     }
     await manager.activateAll(modules)
     extensionCount = manager.getActiveExtensions().length
+    log.info('Extensions activated', { count: extensionCount })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    log.warn('Failed to load extensions', { error: message })
     if (options.verbose) {
       process.stderr.write(`[run] Warning: Failed to load extensions: ${message}\n`)
     }
@@ -271,6 +285,14 @@ export async function runRunCommand(args: string[]): Promise<void> {
     const executor = new AgentExecutor({ ...config, systemPrompt }, eventHandler)
 
     const result = await executor.run({ goal: options.goal, cwd: options.cwd }, ac.signal)
+    log.info('Run command completed', {
+      success: result.success,
+      terminate_mode: result.terminateMode,
+      turns: result.turns,
+      duration_ms: result.durationMs,
+      tokens_in: result.tokensUsed.input,
+      tokens_out: result.tokensUsed.output,
+    })
 
     if (options.json) {
       console.log(
@@ -303,6 +325,7 @@ export async function runRunCommand(args: string[]): Promise<void> {
     process.exitCode = result.success ? 0 : 1
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    log.error('Run command failed', { error: message })
     if (options.json) {
       console.log(JSON.stringify({ type: 'error', error: message }))
     } else {

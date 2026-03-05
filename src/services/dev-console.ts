@@ -9,6 +9,12 @@
 
 import { invoke } from '@tauri-apps/api/core'
 import { createRoot, createSignal } from 'solid-js'
+import {
+  formatLogEntry,
+  isLogLevelEnabled,
+  type StructuredLogLevel,
+  toStructuredFields,
+} from './log-format'
 
 // ============================================================================
 // Types
@@ -26,6 +32,7 @@ export interface DevLogEntry {
 // ============================================================================
 
 const MAX_ENTRIES = 1000
+const MAX_FILE_BUFFER_ENTRIES = 1000
 const FLUSH_INTERVAL_MS = 3000
 const LOG_RETENTION_DAYS = 7
 
@@ -34,6 +41,7 @@ let installed = false
 let flushTimer: ReturnType<typeof setInterval> | null = null
 let fileBuffer: string[] = []
 let logDir = ''
+let minimumLevel: StructuredLogLevel = 'info'
 
 const { entries, setEntries } = createRoot(() => {
   const [entries, setEntries] = createSignal<DevLogEntry[]>([])
@@ -66,16 +74,11 @@ function stringify(args: unknown[]): string {
     .join(' ')
 }
 
-const LEVEL_LABELS: Record<string, string> = {
-  log: 'LOG',
-  info: 'INF',
-  warn: 'WRN',
-  error: 'ERR',
-}
-
-function formatTimestamp(ts: number): string {
-  const d = new Date(ts)
-  return d.toISOString().replace('T', ' ').replace('Z', '')
+const LEVEL_MAP: Record<DevLogEntry['level'], StructuredLogLevel> = {
+  log: 'debug',
+  info: 'info',
+  warn: 'warn',
+  error: 'error',
 }
 
 function todayDateString(): string {
@@ -84,7 +87,16 @@ function todayDateString(): string {
 }
 
 function formatForFile(entry: DevLogEntry): string {
-  return `[${formatTimestamp(entry.timestamp)}] ${LEVEL_LABELS[entry.level]} ${entry.message}`
+  return formatLogEntry({
+    timestamp: new Date(entry.timestamp).toISOString(),
+    level: LEVEL_MAP[entry.level],
+    source: 'app:console',
+    message: 'Console capture',
+    fields: {
+      level: entry.level,
+      message: entry.message,
+    },
+  })
 }
 
 // ============================================================================
@@ -126,6 +138,9 @@ async function cleanupOldLogs(): Promise<void> {
 // ============================================================================
 
 function capture(level: DevLogEntry['level'], args: unknown[]): void {
+  const structuredLevel = LEVEL_MAP[level]
+  if (!isLogLevelEnabled(structuredLevel, minimumLevel)) return
+
   const entry: DevLogEntry = {
     id: nextId++,
     timestamp: Date.now(),
@@ -141,6 +156,9 @@ function capture(level: DevLogEntry['level'], args: unknown[]): void {
 
   // Buffer for file
   fileBuffer.push(formatForFile(entry))
+  if (fileBuffer.length > MAX_FILE_BUFFER_ENTRIES) {
+    fileBuffer = fileBuffer.slice(-MAX_FILE_BUFFER_ENTRIES)
+  }
 
   // Immediate flush for errors
   if (level === 'error') {
@@ -228,4 +246,16 @@ export function clearDevLogs(): void {
 /** Whether capture is currently installed. */
 export function isCapturing(): boolean {
   return installed
+}
+
+export function setDevConsoleLogLevel(level: StructuredLogLevel): void {
+  minimumLevel = level
+  const line = formatLogEntry({
+    timestamp: new Date().toISOString(),
+    level: 'info',
+    source: 'app:console',
+    message: 'Log level updated',
+    fields: toStructuredFields({ level }),
+  })
+  fileBuffer.push(line)
 }

@@ -8,6 +8,7 @@
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import type { PluginManifest, PluginPermission } from '../types/plugin'
+import { logInfo, logWarn } from './logger'
 
 // ─── Extension Imports (sorted by priority) ─────────────────────────────────
 
@@ -91,6 +92,8 @@ const EXTENSIONS: ExtensionEntry[] = [
   { name: 'ollama', priority: 10, activate: activateOllama },
 ]
 
+export const BUILT_IN_EXTENSION_COUNT = EXTENSIONS.length
+
 // ─── Loader ─────────────────────────────────────────────────────────────────
 
 /**
@@ -102,16 +105,36 @@ export async function loadAllExtensions(
 ): Promise<() => void> {
   const disposables: Disposable[] = []
   const sorted = [...EXTENSIONS].sort((a, b) => a.priority - b.priority)
+  const startedAt = Date.now()
+  let failed = 0
 
   for (const ext of sorted) {
+    const extensionStart = Date.now()
     try {
       const api = createApi(ext.name)
       const disposable = await ext.activate(api)
       if (disposable) disposables.push(disposable)
+      logInfo('extensions', 'Activated', {
+        name: ext.name,
+        duration_ms: Date.now() - extensionStart,
+      })
     } catch (err) {
+      failed += 1
+      const error = err instanceof Error ? err.message : String(err)
+      logWarn('extensions', 'Failed', {
+        name: ext.name,
+        error,
+      })
       console.warn(`[extension-loader] Failed to activate ${ext.name}:`, err)
     }
   }
+
+  logInfo('extensions', 'Summary', {
+    total: sorted.length,
+    activated: sorted.length - failed,
+    failed,
+    duration_ms: Date.now() - startedAt,
+  })
 
   return () => {
     for (const d of disposables) {

@@ -28,6 +28,7 @@ import { runPluginCommand } from './commands/plugin.js'
 import { runRunCommand } from './commands/run.js'
 import { runToolCommand } from './commands/tool.js'
 import { runValidateCommand } from './commands/validate.js'
+import { getCliLogger, initCliLogger } from './logger.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -43,7 +44,10 @@ try {
 }
 
 async function main() {
+  initCliLogger('info')
+  const log = getCliLogger('cli:index')
   const args = process.argv.slice(2)
+  log.info('CLI invoked', { args: args.join(' ') || '(none)' })
 
   // Parse arguments
   if (args.includes('--version') || args.includes('-v')) {
@@ -63,48 +67,56 @@ async function main() {
 
   // Agent command
   if (args[0] === 'agent') {
+    log.info('Dispatch command', { command: 'agent' })
     await runAgentCommand(args.slice(1))
     return
   }
 
   // Agent V2 command (core-v2 + extensions)
   if (args[0] === 'agent-v2') {
+    log.info('Dispatch command', { command: 'agent-v2' })
     await runAgentV2Command(args.slice(1))
     return
   }
 
   // Auth command
   if (args[0] === 'auth') {
+    log.info('Dispatch command', { command: 'auth' })
     await runAuthCommand(args.slice(1))
     return
   }
 
   // Plugin command
   if (args[0] === 'plugin') {
+    log.info('Dispatch command', { command: 'plugin' })
     await runPluginCommand(args.slice(1))
     return
   }
 
   // Run command
   if (args[0] === 'run') {
+    log.info('Dispatch command', { command: 'run' })
     await runRunCommand(args.slice(1))
     return
   }
 
   // Tool command
   if (args[0] === 'tool') {
+    log.info('Dispatch command', { command: 'tool' })
     await runToolCommand(args.slice(1))
     return
   }
 
   // Validate command
   if (args[0] === 'validate') {
+    log.info('Dispatch command', { command: 'validate' })
     await runValidateCommand(args.slice(1))
     return
   }
 
   // Ambient terminal command
   if (args[0] === 'ambient') {
+    log.info('Dispatch command', { command: 'ambient' })
     const sub = args[1]
     if (sub === 'install') {
       const shellArg = args[2] as 'bash' | 'zsh' | 'fish' | undefined
@@ -121,6 +133,7 @@ async function main() {
   }
 
   // Default: Show help (TUI not implemented yet)
+  log.info('No command provided, showing default help')
   console.log('AVA CLI')
   console.log('')
   console.log('TUI mode not yet implemented.')
@@ -226,6 +239,9 @@ For more information, visit: https://github.com/g0dxn4/AVA
 }
 
 main().catch((err) => {
+  getCliLogger('cli:index').error('Fatal error', {
+    error: err instanceof Error ? err.message : String(err),
+  })
   console.error('Fatal error:', err)
   process.exit(1)
 })

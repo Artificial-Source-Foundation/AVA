@@ -37,6 +37,7 @@ export type {
   AgentBackend,
   AgentLimitSettings,
   AppearanceSettings,
+  AppLogLevel,
   AppSettings,
   BehaviorSettings,
   BorderRadius,

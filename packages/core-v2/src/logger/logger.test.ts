@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { formatLogEntry } from './format.js'
 import { configureLogger, createLogger, getLoggerConfig, resetLogger } from './logger.js'
 import type { LogEntry, SimpleLogger } from './types.js'
 
@@ -104,12 +105,36 @@ describe('Logger', () => {
       log.timing('operation', start)
       expect(entries).toHaveLength(1)
       expect(entries[0].level).toBe('debug')
-      expect(entries[0].message).toMatch(/operation completed in \d+ms/)
+      expect(entries[0].message).toBe('operation')
+      expect(entries[0].data?.duration_ms).toBeTypeOf('number')
     })
 
     it('includes extra data in timing', () => {
       log.timing('op', Date.now(), { extra: 'data' })
-      expect(entries[0].data).toEqual({ extra: 'data' })
+      expect(entries[0].data?.extra).toBe('data')
+      expect(entries[0].data?.duration_ms).toBeTypeOf('number')
+    })
+
+    it('supports timer helper', () => {
+      const timer = log.time('llm-call')
+      timer.end({ tokens_in: 1200, tokens_out: 350 })
+      expect(entries).toHaveLength(1)
+      expect(entries[0].message).toBe('llm-call')
+      expect(entries[0].data?.tokens_in).toBe(1200)
+      expect(entries[0].data?.duration_ms).toBeTypeOf('number')
+    })
+  })
+
+  describe('formatting', () => {
+    it('formats parseable log entry lines', () => {
+      log.info('Tool called', { tool: 'bash', status: 'ok', duration_ms: 12 })
+      const line = formatLogEntry(entries[0])
+      expect(line).toContain('[INFO]')
+      expect(line).toContain('[Test]')
+      expect(line).toContain('Tool called')
+      expect(line).toContain('tool=bash')
+      expect(line).toContain('status=ok')
+      expect(line).toContain('duration_ms=12')
     })
   })
 

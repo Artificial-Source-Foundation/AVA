@@ -11,7 +11,7 @@ use commands::{
     get_cwd, get_env_var, get_plugins_state, greet, install_plugin, list_tools, memory_recall,
     memory_recent, memory_remember, memory_search, oauth_copilot_device_poll,
     oauth_copilot_device_start, oauth_listen, pty_kill, pty_resize, pty_spawn, pty_write,
-    reflection_reflect_and_fix, set_plugin_enabled, set_plugins_state, uninstall_plugin,
+    read_latest_logs, reflection_reflect_and_fix, set_plugin_enabled, set_plugins_state, uninstall_plugin,
     validation_validate_edit, validation_validate_with_retry,
 };
 use pty::PtyManager;
@@ -50,6 +50,7 @@ pub fn run() {
             allow_project_path,
             append_log,
             cleanup_old_logs,
+            read_latest_logs,
             get_cwd,
             get_plugins_state,
             set_plugins_state,

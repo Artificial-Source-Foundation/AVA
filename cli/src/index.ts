@@ -14,8 +14,10 @@
  *   ava --help          - Show help
  */
 
+import { readFileSync } from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { setPlatform } from '@ava/core-v2'
 import { createNodePlatform } from '@ava/platform-node'
 import { installAmbient, uninstallAmbient } from './ambient/install.js'
@@ -27,7 +29,18 @@ import { runRunCommand } from './commands/run.js'
 import { runToolCommand } from './commands/tool.js'
 import { runValidateCommand } from './commands/validate.js'
 
-const VERSION = '0.1.0'
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+let VERSION: string
+
+try {
+  const pkg = JSON.parse(readFileSync(path.join(__dirname, '../package.json'), 'utf-8')) as {
+    version?: string
+  }
+  VERSION = pkg.version ?? '0.0.0'
+} catch {
+  VERSION = '0.0.0'
+}
 
 async function main() {
   const args = process.argv.slice(2)

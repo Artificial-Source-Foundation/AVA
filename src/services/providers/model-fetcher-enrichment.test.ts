@@ -118,9 +118,7 @@ describe('enrichWithCatalog', () => {
   })
 
   it('passes through models not found in catalog', () => {
-    const fetched: FetchedModel[] = [
-      { id: 'unknown-model', name: 'Unknown', contextWindow: 4096 },
-    ]
+    const fetched: FetchedModel[] = [{ id: 'unknown-model', name: 'Unknown', contextWindow: 4096 }]
     const enriched = enrichWithCatalog('xai', fetched)
     expect(enriched[0]).toEqual(fetched[0])
   })

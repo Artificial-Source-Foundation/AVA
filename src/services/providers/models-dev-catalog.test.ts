@@ -137,10 +137,7 @@ describe('models-dev-catalog', () => {
       store.set('ava:models-dev-catalog', JSON.stringify(MOCK_CATALOG))
       store.set('ava:models-dev-catalog-ts', String(Date.now() - 2 * 60 * 60 * 1000))
 
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockRejectedValue(new Error('Network error'))
-      )
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')))
 
       const result = await syncModelsCatalog()
       expect(result).toBeTruthy()
@@ -148,10 +145,7 @@ describe('models-dev-catalog', () => {
     })
 
     it('returns null when no cache and network fails', async () => {
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockRejectedValue(new Error('Network error'))
-      )
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')))
 
       const result = await syncModelsCatalog()
       expect(result).toBeNull()

@@ -121,7 +121,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 
 [[package]]
 name = "ava-agent"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -139,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "ava-codebase"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "petgraph",
  "tantivy",
@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "ava-commander"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "ava-agent",
@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "ava-config"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "ava-types",
  "dirs",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "ava-context"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "ava-types",
  "thiserror",
@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "ava-db"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "ava-types",
  "chrono",
@@ -199,14 +199,14 @@ dependencies = [
 
 [[package]]
 name = "ava-extensions"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "libloading",
 ]
 
 [[package]]
 name = "ava-llm"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -219,7 +219,7 @@ dependencies = [
 
 [[package]]
 name = "ava-logger"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "ava-types",
  "chrono",
@@ -233,7 +233,7 @@ dependencies = [
 
 [[package]]
 name = "ava-lsp"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "lsp-types",
  "serde",
@@ -244,7 +244,7 @@ dependencies = [
 
 [[package]]
 name = "ava-mcp"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "ava-tools",
@@ -256,7 +256,7 @@ dependencies = [
 
 [[package]]
 name = "ava-memory"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "rusqlite",
  "tempfile",
@@ -264,7 +264,7 @@ dependencies = [
 
 [[package]]
 name = "ava-permissions"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "regex",
  "tree-sitter",
@@ -273,7 +273,7 @@ dependencies = [
 
 [[package]]
 name = "ava-platform"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "ava-sandbox"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "serde",
  "thiserror",
@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "ava-session"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "ava-types",
  "chrono",
@@ -307,7 +307,7 @@ dependencies = [
 
 [[package]]
 name = "ava-tools"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "async-trait",
  "ava-types",
@@ -320,7 +320,7 @@ dependencies = [
 
 [[package]]
 name = "ava-types"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "chrono",
  "serde",
@@ -332,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "ava-validator"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "criterion",
 ]

@@ -1,12 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import {
-  createMockPlatform,
-  MockShell,
-} from '../../packages/core-v2/src/__test-utils__/mock-platform'
+import { createMockPlatform } from '../../packages/core-v2/src/__test-utils__/mock-platform'
 import { MessageBus } from '../../packages/core-v2/src/bus/message-bus'
 import type { ToolMiddlewareContext } from '../../packages/core-v2/src/extensions/types'
 import type { ChatMessage } from '../../packages/core-v2/src/llm/types'
-import { setPlatform } from '../../packages/core-v2/src/platform'
+import { type IShell, setPlatform } from '../../packages/core-v2/src/platform'
 import { bashTool } from '../../packages/core-v2/src/tools/bash'
 import { tieredCompactionStrategy } from '../../packages/extensions/context/src/strategies/tiered-compaction'
 import { createCheckpointMiddleware } from '../../packages/extensions/git/src/checkpoints'
@@ -189,41 +186,83 @@ describe('E2E real extension scenarios', () => {
   })
 
   it('8) creates git checkpoint ref and supports rollback command path', async () => {
-    const shell = new MockShell()
-    shell.setResult('cd "/workspace" && git rev-parse --is-inside-work-tree', {
-      stdout: 'true\n',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/workspace" && git add -A', { stdout: '', stderr: '', exitCode: 0 })
-    shell.setResult('cd "/workspace" && git stash create "ava-checkpoint-1-edit"', {
-      stdout: 'abc123\n',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/workspace" && git update-ref "refs/ava/checkpoints/1" "abc123"', {
-      stdout: '',
-      stderr: '',
-      exitCode: 0,
-    })
-    shell.setResult('cd "/workspace" && git reset --hard abc123', {
-      stdout: 'HEAD is now at abc123\n',
-      stderr: '',
-      exitCode: 0,
-    })
+    // Extended mock shell with git plumbing commands for checkpoint creation
+    const shell: IShell = {
+      exec: async (
+        command: string
+      ): Promise<{ stdout: string; stderr: string; exitCode: number }> => {
+        // Handle git commands that the checkpoint middleware uses
+        if (command.includes('git rev-parse --is-inside-work-tree')) {
+          return { stdout: 'true', stderr: '', exitCode: 0 }
+        }
+        if (command.includes('git add -A')) {
+          return { stdout: '', stderr: '', exitCode: 0 }
+        }
+        if (command.includes('git rev-parse --verify HEAD')) {
+          // Return a fake SHA for HEAD
+          return { stdout: 'abc123def456789012345678901234567890abcd', stderr: '', exitCode: 0 }
+        }
+        if (command.includes('git write-tree')) {
+          // Return a fake tree SHA
+          return { stdout: 'def789abc1234567890123456789012345678901', stderr: '', exitCode: 0 }
+        }
+        if (command.includes('git rev-parse') && command.includes('^{tree}')) {
+          return { stdout: 'different-tree-sha', stderr: '', exitCode: 0 }
+        }
+        if (command.includes('git commit-tree')) {
+          // Return a fake commit SHA
+          return { stdout: 'deadbeef12345678901234567890123456789012', stderr: '', exitCode: 0 }
+        }
+        if (command.includes('git update-ref')) {
+          return { stdout: '', stderr: '', exitCode: 0 }
+        }
+        return { stdout: '', stderr: 'command not found', exitCode: 127 }
+      },
+      spawn: (_command: string, _args: string[]) => {
+        // Return a minimal ChildProcess mock matching platform.ts interface
+        return {
+          pid: 12345,
+          stdin: null,
+          stdout: null,
+          stderr: null,
+          kill: () => {},
+          wait: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
+        }
+      },
+    }
 
     const { middleware, store } = createCheckpointMiddleware(shell)
-    await middleware.after?.(
-      {
-        ...makeCtx('true'),
-        toolName: 'edit',
-      },
-      { success: true, output: 'edited file' }
-    )
 
-    const latest = store.getCheckpoints().at(-1)
-    expect(latest?.ref).toBe('refs/ava/checkpoints/1')
-    await shell.exec('cd "/workspace" && git reset --hard abc123')
+    // Create a mock context for the middleware - use a destructive tool to trigger checkpoint
+    const mockContext: ToolMiddlewareContext = {
+      toolName: 'bash',
+      args: { command: 'rm -rf important/' },
+      ctx: {
+        workingDirectory: '/tmp',
+        sessionId: 'test-session',
+        signal: new AbortController().signal,
+      },
+      definition: {
+        name: 'bash',
+        description: 'Execute bash commands',
+        input_schema: {
+          type: 'object' as const,
+          properties: {},
+        },
+      },
+    }
+
+    // Simulate a destructive tool call - should trigger checkpoint creation
+    await middleware.before?.(mockContext)
+
+    // Checkpoint should have been created
+    const checkpoints = store.getCheckpoints()
+    const latest = checkpoints.at(-1)
+    expect(latest).toBeDefined()
+    // The ref is based on the commit SHA returned by commit-tree
+    expect(latest?.ref).toBe('refs/ava/checkpoints/deadbeef12345678901234567890123456789012')
+    expect(latest?.commit).toBe('deadbeef12345678901234567890123456789012')
+    expect(latest?.toolName).toBe('pre-destructive-bash')
   })
 
   it('9) compacts long context after >50 turns', () => {

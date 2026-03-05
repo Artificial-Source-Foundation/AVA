@@ -46,7 +46,8 @@ function hasReasoning(modelId: string): boolean {
  */
 function hasVision(modelId: string): boolean {
   const entry = getModelFromCatalog(modelId)
-  if (entry) return entry.attachment === true || (entry.modalities?.input?.includes('image') ?? false)
+  if (entry)
+    return entry.attachment === true || (entry.modalities?.input?.includes('image') ?? false)
   return FALLBACK_VISION.has(modelId)
 }
 
@@ -81,23 +82,49 @@ const FALLBACK_PRICING: Record<string, ModelPricing> = {
 }
 
 const FALLBACK_REASONING = new Set([
-  'o3', 'o3-pro', 'o4-mini', 'o3-mini',
-  'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-5-mini', 'gpt-5-nano',
-  'gpt-5.3-codex', 'gpt-5.2-codex', 'gpt-5.1-codex',
-  'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001',
-  'gemini-2.5-pro', 'gemini-2.5-flash',
-  'grok-4-1-fast-reasoning', 'grok-code-fast-1',
+  'o3',
+  'o3-pro',
+  'o4-mini',
+  'o3-mini',
+  'gpt-5.2',
+  'gpt-5.1',
+  'gpt-5',
+  'gpt-5-mini',
+  'gpt-5-nano',
+  'gpt-5.3-codex',
+  'gpt-5.2-codex',
+  'gpt-5.1-codex',
+  'claude-opus-4-6',
+  'claude-sonnet-4-6',
+  'claude-haiku-4-5-20251001',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
+  'grok-4-1-fast-reasoning',
+  'grok-code-fast-1',
   'deepseek-reasoner',
-  'magistral-medium-latest', 'magistral-small-latest',
+  'magistral-medium-latest',
+  'magistral-small-latest',
 ])
 
 const FALLBACK_VISION = new Set([
-  'gpt-5.2', 'gpt-5.1', 'gpt-5', 'gpt-5-mini',
-  'gpt-4.1', 'gpt-4.1-mini', 'o3', 'o4-mini', 'gpt-4o',
-  'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001',
-  'gemini-2.5-pro', 'gemini-2.5-flash',
-  'grok-4-1-fast-reasoning', 'grok-4-1-fast-non-reasoning',
-  'mistral-large-latest', 'mistral-medium-latest',
+  'gpt-5.2',
+  'gpt-5.1',
+  'gpt-5',
+  'gpt-5-mini',
+  'gpt-4.1',
+  'gpt-4.1-mini',
+  'o3',
+  'o4-mini',
+  'gpt-4o',
+  'claude-opus-4-6',
+  'claude-sonnet-4-6',
+  'claude-haiku-4-5-20251001',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
+  'grok-4-1-fast-reasoning',
+  'grok-4-1-fast-non-reasoning',
+  'mistral-large-latest',
+  'mistral-medium-latest',
   'command-a-vision',
 ])
 

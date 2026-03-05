@@ -5,6 +5,8 @@ import { summarizeStrategy } from './summarize.js'
 import { truncateStrategy } from './truncate.js'
 
 const TOOL_RESULT_LIMIT = 2000
+const TOOL_RESULT_HEAD = 500
+const TOOL_RESULT_TAIL = 500
 
 function targetForWindow(windowTokens: number): number {
   if (windowTokens >= 200_000) return 160_000
@@ -28,7 +30,7 @@ function truncateToolResults(messages: ChatMessage[]): ChatMessage[] {
       changed = true
       return {
         ...block,
-        content: `${block.content.slice(0, TOOL_RESULT_LIMIT)}\n[tool output truncated by tiered compaction]`,
+        content: `${block.content.slice(0, TOOL_RESULT_HEAD)}\n[tool output truncated by tiered compaction]\n${block.content.slice(-TOOL_RESULT_TAIL)}`,
       }
     })
 

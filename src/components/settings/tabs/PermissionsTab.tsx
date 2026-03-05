@@ -80,6 +80,38 @@ export const PermissionsTab: Component = () => {
     bypass: 'Bypass',
   }
 
+  const applyPreset = (preset: 'strict' | 'balanced' | 'yolo') => {
+    if (preset === 'strict') {
+      updateSettings({
+        permissionMode: 'ask',
+        toolRules: [
+          { tool: 'bash', action: 'ask' },
+          { tool: 'write_*', action: 'ask' },
+          { tool: 'delete_file', action: 'deny' },
+        ],
+      })
+      return
+    }
+
+    if (preset === 'balanced') {
+      updateSettings({
+        permissionMode: 'ask',
+        toolRules: [
+          { tool: 'read_*', action: 'allow' },
+          { tool: 'glob', action: 'allow' },
+          { tool: 'grep', action: 'allow' },
+          { tool: 'bash', action: 'ask' },
+        ],
+      })
+      return
+    }
+
+    updateSettings({
+      permissionMode: 'bypass',
+      toolRules: [],
+    })
+  }
+
   return (
     <div class="space-y-5">
       {/* Global Mode */}
@@ -105,6 +137,30 @@ export const PermissionsTab: Component = () => {
               )}
             </For>
           </div>
+        </div>
+
+        <div class="mt-2 flex items-center gap-1.5">
+          <button
+            type="button"
+            class="px-2 py-1 text-[10px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--warning)]"
+            onClick={() => applyPreset('strict')}
+          >
+            Strict
+          </button>
+          <button
+            type="button"
+            class="px-2 py-1 text-[10px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--accent)]"
+            onClick={() => applyPreset('balanced')}
+          >
+            Balanced
+          </button>
+          <button
+            type="button"
+            class="px-2 py-1 text-[10px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--error)]"
+            onClick={() => applyPreset('yolo')}
+          >
+            YOLO
+          </button>
         </div>
       </div>
 

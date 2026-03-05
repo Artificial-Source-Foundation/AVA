@@ -2,7 +2,7 @@
  * Diff Review Panel
  *
  * Aggregate view of all file changes in the current session.
- * Shows per-file diffs using the existing DiffViewer component.
+ * Shows per-file diffs and hunk-level review actions.
  * Latest operation per file wins (deduplication).
  */
 
@@ -23,7 +23,7 @@ import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
 import { type EditorInfo, getAvailableEditors, openInEditor } from '../../services/ide-integration'
 import { useSession } from '../../stores/session'
 import type { FileOperation, FileOperationType } from '../../types'
-import { DiffViewer } from '../ui/DiffViewer'
+import { DiffReview } from './DiffReview'
 
 // ============================================================================
 // Helpers
@@ -246,11 +246,10 @@ export const DiffReviewPanel: Component<DiffReviewPanelProps> = () => {
                   {/* Expanded diff view */}
                   <Show when={isExpanded()}>
                     <div class="px-2 pb-2">
-                      <DiffViewer
+                      <DiffReview
                         oldContent={op.originalContent ?? ''}
                         newContent={op.newContent ?? ''}
                         filename={getFileName(op.filePath)}
-                        mode="unified"
                       />
                     </div>
                   </Show>

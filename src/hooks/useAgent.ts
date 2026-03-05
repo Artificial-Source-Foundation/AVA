@@ -362,6 +362,30 @@ function createAgentStore() {
     // Reset streaming content signal
     setStreamingContent('')
 
+    // Streaming text flush (~60fps) to avoid per-token UI churn
+    let contentFlushTimer: ReturnType<typeof setTimeout> | null = null
+    let contentFlushPending = false
+    const scheduleContentFlush = () => {
+      contentFlushPending = true
+      if (contentFlushTimer !== null) return
+      contentFlushTimer = setTimeout(() => {
+        contentFlushTimer = null
+        if (!contentFlushPending) return
+        contentFlushPending = false
+        setStreamingContent(accumulatedContent)
+        setStreamingTokenEstimate(Math.ceil(accumulatedContent.length / 4))
+      }, 16)
+    }
+    const flushStreamingContent = () => {
+      if (contentFlushTimer !== null) {
+        clearTimeout(contentFlushTimer)
+        contentFlushTimer = null
+      }
+      contentFlushPending = false
+      setStreamingContent(accumulatedContent)
+      setStreamingTokenEstimate(Math.ceil(accumulatedContent.length / 4))
+    }
+
     // Buffered tool call updates — signal-only during streaming, store on start/finish
     let toolFlushTimer: ReturnType<typeof setTimeout> | null = null
     let toolUpdatePending = false
@@ -437,11 +461,8 @@ function createAgentStore() {
         switch (event.type) {
           case 'thought': {
             accumulatedContent += event.content
-            // Update signal only — does NOT touch the session store (no new message objects).
-            // This prevents <For> from destroying/recreating DOM on every token.
-            // The store is flushed once on agent:finish.
-            setStreamingContent(accumulatedContent)
-            setStreamingTokenEstimate(Math.ceil(accumulatedContent.length / 4))
+            // Debounced flush to avoid per-token MessageList churn.
+            scheduleContentFlush()
             break
           }
 
@@ -524,6 +545,7 @@ function createAgentStore() {
           }
 
           case 'agent:finish': {
+            flushStreamingContent()
             const finalContent = event.result.output || accumulatedContent
             const totalTokens = event.result.tokensUsed.input + event.result.tokensUsed.output
             logInfo('Agent', '═══ AGENT RUN COMPLETE ═══', {
@@ -617,6 +639,7 @@ function createAgentStore() {
     } finally {
       if (thinkingFlushTimer !== null) clearTimeout(thinkingFlushTimer)
       if (toolFlushTimer !== null) clearTimeout(toolFlushTimer)
+      if (contentFlushTimer !== null) clearTimeout(contentFlushTimer)
       diffDisposable.dispose()
       executorRef.current = null
     }

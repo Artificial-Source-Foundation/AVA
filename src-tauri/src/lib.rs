@@ -6,7 +6,7 @@ mod pty;
 use app_state::AppState;
 use commands::{
     agent_run, agent_stream, allow_project_path, append_log, cleanup_old_logs,
-    compute_fuzzy_replace, compute_grep, evaluate_permission, execute_browser_tool,
+    compute_fuzzy_replace, compute_grep, compute_repo_map, evaluate_permission, execute_browser_tool,
     execute_git_tool, execute_tool, extensions_register_native, extensions_register_wasm,
     get_cwd, get_env_var, get_plugins_state, greet, install_plugin, list_tools, memory_recall,
     memory_recent, memory_remember, memory_search, oauth_copilot_device_poll,
@@ -62,6 +62,7 @@ pub fn run() {
             pty_kill,
             compute_grep,
             compute_fuzzy_replace,
+            compute_repo_map,
             execute_tool,
             agent_run,
             agent_stream,

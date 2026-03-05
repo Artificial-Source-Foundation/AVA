@@ -2,13 +2,14 @@ import { getSettingsManager } from '@ava/core-v2/config'
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import type { ChatMessage } from '@ava/core-v2/llm'
 import { activate as activateCodebase } from './codebase/index.js'
+import type { RepoMap } from './codebase/types.js'
 import { registerModelPricing, trackSessionCost } from './cost-tracker.js'
 import {
   createHistoryProcessorByName,
   type HistoryProcessor,
   runHistoryProcessors,
 } from './processors/index.js'
-import { ALL_STRATEGIES, summarizeStrategy, truncateStrategy } from './strategies.js'
+import { ALL_STRATEGIES, estimateTokens, tieredCompactionStrategy } from './strategies.js'
 import { trackTokens } from './tracker.js'
 
 export interface ContextExtensionSettings {
@@ -27,9 +28,10 @@ export function selectStrategyName(
   messageCount: number,
   settings: ContextExtensionSettings = DEFAULT_CONTEXT_SETTINGS
 ): string | string[] {
+  void messageCount
   if (Array.isArray(settings.strategy)) return settings.strategy
   if (settings.strategy !== 'auto') return settings.strategy
-  return messageCount > SUMMARIZE_THRESHOLD ? summarizeStrategy.name : truncateStrategy.name
+  return tieredCompactionStrategy.name
 }
 
 function createProcessors(settings: ContextExtensionSettings): HistoryProcessor[] {
@@ -47,6 +49,43 @@ function mergeSettings(value: unknown): ContextExtensionSettings {
     strategy: partial.strategy ?? DEFAULT_CONTEXT_SETTINGS.strategy,
     historyProcessors: partial.historyProcessors ?? DEFAULT_CONTEXT_SETTINGS.historyProcessors,
   }
+}
+
+function injectRepoMapContext(messages: ChatMessage[], repoMap: RepoMap): ChatMessage[] {
+  if (repoMap.rankedFiles.length === 0) {
+    return messages
+  }
+
+  const alreadyInjected = messages.some(
+    (message) =>
+      message.role === 'system' &&
+      typeof message.content === 'string' &&
+      message.content.includes('<repo_map>')
+  )
+  if (alreadyInjected) {
+    return messages
+  }
+
+  const totalTokens = messages.reduce(
+    (sum, message) => sum + estimateTokens(JSON.stringify(message)),
+    0
+  )
+  const tokenBudget = Math.max(256, Math.floor(totalTokens * 0.2))
+  const lines = ['<repo_map>']
+  let used = estimateTokens(lines[0] ?? '')
+
+  for (const entry of repoMap.rankedFiles) {
+    const line = `${entry.path} (${entry.score.toFixed(4)})`
+    const cost = estimateTokens(line)
+    if (used + cost > tokenBudget) {
+      break
+    }
+    lines.push(line)
+    used += cost
+  }
+  lines.push('</repo_map>')
+
+  return [{ role: 'system', content: lines.join('\n') }, ...messages]
 }
 
 export function activate(api: ExtensionAPI): Disposable {
@@ -68,8 +107,16 @@ export function activate(api: ExtensionAPI): Disposable {
 
   const hookDisposable =
     typeof api.registerHook === 'function'
-      ? api.registerHook('history:process', (_input: ChatMessage[], current: ChatMessage[]) =>
-          runHistoryProcessors(current, processors)
+      ? api.registerHook(
+          'history:process',
+          async (_input: ChatMessage[], current: ChatMessage[]) => {
+            const processed = runHistoryProcessors(current, processors)
+            const repoMap = await api.storage.get<RepoMap>('repoMap')
+            if (!repoMap) {
+              return processed
+            }
+            return injectRepoMapContext(processed, repoMap)
+          }
         )
       : { dispose() {} }
 

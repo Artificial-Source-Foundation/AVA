@@ -7,6 +7,7 @@
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
+import type { ToolResult } from '@ava/core-v2/tools'
 import { LSPServerManager, pathToUri } from './server-manager.js'
 import { createAllLspTools } from './tools.js'
 import type { LSPDiagnostic, SupportedLanguage } from './types.js'
@@ -32,6 +33,66 @@ export function activate(api: ExtensionAPI): Disposable {
   for (const tool of tools) {
     disposables.push(api.registerTool(tool))
   }
+
+  disposables.push(
+    api.addToolMiddleware({
+      name: 'lsp-diagnostics-after-write',
+      priority: 20,
+      async after(context, result) {
+        if (
+          !['edit', 'write_file', 'create_file', 'apply_patch', 'multiedit'].includes(
+            context.toolName
+          )
+        ) {
+          return undefined
+        }
+
+        const filePath =
+          typeof context.args.filePath === 'string'
+            ? context.args.filePath
+            : typeof context.args.path === 'string'
+              ? context.args.path
+              : null
+
+        if (!filePath) {
+          return undefined
+        }
+
+        const diagnostics = diagnosticsStore.get(filePath) ?? []
+        if (diagnostics.length === 0) {
+          return undefined
+        }
+
+        const formatted = diagnostics
+          .slice(0, 20)
+          .map(
+            (diag) => `${diag.severity.toUpperCase()} [${diag.line}:${diag.column}] ${diag.message}`
+          )
+          .join('\n')
+
+        const output = [
+          result.output,
+          '',
+          `<diagnostics file="${filePath}">`,
+          formatted,
+          '</diagnostics>',
+        ]
+          .filter(Boolean)
+          .join('\n')
+
+        const next: ToolResult = {
+          ...result,
+          output,
+          metadata: {
+            ...result.metadata,
+            diagnostics,
+          },
+        }
+
+        return { result: next }
+      },
+    })
+  )
 
   // Start available servers on session open
   disposables.push(

@@ -23,6 +23,7 @@ describe('context extension activation', () => {
     expect(names).toContain('sliding-window')
     expect(names).toContain('observation-masking')
     expect(names).toContain('amortized-forgetting')
+    expect(names).toContain('tiered-compaction')
   })
 
   it('listens for llm:usage events', () => {
@@ -68,16 +69,10 @@ describe('context extension activation', () => {
 })
 
 describe('selectStrategyName', () => {
-  it('returns "truncate" for short sessions', () => {
-    expect(selectStrategyName(5)).toBe('truncate')
-    expect(selectStrategyName(10)).toBe('truncate')
-    expect(selectStrategyName(SUMMARIZE_THRESHOLD)).toBe('truncate')
-  })
-
-  it('returns "summarize" for long sessions', () => {
-    expect(selectStrategyName(SUMMARIZE_THRESHOLD + 1)).toBe('summarize')
-    expect(selectStrategyName(50)).toBe('summarize')
-    expect(selectStrategyName(100)).toBe('summarize')
+  it('returns tiered-compaction for auto strategy', () => {
+    expect(selectStrategyName(5)).toBe('tiered-compaction')
+    expect(selectStrategyName(10)).toBe('tiered-compaction')
+    expect(selectStrategyName(SUMMARIZE_THRESHOLD + 1)).toBe('tiered-compaction')
   })
 
   it('uses threshold of 20 messages', () => {

@@ -109,6 +109,7 @@ export async function indexFiles(
 export function createRepoMap(files: FileIndex[]): RepoMap {
   return {
     files,
+    rankedFiles: [],
     totalFiles: files.length,
     totalSymbols: files.reduce((sum, f) => sum + f.symbols.length, 0),
     generatedAt: Date.now(),

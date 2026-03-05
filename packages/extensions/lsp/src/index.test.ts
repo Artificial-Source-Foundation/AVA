@@ -30,6 +30,14 @@ describe('lsp extension', () => {
     expect(names).toContain('lsp_definition')
   })
 
+  it('registers diagnostics append middleware with priority 20', () => {
+    const { api, registeredMiddleware } = createMockExtensionAPI()
+    activate(api)
+    const middleware = registeredMiddleware.find((m) => m.name === 'lsp-diagnostics-after-write')
+    expect(middleware).toBeDefined()
+    expect(middleware?.priority).toBe(20)
+  })
+
   it('emits lsp:ready on session open', async () => {
     const { api, emittedEvents } = createMockExtensionAPI()
     activate(api)

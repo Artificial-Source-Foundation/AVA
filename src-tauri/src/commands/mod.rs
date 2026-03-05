@@ -1,6 +1,7 @@
 mod agent_integration;
 mod compute_fuzzy;
 mod compute_grep;
+mod compute_repo_map;
 mod dev_log;
 mod env;
 mod extensions;
@@ -21,6 +22,7 @@ pub use agent_integration::{
 };
 pub use compute_fuzzy::compute_fuzzy_replace;
 pub use compute_grep::compute_grep;
+pub use compute_repo_map::compute_repo_map;
 pub use dev_log::{append_log, cleanup_old_logs, get_cwd};
 pub use env::get_env_var;
 pub use extensions::{extensions_register_native, extensions_register_wasm};

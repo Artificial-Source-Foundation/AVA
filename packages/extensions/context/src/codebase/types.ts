@@ -30,6 +30,7 @@ export interface FileIndex {
 
 export interface RepoMap {
   files: FileIndex[]
+  rankedFiles: Array<{ path: string; score: number }>
   totalFiles: number
   totalSymbols: number
   generatedAt: number

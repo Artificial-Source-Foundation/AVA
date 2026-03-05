@@ -117,6 +117,21 @@ export interface FuzzyReplaceResult {
   strategy: string
 }
 
+export interface RepoMapInputFile {
+  path: string
+  content: string
+  dependencies: string[]
+}
+
+export interface RepoMapEntry {
+  path: string
+  score: number
+}
+
+export interface RepoMapResult {
+  files: RepoMapEntry[]
+}
+
 export interface ReflectToolResult {
   output: string
   error?: string | null

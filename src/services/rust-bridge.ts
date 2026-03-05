@@ -17,6 +17,8 @@ import type {
   PtySpawnOptions,
   ReflectResult,
   ReflectToolResult,
+  RepoMapInputFile,
+  RepoMapResult,
   RetryOutcome,
   RustMemoryEntry,
   RustSession,
@@ -117,6 +119,24 @@ export const rustCompute = {
     replaceAll = false
   ): Promise<FuzzyReplaceResult> =>
     invokeCommand('compute_fuzzy_replace', { content, oldString, newString, replaceAll }),
+  repoMap: (
+    files: RepoMapInputFile[],
+    options?: {
+      query?: string
+      limit?: number
+      activeFiles?: string[]
+      mentionedFiles?: string[]
+      privateFiles?: string[]
+    }
+  ): Promise<RepoMapResult> =>
+    invokeCommand('compute_repo_map', {
+      files,
+      query: options?.query ?? '',
+      limit: options?.limit,
+      activeFiles: options?.activeFiles,
+      mentionedFiles: options?.mentionedFiles,
+      privateFiles: options?.privateFiles,
+    }),
 }
 
 export const rustReflection = {

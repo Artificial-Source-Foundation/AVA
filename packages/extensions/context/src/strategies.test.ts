@@ -1,16 +1,5 @@
+import type { ChatMessage } from '@ava/core-v2/llm'
 import { describe, expect, it } from 'vitest'
-
-type ChatMessage = {
-  role: 'system' | 'user' | 'assistant'
-  content:
-    | string
-    | Array<
-        | { type: 'text'; text: string }
-        | { type: 'image'; source: { type: 'base64' | 'url'; media_type: string; data: string } }
-        | { type: 'tool_use'; id: string; name: string; input: unknown }
-        | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean }
-      >
-}
 
 import {
   ALL_STRATEGIES,
@@ -19,6 +8,8 @@ import {
   observationMaskingStrategy,
   slidingWindowStrategy,
   summarizeStrategy,
+  targetForWindow,
+  tieredCompactionStrategy,
   truncateStrategy,
 } from './strategies.js'
 
@@ -152,11 +143,34 @@ describe('amortizedForgettingStrategy', () => {
 describe('ALL_STRATEGIES', () => {
   it('contains expanded strategy list', () => {
     const names = ALL_STRATEGIES.map((s) => s.name)
+    expect(names).toContain('tiered-compaction')
     expect(names).toContain('prune')
     expect(names).toContain('backward-fifo')
     expect(names).toContain('sliding-window')
     expect(names).toContain('observation-masking')
     expect(names).toContain('amortized-forgetting')
     expect(names.length).toBeGreaterThanOrEqual(7)
+  })
+})
+
+describe('tieredCompactionStrategy', () => {
+  it('uses expected Cline-derived thresholds', () => {
+    expect(targetForWindow(64_000)).toBe(37_000)
+    expect(targetForWindow(128_000)).toBe(98_000)
+    expect(targetForWindow(200_000)).toBe(160_000)
+  })
+
+  it('truncates oversized tool_result blocks before token compaction', () => {
+    const messages: ChatMessage[] = [
+      msg('assistant', [{ type: 'tool_use', id: 't1', name: 'read_file', input: {} }]),
+      msg('user', [{ type: 'tool_result', tool_use_id: 't1', content: 'x'.repeat(3000) }]),
+    ]
+    const compacted = tieredCompactionStrategy.compact(messages, 64_000)
+    const resultMessage = compacted[1]
+    if (!resultMessage || typeof resultMessage.content === 'string')
+      throw new Error('invalid fixture')
+    const block = resultMessage.content[0]
+    if (!block || block.type !== 'tool_result') throw new Error('invalid fixture')
+    expect(block.content).toContain('[tool output truncated by tiered compaction]')
   })
 })

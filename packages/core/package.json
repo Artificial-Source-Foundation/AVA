@@ -9,58 +9,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./agent": {
-      "types": "./dist/agent/index.d.ts",
-      "import": "./dist/agent/index.js"
-    },
-    "./llm": {
-      "types": "./dist/llm/index.d.ts",
-      "import": "./dist/llm/index.js"
-    },
-    "./tools": {
-      "types": "./dist/tools/index.d.ts",
-      "import": "./dist/tools/index.js"
-    },
-    "./types": {
-      "types": "./dist/types/index.d.ts",
-      "import": "./dist/types/index.js"
-    },
-    "./platform": {
-      "types": "./dist/platform.d.ts",
-      "import": "./dist/platform.js"
-    },
-    "./commander": {
-      "types": "./dist/commander/index.d.ts",
-      "import": "./dist/commander/index.js"
-    },
-    "./context": {
-      "types": "./dist/context/index.d.ts",
-      "import": "./dist/context/index.js"
-    },
-    "./session": {
-      "types": "./dist/session/index.d.ts",
-      "import": "./dist/session/index.js"
-    },
-    "./mcp": {
-      "types": "./dist/mcp/index.d.ts",
-      "import": "./dist/mcp/index.js"
-    },
-    "./models": {
-      "types": "./dist/models/index.d.ts",
-      "import": "./dist/models/index.js"
-    },
-    "./permissions": {
-      "types": "./dist/permissions/index.d.ts",
-      "import": "./dist/permissions/index.js"
-    },
-    "./diff": {
-      "types": "./dist/diff/index.d.ts",
-      "import": "./dist/diff/index.js"
-    },
-    "./git": {
-      "types": "./dist/git/index.d.ts",
-      "import": "./dist/git/index.js"
     }
   },
   "scripts": {
@@ -69,6 +17,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ava/core-v2": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.12.3",
     "diff": "^8.0.3",
     "gpt-tokenizer": "^3.4.0",

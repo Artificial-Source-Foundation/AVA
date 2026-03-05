@@ -37,6 +37,7 @@ export default defineConfig({
       'packages/extensions/**/*.{test,spec}.ts',
       'cli/src/**/*.{test,spec}.ts',
       'docs/examples/**/*.{test,spec}.ts',
+      'tests/e2e/**/*.{test,spec}.ts',
     ],
   },
   resolve: {

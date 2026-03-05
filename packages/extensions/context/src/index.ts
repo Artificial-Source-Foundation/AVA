@@ -1,6 +1,7 @@
 import { getSettingsManager } from '@ava/core-v2/config'
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import type { ChatMessage } from '@ava/core-v2/llm'
+import { activate as activateCodebase } from './codebase/index.js'
 import { registerModelPricing, trackSessionCost } from './cost-tracker.js'
 import {
   createHistoryProcessorByName,
@@ -51,6 +52,7 @@ function mergeSettings(value: unknown): ContextExtensionSettings {
 export function activate(api: ExtensionAPI): Disposable {
   const manager = getSettingsManager()
   manager.registerCategory('context', DEFAULT_CONTEXT_SETTINGS)
+  const codebaseDisposable = activateCodebase(api)
 
   const strategyDisposables = ALL_STRATEGIES.map((strategy) =>
     api.registerContextStrategy(strategy)
@@ -145,6 +147,7 @@ export function activate(api: ExtensionAPI): Disposable {
 
   return {
     dispose() {
+      codebaseDisposable.dispose()
       for (const disposable of strategyDisposables) disposable.dispose()
       hookDisposable.dispose()
       settingsDisposable.dispose()

@@ -13,6 +13,14 @@ export default defineConfig({
       '@ava/core-v2/config': path.resolve(__dirname, '../core-v2/src/config/index.ts'),
       '@ava/core-v2/session': path.resolve(__dirname, '../core-v2/src/session/index.ts'),
       '@ava/core-v2/logger': path.resolve(__dirname, '../core-v2/src/logger/index.ts'),
+      '@ava/core-v2/__test-utils__/mock-platform': path.resolve(
+        __dirname,
+        '../core-v2/src/__test-utils__/mock-platform.ts'
+      ),
+      '@ava/core-v2/__test-utils__/mock-extension-api': path.resolve(
+        __dirname,
+        '../core-v2/src/__test-utils__/mock-extension-api.ts'
+      ),
       '@ava/core-v2': path.resolve(__dirname, '../core-v2/src/index.ts'),
     },
   },

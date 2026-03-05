@@ -1,9 +1,0 @@
-{
-  "name": "ava-skills",
-  "version": "1.0.0",
-  "description": "Auto-invoked knowledge modules",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": true,
-  "priority": 10
-}

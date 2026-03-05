@@ -1,7 +1,0 @@
-{
-  "name": "@ava/sharing",
-  "version": "0.1.0",
-  "description": "Session sharing extension",
-  "type": "module",
-  "main": "src/index.ts"
-}

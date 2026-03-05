@@ -8,7 +8,7 @@
 
 import { defineTool } from '@ava/core-v2/tools'
 import * as z from 'zod'
-import { addPromptSection } from '../../prompts/src/builder.js'
+import { addPromptSection } from '../../../prompts/src/builder.js'
 import type { Skill } from './types.js'
 
 export function createLoadSkillTool(skills: Skill[]) {

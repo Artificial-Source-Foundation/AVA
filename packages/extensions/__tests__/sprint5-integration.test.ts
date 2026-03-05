@@ -286,26 +286,31 @@ describe('Sprint 5 Integration', () => {
   describe('Extension manifest validation', () => {
     it('ecosystem extensions have correct manifest structure', async () => {
       const manifests = [
-        '../mcp/ava-extension.json',
-        '../codebase/ava-extension.json',
-        '../git/ava-extension.json',
-        '../lsp/ava-extension.json',
+        '../agent-modes/ava-extension.json',
+        '../commander/ava-extension.json',
+        '../context/ava-extension.json',
         '../diff/ava-extension.json',
-        '../focus-chain/ava-extension.json',
+        '../git/ava-extension.json',
+        '../hooks/ava-extension.json',
         '../instructions/ava-extension.json',
+        '../lsp/ava-extension.json',
+        '../mcp/ava-extension.json',
+        '../memory/ava-extension.json',
         '../models/ava-extension.json',
-        '../scheduler/ava-extension.json',
-        '../sandbox/ava-extension.json',
-        '../skills/ava-extension.json',
-        '../custom-commands/ava-extension.json',
+        '../permissions/ava-extension.json',
+        '../plugins/ava-extension.json',
+        '../prompts/ava-extension.json',
+        '../recall/ava-extension.json',
+        '../server/ava-extension.json',
         '../slash-commands/ava-extension.json',
-        '../integrations/ava-extension.json',
+        '../tools-extended/ava-extension.json',
+        '../validator/ava-extension.json',
       ]
 
       for (const path of manifests) {
         const manifest = await import(path)
         expect(manifest.name).toBeDefined()
-        expect(manifest.version).toBe('1.0.0')
+        expect(manifest.version).toMatch(/^\d+\.\d+\.\d+$/)
         expect(manifest.builtIn).toBe(true)
         expect(typeof manifest.priority).toBe('number')
         expect(typeof manifest.enabledByDefault).toBe('boolean')

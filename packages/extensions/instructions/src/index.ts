@@ -17,14 +17,19 @@ import type {
   ToolMiddlewareResult,
 } from '@ava/core-v2/extensions'
 import type { ToolResult } from '@ava/core-v2/tools'
+import { activate as activateCustomCommands } from './custom-commands/index.js'
 import { DiscoveryCache } from './discovery-cache.js'
 import { loadInstructions, mergeInstructions } from './loader.js'
 import { extractPaths, toDirectoryKey } from './path-extractor.js'
+import { activate as activateSkills } from './skills/index.js'
 import { resolveSubdirectoryInstructions } from './subdirectory.js'
 import type { InstructionConfig } from './types.js'
 import { DEFAULT_INSTRUCTION_CONFIG } from './types.js'
 
 export function activate(api: ExtensionAPI): Disposable {
+  const skillsDisposable = activateSkills(api)
+  const customCommandsDisposable = activateCustomCommands(api)
+
   let userConfig: Partial<InstructionConfig> = {}
   try {
     userConfig = api.getSettings<Partial<InstructionConfig>>('instructions')
@@ -141,6 +146,8 @@ export function activate(api: ExtensionAPI): Disposable {
 
   return {
     dispose() {
+      customCommandsDisposable.dispose()
+      skillsDisposable.dispose()
       for (const d of disposables) d.dispose()
     },
   }

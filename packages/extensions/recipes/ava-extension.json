@@ -1,9 +1,0 @@
-{
-  "name": "ava-recipes",
-  "version": "0.1.0",
-  "description": "YAML/JSON-based composable workflows",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": true,
-  "priority": 70
-}

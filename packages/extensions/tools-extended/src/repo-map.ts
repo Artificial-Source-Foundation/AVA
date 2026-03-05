@@ -7,7 +7,7 @@
 import { getPlatform } from '@ava/core-v2/platform'
 import { defineTool } from '@ava/core-v2/tools'
 import { z } from 'zod'
-import { detectLanguage, indexFiles } from '../../codebase/src/indexer.js'
+import { detectLanguage, indexFiles } from '../../context/src/codebase/indexer.js'
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes}B`

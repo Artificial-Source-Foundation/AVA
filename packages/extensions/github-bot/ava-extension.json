@@ -1,9 +1,0 @@
-{
-  "name": "ava-github-bot",
-  "version": "0.1.0",
-  "description": "GitHub bot — respond to @ava mentions in issues and PRs",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": false,
-  "priority": 95
-}

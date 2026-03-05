@@ -1,9 +1,0 @@
-{
-  "name": "ava-custom-commands",
-  "version": "1.0.0",
-  "description": "TOML-based user commands",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": true,
-  "priority": 10
-}

@@ -2,7 +2,7 @@
  * Rule matcher — matches rules to current files using glob patterns.
  */
 
-import { matchGlob } from '../../skills/src/glob.js'
+import { matchGlob } from '../../../instructions/src/skills/glob.js'
 import type { Rule, RuleConfig, RuleMatch } from './types.js'
 import { DEFAULT_RULE_CONFIG } from './types.js'
 

@@ -2,7 +2,7 @@
  * Custom Commands Service
  *
  * Reads/writes TOML command files via Tauri FS.
- * Inline parser logic matches packages/extensions/custom-commands/src/parser.ts.
+ * Inline parser logic matches packages/extensions/instructions/src/custom-commands/parser.ts.
  */
 
 import { isTauri } from '@tauri-apps/api/core'

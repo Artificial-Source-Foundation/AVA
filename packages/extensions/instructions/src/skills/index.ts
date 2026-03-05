@@ -14,7 +14,7 @@
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
-import { addPromptSection } from '../../prompts/src/builder.js'
+import { addPromptSection } from '../../../prompts/src/builder.js'
 import { discoverSkills } from './loader.js'
 import { matchSkills } from './matcher.js'
 import { createLoadSkillTool } from './tool.js'

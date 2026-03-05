@@ -7,7 +7,7 @@
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
-import { addPromptSection } from '../../prompts/src/builder.js'
+import { addPromptSection } from '../../../prompts/src/builder.js'
 import { discoverRules } from './loader.js'
 import { matchRules } from './matcher.js'
 import type { Rule, RuleConfig } from './types.js'

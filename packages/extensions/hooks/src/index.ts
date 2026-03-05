@@ -14,8 +14,10 @@ import type {
   ToolMiddlewareResult,
 } from '@ava/core-v2/extensions'
 import type { ToolResult } from '@ava/core-v2/tools'
+import { activate as activateFileWatcher } from './file-watcher/index.js'
 import { createFormatterMiddleware } from './formatter.js'
 import { runHooks } from './runner.js'
+import { activate as activateScheduler } from './scheduler/index.js'
 import type { PostToolUseContext, PreToolUseContext } from './types.js'
 
 export function createHooksMiddleware(): ToolMiddleware {
@@ -62,6 +64,8 @@ export function createHooksMiddleware(): ToolMiddleware {
 
 export function activate(api: ExtensionAPI): Disposable {
   const disposables: Disposable[] = []
+  disposables.push(activateFileWatcher(api))
+  disposables.push(activateScheduler(api))
 
   disposables.push(api.addToolMiddleware(createHooksMiddleware()))
 

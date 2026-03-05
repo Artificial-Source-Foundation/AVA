@@ -1,9 +1,0 @@
-{
-  "name": "ava-rules",
-  "version": "1.0.0",
-  "description": "Path-targeted coding rules that inject into the system prompt",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": true,
-  "priority": 8
-}

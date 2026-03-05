@@ -8,6 +8,7 @@ import { getSettingsManager } from '@ava/core-v2/config'
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import { registerBestOfNMode } from './best-of-n-mode.js'
 import { registerDoomLoop } from './doom-loop.js'
+import { activate as activateFocusChain } from './focus-chain/index.js'
 import { registerMinimalMode } from './minimal-mode.js'
 import { registerPlanMode } from './plan-mode.js'
 
@@ -19,8 +20,10 @@ const DEFAULT_AGENT_MODE_SETTINGS = {
 
 export function activate(api: ExtensionAPI): Disposable {
   getSettingsManager().registerCategory('agentModes', DEFAULT_AGENT_MODE_SETTINGS)
+  const focusChainDisposable = activateFocusChain(api)
 
   const disposables = [
+    focusChainDisposable,
     registerPlanMode(api),
     registerMinimalMode(api),
     registerBestOfNMode(api),

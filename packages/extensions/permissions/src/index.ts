@@ -6,6 +6,7 @@
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import { createPermissionMiddleware, updateSettings } from './middleware.js'
 import { loadDeclarativePolicies } from './policy/index.js'
+import { activate as activateRules } from './rules/index.js'
 import type { ToolPermissionRule } from './types.js'
 
 function applySettings(raw: Record<string, unknown>): void {
@@ -32,6 +33,8 @@ async function reloadPolicies(api: ExtensionAPI, cwd: string): Promise<void> {
 }
 
 export function activate(api: ExtensionAPI): Disposable {
+  const rulesDisposable = activateRules(api)
+
   // Register the permission middleware (pass bus for interactive approval)
   const mwDisposable = api.addToolMiddleware(createPermissionMiddleware(api.bus))
 
@@ -59,6 +62,7 @@ export function activate(api: ExtensionAPI): Disposable {
 
   return {
     dispose() {
+      rulesDisposable.dispose()
       mwDisposable.dispose()
       settingsDisposable.dispose()
       sessionDisposable.dispose()

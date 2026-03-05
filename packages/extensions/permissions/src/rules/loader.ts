@@ -7,7 +7,7 @@
  */
 
 import type { IFileSystem } from '@ava/core-v2/platform'
-import { parseFrontmatter, parseGlobs } from '../../skills/src/frontmatter.js'
+import { parseFrontmatter, parseGlobs } from '../../../instructions/src/skills/frontmatter.js'
 import type { Rule, RuleActivation } from './types.js'
 
 /** Directories to scan for rule .md files (relative to project root). */

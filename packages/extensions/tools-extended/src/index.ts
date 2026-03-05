@@ -20,6 +20,7 @@ import { loadCustomTools } from './custom-tools.js'
 import { deleteFileTool } from './delete.js'
 import { editBenchmarkTool } from './edit-benchmark/index.js'
 import { inlineSuggestTool } from './inline-suggest.js'
+import { activate as activateIntegrations } from './integrations/index.js'
 import { lsTool } from './ls.js'
 import { multieditTool } from './multiedit.js'
 import { planEnterTool, planExitTool } from './plan-mode-tools.js'
@@ -68,6 +69,7 @@ const TOOLS = [
 export function activate(api: ExtensionAPI): Disposable {
   getSettingsManager().registerCategory('voice', DEFAULT_VOICE_SETTINGS)
   const disposables: Disposable[] = TOOLS.map((tool) => api.registerTool(tool))
+  disposables.push(activateIntegrations(api))
 
   // Vision capability guard — strip ImageBlock from tool results when the
   // current model doesn't support vision, preventing provider API errors.

@@ -111,6 +111,7 @@ export type {
 } from './platform.js'
 // Platform
 export { getPlatform, setPlatform } from './platform.js'
+export { dispatchCompute, isRunningInTauri } from './platform-dispatch.js'
 export type {
   FileState,
   SessionEvent,

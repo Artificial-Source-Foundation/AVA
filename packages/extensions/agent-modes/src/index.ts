@@ -11,6 +11,7 @@ import { registerDoomLoop } from './doom-loop.js'
 import { activate as activateFocusChain } from './focus-chain/index.js'
 import { registerMinimalMode } from './minimal-mode.js'
 import { registerPlanMode } from './plan-mode.js'
+import { createReliabilityMiddleware } from './reliability-middleware.js'
 
 export { selectAgentMode } from './selector.js'
 
@@ -29,6 +30,10 @@ export function activate(api: ExtensionAPI): Disposable {
     registerBestOfNMode(api),
     registerDoomLoop(api),
   ]
+
+  const reliability = createReliabilityMiddleware(api)
+  disposables.push(api.addToolMiddleware(reliability.middleware))
+  disposables.push(reliability.dispose)
 
   return {
     dispose() {

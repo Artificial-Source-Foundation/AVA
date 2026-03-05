@@ -5,7 +5,8 @@ export class AppHarness {
   private readonly mockMode: boolean
 
   constructor(options?: { mock?: boolean }) {
-    this.mockMode = options?.mock ?? true
+    const envMock = process.env.AVA_E2E_MOCK === '1'
+    this.mockMode = options?.mock ?? envMock
   }
 
   async executeTool(name: string, args: Record<string, JsonValue>): Promise<ToolResult> {

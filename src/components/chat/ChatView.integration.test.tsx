@@ -54,6 +54,17 @@ vi.mock('../../stores/settings', () => ({
   }),
 }))
 
+vi.mock('../../stores/team', () => ({
+  useTeam: () => ({
+    selectedMemberId: () => null,
+  }),
+}))
+
+vi.mock('../../services/clipboard-watcher', () => ({
+  createClipboardWatcher: () => ({ start: vi.fn(), stop: vi.fn() }),
+  looksLikeCode: () => false,
+}))
+
 vi.mock('./ApprovalDock', () => ({
   ApprovalDock: () => null,
 }))
@@ -78,6 +89,14 @@ vi.mock('./MessageQueueBar', () => ({
   MessageQueueBar: () => null,
 }))
 
+vi.mock('./TeamChatView', () => ({
+  TeamChatView: () => null,
+}))
+
+vi.mock('./TeamStatusStrip', () => ({
+  TeamStatusStrip: () => null,
+}))
+
 describe('ChatView integration', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -90,6 +109,8 @@ describe('ChatView integration', () => {
   it('starts watcher and forwards AI question comment to chat.sendMessage', async () => {
     const container = document.createElement('div')
     const dispose = render(() => <ChatView />, container)
+
+    await Promise.resolve()
 
     expect(mockStartFileWatcher).toHaveBeenCalledOnce()
     const callback = mockStartFileWatcher.mock.calls[0]?.[1] as

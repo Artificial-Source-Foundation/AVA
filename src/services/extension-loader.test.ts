@@ -6,7 +6,7 @@
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 let loadInstalledPlugins: (
   createApi: (name: string) => ExtensionAPI
@@ -23,12 +23,10 @@ const mockPluginsFsMod = {
 vi.mock('./plugins-fs', () => mockPluginsFsMod)
 
 describe('extension-loader', () => {
-  beforeAll(async () => {
+  beforeEach(async () => {
+    vi.resetModules()
     const mod = await import('./extension-loader')
     loadInstalledPlugins = mod.loadInstalledPlugins
-  })
-
-  beforeEach(() => {
     vi.clearAllMocks()
   })
 

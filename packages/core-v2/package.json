@@ -45,6 +45,10 @@
     "./logger": {
       "types": "./dist/logger/index.d.ts",
       "import": "./dist/logger/index.js"
+    },
+    "./__test-utils__/mock-extension-api": {
+      "types": "./dist/__test-utils__/mock-extension-api.d.ts",
+      "import": "./dist/__test-utils__/mock-extension-api.js"
     }
   },
   "scripts": {

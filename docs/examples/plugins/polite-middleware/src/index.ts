@@ -20,7 +20,6 @@ const politeMiddleware: ToolMiddleware = {
     }
 
     return {
-      ...result,
       result: {
         ...result,
         output: result.output + REMINDER,

@@ -139,7 +139,7 @@ api.addToolMiddleware({
 
   async after(ctx, result) {
     // Modify result:
-    // return { ...result, result: { ...result, output: result.output + '\n[modified]' } }
+    // return { result: { ...result, output: result.output + '\n[modified]' } }
     return undefined
   },
 })
@@ -297,3 +297,5 @@ Working example plugins with full source and tests:
 | [polite-middleware](../../docs/examples/plugins/polite-middleware/) | `addToolMiddleware()`, priority | `docs/examples/plugins/polite-middleware/` |
 | [session-notes](../../docs/examples/plugins/session-notes/) | `registerCommand()`, `storage` API | `docs/examples/plugins/session-notes/` |
 | [event-logger](../../docs/examples/plugins/event-logger/) | `api.on()`, `emit()`, events + storage | `docs/examples/plugins/event-logger/` |
+| [deploy-command](../../docs/examples/plugins/deploy-command/) | command argument parsing + safety checks | `docs/examples/plugins/deploy-command/` |
+| [react-patterns](../../docs/examples/plugins/react-patterns/) | project-specific guidance registration pattern | `docs/examples/plugins/react-patterns/` |

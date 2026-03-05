@@ -36,8 +36,7 @@ export const fileStatsTool = defineTool({
     path: z.string().describe('Absolute path to the file'),
   }),
 
-  async execute(input, ctx) {
-    const fs = ctx.signal // Access platform through the API
+  async execute(input) {
     // Use the tool context approach — read via the globally registered platform
     const { getPlatform } = await import('@ava/core-v2/platform')
     const content = await getPlatform().fs.readFile(input.path)

@@ -1,6 +1,12 @@
 import type { ExtensionStorage } from '@ava/core-v2/extensions'
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryStore } from './store.js'
+
+const { dispatchComputeMock } = vi.hoisted(() => ({ dispatchComputeMock: vi.fn() }))
+
+vi.mock('@ava/core-v2', () => ({
+  dispatchCompute: dispatchComputeMock,
+}))
 
 function createTestStorage(): ExtensionStorage {
   const data = new Map<string, unknown>()
@@ -21,6 +27,11 @@ function createTestStorage(): ExtensionStorage {
 }
 
 describe('MemoryStore', () => {
+  beforeEach(() => {
+    dispatchComputeMock.mockReset()
+    dispatchComputeMock.mockImplementation(async (_command, _args, tsFallback) => tsFallback())
+  })
+
   it('writes and reads a memory', async () => {
     const store = new MemoryStore(createTestStorage())
     await store.write('test-key', 'test-value', 'project')
@@ -95,5 +106,34 @@ describe('MemoryStore', () => {
     const store2 = new MemoryStore(storage)
     const entry = await store2.read('key')
     expect(entry!.value).toBe('persisted')
+  })
+
+  it('routes write/read/list/search through dispatchCompute', async () => {
+    const store = new MemoryStore(createTestStorage())
+    await store.write('k', 'v')
+    await store.read('k')
+    await store.list('project')
+    await store.search('k')
+
+    expect(dispatchComputeMock).toHaveBeenCalledWith(
+      'memory_remember',
+      expect.objectContaining({ dbPath: 'ava.db', key: 'k', value: 'v' }),
+      expect.any(Function)
+    )
+    expect(dispatchComputeMock).toHaveBeenCalledWith(
+      'memory_recall',
+      expect.objectContaining({ dbPath: 'ava.db', key: 'k' }),
+      expect.any(Function)
+    )
+    expect(dispatchComputeMock).toHaveBeenCalledWith(
+      'memory_recent',
+      expect.objectContaining({ dbPath: 'ava.db', limit: 500 }),
+      expect.any(Function)
+    )
+    expect(dispatchComputeMock).toHaveBeenCalledWith(
+      'memory_search',
+      expect.objectContaining({ dbPath: 'ava.db', query: 'k' }),
+      expect.any(Function)
+    )
   })
 })

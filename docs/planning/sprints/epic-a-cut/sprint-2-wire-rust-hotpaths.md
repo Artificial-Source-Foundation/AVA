@@ -67,6 +67,11 @@ const result = await dispatchCompute('compute_fuzzy_replace', {
 - [ ] Falls back to TS in CLI
 - [ ] Benchmark shows measurable improvement
 
+**Benchmark note:**
+- Rust benchmark harness already exists at `src-tauri/src/bin/hotpath-benchmark.rs`.
+- Compare Rust fuzzy path with: `cargo run --bin hotpath-benchmark -- fuzzy <content-file> <old-file> <new-file> <iterations> <warmup> <replace-all-1-or-0>`.
+- For TS fallback, compare the same corpus against `packages/core-v2/src/tools/edit-replacers.ts::replace()` in a Node timing script.
+
 ---
 
 ## Story 2.3: Wire Grep/Glob to Rust

@@ -2,6 +2,7 @@
  * Permission middleware — safety checks, auto-approve, arity fingerprinting.
  */
 
+import { dispatchCompute } from '@ava/core-v2'
 import type { MessageBus } from '@ava/core-v2/bus'
 import type {
   ToolMiddleware,
@@ -23,6 +24,83 @@ import {
 } from './types.js'
 
 let settings: PermissionSettings = { ...DEFAULT_SETTINGS }
+
+interface NativePermissionPattern {
+  type: 'any' | 'glob' | 'regex' | 'path'
+  value?: string
+}
+
+interface NativePermissionRule {
+  tool: NativePermissionPattern
+  args: NativePermissionPattern
+  action: 'allow' | 'ask' | 'deny'
+}
+
+interface NativePermissionResult {
+  action: 'allow' | 'ask' | 'deny'
+}
+
+function isNativePermissionsEnabled(): boolean {
+  return process.env.AVA_RUST_PERMISSIONS !== '0'
+}
+
+function serializePermissionArgs(args: Record<string, unknown>): string[] {
+  const out: string[] = []
+  const command = typeof args.command === 'string' ? args.command : ''
+  const path = typeof args.path === 'string' ? args.path : ''
+  const filePath = typeof args.filePath === 'string' ? args.filePath : ''
+
+  if (command) out.push(command)
+  if (path) out.push(path)
+  if (filePath) out.push(filePath)
+
+  if (out.length === 0) {
+    out.push(JSON.stringify(args, Object.keys(args).sort()))
+  }
+
+  return out
+}
+
+function toNativeRules(rules: ToolPermissionRule[]): NativePermissionRule[] {
+  return rules
+    .filter((rule) => !rule.paths || rule.paths.length === 0)
+    .map((rule) => ({
+      tool: rule.tool === '*' ? { type: 'any' } : { type: 'glob', value: rule.tool },
+      args: { type: 'any' },
+      action: rule.action,
+    }))
+}
+
+async function evaluateNativePermission(
+  workspaceRoot: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  rules: ToolPermissionRule[]
+): Promise<NativePermissionResult | null> {
+  if (!isNativePermissionsEnabled()) {
+    return null
+  }
+
+  const nativeRules = toNativeRules(rules)
+  if (nativeRules.length === 0) {
+    return null
+  }
+
+  try {
+    return await dispatchCompute<NativePermissionResult | null>(
+      'evaluate_permission',
+      {
+        workspaceRoot,
+        rules: nativeRules,
+        tool: toolName,
+        args: serializePermissionArgs(args),
+      },
+      async () => null
+    )
+  } catch {
+    return null
+  }
+}
 
 export function updateSettings(partial: Partial<PermissionSettings>): void {
   // Filter out undefined values to avoid overwriting defaults (e.g. blockedPatterns: [])
@@ -275,6 +353,17 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
 
       // 9. Legacy per-tool rules (first match wins)
       if (settings.toolRules?.length) {
+        const native = await evaluateNativePermission(
+          ctx.ctx.workingDirectory,
+          toolName,
+          args,
+          settings.toolRules
+        )
+        if (native?.action === 'allow') return undefined
+        if (native?.action === 'deny') {
+          return { blocked: true, reason: 'Denied by Rust permission policy' }
+        }
+
         const rule = evaluateToolRules(toolName, path || undefined, settings.toolRules)
         if (rule) {
           if (rule.action === 'allow') return undefined

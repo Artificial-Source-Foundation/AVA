@@ -4,8 +4,19 @@
  * Each validator uses platform shell to run external tools.
  */
 
+import { dispatchCompute } from '@ava/core-v2'
 import { getPlatform } from '@ava/core-v2/platform'
 import type { ValidationContext, ValidationResult, Validator } from './types.js'
+
+interface RustValidationResult {
+  valid: boolean
+  error?: string
+  details: string[]
+}
+
+function isRustValidationEnabled(): boolean {
+  return process.env.AVA_RUST_VALIDATOR !== '0'
+}
 
 // ─── Syntax Validator ───────────────────────────────────────────────────────
 
@@ -36,12 +47,32 @@ export const syntaxValidator: Validator = {
     }
 
     const errors: string[] = []
+    const warnings: string[] = []
     const shell = getPlatform().shell
+    const fs = getPlatform().fs
 
     for (const file of jsFiles) {
       if (ctx.signal.aborted) break
       const ext = getExtension(file)
       const loader = ext === '.tsx' ? 'tsx' : ext === '.ts' ? 'ts' : ext === '.jsx' ? 'jsx' : 'js'
+
+      if (isRustValidationEnabled()) {
+        try {
+          const content = await fs.readFile(file)
+          const rustResult = await dispatchCompute<RustValidationResult | null>(
+            'validation_validate_edit',
+            { content },
+            async () => null
+          )
+
+          if (rustResult && !rustResult.valid) {
+            const detail = rustResult.error ?? rustResult.details[0] ?? 'validation failed'
+            warnings.push(`${file}: [rust-validator] ${detail}`)
+          }
+        } catch {
+          // Keep validator resilient; shell syntax validation remains source of truth.
+        }
+      }
 
       try {
         const result = await shell.exec(
@@ -59,7 +90,7 @@ export const syntaxValidator: Validator = {
       validator: 'syntax',
       passed: errors.length === 0,
       errors,
-      warnings: [],
+      warnings,
       durationMs: Date.now() - start,
     }
   },

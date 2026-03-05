@@ -1,8 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installMockPlatform, type MockPlatform } from '../__test-utils__/mock-platform.js'
 import { resetLogger } from '../logger/logger.js'
 import { editTool } from './edit.js'
 import type { ToolContext } from './types.js'
+
+const { dispatchComputeMock } = vi.hoisted(() => ({ dispatchComputeMock: vi.fn() }))
+
+vi.mock('../platform-dispatch.js', () => ({
+  dispatchCompute: dispatchComputeMock,
+}))
 
 function makeCtx(cwd = '/project'): ToolContext {
   return {
@@ -18,6 +24,8 @@ describe('edit tool', () => {
   beforeEach(() => {
     platform = installMockPlatform()
     platform.fs.addDir('/project')
+    dispatchComputeMock.mockReset()
+    dispatchComputeMock.mockImplementation(async (_command, _args, tsFallback) => tsFallback())
   })
 
   afterEach(() => {
@@ -36,6 +44,26 @@ describe('edit tool', () => {
     const content = await platform.fs.readFile('/project/test.ts')
     expect(content).toContain('const x = 10')
     expect(content).toContain('const y = 2')
+  })
+
+  it('dispatches fuzzy replace through dispatchCompute', async () => {
+    platform.fs.addFile('/project/test.ts', 'const x = 1\nconst y = 2')
+
+    await editTool.execute(
+      { filePath: '/project/test.ts', oldString: 'const x = 1', newString: 'const x = 10' },
+      makeCtx()
+    )
+
+    expect(dispatchComputeMock).toHaveBeenCalledWith(
+      'compute_fuzzy_replace',
+      {
+        content: 'const x = 1\nconst y = 2',
+        oldString: 'const x = 1',
+        newString: 'const x = 10',
+        replaceAll: false,
+      },
+      expect.any(Function)
+    )
   })
 
   it('shows line delta in output', async () => {

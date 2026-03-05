@@ -3,7 +3,9 @@
  */
 
 import * as z from 'zod'
+import type { NativeFuzzyReplaceOutput } from '../platform.js'
 import { getPlatform } from '../platform.js'
+import { dispatchCompute } from '../platform-dispatch.js'
 import { defineTool } from './define.js'
 import { replace } from './edit-replacers.js'
 import { ToolError, ToolErrorType } from './errors.js'
@@ -88,16 +90,23 @@ export const editTool = defineTool({
 
     let newContent = ''
     let engine: 'rust' | 'typescript' = 'typescript'
-    if (platform.compute && isFeatureEnabled('AVA_RUST_FUZZY_EDIT', true)) {
+    if (isFeatureEnabled('AVA_RUST_FUZZY_EDIT', true)) {
       try {
-        const nativeResult = await platform.compute.fuzzyReplace({
-          content,
-          oldString: input.oldString,
-          newString: sanitizedNew,
-          replaceAll,
-        })
-        newContent = nativeResult.content
-        engine = 'rust'
+        const replacementResult = await dispatchCompute<NativeFuzzyReplaceOutput>(
+          'compute_fuzzy_replace',
+          {
+            content,
+            oldString: input.oldString,
+            newString: sanitizedNew,
+            replaceAll,
+          },
+          async () => ({
+            content: replace(content, input.oldString, sanitizedNew, replaceAll),
+            strategy: 'typescript',
+          })
+        )
+        newContent = replacementResult.content
+        engine = replacementResult.strategy === 'typescript' ? 'typescript' : 'rust'
       } catch {
         newContent = replace(content, input.oldString, sanitizedNew, replaceAll)
       }

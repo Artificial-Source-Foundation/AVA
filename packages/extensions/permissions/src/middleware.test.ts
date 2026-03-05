@@ -1,6 +1,6 @@
 import { MessageBus } from '@ava/core-v2/bus'
 import type { ToolMiddlewareContext } from '@ava/core-v2/extensions'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createPermissionMiddleware,
   evaluateToolRules,
@@ -10,6 +10,13 @@ import {
   resetSettings,
   updateSettings,
 } from './middleware.js'
+import type { PermissionResponse } from './types.js'
+
+const { dispatchComputeMock } = vi.hoisted(() => ({ dispatchComputeMock: vi.fn() }))
+
+vi.mock('@ava/core-v2', () => ({
+  dispatchCompute: dispatchComputeMock,
+}))
 
 function makeCtx(toolName: string, args: Record<string, unknown> = {}): ToolMiddlewareContext {
   return {
@@ -30,6 +37,11 @@ function makeCtx(toolName: string, args: Record<string, unknown> = {}): ToolMidd
 
 describe('Permission Middleware', () => {
   const mw = createPermissionMiddleware()
+
+  beforeEach(() => {
+    dispatchComputeMock.mockReset()
+    dispatchComputeMock.mockImplementation(async (_command, _args, tsFallback) => tsFallback())
+  })
 
   afterEach(() => {
     resetSettings()
@@ -160,12 +172,13 @@ describe('Bus-based approval', () => {
 
     // Subscriber auto-approves
     bus.subscribe('permission:request', (msg) => {
-      bus.publish({
+      const response: PermissionResponse = {
         type: 'permission:response',
         correlationId: msg.correlationId,
         timestamp: Date.now(),
         approved: true,
-      })
+      }
+      bus.publish(response)
     })
 
     const result = await mw.before!(makeCtx('write_file', { path: '/project/file.ts' }))
@@ -177,13 +190,14 @@ describe('Bus-based approval', () => {
     const mw = createPermissionMiddleware(bus)
 
     bus.subscribe('permission:request', (msg) => {
-      bus.publish({
+      const response: PermissionResponse = {
         type: 'permission:response',
         correlationId: msg.correlationId,
         timestamp: Date.now(),
         approved: false,
         reason: 'Not today',
-      })
+      }
+      bus.publish(response)
     })
 
     const result = await mw.before!(makeCtx('write_file', { path: '/project/file.ts' }))
@@ -208,12 +222,13 @@ describe('Bus-based approval', () => {
     let called = false
     bus.subscribe('permission:request', (msg) => {
       called = true
-      bus.publish({
+      const response: PermissionResponse = {
         type: 'permission:response',
         correlationId: msg.correlationId,
         timestamp: Date.now(),
         approved: false,
-      })
+      }
+      bus.publish(response)
     })
 
     const result = await mw.before!(makeCtx('read_file', { path: '/project/file.ts' }))
@@ -241,13 +256,14 @@ describe('Bus-based approval', () => {
     const mw = createPermissionMiddleware(bus)
 
     bus.subscribe('permission:request', (msg) => {
-      bus.publish({
+      const response: PermissionResponse = {
         type: 'permission:response',
         correlationId: msg.correlationId,
         timestamp: Date.now(),
         approved: true,
         alwaysApprove: true,
-      })
+      }
+      bus.publish(response)
     })
 
     // First call — goes through bus
@@ -427,5 +443,21 @@ describe('Per-tool rules in middleware', () => {
 
     const result = await mw.before!(makeCtx('read_file', { path: '/project/secrets/api-key.txt' }))
     expect(result?.blocked).toBe(true)
+  })
+
+  it('routes tool rule checks through native permission evaluator', async () => {
+    const mw = createPermissionMiddleware()
+    updateSettings({ toolRules: [{ tool: 'write_file', action: 'allow' }] })
+
+    await mw.before!(makeCtx('write_file', { path: '/project/file.ts' }))
+
+    expect(dispatchComputeMock).toHaveBeenCalledWith(
+      'evaluate_permission',
+      expect.objectContaining({
+        workspaceRoot: '/tmp',
+        tool: 'write_file',
+      }),
+      expect.any(Function)
+    )
   })
 })

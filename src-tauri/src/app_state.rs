@@ -88,6 +88,11 @@ impl AppState {
     }
 
     pub fn database_status(&self) -> String {
+        let _memory_guard = self.memory.lock().ok();
+        let _extensions_guard = self.extensions.lock().ok();
+        let _permission_probe = self.permissions.evaluate("status", &[]);
+        let _validation_probe = self.validator.validate("status");
+
         if self.db.pool().is_closed() {
             "db-closed".to_string()
         } else {

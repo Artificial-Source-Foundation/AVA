@@ -19,12 +19,15 @@ import { ExtensionManager, loadAllBuiltInExtensions } from '@ava/core-v2/extensi
 import { setPlatform } from '@ava/core-v2/platform'
 import { createSessionManager } from '@ava/core-v2/session'
 import { createNodePlatform } from '@ava/platform-node/v2'
+import { getCliLogger } from '../logger.js'
 
 let initialized = false
+const log = getCliLogger('cli:tool')
 
 async function ensureInitialized(): Promise<void> {
   if (initialized) return
   initialized = true
+  log.info('Initializing tool command runtime')
 
   // Set up platform
   const dbPath = path.join(os.homedir(), '.ava', 'data.db')
@@ -49,8 +52,10 @@ async function ensureInitialized(): Promise<void> {
       modules.set(ext.manifest.name, ext.module)
     }
     await manager.activateAll(modules)
+    log.info('Tool command extensions activated', { count: modules.size })
   } catch {
     // Extensions optional for tool command — core tools still work
+    log.warn('Tool command extension loading failed; continuing with core tools only')
   }
 }
 
@@ -58,6 +63,7 @@ export async function runToolCommand(args: string[]): Promise<void> {
   await ensureInitialized()
 
   const subcommand = args[0]
+  log.info('Tool command invoked', { subcommand: subcommand ?? 'none' })
 
   if (!subcommand) {
     printToolHelp()
@@ -73,6 +79,7 @@ export async function runToolCommand(args: string[]): Promise<void> {
     case 'info': {
       const toolName = args[1]
       if (!toolName) {
+        log.warn('Tool info called without name')
         console.error('Usage: ava tool info <name>')
         process.exit(1)
       }
@@ -89,6 +96,7 @@ export async function runToolCommand(args: string[]): Promise<void> {
 
 function listTools(): void {
   const definitions = getToolDefinitions()
+  log.info('Listing tools', { count: definitions.length })
 
   console.log(`\nRegistered Tools (${definitions.length}):\n`)
 
@@ -109,6 +117,7 @@ function showToolInfo(toolName: string): void {
   const def = definitions.find((d) => d.name === toolName)
 
   if (!def) {
+    log.warn('Tool info target not found', { tool: toolName })
     console.error(`Tool "${toolName}" not found.`)
     console.error(`Run "ava tool list" to see available tools.`)
     process.exit(1)
@@ -126,6 +135,7 @@ async function executeToolCommand(toolName: string, args: string[]): Promise<voi
   // Verify tool exists
   const definitions = getToolDefinitions()
   if (!definitions.find((d: ToolDefinition) => d.name === toolName)) {
+    log.warn('Attempted to execute unknown tool', { tool: toolName })
     console.error(`Tool "${toolName}" not found. Run "ava tool list" to see available tools.`)
     process.exit(1)
   }
@@ -147,11 +157,17 @@ async function executeToolCommand(toolName: string, args: string[]): Promise<voi
   process.on('SIGINT', () => ac.abort())
 
   const startTime = Date.now()
+  log.info('Executing tool', { tool: toolName, args_count: Object.keys(params).length })
   try {
     const result = await executeTool(toolName, params, ctx)
     const durationMs = Date.now() - startTime
 
     if (result.success) {
+      log.info('Tool execution completed', {
+        tool: toolName,
+        status: 'ok',
+        duration_ms: durationMs,
+      })
       console.log(result.output)
       if (result.metadata) {
         console.log('')
@@ -160,6 +176,11 @@ async function executeToolCommand(toolName: string, args: string[]): Promise<voi
       console.log('')
       console.log(`OK (${durationMs}ms)`)
     } else {
+      log.warn('Tool execution failed', {
+        tool: toolName,
+        status: 'failed',
+        duration_ms: durationMs,
+      })
       console.error(`FAILED: ${result.output}`)
       if (result.error) {
         console.error(`Error: ${result.error}`)
@@ -169,6 +190,7 @@ async function executeToolCommand(toolName: string, args: string[]): Promise<voi
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    log.error('Tool execution crashed', { tool: toolName, error: message })
     console.error(`Error executing ${toolName}: ${message}`)
     process.exit(1)
   }

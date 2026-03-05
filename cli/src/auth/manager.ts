@@ -5,10 +5,13 @@
 
 import type { LLMProvider } from '@ava/core-v2'
 import { getPlatform } from '@ava/core-v2'
+import { getCliLogger } from '../logger.js'
 import { authorizeCopilot, refreshCopilotToken } from './copilot-oauth.js'
 import { authorizeGoogle, refreshGoogleToken } from './google-oauth.js'
 import { authorizeOpenAI, refreshOpenAIToken } from './openai-oauth.js'
 import type { OAuthProvider, OAuthTokenResult, StoredAuth } from './types.js'
+
+const log = getCliLogger('cli:auth-manager')
 
 // ============================================================================
 // Auth Storage Keys
@@ -165,7 +168,7 @@ export async function getValidAccessToken(provider: LLMProvider): Promise<string
       return refreshResult.accessToken
     }
     // Refresh failed - return current token anyway (might still work)
-    console.warn(`Token refresh failed for ${provider}: ${refreshResult.error}`)
+    log.warn('Token refresh failed', { provider, error: refreshResult.error })
   }
 
   return auth.accessToken

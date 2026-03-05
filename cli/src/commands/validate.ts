@@ -19,6 +19,7 @@ import {
   syntaxValidator,
   typescriptValidator,
 } from '@ava/extensions/validator/src/validators.js'
+import { getCliLogger } from '../logger.js'
 
 interface ValidateOptions {
   files: string[]
@@ -28,12 +29,21 @@ interface ValidateOptions {
   json: boolean
 }
 
+const log = getCliLogger('cli:validate')
+
 export async function runValidateCommand(args: string[]): Promise<void> {
   const options = parseValidateOptions(args)
   if (!options) {
+    log.warn('Validate command called without files')
     printValidateHelp()
     return
   }
+
+  log.info('Validate command started', {
+    files: options.files.length,
+    validators: options.validators.join(','),
+    json: options.json,
+  })
 
   // Resolve file paths to absolute
   const resolvedFiles = options.files.map((f) => path.resolve(options.cwd, f))
@@ -67,9 +77,15 @@ export async function runValidateCommand(args: string[]): Promise<void> {
       console.log('')
     }
 
+    log.info('Validate command completed', {
+      passed: result.passed,
+      findings: result.summary.total,
+    })
+
     process.exit(result.passed ? 0 : 1)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    log.error('Validate command failed', { error: message })
     if (options.json) {
       console.log(JSON.stringify({ error: message }))
     } else {

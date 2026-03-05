@@ -4,12 +4,34 @@ import * as path from 'node:path'
 import {
   configureLogger,
   createLogger,
-  formatLogEntry,
+  type LogEntry,
   type LogLevel,
   type SimpleLogger,
 } from '@ava/core-v2/logger'
 
 let initialized = false
+
+function formatValue(value: unknown): string {
+  if (value === undefined) return 'undefined'
+  if (value === null) return 'null'
+  if (typeof value === 'string') {
+    if (value.length === 0) return '""'
+    if (/\s/.test(value) || value.includes('"')) return JSON.stringify(value)
+    return value
+  }
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+function formatCliLogEntry(entry: LogEntry): string {
+  const prefix = `[${entry.timestamp}] [${entry.level.toUpperCase()}] [${entry.source}] ${entry.message}`
+  if (!entry.data) return prefix
+  const fields = Object.entries(entry.data)
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}=${formatValue(value)}`)
+    .join(' ')
+  return fields ? `${prefix} | ${fields}` : prefix
+}
 
 function getDateStamp(): string {
   const now = new Date()
@@ -27,7 +49,7 @@ export function initCliLogger(level: LogLevel = 'info'): void {
     level,
     stderr: true,
     callback: (entry) => {
-      appendFileSync(logFile, `${formatLogEntry(entry)}\n`)
+      appendFileSync(logFile, `${formatCliLogEntry(entry)}\n`)
     },
   })
 

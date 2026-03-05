@@ -11,8 +11,10 @@ import {
   removeStoredAuth,
   startOAuthFlow,
 } from '../auth/index.js'
+import { getCliLogger } from '../logger.js'
 
 const SUPPORTED_PROVIDERS: OAuthProvider[] = ['openai', 'google', 'copilot']
+const log = getCliLogger('cli:auth')
 
 /**
  * Run the auth command
@@ -20,6 +22,10 @@ const SUPPORTED_PROVIDERS: OAuthProvider[] = ['openai', 'google', 'copilot']
 export async function runAuthCommand(args: string[]): Promise<void> {
   const subcommand = args[0]
   const provider = args[1] as OAuthProvider | undefined
+  log.info('Auth command invoked', {
+    subcommand: subcommand ?? 'none',
+    provider: provider ?? 'none',
+  })
 
   switch (subcommand) {
     case 'login':
@@ -54,9 +60,11 @@ export async function runAuthCommand(args: string[]): Promise<void> {
  */
 async function loginProvider(provider: OAuthProvider): Promise<void> {
   console.log(`\nConnecting to ${getProviderName(provider)}...`)
+  log.info('Auth login started', { provider })
 
   try {
     const authResult = await startOAuthFlow(provider)
+    log.info('OAuth flow started', { provider, method: authResult.method })
 
     console.log(`\n🔗 Open this URL in your browser:\n`)
     console.log(`   ${authResult.url}\n`)
@@ -71,8 +79,10 @@ async function loginProvider(provider: OAuthProvider): Promise<void> {
 
       if (result.type === 'success') {
         await completeOAuthFlow(provider, result)
+        log.info('Auth login completed', { provider, method: 'code' })
         console.log(`\n✅ Successfully connected to ${getProviderName(provider)}!`)
       } else {
+        log.warn('Auth login failed', { provider, method: 'code', error: result.error })
         console.error(`\n❌ Authentication failed: ${result.error}`)
       }
     } else {
@@ -82,12 +92,18 @@ async function loginProvider(provider: OAuthProvider): Promise<void> {
 
       if (result.type === 'success') {
         await completeOAuthFlow(provider, result)
+        log.info('Auth login completed', { provider, method: 'auto' })
         console.log(`\n✅ Successfully connected to ${getProviderName(provider)}!`)
       } else {
+        log.warn('Auth login failed', { provider, method: 'auto', error: result.error })
         console.error(`\n❌ Authentication failed: ${result.error}`)
       }
     }
   } catch (error) {
+    log.error('Auth login crashed', {
+      provider,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    })
     console.error(`\n❌ Error: ${error instanceof Error ? error.message : 'Unknown error'}`)
   }
 }
@@ -97,6 +113,7 @@ async function loginProvider(provider: OAuthProvider): Promise<void> {
  */
 async function logoutProvider(provider: OAuthProvider): Promise<void> {
   await removeStoredAuth(provider)
+  log.info('Auth logout completed', { provider })
   console.log(`\n✅ Disconnected from ${getProviderName(provider)}`)
 }
 
@@ -142,18 +159,15 @@ COMMANDS:
   status             Show authentication status for all providers
 
 PROVIDERS:
-  anthropic   Claude Pro/Max subscription via claude.ai
   openai      ChatGPT Plus/Pro subscription via OpenAI Codex
   google      Gemini via Google Antigravity
   copilot     GitHub Copilot subscription
 
 EXAMPLES:
-  ava auth login anthropic    # Connect Claude subscription
   ava auth login openai       # Connect ChatGPT subscription
   ava auth login google       # Connect Gemini/Antigravity
   ava auth login copilot      # Connect GitHub Copilot
   ava auth status             # Check auth status
-  ava auth logout anthropic   # Disconnect Claude
 
 NOTE:
   You can also use API keys via environment variables:
@@ -172,7 +186,7 @@ function getProviderName(provider: OAuthProvider): string {
     google: 'Gemini (Google Antigravity)',
     copilot: 'GitHub Copilot',
   }
-  return names[provider]
+  return names[provider] ?? provider
 }
 
 /**

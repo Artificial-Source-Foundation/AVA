@@ -64,3 +64,8 @@ export function activate(api: ExtensionAPI): Disposable {
     },
   }
 }
+
+export { runEditCascade } from './edit/cascade.js'
+export { normalizeForMatch } from './edit/normalize-for-match.js'
+export { RelativeIndenter } from './edit/relative-indenter.js'
+export { StreamingEditParser } from './edit/streaming-edit-parser.js'

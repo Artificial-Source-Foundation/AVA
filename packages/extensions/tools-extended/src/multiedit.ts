@@ -5,6 +5,7 @@
 import { getPlatform } from '@ava/core-v2/platform'
 import { defineTool, resolvePathSafe } from '@ava/core-v2/tools'
 import * as z from 'zod'
+import { runEditCascade } from './edit/cascade.js'
 import {
   executeMultiEditJobs,
   type FileEdit,
@@ -111,7 +112,15 @@ export const multieditTool = defineTool({
       let modified = content
       for (let i = 0; i < job.edits.length; i++) {
         const edit = job.edits[i] as FileEdit
-        if (!modified.includes(edit.oldString)) {
+        try {
+          const result = await runEditCascade({
+            content: modified,
+            oldText: edit.oldString,
+            newText: edit.newString,
+            maxCorrections: 0,
+          })
+          modified = result.content
+        } catch {
           return {
             filePath,
             success: false,
@@ -119,7 +128,6 @@ export const multieditTool = defineTool({
             error: `Edit ${i + 1}: oldString not found in file`,
           }
         }
-        modified = modified.replace(edit.oldString, edit.newString)
       }
 
       await fs.writeFile(filePath, modified)

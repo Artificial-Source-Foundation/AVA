@@ -36,7 +36,6 @@ describe('EXPLORE_WORKER', () => {
     expect(EXPLORE_WORKER.tools).toContain('glob')
     expect(EXPLORE_WORKER.tools).toContain('grep')
     expect(EXPLORE_WORKER.tools).toContain('ls')
-    expect(EXPLORE_WORKER.tools).toContain('repo_map')
     expect(EXPLORE_WORKER.tools).toContain('websearch')
     expect(EXPLORE_WORKER.tools).toContain('webfetch')
   })
@@ -53,9 +52,6 @@ describe('EXPLORE_WORKER', () => {
     expect(denied).toContain('delete_file')
     expect(denied).toContain('edit')
     expect(denied).toContain('bash')
-    expect(denied).toContain('bash_background')
-    expect(denied).toContain('bash_output')
-    expect(denied).toContain('bash_kill')
     expect(denied).toContain('apply_patch')
     expect(denied).toContain('multiedit')
     expect(denied).toContain('task')
@@ -68,8 +64,8 @@ describe('EXPLORE_WORKER', () => {
   })
 
   it('has no overlap between allowed and denied tools', () => {
-    const allowed = new Set(EXPLORE_ALLOWED_TOOLS)
-    const denied = new Set(EXPLORE_DENIED_TOOLS)
+    const allowed = new Set<string>(EXPLORE_ALLOWED_TOOLS)
+    const denied = new Set<string>(EXPLORE_DENIED_TOOLS)
     for (const tool of allowed) {
       expect(denied.has(tool)).toBe(false)
     }

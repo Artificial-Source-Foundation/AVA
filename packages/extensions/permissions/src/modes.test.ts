@@ -129,7 +129,6 @@ describe('isToolAutoApproved', () => {
       expect(isToolAutoApproved('glob', 'auto-edit')).toBe(true)
       expect(isToolAutoApproved('grep', 'auto-edit')).toBe(true)
       expect(isToolAutoApproved('ls', 'auto-edit')).toBe(true)
-      expect(isToolAutoApproved('repo_map', 'auto-edit')).toBe(true)
       expect(isToolAutoApproved('todoread', 'auto-edit')).toBe(true)
       expect(isToolAutoApproved('memory_read', 'auto-edit')).toBe(true)
       expect(isToolAutoApproved('memory_list', 'auto-edit')).toBe(true)
@@ -156,8 +155,6 @@ describe('isToolAutoApproved', () => {
 
     it('does not auto-approve execute tools', () => {
       expect(isToolAutoApproved('bash', 'auto-edit')).toBe(false)
-      expect(isToolAutoApproved('bash_background', 'auto-edit')).toBe(false)
-      expect(isToolAutoApproved('bash_kill', 'auto-edit')).toBe(false)
     })
 
     it('does not auto-approve destructive tools', () => {
@@ -167,7 +164,6 @@ describe('isToolAutoApproved', () => {
     it('does not auto-approve network tools', () => {
       expect(isToolAutoApproved('websearch', 'auto-edit')).toBe(false)
       expect(isToolAutoApproved('webfetch', 'auto-edit')).toBe(false)
-      expect(isToolAutoApproved('codesearch', 'auto-edit')).toBe(false)
     })
 
     it('does not auto-approve unknown tools', () => {
@@ -257,16 +253,13 @@ describe('Tool categories', () => {
     expect(EDIT_TOOLS.has('multiedit')).toBe(true)
   })
 
-  it('EXECUTE_TOOLS contains bash variants', () => {
+  it('EXECUTE_TOOLS contains bash', () => {
     expect(EXECUTE_TOOLS.has('bash')).toBe(true)
-    expect(EXECUTE_TOOLS.has('bash_background')).toBe(true)
-    expect(EXECUTE_TOOLS.has('bash_kill')).toBe(true)
   })
 
   it('NETWORK_TOOLS contains web tools', () => {
     expect(NETWORK_TOOLS.has('websearch')).toBe(true)
     expect(NETWORK_TOOLS.has('webfetch')).toBe(true)
-    expect(NETWORK_TOOLS.has('codesearch')).toBe(true)
   })
 
   it('DESTRUCTIVE_TOOLS contains delete_file', () => {

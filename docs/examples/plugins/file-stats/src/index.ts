@@ -36,10 +36,9 @@ export const fileStatsTool = defineTool({
     path: z.string().describe('Absolute path to the file'),
   }),
 
-  async execute(input) {
-    // Use the tool context approach — read via the globally registered platform
-    const { getPlatform } = await import('@ava/core-v2/platform')
-    const content = await getPlatform().fs.readFile(input.path)
+  async execute(input, context) {
+    // Read file via the platform abstraction available in tool context
+    const content = await context.platform.fs.readFile(input.path)
 
     const lines = content.split('\n').length
     const bytes = new TextEncoder().encode(content).byteLength

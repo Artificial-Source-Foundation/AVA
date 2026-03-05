@@ -1,86 +1,77 @@
 # AVA Documentation
 
-> The Obsidian of AI Coding
+> Single source of truth for architecture, development, and troubleshooting.
 
-Current architecture status: AVA is running a dual-stack backend during migration (`packages/core` baseline plus `packages/core-v2` + `packages/extensions`).
+<!-- Last verified: 2026-03-05. Run 'npm run test:run && cargo test --workspace' to revalidate. -->
 
----
+## Quick Start
 
-## Start Here
-
-| Doc | What You'll Learn |
-|-----|-------------------|
-| [**Vision**](VISION.md) | What AVA is, who it's for, what makes it special |
-| [**Roadmap**](ROADMAP.md) | Migration status, what is complete, and what is next |
-
----
+| Document | Purpose |
+|----------|---------|
+| [CLAUDE.md](../CLAUDE.md) | **Primary reference** — architecture, conventions, quick commands |
+| [troubleshooting.md](troubleshooting.md) | Common issues and solutions |
+| [backend.md](backend.md) | Backend runtime overview |
 
 ## Architecture
 
-| Doc | Contents |
-|-----|----------|
-| [**Overview**](architecture/README.md) | System design, module breakdown, key decisions |
-| [**Components**](architecture/components.md) | Detailed module descriptions |
-| [**Data Flow**](architecture/data-flow.md) | How data moves through the system |
-| [**Database**](architecture/database-schema.md) | SQLite schema (6 tables) |
-
----
-
-## Frontend
-
-| Doc | Contents |
-|-----|----------|
-| [**Desktop App**](frontend/README.md) | SolidJS layout, components, design system |
-| [**Design System**](frontend/design-system.md) | Tokens, themes, animations |
-| [**Changelog**](frontend/changelog.md) | Session-by-session frontend changes |
-| [**Backlog**](frontend/backlog.md) | Pending frontend work |
-
----
-
-## Backend
-
-| Doc | Contents |
-|-----|----------|
-| [**Overview**](backend/README.md) | Core package stats, module listing |
-| [**Modules**](backend/modules.md) | Per-file module documentation |
-| [**Test Coverage**](backend/test-coverage.md) | Latest baseline: ~3,900 tests across 250+ files |
-| [**Gap Analysis**](backend/gap-analysis.md) | Competitive comparison |
-| [**Changelog**](backend/changelog.md) | Backend development history |
-| [**Backlog**](backend/backlog.md) | Test gaps, feature gaps, debt |
-
----
+| Document | Description |
+|----------|-------------|
+| [architecture/README.md](architecture/README.md) | System components and data flow |
+| [backend/architecture-guide.md](backend/architecture-guide.md) | Detailed backend architecture |
+| [backend.md](backend.md) | Backend runtime model and extension index |
+| [CLAUDE.md](../CLAUDE.md) | Primary architecture reference (single source of truth) |
 
 ## Development
 
-| Doc | Contents |
-|-----|----------|
-| [**Active Epics**](development/epics/) | Work in progress |
-| [Sprint 1.6 Testing & Hardening](development/epics/sprint-1.6-testing-hardening.md) | Current sprint status, evidence, remaining gates |
-| [Plugin Ecosystem UX & Integration](development/epics/plugin-ecosystem-ux-integration.md) | Plugin execution track, dependencies, exit criteria |
-| [Frontend Gap Matrix 2026-02-15](development/status/frontend-gap-matrix-2026-02-15.md) | Benchmark-driven missing UX/features with P0/P1/P2 execution IDs |
-| [**Current Focus**](development/status/current-focus.md) | Weekly sprint pulse, migration checkpoints, and blockers |
-| [**Integration Backlog**](development/backlogs/integration-backlog.md) | Frontend-backend wiring tasks and dependencies |
-| [**Sprint Execution Docs**](development/sprints/README.md) | Active sprint templates, ticket boards, closeout checklists |
-| [**Completed Epics**](development/completed/) | Finished work (Epics 1-26) |
+| Document | Description |
+|----------|-------------|
+| [development/status/current-focus.md](development/status/current-focus.md) | Current development priorities |
+| [plugins/PLUGIN_SDK.md](plugins/PLUGIN_SDK.md) | Extension/plugin development guide |
+| [plugins/PLUGIN_TEMPLATE.md](plugins/PLUGIN_TEMPLATE.md) | Plugin template reference |
 
----
+## Backend Reference
 
-## Research
+| Document | Description |
+|----------|-------------|
+| [backend.md](backend.md) | Backend overview (~20 extensions, ~41 tools) |
+| [backend/modules.md](backend/modules.md) | Module organization |
+| [backend/test-coverage.md](backend/test-coverage.md) | Test coverage summary |
 
-| Doc | Contents |
-|-----|----------|
-| [**Competitive Analysis (2026-03)**](research/competitive-analysis-2026-03.md) | 8-tool comparison matrix, AVA positioning, gaps |
-| [**Overview**](research/README.md) | Codebase analyses index |
-| [**Cline**](research/cline/) | 8 reports — hooks, approvals, browser |
-| [**OpenCode**](research/opencode/) | 7 reports — fuzzy edits, batch tools |
-| [**Gemini CLI**](research/gemini-cli/) | 6 reports — policy, extensions, A2A |
-| [**PI Coding Agent**](research/pi-coding-agent.md) | Architecture analysis |
+## Frontend Reference
 
----
+| Document | Description |
+|----------|-------------|
+| [frontend/README.md](frontend/README.md) | Frontend architecture |
+| [frontend/design-system.md](frontend/design-system.md) | UI/UX design system |
+
+## Project Planning
+
+| Document | Description |
+|----------|-------------|
+| [ROADMAP.md](ROADMAP.md) | Project roadmap and phase status |
+| [VISION.md](VISION.md) | Project vision and goals |
+| [plans/](plans/) | Sprint plans and designs |
+
+## Research & Analysis
+
+| Document | Description |
+|----------|-------------|
+| [research/README.md](research/README.md) | Research index |
+| [research/competitive-analysis-2026-03.md](research/competitive-analysis-2026-03.md) | Competitive analysis |
 
 ## Troubleshooting
 
-| Doc | Contents |
-|-----|----------|
-| [**WebKitGTK Rendering**](troubleshooting/webkitgtk-rendering.md) | DMABUF ghost rendering, nested buttons, CSS gotchas |
-| [**Tauri Toolchain**](troubleshooting/tauri-toolchain-checklist.md) | Build toolchain setup checklist |
+| Document | Description |
+|----------|-------------|
+| [troubleshooting.md](troubleshooting.md) | Common issues and fixes |
+
+---
+
+## Status
+
+- **Architecture**: AVA v2.0 uses `packages/core-v2/` + `packages/extensions/` (20 built-in)
+- **Tool Surface**: ~41 tools across core, extended, git, memory, LSP, recall, and delegate categories
+- **Rust Integration**: 19 crates for compute/safety hotpaths
+- **Migration**: Complete — `packages/core/` is now a compatibility shim
+
+See [CLAUDE.md](../CLAUDE.md) for the definitive architecture reference.

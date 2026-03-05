@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-03-05. Run 'npm run test:run && cargo test --workspace' to revalidate. -->
+
 # AVA Backend Architecture Guide (v2)
 
 ## 1) System Boundaries
@@ -62,9 +64,10 @@ When adding middleware, document the chosen priority and expected interactions.
 
 ## 5) Current Topology Summary
 
-- Built-in extensions: 20
-- Tool surface: ~39
+- Built-in extensions: ~20
+- Tool surface: ~41
 - `packages/core/`: compatibility re-export layer (not primary implementation target)
+- Typical runtime extension count: ~31 (20 feature + 16 providers - 4 disabled: lsp, mcp, server, litellm)
 
 ## 6) Docs Contract
 

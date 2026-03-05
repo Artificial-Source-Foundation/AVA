@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-03-05. Run 'npm run test:run && cargo test --workspace' to revalidate. -->
+
 # Troubleshooting
 
 ## Tauri Toolchain
@@ -60,6 +62,31 @@ cargo check -p ava --manifest-path src-tauri/Cargo.toml
 
 ## Common Build Issues
 
+**Linux `ENOSPC` file watcher limit (Vite/Tauri dev):**
+- Symptom: `Error: ENOSPC: System limit for number of file watchers reached`
+- Quick fix (temporary until reboot):
+
+```bash
+sudo sysctl fs.inotify.max_user_watches=524288
+sudo sysctl fs.inotify.max_user_instances=1024
+```
+
+- Persistent fix:
+
+```bash
+printf "fs.inotify.max_user_watches=524288\nfs.inotify.max_user_instances=1024\n" | sudo tee /etc/sysctl.d/99-ava-inotify.conf >/dev/null
+sudo sysctl --system
+```
+
+- Verify values:
+
+```bash
+sysctl fs.inotify.max_user_watches
+sysctl fs.inotify.max_user_instances
+```
+
+Then rerun `npm run tauri dev`.
+
 **Core tsbuildinfo stale:** If types seem wrong after changes, delete and rebuild:
 ```bash
 rm packages/core/tsconfig.tsbuildinfo
@@ -77,6 +104,22 @@ git stash pop            # Restore unstaged changes
 
 ## Test Issues
 
-**ChatView.integration.test.tsx error:** Known issue — missing `logError` mock in GitControlStrip. Pre-existing, does not affect other tests.
-
 **Extensions tests not running from root:** Extensions tests are included in root vitest.config.ts. If they don't run, check that `packages/extensions/**/*.test.ts` is in the include patterns.
+
+## CLI Non-Interactive Usage
+
+**CLI command hangs after completion:**
+- Symptom: `ava run` or `ava agent-v2` commands don't return to shell
+- Cause: Active timers or event listeners preventing process exit
+- Fix: Use `--json` flag for non-interactive environments, or ensure proper cleanup
+- Note: MCP health monitor uses `timer.unref()` to allow exit
+
+**Package manager mismatch:**
+- Symptom: Lockfile conflicts or install failures
+- Fix: Use `pnpm install` (required), not `npm install`
+- Verify: `corepack enable` then `pnpm --version` should show 10.29.2
+
+**Native module build failures:**
+- Symptom: `better-sqlite3` or `node-pty` installation errors
+- Fix: Ensure pnpm is configured to build dependencies. Native modules `better-sqlite3` and `node-pty` require compilation and are listed in `onlyBuiltDependencies`.
+- Requires: Python, build tools (gcc/clang), and Node.js headers

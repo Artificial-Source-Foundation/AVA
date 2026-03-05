@@ -1,3 +1,5 @@
+<!-- Last verified: 2026-03-05. Run 'npm run test:run && cargo test --workspace' to revalidate. -->
+
 # Backend Overview
 
 This document describes AVA's backend as of v2.
@@ -14,10 +16,17 @@ AVA runs a hybrid backend:
 
 ## Current Shape
 
-- Built-in extensions: 20
-- Tool surface: ~39 tools
+- Built-in extensions: ~20
+- Tool surface: ~41 tools
 
-### Extension Module Index (20)
+### Runtime Extension Count
+
+Typical runtime extension activation count is ~31:
+- 20 feature extensions (always enabled)
+- ~16 provider extensions (varies by configuration)
+- Minus 4 commonly disabled: `lsp`, `mcp`, `server`, `litellm`
+
+### Extension Module Index (~20)
 
 - agent-modes
 - commander

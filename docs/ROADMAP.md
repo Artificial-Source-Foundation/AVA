@@ -1,6 +1,6 @@
 # Roadmap
 
-> Desktop-first AI coding app with dev team and community plugins, now in dual-stack backend migration
+> Desktop-first AI coding app with dev team and community plugins
 
 ---
 
@@ -15,8 +15,8 @@
 | **4: Integrations** | Future | Editor (ACP), agent network (A2A), voice, vision |
 
 Migration status:
-- `packages/core` remains the production baseline.
-- `packages/core-v2` + `packages/extensions` are feature-rich and continue to absorb responsibilities from legacy core.
+- `packages/core-v2` + `packages/extensions` are the production baseline.
+- `packages/core` is a compatibility re-export shim.
 
 ---
 
@@ -36,16 +36,16 @@ Everything needed for a working desktop AI coding app.
 - Spring physics animations, glassmorphism design
 - Code viewer (CodeMirror 6)
 
-### Core Engine (~54,500 lines original + ~7K core-v2 + 30+ extensions, latest baseline: ~4,280 tests across ~270 files)
+### Core Engine (~20 extensions + core-v2 kernel, ~41 tools, latest baseline: ~4,280 tests)
 | Category | Modules |
 |----------|---------|
 | Agent System | Agent loop (parallel tools, vision, truncation, steering), Praxis 3-tier hierarchy (13 agents, orchestrator, domain routing), Validator (wired) |
-| Tools | 55+ tools (file, shell, background shell, web, agents, patch, batch, search, delegate, memory, LSP, git/GitHub) |
+| Tools | ~41 tools (file, shell, background shell, web, agents, patch, batch, search, delegate, memory, LSP, git/GitHub, recall) |
 | Intelligence | Codebase understanding, context management (auto-compaction, strategy selection), persistent memory + auto-learning, LSP client, symbol extraction |
 | Extensibility | Extensions, commands, hooks, skills, MCP (tools, resources, prompts, sampling, OAuth, reconnect, HTTP streaming, health monitoring) |
 | Safety | Permissions (5 granular modes), policy engine, per-tool-call checkpoints, trusted folders |
 | Infrastructure | 16 LLM providers (all tested), config, sessions (SQLite + in-memory), auth, bus, model availability + fallback, toolshim |
-| Protocols | ACP (editor integration), A2A (agent network) |
+| Protocols | ACP (editor integration), A2A (agent network) — modules removed, reimplementation needed |
 
 ---
 
@@ -239,6 +239,6 @@ All backend epics are complete. See `docs/development/completed/` for details.
 | 8-15 | Agent System: Loop, Commander, Parallel, Validator, Codebase, Config, Memory |
 | 16-17 | Enhancement: OpenCode features, Missing tools |
 | 19-21 | MVP Polish: Hooks, Browser, Providers |
-| 25 | Protocols: ACP agent, A2A server |
+| 25 | Protocols: ACP agent, A2A server — reimplementation needed |
 | 26 | Gemini CLI: Policy, Bus, Resume, Commands, Trust, Extensions, Compression |
 | Sprints 1-7 | Feature Parity: Security, Approvals, Edits, UX, Cline, OpenCode features |

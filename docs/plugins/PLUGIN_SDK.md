@@ -38,15 +38,27 @@ pnpm run test
   "main": "dist/index.js",
   "capabilities": ["tools", "commands"],
   "priority": 50,
-  "settings": {
-    "apiKey": {
-      "type": "string",
-      "default": "",
-      "description": "API key for the service"
-    }
-  }
+  "settings": {},
+  "builtIn": false,
+  "enabledByDefault": true,
+  "dependencies": []
 }
 ```
+
+Field reference:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `name` | string | Yes | Plugin identifier (kebab-case) |
+| `version` | string | Yes | Semantic version |
+| `description` | string | No | Human-readable description |
+| `main` | string | Yes | Entry point (relative to plugin root) |
+| `capabilities` | string[] | No | Enabled capabilities |
+| `priority` | number | No | Load order (lower = earlier) |
+| `settings` | object | No | Settings schema |
+| `builtIn` | boolean | No | Mark as built-in extension |
+| `enabledByDefault` | boolean | No | Auto-enable on install |
+| `dependencies` | string[] | No | Other extension names required |
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -162,15 +174,29 @@ api.registerAgentMode({
 
 ### Providers
 
+Register an LLM provider by returning a client class that implements the streaming interface:
+
 ```typescript
-api.registerProvider('my-llm', () => ({
-  async *stream(messages, config, signal) {
+class MyLLMClient {
+  async *stream(
+    messages: Message[],
+    config: ModelConfig,
+    signal?: AbortSignal
+  ): AsyncGenerator<StreamDelta, void, unknown> {
     // Yield StreamDelta objects
     yield { content: 'Hello from my LLM!' }
     yield { done: true, usage: { inputTokens: 10, outputTokens: 5 } }
-  },
-}))
+  }
+}
+
+api.registerProvider('my-llm', () => new MyLLMClient())
 ```
+
+The provider client should yield `StreamDelta` objects containing:
+- `content`: Text content chunk (optional)
+- `tool_calls`: Tool call deltas (optional)
+- `done`: Boolean indicating completion (required on final yield)
+- `usage`: Token usage stats (optional, include on final yield)
 
 ### Events
 
@@ -182,6 +208,71 @@ api.on('agent:turn:start', (data) => {
 
 // Emit custom events
 api.emit('my-plugin:action', { type: 'something' })
+```
+
+### Hooks
+
+Register hooks for the hook pipeline system:
+
+```typescript
+// Register a hook handler
+api.registerHook('tool:before', async (context) => {
+  api.log.info('Before tool execution', context.toolName)
+  return context
+})
+
+// Call hooks from your extension
+const result = await api.callHook('custom:event', data)
+```
+
+### Context Strategies
+
+Register custom context compaction strategies:
+
+```typescript
+api.registerContextStrategy('my-strategy', {
+  compact: (messages, maxTokens) => {
+    // Return compacted messages
+    return messages.slice(-10)
+  }
+})
+```
+
+### Validators
+
+Add custom validators for tool inputs:
+
+```typescript
+api.registerValidator('my-validator', {
+  validate: (input) => {
+    if (!input.requiredField) {
+      return { valid: false, error: 'Missing requiredField' }
+    }
+    return { valid: true }
+  }
+})
+```
+
+### Settings Access
+
+Access and monitor extension settings:
+
+```typescript
+// Get current settings
+const settings = api.getSettings()
+
+// Listen for settings changes
+api.onSettingsChanged((newSettings, oldSettings) => {
+  api.log.info('Settings changed', { newSettings, oldSettings })
+})
+
+// Access the message bus
+api.bus.on('agent:message', (msg) => {
+  api.log.debug('Agent message', msg)
+})
+
+// Get session manager
+const sessionManager = api.getSessionManager()
 ```
 
 ### Storage

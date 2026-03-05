@@ -236,13 +236,8 @@ function createAgentStore() {
     const customInstructions = generation.customInstructions
     const systemPrompt = await buildSystemPromptAfterInstructions(model, cwd, customInstructions)
 
-    // Smart tool choice: Anthropic models are good at autonomous tool use,
-    // but non-Anthropic models (OpenAI, etc.) often skip tools with 'auto'.
-    // Use 'required-first' for non-Anthropic — forces ONE tool call on turn 1,
-    // then 'auto' after. Same strategy the CLI uses.
     const provider = resolveProvider(model)
-    const toolChoice: 'auto' | 'required-first' =
-      provider === 'anthropic' ? 'auto' : 'required-first'
+    const toolChoice = 'auto' as const
 
     return {
       provider,
@@ -694,12 +689,20 @@ function createAgentStore() {
       // Auto-title new chats from first user message using AI
       const autoTitleEnabled = settingsRef.settings().behavior.sessionAutoTitle
       const currentSession = session.currentSession()
-      if (
-        autoTitleEnabled &&
-        currentSession?.id === sessionId &&
-        currentSession.name.trim() === DEFAULTS.SESSION_NAME
-      ) {
+      const defaultName = DEFAULTS.SESSION_NAME
+      const sessionName = currentSession?.name?.trim()
+      console.log('[AutoTitle] Checking:', {
+        autoTitleEnabled,
+        sessionName,
+        defaultName,
+        matchesDefault: sessionName === defaultName,
+        sessionId,
+        currentSessionId: currentSession?.id,
+      })
+      if (autoTitleEnabled && currentSession?.id === sessionId && sessionName === defaultName) {
+        console.log('[AutoTitle] Generating title for:', goal.slice(0, 100))
         void generateTitle(goal).then((title) => {
+          console.log('[AutoTitle] Generated title:', title)
           if (title) {
             void session.renameSession(sessionId, title)
           }

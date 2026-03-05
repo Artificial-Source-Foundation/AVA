@@ -49,7 +49,27 @@ export class MCPHealthMonitor {
 
   start(): void {
     if (this.timer) return
-    this.timer = setInterval(() => this.checkAll(), this.config.intervalMs)
+    const timer = setInterval(() => this.checkAll(), this.config.intervalMs)
+    if (typeof timer === 'object' && 'unref' in timer) timer.unref()
+    this.timer = timer
+    log.debug('Health monitoring started')
+  }
+    this.timer = timer
+    log.debug('Health monitoring started')
+  }
+    this.timer = timer
+    log.debug('Health monitoring started')
+  }
+    this.timer = timer
+    log.debug('Health monitoring started')
+  }
+    this.timer = timer
+    log.debug('Health monitoring started')
+  }
+    this.timer = timer
+    log.debug('Health monitoring started')
+  }
+    this.timer = timer
     log.debug('Health monitoring started')
   }
 

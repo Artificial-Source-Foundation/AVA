@@ -65,7 +65,9 @@ export function createAgentEventHandler(
         break
 
       case 'thought':
-        signals.setCurrentThought((prev) => prev + event.content)
+        batch(() => {
+          signals.setCurrentThought((prev) => prev + event.content)
+        })
         break
 
       case 'tool:start':

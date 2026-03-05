@@ -63,19 +63,35 @@ Your output must be:
 export async function generateTitle(firstMessage: string): Promise<string | null> {
   try {
     const settingsMgr = getSettingsManager()
-    const providerSettings = settingsMgr.get<{
+    let providerSettings: {
       defaultProvider: string
       defaultModel: string
       weakModel?: string
       weakModelProvider?: string
-    }>('provider')
+    } | null = null
+
+    try {
+      providerSettings = settingsMgr.get<{
+        defaultProvider: string
+        defaultModel: string
+        weakModel?: string
+        weakModelProvider?: string
+      }>('provider')
+      console.log('[AutoTitle] Provider settings loaded:', providerSettings)
+    } catch (settingsErr) {
+      console.error('[AutoTitle] Failed to load provider settings:', settingsErr)
+      return null
+    }
 
     // Use weak model if configured, otherwise fall back to default
     const model = providerSettings?.weakModel ?? providerSettings?.defaultModel
     const provider = (providerSettings?.weakModelProvider ??
       providerSettings?.defaultProvider) as LLMProvider
 
+    console.log('[AutoTitle] Provider config:', { model, provider })
+
     if (!model || !provider) {
+      console.error('[AutoTitle] Missing model or provider')
       return null
     }
 
@@ -120,8 +136,8 @@ export async function generateTitle(firstMessage: string): Promise<string | null
     }
 
     return title || null
-  } catch {
-    // Silently fail - title generation is non-critical
+  } catch (err) {
+    console.error('[AutoTitle] Title generation failed:', err)
     return null
   }
 }

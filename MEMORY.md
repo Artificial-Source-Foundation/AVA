@@ -4,6 +4,10 @@
 
 - Architecture: hybrid (`core-v2` + extensions + Rust hotpaths)
 - Built-in extensions: 20
+- Runtime activation (typical CLI): ~31 total
+  - 20 feature extensions
+  - 15 active providers
+  - 4 commonly disabled modules (`lsp`, `mcp`, `server`, `litellm`)
 - Tool surface: ~39
 - Legacy `packages/core/`: compatibility re-export shim
 

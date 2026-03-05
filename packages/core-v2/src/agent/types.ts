@@ -48,10 +48,10 @@ export interface AgentConfig {
   /** How queued steering messages are injected into history. */
   steeringDeliveryMode?: 'all' | 'one-at-a-time'
   /**
-   * Tool choice strategy for non-Anthropic models.
-   * - 'auto': model decides (default for Claude)
+   * Tool choice strategy.
+   * - 'auto': model decides when to use tools (default)
    * - 'required': force tool use every turn
-   * - 'required-first': force on turn 1, auto after (good for GPT models)
+   * - 'required-first': force tool use on turn 1 only (legacy opt-in)
    */
   toolChoiceStrategy?: 'auto' | 'required' | 'required-first'
 }

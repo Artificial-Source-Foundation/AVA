@@ -67,6 +67,7 @@ export async function runToolCommand(args: string[]): Promise<void> {
   switch (subcommand) {
     case 'list':
       listTools()
+      process.exit(0)
       return
 
     case 'info': {
@@ -76,6 +77,7 @@ export async function runToolCommand(args: string[]): Promise<void> {
         process.exit(1)
       }
       showToolInfo(toolName)
+      process.exit(0)
       return
     }
 

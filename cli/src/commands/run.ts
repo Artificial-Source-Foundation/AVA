@@ -181,11 +181,6 @@ export async function runRunCommand(args: string[]): Promise<void> {
     config.model = options.model
   }
 
-  // For non-Anthropic providers, use required-first strategy to ensure tool use
-  if (options.yolo && config.provider && config.provider !== 'anthropic') {
-    config.toolChoiceStrategy = 'required-first'
-  }
-
   // Filter tools to ~20 core tools (like OpenCode/Claude Code) to reduce token overhead.
   // Full 53-tool set wastes ~4,500 tokens/turn. Filtered set: ~1,500-2,000 tokens/turn.
   const { getToolDefinitions } = await import('@ava/core-v2/tools')

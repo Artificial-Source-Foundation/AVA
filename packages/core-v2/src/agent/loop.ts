@@ -877,7 +877,7 @@ export class AgentExecutor {
    * Resolve tool_choice based on the configured strategy and current turn.
    * - 'auto': always { type: 'auto' } (default)
    * - 'required': always { type: 'required' }
-   * - 'required-first': { type: 'required' } on turn 1, { type: 'auto' } after
+   * - 'required-first': { type: 'required' } on turn 1, { type: 'auto' } after (legacy opt-in)
    */
   private resolveToolChoice(turn?: number): { type: 'auto' } | { type: 'required' } {
     const strategy = this.config.toolChoiceStrategy ?? 'auto'

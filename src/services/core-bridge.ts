@@ -120,13 +120,17 @@ export async function initCoreBridge(opts: CoreBridgeOptions = {}): Promise<() =
     }),
   ]
 
-  // 10. Bridge session busy/idle status to desktop DB
+  // 10. Bridge session busy/idle status to desktop DB and dispatch frontend event
   const sessionStatusSub = onEvent('session:status', (data) => {
     const { sessionId, status } = data as { sessionId: string; status: string }
     if (status === 'busy') {
       void dbUpdateSession(sessionId, { busySince: Date.now() })
     } else if (status === 'idle') {
       void dbUpdateSession(sessionId, { busySince: null })
+    }
+    // Dispatch DOM event so frontend session store can update busySessionIds
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('ava:session-status', { detail: { sessionId, status } }))
     }
   })
 

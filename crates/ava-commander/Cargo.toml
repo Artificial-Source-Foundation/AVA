@@ -1,0 +1,15 @@
+[package]
+name = "ava-commander"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait.workspace = true
+ava-agent = { path = "../ava-agent" }
+ava-context = { path = "../ava-context" }
+ava-tools = { path = "../ava-tools" }
+ava-types = { path = "../ava-types" }
+futures.workspace = true
+serde.workspace = true
+tokio.workspace = true
+uuid.workspace = true

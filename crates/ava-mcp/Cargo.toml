@@ -1,0 +1,12 @@
+[package]
+name = "ava-mcp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait.workspace = true
+ava-tools = { path = "../ava-tools" }
+ava-types = { path = "../ava-types" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

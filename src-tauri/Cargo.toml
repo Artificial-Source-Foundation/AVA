@@ -36,11 +36,16 @@ regex = "1"
 walkdir = "2"
 globset = "0.4"
 ava-tools = { path = "../crates/ava-tools" }
+ava-db = { path = "../crates/ava-db" }
 ava-memory = { path = "../crates/ava-memory" }
 ava-permissions = { path = "../crates/ava-permissions" }
 ava-extensions = { path = "../crates/ava-extensions" }
 ava-validator = { path = "../crates/ava-validator" }
 ava-agent = { path = "../crates/ava-agent" }
+ava-commander = { path = "../crates/ava-commander" }
+ava-llm = { path = "../crates/ava-llm" }
+ava-mcp = { path = "../crates/ava-mcp" }
+ava-session = { path = "../crates/ava-session" }
 
 [profile.release]
 lto = true
@@ -48,3 +53,6 @@ codegen-units = 1
 strip = true
 opt-level = "s"
 panic = "abort"
+
+[dev-dependencies]
+tempfile = "3"

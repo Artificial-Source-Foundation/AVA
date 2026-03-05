@@ -1,6 +1,7 @@
 pub mod browser;
 pub mod edit;
 pub mod git;
+pub mod registry;
 
 pub fn healthcheck() -> bool {
     true

@@ -24,6 +24,7 @@ import {
 } from './types.js'
 
 let settings: PermissionSettings = { ...DEFAULT_SETTINGS }
+let activeSessionId: string | null = null
 
 interface NativePermissionPattern {
   type: 'any' | 'glob' | 'regex' | 'path'
@@ -222,7 +223,12 @@ function isEnvFile(args: Record<string, unknown>): boolean {
 
 function isDangerousCommand(args: Record<string, unknown>): boolean {
   const cmd = (args.command ?? '') as string
-  return /rm\s+-rf\s+[/~]/.test(cmd) || /rm\s+-rf\s+\*/.test(cmd)
+  return (
+    /rm\s+-rf\s+[/~]/.test(cmd) ||
+    /rm\s+-rf\s+\*/.test(cmd) ||
+    /(?:^|\s)(mkfs|dd|shutdown|reboot)(?:\s|$)/.test(cmd) ||
+    /curl\s+[^|]*\|\s*(bash|sh)/.test(cmd)
+  )
 }
 
 function isSudoCommand(args: Record<string, unknown>): boolean {
@@ -272,7 +278,33 @@ function isAlwaysApproved(toolName: string, args: Record<string, unknown>): bool
   // Backward compat: plain tool name also matches (e.g., "write_file" still works)
   if (key !== toolName && settings.alwaysApproved.includes(toolName)) return true
 
+  // Wildcard support for generalized approvals (e.g., bash:git:*)
+  if (toolName === 'bash') {
+    const wildcardKey = key.split(':').slice(0, 2).join(':') + ':*'
+    if (settings.alwaysApproved.includes(wildcardKey)) return true
+  }
+
   return false
+}
+
+function generalizedApprovalKeys(toolName: string, args: Record<string, unknown>): string[] {
+  const exact = buildApprovalKey(toolName, args)
+  if (toolName !== 'bash') return [exact]
+  if (isDangerousCommand(args) || isSudoCommand(args)) return [exact]
+
+  const command = ((args.command ?? '') as string).trim()
+  const tokens = parseBashTokens(command)
+  const prefix = extractCommandPrefix(tokens)
+  if (prefix.length < 2) return [exact]
+
+  if (prefix[0] === 'git') {
+    const safeSubcommands = new Set(['status', 'log', 'diff', 'show'])
+    if (safeSubcommands.has(prefix[1] ?? '')) {
+      return ['bash:git:*', exact]
+    }
+  }
+
+  return [exact]
 }
 
 // ─── Middleware ──────────────────────────────────────────────────────────────
@@ -285,6 +317,15 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
     async before(ctx: ToolMiddlewareContext): Promise<ToolMiddlewareResult | undefined> {
       const { toolName, args } = ctx
       const path = (args.path ?? args.filePath ?? '') as string
+
+      // Reset learned approvals per session.
+      if (activeSessionId !== ctx.ctx.sessionId) {
+        activeSessionId = ctx.ctx.sessionId
+        settings = {
+          ...settings,
+          alwaysApproved: [],
+        }
+      }
 
       // 1. Always block: .git writes
       if (
@@ -417,12 +458,12 @@ export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
         }
         // Handle "always approve" — store arity-based fingerprint for bash commands
         if (response.alwaysApprove) {
-          const key = buildApprovalKey(toolName, args)
-          if (!settings.alwaysApproved.includes(key)) {
-            settings = {
-              ...settings,
-              alwaysApproved: [...settings.alwaysApproved, key],
-            }
+          const keys = generalizedApprovalKeys(toolName, args)
+          const unique = new Set(settings.alwaysApproved)
+          for (const key of keys) unique.add(key)
+          settings = {
+            ...settings,
+            alwaysApproved: [...unique],
           }
         }
         return undefined

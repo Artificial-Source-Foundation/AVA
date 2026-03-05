@@ -1,12 +1,13 @@
 /**
  * bash tool — execute shell commands.
  *
- * Simplified: no sandbox routing, no interactive detection.
- * Sandbox, security validation, and PTY are extension concerns.
+ * Includes optional sandbox routing for install-class commands.
+ * Security validation and PTY concerns remain extension-level.
  */
 
 import * as z from 'zod'
 import { type ExecResult, getPlatform } from '../platform.js'
+import { dispatchCompute } from '../platform-dispatch.js'
 import { defineTool } from './define.js'
 import { ToolError, ToolErrorType } from './errors.js'
 import { isBinaryOutput, LIMITS, resolvePath, truncateOutput } from './utils.js'
@@ -17,6 +18,13 @@ const schema = z.object({
   workdir: z.string().optional().describe('Working directory (defaults to session cwd)'),
   timeout: z.number().int().min(1000).optional().describe('Timeout in ms (default: 120000)'),
   requires_approval: z.boolean().optional().describe('Whether this command needs user approval'),
+  _sandboxed: z.boolean().optional(),
+  _sandboxPolicy: z
+    .object({
+      writableRoots: z.array(z.string()).optional(),
+      networkAccess: z.boolean().optional(),
+    })
+    .optional(),
 })
 
 export const bashTool = defineTool({
@@ -36,6 +44,55 @@ export const bashTool = defineTool({
       ? resolvePath(input.workdir, ctx.workingDirectory)
       : ctx.workingDirectory
     const timeout = input.timeout ?? 120_000
+
+    if (input._sandboxed) {
+      const runUnsandboxed = async (): Promise<ExecResult> => shell.exec(input.command, { cwd })
+      let result: ExecResult
+      try {
+        result = await dispatchCompute<ExecResult>(
+          'sandbox_run',
+          {
+            command: input.command,
+            cwd,
+            timeout,
+            policy: input._sandboxPolicy ?? { writableRoots: [cwd, '/tmp'], networkAccess: false },
+          },
+          runUnsandboxed
+        )
+      } catch {
+        // TODO(sprint-6): Remove fallback once rust sandbox_run command is available in all runtimes.
+        result = await runUnsandboxed()
+      }
+
+      const success = result.exitCode === 0
+      let output: string
+      if (success) {
+        const combined = result.stdout + (result.stderr ? `\n${result.stderr}` : '')
+        const truncated = truncateOutput(combined, LIMITS.MAX_LINES, LIMITS.MAX_BYTES)
+        output = `<output>\n${truncated.content}\n</output>`
+      } else {
+        output = ''
+        if (result.stderr) output += `<stderr>\n${result.stderr}\n</stderr>\n`
+        if (result.stdout) output += `<stdout>\n${result.stdout}\n</stdout>`
+        output += `\nExit code: ${result.exitCode}`
+      }
+
+      return {
+        success,
+        output,
+        metadata: {
+          command: input.command,
+          description: input.description,
+          cwd,
+          exitCode: result.exitCode,
+          stdoutLength: result.stdout.length,
+          stderrLength: result.stderr.length,
+          requiresApproval: input.requires_approval,
+          sandboxed: true,
+        },
+        locations: [{ path: cwd, type: 'exec' }],
+      }
+    }
 
     // Stream metadata to UI
     ctx.metadata?.({

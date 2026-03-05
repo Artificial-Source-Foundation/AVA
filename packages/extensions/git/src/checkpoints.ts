@@ -32,7 +32,8 @@ export interface Checkpoint {
   id: number
   toolName: string
   timestamp: number
-  stashRef: string
+  ref: string
+  commit: string
 }
 
 export interface CheckpointStore {
@@ -43,13 +44,64 @@ export interface CheckpointStore {
 export function createCheckpointMiddleware(shell: IShell): {
   middleware: ToolMiddleware
   store: CheckpointStore
+  createCheckpoint: (cwd: string, toolName: string) => Promise<void>
 } {
   let counter = 0
   const checkpoints: Checkpoint[] = []
 
+  const createCheckpoint = async (cwd: string, toolName: string): Promise<void> => {
+    // Check if we're in a git repo
+    const check = await shell.exec(`cd "${cwd}" && git rev-parse --is-inside-work-tree`)
+    if (check.stdout.trim() !== 'true') return
+
+    const nextCounter = counter + 1
+    const label = `ava-checkpoint-${nextCounter}-${toolName}`
+    const ref = `refs/ava/checkpoints/${nextCounter}`
+
+    // TODO(sprint-6): Replace stash path with detached commit-tree snapshot using temp index.
+    await shell.exec(`cd "${cwd}" && git add -A`)
+    const stashCreate = await shell.exec(`cd "${cwd}" && git stash create "${label}"`)
+    const commit = stashCreate.stdout.trim()
+    if (!commit) {
+      return
+    }
+
+    await shell.exec(`cd "${cwd}" && git update-ref "${ref}" "${commit}"`)
+
+    counter = nextCounter
+
+    checkpoints.push({
+      id: counter,
+      toolName,
+      timestamp: Date.now(),
+      ref,
+      commit,
+    })
+
+    log.debug(`Checkpoint ${counter} created after ${toolName}`)
+  }
+
   const middleware: ToolMiddleware = {
     name: 'ava-checkpoints',
     priority: 20,
+
+    async before(ctx: ToolMiddlewareContext): Promise<ToolMiddlewareResult | undefined> {
+      if (ctx.toolName !== 'bash') return undefined
+      const command = typeof ctx.args.command === 'string' ? ctx.args.command : ''
+      if (!/(rm\s+-rf|git\s+clean\s+-fd|mv\s+|chmod\s+|chown\s+)/.test(command)) {
+        return undefined
+      }
+
+      try {
+        await createCheckpoint(ctx.ctx.workingDirectory, 'pre-destructive-bash')
+      } catch (err) {
+        log.debug(
+          `Pre-destructive checkpoint failed (non-critical): ${err instanceof Error ? err.message : 'unknown'}`
+        )
+      }
+
+      return undefined
+    },
 
     async after(
       ctx: ToolMiddlewareContext,
@@ -62,34 +114,7 @@ export function createCheckpointMiddleware(shell: IShell): {
       if (!cwd) return undefined
 
       try {
-        // Check if we're in a git repo
-        const check = await shell.exec(`cd "${cwd}" && git rev-parse --is-inside-work-tree`)
-        if (check.stdout.trim() !== 'true') return undefined
-
-        counter++
-        const label = `ava-checkpoint-${counter}-${ctx.toolName}`
-
-        // Stage all changes, then create stash ref
-        await shell.exec(`cd "${cwd}" && git add -A`)
-        const stashCreate = await shell.exec(`cd "${cwd}" && git stash create "${label}"`)
-        const stashRef = stashCreate.stdout.trim()
-
-        if (!stashRef) {
-          // No changes to stash (clean tree)
-          return undefined
-        }
-
-        // Store the stash ref so it's accessible via git stash list
-        await shell.exec(`cd "${cwd}" && git stash store -m "${label}" ${stashRef}`)
-
-        checkpoints.push({
-          id: counter,
-          toolName: ctx.toolName,
-          timestamp: Date.now(),
-          stashRef,
-        })
-
-        log.debug(`Checkpoint ${counter} created after ${ctx.toolName}`)
+        await createCheckpoint(cwd, ctx.toolName)
       } catch (err) {
         log.debug(
           `Checkpoint failed (non-critical): ${err instanceof Error ? err.message : 'unknown'}`
@@ -110,5 +135,5 @@ export function createCheckpointMiddleware(shell: IShell): {
     },
   }
 
-  return { middleware, store }
+  return { middleware, store, createCheckpoint }
 }

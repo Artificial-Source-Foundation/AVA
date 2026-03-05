@@ -48,9 +48,11 @@ export function activate(api: ExtensionAPI): Disposable {
   disposables.push(api.registerTool(readIssueTool))
 
   // ── Per-tool-call checkpoints ───────────────────────────────────────────────
-  const { middleware: checkpointMiddleware, store: checkpointStore } = createCheckpointMiddleware(
-    api.platform.shell
-  )
+  const {
+    middleware: checkpointMiddleware,
+    store: checkpointStore,
+    createCheckpoint,
+  } = createCheckpointMiddleware(api.platform.shell)
   disposables.push(api.addToolMiddleware(checkpointMiddleware))
 
   // Check git availability on session open
@@ -58,11 +60,12 @@ export function activate(api: ExtensionAPI): Disposable {
     api.on('session:opened', (data) => {
       const { workingDirectory } = data as { sessionId: string; workingDirectory: string }
       cwd = workingDirectory
-      void isGitRepo(api.platform.shell, cwd).then((available) => {
+      void isGitRepo(api.platform.shell, cwd).then(async (available) => {
         gitAvailable = available
         if (available) {
           api.log.debug('Git extension: repository detected')
           api.emit('git:ready', { cwd })
+          await createCheckpoint(cwd, 'session-opened')
         } else {
           api.log.debug('Git extension: not a git repository, snapshots disabled')
         }

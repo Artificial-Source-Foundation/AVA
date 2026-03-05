@@ -2,10 +2,10 @@
  * Tests for per-tool-call checkpoint middleware.
  */
 
-import { MockShell } from '@ava/core-v2/__test-utils__/mock-platform'
 import type { ToolMiddlewareContext } from '@ava/core-v2/extensions'
 import type { ToolResult } from '@ava/core-v2/tools'
 import { describe, expect, it } from 'vitest'
+import { MockShell } from '../../../core-v2/src/__test-utils__/mock-platform.js'
 import { createCheckpointMiddleware } from './checkpoints.js'
 
 function makeMiddlewareCtx(toolName: string, cwd = '/project'): ToolMiddlewareContext {
@@ -47,7 +47,7 @@ describe('createCheckpointMiddleware', () => {
       stderr: '',
       exitCode: 0,
     })
-    shell.setResult('cd "/project" && git stash store -m "ava-checkpoint-1-write_file" abc123', {
+    shell.setResult('cd "/project" && git update-ref "refs/ava/checkpoints/1" abc123', {
       stdout: '',
       stderr: '',
       exitCode: 0,
@@ -60,7 +60,7 @@ describe('createCheckpointMiddleware', () => {
     expect(result).toBeUndefined()
     expect(store.getCheckpoints()).toHaveLength(1)
     expect(store.getCheckpoints()[0]!.toolName).toBe('write_file')
-    expect(store.getCheckpoints()[0]!.stashRef).toBe('abc123')
+    expect(store.getCheckpoints()[0]!.commit).toBe('abc123')
     expect(store.getCheckpoints()[0]!.id).toBe(1)
   })
 
@@ -146,7 +146,7 @@ describe('createCheckpointMiddleware', () => {
       stderr: '',
       exitCode: 0,
     })
-    shell.setResult('cd "/project" && git stash store -m "ava-checkpoint-1-edit" hash1', {
+    shell.setResult('cd "/project" && git update-ref "refs/ava/checkpoints/1" hash1', {
       stdout: '',
       stderr: '',
       exitCode: 0,
@@ -157,7 +157,7 @@ describe('createCheckpointMiddleware', () => {
       stderr: '',
       exitCode: 0,
     })
-    shell.setResult('cd "/project" && git stash store -m "ava-checkpoint-2-create_file" hash2', {
+    shell.setResult('cd "/project" && git update-ref "refs/ava/checkpoints/2" hash2', {
       stdout: '',
       stderr: '',
       exitCode: 0,
@@ -202,14 +202,11 @@ describe('createCheckpointMiddleware', () => {
         stderr: '',
         exitCode: 0,
       })
-      shell.setResult(
-        `cd "/project" && git stash store -m "ava-checkpoint-1-${modifyingTools[i]}" hash-${i}`,
-        {
-          stdout: '',
-          stderr: '',
-          exitCode: 0,
-        }
-      )
+      shell.setResult(`cd "/project" && git update-ref "refs/ava/checkpoints/1" hash-${i}`, {
+        stdout: '',
+        stderr: '',
+        exitCode: 0,
+      })
 
       const { middleware, store } = createCheckpointMiddleware(shell)
       await middleware.after!(makeMiddlewareCtx(modifyingTools[i]!), makeResult())
@@ -234,7 +231,7 @@ describe('createCheckpointMiddleware', () => {
       stderr: '',
       exitCode: 0,
     })
-    shell.setResult('cd "/project" && git stash store -m "ava-checkpoint-1-edit" hash1', {
+    shell.setResult('cd "/project" && git update-ref "refs/ava/checkpoints/1" hash1', {
       stdout: '',
       stderr: '',
       exitCode: 0,
@@ -300,7 +297,7 @@ describe('createCheckpointMiddleware', () => {
       stderr: '',
       exitCode: 0,
     })
-    shell.setResult('cd "/project" && git stash store -m "ava-checkpoint-1-edit" hash1', {
+    shell.setResult('cd "/project" && git update-ref "refs/ava/checkpoints/1" hash1', {
       stdout: '',
       stderr: '',
       exitCode: 0,

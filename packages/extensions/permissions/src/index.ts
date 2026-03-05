@@ -7,6 +7,7 @@ import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import { createPermissionMiddleware, updateSettings } from './middleware.js'
 import { loadDeclarativePolicies } from './policy/index.js'
 import { activate as activateRules } from './rules/index.js'
+import { createSandboxMiddleware } from './sandbox-middleware.js'
 import type { ToolPermissionRule } from './types.js'
 
 function applySettings(raw: Record<string, unknown>): void {
@@ -36,6 +37,7 @@ export function activate(api: ExtensionAPI): Disposable {
   const rulesDisposable = activateRules(api)
 
   // Register the permission middleware (pass bus for interactive approval)
+  const sandboxDisposable = api.addToolMiddleware(createSandboxMiddleware())
   const mwDisposable = api.addToolMiddleware(createPermissionMiddleware(api.bus))
 
   // Sync settings from the settings manager (may not exist yet)
@@ -63,6 +65,7 @@ export function activate(api: ExtensionAPI): Disposable {
   return {
     dispose() {
       rulesDisposable.dispose()
+      sandboxDisposable.dispose()
       mwDisposable.dispose()
       settingsDisposable.dispose()
       sessionDisposable.dispose()

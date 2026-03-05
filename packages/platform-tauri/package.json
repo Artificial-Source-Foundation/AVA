@@ -1,6 +1,6 @@
 {
   "name": "@ava/platform-tauri",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "description": "Tauri platform implementations for AVA",
   "type": "module",
   "main": "dist/index.js",

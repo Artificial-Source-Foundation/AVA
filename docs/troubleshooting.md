@@ -14,6 +14,35 @@ Fix: Project uses `linker = "gcc"` in `src-tauri/.cargo/config.toml`. Override t
 
 **Validate setup:** `npm run verify:mvp && npm run tauri dev`
 
+## Rust Build Issues
+
+**Rust toolchain missing:**
+- `cargo: command not found`
+- install/activate stable toolchain and verify:
+
+```bash
+rustup show
+rustup default stable
+cargo --version
+```
+
+**Cargo lock/build cache mismatch:**
+
+```bash
+rm -f src-tauri/Cargo.lock
+cargo generate-lockfile --manifest-path src-tauri/Cargo.toml
+cargo check -p ava --manifest-path src-tauri/Cargo.toml
+```
+
+**Linux native dependency/linker failures:**
+- missing GTK/WebKit/system libs can fail the link step
+- install distro prerequisites, then rerun cargo check
+
+**Runtime command invoke mismatch:**
+- verify command exists in `src-tauri/src/commands/mod.rs`
+- verify command is registered in `src-tauri/src/lib.rs` `generate_handler!`
+- verify TS side uses matching command name and has `dispatchCompute` fallback
+
 ## WebKitGTK Rendering
 
 **DMABUF ghost rendering** (Cosmic DE, Hyprland, Sway + NVIDIA):

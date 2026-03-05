@@ -7,251 +7,155 @@
 ## Quick Start
 
 ```bash
-npm run tauri dev      # Development mode
-npm run lint           # Oxlint + ESLint
-npm run format         # Biome format
-npm run test           # Vitest tests
-npm run knip           # Dead code detection
-npx tsc --noEmit       # Type check
+npm run tauri dev
+npm run lint
+npm run format:check
+npx tsc --noEmit
+npm run test
 ```
 
-**Read First**: `CLAUDE.md` for memory bank workflow
+Read first: `CLAUDE.md`
 
 ---
 
 ## Project Overview
 
-**AVA** is a multi-agent AI coding assistant - a Tauri 2.0 + SolidJS desktop app with a TypeScript core monorepo and a CLI that speaks ACP for editor integration.
+AVA is a multi-agent AI coding assistant desktop app.
 
-| Layer | Technology |
-|-------|------------|
-| Runtime | Tauri 2.0 (Rust + Web) |
-| Frontend | SolidJS + TypeScript |
-| Styling | TailwindCSS |
-| Database | SQLite (Tauri SQL plugin) |
-| Core | TypeScript monorepo |
+- Runtime: Tauri 2 (Rust + Web)
+- Frontend: SolidJS + TypeScript
+- Core runtime: `packages/core-v2/`
+- Features: extension-first in `packages/extensions/`
+- Compatibility shim: `packages/core/`
+- CLI: `cli/` (ACP integration)
 
 ---
 
-## Architecture
+## Architecture (Current)
 
-### Project Structure
-```
+### Repository Layout
+
+```text
 AVA/
 ├── packages/
-│   ├── core/              # Business logic
-│   ├── platform-node/     # Node.js implementations
-│   └── platform-tauri/    # Tauri implementations
-├── cli/                   # CLI with ACP agent
-└── src/                   # Tauri SolidJS frontend
+│   ├── core-v2/         # execution kernel
+│   ├── extensions/      # built-in extension modules (20)
+│   ├── core/            # legacy re-export shim
+│   ├── platform-node/
+│   └── platform-tauri/
+├── cli/
+├── src/
+└── src-tauri/
 ```
 
-### Core Modules (`packages/core/src/`)
+### Important Counts
+
+- Built-in extensions: 20
+- Tool surface: ~39
+
+### Rust Hotpath Rule
+
+Always prefer:
+
+```ts
+dispatchCompute<T>(rustCommand, rustArgs, tsFallback)
 ```
-├── agent/         # Autonomous loop, prompts, recovery, modes
-├── auth/          # OAuth + PKCE flows
-├── codebase/      # Repo map, symbols, tree-sitter
-├── commander/     # Hierarchical delegation, workers
-│   └── parallel/  # Concurrent execution
-├── config/        # Settings + validation
-├── context/       # Token tracking + compaction
-├── diff/          # Change tracking
-├── git/           # Snapshots + rollback
-├── hooks/         # Lifecycle hooks
-├── instructions/  # Project instructions
-├── llm/           # Provider clients
-├── lsp/           # Language Server Protocol
-├── mcp/           # MCP client + discovery
-├── memory/        # Long-term memory + RAG
-├── models/        # Model registry + pricing
-├── permissions/   # Safety + rules
-├── question/      # LLM-to-user questions
-├── scheduler/     # Background tasks
-├── session/       # State + checkpoints + forking
-├── tools/         # Tool registry + implementations
-├── types/         # Shared types
-└── validator/     # QA pipeline
-```
+
+- Tauri runtime -> Rust command path
+- Node/CLI runtime -> TS fallback path
+
+Do not introduce direct `invoke()` calls in feature code where dispatch compute already applies.
 
 ---
 
 ## Data Flow
 
-```
+```text
 AgentExecutor.run(goal, context)
-       │
-       ▼
-    [Turn Loop]
-       │
-       ├─→ LLM generates response
-       ├─→ Parse tool calls
-       ├─→ Execute tools (with retry)
-       ├─→ Stream metadata + record usage
-       ├─→ Check termination (attempt_completion)
-       └─→ Persist session + checkpoints
+  -> prepare history/context
+  -> model response
+  -> parse + execute tools
+  -> middleware before/after hooks
+  -> emit events/usage
+  -> completion/termination
 ```
 
-### Commander Delegation
-```
-Commander → delegate_coder → Worker AgentExecutor
-         → delegate_tester → Worker AgentExecutor
-         → delegate_reviewer → Worker AgentExecutor
-         → delegate_researcher → Worker AgentExecutor
-         → delegate_debugger → Worker AgentExecutor
-```
-
-### Provider Resolution
-- OAuth token (if available)
-- Direct API key (provider-specific)
-- OpenRouter as gateway fallback (if configured)
-
----
-
-## Tools (22 total)
-
-| Tool | File | Purpose |
-|------|------|---------|
-| read_file | read.ts | Read file contents |
-| create_file | create.ts | Create new file |
-| write_file | write.ts | Overwrite file |
-| delete_file | delete.ts | Delete file |
-| edit | edit.ts | Fuzzy text edits |
-| apply_patch | apply-patch/index.ts | Apply unified diffs to files |
-| multiedit | multiedit.ts | Edit multiple files at once |
-| glob | glob.ts | Find files by pattern |
-| grep | grep.ts | Search file contents |
-| ls | ls.ts | Directory listing |
-| bash | bash.ts | Execute shell commands (PTY supported) |
-| batch | batch.ts | Batch execute multiple tools |
-| codesearch | codesearch.ts | Search codebase with context |
-| question | question.ts | Ask user clarifying questions |
-| skill | skill.ts | Auto-invoke skills from plugins |
-| todoread | todo.ts | Read session todo list |
-| todowrite | todo.ts | Update session todo list |
-| task | task.ts | Spawn subagents |
-| websearch | websearch.ts | Web search |
-| webfetch | webfetch.ts | Fetch + convert web pages |
-| browser | browser/index.ts | Puppeteer browser automation |
-| attempt_completion | completion.ts | Finish task with summary |
-| plan_enter | agent/modes/plan.ts | Enter plan mode |
-| plan_exit | agent/modes/plan.ts | Exit plan mode |
+Middleware priorities are contract-sensitive. Lower numeric priority runs earlier.
 
 ---
 
 ## Code Standards
 
 ### TypeScript
-- Strict mode, no `any`
-- Explicit return types
-- Barrel exports (index.ts)
+
+- Strict mode; no `any`
+- Explicit return types for exported functions
+- ESM imports with `.js` where required by package config
 
 ### Files
+
 - Max 300 lines per file
-- kebab-case filenames
+- kebab-case filenames for non-components
 - camelCase functions
-- PascalCase types/components
+- PascalCase component/types
 
 ### Components
-- Functional components only
-- Props: `{Name}Props` interface
-- SolidJS primitives: `createSignal`, `Show`, `For`
 
----
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `packages/core/src/index.ts` | Core exports |
-| `packages/core/src/agent/loop.ts` | AgentExecutor |
-| `packages/core/src/tools/index.ts` | Tool registry |
-| `packages/core/src/commander/executor.ts` | Worker delegation |
-| `cli/src/index.ts` | CLI entry |
-| `src/App.tsx` | Frontend root |
-| `src/hooks/useChat.ts` | Chat streaming |
+- SolidJS only (no React patterns)
+- Functional components
+- Props as `{Name}Props`
+- Use Solid primitives (`createSignal`, `Show`, `For`, `onCleanup`)
 
 ---
 
 ## Common Tasks
 
 ### Add Tool
-1. Create `packages/core/src/tools/{name}.ts`
-2. Define with `defineTool()` if possible
-3. Export + register in `packages/core/src/tools/index.ts`
 
-### Add Worker
-1. Add to `packages/core/src/commander/workers/definitions.ts`
-2. Workers are tools via `delegate_{name}` pattern
+1. Implement in extension package (usually `packages/extensions/tools-extended/src/`)
+2. Register via extension activation
+3. Add tests and export wiring as needed
 
-### Add Module
-1. Create directory in `packages/core/src/`
-2. Add `index.ts` barrel export
-3. Export from `packages/core/src/index.ts`
+### Add Middleware
 
-### Modify Schema
-1. Increment `SCHEMA_VERSION` in migrations.ts
-2. Add `migrateVN()` function
+1. Implement `ToolMiddleware` in extension
+2. Set explicit `priority`
+3. Register in extension `activate()`
+4. Add focused tests for ordering/behavior
 
----
+### Add Rust-Accelerated Feature
 
-## Development Tooling
-
-| Tool | Purpose | Speed |
-|------|---------|-------|
-| **Biome** | Formatting + linting | 7-100x faster than Prettier |
-| **Oxlint** | Linting | 50-100x faster than ESLint |
-| **ESLint** | SolidJS-specific rules | eslint-plugin-solid |
-| **Lefthook** | Git hooks (pre-commit) | Parallel execution |
-| **commitlint** | Commit message validation | Conventional commits |
-| **Vitest** | Testing | Native ESM, SolidJS support |
-| **Knip** | Dead code detection | Finds unused exports/deps |
-| **Renovate** | Dependency updates | Auto-PRs (weekly) |
-
-### CI/CD (GitHub Actions)
-
-- **CI**: Lint, typecheck, test, knip, build (on PR/push)
-- **Release**: Cross-platform builds on tag push (v*)
+1. Add Rust command in `src-tauri/src/commands/`
+2. Register in `src-tauri/src/lib.rs`
+3. Route via `dispatchCompute` with TS fallback
+4. Add tests for both native and fallback paths
 
 ---
 
 ## Before Committing
 
-- [ ] `npm run lint` passes
-- [ ] `npm run format:check` passes
-- [ ] `npx tsc --noEmit` passes
-- [ ] `npm run tauri dev` works
-- [ ] No console errors
-- [ ] Memory bank updated
+- `npm run lint`
+- `npm run format:check`
+- `npx tsc --noEmit`
+- `npm run test`
+- `npm run tauri dev` (or `npm run tauri build` for release verification)
 
 ---
 
-## Don'ts
+## Do Not
 
-- No `any` types
-- No files > 300 lines
-- No parent directory imports
-- No direct signal mutation
-- No API keys in code
-
----
-
-## Documentation
-
-| Priority | Path |
-|----------|------|
-| 1 | `CLAUDE.md` - Memory bank workflow |
-| 2 | `docs/README.md` - Doc index |
-| 3 | `docs/ROADMAP.md` - Epics + status |
-| 4 | `docs/VISION.md` - Product vision |
-| 5 | `docs/development/FEATURE_GAP_ANALYSIS.md` - Gaps vs SOTA |
-| 6 | `docs/development/opencode-comparison.md` - OpenCode comparison |
-| 7 | `docs/reference-code/` - Local reference repos |
+- Commit secrets or credentials
+- Add parent-directory imports
+- Rely on migration-era `packages/core/src/*` paths for new work
+- Use React patterns in `src/`
 
 ---
 
-## Current Status
+## Documentation Priority
 
-- **Core**: Tool registry, permissions, PTY, compaction, session persistence, LSP, browser tool, plan mode
-- **Tools**: 24 registered
-- **Modules**: 29 core modules + platform abstraction
-- **Next**: Frontend polish + UX integration of approvals/metadata (see `docs/ROADMAP.md`)
+1. `CLAUDE.md`
+2. `docs/README.md`
+3. `docs/ROADMAP.md`
+4. `docs/VISION.md`
+5. `docs/development/opencode-comparison.md`
+6. `docs/reference-code/`

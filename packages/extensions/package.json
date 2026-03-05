@@ -1,6 +1,6 @@
 {
   "name": "@ava/extensions",
-  "version": "0.1.0",
+  "version": "2.0.0",
   "description": "AVA built-in extensions — providers, permissions, tools, prompts, context",
   "type": "module",
   "main": "dist/index.js",

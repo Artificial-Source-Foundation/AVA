@@ -309,7 +309,7 @@ export const praxisAgentPresets: AgentPreset[] = [
     icon: Compass as IconComponent,
     enabled: true,
     tier: 'worker',
-    tools: ['read_file', 'glob', 'grep', 'ls', 'repo_map', 'websearch', 'webfetch'],
+    tools: ['read_file', 'glob', 'grep', 'ls', 'websearch', 'webfetch'],
     domain: 'fullstack',
     capabilities: ['codebase-exploration', 'analysis'],
   },

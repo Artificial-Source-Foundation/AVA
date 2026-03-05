@@ -17,14 +17,12 @@ const READ_TOOLS = new Set([
   'glob',
   'grep',
   'ls',
-  'repo_map',
   'todoread',
   'memory_read',
   'memory_list',
   'lsp_diagnostics',
   'lsp_hover',
   'lsp_definition',
-  'bash_output',
 ])
 
 const EDIT_TOOLS = new Set([
@@ -38,9 +36,9 @@ const EDIT_TOOLS = new Set([
   'memory_delete',
 ])
 
-const EXECUTE_TOOLS = new Set(['bash', 'bash_background', 'bash_kill'])
+const EXECUTE_TOOLS = new Set(['bash'])
 
-const NETWORK_TOOLS = new Set(['websearch', 'webfetch', 'codesearch'])
+const NETWORK_TOOLS = new Set(['websearch', 'webfetch'])
 
 const DESTRUCTIVE_TOOLS = new Set(['delete_file'])
 

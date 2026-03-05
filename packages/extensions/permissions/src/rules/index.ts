@@ -25,7 +25,7 @@ export function activate(api: ExtensionAPI): Disposable {
   const alwaysCleanups: Array<() => void> = []
   let autoCleanups: Array<() => void> = []
 
-  // Listen for dynamic rule registration (e.g. from create_rule tool)
+  // Listen for dynamic rule registration events.
   disposables.push(
     api.on('rules:register', (data) => {
       const rule = data as Rule

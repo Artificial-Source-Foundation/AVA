@@ -170,7 +170,7 @@ export function watchPluginDirectory(
 const FS_TOOL_PATTERNS =
   /\b(read_file|write_file|create_file|delete_file|edit|glob|ls|apply_patch|multiedit)\b/i
 const SHELL_TOOL_PATTERNS = /\b(bash|shell|terminal|exec)\b/i
-const NETWORK_TOOL_PATTERNS = /\b(websearch|webfetch|codesearch|fetch|http|request)\b/i
+const NETWORK_TOOL_PATTERNS = /\b(websearch|webfetch|fetch|http|request)\b/i
 
 /**
  * Wrap an ExtensionAPI to enforce permission-based sandboxing.

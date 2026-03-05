@@ -64,17 +64,15 @@ const VERB_PAIRS: Record<string, [string, string]> = {
   delete: ['Deleting', 'Deleted'],
   bash: ['Running', 'Ran'],
   grep: ['Searching', 'Searched'],
-  codesearch: ['Searching', 'Searched'],
   glob: ['Finding', 'Found'],
   ls: ['Listing', 'Listed'],
   websearch: ['Searching', 'Searched'],
   webfetch: ['Fetching', 'Fetched'],
   task: ['Delegating to', 'Delegated to'],
   delegate_coder: ['Delegating to Coder', 'Delegated to Coder'],
-  delegate_tester: ['Delegating to Tester', 'Delegated to Tester'],
   delegate_reviewer: ['Delegating to Reviewer', 'Delegated to Reviewer'],
   delegate_researcher: ['Delegating to Researcher', 'Delegated to Researcher'],
-  delegate_debugger: ['Delegating to Debugger', 'Delegated to Debugger'],
+  delegate_explorer: ['Delegating to Explorer', 'Delegated to Explorer'],
 }
 
 /**
@@ -184,8 +182,6 @@ export function summarizeAction(name: string, args: Record<string, unknown>): st
     }
     case 'glob':
       return args.pattern ? `finding ${args.pattern}` : 'finding files'
-    case 'codesearch':
-      return args.query ? 'searching codebase' : 'searching code'
     case 'ls':
       return shortPath ? `listing ${shortPath}` : 'listing directory'
     case 'websearch':
@@ -198,10 +194,9 @@ export function summarizeAction(name: string, args: Record<string, unknown>): st
       return short ? `delegating: ${short}` : 'delegating task'
     }
     case 'delegate_coder':
-    case 'delegate_tester':
     case 'delegate_reviewer':
     case 'delegate_researcher':
-    case 'delegate_debugger': {
+    case 'delegate_explorer': {
       const worker = name.replace('delegate_', '')
       const task = String(args.task ?? args.description ?? '')
       return task ? `delegating to ${worker}: ${task.slice(0, 60)}` : `delegating to ${worker}`

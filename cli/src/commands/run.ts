@@ -203,15 +203,6 @@ export async function runRunCommand(args: string[]): Promise<void> {
     // Delegation/subagent tools — CLI runs single agent
     'task',
     'sandbox_run',
-    // Meta-tools rarely used autonomously
-    'session_cost',
-    'diff_review',
-    'edit_benchmark',
-    'create_rule',
-    'create_skill',
-    'load_skill',
-    // Exa-based tools — require API key most users don't have
-    'codesearch',
     // Redundant with core tools or rarely needed
     'pty',
     'batch',
@@ -222,10 +213,6 @@ export async function runRunCommand(args: string[]): Promise<void> {
     'memory_write',
     'memory_list',
     'memory_delete',
-    // Background shell — rarely needed for simple tasks
-    'bash_background',
-    'bash_output',
-    'bash_kill',
     // Session management — handled by CLI itself
     'plan_enter',
     'plan_exit',

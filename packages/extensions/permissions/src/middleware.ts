@@ -166,7 +166,7 @@ function isBlockedByPattern(args: Record<string, unknown>): boolean {
  * For other tools, returns the tool name as-is.
  */
 export function buildApprovalKey(toolName: string, args: Record<string, unknown>): string {
-  if (toolName === 'bash' || toolName === 'bash_background') {
+  if (toolName === 'bash') {
     const command = (args.command ?? '') as string
     if (command) {
       const tokens = parseBashTokens(command)

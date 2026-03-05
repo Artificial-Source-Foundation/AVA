@@ -69,7 +69,7 @@ export interface DeclarativePolicyFile {
 
 // ─── Risk Classification ────────────────────────────────────────────────────
 
-const READ_TOOLS = new Set(['read_file', 'glob', 'grep', 'ls', 'codesearch', 'todoread', 'skill'])
+const READ_TOOLS = new Set(['read_file', 'glob', 'grep', 'ls', 'todoread', 'skill'])
 const WRITE_TOOLS = new Set([
   'write_file',
   'create_file',

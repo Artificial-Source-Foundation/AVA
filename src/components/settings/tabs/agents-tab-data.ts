@@ -18,8 +18,8 @@ export const TOOL_CATEGORIES = [
       'apply_patch',
     ],
   },
-  { label: 'Search', tools: ['grep', 'glob', 'ls', 'repo_map', 'codesearch'] },
-  { label: 'Shell', tools: ['bash', 'bash_background', 'bash_output', 'bash_kill', 'pty'] },
+  { label: 'Search', tools: ['grep', 'glob', 'ls'] },
+  { label: 'Shell', tools: ['bash', 'pty'] },
   { label: 'Web', tools: ['websearch', 'webfetch'] },
   { label: 'Comm', tools: ['question', 'attempt_completion'] },
   { label: 'Plan', tools: ['plan_enter', 'plan_exit', 'todoread', 'todowrite', 'task', 'batch'] },
@@ -39,7 +39,7 @@ export const TOOL_CATEGORIES = [
     ],
   },
   { label: 'Memory', tools: ['memory_read', 'memory_write', 'memory_list', 'memory_delete'] },
-  { label: 'Other', tools: ['recall', 'load_skill'] },
+  { label: 'Other', tools: ['recall'] },
 ] as const
 
 export const ALL_TOOLS = TOOL_CATEGORIES.flatMap((c) => c.tools)

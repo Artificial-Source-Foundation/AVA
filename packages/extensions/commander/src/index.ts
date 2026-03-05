@@ -12,8 +12,10 @@ import type { ToolDefinition } from '@ava/core-v2/llm'
 import { getModelPack, resolveModelForTier } from '../../models/src/packs.js'
 import type { AgentDefinition } from './agent-definition.js'
 import { configureDelegation, createDelegateTool } from './delegate.js'
-import { getAgent, getAgentsByTier, registerAgents } from './registry.js'
+import { getAgentsByTier, registerAgents } from './registry.js'
 import { BUILTIN_AGENTS } from './workers.js'
+
+const DELEGATE_TOOL_AGENT_IDS = new Set(['coder', 'researcher', 'reviewer', 'explorer'])
 
 export function activate(api: ExtensionAPI): Disposable {
   const disposables: Disposable[] = []
@@ -52,18 +54,10 @@ export function activate(api: ExtensionAPI): Disposable {
   // Register all built-in agents in the registry
   disposables.push(registerAgents(agentsToRegister))
 
-  // Register delegate tools for leads (commander delegates to leads)
-  const leads = agentsToRegister.filter((a) => a.tier === 'lead')
-  const workers = agentsToRegister.filter((a) => a.tier === 'worker')
+  const delegateAgents = agentsToRegister.filter((a) => DELEGATE_TOOL_AGENT_IDS.has(a.id))
 
-  for (const lead of leads) {
-    const tool = createDelegateTool(lead)
-    disposables.push(api.registerTool(tool))
-  }
-
-  // Register delegate tools for workers (leads delegate to workers)
-  for (const worker of workers) {
-    const tool = createDelegateTool(worker)
+  for (const agent of delegateAgents) {
+    const tool = createDelegateTool(agent)
     disposables.push(api.registerTool(tool))
   }
 
@@ -86,7 +80,7 @@ export function activate(api: ExtensionAPI): Disposable {
   disposables.push(api.registerAgentMode(praxisMode))
 
   api.log.debug(
-    `Commander: registered ${leads.length} leads + ${workers.length} workers + praxis mode (${agentsToRegister.length} agents total)`
+    `Commander: registered ${delegateAgents.length} delegate tools + praxis mode (${agentsToRegister.length} agents total)`
   )
 
   return {
@@ -97,18 +91,11 @@ export function activate(api: ExtensionAPI): Disposable {
 }
 
 function buildCommanderPrompt(): string {
-  const leads = getAgentsByTier('lead')
-  const workers = getAgentsByTier('worker')
+  const workers = getAgentsByTier('worker').filter((w) => DELEGATE_TOOL_AGENT_IDS.has(w.id))
 
-  const leadList = leads
-    .map((l) => {
-      const workerNames = (l.delegates ?? [])
-        .map((id) => {
-          const w = getAgent(id)
-          return w ? w.displayName : id
-        })
-        .join(', ')
-      return `- **${l.displayName}** (\`delegate_${l.name}\`): ${l.description}. Workers: ${workerNames}`
+  const workerList = workers
+    .map((w) => {
+      return `- **${w.displayName}** (\`delegate_${w.name}\`): ${w.description}`
     })
     .join('\n')
 
@@ -123,17 +110,14 @@ You are the **Commander**. You have full tool access AND can delegate to special
 **Simple tasks** (read a file, answer a question, small edit, 1-2 files):
 - Handle directly with your tools. Do NOT delegate.
 
-**Medium tasks** (multi-file changes in a single domain, 3-5 files):
-- Delegate to the appropriate lead (\`delegate_frontend-lead\`, \`delegate_backend-lead\`, etc.)
-
-**Complex tasks** (multi-domain, architectural, 5+ files):
-- Use \`delegate_planner\` first, then delegate to multiple leads.
+**Medium/complex tasks**:
+- Delegate to specialist workers when useful (coder, researcher, reviewer, explorer).
 
 **Default to handling it yourself** unless the task clearly needs delegation.
 
-### Available Leads
+### Available Delegates
 
-${leadList}
+${workerList}
 
 ### Worker Reference
 
@@ -141,11 +125,10 @@ ${workerSummary}
 
 ### Delegation Rules
 
-- **Commander** → handles simple tasks directly, delegates medium/complex to **Leads**
-- **Leads** → delegate to their **Workers** for subtasks
-- **Workers** → execute tasks directly (no delegation)
+- **Commander** handles simple tasks directly and can delegate to specialized workers.
+- Delegated workers execute tasks directly.
 - Each agent may use a different model for cost optimization
-- Review results from leads before completing`
+- Review results before completing`
 }
 
 function formatAgentTable(agents: AgentDefinition[]): string {

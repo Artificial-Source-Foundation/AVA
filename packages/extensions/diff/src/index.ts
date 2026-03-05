@@ -15,7 +15,6 @@ import type {
 } from '@ava/core-v2/extensions'
 import type { ChatMessage } from '@ava/core-v2/llm'
 import type { ToolResult } from '@ava/core-v2/tools'
-import { createDiffReviewTool } from './diff-review-tool.js'
 import { HunkReviewState } from './hunk-review/state.js'
 import { summarizeDiffSession } from './summary.js'
 import { addDiff, createDiffSession, createFileDiff } from './tracker.js'
@@ -163,7 +162,6 @@ export function activate(api: ExtensionAPI): Disposable {
   }
 
   const mwDisposable = api.addToolMiddleware(middleware)
-  const diffReviewToolDisposable = api.registerTool(createDiffReviewTool(hunkReviewState))
 
   // Wire diff:undo listener
   const undoDisposable = api.on('diff:undo', async (data: unknown) => {
@@ -294,7 +292,6 @@ export function activate(api: ExtensionAPI): Disposable {
   return {
     dispose() {
       mwDisposable.dispose()
-      diffReviewToolDisposable.dispose()
       undoDisposable.dispose()
       redoDisposable.dispose()
       revertToDisposable.dispose()

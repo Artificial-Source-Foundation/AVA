@@ -9,15 +9,14 @@
  * Activation modes:
  * - always: injected on session open, persists every turn
  * - auto: glob-matched per turn (default)
- * - agent: listed in catalog so LLM can call load_skill
- * - manual: only accessible via explicit load_skill call
+ * - agent: listed in catalog for model awareness
+ * - manual: only injected by explicit configuration
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import { addPromptSection } from '../../../prompts/src/builder.js'
 import { discoverSkills } from './loader.js'
 import { matchSkills } from './matcher.js'
-import { createLoadSkillTool } from './tool.js'
 import type { Skill, SkillConfig } from './types.js'
 import { DEFAULT_SKILL_CONFIG } from './types.js'
 
@@ -52,7 +51,7 @@ export function activate(api: ExtensionAPI): Disposable {
       catalogCleanup = null
       return
     }
-    const lines = ['Available skills (use load_skill to activate):']
+    const lines = ['Available skills:']
     for (const s of agentSkills) {
       lines.push(`- ${s.name}: ${s.description}`)
     }
@@ -62,9 +61,6 @@ export function activate(api: ExtensionAPI): Disposable {
       content: lines.join('\n'),
     })
   }
-
-  // Register load_skill tool (shares the skills array reference)
-  disposables.push(api.registerTool(createLoadSkillTool(skills)))
 
   // Listen for skill registration from plugins
   disposables.push(

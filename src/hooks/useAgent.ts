@@ -80,14 +80,6 @@ const SOLO_EXCLUDED = new Set([
   'task',
   'sandbox_run',
   // Meta-tools rarely used autonomously
-  'session_cost',
-  'diff_review',
-  'edit_benchmark',
-  'create_rule',
-  'create_skill',
-  'load_skill',
-  // Exa-based (requires API key)
-  'codesearch',
   // Redundant with core tools or rarely needed
   'pty',
   'batch',
@@ -98,10 +90,6 @@ const SOLO_EXCLUDED = new Set([
   'memory_write',
   'memory_list',
   'memory_delete',
-  // Background shell
-  'bash_background',
-  'bash_output',
-  'bash_kill',
   // Session management
   'plan_enter',
   'plan_exit',

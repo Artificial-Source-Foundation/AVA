@@ -144,14 +144,14 @@ describe('Agent presets', () => {
       name: 'Explorer',
       description: 'Read-only codebase exploration and analysis',
       tier: 'worker',
-      tools: ['read_file', 'glob', 'grep', 'ls', 'repo_map', 'websearch', 'webfetch'],
+      tools: ['read_file', 'glob', 'grep', 'ls', 'websearch', 'webfetch'],
       domain: 'fullstack',
     }
     expect(explorer.id).toBe('explorer')
     expect(explorer.name).toBe('Explorer')
     expect(explorer.tier).toBe('worker')
     expect(explorer.tools).toContain('read_file')
-    expect(explorer.tools).toContain('repo_map')
+    expect(explorer.tools).toContain('websearch')
     expect(explorer.domain).toBe('fullstack')
   })
 })

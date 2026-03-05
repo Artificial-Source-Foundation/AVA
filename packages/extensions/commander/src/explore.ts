@@ -13,7 +13,6 @@ export const EXPLORE_ALLOWED_TOOLS = [
   'glob',
   'grep',
   'ls',
-  'repo_map',
   'websearch',
   'webfetch',
 ] as const
@@ -25,17 +24,13 @@ export const EXPLORE_DENIED_TOOLS = [
   'delete_file',
   'edit',
   'bash',
-  'bash_background',
-  'bash_output',
-  'bash_kill',
   'apply_patch',
   'multiedit',
   'task',
   'delegate_coder',
-  'delegate_tester',
   'delegate_reviewer',
   'delegate_researcher',
-  'delegate_debugger',
+  'delegate_explorer',
 ] as const
 
 export const EXPLORE_WORKER: AgentDefinition = {

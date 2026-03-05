@@ -7,7 +7,6 @@
 
 import {
   AlertCircle,
-  Bug,
   Code2,
   File,
   FileEdit,
@@ -17,7 +16,6 @@ import {
   Loader2,
   Search,
   Terminal,
-  TestTube2,
   Trash2,
   Users,
 } from 'lucide-solid'
@@ -46,17 +44,15 @@ const TOOL_ICONS: Record<string, IconComponent> = {
   delete: Trash2,
   glob: FolderSearch,
   grep: Search,
-  codesearch: Search,
   bash: Terminal,
   ls: FolderSearch,
   websearch: Globe,
   webfetch: Globe,
   task: Users,
   delegate_coder: Code2,
-  delegate_tester: TestTube2,
   delegate_reviewer: Search,
   delegate_researcher: Globe,
-  delegate_debugger: Bug,
+  delegate_explorer: FolderSearch,
 }
 
 export function getToolIcon(name: string): IconComponent {

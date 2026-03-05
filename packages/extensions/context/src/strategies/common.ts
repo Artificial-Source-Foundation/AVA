@@ -2,7 +2,7 @@ import type { ChatMessage, ContentBlock, MessageContent } from '@ava/core-v2/llm
 
 export const PRUNE_TOKEN_BUDGET = 40_000
 export const PRUNE_MIN_THRESHOLD = 30_000
-export const PROTECTED_TOOLS = new Set(['load_skill', 'skill', 'memory_read'])
+export const PROTECTED_TOOLS = new Set(['skill', 'memory_read'])
 
 export function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4)

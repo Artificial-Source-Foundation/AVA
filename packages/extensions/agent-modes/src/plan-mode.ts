@@ -20,8 +20,6 @@ const ALLOWED_TOOLS = new Set([
   'ls',
   'websearch',
   'webfetch',
-  'codesearch',
-  'repo_map',
   'todoread',
   'plan_exit',
   'attempt_completion',

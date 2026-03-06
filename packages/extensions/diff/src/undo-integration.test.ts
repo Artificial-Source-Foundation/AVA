@@ -10,6 +10,18 @@ import type { ChatMessage } from '@ava/core-v2/llm'
 import { describe, expect, it } from 'vitest'
 import { activate } from './index.js'
 
+function getTrackerMiddleware(
+  registeredMiddleware: Array<{
+    name: string
+    before?: (ctx: ToolMiddlewareContext) => Promise<unknown>
+    after?: (ctx: ToolMiddlewareContext, result: unknown) => Promise<unknown>
+  }>
+) {
+  const middleware = registeredMiddleware.find((mw) => mw.name === 'ava-diff-tracker')
+  expect(middleware).toBeDefined()
+  return middleware!
+}
+
 function makeCtx(
   toolName: string,
   args: Record<string, unknown>,
@@ -80,7 +92,7 @@ describe('undo integration — full chain', () => {
     const { api, registeredMiddleware, emittedEvents } = createMockExtensionAPI()
     api.platform.fs.addFile('/src/app.ts', 'const x = 1')
     activate(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     // 1. Simulate write_file tool modifying the file
     await simulateWrite(api, mw, '/src/app.ts', 'const x = 2')
@@ -110,7 +122,7 @@ describe('undo integration — full chain', () => {
     const { api, registeredMiddleware, emittedEvents } = createMockExtensionAPI()
     api.platform.fs.addFile('/src/util.ts', 'v1')
     activate(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     await simulateWrite(api, mw, '/src/util.ts', 'v2')
     expect(await api.platform.fs.readFile('/src/util.ts')).toBe('v2')
@@ -134,7 +146,7 @@ describe('undo integration — full chain', () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
     api.platform.fs.addFile('/src/multi.ts', 'v0')
     activate(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     await simulateWrite(api, mw, '/src/multi.ts', 'v1')
     await simulateWrite(api, mw, '/src/multi.ts', 'v2')
@@ -160,7 +172,7 @@ describe('undo integration — full chain', () => {
   it('undo of created file deletes it, redo recreates it', async () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
     activate(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     // Simulate create_file
     const ctx = makeCtx('create_file', { path: '/src/new.ts' })
@@ -186,7 +198,7 @@ describe('undo integration — full chain', () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
     api.platform.fs.addFile('/src/doomed.ts', 'precious')
     activate(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     // Simulate delete_file
     const ctx = makeCtx('delete_file', { path: '/src/doomed.ts' })
@@ -212,7 +224,7 @@ describe('undo integration — full chain', () => {
     api.platform.fs.addFile('/src/a.ts', 'a-original')
     api.platform.fs.addFile('/src/b.ts', 'b-original')
     activate(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     await simulateWrite(api, mw, '/src/a.ts', 'a-modified')
     await simulateWrite(api, mw, '/src/b.ts', 'b-modified')
@@ -233,7 +245,7 @@ describe('undo integration — full chain', () => {
     const { api, registeredMiddleware, emittedEvents } = createMockExtensionAPI()
     api.platform.fs.addFile('/src/fork.ts', 'v1')
     activate(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     await simulateWrite(api, mw, '/src/fork.ts', 'v2')
 
@@ -257,7 +269,7 @@ describe('undo integration — full chain', () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
     api.platform.fs.addFile('/src/x.ts', 'original')
     const disposable = activate(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     await simulateWrite(api, mw, '/src/x.ts', 'changed')
     disposable.dispose()
@@ -278,7 +290,7 @@ describe('undo integration — message removal', () => {
     const { api, registeredMiddleware, sessionMessages } = createMockAPIWithSessions()
     api.platform.fs.addFile('/src/msg.ts', 'original')
     activate(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     // Simulate assistant message being present before the write
     const assistantMsg: ChatMessage = {
@@ -306,7 +318,7 @@ describe('undo integration — message removal', () => {
     const { api, registeredMiddleware, sessionMessages } = createMockAPIWithSessions()
     api.platform.fs.addFile('/src/msg2.ts', 'v1')
     activate(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     // Simulate assistant message
     const assistantMsg: ChatMessage = {
@@ -336,7 +348,7 @@ describe('undo integration — message removal', () => {
     const { api, registeredMiddleware, sessionMessages } = createMockAPIWithSessions()
     api.platform.fs.addFile('/src/multi-msg.ts', 'v0')
     activate(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     // Simulate two assistant messages, each followed by a write
     sessionMessages.push({
@@ -372,7 +384,7 @@ describe('undo integration — message removal', () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
     api.platform.fs.addFile('/src/no-mgr.ts', 'before')
     activate(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     await simulateWrite(api, mw, '/src/no-mgr.ts', 'after')
     expect(await api.platform.fs.readFile('/src/no-mgr.ts')).toBe('after')
@@ -388,7 +400,7 @@ describe('undo integration — message removal', () => {
       createMockAPIWithSessions()
     api.platform.fs.addFile('/src/idx.ts', 'a')
     activate(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     // Add messages to simulate a conversation
     sessionMessages.push({ role: 'user', content: 'do something' })

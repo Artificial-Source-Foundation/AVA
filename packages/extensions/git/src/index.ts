@@ -19,6 +19,7 @@ import { createBranchTool, switchBranchTool } from './branch.js'
 import { createCheckpointMiddleware } from './checkpoints.js'
 import { readIssueTool } from './issue.js'
 import { createPrTool } from './pr.js'
+import { ShadowSnapshotManager } from './shadow-snapshots.js'
 import { createSnapshotManager, isGitRepo } from './snapshots.js'
 import type { GitConfig } from './types.js'
 import { DEFAULT_GIT_CONFIG } from './types.js'
@@ -38,8 +39,14 @@ export function activate(api: ExtensionAPI): Disposable {
   }
   const disposables: Disposable[] = []
   const manager = createSnapshotManager(api.platform.shell, config)
+  let shadowManager: ShadowSnapshotManager | undefined
   let gitAvailable = false
   let cwd = ''
+
+  function extractPath(args: Record<string, unknown>): string | undefined {
+    const filePath = args.path ?? args.file_path ?? args.filePath
+    return typeof filePath === 'string' ? filePath : undefined
+  }
 
   // ── Git tools ───────────────────────────────────────────────────────────────
   disposables.push(api.registerTool(createPrTool))
@@ -63,6 +70,8 @@ export function activate(api: ExtensionAPI): Disposable {
       void isGitRepo(api.platform.shell, cwd).then(async (available) => {
         gitAvailable = available
         if (available) {
+          shadowManager = new ShadowSnapshotManager(cwd)
+          await shadowManager.init()
           api.log.debug('Git extension: repository detected')
           api.emit('git:ready', { cwd })
           await createCheckpoint(cwd, 'session-opened')
@@ -75,6 +84,38 @@ export function activate(api: ExtensionAPI): Disposable {
 
   // Snapshot middleware (only active in git repos with snapshotOnToolCall)
   if (config.snapshotOnToolCall) {
+    const shadowMiddleware: ToolMiddleware = {
+      name: 'ava-shadow-snapshots',
+      priority: 25,
+
+      async before(ctx: ToolMiddlewareContext): Promise<ToolMiddlewareResult | undefined> {
+        if (!gitAvailable || !shadowManager || !FILE_WRITE_TOOLS.has(ctx.toolName)) return undefined
+
+        const filePath = extractPath(ctx.args)
+        if (!filePath) return undefined
+
+        const isDestructive =
+          ctx.toolName === 'delete_file' ||
+          ctx.toolName === 'edit' ||
+          ctx.toolName === 'apply_patch' ||
+          ctx.toolName === 'write_file'
+        if (!isDestructive) return undefined
+
+        if (ctx.toolName === 'write_file') {
+          const exists = await api.platform.fs.exists(filePath)
+          if (!exists) return undefined
+        }
+
+        await shadowManager.take(
+          ctx.ctx.sessionId,
+          `Auto snapshot before ${ctx.toolName}: ${filePath}`
+        )
+
+        return undefined
+      },
+    }
+    disposables.push(api.addToolMiddleware(shadowMiddleware))
+
     const middleware: ToolMiddleware = {
       name: 'ava-git-snapshots',
       priority: 30,
@@ -82,7 +123,7 @@ export function activate(api: ExtensionAPI): Disposable {
       async before(ctx: ToolMiddlewareContext): Promise<ToolMiddlewareResult | undefined> {
         if (!gitAvailable || !FILE_WRITE_TOOLS.has(ctx.toolName)) return undefined
 
-        const filePath = (ctx.args.path ?? ctx.args.file_path) as string | undefined
+        const filePath = extractPath(ctx.args)
         if (!filePath) return undefined
 
         await manager.createSnapshot(
@@ -95,6 +136,14 @@ export function activate(api: ExtensionAPI): Disposable {
     }
     disposables.push(api.addToolMiddleware(middleware))
   }
+
+  disposables.push(
+    api.on('agent:finish', (data) => {
+      const { sessionId } = data as { sessionId?: string }
+      if (!sessionId || !shadowManager) return
+      void shadowManager.prune(10)
+    })
+  )
 
   // Register /snapshot command
   disposables.push(

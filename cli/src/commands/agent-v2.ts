@@ -27,6 +27,7 @@ import { createSessionManager } from '@ava/core-v2/session'
 import { registerCoreTools } from '@ava/core-v2/tools'
 import { createNodePlatform } from '@ava/platform-node/v2'
 import { migrateOAuthCredentials } from '../auth/manager.js'
+import { getCliLogger } from '../logger.js'
 import { expandAtMentions } from './at-mentions.js'
 
 interface AgentV2Options {
@@ -42,6 +43,8 @@ interface AgentV2Options {
   resume: string | null
   praxis: boolean
 }
+
+const log = getCliLogger('cli:agent-v2')
 
 function parseArgs(args: string[]): AgentV2Options | null {
   if (args[0] !== 'run' || args.length < 2) {
@@ -95,6 +98,7 @@ function parseArgs(args: string[]): AgentV2Options | null {
   }
 
   if (!goal && !resume) {
+    log.warn('Agent-v2 command missing goal and resume target')
     console.error('Error: No goal provided.')
     console.error('Usage: ava agent-v2 run "your goal here"')
     return null
@@ -107,9 +111,24 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
   const options = parseArgs(args)
   if (!options) return
 
+  log.info('Agent-v2 command started', {
+    provider: options.provider,
+    model: options.model || 'default',
+    max_turns: options.maxTurns,
+    timeout_min: options.timeout,
+    yolo: options.yolo,
+    json: options.json,
+    resume: options.resume ?? 'none',
+    goal_length: options.goal.length,
+  })
+
   // Expand @file mentions in goal
   if (options.goal) {
+    const originalGoal = options.goal
     options.goal = await expandAtMentions(options.goal, options.cwd)
+    if (options.goal !== originalGoal) {
+      log.info('Expanded @mentions in goal', { goal_length: options.goal.length })
+    }
   }
 
   // Initialize core-v2 platform
@@ -142,21 +161,25 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
       const sessions = sessionManager.list()
       const latest = sessions.sort((a, b) => b.updatedAt - a.updatedAt)[0]
       if (latest) {
+        log.info('Resuming latest session', { session: latest.id })
         if (options.verbose) {
           process.stderr.write(
             `[agent-v2] Resuming session: ${latest.id} (${latest.name ?? 'unnamed'})\n`
           )
         }
       } else {
+        log.warn('Resume requested but no prior sessions found')
         process.stderr.write('[agent-v2] No previous sessions found to resume. Starting fresh.\n')
       }
     } else {
       const session = await sessionManager.loadSession(options.resume)
       if (session) {
+        log.info('Resuming specific session', { session: session.id })
         if (options.verbose) {
           process.stderr.write(`[agent-v2] Resuming session: ${session.id}\n`)
         }
       } else {
+        log.warn('Requested session not found', { session: options.resume })
         process.stderr.write(`[agent-v2] Session ${options.resume} not found. Starting fresh.\n`)
       }
     }
@@ -177,8 +200,10 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
     }
     await manager.activateAll(modules)
     extensionCount = manager.getActiveExtensions().length
+    log.info('Agent-v2 extensions activated', { count: extensionCount })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    log.warn('Agent-v2 extension activation failed', { error: message })
     process.stderr.write(`[agent-v2] Warning: Failed to load extensions: ${message}\n`)
   }
 
@@ -298,6 +323,11 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
     aborted = true
     process.stderr.write('\nAborting agent... (press Ctrl+C again to force)\n')
     abortController.abort()
+    try {
+      log.warn('Agent-v2 abort requested')
+    } catch {
+      // Ignore logger errors in signal handler.
+    }
   }
 
   process.on('SIGINT', onSignal)
@@ -344,6 +374,14 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
     )
 
     const result = await agent.run({ goal: options.goal, cwd: options.cwd }, abortController.signal)
+    log.info('Agent-v2 command completed', {
+      success: result.success,
+      terminate_mode: result.terminateMode,
+      turns: result.turns,
+      duration_ms: result.durationMs,
+      tokens_in: result.tokensUsed.input,
+      tokens_out: result.tokensUsed.output,
+    })
 
     if (options.json) {
       // NDJSON summary line
@@ -374,6 +412,7 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
     process.exitCode = result.success ? 0 : 1
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    log.error('Agent-v2 command failed', { error: message })
     if (options.json) {
       console.log(JSON.stringify({ type: 'error', error: message }))
     } else {

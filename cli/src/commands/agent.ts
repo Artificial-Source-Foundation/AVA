@@ -5,6 +5,7 @@
 
 import type { AgentEvent, AgentResult, LLMProvider } from '@ava/core-v2'
 import { runAgent } from '@ava/core-v2'
+import { getCliLogger } from '../logger.js'
 
 // ============================================================================
 // Types
@@ -21,6 +22,8 @@ interface AgentCommandOptions {
   json: boolean
   logFile?: string
 }
+
+const log = getCliLogger('cli:agent')
 
 // ============================================================================
 // Argument Parsing
@@ -73,6 +76,7 @@ function parseAgentArgs(args: string[]): AgentCommandOptions | null {
   }
 
   if (!goal) {
+    log.warn('Agent command missing goal')
     console.error('Error: No goal provided.')
     console.error('Usage: ava agent run "your goal here"')
     return null
@@ -142,6 +146,16 @@ export async function runAgentCommand(args: string[]): Promise<void> {
   const options = parseAgentArgs(args)
   if (!options) return
 
+  log.info('Agent command started', {
+    provider: options.provider ?? 'anthropic',
+    model: options.model ?? 'default',
+    max_turns: options.maxTurns,
+    timeout_min: options.timeout,
+    verbose: options.verbose,
+    json: options.json,
+    goal_length: options.goal.length,
+  })
+
   // Settings are initialized with defaults via getSettingsManager()
 
   // Set up abort controller for Ctrl+C
@@ -156,6 +170,11 @@ export async function runAgentCommand(args: string[]): Promise<void> {
     aborted = true
     process.stderr.write('\nAborting agent... (press Ctrl+C again to force)\n')
     abortController.abort()
+    try {
+      log.warn('Agent command abort requested')
+    } catch {
+      // Ignore logger errors in signal handler.
+    }
   }
 
   process.on('SIGINT', onSignal)
@@ -202,6 +221,14 @@ export async function runAgentCommand(args: string[]): Promise<void> {
     )
 
     const durationMs = Date.now() - startTime
+    log.info('Agent command completed', {
+      success: result.success,
+      terminate_mode: result.terminateMode,
+      turns: result.turns,
+      duration_ms: durationMs,
+      tokens_in: result.tokensUsed.input,
+      tokens_out: result.tokensUsed.output,
+    })
 
     // Print summary
     if (options.verbose || !options.json) {
@@ -212,6 +239,7 @@ export async function runAgentCommand(args: string[]): Promise<void> {
     process.exitCode = result.success ? 0 : 1
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    log.error('Agent command failed', { error: message })
     process.stderr.write(`\nAgent error: ${message}\n`)
     process.exitCode = 1
   } finally {

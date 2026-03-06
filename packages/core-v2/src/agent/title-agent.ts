@@ -7,7 +7,10 @@
 
 import { getSettingsManager } from '../config/manager.js'
 import type { LLMProvider } from '../llm/types.js'
+import { createLogger } from '../logger/index.js'
 import { AgentExecutor } from './loop.js'
+
+const log = createLogger('AutoTitle')
 
 const TITLE_SYSTEM_PROMPT = `You are a title generator. You output ONLY a thread title. Nothing else.
 
@@ -77,9 +80,11 @@ export async function generateTitle(firstMessage: string): Promise<string | null
         weakModel?: string
         weakModelProvider?: string
       }>('provider')
-      console.log('[AutoTitle] Provider settings loaded:', providerSettings)
+      log.debug('Provider settings loaded')
     } catch (settingsErr) {
-      console.error('[AutoTitle] Failed to load provider settings:', settingsErr)
+      log.error('Failed to load provider settings', {
+        error: settingsErr instanceof Error ? settingsErr.message : String(settingsErr),
+      })
       return null
     }
 
@@ -88,10 +93,10 @@ export async function generateTitle(firstMessage: string): Promise<string | null
     const provider = (providerSettings?.weakModelProvider ??
       providerSettings?.defaultProvider) as LLMProvider
 
-    console.log('[AutoTitle] Provider config:', { model, provider })
+    log.debug('Using model:', { model, provider })
 
     if (!model || !provider) {
-      console.error('[AutoTitle] Missing model or provider')
+      log.warn('Missing model or provider')
       return null
     }
 
@@ -122,7 +127,7 @@ export async function generateTitle(firstMessage: string): Promise<string | null
     // Clean up the title
     let title =
       result.output
-        .replace(/<think>[\s\S]*?<\/think>\s*/g, '') // Remove thinking tags
+        .replace(/<tool_call>[\s\S]*?<\/think>\s*/g, '') // Remove thinking tags
         .split('\n')
         .map((line) => line.trim())
         .find((line) => line.length > 0) ?? ''
@@ -137,7 +142,9 @@ export async function generateTitle(firstMessage: string): Promise<string | null
 
     return title || null
   } catch (err) {
-    console.error('[AutoTitle] Title generation failed:', err)
+    log.error('Title generation failed', {
+      error: err instanceof Error ? err.message : String(err),
+    })
     return null
   }
 }

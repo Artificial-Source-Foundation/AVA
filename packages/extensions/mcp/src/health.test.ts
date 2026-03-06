@@ -34,55 +34,77 @@ describe('MCPHealthMonitor', () => {
       const manager = createMockManager()
       const monitor = new MCPHealthMonitor(manager, { intervalMs: 1000 })
 
-      const status = await monitor.checkServer('server-a')
+      // Trigger check via timer
+      monitor.start()
+      await vi.advanceTimersByTimeAsync(1000)
 
-      expect(status.healthy).toBe(true)
-      expect(status.consecutiveFailures).toBe(0)
-      expect(status.serverId).toBe('server-a')
-      expect(status.latencyMs).toBeGreaterThanOrEqual(0)
+      const status = monitor.getStatus('server-a')
+      expect(status?.healthy).toBe(true)
+      expect(status?.consecutiveFailures).toBe(0)
+      expect(status?.serverId).toBe('server-a')
+      expect(status?.latencyMs).toBeGreaterThanOrEqual(0)
       expect(manager.ping).toHaveBeenCalledWith('server-a')
+
+      monitor.stop()
     })
 
-    it('emits mcp:health event on success', async () => {
+    it('emits mcp:health:unhealthy and mcp:health:recovered events', async () => {
       const manager = createMockManager()
-      const monitor = new MCPHealthMonitor(manager)
-      const handler = vi.fn()
-      const sub = onEvent('mcp:health', handler)
+      const monitor = new MCPHealthMonitor(manager, { intervalMs: 1000, maxFailures: 1 })
+      const unhealthyHandler = vi.fn()
+      const recoveredHandler = vi.fn()
+      const sub1 = onEvent('mcp:health:unhealthy', unhealthyHandler)
+      const sub2 = onEvent('mcp:health:recovered', recoveredHandler)
 
-      await monitor.checkServer('server-a')
+      monitor.start()
 
-      expect(handler).toHaveBeenCalledWith(
-        expect.objectContaining({ serverId: 'server-a', healthy: true })
+      // Make ping fail
+      manager.ping = vi.fn().mockRejectedValue(new Error('fail'))
+      await vi.advanceTimersByTimeAsync(1000)
+
+      expect(unhealthyHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ serverId: 'server-a', failures: 1 })
       )
-      sub.dispose()
+      expect(recoveredHandler).toHaveBeenCalledWith(
+        expect.objectContaining({ serverId: 'server-a' })
+      )
+
+      sub1.dispose()
+      sub2.dispose()
+      monitor.stop()
     })
 
-    it('checkAll checks all connected servers', async () => {
+    it('checks all connected servers via timer', async () => {
       const manager = createMockManager()
-      const monitor = new MCPHealthMonitor(manager)
+      const monitor = new MCPHealthMonitor(manager, { intervalMs: 1000 })
 
-      const statuses = await monitor.checkAll()
+      monitor.start()
+      await vi.advanceTimersByTimeAsync(1000)
 
-      expect(statuses.size).toBe(2)
-      expect(statuses.get('server-a')?.healthy).toBe(true)
-      expect(statuses.get('server-b')?.healthy).toBe(true)
+      const statuses = monitor.getAllStatuses()
+      expect(statuses.length).toBe(2)
+      expect(statuses.find((s) => s.serverId === 'server-a')?.healthy).toBe(true)
+      expect(statuses.find((s) => s.serverId === 'server-b')?.healthy).toBe(true)
       expect(manager.ping).toHaveBeenCalledTimes(2)
+
+      monitor.stop()
     })
 
-    it('resets consecutive failures on success after prior failure', async () => {
-      const pingFn = vi
-        .fn()
-        .mockRejectedValueOnce(new Error('fail'))
-        .mockResolvedValueOnce(undefined)
-      const manager = createMockManager({ ping: pingFn })
-      const monitor = new MCPHealthMonitor(manager, { maxFailures: 5 })
+    it('resets consecutive failures on successful restart after prior failure', async () => {
+      const manager = createMockManager({
+        ping: vi.fn().mockRejectedValue(new Error('fail')),
+      })
+      const monitor = new MCPHealthMonitor(manager, { intervalMs: 1000, maxFailures: 2 })
 
-      await monitor.checkServer('server-a')
+      monitor.start()
+      await vi.advanceTimersByTimeAsync(1000) // 1 failure
       expect(monitor.getStatus('server-a')?.consecutiveFailures).toBe(1)
 
-      await monitor.checkServer('server-a')
+      await vi.advanceTimersByTimeAsync(1000) // 2 failures -> restart
       expect(monitor.getStatus('server-a')?.consecutiveFailures).toBe(0)
       expect(monitor.getStatus('server-a')?.healthy).toBe(true)
+
+      monitor.stop()
     })
   })
 
@@ -93,47 +115,54 @@ describe('MCPHealthMonitor', () => {
       const manager = createMockManager({
         ping: vi.fn().mockRejectedValue(new Error('connection refused')),
       })
-      const monitor = new MCPHealthMonitor(manager, { maxFailures: 5 })
+      const monitor = new MCPHealthMonitor(manager, { intervalMs: 1000, maxFailures: 5 })
 
-      const status = await monitor.checkServer('server-a')
+      monitor.start()
+      await vi.advanceTimersByTimeAsync(1000)
 
-      expect(status.healthy).toBe(false)
-      expect(status.consecutiveFailures).toBe(1)
+      const status = monitor.getStatus('server-a')
+      expect(status?.healthy).toBe(false)
+      expect(status?.consecutiveFailures).toBe(1)
+
+      monitor.stop()
     })
 
     it('increments consecutive failures', async () => {
       const manager = createMockManager({
         ping: vi.fn().mockRejectedValue(new Error('timeout')),
       })
-      const monitor = new MCPHealthMonitor(manager, { maxFailures: 5 })
+      const monitor = new MCPHealthMonitor(manager, { intervalMs: 1000, maxFailures: 5 })
 
-      await monitor.checkServer('server-a')
-      await monitor.checkServer('server-a')
-      await monitor.checkServer('server-a')
+      monitor.start()
+      await vi.advanceTimersByTimeAsync(1000) // 1
+      await vi.advanceTimersByTimeAsync(1000) // 2
+      await vi.advanceTimersByTimeAsync(1000) // 3
 
       const status = monitor.getStatus('server-a')
       expect(status?.consecutiveFailures).toBe(3)
+
+      monitor.stop()
     })
 
-    it('emits mcp:health event with failure info', async () => {
+    it('emits mcp:health:unhealthy event with failure info', async () => {
       const manager = createMockManager({
         ping: vi.fn().mockRejectedValue(new Error('connection refused')),
       })
-      const monitor = new MCPHealthMonitor(manager, { maxFailures: 5 })
+      const monitor = new MCPHealthMonitor(manager, { intervalMs: 1000, maxFailures: 1 })
       const handler = vi.fn()
-      const sub = onEvent('mcp:health', handler)
+      const sub = onEvent('mcp:health:unhealthy', handler)
 
-      await monitor.checkServer('server-a')
+      monitor.start()
+      await vi.advanceTimersByTimeAsync(1000)
 
       expect(handler).toHaveBeenCalledWith(
         expect.objectContaining({
           serverId: 'server-a',
-          healthy: false,
           failures: 1,
-          error: 'connection refused',
         })
       )
       sub.dispose()
+      monitor.stop()
     })
 
     it('handles timeout during health check', async () => {
@@ -142,14 +171,20 @@ describe('MCPHealthMonitor', () => {
           () => new Promise(() => {}) // never resolves
         ),
       })
-      const monitor = new MCPHealthMonitor(manager, { timeoutMs: 100, maxFailures: 5 })
+      const monitor = new MCPHealthMonitor(manager, {
+        intervalMs: 1000,
+        timeoutMs: 100,
+        maxFailures: 5,
+      })
 
-      const checkPromise = monitor.checkServer('server-a')
-      vi.advanceTimersByTime(200)
-      const status = await checkPromise
+      monitor.start()
+      await vi.advanceTimersByTimeAsync(1200) // 1000ms interval + 100ms timeout + buffer
 
-      expect(status.healthy).toBe(false)
-      expect(status.consecutiveFailures).toBe(1)
+      const status = monitor.getStatus('server-a')
+      expect(status?.healthy).toBe(false)
+      expect(status?.consecutiveFailures).toBe(1)
+
+      monitor.stop()
     })
   })
 
@@ -160,14 +195,19 @@ describe('MCPHealthMonitor', () => {
       const manager = createMockManager({
         ping: vi.fn().mockRejectedValue(new Error('dead')),
       })
-      const monitor = new MCPHealthMonitor(manager, { maxFailures: 3 })
+      const monitor = new MCPHealthMonitor(manager, { intervalMs: 1000, maxFailures: 3 })
 
-      await monitor.checkServer('server-a') // failure 1
-      await monitor.checkServer('server-a') // failure 2
+      monitor.start()
+      await vi.advanceTimersByTimeAsync(1000) // 1
       expect(manager.restart).not.toHaveBeenCalled()
 
-      await monitor.checkServer('server-a') // failure 3 → auto-restart
+      await vi.advanceTimersByTimeAsync(1000) // 2
+      expect(manager.restart).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(1000) // 3 → auto-restart
       expect(manager.restart).toHaveBeenCalledWith('server-a')
+
+      monitor.stop()
     })
 
     it('resets failure count after successful restart', async () => {
@@ -175,29 +215,34 @@ describe('MCPHealthMonitor', () => {
         ping: vi.fn().mockRejectedValue(new Error('dead')),
         restart: vi.fn().mockResolvedValue([]),
       })
-      const monitor = new MCPHealthMonitor(manager, { maxFailures: 2 })
+      const monitor = new MCPHealthMonitor(manager, { intervalMs: 1000, maxFailures: 2 })
 
-      await monitor.checkServer('server-a') // failure 1
-      await monitor.checkServer('server-a') // failure 2 → restart
+      monitor.start()
+      await vi.advanceTimersByTimeAsync(1000) // 1
+      await vi.advanceTimersByTimeAsync(1000) // 2 → restart
 
       const status = monitor.getStatus('server-a')
       expect(status?.consecutiveFailures).toBe(0)
       expect(status?.healthy).toBe(true)
+
+      monitor.stop()
     })
 
-    it('emits mcp:restarted event on successful restart', async () => {
+    it('emits mcp:health:recovered event on successful restart', async () => {
       const manager = createMockManager({
         ping: vi.fn().mockRejectedValue(new Error('dead')),
         restart: vi.fn().mockResolvedValue([]),
       })
-      const monitor = new MCPHealthMonitor(manager, { maxFailures: 1 })
+      const monitor = new MCPHealthMonitor(manager, { intervalMs: 1000, maxFailures: 1 })
       const handler = vi.fn()
-      const sub = onEvent('mcp:restarted', handler)
+      const sub = onEvent('mcp:health:recovered', handler)
 
-      await monitor.checkServer('server-a')
+      monitor.start()
+      await vi.advanceTimersByTimeAsync(1000)
 
       expect(handler).toHaveBeenCalledWith({ serverId: 'server-a' })
       sub.dispose()
+      monitor.stop()
     })
 
     it('does not reset failures if restart also fails', async () => {
@@ -205,14 +250,36 @@ describe('MCPHealthMonitor', () => {
         ping: vi.fn().mockRejectedValue(new Error('dead')),
         restart: vi.fn().mockRejectedValue(new Error('restart failed')),
       })
-      const monitor = new MCPHealthMonitor(manager, { maxFailures: 1 })
+      const monitor = new MCPHealthMonitor(manager, { intervalMs: 1000, maxFailures: 1 })
 
-      await monitor.checkServer('server-a')
+      monitor.start()
+      await vi.advanceTimersByTimeAsync(1000)
 
       const status = monitor.getStatus('server-a')
       // restart failed so failures stay at 1 (not reset)
       expect(status?.consecutiveFailures).toBe(1)
       expect(status?.healthy).toBe(false)
+
+      monitor.stop()
+    })
+
+    it('emits mcp:health:restart-failed on restart failure', async () => {
+      const manager = createMockManager({
+        ping: vi.fn().mockRejectedValue(new Error('dead')),
+        restart: vi.fn().mockRejectedValue(new Error('restart failed')),
+      })
+      const monitor = new MCPHealthMonitor(manager, { intervalMs: 1000, maxFailures: 1 })
+      const handler = vi.fn()
+      const sub = onEvent('mcp:health:restart-failed', handler)
+
+      monitor.start()
+      await vi.advanceTimersByTimeAsync(1000)
+
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({ serverId: 'server-a', error: 'restart failed' })
+      )
+      sub.dispose()
+      monitor.stop()
     })
   })
 
@@ -272,15 +339,18 @@ describe('MCPHealthMonitor', () => {
 
     it('getAllStatuses returns a copy of all statuses', async () => {
       const manager = createMockManager()
-      const monitor = new MCPHealthMonitor(manager)
+      const monitor = new MCPHealthMonitor(manager, { intervalMs: 1000 })
 
-      await monitor.checkAll()
+      monitor.start()
+      await vi.advanceTimersByTimeAsync(1000)
 
       const statuses = monitor.getAllStatuses()
-      expect(statuses.size).toBe(2)
+      expect(statuses.length).toBe(2)
       // Verify it's a copy
-      statuses.clear()
-      expect(monitor.getAllStatuses().size).toBe(2)
+      statuses.length = 0
+      expect(monitor.getAllStatuses().length).toBe(2)
+
+      monitor.stop()
     })
   })
 })

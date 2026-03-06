@@ -367,8 +367,10 @@ function createAgentStore() {
         contentFlushTimer = null
         if (!contentFlushPending) return
         contentFlushPending = false
-        setStreamingContent(accumulatedContent)
-        setStreamingTokenEstimate(Math.ceil(accumulatedContent.length / 4))
+        batch(() => {
+          setStreamingContent(accumulatedContent)
+          setStreamingTokenEstimate(Math.ceil(accumulatedContent.length / 4))
+        })
       }, 16)
     }
     const flushStreamingContent = () => {
@@ -377,8 +379,10 @@ function createAgentStore() {
         contentFlushTimer = null
       }
       contentFlushPending = false
-      setStreamingContent(accumulatedContent)
-      setStreamingTokenEstimate(Math.ceil(accumulatedContent.length / 4))
+      batch(() => {
+        setStreamingContent(accumulatedContent)
+        setStreamingTokenEstimate(Math.ceil(accumulatedContent.length / 4))
+      })
     }
 
     // Buffered tool call updates — signal-only during streaming, store on start/finish
@@ -394,7 +398,9 @@ function createAgentStore() {
           session.updateMessage(assistantMsg.id, { toolCalls: snapshot })
         })
       } else {
-        setActiveToolCalls(snapshot)
+        batch(() => {
+          setActiveToolCalls(snapshot)
+        })
       }
     }
     const immediateToolFlush = () => {
@@ -590,9 +596,11 @@ function createAgentStore() {
             })
 
             // Clear streaming signals
-            setStreamingContent('')
-            setStreamingTokenEstimate(0)
-            setActiveToolCalls([])
+            batch(() => {
+              setStreamingContent('')
+              setStreamingTokenEstimate(0)
+              setActiveToolCalls([])
+            })
             getCoreBudget()?.addMessage(assistantMsg.id, finalContent)
 
             void notifyCompletion(
@@ -604,7 +612,9 @@ function createAgentStore() {
           }
 
           case 'error': {
-            setError({ type: 'unknown', message: event.error })
+            batch(() => {
+              setError({ type: 'unknown', message: event.error })
+            })
             session.setMessageError(assistantMsg.id, {
               type: 'unknown',
               message: event.error,
@@ -691,18 +701,8 @@ function createAgentStore() {
       const currentSession = session.currentSession()
       const defaultName = DEFAULTS.SESSION_NAME
       const sessionName = currentSession?.name?.trim()
-      console.log('[AutoTitle] Checking:', {
-        autoTitleEnabled,
-        sessionName,
-        defaultName,
-        matchesDefault: sessionName === defaultName,
-        sessionId,
-        currentSessionId: currentSession?.id,
-      })
       if (autoTitleEnabled && currentSession?.id === sessionId && sessionName === defaultName) {
-        console.log('[AutoTitle] Generating title for:', goal.slice(0, 100))
         void generateTitle(goal).then((title) => {
-          console.log('[AutoTitle] Generated title:', title)
           if (title) {
             void session.renameSession(sessionId, title)
           }
@@ -725,8 +725,10 @@ function createAgentStore() {
         stack: err instanceof Error ? err.stack : undefined,
       })
       void flushLogs()
-      setLastError(errorMsg)
-      setError({ type: 'unknown', message: errorMsg })
+      batch(() => {
+        setLastError(errorMsg)
+        setError({ type: 'unknown', message: errorMsg })
+      })
       return null
     } finally {
       batch(() => {
@@ -788,7 +790,9 @@ function createAgentStore() {
       const errorMsg = err instanceof Error ? err.message : String(err)
       logError('Agent', 'Regenerate failed', { error: errorMsg })
       void flushLogs()
-      setLastError(errorMsg)
+      batch(() => {
+        setLastError(errorMsg)
+      })
       return null
     } finally {
       batch(() => {
@@ -815,8 +819,8 @@ function createAgentStore() {
     abortRef.current?.abort()
     abortRef.current = null
     executorRef.current = null
-    setMessageQueue([])
     batch(() => {
+      setMessageQueue([])
       setActiveToolCalls([])
       setIsRunning(false)
       setStreamingStartedAt(null)
@@ -835,9 +839,9 @@ function createAgentStore() {
       logInfo('Agent', 'Steer via executor', { content: content.slice(0, 80) })
     } else {
       // Fallback: queue as a priority message
-      setMessageQueue([{ content }])
       abortRef.current?.abort()
       batch(() => {
+        setMessageQueue([{ content }])
         setIsRunning(false)
         setStreamingStartedAt(null)
       })
@@ -846,11 +850,11 @@ function createAgentStore() {
   }
 
   function clearQueue(): void {
-    setMessageQueue([])
+    batch(() => setMessageQueue([]))
   }
 
   function removeFromQueue(index: number): void {
-    setMessageQueue((prev) => prev.filter((_, i) => i !== index))
+    batch(() => setMessageQueue((prev) => prev.filter((_, i) => i !== index)))
   }
 
   // ====================================================================
@@ -960,8 +964,10 @@ function createAgentStore() {
   }
 
   function clearError(): void {
-    setLastError(null)
-    setError(null)
+    batch(() => {
+      setLastError(null)
+      setError(null)
+    })
   }
 
   function getState(): AgentState {

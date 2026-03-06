@@ -50,25 +50,9 @@ export class MCPHealthMonitor {
   start(): void {
     if (this.timer) return
     const timer = setInterval(() => this.checkAll(), this.config.intervalMs)
-    if (typeof timer === 'object' && 'unref' in timer) timer.unref()
-    this.timer = timer
-    log.debug('Health monitoring started')
-  }
-    this.timer = timer
-    log.debug('Health monitoring started')
-  }
-    this.timer = timer
-    log.debug('Health monitoring started')
-  }
-    this.timer = timer
-    log.debug('Health monitoring started')
-  }
-    this.timer = timer
-    log.debug('Health monitoring started')
-  }
-    this.timer = timer
-    log.debug('Health monitoring started')
-  }
+    if (typeof timer === 'object' && 'unref' in timer) {
+      ;(timer as ReturnType<typeof setInterval> & { unref(): void }).unref()
+    }
     this.timer = timer
     log.debug('Health monitoring started')
   }
@@ -77,80 +61,7 @@ export class MCPHealthMonitor {
     if (this.timer) {
       clearInterval(this.timer)
       this.timer = null
-    }
-  }
-
-  async checkAll(): Promise<Map<string, HealthStatus>> {
-    const servers = this.manager.getConnectedServers()
-    for (const serverId of servers) {
-      await this.checkServer(serverId)
-    }
-    return new Map(this.statuses)
-  }
-
-  async checkServer(serverId: string): Promise<HealthStatus> {
-    const start = Date.now()
-    const existing = this.statuses.get(serverId) ?? {
-      serverId,
-      healthy: true,
-      lastCheck: 0,
-      consecutiveFailures: 0,
-    }
-
-    try {
-      // Ping using a list tools request with timeout
-      await Promise.race([
-        this.manager.ping(serverId),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Health check timeout')), this.config.timeoutMs)
-        ),
-      ])
-
-      const status: HealthStatus = {
-        serverId,
-        healthy: true,
-        lastCheck: Date.now(),
-        consecutiveFailures: 0,
-        latencyMs: Date.now() - start,
-      }
-      this.statuses.set(serverId, status)
-      emitEvent('mcp:health', { serverId, healthy: true, latencyMs: status.latencyMs })
-      return status
-    } catch (err) {
-      const failures = existing.consecutiveFailures + 1
-      const status: HealthStatus = {
-        serverId,
-        healthy: false,
-        lastCheck: Date.now(),
-        consecutiveFailures: failures,
-        latencyMs: Date.now() - start,
-      }
-      this.statuses.set(serverId, status)
-
-      log.warn(
-        `Health check failed for ${serverId}: ${err instanceof Error ? err.message : 'unknown'}`
-      )
-      emitEvent('mcp:health', {
-        serverId,
-        healthy: false,
-        failures,
-        error: err instanceof Error ? err.message : 'unknown',
-      })
-
-      // Auto-restart after maxFailures
-      if (failures >= this.config.maxFailures) {
-        log.warn(`Auto-restarting ${serverId} after ${failures} consecutive failures`)
-        try {
-          await this.manager.restart(serverId)
-          status.consecutiveFailures = 0
-          status.healthy = true
-          emitEvent('mcp:restarted', { serverId })
-        } catch {
-          log.error(`Failed to restart ${serverId}`)
-        }
-      }
-
-      return status
+      log.debug('Health monitoring stopped')
     }
   }
 
@@ -158,7 +69,90 @@ export class MCPHealthMonitor {
     return this.statuses.get(serverId)
   }
 
-  getAllStatuses(): Map<string, HealthStatus> {
-    return new Map(this.statuses)
+  getAllStatuses(): HealthStatus[] {
+    return Array.from(this.statuses.values())
+  }
+
+  private async checkAll(): Promise<void> {
+    const servers = this.manager.getConnectedServers()
+    const now = Date.now()
+
+    for (const serverId of servers) {
+      await this.checkOne(serverId, now)
+    }
+  }
+
+  private async checkOne(serverId: string, now: number): Promise<void> {
+    const start = now
+
+    try {
+      await Promise.race([
+        this.manager.ping(serverId),
+        new Promise<void>((_, reject) =>
+          setTimeout(() => reject(new Error('Ping timeout')), this.config.timeoutMs)
+        ),
+      ])
+
+      const latency = Date.now() - start
+      this.updateStatus(serverId, {
+        healthy: true,
+        lastCheck: now,
+        consecutiveFailures: 0,
+        latencyMs: latency,
+      })
+    } catch (error) {
+      const current = this.statuses.get(serverId)
+      const failures = (current?.consecutiveFailures ?? 0) + 1
+
+      this.updateStatus(serverId, {
+        healthy: false,
+        lastCheck: now,
+        consecutiveFailures: failures,
+        latencyMs: undefined,
+      })
+
+      if (failures >= this.config.maxFailures) {
+        await this.handleUnhealthy(serverId, failures)
+      }
+    }
+  }
+
+  private updateStatus(serverId: string, update: Partial<HealthStatus>): void {
+    const current = this.statuses.get(serverId)
+    const status: HealthStatus = {
+      serverId,
+      healthy: update.healthy ?? current?.healthy ?? false,
+      lastCheck: update.lastCheck ?? current?.lastCheck ?? 0,
+      consecutiveFailures: update.consecutiveFailures ?? current?.consecutiveFailures ?? 0,
+      latencyMs: update.latencyMs ?? current?.latencyMs,
+    }
+    this.statuses.set(serverId, status)
+  }
+
+  private async handleUnhealthy(serverId: string, failures: number): Promise<void> {
+    log.warn(
+      `MCP server ${serverId} marked unhealthy after ${failures} consecutive failures. Restarting...`
+    )
+
+    emitEvent('mcp:health:unhealthy', { serverId, failures })
+
+    try {
+      await this.manager.restart(serverId)
+      log.info(`MCP server ${serverId} restarted successfully`)
+
+      // Reset failure count after successful restart
+      const status = this.statuses.get(serverId)
+      if (status) {
+        status.consecutiveFailures = 0
+        status.healthy = true
+      }
+
+      emitEvent('mcp:health:recovered', { serverId })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      log.error(`Failed to restart MCP server ${serverId}: ${message}`)
+
+      emitEvent('mcp:health:restart-failed', { serverId, error: message })
+    }
   }
 }

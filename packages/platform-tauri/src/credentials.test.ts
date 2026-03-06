@@ -33,7 +33,7 @@ describe('TauriCredentialStore', () => {
     })
 
     it('should handle key normalization', async () => {
-      localStorage.setItem('ava_cred_API_KEY', 'value')
+      localStorage.setItem('ava_cred_api_key', 'value')
       const value = await store.get('api_key')
       expect(value).toBe('value')
     })

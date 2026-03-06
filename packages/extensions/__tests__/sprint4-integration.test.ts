@@ -583,7 +583,7 @@ describe('Sprint 4 Integration', () => {
       const prompt = teamMode.systemPrompt!('You are AVA.')
       expect(prompt).toContain('Commander')
       expect(prompt).toContain('Coder')
-      expect(prompt).toContain('Tester')
+      expect(prompt).toContain('Reviewer')
 
       disposable.dispose()
       expect(getAgentModes().has('praxis')).toBe(false)

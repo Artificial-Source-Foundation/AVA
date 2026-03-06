@@ -2,7 +2,7 @@ import { createMockExtensionAPI } from '@ava/core-v2/__test-utils__/mock-extensi
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { activate } from './index.js'
 import { clearRegistry } from './registry.js'
-import { BUILTIN_AGENTS, LEAD_AGENTS, WORKER_AGENTS } from './workers.js'
+import { BUILTIN_AGENTS } from './workers.js'
 
 // Mock AgentExecutor to avoid real agent execution
 vi.mock('@ava/core-v2/agent', () => ({
@@ -23,24 +23,14 @@ describe('Commander Extension (Praxis)', () => {
 
     activate(api)
 
-    const expectedCount = LEAD_AGENTS.length + WORKER_AGENTS.length
-    expect(registeredTools).toHaveLength(expectedCount)
+    // Only agents in DELEGATE_TOOL_AGENT_IDS get delegate tools (coder, researcher, reviewer, explorer)
+    expect(registeredTools).toHaveLength(4)
 
     const toolNames = registeredTools.map((t) => t.definition.name)
-    // Leads
-    expect(toolNames).toContain('delegate_frontend-lead')
-    expect(toolNames).toContain('delegate_backend-lead')
-    expect(toolNames).toContain('delegate_qa-lead')
-    expect(toolNames).toContain('delegate_fullstack-lead')
-    // Workers
     expect(toolNames).toContain('delegate_coder')
-    expect(toolNames).toContain('delegate_tester')
     expect(toolNames).toContain('delegate_reviewer')
     expect(toolNames).toContain('delegate_researcher')
-    expect(toolNames).toContain('delegate_debugger')
-    expect(toolNames).toContain('delegate_architect')
-    expect(toolNames).toContain('delegate_planner')
-    expect(toolNames).toContain('delegate_devops')
+    expect(toolNames).toContain('delegate_explorer')
   })
 
   it('registers praxis agent mode', () => {
@@ -117,9 +107,9 @@ describe('Commander Extension (Praxis)', () => {
     expect(prompt).toContain('Base prompt')
     expect(prompt).toContain('Praxis')
     expect(prompt).toContain('Commander')
-    expect(prompt).toContain('Frontend Lead')
-    expect(prompt).toContain('Backend Lead')
-    expect(prompt).toContain('delegate_frontend-lead')
+    expect(prompt).toContain('Coder')
+    expect(prompt).toContain('Reviewer')
+    expect(prompt).toContain('delegate_coder')
     expect(prompt).toContain('Task Complexity Assessment')
   })
 

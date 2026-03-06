@@ -60,7 +60,9 @@ describe('EXPLORE_WORKER', () => {
   it('deniedTools includes delegation tools', () => {
     const denied = EXPLORE_WORKER.deniedTools!
     expect(denied).toContain('delegate_coder')
-    expect(denied).toContain('delegate_tester')
+    expect(denied).toContain('delegate_reviewer')
+    expect(denied).toContain('delegate_researcher')
+    expect(denied).toContain('delegate_explorer')
   })
 
   it('has no overlap between allowed and denied tools', () => {

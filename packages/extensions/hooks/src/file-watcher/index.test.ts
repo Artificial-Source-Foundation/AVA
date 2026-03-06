@@ -2,8 +2,8 @@
  * Activation test for file-watcher extension.
  */
 
+import { createMockExtensionAPI } from '@ava/core-v2/__test-utils__/mock-extension-api'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createMockExtensionAPI } from '../../../core-v2/src/__test-utils__/mock-extension-api.js'
 import { activate } from './index.js'
 
 function activateWatcher(api: unknown) {

@@ -13,6 +13,7 @@ mod plugin_state;
 mod validation;
 mod memory;
 mod permissions;
+mod sandbox_landlock;
 pub mod pty;
 mod tool_browser;
 mod tool_git;
@@ -31,6 +32,7 @@ pub use greet::greet;
 pub use memory::{memory_recall, memory_recent, memory_remember, memory_search};
 pub use oauth::{oauth_copilot_device_poll, oauth_copilot_device_start, oauth_listen};
 pub use permissions::evaluate_permission;
+pub use sandbox_landlock::sandbox_apply_landlock;
 pub use reflection::reflection_reflect_and_fix;
 pub use plugin_state::{
     get_plugins_state, install_plugin, set_plugin_enabled, set_plugins_state, uninstall_plugin,

@@ -4,7 +4,10 @@
  * Subscribes to tool:finish events and tracks call patterns per session.
  */
 
+import { getSettingsManager, type ProviderSettings } from '@ava/core-v2/config'
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
+import type { ChatMessage, LLMProvider, ProviderConfig } from '@ava/core-v2/llm'
+import { createClient } from '@ava/core-v2/llm'
 
 export interface DoomLoopConfig {
   threshold: number
@@ -83,6 +86,7 @@ interface EnhancedToolCall {
 interface EnhancedSessionState {
   turnCount: number
   recentSignatures: string[]
+  recentToolCalls: EnhancedToolCall[]
   lastError: string | null
   consecutiveErrorCount: number
   noToolTurns: number
@@ -107,6 +111,7 @@ function getState(sessionId: string): EnhancedSessionState {
   const created: EnhancedSessionState = {
     turnCount: 0,
     recentSignatures: [],
+    recentToolCalls: [],
     lastError: null,
     consecutiveErrorCount: 0,
     noToolTurns: 0,
@@ -158,6 +163,78 @@ function detectLikelyError(call: EnhancedToolCall): string | null {
   const text = (call.result ?? '').toLowerCase()
   if (text.includes('error') || text.includes('failed')) return text.slice(0, 240)
   return null
+}
+
+function trimText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, maxLength)}...`
+}
+
+function buildToolCallSummary(calls: EnhancedToolCall[]): string {
+  if (calls.length === 0) return 'No recent tool calls'
+  return calls
+    .slice(-5)
+    .map((call, index) => {
+      const args = trimText(JSON.stringify(call.args), 200)
+      const result = trimText(call.result ?? '', 180)
+      const outcome = call.success ? 'success' : 'error'
+      return `${index + 1}. ${call.name} args=${args} outcome=${outcome}${result ? ` result=${result}` : ''}`
+    })
+    .join('\n')
+}
+
+async function judgeTokenWasteWithLLM(
+  sessionId: string,
+  state: EnhancedSessionState
+): Promise<{ stuck: boolean; reason: string }> {
+  const providerSettings = getSettingsManager().get<ProviderSettings>('provider')
+  const provider = (providerSettings.weakModelProvider ??
+    providerSettings.defaultProvider) as LLMProvider
+  const model = providerSettings.weakModel ?? providerSettings.defaultModel
+  if (!provider || !model) {
+    return { stuck: false, reason: 'missing provider/model configuration' }
+  }
+
+  const client = createClient(provider)
+  const summary = buildToolCallSummary(state.recentToolCalls)
+
+  const messages: ChatMessage[] = [
+    {
+      role: 'system',
+      content:
+        'You are a loop detector. Decide whether an agent is stuck in a loop. Reply with YES or NO followed by one short sentence.',
+    },
+    {
+      role: 'user',
+      _variant: 'cheap',
+      content:
+        `Is this agent stuck? Session ${sessionId}. Here are the last 5 tool calls:\n${summary}\n` +
+        'Reply exactly as: YES <one sentence> or NO <one sentence>.',
+    },
+  ]
+
+  const config: ProviderConfig = {
+    provider,
+    model,
+    temperature: 0,
+    thinking: { enabled: false },
+  }
+
+  let response = ''
+  for await (const delta of client.stream(messages, config)) {
+    if (delta.content) {
+      response += delta.content
+    }
+    if (delta.done) {
+      break
+    }
+  }
+
+  const normalized = response.trim().replace(/\s+/g, ' ')
+  return {
+    stuck: /^yes\b/i.test(normalized),
+    reason: normalized || 'No response from loop judge',
+  }
 }
 
 function evaluateSelfAssessment(state: EnhancedSessionState): boolean {
@@ -360,6 +437,8 @@ export function registerDoomLoop(api: ExtensionAPI): Disposable {
     for (const call of toolCalls) {
       state.recentSignatures.push(toSignature(call))
       if (state.recentSignatures.length > 25) state.recentSignatures.shift()
+      state.recentToolCalls.push(call)
+      if (state.recentToolCalls.length > 25) state.recentToolCalls.shift()
 
       const error = detectLikelyError(call)
       if (error) {
@@ -447,7 +526,7 @@ export function registerDoomLoop(api: ExtensionAPI): Disposable {
     }
   })
 
-  const usageDisposable = api.on('llm:usage', (data: unknown) => {
+  const usageDisposable = api.on('llm:usage', async (data: unknown) => {
     const event = data as { sessionId?: string; inputTokens?: number; outputTokens?: number }
     if (!event.sessionId) return
     const state = getState(event.sessionId)
@@ -460,17 +539,38 @@ export function registerDoomLoop(api: ExtensionAPI): Disposable {
     const ratio = state.totalTokens === 0 ? 0 : state.wastedTokens / state.totalTokens
     if (
       state.noProgressTurns >= enhancedConfig.tokenWasteMinTurns &&
-      ratio > enhancedConfig.tokenWasteRatio &&
-      canEmitScenario(state, 'token-waste')
+      ratio > enhancedConfig.tokenWasteRatio
     ) {
-      emitStuck(
-        api,
-        event.sessionId,
-        'token-waste',
-        state.noProgressTurns,
-        `High token spend without progress (${Math.round(ratio * 100)}% wasted).`,
-        'high'
-      )
+      if (state.recentToolCalls.length === 0) {
+        if (canEmitScenario(state, 'token-waste')) {
+          emitStuck(
+            api,
+            event.sessionId,
+            'token-waste',
+            state.noProgressTurns,
+            `High token spend without progress (${Math.round(ratio * 100)}% wasted).`,
+            'high'
+          )
+        }
+        return
+      }
+
+      if (!canEmitScenario(state, 'token-waste-judge')) return
+      try {
+        const verdict = await judgeTokenWasteWithLLM(event.sessionId, state)
+        if (verdict.stuck && canEmitScenario(state, 'token-waste')) {
+          emitStuck(
+            api,
+            event.sessionId,
+            'token-waste',
+            state.noProgressTurns,
+            `High token spend without progress (${Math.round(ratio * 100)}% wasted). ${verdict.reason}`,
+            'high'
+          )
+        }
+      } catch (error) {
+        api.log.debug(`Token-waste judge failed: ${String(error)}`)
+      }
     }
   })
 

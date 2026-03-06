@@ -14,8 +14,9 @@ import type {
   ToolMiddlewareResult,
 } from '@ava/core-v2/extensions'
 import type { ChatMessage } from '@ava/core-v2/llm'
-import type { ToolResult } from '@ava/core-v2/tools'
+import type { Tool, ToolResult } from '@ava/core-v2/tools'
 import { HunkReviewState } from './hunk-review/state.js'
+import type { HunkReviewStatus } from './hunk-review/types.js'
 import { summarizeDiffSession } from './summary.js'
 import { addDiff, createDiffSession, createFileDiff } from './tracker.js'
 import type { DiffSession, FileDiff } from './types.js'
@@ -66,6 +67,14 @@ export function activate(api: ExtensionAPI): Disposable {
       sessions.set(sessionId, session)
     }
     return session
+  }
+
+  function emitHunkReviewUpdate(sessionId: string): void {
+    api.emit('diff:hunks-updated', {
+      sessionId,
+      items: hunkReviewState.list(sessionId),
+      summary: hunkReviewState.summary(sessionId),
+    })
   }
 
   const middleware: ToolMiddleware = {
@@ -125,6 +134,7 @@ export function activate(api: ExtensionAPI): Disposable {
         const session = getOrCreateSession(ctx.ctx.sessionId)
         addDiff(session, diff)
         hunkReviewState.ingest(ctx.ctx.sessionId, diff)
+        emitHunkReviewUpdate(ctx.ctx.sessionId)
 
         // Push to undo stack + clear redo (standard undo/redo semantics)
         const undoStack = getUndoStack(ctx.ctx.sessionId)
@@ -147,6 +157,7 @@ export function activate(api: ExtensionAPI): Disposable {
           const session = getOrCreateSession(ctx.ctx.sessionId)
           addDiff(session, diff)
           hunkReviewState.ingest(ctx.ctx.sessionId, diff)
+          emitHunkReviewUpdate(ctx.ctx.sessionId)
 
           const undoStack = getUndoStack(ctx.ctx.sessionId)
           undoStack.push(diff)
@@ -162,6 +173,70 @@ export function activate(api: ExtensionAPI): Disposable {
   }
 
   const mwDisposable = api.addToolMiddleware(middleware)
+
+  const diffReviewTool: Tool = {
+    definition: {
+      name: 'diff_review',
+      description: 'Review tracked hunks and update hunk decisions',
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['list', 'accept', 'reject', 'apply'],
+            description: 'Review action to perform',
+          },
+          hunkId: { type: 'string', description: 'Hunk id for accept/reject actions' },
+          path: { type: 'string', description: 'Optional file path filter for list action' },
+        },
+        required: ['action'],
+      },
+    },
+    async execute(input, ctx) {
+      const args = input as { action?: string; hunkId?: string; path?: string }
+      const action = args.action ?? 'list'
+      const sessionId = ctx.sessionId
+
+      if (action === 'list') {
+        const items = hunkReviewState.list(sessionId, args.path)
+        return {
+          success: true,
+          output: `Found ${items.length} hunks`,
+          metadata: { items, summary: hunkReviewState.summary(sessionId) },
+        }
+      }
+
+      if (action === 'accept' || action === 'reject') {
+        if (!args.hunkId) {
+          return { success: false, output: 'hunkId is required for accept/reject' }
+        }
+        const status: HunkReviewStatus = action === 'accept' ? 'accepted' : 'rejected'
+        const updated = hunkReviewState.updateStatus(sessionId, args.hunkId, status)
+        if (!updated) {
+          return { success: false, output: `Hunk not found: ${args.hunkId}` }
+        }
+        emitHunkReviewUpdate(sessionId)
+        return {
+          success: true,
+          output: `Marked ${args.hunkId} as ${status}`,
+          metadata: { summary: hunkReviewState.summary(sessionId) },
+        }
+      }
+
+      if (action === 'apply') {
+        const summary = hunkReviewState.summary(sessionId)
+        return {
+          success: true,
+          output: `Applied review state for ${summary.accepted} accepted hunks (${summary.pending} pending).`,
+          metadata: { summary },
+        }
+      }
+
+      return { success: false, output: `Unknown action: ${action}` }
+    },
+  }
+
+  const diffReviewDisposable = api.registerTool(diffReviewTool)
 
   // Wire diff:undo listener
   const undoDisposable = api.on('diff:undo', async (data: unknown) => {
@@ -203,6 +278,7 @@ export function activate(api: ExtensionAPI): Disposable {
     const redoStack = getRedoStack(sessionId)
     redoStack.push(diff)
     api.emit('diff:undone', { sessionId, diff })
+    emitHunkReviewUpdate(sessionId)
   })
 
   // Wire diff:redo listener
@@ -247,6 +323,7 @@ export function activate(api: ExtensionAPI): Disposable {
     const undoStack = getUndoStack(sessionId)
     undoStack.push(diff)
     api.emit('diff:redone', { sessionId, diff })
+    emitHunkReviewUpdate(sessionId)
   })
 
   // Wire diff:revert-to listener — reverts all diffs after a given index
@@ -275,11 +352,33 @@ export function activate(api: ExtensionAPI): Disposable {
     redoStack.length = 0
 
     api.emit('diff:reverted-to', { sessionId, index, reverted })
+    emitHunkReviewUpdate(sessionId)
+  })
+
+  const hunkStatusDisposable = api.on('diff:hunk-status:update', (data: unknown) => {
+    const payload = data as {
+      sessionId?: string
+      hunkId?: string
+      status?: HunkReviewStatus
+    }
+    if (!payload.sessionId || !payload.hunkId || !payload.status) return
+    const updated = hunkReviewState.updateStatus(payload.sessionId, payload.hunkId, payload.status)
+    if (!updated) {
+      api.emit('diff:hunk-status:update-failed', {
+        sessionId: payload.sessionId,
+        hunkId: payload.hunkId,
+        status: payload.status,
+      })
+      return
+    }
+    emitHunkReviewUpdate(payload.sessionId)
   })
 
   // Wire agent:finish listener — compute and emit session summary
   const finishDisposable = api.on('agent:finish', (data: unknown) => {
-    const { sessionId } = data as { sessionId: string }
+    const event = data as { sessionId?: string; agentId?: string }
+    const sessionId = event.sessionId ?? event.agentId
+    if (!sessionId) return
     const session = sessions.get(sessionId)
     if (!session || session.diffs.length === 0) return
 
@@ -292,9 +391,11 @@ export function activate(api: ExtensionAPI): Disposable {
   return {
     dispose() {
       mwDisposable.dispose()
+      diffReviewDisposable.dispose()
       undoDisposable.dispose()
       redoDisposable.dispose()
       revertToDisposable.dispose()
+      hunkStatusDisposable.dispose()
       finishDisposable.dispose()
       sessions.clear()
       snapshots.clear()

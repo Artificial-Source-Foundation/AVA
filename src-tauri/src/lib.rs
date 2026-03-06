@@ -11,8 +11,8 @@ use commands::{
     get_cwd, get_env_var, get_plugins_state, greet, install_plugin, list_tools, memory_recall,
     memory_recent, memory_remember, memory_search, oauth_copilot_device_poll,
     oauth_copilot_device_start, oauth_listen, pty_kill, pty_resize, pty_spawn, pty_write,
-    read_latest_logs, reflection_reflect_and_fix, set_plugin_enabled, set_plugins_state, uninstall_plugin,
-    validation_validate_edit, validation_validate_with_retry,
+    read_latest_logs, reflection_reflect_and_fix, sandbox_apply_landlock, set_plugin_enabled,
+    set_plugins_state, uninstall_plugin, validation_validate_edit, validation_validate_with_retry,
 };
 use pty::PtyManager;
 use tauri::Manager;
@@ -75,6 +75,7 @@ pub fn run() {
             memory_search,
             memory_recent,
             evaluate_permission,
+            sandbox_apply_landlock,
             extensions_register_native,
             extensions_register_wasm,
             validation_validate_edit,

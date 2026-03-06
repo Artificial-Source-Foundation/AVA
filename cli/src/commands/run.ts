@@ -217,14 +217,7 @@ export async function runRunCommand(args: string[]): Promise<void> {
     'batch',
     'multiedit',
     'apply_patch',
-    // Memory — useful but adds 4 tool definitions (~140 tokens)
-    'memory_read',
-    'memory_write',
-    'memory_list',
-    'memory_delete',
-    // Session management — handled by CLI itself
-    'plan_enter',
-    'plan_exit',
+    // Session management — recall is handled by CLI lifecycle
     'recall',
   ])
   const allToolNames = getToolDefinitions().map((t) => t.name)

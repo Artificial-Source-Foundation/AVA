@@ -1,3 +1,4 @@
+import { dispatchCompute } from '@ava/core-v2'
 import type {
   ToolMiddleware,
   ToolMiddlewareContext,
@@ -28,15 +29,27 @@ export function createSandboxMiddleware(): ToolMiddleware {
       if (ctx.toolName !== 'bash') return undefined
       const command = typeof ctx.args.command === 'string' ? ctx.args.command : ''
       const sandboxed = command ? shouldSandbox(command) : false
+      const policy = {
+        writableRoots: [ctx.ctx.workingDirectory, '/tmp'],
+        networkAccess: false,
+      }
+
+      if (sandboxed && process.platform === 'linux') {
+        await dispatchCompute(
+          'sandbox_apply_landlock',
+          {
+            writableRoots: policy.writableRoots,
+            network: policy.networkAccess,
+          },
+          async () => null
+        ).catch(() => null)
+      }
 
       return {
         args: {
           ...ctx.args,
           _sandboxed: sandboxed,
-          _sandboxPolicy: {
-            writableRoots: [ctx.ctx.workingDirectory, '/tmp'],
-            networkAccess: false,
-          },
+          _sandboxPolicy: policy,
         },
       }
     },

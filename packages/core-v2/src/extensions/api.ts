@@ -5,6 +5,8 @@
  * All registration methods return Disposables for clean teardown.
  */
 
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 import type { MessageBus } from '../bus/message-bus.js'
 import { getSettingsManager } from '../config/manager.js'
 import { registerProvider, unregisterProvider } from '../llm/client.js'
@@ -64,6 +66,19 @@ export function emitEvent(event: string, data: unknown): void {
   if (handlers) {
     for (const handler of handlers) {
       handler(data)
+    }
+  }
+}
+
+export async function emitEventAsync(event: string, data: unknown): Promise<void> {
+  const handlers = eventHandlers.get(event)
+  if (!handlers || handlers.size === 0) return
+  const results = await Promise.allSettled(
+    Array.from(handlers, (handler) => Promise.resolve(handler(data)))
+  )
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.warn(`[extensions] event handler failed for "${event}":`, result.reason)
     }
   }
 }
@@ -139,7 +154,7 @@ export function createExtensionAPI(
     return d
   }
 
-  const storage: ExtensionStorage = createInMemoryStorage()
+  const storage: ExtensionStorage = createInMemoryStorage(extensionName)
 
   const api: ExtensionAPI = {
     registerTool(tool: Tool): Disposable {
@@ -298,19 +313,97 @@ export function createExtensionAPI(
 
 // ─── In-Memory Storage ───────────────────────────────────────────────────────
 
-function createInMemoryStorage(): ExtensionStorage {
+const EXTENSION_STORAGE_FILE = join(homedir(), '.ava', 'extension-storage.json')
+const EXTENSION_STORAGE_DIR = dirname(EXTENSION_STORAGE_FILE)
+
+let sharedStorageLoaded = false
+let sharedStorageLoading: Promise<void> | null = null
+let sharedStorageWriteQueue: Promise<void> = Promise.resolve()
+let sharedStorageData: Record<string, Record<string, unknown>> = {}
+
+async function ensureSharedStorageLoaded(): Promise<void> {
+  if (sharedStorageLoaded) return
+  if (sharedStorageLoading) {
+    await sharedStorageLoading
+    return
+  }
+
+  const fs = getPlatform().fs
+  sharedStorageLoading = (async () => {
+    try {
+      const exists = await fs.exists(EXTENSION_STORAGE_FILE).catch(() => false)
+      if (!exists) {
+        sharedStorageData = {}
+        return
+      }
+
+      const raw = await fs.readFile(EXTENSION_STORAGE_FILE)
+      const parsed = JSON.parse(raw) as Record<string, Record<string, unknown>>
+      sharedStorageData = parsed && typeof parsed === 'object' ? parsed : {}
+    } catch {
+      sharedStorageData = {}
+    } finally {
+      sharedStorageLoaded = true
+      sharedStorageLoading = null
+    }
+  })()
+
+  await sharedStorageLoading
+}
+
+async function flushSharedStorage(): Promise<void> {
+  const fs = getPlatform().fs
+  const write = async (): Promise<void> => {
+    const dirExists = await fs.exists(EXTENSION_STORAGE_DIR).catch(() => false)
+    if (!dirExists) {
+      await fs.mkdir(EXTENSION_STORAGE_DIR)
+    }
+    const json = JSON.stringify(sharedStorageData, null, 2)
+    await fs.writeFile(EXTENSION_STORAGE_FILE, json)
+  }
+  sharedStorageWriteQueue = sharedStorageWriteQueue.then(write, write)
+  await sharedStorageWriteQueue
+}
+
+function createInMemoryStorage(extensionName: string): ExtensionStorage {
   const store = new Map<string, unknown>()
+
+  let hydrated = false
+
+  const ensureHydrated = async (): Promise<void> => {
+    if (hydrated) return
+    await ensureSharedStorageLoaded()
+    store.clear()
+    const namespaced = sharedStorageData[extensionName] ?? {}
+    for (const [key, value] of Object.entries(namespaced)) {
+      store.set(key, value)
+    }
+    hydrated = true
+  }
+
+  const persistNamespace = async (): Promise<void> => {
+    await ensureSharedStorageLoaded()
+    sharedStorageData[extensionName] = Object.fromEntries(store)
+    await flushSharedStorage()
+  }
+
   return {
     async get<T>(key: string): Promise<T | null> {
+      await ensureHydrated()
       return (store.get(key) as T) ?? null
     },
     async set<T>(key: string, value: T): Promise<void> {
+      await ensureHydrated()
       store.set(key, value)
+      await persistNamespace()
     },
     async delete(key: string): Promise<void> {
+      await ensureHydrated()
       store.delete(key)
+      await persistNamespace()
     },
     async keys(): Promise<string[]> {
+      await ensureHydrated()
       return [...store.keys()]
     },
   }

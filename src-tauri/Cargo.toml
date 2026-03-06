@@ -36,6 +36,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 regex = "1"
 walkdir = "2"
 globset = "0.4"
+libc = "0.2"
 ava-tools = { path = "../crates/ava-tools" }
 ava-db = { path = "../crates/ava-db" }
 ava-memory = { path = "../crates/ava-memory" }

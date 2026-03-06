@@ -9,7 +9,11 @@ import { buildSystemPrompt } from './builder.js'
 export function activate(api: ExtensionAPI): Disposable {
   // Expose prompt builder via events
   api.on('prompt:build', (data) => {
-    const req = data as { model?: string }
+    const req = data as { model?: string; sections?: string[] }
+    if (Array.isArray(req.sections)) {
+      // Agent loop prompt composition mode — sections are contributed by other extensions.
+      return
+    }
     const prompt = buildSystemPrompt(req.model)
     api.emit('prompt:built', { prompt })
   })

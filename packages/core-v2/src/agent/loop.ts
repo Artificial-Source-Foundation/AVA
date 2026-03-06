@@ -6,7 +6,13 @@
  * Emits events; extensions subscribe and intercept via middleware.
  */
 
-import { callHook, emitEvent, getAgentModes, getContextStrategies } from '../extensions/api.js'
+import {
+  callHook,
+  emitEvent,
+  emitEventAsync,
+  getAgentModes,
+  getContextStrategies,
+} from '../extensions/api.js'
 import { createClient } from '../llm/client.js'
 import { normalizeMessages } from '../llm/normalize.js'
 import type {
@@ -219,6 +225,7 @@ export class AgentExecutor {
   private steeringController: AbortController | null = null
   private stepCount = 0
   private stepLimitReached = false
+  private currentGoal = ''
 
   constructor(config: Partial<AgentConfig>, onEvent?: AgentEventCallback) {
     this.config = {
@@ -260,6 +267,7 @@ export class AgentExecutor {
 
   async run(inputs: AgentInputs, signal: AbortSignal): Promise<AgentResult> {
     const startTime = Date.now()
+    this.currentGoal = inputs.goal
     this.emit({ type: 'agent:start', agentId: this.agentId, goal: inputs.goal })
 
     const provider = this.config.provider ?? 'anthropic'
@@ -286,7 +294,7 @@ export class AgentExecutor {
 
     try {
       // Build initial messages
-      const systemPrompt = this.buildSystemPrompt(inputs)
+      const systemPrompt = await this.buildSystemPrompt(inputs)
 
       // Prepend structured conversation history if provided (desktop app multi-turn)
       if (inputs.messages?.length) {
@@ -677,7 +685,7 @@ export class AgentExecutor {
         tool_calls: toolCalls.length,
       })
       const result = (completionCall.input as Record<string, string>).result ?? assistantContent
-      emitEvent('agent:completing', { agentId: this.agentId, result })
+      emitEvent('agent:completing', { agentId: this.agentId, result, goal: this.currentGoal })
       return {
         status: 'stop',
         terminateMode: AgentTerminateMode.GOAL,
@@ -738,7 +746,11 @@ export class AgentExecutor {
         duration_ms: Date.now() - llmStartedAt,
         tool_calls: toolCalls.length,
       })
-      emitEvent('agent:completing', { agentId: this.agentId, result: jsonResult })
+      emitEvent('agent:completing', {
+        agentId: this.agentId,
+        result: jsonResult,
+        goal: this.currentGoal,
+      })
       return {
         status: 'stop',
         terminateMode: AgentTerminateMode.GOAL,
@@ -976,11 +988,23 @@ export class AgentExecutor {
     return { type: 'auto' }
   }
 
-  private buildSystemPrompt(inputs: AgentInputs): string {
+  private async buildSystemPrompt(inputs: AgentInputs): Promise<string> {
     let prompt = this.config.systemPrompt ?? 'You are AVA, an AI coding assistant.'
 
     if (inputs.context) {
       prompt += `\n\n${inputs.context}`
+    }
+
+    const sections: string[] = []
+    try {
+      await emitEventAsync('prompt:build', { sections })
+    } catch (error) {
+      loopLog.warn('prompt:build event failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+    if (sections.length > 0) {
+      prompt += `\n\n${sections.join('\n\n')}`
     }
 
     prompt += `\n\nWorking directory: ${inputs.cwd}`

@@ -6,6 +6,7 @@
  * Latest operation per file wins (deduplication).
  */
 
+import { emitEvent } from '@ava/core-v2/extensions'
 import {
   ChevronDown,
   ChevronRight,
@@ -19,7 +20,8 @@ import {
   Plus,
   Trash2,
 } from 'lucide-solid'
-import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
+import { type Component, createEffect, createMemo, createSignal, For, Show } from 'solid-js'
+import { useExtensionEvent } from '../../hooks/useExtensionEvents'
 import { type EditorInfo, getAvailableEditors, openInEditor } from '../../services/ide-integration'
 import { useSession } from '../../stores/session'
 import type { FileOperation, FileOperationType } from '../../types'
@@ -66,13 +68,52 @@ interface DiffReviewPanelProps {
   compact?: boolean
 }
 
+type HunkReviewStatus = 'pending' | 'accepted' | 'rejected'
+
+interface HunkReviewItem {
+  id: string
+  path: string
+  status: HunkReviewStatus
+  content: string
+}
+
+interface DiffHunksUpdatedEvent {
+  sessionId: string
+  items: HunkReviewItem[]
+  summary: {
+    total: number
+    pending: number
+    accepted: number
+    rejected: number
+  }
+}
+
 export const DiffReviewPanel: Component<DiffReviewPanelProps> = () => {
-  const { fileOperations } = useSession()
+  const session = useSession()
+  const currentSession =
+    typeof session.currentSession === 'function' ? session.currentSession : () => null
+  const fileOperations = session.fileOperations
   const [expandedFiles, setExpandedFiles] = createSignal<Set<string>>(new Set())
   const [editors, setEditors] = createSignal<EditorInfo[]>([])
+  const [hunkItems, setHunkItems] = createSignal<HunkReviewItem[]>([])
+  const [hunkSummary, setHunkSummary] = createSignal({
+    total: 0,
+    pending: 0,
+    accepted: 0,
+    rejected: 0,
+  })
+  const latestHunkEvent = useExtensionEvent<DiffHunksUpdatedEvent>('diff:hunks-updated')
 
   // Detect available editors once on mount
   void getAvailableEditors().then(setEditors)
+
+  createEffect(() => {
+    const event = latestHunkEvent()
+    const activeSessionId = currentSession()?.id
+    if (!event || !activeSessionId || event.sessionId !== activeSessionId) return
+    setHunkItems(event.items)
+    setHunkSummary(event.summary)
+  })
 
   // Aggregate: latest operation per file, filter out reads and ops without content
   const reviewableOps = createMemo(() => {
@@ -122,14 +163,32 @@ export const DiffReviewPanel: Component<DiffReviewPanelProps> = () => {
     setExpandedFiles(new Set<string>())
   }
 
+  const setHunkStatus = (hunkId: string, status: HunkReviewStatus) => {
+    const sessionId = currentSession()?.id
+    if (!sessionId) return
+    emitEvent('diff:hunk-status:update', { sessionId, hunkId, status })
+  }
+
   return (
     <div class="flex flex-col h-full">
       {/* Header */}
       <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--border-subtle)]">
         <div class="flex items-center gap-2 text-xs">
-          <span class="text-[var(--text-secondary)] font-medium">
-            {stats().files} file{stats().files !== 1 ? 's' : ''} changed
-          </span>
+          <Show
+            when={hunkSummary().total > 0}
+            fallback={
+              <span class="text-[var(--text-secondary)] font-medium">
+                {stats().files} file{stats().files !== 1 ? 's' : ''} changed
+              </span>
+            }
+          >
+            <span class="text-[var(--text-secondary)] font-medium">
+              {hunkSummary().total} hunks
+            </span>
+            <span class="text-[var(--warning)]">{hunkSummary().pending} pending</span>
+            <span class="text-[var(--success)]">{hunkSummary().accepted} accepted</span>
+            <span class="text-[var(--error)]">{hunkSummary().rejected} rejected</span>
+          </Show>
           <Show when={stats().added > 0}>
             <span class="flex items-center gap-0.5 text-[var(--success)]">
               <Plus class="w-3 h-3" />
@@ -143,7 +202,7 @@ export const DiffReviewPanel: Component<DiffReviewPanelProps> = () => {
             </span>
           </Show>
         </div>
-        <Show when={reviewableOps().length > 0}>
+        <Show when={hunkItems().length === 0 && reviewableOps().length > 0}>
           <div class="flex items-center gap-1">
             <button
               type="button"
@@ -167,8 +226,45 @@ export const DiffReviewPanel: Component<DiffReviewPanelProps> = () => {
 
       {/* File list */}
       <div class="flex-1 overflow-y-auto">
+        <Show when={hunkItems().length > 0}>
+          <div class="p-2 space-y-2 border-b border-[var(--border-subtle)]">
+            <For each={hunkItems()}>
+              {(hunk, index) => (
+                <div class="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-base)] overflow-hidden">
+                  <div class="flex items-center justify-between px-2 py-1.5 border-b border-[var(--border-subtle)]">
+                    <div class="text-[11px] text-[var(--text-secondary)]">
+                      Hunk {index() + 1} - {getFileName(hunk.path)}
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
+                        {hunk.status}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setHunkStatus(hunk.id, 'accepted')}
+                        class="px-2 py-1 text-[10px] rounded-[var(--radius-md)] bg-[color-mix(in_srgb,var(--success)_18%,transparent)] text-[var(--success)] border border-[color-mix(in_srgb,var(--success)_35%,transparent)]"
+                      >
+                        Accept
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setHunkStatus(hunk.id, 'rejected')}
+                        class="px-2 py-1 text-[10px] rounded-[var(--radius-md)] bg-[color-mix(in_srgb,var(--error)_18%,transparent)] text-[var(--error)] border border-[color-mix(in_srgb,var(--error)_35%,transparent)]"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                  <pre class="text-[11px] leading-relaxed text-[var(--text-secondary)] p-2 overflow-x-auto bg-[var(--surface-raised)]">
+                    {hunk.content}
+                  </pre>
+                </div>
+              )}
+            </For>
+          </div>
+        </Show>
         <Show
-          when={reviewableOps().length > 0}
+          when={hunkItems().length === 0 && reviewableOps().length > 0}
           fallback={
             <div class="flex flex-col items-center justify-center h-full text-center p-6">
               <div class="p-4 bg-[var(--surface-raised)] rounded-full mb-3">

@@ -73,7 +73,11 @@ const TOOL_GUIDELINES = `When using tools:
 - Verify changes by reading the modified file
 - Use batch tool for independent parallel operations
 - When you say you will use a tool, ACTUALLY call it — do not just describe what you would do
-- NEVER say "I can help with that" or describe actions without doing them — just do it`
+- NEVER say "I can help with that" or describe actions without doing them — just do it
+- You have persistent memory. At the start of complex tasks, use memory_list to check for relevant stored context
+- Use memory_write to save important decisions, patterns, or user preferences for future sessions
+- When a task requires significant research or analysis before implementation, use plan_enter to switch to read-only mode
+- Use plan_exit when ready to implement`
 
 addPromptSection({ name: 'identity', priority: 0, content: CORE_IDENTITY })
 addPromptSection({ name: 'tool-guidelines', priority: 10, content: TOOL_GUIDELINES })

@@ -2,7 +2,7 @@
  * Auto-learning memory — extract patterns from agent sessions.
  */
 
-import type { ExtensionAPI } from '@ava/core-v2/extensions'
+import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import { createLogger } from '@ava/core-v2/logger'
 
 const log = createLogger('AutoLearn')
@@ -110,8 +110,8 @@ export function analyzeSession(output: string, goal: string): LearnedItem[] {
   return allItems
 }
 
-export function registerAutoLearn(api: ExtensionAPI): void {
-  api.on('agent:completing', (data: unknown) => {
+export function registerAutoLearn(api: ExtensionAPI): Disposable {
+  return api.on('agent:completing', (data: unknown) => {
     const event = data as Record<string, unknown>
     const output = (event.result as string) ?? ''
     const goal = (event.goal as string) ?? ''

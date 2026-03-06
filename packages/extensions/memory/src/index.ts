@@ -22,16 +22,38 @@ export function activate(api: ExtensionAPI): Disposable {
 
   // Inject memories into system prompt
   disposables.push(
-    api.on('prompt:build', (data) => {
+    api.on('prompt:build', async (data) => {
       const ctx = data as { sections: string[] }
-      void store.buildPromptSection().then((section) => {
-        if (section) ctx.sections.push(section)
-      })
+      const section = await store.buildPromptSection()
+      if (section) ctx.sections.push(section)
     })
   )
 
   // Register auto-learning from agent sessions
-  registerAutoLearn(api)
+  disposables.push(registerAutoLearn(api))
+  disposables.push(
+    api.on('memory:auto-learned', async (data) => {
+      try {
+        const event = data as {
+          key?: string
+          value?: string
+          category?: 'learned-patterns' | 'user-preferences' | 'project-conventions'
+        }
+        if (!event.key || !event.value) return
+
+        const category =
+          event.category === 'user-preferences'
+            ? 'preferences'
+            : event.category === 'project-conventions'
+              ? 'project'
+              : 'context'
+
+        await store.write(event.key, event.value, category)
+      } catch (error) {
+        api.log.warn(`Failed to persist auto-learned memory: ${String(error)}`)
+      }
+    })
+  )
 
   // Register periodic memory persistence via scheduler
   api.emit('scheduler:register', {

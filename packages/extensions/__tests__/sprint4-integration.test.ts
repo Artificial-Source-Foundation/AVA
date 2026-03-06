@@ -532,26 +532,24 @@ describe('Sprint 4 Integration', () => {
   // ─── Commander Task Routing ──────────────────────────────────────────────
 
   describe('Commander integration', () => {
-    it('routes coding task to coder worker', () => {
+    it('routes coding task to engineer worker', () => {
       const analysis = analyzeTask('Implement a new user authentication system')
       expect(analysis.taskType).toBe('write')
 
       const worker = selectWorker(analysis, BUILTIN_WORKERS)
       expect(worker).not.toBeNull()
-      expect(worker!.name).toBe('coder')
+      expect(worker!.name).toBe('engineer')
 
-      // Coder has write tools but not bash
-      expect(worker!.tools).toContain('write_file')
-      expect(worker!.tools).toContain('edit')
-      expect(worker!.tools).toContain('read_file')
+      // Engineer has write tools
+      expect(worker!.tools).toContain('*')
     })
 
-    it('routes test task to tester worker with bash access', () => {
+    it('routes test task to reviewer worker with bash access', () => {
       const analysis = analyzeTask('Write comprehensive unit tests for the auth module')
       expect(analysis.taskType).toBe('test')
 
       const worker = selectWorker(analysis, BUILTIN_WORKERS)
-      expect(worker!.name).toBe('tester')
+      expect(worker!.name).toBe('reviewer')
       expect(worker!.tools).toContain('bash')
     })
 
@@ -581,9 +579,9 @@ describe('Sprint 4 Integration', () => {
 
       const teamMode = modes.get('praxis')!
       const prompt = teamMode.systemPrompt!('You are AVA.')
-      expect(prompt).toContain('Commander')
-      expect(prompt).toContain('Coder')
-      expect(prompt).toContain('Reviewer')
+      expect(prompt).toContain('Director')
+      expect(prompt).toContain('invoke_team')
+      expect(prompt).toContain('reviewer')
 
       disposable.dispose()
       expect(getAgentModes().has('praxis')).toBe(false)

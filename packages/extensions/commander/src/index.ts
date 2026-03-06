@@ -1,21 +1,18 @@
 /**
- * Commander extension — Praxis 3-tier agent hierarchy.
+ * Commander extension — Praxis v2 hierarchy.
  *
- * Registers all built-in agents, creates delegate tools per tier,
- * and exposes the 'praxis' agent mode. Toggleable via settings.
- *
- * Hierarchy: Commander → Leads → Workers
+ * Hierarchy: Director -> Tech Leads -> Engineers -> Reviewer
  */
 
 import type { AgentMode, Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import type { ToolDefinition } from '@ava/core-v2/llm'
 import { getModelPack, resolveModelForTier } from '../../models/src/packs.js'
 import type { AgentDefinition } from './agent-definition.js'
-import { configureDelegation, createDelegateTool } from './delegate.js'
+import { configureDelegation } from './delegate.js'
+import { createInvokeSubagentTool } from './invoke-subagent.js'
+import { createInvokeTeamTool } from './invoke-team.js'
 import { getAgentsByTier, registerAgents } from './registry.js'
 import { BUILTIN_AGENTS } from './workers.js'
-
-const DELEGATE_TOOL_AGENT_IDS = new Set(['coder', 'researcher', 'reviewer', 'explorer'])
 
 export function activate(api: ExtensionAPI): Disposable {
   const disposables: Disposable[] = []
@@ -54,33 +51,27 @@ export function activate(api: ExtensionAPI): Disposable {
   // Register all built-in agents in the registry
   disposables.push(registerAgents(agentsToRegister))
 
-  const delegateAgents = agentsToRegister.filter((a) => DELEGATE_TOOL_AGENT_IDS.has(a.id))
-
-  for (const agent of delegateAgents) {
-    const tool = createDelegateTool(agent)
-    disposables.push(api.registerTool(tool))
-  }
+  disposables.push(api.registerTool(createInvokeTeamTool('director')))
+  disposables.push(api.registerTool(createInvokeSubagentTool()))
 
   // Register the praxis agent mode
   const praxisMode: AgentMode = {
     name: 'praxis',
-    description: 'Praxis mode: 3-tier hierarchy (Commander → Leads → Workers)',
+    description: 'Praxis mode: 4-tier hierarchy (Director -> Tech Lead -> Engineer -> Reviewer)',
 
     filterTools(tools: ToolDefinition[]): ToolDefinition[] {
-      // Keep ALL tools — commander handles simple tasks directly.
-      // Delegate tools (delegate_*) are already registered and included in `tools`.
       return tools
     },
 
     systemPrompt(base: string): string {
-      return `${base}\n\n${buildCommanderPrompt()}`
+      return `${base}\n\n${buildDirectorPrompt()}`
     },
   }
 
   disposables.push(api.registerAgentMode(praxisMode))
 
   api.log.debug(
-    `Commander: registered ${delegateAgents.length} delegate tools + praxis mode (${agentsToRegister.length} agents total)`
+    `Commander: registered invoke_team + invoke_subagent + praxis mode (${agentsToRegister.length} agents total)`
   )
 
   return {
@@ -90,45 +81,38 @@ export function activate(api: ExtensionAPI): Disposable {
   }
 }
 
-function buildCommanderPrompt(): string {
-  const workers = getAgentsByTier('worker').filter((w) => DELEGATE_TOOL_AGENT_IDS.has(w.id))
+function buildDirectorPrompt(): string {
+  const engineers = [...getAgentsByTier('engineer'), ...getAgentsByTier('worker')]
 
-  const workerList = workers
+  const engineerList = engineers
     .map((w) => {
-      return `- **${w.displayName}** (\`delegate_${w.name}\`): ${w.description}`
+      return `- **${w.displayName}**: ${w.description}`
     })
     .join('\n')
 
-  const workerSummary = formatAgentTable(workers)
+  const workerSummary = formatAgentTable(engineers)
 
-  return `## Praxis — Tiered Agent Hierarchy
+  return `## Praxis v2 — Multi-Agent Hierarchy
 
-You are the **Commander**. You have full tool access AND can delegate to specialized leads/workers.
+You are the **Director**. You orchestrate work and never write code directly.
 
 ### Task Complexity Assessment
 
-**Simple tasks** (read a file, answer a question, small edit, 1-2 files):
-- Handle directly with your tools. Do NOT delegate.
+Use invoke_team for persistent team members and invoke_subagent for ephemeral analysis.
 
-**Medium/complex tasks**:
-- Delegate to specialist workers when useful (coder, researcher, reviewer, explorer).
+### Engineers
 
-**Default to handling it yourself** unless the task clearly needs delegation.
+${engineerList}
 
-### Available Delegates
-
-${workerList}
-
-### Worker Reference
+### Engineer Reference
 
 ${workerSummary}
 
 ### Delegation Rules
 
-- **Commander** handles simple tasks directly and can delegate to specialized workers.
-- Delegated workers execute tasks directly.
-- Each agent may use a different model for cost optimization
-- Review results before completing`
+- Director -> Tech Lead -> Engineer
+- Engineers must pass reviewer validation before final handoff
+- Summarize outcomes and propose next roadmap steps`
 }
 
 function formatAgentTable(agents: AgentDefinition[]): string {

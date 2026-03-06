@@ -41,6 +41,15 @@ export function createBuiltinCommands(
       return `Switching to ${mode} mode.`
     }),
 
+    cmd('praxis', 'Set Praxis orchestration mode: auto|full|light|solo', async (args) => {
+      const mode = args.trim().toLowerCase() || 'auto'
+      if (!['auto', 'full', 'light', 'solo'].includes(mode)) {
+        return 'Usage: /praxis auto|full|light|solo'
+      }
+      emit('praxis:mode-selected', { mode })
+      return mode === 'auto' ? 'Praxis mode set to auto-detect.' : `Praxis mode forced to ${mode}.`
+    }),
+
     cmd('architect', 'Toggle architect mode (e.g. /architect off)', async (args) => {
       const value = args.trim().toLowerCase()
       if (value === 'off') {

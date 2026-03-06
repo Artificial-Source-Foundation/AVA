@@ -12,8 +12,50 @@ import { createLogger } from '@ava/core-v2/logger'
 import type { TaskPlan } from './planning.js'
 import { getAgentsByTier } from './registry.js'
 import { analyzeDomain } from './router.js'
+import type { AgentRole, TierToolPolicy } from './types.js'
 
 const log = createLogger('Orchestrator')
+
+export const TIER_TOOLS: Record<AgentRole, TierToolPolicy> = {
+  director: {
+    allowed: [
+      'read_file',
+      'glob',
+      'grep',
+      'websearch',
+      'webfetch',
+      'invoke_team',
+      'invoke_subagent',
+      'attempt_completion',
+      'remember',
+      'recall',
+    ],
+    denied: ['write_file', 'edit', 'create_file', 'bash', 'multiedit', 'apply_patch'],
+  },
+  'tech-lead': { allowed: ['*'], denied: [] },
+  engineer: { allowed: ['*'], denied: ['invoke_team', 'websearch', 'webfetch'] },
+  reviewer: {
+    allowed: ['read_file', 'glob', 'grep', 'bash', 'attempt_completion'],
+    denied: ['write_file', 'edit', 'create_file', 'invoke_team', 'invoke_subagent'],
+  },
+  subagent: {
+    allowed: ['read_file', 'glob', 'grep', 'websearch', 'webfetch', 'attempt_completion'],
+    denied: ['write_file', 'edit', 'create_file', 'invoke_team', 'invoke_subagent', 'apply_patch'],
+  },
+}
+
+export function applyTierToolPolicy(role: AgentRole, availableTools: string[]): string[] {
+  const policy = TIER_TOOLS[role]
+  if (!policy) return availableTools
+
+  const deniedSet = new Set(policy.denied)
+  if (policy.allowed.includes('*')) {
+    return availableTools.filter((tool) => !deniedSet.has(tool))
+  }
+
+  const allowedSet = new Set(policy.allowed)
+  return availableTools.filter((tool) => allowedSet.has(tool) && !deniedSet.has(tool))
+}
 
 export interface OrchestratorConfig {
   /** Maximum parallel delegations per batch. Default: 3 */
@@ -218,18 +260,18 @@ async function executeBatch(
  */
 function selectBestAgent(taskDescription: string): string {
   const domain = analyzeDomain(taskDescription)
-  const leads = getAgentsByTier('lead')
+  const leads = [...getAgentsByTier('tech-lead'), ...getAgentsByTier('lead')]
 
   const domainMap: Record<string, string> = {
-    frontend: 'frontend-lead',
-    backend: 'backend-lead',
-    testing: 'qa-lead',
-    devops: 'fullstack-lead',
-    fullstack: 'fullstack-lead',
+    frontend: 'tech-lead',
+    backend: 'tech-lead',
+    testing: 'tech-lead',
+    devops: 'tech-lead',
+    fullstack: 'tech-lead',
   }
 
-  const leadId = domainMap[domain] ?? 'fullstack-lead'
-  return leads.find((l) => l.id === leadId)?.id ?? 'fullstack-lead'
+  const leadId = domainMap[domain] ?? 'tech-lead'
+  return leads.find((l) => l.id === leadId)?.id ?? 'tech-lead'
 }
 
 function buildOrchestrationSummary(plan: TaskPlan, results: SubtaskResult[]): string {

@@ -1,5 +1,5 @@
 /**
- * Task router — analyzes goals and routes to the best worker.
+ * Task router — analyzes goals and routes to the best engineer/reviewer role.
  */
 
 import type { TaskAnalysis, TaskType, WorkerDefinition } from './types.js'
@@ -39,11 +39,11 @@ const ROUTE_PATTERNS: RoutePattern[] = [
 ]
 
 const WORKER_TYPE_MAP: Record<string, string> = {
-  test: 'tester',
+  test: 'reviewer',
   review: 'reviewer',
-  research: 'researcher',
-  debug: 'debugger',
-  write: 'coder',
+  research: 'engineer',
+  debug: 'engineer',
+  write: 'engineer',
 }
 
 export function analyzeTask(goal: string): TaskAnalysis {

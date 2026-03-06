@@ -11,6 +11,13 @@ import { createWorktree, removeWorktree } from '../../git/src/worktree.js'
 import type { AgentDefinition } from './agent-definition.js'
 import { getAgent } from './registry.js'
 
+export const REMOVED_DELEGATE_TOOLS = [
+  'delegate_coder',
+  'delegate_reviewer',
+  'delegate_researcher',
+  'delegate_explorer',
+] as const
+
 export interface DelegationConfig {
   /** Maximum retries on delegation failure. Default: 1 */
   maxRetries: number
@@ -58,11 +65,11 @@ export function resolveTools(agent: AgentDefinition, depth = 0): string[] {
   if (depth >= maxDepth) {
     // At max depth: strip all delegate tools regardless of tier
     tools = agent.tools.filter((t) => !t.startsWith('delegate_'))
-  } else if (agent.tier === 'commander') {
-    // Commander: tools are set externally (delegate_<lead> + meta tools)
+  } else if (agent.tier === 'director' || agent.tier === 'commander') {
+    // Director/Commander: tools are provided externally (invoke_team + meta tools)
     tools = agent.tools
   } else {
-    // Leads AND workers: add delegate tools from delegates list
+    // Other tiers may expose explicit delegates where needed
     const delegateTools = (agent.delegates ?? []).map((id) => `delegate_${id}`)
     tools = [...agent.tools, ...delegateTools]
   }

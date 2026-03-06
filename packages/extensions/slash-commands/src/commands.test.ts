@@ -34,9 +34,9 @@ describe('createBuiltinCommands', () => {
     signal: new AbortController().signal,
   }
 
-  it('creates 13 built-in commands', () => {
+  it('creates 14 built-in commands', () => {
     const commands = createBuiltinCommands(emit)
-    expect(commands).toHaveLength(13)
+    expect(commands).toHaveLength(14)
   })
 
   it('includes expected command names', () => {
@@ -53,6 +53,7 @@ describe('createBuiltinCommands', () => {
     expect(names).toContain('settings')
     expect(names).toContain('status')
     expect(names).toContain('recipe')
+    expect(names).toContain('praxis')
   })
 
   it('/help emits commands:help-requested', async () => {

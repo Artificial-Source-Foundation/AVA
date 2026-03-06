@@ -60,9 +60,9 @@ describe('slash commands integration', () => {
 
   // ── Registration ─────────────────────────────────────────────────────────
 
-  it('registers all 13 built-in commands', () => {
+  it('registers all 14 built-in commands', () => {
     const commands = getCommands()
-    expect(commands.size).toBe(13)
+    expect(commands.size).toBe(14)
     expect(commands.has('help')).toBe(true)
     expect(commands.has('clear')).toBe(true)
     expect(commands.has('mode')).toBe(true)
@@ -76,6 +76,7 @@ describe('slash commands integration', () => {
     expect(commands.has('recipe')).toBe(true)
     expect(commands.has('export')).toBe(true)
     expect(commands.has('init')).toBe(true)
+    expect(commands.has('praxis')).toBe(true)
   })
 
   // ── Parse → Resolve Pipeline ─────────────────────────────────────────────
@@ -130,7 +131,7 @@ describe('slash commands integration', () => {
 
   it('returns all commands sorted alphabetically', () => {
     const cmds = getAvailableCommands()
-    expect(cmds.length).toBe(13)
+    expect(cmds.length).toBe(14)
 
     const names = cmds.map((c) => c.name)
     const sorted = [...names].sort()

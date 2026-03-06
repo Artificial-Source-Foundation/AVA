@@ -1,24 +1,30 @@
 /**
- * AgentDefinition — unified type bridging frontend AgentPreset and backend WorkerDefinition.
- *
- * Every agent in the Praxis hierarchy (Commander, Leads, Workers) is an AgentDefinition.
+ * AgentDefinition — unified type for Praxis hierarchy agents.
  */
 
-export type AgentTier = 'commander' | 'lead' | 'worker'
+export type AgentTier =
+  | 'director'
+  | 'tech-lead'
+  | 'engineer'
+  | 'reviewer'
+  | 'subagent'
+  | 'commander'
+  | 'lead'
+  | 'worker'
 
 export interface AgentDefinition {
-  /** Unique identifier, e.g. 'frontend-lead' */
+  /** Unique identifier, e.g. 'director-main' */
   id: string
-  /** Machine name, e.g. 'frontend-lead' */
+  /** Machine name, e.g. 'director' */
   name: string
-  /** Human-readable label, e.g. 'Frontend Lead' */
+  /** Human-readable label, e.g. 'Director' */
   displayName: string
   description: string
   tier: AgentTier
   systemPrompt: string
   /** Concrete tool names this agent can use */
   tools: string[]
-  /** Agent IDs this agent can delegate to (leads + commander) */
+  /** Agent IDs this agent can delegate to */
   delegates?: string[]
   /** Per-agent model override, e.g. 'claude-haiku-4-5' */
   model?: string
@@ -56,7 +62,7 @@ export function workerToDefinition(
     name: worker.name,
     displayName: worker.displayName,
     description: worker.description,
-    tier: 'worker',
+    tier: 'engineer',
     systemPrompt: worker.systemPrompt,
     tools: worker.tools,
     maxTurns: worker.maxTurns,

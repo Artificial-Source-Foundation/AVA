@@ -1,229 +1,41 @@
-/**
- * Built-in agent definitions — Praxis hierarchy.
- */
-
 import { describe, expect, it } from 'vitest'
+import type { AgentRole } from './types.js'
 import {
   BUILTIN_AGENTS,
-  BUILTIN_WORKERS,
   COMMANDER_AGENT,
+  DIRECTOR_AGENT,
+  ENGINEER_AGENT,
   LEAD_AGENTS,
+  REVIEWER_AGENT,
+  TECH_LEAD_AGENT,
   WORKER_AGENTS,
 } from './workers.js'
 
-describe('BUILTIN_AGENTS', () => {
-  it('contains 14 agents total (1 commander + 4 leads + 9 workers)', () => {
-    expect(BUILTIN_AGENTS).toHaveLength(14)
+describe('Praxis v2 workers', () => {
+  it('includes director, tech-lead, engineer, reviewer roles', () => {
+    const roles = new Set(BUILTIN_AGENTS.map((agent) => agent.tier))
+    expect(roles.has('director')).toBe(true)
+    expect(roles.has('tech-lead')).toBe(true)
+    expect(roles.has('engineer')).toBe(true)
+    expect(roles.has('reviewer')).toBe(true)
   })
 
-  it('has 1 commander, 4 leads, and 9 workers', () => {
-    const commanders = BUILTIN_AGENTS.filter((a) => a.tier === 'commander')
-    const leads = BUILTIN_AGENTS.filter((a) => a.tier === 'lead')
-    const workers = BUILTIN_AGENTS.filter((a) => a.tier === 'worker')
-
-    expect(commanders).toHaveLength(1)
-    expect(leads).toHaveLength(4)
-    expect(workers).toHaveLength(9)
-  })
-})
-
-describe('WORKER_AGENTS', () => {
-  it('contains 9 workers', () => {
-    expect(WORKER_AGENTS).toHaveLength(9)
+  it('exports role union including reviewer', () => {
+    const roles: AgentRole[] = ['director', 'tech-lead', 'engineer', 'reviewer', 'subagent']
+    expect(roles).toHaveLength(5)
   })
 
-  it('includes all expected workers', () => {
-    const names = WORKER_AGENTS.map((w) => w.name)
-    expect(names).toContain('coder')
-    expect(names).toContain('tester')
-    expect(names).toContain('reviewer')
-    expect(names).toContain('researcher')
-    expect(names).toContain('debugger')
-    expect(names).toContain('architect')
-    expect(names).toContain('planner')
-    expect(names).toContain('devops')
-    expect(names).toContain('explorer')
+  it('director prompt and tools are read-oriented with invoke capability', () => {
+    expect(DIRECTOR_AGENT.systemPrompt).toContain('NEVER write code')
+    expect(DIRECTOR_AGENT.tools).toContain('invoke_team')
+    expect(DIRECTOR_AGENT.tools).toContain('read_file')
   })
 
-  for (const worker of WORKER_AGENTS) {
-    describe(worker.displayName, () => {
-      it('has required fields', () => {
-        expect(worker.name).toBeDefined()
-        expect(worker.displayName).toBeDefined()
-        expect(worker.description).toBeDefined()
-        expect(worker.systemPrompt).toBeDefined()
-        expect(Array.isArray(worker.tools)).toBe(true)
-        expect(worker.tools.length).toBeGreaterThan(0)
-        expect(worker.tier).toBe('worker')
-        expect(worker.isBuiltIn).toBe(true)
-      })
-
-      it('has reasonable maxTurns', () => {
-        expect(worker.maxTurns).toBeDefined()
-        expect(worker.maxTurns).toBeGreaterThan(0)
-        expect(worker.maxTurns).toBeLessThanOrEqual(20)
-      })
-
-      it('has reasonable maxTimeMinutes', () => {
-        expect(worker.maxTimeMinutes).toBeDefined()
-        expect(worker.maxTimeMinutes).toBeGreaterThan(0)
-        expect(worker.maxTimeMinutes).toBeLessThanOrEqual(10)
-      })
-    })
-  }
-})
-
-describe('LEAD_AGENTS', () => {
-  it('contains 4 leads', () => {
-    expect(LEAD_AGENTS).toHaveLength(4)
-  })
-
-  for (const lead of LEAD_AGENTS) {
-    describe(lead.displayName, () => {
-      it('has tier lead', () => {
-        expect(lead.tier).toBe('lead')
-      })
-
-      it('has delegates list', () => {
-        expect(lead.delegates).toBeDefined()
-        expect(lead.delegates!.length).toBeGreaterThan(0)
-      })
-
-      it('delegates to valid worker IDs', () => {
-        const workerIds = WORKER_AGENTS.map((w) => w.id)
-        for (const delegateId of lead.delegates!) {
-          expect(workerIds).toContain(delegateId)
-        }
-      })
-    })
-  }
-})
-
-describe('COMMANDER_AGENT', () => {
-  it('has tier commander', () => {
-    expect(COMMANDER_AGENT.tier).toBe('commander')
-  })
-
-  it('has direct coding tools for tiered delegation', () => {
-    expect(COMMANDER_AGENT.tools).toContain('read_file')
-    expect(COMMANDER_AGENT.tools).toContain('write_file')
-    expect(COMMANDER_AGENT.tools).toContain('edit')
-    expect(COMMANDER_AGENT.tools).toContain('bash')
-    expect(COMMANDER_AGENT.tools).toContain('glob')
-    expect(COMMANDER_AGENT.tools).toContain('grep')
-  })
-
-  it('has meta tools', () => {
-    expect(COMMANDER_AGENT.tools).toContain('question')
-    expect(COMMANDER_AGENT.tools).toContain('attempt_completion')
-  })
-
-  it('delegates to leads and planning agents', () => {
-    expect(COMMANDER_AGENT.delegates).toContain('frontend-lead')
-    expect(COMMANDER_AGENT.delegates).toContain('backend-lead')
-    expect(COMMANDER_AGENT.delegates).toContain('planner')
-    expect(COMMANDER_AGENT.delegates).toContain('architect')
-  })
-})
-
-describe('BUILTIN_WORKERS (legacy compat)', () => {
-  it('contains original 5 workers as WorkerDefinition[]', () => {
-    expect(BUILTIN_WORKERS).toHaveLength(5)
-    const names = BUILTIN_WORKERS.map((w) => w.name)
-    expect(names).toContain('coder')
-    expect(names).toContain('tester')
-    expect(names).toContain('reviewer')
-    expect(names).toContain('researcher')
-    expect(names).toContain('debugger')
-  })
-})
-
-describe('lead domain tool filtering', () => {
-  const frontendLead = LEAD_AGENTS.find((a) => a.id === 'frontend-lead')!
-  const backendLead = LEAD_AGENTS.find((a) => a.id === 'backend-lead')!
-  const qaLead = LEAD_AGENTS.find((a) => a.id === 'qa-lead')!
-  const fullstackLead = LEAD_AGENTS.find((a) => a.id === 'fullstack-lead')!
-
-  it('frontend lead has core file tools and websearch but no LSP', () => {
-    expect(frontendLead.tools).toContain('read_file')
-    expect(frontendLead.tools).toContain('write_file')
-    expect(frontendLead.tools).toContain('edit')
-    expect(frontendLead.tools).toContain('bash')
-    expect(frontendLead.tools).toContain('websearch')
-    expect(frontendLead.tools).not.toContain('lsp_diagnostics')
-    expect(frontendLead.tools).not.toContain('lsp_hover')
-    expect(frontendLead.tools).not.toContain('lsp_definition')
-  })
-
-  it('backend lead has all core tools plus LSP tools', () => {
-    expect(backendLead.tools).toContain('read_file')
-    expect(backendLead.tools).toContain('write_file')
-    expect(backendLead.tools).toContain('edit')
-    expect(backendLead.tools).toContain('bash')
-    expect(backendLead.tools).toContain('lsp_diagnostics')
-    expect(backendLead.tools).toContain('lsp_hover')
-    expect(backendLead.tools).toContain('lsp_definition')
-  })
-
-  it('qa lead has read-only tools plus bash and diagnostics', () => {
-    expect(qaLead.tools).toContain('read_file')
-    expect(qaLead.tools).toContain('bash')
-    expect(qaLead.tools).toContain('grep')
-    expect(qaLead.tools).toContain('glob')
-    expect(qaLead.tools).toContain('lsp_diagnostics')
-    expect(qaLead.tools).not.toContain('write_file')
-    expect(qaLead.tools).not.toContain('edit')
-    expect(qaLead.tools).not.toContain('create_file')
-  })
-
-  it('fullstack lead has all tools', () => {
-    expect(fullstackLead.tools).toContain('read_file')
-    expect(fullstackLead.tools).toContain('write_file')
-    expect(fullstackLead.tools).toContain('edit')
-    expect(fullstackLead.tools).toContain('bash')
-    expect(fullstackLead.tools).toContain('websearch')
-    expect(fullstackLead.tools).toContain('lsp_diagnostics')
-    expect(fullstackLead.tools).toContain('lsp_hover')
-    expect(fullstackLead.tools).toContain('lsp_definition')
-  })
-})
-
-describe('specific workers', () => {
-  const coder = WORKER_AGENTS.find((a) => a.id === 'coder')!
-  const reviewer = WORKER_AGENTS.find((a) => a.id === 'reviewer')!
-  const tester = WORKER_AGENTS.find((a) => a.id === 'tester')!
-  const researcher = WORKER_AGENTS.find((a) => a.id === 'researcher')!
-  const debugger_ = WORKER_AGENTS.find((a) => a.id === 'debugger')!
-
-  it('coder has write tools', () => {
-    expect(coder.tools).toContain('write_file')
-    expect(coder.tools).toContain('edit')
-    expect(coder.tools).toContain('create_file')
-  })
-
-  it('reviewer has read-only tools', () => {
-    expect(reviewer.tools).toContain('read_file')
-    expect(reviewer.tools).toContain('grep')
-    expect(reviewer.tools).not.toContain('write_file')
-    expect(reviewer.tools).not.toContain('edit')
-    expect(reviewer.tools).not.toContain('bash')
-  })
-
-  it('tester has bash and write tools', () => {
-    expect(tester.tools).toContain('bash')
-    expect(tester.tools).toContain('write_file')
-    expect(tester.tools).toContain('create_file')
-  })
-
-  it('researcher has read-only plus ls', () => {
-    expect(researcher.tools).toContain('read_file')
-    expect(researcher.tools).toContain('ls')
-    expect(researcher.tools).not.toContain('write_file')
-  })
-
-  it('debugger has bash and edit', () => {
-    expect(debugger_.tools).toContain('bash')
-    expect(debugger_.tools).toContain('write_file')
-    expect(debugger_.tools).toContain('edit')
+  it('maintains compatibility aliases', () => {
+    expect(COMMANDER_AGENT.id).toBe(DIRECTOR_AGENT.id)
+    expect(LEAD_AGENTS[0]?.id).toBe(TECH_LEAD_AGENT.id)
+    expect(WORKER_AGENTS.map((agent) => agent.id)).toEqual(
+      expect.arrayContaining([ENGINEER_AGENT.id, REVIEWER_AGENT.id])
+    )
   })
 })

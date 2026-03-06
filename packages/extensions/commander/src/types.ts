@@ -1,9 +1,16 @@
 /**
- * Commander types — worker definitions and team hierarchy.
+ * Commander types — Praxis v2 hierarchy and worker compatibility types.
  */
 
-// Re-export the canonical type
+// Re-export canonical types
 export type { AgentDefinition, AgentTier } from './agent-definition.js'
+
+export type AgentRole = 'director' | 'tech-lead' | 'engineer' | 'reviewer' | 'subagent'
+
+export interface TierToolPolicy {
+  allowed: string[]
+  denied: string[]
+}
 
 /** @deprecated Use AgentDefinition instead */
 export interface WorkerDefinition {

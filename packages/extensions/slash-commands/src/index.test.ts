@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest'
 import { activate } from './index.js'
 
 describe('slash-commands extension', () => {
-  it('activates and registers 13 commands', () => {
+  it('activates and registers 14 commands', () => {
     const { api, registeredCommands } = createMockExtensionAPI()
     activate(api)
-    expect(registeredCommands).toHaveLength(13)
+    expect(registeredCommands).toHaveLength(14)
   })
 
   it('registers expected command names', () => {
@@ -23,18 +23,19 @@ describe('slash-commands extension', () => {
     expect(names).toContain('settings')
     expect(names).toContain('status')
     expect(names).toContain('recipe')
+    expect(names).toContain('praxis')
   })
 
   it('logs activation with command count', () => {
     const { api } = createMockExtensionAPI()
     activate(api)
-    expect(api.log.debug).toHaveBeenCalledWith('Slash commands extension activated (13 commands)')
+    expect(api.log.debug).toHaveBeenCalledWith('Slash commands extension activated (14 commands)')
   })
 
   it('cleans up all commands on dispose', () => {
     const { api, registeredCommands } = createMockExtensionAPI()
     const disposable = activate(api)
-    expect(registeredCommands).toHaveLength(13)
+    expect(registeredCommands).toHaveLength(14)
     disposable.dispose()
     expect(registeredCommands).toHaveLength(0)
   })

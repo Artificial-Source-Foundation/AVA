@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use async_trait::async_trait;
 use glob::Pattern;
 use grep_regex::RegexMatcher;

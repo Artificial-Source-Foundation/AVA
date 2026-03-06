@@ -384,6 +384,7 @@ export const SidebarSessions: Component = () => {
               transition-colors
             "
             title={viewMode() === 'list' ? 'Tree view' : 'List view'}
+            aria-label={viewMode() === 'list' ? 'Switch to tree view' : 'Switch to list view'}
           >
             <Show when={viewMode() === 'list'} fallback={<List class="w-4 h-4" />}>
               <GitBranch class="w-4 h-4" />
@@ -402,6 +403,7 @@ export const SidebarSessions: Component = () => {
               transition-colors
             "
             title="New chat (Ctrl+N)"
+            aria-label="New chat"
           >
             <Plus class="w-4 h-4" />
           </button>
@@ -476,6 +478,7 @@ export const SidebarSessions: Component = () => {
                                       }}
                                       class="p-1 rounded-[var(--radius-sm)] text-[var(--error)] hover:bg-[var(--error)] hover:text-white"
                                       title="Confirm delete"
+                                      aria-label="Confirm delete"
                                     >
                                       <Check class="w-3 h-3" />
                                     </button>
@@ -484,6 +487,7 @@ export const SidebarSessions: Component = () => {
                                       onClick={() => setConfirmDeleteId(null)}
                                       class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]"
                                       title="Cancel"
+                                      aria-label="Cancel"
                                     >
                                       <X class="w-3 h-3" />
                                     </button>
@@ -578,6 +582,7 @@ export const SidebarSessions: Component = () => {
                                   }}
                                   class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]"
                                   title="Rename"
+                                  aria-label="Rename session"
                                 >
                                   <Pencil class="w-3 h-3" />
                                 </button>
@@ -589,6 +594,7 @@ export const SidebarSessions: Component = () => {
                                   }}
                                   class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)]"
                                   title="Delete"
+                                  aria-label="Delete session"
                                 >
                                   <Trash2 class="w-3 h-3" />
                                 </button>
@@ -648,6 +654,7 @@ export const SidebarSessions: Component = () => {
                     onClick={() => void unarchiveSession(session.id)}
                     class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)]"
                     title="Unarchive"
+                    aria-label="Unarchive session"
                   >
                     <ArchiveRestore class="w-3 h-3" />
                   </button>
@@ -675,3 +682,33 @@ export const SidebarSessions: Component = () => {
     </div>
   )
 }
+
+/** Skeleton placeholder shown while sessions are loading */
+export const SidebarSessionsSkeleton: Component = () => (
+  <div class="flex flex-col h-full animate-pulse">
+    <div class="flex items-center justify-between px-3 h-10 flex-shrink-0 border-b border-[var(--border-subtle)]">
+      <div class="h-3 w-16 bg-[var(--surface-raised)] rounded" />
+      <div class="flex gap-1">
+        <div class="w-6 h-6 bg-[var(--surface-raised)] rounded-[var(--radius-md)]" />
+        <div class="w-6 h-6 bg-[var(--surface-raised)] rounded-[var(--radius-md)]" />
+      </div>
+    </div>
+    <div class="px-3 py-2 flex-shrink-0">
+      <div class="h-7 bg-[var(--surface-raised)] rounded-[var(--radius-md)]" />
+    </div>
+    <div class="flex-1 px-1.5 space-y-1">
+      <div class="h-3 w-12 bg-[var(--surface-raised)] rounded mx-2 mb-1" />
+      <For each={[1, 2, 3, 4, 5]}>
+        {() => (
+          <div class="flex items-center gap-2 px-2 py-2 rounded-[var(--radius-md)]">
+            <div class="w-3.5 h-3.5 bg-[var(--surface-raised)] rounded" />
+            <div class="flex-1 space-y-1">
+              <div class="h-3 w-3/4 bg-[var(--surface-raised)] rounded" />
+              <div class="h-2.5 w-1/2 bg-[var(--surface-raised)] rounded" />
+            </div>
+          </div>
+        )}
+      </For>
+    </div>
+  </div>
+)

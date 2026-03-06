@@ -63,18 +63,6 @@ export const Dialog: Component<DialogProps> = (props) => {
   const closeOnOverlay = () => local.closeOnOverlayClick ?? true
   const closeOnEsc = () => local.closeOnEscape ?? true
 
-  const handleOverlayClick = () => {
-    if (closeOnOverlay()) {
-      local.onOpenChange(false)
-    }
-  }
-
-  const handleEscapeKey = (e: KeyboardEvent) => {
-    if (closeOnEsc() && e.key === 'Escape') {
-      local.onOpenChange(false)
-    }
-  }
-
   return (
     <KobalteDialog open={local.open} onOpenChange={local.onOpenChange} {...others}>
       <KobalteDialog.Portal>
@@ -86,12 +74,17 @@ export const Dialog: Component<DialogProps> = (props) => {
             data-[expanded]:animate-in data-[expanded]:fade-in-0
             data-[closed]:animate-out data-[closed]:fade-out-0
           "
-          onClick={handleOverlayClick}
-          onKeyDown={handleEscapeKey}
         />
 
         {/* Content */}
         <KobalteDialog.Content
+          role="dialog"
+          onInteractOutside={(e) => {
+            if (!closeOnOverlay()) e.preventDefault()
+          }}
+          onEscapeKeyDown={(e) => {
+            if (!closeOnEsc()) e.preventDefault()
+          }}
           class={`
             fixed left-1/2 top-1/2 z-50
             -translate-x-1/2 -translate-y-1/2
@@ -129,6 +122,7 @@ export const Dialog: Component<DialogProps> = (props) => {
                     hover:bg-[var(--surface-raised)]
                     transition-colors duration-[var(--duration-fast)]
                   "
+                  aria-label="Close dialog"
                 >
                   <X class="w-5 h-5" />
                 </KobalteDialog.CloseButton>

@@ -31,6 +31,7 @@ import { useLayout } from '../../stores/layout'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
+import { Dialog } from '../ui/Dialog'
 import { FocusChainBar } from './FocusChainBar'
 import { ModelChangeIndicator } from './ModelChangeIndicator'
 import { MessageRow } from './message-list/message-row'
@@ -405,24 +406,26 @@ export const MessageList: Component = () => {
             </For>
 
             {/* "ava is working on it..." indicator (Goose-style) */}
-            <Show when={isStreaming() || agent.isRunning()}>
-              <div class="w-full animate-fade-in py-2">
-                <div class="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-                  <div class="flex items-center gap-[5px]">
-                    <span class="typing-dot" style={{ 'animation-delay': '0ms' }} />
-                    <span class="typing-dot" style={{ 'animation-delay': '160ms' }} />
-                    <span class="typing-dot" style={{ 'animation-delay': '320ms' }} />
-                  </div>
-                  <span class="font-[var(--font-ui-mono)] tracking-wide">
-                    {agent.currentThought()
-                      ? 'ava is working on it...'
-                      : agent.toolActivity().some((t) => t.status === 'running')
+            <div aria-live="polite" aria-atomic="true">
+              <Show when={isStreaming() || agent.isRunning()}>
+                <div class="w-full animate-fade-in py-2">
+                  <div class="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
+                    <div class="flex items-center gap-[5px]">
+                      <span class="typing-dot" style={{ 'animation-delay': '0ms' }} />
+                      <span class="typing-dot" style={{ 'animation-delay': '160ms' }} />
+                      <span class="typing-dot" style={{ 'animation-delay': '320ms' }} />
+                    </div>
+                    <span class="font-[var(--font-ui-mono)] tracking-wide">
+                      {agent.currentThought()
                         ? 'ava is working on it...'
-                        : 'ava is thinking...'}
-                  </span>
+                        : agent.toolActivity().some((t) => t.status === 'running')
+                          ? 'ava is working on it...'
+                          : 'ava is thinking...'}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            </Show>
+              </Show>
+            </div>
           </div>
         </Show>
       </div>
@@ -449,40 +452,40 @@ export const MessageList: Component = () => {
         onConfirm={handleDeleteConfirm}
       />
 
-      {/* Rewind dialog (Item 5) */}
-      <Show when={rewindTarget() !== null}>
-        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div class="bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] p-6 max-w-sm w-full shadow-2xl space-y-4">
-            <h3 class="text-sm font-semibold text-[var(--text-primary)]">Rewind conversation?</h3>
-            <p class="text-xs text-[var(--text-secondary)]">
-              Messages after this point will be removed. Choose whether to also revert file changes.
-            </p>
-            <div class="flex flex-col gap-2">
-              <button
-                type="button"
-                onClick={handleRewindConversationOnly}
-                class="w-full px-3 py-2 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] transition-colors text-left"
-              >
-                Rewind conversation only
-              </button>
-              <button
-                type="button"
-                onClick={handleRewindAndRevert}
-                class="w-full px-3 py-2 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] transition-colors text-left"
-              >
-                Rewind and revert files
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => setRewindTarget(null)}
-              class="w-full text-center text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
+      <Dialog
+        open={rewindTarget() !== null}
+        onOpenChange={(open) => {
+          if (!open) setRewindTarget(null)
+        }}
+        title="Rewind conversation?"
+        description="Messages after this point will be removed. Choose whether to also revert file changes."
+        size="sm"
+        showCloseButton={false}
+      >
+        <div class="space-y-3">
+          <button
+            type="button"
+            onClick={handleRewindConversationOnly}
+            class="w-full px-3 py-2 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] transition-colors text-left"
+          >
+            Rewind conversation only
+          </button>
+          <button
+            type="button"
+            onClick={handleRewindAndRevert}
+            class="w-full px-3 py-2 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] transition-colors text-left"
+          >
+            Rewind and revert files
+          </button>
+          <button
+            type="button"
+            onClick={() => setRewindTarget(null)}
+            class="w-full text-center text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
+          >
+            Cancel
+          </button>
         </div>
-      </Show>
+      </Dialog>
     </div>
   )
 }

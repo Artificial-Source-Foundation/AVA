@@ -207,6 +207,7 @@ export const MemoryBrowserPanel: Component = () => {
                   onClick={() => void handleDelete(item.id)}
                   class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--error)] hover:bg-[var(--error-subtle)] transition-colors flex-shrink-0"
                   title="Delete"
+                  aria-label="Delete memory item"
                 >
                   <Trash2 class="w-3 h-3" />
                 </button>

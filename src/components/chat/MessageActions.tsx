@@ -52,7 +52,7 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
     <div
       class="
         absolute -top-3 right-0
-        opacity-0 group-hover:opacity-100
+        opacity-0 group-hover:opacity-100 focus-within:opacity-100
         transition-opacity duration-[var(--duration-fast)]
         flex gap-0.5
         bg-[var(--surface-overlay)]
@@ -61,6 +61,8 @@ export const MessageActions: Component<MessageActionsProps> = (props) => {
         p-0.5
         shadow-md
       "
+      role="toolbar"
+      aria-label="Message actions"
     >
       {/* Copy button — all messages */}
       <button

@@ -9,7 +9,7 @@
  */
 
 import { ChevronRight } from 'lucide-solid'
-import { type Component, createSignal, onCleanup, Show } from 'solid-js'
+import { type Component, createEffect, createSignal, onCleanup, Show } from 'solid-js'
 import type { ToolCall } from '../../types'
 import { SubagentCard } from './SubagentCard'
 import { ToolIcon } from './tool-call-icon'
@@ -47,14 +47,17 @@ export const ToolCallCard: Component<ToolCallCardProps> = (props) => {
     return formatDuration(props.toolCall.completedAt - props.toolCall.startedAt)
   }
 
-  // Live elapsed timer — updates every second while running
-  const timer = setInterval(() => {
-    if (isRunning()) {
-      setElapsed(formatElapsed(props.toolCall.startedAt))
+  createEffect(() => {
+    if (!isRunning()) {
+      setElapsed('')
+      return
     }
-  }, 1000)
-
-  onCleanup(() => clearInterval(timer))
+    setElapsed(formatElapsed(props.toolCall.startedAt))
+    const timer = setInterval(() => {
+      setElapsed(formatElapsed(props.toolCall.startedAt))
+    }, 1000)
+    onCleanup(() => clearInterval(timer))
+  })
 
   return (
     <div

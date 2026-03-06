@@ -142,6 +142,37 @@ Middleware priorities are contract-sensitive. Lower numeric priority runs earlie
 
 ---
 
+## CLI Testing with OpenRouter
+
+An OpenRouter API key is configured at `~/.ava/credentials.json` for testing.
+
+### Running CLI tests
+
+```bash
+# Build CLI first
+cd cli && npm run build && cd ..
+
+# Run with a goal
+node cli/dist/index.js run "your goal here" --provider openrouter --model <model> --max-turns 5
+```
+
+### Recommended models (via OpenRouter)
+
+| Model | ID | Best for | Cost |
+|-------|-----|----------|------|
+| Codex 5.3 | `openai/gpt-5.3-codex` | Best OpenAI coding model | $1.75/M |
+| Claude Sonnet 4.6 | `anthropic/claude-sonnet-4.6` | General coding, tool use | $3/M |
+| Claude Opus 4.6 | `anthropic/claude-opus-4.6` | Complex tasks, code review | $5/M |
+| Kimi K2.5 | `moonshotai/kimi-k2.5` | Budget bulk work, 262K context | $0.45/M |
+| GLM 5 | `z-ai/glm-5` | Budget bulk work, 200K context | $0.80/M |
+| GLM 4.5 Air | `z-ai/glm-4.5-air` | Free tier testing | FREE |
+
+For smoke tests, use `anthropic/claude-sonnet-4.6` or `openai/gpt-5.3-codex`.
+For quality verification, use `openai/gpt-5.3-codex` or `anthropic/claude-opus-4.6`.
+For budget/bulk work, use `moonshotai/kimi-k2.5` or `z-ai/glm-5`.
+
+---
+
 ## Do Not
 
 - Commit secrets or credentials

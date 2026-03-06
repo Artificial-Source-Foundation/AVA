@@ -112,6 +112,7 @@ export const SidebarMemory: Component = () => {
                         transition-all
                       "
                       title="Remove"
+                      aria-label="Remove memory item"
                     >
                       <Trash2 class="w-3 h-3" />
                     </button>

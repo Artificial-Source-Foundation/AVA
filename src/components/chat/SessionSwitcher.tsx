@@ -50,14 +50,27 @@ export const SessionSwitcher: Component<{ open: boolean; onClose: () => void }> 
     props.onClose()
   }
 
+  const scrollSelectedIntoView = (index: number) => {
+    const el = document.getElementById(`session-option-${index}`)
+    el?.scrollIntoView({ block: 'nearest' })
+  }
+
   const handleKeyDown = (e: KeyboardEvent) => {
     const count = filtered().length
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setSelectedIndex((i) => (i + 1) % count)
+      setSelectedIndex((i) => {
+        const next = (i + 1) % count
+        scrollSelectedIntoView(next)
+        return next
+      })
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
-      setSelectedIndex((i) => (i - 1 + count) % count)
+      setSelectedIndex((i) => {
+        const next = (i - 1 + count) % count
+        scrollSelectedIntoView(next)
+        return next
+      })
     } else if (e.key === 'Enter') {
       e.preventDefault()
       const session = filtered()[selectedIndex()]
@@ -96,6 +109,14 @@ export const SessionSwitcher: Component<{ open: boolean; onClose: () => void }> 
               value={query()}
               onInput={(e) => setQuery(e.currentTarget.value)}
               placeholder="Switch session..."
+              role="combobox"
+              aria-expanded={filtered().length > 0}
+              aria-controls="session-switcher-listbox"
+              aria-activedescendant={
+                filtered().length > 0 ? `session-option-${selectedIndex()}` : undefined
+              }
+              aria-autocomplete="list"
+              aria-label="Search sessions"
               class="
                 w-full bg-transparent text-sm text-[var(--text-primary)]
                 placeholder:text-[var(--text-muted)]
@@ -105,7 +126,12 @@ export const SessionSwitcher: Component<{ open: boolean; onClose: () => void }> 
           </div>
 
           {/* Results */}
-          <div class="max-h-[320px] overflow-y-auto py-1 scroll-smooth">
+          <div
+            id="session-switcher-listbox"
+            role="listbox"
+            aria-label="Sessions"
+            class="max-h-[320px] overflow-y-auto py-1 scroll-smooth"
+          >
             <Show
               when={filtered().length > 0}
               fallback={
@@ -120,6 +146,9 @@ export const SessionSwitcher: Component<{ open: boolean; onClose: () => void }> 
                   return (
                     <button
                       type="button"
+                      id={`session-option-${index()}`}
+                      role="option"
+                      aria-selected={index() === selectedIndex()}
                       onClick={() => handleSelect(session.id)}
                       class="
                         w-full flex items-center gap-3 px-3 py-2 text-left

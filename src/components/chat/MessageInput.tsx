@@ -8,44 +8,22 @@
  * Sub-components live in ./message-input/ for modularity.
  */
 
-import {
-  Activity,
-  AlertCircle,
-  AlertTriangle,
-  Archive,
-  ExternalLink,
-  Eye,
-  EyeOff,
-  Layers,
-  MessageSquare,
-  Shield,
-} from 'lucide-solid'
+import { ExternalLink, Eye, EyeOff, Layers, Shield } from 'lucide-solid'
 import {
   type Component,
   createEffect,
   createMemo,
   createSignal,
-  For,
   on,
   onCleanup,
   Show,
 } from 'solid-js'
 import { useAgent } from '../../hooks/useAgent'
 import { useChat } from '../../hooks/useChat'
-import { formatCost } from '../../lib/cost'
-import { getCoreBudget } from '../../services/core-bridge'
 import type { SearchableFile } from '../../services/file-search'
 import { filterFiles, getProjectFiles } from '../../services/file-search'
 import { openInExternalEditor } from '../../services/ide-integration'
 import { getStash, popStash, pushStash } from '../../services/prompt-stash'
-import {
-  type AudioAnalyserHandle,
-  createAudioAnalyser,
-  createDictation,
-  getAudioDevices,
-  isDictationSupported,
-} from '../../services/voice-dictation'
-import { useDiagnostics } from '../../stores/diagnostics'
 import { useLayout } from '../../stores/layout'
 import { useProject } from '../../stores/project'
 import { useSandbox } from '../../stores/sandbox'
@@ -55,34 +33,26 @@ import { ModelBrowserDialog } from '../dialogs/model-browser/model-browser-dialo
 import { SandboxReviewDialog } from '../dialogs/SandboxReviewDialog'
 import { DoomLoopBanner } from './DoomLoopBanner'
 import { ExpandedEditor } from './ExpandedEditor'
-import { buildFullMessage, processImageFile, processTextFile } from './message-input/attachments'
+import { createAttachmentState } from './message-input/attachment-bar'
+import { buildFullMessage } from './message-input/attachments'
 import { FileMentionPopover } from './message-input/file-mention-popover'
 import { ModelSelector } from './message-input/model-selector'
+import { StatusBar } from './message-input/status-bar'
 import { InputTextArea } from './message-input/text-area'
 import {
   cycleReasoningEffort,
   DelegationToggle,
-  MicButton,
   PermissionBadge,
   PlanActSlider,
   ReasoningDropdown,
 } from './message-input/toolbar-buttons'
-import {
-  MAX_FILES,
-  MAX_IMAGES,
-  PASTE_LINE_THRESHOLD,
-  type PendingFile,
-  type PendingImage,
-  type PendingPaste,
-} from './message-input/types'
+import { VoiceButton } from './message-input/voice-button'
 import { PlanBranchSelector } from './PlanBranchSelector'
 import { ShortcutHint } from './ShortcutHint'
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-const fmt = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
 
 /** Thin vertical divider between strip groups */
 const StripDivider: Component = () => <span class="w-px h-4 bg-[var(--border-subtle)] shrink-0" />
@@ -95,36 +65,27 @@ export const MessageInput: Component = () => {
   // State
   const [input, setInput] = createSignal('')
   const [sendCount, setSendCount] = createSignal(0)
-  const [pendingImages, setPendingImages] = createSignal<PendingImage[]>([])
-  const [pendingFiles, setPendingFiles] = createSignal<PendingFile[]>([])
-  const [pendingPastes, setPendingPastes] = createSignal<PendingPaste[]>([])
-  const [expandedPasteIndex, setExpandedPasteIndex] = createSignal<number | null>(null)
-  const [isDragging, setIsDragging] = createSignal(false)
   const [elapsedSeconds, setElapsedSeconds] = createSignal(0)
   let submitting = false
   let textareaRef: HTMLTextAreaElement | undefined
   let resizeFrame: number | undefined
 
-  // Prompt history navigation (Item 1)
+  // Prompt history navigation
   const [historyIndex, setHistoryIndex] = createSignal(-1)
   const [savedDraft, setSavedDraft] = createSignal('')
 
-  // Prompt stash (Item 3)
+  // Prompt stash
   const [stashSize, setStashSize] = createSignal(getStash().length)
+
+  // Attachment state (extracted hook)
+  const attachments = createAttachmentState()
 
   // Hooks / stores
   const chat = useChat()
   const agent = useAgent()
   const sessionStore = useSession()
   const { currentProject } = useProject()
-  const {
-    selectedModel,
-    selectedProvider,
-    setSelectedModel,
-    contextUsage,
-    sessionTokenStats,
-    messages,
-  } = sessionStore
+  const { selectedModel, selectedProvider, setSelectedModel, messages } = sessionStore
   const { settings, cyclePermissionMode, updateSettings } = useSettings()
   const {
     modelBrowserOpen,
@@ -133,7 +94,6 @@ export const MessageInput: Component = () => {
     expandedEditorOpen,
     setExpandedEditorOpen,
   } = useLayout()
-  const { diagnostics, hasDiagnostics } = useDiagnostics()
   const sandbox = useSandbox()
 
   // Prompt history: reversed list of past user messages
@@ -144,69 +104,11 @@ export const MessageInput: Component = () => {
       .reverse()
   )
 
-  // Voice dictation
-  const [isRecording, setIsRecording] = createSignal(false)
-  const dictationSupported = createMemo(() => isDictationSupported())
-  const dictation = createDictation({
-    onTranscript: (text) => {
-      setInput((prev) => prev + text)
-      queueMicrotask(autoResize)
-    },
-    onStateChange: setIsRecording,
-    onError: (err) => console.warn('Voice dictation:', err),
-  })
-
-  // Audio analyser for waveform visualization (Feature 1.4)
-  const [waveformBars, setWaveformBars] = createSignal<number[]>([0, 0, 0, 0, 0, 0, 0, 0])
-  let analyserHandle: AudioAnalyserHandle | undefined
-  let waveformRaf: number | undefined
-
-  // Audio device list (Feature 1.5)
-  const [audioDevices, setAudioDevices] = createSignal<MediaDeviceInfo[]>([])
-
-  // Load audio devices on mount when dictation is supported
-  if (dictationSupported()) {
-    getAudioDevices()
-      .then(setAudioDevices)
-      .catch(() => {})
-  }
-
-  // Start/stop analyser when recording state changes
-  createEffect(
-    on(isRecording, (rec) => {
-      if (rec) {
-        const deviceId = settings().behavior.voiceDeviceId || undefined
-        createAudioAnalyser(deviceId)
-          .then((handle) => {
-            analyserHandle = handle
-            const tick = () => {
-              const data = handle.getFrequencyData()
-              // Pick 8 evenly-spaced bins, normalize to 0..16
-              const bars: number[] = []
-              const step = Math.floor(data.length / 8)
-              for (let i = 0; i < 8; i++) {
-                bars.push(Math.round((data[i * step] / 255) * 16))
-              }
-              setWaveformBars(bars)
-              waveformRaf = requestAnimationFrame(tick)
-            }
-            waveformRaf = requestAnimationFrame(tick)
-          })
-          .catch(() => {})
-      } else {
-        if (waveformRaf !== undefined) cancelAnimationFrame(waveformRaf)
-        analyserHandle?.stop()
-        analyserHandle = undefined
-        setWaveformBars([0, 0, 0, 0, 0, 0, 0, 0])
-      }
-    })
-  )
-
   // @ mention state
   const [mentionOpen, setMentionOpen] = createSignal(false)
   const [mentionQuery, setMentionQuery] = createSignal('')
   const [mentionIndex, setMentionIndex] = createSignal(0)
-  const [mentionStart, setMentionStart] = createSignal(-1) // cursor position of @
+  const [mentionStart, setMentionStart] = createSignal(-1)
   const [mentionFiles, setMentionFiles] = createSignal<SearchableFile[]>([])
   const mentionFiltered = createMemo(() =>
     mentionOpen() ? filterFiles(mentionFiles(), mentionQuery(), 12) : []
@@ -250,7 +152,6 @@ export const MessageInput: Component = () => {
   const currentModelDisplay = createMemo(() => {
     const modelId = selectedModel()
     const provId = selectedProvider()
-    // Prefer the exact provider match when available
     if (provId) {
       const provider = settings().providers.find((p) => p.id === provId)
       const model = provider?.models.find((m) => m.id === modelId)
@@ -264,7 +165,7 @@ export const MessageInput: Component = () => {
     return modelId
   })
 
-  // Reasoning mode support — find the active provider for effort level cycling
+  // Reasoning mode support
   const activeProviderId = createMemo(() => {
     const provId = selectedProvider()
     if (provId) return provId
@@ -313,34 +214,6 @@ export const MessageInput: Component = () => {
     })
   }
 
-  // Context bar state
-  const showTokens = () => settings().ui.showTokenCount
-  const toggleTokens = () => {
-    updateSettings({ ui: { ...settings().ui, showTokenCount: !showTokens() } })
-  }
-
-  const tokenDisplay = () => {
-    const real = sessionTokenStats().total
-    if (real > 0) return fmt(real)
-    return fmt(contextUsage().used)
-  }
-
-  const percentage = () => {
-    const real = sessionTokenStats().total
-    const limit = contextUsage().total
-    if (real > 0 && limit > 0) return Math.min(100, (real / limit) * 100)
-    return contextUsage().percentage
-  }
-
-  const barColor = () => {
-    const pct = percentage()
-    if (pct > 80) return 'var(--warning)'
-    if (pct > 60) return 'var(--text-muted)'
-    return 'var(--accent)'
-  }
-
-  const msgCount = () => messages().length
-
   // Effects
   createEffect(
     on(
@@ -368,7 +241,7 @@ export const MessageInput: Component = () => {
     )
   )
 
-  // Listen for stash events from global shortcuts (Item 3)
+  // Stash events
   const handleStash = () => {
     const text = input().trim()
     if (!text) return
@@ -388,7 +261,7 @@ export const MessageInput: Component = () => {
   window.addEventListener('ava:stash-prompt', handleStash)
   window.addEventListener('ava:restore-prompt', handleRestore)
 
-  // Listen for external input setting (from templates, etc.)
+  // External input setting (from templates, etc.)
   const handleExternalInput = (e: Event) => {
     const text = (e as CustomEvent<{ text: string }>).detail.text
     setInput(text)
@@ -405,27 +278,7 @@ export const MessageInput: Component = () => {
     window.removeEventListener('ava:set-input', handleExternalInput)
     window.removeEventListener('ava:stash-prompt', handleStash)
     window.removeEventListener('ava:restore-prompt', handleRestore)
-    dictation?.stop()
-    if (waveformRaf !== undefined) cancelAnimationFrame(waveformRaf)
-    analyserHandle?.stop()
   })
-
-  // Attachment handlers
-  const addImages = async (files: File[]) => {
-    const remaining = MAX_IMAGES - pendingImages().length
-    if (remaining <= 0) return
-    const results = await Promise.all(files.slice(0, remaining).map(processImageFile))
-    const valid = results.filter((r): r is NonNullable<typeof r> => r !== null)
-    if (valid.length > 0) setPendingImages((prev) => [...prev, ...valid])
-  }
-
-  const addTextFiles = async (files: File[]) => {
-    const remaining = MAX_FILES - pendingFiles().length
-    if (remaining <= 0) return
-    const results = await Promise.all(files.slice(0, remaining).map(processTextFile))
-    const valid = results.filter((r): r is NonNullable<typeof r> => r !== null)
-    if (valid.length > 0) setPendingFiles((prev) => [...prev, ...valid])
-  }
 
   // Event handlers
   const autoResize = () => {
@@ -437,43 +290,6 @@ export const MessageInput: Component = () => {
       if (textareaRef.style.height !== h) textareaRef.style.height = h
       resizeFrame = undefined
     })
-  }
-
-  const handlePaste = (e: ClipboardEvent) => {
-    const items = e.clipboardData?.items
-    if (!items) return
-    const imageFiles: File[] = []
-    for (const item of items) {
-      if (item.type.startsWith('image/')) {
-        const file = item.getAsFile()
-        if (file) imageFiles.push(file)
-      }
-    }
-    if (imageFiles.length > 0) {
-      e.preventDefault()
-      addImages(imageFiles)
-      return
-    }
-    const text = e.clipboardData?.getData('text/plain')
-    if (text) {
-      const lines = text.split('\n')
-      if (lines.length > PASTE_LINE_THRESHOLD) {
-        e.preventDefault()
-        setPendingPastes((prev) => [...prev, { content: text, lineCount: lines.length }])
-      }
-    }
-  }
-
-  const handleDrop = (e: DragEvent) => {
-    e.preventDefault()
-    setIsDragging(false)
-    const files = e.dataTransfer?.files
-    if (!files) return
-    const all = Array.from(files)
-    const imgs = all.filter((f) => f.type.startsWith('image/'))
-    const txts = all.filter((f) => !f.type.startsWith('image/'))
-    if (imgs.length > 0) addImages(imgs)
-    if (txts.length > 0) addTextFiles(txts)
   }
 
   const handleSubmit = async (e: Event) => {
@@ -488,12 +304,7 @@ export const MessageInput: Component = () => {
     if (textareaRef) textareaRef.style.height = 'auto'
     chat.clearError()
     agent.clearError()
-    setPendingImages([])
-    const files = pendingFiles()
-    setPendingFiles([])
-    const pastes = pendingPastes()
-    setPendingPastes([])
-    setExpandedPasteIndex(null)
+    const { files, pastes } = attachments.clearAll()
     const fullMessage = buildFullMessage(message, files, pastes)
     try {
       await agent.run(fullMessage, { model: selectedModel() })
@@ -504,20 +315,17 @@ export const MessageInput: Component = () => {
 
   /** Detect @ mentions in the input text around the cursor */
   const checkMention = (value: string, cursorPos: number) => {
-    // Scan backwards from cursor for @
     let atPos = -1
     for (let i = cursorPos - 1; i >= 0; i--) {
       const ch = value[i]
       if (ch === '@') {
-        // @ must be at start or preceded by whitespace
         if (i === 0 || /\s/.test(value[i - 1])) {
           atPos = i
         }
         break
       }
-      if (/\s/.test(ch)) break // whitespace before finding @ — no mention
+      if (/\s/.test(ch)) break
     }
-
     if (atPos >= 0) {
       const query = value.slice(atPos + 1, cursorPos)
       setMentionOpen(true)
@@ -540,7 +348,6 @@ export const MessageInput: Component = () => {
     setInput(before + inserted + after)
     setMentionOpen(false)
     textareaRef?.focus()
-    // Set cursor position after inserted text
     const newPos = before.length + inserted.length
     queueMicrotask(() => {
       textareaRef?.setSelectionRange(newPos, newPos)
@@ -573,7 +380,7 @@ export const MessageInput: Component = () => {
       }
     }
 
-    // Prompt history: ArrowUp when input is empty or navigating
+    // Prompt history
     if (e.key === 'ArrowUp' && !mentionOpen()) {
       const history = promptHistory()
       if (history.length === 0) return
@@ -656,31 +463,27 @@ export const MessageInput: Component = () => {
             setInput(v)
             if (historyIndex() >= 0) setHistoryIndex(-1)
             autoResize()
-            // Check for @ mention after input changes
             const cursor = textareaRef?.selectionStart ?? v.length
             checkMention(v, cursor)
           }}
           onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-          onDrop={handleDrop}
-          isDragging={isDragging}
-          setIsDragging={setIsDragging}
+          onPaste={attachments.handlePaste}
+          onDrop={attachments.handleDrop}
+          isDragging={attachments.isDragging}
+          setIsDragging={attachments.setIsDragging}
           disabled={inputDisabled}
           placeholder={placeholder}
           textareaRef={(el) => {
             textareaRef = el
           }}
-          pendingImages={pendingImages}
-          onRemoveImage={(i) => setPendingImages((p) => p.filter((_, x) => x !== i))}
-          pendingFiles={pendingFiles}
-          onRemoveFile={(i) => setPendingFiles((p) => p.filter((_, x) => x !== i))}
-          pendingPastes={pendingPastes}
-          expandedPasteIndex={expandedPasteIndex}
-          onTogglePastePreview={(i) => setExpandedPasteIndex((p) => (p === i ? null : i))}
-          onRemovePaste={(i) => {
-            setPendingPastes((p) => p.filter((_, x) => x !== i))
-            if (expandedPasteIndex() === i) setExpandedPasteIndex(null)
-          }}
+          pendingImages={attachments.pendingImages}
+          onRemoveImage={attachments.removeImage}
+          pendingFiles={attachments.pendingFiles}
+          onRemoveFile={attachments.removeFile}
+          pendingPastes={attachments.pendingPastes}
+          expandedPasteIndex={attachments.expandedPasteIndex}
+          onTogglePastePreview={attachments.togglePastePreview}
+          onRemovePaste={attachments.removePaste}
           isProcessing={isProcessing}
           isStreaming={chat.isStreaming}
           elapsedSeconds={elapsedSeconds}
@@ -729,7 +532,6 @@ export const MessageInput: Component = () => {
               isProcessing={isProcessing}
             />
 
-            {/* Plan branch management — only visible in plan mode */}
             <Show when={agent.isPlanMode()}>
               <PlanBranchSelector
                 isPlanMode={agent.isPlanMode}
@@ -785,7 +587,7 @@ export const MessageInput: Component = () => {
               </Show>
             </button>
 
-            {/* Run in Background button (plan mode + running) */}
+            {/* Run in Background button */}
             <Show
               when={agent.isPlanMode() && isProcessing() && !sessionStore.backgroundPlanActive()}
             >
@@ -810,203 +612,39 @@ export const MessageInput: Component = () => {
               </span>
             </Show>
 
-            <Show when={!isRecording()}>
-              <StripDivider />
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    const result = await openInExternalEditor(input())
-                    setInput(result)
-                    queueMicrotask(autoResize)
-                  } catch (err) {
-                    console.warn('External editor:', err)
-                  }
-                }}
-                class="p-1 rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-raised)] transition-colors"
-                title="Edit prompt in external editor ($EDITOR)"
-              >
-                <ExternalLink class="w-3 h-3" />
-              </button>
-            </Show>
+            <StripDivider />
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const result = await openInExternalEditor(input())
+                  setInput(result)
+                  queueMicrotask(autoResize)
+                } catch (err) {
+                  console.warn('External editor:', err)
+                }
+              }}
+              class="p-1 rounded-[var(--radius-md)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-raised)] transition-colors"
+              title="Edit prompt in external editor ($EDITOR)"
+            >
+              <ExternalLink class="w-3 h-3" />
+            </button>
 
-            <Show when={dictation}>
-              <StripDivider />
-              <MicButton
-                isRecording={isRecording}
-                onToggle={() => dictation!.toggle()}
-                supported={dictationSupported}
-              />
-
-              {/* Waveform visualizer (Feature 1.4) */}
-              <Show when={isRecording()}>
-                <div class="flex items-center gap-[2px] w-[20px] h-[16px]">
-                  <For each={waveformBars()}>
-                    {(h) => (
-                      <div
-                        class="w-[2px] rounded-full bg-[var(--accent)] transition-[height] duration-75"
-                        style={{ height: `${Math.max(2, h)}px` }}
-                      />
-                    )}
-                  </For>
-                </div>
-              </Show>
-
-              {/* Device picker (Feature 1.5) */}
-              <Show when={audioDevices().length > 1}>
-                <select
-                  class="h-[18px] text-[10px] max-w-[80px] truncate bg-transparent border-none outline-none text-[var(--text-tertiary)] cursor-pointer"
-                  style={{ 'font-family': 'var(--font-ui-mono)' }}
-                  value={settings().behavior.voiceDeviceId}
-                  onChange={(e) => {
-                    updateSettings({
-                      behavior: { ...settings().behavior, voiceDeviceId: e.currentTarget.value },
-                    })
-                  }}
-                >
-                  <option value="">Default mic</option>
-                  <For each={audioDevices()}>
-                    {(dev) => (
-                      <option value={dev.deviceId}>
-                        {dev.label || `Mic ${dev.deviceId.slice(0, 6)}`}
-                      </option>
-                    )}
-                  </For>
-                </select>
-              </Show>
-            </Show>
+            <StripDivider />
+            <VoiceButton
+              onTranscript={(text) => {
+                setInput((prev) => prev + text)
+                queueMicrotask(autoResize)
+              }}
+            />
           </div>
 
           {/* Right: token info */}
-          <div class="flex items-center gap-1.5 shrink-0">
-            <button
-              type="button"
-              onClick={toggleTokens}
-              class="inline-flex items-center gap-1 hover:text-[var(--text-secondary)] transition-colors"
-              title={showTokens() ? 'Hide token details' : 'Show token details'}
-            >
-              <Activity class="w-3 h-3" />
-              <span class="tabular-nums">{tokenDisplay()}</span>
-            </button>
-
-            {/* Stash indicator (Item 3) */}
-            <Show when={stashSize() > 0}>
-              <span
-                class="inline-flex items-center gap-0.5 text-[var(--accent)]"
-                title={`${stashSize()} stashed prompt(s) — Ctrl+Shift+R to restore`}
-              >
-                <Archive class="w-2.5 h-2.5" />
-                <span class="tabular-nums">{stashSize()}</span>
-              </span>
-              <span class="text-[var(--border-muted)]">&middot;</span>
-            </Show>
-
-            {/* Context warning icon at 80%+ */}
-            <Show when={percentage() >= 80}>
-              <span title={`Context ${percentage().toFixed(0)}% full`}>
-                <AlertTriangle class="w-3 h-3 text-[var(--warning)]" />
-              </span>
-            </Show>
-
-            {/* Compact button (Item 4) */}
-            <Show when={percentage() >= settings().generation.compactionThreshold}>
-              <button
-                type="button"
-                onClick={async () => {
-                  const budget = getCoreBudget()
-                  if (!budget) return
-                  const msgs = messages()
-                  if (msgs.length <= 4) return
-                  const coreMessages = msgs.map((m) => ({
-                    id: m.id,
-                    role: m.role as 'user' | 'assistant' | 'system',
-                    content: m.content,
-                  }))
-                  const result = await budget.compact(coreMessages)
-                  if (result.tokensSaved === 0) return
-                  const keptIds = new Set(result.messages.map((m) => m.id))
-                  sessionStore.setMessages(msgs.filter((m) => keptIds.has(m.id)))
-                  budget.clear()
-                  for (const m of result.messages) budget.addMessage(m.id, m.content)
-                  window.dispatchEvent(
-                    new CustomEvent('ava:compacted', {
-                      detail: {
-                        removed: result.originalCount - result.compactedCount,
-                        tokensSaved: result.tokensSaved,
-                      },
-                    })
-                  )
-                }}
-                class="text-[10px] text-[var(--warning)] hover:text-[var(--accent)] transition-colors"
-                title="Compact context now"
-              >
-                Compact
-              </button>
-            </Show>
-
-            {/* Progress bar + percentage (togglable) */}
-            <Show when={showTokens()}>
-              <div class="w-10 h-1 bg-[var(--surface-raised)] rounded-full overflow-hidden">
-                <div
-                  class="h-full rounded-full transition-all duration-300"
-                  style={{
-                    width: `${Math.min(100, percentage())}%`,
-                    'background-color': barColor(),
-                  }}
-                />
-              </div>
-              <span
-                class="tabular-nums"
-                classList={{ 'text-[var(--warning)]': percentage() >= 80 }}
-              >
-                {percentage().toFixed(0)}%
-              </span>
-            </Show>
-
-            {/* LSP diagnostics */}
-            <Show when={hasDiagnostics()}>
-              <span class="text-[var(--border-muted)]">&middot;</span>
-              <span class="inline-flex items-center gap-1">
-                <Show when={diagnostics().errors > 0}>
-                  <span class="inline-flex items-center gap-0.5 text-[var(--error)]">
-                    <AlertCircle class="w-2.5 h-2.5" />
-                    {diagnostics().errors}
-                  </span>
-                </Show>
-                <Show when={diagnostics().warnings > 0}>
-                  <span class="inline-flex items-center gap-0.5 text-[var(--warning)]">
-                    <AlertTriangle class="w-2.5 h-2.5" />
-                    {diagnostics().warnings}
-                  </span>
-                </Show>
-              </span>
-            </Show>
-
-            {/* Session cost */}
-            <Show when={sessionTokenStats().totalCost > 0}>
-              <span class="text-[var(--border-muted)]">&middot;</span>
-              <span class="tabular-nums text-[var(--success)]">
-                {formatCost(sessionTokenStats().totalCost)}
-              </span>
-            </Show>
-
-            {/* Streaming token estimate */}
-            <Show when={chat.isStreaming() && chat.streamingTokenEstimate() > 0}>
-              <span class="text-[var(--border-muted)]">&middot;</span>
-              <span class="text-[var(--accent)] animate-pulse tabular-nums">
-                +{fmt(chat.streamingTokenEstimate())}
-              </span>
-            </Show>
-
-            {/* Message count */}
-            <Show when={msgCount() > 0}>
-              <span class="text-[var(--border-muted)]">&middot;</span>
-              <span class="inline-flex items-center gap-0.5 tabular-nums">
-                <MessageSquare class="w-2.5 h-2.5" />
-                {msgCount()}
-              </span>
-            </Show>
-          </div>
+          <StatusBar
+            stashSize={stashSize}
+            isStreaming={chat.isStreaming}
+            streamingTokenEstimate={chat.streamingTokenEstimate}
+          />
         </div>
       </form>
       <ModelBrowserDialog

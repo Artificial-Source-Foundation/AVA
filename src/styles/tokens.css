@@ -534,6 +534,30 @@
   font-weight: 300;
 }
 
+/* Shimmer effect for streaming text content */
+@keyframes shimmer-text {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    var(--text-secondary) 0%,
+    var(--accent) 50%,
+    var(--text-secondary) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-text 2s ease-in-out infinite;
+}
+
 /* ========================================
    LONG-SESSION RENDERING PERFORMANCE
    ======================================== */

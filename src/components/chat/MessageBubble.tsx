@@ -1,35 +1,12 @@
-/**
- * Message Bubble Component
- *
- * Goose-inspired message rendering:
- * - User messages: right-aligned filled bubble
- * - Assistant messages: left-aligned plain text (no bubble), tool cards inline
- * - Timestamps on hover with fade animation
- * - Thinking block as collapsible details
- */
-
-import { AlertCircle, Loader2, RotateCcw } from 'lucide-solid'
-import {
-  type Accessor,
-  type Component,
-  createEffect,
-  createMemo,
-  createSignal,
-  For,
-  Match,
-  on,
-  onCleanup,
-  Show,
-  Switch,
-} from 'solid-js'
+import { type Accessor, type Component, createMemo, For, Match, Show, Switch } from 'solid-js'
 import { formatCost } from '../../lib/cost'
 import type { Message, ToolCall } from '../../types'
 import { EditForm } from './EditForm'
 import { MarkdownContent } from './MarkdownContent'
 import { MessageActions } from './MessageActions'
+import { CommandOutputRow, DiffRow, ErrorRow, ThinkingRow, ToolCallRow } from './message-rows'
 import { type MessageSegment, segmentMessage } from './message-segments'
-import { ThinkingBlock } from './ThinkingBlock'
-import { ToolCallGroup } from './ToolCallGroup'
+import { ToolPreview } from './ToolPreview'
 import { ToolCallErrorBoundary } from './tool-call-error-boundary'
 
 interface MessageBubbleProps {
@@ -54,7 +31,6 @@ interface MessageBubbleProps {
   onRewind: () => void
 }
 
-/** Format raw model ID into a compact display name */
 function formatModelName(modelId: string): string {
   let name = modelId.replace(/-\d{8}$/, '')
   const slash = name.lastIndexOf('/')
@@ -62,7 +38,6 @@ function formatModelName(modelId: string): string {
   return name
 }
 
-/** Format timestamp from message */
 function formatTimestamp(msg: Message): string {
   const date = msg.createdAt ? new Date(msg.createdAt) : new Date()
   const h = date.getHours()
@@ -72,18 +47,38 @@ function formatTimestamp(msg: Message): string {
   return `${h12}:${m} ${ampm}`
 }
 
-// ============================================================================
-// Main component
-// ============================================================================
+interface ToolSegmentProps {
+  toolCalls: ToolCall[]
+  isStreaming: boolean
+}
+
+const ToolSegmentDispatch: Component<ToolSegmentProps> = (props) => {
+  return (
+    <div class="flex flex-col gap-1.5 my-1">
+      <For each={props.toolCalls}>
+        {(tc) => (
+          <ToolCallErrorBoundary>
+            <Switch fallback={<ToolCallRow toolCall={tc} />}>
+              <Match when={tc.name === 'bash' && tc}>
+                {(call) => <CommandOutputRow toolCall={call()} />}
+              </Match>
+              <Match when={tc.diff && tc.name !== 'bash' && tc}>
+                {(call) => <DiffRow toolCall={call()} />}
+              </Match>
+            </Switch>
+          </ToolCallErrorBoundary>
+        )}
+      </For>
+    </div>
+  )
+}
 
 export const MessageBubble: Component<MessageBubbleProps> = (props) => {
   const isUser = () => props.message.role === 'user'
   const shouldAnimateIn = () => props.shouldAnimate && !props.isEditing
 
-  // Whether this is an actively streaming assistant message
   const isActiveStreaming = () => props.isStreaming && props.isLastMessage && !isUser()
 
-  // Content: during streaming, read from signal (no store dependency); otherwise from message
   const displayContent = () => {
     if (isActiveStreaming() && props.streamingContent) {
       return props.streamingContent()
@@ -91,7 +86,6 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
     return props.message.content
   }
 
-  // Tool calls: during streaming, read from signal; otherwise from message
   const effectiveToolCalls = () => {
     if (isActiveStreaming() && props.streamingToolCalls?.length) {
       return props.streamingToolCalls
@@ -100,40 +94,12 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
   }
   const hasToolCalls = () => !isUser() && (effectiveToolCalls()?.length ?? 0) > 0
 
-  // Segments: ONLY for completed messages. During streaming, render separately.
   const segments = createMemo((): MessageSegment[] | null => {
     if (isUser()) return null
     if (isActiveStreaming()) return null
     if (!hasToolCalls() && !props.message.content) return null
     return segmentMessage(props.message.content, effectiveToolCalls())
   })
-
-  // Retry countdown timer
-  const [countdown, setCountdown] = createSignal(0)
-  createEffect(
-    on(
-      () => props.message.error?.retryAfter,
-      (retryAfter) => {
-        if (!retryAfter || retryAfter <= 0) {
-          setCountdown(0)
-          return
-        }
-        setCountdown(retryAfter)
-        const timer = setInterval(() => {
-          setCountdown((prev) => {
-            if (prev <= 1) {
-              clearInterval(timer)
-              return 0
-            }
-            return prev - 1
-          })
-        }, 1000)
-        onCleanup(() => clearInterval(timer))
-      }
-    )
-  )
-
-  // ── Shared sub-components ──────────────────────────────────────────────
 
   const ImagesBlock = () => (
     <Show
@@ -157,12 +123,10 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
     </Show>
   )
 
-  /** Timestamp + meta line with hover fade (Goose-style) */
   const TimestampLine = (lineProps: { align?: 'left' | 'right' }) => {
     const align = lineProps.align ?? (isUser() ? 'right' : 'left')
     return (
       <div class={`relative h-[20px] flex ${align === 'right' ? 'justify-end' : 'justify-start'}`}>
-        {/* Timestamp — fades out on hover, slides up */}
         <Show when={!props.isStreaming}>
           <div
             class={`font-[var(--font-ui-mono)] text-[10px] tracking-wide text-[var(--text-muted)] pt-1 transition-all duration-200 group-hover:-translate-y-3 group-hover:opacity-0 tabular-nums`}
@@ -182,7 +146,6 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
             </Show>
           </div>
         </Show>
-        {/* Actions — appear on hover, slide in */}
         <Show when={props.message.content && !props.isStreaming}>
           <div class="absolute left-0 top-0 pt-1">
             <MessageActions
@@ -202,47 +165,6 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
     )
   }
 
-  const ErrorBlock = () => (
-    <Show when={props.message.error}>
-      <div class="mt-2 p-3 bg-[var(--error-subtle)] border border-[var(--error)] rounded-[var(--radius-md)]">
-        <div class="flex items-center justify-between gap-3">
-          <div class="flex items-start gap-2 flex-1 min-w-0">
-            <AlertCircle class="w-4 h-4 text-[var(--error)] flex-shrink-0" />
-            <span class="text-sm text-[var(--error)] break-words whitespace-pre-wrap leading-relaxed">
-              {props.message.error!.message}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={() => props.onRetry()}
-            disabled={props.isStreaming || props.isRetrying}
-            class="px-3 py-1.5 bg-[var(--error)] hover:brightness-110 text-white text-xs font-medium rounded-[var(--radius-md)] transition-colors duration-[var(--duration-fast)] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-          >
-            <Show
-              when={props.isRetrying}
-              fallback={
-                <>
-                  <RotateCcw class="w-3 h-3" />
-                  Retry
-                </>
-              }
-            >
-              <Loader2 class="w-3 h-3 animate-spin" />
-              Retrying
-            </Show>
-          </button>
-        </div>
-        <Show when={countdown() > 0}>
-          <p class="text-xs text-[var(--error)] opacity-75 mt-2">
-            Retry available in {countdown()}s
-          </p>
-        </Show>
-      </div>
-    </Show>
-  )
-
-  // ── Render ─────────────────────────────────────────────────────────────
-
   return (
     <div
       class={`flex ${isUser() ? 'justify-end' : 'justify-start'} ${shouldAnimateIn() ? 'animate-message-in' : ''}`}
@@ -257,7 +179,6 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
           />
         }
       >
-        {/* ── User message: right-aligned filled bubble ─── */}
         <Show when={isUser()}>
           <div class="relative group max-w-[85%]">
             <div class="flex flex-col">
@@ -276,29 +197,23 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
           </div>
         </Show>
 
-        {/* ── Assistant message: left-aligned, no bubble ─── */}
         <Show when={!isUser()}>
           <div class="relative group w-[90%] min-w-0">
             <div class="flex flex-col w-full min-w-0">
-              {/* Thinking block — collapsible */}
               <Show when={props.message.metadata?.thinking as string}>
-                <ThinkingBlock
+                <ThinkingRow
                   thinking={props.message.metadata!.thinking as string}
                   isStreaming={props.isStreaming}
                 />
               </Show>
 
-              {/* ── Streaming layout: tools + text from signals (no store dependency) ── */}
               <Show when={isActiveStreaming()}>
-                {/* Tool cards from signal (stable, won't re-render on content changes) */}
                 <Show when={hasToolCalls()}>
-                  <div class="my-1.5">
-                    <ToolCallErrorBoundary>
-                      <ToolCallGroup toolCalls={effectiveToolCalls()!} isStreaming={true} />
-                    </ToolCallErrorBoundary>
-                  </div>
+                  <ToolCallErrorBoundary>
+                    <ToolSegmentDispatch toolCalls={effectiveToolCalls()!} isStreaming={true} />
+                  </ToolCallErrorBoundary>
                 </Show>
-                {/* Streaming text content — reads from signal, renders markdown */}
+                <ToolPreview toolCalls={effectiveToolCalls()} isStreaming={true} />
                 <Show when={displayContent()}>
                   <div class="w-full">
                     <MarkdownContent
@@ -310,7 +225,6 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                 </Show>
               </Show>
 
-              {/* ── Completed layout: segmented (tools interleaved at correct positions) ── */}
               <Show when={!isActiveStreaming()}>
                 <Show when={segments()}>
                   {(segs) => (
@@ -330,16 +244,12 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                           </Match>
                           <Match when={seg.type === 'tools' && seg}>
                             {(toolSeg) => (
-                              <div class="my-1.5">
-                                <ToolCallErrorBoundary>
-                                  <ToolCallGroup
-                                    toolCalls={
-                                      (toolSeg() as MessageSegment & { type: 'tools' }).toolCalls
-                                    }
-                                    isStreaming={false}
-                                  />
-                                </ToolCallErrorBoundary>
-                              </div>
+                              <ToolSegmentDispatch
+                                toolCalls={
+                                  (toolSeg() as MessageSegment & { type: 'tools' }).toolCalls
+                                }
+                                isStreaming={false}
+                              />
                             )}
                           </Match>
                         </Switch>
@@ -359,10 +269,16 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
                 </Show>
               </Show>
 
-              {/* Timestamp + meta (fades on hover, actions appear) */}
               <TimestampLine align="left" />
 
-              <ErrorBlock />
+              <Show when={props.message.error}>
+                <ErrorRow
+                  error={props.message.error!}
+                  isStreaming={props.isStreaming}
+                  isRetrying={props.isRetrying}
+                  onRetry={props.onRetry}
+                />
+              </Show>
             </div>
           </div>
         </Show>

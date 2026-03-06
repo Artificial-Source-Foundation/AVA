@@ -17,6 +17,7 @@ import { FileOperationsPanel } from '../panels/FileOperationsPanel'
 import { TerminalPanel } from '../panels/TerminalPanel'
 import { SettingsModal } from '../settings'
 import { SidebarMemory } from '../sidebar/SidebarMemory'
+import { PanelErrorBoundary } from '../ui/PanelErrorBoundary'
 import { ActivityBar } from './ActivityBar'
 import { MainArea } from './MainArea'
 import { SidebarPanel } from './SidebarPanel'
@@ -209,6 +210,7 @@ export const AppShell: Component = () => {
                     type="button"
                     onClick={() => setBottomPanelVisible(false)}
                     class="p-1 mr-1.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors"
+                    aria-label="Close bottom panel"
                   >
                     <X class="w-3 h-3" />
                   </button>
@@ -218,19 +220,25 @@ export const AppShell: Component = () => {
                   class="flex-1 overflow-hidden"
                   style={{ display: bottomPanelTab() === 'memory' ? undefined : 'none' }}
                 >
-                  <SidebarMemory />
+                  <PanelErrorBoundary panelName="Memory">
+                    <SidebarMemory />
+                  </PanelErrorBoundary>
                 </div>
                 <div
                   class="flex-1 overflow-hidden"
                   style={{ display: bottomPanelTab() === 'terminal' ? undefined : 'none' }}
                 >
-                  <XTerminal />
+                  <PanelErrorBoundary panelName="Terminal">
+                    <XTerminal />
+                  </PanelErrorBoundary>
                 </div>
                 <div
                   class="flex-1 overflow-hidden"
                   style={{ display: bottomPanelTab() === 'output' ? undefined : 'none' }}
                 >
-                  <TerminalPanel />
+                  <PanelErrorBoundary panelName="Output">
+                    <TerminalPanel />
+                  </PanelErrorBoundary>
                 </div>
               </div>
             </div>
@@ -303,6 +311,7 @@ export const AppShell: Component = () => {
                   type="button"
                   onClick={() => setRightPanelVisible(false)}
                   class="p-1 mr-1.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)] transition-colors"
+                  aria-label="Close right panel"
                 >
                   <X class="w-3 h-3" />
                 </button>
@@ -310,13 +319,19 @@ export const AppShell: Component = () => {
               {/* Tab content */}
               <div class="flex-1 overflow-hidden">
                 <Show when={rightPanelTab() === 'activity'}>
-                  <AgentActivityPanel compact />
+                  <PanelErrorBoundary panelName="Agent Activity">
+                    <AgentActivityPanel compact />
+                  </PanelErrorBoundary>
                 </Show>
                 <Show when={rightPanelTab() === 'files'}>
-                  <FileOperationsPanel compact />
+                  <PanelErrorBoundary panelName="File Operations">
+                    <FileOperationsPanel compact />
+                  </PanelErrorBoundary>
                 </Show>
                 <Show when={rightPanelTab() === 'review'}>
-                  <DiffReviewPanel />
+                  <PanelErrorBoundary panelName="Diff Review">
+                    <DiffReviewPanel />
+                  </PanelErrorBoundary>
                 </Show>
               </div>
             </div>

@@ -99,6 +99,7 @@ export const ActivityBar: Component = () => {
                   }
                 `}
                 title={item.label}
+                aria-label={item.label}
               >
                 {/* Active indicator — left accent border */}
                 <Show when={active()}>
@@ -139,6 +140,7 @@ export const ActivityBar: Component = () => {
             text-[var(--text-muted)] hover:text-[var(--text-secondary)]
           "
           title="Toggle Sidebar (Ctrl+B)"
+          aria-label="Toggle Sidebar"
         >
           <span class="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] hover:bg-[var(--alpha-white-5)] transition-colors">
             {sidebarVisible() ? (
@@ -164,6 +166,7 @@ export const ActivityBar: Component = () => {
             }
           `}
           title="Settings (Ctrl+,)"
+          aria-label="Settings"
         >
           <span
             class={`

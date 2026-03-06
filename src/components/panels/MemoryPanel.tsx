@@ -147,6 +147,7 @@ export const MemoryPanel: Component = () => {
             transition-colors duration-[var(--duration-fast)]
           "
           title="Refresh"
+          aria-label="Refresh memory"
         >
           <RefreshCw class="w-4 h-4" />
         </button>
@@ -348,3 +349,41 @@ export const MemoryPanel: Component = () => {
     </div>
   )
 }
+
+/** Skeleton placeholder shown while memory data is loading */
+export const MemoryPanelSkeleton: Component = () => (
+  <div class="flex flex-col h-full animate-pulse">
+    <div class="px-4 py-3 border-b border-[var(--border-subtle)]">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-[var(--surface-raised)] rounded-[var(--radius-lg)]" />
+        <div class="space-y-1.5">
+          <div class="h-3.5 w-28 bg-[var(--surface-raised)] rounded" />
+          <div class="h-2.5 w-36 bg-[var(--surface-raised)] rounded" />
+        </div>
+      </div>
+    </div>
+    <div class="px-4 py-3 border-b border-[var(--border-subtle)]">
+      <div class="flex justify-between mb-2">
+        <div class="h-3 w-28 bg-[var(--surface-raised)] rounded" />
+        <div class="h-3 w-10 bg-[var(--surface-raised)] rounded" />
+      </div>
+      <div class="h-2 bg-[var(--surface-raised)] rounded-full" />
+    </div>
+    <div class="flex-1 p-4 space-y-2">
+      <For each={[1, 2]}>
+        {() => (
+          <div class="p-3 rounded-[var(--radius-lg)] border border-[var(--border-subtle)]">
+            <div class="flex items-start gap-3">
+              <div class="w-8 h-8 bg-[var(--surface-raised)] rounded-[var(--radius-md)]" />
+              <div class="flex-1 space-y-1.5">
+                <div class="h-3.5 w-32 bg-[var(--surface-raised)] rounded" />
+                <div class="h-2.5 w-full bg-[var(--surface-raised)] rounded" />
+                <div class="h-2.5 w-16 bg-[var(--surface-raised)] rounded" />
+              </div>
+            </div>
+          </div>
+        )}
+      </For>
+    </div>
+  </div>
+)

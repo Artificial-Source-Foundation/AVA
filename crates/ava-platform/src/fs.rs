@@ -108,7 +108,7 @@ impl FileSystem for LocalFileSystem {
     async fn metadata(&self, path: &Path) -> Result<FileInfo> {
         let metadata = tokio::fs::metadata(path).await?;
 
-        let modified = metadata.modified().ok().map(|t| chrono::DateTime::from(t));
+        let modified = metadata.modified().ok().map(chrono::DateTime::from);
 
         Ok(FileInfo {
             path: path.to_path_buf(),
@@ -125,7 +125,7 @@ impl FileSystem for LocalFileSystem {
         while let Some(entry) = dir.next_entry().await? {
             let metadata = entry.metadata().await?;
 
-            let modified = metadata.modified().ok().map(|t| chrono::DateTime::from(t));
+            let modified = metadata.modified().ok().map(chrono::DateTime::from);
 
             entries.push(FileInfo {
                 path: entry.path(),

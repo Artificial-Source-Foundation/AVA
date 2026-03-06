@@ -2,12 +2,20 @@
 //!
 //! Manages configuration settings for the AVA system.
 
-use ava_types::Result;
+use ava_types::{AvaError, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::RwLock;
+
+pub mod credential_commands;
+pub mod credentials;
+
+pub use credential_commands::{
+    execute_credential_command, execute_credential_command_with_tester, CredentialCommand,
+};
+pub use credentials::{CredentialStore, ProviderCredential};
 
 /// LLM provider configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,64 +105,87 @@ pub struct Config {
 /// Configuration manager with auto-reload support
 pub struct ConfigManager {
     config: Arc<RwLock<Config>>,
+    credentials: Arc<RwLock<CredentialStore>>,
     config_path: PathBuf,
+    credentials_path: PathBuf,
 }
 
 impl ConfigManager {
     /// Load configuration from default location
     pub async fn load() -> Result<Self> {
         let config_path = Self::default_config_path()?;
-        Self::load_from(config_path).await
+        let credentials_path = Self::default_credentials_path()?;
+        Self::load_from_paths(config_path, credentials_path).await
     }
 
     /// Load configuration from specific path
     pub async fn load_from(path: PathBuf) -> Result<Self> {
-        let config = if path.exists() {
-            let content = fs::read_to_string(&path)
+        let credentials_path = Self::default_credentials_path()?;
+        Self::load_from_paths(path, credentials_path).await
+    }
+
+    /// Load configuration and credentials from specific paths
+    pub async fn load_from_paths(config_path: PathBuf, credentials_path: PathBuf) -> Result<Self> {
+        let config = if config_path.exists() {
+            let content = fs::read_to_string(&config_path)
                 .await
-                .map_err(|e| ava_types::AvaError::IoError(e.to_string()))?;
+                .map_err(|e| AvaError::IoError(e.to_string()))?;
 
             // Try YAML first, then JSON
             serde_yaml::from_str(&content)
                 .or_else(|_| serde_json::from_str(&content))
-                .map_err(|e| ava_types::AvaError::SerializationError(e.to_string()))?
+                .map_err(|e| AvaError::SerializationError(e.to_string()))?
         } else {
             Config::default()
         };
 
+        let credentials = CredentialStore::load(&credentials_path).await?;
+
         Ok(Self {
             config: Arc::new(RwLock::new(config)),
-            config_path: path,
+            credentials: Arc::new(RwLock::new(credentials)),
+            config_path,
+            credentials_path,
         })
     }
 
     /// Get default configuration path based on platform
     fn default_config_path() -> Result<PathBuf> {
         let config_dir = dirs::config_dir().ok_or_else(|| {
-            ava_types::AvaError::ConfigError("Could not find config directory".to_string())
+            AvaError::ConfigError("Could not find config directory".to_string())
         })?;
 
         Ok(config_dir.join("ava").join("config.yaml"))
+    }
+
+    fn default_credentials_path() -> Result<PathBuf> {
+        CredentialStore::default_path()
     }
 
     /// Save configuration to file
     pub async fn save(&self) -> Result<()> {
         let config = self.config.read().await;
         let content = serde_yaml::to_string(&*config)
-            .map_err(|e| ava_types::AvaError::SerializationError(e.to_string()))?;
+            .map_err(|e| AvaError::SerializationError(e.to_string()))?;
 
         // Ensure directory exists
         if let Some(parent) = self.config_path.parent() {
             fs::create_dir_all(parent)
                 .await
-                .map_err(|e| ava_types::AvaError::IoError(e.to_string()))?;
+                .map_err(|e| AvaError::IoError(e.to_string()))?;
         }
 
         fs::write(&self.config_path, content)
             .await
-            .map_err(|e| ava_types::AvaError::IoError(e.to_string()))?;
+            .map_err(|e| AvaError::IoError(e.to_string()))?;
 
         Ok(())
+    }
+
+    /// Save credentials to file
+    pub async fn save_credentials(&self) -> Result<()> {
+        let credentials = self.credentials.read().await;
+        credentials.save(&self.credentials_path).await
     }
 
     /// Get current configuration
@@ -177,11 +208,11 @@ impl ConfigManager {
         let new_config = if self.config_path.exists() {
             let content = fs::read_to_string(&self.config_path)
                 .await
-                .map_err(|e| ava_types::AvaError::IoError(e.to_string()))?;
+                .map_err(|e| AvaError::IoError(e.to_string()))?;
 
             serde_yaml::from_str(&content)
                 .or_else(|_| serde_json::from_str(&content))
-                .map_err(|e| ava_types::AvaError::SerializationError(e.to_string()))?
+                .map_err(|e| AvaError::SerializationError(e.to_string()))?
         } else {
             Config::default()
         };
@@ -195,6 +226,26 @@ impl ConfigManager {
     /// Get configuration file path
     pub fn path(&self) -> &Path {
         &self.config_path
+    }
+
+    /// Get credentials file path
+    pub fn credentials_path(&self) -> &Path {
+        &self.credentials_path
+    }
+
+    /// Get current credentials
+    pub async fn credentials(&self) -> CredentialStore {
+        self.credentials.read().await.clone()
+    }
+
+    /// Update credentials in memory
+    pub async fn update_credentials<F>(&self, f: F) -> Result<()>
+    where
+        F: FnOnce(&mut CredentialStore),
+    {
+        let mut credentials = self.credentials.write().await;
+        f(&mut credentials);
+        Ok(())
     }
 }
 
@@ -215,13 +266,18 @@ mod tests {
     async fn test_config_save_and_load() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("config.yaml");
+        let credentials_path = temp_dir.path().join("credentials.json");
 
-        let manager = ConfigManager::load_from(config_path.clone()).await.unwrap();
+        let manager = ConfigManager::load_from_paths(config_path.clone(), credentials_path.clone())
+            .await
+            .unwrap();
         manager.save().await.unwrap();
 
         assert!(config_path.exists());
 
-        let loaded = ConfigManager::load_from(config_path).await.unwrap();
+        let loaded = ConfigManager::load_from_paths(config_path, credentials_path)
+            .await
+            .unwrap();
         let config = loaded.get().await;
         assert_eq!(config.llm.provider, "openai");
     }
@@ -230,8 +286,11 @@ mod tests {
     async fn test_config_update() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("config.yaml");
+        let credentials_path = temp_dir.path().join("credentials.json");
 
-        let manager = ConfigManager::load_from(config_path).await.unwrap();
+        let manager = ConfigManager::load_from_paths(config_path, credentials_path)
+            .await
+            .unwrap();
         manager
             .update(|c| c.llm.model = "gpt-3.5-turbo".to_string())
             .await
@@ -245,9 +304,12 @@ mod tests {
     async fn test_config_reload() {
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("config.yaml");
+        let credentials_path = temp_dir.path().join("credentials.json");
 
         // Create initial config
-        let manager = ConfigManager::load_from(config_path.clone()).await.unwrap();
+        let manager = ConfigManager::load_from_paths(config_path.clone(), credentials_path.clone())
+            .await
+            .unwrap();
         manager
             .update(|c| c.llm.model = "custom-model".to_string())
             .await
@@ -255,8 +317,83 @@ mod tests {
         manager.save().await.unwrap();
 
         // Load fresh and verify
-        let manager2 = ConfigManager::load_from(config_path).await.unwrap();
+        let manager2 = ConfigManager::load_from_paths(config_path, credentials_path)
+            .await
+            .unwrap();
         let config = manager2.get().await;
         assert_eq!(config.llm.model, "custom-model");
+    }
+
+    #[tokio::test]
+    async fn test_config_manager_loads_credentials() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.yaml");
+        let credentials_path = temp_dir.path().join("credentials.json");
+
+        let mut credentials = CredentialStore::default();
+        credentials.set(
+            "openai",
+            ProviderCredential {
+                api_key: "sk-config-manager".to_string(),
+                base_url: None,
+                org_id: None,
+            },
+        );
+        credentials.save(&credentials_path).await.unwrap();
+
+        let manager = ConfigManager::load_from_paths(config_path, credentials_path)
+            .await
+            .unwrap();
+        let loaded = manager.credentials().await;
+        assert_eq!(loaded.get("openai").unwrap().api_key, "sk-config-manager");
+    }
+
+    #[test]
+    fn test_credentials_path_defaults_to_home_ava_credentials_json() {
+        let path = ConfigManager::default_credentials_path().unwrap();
+        let path_str = path.to_string_lossy();
+        assert!(path_str.ends_with(".ava/credentials.json"));
+    }
+
+    #[tokio::test]
+    async fn test_update_credentials_and_save_roundtrip() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.yaml");
+        let credentials_path = temp_dir.path().join("credentials.json");
+
+        let manager = ConfigManager::load_from_paths(config_path, credentials_path.clone())
+            .await
+            .unwrap();
+
+        manager
+            .update_credentials(|store| {
+                store.set(
+                    "anthropic",
+                    ProviderCredential {
+                        api_key: "sk-anthropic".to_string(),
+                        base_url: None,
+                        org_id: None,
+                    },
+                );
+            })
+            .await
+            .unwrap();
+        manager.save_credentials().await.unwrap();
+
+        let reloaded = CredentialStore::load(&credentials_path).await.unwrap();
+        assert_eq!(reloaded.get("anthropic").unwrap().api_key, "sk-anthropic");
+    }
+
+    #[tokio::test]
+    async fn test_missing_credentials_file_is_empty_store() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.yaml");
+        let credentials_path = temp_dir.path().join("missing-credentials.json");
+
+        let manager = ConfigManager::load_from_paths(config_path, credentials_path)
+            .await
+            .unwrap();
+        let credentials = manager.credentials().await;
+        assert!(credentials.providers().is_empty());
     }
 }

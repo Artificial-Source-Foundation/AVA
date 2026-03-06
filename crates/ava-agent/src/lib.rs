@@ -2,6 +2,7 @@
 pub mod agent_loop;
 pub mod llm_trait;
 pub mod reflection;
+pub mod stack;
 
 /// Reflection loop primitives for error analysis and auto-fix retries.
 pub use reflection::{ErrorKind, ReflectionAgent, ReflectionLoop, ToolExecutor, ToolResult};

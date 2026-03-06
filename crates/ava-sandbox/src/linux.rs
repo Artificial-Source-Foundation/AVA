@@ -28,6 +28,17 @@ pub fn build_bwrap_plan(request: &SandboxRequest, policy: &SandboxPolicy) -> Res
         args.push(rw.clone());
     }
 
+    if let Some(cwd) = &request.working_dir {
+        args.push("--chdir".to_string());
+        args.push(cwd.clone());
+    }
+
+    for (key, value) in &request.env {
+        args.push("--setenv".to_string());
+        args.push(key.clone());
+        args.push(value.clone());
+    }
+
     args.push("--".to_string());
     args.push(request.command.clone());
     args.extend(request.args.clone());
@@ -53,5 +64,19 @@ mod tests {
         let plan = build_bwrap_plan(&request, &SandboxPolicy::default()).unwrap();
         assert_eq!(plan.program, "bwrap");
         assert!(plan.args.contains(&"--unshare-user".to_string()));
+    }
+
+    #[test]
+    fn bwrap_plan_includes_working_dir_and_env() {
+        let request = SandboxRequest {
+            command: "echo".to_string(),
+            args: vec!["hi".to_string()],
+            working_dir: Some("/tmp".to_string()),
+            env: vec![("A".to_string(), "1".to_string())],
+        };
+        let plan = build_bwrap_plan(&request, &SandboxPolicy::default()).unwrap();
+
+        assert!(plan.args.windows(2).any(|w| w == ["--chdir", "/tmp"]));
+        assert!(plan.args.windows(3).any(|w| w == ["--setenv", "A", "1"]));
     }
 }

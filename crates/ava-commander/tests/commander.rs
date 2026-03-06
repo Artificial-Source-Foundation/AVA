@@ -1,4 +1,18 @@
-use ava_commander::{Budget, Commander, Domain, Task, TaskType};
+use std::collections::HashMap;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::time::Duration;
+
+use async_trait::async_trait;
+use ava_commander::{
+    Budget, Commander, CommanderConfig, CommanderEvent, Domain, Task, TaskType,
+};
+use ava_llm::provider::LLMProvider;
+use ava_llm::providers::mock::MockProvider;
+use ava_types::{Message, Result};
+use futures::Stream;
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 
 fn sample_budget() -> Budget {
     Budget {
@@ -8,9 +22,25 @@ fn sample_budget() -> Budget {
     }
 }
 
+fn completion_response(result: &str) -> String {
+    format!(
+        r#"{{"tool_calls":[{{"name":"attempt_completion","arguments":{{"result":"{result}"}}}}]}}"#
+    )
+}
+
+fn commander_with_default(provider: Arc<dyn LLMProvider>) -> Commander {
+    Commander::new(CommanderConfig {
+        budget: sample_budget(),
+        default_provider: provider,
+        domain_providers: HashMap::new(),
+    })
+}
+
 #[test]
 fn delegation_routes_to_expected_domain() {
-    let mut commander = Commander::new(sample_budget());
+    let provider = Arc::new(MockProvider::new("default", vec![completion_response("ok")]))
+        as Arc<dyn LLMProvider>;
+    let mut commander = commander_with_default(provider);
 
     let worker = commander
         .delegate(Task {
@@ -31,7 +61,9 @@ fn delegation_routes_to_expected_domain() {
 
 #[test]
 fn budget_allocation_halves_top_level_budget() {
-    let mut commander = Commander::new(sample_budget());
+    let provider = Arc::new(MockProvider::new("default", vec![completion_response("ok")]))
+        as Arc<dyn LLMProvider>;
+    let mut commander = commander_with_default(provider);
     let worker = commander
         .delegate(Task {
             description: "test suite".to_string(),
@@ -46,42 +78,39 @@ fn budget_allocation_halves_top_level_budget() {
 }
 
 #[test]
-fn worker_spawning_creates_unique_id_and_lead_reference() {
-    let mut commander = Commander::new(sample_budget());
+fn worker_spawning_uses_domain_provider_model_name() {
+    let default_provider = Arc::new(MockProvider::new("default-model", vec![]))
+        as Arc<dyn LLMProvider>;
+    let backend_provider = Arc::new(MockProvider::new("backend-model", vec![]))
+        as Arc<dyn LLMProvider>;
+
+    let mut overrides: HashMap<Domain, Arc<dyn LLMProvider>> = HashMap::new();
+    overrides.insert(Domain::Backend, backend_provider);
+
+    let mut commander = Commander::new(CommanderConfig {
+        budget: sample_budget(),
+        default_provider,
+        domain_providers: overrides,
+    });
+
     let worker = commander
         .delegate(Task {
-            description: "simple task".to_string(),
-            task_type: TaskType::Simple,
+            description: "build endpoint".to_string(),
+            task_type: TaskType::CodeGeneration,
             files: vec![],
         })
         .expect("delegation should succeed");
 
-    assert_ne!(worker.id(), uuid::Uuid::nil());
-    assert!(!worker.lead().is_empty());
-}
-
-#[test]
-fn commander_has_all_seven_domain_leads() {
-    let commander = Commander::new(sample_budget());
-    assert_eq!(commander.leads().len(), 7);
-
-    let domains: Vec<Domain> = commander
-        .leads()
-        .iter()
-        .map(|lead| lead.domain().clone())
-        .collect();
-    assert!(domains.contains(&Domain::Frontend));
-    assert!(domains.contains(&Domain::Backend));
-    assert!(domains.contains(&Domain::QA));
-    assert!(domains.contains(&Domain::Research));
-    assert!(domains.contains(&Domain::Debug));
-    assert!(domains.contains(&Domain::Fullstack));
-    assert!(domains.contains(&Domain::DevOps));
+    assert_eq!(worker.model_name(), "backend-model");
 }
 
 #[tokio::test]
 async fn coordinate_runs_workers_and_merges_session_messages() {
-    let mut commander = Commander::new(sample_budget());
+    let provider = Arc::new(MockProvider::new(
+        "default",
+        vec![completion_response("a"), completion_response("b")],
+    )) as Arc<dyn LLMProvider>;
+    let mut commander = commander_with_default(provider);
     let worker_a = commander
         .delegate(Task {
             description: "task a".to_string(),
@@ -97,10 +126,140 @@ async fn coordinate_runs_workers_and_merges_session_messages() {
         })
         .expect("worker b should spawn");
 
+    let cancel = CancellationToken::new();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+
     let session = commander
-        .coordinate(vec![worker_a, worker_b])
+        .coordinate(vec![worker_a, worker_b], cancel, tx)
         .await
         .expect("coordinate should succeed");
 
     assert!(!session.messages.is_empty());
+    let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, CommanderEvent::AllComplete { .. }))
+    );
+}
+
+#[tokio::test]
+async fn cancellation_token_stops_workers() {
+    let provider = Arc::new(SlowProvider {
+        delay: Duration::from_millis(200),
+        model: "slow-model".to_string(),
+    }) as Arc<dyn LLMProvider>;
+    let mut commander = commander_with_default(provider);
+
+    let worker = commander
+        .delegate(Task {
+            description: "slow task".to_string(),
+            task_type: TaskType::Simple,
+            files: vec![],
+        })
+        .expect("worker should spawn");
+
+    let cancel = CancellationToken::new();
+    let cancel_clone = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        cancel_clone.cancel();
+    });
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let session = commander
+        .coordinate(vec![worker], cancel, tx)
+        .await
+        .expect("coordinate returns partial success session");
+
+    assert!(session.messages.is_empty());
+    let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, CommanderEvent::WorkerFailed { .. }))
+    );
+}
+
+#[tokio::test]
+async fn one_worker_failure_isolated_from_successful_worker() {
+    let default_provider = Arc::new(MockProvider::new("good", vec![completion_response("ok")]))
+        as Arc<dyn LLMProvider>;
+    let failing_backend = Arc::new(MockProvider::new("bad", vec![])) as Arc<dyn LLMProvider>;
+    let mut overrides: HashMap<Domain, Arc<dyn LLMProvider>> = HashMap::new();
+    overrides.insert(Domain::Backend, failing_backend);
+
+    let mut commander = Commander::new(CommanderConfig {
+        budget: sample_budget(),
+        default_provider,
+        domain_providers: overrides,
+    });
+
+    let good_worker = commander
+        .delegate(Task {
+            description: "simple success".to_string(),
+            task_type: TaskType::Simple,
+            files: vec![],
+        })
+        .expect("good worker");
+    let bad_worker = commander
+        .delegate(Task {
+            description: "backend fail".to_string(),
+            task_type: TaskType::CodeGeneration,
+            files: vec![],
+        })
+        .expect("bad worker");
+
+    let cancel = CancellationToken::new();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let session = commander
+        .coordinate(vec![good_worker, bad_worker], cancel, tx)
+        .await
+        .expect("coordinate should still succeed");
+
+    assert!(!session.messages.is_empty());
+    let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    assert!(events.iter().any(|event| {
+        matches!(
+            event,
+            CommanderEvent::AllComplete {
+                total_workers: 2,
+                succeeded: 1,
+                failed: 1
+            }
+        )
+    }));
+}
+
+struct SlowProvider {
+    delay: Duration,
+    model: String,
+}
+
+#[async_trait]
+impl LLMProvider for SlowProvider {
+    async fn generate(&self, _messages: &[Message]) -> Result<String> {
+        tokio::time::sleep(self.delay).await;
+        Ok(completion_response("slow"))
+    }
+
+    async fn generate_stream(
+        &self,
+        messages: &[Message],
+    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
+        let out = self.generate(messages).await?;
+        Ok(Box::pin(futures::stream::iter(vec![out])))
+    }
+
+    fn estimate_tokens(&self, input: &str) -> usize {
+        input.len() / 4
+    }
+
+    fn estimate_cost(&self, _input_tokens: usize, _output_tokens: usize) -> f64 {
+        0.0
+    }
+
+    fn model_name(&self) -> &str {
+        &self.model
+    }
 }

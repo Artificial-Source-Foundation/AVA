@@ -12,20 +12,15 @@ use crate::providers::common;
 pub struct OllamaProvider {
     client: reqwest::Client,
     model: String,
-    api_key: Option<String>,
+    base_url: String,
 }
 
 impl OllamaProvider {
-    pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
-        let api_key = api_key.into();
+    pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
             client: reqwest::Client::new(),
             model: model.into(),
-            api_key: if api_key.is_empty() {
-                None
-            } else {
-                Some(api_key)
-            },
+            base_url: base_url.into(),
         }
     }
 
@@ -41,14 +36,10 @@ impl OllamaProvider {
 #[async_trait]
 impl LLMProvider for OllamaProvider {
     async fn generate(&self, messages: &[Message]) -> Result<String> {
-        let mut request = self
+        let request = self
             .client
-            .post("http://localhost:11434/api/chat")
+            .post(format!("{}/api/chat", self.base_url.trim_end_matches('/')))
             .json(&self.build_request_body(messages, false));
-
-        if let Some(api_key) = &self.api_key {
-            request = request.bearer_auth(api_key);
-        }
 
         let response = request
             .send()
@@ -68,14 +59,10 @@ impl LLMProvider for OllamaProvider {
         &self,
         messages: &[Message],
     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
-        let mut request = self
+        let request = self
             .client
-            .post("http://localhost:11434/api/chat")
+            .post(format!("{}/api/chat", self.base_url.trim_end_matches('/')))
             .json(&self.build_request_body(messages, true));
-
-        if let Some(api_key) = &self.api_key {
-            request = request.bearer_auth(api_key);
-        }
 
         let response = request
             .send()

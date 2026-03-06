@@ -1,28 +1,53 @@
-use std::{pin::Pin, sync::Arc};
+use std::collections::HashMap;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
-use ava_agent::{AgentConfig, AgentLoop, LLMProvider};
+use ava_agent::{AgentConfig, AgentEvent, AgentLoop};
 use ava_context::ContextManager;
+use ava_llm::provider::LLMProvider;
 use ava_tools::registry::ToolRegistry;
-use ava_types::{Message, Result, Session};
-use futures::{future::join_all, stream, Stream};
+use ava_types::{AvaError, Message, Result, Session};
+use futures::future::join_all;
+use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc, Mutex};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+pub mod events;
+
+pub use events::CommanderEvent;
 
 pub struct Commander {
     leads: Vec<Lead>,
     budget: Budget,
 }
 
+pub struct CommanderConfig {
+    pub budget: Budget,
+    pub default_provider: Arc<dyn LLMProvider>,
+    pub domain_providers: HashMap<Domain, Arc<dyn LLMProvider>>,
+}
+
+impl CommanderConfig {
+    pub fn provider_for(&self, domain: Domain) -> Arc<dyn LLMProvider> {
+        self.domain_providers
+            .get(&domain)
+            .cloned()
+            .unwrap_or_else(|| self.default_provider.clone())
+    }
+}
+
 pub struct Lead {
     name: String,
     domain: Domain,
     workers: Vec<Worker>,
-    model: Arc<dyn LLMProvider>,
+    provider: Arc<dyn LLMProvider>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum Domain {
     Frontend,
     Backend,
@@ -39,6 +64,7 @@ pub struct Worker {
     agent: Arc<Mutex<AgentLoop>>,
     budget: Budget,
     task: Task,
+    provider: Arc<dyn LLMProvider>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,18 +93,45 @@ pub enum TaskType {
 }
 
 impl Commander {
-    pub fn new(budget: Budget) -> Self {
+    pub fn new(config: CommanderConfig) -> Self {
         let leads = vec![
-            Lead::new("frontend-lead", Domain::Frontend),
-            Lead::new("backend-lead", Domain::Backend),
-            Lead::new("qa-lead", Domain::QA),
-            Lead::new("research-lead", Domain::Research),
-            Lead::new("debug-lead", Domain::Debug),
-            Lead::new("fullstack-lead", Domain::Fullstack),
-            Lead::new("devops-lead", Domain::DevOps),
+            Lead::new(
+                "frontend-lead",
+                Domain::Frontend,
+                config.provider_for(Domain::Frontend),
+            ),
+            Lead::new(
+                "backend-lead",
+                Domain::Backend,
+                config.provider_for(Domain::Backend),
+            ),
+            Lead::new("qa-lead", Domain::QA, config.provider_for(Domain::QA)),
+            Lead::new(
+                "research-lead",
+                Domain::Research,
+                config.provider_for(Domain::Research),
+            ),
+            Lead::new(
+                "debug-lead",
+                Domain::Debug,
+                config.provider_for(Domain::Debug),
+            ),
+            Lead::new(
+                "fullstack-lead",
+                Domain::Fullstack,
+                config.provider_for(Domain::Fullstack),
+            ),
+            Lead::new(
+                "devops-lead",
+                Domain::DevOps,
+                config.provider_for(Domain::DevOps),
+            ),
         ];
 
-        Self { leads, budget }
+        Self {
+            leads,
+            budget: config.budget,
+        }
     }
 
     pub fn leads(&self) -> &[Lead] {
@@ -92,7 +145,7 @@ impl Commander {
     pub fn delegate(&mut self, task: Task) -> Result<Worker> {
         let domain = self.pick_domain(&task);
         let Some(lead) = self.leads.iter_mut().find(|lead| lead.domain == domain) else {
-            return Err(ava_types::AvaError::NotFound("lead not found".to_string()));
+            return Err(AvaError::NotFound("lead not found".to_string()));
         };
 
         let worker = lead.spawn_worker(task, &self.budget)?;
@@ -100,20 +153,80 @@ impl Commander {
         Ok(worker)
     }
 
-    pub async fn coordinate(&self, workers: Vec<Worker>) -> Result<Session> {
-        let run_futures = workers.into_iter().map(|worker| async move {
-            let mut agent = worker.agent.lock().await;
-            agent.run(&worker.task.description).await
+    pub async fn coordinate(
+        &self,
+        workers: Vec<Worker>,
+        cancel: CancellationToken,
+        event_tx: mpsc::UnboundedSender<CommanderEvent>,
+    ) -> Result<Session> {
+        let futures = workers.into_iter().map(|worker| {
+            let cancel = cancel.clone();
+            let tx = event_tx.clone();
+            let timeout = Duration::from_secs((worker.budget.max_turns * 60) as u64);
+
+            async move {
+                let _ = tx.send(CommanderEvent::WorkerStarted {
+                    worker_id: worker.id,
+                    lead: worker.lead.clone(),
+                    task_description: worker.task.description.clone(),
+                });
+
+                let result = tokio::select! {
+                    value = tokio::time::timeout(timeout, run_worker(&worker, tx.clone())) => {
+                        match value {
+                            Ok(result) => result,
+                            Err(_) => Err(AvaError::TimeoutError("Worker timed out".to_string())),
+                        }
+                    }
+                    _ = cancel.cancelled() => {
+                        Err(AvaError::TimeoutError("Operation cancelled".to_string()))
+                    }
+                };
+
+                match &result {
+                    Ok(session) => {
+                        let _ = tx.send(CommanderEvent::WorkerCompleted {
+                            worker_id: worker.id,
+                            success: true,
+                            turns: session.messages.len(),
+                        });
+                    }
+                    Err(error) => {
+                        let _ = tx.send(CommanderEvent::WorkerFailed {
+                            worker_id: worker.id,
+                            error: error.to_string(),
+                        });
+                    }
+                }
+
+                (worker.id, result)
+            }
         });
 
-        let sessions = join_all(run_futures).await;
+        let results = join_all(futures).await;
+
         let mut combined = Session::new();
-        for session in sessions {
-            let session = session?;
-            for message in session.messages {
-                combined.add_message(message);
+        let mut succeeded = 0;
+        let mut failed = 0;
+
+        for (_, result) in &results {
+            match result {
+                Ok(session) => {
+                    for message in &session.messages {
+                        combined.add_message(message.clone());
+                    }
+                    succeeded += 1;
+                }
+                Err(_) => failed += 1,
             }
         }
+
+        let _ = event_tx.send(CommanderEvent::AllComplete {
+            total_workers: results.len(),
+            succeeded,
+            failed,
+        });
+
         Ok(combined)
     }
 
@@ -130,12 +243,12 @@ impl Commander {
 }
 
 impl Lead {
-    pub fn new(name: impl Into<String>, domain: Domain) -> Self {
+    pub fn new(name: impl Into<String>, domain: Domain, provider: Arc<dyn LLMProvider>) -> Self {
         Self {
             name: name.into(),
             domain,
             workers: Vec::new(),
-            model: Arc::new(NullProvider::new("commander-default-model")),
+            provider,
         }
     }
 
@@ -158,21 +271,25 @@ impl Lead {
             max_cost_usd: budget.max_cost_usd / 2.0,
         };
 
+        let model_name = self.provider.model_name().to_string();
+        let agent = AgentLoop::new(
+            Box::new(SharedProvider::new(self.provider.clone())),
+            ToolRegistry::new(),
+            ContextManager::new(worker_budget.max_tokens),
+            AgentConfig {
+                max_turns: worker_budget.max_turns,
+                token_limit: worker_budget.max_tokens,
+                model: model_name,
+            },
+        );
+
         Ok(Worker {
             id: Uuid::new_v4(),
             lead: self.name.clone(),
-            agent: Arc::new(Mutex::new(AgentLoop::new(
-                Box::new(NullProvider::new(self.model.model_name())),
-                ToolRegistry::new(),
-                ContextManager::new(worker_budget.max_tokens),
-                AgentConfig {
-                    max_turns: worker_budget.max_turns,
-                    token_limit: worker_budget.max_tokens,
-                    model: self.model.model_name().to_string(),
-                },
-            ))),
+            agent: Arc::new(Mutex::new(agent)),
             budget: worker_budget,
             task,
+            provider: self.provider.clone(),
         })
     }
 }
@@ -193,44 +310,9 @@ impl Worker {
     pub fn task(&self) -> &Task {
         &self.task
     }
-}
 
-#[derive(Debug, Clone)]
-struct NullProvider {
-    model: String,
-}
-
-impl NullProvider {
-    fn new(model: impl Into<String>) -> Self {
-        Self {
-            model: model.into(),
-        }
-    }
-}
-
-#[async_trait]
-impl LLMProvider for NullProvider {
-    async fn generate(&self, _messages: &[Message]) -> Result<String> {
-        Ok("".to_string())
-    }
-
-    async fn generate_stream(
-        &self,
-        _messages: &[Message],
-    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
-        Ok(Box::pin(stream::iter(Vec::<String>::new())))
-    }
-
-    fn estimate_tokens(&self, input: &str) -> usize {
-        (input.len() / 4).max(1)
-    }
-
-    fn estimate_cost(&self, input_tokens: usize, output_tokens: usize) -> f64 {
-        (input_tokens + output_tokens) as f64 / 1_000_000.0
-    }
-
-    fn model_name(&self) -> &str {
-        &self.model
+    pub fn model_name(&self) -> &str {
+        self.provider.model_name()
     }
 }
 
@@ -242,6 +324,82 @@ impl Clone for Worker {
             agent: Arc::clone(&self.agent),
             budget: self.budget.clone(),
             task: self.task.clone(),
+            provider: self.provider.clone(),
         }
+    }
+}
+
+async fn run_worker(
+    worker: &Worker,
+    event_tx: mpsc::UnboundedSender<CommanderEvent>,
+) -> Result<Session> {
+    let mut agent = worker.agent.lock().await;
+    let mut stream = agent.run_streaming(&worker.task.description).await;
+
+    while let Some(event) = stream.next().await {
+        match event {
+            AgentEvent::Progress(progress) => {
+                if let Some(turn) = parse_turn(&progress) {
+                    let _ = event_tx.send(CommanderEvent::WorkerProgress {
+                        worker_id: worker.id,
+                        turn,
+                        max_turns: worker.budget.max_turns,
+                    });
+                }
+            }
+            AgentEvent::Token(token) => {
+                let _ = event_tx.send(CommanderEvent::WorkerToken {
+                    worker_id: worker.id,
+                    token,
+                });
+            }
+            AgentEvent::Complete(session) => return Ok(session),
+            AgentEvent::Error(error) => return Err(AvaError::ToolError(error)),
+            AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) => {}
+        }
+    }
+
+    Err(AvaError::ToolError(
+        "worker stream ended without completion".to_string(),
+    ))
+}
+
+fn parse_turn(progress: &str) -> Option<usize> {
+    progress.strip_prefix("turn ")?.parse::<usize>().ok()
+}
+
+struct SharedProvider {
+    inner: Arc<dyn LLMProvider>,
+}
+
+impl SharedProvider {
+    fn new(inner: Arc<dyn LLMProvider>) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait]
+impl LLMProvider for SharedProvider {
+    async fn generate(&self, messages: &[Message]) -> Result<String> {
+        self.inner.generate(messages).await
+    }
+
+    async fn generate_stream(
+        &self,
+        messages: &[Message],
+    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
+        self.inner.generate_stream(messages).await
+    }
+
+    fn estimate_tokens(&self, input: &str) -> usize {
+        self.inner.estimate_tokens(input)
+    }
+
+    fn estimate_cost(&self, input_tokens: usize, output_tokens: usize) -> f64 {
+        self.inner.estimate_cost(input_tokens, output_tokens)
+    }
+
+    fn model_name(&self) -> &str {
+        self.inner.model_name()
     }
 }

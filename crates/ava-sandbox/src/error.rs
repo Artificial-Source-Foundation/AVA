@@ -8,4 +8,8 @@ pub enum SandboxError {
     InvalidPolicy(String),
     #[error("unsupported platform: {0}")]
     UnsupportedPlatform(String),
+    #[error("sandbox execution failed: {0}")]
+    ExecutionFailed(String),
+    #[error("sandbox execution timed out")]
+    Timeout,
 }

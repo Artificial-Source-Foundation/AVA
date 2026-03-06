@@ -1,59 +1,75 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use ava_config::CredentialStore;
 use ava_types::{AvaError, Result};
-use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
 
 use crate::provider::LLMProvider;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum RoutingTaskType {
-    Planning,
-    CodeGeneration,
-    Testing,
-    Review,
-    Research,
-    Debug,
-    Simple,
-}
+use crate::providers::create_provider;
 
 pub struct ModelRouter {
-    providers: HashMap<String, Box<dyn LLMProvider>>,
-    default: String,
+    credentials: Arc<RwLock<CredentialStore>>,
+    providers: RwLock<HashMap<String, Arc<dyn LLMProvider>>>,
 }
 
 impl ModelRouter {
-    const TIER_STRONGEST: &'static str = "strongest";
-    const TIER_MID: &'static str = "mid";
-    const TIER_CHEAP: &'static str = "cheap";
-
-    pub fn new(default: impl Into<String>) -> Self {
+    pub fn new(credentials: CredentialStore) -> Self {
         Self {
-            providers: HashMap::new(),
-            default: default.into(),
+            credentials: Arc::new(RwLock::new(credentials)),
+            providers: RwLock::new(HashMap::new()),
         }
     }
 
-    pub fn register(&mut self, name: impl Into<String>, provider: Box<dyn LLMProvider>) {
-        self.providers.insert(name.into(), provider);
+    pub async fn update_credentials(&self, credentials: CredentialStore) {
+        {
+            let mut guard = self.credentials.write().await;
+            *guard = credentials;
+        }
+
+        let mut providers = self.providers.write().await;
+        providers.clear();
     }
 
-    pub fn get(&self, name: &str) -> Option<&dyn LLMProvider> {
-        self.providers.get(name).map(|provider| provider.as_ref())
+    pub async fn route(&self, provider: &str, model: &str) -> Result<Arc<dyn LLMProvider>> {
+        let cache_key = format!("{provider}:{model}");
+
+        if let Some(cached) = self.providers.read().await.get(&cache_key).cloned() {
+            return Ok(cached);
+        }
+
+        let credentials = self.credentials.read().await.clone();
+        let created = create_provider(provider, model, &credentials)?;
+        let created: Arc<dyn LLMProvider> = Arc::from(created);
+
+        let mut providers = self.providers.write().await;
+        if let Some(existing) = providers.get(&cache_key) {
+            return Ok(existing.clone());
+        }
+        providers.insert(cache_key, created.clone());
+
+        Ok(created)
     }
 
-    pub fn route(&self, task: RoutingTaskType) -> Result<&dyn LLMProvider> {
-        let preferred = match task {
-            RoutingTaskType::Planning | RoutingTaskType::Research | RoutingTaskType::Debug => {
-                Self::TIER_STRONGEST
-            }
-            RoutingTaskType::CodeGeneration
-            | RoutingTaskType::Testing
-            | RoutingTaskType::Review => Self::TIER_MID,
-            RoutingTaskType::Simple => Self::TIER_CHEAP,
-        };
+    pub async fn available_providers(&self) -> Vec<String> {
+        self.credentials
+            .read()
+            .await
+            .configured_providers()
+            .into_iter()
+            .map(ToString::to_string)
+            .collect()
+    }
 
-        self.get(preferred)
-            .or_else(|| self.get(&self.default))
-            .ok_or_else(|| AvaError::NotFound("no provider registered for routing".to_string()))
+    pub async fn cache_size(&self) -> usize {
+        self.providers.read().await.len()
+    }
+
+    pub async fn route_required(&self, provider: &str, model: &str) -> Result<Arc<dyn LLMProvider>> {
+        self.route(provider, model).await.map_err(|error| {
+            AvaError::ConfigError(format!(
+                "Could not route provider {provider} with model {model}: {error}"
+            ))
+        })
     }
 }

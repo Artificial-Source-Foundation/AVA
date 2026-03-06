@@ -1,41 +1,21 @@
-use std::pin::Pin;
+use std::sync::Arc;
 
-use async_trait::async_trait;
+use ava_config::{CredentialStore, ProviderCredential};
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
 use ava_llm::providers::openai::OpenAIProvider;
-use ava_llm::router::{ModelRouter, RoutingTaskType};
+use ava_llm::providers::create_provider;
+use ava_llm::router::ModelRouter;
+use ava_llm::{default_model_for_provider, test_provider_credentials};
 use ava_types::{Message, Role};
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use serde_json::json;
 
-struct StubProvider {
-    model: String,
-}
-
-#[async_trait]
-impl LLMProvider for StubProvider {
-    async fn generate(&self, _messages: &[Message]) -> ava_types::Result<String> {
-        Ok("ok".to_string())
-    }
-
-    async fn generate_stream(
-        &self,
-        _messages: &[Message],
-    ) -> ava_types::Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
-        Ok(Box::pin(futures::stream::iter(vec!["ok".to_string()])))
-    }
-
-    fn estimate_tokens(&self, input: &str) -> usize {
-        (input.len() / 4).max(1)
-    }
-
-    fn estimate_cost(&self, input_tokens: usize, output_tokens: usize) -> f64 {
-        (input_tokens + output_tokens) as f64 / 1_000_000.0
-    }
-
-    fn model_name(&self) -> &str {
-        &self.model
+fn credential(api_key: &str) -> ProviderCredential {
+    ProviderCredential {
+        api_key: api_key.to_string(),
+        base_url: None,
+        org_id: None,
     }
 }
 
@@ -84,65 +64,155 @@ fn token_and_cost_estimation_are_non_zero() {
 }
 
 #[test]
-fn router_routes_to_expected_tier() {
-    let mut router = ModelRouter::new("mid");
-    router.register(
-        "strongest",
-        Box::new(StubProvider {
-            model: "strong".to_string(),
-        }),
-    );
-    router.register(
-        "mid",
-        Box::new(StubProvider {
-            model: "mid".to_string(),
-        }),
-    );
-    router.register(
-        "cheap",
-        Box::new(StubProvider {
-            model: "cheap".to_string(),
-        }),
-    );
+fn create_provider_anthropic_succeeds_with_store_key() {
+    let mut store = CredentialStore::default();
+    store.set("anthropic", credential("sk-ant-1234"));
 
-    let planning = router
-        .route(RoutingTaskType::Planning)
-        .expect("planning route should resolve");
-    assert_eq!(planning.model_name(), "strong");
+    let provider = create_provider("anthropic", "claude-sonnet-4-20250514", &store)
+        .expect("anthropic provider should be created");
 
-    let codegen = router
-        .route(RoutingTaskType::CodeGeneration)
-        .expect("code route should resolve");
-    assert_eq!(codegen.model_name(), "mid");
-
-    let simple = router
-        .route(RoutingTaskType::Simple)
-        .expect("simple route should resolve");
-    assert_eq!(simple.model_name(), "cheap");
+    assert_eq!(provider.model_name(), "claude-sonnet-4-20250514");
 }
 
 #[test]
-fn router_falls_back_to_default_tier_when_preferred_missing() {
-    let mut router = ModelRouter::new("mid");
-    router.register(
-        "mid",
-        Box::new(StubProvider {
-            model: "mid".to_string(),
-        }),
-    );
+fn create_provider_anthropic_fails_without_key() {
+    let store = CredentialStore::default();
+    let error = create_provider("anthropic", "claude-sonnet-4-20250514", &store)
+        .err()
+        .expect("missing key should fail");
 
-    let provider = router
-        .route(RoutingTaskType::Simple)
-        .expect("simple route should fall back to default");
-
-    assert_eq!(provider.model_name(), "mid");
+    assert!(error.to_string().contains("No Anthropic API key"));
 }
 
 #[test]
-fn router_returns_error_when_empty() {
-    let router = ModelRouter::new("mid");
-    match router.route(RoutingTaskType::Planning) {
-        Err(error) => assert!(error.to_string().contains("no provider registered")),
-        Ok(_) => panic!("empty router should fail"),
-    }
+fn create_provider_ollama_succeeds_without_key() {
+    let store = CredentialStore::default();
+    let provider = create_provider("ollama", "llama3.1", &store)
+        .expect("ollama should be created without key");
+
+    assert_eq!(provider.model_name(), "llama3.1");
+}
+
+#[test]
+fn create_provider_unknown_errors() {
+    let store = CredentialStore::default();
+    let error = create_provider("unknown-provider", "model", &store)
+        .err()
+        .expect("unknown should fail");
+
+    assert!(error.to_string().contains("Unknown provider"));
+}
+
+#[test]
+fn create_provider_base_url_override_openrouter() {
+    let mut store = CredentialStore::default();
+    store.set(
+        "openrouter",
+        ProviderCredential {
+            api_key: "or-key-1234".to_string(),
+            base_url: Some("https://openrouter.example/api".to_string()),
+            org_id: None,
+        },
+    );
+
+    let provider = create_provider("openrouter", "openai/gpt-5", &store)
+        .expect("openrouter provider should be created");
+    assert_eq!(provider.model_name(), "openai/gpt-5");
+}
+
+#[test]
+fn create_provider_base_url_override_ollama() {
+    let mut store = CredentialStore::default();
+    store.set(
+        "ollama",
+        ProviderCredential {
+            api_key: String::new(),
+            base_url: Some("http://ollama.internal:11434".to_string()),
+            org_id: None,
+        },
+    );
+
+    let provider =
+        create_provider("ollama", "qwen2.5-coder", &store).expect("ollama provider should work");
+    assert_eq!(provider.model_name(), "qwen2.5-coder");
+}
+
+#[tokio::test]
+async fn router_returns_cached_provider_instance() {
+    let mut store = CredentialStore::default();
+    store.set("openai", credential("sk-openai-1234"));
+    let router = ModelRouter::new(store);
+
+    let first = router.route("openai", "gpt-4o-mini").await.unwrap();
+    let second = router.route("openai", "gpt-4o-mini").await.unwrap();
+
+    assert!(Arc::ptr_eq(&first, &second));
+}
+
+#[tokio::test]
+async fn router_credential_update_invalidates_cache() {
+    let mut store = CredentialStore::default();
+    store.set("openai", credential("sk-openai-1"));
+    let router = ModelRouter::new(store);
+
+    let first = router.route("openai", "gpt-4o-mini").await.unwrap();
+    assert_eq!(router.cache_size().await, 1);
+
+    let mut updated = CredentialStore::default();
+    updated.set("openai", credential("sk-openai-2"));
+    router.update_credentials(updated).await;
+
+    assert_eq!(router.cache_size().await, 0);
+    let second = router.route("openai", "gpt-4o-mini").await.unwrap();
+
+    assert!(!Arc::ptr_eq(&first, &second));
+}
+
+#[tokio::test]
+async fn router_available_providers_matches_configured_credentials() {
+    let mut store = CredentialStore::default();
+    store.set("openai", credential("sk-openai"));
+    store.set(
+        "ollama",
+        ProviderCredential {
+            api_key: String::new(),
+            base_url: Some("http://localhost:11434".to_string()),
+            org_id: None,
+        },
+    );
+    let router = ModelRouter::new(store);
+
+    let providers = router.available_providers().await;
+    assert!(providers.contains(&"openai".to_string()));
+    assert!(providers.contains(&"ollama".to_string()));
+}
+
+#[tokio::test]
+async fn router_unconfigured_provider_returns_clear_error() {
+    let router = ModelRouter::new(CredentialStore::default());
+    let error = router
+        .route("anthropic", "claude-sonnet-4-20250514")
+        .await
+        .err()
+        .expect("missing anthro key should fail");
+
+    assert!(error.to_string().contains("No Anthropic API key"));
+}
+
+#[test]
+fn default_model_mapping_is_stable() {
+    assert_eq!(default_model_for_provider("openai"), Some("gpt-4o-mini"));
+    assert_eq!(
+        default_model_for_provider("anthropic"),
+        Some("claude-sonnet-4-20250514")
+    );
+    assert_eq!(default_model_for_provider("unknown"), None);
+}
+
+#[tokio::test]
+async fn credential_test_reports_missing_key_as_fail_message() {
+    let store = CredentialStore::default();
+    let result = test_provider_credentials("anthropic", "claude-sonnet-4-20250514", &store).await;
+
+    assert!(result.starts_with("anthropic: FAIL"));
 }

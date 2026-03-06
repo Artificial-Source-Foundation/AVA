@@ -1,4 +1,5 @@
 pub mod browser;
+pub mod core;
 pub mod edit;
 pub mod git;
 pub mod registry;

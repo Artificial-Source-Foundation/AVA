@@ -1,0 +1,197 @@
+use std::sync::Arc;
+use std::time::Duration;
+
+use async_trait::async_trait;
+use ava_platform::Platform;
+use ava_sandbox::{execute_plan, select_backend, SandboxPolicy, SandboxRequest};
+use ava_types::{AvaError, ToolResult};
+use serde_json::{json, Value};
+
+use crate::registry::Tool;
+
+const DEFAULT_TIMEOUT_MS: u64 = 120_000;
+const MAX_OUTPUT_BYTES: usize = 100 * 1024;
+const DANGEROUS_PATTERNS: [&str; 4] = ["rm -rf /", "dd if=", "mkfs", ":(){ :|:& };:"];
+
+pub struct BashTool {
+    platform: Arc<dyn Platform>,
+}
+
+impl BashTool {
+    pub fn new(platform: Arc<dyn Platform>) -> Self {
+        Self { platform }
+    }
+}
+
+#[async_trait]
+impl Tool for BashTool {
+    fn name(&self) -> &str {
+        "bash"
+    }
+
+    fn description(&self) -> &str {
+        "Execute shell command"
+    }
+
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "required": ["command"],
+            "properties": {
+                "command": { "type": "string" },
+                "timeout_ms": { "type": "integer", "minimum": 1 },
+                "cwd": { "type": "string" }
+            }
+        })
+    }
+
+    async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
+        let command = args
+            .get("command")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                AvaError::ValidationError("missing required field: command".to_string())
+            })?
+            .to_string();
+
+        if DANGEROUS_PATTERNS.iter().any(|pattern| command.contains(pattern)) {
+            return Err(AvaError::PermissionDenied(
+                "Refusing to run dangerous command".to_string(),
+            ));
+        }
+
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_TIMEOUT_MS);
+
+        let final_command = if let Some(cwd) = args.get("cwd").and_then(Value::as_str) {
+            let escaped = cwd.replace('"', "\\\"");
+            format!("cd \"{escaped}\" && {command}")
+        } else {
+            command
+        };
+
+        if is_install_class(&final_command) {
+            let cwd = args
+                .get("cwd")
+                .and_then(Value::as_str)
+                .unwrap_or(".")
+                .to_string();
+            let backend = select_backend().map_err(|e| AvaError::PlatformError(e.to_string()))?;
+            let policy = SandboxPolicy {
+                read_only_paths: vec!["/usr".to_string(), "/bin".to_string(), "/lib".to_string()],
+                writable_paths: vec![cwd.clone(), "/tmp".to_string()],
+                allow_network: true,
+                allow_process_spawn: true,
+            };
+            let request = SandboxRequest {
+                command: "sh".to_string(),
+                args: vec!["-c".to_string(), final_command],
+                working_dir: Some(cwd),
+                env: filtered_env(),
+            };
+
+            let plan = backend
+                .build_plan(&request, &policy)
+                .map_err(|e| AvaError::PlatformError(e.to_string()))?;
+            let output = execute_plan(&plan, Duration::from_millis(timeout_ms))
+                .await
+                .map_err(|e| AvaError::PlatformError(e.to_string()))?;
+
+            let mut rendered = format!(
+                "stdout:\n{}\n\nstderr:\n{}\n\nexit_code: {}",
+                output.stdout, output.stderr, output.exit_code
+            );
+            truncate_with_notice(&mut rendered, MAX_OUTPUT_BYTES);
+
+            return Ok(ToolResult {
+                call_id: String::new(),
+                content: rendered,
+                is_error: false,
+            });
+        }
+
+        let output = tokio::time::timeout(
+            Duration::from_millis(timeout_ms),
+            self.platform.execute(&final_command),
+        )
+        .await
+        .map_err(|_| AvaError::TimeoutError("bash command timed out".to_string()))??;
+
+        let mut rendered = format!(
+            "stdout:\n{}\n\nstderr:\n{}\n\nexit_code: {}",
+            output.stdout, output.stderr, output.exit_code
+        );
+        truncate_with_notice(&mut rendered, MAX_OUTPUT_BYTES);
+
+        Ok(ToolResult {
+            call_id: String::new(),
+            content: rendered,
+            is_error: false,
+        })
+    }
+}
+
+fn truncate_with_notice(content: &mut String, max_bytes: usize) {
+    if content.len() <= max_bytes {
+        return;
+    }
+
+    let mut idx = max_bytes;
+    while !content.is_char_boundary(idx) {
+        idx -= 1;
+    }
+
+    content.truncate(idx);
+    content.push_str("\n[truncated]");
+}
+
+fn is_install_class(command: &str) -> bool {
+    let patterns = [
+        "npm install",
+        "npm i ",
+        "yarn add",
+        "pnpm add",
+        "pip install",
+        "pip3 install",
+        "cargo install",
+        "cargo add",
+        "apt install",
+        "apt-get install",
+        "brew install",
+    ];
+
+    patterns.iter().any(|pattern| command.contains(pattern))
+}
+
+fn filtered_env() -> Vec<(String, String)> {
+    let allow = [
+        "PATH",
+        "HOME",
+        "USER",
+        "SHELL",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TERM",
+        "CARGO_HOME",
+        "RUSTUP_HOME",
+    ];
+
+    std::env::vars()
+        .filter(|(key, _)| allow.contains(&key.as_str()))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_install_class;
+
+    #[test]
+    fn detects_install_commands_for_sandbox_routing() {
+        assert!(is_install_class("npm install lodash"));
+        assert!(is_install_class("cargo add serde"));
+        assert!(!is_install_class("echo hello"));
+    }
+}

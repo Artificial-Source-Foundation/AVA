@@ -32,14 +32,24 @@ pub fn build_sandbox_exec_plan(
         profile_parts.push("(allow network*)".to_string());
     }
 
+    if let Some(cwd) = &request.working_dir {
+        profile_parts.push(format!("(allow file-read* (subpath \"{}\"))", cwd));
+        profile_parts.push(format!("(allow file-write* (subpath \"{}\"))", cwd));
+    }
+
     let profile = profile_parts.join(" ");
 
-    let mut args = vec![
-        "-p".to_string(),
-        profile.to_string(),
-        request.command.clone(),
-    ];
-    args.extend(request.args.clone());
+    let mut args = vec!["-p".to_string(), profile.to_string()];
+
+    if request.env.is_empty() {
+        args.push(request.command.clone());
+        args.extend(request.args.clone());
+    } else {
+        args.push("/usr/bin/env".to_string());
+        args.extend(request.env.iter().map(|(k, v)| format!("{k}={v}")));
+        args.push(request.command.clone());
+        args.extend(request.args.clone());
+    }
 
     Ok(SandboxPlan {
         program: "sandbox-exec".to_string(),
@@ -63,5 +73,19 @@ mod tests {
         assert_eq!(plan.program, "sandbox-exec");
         assert_eq!(plan.args[0], "-p");
         assert!(plan.args[1].contains("deny default"));
+    }
+
+    #[test]
+    fn sandbox_exec_plan_includes_working_dir_and_env() {
+        let request = SandboxRequest {
+            command: "echo".to_string(),
+            args: vec!["hi".to_string()],
+            working_dir: Some("/tmp".to_string()),
+            env: vec![("A".to_string(), "1".to_string())],
+        };
+        let plan = build_sandbox_exec_plan(&request, &SandboxPolicy::default()).unwrap();
+
+        assert!(plan.args[1].contains("subpath \"/tmp\""));
+        assert!(plan.args.iter().any(|arg| arg == "A=1"));
     }
 }

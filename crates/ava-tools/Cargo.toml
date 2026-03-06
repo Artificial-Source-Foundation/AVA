@@ -12,4 +12,14 @@ serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 regex = "1"
+glob = "0.3"
+ignore = "0.4"
+grep-regex = "0.1"
+grep-searcher = "0.1"
+grep-matcher = "0.1"
 ava-types = { path = "../ava-types" }
+ava-platform = { path = "../ava-platform" }
+ava-sandbox = { path = "../ava-sandbox" }
+
+[dev-dependencies]
+tempfile.workspace = true

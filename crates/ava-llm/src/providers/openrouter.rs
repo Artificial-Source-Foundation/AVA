@@ -14,8 +14,16 @@ pub struct OpenRouterProvider {
 
 impl OpenRouterProvider {
     pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+        Self::with_base_url(api_key, model, "https://openrouter.ai/api")
+    }
+
+    pub fn with_base_url(
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
-            inner: OpenAIProvider::with_base_url(api_key, model, "https://openrouter.ai/api"),
+            inner: OpenAIProvider::with_base_url(api_key, model, base_url),
         }
     }
 }

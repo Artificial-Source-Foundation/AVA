@@ -1,12 +1,14 @@
 //! OS-level sandbox planning for command execution.
 
 pub mod error;
+pub mod executor;
 pub mod linux;
 pub mod macos;
 pub mod policy;
 pub mod types;
 
 pub use error::{Result, SandboxError};
+pub use executor::{execute_plan, SandboxOutput};
 pub use types::{SandboxPlan, SandboxPolicy, SandboxRequest};
 
 pub trait SandboxBackend: Send + Sync {

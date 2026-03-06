@@ -7,9 +7,11 @@ edition = "2021"
 async-trait.workspace = true
 ava-agent = { path = "../ava-agent" }
 ava-context = { path = "../ava-context" }
+ava-llm = { path = "../ava-llm" }
 ava-tools = { path = "../ava-tools" }
 ava-types = { path = "../ava-types" }
 futures.workspace = true
 serde.workspace = true
 tokio.workspace = true
+tokio-util = { version = "0.7", features = ["rt"] }
 uuid.workspace = true

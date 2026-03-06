@@ -1,7 +1,7 @@
-# Sprint 16: Interactive TUI — Implementation Prompt
+# Sprint 16: Interactive TUI — Ratatui Implementation Prompt
 
 > For AI coding agent. Estimated: 8 features, mix M/L effort.
-> Run `npm run test:run && npx tsc --noEmit` after each feature.
+> Run `cargo test --workspace && cargo clippy --workspace` after each feature.
 
 ---
 
@@ -11,10 +11,17 @@ You are implementing Sprint 16 (Interactive TUI) for AVA, a multi-agent AI codin
 
 Read these files first:
 - `CLAUDE.md` (conventions, architecture, dispatchCompute pattern)
-- `AGENTS.md` (code standards, common workflows)
 - `docs/research/tui-comparison-matrix.md` (competitor analysis — read the FULL document)
+- `crates/ava-agent/src/lib.rs` (agent loop API)
+- `crates/ava-llm/src/lib.rs` (LLM provider API)
+- `crates/ava-tools/src/lib.rs` (tool registry API)
+- `crates/ava-session/src/lib.rs` (session manager API)
+- `crates/ava-memory/src/lib.rs` (memory system API)
+- `crates/ava-permissions/src/lib.rs` (permission rules API)
+- `crates/ava-config/src/lib.rs` (config manager API)
+- `crates/ava-platform/src/lib.rs` (filesystem + shell API)
 
-**IMPORTANT**: The TUI uses **React + Ink** (NOT SolidJS). The desktop app uses SolidJS, but the CLI TUI is a separate React app using Ink for terminal rendering. Do NOT mix SolidJS and React patterns.
+**IMPORTANT**: This is a **pure Rust TUI** using Ratatui + Crossterm + Tokio. It calls directly into existing AVA Rust crates (ava-agent, ava-llm, ava-tools, ava-session, etc.) — NO Node.js, NO IPC bridge, NO TypeScript. The TUI is a new binary crate that composes the existing library crates.
 
 ---
 
@@ -25,136 +32,263 @@ Read these files first:
 For EACH feature:
 1. **Read** the listed competitor reference files
 2. **Extract** key patterns (architecture, state management, rendering tricks)
-3. **Adapt** to AVA's Ink + TypeScript architecture
-4. **Implement** (<300 lines/file, no `any`)
+3. **Adapt** to AVA's Ratatui + Rust architecture
+4. **Implement** (<300 lines/file, idiomatic Rust)
 5. **Test** + verify
 
 ---
 
 ## Setup: Dependencies & Project Structure
 
-### Step 0: Install Dependencies
+### Step 0: Create the Crate
 
-Add to `cli/package.json`:
-```json
-{
-  "dependencies": {
-    "ink": "^5.1.0",
-    "ink-text-input": "^6.0.0",
-    "ink-spinner": "^5.0.0",
-    "ink-select-input": "^6.0.0",
-    "@inkjs/ui": "^2.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "marked": "^15.0.0",
-    "marked-terminal": "^7.0.0",
-    "cli-highlight": "^2.1.11",
-    "fuzzysort": "^3.0.0",
-    "diff": "^7.0.0",
-    "chalk": "^5.0.0"
-  },
-  "devDependencies": {
-    "@types/react": "^19.0.0",
-    "ink-testing-library": "^4.0.0"
-  }
-}
+Create `crates/ava-tui/Cargo.toml`:
+```toml
+[package]
+name = "ava-tui"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "ava"
+path = "src/main.rs"
+
+[dependencies]
+# TUI framework
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+futures = "0.3"
+
+# Markdown & syntax highlighting
+pulldown-cmark = "0.12"
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+
+# Diff rendering
+similar = { version = "2", features = ["unicode"] }
+
+# Fuzzy search
+nucleo = "0.5"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Workspace crates — direct in-process calls
+ava-agent = { path = "../ava-agent" }
+ava-llm = { path = "../ava-llm" }
+ava-tools = { path = "../ava-tools" }
+ava-session = { path = "../ava-session" }
+ava-memory = { path = "../ava-memory" }
+ava-permissions = { path = "../ava-permissions" }
+ava-config = { path = "../ava-config" }
+ava-platform = { path = "../ava-platform" }
+ava-context = { path = "../ava-context" }
+ava-types = { path = "../ava-types" }
+ava-db = { path = "../ava-db" }
+ava-codebase = { path = "../ava-codebase" }
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# Error handling
+color-eyre = "0.6"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Misc
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"
+dirs = "5"
+unicode-width = "0.2"
+
+[dev-dependencies]
+insta = "1"
+tempfile = "3"
 ```
 
-**Library roles (all battle-tested, millions of weekly downloads):**
-- `marked` + `marked-terminal` — Markdown to ANSI terminal output (2.8M downloads/week). Handles headings, bold, italic, tables, links, blockquotes. Uses `cli-highlight` internally for code block syntax highlighting.
-- `cli-highlight` — Syntax highlighting for 190+ languages via highlight.js. Auto-detects language. Themeable via JSON.
-- `diff` — Compute unified diffs between strings (50M+ downloads/week). Used for the diff preview in tool approval.
-- `chalk` — ANSI color the diff output (green additions, red deletions, gray context lines).
-- `@inkjs/ui` — Official Ink component library (TextInput, Select, Spinner, ProgressBar, Badge).
-- `fuzzysort` — Fast fuzzy search for command palette and autocomplete.
-
-Check which dependencies already exist in the workspace before adding duplicates. Use workspace versions where available.
+Register in workspace `Cargo.toml`:
+```toml
+members = [
+  # ... existing crates ...
+  "crates/ava-tui",
+]
+```
 
 ### Step 0b: Create TUI Directory Structure
 
 ```
-cli/src/tui/
-  index.tsx                  # Entry point — render(<App />)
-  app.tsx                    # Root component + provider stack
-  contexts/
-    streaming.tsx            # Event batching + streaming state
-    session.tsx              # Session management
-    keybind.tsx              # Keyboard shortcuts
-    theme.tsx                # Terminal themes
-    permission.tsx           # Tool approval state
-  components/
-    chat/
-      message-list.tsx       # Scrollable message history
-      message.tsx            # Single message renderer
-      streaming-text.tsx     # Real-time markdown streaming
-    input/
-      composer.tsx           # Multi-line text input
-      autocomplete.tsx       # @mentions + /commands
-      command-palette.tsx    # Fuzzy command search
-    approval/
-      tool-approval.tsx      # 3-stage approval modal
-      diff-preview.tsx       # Inline diff display
-    layout/
-      app-layout.tsx         # Main layout: header + messages + input + footer
-      sidebar.tsx            # Optional info panel
-      status-bar.tsx         # Model, tokens, session info
-    shared/
-      markdown.tsx           # Terminal markdown renderer
-      code-block.tsx         # Syntax-highlighted code
-      spinner.tsx            # Loading indicators
-      dialog.tsx             # Modal dialog system
-  hooks/
-    use-streaming.ts         # Streaming event handler
-    use-keypress.ts          # Global key events
-    use-terminal-size.ts     # Responsive layout
-  themes/
-    index.ts                 # Theme loader + dark/light detection
-    dracula.ts
-    nord.ts
-    default.ts
+crates/ava-tui/
+  src/
+    main.rs                    # Entry point — CLI args + terminal setup
+    app.rs                     # App state machine + main event loop
+    event.rs                   # Event types (Key, Agent, Resize, Tick)
+    ui/
+      mod.rs                   # Root render function
+      layout.rs                # Main layout: header + messages + input + footer
+      status_bar.rs            # Top/bottom status bars
+      sidebar.rs               # Optional info panel
+    widgets/
+      mod.rs                   # Widget re-exports
+      message_list.rs          # Scrollable message history widget
+      message.rs               # Single message renderer (user/assistant/tool/error)
+      streaming_text.rs        # Real-time token streaming with markdown
+      composer.rs              # Multi-line text input widget
+      autocomplete.rs          # Fuzzy autocomplete popup
+      command_palette.rs       # Ctrl+/ command search
+      tool_approval.rs         # 3-stage approval modal overlay
+      diff_preview.rs          # Colored unified diff display
+      session_list.rs          # Session picker dialog
+      dialog.rs                # Generic modal dialog
+    rendering/
+      mod.rs                   # Rendering re-exports
+      markdown.rs              # pulldown-cmark → ratatui Spans conversion
+      syntax.rs                # syntect → ratatui styled code blocks
+      diff.rs                  # similar → colored diff lines
+    state/
+      mod.rs                   # State re-exports
+      agent.rs                 # Agent execution state + event bridge
+      messages.rs              # Message history + scroll position
+      input.rs                 # Input buffer + cursor + history
+      session.rs               # Session state (wraps ava-session)
+      permission.rs            # Tool approval queue
+      theme.rs                 # Terminal theme (colors, styles)
+      keybinds.rs              # Configurable keyboard shortcuts
+    config/
+      mod.rs                   # Config re-exports
+      cli.rs                   # clap CLI argument definitions
+      keybindings.rs           # Keybind config file loader
+      themes.rs                # Theme definitions (dracula, nord, default)
+  tests/
+    app_test.rs                # App state machine tests
+    rendering_test.rs          # Markdown + syntax + diff rendering tests
+    widgets_test.rs            # Widget unit tests
+    integration_test.rs        # Full TUI integration test with mock agent
 ```
 
 ---
 
-## Feature 1: Core TUI Shell & Layout
+## Feature 1: Core App Shell & Event Loop
 
 ### Competitor Research
 Read these files:
-- `docs/reference-code/gemini-cli/packages/cli/src/gemini.tsx` — Ink render entry point
-- `docs/reference-code/gemini-cli/packages/cli/src/ui/App.tsx` — Root component
-- `docs/reference-code/gemini-cli/packages/cli/src/ui/layouts/DefaultAppLayout.tsx` — Layout structure
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/app.tsx` — Provider stack pattern
+- `docs/reference-code/codex-cli/codex-rs/tui/src/app.rs` (lines 1-200) — App struct, event loop pattern
+- `docs/reference-code/codex-cli/codex-rs/tui/src/tui.rs` — Terminal setup/teardown
+- `docs/reference-code/codex-cli/codex-rs/tui/src/app_event.rs` — Event types
 
 ### What to Build
-The foundational Ink app with layout, theme system, and provider stack.
+The foundational Ratatui app with terminal setup, event loop, and layout scaffolding.
 
 **Files:**
-- `cli/src/tui/index.tsx` — Entry point
-- `cli/src/tui/app.tsx` — Root component with provider nesting
-- `cli/src/tui/components/layout/app-layout.tsx` — Main layout
-- `cli/src/tui/components/layout/status-bar.tsx` — Bottom status bar
-- `cli/src/tui/contexts/theme.tsx` — Theme context + dark/light detection
-- `cli/src/tui/themes/index.ts` — Theme definitions
-- `cli/src/tui/hooks/use-terminal-size.ts` — Terminal dimensions hook
+- `crates/ava-tui/src/main.rs` — Entry point with clap
+- `crates/ava-tui/src/app.rs` — App state machine
+- `crates/ava-tui/src/event.rs` — Event enum + event reader task
+- `crates/ava-tui/src/ui/mod.rs` — Root render function
+- `crates/ava-tui/src/ui/layout.rs` — Main layout
+- `crates/ava-tui/src/ui/status_bar.rs` — Status bars
+- `crates/ava-tui/src/config/cli.rs` — CLI args
+- `crates/ava-tui/src/state/theme.rs` — Theme state
 
 **Implementation:**
 
-Entry point (`index.tsx`):
-```typescript
-import { render } from 'ink'
-import React from 'react'
-import { App } from './app.js'
+Entry point (`main.rs`):
+```rust
+use clap::Parser;
+use color_eyre::Result;
 
-export function startTUI(options: TUIOptions): void {
-  const { waitUntilExit } = render(<App {...options} />)
-  waitUntilExit().then(() => process.exit(0))
+#[derive(Parser)]
+#[command(name = "ava", about = "AVA — AI coding assistant")]
+struct Cli {
+    /// Goal to execute (if provided, submits immediately)
+    goal: Option<String>,
+
+    /// Resume last session
+    #[arg(short = 'c', long = "continue")]
+    resume: bool,
+
+    /// Resume specific session
+    #[arg(long)]
+    session: Option<String>,
+
+    /// Model to use
+    #[arg(long, short)]
+    model: Option<String>,
+
+    /// Provider name
+    #[arg(long)]
+    provider: Option<String>,
+
+    /// Max agent turns
+    #[arg(long, default_value = "20")]
+    max_turns: usize,
+
+    /// Auto-approve all tool calls
+    #[arg(long)]
+    yolo: bool,
+
+    /// Theme name
+    #[arg(long, default_value = "default")]
+    theme: String,
+}
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    color_eyre::install()?;
+    let cli = Cli::parse();
+    let mut app = App::new(cli)?;
+    app.run().await
 }
 ```
 
-App layout structure:
+App event loop pattern (from Codex CLI):
+```rust
+pub struct App {
+    state: AppState,
+    should_quit: bool,
+}
+
+impl App {
+    pub async fn run(&mut self) -> Result<()> {
+        let mut terminal = ratatui::init();
+        crossterm::execute!(std::io::stdout(), crossterm::event::EnableBracketedPaste)?;
+
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        // Spawn terminal event reader
+        spawn_event_reader(event_tx.clone());
+
+        // Spawn tick timer (60fps for streaming, 4fps idle)
+        spawn_tick_timer(event_tx.clone());
+
+        loop {
+            // Render
+            terminal.draw(|frame| ui::render(frame, &self.state))?;
+
+            // Handle next event
+            if let Some(event) = event_rx.recv().await {
+                self.handle_event(event)?;
+            }
+
+            if self.should_quit {
+                break;
+            }
+        }
+
+        ratatui::restore();
+        Ok(())
+    }
+}
+```
+
+Layout structure:
 ```
 +-----------------------------------------------+
-| AVA v{version}  |  model: claude-sonnet  | ... |  <- StatusBar (top)
+| AVA v0.1.0  |  model: claude-sonnet  | 1.2k tok |  <- StatusBar (top)
 +-----------------------------------------------+
 |                                               |
 |  [messages scroll area]                       |  <- MessageList
@@ -162,37 +296,22 @@ App layout structure:
 +-----------------------------------------------+
 | > user input here...                          |  <- Composer
 +-----------------------------------------------+
-| session: abc123 | tokens: 1.2k | Ctrl+/ help |  <- StatusBar (bottom)
+| session: abc123 | turn 3/20 | Ctrl+/ help     |  <- StatusBar (bottom)
 +-----------------------------------------------+
 ```
 
-Provider stack (nested in App):
-```typescript
-<ThemeProvider>
-  <SessionProvider options={options}>
-    <StreamingProvider>
-      <KeybindProvider>
-        <PermissionProvider>
-          <AppLayout />
-        </PermissionProvider>
-      </KeybindProvider>
-    </StreamingProvider>
-  </SessionProvider>
-</ThemeProvider>
-```
-
 Theme system:
-- Auto-detect dark/light via OSC 11 query (like OpenCode)
-- 3 built-in themes: default (auto), dracula (dark), nord (dark)
-- Colors: primary, secondary, accent, error, warning, text, textMuted, border, background
-- Diff colors: added, removed, context
+- 3 built-in themes: `default` (auto dark/light), `dracula`, `nord`
+- Colors stored as `ratatui::style::Color` values
+- Theme struct: primary, secondary, accent, error, warning, text, text_muted, border, bg
+- Diff colors: added (green), removed (red), context (gray), hunk_header (cyan)
+- Auto dark/light detection via terminal background color query
 
-**Integration:** Add `tui` command to `cli/src/index.ts`. Running `ava` with no args launches TUI instead of showing help.
+**Integration:** The binary is `ava`. Running `ava` with no args launches the TUI. Running `ava "goal"` launches TUI and auto-submits the goal.
 
 ### Tests
-- `cli/src/tui/app.test.tsx` — Renders without crash using ink-testing-library
-- `cli/src/tui/contexts/theme.test.ts` — Theme loading + color resolution
-- `cli/src/tui/hooks/use-terminal-size.test.ts` — Returns dimensions
+- `tests/app_test.rs` — App initializes, handles quit event, state transitions
+- Theme loading + color resolution
 
 ---
 
@@ -200,80 +319,136 @@ Theme system:
 
 ### Competitor Research
 Read these files:
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/context/sdk.tsx` — Event batching (16ms)
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx` — Message rendering
+- `docs/reference-code/codex-cli/codex-rs/tui/src/chatwidget.rs` (lines 1-300) — Chat widget structure
 - `docs/reference-code/codex-cli/codex-rs/tui/src/streaming/chunking.rs` — Adaptive streaming
-- `docs/reference-code/aider/aider/mdstream.py` — Sliding window markdown streaming
+- `docs/reference-code/codex-cli/codex-rs/tui/src/markdown_render.rs` — Markdown to ratatui Spans
+- `docs/reference-code/codex-cli/codex-rs/tui/src/markdown_stream.rs` — Streaming markdown
 
 ### What to Build
-Real-time streaming message display with event batching and markdown rendering.
+Real-time streaming message display with adaptive batching and markdown rendering.
 
 **Files:**
-- `cli/src/tui/contexts/streaming.tsx` — StreamingContext with event batching
-- `cli/src/tui/hooks/use-streaming.ts` — Streaming hook for components
-- `cli/src/tui/components/chat/message-list.tsx` — Scrollable message list
-- `cli/src/tui/components/chat/message.tsx` — Individual message renderer
-- `cli/src/tui/components/chat/streaming-text.tsx` — Live streaming text with markdown
-- `cli/src/tui/components/shared/markdown.tsx` — Terminal markdown renderer
-- `cli/src/tui/components/shared/code-block.tsx` — Syntax-highlighted code blocks
+- `crates/ava-tui/src/state/messages.rs` — Message history + scroll state
+- `crates/ava-tui/src/widgets/message_list.rs` — Scrollable message list widget
+- `crates/ava-tui/src/widgets/message.rs` — Individual message renderer
+- `crates/ava-tui/src/widgets/streaming_text.rs` — Live streaming text
+- `crates/ava-tui/src/rendering/markdown.rs` — pulldown-cmark → ratatui Lines
+- `crates/ava-tui/src/rendering/syntax.rs` — syntect code highlighting
 
 **Implementation:**
 
-Event batching (from OpenCode pattern):
-```typescript
-// Queue events for 16ms windows, flush as batch
-const BATCH_INTERVAL = 16 // ~60fps
-const eventQueue: AgentEvent[] = []
-let flushTimer: NodeJS.Timeout | null = null
-
-function queueEvent(event: AgentEvent): void {
-  eventQueue.push(event)
-  if (!flushTimer) {
-    flushTimer = setTimeout(flush, BATCH_INTERVAL)
-  }
+Adaptive tick rate (from Codex CLI pattern):
+```rust
+/// During streaming: 60fps (16ms ticks) for smooth token display
+/// During idle: 4fps (250ms ticks) to save CPU
+fn tick_interval(is_streaming: bool) -> Duration {
+    if is_streaming {
+        Duration::from_millis(16) // 60fps
+    } else {
+        Duration::from_millis(250) // 4fps idle
+    }
 }
 ```
 
 Message types to render:
-- **User message** — plain text with username prefix
-- **Assistant message** — markdown with streaming indicator
+- **User message** — plain text with `>` prefix, themed user color
+- **Assistant message** — markdown rendered to styled ratatui Lines
 - **Tool call** — tool name + args (collapsible) + result + duration
-- **Thinking** — collapsible thinking block (dimmed)
-- **Error** — red error card
+- **Thinking** — collapsible thinking block (dimmed/italic)
+- **Error** — red bordered block
 - **System** — info messages (turn markers, compression notices)
 
-Markdown rendering — use `marked` + `marked-terminal` (NOT custom):
-```typescript
-import { marked } from 'marked'
-import TerminalRenderer from 'marked-terminal'
+Markdown rendering with `pulldown-cmark` → `ratatui::text::Line`:
+```rust
+use pulldown_cmark::{Event, Parser, Tag};
+use ratatui::text::{Line, Span};
+use ratatui::style::{Color, Modifier, Style};
 
-marked.setOptions({ renderer: new TerminalRenderer({
-  // Customize colors via theme context
-  codespan: chalk.yellow,
-  code: (code: string, lang: string) => highlight(code, { language: lang }),
-  heading: chalk.green.bold,
-}) })
+pub fn markdown_to_lines(md: &str, theme: &Theme) -> Vec<Line<'static>> {
+    let parser = Parser::new(md);
+    let mut lines = Vec::new();
+    let mut current_spans: Vec<Span<'static>> = Vec::new();
+    let mut style_stack: Vec<Style> = vec![Style::default()];
 
-// Render markdown to ANSI string, wrap in Ink <Text>
-const rendered = marked(markdownString)
-return <Text>{rendered}</Text>
+    for event in parser {
+        match event {
+            Event::Text(text) => {
+                let style = *style_stack.last().unwrap_or(&Style::default());
+                current_spans.push(Span::styled(text.to_string(), style));
+            }
+            Event::Code(code) => {
+                current_spans.push(Span::styled(
+                    format!("`{}`", code),
+                    Style::default().fg(theme.accent),
+                ));
+            }
+            Event::Start(Tag::Heading { level, .. }) => {
+                style_stack.push(Style::default()
+                    .fg(theme.primary)
+                    .add_modifier(Modifier::BOLD));
+            }
+            Event::Start(Tag::Strong) => {
+                style_stack.push(Style::default().add_modifier(Modifier::BOLD));
+            }
+            Event::Start(Tag::Emphasis) => {
+                style_stack.push(Style::default().add_modifier(Modifier::ITALIC));
+            }
+            Event::Start(Tag::CodeBlock(kind)) => {
+                // Flush current line, start code block
+                // Use syntect for highlighting (see rendering/syntax.rs)
+            }
+            Event::End(_) => { style_stack.pop(); }
+            Event::SoftBreak | Event::HardBreak => {
+                lines.push(Line::from(std::mem::take(&mut current_spans)));
+            }
+            _ => {}
+        }
+    }
+    if !current_spans.is_empty() {
+        lines.push(Line::from(current_spans));
+    }
+    lines
+}
 ```
-- `marked-terminal` handles headings, bold, italic, code blocks, tables, links, blockquotes — all out of the box
-- Code block syntax highlighting via `cli-highlight` (190+ languages, auto-detect)
-- Override colors per theme by passing chalk styles to TerminalRenderer options
-- For streaming: re-render on each batch flush (markdown is fast, no need to diff)
+
+Syntax highlighting with `syntect`:
+```rust
+use syntect::highlighting::ThemeSet;
+use syntect::parsing::SyntaxSet;
+use syntect::easy::HighlightLines;
+
+lazy_static! {
+    static ref SYNTAX_SET: SyntaxSet = SyntaxSet::load_defaults_newlines();
+    static ref THEME_SET: ThemeSet = ThemeSet::load_defaults();
+}
+
+pub fn highlight_code(code: &str, language: &str) -> Vec<Line<'static>> {
+    let syntax = SYNTAX_SET.find_syntax_by_token(language)
+        .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
+    let theme = &THEME_SET.themes["base16-ocean.dark"];
+    let mut h = HighlightLines::new(syntax, theme);
+
+    code.lines().map(|line| {
+        let ranges = h.highlight_line(line, &SYNTAX_SET).unwrap_or_default();
+        let spans: Vec<Span> = ranges.into_iter().map(|(style, text)| {
+            Span::styled(text.to_string(), syntect_to_ratatui_style(style))
+        }).collect();
+        Line::from(spans)
+    }).collect()
+}
+```
 
 Scrolling:
-- Track scroll position with `useState`
+- Track `scroll_offset: usize` and `auto_scroll: bool`
 - Page up/down moves by half terminal height
 - Auto-scroll to bottom on new messages (unless user scrolled up)
 - Show "New messages below" indicator when scrolled up
+- Home/End to jump to top/bottom
 
 ### Tests
-- `cli/src/tui/components/chat/message-list.test.tsx` — Renders messages
-- `cli/src/tui/components/chat/message.test.tsx` — Renders each message type
-- `cli/src/tui/components/shared/markdown.test.tsx` — Markdown to terminal text
-- `cli/src/tui/contexts/streaming.test.tsx` — Event batching flushes correctly
+- `tests/rendering_test.rs` — Markdown to Lines, syntax highlighting, message rendering
+- Message types all render correctly
+- Scroll position tracking
 
 ---
 
@@ -281,40 +456,75 @@ Scrolling:
 
 ### Competitor Research
 Read these files:
-- `docs/reference-code/gemini-cli/packages/cli/src/ui/components/Composer.tsx` — Ink input component
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/component/prompt/index.tsx` — Multi-part prompt
-- `docs/reference-code/pi-mono/packages/tui/src/components/input.ts` — Input with kill ring + word nav
+- `docs/reference-code/codex-cli/codex-rs/tui/src/chatwidget.rs` — Search for `input` / `cursor` / `compose`
+- `docs/reference-code/codex-cli/codex-rs/tui/src/clipboard_paste.rs` — Paste handling
+- `docs/reference-code/codex-cli/codex-rs/tui/src/insert_history.rs` — Input history
 
 ### What to Build
 Multi-line text input with history navigation, slash commands, and @mentions.
 
 **Files:**
-- `cli/src/tui/components/input/composer.tsx` — Main input component
-- `cli/src/tui/components/input/autocomplete.tsx` — Autocomplete popup
+- `crates/ava-tui/src/state/input.rs` — Input buffer state
+- `crates/ava-tui/src/widgets/composer.rs` — Input widget
+- `crates/ava-tui/src/widgets/autocomplete.rs` — Autocomplete popup
 
 **Implementation:**
 
+Input state:
+```rust
+pub struct InputState {
+    /// Current input buffer (supports multi-line)
+    pub buffer: String,
+    /// Cursor position (byte offset)
+    pub cursor: usize,
+    /// Command history
+    pub history: Vec<String>,
+    /// History navigation index (None = current input)
+    pub history_index: Option<usize>,
+    /// Saved current input when navigating history
+    pub saved_input: String,
+    /// Autocomplete state
+    pub autocomplete: Option<AutocompleteState>,
+}
+```
+
 Composer features:
-- Multi-line input (Shift+Enter or Ctrl+J for newline, Enter to submit)
-- History navigation (Up/Down when cursor at start/end)
+- Multi-line input (Shift+Enter or Alt+Enter for newline, Enter to submit)
+- History navigation (Up/Down when cursor at line start/end)
 - Persistent history saved to `~/.ava/cli-history.jsonl`
 - Slash command detection: typing `/` shows autocomplete popup
 - @mention detection: typing `@` shows file/agent autocomplete
-- Paste detection: handle bracketed paste mode for multi-line content
+- Bracketed paste handling for multi-line content
 - Ctrl+C: cancel current input (or abort running agent)
 - Ctrl+D: exit TUI
 - Word navigation: Ctrl+Left/Right, Ctrl+Backspace (delete word)
+- Ctrl+A / Ctrl+E: Home / End of line
+- Ctrl+U: Clear line
+- Ctrl+W: Delete word backward
 
-Autocomplete popup:
+Autocomplete popup (using `nucleo` fuzzy matcher):
+```rust
+use nucleo::Nucleo;
+
+pub struct AutocompleteState {
+    pub trigger: AutocompleteTrigger, // Slash or AtMention
+    pub query: String,
+    pub items: Vec<AutocompleteItem>,
+    pub selected: usize,
+    pub matcher: Nucleo<String>,
+}
+```
+
 - Shows below input when typing `/` or `@`
-- Fuzzy search with `fuzzysort`
+- Fuzzy search with `nucleo` (same engine as Helix editor)
 - Arrow keys to navigate, Tab/Enter to select, Escape to dismiss
-- Slash commands: `/help`, `/model`, `/session`, `/clear`, `/recipe`, `/compact`
-- @mentions: `@file.ts` (reads file into context), `@agent` (invoke agent)
+- Slash commands: `/help`, `/model`, `/session`, `/clear`, `/compact`, `/recipe`, `/praxis`
+- @mentions: `@file.ts` (reads file into context)
 
 ### Tests
-- `cli/src/tui/components/input/composer.test.tsx` — Input, submit, history
-- `cli/src/tui/components/input/autocomplete.test.tsx` — Fuzzy search + selection
+- Input buffer operations (insert, delete, word nav, cursor movement)
+- History navigation (up/down, save/restore)
+- Autocomplete trigger detection and fuzzy matching
 
 ---
 
@@ -322,24 +532,25 @@ Autocomplete popup:
 
 ### Competitor Research
 Read these files:
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/routes/session/permission.tsx` — 3-stage approval
 - `docs/reference-code/codex-cli/codex-rs/tui/src/bottom_pane/approval_overlay.rs` — Modal approval overlay
-- `docs/reference-code/gemini-cli/packages/cli/src/ui/components/messages/ToolConfirmationMessage.tsx` — Tool confirmation
+- `docs/reference-code/codex-cli/codex-rs/tui/src/diff_render.rs` — Diff rendering
+- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/routes/session/permission.tsx` — 3-stage approval
 
 ### What to Build
-Interactive 3-stage tool approval flow in the terminal.
+Interactive 3-stage tool approval flow as a modal overlay.
 
 **Files:**
-- `cli/src/tui/contexts/permission.tsx` — Permission state + queue
-- `cli/src/tui/components/approval/tool-approval.tsx` — Approval modal
-- `cli/src/tui/components/approval/diff-preview.tsx` — Inline diff display
+- `crates/ava-tui/src/state/permission.rs` — Permission state + queue
+- `crates/ava-tui/src/widgets/tool_approval.rs` — Approval overlay widget
+- `crates/ava-tui/src/widgets/diff_preview.rs` — Diff display widget
+- `crates/ava-tui/src/rendering/diff.rs` — similar → colored Lines
 
 **Implementation:**
 
-3-stage approval flow (adapted from OpenCode):
+3-stage approval flow (adapted from OpenCode + Codex):
 
 **Stage 1 — Preview:**
-- Shows tool name + icon (bash -> `$`, edit -> pencil, read -> eye, etc.)
+- Shows tool name + icon (bash → `$`, edit → `~`, read → eye, etc.)
 - Shows arguments formatted as key-value pairs
 - For file edits: shows unified diff with +/- coloring
 - For bash commands: shows command + working directory
@@ -348,43 +559,73 @@ Interactive 3-stage tool approval flow in the terminal.
 - `[a] Allow once` — run this tool call
 - `[s] Allow for session` — auto-approve this tool for rest of session
 - `[r] Reject` — deny this call
-- `[y] YOLO mode` — auto-approve everything (like --yolo flag)
-- Navigate with arrow keys or press shortcut key
+- `[y] YOLO mode` — auto-approve everything
+- Press shortcut key directly (no arrow navigation needed)
 
 **Stage 3 — Rejection reason (optional):**
 - If rejected, optional text input for rejection message sent back to agent
 - Enter to confirm, Escape to skip
 
 Permission queue:
-- Multiple tool calls queue up (agent may request several)
-- Process one at a time
-- Show queue count: "Approval 1 of 3"
-- Modal blocks input to chat while approval pending
+```rust
+pub struct PermissionState {
+    pub queue: VecDeque<ApprovalRequest>,
+    pub current_stage: ApprovalStage,
+    pub session_approved: HashSet<String>, // tool names auto-approved
+    pub yolo_mode: bool,
+    pub rejection_input: String,
+}
 
-Diff preview — use `diff` npm package + `chalk` for coloring:
-```typescript
-import { createTwoFilesPatch } from 'diff'
-import chalk from 'chalk'
-
-function renderDiff(oldContent: string, newContent: string, filePath: string): string {
-  const patch = createTwoFilesPatch(`a/${filePath}`, `b/${filePath}`, oldContent, newContent)
-  return patch.split('\n').map(line => {
-    if (line.startsWith('+')) return chalk.green(line)
-    if (line.startsWith('-')) return chalk.red(line)
-    if (line.startsWith('@@')) return chalk.cyan(line)
-    return chalk.gray(line)
-  }).join('\n')
+pub enum ApprovalStage {
+    Preview,
+    ActionSelect,
+    RejectionReason,
 }
 ```
-- `diff` (50M+ downloads/week) computes the unified diff
-- `chalk` colorizes: green additions, red deletions, cyan hunk headers, gray context
-- Show file path header above diff
-- Wrap in Ink `<Text>` inside a `<Box borderStyle="single">` for visual framing
+
+Diff rendering with `similar`:
+```rust
+use similar::{ChangeTag, TextDiff};
+use ratatui::text::{Line, Span};
+use ratatui::style::{Color, Style};
+
+pub fn render_diff(old: &str, new: &str, theme: &Theme) -> Vec<Line<'static>> {
+    let diff = TextDiff::from_lines(old, new);
+    let mut lines = Vec::new();
+
+    for change in diff.iter_all_changes() {
+        let (sign, color) = match change.tag() {
+            ChangeTag::Delete => ("-", theme.diff_removed),
+            ChangeTag::Insert => ("+", theme.diff_added),
+            ChangeTag::Equal => (" ", theme.diff_context),
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{}{}", sign, change.value().trim_end_matches('\n')),
+            Style::default().fg(color),
+        )));
+    }
+    lines
+}
+```
+
+The overlay renders on top of the main UI using ratatui's `Clear` + centered `Rect` pattern:
+```rust
+// In ui render function:
+if let Some(approval) = &state.permission.queue.front() {
+    let area = centered_rect(80, 60, frame.area());
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        ToolApprovalWidget::new(approval, &state.permission, &state.theme),
+        area,
+    );
+}
+```
 
 ### Tests
-- `cli/src/tui/components/approval/tool-approval.test.tsx` — 3 stages render
-- `cli/src/tui/components/approval/diff-preview.test.tsx` — Diff coloring
-- `cli/src/tui/contexts/permission.test.tsx` — Queue management
+- 3 approval stages render correctly
+- Diff coloring (additions green, deletions red)
+- Queue management (enqueue, dequeue, session approvals)
+- YOLO mode bypasses all
 
 ---
 
@@ -392,48 +633,49 @@ function renderDiff(oldContent: string, newContent: string, filePath: string): s
 
 ### Competitor Research
 Read these files:
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/context/keybind.tsx` — Leader key system
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/component/dialog-command.tsx` — Command palette
-- `docs/reference-code/pi-mono/packages/tui/src/components/input.ts` — Keybinding config
+- `docs/reference-code/codex-cli/codex-rs/tui/src/app.rs` — Search for `KeyCode` / `handle_key`
+- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/context/keybind.tsx` — Keybind system
 
 ### What to Build
-Configurable keyboard shortcuts with leader key support and a fuzzy command palette.
+Configurable keyboard shortcuts with a fuzzy command palette.
 
 **Files:**
-- `cli/src/tui/contexts/keybind.tsx` — Keybind context + matching
-- `cli/src/tui/hooks/use-keypress.ts` — Global key event hook
-- `cli/src/tui/components/input/command-palette.tsx` — Fuzzy command search dialog
+- `crates/ava-tui/src/state/keybinds.rs` — Keybind state + matching
+- `crates/ava-tui/src/config/keybindings.rs` — Keybind config file
+- `crates/ava-tui/src/widgets/command_palette.rs` — Fuzzy command search
 
 **Implementation:**
 
 Default keybindings:
-```typescript
-const DEFAULT_KEYBINDS = {
-  'command_palette': ['ctrl+/'],
-  'new_session': ['ctrl+n'],
-  'session_list': ['ctrl+k'],
-  'model_switch': ['ctrl+m'],
-  'scroll_up': ['pageup'],
-  'scroll_down': ['pagedown'],
-  'scroll_top': ['home'],
-  'scroll_bottom': ['end'],
-  'toggle_sidebar': ['ctrl+s'],
-  'toggle_thinking': ['ctrl+t'],
-  'cancel': ['ctrl+c'],
-  'quit': ['ctrl+d'],
-  'yolo_toggle': ['ctrl+y'],
+```rust
+pub fn default_keybinds() -> HashMap<Action, Vec<KeyBinding>> {
+    hashmap! {
+        Action::CommandPalette => vec![kb(Ctrl, '/')],
+        Action::NewSession => vec![kb(Ctrl, 'n')],
+        Action::SessionList => vec![kb(Ctrl, 'k')],
+        Action::ModelSwitch => vec![kb(Ctrl, 'm')],
+        Action::ScrollUp => vec![kb(None, KeyCode::PageUp)],
+        Action::ScrollDown => vec![kb(None, KeyCode::PageDown)],
+        Action::ScrollTop => vec![kb(None, KeyCode::Home)],
+        Action::ScrollBottom => vec![kb(None, KeyCode::End)],
+        Action::ToggleSidebar => vec![kb(Ctrl, 's')],
+        Action::ToggleThinking => vec![kb(Ctrl, 't')],
+        Action::Cancel => vec![kb(Ctrl, 'c')],
+        Action::Quit => vec![kb(Ctrl, 'd')],
+        Action::YoloToggle => vec![kb(Ctrl, 'y')],
+    }
 }
 ```
 
-Keybind config file: `~/.ava/keybindings.json` (override defaults)
+Keybind config: `~/.ava/keybindings.json` (overrides defaults).
 
 Command palette:
 - Opens with Ctrl+/ (like VS Code)
-- Fuzzy search all available commands
-- Shows command name + keybinding + category
+- Fuzzy search all available commands using `nucleo`
+- Shows command name + keybinding hint + category
 - Categories: Session, Model, Navigation, View, Agent
 - Enter to execute, Escape to close
-- Recent commands shown first (frecency)
+- Recent commands shown first
 
 Commands include:
 - New Session, Switch Session, Rename Session, Delete Session
@@ -441,11 +683,12 @@ Commands include:
 - Toggle Sidebar, Toggle Thinking Blocks, Toggle Tool Details
 - Clear Chat, Export Session, Fork Session
 - YOLO Mode Toggle
-- Run Recipe (lists available recipes)
+- Run Recipe, Switch Praxis Mode
 
 ### Tests
-- `cli/src/tui/contexts/keybind.test.ts` — Key matching, config override
-- `cli/src/tui/components/input/command-palette.test.tsx` — Fuzzy search + selection
+- Key matching against configured bindings
+- Config file loading + override
+- Fuzzy search ranking in command palette
 
 ---
 
@@ -453,45 +696,80 @@ Commands include:
 
 ### Competitor Research
 Read these files:
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx` — Session view
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/routes/home.tsx` — Home/session list
-- `docs/reference-code/pi-mono/packages/coding-agent/src/core/session-manager.ts` — Session DAG
+- `docs/reference-code/codex-cli/codex-rs/tui/src/resume_picker.rs` — Session resume picker
+- `docs/reference-code/codex-cli/codex-rs/tui/src/history_cell.rs` — History management
+- `crates/ava-session/src/lib.rs` — AVA's existing session manager (USE THIS)
 
 ### What to Build
-Session list, switching, resume, and fork UI.
+Session list dialog, switching, resume, and fork — wrapping existing `ava-session` crate.
 
 **Files:**
-- `cli/src/tui/contexts/session.tsx` — Session state + operations
-- `cli/src/tui/components/layout/session-list.tsx` — Session picker dialog
+- `crates/ava-tui/src/state/session.rs` — Session state (wraps ava_session::SessionManager)
+- `crates/ava-tui/src/widgets/session_list.rs` — Session picker dialog
 
 **Implementation:**
 
-Session context integrates with existing `createSessionManager()` from core-v2.
+Session state wraps `ava_session::SessionManager` directly:
+```rust
+use ava_session::SessionManager;
+
+pub struct SessionState {
+    manager: SessionManager,
+    pub current_session: Option<Session>,
+    pub sessions: Vec<Session>, // cached list for UI
+}
+
+impl SessionState {
+    pub fn new(db_path: &Path) -> Result<Self> {
+        let manager = SessionManager::new(db_path)?;
+        Ok(Self { manager, current_session: None, sessions: Vec::new() })
+    }
+
+    pub fn create_session(&mut self) -> Result<Session> {
+        let session = self.manager.create()?;
+        self.current_session = Some(session.clone());
+        Ok(session)
+    }
+
+    pub fn switch_to(&mut self, id: Uuid) -> Result<()> {
+        self.current_session = self.manager.get(id)?;
+        Ok(())
+    }
+
+    pub fn fork_current(&mut self) -> Result<Session> {
+        let current = self.current_session.as_ref().ok_or(eyre!("No session"))?;
+        let forked = self.manager.fork(current)?;
+        self.current_session = Some(forked.clone());
+        Ok(forked)
+    }
+
+    pub fn list_recent(&self, limit: usize) -> Result<Vec<Session>> {
+        self.manager.list_recent(limit)
+    }
+
+    pub fn search(&self, query: &str) -> Result<Vec<Session>> {
+        self.manager.search(query)
+    }
+}
+```
 
 Session list dialog (Ctrl+K):
 - Shows all sessions sorted by last updated
 - Each row: session name, date, message count, model used
-- Fuzzy search to filter
-- Enter to switch, Delete to archive
-- `+` to create new session
-
-Session operations:
-- **New** (Ctrl+N): creates fresh session, clears chat
-- **Switch** (Ctrl+K): open session list
-- **Resume** (on startup): `ava --continue` resumes last session
-- **Fork**: create branch from current point in conversation
-- **Rename**: edit session name inline
-- **Export**: download as JSON
+- Fuzzy search to filter with `nucleo`
+- Enter to switch, `d` to delete
+- `+` or `n` to create new session
 
 Startup behavior:
-- `ava` — new session (home screen with prompt)
+- `ava` — new session (show composer prompt)
 - `ava --continue` or `ava -c` — resume last session
 - `ava --session <id>` — resume specific session
-- `ava "goal"` — new session with pre-filled goal (submits immediately)
+- `ava "goal"` — new session, auto-submit goal
 
 ### Tests
-- `cli/src/tui/contexts/session.test.ts` — Create, switch, resume, fork
-- `cli/src/tui/components/layout/session-list.test.tsx` — List rendering + search
+- Session create, switch, resume, fork via manager
+- Session list rendering + fuzzy search
+- Startup modes (new, continue, specific session, with goal)
 
 ---
 
@@ -499,20 +777,19 @@ Startup behavior:
 
 ### Competitor Research
 Read these files:
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/routes/session/sidebar.tsx` — Sidebar content
-- `docs/reference-code/codex-cli/codex-rs/tui/src/chatwidget.rs` — Search for sidebar/panel sections
+- `docs/reference-code/codex-cli/codex-rs/tui/src/chatwidget.rs` — Search for sidebar/panel/status sections
+- `docs/reference-code/codex-cli/codex-rs/tui/src/status/` — Status display modules
 
 ### What to Build
 Optional sidebar showing session metadata, diffs, and agent status.
 
 **Files:**
-- `cli/src/tui/components/layout/sidebar.tsx` — Sidebar component
-- `cli/src/tui/components/layout/app-layout.tsx` — Update to include sidebar
+- `crates/ava-tui/src/ui/sidebar.rs` — Sidebar render
+- `crates/ava-tui/src/ui/layout.rs` — Update to include sidebar
 
 **Implementation:**
 
-Sidebar (shown when terminal width > 120 chars, toggled with Ctrl+S):
-
+Sidebar layout (shown when terminal width > 120 cols, toggle with Ctrl+S):
 ```
 +------------------+
 | Session          |
@@ -523,9 +800,9 @@ Sidebar (shown when terminal width > 120 chars, toggled with Ctrl+S):
 |   tokens: 12.4k  |
 +------------------+
 | Files Changed    |
-|   M src/app.ts   |
-|   + src/util.ts  |
-|   M package.json |
+|   M src/app.rs   |
+|   + src/util.rs  |
+|   M Cargo.toml   |
 +------------------+
 | Agent Status     |
 |   Turn 3/20      |
@@ -536,82 +813,161 @@ Sidebar (shown when terminal width > 120 chars, toggled with Ctrl+S):
 Sections:
 - **Session**: name, duration, ID
 - **Model**: current model, token usage (input/output), cost estimate
-- **Files Changed**: list of files modified in this session (from tool events)
+- **Files Changed**: list of files modified in this session (tracked from tool events)
 - **Agent Status**: current turn, max turns, running/idle/waiting for approval
 - **Errors**: count of errors in session (if any)
 
-Responsive behavior:
-- Width <= 120: sidebar hidden (toggle with Ctrl+S overrides)
-- Width > 120: sidebar shown by default (42 char wide, like OpenCode)
-- Sidebar content scrollable independently
-
-### Tests
-- `cli/src/tui/components/layout/sidebar.test.tsx` — Renders sections
-- `cli/src/tui/components/layout/app-layout.test.tsx` — Sidebar show/hide responsive
-
----
-
-## Feature 8: Agent Integration & Event Bridge
-
-### Competitor Research
-Read these files:
-- `docs/reference-code/opencode/packages/opencode/src/cli/cmd/tui/context/sync.tsx` — Real-time sync
-- `docs/reference-code/gemini-cli/packages/cli/src/ui/hooks/useGeminiStream.ts` — Stream consumption
-- `cli/src/commands/run.ts` — Existing CLI agent integration (AVA's current approach)
-
-### What to Build
-Bridge between the TUI and AVA's agent executor, connecting all the UI to the actual agent loop.
-
-**Files:**
-- `cli/src/tui/hooks/use-agent.ts` — Agent lifecycle hook
-- `cli/src/tui/contexts/streaming.tsx` — Update to wire real agent events
-- `cli/src/tui/index.tsx` — Update to initialize platform + extensions
-
-**Implementation:**
-
-Agent hook (`useAgent`):
-```typescript
-function useAgent(): {
-  start: (goal: string) => void
-  abort: () => void
-  isRunning: boolean
-  currentTurn: number
-  maxTurns: number
-  tokensUsed: { input: number; output: number }
+Responsive layout:
+```rust
+pub fn build_layout(area: Rect, show_sidebar: bool) -> (Rect, Option<Rect>) {
+    if show_sidebar && area.width > 120 {
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Min(60),           // Main content
+                Constraint::Length(42),         // Sidebar
+            ])
+            .split(area);
+        (chunks[0], Some(chunks[1]))
+    } else {
+        (area, None)
+    }
 }
 ```
 
-Integration flow:
-1. TUI initializes platform (`createNodePlatform`) + extensions (reuse from `run.ts`)
-2. User types goal in Composer, presses Enter
-3. `useAgent().start(goal)` creates AgentExecutor and runs
-4. Agent events flow through StreamingContext → MessageList renders them
-5. Tool calls that need approval flow through PermissionContext → ToolApproval renders
-6. User approves/rejects → result flows back to agent
-7. Agent completes → summary shown in chat
+### Tests
+- Sidebar renders all sections
+- Responsive show/hide at width threshold
+- Sidebar toggle via keybind
+
+---
+
+## Feature 8: Agent Integration — Direct Rust Calls
+
+### Competitor Research
+Read these files:
+- `docs/reference-code/codex-cli/codex-rs/tui/src/app.rs` — Search for `thread_manager` / `send_message`
+- `crates/ava-agent/src/lib.rs` — AVA's AgentLoop API (USE THIS)
+- `crates/ava-llm/src/lib.rs` — AVA's LLM provider API (USE THIS)
+- `crates/ava-tools/src/lib.rs` — AVA's ToolRegistry API (USE THIS)
+
+### What to Build
+Bridge between the TUI and AVA's existing Rust crates — direct function calls, no IPC.
+
+**Files:**
+- `crates/ava-tui/src/state/agent.rs` — Agent execution state
+- `crates/ava-tui/src/app.rs` — Update to wire agent events
+
+**Implementation:**
+
+Agent state — wraps `ava_agent::AgentLoop` directly:
+```rust
+use ava_agent::{AgentLoop, AgentConfig, AgentEvent};
+use ava_llm::ModelRouter;
+use ava_tools::ToolRegistry;
+use ava_permissions::PermissionEngine;
+
+pub struct AgentState {
+    pub is_running: bool,
+    pub current_turn: usize,
+    pub max_turns: usize,
+    pub tokens_used: TokenUsage,
+    pub abort_handle: Option<tokio::task::AbortHandle>,
+}
+
+impl AgentState {
+    pub fn start(
+        &mut self,
+        goal: String,
+        config: AgentConfig,
+        router: Arc<ModelRouter>,
+        tools: Arc<ToolRegistry>,
+        event_tx: mpsc::UnboundedSender<AppEvent>,
+    ) {
+        let handle = tokio::spawn(async move {
+            let agent = AgentLoop::new(config);
+            let provider = router.route(RoutingTaskType::CodeGeneration);
+
+            agent.run_streaming(goal, provider, tools, |event| {
+                let _ = event_tx.send(AppEvent::Agent(event));
+            }).await
+        });
+
+        self.abort_handle = Some(handle.abort_handle());
+        self.is_running = true;
+    }
+
+    pub fn abort(&mut self) {
+        if let Some(handle) = self.abort_handle.take() {
+            handle.abort();
+        }
+        self.is_running = false;
+    }
+}
+```
+
+Event flow:
+1. User types goal in Composer, presses Enter
+2. `AgentState::start()` spawns tokio task running `AgentLoop::run_streaming()`
+3. Agent events (`AgentEvent::Token`, `ToolCall`, `ToolResult`, `Complete`, `Error`) sent to event channel
+4. App event loop receives `AppEvent::Agent(event)` → updates `MessageState`
+5. Tool calls that need approval → pushed to `PermissionState` queue → overlay shown
+6. User approves/rejects → result sent back to agent via oneshot channel
+7. Agent completes → summary message added, `is_running = false`
 
 Permission bridge:
-- Agent's permission middleware emits `permission:request` events
-- TUI catches these, pauses agent, shows approval UI
-- User decision flows back via `permission:reply` event
-- Agent resumes with approved/rejected result
+```rust
+// When agent requests tool approval:
+AppEvent::Agent(AgentEvent::ToolCall(call)) => {
+    if self.state.permission.yolo_mode
+        || self.state.permission.session_approved.contains(&call.tool_name)
+    {
+        // Auto-approve
+        call.approve_tx.send(ToolApproval::Allowed).ok();
+    } else {
+        // Queue for user approval
+        self.state.permission.queue.push_back(ApprovalRequest {
+            call,
+            approve_tx,
+        });
+    }
+}
+```
 
-Extension loading:
-- Reuse `loadAllBuiltInExtensions()` from existing CLI
-- Skip LSP, MCP, server extensions (same as current CLI)
-- Load prompts extension for system prompt building
-- Load instructions extension for project-specific instructions
+Initialization — compose all crates at startup:
+```rust
+pub fn init_agent_stack(config: &CliConfig) -> Result<AgentStack> {
+    // Load config
+    let config_mgr = ava_config::ConfigManager::load()?;
 
-Slash command integration:
-- `/model <name>` — switch model mid-session
-- `/compact` — trigger context compaction
-- `/clear` — clear display (not session)
-- `/help` — show available commands
-- `/recipe <name>` — run a recipe (Sprint 15's recipe system)
+    // Set up LLM providers
+    let mut router = ModelRouter::new("default");
+    // Register providers from config (Anthropic, OpenAI, etc.)
+
+    // Set up tool registry
+    let mut tools = ToolRegistry::new();
+    // Register core tools (read, write, edit, bash, glob, grep)
+
+    // Set up permissions
+    let perms = ava_permissions::PermissionEngine::new();
+
+    // Set up session
+    let db_path = dirs::home_dir().unwrap().join(".ava/data.db");
+    let session_mgr = ava_session::SessionManager::new(&db_path)?;
+
+    // Set up memory
+    let memory = ava_memory::MemorySystem::new(&db_path)?;
+
+    Ok(AgentStack { router, tools, perms, session_mgr, memory })
+}
+```
+
+**Key point**: This is the integration feature that makes the TUI a real agent. All previous features built the UI shell. This feature wires the UI to the agent execution pipeline using direct Rust function calls — no serialization, no IPC, no subprocess. The `ava-tui` binary is a single process containing the entire AVA agent stack.
 
 ### Tests
-- `cli/src/tui/hooks/use-agent.test.ts` — Start, abort, event flow
-- `cli/src/tui/index.test.tsx` — Full integration renders + accepts input
+- Agent start, event flow, abort
+- Permission bridge (auto-approve, queue, yolo)
+- Full integration: mock LLM → agent loop → TUI events → message state
 
 ---
 
@@ -619,13 +975,14 @@ Slash command integration:
 
 After ALL 8 features:
 
-1. `npm run test:run`
-2. `npx tsc --noEmit`
-3. `npm run lint`
-4. `npm run format:check`
-5. Verify no files exceed 300 lines
-6. Manual test: `npx tsx cli/src/index.ts` — should show TUI
-7. Commit: `git commit -m "feat(sprint-16): interactive TUI with Ink"`
+1. `cargo test --workspace` — all tests pass
+2. `cargo clippy --workspace -- -D warnings` — no warnings
+3. `cargo build --release -p ava-tui` — binary builds
+4. Verify no files exceed 300 lines
+5. Manual test: `cargo run -p ava-tui` — TUI launches
+6. Manual test: `cargo run -p ava-tui -- "hello"` — submits goal
+7. Binary size check: `ls -lh target/release/ava` (should be ~10-20MB)
+8. Commit: `git commit -m "feat(sprint-16): interactive TUI with ratatui"`
 
 ---
 
@@ -633,55 +990,43 @@ After ALL 8 features:
 
 | Action | File |
 |--------|------|
-| CREATE | `cli/src/tui/index.tsx` |
-| CREATE | `cli/src/tui/app.tsx` |
-| CREATE | `cli/src/tui/app.test.tsx` |
-| CREATE | `cli/src/tui/contexts/streaming.tsx` |
-| CREATE | `cli/src/tui/contexts/streaming.test.tsx` |
-| CREATE | `cli/src/tui/contexts/session.tsx` |
-| CREATE | `cli/src/tui/contexts/session.test.ts` |
-| CREATE | `cli/src/tui/contexts/keybind.tsx` |
-| CREATE | `cli/src/tui/contexts/keybind.test.ts` |
-| CREATE | `cli/src/tui/contexts/theme.tsx` |
-| CREATE | `cli/src/tui/contexts/theme.test.ts` |
-| CREATE | `cli/src/tui/contexts/permission.tsx` |
-| CREATE | `cli/src/tui/contexts/permission.test.tsx` |
-| CREATE | `cli/src/tui/components/layout/app-layout.tsx` |
-| CREATE | `cli/src/tui/components/layout/app-layout.test.tsx` |
-| CREATE | `cli/src/tui/components/layout/status-bar.tsx` |
-| CREATE | `cli/src/tui/components/layout/sidebar.tsx` |
-| CREATE | `cli/src/tui/components/layout/sidebar.test.tsx` |
-| CREATE | `cli/src/tui/components/layout/session-list.tsx` |
-| CREATE | `cli/src/tui/components/layout/session-list.test.tsx` |
-| CREATE | `cli/src/tui/components/chat/message-list.tsx` |
-| CREATE | `cli/src/tui/components/chat/message-list.test.tsx` |
-| CREATE | `cli/src/tui/components/chat/message.tsx` |
-| CREATE | `cli/src/tui/components/chat/message.test.tsx` |
-| CREATE | `cli/src/tui/components/chat/streaming-text.tsx` |
-| CREATE | `cli/src/tui/components/shared/markdown.tsx` |
-| CREATE | `cli/src/tui/components/shared/markdown.test.tsx` |
-| CREATE | `cli/src/tui/components/shared/code-block.tsx` |
-| CREATE | `cli/src/tui/components/shared/spinner.tsx` |
-| CREATE | `cli/src/tui/components/shared/dialog.tsx` |
-| CREATE | `cli/src/tui/components/input/composer.tsx` |
-| CREATE | `cli/src/tui/components/input/composer.test.tsx` |
-| CREATE | `cli/src/tui/components/input/autocomplete.tsx` |
-| CREATE | `cli/src/tui/components/input/autocomplete.test.tsx` |
-| CREATE | `cli/src/tui/components/input/command-palette.tsx` |
-| CREATE | `cli/src/tui/components/input/command-palette.test.tsx` |
-| CREATE | `cli/src/tui/components/approval/tool-approval.tsx` |
-| CREATE | `cli/src/tui/components/approval/tool-approval.test.tsx` |
-| CREATE | `cli/src/tui/components/approval/diff-preview.tsx` |
-| CREATE | `cli/src/tui/components/approval/diff-preview.test.tsx` |
-| CREATE | `cli/src/tui/hooks/use-streaming.ts` |
-| CREATE | `cli/src/tui/hooks/use-keypress.ts` |
-| CREATE | `cli/src/tui/hooks/use-terminal-size.ts` |
-| CREATE | `cli/src/tui/hooks/use-terminal-size.test.ts` |
-| CREATE | `cli/src/tui/hooks/use-agent.ts` |
-| CREATE | `cli/src/tui/hooks/use-agent.test.ts` |
-| CREATE | `cli/src/tui/themes/index.ts` |
-| CREATE | `cli/src/tui/themes/default.ts` |
-| CREATE | `cli/src/tui/themes/dracula.ts` |
-| CREATE | `cli/src/tui/themes/nord.ts` |
-| MODIFY | `cli/src/index.ts` (add `tui` command, change default to launch TUI) |
-| MODIFY | `cli/package.json` (add ink + react dependencies) |
+| CREATE | `crates/ava-tui/Cargo.toml` |
+| CREATE | `crates/ava-tui/src/main.rs` |
+| CREATE | `crates/ava-tui/src/app.rs` |
+| CREATE | `crates/ava-tui/src/event.rs` |
+| CREATE | `crates/ava-tui/src/ui/mod.rs` |
+| CREATE | `crates/ava-tui/src/ui/layout.rs` |
+| CREATE | `crates/ava-tui/src/ui/status_bar.rs` |
+| CREATE | `crates/ava-tui/src/ui/sidebar.rs` |
+| CREATE | `crates/ava-tui/src/widgets/mod.rs` |
+| CREATE | `crates/ava-tui/src/widgets/message_list.rs` |
+| CREATE | `crates/ava-tui/src/widgets/message.rs` |
+| CREATE | `crates/ava-tui/src/widgets/streaming_text.rs` |
+| CREATE | `crates/ava-tui/src/widgets/composer.rs` |
+| CREATE | `crates/ava-tui/src/widgets/autocomplete.rs` |
+| CREATE | `crates/ava-tui/src/widgets/command_palette.rs` |
+| CREATE | `crates/ava-tui/src/widgets/tool_approval.rs` |
+| CREATE | `crates/ava-tui/src/widgets/diff_preview.rs` |
+| CREATE | `crates/ava-tui/src/widgets/session_list.rs` |
+| CREATE | `crates/ava-tui/src/widgets/dialog.rs` |
+| CREATE | `crates/ava-tui/src/rendering/mod.rs` |
+| CREATE | `crates/ava-tui/src/rendering/markdown.rs` |
+| CREATE | `crates/ava-tui/src/rendering/syntax.rs` |
+| CREATE | `crates/ava-tui/src/rendering/diff.rs` |
+| CREATE | `crates/ava-tui/src/state/mod.rs` |
+| CREATE | `crates/ava-tui/src/state/agent.rs` |
+| CREATE | `crates/ava-tui/src/state/messages.rs` |
+| CREATE | `crates/ava-tui/src/state/input.rs` |
+| CREATE | `crates/ava-tui/src/state/session.rs` |
+| CREATE | `crates/ava-tui/src/state/permission.rs` |
+| CREATE | `crates/ava-tui/src/state/theme.rs` |
+| CREATE | `crates/ava-tui/src/state/keybinds.rs` |
+| CREATE | `crates/ava-tui/src/config/mod.rs` |
+| CREATE | `crates/ava-tui/src/config/cli.rs` |
+| CREATE | `crates/ava-tui/src/config/keybindings.rs` |
+| CREATE | `crates/ava-tui/src/config/themes.rs` |
+| CREATE | `crates/ava-tui/tests/app_test.rs` |
+| CREATE | `crates/ava-tui/tests/rendering_test.rs` |
+| CREATE | `crates/ava-tui/tests/widgets_test.rs` |
+| CREATE | `crates/ava-tui/tests/integration_test.rs` |
+| MODIFY | `Cargo.toml` (add ava-tui to workspace members) |

@@ -11,7 +11,7 @@
  * useChat.ts is now a thin backward-compat wrapper over this hook.
  */
 
-import type { AgentExecutor } from '@ava/core-v2/agent'
+import type { AgentEvent, AgentExecutor } from '@ava/core-v2/agent'
 import { batch, createSignal } from 'solid-js'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
 import {
@@ -68,6 +68,7 @@ function createAgentStore() {
   const [doomLoopDetected, setDoomLoopDetected] = createSignal(false)
   const [lastError, setLastError] = createSignal<string | null>(null)
   const [currentAgentId, setCurrentAgentId] = createSignal<string | null>(null)
+  const [eventTimeline, setEventTimeline] = createSignal<AgentEvent[]>([])
 
   // ── Chat signals (absorbed from useChat) ──────────────────────────────
   const [activeToolCalls, setActiveToolCalls] = createSignal<ToolCall[]>([])
@@ -96,7 +97,7 @@ function createAgentStore() {
     stopAgent,
     sendMessage: sendTeamMessage,
   } = createTeamBridge(teamStore, isTeamMode)
-  const handleAgentEvent = createAgentEventHandler(
+  const baseAgentEventHandler = createAgentEventHandler(
     {
       setCurrentAgentId,
       setCurrentTurn,
@@ -109,6 +110,18 @@ function createAgentStore() {
     },
     bridgeToTeam
   )
+
+  const handleAgentEvent = (event: AgentEvent): void => {
+    if (event.type === 'agent:start') {
+      setEventTimeline([event])
+    } else {
+      setEventTimeline((prev) => {
+        const next = [...prev, event]
+        return next.length > 2000 ? next.slice(-2000) : next
+      })
+    }
+    baseAgentEventHandler(event)
+  }
 
   // ── Assemble signals, refs, and bridges for extracted modules ─────────
   const signals = {
@@ -131,6 +144,7 @@ function createAgentStore() {
     lastError,
     setLastError,
     currentAgentId,
+    eventTimeline,
     setCurrentAgentId,
     activeToolCalls,
     setActiveToolCalls,
@@ -224,6 +238,7 @@ function createAgentStore() {
     doomLoopDetected,
     lastError,
     currentAgentId,
+    eventTimeline,
 
     // ── Chat signals (from absorbed useChat) ──────────────────────────
     isStreaming: isRunning, // alias for backward compat

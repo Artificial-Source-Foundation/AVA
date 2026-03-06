@@ -1,20 +1,22 @@
-/**
- * App Shell - Main Layout Container
- *
- * Layout: Activity Bar | Sidebar | Main Area (+ Bottom Panel) | Right Panel
- * Settings is rendered as a modal overlay.
- * Sidebar uses CSS width transition for smooth open/close.
- * Resize handles allow drag-to-resize for sidebar and bottom panel.
- */
-
-import { Bot, Brain, FolderOpen, GitCompareArrows, ScrollText, Terminal, X } from 'lucide-solid'
+import {
+  Bot,
+  Brain,
+  FolderOpen,
+  GitCompareArrows,
+  Route,
+  ScrollText,
+  Terminal,
+  X,
+} from 'lucide-solid'
 import { type Component, lazy, Show } from 'solid-js'
 import { useLayout } from '../../stores/layout'
+import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
 import { AgentActivityPanel } from '../panels/AgentActivityPanel'
 import { DiffReviewPanel } from '../panels/DiffReviewPanel'
 import { FileOperationsPanel } from '../panels/FileOperationsPanel'
 import { TerminalPanel } from '../panels/TerminalPanel'
+import { TrajectoryInspector } from '../panels/TrajectoryInspector'
 import { SettingsModal } from '../settings'
 import { SidebarMemory } from '../sidebar/SidebarMemory'
 import { PanelErrorBoundary } from '../ui/PanelErrorBoundary'
@@ -45,6 +47,7 @@ export const AppShell: Component = () => {
     switchBottomPanelTab,
   } = useLayout()
   const { settings } = useSettings()
+  const { currentSession } = useSession()
 
   const { startSidebarResize, startRightResize, startBottomResize } = createResizeHandlers({
     sidebarWidth,
@@ -212,7 +215,6 @@ export const AppShell: Component = () => {
             style={{ width: `${rightPanelWidth()}px` }}
           >
             <div class="flex flex-col h-full bg-[var(--gray-1)]">
-              {/* Tab header */}
               <div class="flex items-center h-8 flex-shrink-0 border-b border-[var(--border-subtle)]">
                 <button
                   type="button"
@@ -256,6 +258,20 @@ export const AppShell: Component = () => {
                   <GitCompareArrows class="w-3 h-3" />
                   Review
                 </button>
+                <button
+                  type="button"
+                  onClick={() => switchRightPanelTab('trajectory')}
+                  class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
+                  classList={{
+                    'text-[var(--accent)] border-b border-[var(--accent)]':
+                      rightPanelTab() === 'trajectory',
+                    'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
+                      rightPanelTab() !== 'trajectory',
+                  }}
+                >
+                  <Route class="w-3 h-3" />
+                  Trajectory
+                </button>
                 <div class="flex-1" />
                 <button
                   type="button"
@@ -266,7 +282,6 @@ export const AppShell: Component = () => {
                   <X class="w-3 h-3" />
                 </button>
               </div>
-              {/* Tab content */}
               <div class="flex-1 overflow-hidden">
                 <Show when={rightPanelTab() === 'activity'}>
                   <PanelErrorBoundary panelName="Agent Activity">
@@ -281,6 +296,11 @@ export const AppShell: Component = () => {
                 <Show when={rightPanelTab() === 'review'}>
                   <PanelErrorBoundary panelName="Diff Review">
                     <DiffReviewPanel />
+                  </PanelErrorBoundary>
+                </Show>
+                <Show when={rightPanelTab() === 'trajectory'}>
+                  <PanelErrorBoundary panelName="Trajectory Inspector">
+                    <TrajectoryInspector sessionId={currentSession()?.id ?? 'unknown'} />
                   </PanelErrorBoundary>
                 </Show>
               </div>

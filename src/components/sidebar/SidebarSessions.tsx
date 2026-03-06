@@ -13,6 +13,7 @@ import {
   MessageSquare,
   Pencil,
   Plus,
+  Route,
   Search,
   Trash2,
 } from 'lucide-solid'
@@ -49,7 +50,7 @@ export const SidebarSessions: Component = () => {
     isSessionBusy,
     getSessionTree,
   } = useSession()
-  const { closeProjectHub } = useLayout()
+  const { closeProjectHub, setRightPanelVisible, switchRightPanelTab } = useLayout()
   const [search, setSearch] = createSignal('')
   const [contextMenu, setContextMenu] = createSignal<ContextMenuState | null>(null)
   const [viewMode, setViewMode] = createSignal<'list' | 'tree'>('list')
@@ -93,6 +94,15 @@ export const SidebarSessions: Component = () => {
       action: () => {
         const session = sessions().find((s) => s.id === sessionId)
         if (session) forkSession(sessionId, `${session.name} (fork)`)
+      },
+    },
+    {
+      label: 'View Trajectory',
+      icon: Route,
+      action: () => {
+        void switchSession(sessionId)
+        setRightPanelVisible(true)
+        switchRightPanelTab('trajectory')
       },
     },
     { label: '', action: () => {}, separator: true },

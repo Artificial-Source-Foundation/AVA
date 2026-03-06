@@ -5,16 +5,14 @@
  */
 
 import type { Message } from '../types'
+import { applyRedaction, type RedactionOptions } from './export-redaction'
+
+// Re-export types so consumers don't need to change imports
+export type { RedactionOptions } from './export-redaction'
 
 // ============================================================================
 // Types
 // ============================================================================
-
-export interface RedactionOptions {
-  stripApiKeys: boolean
-  stripFilePaths: boolean
-  stripEmails: boolean
-}
 
 export interface ExportOptions {
   redaction: RedactionOptions
@@ -23,11 +21,7 @@ export interface ExportOptions {
 }
 
 export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
-  redaction: {
-    stripApiKeys: true,
-    stripFilePaths: false,
-    stripEmails: false,
-  },
+  redaction: { stripApiKeys: true, stripFilePaths: false, stripEmails: false },
   includeMetadata: true,
   includeArtifacts: true,
 }
@@ -38,44 +32,13 @@ interface ArtifactSummary {
   deleted: string[]
 }
 
-// ============================================================================
-// Redaction
-// ============================================================================
-
-const API_KEY_PATTERNS = [
-  /\bsk-[a-zA-Z0-9_-]{20,}\b/g, // OpenAI, Anthropic
-  /\bkey-[a-zA-Z0-9_-]{20,}\b/g, // Generic key-prefixed
-  /\bBearer\s+[a-zA-Z0-9._-]{20,}\b/g, // Bearer tokens
-  /\bghp_[a-zA-Z0-9]{36,}\b/g, // GitHub PAT
-  /\bgho_[a-zA-Z0-9]{36,}\b/g, // GitHub OAuth
-  /\bxoxb-[a-zA-Z0-9-]+\b/g, // Slack bot
-  /\bAIza[a-zA-Z0-9_-]{35}\b/g, // Google API
-  /\bAKIA[A-Z0-9]{16}\b/g, // AWS access key
-]
-
-const FILE_PATH_PATTERNS = [
-  /(?:\/(?:home|Users|root|var|tmp|etc|opt|usr)\/)[^\s"'`),;]+/g, // Unix absolute
-  /[A-Z]:\\[^\s"'`),;]+/g, // Windows absolute
-]
-
-const EMAIL_PATTERN = /\b[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b/g
-
-function applyRedaction(text: string, options: RedactionOptions): string {
-  let result = text
-  if (options.stripApiKeys) {
-    for (const pattern of API_KEY_PATTERNS) {
-      result = result.replace(pattern, '[REDACTED_KEY]')
-    }
-  }
-  if (options.stripFilePaths) {
-    for (const pattern of FILE_PATH_PATTERNS) {
-      result = result.replace(pattern, '[REDACTED_PATH]')
-    }
-  }
-  if (options.stripEmails) {
-    result = result.replace(EMAIL_PATTERN, '[REDACTED_EMAIL]')
-  }
-  return result
+interface SessionMetadata {
+  sessionName?: string
+  duration: string
+  totalCost: number
+  toolsUsed: string[]
+  messageCount: number
+  modelCount: number
 }
 
 // ============================================================================
@@ -92,15 +55,11 @@ function extractArtifacts(messages: Message[]): ArtifactSummary {
     for (const tc of msg.toolCalls) {
       const filePath = tc.filePath || (tc.args?.file_path as string) || (tc.args?.path as string)
       if (!filePath) continue
-
       switch (tc.name) {
         case 'create_file':
         case 'write_file':
-          if (tc.name === 'create_file' || tc.args?.isNew) {
-            created.add(filePath)
-          } else {
-            modified.add(filePath)
-          }
+          if (tc.name === 'create_file' || tc.args?.isNew) created.add(filePath)
+          else modified.add(filePath)
           break
         case 'edit':
         case 'multiedit':
@@ -125,16 +84,6 @@ function extractArtifacts(messages: Message[]): ArtifactSummary {
 // Metadata
 // ============================================================================
 
-interface SessionMetadata {
-  projectName?: string
-  sessionName?: string
-  duration: string
-  totalCost: number
-  toolsUsed: string[]
-  messageCount: number
-  modelCount: number
-}
-
 function computeMetadata(messages: Message[], sessionName?: string): SessionMetadata {
   const toolSet = new Set<string>()
   const modelSet = new Set<string>()
@@ -144,9 +93,7 @@ function computeMetadata(messages: Message[], sessionName?: string): SessionMeta
     if (msg.model) modelSet.add(msg.model)
     if (msg.costUSD) totalCost += msg.costUSD
     if (msg.toolCalls) {
-      for (const tc of msg.toolCalls) {
-        toolSet.add(tc.name)
-      }
+      for (const tc of msg.toolCalls) toolSet.add(tc.name)
     }
   }
 
@@ -188,18 +135,12 @@ function formatToolCalls(message: Message): string {
 }
 
 function formatMetadataHeader(meta: SessionMetadata): string {
-  const lines: string[] = ['## Session Info\n']
-  lines.push(`| Field | Value |`)
-  lines.push(`| --- | --- |`)
+  const lines = ['## Session Info\n', '| Field | Value |', '| --- | --- |']
   lines.push(`| Messages | ${meta.messageCount} |`)
   lines.push(`| Duration | ${meta.duration} |`)
   lines.push(`| Models used | ${meta.modelCount} |`)
-  if (meta.totalCost > 0) {
-    lines.push(`| Total cost | $${meta.totalCost.toFixed(4)} |`)
-  }
-  if (meta.toolsUsed.length > 0) {
-    lines.push(`| Tools used | ${meta.toolsUsed.join(', ')} |`)
-  }
+  if (meta.totalCost > 0) lines.push(`| Total cost | $${meta.totalCost.toFixed(4)} |`)
+  if (meta.toolsUsed.length > 0) lines.push(`| Tools used | ${meta.toolsUsed.join(', ')} |`)
   lines.push('')
   return lines.join('\n')
 }
@@ -232,9 +173,7 @@ function formatArtifacts(artifacts: ArtifactSummary): string {
 // Public API
 // ============================================================================
 
-/**
- * Convert messages to a Markdown string with optional enhancements.
- */
+/** Convert messages to a Markdown string with optional enhancements. */
 export function messagesToMarkdown(
   messages: Message[],
   sessionName?: string,
@@ -246,15 +185,10 @@ export function messagesToMarkdown(
   parts.push(`# ${sessionName || 'Conversation'}`)
   parts.push(`\n*Exported ${new Date().toLocaleString()}*\n`)
 
-  if (opts.includeMetadata) {
-    const meta = computeMetadata(messages, sessionName)
-    parts.push(formatMetadataHeader(meta))
-  }
-
+  if (opts.includeMetadata) parts.push(formatMetadataHeader(computeMetadata(messages, sessionName)))
   if (opts.includeArtifacts) {
-    const artifacts = extractArtifacts(messages)
-    const artifactSection = formatArtifacts(artifacts)
-    if (artifactSection) parts.push(artifactSection)
+    const section = formatArtifacts(extractArtifacts(messages))
+    if (section) parts.push(section)
   }
 
   parts.push('---\n')
@@ -262,21 +196,17 @@ export function messagesToMarkdown(
   for (const msg of messages) {
     const role = msg.role === 'user' ? 'You' : msg.role === 'assistant' ? 'Assistant' : 'System'
     const time = formatTimestamp(msg.createdAt)
-
     parts.push(`### ${role}`)
     parts.push(`*${time}*${msg.model ? ` — ${msg.model}` : ''}\n`)
 
-    // Thinking block
     const thinking = msg.metadata?.thinking as string | undefined
     if (thinking) {
-      const redactedThinking = applyRedaction(thinking, opts.redaction)
       parts.push('<details>\n<summary>Thinking</summary>\n')
-      parts.push(redactedThinking)
+      parts.push(applyRedaction(thinking, opts.redaction))
       parts.push('\n</details>\n')
     }
 
-    const content = msg.content || '*No content*'
-    parts.push(applyRedaction(content, opts.redaction))
+    parts.push(applyRedaction(msg.content || '*No content*', opts.redaction))
     parts.push(formatToolCalls(msg))
     parts.push('\n---\n')
   }
@@ -284,9 +214,7 @@ export function messagesToMarkdown(
   return parts.join('\n')
 }
 
-/**
- * Export conversation as a downloadable .md file.
- */
+/** Export conversation as a downloadable .md file. */
 export function exportConversation(
   messages: Message[],
   sessionName?: string,

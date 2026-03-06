@@ -1,6 +1,7 @@
-# Sprint 16: Interactive TUI — Ratatui Implementation Prompt
+# Sprint 16b: Interactive TUI — Ratatui Implementation Prompt
 
-> For AI coding agent. Estimated: 9 features (Feature 0 + Features 1-8), mix M/L effort.
+> For AI coding agent. Estimated: 8 features, mix M/L effort.
+> **Prerequisite**: Sprint 16a (Rust Agent Stack) must be complete first.
 > Run `cargo test --workspace && cargo clippy --workspace` after each feature.
 
 ---
@@ -22,6 +23,8 @@ Read these files first:
 - `crates/ava-platform/src/lib.rs` (filesystem + shell API)
 
 **IMPORTANT**: This is a **pure Rust TUI** using Ratatui + Crossterm + Tokio. It calls directly into existing AVA Rust crates (ava-agent, ava-llm, ava-tools, ava-session, etc.) — NO Node.js, NO IPC bridge, NO TypeScript. The TUI is a new binary crate that composes the existing library crates.
+
+**Sprint 16a provides**: Core tools (read/write/edit/bash/glob/grep), wired Commander with real LLM providers, sandbox execution, and `AgentStack` — the unified entrypoint this TUI calls into.
 
 ---
 
@@ -170,176 +173,6 @@ crates/ava-tui/
     widgets_test.rs            # Widget unit tests
     integration_test.rs        # Full TUI integration test with mock agent
 ```
-
----
-
-## Feature 0: Rust Core Tool Implementations (PREREQUISITE)
-
-### Context
-The `ava-tools` crate has a production-ready `Tool` trait and `ToolRegistry`, and `ava-platform` has `Platform` with `read_file`, `write_file`, `execute`, `execute_streaming`. But there are no concrete `Tool` implementations for the 6 core tools (read, write, edit, bash, glob, grep). These currently only exist in TypeScript (`packages/extensions/tools-extended/`). The TUI needs them in Rust.
-
-### What to Read First
-- `crates/ava-tools/src/registry.rs` — `Tool` trait, `ToolRegistry`, `Middleware` trait
-- `crates/ava-tools/src/edit/mod.rs` — `EditEngine` with 9 strategies (ExactMatch, FlexibleMatch, BlockAnchor, Regex, Fuzzy, LineNumber, TokenBoundary, IndentationAware, MultiOccurrence)
-- `crates/ava-platform/src/lib.rs` — `Platform` trait: `read_file`, `write_file`, `exists`, `is_directory`, `execute`, `execute_streaming`
-- `crates/ava-codebase/src/search.rs` — `SearchIndex` using tantivy (BM25 full-text search)
-- `packages/extensions/tools-extended/src/` — TypeScript tool implementations to port (read the parameter schemas and behavior)
-
-### What to Build
-6 concrete `Tool` trait implementations in a new module `crates/ava-tools/src/core/`.
-
-**Files:**
-- `crates/ava-tools/src/core/mod.rs` — Module + `register_core_tools(registry)` helper
-- `crates/ava-tools/src/core/read.rs` — ReadTool
-- `crates/ava-tools/src/core/write.rs` — WriteTool
-- `crates/ava-tools/src/core/edit.rs` — EditTool (wraps EditEngine)
-- `crates/ava-tools/src/core/bash.rs` — BashTool (wraps Platform::execute)
-- `crates/ava-tools/src/core/glob.rs` — GlobTool
-- `crates/ava-tools/src/core/grep.rs` — GrepTool
-- Update `crates/ava-tools/src/lib.rs` to export `pub mod core;`
-
-**Implementation:**
-
-Each tool implements the `Tool` trait from `registry.rs`:
-```rust
-#[async_trait]
-pub trait Tool: Send + Sync {
-    fn name(&self) -> &str;
-    fn description(&self) -> &str;
-    fn parameters(&self) -> Value; // JSON Schema
-    async fn execute(&self, args: Value) -> Result<ToolResult>;
-}
-```
-
-#### ReadTool (`read.rs`)
-```rust
-use ava_platform::StandardPlatform;
-
-pub struct ReadTool {
-    platform: StandardPlatform,
-}
-
-impl ReadTool {
-    pub fn new() -> Self { Self { platform: StandardPlatform } }
-}
-
-#[async_trait]
-impl Tool for ReadTool {
-    fn name(&self) -> &str { "read" }
-    fn description(&self) -> &str { "Read the contents of a file at the given path. Returns the file content with line numbers." }
-
-    fn parameters(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "required": ["path"],
-            "properties": {
-                "path": { "type": "string", "description": "Absolute path to the file" },
-                "offset": { "type": "integer", "description": "Line number to start reading from (1-based)" },
-                "limit": { "type": "integer", "description": "Maximum number of lines to read" }
-            }
-        })
-    }
-
-    async fn execute(&self, args: Value) -> Result<ToolResult> {
-        let path: String = args["path"].as_str()
-            .ok_or_else(|| AvaError::InvalidInput("path is required".into()))?.to_string();
-        let offset = args["offset"].as_u64().unwrap_or(0) as usize;
-        let limit = args["limit"].as_u64().map(|l| l as usize);
-
-        let content = self.platform.read_file(Path::new(&path)).await?;
-
-        // Add line numbers, apply offset/limit
-        let lines: Vec<String> = content.lines().enumerate()
-            .skip(offset)
-            .take(limit.unwrap_or(usize::MAX))
-            .map(|(i, line)| format!("{:>6}\t{}", i + 1, line))
-            .collect();
-
-        Ok(ToolResult {
-            output: lines.join("\n"),
-            error: None,
-            call_id: None,
-        })
-    }
-}
-```
-
-#### WriteTool (`write.rs`)
-- Takes `path` (string) and `content` (string)
-- Creates parent directories if they don't exist (`tokio::fs::create_dir_all`)
-- Writes content via `Platform::write_file`
-- Returns confirmation with byte count
-
-#### EditTool (`edit.rs`)
-- Takes `path`, `old_text`, `new_text`, optional `replace_all`
-- Reads file via `Platform::read_file`
-- Uses existing `EditEngine::apply()` with the 9-strategy cascade
-- Writes result back via `Platform::write_file`
-- Returns the applied strategy name and a brief diff summary
-
-#### BashTool (`bash.rs`)
-- Takes `command` (string), optional `timeout_ms` (u64, default 120000), optional `cwd` (string)
-- Executes via `Platform::execute` (or `execute_streaming` for long-running)
-- Returns stdout, stderr, exit_code
-- Respects timeout via `tokio::time::timeout`
-- **Security**: reject commands containing `rm -rf /`, validate no path traversal beyond cwd
-
-#### GlobTool (`glob.rs`)
-- Takes `pattern` (string), optional `path` (string, default cwd)
-- Uses `glob` crate (add `glob = "0.3"` to ava-tools/Cargo.toml)
-- Returns matching file paths, sorted by modification time (newest first)
-- Limit results to 1000 files max
-
-#### GrepTool (`grep.rs`)
-- Takes `pattern` (string), optional `path` (string, default cwd), optional `include` (string, file pattern)
-- Uses `grep-regex` + `grep-searcher` crates from the ripgrep ecosystem (add to Cargo.toml):
-  ```toml
-  grep-regex = "0.1"
-  grep-searcher = "0.1"
-  grep-matcher = "0.1"
-  ```
-- Returns matching lines with file path, line number, and content
-- Limit results to 500 matches max
-- Supports regex patterns
-
-#### Registration helper (`mod.rs`):
-```rust
-pub mod read;
-pub mod write;
-pub mod edit;
-pub mod bash;
-pub mod glob;
-pub mod grep;
-
-use crate::registry::ToolRegistry;
-
-pub fn register_core_tools(registry: &mut ToolRegistry) {
-    registry.register(read::ReadTool::new());
-    registry.register(write::WriteTool::new());
-    registry.register(edit::EditTool::new());
-    registry.register(bash::BashTool::new());
-    registry.register(glob::GlobTool::new());
-    registry.register(grep::GrepTool::new());
-}
-```
-
-### Tests
-Each tool needs tests in `crates/ava-tools/tests/core_tools_test.rs`:
-- **ReadTool**: read existing file, read with offset/limit, read nonexistent file returns error
-- **WriteTool**: write new file, write creates parent dirs, overwrite existing
-- **EditTool**: exact match replacement, fuzzy fallback, no-match error
-- **BashTool**: echo command, exit code propagation, timeout enforcement
-- **GlobTool**: match patterns, no matches returns empty, respects path
-- **GrepTool**: regex match, file include filter, no matches returns empty
-
-Use `tempfile` crate for all file system tests. All tests must be `#[tokio::test]`.
-
-### Acceptance Criteria
-- `cargo test -p ava-tools` — all tests pass (existing + new)
-- `cargo clippy -p ava-tools -- -D warnings` — no warnings
-- `register_core_tools()` registers all 6 tools in the registry
-- Each tool's `parameters()` returns valid JSON Schema
-- Tools handle errors gracefully (file not found, permission denied, timeout)
 
 ---
 
@@ -1143,7 +976,7 @@ pub fn init_agent_stack(config: &CliConfig) -> Result<AgentStack> {
 
 ## Post-Implementation Verification
 
-After ALL 9 features (Feature 0 + Features 1-8):
+After ALL 8 features:
 
 1. `cargo test --workspace` — all tests pass (including new core tool tests)
 2. `cargo clippy --workspace -- -D warnings` — no warnings
@@ -1160,16 +993,6 @@ After ALL 9 features (Feature 0 + Features 1-8):
 
 | Action | File |
 |--------|------|
-| CREATE | `crates/ava-tools/src/core/mod.rs` |
-| CREATE | `crates/ava-tools/src/core/read.rs` |
-| CREATE | `crates/ava-tools/src/core/write.rs` |
-| CREATE | `crates/ava-tools/src/core/edit.rs` |
-| CREATE | `crates/ava-tools/src/core/bash.rs` |
-| CREATE | `crates/ava-tools/src/core/glob.rs` |
-| CREATE | `crates/ava-tools/src/core/grep.rs` |
-| CREATE | `crates/ava-tools/tests/core_tools_test.rs` |
-| MODIFY | `crates/ava-tools/src/lib.rs` (add `pub mod core;`) |
-| MODIFY | `crates/ava-tools/Cargo.toml` (add glob, grep-regex, grep-searcher, grep-matcher deps) |
 | CREATE | `crates/ava-tui/Cargo.toml` |
 | CREATE | `crates/ava-tui/src/main.rs` |
 | CREATE | `crates/ava-tui/src/app.rs` |

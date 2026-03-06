@@ -18,7 +18,7 @@ This analysis is based on a comprehensive audit of 12 competitor AI coding agent
 
 These are capabilities AVA has that few or no competitors match:
 
-### 1.1 Comprehensive Tool Suite (55+ tools)
+### 1.1 Comprehensive Tool Suite (~41 tools)
 
 **Competitive Position**: AVA has the most comprehensive tool suite of any competitor.
 
@@ -32,7 +32,7 @@ These are capabilities AVA has that few or no competitors match:
 | Context & Memory | 4 | Gemini CLI (~2) |
 | LSP Integration | **9** | Cline/Continue (0 as discrete tools) |
 | Protocols & Interop | 3 | Cline (~2) |
-| **TOTAL** | **55+** | Cline (~25) |
+| **TOTAL** | **~41** | Cline (~25) |
 
 **Why it matters**: AVA's LSP integration (9 tools) is unique — no other standalone tool exposes LSP as discrete agent tools. This enables sophisticated code understanding and refactoring.
 
@@ -380,7 +380,7 @@ Handle thinking blocks, tool ID normalization, orphaned tool repair.
 
 | Dimension | Lead | Match | Trail (High Priority) |
 |-----------|------|-------|----------------------|
-| **Edit System** | 55+ tools, 8 strategies | Fuzzy matching, streaming | StreamingDiff, per-hunk UI |
+| **Edit System** | ~41 tools, 8 strategies | Fuzzy matching, streaming | StreamingDiff, per-hunk UI |
 | **Context & Memory** | FTS5 recall, DAG sessions | Compaction, token tracking | PageRank repo map, 9 condensers |
 | **Agent Loop** | Praxis 3-tier hierarchy | Subagent spawning, retry | 3-layer loop detection |
 | **Safety** | Middleware pipeline | Git checkpoints, filtering | OS-level sandbox, Conseca |
@@ -391,7 +391,7 @@ Handle thinking blocks, tool ID normalization, orphaned tool repair.
 
 ## 6. Key Takeaways
 
-1. **AVA leads in breadth** — 55+ tools, richest extension API, best multi-agent system
+1. **AVA leads in breadth** — ~41 tools, richest extension API, best multi-agent system
 2. **AVA matches in depth** — Competitive edit strategies, context management, safety
 3. **AVA trails in polish** — Zed's streaming diff and per-hunk UI are significant UX gaps
 4. **Most urgent gaps** — Edit system (StreamingDiff, per-hunk), context (PageRank, condensers), loop detection

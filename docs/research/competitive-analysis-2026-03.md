@@ -63,7 +63,7 @@ AVA's unique position: the only tool with a **3-tier agent hierarchy (Praxis)** 
 
 1. **3-tier Praxis hierarchy** — Commander → 4 Leads → 8 Workers (13 agents). No competitor has a visible, configurable team hierarchy.
 2. **Obsidian-style plugin ecosystem** — Full `activate(api)` pattern with registerTool, registerCommand, registerAgentMode, registerProvider, addToolMiddleware. Richer than any competitor's extension API.
-3. **55+ built-in tools** — Most tools of any competitor (OpenCode has ~20, others have 5-15).
+3. **~41 built-in tools** — Most tools of any competitor (OpenCode has ~20, others have 5-15).
 4. **Desktop-first with Tauri** — Native performance, not Electron overhead.
 5. **Skills + Custom Commands** — Two distinct plugin types (auto-triggered vs explicit).
 6. **Per-agent model selection** — Each agent in the hierarchy can use a different provider/model.

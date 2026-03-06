@@ -51,7 +51,7 @@ AVA/
 ### Important Counts
 
 - Built-in extensions: 20
-- Tool surface: ~39
+- Tool surface: ~41
 
 ### Rust Hotpath Rule
 

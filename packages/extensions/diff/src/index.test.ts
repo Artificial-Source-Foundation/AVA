@@ -1,7 +1,7 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { ToolMiddlewareContext } from '@ava/core-v2/extensions'
+import type { ToolMiddleware, ToolMiddlewareContext } from '@ava/core-v2/extensions'
 import { setPlatform } from '@ava/core-v2/platform'
 import { describe, expect, it } from 'vitest'
 import { createMockExtensionAPI } from '../../../core-v2/src/__test-utils__/mock-extension-api.js'
@@ -9,6 +9,12 @@ import { activate } from './index.js'
 
 function activateDiff(api: unknown) {
   return activate(api as never)
+}
+
+function getTrackerMiddleware(registeredMiddleware: ToolMiddleware[]): ToolMiddleware {
+  const middleware = registeredMiddleware.find((mw) => mw.name === 'ava-diff-tracker')
+  expect(middleware).toBeDefined()
+  return middleware!
 }
 
 function makeCtx(
@@ -32,16 +38,18 @@ describe('diff extension', () => {
   it('activates and registers middleware', () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
     activateDiff(api)
-    expect(registeredMiddleware).toHaveLength(1)
-    expect(registeredMiddleware[0].name).toBe('ava-diff-tracker')
-    expect(registeredMiddleware[0].priority).toBe(20)
+    expect(registeredMiddleware).toHaveLength(2)
+    expect(registeredMiddleware.some((mw) => mw.name === 'ava-diff-sandbox')).toBe(true)
+    expect(registeredMiddleware.some((mw) => mw.name === 'ava-diff-tracker')).toBe(true)
+    expect(getTrackerMiddleware(registeredMiddleware).priority).toBe(20)
   })
 
   it('middleware has before and after hooks', () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
     activateDiff(api)
-    expect(registeredMiddleware[0].before).toBeTypeOf('function')
-    expect(registeredMiddleware[0].after).toBeTypeOf('function')
+    const trackerMiddleware = getTrackerMiddleware(registeredMiddleware)
+    expect(trackerMiddleware.before).toBeTypeOf('function')
+    expect(trackerMiddleware.after).toBeTypeOf('function')
   })
 
   it('registers diff_review tool', () => {
@@ -76,7 +84,7 @@ describe('diff extension', () => {
 
       activateDiff(api)
 
-      const mw = registeredMiddleware[0]
+      const mw = getTrackerMiddleware(registeredMiddleware)
       const diffReview = registeredTools.find((t) => t.definition?.name === 'diff_review')
       expect(diffReview).toBeDefined()
 
@@ -128,7 +136,7 @@ describe('diff extension', () => {
     api.platform.fs.addFile('/test.ts', 'original content')
     activateDiff(api)
 
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
     const result = await mw.before!(makeCtx('write_file', { path: '/test.ts' }))
 
     // Should not block
@@ -139,7 +147,7 @@ describe('diff extension', () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
     activateDiff(api)
 
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
     const result = await mw.before!(makeCtx('read_file', { path: '/test.ts' }))
 
     expect(result).toBeUndefined()
@@ -150,7 +158,7 @@ describe('diff extension', () => {
     api.platform.fs.addFile('/to-delete.ts', 'content to delete')
     activateDiff(api)
 
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
     // Before should snapshot the file
     const beforeResult = await mw.before!(makeCtx('delete_file', { path: '/to-delete.ts' }))
     expect(beforeResult).toBeUndefined()
@@ -159,7 +167,7 @@ describe('diff extension', () => {
   it('cleans up on dispose', () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
     const disposable = activateDiff(api)
-    expect(registeredMiddleware).toHaveLength(1)
+    expect(registeredMiddleware).toHaveLength(2)
     disposable.dispose()
     expect(registeredMiddleware).toHaveLength(0)
   })
@@ -232,7 +240,7 @@ describe('undo/redo', () => {
       'original'
     )
     activateDiff(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     await simulateWrite(api, mw, '/file.ts', 'modified')
     expect(await api.platform.fs.readFile('/file.ts')).toBe('modified')
@@ -249,7 +257,7 @@ describe('undo/redo', () => {
   it('undo created file deletes it', async () => {
     const { api, registeredMiddleware } = createMockExtensionAPI()
     activateDiff(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     await simulateCreate(api, mw, '/new.ts', 'new content')
     expect(await api.platform.fs.exists('/new.ts')).toBe(true)
@@ -267,7 +275,7 @@ describe('undo/redo', () => {
       'precious content'
     )
     activateDiff(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     await simulateDelete(api, mw, '/doomed.ts')
     expect(await api.platform.fs.exists('/doomed.ts')).toBe(false)
@@ -285,7 +293,7 @@ describe('undo/redo', () => {
       'original'
     )
     activateDiff(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     await simulateWrite(api, mw, '/file.ts', 'modified')
     api.emit('diff:undo', { sessionId: 'test' })
@@ -304,7 +312,7 @@ describe('undo/redo', () => {
       'v1'
     )
     activateDiff(api)
-    const mw = registeredMiddleware[0]
+    const mw = getTrackerMiddleware(registeredMiddleware)
 
     await simulateWrite(api, mw, '/file.ts', 'v2')
     api.emit('diff:undo', { sessionId: 'test' })

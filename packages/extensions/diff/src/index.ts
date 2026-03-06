@@ -17,6 +17,7 @@ import type { ChatMessage } from '@ava/core-v2/llm'
 import type { Tool, ToolResult } from '@ava/core-v2/tools'
 import { HunkReviewState } from './hunk-review/state.js'
 import type { HunkReviewStatus } from './hunk-review/types.js'
+import { DiffSandbox } from './sandbox.js'
 import { summarizeDiffSession } from './summary.js'
 import { addDiff, createDiffSession, createFileDiff } from './tracker.js'
 import type { DiffSession, FileDiff } from './types.js'
@@ -28,6 +29,14 @@ const FILE_WRITE_TOOLS = new Set([
   'apply_patch',
   'delete_file',
 ])
+
+const SANDBOX_FILE_WRITE_TOOLS = new Set(['write_file', 'edit', 'create_file', 'delete_file'])
+
+interface DiffExtensionSettings {
+  sandbox?: {
+    enabled?: boolean
+  }
+}
 
 export function activate(api: ExtensionAPI): Disposable {
   const sessions = new Map<string, DiffSession>()
@@ -41,6 +50,123 @@ export function activate(api: ExtensionAPI): Disposable {
 
   // Store removed messages keyed by `sessionId:messageIndex` for redo restoration
   const removedMessages = new Map<string, ChatMessage>()
+  const diffSandbox = new DiffSandbox(api.platform.fs)
+
+  function getDiffSettings(): DiffExtensionSettings {
+    try {
+      return api.getSettings<DiffExtensionSettings>('diff')
+    } catch {
+      return {}
+    }
+  }
+
+  function isDiffSandboxEnabled(): boolean {
+    return Boolean(getDiffSettings().sandbox?.enabled ?? false)
+  }
+
+  function getFilePath(args: Record<string, unknown>): string | undefined {
+    const filePath = args.path ?? args.file_path ?? args.filePath
+    if (typeof filePath !== 'string' || filePath.length === 0) {
+      return undefined
+    }
+    return filePath
+  }
+
+  function applyEditChange(
+    originalContent: string | null,
+    oldString: string | undefined,
+    newString: string | undefined,
+    replaceAll: boolean
+  ): string {
+    const current = originalContent ?? ''
+    const oldValue = oldString ?? ''
+    const newValue = newString ?? ''
+
+    if (oldValue.length === 0) {
+      return newValue
+    }
+
+    if (replaceAll) {
+      return current.split(oldValue).join(newValue)
+    }
+
+    return current.replace(oldValue, newValue)
+  }
+
+  function getNewContent(
+    toolName: string,
+    args: Record<string, unknown>,
+    originalContent: string | null
+  ): string {
+    if (toolName === 'create_file' || toolName === 'write_file') {
+      return typeof args.content === 'string' ? args.content : ''
+    }
+
+    if (toolName === 'edit') {
+      const oldString = typeof args.oldString === 'string' ? args.oldString : undefined
+      const newString = typeof args.newString === 'string' ? args.newString : undefined
+      return applyEditChange(originalContent, oldString, newString, args.replaceAll === true)
+    }
+
+    return ''
+  }
+
+  function getChangeType(
+    toolName: string,
+    originalContent: string | null
+  ): 'create' | 'modify' | 'delete' {
+    if (toolName === 'delete_file') {
+      return 'delete'
+    }
+
+    if (toolName === 'create_file') {
+      return 'create'
+    }
+
+    if (toolName === 'write_file' && originalContent === null) {
+      return 'create'
+    }
+
+    return 'modify'
+  }
+
+  const sandboxMiddleware: ToolMiddleware = {
+    name: 'ava-diff-sandbox',
+    priority: 2,
+    async before(ctx: ToolMiddlewareContext): Promise<ToolMiddlewareResult | undefined> {
+      if (!isDiffSandboxEnabled()) return undefined
+      if (!SANDBOX_FILE_WRITE_TOOLS.has(ctx.toolName)) return undefined
+
+      const filePath = getFilePath(ctx.args)
+      if (!filePath) return undefined
+
+      let originalContent: string | null = null
+      try {
+        originalContent = await api.platform.fs.readFile(filePath)
+      } catch {
+        originalContent = null
+      }
+
+      const staged = diffSandbox.stage({
+        file: filePath,
+        type: getChangeType(ctx.toolName, originalContent),
+        originalContent,
+        newContent: getNewContent(ctx.toolName, ctx.args, originalContent),
+      })
+
+      await api.emit('diff:staged', {
+        sessionId: ctx.ctx.sessionId,
+        change: staged,
+      })
+
+      return {
+        blocked: true,
+        reason: `Change staged in diff sandbox for ${filePath}. Approve before applying.`,
+      }
+    },
+  }
+
+  const sandboxMwDisposable = api.addToolMiddleware(sandboxMiddleware)
 
   function getUndoStack(sessionId: string): FileDiff[] {
     let stack = undoStacks.get(sessionId)
@@ -84,7 +210,7 @@ export function activate(api: ExtensionAPI): Disposable {
     async before(ctx: ToolMiddlewareContext): Promise<ToolMiddlewareResult | undefined> {
       if (!FILE_WRITE_TOOLS.has(ctx.toolName)) return undefined
 
-      const filePath = (ctx.args.path ?? ctx.args.file_path) as string | undefined
+      const filePath = getFilePath(ctx.args)
       if (!filePath) return undefined
 
       try {
@@ -103,7 +229,7 @@ export function activate(api: ExtensionAPI): Disposable {
     ): Promise<ToolMiddlewareResult | undefined> {
       if (!FILE_WRITE_TOOLS.has(ctx.toolName)) return undefined
 
-      const filePath = (ctx.args.path ?? ctx.args.file_path) as string | undefined
+      const filePath = getFilePath(ctx.args)
       if (!filePath) return undefined
 
       const snapshotKey = `${ctx.ctx.sessionId}:${filePath}`
@@ -391,6 +517,7 @@ export function activate(api: ExtensionAPI): Disposable {
   return {
     dispose() {
       mwDisposable.dispose()
+      sandboxMwDisposable.dispose()
       diffReviewDisposable.dispose()
       undoDisposable.dispose()
       redoDisposable.dispose()

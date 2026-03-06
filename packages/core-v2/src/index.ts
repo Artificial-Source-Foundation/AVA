@@ -26,6 +26,8 @@ export {
   SettingsManager,
   setSettingsManager,
 } from './config/index.js'
+export type { StoredEvent } from './events/event-store.js'
+export { EventStore } from './events/event-store.js'
 export type {
   AgentMode,
   ContextStrategy,
@@ -71,7 +73,6 @@ export type {
   ToolDefinition,
   ToolUseBlock,
 } from './llm/index.js'
-
 // LLM
 export {
   createClient,

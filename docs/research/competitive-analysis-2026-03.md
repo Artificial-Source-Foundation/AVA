@@ -1,7 +1,7 @@
 # Competitive Analysis — AI Coding CLI Tools (March 2026)
 
 > Comprehensive analysis of 7 open-source competitors + Pi reference baseline.
-> Updated: 2026-03-01
+> Updated: 2026-03-05
 
 ---
 
@@ -9,7 +9,7 @@
 
 AVA's unique position: the only tool with a **3-tier agent hierarchy (Praxis)** paired with an **Obsidian-style plugin ecosystem** and a **desktop-first Tauri app**. No competitor combines all three.
 
-**Current snapshot:** 55+ tools, 30+ extensions, 16 providers, ~4,280 tests. CLI `ava agent-v2` works end-to-end.
+**Current snapshot:** ~41 tools, 30+ extensions, 16 providers, ~4,280 tests. CLI `ava agent-v2` works end-to-end.
 
 ---
 
@@ -36,23 +36,23 @@ AVA's unique position: the only tool with a **3-tier agent hierarchy (Praxis)** 
 | **Plugin System** | **Full npm** | npm hooks | MCP only | ❌ | MCP only | Microagents | ❌ | MCP only |
 | **Desktop App** | **Tauri** | Electron | ❌ | Gradio | Electron | Web | ❌ | ❌ |
 | **Provider Count** | 16 | 75+ | 1+MCP | 100+ | 20+ | Many | Many | Many |
-| **Tool Count** | 55+ | ~20 | ~15 | ~5 | MCP | ~10 | ~10 | ~15 |
+| **Tool Count** | ~41 | ~20 | ~15 | ~5 | MCP | ~10 | ~10 | ~15 |
 | **MCP Support** | Full | Full | Full | ❌ | MCP-first | Partial | ❌ | Full |
-| **LSP Integration** | 3 tools | Experimental | ❌ | ❌ | ❌ | Partial | ❌ | tree-sitter |
+| **LSP Integration** | 9 tools | Experimental | ❌ | ❌ | ❌ | Partial | ❌ | tree-sitter |
 | **Persistent Memory** | SQLite | SQLite | GEMINI.md | ❌ | MCP | Partial | ❌ | ❌ |
-| **Context Compaction** | Manual | Auto | Auto | Summary | ❌ | ❌ | Auto | Auto |
-| **Parallel Tool Exec** | ❌ | ❌ | **Scheduler** | ❌ | ❌ | ❌ | ❌ | ❌ |
+| **Context Compaction** | Auto | Auto | Auto | Summary | ❌ | ❌ | Auto | Auto |
+| **Parallel Tool Exec** | Partial | ❌ | **Scheduler** | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Git Worktrees** | ❌ | **Yes** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| **Snapshot/Undo** | ❌ | **Yes** | ❌ | git | ❌ | ❌ | Sandbox | ❌ |
+| **Snapshot/Undo** | ✅ | **Yes** | ❌ | git | ❌ | ❌ | Sandbox | ❌ |
 | **Diff Sandbox** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | **Yes** | ❌ |
-| **Ripgrep Search** | ❌ | ❌ | **Yes** | ❌ | ❌ | ❌ | ❌ | **Yes** |
+| **Ripgrep Search** | ✅ | ❌ | **Yes** | ❌ | ❌ | ❌ | ❌ | **Yes** |
 | **Session DAG/Tree** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | Branches | Pi: **Yes** |
-| **Auto-Compaction** | ❌ | **Yes** | **Yes** | ❌ | ❌ | ❌ | **Yes** | **Yes** |
+| **Auto-Compaction** | ✅ | **Yes** | **Yes** | ❌ | ❌ | ❌ | **Yes** | **Yes** |
 | **Voice Input** | ❌ | ❌ | ❌ | **Yes** | ❌ | ❌ | ❌ | ❌ |
 | **File Watcher** | ❌ | ❌ | ❌ | **Yes** | ❌ | ❌ | ❌ | ❌ |
 | **Docker Sandbox** | ❌ | ❌ | ❌ | ❌ | ❌ | **Default** | ❌ | ❌ |
 | **Browser Automation** | MCP | MCP | **Playwright** | ❌ | MCP | **Playwright** | Partial | **Playwright** |
-| **Repo Map** | Regex | ❌ | ❌ | **PageRank** | ❌ | ❌ | tree-sitter | tree-sitter |
+| **Repo Map** | PageRank | ❌ | ❌ | **PageRank** | ❌ | ❌ | tree-sitter | tree-sitter |
 | **Recipes/Workflows** | TOML cmds | ❌ | ❌ | ❌ | **YAML** | ❌ | Plans | ❌ |
 | **Cross-provider msg norm** | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | Pi: **Yes** |
 | **Free Tier** | ❌ | ❌ | **1000/day** | ❌ | ❌ | ❌ | ❌ | ❌ |
@@ -76,9 +76,9 @@ AVA's unique position: the only tool with a **3-tier agent hierarchy (Praxis)** 
 
 | # | Gap | Source | Impact | Effort |
 |---|-----|--------|--------|--------|
-| CG-01 | **Auto-compaction** | Pi, OpenCode, Gemini, Cline | HIGH — prevents context overflow crashes | Small |
+| CG-01 | **Auto-compaction** (DONE) | Pi, OpenCode, Gemini, Cline | CLOSED — implemented 3-tier cascade compaction | Done |
 | CG-02 | **Parallel tool execution** | Gemini CLI scheduler | HIGH — 2-5x speed for multi-file ops | Medium |
-| CG-03 | **Git snapshot/undo** | OpenCode, Aider | HIGH — safety net for all file changes | Medium |
+| CG-03 | **Git snapshot/undo** (DONE) | OpenCode, Aider | CLOSED — implemented ghost checkpoints/snapshots | Done |
 | CG-04 | **Cross-provider message normalization** | Pi `transform-messages.ts` | MEDIUM — enables mid-session model switching | Small |
 | CG-05 | **Steering interrupts (skip pending tools)** | Pi agent loop | MEDIUM — user can redirect agent mid-run | Small |
 | CG-06 | **Session DAG/tree** | Pi session manager | MEDIUM — non-destructive branching | Large |

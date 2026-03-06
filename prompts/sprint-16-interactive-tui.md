@@ -43,12 +43,15 @@ Add to `cli/package.json`:
     "ink-text-input": "^6.0.0",
     "ink-spinner": "^5.0.0",
     "ink-select-input": "^6.0.0",
+    "@inkjs/ui": "^2.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "marked": "^15.0.0",
+    "marked-terminal": "^7.0.0",
     "cli-highlight": "^2.1.11",
     "fuzzysort": "^3.0.0",
-    "diff": "^7.0.0"
+    "diff": "^7.0.0",
+    "chalk": "^5.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
@@ -56,6 +59,14 @@ Add to `cli/package.json`:
   }
 }
 ```
+
+**Library roles (all battle-tested, millions of weekly downloads):**
+- `marked` + `marked-terminal` — Markdown to ANSI terminal output (2.8M downloads/week). Handles headings, bold, italic, tables, links, blockquotes. Uses `cli-highlight` internally for code block syntax highlighting.
+- `cli-highlight` — Syntax highlighting for 190+ languages via highlight.js. Auto-detects language. Themeable via JSON.
+- `diff` — Compute unified diffs between strings (50M+ downloads/week). Used for the diff preview in tool approval.
+- `chalk` — ANSI color the diff output (green additions, red deletions, gray context lines).
+- `@inkjs/ui` — Official Ink component library (TextInput, Select, Spinner, ProgressBar, Badge).
+- `fuzzysort` — Fast fuzzy search for command palette and autocomplete.
 
 Check which dependencies already exist in the workspace before adding duplicates. Use workspace versions where available.
 
@@ -231,11 +242,26 @@ Message types to render:
 - **Error** — red error card
 - **System** — info messages (turn markers, compression notices)
 
-Markdown rendering:
-- Use `marked` for parsing markdown to tokens
-- Use `cli-highlight` for syntax highlighting in code blocks
-- Render to Ink `<Text>` components with appropriate colors
-- Handle: headings, bold, italic, code, code blocks, lists, links, blockquotes
+Markdown rendering — use `marked` + `marked-terminal` (NOT custom):
+```typescript
+import { marked } from 'marked'
+import TerminalRenderer from 'marked-terminal'
+
+marked.setOptions({ renderer: new TerminalRenderer({
+  // Customize colors via theme context
+  codespan: chalk.yellow,
+  code: (code: string, lang: string) => highlight(code, { language: lang }),
+  heading: chalk.green.bold,
+}) })
+
+// Render markdown to ANSI string, wrap in Ink <Text>
+const rendered = marked(markdownString)
+return <Text>{rendered}</Text>
+```
+- `marked-terminal` handles headings, bold, italic, code blocks, tables, links, blockquotes — all out of the box
+- Code block syntax highlighting via `cli-highlight` (190+ languages, auto-detect)
+- Override colors per theme by passing chalk styles to TerminalRenderer options
+- For streaming: re-render on each batch flush (markdown is fast, no need to diff)
 
 Scrolling:
 - Track scroll position with `useState`
@@ -335,11 +361,25 @@ Permission queue:
 - Show queue count: "Approval 1 of 3"
 - Modal blocks input to chat while approval pending
 
-Diff preview:
-- Use `diff` npm package to generate unified diff
-- Color: green for additions, red for deletions, gray for context
-- Line numbers on both sides
-- File path header
+Diff preview — use `diff` npm package + `chalk` for coloring:
+```typescript
+import { createTwoFilesPatch } from 'diff'
+import chalk from 'chalk'
+
+function renderDiff(oldContent: string, newContent: string, filePath: string): string {
+  const patch = createTwoFilesPatch(`a/${filePath}`, `b/${filePath}`, oldContent, newContent)
+  return patch.split('\n').map(line => {
+    if (line.startsWith('+')) return chalk.green(line)
+    if (line.startsWith('-')) return chalk.red(line)
+    if (line.startsWith('@@')) return chalk.cyan(line)
+    return chalk.gray(line)
+  }).join('\n')
+}
+```
+- `diff` (50M+ downloads/week) computes the unified diff
+- `chalk` colorizes: green additions, red deletions, cyan hunk headers, gray context
+- Show file path header above diff
+- Wrap in Ink `<Text>` inside a `<Box borderStyle="single">` for visual framing
 
 ### Tests
 - `cli/src/tui/components/approval/tool-approval.test.tsx` — 3 stages render

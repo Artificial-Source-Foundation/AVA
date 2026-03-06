@@ -11,6 +11,7 @@ import type { AgentDefinition } from './agent-definition.js'
 import { configureDelegation } from './delegate.js'
 import { createInvokeSubagentTool } from './invoke-subagent.js'
 import { createInvokeTeamTool } from './invoke-team.js'
+import { PraxisProgressTracker } from './progress.js'
 import { getAgentsByTier, registerAgents } from './registry.js'
 import { BUILTIN_AGENTS } from './workers.js'
 
@@ -51,8 +52,27 @@ export function activate(api: ExtensionAPI): Disposable {
   // Register all built-in agents in the registry
   disposables.push(registerAgents(agentsToRegister))
 
-  disposables.push(api.registerTool(createInvokeTeamTool('director')))
+  disposables.push(api.registerTool(createInvokeTeamTool()))
   disposables.push(api.registerTool(createInvokeSubagentTool()))
+
+  const progressTracker = new PraxisProgressTracker()
+  const trackedEvents = [
+    'praxis:mode-selected',
+    'praxis:lead-assigned',
+    'praxis:engineer-spawned',
+    'praxis:review-requested',
+    'praxis:review-complete',
+    'praxis:merge-complete',
+  ] as const
+  for (const eventName of trackedEvents) {
+    disposables.push(
+      api.on(eventName, (payload) => {
+        const event = { type: eventName, ...(payload as Record<string, unknown>) }
+        if (!progressTracker.handleEvent(event)) return
+        api.emit('praxis:progress-updated', progressTracker.getProgress())
+      })
+    )
+  }
 
   // Register the praxis agent mode
   const praxisMode: AgentMode = {

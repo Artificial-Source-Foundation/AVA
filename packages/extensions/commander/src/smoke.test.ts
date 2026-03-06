@@ -15,7 +15,7 @@ describe('Commander Praxis v2 smoke test', () => {
   })
 
   it('registers invoke_team and invoke_subagent tools', () => {
-    expect(createInvokeTeamTool('director').definition.name).toBe('invoke_team')
+    expect(createInvokeTeamTool().definition.name).toBe('invoke_team')
     expect(createInvokeSubagentTool().definition.name).toBe('invoke_subagent')
   })
 })

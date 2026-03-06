@@ -33,4 +33,24 @@ describe('progress tracker', () => {
     expect(progress.leads[0]?.engineers[0]?.status).toBe('complete')
     expect(progress.leads[0]?.status).toBe('complete')
   })
+
+  it('assigns engineer to targeted lead via leadId', () => {
+    const tracker = new PraxisProgressTracker()
+    tracker.handleEvent({
+      type: 'praxis:lead-assigned',
+      childAgentId: 'lead-1',
+      domain: 'frontend',
+    })
+    tracker.handleEvent({ type: 'praxis:lead-assigned', childAgentId: 'lead-2', domain: 'backend' })
+    tracker.handleEvent({
+      type: 'praxis:engineer-spawned',
+      leadId: 'lead-2',
+      childAgentId: 'eng-2',
+      task: 'backend fix',
+    })
+
+    const progress = tracker.getProgress()
+    expect(progress.leads[0]?.engineers).toHaveLength(0)
+    expect(progress.leads[1]?.engineers[0]?.id).toBe('eng-2')
+  })
 })

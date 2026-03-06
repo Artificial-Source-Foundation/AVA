@@ -22,6 +22,15 @@ export interface InvokeTeamResult {
   worktreeBranch?: string
 }
 
+const SESSION_ROLE = new Map<string, 'director' | 'tech-lead' | 'engineer'>()
+
+function inferCallerRole(ctx: ToolContext): 'director' | 'tech-lead' | 'engineer' {
+  const known = SESSION_ROLE.get(ctx.sessionId)
+  if (known) return known
+  if ((ctx.delegationDepth ?? 0) <= 0) return 'director'
+  return 'engineer'
+}
+
 function parseChangedFiles(output: string): string[] {
   const matches = output.match(/([\w./-]+\.(?:ts|tsx|js|jsx|json|md|rs))/g) ?? []
   return [...new Set(matches)]
@@ -35,7 +44,7 @@ function buildGoal(params: InvokeTeamInput): string {
   return lines.join('\n\n')
 }
 
-export function createInvokeTeamTool(currentRole: 'director' | 'tech-lead' | 'engineer'): AnyTool {
+export function createInvokeTeamTool(): AnyTool {
   return {
     definition: {
       name: 'invoke_team',
@@ -55,13 +64,14 @@ export function createInvokeTeamTool(currentRole: 'director' | 'tech-lead' | 'en
     },
 
     async execute(params: InvokeTeamInput, ctx: ToolContext): Promise<ToolResult> {
-      if (currentRole === 'engineer') {
+      const callerRole = inferCallerRole(ctx)
+      if (callerRole === 'engineer') {
         return { success: false, output: 'Engineers cannot invoke team members.' }
       }
-      if (currentRole === 'director' && params.role !== 'tech-lead') {
-        return { success: false, output: 'Director can only invoke tech-lead.' }
+      if (callerRole === 'director' && params.role !== 'tech-lead' && params.role !== 'engineer') {
+        return { success: false, output: 'Director can invoke tech-lead or engineer.' }
       }
-      if (currentRole === 'tech-lead' && params.role !== 'engineer') {
+      if (callerRole === 'tech-lead' && params.role !== 'engineer') {
         return { success: false, output: 'Tech Lead can only invoke engineer.' }
       }
 
@@ -91,7 +101,7 @@ export function createInvokeTeamTool(currentRole: 'director' | 'tech-lead' | 'en
         try {
           const wt = await createWorktree(ctx.workingDirectory, childId)
           cwd = wt.path
-          branch = `ava/engineer/${childId}`
+          branch = wt.branch
           worktreePath = wt.path
         } catch {
           cwd = ctx.workingDirectory
@@ -102,6 +112,9 @@ export function createInvokeTeamTool(currentRole: 'director' | 'tech-lead' | 'en
         type: params.role === 'tech-lead' ? 'praxis:lead-assigned' : 'praxis:engineer-spawned',
         agentId: ctx.sessionId,
         childAgentId: childId,
+        leadId: params.role === 'engineer' ? ctx.sessionId : childId,
+        task: params.task,
+        domain: params.domain,
         role: params.role,
       })
 
@@ -125,6 +138,7 @@ export function createInvokeTeamTool(currentRole: 'director' | 'tech-lead' | 'en
 
       const abort = new AbortController()
       registerExecutor(childId, child, abort, ctx.sessionId, params.role)
+      SESSION_ROLE.set(childId, params.role)
 
       try {
         const signal = AbortSignal.any([ctx.signal, abort.signal])
@@ -144,6 +158,7 @@ export function createInvokeTeamTool(currentRole: 'director' | 'tech-lead' | 'en
         }
       } finally {
         unregisterExecutor(childId)
+        SESSION_ROLE.delete(childId)
         if (worktreePath && !ctx.signal.aborted) {
           await removeWorktree(ctx.workingDirectory, worktreePath).catch(() => undefined)
         }

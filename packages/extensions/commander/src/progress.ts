@@ -44,7 +44,9 @@ export class PraxisProgressTracker {
     }
 
     if (type === 'praxis:engineer-spawned') {
-      const lead = this.progress.leads[0]
+      const leadId = String(event.leadId ?? '')
+      const lead =
+        this.progress.leads.find((entry) => entry.id === leadId) ?? this.progress.leads[0]
       if (!lead) return false
       lead.engineers.push({
         id: String(event.childAgentId ?? ''),

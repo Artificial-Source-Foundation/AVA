@@ -58,3 +58,4 @@ docs/memory-bank/
 e2e/screenshots/
 playwright-report/
 test-results/
+.ava/

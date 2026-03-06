@@ -10,6 +10,7 @@ import type { ChatMessage } from '@ava/core-v2/llm'
 import { getPlatform } from '@ava/core-v2/platform'
 import { exportSessionToMarkdown } from '@ava/core-v2/session'
 import type { ToolContext } from '@ava/core-v2/tools'
+import { discoverRecipes, executeRecipe } from './recipes.js'
 
 function cmd(
   name: string,
@@ -83,6 +84,47 @@ export function createBuiltinCommands(
     cmd('status', 'Show current session status', async (_args, ctx) => {
       emit('session:status-requested', { sessionId: ctx.sessionId })
       return 'Fetching session status.'
+    }),
+
+    cmd('recipe', 'Recipe workflows: /recipe list|run <name>|create', async (args, ctx) => {
+      const [action, ...rest] = args.trim().split(/\s+/).filter(Boolean)
+
+      if (!action || action === 'list') {
+        const recipes = await discoverRecipes()
+        if (recipes.length === 0) {
+          return 'No recipes found in ~/.ava/recipes or .ava/recipes.'
+        }
+        return `Recipes:\n${recipes.map((r) => `- ${r.name}: ${r.description}`).join('\n')}`
+      }
+
+      if (action === 'create') {
+        emit('recipe:create-requested', { sessionId: ctx.sessionId })
+        return 'Open recipe creator and save to .ava/recipes/<name>.yaml.'
+      }
+
+      if (action === 'run') {
+        const recipeName = rest.join(' ').trim()
+        if (!recipeName) return 'Usage: /recipe run <name>'
+        const recipes = await discoverRecipes()
+        const recipe = recipes.find((r) => r.name === recipeName)
+        if (!recipe) return `Recipe not found: ${recipeName}`
+
+        emit('recipe:run-started', { sessionId: ctx.sessionId, name: recipe.name })
+        const result = await executeRecipe(recipe, ctx, (step, status) => {
+          emit('recipe:progress', { sessionId: ctx.sessionId, name: recipe.name, step, status })
+        })
+        emit('recipe:run-finished', {
+          sessionId: ctx.sessionId,
+          name: recipe.name,
+          success: result.success,
+          steps: result.steps,
+        })
+        return result.success
+          ? `Recipe '${recipe.name}' completed (${result.steps.length} steps).`
+          : `Recipe '${recipe.name}' failed.`
+      }
+
+      return 'Usage: /recipe list | /recipe run <name> | /recipe create'
     }),
 
     cmd('export', 'Export session conversation to markdown', async (_args, ctx) => {

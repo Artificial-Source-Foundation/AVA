@@ -1,6 +1,31 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createBuiltinCommands } from './commands.js'
 
+vi.mock('./recipes.js', () => ({
+  discoverRecipes: vi.fn(async () => [
+    {
+      name: 'add-feature',
+      description: 'Standard workflow',
+      version: '1.0',
+      steps: [{ name: 'research', goal: 'Research' }],
+    },
+  ]),
+  executeRecipe: vi.fn(
+    async (
+      _recipe: unknown,
+      _ctx: unknown,
+      onProgress?: (step: string, status: string) => void
+    ) => {
+      onProgress?.('research', 'running')
+      onProgress?.('research', 'completed')
+      return {
+        success: true,
+        steps: [{ name: 'research', status: 'completed' }],
+      }
+    }
+  ),
+}))
+
 describe('createBuiltinCommands', () => {
   const emit = vi.fn()
   const ctx = {
@@ -9,9 +34,9 @@ describe('createBuiltinCommands', () => {
     signal: new AbortController().signal,
   }
 
-  it('creates 12 built-in commands', () => {
+  it('creates 13 built-in commands', () => {
     const commands = createBuiltinCommands(emit)
-    expect(commands).toHaveLength(12)
+    expect(commands).toHaveLength(13)
   })
 
   it('includes expected command names', () => {
@@ -27,6 +52,7 @@ describe('createBuiltinCommands', () => {
     expect(names).toContain('redo')
     expect(names).toContain('settings')
     expect(names).toContain('status')
+    expect(names).toContain('recipe')
   })
 
   it('/help emits commands:help-requested', async () => {
@@ -83,5 +109,23 @@ describe('createBuiltinCommands', () => {
     const compact = commands.find((c) => c.name === 'compact')!
     await compact.execute('', ctx)
     expect(emit).toHaveBeenCalledWith('context:compact', { sessionId: 'test-session' })
+  })
+
+  it('/recipe run emits progress events', async () => {
+    const commands = createBuiltinCommands(emit)
+    const recipe = commands.find((c) => c.name === 'recipe')!
+    const message = await recipe.execute('run add-feature', ctx)
+
+    expect(message).toContain('completed')
+    expect(emit).toHaveBeenCalledWith('recipe:run-started', {
+      sessionId: 'test-session',
+      name: 'add-feature',
+    })
+    expect(emit).toHaveBeenCalledWith('recipe:progress', {
+      sessionId: 'test-session',
+      name: 'add-feature',
+      step: 'research',
+      status: 'running',
+    })
   })
 })

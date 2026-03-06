@@ -62,7 +62,7 @@ describe('file-watcher extension', () => {
     disposable.dispose()
   })
 
-  it('emits ava:comment-detected for // AVA directives', async () => {
+  it('emits comment:trigger for // ava directives', async () => {
     const { api, emittedEvents } = createMockExtensionAPI()
     const fs = api.platform.fs as unknown as {
       addFile: (path: string, content: string) => void
@@ -70,19 +70,19 @@ describe('file-watcher extension', () => {
     }
     fs.addDir('/project/.git')
     fs.addFile('/project/.git/HEAD', 'ref: refs/heads/main\n')
-    fs.addFile('/project/src/a.ts', 'const a = 1\n// AVA: refactor a\n')
+    fs.addFile('/project/src/a.ts', 'const a = 1\n// ava: refactor a\n')
 
     const disposable = activateWatcher(api)
     api.emit('session:opened', { sessionId: 's1', workingDirectory: '/project' })
     await wait()
 
-    const evt = emittedEvents.find((e) => e.event === 'ava:comment-detected')
+    const evt = emittedEvents.find((e) => e.event === 'comment:trigger')
     expect(evt).toBeDefined()
-    expect((evt!.data as { marker: string }).marker).toBe('// AVA:')
+    expect((evt!.data as { comment: string }).comment).toBe('ava: refactor a')
     disposable.dispose()
   })
 
-  it('emits ava:comment-detected for # AVA directives', async () => {
+  it('emits comment:trigger for # ava directives', async () => {
     const { api, emittedEvents } = createMockExtensionAPI()
     const fs = api.platform.fs as unknown as {
       addFile: (path: string, content: string) => void
@@ -90,15 +90,15 @@ describe('file-watcher extension', () => {
     }
     fs.addDir('/project/.git')
     fs.addFile('/project/.git/HEAD', 'ref: refs/heads/main\n')
-    fs.addFile('/project/scripts/tool.py', '# AVA: improve parser\nprint(1)\n')
+    fs.addFile('/project/scripts/tool.py', '# ava: improve parser\nprint(1)\n')
 
     const disposable = activateWatcher(api)
     api.emit('session:opened', { sessionId: 's1', workingDirectory: '/project' })
     await wait()
 
-    const evt = emittedEvents.find((e) => e.event === 'ava:comment-detected')
+    const evt = emittedEvents.find((e) => e.event === 'comment:trigger')
     expect(evt).toBeDefined()
-    expect((evt!.data as { marker: string }).marker).toBe('# AVA:')
+    expect((evt!.data as { comment: string }).comment).toBe('ava: improve parser')
     disposable.dispose()
   })
 
@@ -110,13 +110,13 @@ describe('file-watcher extension', () => {
     }
     fs.addDir('/project/.git')
     fs.addFile('/project/.git/HEAD', 'ref: refs/heads/main\n')
-    fs.addFile('/project/src/noise.ts', 'const s = "// AVA: not a directive"\n')
+    fs.addFile('/project/src/noise.ts', 'const s = "// ava: not a directive"\n')
 
     const disposable = activateWatcher(api)
     api.emit('session:opened', { sessionId: 's1', workingDirectory: '/project' })
     await wait()
 
-    const directiveEvents = emittedEvents.filter((e) => e.event === 'ava:comment-detected')
+    const directiveEvents = emittedEvents.filter((e) => e.event === 'comment:trigger')
     expect(directiveEvents).toHaveLength(0)
     disposable.dispose()
   })
@@ -130,13 +130,13 @@ describe('file-watcher extension', () => {
     }
     fs.addDir('/project/.git')
     fs.addFile('/project/.git/HEAD', 'ref: refs/heads/main\n')
-    fs.addFile('/project/src/a.ts', '// AVA: stable\n')
+    fs.addFile('/project/src/a.ts', '// ava: stable\n')
 
     const disposable = activateWatcher(api)
     api.emit('session:opened', { sessionId: 's1', workingDirectory: '/project' })
     await vi.advanceTimersByTimeAsync(7000)
 
-    const directiveEvents = emittedEvents.filter((e) => e.event === 'ava:comment-detected')
+    const directiveEvents = emittedEvents.filter((e) => e.event === 'comment:trigger')
     expect(directiveEvents).toHaveLength(1)
     disposable.dispose()
   })

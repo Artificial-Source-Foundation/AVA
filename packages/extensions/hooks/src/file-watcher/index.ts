@@ -7,11 +7,7 @@
 
 import { join } from 'node:path'
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
-import {
-  type AvaCommentDirective,
-  directiveSignature,
-  extractAvaCommentDirectives,
-} from './comment-detector.js'
+import { type CommentTrigger, CommentWatcher } from './comment-watcher.js'
 import { FileWatcher } from './watcher.js'
 
 const RESCAN_INTERVAL_MS = 5000
@@ -98,23 +94,31 @@ export function activate(api: ExtensionAPI): Disposable {
   const lastDirectiveSignatures = new Map<string, Set<string>>()
   let rescanTimer: ReturnType<typeof setInterval> | null = null
 
+  const hookSettings = api.getSettings<{
+    commentWatcher?: { enabled?: boolean; patterns?: string[] }
+  }>('hooks')
+  const commentWatcherSettings = hookSettings.commentWatcher ?? {}
+  const commentWatcher = new CommentWatcher(commentWatcherSettings.patterns)
+  const isCommentWatcherEnabled = commentWatcherSettings.enabled ?? true
+
+  function triggerSignature(trigger: CommentTrigger): string {
+    return `${trigger.file}:${trigger.line}:${trigger.comment}`
+  }
+
   async function emitDirectives(
     filePath: string,
     workingDirectory: string,
-    directives: AvaCommentDirective[]
+    directives: CommentTrigger[]
   ): Promise<void> {
-    const nextSignatures = new Set(directives.map((d) => directiveSignature(filePath, d)))
+    const nextSignatures = new Set(directives.map((d) => triggerSignature(d)))
     const previous = lastDirectiveSignatures.get(filePath) ?? new Set<string>()
 
     for (const directive of directives) {
-      const sig = directiveSignature(filePath, directive)
+      const sig = triggerSignature(directive)
       if (previous.has(sig)) continue
-      api.emit('ava:comment-detected', {
-        filePath,
+      api.emit('comment:trigger', {
+        ...directive,
         workingDirectory,
-        marker: directive.marker,
-        message: directive.message,
-        line: directive.line,
       })
     }
 
@@ -122,9 +126,10 @@ export function activate(api: ExtensionAPI): Disposable {
   }
 
   async function inspectFile(filePath: string, workingDirectory: string): Promise<void> {
+    if (!isCommentWatcherEnabled) return
     try {
       const content = await api.platform.fs.readFile(filePath)
-      const directives = extractAvaCommentDirectives(content)
+      const directives = commentWatcher.scan(filePath, content)
       await emitDirectives(filePath, workingDirectory, directives)
     } catch {
       lastDirectiveSignatures.delete(filePath)

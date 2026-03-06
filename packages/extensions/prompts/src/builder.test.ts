@@ -41,20 +41,21 @@ describe('Prompt Builder', () => {
     expect(buildSystemPrompt()).not.toContain('temporary')
   })
 
-  it('appends model-family section for claude', () => {
+  it('appends model-variant section for claude', () => {
     resetPromptSections()
     addPromptSection({ name: 'base', priority: 0, content: 'Base prompt' })
     const prompt = buildSystemPrompt('claude-3-opus')
-    expect(prompt).toContain('thinking blocks')
-    expect(prompt).toContain('autonomous agent')
+    expect(prompt).toContain('Model Variant Guidance')
+    expect(prompt).toContain('Family: claude')
+    expect(prompt).toContain('Thinking:')
   })
 
-  it('appends model-family section for gpt', () => {
+  it('appends model-variant section for gpt', () => {
     resetPromptSections()
     addPromptSection({ name: 'base', priority: 0, content: 'Base prompt' })
     const prompt = buildSystemPrompt('gpt-4o')
-    expect(prompt).toContain('CALL THE TOOLS')
-    expect(prompt).toContain('ACTUALLY make the tool call')
+    expect(prompt).toContain('Family: gpt')
+    expect(prompt).toContain('Structured output:')
   })
 
   it('appends fallback directives for unknown models', () => {
@@ -62,7 +63,7 @@ describe('Prompt Builder', () => {
     addPromptSection({ name: 'base', priority: 0, content: 'Base prompt' })
     const prompt = buildSystemPrompt('qwen-72b')
     expect(prompt).toContain('Base prompt')
-    expect(prompt).toContain('Use your tools')
+    expect(prompt).toContain('Family: other')
   })
 
   it('does not append family section when no model is provided', () => {

@@ -5,7 +5,7 @@
  */
 
 import { Check, Loader2, MessageSquare, Pencil, Trash2, X } from 'lucide-solid'
-import { type Component, createSignal, Show } from 'solid-js'
+import { type Component, createEffect, createSignal, Show } from 'solid-js'
 import type { SessionWithStats } from '../../../types'
 import { formatDate, formatSessionName } from './session-utils'
 
@@ -17,12 +17,16 @@ export interface SessionItemProps {
   onRename: (id: string, name: string) => void
   onDelete: (id: string) => void
   onContextMenu: (e: MouseEvent, id: string) => void
+  renameRequestId?: string
+  renameRequestSeq?: number
+  onRenameRequestHandled?: () => void
 }
 
 export const SessionItem: Component<SessionItemProps> = (props) => {
   const [isRenaming, setIsRenaming] = createSignal(false)
   const [renameValue, setRenameValue] = createSignal('')
   const [isConfirmingDelete, setIsConfirmingDelete] = createSignal(false)
+  const [lastHandledRenameRequest, setLastHandledRenameRequest] = createSignal(0)
 
   const startRename = (): void => {
     setIsRenaming(true)
@@ -34,6 +38,18 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
     if (newName) props.onRename(props.session.id, newName)
     setIsRenaming(false)
   }
+
+  createEffect(() => {
+    const requestId = props.renameRequestId
+    const requestSeq = props.renameRequestSeq ?? 0
+    if (!requestId || requestSeq === 0) return
+    if (requestId !== props.session.id) return
+    if (requestSeq === lastHandledRenameRequest()) return
+
+    setLastHandledRenameRequest(requestSeq)
+    startRename()
+    props.onRenameRequestHandled?.()
+  })
 
   return (
     <Show

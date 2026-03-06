@@ -12,7 +12,7 @@
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { AgentConfig, AgentEvent, AgentEventCallback, LLMProvider } from '@ava/core-v2'
+import type { AgentConfig, AgentEventCallback } from '@ava/core-v2'
 import { AgentExecutor, registerProvider } from '@ava/core-v2'
 import { MessageBus } from '@ava/core-v2/bus'
 import type { ExtensionModule } from '@ava/core-v2/extensions'
@@ -27,33 +27,26 @@ import { createSessionManager } from '@ava/core-v2/session'
 import { registerCoreTools } from '@ava/core-v2/tools'
 import { createNodePlatform } from '@ava/platform-node/v2'
 import { getCliLogger } from '../logger.js'
+import { DiffRenderer } from '../rendering/diff-renderer.js'
 import { MockLLMClient, setupMockEnvironment } from './mock-client.js'
-
-type AgentBackend = 'core' | 'core-v2'
-
-interface RunOptions {
-  goal: string
-  provider?: LLMProvider
-  model?: string
-  maxTurns: number
-  maxTimeMinutes: number
-  cwd: string
-  json: boolean
-  verbose: boolean
-  mock: boolean
-  validation: boolean
-  backend: AgentBackend
-  yolo: boolean
-}
+import {
+  applyCliToolFilter,
+  applyMockProviderDefaults,
+  buildLegacyArgs,
+  importWithFallback,
+} from './run-helpers.js'
+import { parseRunOptions, printRunHelp } from './run-options.js'
+import { createStreamingCallback } from './run-streaming.js'
 
 export async function runRunCommand(args: string[]): Promise<void> {
   const log = getCliLogger('cli:run')
-  const options = parseRunOptions(args)
-  if (!options) {
+  const parsed = parseRunOptions(args)
+  if (!parsed) {
     log.warn('Invalid run options', { args: args.join(' ') })
     printRunHelp()
     return
   }
+  let options = parsed
 
   log.info('Run command started', {
     backend: options.backend,
@@ -70,16 +63,7 @@ export async function runRunCommand(args: string[]): Promise<void> {
       process.stderr.write('[run] Using legacy core backend\n')
     }
     const { runAgentCommand } = await import('./agent.js')
-    // Re-pack args for the legacy agent command: agent run "goal" [flags]
-    const legacyArgs = ['run', options.goal]
-    if (options.provider) legacyArgs.push('--provider', options.provider)
-    if (options.model) legacyArgs.push('--model', options.model)
-    legacyArgs.push('--max-turns', String(options.maxTurns))
-    legacyArgs.push('--timeout', String(options.maxTimeMinutes))
-    legacyArgs.push('--cwd', options.cwd)
-    if (options.json) legacyArgs.push('--json')
-    if (options.verbose) legacyArgs.push('--verbose')
-    await runAgentCommand(legacyArgs)
+    await runAgentCommand(buildLegacyArgs(options))
     return
   }
 
@@ -91,11 +75,11 @@ export async function runRunCommand(args: string[]): Promise<void> {
   // Set up mock if requested
   if (options.mock) {
     setupMockEnvironment()
-    registerProvider('mock', () => new MockLLMClient())
-    registerProvider('anthropic', () => new MockLLMClient())
-    if (!options.provider) {
-      options.provider = 'mock' as LLMProvider
-    }
+    options = applyMockProviderDefaults(
+      options,
+      (provider, factory) => registerProvider(provider, () => factory() as MockLLMClient),
+      () => new MockLLMClient()
+    )
   }
 
   // Load built-in extensions
@@ -195,34 +179,10 @@ export async function runRunCommand(args: string[]): Promise<void> {
     config.model = options.model
   }
 
-  // Filter tools to ~20 core tools (like OpenCode/Claude Code) to reduce token overhead.
-  // Full 53-tool set wastes ~4,500 tokens/turn. Filtered set: ~1,500-2,000 tokens/turn.
   const { getToolDefinitions } = await import('@ava/core-v2/tools')
-  const CLI_EXCLUDED = new Set([
-    // LSP tools — need running LSP server, not available in CLI
-    'lsp_diagnostics',
-    'lsp_hover',
-    'lsp_definition',
-    'lsp_references',
-    'lsp_document_symbols',
-    'lsp_workspace_symbols',
-    'lsp_code_actions',
-    'lsp_rename',
-    'lsp_completions',
-    // Delegation/subagent tools — CLI runs single agent
-    'task',
-    'sandbox_run',
-    // Redundant with core tools or rarely needed
-    'pty',
-    'batch',
-    'multiedit',
-    'apply_patch',
-    // Session management — recall is handled by CLI lifecycle
-    'recall',
-  ])
-  const allToolNames = getToolDefinitions().map((t) => t.name)
-  config.allowedTools = allToolNames.filter(
-    (n) => !n.startsWith('delegate_') && !CLI_EXCLUDED.has(n)
+  applyCliToolFilter(
+    config,
+    getToolDefinitions().map((tool) => tool.name)
   )
 
   // Set up abort controller
@@ -240,9 +200,10 @@ export async function runRunCommand(args: string[]): Promise<void> {
   process.on('SIGTERM', onSignal)
 
   // Create event callback
+  const diffRenderer = options.json ? undefined : new DiffRenderer()
   const eventHandler: AgentEventCallback = options.json
     ? (event) => console.log(JSON.stringify(event))
-    : createStreamingCallback(options.verbose)
+    : createStreamingCallback(options.verbose, diffRenderer)
 
   try {
     // Create session and emit session:opened for extensions
@@ -328,189 +289,7 @@ export async function runRunCommand(args: string[]): Promise<void> {
   } finally {
     process.removeListener('SIGINT', onSignal)
     process.removeListener('SIGTERM', onSignal)
+    diffRenderer?.dispose()
     await manager.dispose()
   }
-}
-
-/** Try importing from source (tsx), fall back to compiled dist. */
-async function importWithFallback(srcPath: string, distPath: string): Promise<unknown> {
-  try {
-    return await import(srcPath)
-  } catch {
-    return await import(distPath)
-  }
-}
-
-function createStreamingCallback(verbose: boolean): AgentEventCallback {
-  return (event: AgentEvent) => {
-    switch (event.type) {
-      case 'agent:start':
-        console.log(`[Agent] Starting: ${event.goal}`)
-        break
-
-      case 'turn:start':
-        console.log(`\n[Turn ${event.turn}] ---`)
-        break
-
-      case 'turn:end': {
-        const u = event.usage
-        if (u) {
-          const parts = [`  tokens: ${u.inputTokens} in / ${u.outputTokens} out`]
-          if (u.cacheReadTokens) parts.push(`(${u.cacheReadTokens} cached)`)
-          console.log(parts.join(' '))
-        }
-        break
-      }
-
-      case 'tool:start':
-        console.log(`[Tool] ${event.toolName}(${JSON.stringify(event.args)})`)
-        break
-
-      case 'tool:finish':
-        console.log(
-          `[Tool] ${event.toolName}: ${event.success ? 'OK' : 'FAIL'} (${event.durationMs}ms)`
-        )
-        break
-
-      case 'thought':
-        if (verbose) {
-          console.log(`[Thought] ${event.content}`)
-        }
-        break
-
-      case 'error':
-        console.error(`[Error] ${event.error}`)
-        break
-
-      default:
-        if (verbose) {
-          console.log(`[Event] ${event.type}`)
-        }
-    }
-  }
-}
-
-function parseRunOptions(args: string[]): RunOptions | null {
-  // First non-flag argument is the goal
-  let goal: string | undefined
-  let provider: LLMProvider | undefined
-  let model: string | undefined
-  let maxTurns = 20
-  let maxTimeMinutes = 10
-  let cwd = process.cwd()
-  let json = false
-  let verbose = false
-  let mock = false
-  let validation = false
-  let yolo = false
-  let backend: AgentBackend = 'core-v2'
-
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i]
-
-    if (arg === '--provider') {
-      provider = args[++i] as LLMProvider
-      continue
-    }
-    if (arg === '--model') {
-      model = args[++i]
-      continue
-    }
-    if (arg === '--max-turns') {
-      maxTurns = parseInt(args[++i], 10)
-      continue
-    }
-    if (arg === '--max-time') {
-      maxTimeMinutes = parseInt(args[++i], 10)
-      continue
-    }
-    if (arg === '--cwd') {
-      cwd = args[++i]
-      continue
-    }
-    if (arg === '--backend') {
-      const val = args[++i]
-      if (val === 'core' || val === 'core-v2') {
-        backend = val
-      } else {
-        console.error(`Error: Invalid backend "${val}". Must be "core" or "core-v2".`)
-        return null
-      }
-      continue
-    }
-    if (arg === '--json') {
-      json = true
-      continue
-    }
-    if (arg === '--verbose') {
-      verbose = true
-      continue
-    }
-    if (arg === '--mock') {
-      mock = true
-      continue
-    }
-    if (arg === '--validation') {
-      validation = true
-      continue
-    }
-    if (arg === '--yolo') {
-      yolo = true
-      continue
-    }
-
-    // First non-flag argument is the goal
-    if (!goal && !arg.startsWith('--')) {
-      goal = arg
-    }
-  }
-
-  if (!goal) {
-    return null
-  }
-
-  return {
-    goal,
-    provider,
-    model,
-    maxTurns,
-    maxTimeMinutes,
-    cwd,
-    json,
-    verbose,
-    mock,
-    validation,
-    yolo,
-    backend,
-  }
-}
-
-function printRunHelp(): void {
-  console.log(`
-AVA Run - Unified agent entry point with dual-stack support
-
-USAGE:
-  ava run "<goal>" [options]
-
-OPTIONS:
-  --backend <stack>     Agent backend: "core" (legacy) or "core-v2" (default)
-  --provider <name>     LLM provider (anthropic, openai, openrouter, etc.)
-  --model <name>        Specific model name
-  --max-turns <n>       Maximum turns (default: 20)
-  --max-time <n>        Time limit in minutes (default: 10)
-  --cwd <path>          Working directory (default: current)
-  --json                Machine-readable JSON output
-  --verbose             Show debug-level output (thoughts, tool output)
-  --mock                Use mock LLM (no API key needed)
-  --yolo                Bypass all permission checks (auto-approve everything)
-  --validation          Enable QA validation gate
-
-EXAMPLES:
-  ava run "List all TypeScript files in src/"
-  ava run "Fix the bug in auth.ts" --provider anthropic --max-turns 10
-  ava run "Read the README" --mock --max-turns 3
-  ava run "Read the codebase" --provider openai --model gpt-4o --yolo
-  ava run "Refactor the database module" --backend core --verbose
-  ava run "Refactor the database module" --json --verbose
-`)
 }

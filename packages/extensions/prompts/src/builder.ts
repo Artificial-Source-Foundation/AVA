@@ -3,7 +3,7 @@
  * Constructs the system prompt from sections and model-specific variants.
  */
 
-import { getModelFamilyPromptSection } from './families.js'
+import { getModelVariantPromptSection } from './model-variants.js'
 
 export interface PromptSection {
   name: string
@@ -36,10 +36,7 @@ export function buildSystemPrompt(model?: string): string {
 
   // Model-family-specific adjustments
   if (model) {
-    const familySection = getModelFamilyPromptSection(model)
-    if (familySection) {
-      prompt = `${prompt}\n\n${familySection}`
-    }
+    prompt = `${prompt}\n\n${getModelVariantPromptSection(model)}`
   }
 
   return prompt

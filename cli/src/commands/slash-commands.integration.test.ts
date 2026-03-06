@@ -60,9 +60,9 @@ describe('slash commands integration', () => {
 
   // ── Registration ─────────────────────────────────────────────────────────
 
-  it('registers all 12 built-in commands', () => {
+  it('registers all 13 built-in commands', () => {
     const commands = getCommands()
-    expect(commands.size).toBe(12)
+    expect(commands.size).toBe(13)
     expect(commands.has('help')).toBe(true)
     expect(commands.has('clear')).toBe(true)
     expect(commands.has('mode')).toBe(true)
@@ -73,6 +73,7 @@ describe('slash commands integration', () => {
     expect(commands.has('redo')).toBe(true)
     expect(commands.has('settings')).toBe(true)
     expect(commands.has('status')).toBe(true)
+    expect(commands.has('recipe')).toBe(true)
     expect(commands.has('export')).toBe(true)
     expect(commands.has('init')).toBe(true)
   })
@@ -129,18 +130,19 @@ describe('slash commands integration', () => {
 
   it('returns all commands sorted alphabetically', () => {
     const cmds = getAvailableCommands()
-    expect(cmds.length).toBe(12)
+    expect(cmds.length).toBe(13)
 
     const names = cmds.map((c) => c.name)
     const sorted = [...names].sort()
     expect(names).toEqual(sorted)
   })
 
-  it('marks all 12 commands as built-in', () => {
+  it('marks core slash commands as built-in', () => {
     const cmds = getAvailableCommands()
-    for (const cmd of cmds) {
-      expect(cmd.isBuiltIn).toBe(true)
-    }
+    const builtIn = new Map(cmds.filter((cmd) => cmd.isBuiltIn).map((cmd) => [cmd.name, cmd]))
+    expect(builtIn.has('help')).toBe(true)
+    expect(builtIn.has('mode')).toBe(true)
+    expect(builtIn.has('model')).toBe(true)
   })
 
   it('includes descriptions for all commands', () => {

@@ -4,34 +4,21 @@
  * Session list with search, new chat, and right-click context menu.
  */
 
-import {
-  Archive,
-  Copy,
-  GitBranch,
-  GitFork,
-  List,
-  MessageSquare,
-  Pencil,
-  Plus,
-  Route,
-  Search,
-  Trash2,
-} from 'lucide-solid'
+import { MessageSquare } from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
 import { useLayout } from '../../stores/layout'
 import { useSession } from '../../stores/session'
-import { ContextMenu, type ContextMenuItem } from '../ui/ContextMenu'
+import { ContextMenu } from '../ui/ContextMenu'
 import { SessionBranchTree } from './SessionBranchTree'
 import { ArchivedSection } from './sessions/ArchivedSection'
-import { ProjectDropdown } from './sessions/ProjectDropdown'
 import { SessionItem } from './sessions/SessionItem'
+import { SessionsSearch } from './sessions/SessionsSearch'
+import { SessionsToolbar } from './sessions/SessionsToolbar'
+import {
+  buildSessionContextMenuItems,
+  type ContextMenuState,
+} from './sessions/session-context-menu'
 import { groupSessionsByDate } from './sessions/session-utils'
-
-interface ContextMenuState {
-  x: number
-  y: number
-  sessionId: string
-}
 
 export const SidebarSessions: Component = () => {
   const {
@@ -54,6 +41,7 @@ export const SidebarSessions: Component = () => {
   const [search, setSearch] = createSignal('')
   const [contextMenu, setContextMenu] = createSignal<ContextMenuState | null>(null)
   const [viewMode, setViewMode] = createSignal<'list' | 'tree'>('list')
+  const [renameRequest, setRenameRequest] = createSignal<{ id: string; seq: number } | null>(null)
 
   const handleNewChat = async (): Promise<void> => {
     await createNewSession()
@@ -67,7 +55,13 @@ export const SidebarSessions: Component = () => {
   }
 
   const groupedSessions = createMemo(() => groupSessionsByDate(filteredSessions()))
-  const sessionTree = createMemo(() => getSessionTree())
+  const sessionTree = getSessionTree
+
+  const runActionSafely = (action: () => Promise<void>): void => {
+    void action().catch((error: unknown) => {
+      console.error('[SidebarSessions] Action failed', error)
+    })
+  }
 
   const handleContextMenu = (e: MouseEvent, sessionId: string): void => {
     e.preventDefault()
@@ -75,120 +69,30 @@ export const SidebarSessions: Component = () => {
     setContextMenu({ x: e.clientX, y: e.clientY, sessionId })
   }
 
-  const getContextMenuItems = (sessionId: string): ContextMenuItem[] => [
-    {
-      label: 'Rename',
-      icon: Pencil,
-      action: () => {
-        /* Rename is handled by SessionItem inline */
-      },
-    },
-    {
-      label: 'Duplicate',
-      icon: Copy,
-      action: () => duplicateSession(sessionId),
-    },
-    {
-      label: 'Fork from here',
-      icon: GitFork,
-      action: () => {
-        const session = sessions().find((s) => s.id === sessionId)
-        if (session) forkSession(sessionId, `${session.name} (fork)`)
-      },
-    },
-    {
-      label: 'View Trajectory',
-      icon: Route,
-      action: () => {
-        void switchSession(sessionId)
+  const getContextMenuItems = (sessionId: string) =>
+    buildSessionContextMenuItems(sessionId, {
+      sessions,
+      requestRename: (id) => setRenameRequest({ id, seq: Date.now() }),
+      duplicateSession: (id) => runActionSafely(() => duplicateSession(id)),
+      forkSession: (id, name) => runActionSafely(() => forkSession(id, name)),
+      archiveSession: (id) => runActionSafely(() => archiveSession(id)),
+      deleteSession: (id) => runActionSafely(() => deleteSessionPermanently(id)),
+      viewTrajectory: (id) => {
+        runActionSafely(() => switchSession(id))
         setRightPanelVisible(true)
         switchRightPanelTab('trajectory')
       },
-    },
-    { label: '', action: () => {}, separator: true },
-    {
-      label: 'Archive',
-      icon: Archive,
-      action: () => void archiveSession(sessionId),
-    },
-    {
-      label: 'Delete',
-      icon: Trash2,
-      danger: true,
-      action: () => void deleteSessionPermanently(sessionId),
-    },
-  ]
+    })
 
   return (
     <div class="flex flex-col h-full">
-      {/* Header: title + project switcher + new chat */}
-      <div class="flex items-center justify-between density-px h-10 flex-shrink-0 border-b border-[var(--border-subtle)]">
-        <span class="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
-          Sessions
-        </span>
+      <SessionsToolbar
+        viewMode={viewMode()}
+        onToggleView={() => setViewMode((value) => (value === 'list' ? 'tree' : 'list'))}
+        onNewChat={() => void handleNewChat()}
+      />
 
-        <div class="flex items-center gap-1">
-          <ProjectDropdown />
-
-          {/* Tree/List view toggle */}
-          <button
-            type="button"
-            onClick={() => setViewMode((v) => (v === 'list' ? 'tree' : 'list'))}
-            class="
-              flex items-center justify-center w-6 h-6
-              rounded-[var(--radius-md)]
-              text-[var(--text-muted)] hover:text-[var(--text-primary)]
-              hover:bg-[var(--alpha-white-8)]
-              transition-colors
-            "
-            title={viewMode() === 'list' ? 'Tree view' : 'List view'}
-            aria-label={viewMode() === 'list' ? 'Switch to tree view' : 'Switch to list view'}
-          >
-            <Show when={viewMode() === 'list'} fallback={<List class="w-4 h-4" />}>
-              <GitBranch class="w-4 h-4" />
-            </Show>
-          </button>
-
-          {/* New chat button */}
-          <button
-            type="button"
-            onClick={handleNewChat}
-            class="
-              flex items-center justify-center w-6 h-6
-              rounded-[var(--radius-md)]
-              text-[var(--text-muted)] hover:text-[var(--text-primary)]
-              hover:bg-[var(--alpha-white-8)]
-              transition-colors
-            "
-            title="New chat (Ctrl+N)"
-            aria-label="New chat"
-          >
-            <Plus class="w-4 h-4" />
-          </button>
-        </div>
-      </div>
-
-      {/* Search */}
-      <div class="density-px density-py flex-shrink-0">
-        <div class="relative">
-          <Search class="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)]" />
-          <input
-            type="text"
-            placeholder="Search sessions..."
-            value={search()}
-            onInput={(e) => setSearch(e.currentTarget.value)}
-            class="
-              w-full pl-7 pr-2 py-1.5
-              text-xs text-[var(--text-primary)]
-              bg-[var(--surface-sunken)]
-              border border-[var(--border-subtle)]
-              rounded-[var(--radius-md)]
-              placeholder:text-[var(--text-muted)]
-              focus-glow
-            "
-          />
-        </div>
-      </div>
+      <SessionsSearch value={search()} onInput={(event) => setSearch(event.currentTarget.value)} />
 
       {/* Session List */}
       <div class="flex-1 overflow-y-auto px-1.5 scrollbar-none">
@@ -197,7 +101,7 @@ export const SidebarSessions: Component = () => {
             roots={sessionTree().roots}
             childMap={sessionTree().childMap}
             currentSessionId={currentSession()?.id}
-            onSelect={(id) => switchSession(id)}
+            onSelect={(id) => runActionSafely(() => switchSession(id))}
           />
         </Show>
         <Show when={viewMode() === 'list'}>
@@ -219,6 +123,11 @@ export const SidebarSessions: Component = () => {
                           onRename={(id, name) => renameSession(id, name)}
                           onDelete={(id) => deleteSessionPermanently(id)}
                           onContextMenu={handleContextMenu}
+                          renameRequestId={renameRequest()?.id}
+                          renameRequestSeq={renameRequest()?.seq}
+                          onRenameRequestHandled={() => {
+                            setRenameRequest(null)
+                          }}
                         />
                       )}
                     </For>
@@ -244,7 +153,7 @@ export const SidebarSessions: Component = () => {
       <ArchivedSection
         archivedSessions={archivedSessions}
         loadArchived={loadArchivedSessions}
-        unarchive={(id) => void unarchiveSession(id)}
+        unarchive={(id) => runActionSafely(() => unarchiveSession(id))}
       />
 
       {/* Context Menu */}

@@ -6,12 +6,20 @@
  */
 
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
+import { activateToolHooks, pluginToolHooksApi } from './tool-hooks.js'
 
 export function activate(api: ExtensionAPI): Disposable {
   api.log.info('Plugin infrastructure loaded')
+  const toolHooksDisposable = activateToolHooks(api)
 
-  return { dispose() {} }
+  return {
+    dispose() {
+      toolHooksDisposable.dispose()
+    },
+  }
 }
+
+export { pluginToolHooksApi }
 
 export type {
   CatalogEntry,
@@ -31,3 +39,4 @@ export type { InstalledPlugin, InstallResult } from './installer.js'
 export { getInstalledPlugins, installPlugin, uninstallPlugin } from './installer.js'
 export type { PluginReview, PluginReviewInput } from './reviews.js'
 export { ReviewStore } from './reviews.js'
+export type { ToolDescribeHook } from './tool-hooks.js'

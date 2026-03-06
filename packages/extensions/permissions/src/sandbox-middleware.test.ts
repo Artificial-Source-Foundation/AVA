@@ -40,4 +40,25 @@ describe('createSandboxMiddleware', () => {
     expect((ls?.args as { _sandboxed?: boolean })._sandboxed).toBe(false)
     expect((cat?.args as { _sandboxed?: boolean })._sandboxed).toBe(false)
   })
+
+  it('removes denied env vars before sandbox execution', async () => {
+    const middleware = createSandboxMiddleware()
+    const result = await middleware.before?.({
+      ...makeCtx('npm install vite'),
+      args: {
+        command: 'npm install vite',
+        description: 'test',
+        env: {
+          PATH: '/tmp/fake',
+          OPENAI_API_KEY: 'secret',
+          SAFE_VAR: 'ok',
+        },
+      },
+    })
+
+    const env = (result?.args as { env?: Record<string, string> })?.env ?? {}
+    expect(env.PATH).toBeUndefined()
+    expect(env.OPENAI_API_KEY).toBeUndefined()
+    expect(env.SAFE_VAR).toBe('ok')
+  })
 })

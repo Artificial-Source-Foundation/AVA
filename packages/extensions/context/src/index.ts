@@ -4,6 +4,7 @@ import type { ChatMessage } from '@ava/core-v2/llm'
 import { activate as activateCodebase } from './codebase/index.js'
 import type { RepoMap } from './codebase/types.js'
 import { registerModelPricing, trackSessionCost } from './cost-tracker.js'
+import { activateMoim } from './moim.js'
 import {
   createHistoryProcessorByName,
   type HistoryProcessor,
@@ -92,6 +93,7 @@ export function activate(api: ExtensionAPI): Disposable {
   const manager = getSettingsManager()
   manager.registerCategory('context', DEFAULT_CONTEXT_SETTINGS)
   const codebaseDisposable = activateCodebase(api)
+  const moimDisposable = activateMoim(api)
 
   const strategyDisposables = ALL_STRATEGIES.map((strategy) =>
     api.registerContextStrategy(strategy)
@@ -195,6 +197,7 @@ export function activate(api: ExtensionAPI): Disposable {
   return {
     dispose() {
       codebaseDisposable.dispose()
+      moimDisposable.dispose()
       for (const disposable of strategyDisposables) disposable.dispose()
       hookDisposable.dispose()
       settingsDisposable.dispose()

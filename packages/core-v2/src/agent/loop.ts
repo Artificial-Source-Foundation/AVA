@@ -55,6 +55,28 @@ const agentLog = createLogger('agent')
 const loopLog = createLogger('agent:loop')
 const llmLog = createLogger('llm')
 const toolLog = createLogger('agent:tool')
+const MAX_TOOL_CHAIN_DEPTH = 3
+
+// Mirrors permissions SmartApprove read-only list for parallelization safety heuristic.
+const READ_ONLY_TOOLS = new Set([
+  'read_file',
+  'glob',
+  'grep',
+  'ls',
+  'websearch',
+  'webfetch',
+  'memory_read',
+  'memory_list',
+  'recall',
+  'plan_enter',
+  'lsp_hover',
+  'lsp_definition',
+  'lsp_references',
+  'lsp_diagnostics',
+  'lsp_workspace_symbols',
+  'todoread',
+  'question',
+])
 
 function isRetryableError(message: string): boolean {
   return /rate.limit|overloaded|429|529|server error|too many requests/i.test(message)
@@ -64,9 +86,10 @@ function contentLength(content: MessageContent): number {
   if (typeof content === 'string') return content.length
   return content.reduce((sum, b) => {
     if (b.type === 'text') return sum + b.text.length
-    if (b.type === 'tool_result') return sum + b.content.length
+    if (b.type === 'tool_result') return sum + (b.content?.length ?? 0)
     if (b.type === 'image') return sum + 1000 // rough estimate for images
-    return sum + b.name.length + JSON.stringify(b.input).length
+    if (b.type === 'tool_use') return sum + b.name.length + JSON.stringify(b.input).length
+    return sum
   }, 0)
 }
 
@@ -371,7 +394,7 @@ export class AgentExecutor {
         loopLog.info(`Turn ${turn} started`, { model, provider })
 
         // If step limit was reached last turn, pass empty tools to force text-only response
-        const tools = this.stepLimitReached ? [] : this.getAvailableTools()
+        const tools = this.stepLimitReached ? [] : await this.getAvailableTools()
         if (turn === 1) {
           console.debug(
             `[AVA:Agent] Turn 1 — ${tools.length} tools available, model=${model}, provider=${this.config.provider}`
@@ -780,9 +803,27 @@ export class AgentExecutor {
 
     const callInfos: ToolCallInfo[] = []
     const toolResultBlocks: ToolResultBlock[] = []
-    for (const { callInfo, resultBlock } of results) {
-      callInfos.push(callInfo)
-      toolResultBlocks.push(resultBlock)
+    for (const result of results) {
+      callInfos.push(...result.callInfos)
+      toolResultBlocks.push(...result.resultBlocks)
+    }
+
+    // Ensure chained tail-call tool results have matching tool_use blocks in history.
+    const assistantMsg = history[history.length - 1]
+    if (assistantMsg?.role === 'assistant' && Array.isArray(assistantMsg.content)) {
+      for (const result of results) {
+        for (let i = 1; i < result.callInfos.length; i++) {
+          const info = result.callInfos[i]
+          const block = result.resultBlocks[i]
+          if (!info || !block) continue
+          assistantMsg.content.push({
+            type: 'tool_use',
+            id: block.tool_use_id,
+            name: info.name,
+            input: info.args,
+          })
+        }
+      }
     }
 
     // Truncate tool results that exceed byte limits before adding to history
@@ -833,23 +874,28 @@ export class AgentExecutor {
     call: ToolUseBlock,
     cwd: string,
     model: string,
-    signal: AbortSignal
-  ): Promise<{ callInfo: ToolCallInfo; resultBlock: ToolResultBlock }> {
+    signal: AbortSignal,
+    chainDepth = 0
+  ): Promise<{ callInfos: ToolCallInfo[]; resultBlocks: ToolResultBlock[] }> {
     if (signal.aborted) {
       return {
-        callInfo: {
-          name: call.name,
-          args: call.input,
-          result: 'Tool call skipped — user interrupted',
-          success: false,
-          durationMs: 0,
-        },
-        resultBlock: {
-          type: 'tool_result' as const,
-          tool_use_id: call.id,
-          content: 'Tool call skipped — user interrupted',
-          is_error: true,
-        },
+        callInfos: [
+          {
+            name: call.name,
+            args: call.input,
+            result: 'Tool call skipped — user interrupted',
+            success: false,
+            durationMs: 0,
+          },
+        ],
+        resultBlocks: [
+          {
+            type: 'tool_result' as const,
+            tool_use_id: call.id,
+            content: 'Tool call skipped — user interrupted',
+            is_error: true,
+          },
+        ],
       }
     }
 
@@ -864,19 +910,23 @@ export class AgentExecutor {
         const available = availableNames.slice(0, 20).join(', ')
         const errorMsg = `Unknown tool "${call.name}". Available tools: ${available}${availableNames.length > 20 ? ` (and ${availableNames.length - 20} more)` : ''}`
         return {
-          callInfo: {
-            name: call.name,
-            args: call.input,
-            result: errorMsg,
-            success: false,
-            durationMs: 0,
-          },
-          resultBlock: {
-            type: 'tool_result' as const,
-            tool_use_id: call.id,
-            content: errorMsg,
-            is_error: true,
-          },
+          callInfos: [
+            {
+              name: call.name,
+              args: call.input,
+              result: errorMsg,
+              success: false,
+              durationMs: 0,
+            },
+          ],
+          resultBlocks: [
+            {
+              type: 'tool_result' as const,
+              tool_use_id: call.id,
+              content: errorMsg,
+              is_error: true,
+            },
+          ],
         }
       }
     }
@@ -934,30 +984,61 @@ export class AgentExecutor {
       duration_ms: durationMs,
     })
 
+    const currentCallInfo: ToolCallInfo = {
+      name: resolvedName,
+      args: call.input,
+      result: output,
+      success: result.success,
+      durationMs,
+    }
+    const currentResultBlock: ToolResultBlock = {
+      type: 'tool_result' as const,
+      tool_use_id: call.id,
+      content: efficientOutput,
+      is_error: !result.success,
+    }
+
+    if (result.nextToolCall) {
+      if (chainDepth >= MAX_TOOL_CHAIN_DEPTH) {
+        const warning =
+          '\n\n[Tool chain truncated: maximum tail-call depth reached; skipping nextToolCall]'
+        return {
+          callInfos: [currentCallInfo],
+          resultBlocks: [
+            { ...currentResultBlock, content: `${currentResultBlock.content}${warning}` },
+          ],
+        }
+      }
+
+      const chainedCall: ToolUseBlock = {
+        type: 'tool_use',
+        id: `${call.id}:chain:${chainDepth + 1}`,
+        name: result.nextToolCall.name,
+        input: result.nextToolCall.input,
+      }
+      const chained = await this.executeOneToolCall(chainedCall, cwd, model, signal, chainDepth + 1)
+      return {
+        callInfos: [currentCallInfo, ...chained.callInfos],
+        resultBlocks: [currentResultBlock, ...chained.resultBlocks],
+      }
+    }
+
     return {
-      callInfo: {
-        name: resolvedName,
-        args: call.input,
-        result: output,
-        success: result.success,
-        durationMs,
-      },
-      resultBlock: {
-        type: 'tool_result' as const,
-        tool_use_id: call.id,
-        content: efficientOutput,
-        is_error: !result.success,
-      },
+      callInfos: [currentCallInfo],
+      resultBlocks: [currentResultBlock],
     }
   }
 
-  /** Execute all tool calls in parallel via Promise.all(). */
+  /** Execute tool calls in parallel only when all are read-only. */
   private async executeToolCallsParallel(
     toolCalls: ToolUseBlock[],
     cwd: string,
     model: string,
     signal: AbortSignal
-  ): Promise<{ callInfo: ToolCallInfo; resultBlock: ToolResultBlock }[]> {
+  ): Promise<{ callInfos: ToolCallInfo[]; resultBlocks: ToolResultBlock[] }[]> {
+    if (!this.areToolCallsIndependent(toolCalls)) {
+      return this.executeToolCallsSequential(toolCalls, cwd, model, signal)
+    }
     return Promise.all(toolCalls.map((call) => this.executeOneToolCall(call, cwd, model, signal)))
   }
 
@@ -967,12 +1048,17 @@ export class AgentExecutor {
     cwd: string,
     model: string,
     signal: AbortSignal
-  ): Promise<{ callInfo: ToolCallInfo; resultBlock: ToolResultBlock }[]> {
-    const results: { callInfo: ToolCallInfo; resultBlock: ToolResultBlock }[] = []
+  ): Promise<{ callInfos: ToolCallInfo[]; resultBlocks: ToolResultBlock[] }[]> {
+    const results: { callInfos: ToolCallInfo[]; resultBlocks: ToolResultBlock[] }[] = []
     for (const call of toolCalls) {
       results.push(await this.executeOneToolCall(call, cwd, model, signal))
     }
     return results
+  }
+
+  private areToolCallsIndependent(toolCalls: ToolUseBlock[]): boolean {
+    if (toolCalls.length <= 1) return true
+    return toolCalls.every((call) => READ_ONLY_TOOLS.has(call.name))
   }
 
   /**
@@ -1020,7 +1106,7 @@ export class AgentExecutor {
     return prompt
   }
 
-  private getAvailableTools(): ToolDefinition[] {
+  private async getAvailableTools(): Promise<ToolDefinition[]> {
     let tools = getToolDefinitions()
 
     // Filter by allowedTools if set (for subagents)
@@ -1035,6 +1121,19 @@ export class AgentExecutor {
       if (mode?.filterTools) {
         tools = mode.filterTools(tools)
       }
+    }
+
+    try {
+      const described = await callHook<ToolDefinition[], ToolDefinition[]>(
+        'tool:describe',
+        tools,
+        tools
+      )
+      tools = described.output
+    } catch (error) {
+      loopLog.warn('tool:describe hook failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
     }
 
     return tools

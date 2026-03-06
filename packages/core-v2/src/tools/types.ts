@@ -46,6 +46,11 @@ export interface ToolResult {
   metadata?: Record<string, unknown>
   error?: string
   locations?: ToolLocation[]
+  /** Optional tail-call tool request to run immediately without another LLM turn. */
+  nextToolCall?: {
+    name: string
+    input: Record<string, unknown>
+  }
 }
 
 // ─── Tool Interface ──────────────────────────────────────────────────────────

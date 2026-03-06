@@ -275,7 +275,7 @@ function isAlwaysApproved(toolName: string, args: Record<string, unknown>): bool
 export function createPermissionMiddleware(bus?: MessageBus): ToolMiddleware {
   return {
     name: 'ava-permissions',
-    priority: 0, // Runs first — before all other middleware
+    priority: 4,
 
     async before(ctx: ToolMiddlewareContext): Promise<ToolMiddlewareResult | undefined> {
       const { toolName, args } = ctx

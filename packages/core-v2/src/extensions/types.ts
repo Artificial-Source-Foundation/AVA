@@ -158,6 +158,7 @@ export interface SlashCommand {
 /** Well-known hook names (extensible via string). */
 export type HookName =
   | 'prompt:transform'
+  | 'tool:describe'
   | 'tool:beforeExecute'
   | 'tool:afterExecute'
   | 'history:process'

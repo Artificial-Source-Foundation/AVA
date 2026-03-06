@@ -12,6 +12,7 @@ import type {
   ToolUseBlock,
 } from '@ava/core-v2/llm'
 import { getAuth } from '@ava/core-v2/llm'
+import { normalizeProviderMessages } from '../../src/normalize.js'
 import { addCacheControlMarkers, addToolCacheMarker } from './cache.js'
 
 const BASE_URL = 'https://api.anthropic.com/v1'
@@ -56,8 +57,10 @@ export class AnthropicClient implements LLMClient {
       return
     }
 
+    const preNormalizedMessages = normalizeProviderMessages(messages, config.provider)
+
     // Apply prompt caching markers before processing
-    const cachedMessages = addCacheControlMarkers(messages)
+    const cachedMessages = addCacheControlMarkers(preNormalizedMessages)
 
     // Separate system message from conversation
     const systemMessage = cachedMessages.find((m) => m.role === 'system')

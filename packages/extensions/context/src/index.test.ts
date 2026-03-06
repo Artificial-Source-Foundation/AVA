@@ -47,12 +47,43 @@ describe('context extension activation', () => {
     expect(eventHandlers.has('session:status')).toBe(true)
   })
 
+  it('listens for prompt:build events for per-turn context injection', () => {
+    const { api, eventHandlers } = createMockExtensionAPI()
+    withHook(api as unknown as Record<string, unknown>)
+    activate(api)
+    expect(eventHandlers.has('prompt:build')).toBe(true)
+  })
+
   it('logs session:status events', () => {
     const { api } = createMockExtensionAPI()
     withHook(api as unknown as Record<string, unknown>)
     activate(api)
     api.emit('session:status', { sessionId: 'sess-1', status: 'busy' })
     expect(api.log.debug).toHaveBeenCalledWith('Session status: sess-1 -> busy')
+  })
+
+  it('injects one-line turn context into prompt sections', () => {
+    const { api } = createMockExtensionAPI()
+    withHook(api as unknown as Record<string, unknown>)
+    activate(api)
+
+    api.emit('session:opened', { sessionId: 's1', workingDirectory: '/project' })
+    api.emit('extensions:loaded', { count: 31 })
+    api.emit('turn:start', { turn: 3 })
+    api.emit('llm:usage', {
+      sessionId: 's1',
+      inputTokens: 45_000,
+      outputTokens: 45_000,
+    })
+
+    const sections: string[] = []
+    api.emit('prompt:build', { sections })
+
+    expect(sections).toHaveLength(1)
+    expect(sections[0]).toContain('[Context] CWD: /project')
+    expect(sections[0]).toContain('Tokens: 45% of 200K')
+    expect(sections[0]).toContain('Turn: 3/50')
+    expect(sections[0]).toContain('Extensions: 31 active')
   })
 
   it('cleans up on dispose', () => {

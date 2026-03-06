@@ -8,6 +8,7 @@ import { createPermissionMiddleware, updateSettings } from './middleware.js'
 import { loadDeclarativePolicies } from './policy/index.js'
 import { activate as activateRules } from './rules/index.js'
 import { createSandboxMiddleware } from './sandbox-middleware.js'
+import { createSmartApproveMiddleware } from './smart-approve.js'
 import type { ToolPermissionRule } from './types.js'
 
 function applySettings(raw: Record<string, unknown>): void {
@@ -37,6 +38,7 @@ export function activate(api: ExtensionAPI): Disposable {
   const rulesDisposable = activateRules(api)
 
   // Register the permission middleware (pass bus for interactive approval)
+  const smartApproveDisposable = api.addToolMiddleware(createSmartApproveMiddleware())
   const sandboxDisposable = api.addToolMiddleware(createSandboxMiddleware())
   const mwDisposable = api.addToolMiddleware(createPermissionMiddleware(api.bus))
 
@@ -65,6 +67,7 @@ export function activate(api: ExtensionAPI): Disposable {
   return {
     dispose() {
       rulesDisposable.dispose()
+      smartApproveDisposable.dispose()
       sandboxDisposable.dispose()
       mwDisposable.dispose()
       settingsDisposable.dispose()
@@ -99,6 +102,7 @@ export {
   isToolAutoApproved,
   PERMISSION_MODES,
 } from './modes.js'
+export { createSmartApproveMiddleware, READ_ONLY_TOOLS } from './smart-approve.js'
 export type {
   PermissionRequest,
   PermissionResponse,

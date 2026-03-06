@@ -1307,6 +1307,122 @@ describe('Parallel tool execution', () => {
     expect(toolStartEvents.map((e) => e.toolName).sort()).toEqual(['grep', 'read_file'])
     expect(toolFinishEvents.map((e) => e.toolName).sort()).toEqual(['grep', 'read_file'])
   })
+
+  it('falls back to sequential execution when a write tool is present', async () => {
+    const executionLog: string[] = []
+
+    const client = createMockClient([
+      [
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-a',
+            name: 'read_file',
+            input: { path: '/a.txt' },
+          },
+        },
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-b',
+            name: 'write_file',
+            input: { path: '/b.txt', content: 'x' },
+          },
+        },
+      ],
+      [{ content: 'Done', done: true }],
+    ])
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+      mockToolDef('write_file'),
+    ])
+    vi.spyOn(await import('../tools/registry.js'), 'executeTool').mockImplementation(
+      async (name: string) => {
+        executionLog.push(`start:${name}`)
+        const delay = name === 'read_file' ? 30 : 5
+        await new Promise((r) => setTimeout(r, delay))
+        executionLog.push(`end:${name}`)
+        return { success: true, output: `result-${name}` }
+      }
+    )
+
+    const exec = new AgentExecutor({ maxTurns: 5, parallelToolExecution: true })
+    await exec.run({ goal: 'Read then write', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    const endRead = executionLog.indexOf('end:read_file')
+    const startWrite = executionLog.indexOf('start:write_file')
+    expect(endRead).toBeLessThan(startWrite)
+  })
+
+  it('executes nextToolCall in the same turn up to chain depth', async () => {
+    const capturedHistory: Array<{ role: string; content: unknown }> = []
+    const firstTurnClient = createMockClient([
+      [
+        {
+          toolUse: {
+            type: 'tool_use',
+            id: 'call-a',
+            name: 'read_file',
+            input: { path: '/a.txt' },
+          },
+        },
+      ],
+      [{ content: 'Done', done: true }],
+    ])
+
+    const client: LLMClient = {
+      async *stream(messages) {
+        if (messages.length > 2) {
+          for (const m of messages) capturedHistory.push({ role: m.role, content: m.content })
+        }
+        yield* firstTurnClient.stream(messages, {} as never, new AbortController().signal)
+      },
+    }
+
+    vi.spyOn(await import('../llm/client.js'), 'createClient').mockReturnValue(client)
+    vi.spyOn(await import('../tools/registry.js'), 'getToolDefinitions').mockReturnValue([
+      mockToolDef('read_file'),
+      mockToolDef('grep'),
+    ])
+    const executeToolSpy = vi
+      .spyOn(await import('../tools/registry.js'), 'executeTool')
+      .mockImplementation(async (name: string) => {
+        if (name === 'read_file') {
+          return {
+            success: true,
+            output: 'file content',
+            nextToolCall: { name: 'grep', input: { pattern: 'foo', path: '/a.txt' } },
+          }
+        }
+        return { success: true, output: 'grep matches' }
+      })
+
+    const exec = new AgentExecutor({ maxTurns: 5 })
+    await exec.run({ goal: 'Chain read then grep', cwd: '/tmp' }, AbortSignal.timeout(5000))
+
+    expect(executeToolSpy).toHaveBeenCalledTimes(2)
+    expect(executeToolSpy).toHaveBeenNthCalledWith(
+      1,
+      'read_file',
+      { path: '/a.txt' },
+      expect.any(Object)
+    )
+    expect(executeToolSpy).toHaveBeenNthCalledWith(
+      2,
+      'grep',
+      { pattern: 'foo', path: '/a.txt' },
+      expect.any(Object)
+    )
+
+    const toolResultMsg = capturedHistory.find((m) => m.role === 'user' && Array.isArray(m.content))
+    expect(toolResultMsg).toBeDefined()
+    const results = toolResultMsg!.content as ToolResultBlock[]
+    expect(results).toHaveLength(2)
+    expect(results[0]!.tool_use_id).toBe('call-a')
+    expect(results[1]!.tool_use_id).toContain('call-a:chain:1')
+  })
 })
 
 // ─── Doom Loop Detection ────────────────────────────────────────────────────

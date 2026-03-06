@@ -21,6 +21,7 @@ import { activate as activateCustomCommands } from './custom-commands/index.js'
 import { DiscoveryCache } from './discovery-cache.js'
 import { loadInstructions, mergeInstructions } from './loader.js'
 import { extractPaths, toDirectoryKey } from './path-extractor.js'
+import { loadCrossToolSkillInstructions } from './skill-compat.js'
 import { activate as activateSkills } from './skills/index.js'
 import { resolveSubdirectoryInstructions } from './subdirectory.js'
 import type { InstructionConfig } from './types.js'
@@ -58,21 +59,36 @@ export function activate(api: ExtensionAPI): Disposable {
       alreadyLoaded.clear()
       cache.clear()
 
-      void loadInstructions(workingDirectory, api.platform.fs, config, api.log).then((files) => {
-        if (files.length > 0) {
-          const merged = mergeInstructions(files)
-          // Track all initially loaded paths for dedup
-          for (const f of files) alreadyLoaded.add(f.path)
-          void api.storage.set(`instructions:${sessionId}`, files)
-          api.emit('instructions:loaded', {
-            sessionId,
-            files,
-            merged,
-            count: files.length,
-          })
-          api.log.info(`Loaded ${files.length} instruction file(s)`)
+      void loadInstructions(workingDirectory, api.platform.fs, config, api.log).then(
+        async (files) => {
+          const compatFiles = await loadCrossToolSkillInstructions(
+            workingDirectory,
+            api.platform.fs,
+            api.log
+          )
+
+          const mergedFiles = [...files]
+          for (const compat of compatFiles) {
+            if (!alreadyLoaded.has(compat.path)) {
+              mergedFiles.push(compat)
+            }
+          }
+
+          if (mergedFiles.length > 0) {
+            const merged = mergeInstructions(mergedFiles)
+            // Track all initially loaded paths for dedup
+            for (const f of mergedFiles) alreadyLoaded.add(f.path)
+            void api.storage.set(`instructions:${sessionId}`, mergedFiles)
+            api.emit('instructions:loaded', {
+              sessionId,
+              files: mergedFiles,
+              merged,
+              count: mergedFiles.length,
+            })
+            api.log.info(`Loaded ${mergedFiles.length} instruction file(s)`)
+          }
         }
-      })
+      )
     })
   )
 

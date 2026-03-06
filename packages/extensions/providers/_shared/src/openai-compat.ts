@@ -16,6 +16,7 @@ import type {
   ToolUseBlock,
 } from '@ava/core-v2/llm'
 import { getApiKey } from '@ava/core-v2/llm'
+import { normalizeProviderMessages } from '../../src/normalize.js'
 import { buildHttpError, parseRetryAfter } from './errors.js'
 import { readSSEStream } from './sse.js'
 
@@ -377,7 +378,10 @@ export function createOpenAICompatClient(
         return
       }
 
-      const transformedMessages = transformMessages ? transformMessages(messages) : messages
+      const preNormalizedMessages = normalizeProviderMessages(messages, config.provider)
+      const transformedMessages = transformMessages
+        ? transformMessages(preNormalizedMessages)
+        : preNormalizedMessages
       let body = buildOpenAIRequestBody(transformedMessages, config, { model: defaultModel })
       if (transformRequestBody) body = transformRequestBody(body)
 

@@ -66,8 +66,7 @@ impl Tool for BashTool {
             .unwrap_or(DEFAULT_TIMEOUT_MS);
 
         let final_command = if let Some(cwd) = args.get("cwd").and_then(Value::as_str) {
-            let escaped = cwd.replace('"', "\\\"");
-            format!("cd \"{escaped}\" && {command}")
+            format!("cd {} && {command}", shell_single_quote(cwd))
         } else {
             command
         };
@@ -108,7 +107,7 @@ impl Tool for BashTool {
             return Ok(ToolResult {
                 call_id: String::new(),
                 content: rendered,
-                is_error: false,
+                is_error: output.exit_code != 0,
             });
         }
 
@@ -128,7 +127,7 @@ impl Tool for BashTool {
         Ok(ToolResult {
             call_id: String::new(),
             content: rendered,
-            is_error: false,
+            is_error: output.exit_code != 0,
         })
     }
 }
@@ -148,9 +147,9 @@ fn truncate_with_notice(content: &mut String, max_bytes: usize) {
 }
 
 fn is_install_class(command: &str) -> bool {
+    let normalized = command.trim().to_lowercase();
     let patterns = [
         "npm install",
-        "npm i ",
         "yarn add",
         "pnpm add",
         "pip install",
@@ -162,7 +161,15 @@ fn is_install_class(command: &str) -> bool {
         "brew install",
     ];
 
-    patterns.iter().any(|pattern| command.contains(pattern))
+    normalized == "npm i"
+        || normalized.contains("npm i ")
+        || patterns
+            .iter()
+            .any(|pattern| normalized.contains(pattern))
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 fn filtered_env() -> Vec<(String, String)> {

@@ -15,10 +15,14 @@ pub struct SandboxOutput {
 
 pub async fn execute_plan(plan: &SandboxPlan, timeout: Duration) -> Result<SandboxOutput, SandboxError> {
     let result = tokio::time::timeout(timeout, async {
-        let output = Command::new(&plan.program)
+        let mut command = Command::new(&plan.program);
+        command
             .args(&plan.args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .kill_on_drop(true);
+
+        let output = command
             .spawn()
             .map_err(|e| SandboxError::ExecutionFailed(e.to_string()))?
             .wait_with_output()

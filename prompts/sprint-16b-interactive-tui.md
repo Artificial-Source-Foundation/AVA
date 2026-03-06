@@ -11,7 +11,7 @@
 You are implementing Sprint 16 (Interactive TUI) for AVA, a multi-agent AI coding assistant.
 
 Read these files first:
-- `CLAUDE.md` (conventions, architecture, dispatchCompute pattern)
+- `CLAUDE.md` (conventions, Rust-first architecture)
 - `docs/research/tui-comparison-matrix.md` (competitor analysis — read the FULL document)
 - `crates/ava-agent/src/lib.rs` (agent loop API)
 - `crates/ava-llm/src/lib.rs` (LLM provider API)
@@ -974,18 +974,110 @@ pub fn init_agent_stack(config: &CliConfig) -> Result<AgentStack> {
 
 ---
 
+## Pre-Feature Smoke Test: Verify Rust Agent Stack
+
+**Before starting on TUI features**, verify the Rust agent stack from Sprint 16a/16c is working end-to-end.
+
+### Step 1: Build and test the workspace
+```bash
+cargo test --workspace
+cargo clippy --workspace
+```
+If tests fail, fix before proceeding.
+
+### Step 2: Create a minimal CLI smoke test binary
+
+**File:** `crates/ava-tui/src/bin/smoke.rs` (temporary, delete after TUI is working)
+
+```rust
+//! Smoke test: verify AgentStack runs end-to-end with a mock provider
+use ava_agent::stack::{AgentStack, AgentStackConfig, AgentEvent};
+use ava_llm::providers::mock::MockProvider;
+use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
+
+#[tokio::main]
+async fn main() -> color_eyre::Result<()> {
+    color_eyre::install()?;
+    let temp_dir = tempfile::tempdir()?;
+
+    let stack = AgentStack::new(AgentStackConfig {
+        data_dir: temp_dir.path().to_path_buf(),
+        injected_provider: Some(Arc::new(MockProvider::new())),
+        max_turns: 3,
+        ..Default::default()
+    }).await?;
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let cancel = CancellationToken::new();
+
+    println!("Running agent with mock provider...");
+    let handle = {
+        let cancel = cancel.clone();
+        tokio::spawn(async move {
+            stack.run("Say hello", 3, Some(tx), cancel).await
+        })
+    };
+
+    // Print events as they arrive
+    while let Some(event) = rx.recv().await {
+        match &event {
+            AgentEvent::Token(t) => print!("{t}"),
+            AgentEvent::ToolCall(tc) => println!("\n[tool: {}]", tc),
+            AgentEvent::ToolResult(tr) => println!("[result: {}]", tr),
+            AgentEvent::Progress(p) => println!("[progress: {}]", p),
+            AgentEvent::Complete(_) => { println!("\n[complete]"); break; }
+            AgentEvent::Error(e) => { eprintln!("\n[error: {}]", e); break; }
+        }
+    }
+
+    let result = handle.await??;
+    println!("\nSmoke test result: success={}, turns={}", result.success, result.turns);
+    Ok(())
+}
+```
+
+Add to `Cargo.toml`:
+```toml
+[[bin]]
+name = "ava-smoke"
+path = "src/bin/smoke.rs"
+```
+
+Run it:
+```bash
+cargo run -p ava-tui --bin ava-smoke
+```
+
+If this prints events and completes successfully, the Rust agent stack is verified. Proceed to Feature 1.
+
+### Step 3 (optional): Real provider smoke test
+
+If credentials are configured at `~/.ava/credentials.json`, test with a real provider:
+```bash
+# Set in credentials.json: { "providers": { "openrouter": { "api_key": "..." } } }
+cargo run -p ava-tui --bin ava-smoke -- --real --provider openrouter --model anthropic/claude-sonnet-4.6
+```
+
+This requires adding a `--real` flag to the smoke binary that skips the mock provider injection and lets `AgentStack` load credentials normally.
+
+---
+
 ## Post-Implementation Verification
 
 After ALL 8 features:
 
-1. `cargo test --workspace` — all tests pass (including new core tool tests)
+1. `cargo test --workspace` — all tests pass
 2. `cargo clippy --workspace -- -D warnings` — no warnings
 3. `cargo build --release -p ava-tui` — binary builds
 4. Verify no files exceed 300 lines
-5. Manual test: `cargo run -p ava-tui` — TUI launches
-6. Manual test: `cargo run -p ava-tui -- "hello"` — submits goal
-7. Binary size check: `ls -lh target/release/ava` (should be ~10-20MB)
-8. Commit: `git commit -m "feat(sprint-16): interactive TUI with ratatui"`
+5. Smoke test: `cargo run -p ava-tui --bin ava-smoke` — agent pipeline works
+6. Manual test: `cargo run -p ava-tui` — TUI launches
+7. Manual test: `cargo run -p ava-tui -- "hello"` — submits goal
+8. Binary size check: `ls -lh target/release/ava` (should be ~10-20MB)
+9. Delete `src/bin/smoke.rs` if TUI is fully working
+10. Commit: `git commit -m "feat(sprint-16b): interactive TUI with ratatui"`
 
 ---
 

@@ -127,8 +127,3 @@ impl Tool for GrepTool {
         })
     }
 }
-
-#[allow(dead_code)]
-fn _is_under_root(file_path: &Path, root: &Path) -> bool {
-    file_path.starts_with(root)
-}

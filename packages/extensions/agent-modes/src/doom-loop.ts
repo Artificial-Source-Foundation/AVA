@@ -93,6 +93,7 @@ interface EnhancedSessionState {
   wastedTokens: number
   totalTokens: number
   noProgressTurns: number
+  consecutiveCompactions: number
   lastScenarioTurn: Map<string, number>
 }
 
@@ -118,6 +119,7 @@ function getState(sessionId: string): EnhancedSessionState {
     wastedTokens: 0,
     totalTokens: 0,
     noProgressTurns: 0,
+    consecutiveCompactions: 0,
     lastScenarioTurn: new Map(),
   }
   enhancedSessions.set(sessionId, created)
@@ -155,6 +157,32 @@ function evaluateErrorCycling(state: EnhancedSessionState): { detected: boolean;
   return {
     detected: state.consecutiveErrorCount >= enhancedConfig.errorCycleThreshold,
     count: state.consecutiveErrorCount,
+  }
+}
+
+function evaluateAlternatingPairs(state: EnhancedSessionState): {
+  detected: boolean
+  count: number
+  pair?: string
+} {
+  if (state.recentToolCalls.length < 6) return { detected: false, count: 0 }
+  const last6 = state.recentToolCalls.slice(-6)
+  const pair1 = `${toSignature(last6[0] as EnhancedToolCall)}|${toSignature(last6[1] as EnhancedToolCall)}`
+  const pair2 = `${toSignature(last6[2] as EnhancedToolCall)}|${toSignature(last6[3] as EnhancedToolCall)}`
+  const pair3 = `${toSignature(last6[4] as EnhancedToolCall)}|${toSignature(last6[5] as EnhancedToolCall)}`
+  if (pair1 === pair2 && pair2 === pair3) {
+    return { detected: true, count: 3, pair: pair1 }
+  }
+  return { detected: false, count: 0 }
+}
+
+function evaluateContextWindowLoop(state: EnhancedSessionState): {
+  detected: boolean
+  count: number
+} {
+  return {
+    detected: state.consecutiveCompactions >= 5,
+    count: state.consecutiveCompactions,
   }
 }
 
@@ -435,6 +463,10 @@ export function registerDoomLoop(api: ExtensionAPI): Disposable {
     }
 
     for (const call of toolCalls) {
+      if (call.success) {
+        state.consecutiveCompactions = 0
+      }
+
       state.recentSignatures.push(toSignature(call))
       if (state.recentSignatures.length > 25) state.recentSignatures.shift()
       state.recentToolCalls.push(call)
@@ -482,6 +514,30 @@ export function registerDoomLoop(api: ExtensionAPI): Disposable {
         'error-cycling',
         cycling.count,
         'Repeated identical error pattern detected; switch strategy or inspect root cause.',
+        'high'
+      )
+    }
+
+    const alternating = evaluateAlternatingPairs(state)
+    if (alternating.detected && canEmitScenario(state, 'alternating-pairs')) {
+      emitStuck(
+        api,
+        sessionId,
+        'alternating-pairs',
+        alternating.count,
+        'Detected repeated alternating two-step tool pattern. Break the loop by changing strategy.',
+        'high'
+      )
+    }
+
+    const contextLoop = evaluateContextWindowLoop(state)
+    if (contextLoop.detected && canEmitScenario(state, 'context-window-loop')) {
+      emitStuck(
+        api,
+        sessionId,
+        'context-window-loop',
+        contextLoop.count,
+        'Repeated context compaction detected without productive work. Change approach or reset plan scope.',
         'high'
       )
     }
@@ -574,11 +630,20 @@ export function registerDoomLoop(api: ExtensionAPI): Disposable {
     }
   })
 
+  const compactionDisposable = api.on('context:compacting', (data: unknown) => {
+    const event = data as { sessionId?: string; agentId?: string }
+    const sessionId = event.sessionId ?? event.agentId
+    if (!sessionId) return
+    const state = getState(sessionId)
+    state.consecutiveCompactions += 1
+  })
+
   return {
     dispose() {
       toolDisposable.dispose()
       turnDisposable.dispose()
       usageDisposable.dispose()
+      compactionDisposable.dispose()
     },
   }
 }

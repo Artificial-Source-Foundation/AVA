@@ -128,6 +128,12 @@ export type AgentEvent =
   | { type: 'agent:steered'; agentId: string; message: string }
   | { type: 'agent:follow-up-queued'; agentId: string; message: string }
   | {
+      type: 'agent:tools-skipped'
+      agentId: string
+      skippedTools: string[]
+      reason: 'steering'
+    }
+  | {
       type: 'delegation:start'
       agentId: string
       childAgentId: string

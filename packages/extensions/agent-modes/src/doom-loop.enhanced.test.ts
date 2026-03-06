@@ -1,5 +1,5 @@
+import { createMockExtensionAPI } from '@ava/core-v2/__test-utils__/mock-extension-api'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createMockExtensionAPI } from '../../../core-v2/src/__test-utils__/mock-extension-api.js'
 
 import { configureEnhanced, registerDoomLoop, resetDoomLoop } from './doom-loop.js'
 
@@ -127,5 +127,124 @@ describe('enhanced stuck detection', () => {
         (e.data as { scenario: string }).scenario === 'self-assessment'
     )
     expect(stuck).toBeDefined()
+  })
+
+  it('detects alternating pairs pattern (A,B repeated 3x)', () => {
+    const { api, emittedEvents } = createMockExtensionAPI()
+    register(api)
+
+    api.emit('turn:end', {
+      agentId: 'a2',
+      turn: 1,
+      toolCalls: [
+        { name: 'read_file', args: { path: 'a.ts' }, success: true, result: 'ok' },
+        { name: 'grep', args: { pattern: 'foo' }, success: true, result: 'ok' },
+      ],
+    })
+    api.emit('turn:end', {
+      agentId: 'a2',
+      turn: 2,
+      toolCalls: [
+        { name: 'read_file', args: { path: 'a.ts' }, success: true, result: 'ok' },
+        { name: 'grep', args: { pattern: 'foo' }, success: true, result: 'ok' },
+      ],
+    })
+    api.emit('turn:end', {
+      agentId: 'a2',
+      turn: 3,
+      toolCalls: [
+        { name: 'read_file', args: { path: 'a.ts' }, success: true, result: 'ok' },
+        { name: 'grep', args: { pattern: 'foo' }, success: true, result: 'ok' },
+      ],
+    })
+
+    const stuck = emittedEvents.find(
+      (e) =>
+        e.event === 'stuck:detected' &&
+        (e.data as { scenario: string }).scenario === 'alternating-pairs'
+    )
+    expect(stuck).toBeDefined()
+  })
+
+  it('does not detect alternating pairs for mixed calls', () => {
+    const { api, emittedEvents } = createMockExtensionAPI()
+    register(api)
+
+    api.emit('turn:end', {
+      agentId: 'a3',
+      turn: 1,
+      toolCalls: [
+        { name: 'read_file', args: { path: 'a.ts' }, success: true, result: 'ok' },
+        { name: 'grep', args: { pattern: 'foo' }, success: true, result: 'ok' },
+      ],
+    })
+    api.emit('turn:end', {
+      agentId: 'a3',
+      turn: 2,
+      toolCalls: [
+        { name: 'read_file', args: { path: 'b.ts' }, success: true, result: 'ok' },
+        { name: 'grep', args: { pattern: 'foo' }, success: true, result: 'ok' },
+      ],
+    })
+    api.emit('turn:end', {
+      agentId: 'a3',
+      turn: 3,
+      toolCalls: [
+        { name: 'read_file', args: { path: 'a.ts' }, success: true, result: 'ok' },
+        { name: 'grep', args: { pattern: 'bar' }, success: true, result: 'ok' },
+      ],
+    })
+
+    const stuck = emittedEvents.find(
+      (e) =>
+        e.event === 'stuck:detected' &&
+        (e.data as { scenario: string }).scenario === 'alternating-pairs'
+    )
+    expect(stuck).toBeUndefined()
+  })
+
+  it('detects context window loop after consecutive compactions', () => {
+    const { api, emittedEvents } = createMockExtensionAPI()
+    register(api)
+
+    for (let i = 0; i < 5; i++) {
+      api.emit('context:compacting', { sessionId: 'a4' })
+      api.emit('turn:end', { agentId: 'a4', turn: i + 1, toolCalls: [] })
+    }
+
+    const stuck = emittedEvents.find(
+      (e) =>
+        e.event === 'stuck:detected' &&
+        (e.data as { scenario: string }).scenario === 'context-window-loop'
+    )
+    expect(stuck).toBeDefined()
+  })
+
+  it('does not detect context window loop when productive work occurs between compactions', () => {
+    const { api, emittedEvents } = createMockExtensionAPI()
+    register(api)
+
+    for (let i = 0; i < 3; i++) {
+      api.emit('context:compacting', { sessionId: 'a5' })
+      api.emit('turn:end', { agentId: 'a5', turn: i + 1, toolCalls: [] })
+    }
+
+    api.emit('turn:end', {
+      agentId: 'a5',
+      turn: 4,
+      toolCalls: [{ name: 'read_file', args: { path: 'x.ts' }, success: true, result: 'ok' }],
+    })
+
+    for (let i = 0; i < 2; i++) {
+      api.emit('context:compacting', { sessionId: 'a5' })
+      api.emit('turn:end', { agentId: 'a5', turn: i + 5, toolCalls: [] })
+    }
+
+    const stuck = emittedEvents.find(
+      (e) =>
+        e.event === 'stuck:detected' &&
+        (e.data as { scenario: string }).scenario === 'context-window-loop'
+    )
+    expect(stuck).toBeUndefined()
   })
 })

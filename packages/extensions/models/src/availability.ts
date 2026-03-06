@@ -82,6 +82,58 @@ const FALLBACK_CHAINS: Record<string, string[]> = {
   'openrouter:anthropic/claude-opus': ['anthropic/claude-sonnet-4', 'openai/gpt-4o'],
 }
 
+export interface ContextFallbackChain {
+  provider: string
+  model: string
+  contextWindow: number
+}
+
+/** Ordered by context window size (ascending). */
+const CONTEXT_FALLBACK_CHAINS: Record<string, ContextFallbackChain[]> = {
+  anthropic: [
+    { provider: 'anthropic', model: 'claude-haiku-4-5', contextWindow: 200_000 },
+    { provider: 'anthropic', model: 'claude-sonnet-4-6', contextWindow: 200_000 },
+    { provider: 'anthropic', model: 'claude-opus-4-6', contextWindow: 200_000 },
+  ],
+  openrouter: [
+    { provider: 'openrouter', model: 'anthropic/claude-sonnet-4-6', contextWindow: 200_000 },
+    { provider: 'openrouter', model: 'google/gemini-2.5-pro', contextWindow: 1_000_000 },
+  ],
+}
+
+function normalizeModelName(model: string): string {
+  return model.toLowerCase()
+}
+
+function getCurrentContextWindow(provider: string, model: string): number {
+  const chain = CONTEXT_FALLBACK_CHAINS[provider]
+  if (!chain) return 0
+  const normalized = normalizeModelName(model)
+  const match = chain.find((entry) => normalized.includes(normalizeModelName(entry.model)))
+  return match?.contextWindow ?? 0
+}
+
+export function getContextFallback(
+  currentProvider: string,
+  currentModel: string,
+  requiredTokens: number
+): ContextFallbackChain | null {
+  const chain = CONTEXT_FALLBACK_CHAINS[currentProvider]
+  if (!chain || chain.length === 0) return null
+
+  const currentWindow = getCurrentContextWindow(currentProvider, currentModel)
+  const ordered = [...chain].sort((a, b) => a.contextWindow - b.contextWindow)
+
+  for (const entry of ordered) {
+    if (entry.contextWindow <= currentWindow) continue
+    if (entry.contextWindow < requiredTokens) continue
+    if (!isModelAvailable(entry.provider, entry.model)) continue
+    return entry
+  }
+
+  return null
+}
+
 export function getFallbackModel(
   provider: string,
   model: string

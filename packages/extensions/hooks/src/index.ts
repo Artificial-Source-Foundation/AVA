@@ -18,6 +18,7 @@ import { createErrorRecoveryMiddleware } from './error-recovery-middleware.js'
 import { activate as activateFileWatcher } from './file-watcher/index.js'
 import { createFormatterMiddleware } from './formatter.js'
 import { createFormatterDetectionMiddleware } from './formatter-detection.js'
+import { createProgressiveEscalationMiddleware } from './progressive-escalation.js'
 import { runHooks } from './runner.js'
 import { activate as activateScheduler } from './scheduler/index.js'
 import type { PostToolUseContext, PreToolUseContext } from './types.js'
@@ -70,6 +71,7 @@ export function activate(api: ExtensionAPI): Disposable {
   disposables.push(activateScheduler(api))
 
   disposables.push(api.addToolMiddleware(createHooksMiddleware()))
+  disposables.push(api.addToolMiddleware(createProgressiveEscalationMiddleware(api, api.log)))
   disposables.push(api.addToolMiddleware(createErrorRecoveryMiddleware(api.platform, api.log)))
 
   // Register formatter middleware when a session opens

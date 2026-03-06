@@ -9,9 +9,9 @@ describe('createBuiltinCommands', () => {
     signal: new AbortController().signal,
   }
 
-  it('creates 11 built-in commands', () => {
+  it('creates 12 built-in commands', () => {
     const commands = createBuiltinCommands(emit)
-    expect(commands).toHaveLength(11)
+    expect(commands).toHaveLength(12)
   })
 
   it('includes expected command names', () => {
@@ -20,6 +20,7 @@ describe('createBuiltinCommands', () => {
     expect(names).toContain('help')
     expect(names).toContain('clear')
     expect(names).toContain('mode')
+    expect(names).toContain('architect')
     expect(names).toContain('model')
     expect(names).toContain('compact')
     expect(names).toContain('undo')
@@ -54,6 +55,20 @@ describe('createBuiltinCommands', () => {
     const mode = commands.find((c) => c.name === 'mode')!
     const result = await mode.execute('', ctx)
     expect(result).toContain('Usage')
+  })
+
+  it('/architect enables architect mode by default', async () => {
+    const commands = createBuiltinCommands(emit)
+    const architect = commands.find((c) => c.name === 'architect')!
+    await architect.execute('', ctx)
+    expect(emit).toHaveBeenCalledWith('mode:switch', { mode: 'architect' })
+  })
+
+  it('/architect off switches back to normal mode', async () => {
+    const commands = createBuiltinCommands(emit)
+    const architect = commands.find((c) => c.name === 'architect')!
+    await architect.execute('off', ctx)
+    expect(emit).toHaveBeenCalledWith('mode:switch', { mode: 'normal' })
   })
 
   it('/model emits model:switch', async () => {

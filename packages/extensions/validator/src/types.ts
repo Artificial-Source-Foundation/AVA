@@ -2,6 +2,8 @@
  * Validator types — QA pipeline contracts.
  */
 
+import type { LLMProvider } from '@ava/core-v2/llm'
+
 export type ValidatorName = 'syntax' | 'typescript' | 'lint' | 'test' | 'build' | 'self-review'
 
 export interface ValidationResult {
@@ -33,6 +35,10 @@ export interface ValidatorConfig {
   enabledValidators: ValidatorName[]
   timeout: number
   failFast: boolean
+  reviewEnabled?: boolean
+  reviewProvider?: LLMProvider
+  reviewModel?: string
+  reviewMaxRetries?: number
   testCommand?: string
   buildCommand?: string
   lintCommand?: string
@@ -44,6 +50,8 @@ export const DEFAULT_VALIDATOR_CONFIG: ValidatorConfig = {
   enabledValidators: ['syntax', 'typescript', 'lint'],
   timeout: 30_000,
   failFast: true,
+  reviewEnabled: false,
+  reviewMaxRetries: 1,
 }
 
 export interface ValidationPipelineResult {

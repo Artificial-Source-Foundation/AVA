@@ -6,6 +6,7 @@
 
 import { getSettingsManager } from '@ava/core-v2/config'
 import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
+import { registerArchitectMode } from './architect-mode.js'
 import { registerBestOfNMode } from './best-of-n-mode.js'
 import { registerDoomLoop } from './doom-loop.js'
 import { activate as activateFocusChain } from './focus-chain/index.js'
@@ -30,6 +31,7 @@ export function activate(api: ExtensionAPI): Disposable {
     registerMinimalMode(api),
     registerWindowedMode(api),
     registerBestOfNMode(api),
+    registerArchitectMode(api),
     registerDoomLoop(api),
   ]
 

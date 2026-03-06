@@ -40,6 +40,19 @@ export function createBuiltinCommands(
       return `Switching to ${mode} mode.`
     }),
 
+    cmd('architect', 'Toggle architect mode (e.g. /architect off)', async (args) => {
+      const value = args.trim().toLowerCase()
+      if (value === 'off') {
+        emit('mode:switch', { mode: 'normal' })
+        return 'Architect mode disabled.'
+      }
+      if (value && value !== 'on') {
+        return 'Usage: /architect [on|off]'
+      }
+      emit('mode:switch', { mode: 'architect' })
+      return 'Architect mode enabled.'
+    }),
+
     cmd('model', 'Switch the active model (e.g. /model claude-sonnet)', async (args) => {
       const model = args.trim()
       if (!model) return 'Usage: /model <model-id>'

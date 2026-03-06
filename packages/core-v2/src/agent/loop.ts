@@ -28,6 +28,7 @@ import type {
 import { createLogger } from '../logger/logger.js'
 import { executeTool, getToolDefinitions } from '../tools/registry.js'
 import type { ToolContext } from '../tools/types.js'
+import { getContextFallbackCandidate, getContextLimit } from './context-fallback.js'
 import { efficientToolResult } from './efficient-results.js'
 import { saveOverflowOutput } from './output-files.js'
 import { repairToolName } from './repair.js'
@@ -96,25 +97,6 @@ function contentLength(content: MessageContent): number {
 /** Estimate tokens from character count. ~1.3 tokens per word, ~5 chars per word. */
 function estimateTokens(charCount: number): number {
   return Math.ceil((charCount / 5) * 1.3)
-}
-
-/** Known context window sizes by model prefix. */
-const MODEL_CONTEXT_LIMITS: Record<string, number> = {
-  'claude-opus': 200_000,
-  'claude-sonnet': 200_000,
-  'claude-haiku': 200_000,
-  'gpt-4o': 128_000,
-  'gpt-4': 128_000,
-  'gpt-3.5': 16_000,
-  gemini: 1_000_000,
-  deepseek: 64_000,
-}
-
-function getContextLimit(model: string): number {
-  for (const [prefix, limit] of Object.entries(MODEL_CONTEXT_LIMITS)) {
-    if (model.startsWith(prefix)) return limit
-  }
-  return 200_000 // conservative default
 }
 
 /**
@@ -293,15 +275,15 @@ export class AgentExecutor {
     this.currentGoal = inputs.goal
     this.emit({ type: 'agent:start', agentId: this.agentId, goal: inputs.goal })
 
-    const provider = this.config.provider ?? 'anthropic'
-    const model = this.config.model ?? 'claude-sonnet-4-20250514'
+    let provider = this.config.provider ?? 'anthropic'
+    let model = this.config.model ?? 'claude-sonnet-4-20250514'
     agentLog.info('Run started', {
       goal_length: inputs.goal.length,
       session: this.agentId,
       model,
       provider,
     })
-    const client = createClient(provider)
+    let client = createClient(provider)
 
     const history: ChatMessage[] = []
     let totalInput = 0
@@ -346,12 +328,33 @@ export class AgentExecutor {
           this.emit({ type: 'agent:steered', agentId: this.agentId, message: msg })
         }
 
-        // Context window management — compact when usage exceeds threshold
+        // Context window management — switch model first, then compact if needed
         const contextLimit = getContextLimit(model)
         const threshold = this.config.compactionThreshold ?? 0.8
         const charCount = history.reduce((sum, m) => sum + contentLength(m.content), 0)
         const estimatedTokens = estimateTokens(charCount)
-        if (estimatedTokens > contextLimit * threshold) {
+        const contextFallbackThreshold = 0.9
+        let switchedForContext = false
+
+        if (estimatedTokens > contextLimit * contextFallbackThreshold) {
+          const fallback = getContextFallbackCandidate(provider, model, estimatedTokens)
+          if (fallback && (fallback.provider !== provider || fallback.model !== model)) {
+            emitEvent('model:context-fallback', {
+              from: { provider, model },
+              to: { provider: fallback.provider, model: fallback.model },
+              reason: 'context_overflow',
+            })
+            loopLog.info(
+              `Switching from ${model} (${contextLimit} tokens) to ${fallback.model} (${fallback.contextWindow} tokens) due to context overflow`
+            )
+            provider = fallback.provider
+            model = fallback.model
+            client = createClient(provider)
+            switchedForContext = true
+          }
+        }
+
+        if (!switchedForContext && estimatedTokens > contextLimit * threshold) {
           const messagesBefore = history.length
           const strategy = selectCompactionStrategy(history, this.config.compactionStrategy)
           if (strategy) {
@@ -1050,10 +1053,39 @@ export class AgentExecutor {
     signal: AbortSignal
   ): Promise<{ callInfos: ToolCallInfo[]; resultBlocks: ToolResultBlock[] }[]> {
     const results: { callInfos: ToolCallInfo[]; resultBlocks: ToolResultBlock[] }[] = []
-    for (const call of toolCalls) {
+    for (let index = 0; index < toolCalls.length; index++) {
+      if (this.steeringQueue.length > 0) {
+        const skipped = this.skipPendingTools(toolCalls, index)
+        if (skipped.length > 0) {
+          const notice = `[Steering interrupt: ${skipped.length} pending tool calls skipped. User message follows.]`
+          this.emit({
+            type: 'agent:tools-skipped',
+            agentId: this.agentId,
+            skippedTools: skipped,
+            reason: 'steering',
+          })
+          results.push({
+            callInfos: [],
+            resultBlocks: toolCalls.slice(index).map((call) => ({
+              type: 'tool_result' as const,
+              tool_use_id: call.id,
+              content: notice,
+              is_error: true,
+            })),
+          })
+        }
+        break
+      }
+
+      const call = toolCalls[index]
+      if (!call) continue
       results.push(await this.executeOneToolCall(call, cwd, model, signal))
     }
     return results
+  }
+
+  private skipPendingTools(toolCalls: ToolUseBlock[], startIndex: number): string[] {
+    return toolCalls.slice(startIndex).map((call) => call.name)
   }
 
   private areToolCallsIndependent(toolCalls: ToolUseBlock[]): boolean {

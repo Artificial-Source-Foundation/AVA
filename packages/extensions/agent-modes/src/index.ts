@@ -12,6 +12,7 @@ import { activate as activateFocusChain } from './focus-chain/index.js'
 import { registerMinimalMode } from './minimal-mode.js'
 import { registerPlanMode } from './plan-mode.js'
 import { createReliabilityMiddleware } from './reliability-middleware.js'
+import { registerWindowedMode } from './windowed-mode.js'
 
 export { selectAgentMode } from './selector.js'
 
@@ -27,6 +28,7 @@ export function activate(api: ExtensionAPI): Disposable {
     focusChainDisposable,
     registerPlanMode(api),
     registerMinimalMode(api),
+    registerWindowedMode(api),
     registerBestOfNMode(api),
     registerDoomLoop(api),
   ]

@@ -35,7 +35,7 @@ describe('runEditCascade', () => {
     expect(result.tier).toBe('flexible')
   })
 
-  it('falls back to fuzzy tier for near matches', async () => {
+  it('uses four-pass tier for near matches after structural', async () => {
     const result = await runEditCascade({
       content: 'const greeting = "hullo world"\n',
       oldText: 'const greeting = "hello world"\n',
@@ -43,7 +43,8 @@ describe('runEditCascade', () => {
     })
 
     expect(result.content).toContain('hello ava')
-    expect(result.tier).toBe('fuzzy')
+    expect(result.tier).toBe('four-pass')
+    expect(result.fuzzLevel).toBe(1000)
   })
 
   it('retries with corrector at most twice', async () => {
@@ -87,5 +88,17 @@ describe('runEditCascade', () => {
       expect.any(Object),
       expect.any(Function)
     )
+  })
+
+  it('uses race tier when race flag is enabled', async () => {
+    const result = await runEditCascade({
+      content: 'hello world',
+      oldText: 'world',
+      newText: 'ava',
+      race: true,
+    })
+
+    expect(result.content).toBe('hello ava')
+    expect(result.tier).toBe('race')
   })
 })

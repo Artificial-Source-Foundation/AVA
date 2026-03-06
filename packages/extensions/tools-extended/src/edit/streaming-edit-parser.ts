@@ -1,5 +1,5 @@
 import type { BusMessage, MessageBus } from '@ava/core-v2/bus'
-import { normalizeForMatch } from './normalize-for-match.js'
+import { StreamingFuzzyMatcher } from './streaming-fuzzy-matcher.js'
 
 export interface StreamingEditMessage extends BusMessage {
   type: 'edit:stream-diff'
@@ -11,69 +11,41 @@ export interface StreamingEditMessage extends BusMessage {
   preview: string
 }
 
+export interface StreamingEditPreviewMessage extends BusMessage {
+  type: 'edit:stream-preview'
+  path?: string
+  oldText: string
+  startOffset: number
+  endOffset: number
+  confidence: number
+}
+
 interface StreamingEditPartial {
   path?: string
   edits?: Array<{ old_text?: string; new_text?: string }>
 }
 
-function similarity(left: string, right: string): number {
-  const a = normalizeForMatch(left)
-  const b = normalizeForMatch(right)
-  if (a === b) {
-    return 1
-  }
-  const maxLength = Math.max(a.length, b.length)
-  if (maxLength === 0) {
-    return 1
-  }
-
-  const limit = Math.min(a.length, b.length)
-  let same = 0
-  for (let i = 0; i < limit; i += 1) {
-    if (a[i] === b[i]) {
-      same += 1
-    }
-  }
-
-  return same / maxLength
-}
-
-function findFuzzyWindow(content: string, oldText: string): { start: number; end: number } | null {
+function findFuzzyWindow(
+  content: string,
+  oldText: string
+): { start: number; end: number; confidence: number } | null {
   const exactIndex = content.indexOf(oldText)
   if (exactIndex >= 0) {
-    return { start: exactIndex, end: exactIndex + oldText.length }
+    return { start: exactIndex, end: exactIndex + oldText.length, confidence: 1 }
   }
 
-  const lines = content.split('\n')
-  const oldLines = oldText.split('\n')
-  if (oldLines.length === 0) {
+  const matcher = new StreamingFuzzyMatcher(content, 0.8)
+  matcher.pushChunk(`${oldText}\n`)
+  const best = matcher.getBestMatch()
+  if (!best) {
     return null
   }
 
-  let bestStart = -1
-  let bestScore = 0
-  const width = oldLines.length
-
-  for (let i = 0; i <= lines.length - width; i += 1) {
-    const candidate = lines.slice(i, i + width).join('\n')
-    const score = similarity(candidate, oldText)
-    if (score > bestScore) {
-      bestScore = score
-      bestStart = i
-    }
+  return {
+    start: best.startOffset,
+    end: best.endOffset,
+    confidence: best.confidence,
   }
-
-  if (bestStart < 0 || bestScore < 0.8) {
-    return null
-  }
-
-  const prefix = content.split('\n').slice(0, bestStart).join('\n')
-  const start = prefix.length > 0 ? prefix.length + 1 : 0
-  const match = content
-    .split('\n')
-    .slice(bestStart, bestStart + width)
-    .join('\n')
-  return { start, end: start + match.length }
 }
 
 export class StreamingEditParser {
@@ -118,6 +90,18 @@ export class StreamingEditParser {
       if (!range) {
         continue
       }
+
+      const previewMessage: StreamingEditPreviewMessage = {
+        type: 'edit:stream-preview',
+        correlationId: this.correlationId,
+        timestamp: Date.now(),
+        path: partial.path,
+        oldText,
+        startOffset: range.start,
+        endOffset: range.end,
+        confidence: range.confidence,
+      }
+      this.bus.publish(previewMessage)
 
       const before = current.slice(0, range.start)
       const after = current.slice(range.end)

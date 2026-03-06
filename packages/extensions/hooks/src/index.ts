@@ -17,6 +17,7 @@ import type { ToolResult } from '@ava/core-v2/tools'
 import { createErrorRecoveryMiddleware } from './error-recovery-middleware.js'
 import { activate as activateFileWatcher } from './file-watcher/index.js'
 import { createFormatterMiddleware } from './formatter.js'
+import { createFormatterDetectionMiddleware } from './formatter-detection.js'
 import { runHooks } from './runner.js'
 import { activate as activateScheduler } from './scheduler/index.js'
 import type { PostToolUseContext, PreToolUseContext } from './types.js'
@@ -75,7 +76,9 @@ export function activate(api: ExtensionAPI): Disposable {
   disposables.push(
     api.on('session:opened', () => {
       const fmtMiddleware = createFormatterMiddleware(api.platform, api.log)
+      const fmtDetectionMiddleware = createFormatterDetectionMiddleware(api.platform, api.log)
       disposables.push(api.addToolMiddleware(fmtMiddleware))
+      disposables.push(api.addToolMiddleware(fmtDetectionMiddleware))
       api.log.debug('Formatter middleware registered')
     })
   )

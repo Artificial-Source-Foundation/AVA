@@ -14,6 +14,7 @@ import { loadCustomTools } from './custom-tools.js'
 import { deleteFileTool } from './delete.js'
 import { activate as activateIntegrations } from './integrations/index.js'
 import { lsTool } from './ls.js'
+import { createModifiableToolMiddleware, makeModifiable } from './modifiable-tool.js'
 import { multieditTool } from './multiedit.js'
 import { planEnterTool, planExitTool } from './plan-mode-tools.js'
 import { questionTool } from './question.js'
@@ -21,6 +22,7 @@ import { taskTool } from './task.js'
 import { todoReadTool, todoWriteTool } from './todo.js'
 import { webfetchTool } from './webfetch.js'
 import { websearchTool } from './websearch.js'
+import { gotoLineTool, scrollDownTool, scrollUpTool, viewWindowTool } from './windowed-view.js'
 
 const TOOLS = [
   createFileTool,
@@ -35,7 +37,30 @@ const TOOLS = [
   taskTool,
   websearchTool,
   webfetchTool,
-  applyPatchTool,
+  viewWindowTool,
+  scrollUpTool,
+  scrollDownTool,
+  gotoLineTool,
+  makeModifiable(applyPatchTool, {
+    getFilePath(params) {
+      const patch = (params as { patch?: string }).patch
+      if (typeof patch !== 'string') {
+        return 'apply_patch.diff'
+      }
+      const updateLine = patch.split('\n').find((line) => line.startsWith('*** Update File: '))
+      return updateLine ? updateLine.replace('*** Update File: ', '').trim() : 'apply_patch.diff'
+    },
+    async getCurrentContent() {
+      return ''
+    },
+    getProposedContent(params) {
+      const patch = (params as { patch?: string }).patch
+      return typeof patch === 'string' ? patch : ''
+    },
+    createUpdatedParams(_current, modified, original) {
+      return { ...(original as Record<string, unknown>), patch: modified }
+    },
+  }),
   planEnterTool,
   planExitTool,
 ]
@@ -43,6 +68,7 @@ const TOOLS = [
 export function activate(api: ExtensionAPI): Disposable {
   getSettingsManager()
   const disposables: Disposable[] = TOOLS.map((tool) => api.registerTool(tool))
+  disposables.push(api.addToolMiddleware(createModifiableToolMiddleware(api.emit.bind(api))))
   disposables.push(activateIntegrations(api))
 
   // Load custom user tools when a session opens

@@ -8,9 +8,17 @@ use tokio::sync::RwLock;
 use crate::provider::LLMProvider;
 use crate::providers::create_provider;
 
+/// External provider factory for providers that live outside ava-llm
+/// (e.g., CLI agent providers in ava-cli-providers).
+pub trait ProviderFactory: Send + Sync {
+    fn create(&self, provider_name: &str, model: &str) -> Result<Box<dyn LLMProvider>>;
+    fn handles(&self, provider_name: &str) -> bool;
+}
+
 pub struct ModelRouter {
     credentials: Arc<RwLock<CredentialStore>>,
     providers: RwLock<HashMap<String, Arc<dyn LLMProvider>>>,
+    factories: Vec<Arc<dyn ProviderFactory>>,
 }
 
 impl ModelRouter {
@@ -18,7 +26,13 @@ impl ModelRouter {
         Self {
             credentials: Arc::new(RwLock::new(credentials)),
             providers: RwLock::new(HashMap::new()),
+            factories: Vec::new(),
         }
+    }
+
+    /// Register an external provider factory (e.g., for CLI agent providers).
+    pub fn register_factory(&mut self, factory: Arc<dyn ProviderFactory>) {
+        self.factories.push(factory);
     }
 
     pub async fn update_credentials(&self, credentials: CredentialStore) {
@@ -38,8 +52,14 @@ impl ModelRouter {
             return Ok(cached);
         }
 
-        let credentials = self.credentials.read().await.clone();
-        let created = create_provider(provider, model, &credentials)?;
+        // Try external factories first
+        let created: Box<dyn LLMProvider> = if let Some(factory) = self.factories.iter().find(|f| f.handles(provider)) {
+            factory.create(provider, model)?
+        } else {
+            let credentials = self.credentials.read().await.clone();
+            create_provider(provider, model, &credentials)?
+        };
+
         let created: Arc<dyn LLMProvider> = Arc::from(created);
 
         let mut providers = self.providers.write().await;

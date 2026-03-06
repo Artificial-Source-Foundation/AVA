@@ -19,11 +19,22 @@ pub use ollama::OllamaProvider;
 pub use openai::OpenAIProvider;
 pub use openrouter::OpenRouterProvider;
 
+/// Create a provider by name from credentials.
+///
+/// For CLI agent providers (e.g., `cli:claude-code`), use a `ProviderFactory`
+/// registered on the `ModelRouter` instead — this function only handles API providers.
 pub fn create_provider(
     provider_name: &str,
     model: &str,
     credentials: &CredentialStore,
 ) -> Result<Box<dyn LLMProvider>> {
+    if provider_name.starts_with("cli:") {
+        return Err(AvaError::ConfigError(format!(
+            "CLI provider '{provider_name}' must be registered via ModelRouter::register_factory(). \
+             Add ava-cli-providers to your binary crate and register it at startup."
+        )));
+    }
+
     let credential = credentials.get(provider_name);
 
     match provider_name {
@@ -101,5 +112,26 @@ pub fn create_provider(
         _ => Err(AvaError::ConfigError(format!(
             "Unknown provider: {provider_name}"
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_provider_returns_error() {
+        let credentials = CredentialStore::default();
+        let result = create_provider("unknown-provider", "model", &credentials);
+        let err = result.err().expect("should fail");
+        assert!(err.to_string().contains("Unknown provider"));
+    }
+
+    #[test]
+    fn cli_provider_without_factory_returns_error() {
+        let credentials = CredentialStore::default();
+        let result = create_provider("cli:claude-code", "sonnet", &credentials);
+        let err = result.err().expect("should fail");
+        assert!(err.to_string().contains("must be registered via ModelRouter"));
     }
 }

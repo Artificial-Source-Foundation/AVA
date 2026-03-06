@@ -1,0 +1,15 @@
+[package]
+name = "ava-cli-providers"
+version = "2.0.0"
+edition = "2021"
+
+[dependencies]
+async-trait.workspace = true
+ava-llm = { path = "../ava-llm" }
+ava-types = { path = "../ava-types" }
+futures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util = { version = "0.7", features = ["rt"] }

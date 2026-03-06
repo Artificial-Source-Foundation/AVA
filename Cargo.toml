@@ -16,9 +16,11 @@ members = [
     "crates/ava-lsp",
     "crates/ava-sandbox",
     "crates/ava-llm",
+    "crates/ava-cli-providers",
     "crates/ava-commander",
     "crates/ava-mcp",
     "crates/ava-session",
+    "crates/ava-tui",
 ]
 exclude = ["src-tauri"]
 resolver = "2"

@@ -13,6 +13,7 @@ const BUILT_IN_NAMES = new Set([
   'help',
   'clear',
   'mode',
+  'architect',
   'model',
   'compact',
   'undo',
@@ -49,7 +50,7 @@ export interface CommandEntry {
 export function parseSlashCommand(input: string): ParsedCommand | null {
   const match = input.match(/^\/([a-zA-Z][\w-]*)(?:\s+(.*))?$/)
   if (!match) return null
-  return { name: match[1], args: match[2]?.trim() ?? '' }
+  return { name: match[1]!, args: match[2]?.trim() ?? '' }
 }
 
 /**

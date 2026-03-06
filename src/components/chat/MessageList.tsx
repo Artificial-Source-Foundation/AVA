@@ -12,18 +12,7 @@
  * - Delete/rollback with confirmation dialog
  */
 
-import {
-  type Component,
-  createEffect,
-  createMemo,
-  createSignal,
-  For,
-  on,
-  onCleanup,
-  onMount,
-  Show,
-  untrack,
-} from 'solid-js'
+import { type Component, createSignal, For, Show } from 'solid-js'
 import { useNotification } from '../../contexts/notification'
 import { useAgent } from '../../hooks/useAgent'
 import { useChat } from '../../hooks/useChat'
@@ -36,6 +25,9 @@ import { FocusChainBar } from './FocusChainBar'
 import { ModelChangeIndicator } from './ModelChangeIndicator'
 import { MessageRow } from './message-list/message-row'
 import { MessageListEmpty, MessageListLoading, ScrollToBottomButton } from './message-list/sections'
+import { useMessageActions } from './message-list/useMessageActions'
+import { useMessageData } from './message-list/useMessageData'
+import { useMessageScroll } from './message-list/useMessageScroll'
 import { SearchBar } from './SearchBar'
 
 // ============================================================================
@@ -43,22 +35,9 @@ import { SearchBar } from './SearchBar'
 // ============================================================================
 
 export const MessageList: Component = () => {
-  // oxlint-disable-next-line no-unassigned-vars -- SolidJS ref pattern: assigned via ref={} in JSX
-  let containerRef: HTMLDivElement | undefined
-  let scrollRaf: number | undefined
   const { settings } = useSettings()
-  const [shouldAutoScroll, setShouldAutoScroll] = createSignal(true)
-  // Adaptive visible limit based on viewport height (~60px per message row)
-  const adaptiveChunk = () => Math.max(50, Math.min(300, Math.floor(window.innerHeight / 60)))
-  const [visibleLimit, setVisibleLimit] = createSignal(adaptiveChunk())
-  const [deleteTarget, setDeleteTarget] = createSignal<{
-    messageId: string
-    isLast: boolean
-  } | null>(null)
-  const [rewindTarget, setRewindTarget] = createSignal<string | null>(null)
   const [searchMatchIds, setSearchMatchIds] = createSignal<Set<string>>(new Set())
   const [currentSearchId, setCurrentSearchId] = createSignal<string | null>(null)
-
   const { chatSearchOpen, closeChatSearch } = useLayout()
 
   const {
@@ -81,279 +60,82 @@ export const MessageList: Component = () => {
   // Track which messages have already animated in (persists across <For> re-creations)
   const animatedMessageIds = new Set<string>()
 
-  const messageCount = createMemo(() => messages().length)
+  // ── Computed data ──────────────────────────────────────────────────────
+  const data = useMessageData({ messages, checkpoints })
 
-  const messageIndexById = createMemo(() => {
-    messageCount() // tracked: only re-run when count changes
-    return untrack(() => {
-      const indexMap = new Map<string, number>()
-      const msgs = messages()
-      for (let i = 0; i < msgs.length; i++) {
-        indexMap.set(msgs[i].id, i)
-      }
-      return indexMap
-    })
+  // ── Scroll management ──────────────────────────────────────────────────
+  const scroll = useMessageScroll({
+    autoScrollEnabled: () => settings().behavior.autoScroll,
+    isStreaming: () => isStreaming() || agent.isRunning(),
+    hiddenMessageCount: data.hiddenMessageCount,
+    onLoadOlder: data.loadOlderMessages,
   })
+  scroll.setup()
 
-  const checkpointByIndex = createMemo(() => {
-    const map = new Map<number, { id: string; description: string }>()
-    for (const c of checkpoints()) {
-      map.set(c.messageCount - 1, { id: c.id, description: c.description })
-    }
-    return map
+  // ── Message actions (delete/rewind/branch) ─────────────────────────────
+  const actions = useMessageActions({
+    messages,
+    lastMessageId: data.lastMessageId,
+    rollbackToMessage,
+    branchAtMessage,
+    revertFilesAfter,
+    notifySuccess,
   })
-
-  const modelChangeById = createMemo(() => {
-    const map = new Map<string, { from: string; to: string }>()
-    let lastAssistantModel = ''
-
-    for (const msg of messages()) {
-      if (msg.role !== 'assistant') continue
-
-      const currentModel = (msg.metadata?.model as string) || msg.model || ''
-      if (!currentModel) continue
-
-      if (lastAssistantModel && lastAssistantModel !== currentModel) {
-        map.set(msg.id, { from: lastAssistantModel, to: currentModel })
-      }
-
-      lastAssistantModel = currentModel
-    }
-
-    return map
-  })
-
-  // Match checkpoints to message indices
-  const checkpointAtIndex = (msgIndex: number): { id: string; description: string } | null =>
-    checkpointByIndex().get(msgIndex) ?? null
-
-  const visibleMessages = createMemo(() => {
-    const all = messages()
-    const limit = visibleLimit()
-    if (all.length <= limit) return all
-    return all.slice(-limit)
-  })
-
-  const hiddenMessageCount = createMemo(() =>
-    Math.max(0, messages().length - visibleMessages().length)
-  )
-
-  // Track which message is the last one (for delete vs rollback label)
-  const lastMessageId = createMemo(() => {
-    const msgs = messages()
-    return msgs.length > 0 ? msgs[msgs.length - 1].id : null
-  })
-
-  // ── ResizeObserver-based auto-scroll (like OpenCode) ──────────────────
-  // Fires after layout, before paint — keeps bottom locked without jumps.
-  // Much more reliable than tracking content changes via reactive effects.
-  let resizeObserver: ResizeObserver | undefined
-  let userScrolledUp = false
-
-  // Reset when streaming starts
-  createEffect(
-    on(
-      () => isStreaming() || agent.isRunning(),
-      (streaming) => {
-        if (streaming) {
-          userScrolledUp = false
-          setShouldAutoScroll(true)
-        }
-      }
-    )
-  )
-
-  const setupResizeObserver = () => {
-    if (!containerRef) return
-    resizeObserver = new ResizeObserver(() => {
-      if (!containerRef || !settings().behavior.autoScroll) return
-      if (userScrolledUp) return
-      if (!shouldAutoScroll()) return
-      // Direct assignment (bypasses smooth scroll CSS)
-      containerRef.scrollTop = containerRef.scrollHeight
-    })
-    // Observe the scrollable content (first child) — its resize = content growth
-    const content = containerRef.firstElementChild
-    if (content) resizeObserver.observe(content)
-    // Also observe the container itself (viewport resize)
-    resizeObserver.observe(containerRef)
-  }
-
-  const handleScroll = () => {
-    if (!containerRef) return
-    if (scrollRaf !== undefined) return
-
-    scrollRaf = requestAnimationFrame(() => {
-      scrollRaf = undefined
-      if (!containerRef) return
-
-      const { scrollTop, scrollHeight, clientHeight } = containerRef
-      const distanceFromBottom = scrollHeight - scrollTop - clientHeight
-
-      const streaming = isStreaming() || agent.isRunning()
-
-      if (streaming) {
-        // During streaming: detect if user scrolled up (away from bottom)
-        userScrolledUp = distanceFromBottom > 300
-        if (!userScrolledUp) setShouldAutoScroll(true)
-      } else {
-        const nextAutoScroll = distanceFromBottom < 100
-        if (nextAutoScroll !== shouldAutoScroll()) {
-          setShouldAutoScroll(nextAutoScroll)
-        }
-      }
-
-      // Scroll-up backfill: load older messages when near top
-      if (scrollTop < 200 && hiddenMessageCount() > 0) {
-        loadOlderMessages()
-      }
-    })
-  }
-
-  onMount(() => {
-    if (containerRef) {
-      containerRef.scrollTop = containerRef.scrollHeight
-      // Passive listener — critical for smooth scrolling in WebKitGTK.
-      // SolidJS onScroll doesn't set { passive: true }, which blocks the
-      // browser's scroll thread while the JS handler runs.
-      containerRef.addEventListener('scroll', handleScroll, { passive: true })
-      setupResizeObserver()
-    }
-  })
-
-  onCleanup(() => {
-    if (scrollRaf !== undefined) cancelAnimationFrame(scrollRaf)
-    containerRef?.removeEventListener('scroll', handleScroll)
-    resizeObserver?.disconnect()
-  })
-
-  const scrollToBottom = () => {
-    if (containerRef) {
-      containerRef.scrollTop = containerRef.scrollHeight
-      setShouldAutoScroll(true)
-    }
-  }
-
-  const loadOlderMessages = () => {
-    const increment = Math.max(100, Math.min(400, Math.floor(window.innerHeight / 60) * 2))
-    setVisibleLimit((limit) => limit + increment)
-  }
-
-  const scrollToMessage = (messageId: string) => {
-    if (!containerRef) return
-    const el = containerRef.querySelector(`[data-message-id="${messageId}"]`)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    }
-  }
 
   const handleSearchHighlight = (matchIds: Set<string>, currentId: string | null) => {
     setSearchMatchIds(matchIds)
     setCurrentSearchId(currentId)
   }
 
-  // Branch handler
-  const handleBranch = async (messageId: string) => {
-    await branchAtMessage(messageId)
-    notifySuccess('Conversation branched')
-  }
-
-  // Delete/rollback handlers
-  const handleDeleteRequest = (messageId: string) => {
-    setDeleteTarget({ messageId, isLast: messageId === lastMessageId() })
-  }
-
-  const handleDeleteConfirm = async () => {
-    const target = deleteTarget()
-    if (!target) return
-    setDeleteTarget(null)
-    await rollbackToMessage(target.messageId)
-  }
-
-  // Rewind handlers (Item 5)
-  const handleRewindConversationOnly = async () => {
-    const msgId = rewindTarget()
-    if (!msgId) return
-    setRewindTarget(null)
-    // Keep messages up to and including the target
-    const msgs = messages()
-    const index = msgs.findIndex((m) => m.id === msgId)
-    if (index === -1) return
-    // Delete everything after this message
-    const nextMsg = msgs[index + 1]
-    if (nextMsg) await rollbackToMessage(nextMsg.id)
-    notifySuccess('Conversation rewound')
-  }
-
-  const handleRewindAndRevert = async () => {
-    const msgId = rewindTarget()
-    if (!msgId) return
-    setRewindTarget(null)
-    const reverted = await revertFilesAfter(msgId)
-    const msgs = messages()
-    const index = msgs.findIndex((m) => m.id === msgId)
-    if (index === -1) return
-    const nextMsg = msgs[index + 1]
-    if (nextMsg) await rollbackToMessage(nextMsg.id)
-    notifySuccess(`Rewound${reverted > 0 ? ` and reverted ${reverted} file(s)` : ''}`)
-  }
-
   return (
     <div class="relative flex-1 min-h-0 flex flex-col overflow-hidden">
-      {/* Focus chain progress bar (Item 7) */}
       <FocusChainBar />
 
-      {/* Search bar */}
       <Show when={chatSearchOpen()}>
         <SearchBar
           messages={messages()}
           onClose={closeChatSearch}
-          onNavigate={scrollToMessage}
+          onNavigate={scroll.scrollToMessage}
           onHighlightChange={handleSearchHighlight}
         />
       </Show>
 
       <div
-        ref={containerRef}
+        ref={scroll.setContainerRef}
         class="flex-1 overflow-y-auto density-section-px density-section-py"
         style={{ 'overflow-anchor': 'none' }}
       >
-        {/* Loading skeleton */}
         <Show when={isLoadingMessages()}>
           <MessageListLoading />
         </Show>
 
-        {/* Empty state */}
         <Show when={!isLoadingMessages() && messages().length === 0}>
           <MessageListEmpty />
         </Show>
 
-        {/* Message items */}
         <Show when={!isLoadingMessages() && messages().length > 0}>
           <div>
-            <Show when={hiddenMessageCount() > 0}>
+            <Show when={data.hiddenMessageCount() > 0}>
               <div class="mb-2 flex items-center justify-center">
                 <button
                   type="button"
-                  onClick={loadOlderMessages}
+                  onClick={data.loadOlderMessages}
                   class="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2.5 py-1 text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
                 >
                   Load{' '}
                   {Math.min(
                     Math.max(100, Math.min(400, Math.floor(window.innerHeight / 60) * 2)),
-                    hiddenMessageCount()
+                    data.hiddenMessageCount()
                   )}{' '}
-                  older messages ({hiddenMessageCount()} hidden)
+                  older messages ({data.hiddenMessageCount()} hidden)
                 </button>
               </div>
             </Show>
 
-            <For each={visibleMessages()}>
+            <For each={data.visibleMessages()}>
               {(msg) => {
-                const msgIndex = () => messageIndexById().get(msg.id) ?? -1
-                const modelChange = () => modelChangeById().get(msg.id)
-
-                // Compute shouldAnimate ONCE per new message (persists across <For> re-creations)
+                const msgIndex = () => data.messageIndexById().get(msg.id) ?? -1
+                const modelChange = () => data.modelChangeById().get(msg.id)
                 const shouldAnimate = !animatedMessageIds.has(msg.id)
                 if (shouldAnimate) animatedMessageIds.add(msg.id)
 
@@ -369,22 +151,22 @@ export const MessageList: Component = () => {
                       isRetrying={retryingMessageId() === msg.id}
                       isStreaming={
                         (isStreaming() || agent.isRunning()) &&
-                        msg.id === lastMessageId() &&
+                        msg.id === data.lastMessageId() &&
                         msg.role === 'assistant'
                       }
-                      isLastMessage={msg.id === lastMessageId()}
+                      isLastMessage={msg.id === data.lastMessageId()}
                       isSearchMatch={searchMatchIds().has(msg.id)}
                       isCurrentSearchMatch={currentSearchId() === msg.id}
-                      checkpoint={checkpointAtIndex(msgIndex()) ?? undefined}
+                      checkpoint={data.checkpointAtIndex(msgIndex()) ?? undefined}
                       streamingToolCalls={
-                        msg.id === lastMessageId() &&
+                        msg.id === data.lastMessageId() &&
                         msg.role === 'assistant' &&
                         (isStreaming() || agent.isRunning())
                           ? agent.activeToolCalls()
                           : undefined
                       }
                       streamingContent={
-                        msg.id === lastMessageId() &&
+                        msg.id === data.lastMessageId() &&
                         msg.role === 'assistant' &&
                         (isStreaming() || agent.isRunning())
                           ? agent.streamingContent
@@ -395,9 +177,9 @@ export const MessageList: Component = () => {
                       onSaveEdit={(content) => editAndResend(msg.id, content)}
                       onRetry={() => retryMessage(msg.id)}
                       onRegenerate={() => regenerateResponse(msg.id)}
-                      onDelete={() => handleDeleteRequest(msg.id)}
-                      onBranch={() => handleBranch(msg.id)}
-                      onRewind={() => setRewindTarget(msg.id)}
+                      onDelete={() => actions.handleDeleteRequest(msg.id)}
+                      onBranch={() => actions.handleBranch(msg.id)}
+                      onRewind={() => actions.setRewindTarget(msg.id)}
                       onRestoreCheckpoint={rollbackToCheckpoint}
                     />
                   </>
@@ -405,7 +187,7 @@ export const MessageList: Component = () => {
               }}
             </For>
 
-            {/* "ava is working on it..." indicator (Goose-style) */}
+            {/* "ava is working on it..." indicator */}
             <div aria-live="polite" aria-atomic="true">
               <Show when={isStreaming() || agent.isRunning()}>
                 <div class="w-full animate-fade-in py-2">
@@ -430,32 +212,30 @@ export const MessageList: Component = () => {
         </Show>
       </div>
 
-      {/* Scroll to bottom button */}
-      <Show when={!shouldAutoScroll() && messages().length > 0}>
-        <ScrollToBottomButton onClick={scrollToBottom} />
+      <Show when={!scroll.shouldAutoScroll() && messages().length > 0}>
+        <ScrollToBottomButton onClick={scroll.scrollToBottom} />
       </Show>
 
-      {/* Delete confirmation dialog */}
       <ConfirmDialog
-        open={deleteTarget() !== null}
+        open={actions.deleteTarget() !== null}
         onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null)
+          if (!open) actions.setDeleteTarget(null)
         }}
-        title={deleteTarget()?.isLast ? 'Delete message?' : 'Rollback conversation?'}
+        title={actions.deleteTarget()?.isLast ? 'Delete message?' : 'Rollback conversation?'}
         message={
-          deleteTarget()?.isLast
+          actions.deleteTarget()?.isLast
             ? 'This message will be permanently deleted.'
             : 'This will delete this message and all messages after it. This cannot be undone.'
         }
-        confirmText={deleteTarget()?.isLast ? 'Delete' : 'Rollback'}
+        confirmText={actions.deleteTarget()?.isLast ? 'Delete' : 'Rollback'}
         variant="danger"
-        onConfirm={handleDeleteConfirm}
+        onConfirm={actions.handleDeleteConfirm}
       />
 
       <Dialog
-        open={rewindTarget() !== null}
+        open={actions.rewindTarget() !== null}
         onOpenChange={(open) => {
-          if (!open) setRewindTarget(null)
+          if (!open) actions.setRewindTarget(null)
         }}
         title="Rewind conversation?"
         description="Messages after this point will be removed. Choose whether to also revert file changes."
@@ -465,21 +245,21 @@ export const MessageList: Component = () => {
         <div class="space-y-3">
           <button
             type="button"
-            onClick={handleRewindConversationOnly}
+            onClick={actions.handleRewindConversationOnly}
             class="w-full px-3 py-2 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] transition-colors text-left"
           >
             Rewind conversation only
           </button>
           <button
             type="button"
-            onClick={handleRewindAndRevert}
+            onClick={actions.handleRewindAndRevert}
             class="w-full px-3 py-2 text-xs font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--accent-subtle)] transition-colors text-left"
           >
             Rewind and revert files
           </button>
           <button
             type="button"
-            onClick={() => setRewindTarget(null)}
+            onClick={() => actions.setRewindTarget(null)}
             class="w-full text-center text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
           >
             Cancel

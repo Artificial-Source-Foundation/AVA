@@ -5,75 +5,15 @@
  * Connected to the session store for real-time context tracking.
  */
 
-import {
-  AlertTriangle,
-  Bookmark,
-  Brain,
-  ChevronRight,
-  Code2,
-  FileText,
-  MessageSquare,
-  RefreshCw,
-  Sparkles,
-  Trash2,
-} from 'lucide-solid'
-import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
+import { AlertTriangle, Brain, RefreshCw } from 'lucide-solid'
+import { type Component, createMemo, For, Show } from 'solid-js'
 import { useSession } from '../../stores/session'
-import type { MemoryItem, MemoryItemType } from '../../types'
-
-// ============================================================================
-// Memory Item Configuration
-// ============================================================================
-
-const memoryTypeConfig: Record<
-  MemoryItemType,
-  { color: string; bg: string; icon: typeof MessageSquare; label: string }
-> = {
-  conversation: {
-    color: 'var(--accent)',
-    bg: 'var(--accent-subtle)',
-    icon: MessageSquare,
-    label: 'Conversation',
-  },
-  file: {
-    color: 'var(--info)',
-    bg: 'var(--info-subtle)',
-    icon: FileText,
-    label: 'File',
-  },
-  code: {
-    color: 'var(--warning)',
-    bg: 'var(--warning-subtle)',
-    icon: Code2,
-    label: 'Code',
-  },
-  knowledge: {
-    color: 'var(--success)',
-    bg: 'var(--success-subtle)',
-    icon: Sparkles,
-    label: 'Knowledge',
-  },
-  checkpoint: {
-    color: 'var(--text-muted)',
-    bg: 'var(--surface-raised)',
-    icon: Bookmark,
-    label: 'Checkpoint',
-  },
-}
-
-// ============================================================================
-// Component
-// ============================================================================
+import type { MemoryItem } from '../../types'
+import { MemoryItemCard } from './memory/MemoryItemCard'
+import { formatTokens } from './memory/memory-config'
 
 export const MemoryPanel: Component = () => {
   const { memoryItems, contextUsage, clearMemoryItems, removeMemoryItem, messages } = useSession()
-  const [selectedItem, setSelectedItem] = createSignal<string | null>(null)
-
-  const formatTokens = (tokens: number): string => {
-    if (tokens >= 1000000) return `${(tokens / 1000000).toFixed(1)}M`
-    if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}K`
-    return tokens.toString()
-  }
 
   const usagePercentage = createMemo(() => contextUsage().percentage)
   const isHighUsage = createMemo(() => usagePercentage() > 80)
@@ -84,11 +24,9 @@ export const MemoryPanel: Component = () => {
     const items = memoryItems()
     if (items.length > 0) return items
 
-    // Generate items from messages for display
     const msgs = messages()
     if (msgs.length === 0) return []
 
-    // Group messages as conversation memory
     const conversationItem: MemoryItem = {
       id: 'conversation-current',
       sessionId: msgs[0]?.sessionId || '',
@@ -105,9 +43,7 @@ export const MemoryPanel: Component = () => {
     return [conversationItem]
   })
 
-  const totalTokens = createMemo(() => {
-    return displayItems().reduce((sum, item) => sum + item.tokens, 0)
-  })
+  const totalTokens = createMemo(() => displayItems().reduce((sum, item) => sum + item.tokens, 0))
 
   return (
     <div class="flex flex-col h-full">
@@ -136,21 +72,17 @@ export const MemoryPanel: Component = () => {
             </p>
           </div>
         </div>
-        <button
-          type="button"
+        <span
           class="
             p-2
+            inline-flex items-center justify-center
             rounded-[var(--radius-md)]
             text-[var(--text-tertiary)]
-            hover:text-[var(--text-primary)]
-            hover:bg-[var(--surface-raised)]
-            transition-colors duration-[var(--duration-fast)]
           "
-          title="Refresh"
-          aria-label="Refresh memory"
+          aria-hidden="true"
         >
           <RefreshCw class="w-4 h-4" />
-        </button>
+        </span>
       </div>
 
       {/* Context Usage Bar */}
@@ -182,7 +114,6 @@ export const MemoryPanel: Component = () => {
           />
         </div>
 
-        {/* Warning for high usage */}
         <Show when={isHighUsage()}>
           <div class="flex items-center gap-2 mt-2 text-xs text-[var(--error)]">
             <AlertTriangle class="w-3.5 h-3.5" />
@@ -208,115 +139,14 @@ export const MemoryPanel: Component = () => {
           }
         >
           <For each={displayItems()}>
-            {(item) => {
-              const config = memoryTypeConfig[item.type]
-              const ItemIcon = config.icon
-
-              return (
-                <button
-                  type="button"
-                  onClick={() => setSelectedItem(selectedItem() === item.id ? null : item.id)}
-                  class={`
-                    w-full text-left
-                    density-section-px density-section-py
-                    rounded-[var(--radius-lg)]
-                    border
-                    transition-all duration-[var(--duration-fast)]
-                    ${
-                      selectedItem() === item.id
-                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
-                        : 'border-[var(--border-subtle)] hover:border-[var(--border-default)] hover:bg-[var(--surface-raised)]'
-                    }
-                  `}
-                >
-                  <div class="flex items-start gap-3">
-                    {/* Item Icon */}
-                    <div
-                      class="p-2 rounded-[var(--radius-md)] flex-shrink-0"
-                      style={{ background: config.bg }}
-                    >
-                      <ItemIcon class="w-4 h-4" style={{ color: config.color }} />
-                    </div>
-
-                    {/* Item Info */}
-                    <div class="flex-1 min-w-0">
-                      <div class="flex items-center justify-between gap-2">
-                        <span class="text-sm font-medium text-[var(--text-primary)] truncate">
-                          {item.title}
-                        </span>
-                        <span
-                          class="flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full flex-shrink-0"
-                          style={{ background: config.bg, color: config.color }}
-                        >
-                          {config.label}
-                        </span>
-                      </div>
-
-                      <p class="text-xs text-[var(--text-muted)] mt-1 line-clamp-2">
-                        {item.preview}
-                      </p>
-
-                      {/* Token count */}
-                      <div class="flex items-center gap-2 mt-2">
-                        <span class="text-xs text-[var(--text-muted)]">
-                          {formatTokens(item.tokens)} tokens
-                        </span>
-                        <Show when={item.source}>
-                          <span class="text-xs text-[var(--text-muted)]">·</span>
-                          <span class="text-xs text-[var(--text-muted)] truncate">
-                            {item.source}
-                          </span>
-                        </Show>
-                      </div>
-
-                      {/* Expanded details */}
-                      <Show when={selectedItem() === item.id}>
-                        <div class="mt-3 pt-3 border-t border-[var(--border-subtle)] space-y-2">
-                          {/* Full preview */}
-                          <div class="text-xs text-[var(--text-secondary)] p-2 bg-[var(--surface-sunken)] rounded-[var(--radius-md)] max-h-32 overflow-y-auto">
-                            {item.preview}
-                          </div>
-
-                          {/* Actions */}
-                          <Show when={item.id !== 'conversation-current'}>
-                            <div class="flex items-center justify-end">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  removeMemoryItem(item.id)
-                                  setSelectedItem(null)
-                                }}
-                                class="
-                                  flex items-center gap-1 px-2 py-1
-                                  text-xs text-[var(--error)]
-                                  hover:bg-[var(--error-subtle)]
-                                  rounded-[var(--radius-md)]
-                                  transition-colors
-                                "
-                              >
-                                <Trash2 class="w-3 h-3" />
-                                Remove
-                              </button>
-                            </div>
-                          </Show>
-                        </div>
-                      </Show>
-                    </div>
-
-                    {/* Expand indicator */}
-                    <ChevronRight
-                      class={`
-                        w-4 h-4 flex-shrink-0
-                        text-[var(--text-muted)]
-                        transition-transform duration-[var(--duration-fast)]
-                        ${selectedItem() === item.id ? 'rotate-90' : ''}
-                      `}
-                    />
-                  </div>
-                </button>
-              )
-            }}
+            {(item) => (
+              <MemoryItemCard
+                item={item}
+                onRemove={(id) => {
+                  removeMemoryItem(id)
+                }}
+              />
+            )}
           </For>
         </Show>
       </div>
@@ -332,7 +162,7 @@ export const MemoryPanel: Component = () => {
         <div class="flex items-center justify-between text-xs text-[var(--text-muted)]">
           <div class="flex items-center gap-3">
             <span>{displayItems().length} items</span>
-            <span>·</span>
+            <span>&middot;</span>
             <span>{formatTokens(totalTokens())} tokens total</span>
           </div>
           <Show when={memoryItems().length > 0}>

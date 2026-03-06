@@ -60,12 +60,13 @@ describe('slash commands integration', () => {
 
   // ── Registration ─────────────────────────────────────────────────────────
 
-  it('registers all 11 built-in commands', () => {
+  it('registers all 12 built-in commands', () => {
     const commands = getCommands()
-    expect(commands.size).toBe(11)
+    expect(commands.size).toBe(12)
     expect(commands.has('help')).toBe(true)
     expect(commands.has('clear')).toBe(true)
     expect(commands.has('mode')).toBe(true)
+    expect(commands.has('architect')).toBe(true)
     expect(commands.has('model')).toBe(true)
     expect(commands.has('compact')).toBe(true)
     expect(commands.has('undo')).toBe(true)
@@ -128,14 +129,14 @@ describe('slash commands integration', () => {
 
   it('returns all commands sorted alphabetically', () => {
     const cmds = getAvailableCommands()
-    expect(cmds.length).toBe(11)
+    expect(cmds.length).toBe(12)
 
     const names = cmds.map((c) => c.name)
     const sorted = [...names].sort()
     expect(names).toEqual(sorted)
   })
 
-  it('marks all 11 commands as built-in', () => {
+  it('marks all 12 commands as built-in', () => {
     const cmds = getAvailableCommands()
     for (const cmd of cmds) {
       expect(cmd.isBuiltIn).toBe(true)

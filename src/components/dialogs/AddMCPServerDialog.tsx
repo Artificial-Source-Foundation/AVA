@@ -8,6 +8,7 @@ import { Plus, Server } from 'lucide-solid'
 import { type Component, createSignal, For, Show } from 'solid-js'
 import { MCP_CATEGORIES, MCP_PRESETS, type MCPPreset } from '../../config/mcp-presets'
 import type { MCPServerConfig, MCPTransportType } from '../../stores/settings/settings-types'
+import { MCPManualForm } from './mcp/MCPManualForm'
 
 interface AddMCPServerDialogProps {
   open: boolean
@@ -169,141 +170,24 @@ export const AddMCPServerDialog: Component<AddMCPServerDialogProps> = (props) =>
             </Show>
 
             <Show when={tab() === 'manual'}>
-              <div class="space-y-3">
-                {/* Name */}
-                <label class="block">
-                  <span class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">
-                    Name *
-                  </span>
-                  <input
-                    type="text"
-                    value={name()}
-                    onInput={(e) => setName(e.currentTarget.value)}
-                    placeholder="my-server"
-                    class="w-full mt-1 px-2.5 py-1.5 text-xs rounded-[var(--radius-md)] bg-[var(--surface-sunken)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
-                  />
-                </label>
-
-                {/* Transport */}
-                <div>
-                  <span class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">
-                    Transport
-                  </span>
-                  <div class="flex gap-1 mt-1">
-                    <For each={['stdio', 'sse', 'http'] as MCPTransportType[]}>
-                      {(t) => (
-                        <button
-                          type="button"
-                          onClick={() => setTransport(t)}
-                          class={`px-2.5 py-1 text-[11px] rounded-[var(--radius-md)] transition-colors ${
-                            transport() === t
-                              ? 'bg-[var(--accent)] text-white'
-                              : 'bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)]'
-                          }`}
-                        >
-                          {t.toUpperCase()}
-                        </button>
-                      )}
-                    </For>
-                  </div>
-                </div>
-
-                {/* Command + Args (stdio) */}
-                <Show when={transport() === 'stdio'}>
-                  <label class="block">
-                    <span class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">
-                      Command *
-                    </span>
-                    <input
-                      type="text"
-                      value={command()}
-                      onInput={(e) => setCommand(e.currentTarget.value)}
-                      placeholder="npx"
-                      class="w-full mt-1 px-2.5 py-1.5 text-xs font-mono rounded-[var(--radius-md)] bg-[var(--surface-sunken)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
-                    />
-                  </label>
-                  <label class="block">
-                    <span class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">
-                      Arguments
-                    </span>
-                    <input
-                      type="text"
-                      value={args()}
-                      onInput={(e) => setArgs(e.currentTarget.value)}
-                      placeholder="-y @modelcontextprotocol/server-name"
-                      class="w-full mt-1 px-2.5 py-1.5 text-xs font-mono rounded-[var(--radius-md)] bg-[var(--surface-sunken)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
-                    />
-                  </label>
-                </Show>
-
-                {/* URL (sse/http) */}
-                <Show when={transport() !== 'stdio'}>
-                  <label class="block">
-                    <span class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">
-                      URL *
-                    </span>
-                    <input
-                      type="text"
-                      value={url()}
-                      onInput={(e) => setUrl(e.currentTarget.value)}
-                      placeholder="http://localhost:3001"
-                      class="w-full mt-1 px-2.5 py-1.5 text-xs font-mono rounded-[var(--radius-md)] bg-[var(--surface-sunken)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
-                    />
-                  </label>
-                </Show>
-
-                {/* CWD */}
-                <label class="block">
-                  <span class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">
-                    Working Directory (optional)
-                  </span>
-                  <input
-                    type="text"
-                    value={cwd()}
-                    onInput={(e) => setCwd(e.currentTarget.value)}
-                    placeholder="/path/to/project"
-                    class="w-full mt-1 px-2.5 py-1.5 text-xs font-mono rounded-[var(--radius-md)] bg-[var(--surface-sunken)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
-                  />
-                </label>
-
-                {/* Environment Variables */}
-                <label class="block">
-                  <span class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">
-                    Environment Variables (KEY=value, one per line)
-                  </span>
-                  <textarea
-                    value={envPairs()}
-                    onInput={(e) => setEnvPairs(e.currentTarget.value)}
-                    placeholder="BRAVE_API_KEY=your_key"
-                    rows={2}
-                    class="w-full mt-1 px-2.5 py-1.5 text-xs font-mono rounded-[var(--radius-md)] bg-[var(--surface-sunken)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none resize-none"
-                  />
-                </label>
-
-                {/* Trust Level */}
-                <div>
-                  <span class="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">
-                    Trust Level
-                  </span>
-                  <div class="flex gap-1 mt-1">
-                    <For each={['full', 'sandbox', 'none'] as const}>
-                      {(level) => (
-                        <button
-                          type="button"
-                          onClick={() => setTrust(level)}
-                          class={`px-2.5 py-1 text-[11px] rounded-[var(--radius-md)] transition-colors ${
-                            trust() === level
-                              ? 'bg-[var(--accent)] text-white'
-                              : 'bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)]'
-                          }`}
-                        >
-                          {level.charAt(0).toUpperCase() + level.slice(1)}
-                        </button>
-                      )}
-                    </For>
-                  </div>
-                </div>
-              </div>
+              <MCPManualForm
+                name={name}
+                setName={setName}
+                transport={transport}
+                setTransport={setTransport}
+                command={command}
+                setCommand={setCommand}
+                args={args}
+                setArgs={setArgs}
+                url={url}
+                setUrl={setUrl}
+                cwd={cwd}
+                setCwd={setCwd}
+                envPairs={envPairs}
+                setEnvPairs={setEnvPairs}
+                trust={trust}
+                setTrust={setTrust}
+              />
             </Show>
           </div>
 

@@ -5,8 +5,8 @@
  * Port of the logic from provider-row-expanded.tsx into the card layout.
  */
 
-import { ExternalLink, Loader2, LogIn, LogOut, RefreshCw, Server, Trash2 } from 'lucide-solid'
-import { type Component, createSignal, For, Show } from 'solid-js'
+import { ExternalLink, Server, Trash2 } from 'lucide-solid'
+import { type Component, createSignal, Show } from 'solid-js'
 import type {
   LLMProviderConfig,
   ProviderModel,
@@ -25,7 +25,9 @@ import { OllamaModelBrowser } from '../../OllamaModelBrowser'
 import { ProviderRowApiKeyInput } from '../provider-row-api-key-input'
 import { ProviderRowClearConfirm } from '../provider-row-clear-confirm'
 import { checkStoredOAuth, clearProviderCredentials } from '../providers-tab-helpers'
-import { formatContextWindow, getProviderDocsUrl, oauthButtonText } from '../providers-tab-utils'
+import { getProviderDocsUrl, oauthButtonText } from '../providers-tab-utils'
+import { ModelsListSection } from './ModelsListSection'
+import { OAuthSection } from './OAuthSection'
 
 interface ProviderCardExpandedProps {
   provider: LLMProviderConfig
@@ -129,51 +131,14 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
 
       {/* OAuth section */}
       <Show when={isOAuthSupported(props.provider.id as LLMProvider)}>
-        <div class="pt-3">
-          <Show
-            when={isOAuthConnected()}
-            fallback={
-              <button
-                type="button"
-                onClick={handleOAuthClick}
-                disabled={isOAuthLoading()}
-                class="flex items-center gap-2 px-2.5 py-1.5 text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent)] bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors w-full disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Show when={isOAuthLoading()} fallback={<LogIn class="w-3 h-3" />}>
-                  <Loader2 class="w-3 h-3 animate-spin" />
-                </Show>
-                <span>
-                  {isOAuthLoading()
-                    ? 'Waiting for authorization...'
-                    : oauthButtonText(props.provider.id).label}
-                </span>
-              </button>
-            }
-          >
-            <div class="flex items-center gap-2">
-              <div class="flex items-center gap-1.5 flex-1 px-2.5 py-1.5 text-[11px] text-[var(--success)] bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-[var(--radius-md)]">
-                <span class="w-1.5 h-1.5 rounded-full bg-[var(--success)]" />
-                <span>Connected via OAuth</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowClearConfirm(true)}
-                class="px-2 py-1.5 text-[11px] text-[var(--text-muted)] hover:text-[var(--error)] bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] transition-colors"
-                title="Disconnect OAuth"
-              >
-                <LogOut class="w-3 h-3" />
-              </button>
-            </div>
-          </Show>
-          <Show when={oauthError()}>
-            <p class="text-[10px] text-[var(--error)] px-1 mt-1">{oauthError()}</p>
-          </Show>
-          <div class="flex items-center gap-2 px-1 mt-2">
-            <div class="flex-1 h-px bg-[var(--border-subtle)]" />
-            <span class="text-[9px] text-[var(--text-muted)] uppercase">or API key</span>
-            <div class="flex-1 h-px bg-[var(--border-subtle)]" />
-          </div>
-        </div>
+        <OAuthSection
+          isConnected={isOAuthConnected()}
+          isLoading={isOAuthLoading()}
+          error={oauthError()}
+          buttonLabel={oauthButtonText(props.provider.id).label}
+          onConnect={handleOAuthClick}
+          onDisconnect={() => setShowClearConfirm(true)}
+        />
       </Show>
 
       {/* API Key input */}
@@ -219,49 +184,13 @@ export const ProviderCardExpanded: Component<ProviderCardExpandedProps> = (props
 
       {/* Models list */}
       <Show when={props.provider.models.length > 0}>
-        <div class="space-y-1">
-          <div class="flex items-center justify-between">
-            <span class="text-[10px] font-medium text-[var(--text-muted)]">
-              {props.provider.models.length} models
-            </span>
-            <button
-              type="button"
-              onClick={handleRefreshModels}
-              disabled={isLoadingModels()}
-              class="flex items-center gap-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              title="Refresh models from API"
-            >
-              <Show when={isLoadingModels()} fallback={<RefreshCw class="w-2.5 h-2.5" />}>
-                <Loader2 class="w-2.5 h-2.5 animate-spin" />
-              </Show>
-              Refresh
-            </button>
-          </div>
-          <div class="flex flex-wrap gap-1">
-            <For each={props.provider.models.slice(0, 6)}>
-              {(model) => (
-                <span
-                  class={`px-1.5 py-0.5 text-[9px] rounded-[var(--radius-sm)] border cursor-default ${
-                    model.id === props.provider.defaultModel
-                      ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--accent)]/5'
-                      : 'border-[var(--border-subtle)] text-[var(--text-muted)]'
-                  }`}
-                  title={`${model.name} · ${formatContextWindow(model.contextWindow)}`}
-                >
-                  {model.name}
-                </span>
-              )}
-            </For>
-            <Show when={props.provider.models.length > 6}>
-              <span class="px-1.5 py-0.5 text-[9px] text-[var(--text-muted)]">
-                +{props.provider.models.length - 6} more
-              </span>
-            </Show>
-          </div>
-          <Show when={modelError()}>
-            <p class="text-[10px] text-[var(--error)] px-1">{modelError()}</p>
-          </Show>
-        </div>
+        <ModelsListSection
+          models={props.provider.models}
+          defaultModel={props.provider.defaultModel}
+          isLoading={isLoadingModels()}
+          error={modelError()}
+          onRefresh={handleRefreshModels}
+        />
       </Show>
 
       {/* Clear confirm */}

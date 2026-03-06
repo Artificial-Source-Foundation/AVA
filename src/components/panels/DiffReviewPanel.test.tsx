@@ -2,11 +2,14 @@ import { render } from 'solid-js/web'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DiffReviewPanel } from './DiffReviewPanel'
 
-const { fileOperationsMock, getAvailableEditorsMock, openInEditorMock } = vi.hoisted(() => ({
-  fileOperationsMock: vi.fn(),
-  getAvailableEditorsMock: vi.fn(),
-  openInEditorMock: vi.fn(),
-}))
+const { fileOperationsMock, getAvailableEditorsMock, openInEditorMock, emitEventMock } = vi.hoisted(
+  () => ({
+    fileOperationsMock: vi.fn(),
+    getAvailableEditorsMock: vi.fn(),
+    openInEditorMock: vi.fn(),
+    emitEventMock: vi.fn(),
+  })
+)
 
 vi.mock('../../stores/session', () => ({
   useSession: () => ({
@@ -17,6 +20,14 @@ vi.mock('../../stores/session', () => ({
 vi.mock('../../services/ide-integration', () => ({
   getAvailableEditors: getAvailableEditorsMock,
   openInEditor: openInEditorMock,
+}))
+
+vi.mock('../../hooks/useExtensionEvents', () => ({
+  useExtensionEvent: () => () => undefined,
+}))
+
+vi.mock('@ava/core-v2/extensions', () => ({
+  emitEvent: emitEventMock,
 }))
 
 vi.mock('./DiffReview', () => ({

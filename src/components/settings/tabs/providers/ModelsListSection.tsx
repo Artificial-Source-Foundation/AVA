@@ -1,0 +1,66 @@
+/**
+ * Models List Section — compact model tag display with refresh
+ *
+ * Shows model names as chips with a refresh button to re-fetch from API.
+ */
+
+import { Loader2, RefreshCw } from 'lucide-solid'
+import { type Component, For, Show } from 'solid-js'
+import type { ProviderModel } from '../../../../config/defaults/provider-defaults'
+import { formatContextWindow } from '../providers-tab-utils'
+
+interface ModelsListSectionProps {
+  models: ProviderModel[]
+  defaultModel?: string
+  isLoading: boolean
+  error: string | null
+  onRefresh: () => void
+}
+
+export const ModelsListSection: Component<ModelsListSectionProps> = (props) => {
+  return (
+    <div class="space-y-1">
+      <div class="flex items-center justify-between">
+        <span class="text-[10px] font-medium text-[var(--text-muted)]">
+          {props.models.length} models
+        </span>
+        <button
+          type="button"
+          onClick={props.onRefresh}
+          disabled={props.isLoading}
+          class="flex items-center gap-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          title="Refresh models from API"
+        >
+          <Show when={props.isLoading} fallback={<RefreshCw class="w-2.5 h-2.5" />}>
+            <Loader2 class="w-2.5 h-2.5 animate-spin" />
+          </Show>
+          Refresh
+        </button>
+      </div>
+      <div class="flex flex-wrap gap-1">
+        <For each={props.models.slice(0, 6)}>
+          {(model) => (
+            <span
+              class={`px-1.5 py-0.5 text-[9px] rounded-[var(--radius-sm)] border cursor-default ${
+                model.id === props.defaultModel
+                  ? 'border-[var(--accent)] text-[var(--accent)] bg-[var(--accent)]/5'
+                  : 'border-[var(--border-subtle)] text-[var(--text-muted)]'
+              }`}
+              title={`${model.name} · ${formatContextWindow(model.contextWindow)}`}
+            >
+              {model.name}
+            </span>
+          )}
+        </For>
+        <Show when={props.models.length > 6}>
+          <span class="px-1.5 py-0.5 text-[9px] text-[var(--text-muted)]">
+            +{props.models.length - 6} more
+          </span>
+        </Show>
+      </div>
+      <Show when={props.error}>
+        <p class="text-[10px] text-[var(--error)] px-1">{props.error}</p>
+      </Show>
+    </div>
+  )
+}

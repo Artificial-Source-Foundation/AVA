@@ -22,6 +22,7 @@ import { ActivityBar } from './ActivityBar'
 import { MainArea } from './MainArea'
 import { SidebarPanel } from './SidebarPanel'
 import { StatusBar } from './StatusBar'
+import { createResizeHandlers } from './useResizeHandlers'
 
 const XTerminal = lazy(() => import('../panels/XTerminal').then((m) => ({ default: m.XTerminal })))
 
@@ -45,65 +46,14 @@ export const AppShell: Component = () => {
   } = useLayout()
   const { settings } = useSettings()
 
-  // Sidebar resize handler
-  const startSidebarResize = (e: MouseEvent) => {
-    e.preventDefault()
-    const startX = e.clientX
-    const startWidth = sidebarWidth()
-
-    const onMove = (moveEvent: MouseEvent) => {
-      const delta = moveEvent.clientX - startX
-      setSidebarWidth(startWidth + delta)
-    }
-
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-    }
-
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
-  }
-
-  // Right panel resize handler
-  const startRightResize = (e: MouseEvent) => {
-    e.preventDefault()
-    const startX = e.clientX
-    const startWidth = rightPanelWidth()
-
-    const onMove = (moveEvent: MouseEvent) => {
-      const delta = startX - moveEvent.clientX
-      setRightPanelWidth(startWidth + delta)
-    }
-
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-    }
-
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
-  }
-
-  // Bottom panel resize handler
-  const startBottomResize = (e: MouseEvent) => {
-    e.preventDefault()
-    const startY = e.clientY
-    const startHeight = bottomPanelHeight()
-
-    const onMove = (moveEvent: MouseEvent) => {
-      const delta = startY - moveEvent.clientY
-      setBottomPanelHeight(startHeight + delta)
-    }
-
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove)
-      document.removeEventListener('mouseup', onUp)
-    }
-
-    document.addEventListener('mousemove', onMove)
-    document.addEventListener('mouseup', onUp)
-  }
+  const { startSidebarResize, startRightResize, startBottomResize } = createResizeHandlers({
+    sidebarWidth,
+    setSidebarWidth,
+    rightPanelWidth,
+    setRightPanelWidth,
+    bottomPanelHeight,
+    setBottomPanelHeight,
+  })
 
   return (
     <div class="h-screen flex flex-col text-[var(--text-primary)] overflow-hidden">

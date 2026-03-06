@@ -5,82 +5,10 @@
  * Connected to the session store for real-time command tracking.
  */
 
-import { Check, ChevronRight, Clock, Copy, Loader2, Terminal, Trash2, X } from 'lucide-solid'
+import { Terminal, Trash2 } from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
 import { useSession } from '../../stores/session'
-import type { ExecutionStatus } from '../../types'
-
-// ============================================================================
-// ANSI Color Parsing
-// ============================================================================
-
-const ansiToClass: Record<string, string> = {
-  '30': 'text-gray-900 dark:text-gray-100',
-  '31': 'text-red-600 dark:text-red-400',
-  '32': 'text-green-600 dark:text-green-400',
-  '33': 'text-yellow-600 dark:text-yellow-400',
-  '34': 'text-blue-600 dark:text-blue-400',
-  '35': 'text-purple-600 dark:text-purple-400',
-  '36': 'text-cyan-600 dark:text-cyan-400',
-  '37': 'text-gray-600 dark:text-gray-300',
-  '90': 'text-gray-500',
-  '91': 'text-red-500',
-  '92': 'text-green-500',
-  '93': 'text-yellow-500',
-  '94': 'text-blue-500',
-  '95': 'text-purple-500',
-  '96': 'text-cyan-500',
-  '97': 'text-white',
-}
-
-// Parse ANSI codes and convert to styled spans
-const parseAnsi = (text: string): { text: string; class: string }[] => {
-  const parts: { text: string; class: string }[] = []
-  // oxlint-disable-next-line no-control-regex -- ANSI escape codes require control characters
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape codes require control characters by definition
-  const regex = /\x1b\[(\d+)m/g
-  let lastIndex = 0
-  let currentClass = ''
-  let match: RegExpExecArray | null
-
-  // biome-ignore lint/suspicious/noAssignInExpressions: Standard regex iteration pattern
-  while ((match = regex.exec(text)) !== null) {
-    // Add text before this match
-    if (match.index > lastIndex) {
-      parts.push({ text: text.slice(lastIndex, match.index), class: currentClass })
-    }
-
-    // Update current class
-    const code = match[1]
-    if (code === '0') {
-      currentClass = '' // Reset
-    } else if (ansiToClass[code]) {
-      currentClass = ansiToClass[code]
-    }
-
-    lastIndex = regex.lastIndex
-  }
-
-  // Add remaining text
-  if (lastIndex < text.length) {
-    parts.push({ text: text.slice(lastIndex), class: currentClass })
-  }
-
-  return parts.length > 0 ? parts : [{ text, class: '' }]
-}
-
-// ============================================================================
-// Status Configuration
-// ============================================================================
-
-const statusConfig: Record<
-  ExecutionStatus,
-  { color: string; bg: string; icon: typeof Check; label: string }
-> = {
-  running: { color: 'var(--accent)', bg: 'var(--accent-subtle)', icon: Loader2, label: 'Running' },
-  success: { color: 'var(--success)', bg: 'var(--success-subtle)', icon: Check, label: 'Success' },
-  error: { color: 'var(--error)', bg: 'var(--error-subtle)', icon: X, label: 'Error' },
-}
+import { ExecutionItem } from './terminal/ExecutionItem'
 
 // ============================================================================
 // Component
@@ -111,18 +39,6 @@ export const TerminalPanel: Component<TerminalPanelProps> = (props) => {
     await navigator.clipboard.writeText(text)
     setCopiedId(id)
     setTimeout(() => setCopiedId(null), 2000)
-  }
-
-  const formatDuration = (ms: number): string => {
-    if (ms < 1000) return `${ms}ms`
-    return `${(ms / 1000).toFixed(1)}s`
-  }
-
-  const formatTimestamp = (ts: number): string => {
-    const diff = Date.now() - ts
-    if (diff < 60000) return 'Just now'
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
-    return new Date(ts).toLocaleTimeString()
   }
 
   const executionStats = createMemo(() => ({
@@ -201,157 +117,15 @@ export const TerminalPanel: Component<TerminalPanelProps> = (props) => {
           }
         >
           <For each={terminalExecutions()}>
-            {(execution) => {
-              const config = statusConfig[execution.status]
-              const StatusIcon = config.icon
-              const isExpanded = () => expandedIds().has(execution.id)
-              const duration =
-                execution.completedAt && execution.startedAt
-                  ? execution.completedAt - execution.startedAt
-                  : null
-
-              return (
-                <div
-                  class={`
-                    rounded-[var(--radius-lg)]
-                    border
-                    overflow-hidden
-                    transition-all duration-[var(--duration-fast)]
-                    ${
-                      isExpanded()
-                        ? 'border-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] hover:border-[var(--border-default)]'
-                    }
-                  `}
-                >
-                  {/* Command Header — div (not button) to avoid nested button with copy */}
-                  {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button (copy inside) which crashes WebKitGTK */}
-                  <div
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => toggleExpanded(execution.id)}
-                    onKeyDown={(e) =>
-                      (e.key === 'Enter' || e.key === ' ') && toggleExpanded(execution.id)
-                    }
-                    class="
-                      w-full text-left
-                      flex items-center density-gap
-                      density-section-px density-section-py
-                      bg-[var(--surface)]
-                      hover:bg-[var(--surface-raised)]
-                      transition-colors duration-[var(--duration-fast)]
-                      cursor-pointer border-none
-                    "
-                  >
-                    {/* Status Icon */}
-                    <div
-                      class="p-1.5 rounded-[var(--radius-md)] flex-shrink-0"
-                      style={{ background: config.bg }}
-                    >
-                      <StatusIcon
-                        class={`w-3.5 h-3.5 ${execution.status === 'running' ? 'animate-spin' : ''}`}
-                        style={{ color: config.color }}
-                      />
-                    </div>
-
-                    {/* Command */}
-                    <div class="flex-1 min-w-0">
-                      <div class="flex items-center gap-2">
-                        <code class="text-sm font-mono text-[var(--text-primary)] truncate">
-                          $ {execution.command}
-                        </code>
-                      </div>
-                      <div class="flex items-center gap-3 mt-1 text-xs text-[var(--text-muted)]">
-                        <span class="flex items-center gap-1">
-                          <Clock class="w-3 h-3" />
-                          {formatTimestamp(execution.startedAt)}
-                        </span>
-                        <Show when={duration !== null}>
-                          <span>{formatDuration(duration!)}</span>
-                        </Show>
-                        <Show
-                          when={execution.exitCode !== undefined && execution.status !== 'running'}
-                        >
-                          <span
-                            class={
-                              execution.exitCode === 0
-                                ? 'text-[var(--success)]'
-                                : 'text-[var(--error)]'
-                            }
-                          >
-                            exit {execution.exitCode}
-                          </span>
-                        </Show>
-                      </div>
-                    </div>
-
-                    {/* Expand/Copy */}
-                    <div class="flex items-center gap-1 flex-shrink-0">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          copyToClipboard(execution.output, execution.id)
-                        }}
-                        class="
-                          p-1.5
-                          rounded-[var(--radius-md)]
-                          text-[var(--text-muted)]
-                          hover:text-[var(--text-primary)]
-                          hover:bg-[var(--surface-raised)]
-                          transition-colors
-                        "
-                        title="Copy output"
-                      >
-                        <Show
-                          when={copiedId() === execution.id}
-                          fallback={<Copy class="w-3.5 h-3.5" />}
-                        >
-                          <Check class="w-3.5 h-3.5 text-[var(--success)]" />
-                        </Show>
-                      </button>
-                      <ChevronRight
-                        class={`
-                          w-4 h-4
-                          text-[var(--text-muted)]
-                          transition-transform duration-[var(--duration-fast)]
-                          ${isExpanded() ? 'rotate-90' : ''}
-                        `}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Output */}
-                  <Show when={isExpanded()}>
-                    <div
-                      class="
-                        p-3
-                        bg-[var(--code-background)]
-                        border-t border-[var(--border-subtle)]
-                        max-h-64 overflow-y-auto
-                      "
-                    >
-                      <pre class="text-xs font-mono whitespace-pre-wrap">
-                        <Show
-                          when={execution.output}
-                          fallback={
-                            <span class="text-[var(--text-muted)] italic">
-                              {execution.status === 'running'
-                                ? 'Waiting for output...'
-                                : 'No output'}
-                            </span>
-                          }
-                        >
-                          <For each={parseAnsi(execution.output)}>
-                            {(part) => <span class={part.class}>{part.text}</span>}
-                          </For>
-                        </Show>
-                      </pre>
-                    </div>
-                  </Show>
-                </div>
-              )
-            }}
+            {(execution) => (
+              <ExecutionItem
+                execution={execution}
+                isExpanded={expandedIds().has(execution.id)}
+                isCopied={copiedId() === execution.id}
+                onToggle={() => toggleExpanded(execution.id)}
+                onCopy={() => void copyToClipboard(execution.output, execution.id)}
+              />
+            )}
           </For>
         </Show>
       </div>

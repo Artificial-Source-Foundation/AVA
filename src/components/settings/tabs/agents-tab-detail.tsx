@@ -6,10 +6,11 @@
  */
 
 import { Copy, Info } from 'lucide-solid'
-import { type Component, createMemo, createSignal, For, Show } from 'solid-js'
+import { type Component, createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import type { AgentPreset } from '../../../config/defaults/agent-defaults'
 import type { LLMProviderConfig } from '../../../config/defaults/provider-defaults'
 import { aggregateModels } from '../../dialogs/model-browser/model-browser-helpers'
+import { CategoryToggleSection } from './agents-detail/CategoryToggleSection'
 import { ALL_TOOLS, CAPABILITY_CATEGORIES, TOOL_CATEGORIES } from './agents-tab-data'
 
 export interface AgentsTabDetailProps {
@@ -45,13 +46,11 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
     setLoadedId(agent.id)
   }
 
-  const current = createMemo(() => {
-    const a = props.agent
-    if (a && a.id !== loadedId()) loadAgent(a)
-    return a
+  createEffect(() => {
+    const agent = props.agent
+    if (agent && agent.id !== loadedId()) loadAgent(agent)
   })
 
-  // Show models from ALL enabled providers (not just those with API keys)
   const modelGroups = createMemo(() => {
     const enabled = props.providers.filter((p) => p.enabled)
     const all = aggregateModels(enabled)
@@ -70,10 +69,10 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
   }
 
   const handleSave = () => {
-    const a = current()
+    const a = props.agent
     if (!a || !name().trim()) return
     props.onSave({
-      ...a, // preserves tier, domain, delegates, icon, etc.
+      ...a,
       name: name().trim(),
       description: description().trim(),
       systemPrompt: systemPrompt() || undefined,
@@ -85,7 +84,7 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
   }
 
   const handleCopyJson = () => {
-    const a = current()
+    const a = props.agent
     if (!a) return
     const { icon: _, ...rest } = a
     navigator.clipboard.writeText(JSON.stringify(rest, null, 2))
@@ -93,10 +92,14 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
     setTimeout(() => setCopied(false), 1500)
   }
 
+  // Adapt TOOL_CATEGORIES shape for CategoryToggleSection
+  const toolCategories = TOOL_CATEGORIES.map((c) => ({ label: c.label, items: c.tools }))
+  const capCategories = CAPABILITY_CATEGORIES.map((c) => ({ label: c.label, items: c.items }))
+
   return (
     <div class="h-full overflow-y-auto p-5">
       <Show
-        when={current()}
+        when={props.agent}
         fallback={
           <div class="flex items-center justify-center h-full text-center">
             <div>
@@ -170,84 +173,24 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
           </div>
 
           {/* Tools — categorized */}
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-[11px] font-medium text-[var(--text-secondary)]">
-                Tools{' '}
-                <span class="text-[var(--text-muted)] font-normal">
-                  ({tools().length}/{ALL_TOOLS.length})
-                </span>
-              </span>
-              <div class="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setTools([...ALL_TOOLS])}
-                  class="text-[9px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
-                >
-                  All
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTools([])}
-                  class="text-[9px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
-                >
-                  None
-                </button>
-              </div>
-            </div>
-            <div class="space-y-1.5">
-              <For each={TOOL_CATEGORIES}>
-                {(cat) => (
-                  <div class="flex items-start gap-2">
-                    <span class="text-[9px] text-[var(--text-muted)] w-14 flex-shrink-0 pt-0.5 text-right">
-                      {cat.label}
-                    </span>
-                    <div class="flex flex-wrap gap-1">
-                      <For each={cat.tools}>
-                        {(tool) => (
-                          <Chip
-                            label={tool}
-                            active={tools().includes(tool)}
-                            onClick={() => toggle(tools(), setTools, tool)}
-                          />
-                        )}
-                      </For>
-                    </div>
-                  </div>
-                )}
-              </For>
-            </div>
-          </div>
+          <CategoryToggleSection
+            title="Tools"
+            countLabel={`${tools().length}/${ALL_TOOLS.length}`}
+            categories={toolCategories}
+            selected={tools()}
+            onToggle={(tool) => toggle(tools(), setTools, tool)}
+            onSelectAll={() => setTools([...ALL_TOOLS])}
+            onSelectNone={() => setTools([])}
+          />
 
           {/* Capabilities — categorized */}
-          <div>
-            <span class="text-[11px] font-medium text-[var(--text-secondary)] mb-2 block">
-              Capabilities{' '}
-              <span class="text-[var(--text-muted)] font-normal">({capabilities().length})</span>
-            </span>
-            <div class="space-y-1.5">
-              <For each={CAPABILITY_CATEGORIES}>
-                {(cat) => (
-                  <div class="flex items-start gap-2">
-                    <span class="text-[9px] text-[var(--text-muted)] w-14 flex-shrink-0 pt-0.5 text-right">
-                      {cat.label}
-                    </span>
-                    <div class="flex flex-wrap gap-1">
-                      <For each={cat.items}>
-                        {(cap) => (
-                          <Chip
-                            label={cap}
-                            active={capabilities().includes(cap)}
-                            onClick={() => toggle(capabilities(), setCapabilities, cap)}
-                          />
-                        )}
-                      </For>
-                    </div>
-                  </div>
-                )}
-              </For>
-            </div>
-          </div>
+          <CategoryToggleSection
+            title="Capabilities"
+            countLabel={`${capabilities().length}`}
+            categories={capCategories}
+            selected={capabilities()}
+            onToggle={(cap) => toggle(capabilities(), setCapabilities, cap)}
+          />
 
           {/* Storage info */}
           <div class="flex items-start gap-2 p-3 rounded-[var(--radius-md)] bg-[var(--alpha-white-3)] border border-[var(--border-subtle)]">
@@ -271,10 +214,10 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
 
           {/* Actions */}
           <div class="flex items-center gap-2 pt-2 border-t border-[var(--border-subtle)]">
-            <Show when={current()?.isCustom && props.onDelete}>
+            <Show when={props.agent?.isCustom && props.onDelete}>
               <button
                 type="button"
-                onClick={() => props.onDelete?.(current()!.id)}
+                onClick={() => props.onDelete?.(props.agent!.id)}
                 class="px-3 py-1.5 text-xs text-[var(--error)] hover:bg-[var(--error)]/10 rounded-[var(--radius-md)] transition-colors"
               >
                 Delete
@@ -284,7 +227,7 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
             <button
               type="button"
               onClick={() => {
-                const a = current()
+                const a = props.agent
                 if (a) loadAgent(a)
               }}
               class="px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-[var(--radius-md)] transition-colors"
@@ -305,21 +248,3 @@ export const AgentsTabDetail: Component<AgentsTabDetailProps> = (props) => {
     </div>
   )
 }
-
-// ============================================================================
-// Chip Toggle — compact, toggleable label
-// ============================================================================
-
-const Chip: Component<{ label: string; active: boolean; onClick: () => void }> = (props) => (
-  <button
-    type="button"
-    onClick={props.onClick}
-    class={`px-1.5 py-0.5 text-[10px] rounded-[var(--radius-sm)] transition-colors ${
-      props.active
-        ? 'bg-[var(--accent)] text-white'
-        : 'bg-[var(--alpha-white-5)] text-[var(--text-tertiary)] hover:bg-[var(--alpha-white-8)] hover:text-[var(--text-secondary)]'
-    }`}
-  >
-    {props.label}
-  </button>
-)

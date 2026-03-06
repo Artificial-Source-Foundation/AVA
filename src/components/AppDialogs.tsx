@@ -1,0 +1,155 @@
+/**
+ * App Dialogs Component
+ *
+ * Renders all top-level dialog components (workflow, checkpoint,
+ * export, changelog, update) and command palette with its handlers.
+ */
+
+import type { Component } from 'solid-js'
+import { useNotification } from '../contexts/notification'
+import { type ExportOptions, exportConversation } from '../lib/export-conversation'
+import type { UpdateInfo } from '../services/auto-updater'
+import { useLayout } from '../stores/layout'
+import { useProject } from '../stores/project'
+import { useSession } from '../stores/session'
+import { useWorkflows } from '../stores/workflows'
+import { CommandPalette, createDefaultCommands } from './CommandPalette'
+import { QuickModelPicker } from './chat/QuickModelPicker'
+import { SessionSwitcher } from './chat/SessionSwitcher'
+import { ChangelogDialog, markChangelogSeen } from './dialogs/ChangelogDialog'
+import { CheckpointDialog } from './dialogs/CheckpointDialog'
+import { ExportOptionsDialog } from './dialogs/ExportOptionsDialog'
+import { UpdateDialog } from './dialogs/UpdateDialog'
+import { WorkflowDialog } from './dialogs/WorkflowDialog'
+
+export interface AppDialogsProps {
+  workflowDialogOpen: boolean
+  setWorkflowDialogOpen: (v: boolean) => void
+  checkpointDialogOpen: boolean
+  setCheckpointDialogOpen: (v: boolean) => void
+  exportDialogOpen: boolean
+  setExportDialogOpen: (v: boolean) => void
+  changelogOpen: boolean
+  setChangelogOpen: (v: boolean) => void
+  updateDialogOpen: boolean
+  setUpdateDialogOpen: (v: boolean) => void
+  updateInfo: UpdateInfo | null
+  onInstallUpdate: () => Promise<void>
+  setProjectHubVisible: (v: boolean) => void
+}
+
+export const AppDialogs: Component<AppDialogsProps> = (props) => {
+  const { toggleSettings } = useLayout()
+  const {
+    sessionSwitcherOpen,
+    setSessionSwitcherOpen,
+    quickModelPickerOpen,
+    setQuickModelPickerOpen,
+  } = useLayout()
+  const { currentProject } = useProject()
+  const { messages, currentSession, createNewSession, createCheckpoint } = useSession()
+  const { loadWorkflows } = useWorkflows()
+  const { info } = useNotification()
+
+  return (
+    <>
+      <QuickModelPicker
+        open={quickModelPickerOpen()}
+        onClose={() => setQuickModelPickerOpen(false)}
+      />
+      <SessionSwitcher open={sessionSwitcherOpen()} onClose={() => setSessionSwitcherOpen(false)} />
+      <CommandPalette
+        commands={createDefaultCommands({
+          newChat: async () => {
+            if (!currentProject()) {
+              props.setProjectHubVisible(true)
+              return
+            }
+            await createNewSession()
+            props.setProjectHubVisible(false)
+          },
+          exportChat: () => {
+            if (messages().length === 0) return
+            props.setExportDialogOpen(true)
+          },
+          initProject: () => {
+            const project = currentProject()
+            if (!project) return
+            const prompt = [
+              'Analyze this project and generate a comprehensive `.ava-instructions` file in the project root.',
+              'Include:',
+              '- Project overview (what it does, tech stack)',
+              '- Architecture and key directories',
+              '- Build, test, and lint commands',
+              '- Code style conventions (naming, formatting, patterns)',
+              '- Important rules and gotchas',
+              '',
+              `Project directory: ${project.directory}`,
+            ].join('\n')
+            window.dispatchEvent(new CustomEvent('ava:set-input', { detail: { text: prompt } }))
+          },
+          openSettings: toggleSettings,
+          saveWorkflow: () => {
+            if (messages().length === 0) return
+            props.setWorkflowDialogOpen(true)
+          },
+          browseWorkflows: () => {
+            loadWorkflows(currentProject()?.id)
+          },
+          importWorkflows: async () => {
+            try {
+              const { importFromFile } = useWorkflows()
+              const count = await importFromFile()
+              info('Imported', `${count} workflow${count !== 1 ? 's' : ''} imported`)
+            } catch (err) {
+              info('Import failed', err instanceof Error ? err.message : 'Unknown error')
+            }
+          },
+          exportWorkflows: () => {
+            const { exportAll } = useWorkflows()
+            exportAll()
+          },
+          openProjectStats: () => {
+            window.dispatchEvent(new CustomEvent('ava:open-project-stats'))
+          },
+          saveCheckpoint: () => {
+            if (messages().length === 0) return
+            props.setCheckpointDialogOpen(true)
+          },
+        })}
+      />
+      <WorkflowDialog
+        open={props.workflowDialogOpen}
+        onClose={() => props.setWorkflowDialogOpen(false)}
+      />
+      <CheckpointDialog
+        open={props.checkpointDialogOpen}
+        onClose={() => props.setCheckpointDialogOpen(false)}
+        onSave={async (desc) => {
+          const id = await createCheckpoint(desc)
+          if (id) info('Checkpoint saved', desc)
+        }}
+      />
+      <ExportOptionsDialog
+        open={props.exportDialogOpen}
+        onClose={() => props.setExportDialogOpen(false)}
+        onExport={(opts: ExportOptions) => {
+          exportConversation(messages(), currentSession()?.name, opts)
+        }}
+      />
+      <ChangelogDialog
+        open={props.changelogOpen}
+        onClose={() => {
+          props.setChangelogOpen(false)
+          markChangelogSeen()
+        }}
+      />
+      <UpdateDialog
+        open={props.updateDialogOpen}
+        updateInfo={props.updateInfo}
+        onClose={() => props.setUpdateDialogOpen(false)}
+        onInstall={props.onInstallUpdate}
+      />
+    </>
+  )
+}

@@ -7,86 +7,24 @@
  */
 
 import { emitEvent } from '@ava/core-v2/extensions'
-import {
-  ChevronDown,
-  ChevronRight,
-  ChevronsDownUp,
-  ChevronsUpDown,
-  ExternalLink,
-  FileEdit,
-  FilePlus2,
-  FolderOpen,
-  Minus,
-  Plus,
-  Trash2,
-} from 'lucide-solid'
+import { ChevronsDownUp, ChevronsUpDown, FileEdit, Minus, Plus } from 'lucide-solid'
 import { type Component, createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import { useExtensionEvent } from '../../hooks/useExtensionEvents'
-import { type EditorInfo, getAvailableEditors, openInEditor } from '../../services/ide-integration'
+import { type EditorInfo, getAvailableEditors } from '../../services/ide-integration'
 import { useSession } from '../../stores/session'
-import type { FileOperation, FileOperationType } from '../../types'
-import { DiffReview } from './DiffReview'
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-const opIcons: Record<
-  FileOperationType,
-  Component<{ class?: string; style?: Record<string, string> }>
-> = {
-  read: FolderOpen,
-  write: FilePlus2,
-  edit: FileEdit,
-  delete: Trash2,
-}
-
-const opColors: Record<FileOperationType, string> = {
-  read: 'var(--accent)',
-  write: 'var(--success)',
-  edit: 'var(--warning)',
-  delete: 'var(--error)',
-}
-
-function getFileName(path: string): string {
-  return path.split('/').pop() || path
-}
-
-function getDirectory(path: string): string {
-  const parts = path.split('/')
-  if (parts.length <= 1) return ''
-  parts.pop()
-  // Show last 2 segments for context
-  return parts.slice(-2).join('/')
-}
+import type { FileOperation } from '../../types'
+import type {
+  DiffHunksUpdatedEvent,
+  DiffReviewPanelProps,
+  HunkReviewItem,
+  HunkReviewStatus,
+} from './diff-review/diff-review-helpers'
+import { FileChangeRow } from './diff-review/FileChangeRow'
+import { HunkReviewList } from './diff-review/HunkReviewList'
 
 // ============================================================================
 // Component
 // ============================================================================
-
-interface DiffReviewPanelProps {
-  compact?: boolean
-}
-
-type HunkReviewStatus = 'pending' | 'accepted' | 'rejected'
-
-interface HunkReviewItem {
-  id: string
-  path: string
-  status: HunkReviewStatus
-  content: string
-}
-
-interface DiffHunksUpdatedEvent {
-  sessionId: string
-  items: HunkReviewItem[]
-  summary: {
-    total: number
-    pending: number
-    accepted: number
-    rejected: number
-  }
-}
 
 export const DiffReviewPanel: Component<DiffReviewPanelProps> = () => {
   const session = useSession()
@@ -104,7 +42,6 @@ export const DiffReviewPanel: Component<DiffReviewPanelProps> = () => {
   })
   const latestHunkEvent = useExtensionEvent<DiffHunksUpdatedEvent>('diff:hunks-updated')
 
-  // Detect available editors once on mount
   void getAvailableEditors().then(setEditors)
 
   createEffect(() => {
@@ -115,25 +52,20 @@ export const DiffReviewPanel: Component<DiffReviewPanelProps> = () => {
     setHunkSummary(event.summary)
   })
 
-  // Aggregate: latest operation per file, filter out reads and ops without content
   const reviewableOps = createMemo(() => {
     const ops = fileOperations()
     const byFile = new Map<string, FileOperation>()
-
     for (const op of ops) {
       if (op.type === 'read') continue
       if (!op.originalContent && !op.newContent) continue
-      // Latest operation wins
       const existing = byFile.get(op.filePath)
       if (!existing || op.timestamp > existing.timestamp) {
         byFile.set(op.filePath, op)
       }
     }
-
     return Array.from(byFile.values()).sort((a, b) => b.timestamp - a.timestamp)
   })
 
-  // Aggregate stats
   const stats = createMemo(() => {
     const ops = reviewableOps()
     let totalAdded = 0
@@ -147,11 +79,8 @@ export const DiffReviewPanel: Component<DiffReviewPanelProps> = () => {
 
   const toggleFile = (filePath: string) => {
     const current = new Set<string>(expandedFiles())
-    if (current.has(filePath)) {
-      current.delete(filePath)
-    } else {
-      current.add(filePath)
-    }
+    if (current.has(filePath)) current.delete(filePath)
+    else current.add(filePath)
     setExpandedFiles(current)
   }
 
@@ -159,9 +88,7 @@ export const DiffReviewPanel: Component<DiffReviewPanelProps> = () => {
     setExpandedFiles(new Set<string>(reviewableOps().map((op) => op.filePath)))
   }
 
-  const collapseAll = () => {
-    setExpandedFiles(new Set<string>())
-  }
+  const collapseAll = () => setExpandedFiles(new Set<string>())
 
   const setHunkStatus = (hunkId: string, status: HunkReviewStatus) => {
     const sessionId = currentSession()?.id
@@ -227,41 +154,7 @@ export const DiffReviewPanel: Component<DiffReviewPanelProps> = () => {
       {/* File list */}
       <div class="flex-1 overflow-y-auto">
         <Show when={hunkItems().length > 0}>
-          <div class="p-2 space-y-2 border-b border-[var(--border-subtle)]">
-            <For each={hunkItems()}>
-              {(hunk, index) => (
-                <div class="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-base)] overflow-hidden">
-                  <div class="flex items-center justify-between px-2 py-1.5 border-b border-[var(--border-subtle)]">
-                    <div class="text-[11px] text-[var(--text-secondary)]">
-                      Hunk {index() + 1} - {getFileName(hunk.path)}
-                    </div>
-                    <div class="flex items-center gap-1.5">
-                      <span class="text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
-                        {hunk.status}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setHunkStatus(hunk.id, 'accepted')}
-                        class="px-2 py-1 text-[10px] rounded-[var(--radius-md)] bg-[color-mix(in_srgb,var(--success)_18%,transparent)] text-[var(--success)] border border-[color-mix(in_srgb,var(--success)_35%,transparent)]"
-                      >
-                        Accept
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setHunkStatus(hunk.id, 'rejected')}
-                        class="px-2 py-1 text-[10px] rounded-[var(--radius-md)] bg-[color-mix(in_srgb,var(--error)_18%,transparent)] text-[var(--error)] border border-[color-mix(in_srgb,var(--error)_35%,transparent)]"
-                      >
-                        Reject
-                      </button>
-                    </div>
-                  </div>
-                  <pre class="text-[11px] leading-relaxed text-[var(--text-secondary)] p-2 overflow-x-auto bg-[var(--surface-raised)]">
-                    {hunk.content}
-                  </pre>
-                </div>
-              )}
-            </For>
-          </div>
+          <HunkReviewList items={hunkItems()} onSetStatus={setHunkStatus} />
         </Show>
         <Show
           when={hunkItems().length === 0 && reviewableOps().length > 0}
@@ -278,80 +171,14 @@ export const DiffReviewPanel: Component<DiffReviewPanelProps> = () => {
           }
         >
           <For each={reviewableOps()}>
-            {(op) => {
-              const Icon = opIcons[op.type]
-              const color = opColors[op.type]
-              const isExpanded = () => expandedFiles().has(op.filePath)
-
-              return (
-                <div class="border-b border-[var(--border-subtle)]">
-                  {/* File header row */}
-                  <button
-                    type="button"
-                    onClick={() => toggleFile(op.filePath)}
-                    class="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-[var(--surface-raised)] transition-colors"
-                  >
-                    <Show
-                      when={isExpanded()}
-                      fallback={
-                        <ChevronRight class="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
-                      }
-                    >
-                      <ChevronDown class="w-3.5 h-3.5 text-[var(--text-muted)] flex-shrink-0" />
-                    </Show>
-
-                    <Icon class="w-3.5 h-3.5 flex-shrink-0" style={{ color }} />
-
-                    <div class="flex-1 min-w-0 flex items-center gap-1.5">
-                      <span class="text-xs font-medium text-[var(--text-primary)] truncate">
-                        {getFileName(op.filePath)}
-                      </span>
-                      <span class="text-[10px] text-[var(--text-muted)] truncate">
-                        {getDirectory(op.filePath)}
-                      </span>
-                    </div>
-
-                    <div class="flex items-center gap-1.5 text-[10px] flex-shrink-0">
-                      <Show when={op.isNew}>
-                        <span class="px-1.5 py-0.5 bg-[var(--success-subtle)] text-[var(--success)] rounded-full font-medium">
-                          new
-                        </span>
-                      </Show>
-                      <Show when={op.linesAdded}>
-                        <span class="text-[var(--success)]">+{op.linesAdded}</span>
-                      </Show>
-                      <Show when={op.linesRemoved}>
-                        <span class="text-[var(--error)]">-{op.linesRemoved}</span>
-                      </Show>
-                      <Show when={editors().length > 0 && op.type !== 'delete'}>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            void openInEditor(editors()[0]!.command, op.filePath)
-                          }}
-                          class="p-0.5 rounded hover:bg-[var(--alpha-white-05)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors cursor-pointer"
-                          title={`Open in ${editors()[0]!.name}`}
-                        >
-                          <ExternalLink class="w-3 h-3" />
-                        </button>
-                      </Show>
-                    </div>
-                  </button>
-
-                  {/* Expanded diff view */}
-                  <Show when={isExpanded()}>
-                    <div class="px-2 pb-2">
-                      <DiffReview
-                        oldContent={op.originalContent ?? ''}
-                        newContent={op.newContent ?? ''}
-                        filename={getFileName(op.filePath)}
-                      />
-                    </div>
-                  </Show>
-                </div>
-              )
-            }}
+            {(op) => (
+              <FileChangeRow
+                op={op}
+                isExpanded={expandedFiles().has(op.filePath)}
+                editors={editors()}
+                onToggle={() => toggleFile(op.filePath)}
+              />
+            )}
           </For>
         </Show>
       </div>

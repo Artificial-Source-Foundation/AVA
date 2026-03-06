@@ -3,41 +3,21 @@
  * Lists locally installed Ollama models with pull and delete actions.
  */
 
-import { AlertTriangle, Download, Loader2, Server, Trash2, X } from 'lucide-solid'
+import { AlertTriangle, Download, Loader2, Server, X } from 'lucide-solid'
 import { type Component, createSignal, For, onMount, Show } from 'solid-js'
-
-// ============================================================================
-// Types
-// ============================================================================
-
-interface OllamaModel {
-  name: string
-  size: number
-  family: string
-  parameterSize: string
-  quantizationLevel: string
-  modifiedAt: string
-}
+import { OllamaModelCard } from './ollama/OllamaModelCard'
+import {
+  deleteOllamaModel,
+  fetchOllamaModels,
+  type OllamaModel,
+  pullOllamaModel,
+} from './ollama/ollama-helpers'
 
 interface OllamaModelBrowserProps {
   open: boolean
   onClose: () => void
   baseUrl?: string
 }
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1_000_000) return `${(bytes / 1_000).toFixed(1)} KB`
-  if (bytes < 1_000_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`
-  return `${(bytes / 1_000_000_000).toFixed(2)} GB`
-}
-
-// ============================================================================
-// Component
-// ============================================================================
 
 export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) => {
   const [models, setModels] = createSignal<OllamaModel[]>([])
@@ -51,34 +31,11 @@ export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) =>
 
   const baseUrl = () => props.baseUrl || 'http://localhost:11434'
 
-  const fetchModels = async () => {
+  const loadModels = async () => {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`${baseUrl()}/api/tags`)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = (await res.json()) as {
-        models: Array<{
-          name: string
-          size: number
-          details: {
-            family: string
-            parameter_size: string
-            quantization_level: string
-          }
-          modified_at: string
-        }>
-      }
-      setModels(
-        (data.models ?? []).map((m) => ({
-          name: m.name,
-          size: m.size,
-          family: m.details?.family ?? 'unknown',
-          parameterSize: m.details?.parameter_size ?? '',
-          quantizationLevel: m.details?.quantization_level ?? '',
-          modifiedAt: m.modified_at,
-        }))
-      )
+      setModels(await fetchOllamaModels(baseUrl()))
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Unknown error'
       if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) {
@@ -97,18 +54,10 @@ export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) =>
     setPulling(true)
     setPullStatus('Starting pull...')
     try {
-      const res = await fetch(`${baseUrl()}/api/pull`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, stream: false }),
-      })
-      if (!res.ok) {
-        const body = await res.text()
-        throw new Error(body || `HTTP ${res.status}`)
-      }
+      await pullOllamaModel(baseUrl(), name)
       setPullStatus('Pull complete')
       setPullName('')
-      await fetchModels()
+      await loadModels()
     } catch (err) {
       setPullStatus(`Pull failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
     } finally {
@@ -120,12 +69,7 @@ export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) =>
   const handleDelete = async (name: string) => {
     setDeleting(name)
     try {
-      const res = await fetch(`${baseUrl()}/api/delete`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name }),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      await deleteOllamaModel(baseUrl(), name)
       setModels((prev) => prev.filter((m) => m.name !== name))
     } catch (err) {
       setError(`Delete failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
@@ -136,7 +80,7 @@ export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) =>
   }
 
   onMount(() => {
-    if (props.open) void fetchModels()
+    if (props.open) void loadModels()
   })
 
   return (
@@ -220,62 +164,14 @@ export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) =>
               >
                 <For each={models()}>
                   {(model) => (
-                    <div class="flex items-center gap-3 px-3 py-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-raised)]">
-                      <div class="flex-1 min-w-0">
-                        <p class="text-xs font-medium text-[var(--text-primary)] truncate">
-                          {model.name}
-                        </p>
-                        <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
-                          <span class="text-[10px] text-[var(--text-muted)]">
-                            {formatBytes(model.size)}
-                          </span>
-                          <Show when={model.family}>
-                            <span class="text-[10px] text-[var(--text-muted)]">{model.family}</span>
-                          </Show>
-                          <Show when={model.parameterSize}>
-                            <span class="text-[10px] text-[var(--text-muted)]">
-                              {model.parameterSize}
-                            </span>
-                          </Show>
-                          <Show when={model.quantizationLevel}>
-                            <span class="text-[10px] px-1 py-0.5 rounded bg-[var(--surface-sunken)] text-[var(--text-muted)]">
-                              {model.quantizationLevel}
-                            </span>
-                          </Show>
-                        </div>
-                      </div>
-                      <Show
-                        when={confirmDelete() !== model.name}
-                        fallback={
-                          <div class="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => void handleDelete(model.name)}
-                              disabled={deleting() === model.name}
-                              class="px-2 py-1 text-[10px] text-white bg-[var(--error)] rounded-[var(--radius-sm)] disabled:opacity-50"
-                            >
-                              {deleting() === model.name ? 'Deleting...' : 'Confirm'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDelete(null)}
-                              class="px-2 py-1 text-[10px] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        }
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDelete(model.name)}
-                          class="p-1.5 text-[var(--text-muted)] hover:text-[var(--error)] rounded-[var(--radius-sm)] hover:bg-[var(--error-subtle)] transition-colors"
-                          title="Delete model"
-                        >
-                          <Trash2 class="w-3.5 h-3.5" />
-                        </button>
-                      </Show>
-                    </div>
+                    <OllamaModelCard
+                      model={model}
+                      isDeleting={deleting() === model.name}
+                      isConfirmingDelete={confirmDelete() === model.name}
+                      onRequestDelete={() => setConfirmDelete(model.name)}
+                      onConfirmDelete={() => void handleDelete(model.name)}
+                      onCancelDelete={() => setConfirmDelete(null)}
+                    />
                   )}
                 </For>
               </Show>
@@ -289,7 +185,7 @@ export const OllamaModelBrowser: Component<OllamaModelBrowserProps> = (props) =>
             </span>
             <button
               type="button"
-              onClick={() => void fetchModels()}
+              onClick={() => void loadModels()}
               disabled={loading()}
               class="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors disabled:opacity-50"
             >

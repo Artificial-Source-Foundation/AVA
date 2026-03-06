@@ -1,0 +1,124 @@
+/**
+ * useModelState Hook
+ *
+ * Encapsulates model selection, provider resolution, reasoning effort, and
+ * delegation toggle logic. Consumed by both the composition shell and ToolbarStrip.
+ */
+
+import { type Accessor, createEffect, createMemo } from 'solid-js'
+import { useSession } from '../../../stores/session'
+import { useSettings } from '../../../stores/settings'
+import { cycleReasoningEffort } from './toolbar-buttons'
+
+// ---------------------------------------------------------------------------
+// Return type
+// ---------------------------------------------------------------------------
+
+export interface ModelState {
+  enabledProviders: Accessor<ReturnType<ReturnType<typeof useSettings>['settings']>['providers']>
+  currentModelDisplay: Accessor<string>
+  activeProviderId: Accessor<string | null>
+  modelSupportsReasoning: Accessor<boolean>
+  handleCycleReasoning: () => void
+  toggleDelegation: () => void
+}
+
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
+
+export function useModelState(): ModelState {
+  const sessionStore = useSession()
+  const { selectedModel, selectedProvider, setSelectedModel } = sessionStore
+  const { settings, updateSettings } = useSettings()
+
+  const enabledProviders = createMemo(() =>
+    settings().providers.filter((p) => p.enabled && p.models.length > 0)
+  )
+
+  // Auto-select a valid model when current selection doesn't match any enabled provider
+  createEffect(() => {
+    const providers = enabledProviders()
+    if (providers.length === 0) return
+    const modelId = selectedModel()
+    const modelExists = providers.some((p) => p.models.some((m) => m.id === modelId))
+    if (!modelExists) {
+      const first = providers[0]
+      const defaultModel = first.defaultModel || first.models[0]?.id
+      if (defaultModel) setSelectedModel(defaultModel)
+    }
+  })
+
+  const currentModelDisplay = createMemo(() => {
+    const modelId = selectedModel()
+    const provId = selectedProvider()
+    if (provId) {
+      const provider = settings().providers.find((p) => p.id === provId)
+      const model = provider?.models.find((m) => m.id === modelId)
+      if (provider && model) return `${provider.name} | ${model.name}`
+    }
+    for (const provider of settings().providers) {
+      const model = provider.models.find((m) => m.id === modelId)
+      if (model) return `${provider.name} | ${model.name}`
+    }
+    if (modelId.length > 30) return `${modelId.slice(0, 27)}...`
+    return modelId
+  })
+
+  const activeProviderId = createMemo(() => {
+    const provId = selectedProvider()
+    if (provId) return provId
+    const modelId = selectedModel()
+    for (const provider of settings().providers) {
+      if (provider.models.some((m) => m.id === modelId)) return provider.id
+    }
+    return null
+  })
+
+  const modelSupportsReasoning = createMemo(() => {
+    const modelId = selectedModel()
+    const provId = activeProviderId()
+    if (provId) {
+      const provider = settings().providers.find((p) => p.id === provId)
+      const model = provider?.models.find((m) => m.id === modelId)
+      if (model)
+        return model.capabilities?.some((c) => c === 'thinking' || c === 'reasoning') ?? false
+    }
+    for (const provider of settings().providers) {
+      const model = provider.models.find((m) => m.id === modelId)
+      if (model)
+        return model.capabilities?.some((c) => c === 'thinking' || c === 'reasoning') ?? false
+    }
+    return /claude|sonnet|opus|gpt-5|o3-|o4-|codex|gemini|deepseek-r/i.test(modelId)
+  })
+
+  const handleCycleReasoning = (): void => {
+    const current = settings().generation.reasoningEffort
+    const next = cycleReasoningEffort(current, activeProviderId() ?? undefined)
+    updateSettings({
+      generation: {
+        ...settings().generation,
+        reasoningEffort: next,
+        thinkingEnabled: next !== 'off',
+      },
+    })
+  }
+
+  const toggleDelegation = (): void => {
+    updateSettings({
+      generation: {
+        ...settings().generation,
+        delegationEnabled: !settings().generation.delegationEnabled,
+      },
+    })
+  }
+
+  return {
+    enabledProviders,
+    currentModelDisplay,
+    activeProviderId,
+    modelSupportsReasoning,
+    handleCycleReasoning,
+    toggleDelegation,
+  }
+}

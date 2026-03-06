@@ -1,6 +1,7 @@
 /**
  * Session Lifecycle Actions
- * Create, switch, archive, delete, duplicate, fork, and branch sessions.
+ * Create, switch, archive, delete sessions; stats updates.
+ * Branching operations (duplicate/fork/branch) are in session-branching.ts.
  */
 
 import { createMemo } from 'solid-js'
@@ -10,9 +11,7 @@ import {
   archiveSession as dbArchiveSession,
   createSession as dbCreateSession,
   deleteSession as dbDeleteSession,
-  duplicateSessionMessages as dbDuplicateSessionMessages,
   getArchivedSessions as dbGetArchivedSessions,
-  insertMessages as dbInsertMessages,
   updateSession as dbUpdateSession,
   getAgents,
   getCheckpoints,
@@ -29,7 +28,6 @@ import { getLastSessionForProject, setLastSessionForProject } from '../session-p
 import {
   archivedSessions,
   currentSession,
-  messages,
   sessions,
   setAgents,
   setArchivedSessions,
@@ -46,15 +44,13 @@ import {
   setTerminalExecutions,
 } from './session-state'
 
-// ============================================================================
-// Session Tree
-// ============================================================================
+// Re-export branching operations so existing `import * as lifecycle` still works
+export { branchAtMessage, duplicateSession, forkSession } from './session-branching'
 
 export const getSessionTree = createMemo(() => {
   const all = sessions()
   const childMap = new Map<string, SessionWithStats[]>()
   const roots: SessionWithStats[] = []
-
   for (const s of all) {
     if (s.parentSessionId) {
       const siblings = childMap.get(s.parentSessionId) ?? []
@@ -64,18 +60,12 @@ export const getSessionTree = createMemo(() => {
       roots.push(s)
     }
   }
-
   return { roots, childMap }
 })
-
-// ============================================================================
-// Session List Management
-// ============================================================================
 
 export async function loadSessionsForCurrentProject(): Promise<void> {
   const { currentProject } = useProject()
   const projectId = currentProject()?.id
-
   setIsLoadingSessions(true)
   try {
     const dbSessions = await getSessionsWithStats(projectId)
@@ -110,7 +100,6 @@ export async function restoreForCurrentProject(): Promise<void> {
     await createNewSession()
     return
   }
-
   await switchSession(restoreTarget.id)
 }
 
@@ -118,19 +107,13 @@ export async function createNewSession(name?: string): Promise<Session> {
   const { currentProject } = useProject()
   const project = currentProject()
   const projectId = project?.id
-
   const session = await dbCreateSession(name || DEFAULTS.SESSION_NAME, projectId)
-  const sessionWithStats: SessionWithStats = {
-    ...session,
-    messageCount: 0,
-    totalTokens: 0,
-  }
+  const sessionWithStats: SessionWithStats = { ...session, messageCount: 0, totalTokens: 0 }
 
   setSessions((prev) => [sessionWithStats, ...prev])
   setCurrentSession(session)
   setMessages([])
   setAgents([])
-
   logInfo('session', 'Session created', {
     id: session.id,
     name: session.name,
@@ -140,10 +123,8 @@ export async function createNewSession(name?: string): Promise<Session> {
   const { currentProject: getProject } = useProject()
   const cwd = getProject()?.directory || '.'
   notifySessionOpened(session.id, cwd)
-
   localStorage.setItem(STORAGE_KEYS.LAST_SESSION, session.id)
   setLastSessionForProject(projectId, session.id)
-
   return session
 }
 
@@ -200,13 +181,12 @@ export async function switchSession(id: string): Promise<void> {
   const { currentProject: getProject } = useProject()
   const cwd = getProject()?.directory || '.'
   notifySessionOpened(id, cwd)
-
   localStorage.setItem(STORAGE_KEYS.LAST_SESSION, id)
   const { currentProject } = useProject()
   setLastSessionForProject(currentProject()?.id, id)
 }
 
-/** Helper: switch to most-recent or create new session after removal */
+/** Switch to most-recent or create new session after removal */
 async function switchAfterRemoval(projectId: string | undefined): Promise<void> {
   const remaining = sessions()
   if (remaining.length > 0) {
@@ -214,8 +194,7 @@ async function switchAfterRemoval(projectId: string | undefined): Promise<void> 
     setCurrentSession(mostRecent)
     setIsLoadingMessages(true)
     try {
-      const dbMessages = await getMessages(mostRecent.id)
-      setMessages(dbMessages)
+      setMessages(await getMessages(mostRecent.id))
     } catch {
       setMessages([])
     } finally {
@@ -225,12 +204,8 @@ async function switchAfterRemoval(projectId: string | undefined): Promise<void> 
     setLastSessionForProject(projectId, mostRecent.id)
   } else {
     const newSession = await dbCreateSession(DEFAULTS.SESSION_NAME, projectId)
-    const sessionWithStats: SessionWithStats = {
-      ...newSession,
-      messageCount: 0,
-      totalTokens: 0,
-    }
-    setSessions([sessionWithStats])
+    const s: SessionWithStats = { ...newSession, messageCount: 0, totalTokens: 0 }
+    setSessions([s])
     setCurrentSession(newSession)
     setMessages([])
     localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
@@ -241,37 +216,28 @@ async function switchAfterRemoval(projectId: string | undefined): Promise<void> 
 export async function renameSession(id: string, newName: string): Promise<void> {
   const trimmedName = newName.trim()
   if (!trimmedName) return
-
   await dbUpdateSession(id, { name: trimmedName })
-
   setSessions((prev) =>
     prev.map((s) => (s.id === id ? { ...s, name: trimmedName, updatedAt: Date.now() } : s))
   )
-
   if (currentSession()?.id === id) {
     setCurrentSession((prev) =>
       prev ? { ...prev, name: trimmedName, updatedAt: Date.now() } : null
     )
   }
-
   logInfo('session', 'Session renamed', { id, name: trimmedName })
 }
 
 export async function archiveSession(id: string): Promise<void> {
   const { currentProject } = useProject()
   const projectId = currentProject()?.id
-
   await dbArchiveSession(id)
   setSessions((prev) => prev.filter((s) => s.id !== id))
-
-  if (currentSession()?.id === id) {
-    await switchAfterRemoval(projectId)
-  }
+  if (currentSession()?.id === id) await switchAfterRemoval(projectId)
 }
 
 export async function unarchiveSession(id: string): Promise<void> {
   await dbUpdateSession(id, { status: 'active' })
-
   const archived = archivedSessions().find((s) => s.id === id)
   if (archived) {
     const restored = { ...archived, status: 'active' as const }
@@ -303,112 +269,9 @@ export async function updateSessionSlug(id: string, slug: string): Promise<void>
 export async function deleteSessionPermanently(id: string): Promise<void> {
   const { currentProject } = useProject()
   const projectId = currentProject()?.id
-
   await dbDeleteSession(id)
   setSessions((prev) => prev.filter((s) => s.id !== id))
-
-  if (currentSession()?.id === id) {
-    await switchAfterRemoval(projectId)
-  }
-}
-
-export async function duplicateSession(sourceSessionId: string): Promise<void> {
-  const source = sessions().find((s) => s.id === sourceSessionId)
-  if (!source) return
-
-  const { currentProject } = useProject()
-  const projectId = currentProject()?.id
-
-  const newSession = await dbCreateSession(`${source.name} (copy)`, projectId)
-  await dbDuplicateSessionMessages(sourceSessionId, newSession.id)
-
-  const sessionWithStats: SessionWithStats = {
-    ...newSession,
-    messageCount: source.messageCount,
-    totalTokens: source.totalTokens,
-    lastPreview: source.lastPreview,
-  }
-  setSessions((prev) => [sessionWithStats, ...prev])
-
-  setCurrentSession(newSession)
-  setIsLoadingMessages(true)
-  try {
-    const dbMessages = await getMessages(newSession.id)
-    setMessages(dbMessages)
-  } catch {
-    setMessages([])
-  } finally {
-    setIsLoadingMessages(false)
-  }
-  localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
-  setLastSessionForProject(projectId, newSession.id)
-}
-
-export async function forkSession(sourceSessionId: string, name?: string): Promise<void> {
-  const source = sessions().find((s) => s.id === sourceSessionId)
-  if (!source) return
-
-  const { currentProject } = useProject()
-  const projectId = currentProject()?.id
-
-  const forkName = name || `${source.name} (fork)`
-  const newSession = await dbCreateSession(forkName, projectId, sourceSessionId)
-  await dbDuplicateSessionMessages(sourceSessionId, newSession.id)
-
-  const sessionWithStats: SessionWithStats = {
-    ...newSession,
-    messageCount: source.messageCount,
-    totalTokens: source.totalTokens,
-    lastPreview: source.lastPreview,
-  }
-  setSessions((prev) => [sessionWithStats, ...prev])
-
-  setCurrentSession(newSession)
-  setIsLoadingMessages(true)
-  try {
-    const dbMessages = await getMessages(newSession.id)
-    setMessages(dbMessages)
-  } catch {
-    setMessages([])
-  } finally {
-    setIsLoadingMessages(false)
-  }
-  localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
-  setLastSessionForProject(projectId, newSession.id)
-}
-
-export async function branchAtMessage(messageId: string): Promise<void> {
-  const session = currentSession()
-  if (!session) return
-
-  const msgs = messages()
-  const index = msgs.findIndex((m) => m.id === messageId)
-  if (index === -1) return
-
-  const { currentProject } = useProject()
-  const projectId = currentProject()?.id
-
-  const messagesToCopy = msgs.slice(0, index + 1)
-  const branchName = `${session.name} (branch)`
-  const newSession = await dbCreateSession(branchName, projectId, session.id)
-
-  await dbInsertMessages(messagesToCopy.map((m) => ({ ...m, sessionId: newSession.id })))
-
-  const totalTokens = messagesToCopy.reduce((sum, m) => sum + (m.tokensUsed || 0), 0)
-  const sessionWithStats: SessionWithStats = {
-    ...newSession,
-    messageCount: messagesToCopy.length,
-    totalTokens,
-    lastPreview: messagesToCopy[messagesToCopy.length - 1]?.content.slice(0, 100) || '',
-  }
-  setSessions((prev) => [sessionWithStats, ...prev])
-
-  setCurrentSession(newSession)
-  setMessages(messagesToCopy.map((m) => ({ ...m, sessionId: newSession.id })))
-  localStorage.setItem(STORAGE_KEYS.LAST_SESSION, newSession.id)
-  setLastSessionForProject(projectId, newSession.id)
-
-  logInfo('Session', `Branched at message ${index + 1}/${msgs.length} → ${newSession.id}`)
+  if (currentSession()?.id === id) await switchAfterRemoval(projectId)
 }
 
 export function updateSessionStats(

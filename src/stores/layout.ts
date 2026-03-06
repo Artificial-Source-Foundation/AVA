@@ -5,90 +5,41 @@
 
 import { createSignal } from 'solid-js'
 import { STORAGE_KEYS } from '../config/constants'
+import * as dialogs from './layout-dialogs'
+import { loadBool, loadNumber, loadString, save } from './layout-persistence'
 
-// ============================================================================
-// Types
-// ============================================================================
-
+// Re-export types so consumers keep importing from 'stores/layout'
+export type { RightPanelTab } from './layout-dialogs'
 export type ActivityId = 'sessions' | 'explorer'
+export type BottomPanelTab = 'memory' | 'terminal' | 'output'
 
 // ============================================================================
-// Persistence Helpers
-// ============================================================================
-
-function loadString<T extends string>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key)
-    if (raw) return raw as T
-  } catch {
-    /* ignore */
-  }
-  return fallback
-}
-
-function loadBool(key: string, fallback: boolean): boolean {
-  try {
-    const raw = localStorage.getItem(key)
-    if (raw !== null) return raw === 'true'
-  } catch {
-    /* ignore */
-  }
-  return fallback
-}
-
-function loadNumber(key: string, fallback: number, min: number, max: number): number {
-  try {
-    const raw = localStorage.getItem(key)
-    if (raw) {
-      const n = Number(raw)
-      if (n >= min && n <= max) return n
-    }
-  } catch {
-    /* ignore */
-  }
-  return fallback
-}
-
-function save(key: string, value: string) {
-  try {
-    localStorage.setItem(key, value)
-  } catch {
-    /* ignore */
-  }
-}
-
-// ============================================================================
-// Activity Bar State
+// Activity Bar
 // ============================================================================
 
 const [activeActivity, setActiveActivityRaw] = createSignal<ActivityId>(
   loadString(STORAGE_KEYS.LAYOUT_ACTIVITY, 'sessions') as ActivityId
 )
 
-function setActiveActivity(id: ActivityId) {
+function setActiveActivity(id: ActivityId): void {
   setActiveActivityRaw(id)
   save(STORAGE_KEYS.LAYOUT_ACTIVITY, id)
 }
 
 // ============================================================================
-// Sidebar Visibility
+// Sidebar
 // ============================================================================
 
 const [sidebarVisible, setSidebarVisibleRaw] = createSignal(
   loadBool(STORAGE_KEYS.LAYOUT_SIDEBAR_VISIBLE, true)
 )
 
-function setSidebarVisible(visible: boolean) {
+function setSidebarVisible(visible: boolean): void {
   setSidebarVisibleRaw(visible)
   save(STORAGE_KEYS.LAYOUT_SIDEBAR_VISIBLE, String(visible))
 }
 
-/**
- * Toggle sidebar visibility.
- * If clicking the already-active activity icon, collapse/expand the sidebar (VS Code behavior).
- * If clicking a different icon, switch to it and ensure sidebar is visible.
- */
-function handleActivityClick(id: ActivityId) {
+function handleActivityClick(id: ActivityId): void {
   if (activeActivity() === id) {
     setSidebarVisible(!sidebarVisible())
   } else {
@@ -99,13 +50,9 @@ function handleActivityClick(id: ActivityId) {
   }
 }
 
-function toggleSidebar() {
+function toggleSidebar(): void {
   setSidebarVisible(!sidebarVisible())
 }
-
-// ============================================================================
-// Sidebar Width (persisted)
-// ============================================================================
 
 const SIDEBAR_WIDTH_KEY = 'ava-sidebar-width'
 
@@ -113,178 +60,28 @@ const [sidebarWidth, setSidebarWidthRaw] = createSignal(
   loadNumber(SIDEBAR_WIDTH_KEY, 260, 180, 480)
 )
 
-function setSidebarWidth(w: number) {
+function setSidebarWidth(w: number): void {
   const clamped = Math.min(480, Math.max(180, w))
   setSidebarWidthRaw(clamped)
   save(SIDEBAR_WIDTH_KEY, String(clamped))
 }
 
 // ============================================================================
-// Right Panel (Agent Activity)
+// Right Panel
 // ============================================================================
 
 const [rightPanelVisible, setRightPanelVisibleRaw] = createSignal(
   loadBool(STORAGE_KEYS.LAYOUT_RIGHT_VISIBLE, false)
 )
 
-function setRightPanelVisible(visible: boolean) {
+function setRightPanelVisible(visible: boolean): void {
   setRightPanelVisibleRaw(visible)
   save(STORAGE_KEYS.LAYOUT_RIGHT_VISIBLE, String(visible))
 }
 
-function toggleRightPanel() {
+function toggleRightPanel(): void {
   setRightPanelVisible(!rightPanelVisible())
 }
-
-// ============================================================================
-// Bottom Panel (Memory/Context)
-// ============================================================================
-
-const [bottomPanelVisible, setBottomPanelVisibleRaw] = createSignal(
-  loadBool(STORAGE_KEYS.LAYOUT_BOTTOM_VISIBLE, false)
-)
-
-function setBottomPanelVisible(visible: boolean) {
-  setBottomPanelVisibleRaw(visible)
-  save(STORAGE_KEYS.LAYOUT_BOTTOM_VISIBLE, String(visible))
-}
-
-function toggleBottomPanel() {
-  setBottomPanelVisible(!bottomPanelVisible())
-}
-
-const [bottomPanelHeight, setBottomPanelHeightRaw] = createSignal(
-  loadNumber(STORAGE_KEYS.LAYOUT_BOTTOM_HEIGHT, 200, 100, 600)
-)
-
-function setBottomPanelHeight(h: number) {
-  const clamped = Math.min(600, Math.max(100, h))
-  setBottomPanelHeightRaw(clamped)
-  save(STORAGE_KEYS.LAYOUT_BOTTOM_HEIGHT, String(clamped))
-}
-
-// ============================================================================
-// Bottom Panel Tab
-// ============================================================================
-
-export type BottomPanelTab = 'memory' | 'terminal' | 'output'
-
-const [bottomPanelTab, setBottomPanelTab] = createSignal<BottomPanelTab>(
-  loadString('ava-bottom-panel-tab', 'memory') as BottomPanelTab
-)
-
-function switchBottomPanelTab(tab: BottomPanelTab) {
-  setBottomPanelTab(tab)
-  save('ava-bottom-panel-tab', tab)
-  // Also ensure the panel is visible
-  if (!bottomPanelVisible()) setBottomPanelVisible(true)
-}
-
-// ============================================================================
-// Code Editor Panel
-// ============================================================================
-
-const [codeEditorFile, setCodeEditorFileRaw] = createSignal<string | null>(null)
-
-function openCodeEditor(filePath: string) {
-  setCodeEditorFileRaw(filePath)
-}
-
-function closeCodeEditor() {
-  setCodeEditorFileRaw(null)
-}
-
-// ============================================================================
-// Settings Modal
-// ============================================================================
-
-const [settingsOpen, setSettingsOpen] = createSignal(false)
-
-// ============================================================================
-// Model Browser Dialog
-// ============================================================================
-
-const [modelBrowserOpen, setModelBrowserOpen] = createSignal(false)
-
-function openModelBrowser() {
-  setModelBrowserOpen(true)
-}
-
-function closeModelBrowser() {
-  setModelBrowserOpen(false)
-}
-
-function toggleModelBrowser() {
-  setModelBrowserOpen(!modelBrowserOpen())
-}
-
-// ============================================================================
-// Project Hub Visibility
-// ============================================================================
-
-const [projectHubVisible, setProjectHubVisibleRaw] = createSignal(
-  loadBool(STORAGE_KEYS.LAYOUT_PROJECT_HUB_VISIBLE, false)
-)
-
-function setProjectHubVisible(visible: boolean) {
-  setProjectHubVisibleRaw(visible)
-  save(STORAGE_KEYS.LAYOUT_PROJECT_HUB_VISIBLE, String(visible))
-}
-
-function openProjectHub() {
-  setProjectHubVisible(true)
-}
-
-function closeProjectHub() {
-  setProjectHubVisible(false)
-}
-
-function toggleProjectHub() {
-  setProjectHubVisible(!projectHubVisible())
-}
-
-function openSettings() {
-  setSettingsOpen(true)
-}
-
-function closeSettings() {
-  setSettingsOpen(false)
-}
-
-function toggleSettings() {
-  setSettingsOpen(!settingsOpen())
-}
-
-// ============================================================================
-// Right Panel Tab
-// ============================================================================
-
-export type RightPanelTab = 'activity' | 'files' | 'review'
-
-const [rightPanelTab, setRightPanelTab] = createSignal<RightPanelTab>(
-  loadString('ava-right-panel-tab', 'activity') as RightPanelTab
-)
-
-function switchRightPanelTab(tab: RightPanelTab) {
-  setRightPanelTab(tab)
-  save('ava-right-panel-tab', tab)
-  // Also ensure the panel is visible
-  if (!rightPanelVisible()) setRightPanelVisible(true)
-}
-
-// ============================================================================
-// Expanded Editor
-// ============================================================================
-
-const [expandedEditorOpen, setExpandedEditorOpen] = createSignal(false)
-
-function toggleExpandedEditor() {
-  setExpandedEditorOpen(!expandedEditorOpen())
-}
-
-// ============================================================================
-// Right Panel Width (persisted)
-// ============================================================================
 
 const RIGHT_PANEL_WIDTH_KEY = 'ava-right-panel-width'
 
@@ -292,48 +89,92 @@ const [rightPanelWidth, setRightPanelWidthRaw] = createSignal(
   loadNumber(RIGHT_PANEL_WIDTH_KEY, 320, 250, 600)
 )
 
-function setRightPanelWidth(w: number) {
+function setRightPanelWidth(w: number): void {
   const clamped = Math.min(600, Math.max(250, w))
   setRightPanelWidthRaw(clamped)
   save(RIGHT_PANEL_WIDTH_KEY, String(clamped))
 }
 
-// ============================================================================
-// Quick Model Picker
-// ============================================================================
-
-const [quickModelPickerOpen, setQuickModelPickerOpen] = createSignal(false)
-
-function toggleQuickModelPicker() {
-  setQuickModelPickerOpen(!quickModelPickerOpen())
+function switchRightPanelTab(tab: dialogs.RightPanelTab): void {
+  dialogs.switchRightPanelTab(tab, () => {
+    if (!rightPanelVisible()) setRightPanelVisible(true)
+  })
 }
 
 // ============================================================================
-// Session Switcher
+// Bottom Panel
 // ============================================================================
 
-const [sessionSwitcherOpen, setSessionSwitcherOpen] = createSignal(false)
+const [bottomPanelVisible, setBottomPanelVisibleRaw] = createSignal(
+  loadBool(STORAGE_KEYS.LAYOUT_BOTTOM_VISIBLE, false)
+)
 
-function toggleSessionSwitcher() {
-  setSessionSwitcherOpen(!sessionSwitcherOpen())
+function setBottomPanelVisible(visible: boolean): void {
+  setBottomPanelVisibleRaw(visible)
+  save(STORAGE_KEYS.LAYOUT_BOTTOM_VISIBLE, String(visible))
+}
+
+function toggleBottomPanel(): void {
+  setBottomPanelVisible(!bottomPanelVisible())
+}
+
+const [bottomPanelHeight, setBottomPanelHeightRaw] = createSignal(
+  loadNumber(STORAGE_KEYS.LAYOUT_BOTTOM_HEIGHT, 200, 100, 600)
+)
+
+function setBottomPanelHeight(h: number): void {
+  const clamped = Math.min(600, Math.max(100, h))
+  setBottomPanelHeightRaw(clamped)
+  save(STORAGE_KEYS.LAYOUT_BOTTOM_HEIGHT, String(clamped))
+}
+
+const [bottomPanelTab, setBottomPanelTab] = createSignal<BottomPanelTab>(
+  loadString('ava-bottom-panel-tab', 'memory') as BottomPanelTab
+)
+
+function switchBottomPanelTab(tab: BottomPanelTab): void {
+  setBottomPanelTab(tab)
+  save('ava-bottom-panel-tab', tab)
+  if (!bottomPanelVisible()) setBottomPanelVisible(true)
 }
 
 // ============================================================================
-// Chat Search
+// Code Editor
 // ============================================================================
 
-const [chatSearchOpen, setChatSearchOpen] = createSignal(false)
+const [codeEditorFile, setCodeEditorFileRaw] = createSignal<string | null>(null)
 
-function openChatSearch() {
-  setChatSearchOpen(true)
+function openCodeEditor(filePath: string): void {
+  setCodeEditorFileRaw(filePath)
 }
 
-function closeChatSearch() {
-  setChatSearchOpen(false)
+function closeCodeEditor(): void {
+  setCodeEditorFileRaw(null)
 }
 
-function toggleChatSearch() {
-  setChatSearchOpen(!chatSearchOpen())
+// ============================================================================
+// Project Hub
+// ============================================================================
+
+const [projectHubVisible, setProjectHubVisibleRaw] = createSignal(
+  loadBool(STORAGE_KEYS.LAYOUT_PROJECT_HUB_VISIBLE, false)
+)
+
+function setProjectHubVisible(visible: boolean): void {
+  setProjectHubVisibleRaw(visible)
+  save(STORAGE_KEYS.LAYOUT_PROJECT_HUB_VISIBLE, String(visible))
+}
+
+function openProjectHub(): void {
+  setProjectHubVisible(true)
+}
+
+function closeProjectHub(): void {
+  setProjectHubVisible(false)
+}
+
+function toggleProjectHub(): void {
+  setProjectHubVisible(!projectHubVisible())
 }
 
 // ============================================================================
@@ -351,17 +192,15 @@ export function useLayout() {
     sidebarVisible,
     setSidebarVisible,
     toggleSidebar,
-
-    // Sidebar width
     sidebarWidth,
     setSidebarWidth,
 
     // Expanded editor
-    expandedEditorOpen,
-    setExpandedEditorOpen,
-    toggleExpandedEditor,
+    expandedEditorOpen: dialogs.expandedEditorOpen,
+    setExpandedEditorOpen: dialogs.setExpandedEditorOpen,
+    toggleExpandedEditor: dialogs.toggleExpandedEditor,
 
-    // Right panel (agent activity)
+    // Right panel
     rightPanelVisible,
     setRightPanelVisible,
     toggleRightPanel,
@@ -383,10 +222,10 @@ export function useLayout() {
     closeCodeEditor,
 
     // Settings modal
-    settingsOpen,
-    openSettings,
-    closeSettings,
-    toggleSettings,
+    settingsOpen: dialogs.settingsOpen,
+    openSettings: dialogs.openSettings,
+    closeSettings: dialogs.closeSettings,
+    toggleSettings: dialogs.toggleSettings,
 
     // Project hub
     projectHubVisible,
@@ -396,29 +235,29 @@ export function useLayout() {
     toggleProjectHub,
 
     // Model browser
-    modelBrowserOpen,
-    openModelBrowser,
-    closeModelBrowser,
-    toggleModelBrowser,
+    modelBrowserOpen: dialogs.modelBrowserOpen,
+    openModelBrowser: dialogs.openModelBrowser,
+    closeModelBrowser: dialogs.closeModelBrowser,
+    toggleModelBrowser: dialogs.toggleModelBrowser,
 
     // Right panel tab
-    rightPanelTab,
+    rightPanelTab: dialogs.rightPanelTab,
     switchRightPanelTab,
 
     // Quick model picker
-    quickModelPickerOpen,
-    setQuickModelPickerOpen,
-    toggleQuickModelPicker,
+    quickModelPickerOpen: dialogs.quickModelPickerOpen,
+    setQuickModelPickerOpen: dialogs.setQuickModelPickerOpen,
+    toggleQuickModelPicker: dialogs.toggleQuickModelPicker,
 
     // Session switcher
-    sessionSwitcherOpen,
-    setSessionSwitcherOpen,
-    toggleSessionSwitcher,
+    sessionSwitcherOpen: dialogs.sessionSwitcherOpen,
+    setSessionSwitcherOpen: dialogs.setSessionSwitcherOpen,
+    toggleSessionSwitcher: dialogs.toggleSessionSwitcher,
 
     // Chat search
-    chatSearchOpen,
-    openChatSearch,
-    closeChatSearch,
-    toggleChatSearch,
+    chatSearchOpen: dialogs.chatSearchOpen,
+    openChatSearch: dialogs.openChatSearch,
+    closeChatSearch: dialogs.closeChatSearch,
+    toggleChatSearch: dialogs.toggleChatSearch,
   }
 }

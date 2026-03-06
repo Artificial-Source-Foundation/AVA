@@ -1,6 +1,6 @@
 # Sprint 16a: Complete Rust Agent Stack — Implementation Prompt
 
-> For AI coding agent. Estimated: 6 features, mix M/L effort.
+> For AI coding agent. Estimated: 7 features, mix M/L effort.
 > Run `cargo test --workspace && cargo clippy --workspace -- -D warnings` after each feature.
 > This sprint MUST complete before Sprint 16b (Ratatui TUI).
 

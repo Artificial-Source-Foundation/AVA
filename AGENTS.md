@@ -20,14 +20,14 @@ Read first: `CLAUDE.md`
 
 ## Project Overview
 
-AVA is a multi-agent AI coding assistant desktop app.
+AVA is a multi-agent AI coding assistant with desktop app and CLI.
 
-- Runtime: Tauri 2 (Rust + Web)
-- Frontend: SolidJS + TypeScript
-- Core runtime: `packages/core-v2/`
-- Features: extension-first in `packages/extensions/`
-- Compatibility shim: `packages/core/`
-- CLI: `cli/` (ACP integration)
+- **CLI/TUI**: Pure Rust binary (`crates/ava-tui/`) — Ratatui + Crossterm + Tokio
+- **Agent runtime**: Rust crates (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-commander/`)
+- **Desktop**: Tauri 2 (Rust backend + SolidJS frontend)
+- **Desktop orchestration**: `packages/core-v2/` + `packages/extensions/` (TypeScript, desktop only)
+
+**IMPORTANT: All new CLI/agent features MUST be Rust. Do not add new features to `packages/` (TypeScript). The TypeScript layer is retained only for the Tauri desktop webview.**
 
 ---
 
@@ -37,34 +37,37 @@ AVA is a multi-agent AI coding assistant desktop app.
 
 ```text
 AVA/
-├── packages/
-│   ├── core-v2/         # execution kernel
-│   ├── extensions/      # built-in extension modules (20)
-│   ├── core/            # legacy re-export shim
-│   ├── platform-node/
-│   └── platform-tauri/
-├── cli/
-├── src/
-└── src-tauri/
+├── crates/              # Rust crates — PRIMARY codebase for CLI/agent
+│   ├── ava-tui/         # CLI/TUI binary (Ratatui)
+│   ├── ava-agent/       # Agent loop + reflection
+│   ├── ava-llm/         # LLM providers (6 built-in)
+│   ├── ava-tools/       # Tool trait + registry + core tools
+│   ├── ava-commander/   # Multi-agent orchestration
+│   ├── ava-session/     # Session persistence
+│   ├── ava-memory/      # Persistent memory/recall
+│   └── ...              # 12 more crates
+├── packages/            # TypeScript — DESKTOP ONLY
+│   ├── core-v2/         # desktop orchestration kernel
+│   ├── extensions/      # desktop extension modules (20)
+│   └── ...
+├── src/                 # desktop frontend (SolidJS)
+├── src-tauri/           # desktop Tauri host
+└── cli/                 # legacy TS CLI (being replaced by crates/ava-tui)
 ```
+
+### Rust-First Rule
+
+**All new CLI/agent features MUST be Rust.** The `dispatchCompute` pattern is deprecated for new work.
+
+- New tools → `crates/ava-tools/src/core/` (implement `Tool` trait)
+- New providers → `crates/ava-llm/src/providers/`
+- New agent features → `crates/ava-agent/` or `crates/ava-commander/`
+- TUI features → `crates/ava-tui/`
 
 ### Important Counts
 
-- Built-in extensions: 20
+- Rust crates: ~20
 - Tool surface: ~41
-
-### Rust Hotpath Rule
-
-Always prefer:
-
-```ts
-dispatchCompute<T>(rustCommand, rustArgs, tsFallback)
-```
-
-- Tauri runtime -> Rust command path
-- Node/CLI runtime -> TS fallback path
-
-Do not introduce direct `invoke()` calls in feature code where dispatch compute already applies.
 
 ---
 
@@ -110,25 +113,24 @@ Middleware priorities are contract-sensitive. Lower numeric priority runs earlie
 
 ## Common Tasks
 
-### Add Tool
+### Add Tool (Rust)
 
-1. Implement in extension package (usually `packages/extensions/tools-extended/src/`)
-2. Register via extension activation
-3. Add tests and export wiring as needed
+1. Create `crates/ava-tools/src/core/{tool_name}.rs`
+2. Implement `Tool` trait (`name`, `description`, `parameters`, `execute`)
+3. Register in `register_core_tools()`
+4. Add tests, run `cargo test -p ava-tools`
 
-### Add Middleware
+### Add LLM Provider (Rust)
 
-1. Implement `ToolMiddleware` in extension
-2. Set explicit `priority`
-3. Register in extension `activate()`
-4. Add focused tests for ordering/behavior
+1. Create `crates/ava-llm/src/providers/{provider}.rs`
+2. Implement `LLMProvider` trait (generate, generate_stream, estimate_tokens, estimate_cost, model_name)
+3. Add tests, run `cargo test -p ava-llm`
 
-### Add Rust-Accelerated Feature
+### Add Desktop Feature (TypeScript — desktop only)
 
-1. Add Rust command in `src-tauri/src/commands/`
-2. Register in `src-tauri/src/lib.rs`
-3. Route via `dispatchCompute` with TS fallback
-4. Add tests for both native and fallback paths
+1. Implement in `packages/extensions/`
+2. Register on activation
+3. Optionally add Rust hotpath via `src-tauri/src/commands/`
 
 ---
 

@@ -23,29 +23,47 @@ cargo test --workspace
 
 ## Architecture
 
-AVA uses a hybrid architecture:
+AVA is migrating to a **Rust-first architecture**. All new CLI/agent code MUST be Rust.
 
-- Rust crates for compute-heavy and safety-sensitive hotpaths
-- `packages/core-v2/` as the orchestration kernel
-- extension-first capability surface in `packages/extensions/`
-- `packages/core/` as a compatibility re-export shim
+- **CLI/TUI**: Pure Rust binary (`crates/ava-tui/`) — Ratatui + Crossterm + Tokio
+- **Agent runtime**: Rust (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-commander/`)
+- **Desktop frontend**: SolidJS + TypeScript (stays — Tauri requires web frontend)
+- **Desktop backend**: Rust via Tauri commands (`src-tauri/`)
+- **Legacy TS packages**: `packages/core-v2/` and `packages/extensions/` are desktop-only; do NOT add new features here
 
-Orchestration is primarily in TypeScript (core-v2 + 20 feature extensions), with all major compute paths routed through Rust when available.
+The TypeScript layer (`packages/`) is retained only for the Tauri desktop webview. The CLI is 100% Rust — no Node.js dependency.
 
 ## Project Structure
 
 ```text
 AVA/
-├── crates/                   # ~19 Rust crates (compute/safety/runtime services)
-├── packages/
-│   ├── core-v2/              # execution kernel (~90 files including tests)
-│   ├── extensions/           # ~20 built-in extension modules
-│   ├── core/                 # compatibility shim (re-exports from core-v2)
+├── crates/                   # ~20 Rust crates (agent stack + TUI + services)
+│   ├── ava-tui/              # CLI/TUI binary (Ratatui) — THE primary interface
+│   ├── ava-agent/            # Agent execution loop + reflection
+│   ├── ava-llm/              # LLM providers (Anthropic, OpenAI, Gemini, Ollama, OpenRouter)
+│   ├── ava-tools/            # Tool trait + registry + core tools (read/write/edit/bash/glob/grep)
+│   ├── ava-commander/        # Multi-agent orchestration (Praxis)
+│   ├── ava-session/          # Session persistence (SQLite + FTS5)
+│   ├── ava-memory/           # Persistent memory/recall
+│   ├── ava-config/           # Configuration management
+│   ├── ava-permissions/      # Tool permission checks
+│   ├── ava-sandbox/          # Command sandboxing (bwrap/sandbox-exec)
+│   ├── ava-platform/         # File system + shell abstractions
+│   ├── ava-context/          # Context window management + condensation
+│   ├── ava-codebase/         # Code indexing (BM25 + PageRank)
+│   ├── ava-db/               # SQLite connection pool
+│   ├── ava-types/            # Shared types
+│   ├── ava-logger/           # Structured logging
+│   └── ...                   # ava-extensions, ava-validator, ava-mcp, ava-lsp
+├── packages/                 # TypeScript — DESKTOP ONLY (do not use for CLI)
+│   ├── core-v2/              # desktop orchestration kernel
+│   ├── extensions/           # desktop extension modules
+│   ├── core/                 # compatibility shim
 │   ├── platform-node/
 │   └── platform-tauri/
 ├── src/                      # desktop frontend (SolidJS)
-├── src-tauri/                # desktop native host + commands
-├── cli/                      # ACP-compatible CLI
+├── src-tauri/                # desktop native host + Tauri commands
+├── cli/                      # legacy TS CLI (being replaced by crates/ava-tui)
 └── tests/
 ```
 
@@ -92,35 +110,27 @@ Runtime extension count explanation:
 - Disabled in CLI: `lsp`, `mcp`, `server`, `litellm` (4)
 - Typical CLI activation: ~31 extensions (20 + 15 - 4)
 
-## dispatchCompute Pattern
+## Rust-First Rule
 
-Use this pattern for Rust-backed features:
+**All new agent/CLI features MUST be implemented in Rust.** Do not add new features to `packages/` (TypeScript).
+
+- New tools → `crates/ava-tools/src/core/` (implement `Tool` trait)
+- New providers → `crates/ava-llm/src/providers/`
+- New agent features → `crates/ava-agent/` or `crates/ava-commander/`
+- TUI features → `crates/ava-tui/`
+- Configuration → `crates/ava-config/`
+
+The `dispatchCompute` pattern is **deprecated for new work**. It remains in `packages/` for the desktop app only. The CLI calls Rust crates directly — no IPC, no bridge.
+
+### Legacy dispatchCompute (desktop only)
+
+Still used in `packages/extensions/` for Tauri desktop features:
 
 ```typescript
-// Example from packages/extensions/tools-extended/src/edit.ts
-import { dispatchCompute } from '@ava/core-v2/platform'
-
-export const editTool = defineTool({
-  name: 'edit',
-  execute: async (input, context) => {
-    return dispatchCompute<EditResult>(
-      'edit_file',                    // Rust command name
-      { path: input.path, content: input.content },  // Args for Rust
-      async () => {
-        // TypeScript fallback for Node/CLI runtime
-        const fs = await import('fs/promises')
-        await fs.writeFile(input.path, input.content)
-        return { success: true }
-      }
-    )
-  }
-})
+dispatchCompute<T>(rustCommand, rustArgs, tsFallback)
 ```
 
-- Tauri runtime: execute Rust command
-- Node/CLI runtime: execute TS fallback
-
-Apply this in edit/grep/validation/permissions/memory/sandbox or any new compute-heavy path.
+Do NOT use this pattern for new CLI/agent features. Write Rust directly.
 
 ## Middleware Priority
 
@@ -154,25 +164,34 @@ Register middleware via `api.addToolMiddleware({ priority, before, after })`.
 
 ## Common Workflows
 
-### Add a Tool
+### Add a Tool (Rust)
 
-1. implement tool in extension package (usually `packages/extensions/tools-extended/src/`)
-2. register on activation
-3. add unit tests
+1. Create `crates/ava-tools/src/core/{tool_name}.rs`
+2. Implement `Tool` trait (`name`, `description`, `parameters`, `execute`)
+3. Register in `crates/ava-tools/src/core/mod.rs` → `register_core_tools()`
+4. Add tests in `crates/ava-tools/tests/`
+5. `cargo test -p ava-tools`
 
-### Add Middleware
+### Add an LLM Provider (Rust)
 
-1. implement `ToolMiddleware`
-2. choose explicit priority (see priority table above)
-3. register in extension `activate()`
-4. add ordering/behavior tests
+1. Create `crates/ava-llm/src/providers/{provider_name}.rs`
+2. Implement `LLMProvider` trait (5 methods: generate, generate_stream, estimate_tokens, estimate_cost, model_name)
+3. Register in provider module
+4. Add tests
+5. `cargo test -p ava-llm`
 
-### Add Rust Hotpath
+### Add Middleware (Rust)
 
-1. add command in `src-tauri/src/commands/`
-2. export in `mod.rs` + register handler in `lib.rs`
-3. route via `dispatchCompute` with TS fallback
-4. test both native path and fallback
+1. Implement `Middleware` trait in `crates/ava-tools/src/`
+2. Set explicit priority
+3. Register via `ToolRegistry::add_middleware()`
+4. Add ordering/behavior tests
+
+### Add Desktop Feature (TypeScript — desktop only)
+
+1. Implement in `packages/extensions/`
+2. Register on activation
+3. Optionally add Rust hotpath via `src-tauri/src/commands/` + `dispatchCompute`
 
 ## Documentation Priority
 

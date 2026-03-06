@@ -7,10 +7,8 @@
 
 import * as os from 'node:os'
 import * as path from 'node:path'
-import * as readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { type AgentEvent, type AgentEventCallback, AgentExecutor } from '@ava/core-v2/agent'
-import type { BusMessage } from '@ava/core-v2/bus'
+import { AgentExecutor } from '@ava/core-v2/agent'
 import { MessageBus } from '@ava/core-v2/bus'
 import type { ExtensionModule } from '@ava/core-v2/extensions'
 import {
@@ -18,7 +16,6 @@ import {
   emitEvent,
   getAgentModes,
   loadAllBuiltInExtensions,
-  onEvent,
 } from '@ava/core-v2/extensions'
 import type { LLMProvider } from '@ava/core-v2/llm'
 import { registerProvider } from '@ava/core-v2/llm'
@@ -28,168 +25,64 @@ import { registerCoreTools } from '@ava/core-v2/tools'
 import { createNodePlatform } from '@ava/platform-node/v2'
 import { migrateOAuthCredentials } from '../auth/manager.js'
 import { getCliLogger } from '../logger.js'
+import { parseArgs } from './agent-v2/args.js'
+import { createEventHandler } from './agent-v2/events.js'
+import { setupPermissionPrompts } from './agent-v2/permissions.js'
+import { createInstructionsReadyPromise, loadPromptsModule } from './agent-v2/prompts.js'
+import { loadAgentModeSelector, resolveAgentMode } from './agent-v2/runtime.js'
 import { expandAtMentions } from './at-mentions.js'
-
-interface AgentV2Options {
-  goal: string
-  provider: string
-  model: string
-  maxTurns: number
-  timeout: number
-  cwd: string
-  verbose: boolean
-  yolo: boolean
-  json: boolean
-  resume: string | null
-  praxis: boolean
-}
 
 const log = getCliLogger('cli:agent-v2')
 
-function parseArgs(args: string[]): AgentV2Options | null {
-  if (args[0] !== 'run' || args.length < 2) {
-    printHelp()
-    return null
-  }
-
-  let goal = ''
-  let provider = 'mock'
-  let model = ''
-  let maxTurns = 20
-  let timeout = 10
-  let cwd = process.cwd()
-  let verbose = false
-  let yolo = false
-  let json = false
-  let resume: string | null = null
-  let praxis = false
-
-  let i = 1
-  while (i < args.length) {
-    const arg = args[i]
-
-    if (arg === '--provider' && i + 1 < args.length) {
-      provider = args[++i]!
-    } else if (arg === '--model' && i + 1 < args.length) {
-      model = args[++i]!
-    } else if (arg === '--max-turns' && i + 1 < args.length) {
-      maxTurns = parseInt(args[++i]!, 10)
-    } else if (arg === '--timeout' && i + 1 < args.length) {
-      timeout = parseInt(args[++i]!, 10)
-    } else if (arg === '--cwd' && i + 1 < args.length) {
-      cwd = args[++i]!
-    } else if (arg === '--resume' && i + 1 < args.length) {
-      resume = args[++i]!
-    } else if (arg === '--resume') {
-      resume = 'latest'
-    } else if (arg === '--verbose') {
-      verbose = true
-    } else if (arg === '--yolo') {
-      yolo = true
-    } else if (arg === '--json') {
-      json = true
-    } else if (arg === '--praxis') {
-      praxis = true
-    } else if (!arg!.startsWith('--') && !goal) {
-      goal = arg!
-    }
-
-    i++
-  }
-
-  if (!goal && !resume) {
-    log.warn('Agent-v2 command missing goal and resume target')
-    console.error('Error: No goal provided.')
-    console.error('Usage: ava agent-v2 run "your goal here"')
-    return null
-  }
-
-  return { goal, provider, model, maxTurns, timeout, cwd, verbose, yolo, json, resume, praxis }
-}
-
-export async function runAgentV2Command(args: string[]): Promise<void> {
-  const options = parseArgs(args)
-  if (!options) return
-
-  log.info('Agent-v2 command started', {
-    provider: options.provider,
-    model: options.model || 'default',
-    max_turns: options.maxTurns,
-    timeout_min: options.timeout,
-    yolo: options.yolo,
-    json: options.json,
-    resume: options.resume ?? 'none',
-    goal_length: options.goal.length,
-  })
-
-  // Expand @file mentions in goal
-  if (options.goal) {
-    const originalGoal = options.goal
-    options.goal = await expandAtMentions(options.goal, options.cwd)
-    if (options.goal !== originalGoal) {
-      log.info('Expanded @mentions in goal', { goal_length: options.goal.length })
-    }
-  }
-
-  // Initialize core-v2 platform
-  const dbPath = path.join(os.homedir(), '.ava', 'data.db')
-  const platform = createNodePlatform(dbPath)
-  setPlatform(platform)
-
-  // Migrate any existing CLI OAuth tokens to core-v2 format
-  await migrateOAuthCredentials()
-
-  // Register the 6 core tools (read, write, edit, bash, glob, grep)
-  registerCoreTools()
-
-  // Always register the mock provider as a fallback
+function registerMockProvider(): void {
   registerProvider('mock', () => ({
     async *stream() {
       yield { content: 'Mock response — core-v2 agent loop is working!' }
       yield { done: true }
     },
   }))
+}
 
-  // Load built-in extensions (providers, tools, permissions, etc.)
-  const bus = new MessageBus()
-  const sessionManager = createSessionManager()
+async function resolveResume(
+  options: { resume: string | null; verbose: boolean },
+  sessionManager: ReturnType<typeof createSessionManager>
+): Promise<void> {
+  if (!options.resume) return
 
-  // Resume session if requested
-  if (options.resume) {
-    await sessionManager.loadFromStorage()
-    if (options.resume === 'latest') {
-      const sessions = sessionManager.list()
-      const latest = sessions.sort((a, b) => b.updatedAt - a.updatedAt)[0]
-      if (latest) {
-        log.info('Resuming latest session', { session: latest.id })
-        if (options.verbose) {
-          process.stderr.write(
-            `[agent-v2] Resuming session: ${latest.id} (${latest.name ?? 'unnamed'})\n`
-          )
-        }
-      } else {
-        log.warn('Resume requested but no prior sessions found')
-        process.stderr.write('[agent-v2] No previous sessions found to resume. Starting fresh.\n')
+  await sessionManager.loadFromStorage()
+  if (options.resume === 'latest') {
+    const sessions = sessionManager.list()
+    const latest = sessions.sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    if (latest) {
+      log.info('Resuming latest session', { session: latest.id })
+      if (options.verbose) {
+        process.stderr.write(
+          `[agent-v2] Resuming session: ${latest.id} (${latest.name ?? 'unnamed'})\n`
+        )
       }
     } else {
-      const session = await sessionManager.loadSession(options.resume)
-      if (session) {
-        log.info('Resuming specific session', { session: session.id })
-        if (options.verbose) {
-          process.stderr.write(`[agent-v2] Resuming session: ${session.id}\n`)
-        }
-      } else {
-        log.warn('Requested session not found', { session: options.resume })
-        process.stderr.write(`[agent-v2] Session ${options.resume} not found. Starting fresh.\n`)
-      }
+      log.warn('Resume requested but no prior sessions found')
+      process.stderr.write('[agent-v2] No previous sessions found to resume. Starting fresh.\n')
     }
+    return
   }
 
-  const manager = new ExtensionManager(bus, sessionManager)
+  const session = await sessionManager.loadSession(options.resume)
+  if (session) {
+    log.info('Resuming specific session', { session: session.id })
+    if (options.verbose) {
+      process.stderr.write(`[agent-v2] Resuming session: ${session.id}\n`)
+    }
+  } else {
+    log.warn('Requested session not found', { session: options.resume })
+    process.stderr.write(`[agent-v2] Session ${options.resume} not found. Starting fresh.\n`)
+  }
+}
 
-  const currentDir = path.dirname(fileURLToPath(import.meta.url))
-  const extensionsDir = path.resolve(currentDir, '../../../packages/extensions')
-
+async function activateExtensions(
+  manager: ExtensionManager,
+  extensionsDir: string
+): Promise<number> {
   let extensionCount = 0
   try {
     const loaded = await loadAllBuiltInExtensions(extensionsDir)
@@ -206,118 +99,56 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
     log.warn('Agent-v2 extension activation failed', { error: message })
     process.stderr.write(`[agent-v2] Warning: Failed to load extensions: ${message}\n`)
   }
+  return extensionCount
+}
 
-  // Load agent mode selector from extensions
+export async function runAgentV2Command(args: string[]): Promise<void> {
+  const options = parseArgs(args, log)
+  if (!options) return
+
+  log.info('Agent-v2 command started', {
+    provider: options.provider,
+    model: options.model || 'default',
+    max_turns: options.maxTurns,
+    timeout_min: options.timeout,
+    yolo: options.yolo,
+    json: options.json,
+    resume: options.resume ?? 'none',
+    goal_length: options.goal.length,
+  })
+
+  if (options.goal) {
+    const originalGoal = options.goal
+    options.goal = await expandAtMentions(options.goal, options.cwd)
+    if (options.goal !== originalGoal) {
+      log.info('Expanded @mentions in goal', { goal_length: options.goal.length })
+    }
+  }
+
+  const dbPath = path.join(os.homedir(), '.ava', 'data.db')
+  const platform = createNodePlatform(dbPath)
+  setPlatform(platform)
+
+  await migrateOAuthCredentials()
+  registerCoreTools()
+  registerMockProvider()
+
+  const bus = new MessageBus()
+  const sessionManager = createSessionManager()
+  await resolveResume(options, sessionManager)
+
+  const manager = new ExtensionManager(bus, sessionManager)
+  const currentDir = path.dirname(fileURLToPath(import.meta.url))
+  const extensionsDir = path.resolve(currentDir, '../../../packages/extensions')
+  const extensionCount = await activateExtensions(manager, extensionsDir)
+
   await loadAgentModeSelector(extensionsDir)
+  const promptsModule = await loadPromptsModule(extensionsDir, options.cwd)
+  const instructionsReady = createInstructionsReadyPromise(promptsModule, options)
+  const permissionBridge = setupPermissionPrompts(bus, options)
 
-  // Import prompts module for building system prompt (deferred until after session:opened)
-  interface PromptsModule {
-    addPromptSection: (s: { name: string; priority: number; content: string }) => () => void
-    buildSystemPrompt: (model?: string) => string
-  }
-  let promptsModule: PromptsModule | null = null
-  try {
-    promptsModule = (await importWithDistFallback(
-      path.resolve(extensionsDir, 'prompts/src/builder.ts'),
-      path.resolve(extensionsDir, 'dist/prompts/src/builder.js')
-    )) as unknown as PromptsModule
-    promptsModule.addPromptSection({
-      name: 'cwd',
-      priority: 100,
-      content: `Working directory: ${options.cwd}`,
-    })
-  } catch {
-    // Prompts extension not available
-  }
-
-  // Listen for instructions:loaded to inject project instructions into the system prompt.
-  // Uses a promise that resolves when instructions load or times out at 1s (no files found).
-  let instructionsReady: Promise<void> = Promise.resolve()
-  if (promptsModule) {
-    const pm = promptsModule
-    instructionsReady = new Promise<void>((resolve) => {
-      const timeout = setTimeout(resolve, 1000)
-      onEvent('instructions:loaded', (data) => {
-        clearTimeout(timeout)
-        const { merged, count } = data as { merged: string; count: number }
-        if (merged) {
-          pm.addPromptSection({
-            name: 'project-instructions',
-            content: `# Project Instructions\n\n${merged}`,
-            priority: 5,
-          })
-          if (options.verbose) {
-            process.stderr.write(
-              `[agent-v2] Loaded ${count} instruction file(s) into system prompt\n`
-            )
-          }
-        }
-        resolve()
-      })
-    })
-  }
-
-  // Set up tool approval via bus (Phase 2)
-  const alwaysApproved = new Set<string>()
-  let rlInterface: readline.Interface | undefined
-
-  if (!options.yolo && !options.json) {
-    bus.subscribe('permission:request', async (msg: BusMessage) => {
-      const data = msg as BusMessage & {
-        toolName: string
-        args: Record<string, unknown>
-        risk: string
-      }
-
-      // Check "always" approved
-      if (alwaysApproved.has(data.toolName)) {
-        bus.publish({
-          type: 'permission:response',
-          correlationId: msg.correlationId,
-          timestamp: Date.now(),
-          approved: true,
-        } as BusMessage & { approved: boolean })
-        return
-      }
-
-      const argsPreview = JSON.stringify(data.args).slice(0, 120)
-      const riskLabel =
-        data.risk === 'high'
-          ? '\x1b[31m[HIGH]\x1b[0m'
-          : data.risk === 'medium'
-            ? '\x1b[33m[MED]\x1b[0m'
-            : ''
-
-      if (!rlInterface) {
-        rlInterface = readline.createInterface({ input: process.stdin, output: process.stderr })
-      }
-
-      const answer = await new Promise<string>((resolve) => {
-        rlInterface!.question(
-          `${riskLabel} Allow \x1b[1m${data.toolName}\x1b[0m(${argsPreview})? [y/N/a(lways)] `,
-          (ans) => resolve(ans.trim().toLowerCase())
-        )
-      })
-
-      const approved = answer === 'y' || answer === 'yes' || answer === 'a' || answer === 'always'
-      if (answer === 'a' || answer === 'always') {
-        alwaysApproved.add(data.toolName)
-      }
-
-      bus.publish({
-        type: 'permission:response',
-        correlationId: msg.correlationId,
-        timestamp: Date.now(),
-        approved,
-        reason: approved ? undefined : 'Denied by user',
-      } as BusMessage & { approved: boolean; reason?: string })
-    })
-  }
-
-  // Set up abort controller
   const abortController = new AbortController()
   let aborted = false
-
   const onSignal = () => {
     if (aborted) process.exit(1)
     aborted = true
@@ -334,8 +165,7 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
   process.on('SIGTERM', onSignal)
 
   try {
-    // Build the event handler based on output mode
-    const onEvent = createEventHandler(options)
+    const onAgentEvent = createEventHandler(options)
 
     if (options.verbose) {
       process.stderr.write(`[agent-v2] Running with goal: ${options.goal}\n`)
@@ -346,20 +176,16 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
       process.stderr.write(`[agent-v2] Yolo: ${options.yolo}\n\n`)
     }
 
-    // Create session and emit session:opened so extensions can load instructions, skills, etc.
     const session = sessionManager.create(options.goal.slice(0, 50), options.cwd)
     emitEvent('session:opened', {
       sessionId: session.id,
       workingDirectory: options.cwd,
     })
-    // Wait for instructions to load (resolves on event or 1s timeout)
     await instructionsReady
 
-    // Build system prompt AFTER instructions are loaded
-    let systemPrompt: string | undefined
-    if (promptsModule) {
-      systemPrompt = promptsModule.buildSystemPrompt(options.model || undefined)
-    }
+    const systemPrompt = promptsModule
+      ? promptsModule.buildSystemPrompt(options.model || undefined)
+      : undefined
 
     const agent = new AgentExecutor(
       {
@@ -368,9 +194,9 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
         maxTurns: options.maxTurns,
         maxTimeMinutes: options.timeout,
         systemPrompt,
-        toolMode: options.praxis ? 'praxis' : selectAgentMode(options.goal, getAgentModes()),
+        toolMode: options.praxis ? 'praxis' : resolveAgentMode(options.goal, getAgentModes()),
       },
-      onEvent
+      onAgentEvent
     )
 
     const result = await agent.run({ goal: options.goal, cwd: options.cwd }, abortController.signal)
@@ -384,7 +210,6 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
     })
 
     if (options.json) {
-      // NDJSON summary line
       console.log(
         JSON.stringify({
           type: 'summary',
@@ -403,7 +228,6 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
       console.log(`Turns:    ${result.turns}`)
       console.log(`Tokens:   ${input} in / ${output} out`)
       console.log(`Duration: ${(result.durationMs / 1000).toFixed(1)}s`)
-
       if (result.output) {
         console.log(`Output:   ${result.output.slice(0, 500)}`)
       }
@@ -422,217 +246,8 @@ export async function runAgentV2Command(args: string[]): Promise<void> {
   } finally {
     process.removeListener('SIGINT', onSignal)
     process.removeListener('SIGTERM', onSignal)
-    rlInterface?.close()
+    permissionBridge.unsubscribe()
+    permissionBridge.close()
     await manager.dispose()
   }
-}
-
-// ─── Event Handler Factory ───────────────────────────────────────────────────
-
-function createEventHandler(options: AgentV2Options): AgentEventCallback | undefined {
-  if (options.json) {
-    return (event: AgentEvent) => {
-      console.log(JSON.stringify(event))
-    }
-  }
-
-  if (options.verbose) {
-    return (event: AgentEvent) => {
-      switch (event.type) {
-        case 'turn:start':
-          process.stderr.write(`\n\x1b[36m── Turn ${event.turn} ──\x1b[0m\n`)
-          break
-        case 'thought':
-          process.stderr.write(`\x1b[2m${event.content.slice(0, 300)}\x1b[0m\n`)
-          break
-        case 'tool:start':
-          process.stderr.write(formatToolStart(event.toolName, event.args))
-          break
-        case 'tool:finish':
-          process.stderr.write(formatToolFinish(event.toolName, event.success, event.durationMs))
-          break
-        case 'retry':
-          process.stderr.write(
-            `\x1b[33m[retry] Attempt ${(event as RetryEvent).attempt}/${(event as RetryEvent).maxRetries} — waiting ${((event as RetryEvent).delayMs / 1000).toFixed(1)}s\x1b[0m\n`
-          )
-          break
-        case 'context:compacting': {
-          const ce = event as CompactingEvent
-          process.stderr.write(
-            `\x1b[33m[compaction] ${ce.messagesBefore} → ${ce.messagesAfter} messages (${ce.estimatedTokens} tokens / ${ce.contextLimit} limit)\x1b[0m\n`
-          )
-          break
-        }
-        case 'doom-loop':
-          process.stderr.write(
-            `\x1b[31m[doom-loop] ${(event as DoomLoopEvent).tool} called ${(event as DoomLoopEvent).count}x with same args\x1b[0m\n`
-          )
-          break
-        case 'error':
-          process.stderr.write(`\x1b[31m[error] ${event.error}\x1b[0m\n`)
-          break
-      }
-    }
-  }
-
-  // Default mode — minimal spinner-like output
-  return (event: AgentEvent) => {
-    switch (event.type) {
-      case 'tool:start':
-        process.stderr.write(`  ${toolIcon(event.toolName)} ${event.toolName}\n`)
-        break
-      case 'error':
-        process.stderr.write(`\x1b[31m  Error: ${event.error}\x1b[0m\n`)
-        break
-    }
-  }
-}
-
-// ─── Tool Output Formatters ─────────────────────────────────────────────────
-
-function toolIcon(name: string): string {
-  switch (name) {
-    case 'bash':
-      return '$'
-    case 'read_file':
-      return '>'
-    case 'write_file':
-    case 'create_file':
-      return '+'
-    case 'edit':
-    case 'multiedit':
-      return '~'
-    case 'delete_file':
-      return '-'
-    case 'glob':
-    case 'grep':
-      return '?'
-    case 'task':
-      return '|'
-    default:
-      return '*'
-  }
-}
-
-function formatToolStart(toolName: string, args: Record<string, unknown>): string {
-  const lines: string[] = []
-  lines.push(`\x1b[1m  ${toolIcon(toolName)} ${toolName}\x1b[0m`)
-
-  switch (toolName) {
-    case 'bash': {
-      const cmd = (args.command ?? '') as string
-      lines.push(`    \x1b[2m$ ${cmd.slice(0, 200)}\x1b[0m`)
-      break
-    }
-    case 'read_file': {
-      const p = (args.path ?? args.filePath ?? '') as string
-      lines.push(`    \x1b[2m${p}\x1b[0m`)
-      break
-    }
-    case 'edit': {
-      const p = (args.filePath ?? args.file_path ?? args.path ?? '') as string
-      lines.push(`    \x1b[2m${p}\x1b[0m`)
-      break
-    }
-    case 'write_file':
-    case 'create_file': {
-      const p = (args.path ?? args.filePath ?? '') as string
-      lines.push(`    \x1b[2m${p}\x1b[0m`)
-      break
-    }
-    case 'glob': {
-      const pattern = (args.pattern ?? '') as string
-      lines.push(`    \x1b[2m${pattern}\x1b[0m`)
-      break
-    }
-    case 'grep': {
-      const pattern = (args.pattern ?? '') as string
-      lines.push(`    \x1b[2m/${pattern}/\x1b[0m`)
-      break
-    }
-    case 'task': {
-      const desc = (args.description ?? '') as string
-      lines.push(`    \x1b[2m└ ${desc}\x1b[0m`)
-      break
-    }
-    default: {
-      const preview = JSON.stringify(args).slice(0, 120)
-      lines.push(`    \x1b[2m${preview}\x1b[0m`)
-    }
-  }
-
-  return `${lines.join('\n')}\n`
-}
-
-function formatToolFinish(_toolName: string, success: boolean, durationMs: number): string {
-  const status = success ? '\x1b[32mOK\x1b[0m' : '\x1b[31mFAIL\x1b[0m'
-  return `    ${status} \x1b[2m(${durationMs}ms)\x1b[0m\n`
-}
-
-// Extended event type narrowing helpers
-type RetryEvent = Extract<AgentEvent, { type: 'retry' }>
-type DoomLoopEvent = Extract<AgentEvent, { type: 'doom-loop' }>
-type CompactingEvent = Extract<AgentEvent, { type: 'context:compacting' }>
-
-/** Import a module with fallback from .ts source to compiled .js in dist. */
-async function importWithDistFallback(
-  sourcePath: string,
-  distPath: string
-): Promise<Record<string, unknown>> {
-  try {
-    return (await import(sourcePath)) as Record<string, unknown>
-  } catch {
-    return (await import(distPath)) as Record<string, unknown>
-  }
-}
-
-// selectAgentMode imported from agent-modes extension at runtime via importWithDistFallback
-let selectAgentMode = (
-  _goal: string,
-  availableModes: ReadonlyMap<string, { name: string }>
-): string | undefined => {
-  // Fallback: no auto-select if agent-modes extension not available
-  return availableModes.has('praxis') ? undefined : undefined
-}
-
-async function loadAgentModeSelector(extensionsDir: string): Promise<void> {
-  try {
-    const mod = (await importWithDistFallback(
-      path.resolve(extensionsDir, 'agent-modes/src/selector.ts'),
-      path.resolve(extensionsDir, 'dist/agent-modes/src/selector.js')
-    )) as { selectAgentMode?: typeof selectAgentMode }
-    if (mod.selectAgentMode) {
-      selectAgentMode = mod.selectAgentMode
-    }
-  } catch {
-    // Use fallback — no auto-select
-  }
-}
-
-function printHelp(): void {
-  console.log(`
-AVA Agent V2 - Core-v2 agent loop with extension system
-
-USAGE:
-  ava agent-v2 run "your goal here" [OPTIONS]
-
-OPTIONS:
-  --provider <name>     LLM provider (default: mock)
-  --model <id>          Model ID (default: provider default)
-  --max-turns <n>       Maximum turns (default: 20)
-  --timeout <minutes>   Timeout in minutes (default: 10)
-  --cwd <path>          Working directory (default: current)
-  --resume [id]         Resume a previous session (latest if no ID given)
-  --praxis              Force Praxis 3-tier delegation (auto-detected by default)
-  --verbose             Verbose output with tool details
-  --yolo                Auto-approve all tool calls (skip confirmation)
-  --json                NDJSON output for scripting
-
-EXAMPLES:
-  ava agent-v2 run "list files" --verbose
-  ava agent-v2 run "create hello.txt" --provider anthropic
-  ava agent-v2 run "find TODOs" --provider anthropic --model claude-sonnet-4-20250514 --yolo
-  ava agent-v2 run "refactor utils" --provider anthropic --json
-  ava agent-v2 run "continue working" --resume
-`)
 }

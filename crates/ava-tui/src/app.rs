@@ -115,30 +115,23 @@ impl App {
         spawn_event_reader(app_tx.clone());
         spawn_tick_timer(app_tx.clone(), Arc::clone(&self.is_streaming));
 
-        let local = tokio::task::LocalSet::new();
-        local
-            .run_until(async {
-                if let Some(goal) = self.pending_goal.take() {
-                    self.submit_goal(goal, app_tx.clone(), agent_tx.clone());
-                }
+        if let Some(goal) = self.pending_goal.take() {
+            self.submit_goal(goal, app_tx.clone(), agent_tx.clone());
+        }
 
-                loop {
-                    terminal.draw(|frame| ui::render(frame, &self.state))?;
+        loop {
+            terminal.draw(|frame| ui::render(frame, &self.state))?;
 
-                    tokio::select! {
-                        Some(event) = app_rx.recv() => self.handle_event(event, app_tx.clone(), agent_tx.clone()),
-                        Some(agent_event) = agent_rx.recv() => self.handle_event(AppEvent::Agent(agent_event), app_tx.clone(), agent_tx.clone()),
-                        else => break,
-                    }
+            tokio::select! {
+                Some(event) = app_rx.recv() => self.handle_event(event, app_tx.clone(), agent_tx.clone()),
+                Some(agent_event) = agent_rx.recv() => self.handle_event(AppEvent::Agent(agent_event), app_tx.clone(), agent_tx.clone()),
+                else => break,
+            }
 
-                    if self.should_quit {
-                        break;
-                    }
-                }
-
-                Ok::<(), color_eyre::Report>(())
-            })
-            .await?;
+            if self.should_quit {
+                break;
+            }
+        }
 
         disable_raw_mode()?;
         execute!(
@@ -169,14 +162,41 @@ impl App {
             AppEvent::Resize(_, _) | AppEvent::Tick => {}
             AppEvent::Agent(agent_event) => {
                 match agent_event {
-                    ava_agent::AgentEvent::Token(chunk) => self
-                        .state
-                        .messages
-                        .push(UiMessage::new(MessageKind::Assistant, chunk)),
-                    ava_agent::AgentEvent::ToolCall(call) => self.state.messages.push(UiMessage::new(
-                        MessageKind::ToolCall,
-                        format!("{} {}", call.name, call.arguments),
-                    )),
+                    ava_agent::AgentEvent::Token(chunk) => {
+                        // Append to last assistant message or create new one
+                        if let Some(last) = self.state.messages.messages.last_mut() {
+                            if matches!(last.kind, MessageKind::Assistant) {
+                                last.content.push_str(&chunk);
+                            } else {
+                                self.state
+                                    .messages
+                                    .push(UiMessage::new(MessageKind::Assistant, chunk));
+                            }
+                        } else {
+                            self.state
+                                .messages
+                                .push(UiMessage::new(MessageKind::Assistant, chunk));
+                        }
+                    }
+                    ava_agent::AgentEvent::ToolCall(call) => {
+                        // Check if we need approval
+                        if !self.state.permission.yolo_mode
+                            && !self.state.permission.session_approved.contains(&call.name)
+                        {
+                            // Create approval request
+                            let (tx, _rx) = tokio::sync::oneshot::channel();
+                            let request = crate::state::permission::ApprovalRequest {
+                                call: call.clone(),
+                                approve_tx: tx,
+                            };
+                            self.state.permission.enqueue(request);
+                            self.state.active_modal = Some(ModalType::ToolApproval);
+                        }
+                        self.state.messages.push(UiMessage::new(
+                            MessageKind::ToolCall,
+                            format!("{} {}", call.name, call.arguments),
+                        ));
+                    }
                     ava_agent::AgentEvent::ToolResult(result) => self
                         .state
                         .messages

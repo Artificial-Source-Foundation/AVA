@@ -191,6 +191,14 @@ fn build_tool_registry(platform: Arc<StandardPlatform>) -> ToolRegistry {
     registry
 }
 
+#[cfg(test)]
+const _: () = {
+    fn assert_send<T: Send>() {}
+    fn check() {
+        assert_send::<AgentStack>();
+    }
+};
+
 struct SharedProvider {
     inner: Arc<dyn LLMProvider>,
 }

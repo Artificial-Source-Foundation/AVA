@@ -33,4 +33,12 @@ pub struct CliArgs {
     /// Theme name
     #[arg(long, default_value = "default")]
     pub theme: String,
+
+    /// Force headless mode (no TUI)
+    #[arg(long)]
+    pub headless: bool,
+
+    /// Output JSON events (for scripting/piping)
+    #[arg(long)]
+    pub json: bool,
 }

@@ -1,7 +1,9 @@
 use ava_tui::app::App;
+use ava_tui::headless::run_headless;
 use clap::Parser;
 use color_eyre::Result;
 use ava_tui::config::cli::CliArgs;
+use std::io::IsTerminal;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -13,6 +15,11 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = CliArgs::parse();
+
+    if cli.headless || cli.json || !std::io::stdout().is_terminal() {
+        return run_headless(cli).await;
+    }
+
     let mut app = App::new(cli).await?;
     app.run().await
 }

@@ -2,7 +2,7 @@ use crate::event::AppEvent;
 use ava_agent::stack::{AgentRunResult, AgentStack, AgentStackConfig};
 use color_eyre::Result;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -13,7 +13,7 @@ pub struct TokenUsage {
 }
 
 pub struct AgentState {
-    stack: Rc<AgentStack>,
+    stack: Arc<AgentStack>,
     pub is_running: bool,
     pub current_turn: usize,
     pub max_turns: usize,
@@ -38,7 +38,7 @@ impl AgentState {
             yolo,
             ..AgentStackConfig::default()
         };
-        let stack = Rc::new(AgentStack::new(config).await?);
+        let stack = Arc::new(AgentStack::new(config).await?);
 
         Ok(Self {
             stack,
@@ -59,14 +59,14 @@ impl AgentState {
         agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
     ) {
         let cancel = CancellationToken::new();
-        let stack = Rc::clone(&self.stack);
+        let stack = Arc::clone(&self.stack);
         let run_cancel = cancel.clone();
 
         self.is_running = true;
         self.current_turn = 0;
         self.max_turns = max_turns;
 
-        self.task = Some(tokio::task::spawn_local(async move {
+        self.task = Some(tokio::spawn(async move {
             let result = stack.run(&goal, max_turns, Some(agent_tx), run_cancel).await;
             let mapped = result.map_err(|err| err.to_string());
             let _ = app_tx.send(AppEvent::AgentDone(mapped));

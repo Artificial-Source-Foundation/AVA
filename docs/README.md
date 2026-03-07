@@ -2,7 +2,7 @@
 
 > Single source of truth for architecture, development, and troubleshooting.
 
-<!-- Last verified: 2026-03-05. Run 'npm run test:run && cargo test --workspace' to revalidate. -->
+<!-- Last verified: 2026-03-07. Run 'npm run test:run && cargo test --workspace' to revalidate. -->
 
 ## Quick Start
 
@@ -51,6 +51,7 @@
 | [ROADMAP.md](ROADMAP.md) | Project roadmap and phase status |
 | [VISION.md](VISION.md) | Project vision and goals |
 | [plans/](plans/) | Sprint plans and designs |
+| [archives/](archives/) | Completed sprints and epics (historical reference) |
 
 ## Research & Analysis
 

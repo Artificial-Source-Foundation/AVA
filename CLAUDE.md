@@ -37,7 +37,7 @@ The TypeScript layer (`packages/`) is retained only for the Tauri desktop webvie
 
 ```text
 AVA/
-├── crates/                   # ~20 Rust crates (agent stack + TUI + services)
+├── crates/                   # ~21 Rust crates (agent stack + TUI + services)
 │   ├── ava-tui/              # CLI/TUI binary (Ratatui) — THE primary interface
 │   ├── ava-agent/            # Agent execution loop + reflection
 │   ├── ava-llm/              # LLM providers (Anthropic, OpenAI, Gemini, Ollama, OpenRouter)

@@ -4,9 +4,9 @@
 >
 > Gap analysis based on feature comparison with **8 competitors** (OpenCode, Gemini CLI, Aider, Goose, OpenHands, Plandex, Cline, Pi). Full competitive analysis: [`docs/research/competitive-analysis-2026-03.md`](../research/competitive-analysis-2026-03.md)
 
-**Current snapshot:** 55+ tools, 30+ extensions, 16 providers. Detailed status: 55+ tools registered (7 core + 48+ extended), 34+ extensions active, 16 providers (all real implementations), ~5,350+ tests passing across 340+ files. CLI `ava agent-v2` works end-to-end with real LLMs — 5 E2E smoke tests passing (flat mode, Praxis mode, memory, git, background shell). All Praxis fixes landed (child CWD scoping, auto-detect flat vs hierarchy). **Desktop app fully integrated with core-v2:** chat uses AgentExecutor (unified middleware chain), bidirectional settings sync, extension event bridge hooks, context budget sync, model status hook. Full competitive parity + differentiation achieved (Sprint 23): session DAG/branching, token-efficient results, Azure provider, ambient terminal, Tauri PTY/watcher, dual-stack toggle, team delegation UI, client-server API (ACP), plugin marketplace reviews, recipe/workflow system, chat recall (FTS5), GitHub bot.
+**Current snapshot:** ~41 static tools (plus dynamic MCP and custom tools), 20 feature extensions (~31 at runtime including ~15 provider sub-extensions), 16 providers. Detailed status: ~41 tools registered (6 core + ~35 extended), 20 feature extensions active, 16 providers (all real implementations), ~5,350+ tests passing across 340+ files. CLI `ava agent-v2` works end-to-end with real LLMs — 5 E2E smoke tests passing (flat mode, Praxis mode, memory, git, background shell). All Praxis fixes landed (child CWD scoping, auto-detect flat vs hierarchy). **Desktop app fully integrated with core-v2:** chat uses AgentExecutor (unified middleware chain), bidirectional settings sync, extension event bridge hooks, context budget sync, model status hook. Full competitive parity + differentiation achieved (Sprint 23): session DAG/branching, token-efficient results, Azure provider, ambient terminal, Tauri PTY/watcher, dual-stack toggle, team delegation UI, client-server API (ACP), plugin marketplace reviews, recipe/workflow system, chat recall (FTS5), GitHub bot.
 
-**AVA's unique advantages:** 3-tier Praxis hierarchy (no competitor has this), 50+ built-in tools (more than any competitor), Tauri desktop (native, not Electron), extension-first architecture, Obsidian-style plugin ecosystem.
+**AVA's unique advantages:** 3-tier Praxis hierarchy (no competitor has this), ~41 static tools (plus dynamic MCP and custom tools), Tauri desktop (native, not Electron), extension-first architecture, Obsidian-style plugin ecosystem.
 
 ---
 
@@ -238,7 +238,7 @@ See: [`docs/research/backend-analysis/AVA-SYNTHESIS-VISION.md`](../research/back
 |---|------|------------|----------|--------------|
 | B-110 | **Multiple context compaction strategies** | OpenHands (9) | MEDIUM | Add LLM-summarize, observation-masking, amortized compaction. Currently 1 strategy. |
 | B-111 | **History processor pipeline** | SWE-agent | MEDIUM | Hook-based transforms that filter what LLM sees before each call. |
-| B-112 | **MCP server mode** | Zed | MEDIUM | Expose AVA's 55+ tools as MCP server for other tools to consume. |
+| B-112 | **MCP server mode** | Zed | MEDIUM | Expose AVA's ~41 tools as MCP server for other tools to consume. |
 | B-113 | **Concurrent multi-file builds** | Plandex | LOW | Build multiple files simultaneously. Currently sequential in multiedit. |
 | B-114 | **Voice coding** | Aider | LOW | Voice-to-text input for chat. Whisper integration. |
 | B-115 | **AI comment watcher** | Aider | LOW | Watch files for `# AVA: do X` comments and auto-trigger. |
@@ -383,4 +383,4 @@ feat(agent): parallel tool execution [B-034]
 | — | Retry-after header parsing (3 formats: ms, seconds, HTTP date) | 2026-03-02 |
 | — | Well-known org config (fetchWellKnownConfig from /.well-known/ava) | 2026-03-02 |
 | — | OpenAI Responses API (shouldUseResponsesAPI for GPT-5/o3/o4/Codex) | 2026-03-02 |
-| — | ACP protocol stub (run/stream/steer methods) | 2026-03-02 |
+| — | ACP protocol stub (run/stream/steer methods) (Removed — see git history) | 2026-03-02 |

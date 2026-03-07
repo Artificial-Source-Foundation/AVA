@@ -291,4 +291,4 @@
 
 ---
 
-*Last updated: 2026-03-02 — historical Sprint 17 backend completion metrics (+271 tests across 39 files). Current snapshot: 55+ tools, 30+ extensions, 16 providers.*
+*Last updated: 2026-03-02 — historical Sprint 17 backend completion metrics (+271 tests across 39 files). Current snapshot: ~41 static tools (plus dynamic MCP and custom tools), 20 feature extensions (~31 at runtime including provider sub-extensions), 16 providers.*

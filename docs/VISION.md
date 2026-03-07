@@ -1,3 +1,4 @@
+<!-- Last verified: 2026-03-07 -->
 # AVA — Vision
 
 > The Obsidian of AI Coding

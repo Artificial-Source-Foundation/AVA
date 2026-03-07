@@ -48,7 +48,7 @@ AVA has strong foundations in multi-agent orchestration, codebase intelligence, 
 | ~~Minimal tool mode (4-tool subset)~~ | PI | ~~Low~~ **DONE** |
 | Runtime skill/tool creation + hot reload | PI | Medium |
 | ~~MCP OAuth flows (auth + refresh + storage)~~ | Cline, Gemini CLI, Goose | ~~Medium~~ **DONE** (Sprint 17: full OAuth + resources + prompts + sampling + reconnect) |
-| ~~Remote browser support~~ | Cline | ~~Medium~~ **OUT OF SCOPE** (browser tool removed Sprint 13, use MCP Puppeteer) |
+| ~~Remote browser support~~ | Cline | ~~Medium~~ **OUT OF SCOPE** (browser tool removed Sprint 13 — see git history; use MCP Puppeteer) |
 
 ### New Gaps Identified (2026-02-28 — Sprint 16 Audit)
 

@@ -1,3 +1,4 @@
+<!-- Last verified: 2026-03-07 -->
 # Praxis — 3-Tier Agent Hierarchy
 
 Praxis is AVA's agent hierarchy system. Instead of a flat delegation model (one agent delegates to workers), Praxis implements a 3-tier structure:

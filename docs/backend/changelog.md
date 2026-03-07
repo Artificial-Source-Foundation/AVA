@@ -8,7 +8,7 @@
 
 ### Sprint 23 — Complete Backend + Differentiation (15 Items, 5 Phases)
 
-**~460 new tests across 30+ new files** in the new architecture stack. Tool count 50+ → 55+. Extensions 30+ → 34+. Providers 15 → 16 (Azure). Total: ~5,350+ tests across ~340+ files. `pnpm build:all` + `npx tsc --noEmit` + `npm run lint` all clean.
+**~460 new tests across 30+ new files** in the new architecture stack. Tool count ~41 static (plus dynamic MCP and custom tools). Extensions: 20 feature extensions (~31 at runtime including provider sub-extensions). Providers 15 → 16 (Azure). Total: ~5,350+ tests across ~340+ files. `pnpm build:all` + `npx tsc --noEmit` + `npm run lint` all clean.
 
 **Phase 1: Session DAG (CG-06)**
 - `parentSessionId`, `branchName`, `branchPoint`, `children` on SessionState/SessionMeta. `fork()`, `getTree()`, `getBranches()` on SessionManager. `dag.ts` — `getAncestors()`, `getDescendants()`, `flattenTree()`, `findRoot()`, `getDepth()`. SQLite migration for new columns. 26 tests.
@@ -64,7 +64,7 @@
 - **Diff Enhancements + Session Sharing + Plan Saves (items 18, 19, 20, 21, 35)**: `toolCallIndex`/`messageIndex` on FileDiff. `diff:revert-to` handler. `summarizeDiffSession()`. `savePlanToFile()`. Sharing extension stub. 55 tests.
 
 **Phase 5: Low Priority (2 agents)**
-- **Protocol Features (items 29, 30, 31, 32)**: `parseRetryAfterMs()` for 3 formats. `fetchWellKnownConfig(domain)`. OpenAI Responses API body builder + `shouldUseResponsesAPI()` auto-routing. ACP protocol stub. 73 tests.
+- **Protocol Features (items 29, 30, 31, 32)**: `parseRetryAfterMs()` for 3 formats. `fetchWellKnownConfig(domain)`. OpenAI Responses API body builder + `shouldUseResponsesAPI()` auto-routing. ACP protocol stub (Removed — see git history). 73 tests.
 - **Cleanup + Integration Tests**: Activation smoke test updated to 25 extensions (session snapshot at that time). Full suite: 4,859 tests across 310 files. Build, typecheck, lint all clean.
 
 **CLAUDE.md updated:** Tools table 44 → 50+ (added pty, 6 new LSP tools, delegate_explorer). Extensions module map updated. Extension API updated with `registerHook`/`callHook`.
@@ -599,7 +599,7 @@
 - Code splitting (solid 116KB, icons 20KB, app 408KB, vendor 2.3MB)
 
 ### Session 30 — Epics 25-26
-- Epic 25: ACP + A2A protocols (97 tests)
+- Epic 25: ACP + A2A protocols (97 tests) (Removed — see git history)
 - Epic 26: Gemini CLI feature parity (337 tests)
 
 ---
@@ -608,7 +608,7 @@
 
 ### Epics 19-21 — MVP Polish
 - Epic 19: Hooks system (PreToolUse, PostToolUse, etc.)
-- Epic 20: Browser tool (Puppeteer automation)
+- Epic 20: Browser tool (Puppeteer automation) (Removed — see git history)
 - Epic 21: Provider expansion
 - Feature parity sprints 1-7
 

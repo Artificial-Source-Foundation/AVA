@@ -1,3 +1,4 @@
+<!-- Last verified: 2026-03-07 -->
 # Roadmap
 
 > Desktop-first AI coding app with dev team and community plugins
@@ -210,12 +211,12 @@ This is what makes AVA "The Obsidian of AI Coding". Easy to create, discover, in
 ## Phase 4: Integrations
 
 ### Sprint 4.1: Editor Integration
-- [ ] VS Code extension (ACP protocol — needs reimplementation)
+- [ ] VS Code extension (ACP protocol — Removed, see git history; needs reimplementation)
 - [ ] Cursor/Windsurf support
 - [ ] Session sync between desktop app and editor
 
 ### Sprint 4.2: Agent Network
-- [ ] Agent-to-agent HTTP communication (A2A protocol — needs reimplementation)
+- [ ] Agent-to-agent HTTP communication (A2A protocol — Removed, see git history; needs reimplementation)
 - [ ] Remote agent discovery
 - [ ] Cross-agent task delegation
 
@@ -230,7 +231,7 @@ This is what makes AVA "The Obsidian of AI Coding". Easy to create, discover, in
 
 ## Engineering History
 
-All backend epics are complete. See `docs/development/completed/` for details.
+All backend epics are complete. See `docs/archives/completed-epics/` for details.
 
 | Epics | Scope |
 |-------|-------|

@@ -1,3 +1,4 @@
+<!-- Last verified: 2026-03-07 -->
 # QA Checklist — Sprint 23 (Launch Readiness)
 
 > Manual test matrix for verifying the desktop app before release.

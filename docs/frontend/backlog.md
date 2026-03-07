@@ -294,7 +294,7 @@ Features below are things **competitors ship that AVA does not yet have**.
 - [x] ~~Interruption handler (pause/redirect)~~ — **Removed** (Gap Analysis Sprint: adds complexity without value). Pause/resume UI, signals, and store methods deleted.
 - [x] Working directory switcher — CWD button in StatusBar with Tauri dialog.open. setCurrentDirectory in project store. — **Small** *(done)*
 - [x] Waveform visualizer for voice — AudioAnalyser + AnalyserNode in voice-dictation.ts. 8 animated bars near MicButton. — **Tiny** *(done)*
-- [ ] Browser automation UI — Screenshot display, action history, session tracking. — **Medium** *(out of scope: browser tool removed)*
+- [ ] Browser automation UI — Screenshot display, action history, session tracking. — **Medium** *(out of scope: browser tool removed — see git history)*
 - [x] Voice device selection — getAudioDevices() in voice-dictation.ts. Device picker dropdown in MessageInput strip. voiceDeviceId in settings. — **Tiny** *(done)*
 - [x] Read-only file context — readOnlyFiles signal in session store. Lock icon + context menu in SidebarExplorer. — **Small** *(done)*
 - [x] Plan branch management — plan-branches.ts store + PlanBranchSelector.tsx. Create/switch/compare/merge/delete branches. Inline in plan mode strip. — **Large** *(done)*
@@ -354,7 +354,7 @@ Features below are things **competitors ship that AVA does not yet have**.
 | Progressive rendering | — | Render window for long sessions |
 | Onboarding wizard | Cline | OnboardingScreen (theme, mode, API keys) |
 | Context token tracking | Cline, Plandex | ContextBar with token counts |
-| Web scraping | Aider | webfetch + browser tools |
+| Web scraping | Aider | webfetch + browser tools (browser tool removed — see git history) |
 
 ### Sprint 2.4: Plugin Distribution
 - [x] Publish flow stub (PublishDialog.tsx) — **DONE** (Gap Analysis Sprint)

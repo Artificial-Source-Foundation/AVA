@@ -9,7 +9,7 @@
 
 AVA's unique position: the only tool with a **3-tier agent hierarchy (Praxis)** paired with an **Obsidian-style plugin ecosystem** and a **desktop-first Tauri app**. No competitor combines all three.
 
-**Current snapshot:** ~41 tools, 30+ extensions, 16 providers, ~4,280 tests. CLI `ava agent-v2` works end-to-end.
+**Current snapshot:** ~41 static tools (plus dynamic MCP and custom tools), 20 feature extensions (~31 at runtime including provider sub-extensions), 16 providers, ~4,280 tests. CLI `cargo run --bin ava` works end-to-end.
 
 ---
 

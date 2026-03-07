@@ -1,3 +1,4 @@
+<!-- Last verified: 2026-03-07 -->
 # Reference Repositories
 
 Shallow clones in `docs/reference-code/` for architecture comparison and feature gap analysis.

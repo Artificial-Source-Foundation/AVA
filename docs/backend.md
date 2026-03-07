@@ -49,7 +49,7 @@ Typical runtime extension activation count is ~31:
 - tools-extended
 - validator
 
-### Rust Crate Index (19)
+### Rust Crate Index (~21)
 
 - ava-agent
 - ava-codebase
@@ -75,7 +75,9 @@ Counts are approximate and may drift between releases. Use runtime registries fo
 
 ## Rust Hotpath Pattern
 
-Use `dispatchCompute<T>(rustCommand, rustArgs, tsFallback)` for performance-sensitive logic.
+> **Note:** `dispatchCompute` is still used in the desktop Tauri app. It is **deprecated for new CLI/agent features** — write Rust directly in `crates/`.
+
+Use `dispatchCompute<T>(rustCommand, rustArgs, tsFallback)` for performance-sensitive logic in the desktop app only.
 
 - Tauri desktop runtime: execute Rust command
 - Node/CLI runtime: use TypeScript fallback

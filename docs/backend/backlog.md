@@ -23,7 +23,7 @@
 ### P1
 - ~~PI Coding Agent parity items (provider switching, session branching tree, minimal tool mode, runtime skill creation)~~ **DONE** (provider switching Sprint B9, session branching Gap Analysis Batch 6, minimal tool mode Sprint B8, skill CRUD Gap Analysis Batch 5)
 - ~~MCP OAuth flows (auth + refresh + storage)~~ **DONE** (Gap Analysis: `mcp/src/oauth.ts` PKCE flow + `mcp/src/reconnect.ts` exponential backoff)
-- ~~Remote browser support baseline~~ Removed — browser tool deleted (Sprint 13), use Puppeteer MCP server
+- ~~Remote browser support baseline~~ Removed — browser tool deleted (Sprint 13, see git history), use Puppeteer MCP server
 
 ### P2
 - Reduce oversized frontend files (>300 lines) to meet CLAUDE.md constraints
@@ -63,7 +63,7 @@
 
 ### Missing in Tools
 - [x] **Tool execution tests** — ~~Individual tool `execute()` methods untested~~ **DONE** (write + edit execute tests already comprehensive; 11 + 12 tests respectively)
-- [x] **Browser tool** — ~~Requires Puppeteer mocking~~ Removed (Sprint 13, use Puppeteer MCP server)
+- [x] **Browser tool** — ~~Requires Puppeteer mocking~~ Removed (Sprint 13, see git history; use Puppeteer MCP server)
 - [x] **Apply-patch tests** — ~~Parser and applier untested~~ **DONE** (parser.test.ts, 10 tests)
 - [ ] **Edit strategy benchmarks** — No comparison of 8 edit strategies on real diffs
 
@@ -170,7 +170,7 @@ This backlog feeds into the project roadmap:
 > **Sprint 13** removed the browser tool, added free DuckDuckGo websearch, and implemented a real MCP client with JSON-RPC 2.0 over stdio/SSE. Net: −888 lines deleted, +1238 lines added across 19 files. Tool count 24 → 23. Extension tests: 609 passing (67 files).
 
 #### Completed
-- [x] **Browser tool removed** — Deleted `tools-extended/src/browser/` (4 files, −689 lines), users should use Puppeteer MCP server instead
+- [x] **Browser tool removed** — Deleted `tools-extended/src/browser/` (4 files, −689 lines; Removed — see git history), users should use Puppeteer MCP server instead
 - [x] **Free websearch** — DuckDuckGo HTML scraping as default (no API key needed), Tavily/Exa as optional fallbacks
 - [x] **MCP transport layer** — `StdioTransport` (newline-delimited JSON via platform shell spawn) + `SSETransport` (Server-Sent Events + POST) — `mcp/src/transport.ts` (~190 lines)
 - [x] **MCP protocol client** — Initialize handshake (`2024-11-05`), tools/list, tools/call with request/response correlation + 30s timeouts — `mcp/src/client.ts` (~130 lines)

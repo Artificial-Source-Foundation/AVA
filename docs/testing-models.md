@@ -1,3 +1,4 @@
+<!-- Last verified: 2026-03-07 -->
 # SOTA Models for Testing
 
 Updated March 2026.
@@ -58,9 +59,11 @@ These require an API key (`--provider openai` with `AVA_OPENAI_API_KEY` env var)
 ## Quick test commands
 
 ```bash
-# OpenAI OAuth (ChatGPT account)
-node cli/dist/index.js run "Read package.json and tell me the version" --provider openai --model gpt-5.3-codex --yolo --verbose
+# Rust CLI (current)
+cargo run --bin ava -- "Read package.json and tell me the version" --headless --provider openai --model gpt-5.3-codex
+cargo run --bin ava -- "Read README.md and tell me the project name" --headless --provider openrouter --model "<model-id>"
 
-# OpenRouter (API key)
-node cli/dist/index.js run "Read README.md and tell me the project name" --provider openrouter --model "<model-id>" --max-turns 3 --verbose
+# Legacy Node CLI (legacy — being replaced by Rust CLI: cargo run --bin ava)
+# node cli/dist/index.js run "Read package.json and tell me the version" --provider openai --model gpt-5.3-codex --yolo --verbose
+# node cli/dist/index.js run "Read README.md and tell me the project name" --provider openrouter --model "<model-id>" --max-turns 3 --verbose
 ```

@@ -1,3 +1,4 @@
+<!-- Last verified: 2026-03-07 -->
 # AI Coding Agent Instructions
 
 > Universal instructions for AI assistants working on AVA
@@ -66,7 +67,7 @@ AVA/
 
 ### Important Counts
 
-- Rust crates: ~20
+- Rust crates: ~21
 - Tool surface: ~41
 
 ---
@@ -151,10 +152,11 @@ An OpenRouter API key is configured at `~/.ava/credentials.json` for testing.
 ### Running CLI tests
 
 ```bash
-# Build CLI first
-cd cli && npm run build && cd ..
+# Rust CLI (current)
+cargo run --bin ava -- "your goal here" --headless --provider openrouter --model <model>
 
-# Run with a goal
+# Legacy Node CLI (legacy — being replaced by Rust CLI: cargo run --bin ava)
+cd cli && npm run build && cd ..
 node cli/dist/index.js run "your goal here" --provider openrouter --model <model> --max-turns 5
 ```
 

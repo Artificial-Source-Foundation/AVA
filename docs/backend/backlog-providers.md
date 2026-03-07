@@ -105,17 +105,14 @@ To verify a provider works E2E:
 # 1. Set credential
 export AVA_<PROVIDER>_API_KEY="..."
 
-# 2. Run agent-v2 with provider
-node cli/dist/index.js agent-v2 run "Say hello" \
-  --provider <name> \
-  --model <model-id> \
-  --yolo
+# 2. Run with Rust CLI (current)
+cargo run --bin ava -- "Say hello" --headless --provider <name> --model <model-id>
 
-# 3. Run with tool use
-node cli/dist/index.js agent-v2 run "List files in the current directory" \
-  --provider <name> \
-  --model <model-id> \
-  --yolo
+# 3. Run with tool use (Rust CLI)
+cargo run --bin ava -- "List files in the current directory" --headless --provider <name> --model <model-id>
+
+# Legacy Node CLI (legacy — being replaced by Rust CLI: cargo run --bin ava)
+# node cli/dist/index.js agent-v2 run "Say hello" --provider <name> --model <model-id> --yolo
 
 # 4. Check: streaming works, tool calls parse, response completes
 ```

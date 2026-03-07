@@ -102,15 +102,20 @@ pub fn parse_sse_lines(text: &str) -> Vec<String> {
 }
 
 pub fn parse_openai_completion_payload(payload: &Value) -> Result<String> {
-    payload
+    let choice = payload
         .get("choices")
         .and_then(Value::as_array)
         .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("message"))
+        .ok_or_else(|| AvaError::SerializationError("missing OpenAI completion choices".to_string()))?;
+
+    // Content may be null when finish_reason is "stop" with no further text
+    let content = choice
+        .get("message")
         .and_then(|message| message.get("content"))
         .and_then(Value::as_str)
-        .map(ToString::to_string)
-        .ok_or_else(|| AvaError::SerializationError("missing OpenAI completion content".to_string()))
+        .unwrap_or("");
+
+    Ok(content.to_string())
 }
 
 pub fn parse_openai_delta_payload(payload: &Value) -> Option<String> {

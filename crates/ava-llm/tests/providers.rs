@@ -50,7 +50,7 @@ fn openai_bad_response_returns_error() {
     let error = OpenAIProvider::parse_response_payload(&payload)
         .expect_err("bad payload should fail parsing");
 
-    assert!(error.to_string().contains("missing OpenAI completion content"));
+    assert!(error.to_string().contains("missing OpenAI completion choices"));
 }
 
 #[test]

@@ -1,18 +1,18 @@
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use ava_agent::{AgentConfig, AgentEvent, AgentLoop};
 #[cfg(feature = "cli-providers")]
 use ava_cli_providers::{create_providers, discover_agents};
 use ava_context::ContextManager;
-use ava_llm::provider::LLMProvider;
+use ava_llm::provider::{LLMProvider, SharedProvider};
+use ava_platform::StandardPlatform;
+use ava_tools::core::register_core_tools;
 use ava_tools::registry::ToolRegistry;
-use ava_types::{AvaError, Message, Result, Session};
+use ava_types::{AvaError, Message, Result, Role, Session};
 use futures::future::join_all;
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -31,6 +31,7 @@ pub struct CommanderConfig {
     pub budget: Budget,
     pub default_provider: Arc<dyn LLMProvider>,
     pub domain_providers: HashMap<Domain, Arc<dyn LLMProvider>>,
+    pub platform: Option<Arc<StandardPlatform>>,
 }
 
 impl CommanderConfig {
@@ -53,7 +54,8 @@ impl CommanderConfig {
         for (domain, provider_name) in tier_providers {
             if provider_name.starts_with("cli:") {
                 if let Some(provider) = cli_providers.get(provider_name) {
-                    self.domain_providers.insert(domain.clone(), provider.clone());
+                    self.domain_providers
+                        .insert(domain.clone(), provider.clone());
                 }
             }
         }
@@ -65,6 +67,7 @@ pub struct Lead {
     domain: Domain,
     workers: Vec<Worker>,
     provider: Arc<dyn LLMProvider>,
+    platform: Option<Arc<StandardPlatform>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -114,37 +117,49 @@ pub enum TaskType {
 
 impl Commander {
     pub fn new(config: CommanderConfig) -> Self {
+        let platform = config.platform.clone();
         let leads = vec![
             Lead::new(
                 "frontend-lead",
                 Domain::Frontend,
                 config.provider_for(Domain::Frontend),
+                platform.clone(),
             ),
             Lead::new(
                 "backend-lead",
                 Domain::Backend,
                 config.provider_for(Domain::Backend),
+                platform.clone(),
             ),
-            Lead::new("qa-lead", Domain::QA, config.provider_for(Domain::QA)),
+            Lead::new(
+                "qa-lead",
+                Domain::QA,
+                config.provider_for(Domain::QA),
+                platform.clone(),
+            ),
             Lead::new(
                 "research-lead",
                 Domain::Research,
                 config.provider_for(Domain::Research),
+                platform.clone(),
             ),
             Lead::new(
                 "debug-lead",
                 Domain::Debug,
                 config.provider_for(Domain::Debug),
+                platform.clone(),
             ),
             Lead::new(
                 "fullstack-lead",
                 Domain::Fullstack,
                 config.provider_for(Domain::Fullstack),
+                platform.clone(),
             ),
             Lead::new(
                 "devops-lead",
                 Domain::DevOps,
                 config.provider_for(Domain::DevOps),
+                platform.clone(),
             ),
         ];
 
@@ -195,11 +210,19 @@ impl Commander {
                     value = tokio::time::timeout(timeout, run_worker(&worker, tx.clone())) => {
                         match value {
                             Ok(result) => result,
-                            Err(_) => Err(AvaError::TimeoutError("Worker timed out".to_string())),
+                            Err(_) => Err(AvaError::TimeoutError(format!(
+                                "Worker '{}' timed out after {}s on task: {}",
+                                worker.lead,
+                                timeout.as_secs(),
+                                worker.task.description
+                            ))),
                         }
                     }
                     _ = cancel.cancelled() => {
-                        Err(AvaError::TimeoutError("Operation cancelled".to_string()))
+                        Err(AvaError::TimeoutError(format!(
+                            "Worker '{}' cancelled while executing: {}",
+                            worker.lead, worker.task.description
+                        )))
                     }
                 };
 
@@ -219,7 +242,7 @@ impl Commander {
                     }
                 }
 
-                (worker.id, result)
+                (worker.id, worker.lead.clone(), result)
             }
         });
 
@@ -228,23 +251,57 @@ impl Commander {
         let mut combined = Session::new();
         let mut succeeded = 0;
         let mut failed = 0;
+        let mut total_turns = 0;
 
-        for (_, result) in &results {
+        for (worker_id, lead_name, result) in &results {
             match result {
                 Ok(session) => {
+                    // Add a separator message attributing this group to the worker
+                    let header = Message::new(
+                        Role::System,
+                        format!("[worker-{}: {}] — {} messages", worker_id, lead_name, session.messages.len()),
+                    );
+                    combined.add_message(header);
+
                     for message in &session.messages {
                         combined.add_message(message.clone());
                     }
+                    total_turns += session.messages.len();
                     succeeded += 1;
                 }
-                Err(_) => failed += 1,
+                Err(error) => {
+                    let error_msg = Message::new(
+                        Role::System,
+                        format!("[worker-{worker_id}: {lead_name}] ERROR: {error}"),
+                    );
+                    combined.add_message(error_msg);
+                    failed += 1;
+                }
             }
         }
+
+        // Summary message
+        combined.add_message(Message::new(
+            Role::System,
+            format!(
+                "Completed {}/{} workers successfully ({} total turns)",
+                succeeded,
+                results.len(),
+                total_turns
+            ),
+        ));
 
         let _ = event_tx.send(CommanderEvent::AllComplete {
             total_workers: results.len(),
             succeeded,
             failed,
+        });
+
+        let _ = event_tx.send(CommanderEvent::Summary {
+            total_workers: results.len(),
+            succeeded,
+            failed,
+            total_turns,
         });
 
         Ok(combined)
@@ -263,12 +320,18 @@ impl Commander {
 }
 
 impl Lead {
-    pub fn new(name: impl Into<String>, domain: Domain, provider: Arc<dyn LLMProvider>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        domain: Domain,
+        provider: Arc<dyn LLMProvider>,
+        platform: Option<Arc<StandardPlatform>>,
+    ) -> Self {
         Self {
             name: name.into(),
             domain,
             workers: Vec::new(),
             provider,
+            platform,
         }
     }
 
@@ -292,14 +355,22 @@ impl Lead {
         };
 
         let model_name = self.provider.model_name().to_string();
+
+        let mut registry = ToolRegistry::new();
+        if let Some(platform) = &self.platform {
+            register_core_tools(&mut registry, platform.clone());
+        }
+
         let agent = AgentLoop::new(
             Box::new(SharedProvider::new(self.provider.clone())),
-            ToolRegistry::new(),
+            registry,
             ContextManager::new(worker_budget.max_tokens),
             AgentConfig {
                 max_turns: worker_budget.max_turns,
                 token_limit: worker_budget.max_tokens,
                 model: model_name,
+                max_cost_usd: worker_budget.max_cost_usd,
+                loop_detection: true,
             },
         );
 
@@ -375,7 +446,7 @@ async fn run_worker(
             }
             AgentEvent::Complete(session) => return Ok(session),
             AgentEvent::Error(error) => return Err(AvaError::ToolError(error)),
-            AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) => {}
+            AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) => {}
         }
     }
 
@@ -386,40 +457,4 @@ async fn run_worker(
 
 fn parse_turn(progress: &str) -> Option<usize> {
     progress.strip_prefix("turn ")?.parse::<usize>().ok()
-}
-
-struct SharedProvider {
-    inner: Arc<dyn LLMProvider>,
-}
-
-impl SharedProvider {
-    fn new(inner: Arc<dyn LLMProvider>) -> Self {
-        Self { inner }
-    }
-}
-
-#[async_trait]
-impl LLMProvider for SharedProvider {
-    async fn generate(&self, messages: &[Message]) -> Result<String> {
-        self.inner.generate(messages).await
-    }
-
-    async fn generate_stream(
-        &self,
-        messages: &[Message],
-    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
-        self.inner.generate_stream(messages).await
-    }
-
-    fn estimate_tokens(&self, input: &str) -> usize {
-        self.inner.estimate_tokens(input)
-    }
-
-    fn estimate_cost(&self, input_tokens: usize, output_tokens: usize) -> f64 {
-        self.inner.estimate_cost(input_tokens, output_tokens)
-    }
-
-    fn model_name(&self) -> &str {
-        self.inner.model_name()
-    }
 }

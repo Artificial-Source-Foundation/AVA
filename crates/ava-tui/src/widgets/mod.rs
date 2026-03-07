@@ -7,4 +7,5 @@ pub mod message;
 pub mod message_list;
 pub mod session_list;
 pub mod streaming_text;
+pub mod token_buffer;
 pub mod tool_approval;

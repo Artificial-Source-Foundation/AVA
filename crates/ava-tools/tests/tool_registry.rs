@@ -127,8 +127,8 @@ async fn missing_tool_returns_tool_not_found_error() {
         .expect_err("unknown tool should fail");
 
     match error {
-        AvaError::NotFound(message) => assert!(message.contains("ToolNotFound")),
-        other => panic!("expected not found error, got {other:?}"),
+        AvaError::ToolNotFound { tool, .. } => assert_eq!(tool, "does_not_exist"),
+        other => panic!("expected ToolNotFound error, got {other:?}"),
     }
 }
 

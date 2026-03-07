@@ -159,7 +159,7 @@ impl SessionManager {
             .map_err(db_error)?;
 
         if deleted == 0 {
-            return Err(AvaError::NotFound(format!("session {} not found", id)));
+            return Err(AvaError::NotFound(format!("session {id} not found")));
         }
 
         Ok(())
@@ -222,6 +222,7 @@ impl SessionManager {
                         .map_err(to_conversion_error)?,
                     tool_calls,
                     tool_results,
+                    tool_call_id: None,
                 })
             })
             .map_err(db_error)?

@@ -100,9 +100,8 @@ impl<'a> ReflectionLoop<'a> {
         };
 
         let error_kind = Self::analyze_error(error_message).unwrap_or(ErrorKind::Unknown);
-        let fix = match self.reflection_agent.generate_fix(error_kind, &result) {
-            Ok(fix) => fix,
-            Err(_) => return result,
+        let Ok(fix) = self.reflection_agent.generate_fix(error_kind, &result) else {
+            return result;
         };
 
         self.tool_executor.execute_tool(&fix)

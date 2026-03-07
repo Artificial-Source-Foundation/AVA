@@ -15,7 +15,7 @@ pub fn render_diff(old: &str, new: &str, theme: &Theme) -> Vec<Line<'static>> {
         };
         let value = change.value().trim_end_matches('\n');
         lines.push(Line::from(Span::styled(
-            format!("{}{}", prefix, value),
+            format!("{prefix}{value}"),
             Style::default().fg(color),
         )));
     }

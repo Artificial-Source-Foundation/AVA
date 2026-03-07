@@ -1,7 +1,11 @@
 use regex::Regex;
 use std::path::{Component, Path, PathBuf};
 
-mod classifier;
+pub(crate) mod classifier;
+pub mod inspector;
+pub mod policy;
+pub mod tags;
+
 use classifier::classify_bash_command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

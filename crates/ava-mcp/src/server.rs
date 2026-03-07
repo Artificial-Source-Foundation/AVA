@@ -5,7 +5,7 @@ use ava_types::Result;
 use serde_json::{json, Value};
 
 use crate::client::tool_call_from_request;
-use crate::transport::MCPTransport;
+use crate::transport::FramedTransport;
 
 pub struct AVAMCPServer {
     tool_registry: Arc<ToolRegistry>,
@@ -19,7 +19,7 @@ impl AVAMCPServer {
     pub async fn run(&self) -> Result<()> {
         let stdin = tokio::io::stdin();
         let stdout = tokio::io::stdout();
-        let mut transport = MCPTransport::new(stdin, stdout);
+        let mut transport = FramedTransport::new(stdin, stdout);
 
         loop {
             let request = transport.receive().await?;

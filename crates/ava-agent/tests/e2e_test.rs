@@ -124,7 +124,7 @@ async fn agent_run_cancellation() {
         .run("slow run", 5, None, cancel)
         .await
         .expect_err("run should be cancelled");
-    assert!(matches!(err, AvaError::TimeoutError(_)));
+    assert!(matches!(err, AvaError::Cancelled));
 }
 
 #[tokio::test]
@@ -141,6 +141,7 @@ async fn commander_multi_agent_coordination() {
         },
         default_provider: provider,
         domain_providers: HashMap::new(),
+        platform: None,
     });
 
     let worker_a = commander

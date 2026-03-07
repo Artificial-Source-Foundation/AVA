@@ -87,7 +87,7 @@ async fn agent_stack_run_honors_cancellation() {
         .run("slow task", 5, None, cancel)
         .await
         .expect_err("run should be cancelled");
-    assert!(matches!(err, AvaError::TimeoutError(_)));
+    assert!(matches!(err, AvaError::Cancelled));
 }
 
 struct SlowProvider {

@@ -46,6 +46,7 @@ async fn main() -> Result<()> {
             AgentEvent::ToolResult(tr) => eprintln!("[result: {}]", tr.content),
             AgentEvent::Progress(p) => eprintln!("[{p}]"),
             AgentEvent::Complete(_) => break,
+            AgentEvent::ToolStats(_) => {}
             AgentEvent::Error(e) => {
                 eprintln!("[error: {e}]");
                 break;

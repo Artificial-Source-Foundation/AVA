@@ -45,7 +45,7 @@ where
     execute_internal(cmd, store, None, tester).await
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 async fn execute_with_path(
     cmd: CredentialCommand,
     store: &mut CredentialStore,

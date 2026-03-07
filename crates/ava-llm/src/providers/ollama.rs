@@ -1,24 +1,28 @@
 use std::pin::Pin;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use ava_types::{AvaError, Message, Result};
 use futures::{Stream, StreamExt};
 use serde_json::{json, Value};
 
+use tracing::instrument;
+
+use crate::pool::ConnectionPool;
 use crate::provider::LLMProvider;
 use crate::providers::common;
 
 #[derive(Clone)]
 pub struct OllamaProvider {
-    client: reqwest::Client,
+    pool: Arc<ConnectionPool>,
     model: String,
     base_url: String,
 }
 
 impl OllamaProvider {
-    pub fn new(base_url: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(pool: Arc<ConnectionPool>, base_url: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            pool,
             model: model.into(),
             base_url: base_url.into(),
         }
@@ -31,21 +35,22 @@ impl OllamaProvider {
             "stream": stream,
         })
     }
+
+    async fn client(&self) -> Arc<reqwest::Client> {
+        self.pool.get_client(&self.base_url).await
+    }
 }
 
 #[async_trait]
 impl LLMProvider for OllamaProvider {
+    #[instrument(skip(self, messages), fields(model = %self.model))]
     async fn generate(&self, messages: &[Message]) -> Result<String> {
-        let request = self
-            .client
+        let client = self.client().await;
+        let request = client
             .post(format!("{}/api/chat", self.base_url.trim_end_matches('/')))
             .json(&self.build_request_body(messages, false));
 
-        let response = request
-            .send()
-            .await
-            .map_err(common::reqwest_error)?;
-
+        let response = common::send_retrying(request, "Ollama").await?;
         let response = common::validate_status(response, "Ollama").await?;
         let payload: Value = response
             .json()
@@ -55,20 +60,17 @@ impl LLMProvider for OllamaProvider {
         common::parse_ollama_completion_payload(&payload)
     }
 
+    #[instrument(skip(self, messages), fields(model = %self.model))]
     async fn generate_stream(
         &self,
         messages: &[Message],
     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
-        let request = self
-            .client
+        let client = self.client().await;
+        let request = client
             .post(format!("{}/api/chat", self.base_url.trim_end_matches('/')))
             .json(&self.build_request_body(messages, true));
 
-        let response = request
-            .send()
-            .await
-            .map_err(common::reqwest_error)?;
-
+        let response = common::send_retrying(request, "Ollama").await?;
         let response = common::validate_status(response, "Ollama").await?;
         let stream = response.bytes_stream().flat_map(|chunk| {
             let content = chunk

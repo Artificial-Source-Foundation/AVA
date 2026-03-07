@@ -1,14 +1,21 @@
 use ava_types::{Message, Role, ToolResult};
 
-use crate::condenser::{create_condenser, Condenser};
+use crate::condenser::{create_condenser, Condenser, HybridCondenser};
 use crate::token_tracker::TokenTracker;
+use crate::types::CondenserConfig;
 use crate::Result;
+
+enum CondenserKind {
+    Sync(Condenser),
+    Hybrid(HybridCondenser),
+}
 
 pub struct ContextManager {
     messages: Vec<Message>,
     token_limit: usize,
+    compaction_threshold_pct: f32,
     tracker: TokenTracker,
-    condenser: Condenser,
+    condenser: CondenserKind,
 }
 
 impl ContextManager {
@@ -16,8 +23,20 @@ impl ContextManager {
         Self {
             messages: Vec::new(),
             token_limit,
+            compaction_threshold_pct: 0.8,
             tracker: TokenTracker::new(token_limit),
-            condenser: create_condenser(token_limit),
+            condenser: CondenserKind::Sync(create_condenser(token_limit)),
+        }
+    }
+
+    pub fn new_with_condenser(config: CondenserConfig, condenser: HybridCondenser) -> Self {
+        let threshold = config.compaction_threshold_pct;
+        Self {
+            messages: Vec::new(),
+            token_limit: config.max_tokens,
+            compaction_threshold_pct: threshold,
+            tracker: TokenTracker::new(config.max_tokens),
+            condenser: CondenserKind::Hybrid(condenser),
         }
     }
 
@@ -41,12 +60,48 @@ impl ContextManager {
     }
 
     pub fn should_compact(&self) -> bool {
-        self.token_count() > self.token_limit.saturating_mul(4) / 5
+        let threshold =
+            (self.token_limit as f32 * self.compaction_threshold_pct) as usize;
+        self.token_count() > threshold
     }
 
+    /// Synchronous compaction — only works when using a sync Condenser.
+    /// For hybrid condensers, use `compact_async()`.
     pub fn compact(&mut self) -> Result<()> {
-        let condensed = self.condenser.condense(&self.messages)?;
-        self.messages = condensed.messages;
+        match &mut self.condenser {
+            CondenserKind::Sync(condenser) => {
+                let condensed = condenser.condense(&self.messages)?;
+                self.messages = condensed.messages;
+                self.tracker.reset();
+                self.tracker.add_messages(&self.messages);
+                Ok(())
+            }
+            CondenserKind::Hybrid(_) => {
+                // Caller should use compact_async() for hybrid condensers.
+                // Fall back to a basic sliding window to avoid panicking.
+                use crate::strategies::{CondensationStrategy, SlidingWindowStrategy};
+                let target = (self.token_limit as f32 * 0.75) as usize;
+                let condensed = SlidingWindowStrategy.condense(&self.messages, target)?;
+                self.messages = condensed;
+                self.tracker.reset();
+                self.tracker.add_messages(&self.messages);
+                Ok(())
+            }
+        }
+    }
+
+    /// Async compaction — uses the hybrid condenser pipeline.
+    pub async fn compact_async(&mut self) -> Result<()> {
+        match &mut self.condenser {
+            CondenserKind::Sync(condenser) => {
+                let condensed = condenser.condense(&self.messages)?;
+                self.messages = condensed.messages;
+            }
+            CondenserKind::Hybrid(condenser) => {
+                let condensed = condenser.condense(&self.messages).await?;
+                self.messages = condensed.messages;
+            }
+        }
         self.tracker.reset();
         self.tracker.add_messages(&self.messages);
         Ok(())

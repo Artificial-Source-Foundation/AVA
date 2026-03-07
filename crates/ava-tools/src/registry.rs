@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use ava_types::{AvaError, Result, Tool as ToolDefinition, ToolCall, ToolResult};
 use serde_json::Value;
+use tracing::instrument;
 
 #[async_trait]
 pub trait Tool: Send + Sync {
@@ -46,15 +47,24 @@ impl ToolRegistry {
         self.middleware.push(Box::new(middleware));
     }
 
+    #[instrument(skip(self), fields(tool = %tool_call.name))]
     pub async fn execute(&self, tool_call: ToolCall) -> Result<ToolResult> {
         for middleware in &self.middleware {
             middleware.before(&tool_call).await?;
         }
 
-        let tool = self
-            .tools
-            .get(&tool_call.name)
-            .ok_or_else(|| AvaError::NotFound(format!("ToolNotFound: {}", tool_call.name)))?;
+        let tool = self.tools.get(&tool_call.name).ok_or_else(|| {
+            let available = self
+                .tools
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            AvaError::ToolNotFound {
+                tool: tool_call.name.clone(),
+                available,
+            }
+        })?;
 
         let mut result = tool.execute(tool_call.arguments.clone()).await?;
 

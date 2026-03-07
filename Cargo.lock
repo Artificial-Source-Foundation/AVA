@@ -188,6 +188,7 @@ dependencies = [
  "ava-config",
  "ava-context",
  "ava-llm",
+ "ava-mcp",
  "ava-memory",
  "ava-platform",
  "ava-session",
@@ -201,6 +202,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-util",
+ "tracing",
  "uuid",
 ]
 
@@ -237,6 +239,7 @@ dependencies = [
  "ava-cli-providers",
  "ava-context",
  "ava-llm",
+ "ava-platform",
  "ava-tools",
  "ava-types",
  "futures",
@@ -263,7 +266,9 @@ dependencies = [
 name = "ava-context"
 version = "2.0.0"
 dependencies = [
+ "async-trait",
  "ava-types",
+ "serde_json",
  "thiserror 1.0.69",
  "tokio",
 ]
@@ -301,6 +306,8 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -338,6 +345,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -353,6 +361,8 @@ name = "ava-permissions"
 version = "2.0.0"
 dependencies = [
  "regex",
+ "serde",
+ "serde_json",
  "tree-sitter",
  "tree-sitter-bash",
 ]
@@ -397,6 +407,7 @@ name = "ava-tools"
 version = "2.0.0"
 dependencies = [
  "async-trait",
+ "ava-permissions",
  "ava-platform",
  "ava-sandbox",
  "ava-types",
@@ -411,6 +422,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -419,6 +431,7 @@ version = "0.1.0"
 dependencies = [
  "ava-agent",
  "ava-codebase",
+ "ava-commander",
  "ava-config",
  "ava-context",
  "ava-db",
@@ -441,6 +454,7 @@ dependencies = [
  "ratatui",
  "serde",
  "serde_json",
+ "serde_yaml",
  "similar",
  "syntect",
  "tempfile",

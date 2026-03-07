@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use ava_config::{CredentialStore, ProviderCredential};
+use ava_llm::pool::ConnectionPool;
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
 use ava_llm::providers::openai::OpenAIProvider;
@@ -17,6 +18,10 @@ fn credential(api_key: &str) -> ProviderCredential {
         base_url: None,
         org_id: None,
     }
+}
+
+fn pool() -> Arc<ConnectionPool> {
+    Arc::new(ConnectionPool::new())
 }
 
 #[tokio::test]
@@ -36,7 +41,7 @@ async fn mock_provider_generate_and_stream() {
 
 #[test]
 fn openai_request_body_serialization() {
-    let provider = OpenAIProvider::new("key", "gpt-4o-mini");
+    let provider = OpenAIProvider::new(pool(), "key", "gpt-4o-mini");
     let body = provider.build_request_body(&[Message::new(Role::User, "hello")], false);
 
     assert_eq!(body["model"], "gpt-4o-mini");
@@ -55,7 +60,7 @@ fn openai_bad_response_returns_error() {
 
 #[test]
 fn token_and_cost_estimation_are_non_zero() {
-    let provider = OpenAIProvider::new("key", "gpt-4o-mini");
+    let provider = OpenAIProvider::new(pool(), "key", "gpt-4o-mini");
     let tokens = provider.estimate_tokens("estimate me");
     let cost = provider.estimate_cost(1500, 800);
 
@@ -68,7 +73,7 @@ fn create_provider_anthropic_succeeds_with_store_key() {
     let mut store = CredentialStore::default();
     store.set("anthropic", credential("sk-ant-1234"));
 
-    let provider = create_provider("anthropic", "claude-sonnet-4-20250514", &store)
+    let provider = create_provider("anthropic", "claude-sonnet-4-20250514", &store, pool())
         .expect("anthropic provider should be created");
 
     assert_eq!(provider.model_name(), "claude-sonnet-4-20250514");
@@ -77,17 +82,18 @@ fn create_provider_anthropic_succeeds_with_store_key() {
 #[test]
 fn create_provider_anthropic_fails_without_key() {
     let store = CredentialStore::default();
-    let error = create_provider("anthropic", "claude-sonnet-4-20250514", &store)
+    let error = create_provider("anthropic", "claude-sonnet-4-20250514", &store, pool())
         .err()
         .expect("missing key should fail");
 
-    assert!(error.to_string().contains("No Anthropic API key"));
+    assert!(error.to_string().contains("anthropic"));
+    assert!(error.to_string().contains("No API key"));
 }
 
 #[test]
 fn create_provider_ollama_succeeds_without_key() {
     let store = CredentialStore::default();
-    let provider = create_provider("ollama", "llama3.1", &store)
+    let provider = create_provider("ollama", "llama3.1", &store, pool())
         .expect("ollama should be created without key");
 
     assert_eq!(provider.model_name(), "llama3.1");
@@ -96,11 +102,11 @@ fn create_provider_ollama_succeeds_without_key() {
 #[test]
 fn create_provider_unknown_errors() {
     let store = CredentialStore::default();
-    let error = create_provider("unknown-provider", "model", &store)
+    let error = create_provider("unknown-provider", "model", &store, pool())
         .err()
         .expect("unknown should fail");
 
-    assert!(error.to_string().contains("Unknown provider"));
+    assert!(error.to_string().contains("unknown provider"));
 }
 
 #[test]
@@ -115,7 +121,7 @@ fn create_provider_base_url_override_openrouter() {
         },
     );
 
-    let provider = create_provider("openrouter", "openai/gpt-5", &store)
+    let provider = create_provider("openrouter", "openai/gpt-5", &store, pool())
         .expect("openrouter provider should be created");
     assert_eq!(provider.model_name(), "openai/gpt-5");
 }
@@ -133,7 +139,7 @@ fn create_provider_base_url_override_ollama() {
     );
 
     let provider =
-        create_provider("ollama", "qwen2.5-coder", &store).expect("ollama provider should work");
+        create_provider("ollama", "qwen2.5-coder", &store, pool()).expect("ollama provider should work");
     assert_eq!(provider.model_name(), "qwen2.5-coder");
 }
 
@@ -196,7 +202,8 @@ async fn router_unconfigured_provider_returns_clear_error() {
         .err()
         .expect("missing anthro key should fail");
 
-    assert!(error.to_string().contains("No Anthropic API key"));
+    assert!(error.to_string().contains("anthropic"));
+    assert!(error.to_string().contains("No API key"));
 }
 
 #[test]
@@ -215,4 +222,26 @@ async fn credential_test_reports_missing_key_as_fail_message() {
     let result = test_provider_credentials("anthropic", "claude-sonnet-4-20250514", &store).await;
 
     assert!(result.starts_with("anthropic: FAIL"));
+}
+
+#[tokio::test]
+async fn router_with_pool_shares_connection_pool() {
+    let mut store = CredentialStore::default();
+    store.set("openai", credential("sk-openai-1234"));
+
+    let shared_pool = Arc::new(ConnectionPool::new());
+    let router = ModelRouter::with_pool(store, shared_pool.clone());
+
+    // Verify the router uses the shared pool
+    assert!(Arc::ptr_eq(router.pool(), &shared_pool));
+
+    // Pool starts empty (clients are lazy)
+    let stats = shared_pool.stats().await;
+    assert_eq!(stats.active_clients, 0);
+
+    // Manually trigger a client to verify the pool works
+    let client = shared_pool.get_client("https://api.openai.com").await;
+    let stats = shared_pool.stats().await;
+    assert_eq!(stats.active_clients, 1);
+    drop(client);
 }

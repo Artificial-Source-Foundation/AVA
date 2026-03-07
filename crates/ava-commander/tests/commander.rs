@@ -9,7 +9,8 @@ use ava_commander::{
 };
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
-use ava_types::{Message, Result};
+use ava_platform::StandardPlatform;
+use ava_types::{Message, Result, Role};
 use futures::Stream;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -33,8 +34,20 @@ fn commander_with_default(provider: Arc<dyn LLMProvider>) -> Commander {
         budget: sample_budget(),
         default_provider: provider,
         domain_providers: HashMap::new(),
+        platform: None,
     })
 }
+
+fn commander_with_platform(provider: Arc<dyn LLMProvider>) -> Commander {
+    Commander::new(CommanderConfig {
+        budget: sample_budget(),
+        default_provider: provider,
+        domain_providers: HashMap::new(),
+        platform: Some(Arc::new(StandardPlatform)),
+    })
+}
+
+// --- Story 1: Domain Routing ---
 
 #[test]
 fn delegation_routes_to_expected_domain() {
@@ -60,6 +73,56 @@ fn delegation_routes_to_expected_domain() {
 }
 
 #[test]
+fn domain_routing_covers_all_task_types() {
+    let provider = Arc::new(MockProvider::new("default", vec![
+        completion_response("1"),
+        completion_response("2"),
+        completion_response("3"),
+        completion_response("4"),
+        completion_response("5"),
+        completion_response("6"),
+        completion_response("7"),
+    ])) as Arc<dyn LLMProvider>;
+    let mut commander = commander_with_default(provider);
+
+    let cases = vec![
+        (TaskType::CodeGeneration, Domain::Backend),
+        (TaskType::Testing, Domain::QA),
+        (TaskType::Review, Domain::QA),
+        (TaskType::Research, Domain::Research),
+        (TaskType::Debug, Domain::Debug),
+        (TaskType::Planning, Domain::Fullstack),
+        (TaskType::Simple, Domain::Fullstack),
+    ];
+
+    for (task_type, expected_domain) in cases {
+        let worker = commander
+            .delegate(Task {
+                description: format!("task for {:?}", task_type),
+                task_type,
+                files: vec![],
+            })
+            .expect("delegation should succeed");
+
+        let lead = commander
+            .leads()
+            .iter()
+            .find(|lead| lead.name() == worker.lead())
+            .expect("lead should exist");
+
+        assert_eq!(
+            lead.domain(),
+            &expected_domain,
+            "task type {:?} should route to {:?}",
+            worker.task().task_type,
+            expected_domain
+        );
+    }
+}
+
+// --- Story 1: Budget Enforcement ---
+
+#[test]
 fn budget_allocation_halves_top_level_budget() {
     let provider = Arc::new(MockProvider::new("default", vec![completion_response("ok")]))
         as Arc<dyn LLMProvider>;
@@ -77,6 +140,8 @@ fn budget_allocation_halves_top_level_budget() {
     assert!((worker.budget().max_cost_usd - 1.0).abs() < f64::EPSILON);
 }
 
+// --- Story 1: Provider routing ---
+
 #[test]
 fn worker_spawning_uses_domain_provider_model_name() {
     let default_provider = Arc::new(MockProvider::new("default-model", vec![]))
@@ -91,6 +156,7 @@ fn worker_spawning_uses_domain_provider_model_name() {
         budget: sample_budget(),
         default_provider,
         domain_providers: overrides,
+        platform: None,
     });
 
     let worker = commander
@@ -103,6 +169,48 @@ fn worker_spawning_uses_domain_provider_model_name() {
 
     assert_eq!(worker.model_name(), "backend-model");
 }
+
+// --- Story 1: Single worker delegation (e2e) ---
+
+#[tokio::test]
+async fn single_worker_completes_successfully() {
+    let provider = Arc::new(MockProvider::new(
+        "default",
+        vec![completion_response("done")],
+    )) as Arc<dyn LLMProvider>;
+    let mut commander = commander_with_default(provider);
+
+    let worker = commander
+        .delegate(Task {
+            description: "simple task".to_string(),
+            task_type: TaskType::Simple,
+            files: vec![],
+        })
+        .expect("should spawn worker");
+
+    let cancel = CancellationToken::new();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+
+    let session = commander
+        .coordinate(vec![worker], cancel, tx)
+        .await
+        .expect("coordinate should succeed");
+
+    assert!(!session.messages.is_empty());
+
+    let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, CommanderEvent::WorkerStarted { .. })));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, CommanderEvent::WorkerCompleted { success: true, .. })));
+    assert!(events.iter().any(
+        |e| matches!(e, CommanderEvent::AllComplete { total_workers: 1, succeeded: 1, failed: 0 })
+    ));
+}
+
+// --- Story 1: Multi-worker coordination ---
 
 #[tokio::test]
 async fn coordinate_runs_workers_and_merges_session_messages() {
@@ -135,13 +243,33 @@ async fn coordinate_runs_workers_and_merges_session_messages() {
         .expect("coordinate should succeed");
 
     assert!(!session.messages.is_empty());
+
+    // Check that messages are grouped by worker (system header messages)
+    let system_msgs: Vec<&Message> = session
+        .messages
+        .iter()
+        .filter(|m| m.role == Role::System && m.content.starts_with("[worker-"))
+        .collect();
+    assert!(system_msgs.len() >= 2, "should have worker attribution headers");
+
+    // Check for summary message
+    let summary = session
+        .messages
+        .iter()
+        .find(|m| m.content.starts_with("Completed"))
+        .expect("should have summary message");
+    assert!(summary.content.contains("workers successfully"));
+
     let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, CommanderEvent::AllComplete { .. }))
-    );
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, CommanderEvent::AllComplete { .. })));
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, CommanderEvent::Summary { .. })));
 }
+
+// --- Story 1: Cancellation ---
 
 #[tokio::test]
 async fn cancellation_token_stops_workers() {
@@ -172,14 +300,20 @@ async fn cancellation_token_stops_workers() {
         .await
         .expect("coordinate returns partial success session");
 
-    assert!(session.messages.is_empty());
+    // Failed workers produce error messages in session
+    let has_error = session
+        .messages
+        .iter()
+        .any(|m| m.content.contains("ERROR"));
+    assert!(has_error || session.messages.is_empty());
+
     let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
-    assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, CommanderEvent::WorkerFailed { .. }))
-    );
+    assert!(events
+        .iter()
+        .any(|event| matches!(event, CommanderEvent::WorkerFailed { .. })));
 }
+
+// --- Story 1: Worker failure isolation ---
 
 #[tokio::test]
 async fn one_worker_failure_isolated_from_successful_worker() {
@@ -193,6 +327,7 @@ async fn one_worker_failure_isolated_from_successful_worker() {
         budget: sample_budget(),
         default_provider,
         domain_providers: overrides,
+        platform: None,
     });
 
     let good_worker = commander
@@ -218,6 +353,14 @@ async fn one_worker_failure_isolated_from_successful_worker() {
         .expect("coordinate should still succeed");
 
     assert!(!session.messages.is_empty());
+
+    // Failed worker error is preserved in session
+    let has_error_msg = session
+        .messages
+        .iter()
+        .any(|m| m.role == Role::System && m.content.contains("ERROR"));
+    assert!(has_error_msg, "failed worker error should be in session");
+
     let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
     assert!(events.iter().any(|event| {
         matches!(
@@ -230,6 +373,135 @@ async fn one_worker_failure_isolated_from_successful_worker() {
         )
     }));
 }
+
+// --- Story 1: Event stream order ---
+
+#[tokio::test]
+async fn event_stream_fires_in_order() {
+    let provider = Arc::new(MockProvider::new(
+        "default",
+        vec![completion_response("ok")],
+    )) as Arc<dyn LLMProvider>;
+    let mut commander = commander_with_default(provider);
+
+    let worker = commander
+        .delegate(Task {
+            description: "ordered task".to_string(),
+            task_type: TaskType::Simple,
+            files: vec![],
+        })
+        .expect("worker should spawn");
+
+    let cancel = CancellationToken::new();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+
+    commander
+        .coordinate(vec![worker], cancel, tx)
+        .await
+        .expect("coordinate should succeed");
+
+    let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+
+    // WorkerStarted must come before WorkerCompleted/WorkerFailed
+    let started_idx = events
+        .iter()
+        .position(|e| matches!(e, CommanderEvent::WorkerStarted { .. }))
+        .expect("should have WorkerStarted");
+    let completed_idx = events
+        .iter()
+        .position(|e| matches!(e, CommanderEvent::WorkerCompleted { .. }))
+        .expect("should have WorkerCompleted");
+    let all_complete_idx = events
+        .iter()
+        .position(|e| matches!(e, CommanderEvent::AllComplete { .. }))
+        .expect("should have AllComplete");
+    let summary_idx = events
+        .iter()
+        .position(|e| matches!(e, CommanderEvent::Summary { .. }))
+        .expect("should have Summary");
+
+    assert!(started_idx < completed_idx, "Started before Completed");
+    assert!(completed_idx < all_complete_idx, "Completed before AllComplete");
+    assert!(all_complete_idx < summary_idx, "AllComplete before Summary");
+}
+
+// --- Story 2: Workers have tools when platform is provided ---
+
+#[tokio::test]
+async fn worker_with_platform_has_core_tools() {
+    let provider = Arc::new(MockProvider::new(
+        "default",
+        vec![completion_response("ok")],
+    )) as Arc<dyn LLMProvider>;
+    let mut commander = commander_with_platform(provider);
+
+    let worker = commander
+        .delegate(Task {
+            description: "tooled task".to_string(),
+            task_type: TaskType::Simple,
+            files: vec![],
+        })
+        .expect("worker should spawn");
+
+    // Run it — the agent loop should execute with tools available
+    let cancel = CancellationToken::new();
+    let (tx, _rx) = mpsc::unbounded_channel();
+
+    let session = commander
+        .coordinate(vec![worker], cancel, tx)
+        .await
+        .expect("coordinate should succeed");
+
+    assert!(!session.messages.is_empty());
+}
+
+// --- Story 4: Summary event has total_turns ---
+
+#[tokio::test]
+async fn summary_event_includes_total_turns() {
+    let provider = Arc::new(MockProvider::new(
+        "default",
+        vec![completion_response("ok")],
+    )) as Arc<dyn LLMProvider>;
+    let mut commander = commander_with_default(provider);
+
+    let worker = commander
+        .delegate(Task {
+            description: "count turns".to_string(),
+            task_type: TaskType::Simple,
+            files: vec![],
+        })
+        .expect("worker should spawn");
+
+    let cancel = CancellationToken::new();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+
+    commander
+        .coordinate(vec![worker], cancel, tx)
+        .await
+        .expect("coordinate should succeed");
+
+    let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    let summary = events
+        .iter()
+        .find(|e| matches!(e, CommanderEvent::Summary { .. }))
+        .expect("should have Summary event");
+
+    if let CommanderEvent::Summary {
+        total_workers,
+        succeeded,
+        failed,
+        total_turns,
+    } = summary
+    {
+        assert_eq!(*total_workers, 1);
+        assert_eq!(*succeeded, 1);
+        assert_eq!(*failed, 0);
+        assert!(*total_turns > 0, "total_turns should be > 0");
+    }
+}
+
+// --- Helper: SlowProvider for cancellation test ---
 
 struct SlowProvider {
     delay: Duration,

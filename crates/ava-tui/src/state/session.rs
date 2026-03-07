@@ -50,4 +50,12 @@ impl SessionState {
     pub fn search(&self, query: &str) -> Result<Vec<Session>> {
         Ok(self.manager.search(query)?)
     }
+
+    /// Save a completed agent session to the database.
+    pub fn save_session(&mut self, session: &Session) {
+        if let Err(e) = self.manager.save(session) {
+            tracing::warn!("Failed to save session: {}", e);
+        }
+        self.current_session = Some(session.clone());
+    }
 }

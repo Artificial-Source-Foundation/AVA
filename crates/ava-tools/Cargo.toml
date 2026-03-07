@@ -17,9 +17,11 @@ ignore = "0.4"
 grep-regex = "0.1"
 grep-searcher = "0.1"
 grep-matcher = "0.1"
+tracing.workspace = true
 ava-types = { path = "../ava-types" }
 ava-platform = { path = "../ava-platform" }
 ava-sandbox = { path = "../ava-sandbox" }
+ava-permissions = { path = "../ava-permissions" }
 
 [dev-dependencies]
 tempfile.workspace = true

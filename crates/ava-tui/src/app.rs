@@ -1,7 +1,7 @@
 use crate::config::cli::CliArgs;
 use crate::config::keybindings::load_keybind_overrides;
 use crate::event::{spawn_event_reader, spawn_tick_timer, AppEvent};
-use crate::state::agent::AgentState;
+use crate::state::agent::{AgentActivity, AgentState};
 use crate::state::input::InputState;
 use crate::state::keybinds::{Action, KeybindState};
 use crate::state::messages::{MessageKind, MessageState, UiMessage};
@@ -11,6 +11,7 @@ use crate::state::theme::Theme;
 use crate::ui;
 use crate::widgets::command_palette::CommandPaletteState;
 use crate::widgets::session_list::SessionListState;
+use crate::widgets::token_buffer::TokenBuffer;
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
@@ -51,6 +52,7 @@ pub struct App {
     should_quit: bool,
     pending_goal: Option<String>,
     is_streaming: Arc<AtomicBool>,
+    token_buffer: TokenBuffer,
 }
 
 impl App {
@@ -78,6 +80,8 @@ impl App {
             ..PermissionState::default()
         };
 
+        let (provider, model) = cli.resolve_provider_model().await?;
+
         let state = AppState {
             theme: Theme::from_name(&cli.theme),
             messages: MessageState::default(),
@@ -85,7 +89,7 @@ impl App {
             session,
             permission,
             keybinds,
-            agent: AgentState::new(data_dir, cli.provider, cli.model, cli.max_turns, cli.yolo)
+            agent: AgentState::new(data_dir, provider, model, cli.max_turns, cli.yolo)
                 .await?,
             show_sidebar: true,
             command_palette: CommandPaletteState::with_defaults(),
@@ -98,6 +102,7 @@ impl App {
             should_quit: false,
             pending_goal: cli.goal,
             is_streaming: Arc::new(AtomicBool::new(false)),
+            token_buffer: TokenBuffer::new(60),
         })
     }
 
@@ -115,12 +120,25 @@ impl App {
         spawn_event_reader(app_tx.clone());
         spawn_tick_timer(app_tx.clone(), Arc::clone(&self.is_streaming));
 
+        // Load session messages if resuming
+        if let Some(ref session) = self.state.session.current_session {
+            for msg in &session.messages {
+                let kind = match msg.role {
+                    ava_types::Role::User => MessageKind::User,
+                    ava_types::Role::Assistant => MessageKind::Assistant,
+                    ava_types::Role::Tool => MessageKind::ToolResult,
+                    ava_types::Role::System => MessageKind::System,
+                };
+                self.state.messages.push(UiMessage::new(kind, msg.content.clone()));
+            }
+        }
+
         if let Some(goal) = self.pending_goal.take() {
             self.submit_goal(goal, app_tx.clone(), agent_tx.clone());
         }
 
         loop {
-            terminal.draw(|frame| ui::render(frame, &self.state))?;
+            terminal.draw(|frame| ui::render(frame, &mut self.state))?;
 
             tokio::select! {
                 Some(event) = app_rx.recv() => self.handle_event(event, app_tx.clone(), agent_tx.clone()),
@@ -159,31 +177,37 @@ impl App {
             }
             AppEvent::Key(_) => {}
             AppEvent::Paste(value) => self.state.input.insert_str(&value),
-            AppEvent::Resize(_, _) | AppEvent::Tick => {}
+            AppEvent::Resize(_, _) => {}
+            AppEvent::Tick => {
+                self.flush_token_buffer();
+            }
             AppEvent::Agent(agent_event) => {
                 match agent_event {
                     ava_agent::AgentEvent::Token(chunk) => {
-                        // Append to last assistant message or create new one
+                        self.state.agent.activity = AgentActivity::Thinking;
+                        self.token_buffer.push(&chunk);
+                        // Ensure the streaming indicator is set on the current message
                         if let Some(last) = self.state.messages.messages.last_mut() {
                             if matches!(last.kind, MessageKind::Assistant) {
-                                last.content.push_str(&chunk);
-                            } else {
-                                self.state
-                                    .messages
-                                    .push(UiMessage::new(MessageKind::Assistant, chunk));
+                                last.is_streaming = true;
                             }
-                        } else {
-                            self.state
-                                .messages
-                                .push(UiMessage::new(MessageKind::Assistant, chunk));
                         }
                     }
                     ava_agent::AgentEvent::ToolCall(call) => {
+                        // Force flush any buffered tokens before tool call
+                        self.force_flush_token_buffer();
+                        // Mark last assistant message as done streaming
+                        if let Some(last) = self.state.messages.messages.last_mut() {
+                            if matches!(last.kind, MessageKind::Assistant) {
+                                last.is_streaming = false;
+                            }
+                        }
+                        self.state.agent.activity = AgentActivity::ExecutingTool(call.name.clone());
+
                         // Check if we need approval
                         if !self.state.permission.yolo_mode
                             && !self.state.permission.session_approved.contains(&call.name)
                         {
-                            // Create approval request
                             let (tx, _rx) = tokio::sync::oneshot::channel();
                             let request = crate::state::permission::ApprovalRequest {
                                 call: call.clone(),
@@ -197,22 +221,47 @@ impl App {
                             format!("{} {}", call.name, call.arguments),
                         ));
                     }
-                    ava_agent::AgentEvent::ToolResult(result) => self
-                        .state
-                        .messages
-                        .push(UiMessage::new(MessageKind::ToolResult, result.content)),
-                    ava_agent::AgentEvent::Progress(progress) => self
-                        .state
-                        .messages
-                        .push(UiMessage::new(MessageKind::System, progress)),
+                    ava_agent::AgentEvent::ToolResult(result) => {
+                        self.state.agent.activity = AgentActivity::Thinking;
+                        self.state
+                            .messages
+                            .push(UiMessage::new(MessageKind::ToolResult, result.content));
+                    }
+                    ava_agent::AgentEvent::Progress(progress) => {
+                        // Parse turn info from progress messages
+                        if let Some(turn_str) = progress.strip_prefix("turn ") {
+                            if let Ok(turn) = turn_str.trim().parse::<usize>() {
+                                self.state.agent.current_turn = turn;
+                            }
+                        }
+                        self.state
+                            .messages
+                            .push(UiMessage::new(MessageKind::System, progress));
+                    }
                     ava_agent::AgentEvent::Complete(_) => {
+                        // Force flush any remaining buffered tokens
+                        self.force_flush_token_buffer();
+                        // Mark last assistant message as done streaming
+                        if let Some(last) = self.state.messages.messages.last_mut() {
+                            last.is_streaming = false;
+                        }
                         self.is_streaming.store(false, Ordering::Relaxed);
                         self.state.agent.is_running = false;
+                        self.state.agent.activity = AgentActivity::Idle;
                     }
-                    ava_agent::AgentEvent::Error(err) => self
-                        .state
-                        .messages
-                        .push(UiMessage::new(MessageKind::Error, err)),
+                    ava_agent::AgentEvent::ToolStats(_) => {}
+                    ava_agent::AgentEvent::Error(err) => {
+                        // Force flush any remaining buffered tokens
+                        self.force_flush_token_buffer();
+                        // Mark last assistant message as done streaming
+                        if let Some(last) = self.state.messages.messages.last_mut() {
+                            last.is_streaming = false;
+                        }
+                        self.state.agent.activity = AgentActivity::Idle;
+                        self.state
+                            .messages
+                            .push(UiMessage::new(MessageKind::Error, err));
+                    }
                 }
             }
             AppEvent::AgentDone(result) => match result {
@@ -220,6 +269,7 @@ impl App {
                 Err(err) => {
                     self.is_streaming.store(false, Ordering::Relaxed);
                     self.state.agent.is_running = false;
+                    self.state.agent.activity = AgentActivity::Idle;
                     self.state
                         .messages
                         .push(UiMessage::new(MessageKind::Error, err));
@@ -334,15 +384,8 @@ impl App {
                 }
             }
             KeyCode::Up => {
-                let filtered = self.state.command_palette.filtered();
-                if !filtered.is_empty() {
-                    self.state.command_palette.selected = self
-                        .state
-                        .command_palette
-                        .selected
-                        .saturating_sub(1)
-                        .max(filtered.len().saturating_sub(1));
-                }
+                self.state.command_palette.selected =
+                    self.state.command_palette.selected.saturating_sub(1);
             }
             KeyCode::Enter => {
                 let filtered = self.state.command_palette.filtered();
@@ -379,20 +422,28 @@ impl App {
                 }
             }
             KeyCode::Up => {
-                let sessions = &self.state.session.sessions;
-                if !sessions.is_empty() {
-                    self.state.session_list.selected = self
-                        .state
-                        .session_list
-                        .selected
-                        .saturating_sub(1)
-                        .max(sessions.len().saturating_sub(1));
-                }
+                self.state.session_list.selected =
+                    self.state.session_list.selected.saturating_sub(1);
             }
             KeyCode::Enter => {
                 if let Some(session) = self.state.session.sessions.get(self.state.session_list.selected) {
-                    let _ = self.state.session.switch_to(session.id);
-                    self.state.messages.messages.clear();
+                    let session_id = session.id;
+                    if self.state.session.switch_to(session_id).is_ok() {
+                        // Restore messages from the loaded session
+                        self.state.messages.messages.clear();
+                        self.state.messages.reset_scroll();
+                        if let Some(ref session) = self.state.session.current_session {
+                            for msg in &session.messages {
+                                let kind = match msg.role {
+                                    ava_types::Role::User => MessageKind::User,
+                                    ava_types::Role::Assistant => MessageKind::Assistant,
+                                    ava_types::Role::Tool => MessageKind::ToolResult,
+                                    ava_types::Role::System => MessageKind::System,
+                                };
+                                self.state.messages.push(UiMessage::new(kind, msg.content.clone()));
+                            }
+                        }
+                    }
                 }
                 self.state.session_list.open = false;
                 self.state.active_modal = None;
@@ -516,21 +567,115 @@ impl App {
         app_tx: mpsc::UnboundedSender<AppEvent>,
         agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
     ) {
+        // Handle slash commands
+        if let Some((kind, msg)) = self.handle_slash_command(&goal) {
+            self.state
+                .messages
+                .push(UiMessage::new(MessageKind::User, goal));
+            self.state.messages.push(UiMessage::new(kind, msg));
+            return;
+        }
+
         self.state
             .messages
             .push(UiMessage::new(MessageKind::User, goal.clone()));
         self.is_streaming.store(true, Ordering::Relaxed);
+        self.state.agent.activity = AgentActivity::Thinking;
         self.state
             .agent
             .start(goal, self.state.agent.max_turns, app_tx, agent_tx);
     }
 
+    /// Handle slash commands. Returns Some((kind, message)) if handled, None if not a slash command.
+    fn handle_slash_command(&mut self, input: &str) -> Option<(MessageKind, String)> {
+        let trimmed = input.trim();
+        if !trimmed.starts_with('/') {
+            return None;
+        }
+
+        let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
+        let cmd = parts[0];
+        let arg = parts.get(1).map(|s| s.trim());
+
+        match cmd {
+            "/model" => {
+                if let Some(model_str) = arg {
+                    // Parse "provider/model" format — split on first '/' only
+                    if let Some((provider, model)) = model_str.split_once('/') {
+                        let provider = provider.to_string();
+                        let model = model.to_string();
+                        let result = tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(
+                                self.state.agent.switch_model(&provider, &model)
+                            )
+                        });
+                        match result {
+                            Ok(desc) => Some((MessageKind::System, format!("Switched to {desc}"))),
+                            Err(err) => Some((MessageKind::Error, format!("Failed to switch model: {err}"))),
+                        }
+                    } else {
+                        Some((MessageKind::Error,
+                            "Invalid format. Use: /model provider/model (e.g., /model openrouter/anthropic/claude-sonnet-4)".to_string()
+                        ))
+                    }
+                } else {
+                    let display = self.state.agent.current_model_display();
+                    Some((MessageKind::System, format!("Current model: {display}")))
+                }
+            }
+            _ => Some((MessageKind::Error, format!("Unknown command: {cmd}"))),
+        }
+    }
+
+    /// Flush buffered tokens to the message list (called on tick).
+    fn flush_token_buffer(&mut self) {
+        if let Some(buffered) = self.token_buffer.flush() {
+            self.append_buffered_tokens(buffered);
+        }
+    }
+
+    /// Force flush all buffered tokens (called on stream end, tool call, error).
+    fn force_flush_token_buffer(&mut self) {
+        if let Some(buffered) = self.token_buffer.force_flush() {
+            self.append_buffered_tokens(buffered);
+        }
+    }
+
+    /// Append buffered token content to the last assistant message or create a new one.
+    fn append_buffered_tokens(&mut self, content: String) {
+        if let Some(last) = self.state.messages.messages.last_mut() {
+            if matches!(last.kind, MessageKind::Assistant) {
+                last.content.push_str(&content);
+                last.is_streaming = true;
+            } else {
+                let mut msg = UiMessage::new(MessageKind::Assistant, content);
+                msg.is_streaming = true;
+                self.state.messages.push(msg);
+            }
+        } else {
+            let mut msg = UiMessage::new(MessageKind::Assistant, content);
+            msg.is_streaming = true;
+            self.state.messages.push(msg);
+        }
+        if self.state.messages.auto_scroll {
+            self.state.messages.scroll_to_bottom();
+        }
+    }
+
     fn finish_run(&mut self, result: ava_agent::stack::AgentRunResult) {
         self.is_streaming.store(false, Ordering::Relaxed);
         self.state.agent.finish(&result);
+
+        // Save session to SQLite
+        self.state.session.save_session(&result.session);
+
         self.state.messages.push(UiMessage::new(
             MessageKind::System,
-            format!("Run complete: success={}, turns={}", result.success, result.turns),
+            format!(
+                "Complete — {} turns, {}",
+                result.turns,
+                if result.success { "success" } else { "failed" }
+            ),
         ));
     }
 }

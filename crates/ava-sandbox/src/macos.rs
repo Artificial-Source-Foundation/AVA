@@ -21,11 +21,11 @@ pub fn build_sandbox_exec_plan(
         .iter()
         .chain(policy.writable_paths.iter())
     {
-        profile_parts.push(format!("(allow file-read* (subpath \"{}\"))", path));
+        profile_parts.push(format!("(allow file-read* (subpath \"{path}\"))"));
     }
 
     for path in &policy.writable_paths {
-        profile_parts.push(format!("(allow file-write* (subpath \"{}\"))", path));
+        profile_parts.push(format!("(allow file-write* (subpath \"{path}\"))"));
     }
 
     if policy.allow_network {
@@ -33,13 +33,13 @@ pub fn build_sandbox_exec_plan(
     }
 
     if let Some(cwd) = &request.working_dir {
-        profile_parts.push(format!("(allow file-read* (subpath \"{}\"))", cwd));
-        profile_parts.push(format!("(allow file-write* (subpath \"{}\"))", cwd));
+        profile_parts.push(format!("(allow file-read* (subpath \"{cwd}\"))"));
+        profile_parts.push(format!("(allow file-write* (subpath \"{cwd}\"))"));
     }
 
     let profile = profile_parts.join(" ");
 
-    let mut args = vec!["-p".to_string(), profile.to_string()];
+    let mut args = vec!["-p".to_string(), profile.clone()];
 
     if request.env.is_empty() {
         args.push(request.command.clone());

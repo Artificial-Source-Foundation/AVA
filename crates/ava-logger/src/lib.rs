@@ -63,7 +63,7 @@ impl Logger {
         tracing_subscriber::fmt()
             .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
             .try_init()
-            .map_err(|e| ava_types::AvaError::ConfigError(format!("Failed to init logger: {}", e)))
+            .map_err(|e| ava_types::AvaError::ConfigError(format!("Failed to init logger: {e}")))
     }
 
     /// Create a new logger instance
@@ -85,7 +85,7 @@ impl Logger {
             let mut file = match file {
                 Ok(f) => f,
                 Err(e) => {
-                    eprintln!("Failed to open log file: {}", e);
+                    eprintln!("Failed to open log file: {e}");
                     return;
                 }
             };
@@ -96,7 +96,7 @@ impl Logger {
                     entry.timestamp, entry.level, entry.message
                 );
                 if let Err(e) = file.write_all(line.as_bytes()).await {
-                    eprintln!("Failed to write log: {}", e);
+                    eprintln!("Failed to write log: {e}");
                 }
             }
         });
@@ -160,7 +160,7 @@ impl Logger {
 
         self.log(
             LogLevel::Info,
-            &format!("Tool '{}' executed in {:?}", tool, duration),
+            &format!("Tool '{tool}' executed in {duration:?}"),
         )
         .await;
     }
@@ -173,7 +173,7 @@ impl Logger {
 
         self.log(
             LogLevel::Info,
-            &format!("LLM request: {} tokens, ${:.4}", tokens, cost),
+            &format!("LLM request: {tokens} tokens, ${cost:.4}"),
         )
         .await;
     }

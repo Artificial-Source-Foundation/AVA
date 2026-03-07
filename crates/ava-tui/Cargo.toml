@@ -25,6 +25,7 @@ nucleo = "0.5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ava-agent = { path = "../ava-agent" }
+ava-commander = { path = "../ava-commander" }
 ava-llm = { path = "../ava-llm" }
 ava-tools = { path = "../ava-tools" }
 ava-session = { path = "../ava-session" }
@@ -37,6 +38,7 @@ ava-types = { path = "../ava-types" }
 ava-db = { path = "../ava-db" }
 ava-codebase = { path = "../ava-codebase" }
 clap = { version = "4", features = ["derive"] }
+serde_yaml.workspace = true
 color-eyre = "0.6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

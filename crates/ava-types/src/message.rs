@@ -14,6 +14,9 @@ pub struct Message {
     pub timestamp: DateTime<Utc>,
     pub tool_calls: Vec<ToolCall>,
     pub tool_results: Vec<ToolResult>,
+    /// For Role::Tool messages, links back to the tool_call that produced this result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
 }
 
 impl Message {
@@ -25,6 +28,7 @@ impl Message {
             timestamp: Utc::now(),
             tool_calls: Vec::new(),
             tool_results: Vec::new(),
+            tool_call_id: None,
         }
     }
 
@@ -35,6 +39,11 @@ impl Message {
 
     pub fn with_tool_results(mut self, tool_results: Vec<ToolResult>) -> Self {
         self.tool_results = tool_results;
+        self
+    }
+
+    pub fn with_tool_call_id(mut self, id: impl Into<String>) -> Self {
+        self.tool_call_id = Some(id.into());
         self
     }
 }

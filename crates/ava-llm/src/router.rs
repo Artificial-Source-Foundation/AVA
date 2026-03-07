@@ -5,6 +5,7 @@ use ava_config::CredentialStore;
 use ava_types::{AvaError, Result};
 use tokio::sync::RwLock;
 
+use crate::pool::ConnectionPool;
 use crate::provider::LLMProvider;
 use crate::providers::create_provider;
 
@@ -19,6 +20,7 @@ pub struct ModelRouter {
     credentials: Arc<RwLock<CredentialStore>>,
     providers: RwLock<HashMap<String, Arc<dyn LLMProvider>>>,
     factories: Vec<Arc<dyn ProviderFactory>>,
+    pool: Arc<ConnectionPool>,
 }
 
 impl ModelRouter {
@@ -27,12 +29,26 @@ impl ModelRouter {
             credentials: Arc::new(RwLock::new(credentials)),
             providers: RwLock::new(HashMap::new()),
             factories: Vec::new(),
+            pool: Arc::new(ConnectionPool::new()),
+        }
+    }
+
+    pub fn with_pool(credentials: CredentialStore, pool: Arc<ConnectionPool>) -> Self {
+        Self {
+            credentials: Arc::new(RwLock::new(credentials)),
+            providers: RwLock::new(HashMap::new()),
+            factories: Vec::new(),
+            pool,
         }
     }
 
     /// Register an external provider factory (e.g., for CLI agent providers).
     pub fn register_factory(&mut self, factory: Arc<dyn ProviderFactory>) {
         self.factories.push(factory);
+    }
+
+    pub fn pool(&self) -> &Arc<ConnectionPool> {
+        &self.pool
     }
 
     pub async fn update_credentials(&self, credentials: CredentialStore) {
@@ -57,7 +73,7 @@ impl ModelRouter {
             factory.create(provider, model)?
         } else {
             let credentials = self.credentials.read().await.clone();
-            create_provider(provider, model, &credentials)?
+            create_provider(provider, model, &credentials, self.pool.clone())?
         };
 
         let created: Arc<dyn LLMProvider> = Arc::from(created);

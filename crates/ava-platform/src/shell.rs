@@ -88,8 +88,7 @@ impl Shell for LocalShell {
                 }),
                 Ok(Err(e)) => Err(AvaError::IoError(e.to_string())),
                 Err(_) => Err(AvaError::TimeoutError(format!(
-                    "Command timed out after {:?}",
-                    timeout
+                    "Command timed out after {timeout:?}"
                 ))),
             }
         } else {
@@ -123,19 +122,17 @@ impl Shell for LocalShell {
             cmd.env(key, value);
         }
 
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| AvaError::PlatformError(format!("Failed to spawn command: {}", e)))?;
+        let mut child = cmd.spawn().map_err(|e| {
+            AvaError::PlatformError(format!("Failed to spawn 'sh -c {command}': {e}"))
+        })?;
 
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| AvaError::PlatformError("Failed to capture stdout".to_string()))?;
+        let stdout = child.stdout.take().ok_or_else(|| {
+            AvaError::PlatformError(format!("Failed to capture stdout for command: {command}"))
+        })?;
 
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or_else(|| AvaError::PlatformError("Failed to capture stderr".to_string()))?;
+        let stderr = child.stderr.take().ok_or_else(|| {
+            AvaError::PlatformError(format!("Failed to capture stderr for command: {command}"))
+        })?;
 
         let stdout_reader = BufReader::new(stdout);
         let stderr_reader = BufReader::new(stderr);
@@ -147,7 +144,7 @@ impl Shell for LocalShell {
         tokio::spawn(async move {
             let mut lines = stdout_reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let _ = tx_stdout.send(Ok(format!("[stdout] {}", line)));
+                let _ = tx_stdout.send(Ok(format!("[stdout] {line}")));
             }
         });
 
@@ -156,7 +153,7 @@ impl Shell for LocalShell {
         tokio::spawn(async move {
             let mut lines = stderr_reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let _ = tx_stderr.send(Ok(format!("[stderr] {}", line)));
+                let _ = tx_stderr.send(Ok(format!("[stderr] {line}")));
             }
         });
 
@@ -171,8 +168,7 @@ impl Shell for LocalShell {
                 tokio::select! {
                     _ = tokio::time::sleep(timeout) => {
                         let _ = tx_timeout.send(Err(AvaError::TimeoutError(format!(
-                            "Command timed out after {:?}",
-                            timeout
+                            "Command timed out after {timeout:?}"
                         ))));
                     }
                     _ = done_rx => {}
@@ -190,8 +186,7 @@ impl Shell for LocalShell {
                 Err(e) => {
                     let _ = completion_tx.and_then(|tx_done| tx_done.send(()).ok());
                     let _ = tx.send(Err(AvaError::PlatformError(format!(
-                        "Process error: {}",
-                        e
+                        "Process error: {e}"
                     ))));
                 }
             }

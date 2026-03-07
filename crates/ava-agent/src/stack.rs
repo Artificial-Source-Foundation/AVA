@@ -1,23 +1,55 @@
 use std::path::PathBuf;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use ava_config::ConfigManager;
-use ava_context::ContextManager;
-use ava_llm::provider::LLMProvider;
+use ava_context::{create_hybrid_condenser, CondenserConfig, ContextManager, Summarizer};
+use ava_llm::provider::{LLMProvider, SharedProvider};
 use ava_llm::ModelRouter;
+use ava_mcp::config::load_mcp_config;
+use ava_mcp::manager::ExtensionManager;
 use ava_memory::MemorySystem;
 use ava_platform::StandardPlatform;
 use ava_session::SessionManager;
 use ava_tools::core::register_core_tools;
+use ava_tools::mcp_bridge::{MCPBridgeTool, MCPToolCaller};
 use ava_tools::registry::ToolRegistry;
-use ava_types::{AvaError, Message, Result, Session};
-use futures::{Stream, StreamExt};
-use tokio::sync::mpsc;
+use ava_types::{AvaError, Result, Session, ToolResult};
+use futures::StreamExt;
+use serde_json::Value;
+use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 
+use tracing::{info, instrument, warn};
+
 use crate::agent_loop::{AgentConfig, AgentEvent, AgentLoop};
+
+/// Wraps an `LLMProvider` into the `Summarizer` trait for context compaction.
+struct LlmSummarizer(Arc<dyn LLMProvider>);
+
+#[async_trait]
+impl Summarizer for LlmSummarizer {
+    async fn summarize(&self, text: &str) -> std::result::Result<String, String> {
+        use ava_types::{Message, Role};
+        let messages = vec![Message::new(Role::User, text.to_string())];
+        self.0
+            .generate(&messages)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Adapter implementing `MCPToolCaller` by delegating to `ExtensionManager`.
+struct ExtensionManagerCaller {
+    manager: ExtensionManager,
+}
+
+#[async_trait]
+impl MCPToolCaller for ExtensionManagerCaller {
+    async fn call_tool(&self, name: &str, arguments: Value) -> Result<ToolResult> {
+        self.manager.call_tool(name, arguments).await
+    }
+}
 
 pub struct AgentStack {
     pub router: ModelRouter,
@@ -26,12 +58,13 @@ pub struct AgentStack {
     pub memory: MemorySystem,
     pub config: ConfigManager,
     pub platform: Arc<StandardPlatform>,
-    provider_override: Option<String>,
-    model_override: Option<String>,
+    provider_override: RwLock<Option<String>>,
+    model_override: RwLock<Option<String>>,
     max_turns: usize,
-    #[allow(dead_code)]
     yolo: bool,
     injected_provider: Option<Arc<dyn LLMProvider>>,
+    /// MCP extension manager (if any MCP servers are configured).
+    _mcp_caller: Option<Arc<dyn MCPToolCaller>>,
 }
 
 pub struct AgentStackConfig {
@@ -74,7 +107,34 @@ impl AgentStack {
         let credentials_path = config.data_dir.join("credentials.json");
 
         let platform = Arc::new(StandardPlatform);
-        let tools = Arc::new(build_tool_registry(platform.clone()));
+        let mut registry = build_tool_registry(platform.clone());
+
+        // Load MCP servers (optional — no crash if mcp.json doesn't exist)
+        let mcp_config_path = config.data_dir.join("mcp.json");
+        let mcp_caller = match load_mcp_config(&mcp_config_path).await {
+            Ok(configs) if !configs.is_empty() => {
+                let mut manager = ExtensionManager::new();
+                manager.initialize(configs).await?;
+
+                let mcp_tools = manager.list_tools();
+                let caller: Arc<dyn MCPToolCaller> =
+                    Arc::new(ExtensionManagerCaller { manager });
+
+                for tool_def in mcp_tools {
+                    info!(tool = %tool_def.name, "Registering MCP tool");
+                    registry.register(MCPBridgeTool::new(tool_def, caller.clone()));
+                }
+
+                Some(caller)
+            }
+            Ok(_) => None,
+            Err(e) => {
+                warn!(error = %e, "Failed to load MCP config, continuing without MCP tools");
+                None
+            }
+        };
+
+        let tools = Arc::new(registry);
 
         let config_mgr = ConfigManager::load_from_paths(config_path, credentials_path).await?;
         let credentials = config_mgr.credentials().await;
@@ -91,14 +151,51 @@ impl AgentStack {
             memory,
             config: config_mgr,
             platform,
-            provider_override: config.provider,
-            model_override: config.model,
+            provider_override: RwLock::new(config.provider),
+            model_override: RwLock::new(config.model),
             max_turns: config.max_turns,
             yolo: config.yolo,
             injected_provider: config.injected_provider,
+            _mcp_caller: mcp_caller,
         })
     }
 
+    /// Whether this stack runs in yolo mode (skip tool permission checks).
+    pub fn yolo(&self) -> bool {
+        self.yolo
+    }
+
+    /// Switch the provider and model for subsequent runs.
+    /// Validates that the provider/model combination can be routed.
+    #[instrument(skip(self))]
+    pub async fn switch_model(&self, provider: &str, model: &str) -> Result<()> {
+        // Validate by attempting to route — this ensures credentials exist
+        self.router.route_required(provider, model).await?;
+
+        *self.provider_override.write().await = Some(provider.to_string());
+        *self.model_override.write().await = Some(model.to_string());
+        Ok(())
+    }
+
+    /// Get the current provider and model names.
+    pub async fn current_model(&self) -> (String, String) {
+        let cfg = self.config.get().await;
+        let provider = self
+            .provider_override
+            .read()
+            .await
+            .clone()
+            .unwrap_or_else(|| cfg.llm.provider.clone());
+        let model = self
+            .model_override
+            .read()
+            .await
+            .clone()
+            .unwrap_or_else(|| cfg.llm.model.clone());
+        (provider, model)
+    }
+
+    #[instrument(skip(self, event_tx, cancel), fields(max_turns))]
     pub async fn run(
         &self,
         goal: &str,
@@ -109,15 +206,7 @@ impl AgentStack {
         let provider = if let Some(provider) = &self.injected_provider {
             provider.clone()
         } else {
-            let cfg = self.config.get().await;
-            let provider_name = self
-                .provider_override
-                .clone()
-                .unwrap_or_else(|| cfg.llm.provider.clone());
-            let model_name = self
-                .model_override
-                .clone()
-                .unwrap_or_else(|| cfg.llm.model.clone());
+            let (provider_name, model_name) = self.current_model().await;
             self.router.route_required(&provider_name, &model_name).await?
         };
 
@@ -127,12 +216,23 @@ impl AgentStack {
             max_turns: turns_limit,
             token_limit: 128_000,
             model: provider.model_name().to_string(),
+            max_cost_usd: 10.0,
+            loop_detection: true,
         };
+
+        let summarizer: Arc<dyn Summarizer> = Arc::new(LlmSummarizer(provider.clone()));
+        let condenser_config = CondenserConfig {
+            max_tokens: config.token_limit,
+            target_tokens: config.token_limit * 3 / 4,
+            ..Default::default()
+        };
+        let condenser = create_hybrid_condenser(condenser_config.clone(), Some(summarizer));
+        let context = ContextManager::new_with_condenser(condenser_config, condenser);
 
         let mut agent = AgentLoop::new(
             Box::new(SharedProvider::new(provider)),
             build_tool_registry(self.platform.clone()),
-            ContextManager::new(config.token_limit),
+            context,
             config,
         );
 
@@ -143,7 +243,7 @@ impl AgentStack {
             loop {
                 tokio::select! {
                     _ = cancel.cancelled() => {
-                        return Err(AvaError::TimeoutError("Operation cancelled".to_string()));
+                        return Err(AvaError::Cancelled);
                     }
                     maybe_event = stream.next() => {
                         let Some(event) = maybe_event else { break; };
@@ -154,16 +254,19 @@ impl AgentStack {
                                 break;
                             }
                             AgentEvent::Error(error) => {
-                                return Err(AvaError::ToolError(error));
+                                return Err(AvaError::AgentStopped { reason: error });
                             }
-                            AgentEvent::Progress(_) | AgentEvent::Token(_) | AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) => {}
+                            AgentEvent::Progress(_) | AgentEvent::Token(_) | AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) => {}
                         }
                     }
                 }
             }
 
             let session = final_session
-                .ok_or_else(|| AvaError::ToolError("agent stream ended without completion".to_string()))?;
+                .ok_or_else(|| AvaError::ToolError(
+                "Agent stream ended unexpectedly without a completion event. \
+                 This may indicate the model returned no actionable response".to_string()
+            ))?;
 
             return Ok(AgentRunResult {
                 success: true,
@@ -174,7 +277,7 @@ impl AgentStack {
 
         let session = tokio::select! {
             value = agent.run(goal) => value,
-            _ = cancel.cancelled() => Err(AvaError::TimeoutError("Operation cancelled".to_string())),
+            _ = cancel.cancelled() => Err(AvaError::Cancelled),
         }?;
 
         Ok(AgentRunResult {
@@ -198,39 +301,3 @@ const _: () = {
         assert_send::<AgentStack>();
     }
 };
-
-struct SharedProvider {
-    inner: Arc<dyn LLMProvider>,
-}
-
-impl SharedProvider {
-    fn new(inner: Arc<dyn LLMProvider>) -> Self {
-        Self { inner }
-    }
-}
-
-#[async_trait]
-impl LLMProvider for SharedProvider {
-    async fn generate(&self, messages: &[Message]) -> Result<String> {
-        self.inner.generate(messages).await
-    }
-
-    async fn generate_stream(
-        &self,
-        messages: &[Message],
-    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
-        self.inner.generate_stream(messages).await
-    }
-
-    fn estimate_tokens(&self, input: &str) -> usize {
-        self.inner.estimate_tokens(input)
-    }
-
-    fn estimate_cost(&self, input_tokens: usize, output_tokens: usize) -> f64 {
-        self.inner.estimate_cost(input_tokens, output_tokens)
-    }
-
-    fn model_name(&self) -> &str {
-        self.inner.model_name()
-    }
-}

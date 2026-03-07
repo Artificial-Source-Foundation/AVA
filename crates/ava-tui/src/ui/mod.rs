@@ -10,7 +10,7 @@ pub mod layout;
 pub mod sidebar;
 pub mod status_bar;
 
-pub fn render(frame: &mut Frame<'_>, state: &AppState) {
+pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     let split = build_layout(frame.area(), state.show_sidebar);
 
     status_bar::render_top(frame, split.top_bar, state);
@@ -79,7 +79,12 @@ fn render_session_list(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         } else {
             "  "
         };
-        text.push_str(&format!("{}Session {}\n", prefix, session.id));
+        text.push_str(&format!(
+            "{}Session {} ({})\n",
+            prefix,
+            &session.id.to_string()[..8],
+            session.updated_at.format("%Y-%m-%d %H:%M")
+        ));
     }
 
     let widget =

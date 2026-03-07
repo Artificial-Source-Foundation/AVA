@@ -1,8 +1,11 @@
-mod common;
+pub mod common;
+
+use std::sync::Arc;
 
 use ava_config::CredentialStore;
 use ava_types::{AvaError, Result};
 
+use crate::pool::ConnectionPool;
 use crate::provider::LLMProvider;
 
 pub mod anthropic;
@@ -19,7 +22,7 @@ pub use ollama::OllamaProvider;
 pub use openai::OpenAIProvider;
 pub use openrouter::OpenRouterProvider;
 
-/// Create a provider by name from credentials.
+/// Create a provider by name from credentials, using the shared connection pool.
 ///
 /// For CLI agent providers (e.g., `cli:claude-code`), use a `ProviderFactory`
 /// registered on the `ModelRouter` instead — this function only handles API providers.
@@ -27,6 +30,7 @@ pub fn create_provider(
     provider_name: &str,
     model: &str,
     credentials: &CredentialStore,
+    pool: Arc<ConnectionPool>,
 ) -> Result<Box<dyn LLMProvider>> {
     if provider_name.starts_with("cli:") {
         return Err(AvaError::ConfigError(format!(
@@ -43,50 +47,43 @@ pub fn create_provider(
                 .as_ref()
                 .map(|entry| entry.api_key.as_str())
                 .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| {
-                    AvaError::ConfigError(
-                        "No Anthropic API key. Set AVA_ANTHROPIC_API_KEY or add to ~/.ava/credentials.json"
-                            .to_string(),
-                    )
+                .ok_or_else(|| AvaError::MissingApiKey {
+                    provider: "anthropic".to_string(),
                 })?;
-            Ok(Box::new(AnthropicProvider::new(api_key, model)))
+            Ok(Box::new(AnthropicProvider::new(pool, api_key, model)))
         }
         "openai" => {
             let entry = credential
                 .filter(|entry| !entry.api_key.trim().is_empty())
-                .ok_or_else(|| {
-                    AvaError::ConfigError(
-                        "No OpenAI API key. Set AVA_OPENAI_API_KEY or add to ~/.ava/credentials.json"
-                            .to_string(),
-                    )
+                .ok_or_else(|| AvaError::MissingApiKey {
+                    provider: "openai".to_string(),
                 })?;
             if let Some(base_url) = entry.base_url {
                 Ok(Box::new(OpenAIProvider::with_base_url(
+                    pool,
                     entry.api_key,
                     model,
                     base_url,
                 )))
             } else {
-                Ok(Box::new(OpenAIProvider::new(entry.api_key, model)))
+                Ok(Box::new(OpenAIProvider::new(pool, entry.api_key, model)))
             }
         }
         "openrouter" => {
             let entry = credential
                 .filter(|entry| !entry.api_key.trim().is_empty())
-                .ok_or_else(|| {
-                    AvaError::ConfigError(
-                        "No OpenRouter API key. Set AVA_OPENROUTER_API_KEY or add to ~/.ava/credentials.json"
-                            .to_string(),
-                    )
+                .ok_or_else(|| AvaError::MissingApiKey {
+                    provider: "openrouter".to_string(),
                 })?;
             if let Some(base_url) = entry.base_url {
                 Ok(Box::new(OpenRouterProvider::with_base_url(
+                    pool,
                     entry.api_key,
                     model,
                     base_url,
                 )))
             } else {
-                Ok(Box::new(OpenRouterProvider::new(entry.api_key, model)))
+                Ok(Box::new(OpenRouterProvider::new(pool, entry.api_key, model)))
             }
         }
         "gemini" => {
@@ -94,24 +91,23 @@ pub fn create_provider(
                 .as_ref()
                 .map(|entry| entry.api_key.as_str())
                 .filter(|value| !value.trim().is_empty())
-                .ok_or_else(|| {
-                    AvaError::ConfigError(
-                        "No Gemini API key. Set AVA_GEMINI_API_KEY or add to ~/.ava/credentials.json"
-                            .to_string(),
-                    )
+                .ok_or_else(|| AvaError::MissingApiKey {
+                    provider: "gemini".to_string(),
                 })?;
-            Ok(Box::new(GeminiProvider::new(api_key, model)))
+            Ok(Box::new(GeminiProvider::new(pool, api_key, model)))
         }
         "ollama" => {
             let base_url = credential
                 .and_then(|entry| entry.base_url)
                 .or_else(|| std::env::var("OLLAMA_BASE_URL").ok())
                 .unwrap_or_else(|| "http://localhost:11434".to_string());
-            Ok(Box::new(OllamaProvider::new(base_url, model)))
+            Ok(Box::new(OllamaProvider::new(pool, base_url, model)))
         }
-        _ => Err(AvaError::ConfigError(format!(
-            "Unknown provider: {provider_name}"
-        ))),
+        _ => Err(AvaError::ProviderError {
+            provider: provider_name.to_string(),
+            message: "unknown provider. Available: anthropic, openai, openrouter, gemini, ollama"
+                .to_string(),
+        }),
     }
 }
 
@@ -119,18 +115,22 @@ pub fn create_provider(
 mod tests {
     use super::*;
 
+    fn default_pool() -> Arc<ConnectionPool> {
+        Arc::new(ConnectionPool::new())
+    }
+
     #[test]
     fn unknown_provider_returns_error() {
         let credentials = CredentialStore::default();
-        let result = create_provider("unknown-provider", "model", &credentials);
+        let result = create_provider("unknown-provider", "model", &credentials, default_pool());
         let err = result.err().expect("should fail");
-        assert!(err.to_string().contains("Unknown provider"));
+        assert!(err.to_string().contains("unknown provider"));
     }
 
     #[test]
     fn cli_provider_without_factory_returns_error() {
         let credentials = CredentialStore::default();
-        let result = create_provider("cli:claude-code", "sonnet", &credentials);
+        let result = create_provider("cli:claude-code", "sonnet", &credentials, default_pool());
         let err = result.err().expect("should fail");
         assert!(err.to_string().contains("must be registered via ModelRouter"));
     }

@@ -1,8 +1,10 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use ava_config::CredentialStore;
 use ava_types::{Message, Role};
 
+use crate::pool::ConnectionPool;
 use crate::providers::create_provider;
 
 const DEFAULT_TIMEOUT_SECS: u64 = 20;
@@ -23,7 +25,8 @@ pub async fn test_provider_credentials(
     model: &str,
     credentials: &CredentialStore,
 ) -> String {
-    let provider_impl = match create_provider(provider, model, credentials) {
+    let pool = Arc::new(ConnectionPool::new());
+    let provider_impl = match create_provider(provider, model, credentials, pool) {
         Ok(provider_impl) => provider_impl,
         Err(error) => {
             return format!("{provider}: FAIL ({error})");

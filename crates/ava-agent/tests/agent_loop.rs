@@ -99,6 +99,8 @@ fn build_loop(responses: Vec<String>, token_limit: usize, max_turns: usize) -> A
             max_turns,
             token_limit,
             model: "mock-model".to_string(),
+            max_cost_usd: 10.0,
+            loop_detection: true,
         },
     )
 }
@@ -124,29 +126,34 @@ async fn completion_detection_stops_loop() {
 }
 
 #[tokio::test]
-async fn max_turn_limit_stops_execution() {
-    let mut loop_engine = build_loop(vec!["plain response".to_string(); 5], 1_000, 2);
+async fn natural_completion_on_text_only_response() {
+    let mut loop_engine = build_loop(vec!["plain response".to_string(); 5], 1_000, 5);
     let session = loop_engine
         .run("keep going")
         .await
-        .expect("run should stop at max turns");
+        .expect("run should succeed");
 
+    // Natural completion: first non-empty text-only response ends the loop immediately
     assert_eq!(
         session
             .messages
             .iter()
             .filter(|message| message.role == ava_types::Role::Assistant)
             .count(),
-        2
+        1
     );
 }
 
 #[tokio::test]
 async fn context_compaction_triggered_when_threshold_exceeded() {
+    // First response uses a tool call (so the loop continues), with a long body to fill context.
+    // Second response completes via attempt_completion.
+    let long_tool_response = json!({
+        "tool_call": {"name": "echo", "arguments": {"data": "x".repeat(800)}},
+    }).to_string();
     let mut loop_engine = build_loop(
         vec![
-            "A very long response that consumes many tokens in one shot and should trigger compaction"
-                .repeat(20),
+            long_tool_response,
             json!({"tool_call": {"name": "attempt_completion", "arguments": {}}}).to_string(),
         ],
         40,

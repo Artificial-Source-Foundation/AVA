@@ -1,24 +1,30 @@
 use std::pin::Pin;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use ava_types::{AvaError, Message, Result};
 use futures::{Stream, StreamExt};
 use serde_json::{json, Value};
 
+use tracing::instrument;
+
+use crate::pool::ConnectionPool;
 use crate::provider::LLMProvider;
 use crate::providers::common;
 
+const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com";
+
 #[derive(Clone)]
 pub struct GeminiProvider {
-    client: reqwest::Client,
+    pool: Arc<ConnectionPool>,
     api_key: String,
     model: String,
 }
 
 impl GeminiProvider {
-    pub fn new(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(pool: Arc<ConnectionPool>, api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            pool,
             api_key: api_key.into(),
             model: model.into(),
         }
@@ -26,14 +32,14 @@ impl GeminiProvider {
 
     fn generate_url(&self) -> String {
         format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            "{GEMINI_BASE_URL}/v1beta/models/{}:generateContent",
             self.model
         )
     }
 
     fn stream_url(&self) -> String {
         format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:streamGenerateContent?alt=sse",
+            "{GEMINI_BASE_URL}/v1beta/models/{}:streamGenerateContent?alt=sse",
             self.model
         )
     }
@@ -46,20 +52,23 @@ impl GeminiProvider {
         }
         body
     }
+
+    async fn client(&self) -> Arc<reqwest::Client> {
+        self.pool.get_client(GEMINI_BASE_URL).await
+    }
 }
 
 #[async_trait]
 impl LLMProvider for GeminiProvider {
+    #[instrument(skip(self, messages), fields(model = %self.model))]
     async fn generate(&self, messages: &[Message]) -> Result<String> {
-        let response = self
-            .client
+        let client = self.client().await;
+        let request = client
             .post(self.generate_url())
             .header("x-goog-api-key", &self.api_key)
-            .json(&self.build_request_body(messages))
-            .send()
-            .await
-            .map_err(common::reqwest_error)?;
+            .json(&self.build_request_body(messages));
 
+        let response = common::send_retrying(request, "Gemini").await?;
         let response = common::validate_status(response, "Gemini").await?;
         let payload: Value = response
             .json()
@@ -69,19 +78,18 @@ impl LLMProvider for GeminiProvider {
         common::parse_gemini_completion_payload(&payload)
     }
 
+    #[instrument(skip(self, messages), fields(model = %self.model))]
     async fn generate_stream(
         &self,
         messages: &[Message],
     ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
-        let response = self
-            .client
+        let client = self.client().await;
+        let request = client
             .post(self.stream_url())
             .header("x-goog-api-key", &self.api_key)
-            .json(&self.build_request_body(messages))
-            .send()
-            .await
-            .map_err(common::reqwest_error)?;
+            .json(&self.build_request_body(messages));
 
+        let response = common::send_retrying(request, "Gemini").await?;
         let response = common::validate_status(response, "Gemini").await?;
         let stream = response.bytes_stream().flat_map(|chunk| {
             let content = chunk

@@ -31,4 +31,10 @@ pub enum CommanderEvent {
         succeeded: usize,
         failed: usize,
     },
+    Summary {
+        total_workers: usize,
+        succeeded: usize,
+        failed: usize,
+        total_turns: usize,
+    },
 }

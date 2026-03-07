@@ -7,10 +7,15 @@ pub mod strategies;
 pub mod token_tracker;
 pub mod types;
 
-pub use condenser::{create_condenser, create_full_condenser, Condenser};
+pub use condenser::{
+    create_condenser, create_full_condenser, create_hybrid_condenser, Condenser, HybridCondenser,
+};
 pub use error::{ContextError, Result};
 pub use manager::ContextManager;
-pub use strategies::{CondensationStrategy, SlidingWindowStrategy, ToolTruncationStrategy};
+pub use strategies::{
+    AsyncCondensationStrategy, CondensationStrategy, SlidingWindowStrategy, Summarizer,
+    SummarizationStrategy, ToolTruncationStrategy,
+};
 pub use token_tracker::{estimate_tokens, estimate_tokens_for_message, TokenTracker};
 pub use types::{CondensationResult, CondenserConfig, ContextChunk};
 

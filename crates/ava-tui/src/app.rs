@@ -9,6 +9,8 @@ use crate::state::permission::PermissionState;
 use crate::state::session::SessionState;
 use crate::state::theme::Theme;
 use crate::ui;
+use crate::widgets::command_palette::CommandPaletteState;
+use crate::widgets::session_list::SessionListState;
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
@@ -32,6 +34,16 @@ pub struct AppState {
     pub keybinds: KeybindState,
     pub agent: AgentState,
     pub show_sidebar: bool,
+    pub command_palette: CommandPaletteState,
+    pub session_list: SessionListState,
+    pub active_modal: Option<ModalType>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModalType {
+    CommandPalette,
+    SessionList,
+    ToolApproval,
 }
 
 pub struct App {
@@ -76,6 +88,9 @@ impl App {
             agent: AgentState::new(data_dir, cli.provider, cli.model, cli.max_turns, cli.yolo)
                 .await?,
             show_sidebar: true,
+            command_palette: CommandPaletteState::with_defaults(),
+            session_list: SessionListState::default(),
+            active_modal: None,
         };
 
         Ok(Self {
@@ -202,6 +217,12 @@ impl App {
         app_tx: mpsc::UnboundedSender<AppEvent>,
         agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
     ) -> bool {
+        // Handle modal-specific input first
+        if let Some(modal) = self.state.active_modal {
+            return self.handle_modal_key(modal, key);
+        }
+
+        // Handle global keybindings
         if let Some(action) = self.state.keybinds.action_for(key) {
             match action {
                 Action::Quit => return true,
@@ -220,11 +241,25 @@ impl App {
                 Action::YoloToggle => {
                     self.state.permission.yolo_mode = !self.state.permission.yolo_mode;
                 }
+                Action::CommandPalette => {
+                    self.state.command_palette.open = true;
+                    self.state.active_modal = Some(ModalType::CommandPalette);
+                }
+                Action::NewSession => {
+                    let _ = self.state.session.create_session();
+                    self.state.messages.messages.clear();
+                }
+                Action::SessionList => {
+                    let _ = self.state.session.list_recent(50);
+                    self.state.session_list.open = true;
+                    self.state.active_modal = Some(ModalType::SessionList);
+                }
                 _ => {}
             }
             return false;
         }
 
+        // Handle normal input
         match key.code {
             KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
                 if let Some(goal) = self.state.input.submit() {
@@ -247,6 +282,212 @@ impl App {
         }
 
         false
+    }
+
+    fn handle_modal_key(
+        &mut self,
+        modal: ModalType,
+        key: crossterm::event::KeyEvent,
+    ) -> bool {
+        if key.kind != KeyEventKind::Press {
+            return false;
+        }
+
+        match modal {
+            ModalType::CommandPalette => self.handle_command_palette_key(key),
+            ModalType::SessionList => self.handle_session_list_key(key),
+            ModalType::ToolApproval => self.handle_tool_approval_key(key),
+        }
+    }
+
+    fn handle_command_palette_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Esc => {
+                self.state.command_palette.open = false;
+                self.state.active_modal = None;
+            }
+            KeyCode::Down => {
+                let filtered = self.state.command_palette.filtered();
+                if !filtered.is_empty() {
+                    self.state.command_palette.selected =
+                        (self.state.command_palette.selected + 1) % filtered.len();
+                }
+            }
+            KeyCode::Up => {
+                let filtered = self.state.command_palette.filtered();
+                if !filtered.is_empty() {
+                    self.state.command_palette.selected = self
+                        .state
+                        .command_palette
+                        .selected
+                        .saturating_sub(1)
+                        .max(filtered.len().saturating_sub(1));
+                }
+            }
+            KeyCode::Enter => {
+                let filtered = self.state.command_palette.filtered();
+                if let Some(item) = filtered.get(self.state.command_palette.selected) {
+                    self.execute_command_action(item.action);
+                }
+                self.state.command_palette.open = false;
+                self.state.active_modal = None;
+            }
+            KeyCode::Char(ch) => {
+                self.state.command_palette.query.push(ch);
+                self.state.command_palette.selected = 0;
+            }
+            KeyCode::Backspace => {
+                self.state.command_palette.query.pop();
+                self.state.command_palette.selected = 0;
+            }
+            _ => {}
+        }
+        false
+    }
+
+    fn handle_session_list_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Esc => {
+                self.state.session_list.open = false;
+                self.state.active_modal = None;
+            }
+            KeyCode::Down => {
+                let sessions = &self.state.session.sessions;
+                if !sessions.is_empty() {
+                    self.state.session_list.selected =
+                        (self.state.session_list.selected + 1) % sessions.len();
+                }
+            }
+            KeyCode::Up => {
+                let sessions = &self.state.session.sessions;
+                if !sessions.is_empty() {
+                    self.state.session_list.selected = self
+                        .state
+                        .session_list
+                        .selected
+                        .saturating_sub(1)
+                        .max(sessions.len().saturating_sub(1));
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(session) = self.state.session.sessions.get(self.state.session_list.selected) {
+                    let _ = self.state.session.switch_to(session.id);
+                    self.state.messages.messages.clear();
+                }
+                self.state.session_list.open = false;
+                self.state.active_modal = None;
+            }
+            KeyCode::Char(ch) => {
+                self.state.session_list.query.push(ch);
+                self.state.session_list.selected = 0;
+            }
+            KeyCode::Backspace => {
+                self.state.session_list.query.pop();
+                self.state.session_list.selected = 0;
+            }
+            _ => {}
+        }
+        false
+    }
+
+    fn handle_tool_approval_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        use crate::state::permission::ApprovalStage;
+
+        if self.state.permission.queue.is_empty() {
+            self.state.active_modal = None;
+            return false;
+        }
+
+        match self.state.permission.current_stage {
+            ApprovalStage::Preview => {
+                // Any key moves to action selection
+                self.state.permission.current_stage = ApprovalStage::ActionSelect;
+            }
+            ApprovalStage::ActionSelect => match key.code {
+                KeyCode::Char('a') => {
+                    self.state.permission.approve_current_once();
+                    if self.state.permission.queue.is_empty() {
+                        self.state.active_modal = None;
+                    }
+                }
+                KeyCode::Char('s') => {
+                    self.state.permission.approve_current_for_session();
+                    if self.state.permission.queue.is_empty() {
+                        self.state.active_modal = None;
+                    }
+                }
+                KeyCode::Char('r') => {
+                    self.state.permission.current_stage = ApprovalStage::RejectionReason;
+                }
+                KeyCode::Char('y') => {
+                    self.state.permission.yolo_mode = true;
+                    // Approve all pending
+                    while !self.state.permission.queue.is_empty() {
+                        self.state.permission.approve_current_once();
+                    }
+                    self.state.active_modal = None;
+                }
+                KeyCode::Esc => {
+                    // Cancel/reject without reason
+                    self.state.permission.reject_current();
+                    if self.state.permission.queue.is_empty() {
+                        self.state.active_modal = None;
+                    }
+                }
+                _ => {}
+            },
+            ApprovalStage::RejectionReason => match key.code {
+                KeyCode::Enter => {
+                    self.state.permission.reject_current();
+                    if self.state.permission.queue.is_empty() {
+                        self.state.active_modal = None;
+                    }
+                }
+                KeyCode::Esc => {
+                    // Cancel rejection, go back
+                    self.state.permission.current_stage = ApprovalStage::ActionSelect;
+                    self.state.permission.rejection_input.clear();
+                }
+                KeyCode::Char(ch) => {
+                    self.state.permission.rejection_input.push(ch);
+                }
+                KeyCode::Backspace => {
+                    self.state.permission.rejection_input.pop();
+                }
+                _ => {}
+            },
+        }
+        false
+    }
+
+    fn execute_command_action(&mut self, action: Action) {
+        match action {
+            Action::NewSession => {
+                let _ = self.state.session.create_session();
+                self.state.messages.messages.clear();
+            }
+            Action::SessionList => {
+                let _ = self.state.session.list_recent(50);
+                self.state.session_list.open = true;
+                self.state.active_modal = Some(ModalType::SessionList);
+            }
+            Action::YoloToggle => {
+                self.state.permission.yolo_mode = !self.state.permission.yolo_mode;
+            }
+            Action::ToggleSidebar => {
+                self.state.show_sidebar = !self.state.show_sidebar;
+            }
+            Action::ScrollUp => self.state.messages.scroll_up(10),
+            Action::ScrollDown => self.state.messages.scroll_down(10),
+            Action::ScrollTop => self.state.messages.scroll_to_top(),
+            Action::ScrollBottom => self.state.messages.scroll_to_bottom(),
+            Action::Cancel => {
+                if self.state.agent.is_running {
+                    self.state.agent.abort();
+                }
+            }
+            _ => {}
+        }
     }
 
     fn submit_goal(

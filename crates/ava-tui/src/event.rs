@@ -1,0 +1,64 @@
+use crate::state::agent::TokenUsage;
+use ava_agent::AgentEvent;
+use crossterm::event::{Event as CEvent, EventStream, KeyEvent};
+use futures::StreamExt;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::mpsc;
+
+#[derive(Debug)]
+pub enum AppEvent {
+    Key(KeyEvent),
+    Paste(String),
+    Resize(u16, u16),
+    Tick,
+    Agent(AgentEvent),
+    AgentDone(Result<ava_agent::stack::AgentRunResult, String>),
+    TokenUsage(TokenUsage),
+    Quit,
+}
+
+pub fn spawn_event_reader(tx: mpsc::UnboundedSender<AppEvent>) {
+    tokio::spawn(async move {
+        let mut events = EventStream::new();
+        while let Some(next) = events.next().await {
+            match next {
+                Ok(CEvent::Key(key)) => {
+                    let _ = tx.send(AppEvent::Key(key));
+                }
+                Ok(CEvent::Paste(value)) => {
+                    let _ = tx.send(AppEvent::Paste(value));
+                }
+                Ok(CEvent::Resize(w, h)) => {
+                    let _ = tx.send(AppEvent::Resize(w, h));
+                }
+                Ok(_) => {}
+                Err(_) => {
+                    let _ = tx.send(AppEvent::Quit);
+                    break;
+                }
+            }
+        }
+    });
+}
+
+pub fn spawn_tick_timer(tx: mpsc::UnboundedSender<AppEvent>, is_streaming: Arc<AtomicBool>) {
+    tokio::spawn(async move {
+        loop {
+            let delay = tick_interval(is_streaming.load(Ordering::Relaxed));
+            tokio::time::sleep(delay).await;
+            if tx.send(AppEvent::Tick).is_err() {
+                break;
+            }
+        }
+    });
+}
+
+pub fn tick_interval(is_streaming: bool) -> Duration {
+    if is_streaming {
+        Duration::from_millis(16)
+    } else {
+        Duration::from_millis(250)
+    }
+}

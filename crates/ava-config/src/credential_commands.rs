@@ -79,6 +79,10 @@ where
                     api_key,
                     base_url,
                     org_id: None,
+                    oauth_token: None,
+                    oauth_refresh_token: None,
+                    oauth_expires_at: None,
+                    oauth_account_id: None,
                 },
             );
 
@@ -112,12 +116,18 @@ where
                 .iter()
                 .filter_map(|provider| {
                     store.get(provider).map(|credential| {
+                        let key_display = if credential.is_oauth_configured() {
+                            let token = credential.oauth_token.as_deref().unwrap_or("");
+                            format!("OAuth ({})", redact_key(token))
+                        } else {
+                            redact_key(&credential.api_key)
+                        };
                         let mut line = format!(
                             "{}: {}",
                             provider_name(provider),
-                            redact_key(&credential.api_key)
+                            key_display,
                         );
-                        if let Some(base_url) = credential.base_url {
+                        if let Some(ref base_url) = credential.base_url {
                             line.push_str(&format!(" (base_url: {base_url})"));
                         }
                         line
@@ -156,13 +166,24 @@ async fn default_tester(provider: &str, store: &CredentialStore) -> Result<Strin
     Ok(format!("{provider}: OK (credentials configured)"))
 }
 
-fn provider_name(provider: &str) -> String {
+pub fn provider_name(provider: &str) -> String {
     match provider {
         "openai" => "OpenAI".to_string(),
         "openrouter" => "OpenRouter".to_string(),
         "ollama" => "Ollama".to_string(),
         "anthropic" => "Anthropic".to_string(),
         "gemini" => "Gemini".to_string(),
+        "copilot" => "GitHub Copilot".to_string(),
+        "mistral" => "Mistral".to_string(),
+        "groq" => "Groq".to_string(),
+        "xai" => "xAI (Grok)".to_string(),
+        "deepinfra" => "DeepInfra".to_string(),
+        "together" => "Together AI".to_string(),
+        "cerebras" => "Cerebras".to_string(),
+        "perplexity" => "Perplexity".to_string(),
+        "cohere" => "Cohere".to_string(),
+        "azure" => "Azure OpenAI".to_string(),
+        "bedrock" => "AWS Bedrock".to_string(),
         _ => {
             let mut chars = provider.chars();
             if let Some(first) = chars.next() {
@@ -174,7 +195,7 @@ fn provider_name(provider: &str) -> String {
     }
 }
 
-fn redact_key(key: &str) -> String {
+pub fn redact_key(key: &str) -> String {
     let chars = key.chars().collect::<Vec<_>>();
     if chars.len() <= 8 {
         "****".to_string()
@@ -226,6 +247,10 @@ mod tests {
                 api_key: "key-12345678".to_string(),
                 base_url: None,
                 org_id: None,
+                oauth_token: None,
+                oauth_refresh_token: None,
+                oauth_expires_at: None,
+                oauth_account_id: None,
             },
         );
 
@@ -279,6 +304,10 @@ mod tests {
                 api_key: "sk-live-test".to_string(),
                 base_url: None,
                 org_id: None,
+                oauth_token: None,
+                oauth_refresh_token: None,
+                oauth_expires_at: None,
+                oauth_account_id: None,
             },
         );
 

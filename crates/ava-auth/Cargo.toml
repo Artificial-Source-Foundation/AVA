@@ -1,0 +1,23 @@
+[package]
+name = "ava-auth"
+description = "OAuth and provider authentication for AVA (shared by CLI + Desktop)"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tokio = { version = "1", features = ["net", "time", "io-util", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.9"
+open = "5"
+urlencoding = "2"
+thiserror = "1"
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["full"] }

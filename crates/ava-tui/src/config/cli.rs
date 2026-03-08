@@ -63,6 +63,32 @@ pub struct CliArgs {
 pub enum Command {
     /// Review code changes using an LLM agent
     Review(ReviewArgs),
+    /// Manage provider authentication (OAuth, API keys)
+    Auth {
+        #[command(subcommand)]
+        action: AuthCommand,
+    },
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum AuthCommand {
+    /// Sign in to a provider (opens browser for OAuth, prompts for API key)
+    Login {
+        /// Provider ID (e.g., openai, copilot, anthropic)
+        provider: String,
+    },
+    /// Remove credentials for a provider
+    Logout {
+        /// Provider ID
+        provider: String,
+    },
+    /// List all configured providers with status
+    List,
+    /// Test connection to a provider
+    Test {
+        /// Provider ID
+        provider: String,
+    },
 }
 
 #[derive(Debug, Clone, Parser)]

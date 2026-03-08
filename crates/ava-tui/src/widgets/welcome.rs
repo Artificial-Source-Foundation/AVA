@@ -5,57 +5,76 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
+const ASCII_ART: &[&str] = &[
+    "   _   __   __  _   ",
+    "  /_\\ \\ \\ / / /_\\  ",
+    " / _ \\ \\ V / / _ \\ ",
+    "/_/ \\_\\ \\_/ /_/ \\_\\",
+];
+
 pub fn render_welcome(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let cwd = std::env::current_dir()
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
 
-    let lines = vec![
-        Line::from(""),
-        Line::from(Span::styled(
+    let show_art = area.width >= 40 && area.height >= 16;
+
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    lines.push(Line::from(""));
+
+    if show_art {
+        for art_line in ASCII_ART {
+            lines.push(Line::from(Span::styled(
+                *art_line,
+                Style::default()
+                    .fg(state.theme.primary)
+                    .add_modifier(Modifier::BOLD),
+            )));
+        }
+        lines.push(Line::from(""));
+    } else {
+        lines.push(Line::from(Span::styled(
             "AVA",
             Style::default()
                 .fg(state.theme.primary)
                 .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            "AI Coding Agent",
-            Style::default().fg(state.theme.text_muted),
-        )),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Model:    ", Style::default().fg(state.theme.text_muted)),
-            Span::styled(
-                format!("{}/{}", state.agent.provider_name, state.agent.model_name),
-                Style::default().fg(state.theme.text),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("Provider: ", Style::default().fg(state.theme.text_muted)),
-            Span::styled(
-                &state.agent.provider_name,
-                Style::default().fg(state.theme.text),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled("CWD:      ", Style::default().fg(state.theme.text_muted)),
-            Span::styled(cwd, Style::default().fg(state.theme.text)),
-        ]),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Enter", Style::default().fg(state.theme.text)),
-            Span::styled(" send", Style::default().fg(state.theme.text_muted)),
-            Span::styled(" | ", Style::default().fg(state.theme.border)),
-            Span::styled("Ctrl+/", Style::default().fg(state.theme.text)),
-            Span::styled(" commands", Style::default().fg(state.theme.text_muted)),
-            Span::styled(" | ", Style::default().fg(state.theme.border)),
-            Span::styled("Ctrl+M", Style::default().fg(state.theme.text)),
-            Span::styled(" model", Style::default().fg(state.theme.text_muted)),
-            Span::styled(" | ", Style::default().fg(state.theme.border)),
-            Span::styled("Ctrl+D", Style::default().fg(state.theme.text)),
-            Span::styled(" quit", Style::default().fg(state.theme.text_muted)),
-        ]),
-    ];
+        )));
+    }
+
+    lines.push(Line::from(Span::styled(
+        "AI Coding Agent",
+        Style::default().fg(state.theme.text_muted),
+    )));
+    lines.push(Line::from(""));
+
+    // Info lines
+    lines.push(Line::from(vec![
+        Span::styled("Model     ", Style::default().fg(state.theme.text_dimmed)),
+        Span::styled(
+            format!("{}/{}", state.agent.provider_name, state.agent.model_name),
+            Style::default().fg(state.theme.text),
+        ),
+    ]));
+    lines.push(Line::from(vec![
+        Span::styled("Directory ", Style::default().fg(state.theme.text_dimmed)),
+        Span::styled(cwd, Style::default().fg(state.theme.text)),
+    ]));
+    lines.push(Line::from(""));
+
+    // Hints
+    let sep = Span::styled(
+        " \u{2502} ",
+        Style::default().fg(state.theme.border),
+    );
+    lines.push(Line::from(vec![
+        Span::styled("Type a message to start", Style::default().fg(state.theme.text_muted)),
+        sep.clone(),
+        Span::styled("/", Style::default().fg(state.theme.text)),
+        Span::styled(" commands", Style::default().fg(state.theme.text_muted)),
+        sep,
+        Span::styled("Ctrl+M", Style::default().fg(state.theme.text)),
+        Span::styled(" model", Style::default().fg(state.theme.text_muted)),
+    ]));
 
     // Center vertically
     let content_height = lines.len() as u16;

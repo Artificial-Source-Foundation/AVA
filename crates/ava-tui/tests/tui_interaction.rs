@@ -109,12 +109,13 @@ fn command_palette_opens() {
 }
 
 #[test]
-fn slash_triggers_autocomplete() {
+fn slash_opens_command_palette() {
     let (mut app, _tmp) = make_app();
     press_char(&mut app, '/');
-    assert!(
-        app.state.input.autocomplete.is_some(),
-        "typing '/' should trigger autocomplete"
+    assert_eq!(
+        app.state.active_modal,
+        Some(ModalType::CommandPalette),
+        "typing '/' on empty input should open command palette"
     );
 }
 

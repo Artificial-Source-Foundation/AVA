@@ -146,16 +146,169 @@ impl App {
                     )),
                 }
             }
+            "/connect" | "/providers" => {
+                let credentials = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(ava_config::CredentialStore::load_default())
+                })
+                .unwrap_or_default();
+
+                if let Some(provider) = arg {
+                    // Direct configure for specific provider
+                    let provider = provider.to_lowercase();
+                    self.state.provider_connect =
+                        Some(ProviderConnectState::for_provider(&credentials, &provider));
+                } else {
+                    // Show provider list
+                    self.state.provider_connect =
+                        Some(ProviderConnectState::from_credentials(&credentials));
+                }
+                self.state.active_modal = Some(ModalType::ProviderConnect);
+                None
+            }
+            "/disconnect" => {
+                if let Some(provider) = arg {
+                    let provider = provider.to_lowercase();
+                    let result = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(async {
+                            let mut store = ava_config::CredentialStore::load_default()
+                                .await
+                                .unwrap_or_default();
+                            ava_config::execute_credential_command(
+                                ava_config::CredentialCommand::Remove { provider },
+                                &mut store,
+                            )
+                            .await
+                        })
+                    });
+                    match result {
+                        Ok(msg) => {
+                            self.set_status(&msg, StatusLevel::Info);
+                            Some((MessageKind::System, msg))
+                        }
+                        Err(err) => {
+                            self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                            Some((MessageKind::Error, format!("Failed: {err}")))
+                        }
+                    }
+                } else {
+                    Some((
+                        MessageKind::Error,
+                        "Usage: /disconnect <provider> (e.g., /disconnect openrouter)".to_string(),
+                    ))
+                }
+            }
+            "/status" => {
+                let model = self.state.agent.current_model_display();
+                let tokens_in = self.state.agent.tokens_used.input;
+                let tokens_out = self.state.agent.tokens_used.output;
+                let cost = self.state.agent.cost;
+                let turn = self.state.agent.current_turn;
+
+                let session_id = self
+                    .state
+                    .session
+                    .current_session
+                    .as_ref()
+                    .map(|s| format!("{}", s.id))
+                    .unwrap_or_else(|| "none".to_string());
+
+                let tool_count = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(self.state.agent.list_tools_with_source())
+                })
+                .len();
+
+                let mcp_count = self.state.agent.mcp_tool_count;
+
+                let cwd = std::env::current_dir()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|_| "unknown".to_string());
+
+                let status = format!(
+                    "Model: {model}\n\
+                     Tokens: {tokens_in} in / {tokens_out} out (${cost:.2})\n\
+                     Session: {session_id} ({turn} turns)\n\
+                     Tools: {tool_count} total ({mcp_count} MCP)\n\
+                     Working directory: {cwd}"
+                );
+                Some((MessageKind::System, status))
+            }
+            "/diff" => {
+                let diff_stat = std::process::Command::new("git")
+                    .args(["diff", "--stat"])
+                    .output();
+
+                let status_short = std::process::Command::new("git")
+                    .args(["status", "--short"])
+                    .output();
+
+                let mut output = String::new();
+
+                match diff_stat {
+                    Ok(ref result) if !result.stdout.is_empty() => {
+                        output.push_str(&String::from_utf8_lossy(&result.stdout));
+                    }
+                    Ok(_) => {
+                        output.push_str("No staged/unstaged changes.\n");
+                    }
+                    Err(err) => {
+                        return Some((
+                            MessageKind::Error,
+                            format!("Failed to run git diff: {err}"),
+                        ));
+                    }
+                }
+
+                if let Ok(ref result) = status_short {
+                    let status_text = String::from_utf8_lossy(&result.stdout);
+                    let untracked_count = status_text
+                        .lines()
+                        .filter(|l| l.starts_with("??"))
+                        .count();
+                    if untracked_count > 0 {
+                        output.push_str(&format!("{untracked_count} untracked files\n"));
+                    }
+                }
+
+                Some((MessageKind::System, output.trim_end().to_string()))
+            }
+            "/clear" => {
+                self.state.messages.messages.clear();
+                self.state.messages.reset_scroll();
+                self.set_status("Chat cleared", StatusLevel::Info);
+                None
+            }
+            "/compact" => {
+                self.set_status("Context compaction requested", StatusLevel::Info);
+                Some((MessageKind::System, "Context compaction requested".to_string()))
+            }
             "/help" => {
                 let help = "\
 Available commands:
   /model [provider/model]  — show or switch model
+  /connect [provider]      — add provider credentials
+  /providers               — show provider status
+  /disconnect <provider>   — remove provider credentials
   /tools                   — list all tools
   /tools reload            — reload tools from disk
   /tools init              — create tool templates
-  /mcp list                — show MCP servers
+  /mcp [list]              — show MCP servers
   /mcp reload              — reload MCP config
-  /help                    — show this help";
+  /status                  — show session info
+  /diff                    — show git changes
+  /clear                   — clear chat
+  /compact                 — compact context
+  /help                    — show this help
+
+Keyboard shortcuts:
+  Ctrl+K / Ctrl+/          — command palette
+  Ctrl+M                   — model selector
+  Ctrl+N                   — new session
+  Ctrl+Y                   — toggle YOLO mode
+  Ctrl+S                   — toggle sidebar
+  Ctrl+C                   — cancel / clear input
+  Ctrl+D                   — quit";
                 Some((MessageKind::System, help.to_string()))
             }
             _ => Some((MessageKind::Error, format!("Unknown command: {cmd}. Type /help for available commands."))),
@@ -165,7 +318,16 @@ Available commands:
     pub(crate) fn execute_command_action(&mut self, action: Action) {
         match action {
             Action::ModelSwitch => {
-                self.state.model_selector = Some(ModelSelectorState::default());
+                // Load credentials for dynamic model list
+                let credentials = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(ava_config::CredentialStore::load_default())
+                })
+                .unwrap_or_default();
+                self.state.model_selector = Some(ModelSelectorState::from_credentials(
+                    &credentials,
+                    &self.state.agent.recent_models,
+                ));
                 self.state.active_modal = Some(ModalType::ModelSelector);
             }
             Action::NewSession => {

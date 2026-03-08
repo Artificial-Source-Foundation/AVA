@@ -1,8 +1,4 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpListener;
-use tokio::time::{timeout, Duration};
+use serde::Serialize;
 
 #[derive(Serialize)]
 pub struct OAuthCallback {
@@ -10,15 +6,7 @@ pub struct OAuthCallback {
     pub state: String,
 }
 
-const SUCCESS_HTML: &str = r#"<!DOCTYPE html>
-<html><head><title>Authorization Complete</title>
-<style>body{font-family:system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#0a0a0f;color:#e4e4e7}
-.card{text-align:center;padding:2rem}h1{font-size:1.25rem;margin-bottom:0.5rem}p{color:#71717a;font-size:0.875rem}</style>
-</head><body><div class="card"><h1>Authorization successful</h1><p>You can close this tab and return to AVA.</p></div></body></html>"#;
-
-const TIMEOUT_SECS: u64 = 120;
-
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub struct CopilotDeviceCodeResponse {
     pub device_code: String,
     pub user_code: String,
@@ -27,7 +15,7 @@ pub struct CopilotDeviceCodeResponse {
     pub interval: Option<u64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub struct CopilotDevicePollResponse {
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
@@ -36,77 +24,17 @@ pub struct CopilotDevicePollResponse {
 }
 
 /// Start a one-shot HTTP server on the given port to catch an OAuth callback.
-/// Returns the `code` and `state` query params from the redirect.
+/// Delegates to the shared `ava-auth` crate.
 #[tauri::command]
 pub async fn oauth_listen(port: u16) -> Result<OAuthCallback, String> {
-    let listener = TcpListener::bind(format!("127.0.0.1:{port}"))
+    let cb = ava_auth::callback::listen_for_callback(port, "/auth/callback", 120)
         .await
-        .map_err(|e| format!("Bind error on port {port}: {e}"))?;
+        .map_err(|e| e.to_string())?;
 
-    // Wait for a single connection with timeout
-    let (mut stream, _) = timeout(Duration::from_secs(TIMEOUT_SECS), listener.accept())
-        .await
-        .map_err(|_| "OAuth callback timed out. Please try again.".to_string())?
-        .map_err(|e| format!("Accept error: {e}"))?;
-
-    // Read the HTTP request line
-    let (reader_half, mut writer_half) = stream.split();
-    let reader = BufReader::new(reader_half);
-    let mut lines = reader.lines();
-
-    let request_line = lines
-        .next_line()
-        .await
-        .map_err(|e| format!("Read error: {e}"))?
-        .ok_or("No request received")?;
-
-    // Parse query params from "GET /callback?code=X&state=Y HTTP/1.1"
-    let path = request_line
-        .split_whitespace()
-        .nth(1)
-        .ok_or("Invalid HTTP request")?
-        .to_string();
-
-    let query = path
-        .split('?')
-        .nth(1)
-        .ok_or("No query parameters in callback")?;
-
-    let params: HashMap<String, String> = query
-        .split('&')
-        .filter_map(|pair| {
-            let mut parts = pair.splitn(2, '=');
-            Some((parts.next()?.to_string(), parts.next()?.to_string()))
-        })
-        .collect();
-
-    let code = params
-        .get("code")
-        .ok_or("Missing 'code' parameter in callback")?
-        .clone();
-    let state = params
-        .get("state")
-        .ok_or("Missing 'state' parameter in callback")?
-        .clone();
-
-    // Drain remaining headers before writing response
-    loop {
-        match lines.next_line().await {
-            Ok(Some(line)) if !line.is_empty() => continue,
-            _ => break,
-        }
-    }
-
-    // Send success response
-    let response = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-        SUCCESS_HTML.len(),
-        SUCCESS_HTML
-    );
-    let _ = writer_half.write_all(response.as_bytes()).await;
-    let _ = writer_half.flush().await;
-
-    Ok(OAuthCallback { code, state })
+    Ok(OAuthCallback {
+        code: cb.code,
+        state: cb.state,
+    })
 }
 
 #[tauri::command]
@@ -114,27 +42,20 @@ pub async fn oauth_copilot_device_start(
     client_id: String,
     scope: String,
 ) -> Result<CopilotDeviceCodeResponse, String> {
-    let client = reqwest::Client::new();
-    let response = client
-        .post("https://github.com/login/device/code")
-        .header("Accept", "application/json")
-        .form(&[("client_id", client_id), ("scope", scope)])
-        .send()
-        .await
-        .map_err(|e| format!("Copilot device code request failed: {e}"))?;
+    let config = ava_auth::config::oauth_config("copilot")
+        .ok_or_else(|| "No OAuth config for copilot".to_string())?;
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!(
-            "Copilot device code request failed ({status}): {body}"
-        ));
-    }
-
-    response
-        .json::<CopilotDeviceCodeResponse>()
+    let device = ava_auth::device_code::request_device_code(config)
         .await
-        .map_err(|e| format!("Failed to parse Copilot device code response: {e}"))
+        .map_err(|e| e.to_string())?;
+
+    Ok(CopilotDeviceCodeResponse {
+        device_code: device.device_code,
+        user_code: device.user_code,
+        verification_uri: device.verification_uri,
+        expires_in: device.expires_in,
+        interval: Some(device.interval),
+    })
 }
 
 #[tauri::command]
@@ -142,30 +63,31 @@ pub async fn oauth_copilot_device_poll(
     client_id: String,
     device_code: String,
 ) -> Result<CopilotDevicePollResponse, String> {
-    let client = reqwest::Client::new();
-    let response = client
-        .post("https://github.com/login/oauth/access_token")
-        .header("Accept", "application/json")
-        .form(&[
-            ("client_id", client_id),
-            ("device_code", device_code),
-            (
-                "grant_type",
-                "urn:ietf:params:oauth:grant-type:device_code".to_string(),
-            ),
-        ])
-        .send()
-        .await
-        .map_err(|e| format!("Copilot device poll request failed: {e}"))?;
+    let config = ava_auth::config::oauth_config("copilot")
+        .ok_or_else(|| "No OAuth config for copilot".to_string())?;
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        return Err(format!("Copilot device poll failed ({status}): {body}"));
+    let result = ava_auth::device_code::poll_device_code(config, &device_code, 5, 900)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    match result {
+        Some(tokens) => Ok(CopilotDevicePollResponse {
+            access_token: Some(tokens.access_token),
+            refresh_token: tokens.refresh_token,
+            expires_in: tokens.expires_at.map(|at| {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                at.saturating_sub(now)
+            }),
+            error: None,
+        }),
+        None => Ok(CopilotDevicePollResponse {
+            access_token: None,
+            refresh_token: None,
+            expires_in: None,
+            error: Some("expired_token".to_string()),
+        }),
     }
-
-    response
-        .json::<CopilotDevicePollResponse>()
-        .await
-        .map_err(|e| format!("Failed to parse Copilot device poll response: {e}"))
 }

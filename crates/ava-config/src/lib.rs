@@ -13,9 +13,11 @@ pub mod credential_commands;
 pub mod credentials;
 
 pub use credential_commands::{
-    execute_credential_command, execute_credential_command_with_tester, CredentialCommand,
+    execute_credential_command, execute_credential_command_with_tester, provider_name, redact_key,
+    CredentialCommand,
 };
-pub use credentials::{CredentialStore, ProviderCredential};
+pub use credentials::{known_providers, standard_env_var, CredentialStore, ProviderCredential};
+pub use ava_auth;
 
 /// LLM provider configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -378,6 +380,10 @@ mod tests {
                 api_key: "sk-config-manager".to_string(),
                 base_url: None,
                 org_id: None,
+                oauth_token: None,
+                oauth_refresh_token: None,
+                oauth_expires_at: None,
+                oauth_account_id: None,
             },
         );
         credentials.save(&credentials_path).await.unwrap();
@@ -414,6 +420,10 @@ mod tests {
                         api_key: "sk-anthropic".to_string(),
                         base_url: None,
                         org_id: None,
+                        oauth_token: None,
+                        oauth_refresh_token: None,
+                        oauth_expires_at: None,
+                        oauth_account_id: None,
                     },
                 );
             })

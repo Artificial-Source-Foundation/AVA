@@ -17,6 +17,10 @@ fn credential(api_key: &str) -> ProviderCredential {
         api_key: api_key.to_string(),
         base_url: None,
         org_id: None,
+        oauth_token: None,
+        oauth_refresh_token: None,
+        oauth_expires_at: None,
+        oauth_account_id: None,
     }
 }
 
@@ -118,6 +122,10 @@ fn create_provider_base_url_override_openrouter() {
             api_key: "or-key-1234".to_string(),
             base_url: Some("https://openrouter.example/api".to_string()),
             org_id: None,
+            oauth_token: None,
+            oauth_refresh_token: None,
+            oauth_expires_at: None,
+            oauth_account_id: None,
         },
     );
 
@@ -135,6 +143,10 @@ fn create_provider_base_url_override_ollama() {
             api_key: String::new(),
             base_url: Some("http://ollama.internal:11434".to_string()),
             org_id: None,
+            oauth_token: None,
+            oauth_refresh_token: None,
+            oauth_expires_at: None,
+            oauth_account_id: None,
         },
     );
 
@@ -184,6 +196,10 @@ async fn router_available_providers_matches_configured_credentials() {
             api_key: String::new(),
             base_url: Some("http://localhost:11434".to_string()),
             org_id: None,
+            oauth_token: None,
+            oauth_refresh_token: None,
+            oauth_expires_at: None,
+            oauth_account_id: None,
         },
     );
     let router = ModelRouter::new(store);

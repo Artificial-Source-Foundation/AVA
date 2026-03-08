@@ -8,6 +8,7 @@
 #![allow(dead_code)]
 
 pub mod app;
+pub mod auth;
 #[cfg(feature = "voice")]
 pub mod audio;
 pub mod config;

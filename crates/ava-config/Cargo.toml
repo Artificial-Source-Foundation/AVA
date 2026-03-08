@@ -13,6 +13,7 @@ serde_yaml.workspace = true
 tokio.workspace = true
 dirs.workspace = true
 ava-types = { path = "../ava-types" }
+ava-auth = { path = "../ava-auth" }
 
 [dev-dependencies]
 tempfile = "3.0"

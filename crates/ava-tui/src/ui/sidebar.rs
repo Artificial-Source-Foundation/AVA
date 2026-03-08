@@ -1,6 +1,6 @@
 use crate::app::AppState;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
@@ -13,58 +13,46 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         .map(|s| s.id.to_string()[..8].to_string())
         .unwrap_or_else(|| "none".to_string());
 
+    let label_style = Style::default()
+        .fg(state.theme.text_muted)
+        .add_modifier(Modifier::BOLD);
+    let value_style = Style::default().fg(state.theme.text);
+    let dim_style = Style::default().fg(state.theme.text_dimmed);
+
     let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled("Session", label_style)),
+        Line::from(Span::styled(format!("  {session_label}"), value_style)),
+        Line::from(""),
+        Line::from(Span::styled("Provider", label_style)),
+        Line::from(Span::styled(format!("  {}", state.agent.provider_name), value_style)),
+        Line::from(Span::styled(format!("  {}", state.agent.model_name), value_style)),
+        Line::from(""),
+        Line::from(Span::styled("Tokens", label_style)),
+        Line::from(Span::styled(format!("  in:  {}", state.agent.tokens_used.input), value_style)),
+        Line::from(Span::styled(format!("  out: {}", state.agent.tokens_used.output), value_style)),
+        Line::from(""),
+        Line::from(Span::styled("Agent", label_style)),
         Line::from(Span::styled(
-            "Session",
-            Style::default().fg(state.theme.primary),
+            format!("  Turn {}/{}", state.agent.current_turn, state.agent.max_turns),
+            value_style,
         )),
-        Line::raw(format!("  {session_label}")),
-        Line::raw(""),
         Line::from(Span::styled(
-            "Provider",
-            Style::default().fg(state.theme.primary),
+            format!("  {}", state.agent.activity),
+            value_style,
         )),
-        Line::raw(format!("  {}", state.agent.provider_name)),
-        Line::raw(format!("  {}", state.agent.model_name)),
-        Line::raw(""),
-        Line::from(Span::styled(
-            "Tokens",
-            Style::default().fg(state.theme.primary),
-        )),
-        Line::raw(format!("  in:  {}", state.agent.tokens_used.input)),
-        Line::raw(format!("  out: {}", state.agent.tokens_used.output)),
-        Line::raw(""),
-        Line::from(Span::styled(
-            "Agent",
-            Style::default().fg(state.theme.primary),
-        )),
-        Line::raw(format!(
-            "  Turn {}/{}",
-            state.agent.current_turn, state.agent.max_turns
-        )),
-        Line::raw(format!("  {}", state.agent.activity)),
-        Line::raw(""),
-        Line::from(Span::styled(
-            "Messages",
-            Style::default().fg(state.theme.primary),
-        )),
-        Line::raw(format!("  {} total", state.messages.messages.len())),
-        Line::raw(""),
-        Line::from(Span::styled(
-            "Keybindings",
-            Style::default().fg(state.theme.primary),
-        )),
-        Line::raw("  Ctrl+/  palette"),
-        Line::raw("  Ctrl+D  quit"),
-        Line::raw("  Ctrl+C  cancel"),
-        Line::raw("  Ctrl+N  new session"),
-        Line::raw("  Ctrl+B  sidebar"),
+        Line::from(""),
+        Line::from(Span::styled("Keys", label_style)),
+        Line::from(Span::styled("  Ctrl+/  palette", dim_style)),
+        Line::from(Span::styled("  Ctrl+D  quit", dim_style)),
+        Line::from(Span::styled("  Ctrl+C  cancel", dim_style)),
+        Line::from(Span::styled("  Ctrl+N  new session", dim_style)),
+        Line::from(Span::styled("  Ctrl+B  sidebar", dim_style)),
     ];
 
     let widget = Paragraph::new(lines).block(
         Block::default()
-            .title("Info")
-            .borders(Borders::ALL)
+            .borders(Borders::LEFT)
             .border_style(Style::default().fg(state.theme.border)),
     );
     frame.render_widget(widget, area);

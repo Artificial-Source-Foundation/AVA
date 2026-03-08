@@ -17,6 +17,7 @@ use crate::ui;
 use crate::ui::status_bar::{StatusLevel, StatusMessage};
 use crate::widgets::command_palette::CommandPaletteState;
 use crate::widgets::model_selector::ModelSelectorState;
+use crate::widgets::provider_connect::ProviderConnectState;
 use crate::widgets::session_list::SessionListState;
 use crate::widgets::tool_list::ToolListState;
 use crate::widgets::token_buffer::TokenBuffer;
@@ -47,6 +48,7 @@ pub struct AppState {
     pub session_list: SessionListState,
     pub model_selector: Option<ModelSelectorState>,
     pub tool_list: ToolListState,
+    pub provider_connect: Option<ProviderConnectState>,
     pub active_modal: Option<ModalType>,
     pub status_message: Option<StatusMessage>,
     pub voice: VoiceState,
@@ -59,6 +61,7 @@ pub enum ModalType {
     ToolApproval,
     ModelSelector,
     ToolList,
+    ProviderConnect,
 }
 
 pub struct App {
@@ -116,6 +119,7 @@ impl App {
             session_list: SessionListState::default(),
             model_selector: None,
             tool_list: ToolListState::default(),
+            provider_connect: None,
             active_modal: None,
             status_message: None,
             voice: VoiceState {
@@ -329,9 +333,7 @@ impl App {
                     self.set_status("New session created", StatusLevel::Info);
                 }
                 Action::SessionList => {
-                    let _ = self.state.session.list_recent(50);
-                    self.state.session_list.open = true;
-                    self.state.active_modal = Some(ModalType::SessionList);
+                    self.execute_command_action(Action::SessionList);
                 }
                 Action::VoiceToggle => {
                     #[cfg(feature = "voice")]
@@ -350,6 +352,16 @@ impl App {
                 }
             }
             KeyCode::Enter => self.state.input.insert_char('\n'),
+            KeyCode::Char('/')
+                if key.modifiers == KeyModifiers::NONE
+                    && self.state.input.buffer.is_empty() =>
+            {
+                // '/' on empty input opens command palette
+                self.state.command_palette.open = true;
+                self.state.command_palette.query.clear();
+                self.state.command_palette.selected = 0;
+                self.state.active_modal = Some(ModalType::CommandPalette);
+            }
             KeyCode::Char(ch)
                 if key.modifiers == KeyModifiers::NONE
                     || key.modifiers == KeyModifiers::SHIFT =>
@@ -439,6 +451,7 @@ impl App {
             session_list: SessionListState::default(),
             model_selector: None,
             tool_list: ToolListState::default(),
+            provider_connect: None,
             active_modal: None,
             status_message: None,
             voice: VoiceState::default(),

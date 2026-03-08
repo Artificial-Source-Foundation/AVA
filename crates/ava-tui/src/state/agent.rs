@@ -48,6 +48,8 @@ pub struct AgentState {
     pub workflow_phase: Option<(usize, usize, String)>,
     /// Workflow iteration: (current, max)
     pub workflow_iteration: Option<(usize, usize)>,
+    /// Recently used models (most recent first, max 5).
+    pub recent_models: Vec<String>,
     cancel: Option<CancellationToken>,
     task: Option<tokio::task::JoinHandle<()>>,
 }
@@ -91,6 +93,7 @@ impl AgentState {
             tool_start: None,
             workflow_phase: None,
             workflow_iteration: None,
+            recent_models: Vec::new(),
             cancel: None,
             task: None,
         })
@@ -158,6 +161,13 @@ impl AgentState {
             .map_err(|e| e.to_string())?;
         self.provider_name = provider.to_string();
         self.model_name = model.to_string();
+
+        // Track in recent models (most recent first, max 5)
+        let key = format!("{provider}/{model}");
+        self.recent_models.retain(|m| m != &key);
+        self.recent_models.insert(0, key);
+        self.recent_models.truncate(5);
+
         Ok(format!("{provider}/{model}"))
     }
 
@@ -212,6 +222,7 @@ impl AgentState {
             tool_start: None,
             workflow_phase: None,
             workflow_iteration: None,
+            recent_models: Vec::new(),
             cancel: None,
             task: None,
         }

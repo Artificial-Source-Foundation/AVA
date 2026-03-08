@@ -2,7 +2,7 @@ use ava_tools::registry::ToolSource;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use crate::state::theme::Theme;
@@ -115,14 +115,7 @@ pub fn render_tool_list(frame: &mut Frame<'_>, area: Rect, state: &ToolListState
         }
     }
 
-    let widget = Paragraph::new(lines)
-        .scroll((state.scroll as u16, 0))
-        .block(
-            Block::default()
-                .title("Tools")
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.border)),
-        );
+    let widget = Paragraph::new(lines).scroll((state.scroll as u16, 0));
     frame.render_widget(widget, area);
 }
 

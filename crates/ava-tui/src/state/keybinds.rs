@@ -78,9 +78,8 @@ fn ctrl(code: char) -> KeyBinding {
 
 pub fn default_keybinds() -> HashMap<Action, Vec<KeyBinding>> {
     HashMap::from([
-        (Action::CommandPalette, vec![ctrl('/')]),
+        (Action::CommandPalette, vec![ctrl('/'), ctrl('k')]),
         (Action::NewSession, vec![ctrl('n')]),
-        (Action::SessionList, vec![ctrl('k')]),
         (Action::ModelSwitch, vec![ctrl('m')]),
         (
             Action::ScrollUp,

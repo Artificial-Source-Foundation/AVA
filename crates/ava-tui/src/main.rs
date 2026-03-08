@@ -1,4 +1,5 @@
 use ava_tui::app::App;
+use ava_tui::auth::run_auth;
 use ava_tui::config::cli::{CliArgs, Command};
 use ava_tui::headless::run_headless;
 use ava_tui::review::run_review;
@@ -18,8 +19,10 @@ async fn main() -> Result<()> {
     let cli = CliArgs::parse();
 
     // Subcommand routing
-    if let Some(Command::Review(args)) = cli.command.clone() {
-        return run_review(args).await;
+    match cli.command.clone() {
+        Some(Command::Review(args)) => return run_review(args).await,
+        Some(Command::Auth { action }) => return run_auth(action).await,
+        None => {}
     }
 
     if cli.headless || cli.json || !std::io::stdout().is_terminal() {

@@ -49,6 +49,7 @@ ava-llm = { path = "../crates/ava-llm" }
 ava-mcp = { path = "../crates/ava-mcp" }
 ava-session = { path = "../crates/ava-session" }
 ava-codebase = { path = "../crates/ava-codebase" }
+ava-auth = { path = "../crates/ava-auth" }
 
 [profile.release]
 lto = true

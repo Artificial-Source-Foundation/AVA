@@ -34,7 +34,9 @@ pub fn render_diff(old: &str, new: &str, theme: &Theme) -> Vec<Line<'static>> {
                     let value = change.value().trim_end_matches('\n');
                     lines.push(Line::from(Span::styled(
                         format!("-{value}"),
-                        Style::default().fg(theme.diff_removed),
+                        Style::default()
+                            .fg(theme.diff_removed)
+                            .bg(theme.diff_removed_bg),
                     )));
                     i += 1;
                 }
@@ -43,7 +45,9 @@ pub fn render_diff(old: &str, new: &str, theme: &Theme) -> Vec<Line<'static>> {
                 let value = change.value().trim_end_matches('\n');
                 lines.push(Line::from(Span::styled(
                     format!("+{value}"),
-                    Style::default().fg(theme.diff_added),
+                    Style::default()
+                        .fg(theme.diff_added)
+                        .bg(theme.diff_added_bg),
                 )));
                 i += 1;
             }
@@ -59,32 +63,27 @@ fn word_level_spans(
     theme: &Theme,
 ) -> (Vec<Span<'static>>, Vec<Span<'static>>) {
     let word_diff = TextDiff::from_words(old_line, new_line);
-    let mut del_spans: Vec<Span<'static>> = vec![Span::styled(
-        "-".to_string(),
-        Style::default().fg(theme.diff_removed),
-    )];
-    let mut add_spans: Vec<Span<'static>> = vec![Span::styled(
-        "+".to_string(),
-        Style::default().fg(theme.diff_added),
-    )];
+    let del_base = Style::default()
+        .fg(theme.diff_removed)
+        .bg(theme.diff_removed_bg);
+    let add_base = Style::default()
+        .fg(theme.diff_added)
+        .bg(theme.diff_added_bg);
+
+    let mut del_spans: Vec<Span<'static>> = vec![Span::styled("-".to_string(), del_base)];
+    let mut add_spans: Vec<Span<'static>> = vec![Span::styled("+".to_string(), add_base)];
 
     for change in word_diff.iter_all_changes() {
         let value = change.value().to_string();
         match change.tag() {
             ChangeTag::Equal => {
-                del_spans.push(Span::styled(
-                    value.clone(),
-                    Style::default().fg(theme.diff_removed),
-                ));
-                add_spans.push(Span::styled(
-                    value,
-                    Style::default().fg(theme.diff_added),
-                ));
+                del_spans.push(Span::styled(value.clone(), del_base));
+                add_spans.push(Span::styled(value, add_base));
             }
             ChangeTag::Delete => {
                 del_spans.push(Span::styled(
                     value,
-                    Style::default()
+                    del_base
                         .fg(theme.diff_removed_highlight)
                         .add_modifier(Modifier::BOLD),
                 ));
@@ -92,7 +91,7 @@ fn word_level_spans(
             ChangeTag::Insert => {
                 add_spans.push(Span::styled(
                     value,
-                    Style::default()
+                    add_base
                         .fg(theme.diff_added_highlight)
                         .add_modifier(Modifier::BOLD),
                 ));

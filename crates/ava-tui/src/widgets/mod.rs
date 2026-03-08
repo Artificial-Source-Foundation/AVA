@@ -6,6 +6,7 @@ pub mod diff_preview;
 pub mod message;
 pub mod message_list;
 pub mod model_selector;
+pub mod provider_connect;
 pub mod session_list;
 pub mod streaming_text;
 pub mod token_buffer;

@@ -14,9 +14,59 @@ pub struct ProviderCredential {
     /// API key or token.
     pub api_key: String,
     /// Optional base URL override (e.g., custom OpenAI-compatible endpoint).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
     /// Optional organization ID (OpenAI).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub org_id: Option<String>,
+    /// OAuth access token (for PKCE/device code providers).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_token: Option<String>,
+    /// OAuth refresh token for automatic renewal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_refresh_token: Option<String>,
+    /// OAuth token expiry as Unix timestamp (seconds).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_expires_at: Option<u64>,
+    /// OAuth account identifier (e.g., ChatGPT account ID).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_account_id: Option<String>,
+}
+
+impl ProviderCredential {
+    /// Whether this credential has OAuth tokens configured.
+    pub fn is_oauth_configured(&self) -> bool {
+        self.oauth_token.is_some()
+    }
+
+    /// Whether the OAuth token has expired.
+    pub fn is_oauth_expired(&self) -> bool {
+        match self.oauth_expires_at {
+            Some(expires_at) => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                // Refresh 30 seconds before actual expiry
+                now + 30 >= expires_at
+            }
+            None => false, // No expiry set — assume valid
+        }
+    }
+
+    /// Returns the effective API key: OAuth token (if valid) > api_key.
+    pub fn effective_api_key(&self) -> Option<&str> {
+        if let Some(ref token) = self.oauth_token {
+            if !self.is_oauth_expired() {
+                return Some(token.as_str());
+            }
+        }
+        if self.api_key.trim().is_empty() {
+            None
+        } else {
+            Some(&self.api_key)
+        }
+    }
 }
 
 /// Credential store loaded from ~/.ava/credentials.json.
@@ -100,6 +150,10 @@ impl CredentialStore {
                         api_key: String::new(),
                         base_url: None,
                         org_id: None,
+                        oauth_token: None,
+                        oauth_refresh_token: None,
+                        oauth_expires_at: None,
+                        oauth_account_id: None,
                     }
                 });
                 credential.api_key = api_key;
@@ -116,6 +170,10 @@ impl CredentialStore {
                             api_key: String::new(),
                             base_url: None,
                             org_id: None,
+                            oauth_token: None,
+                            oauth_refresh_token: None,
+                            oauth_expires_at: None,
+                            oauth_account_id: None,
                         }
                     });
                     credential.api_key = api_key;
@@ -151,8 +209,9 @@ impl CredentialStore {
         for provider in self.providers() {
             if let Some(credential) = self.get(provider) {
                 let has_key = !credential.api_key.trim().is_empty();
+                let has_oauth = credential.is_oauth_configured();
                 let has_base_url = credential.base_url.is_some();
-                if has_key || (provider == "ollama" && has_base_url) {
+                if has_key || has_oauth || (provider == "ollama" && has_base_url) {
                     configured.insert(provider);
                 }
             }
@@ -161,8 +220,9 @@ impl CredentialStore {
         for &provider in known_providers() {
             if let Some(credential) = self.get(provider) {
                 let has_key = !credential.api_key.trim().is_empty();
+                let has_oauth = credential.is_oauth_configured();
                 let has_base_url = credential.base_url.is_some();
-                if has_key || (provider == "ollama" && has_base_url) {
+                if has_key || has_oauth || (provider == "ollama" && has_base_url) {
                     configured.insert(provider);
                 }
             }
@@ -181,17 +241,44 @@ impl CredentialStore {
     }
 }
 
-fn known_providers() -> &'static [&'static str] {
-    &["anthropic", "openai", "openrouter", "gemini", "ollama"]
+pub fn known_providers() -> &'static [&'static str] {
+    &[
+        "anthropic",
+        "openai",
+        "openrouter",
+        "copilot",
+        "gemini",
+        "mistral",
+        "groq",
+        "xai",
+        "deepinfra",
+        "together",
+        "cerebras",
+        "perplexity",
+        "cohere",
+        "azure",
+        "bedrock",
+        "ollama",
+    ]
 }
 
-fn standard_env_var(provider: &str) -> Option<&'static str> {
+pub fn standard_env_var(provider: &str) -> Option<&'static str> {
     match provider {
         "anthropic" => Some("ANTHROPIC_API_KEY"),
         "openai" => Some("OPENAI_API_KEY"),
         "openrouter" => Some("OPENROUTER_API_KEY"),
         "gemini" => Some("GEMINI_API_KEY"),
         "ollama" => Some("OLLAMA_API_KEY"),
+        "mistral" => Some("MISTRAL_API_KEY"),
+        "groq" => Some("GROQ_API_KEY"),
+        "xai" => Some("XAI_API_KEY"),
+        "deepinfra" => Some("DEEPINFRA_API_KEY"),
+        "together" => Some("TOGETHER_API_KEY"),
+        "cerebras" => Some("CEREBRAS_API_KEY"),
+        "perplexity" => Some("PERPLEXITY_API_KEY"),
+        "cohere" => Some("COHERE_API_KEY"),
+        "azure" => Some("AZURE_OPENAI_API_KEY"),
+        "bedrock" => Some("AWS_BEARER_TOKEN_BEDROCK"),
         _ => None,
     }
 }
@@ -214,6 +301,10 @@ mod tests {
             api_key: key.to_string(),
             base_url: None,
             org_id: None,
+            oauth_token: None,
+            oauth_refresh_token: None,
+            oauth_expires_at: None,
+            oauth_account_id: None,
         }
     }
 
@@ -243,6 +334,10 @@ mod tests {
                 api_key: "or-key-1234".to_string(),
                 base_url: Some("https://openrouter.ai/api".to_string()),
                 org_id: None,
+                oauth_token: None,
+                oauth_refresh_token: None,
+                oauth_expires_at: None,
+                oauth_account_id: None,
             },
         );
         store.save(&path).await.unwrap();

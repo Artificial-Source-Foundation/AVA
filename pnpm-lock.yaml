@@ -175,6 +175,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@ava/core-v2':
+        specifier: workspace:*
+        version: link:../core-v2
       '@modelcontextprotocol/sdk':
         specifier: ^1.12.3
         version: 1.25.3(hono@4.11.7)(zod@4.3.6)

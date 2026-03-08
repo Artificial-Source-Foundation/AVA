@@ -7,7 +7,7 @@ use ava_sandbox::{execute_plan, select_backend, SandboxPolicy, SandboxRequest};
 use ava_types::{AvaError, ToolResult};
 use serde_json::{json, Value};
 
-use crate::registry::Tool;
+use crate::registry::{Tool, ToolOutput};
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 const MAX_OUTPUT_BYTES: usize = 100 * 1024;
@@ -129,6 +129,55 @@ impl Tool for BashTool {
             content: rendered,
             is_error: output.exit_code != 0,
         })
+    }
+
+    async fn execute_streaming(&self, args: Value) -> ava_types::Result<ToolOutput> {
+        let command = args
+            .get("command")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                AvaError::ValidationError("missing required field: command".to_string())
+            })?
+            .to_string();
+
+        if DANGEROUS_PATTERNS.iter().any(|p| command.contains(p)) {
+            return Err(AvaError::PermissionDenied(
+                "Refusing to run dangerous command".to_string(),
+            ));
+        }
+
+        // For install-class or complex commands, fall back to complete
+        if is_install_class(&command) {
+            return self.execute(args).await.map(ToolOutput::Complete);
+        }
+
+        let final_command = if let Some(cwd) = args.get("cwd").and_then(Value::as_str) {
+            format!("cd {} && {command}", shell_single_quote(cwd))
+        } else {
+            command
+        };
+
+        let mut child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(&final_command)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| AvaError::PlatformError(e.to_string()))?;
+
+        let stdout = child.stdout.take();
+        let stream = async_stream::stream! {
+            if let Some(stdout) = stdout {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let reader = BufReader::new(stdout);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    yield line;
+                }
+            }
+        };
+
+        Ok(ToolOutput::Streaming(Box::pin(stream)))
     }
 }
 

@@ -27,7 +27,7 @@ async fn agent_stack_new_initializes_components() {
     .await
     .expect("stack init should succeed");
 
-    let tools = stack.tools.list_tools();
+    let tools = stack.tools.read().await.list_tools();
     let names = tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>();
     assert!(names.contains(&"read"));
     assert!(names.contains(&"write"));

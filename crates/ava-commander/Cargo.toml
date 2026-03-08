@@ -1,7 +1,8 @@
 [package]
 name = "ava-commander"
-version = "2.0.0"
-edition = "2021"
+description = "Multi-agent orchestration with domain-specific leads"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 async-trait.workspace = true
@@ -12,8 +13,11 @@ ava-llm = { path = "../ava-llm" }
 ava-platform = { path = "../ava-platform" }
 ava-tools = { path = "../ava-tools" }
 ava-types = { path = "../ava-types" }
+regex = "1"
 futures.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
 tokio.workspace = true
 tokio-util = { version = "0.7", features = ["rt"] }
 uuid.workspace = true

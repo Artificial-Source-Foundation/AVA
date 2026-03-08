@@ -1,10 +1,17 @@
-<!-- Last verified: 2026-03-05. Run 'npm run test:run && cargo test --workspace' to revalidate. -->
+<!-- Last verified: 2026-03-08. Run 'npm run test:run && cargo test --workspace' to revalidate. -->
 
-# AVA Architecture & Conventions
+# AVA Architecture & Conventions (v2.1)
 
 ## Quick Commands
 
 ```bash
+# Rust CLI/agent (primary)
+cargo test --workspace
+cargo clippy --workspace
+cargo run --bin ava             # interactive TUI
+cargo run --bin ava -- --help   # see all flags
+
+# Desktop app (TypeScript + Tauri)
 npm run tauri dev
 npm run lint
 npm run format:check
@@ -12,18 +19,19 @@ npx tsc --noEmit
 npm run test:run
 ```
 
-If `npm run tauri dev` fails with `ENOSPC` watcher errors on Linux, see `docs/troubleshooting.md`.
+If `npm run tauri dev` fails with `ENOSPC` watcher errors on Linux, see `docs/troubleshooting/`.
 
 Release verification:
 
 ```bash
-npm run tauri build
 cargo test --workspace
+cargo clippy --workspace
+npm run tauri build
 ```
 
 ## Architecture
 
-AVA is migrating to a **Rust-first architecture**. All new CLI/agent code MUST be Rust.
+AVA uses a **Rust-first architecture**. All new CLI/agent code MUST be Rust.
 
 - **CLI/TUI**: Pure Rust binary (`crates/ava-tui/`) — Ratatui + Crossterm + Tokio
 - **Agent runtime**: Rust (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-commander/`)
@@ -54,7 +62,11 @@ AVA/
 │   ├── ava-db/               # SQLite connection pool
 │   ├── ava-types/            # Shared types
 │   ├── ava-logger/           # Structured logging
-│   └── ...                   # ava-extensions, ava-validator, ava-mcp, ava-lsp
+│   ├── ava-validator/        # Validation utilities
+│   ├── ava-lsp/              # LSP client integration
+│   ├── ava-mcp/              # MCP (Model Context Protocol) support
+│   ├── ava-extensions/       # Extension system
+│   └── ava-cli-providers/    # CLI provider resolution
 ├── packages/                 # TypeScript — DESKTOP ONLY (do not use for CLI)
 │   ├── core-v2/              # desktop orchestration kernel
 │   ├── extensions/           # desktop extension modules
@@ -67,21 +79,24 @@ AVA/
 └── tests/
 ```
 
-## Tool Surface (~41)
+## Tool Surface (19 built-in)
 
-| Group | Count | Notes |
+| Group | Count | Tools |
 |---|---:|---|
-| Core tools | 6 | read, write, edit, bash, glob, grep |
-| Extended tools | ~16 | multiedit, apply-patch, task, webfetch/search, question, completion, plan_enter, plan_exit |
-| Git tools | 4 | status/diff/commit helper flows |
-| Memory tools | 4 | remember/recall/search/recent |
-| LSP tools | 9 | diagnostics, definition, references, rename, hover, symbols, format |
-| Recall tools | 1 | recall |
-| Delegate tools | 4 | delegate_coder, delegate_reviewer, delegate_researcher, delegate_explorer |
+| Core | 11 | read, write, edit, bash, glob, grep, multiedit, apply_patch, test_runner, lint, diagnostics |
+| Memory | 3 | remember, recall, memory_search |
+| Session | 3 | session_search, session_list, session_load |
+| Codebase | 1 | codebase_search |
+| Git | 1 | git_read (review subcommand only) |
 
-Total: ~41 static tools (plus dynamic MCP and custom tools)
+Total: 19 built-in tools + dynamic MCP tools + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
 
-## Extensions Map (20)
+## Extensions Map (Desktop Only)
+
+The following 20 extensions are part of the **TypeScript desktop layer** (`packages/extensions/`). They do NOT apply to the Rust CLI.
+
+<details>
+<summary>Desktop extensions list</summary>
 
 1. `agent-modes`
 2. `commander`
@@ -104,11 +119,7 @@ Total: ~41 static tools (plus dynamic MCP and custom tools)
 19. `tools-extended`
 20. `validator`
 
-Runtime extension count explanation:
-- Feature extensions: 20 total (always loaded)
-- Provider extensions: ~15 at runtime (sub-extensions within providers/)
-- Disabled in CLI: `lsp`, `mcp`, `server`, `litellm` (4)
-- Typical CLI activation: ~31 extensions (20 + 15 - 4)
+</details>
 
 ## Rust-First Rule
 
@@ -143,7 +154,7 @@ Middleware runs in priority order (lower number = earlier execution):
 | error-recovery | 15 | Checkpoint recovery before destructive actions |
 | lsp-diagnostics | 20 | LSP-based diagnostics validation |
 
-Register middleware via `api.addToolMiddleware({ priority, before, after })`.
+Register middleware via `ToolRegistry::add_middleware()` (Rust) or `api.addToolMiddleware({ priority, before, after })` (desktop TS).
 
 ## Code Style
 
@@ -193,10 +204,33 @@ Register middleware via `api.addToolMiddleware({ priority, before, after })`.
 2. Register on activation
 3. Optionally add Rust hotpath via `src-tauri/src/commands/` + `dispatchCompute`
 
+## CLI Testing
+
+Use OpenRouter for smoke tests. Credentials at `~/.ava/credentials.json`.
+
+```bash
+# Smoke test (cheapest Western SOTA)
+cargo run --bin ava -- "Reply with SMOKE_OK" --headless --provider openrouter --model anthropic/claude-haiku-4.5 --max-turns 3
+
+# Quality test
+cargo run --bin ava -- "goal" --headless --provider openrouter --model anthropic/claude-sonnet-4
+
+# Multi-agent / commander
+cargo run --bin ava -- "goal" --headless --multi-agent --provider openrouter --model anthropic/claude-haiku-4.5
+
+# Workflow pipeline
+cargo run --bin ava -- "goal" --headless --workflow plan-code-review --provider openrouter --model anthropic/claude-haiku-4.5
+```
+
+**Default test model**: `anthropic/claude-haiku-4.5` ($1/$5 per M tokens — cheapest Western SOTA with full tool use support).
+
 ## Documentation Priority
 
-1. `CLAUDE.md` (this file)
-2. `docs/backend.md`
-3. `docs/troubleshooting.md`
-4. `docs/plugins/PLUGIN_SDK.md`
-5. `docs/reference-code/`
+1. `CLAUDE.md` (this file) — architecture, conventions, commands
+2. `AGENTS.md` — AI agent instructions
+3. `docs/development/roadmap.md` — sprint roadmap (11-50+)
+4. `docs/development/test-matrix.md` — E2E test verification
+5. `docs/development/sprints/` — sprint prompts
+6. `docs/development/research/` — competitor analysis
+7. `docs/architecture/` — system design docs
+8. `docs/reference-code/` — competitor source code notes (12 projects)

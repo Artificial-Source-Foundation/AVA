@@ -1,3 +1,10 @@
+//! AVA CLI Providers — external CLI agent integration and discovery.
+//!
+//! This crate enables integration with external CLI-based AI agents:
+//! - CLI agent discovery and configuration
+//! - Bridge for executing external agents
+//! - Runner for managing agent lifecycle
+
 pub mod bridge;
 pub mod config;
 pub mod configs;

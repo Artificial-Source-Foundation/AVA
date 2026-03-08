@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ava_types::{Message, Result, Tool, ToolCall};
+use ava_types::{Message, Result, TokenUsage, Tool, ToolCall};
 use futures::Stream;
 
 /// Response from an LLM that may include both text content and native tool calls.
@@ -10,6 +10,7 @@ use futures::Stream;
 pub struct LLMResponse {
     pub content: String,
     pub tool_calls: Vec<ToolCall>,
+    pub usage: Option<TokenUsage>,
 }
 
 #[async_trait]
@@ -39,6 +40,7 @@ pub trait LLMProvider: Send + Sync {
         Ok(LLMResponse {
             content: text,
             tool_calls: vec![],
+            usage: None,
         })
     }
 }

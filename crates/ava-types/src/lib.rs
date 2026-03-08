@@ -17,6 +17,13 @@ pub use message::{Message, Role};
 pub use session::Session;
 pub use tool::{Tool, ToolCall, ToolResult};
 
+/// Token usage reported by an LLM provider after a request.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct TokenUsage {
+    pub input_tokens: usize,
+    pub output_tokens: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use uuid::Uuid;

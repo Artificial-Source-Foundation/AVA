@@ -37,4 +37,27 @@ pub enum CommanderEvent {
         failed: usize,
         total_turns: usize,
     },
+    // Workflow events
+    PhaseStarted {
+        phase_index: usize,
+        phase_count: usize,
+        phase_name: String,
+        role: String,
+    },
+    PhaseCompleted {
+        phase_index: usize,
+        phase_name: String,
+        turns: usize,
+        output_preview: String,
+    },
+    IterationStarted {
+        iteration: usize,
+        max_iterations: usize,
+    },
+    WorkflowComplete {
+        phases_completed: usize,
+        total_phases: usize,
+        iterations: usize,
+        total_turns: usize,
+    },
 }

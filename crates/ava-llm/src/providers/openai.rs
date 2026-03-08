@@ -165,10 +165,12 @@ impl LLMProvider for OpenAIProvider {
 
         let content = Self::parse_response_payload(&payload).unwrap_or_default();
         let tool_calls = common::parse_openai_tool_calls(&payload);
+        let usage = common::parse_usage(&payload);
 
         Ok(LLMResponse {
             content,
             tool_calls,
+            usage,
         })
     }
 }

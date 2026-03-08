@@ -1,7 +1,0 @@
-{
-  "name": "event-logger",
-  "version": "0.1.0",
-  "description": "Logs all agent events, viewable via /events command",
-  "main": "dist/index.js",
-  "capabilities": ["commands"]
-}

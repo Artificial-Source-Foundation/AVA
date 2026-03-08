@@ -5,3 +5,4 @@ pub mod messages;
 pub mod permission;
 pub mod session;
 pub mod theme;
+pub mod voice;

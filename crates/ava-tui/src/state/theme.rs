@@ -16,6 +16,8 @@ pub struct Theme {
     pub diff_removed: Color,
     pub diff_context: Color,
     pub diff_hunk_header: Color,
+    pub diff_added_highlight: Color,
+    pub diff_removed_highlight: Color,
 }
 
 impl Theme {
@@ -35,6 +37,8 @@ impl Theme {
             diff_removed: Color::Red,
             diff_context: Color::Gray,
             diff_hunk_header: Color::Cyan,
+            diff_added_highlight: Color::LightGreen,
+            diff_removed_highlight: Color::LightRed,
         }
     }
 
@@ -54,6 +58,8 @@ impl Theme {
             diff_removed: Color::Rgb(255, 85, 85),
             diff_context: Color::Rgb(98, 114, 164),
             diff_hunk_header: Color::Rgb(139, 233, 253),
+            diff_added_highlight: Color::Rgb(120, 255, 160),
+            diff_removed_highlight: Color::Rgb(255, 120, 120),
         }
     }
 
@@ -73,6 +79,8 @@ impl Theme {
             diff_removed: Color::Rgb(191, 97, 106),
             diff_context: Color::Rgb(129, 161, 193),
             diff_hunk_header: Color::Rgb(136, 192, 208),
+            diff_added_highlight: Color::Rgb(180, 210, 160),
+            diff_removed_highlight: Color::Rgb(210, 120, 130),
         }
     }
 

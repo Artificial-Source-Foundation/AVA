@@ -1,8 +1,17 @@
+//! AVA Permissions — permission system with rule evaluation.
+//!
+//! This crate implements:
+//! - Static and dynamic permission rules
+//! - Bash command risk classification
+//! - Workspace boundary enforcement
+
 use regex::Regex;
 use std::path::{Component, Path, PathBuf};
 
-pub(crate) mod classifier;
+pub mod audit;
+pub mod classifier;
 pub mod inspector;
+pub mod path_safety;
 pub mod policy;
 pub mod tags;
 
@@ -69,11 +78,13 @@ impl PermissionSystem {
         if tool == "bash" {
             let command = args
                 .first()
-                .ok_or("missing bash command")?
-                .to_ascii_lowercase();
+                .ok_or("missing bash command")?;
 
-            let risk = classify_bash_command(&command);
-            if risk.destructive || risk.network {
+            let classification = classify_bash_command(command);
+            if classification.blocked {
+                return Ok(Some(Action::Deny));
+            }
+            if classification.risk_level >= crate::tags::RiskLevel::High {
                 return Ok(Some(Action::Ask));
             }
         }

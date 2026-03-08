@@ -3,6 +3,7 @@ use ava_agent::stack::{AgentRunResult, AgentStack, AgentStackConfig};
 use color_eyre::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -31,14 +32,22 @@ impl std::fmt::Display for AgentActivity {
 }
 
 pub struct AgentState {
-    stack: Arc<AgentStack>,
+    stack: Option<Arc<AgentStack>>,
     pub is_running: bool,
     pub current_turn: usize,
     pub max_turns: usize,
     pub tokens_used: TokenUsage,
+    pub cost: f64,
     pub activity: AgentActivity,
     pub provider_name: String,
     pub model_name: String,
+    pub mcp_server_count: usize,
+    pub mcp_tool_count: usize,
+    pub tool_start: Option<Instant>,
+    /// Workflow phase: (current_index, total_count, phase_name)
+    pub workflow_phase: Option<(usize, usize, String)>,
+    /// Workflow iteration: (current, max)
+    pub workflow_iteration: Option<(usize, usize)>,
     cancel: Option<CancellationToken>,
     task: Option<tokio::task::JoinHandle<()>>,
 }
@@ -64,18 +73,31 @@ impl AgentState {
         };
         let stack = Arc::new(AgentStack::new(config).await?);
 
+        let mcp_server_count = stack.mcp_server_count().await;
+        let mcp_tool_count = stack.mcp_tool_count().await;
+
         Ok(Self {
-            stack,
+            stack: Some(stack),
             is_running: false,
             current_turn: 0,
             max_turns,
             tokens_used: TokenUsage::default(),
+            cost: 0.0,
             activity: AgentActivity::Idle,
             provider_name,
             model_name,
+            mcp_server_count,
+            mcp_tool_count,
+            tool_start: None,
+            workflow_phase: None,
+            workflow_iteration: None,
             cancel: None,
             task: None,
         })
+    }
+
+    fn stack(&self) -> &Arc<AgentStack> {
+        self.stack.as_ref().expect("AgentStack not initialised")
     }
 
     pub fn start(
@@ -85,8 +107,16 @@ impl AgentState {
         app_tx: mpsc::UnboundedSender<AppEvent>,
         agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
     ) {
+        let Some(stack) = self.stack.as_ref().map(Arc::clone) else {
+            // No AgentStack (test mode) — mark running state but skip spawn
+            self.is_running = true;
+            self.current_turn = 0;
+            self.max_turns = max_turns;
+            self.activity = AgentActivity::Thinking;
+            return;
+        };
+
         let cancel = CancellationToken::new();
-        let stack = Arc::clone(&self.stack);
         let run_cancel = cancel.clone();
 
         self.is_running = true;
@@ -122,7 +152,7 @@ impl AgentState {
 
     /// Switch model at runtime. Returns Ok(description) or Err(message).
     pub async fn switch_model(&mut self, provider: &str, model: &str) -> std::result::Result<String, String> {
-        self.stack
+        self.stack()
             .switch_model(provider, model)
             .await
             .map_err(|e| e.to_string())?;
@@ -134,5 +164,76 @@ impl AgentState {
     /// Get current provider/model description.
     pub fn current_model_display(&self) -> String {
         format!("{}/{}", self.provider_name, self.model_name)
+    }
+
+    /// Get MCP server info for display.
+    pub async fn mcp_server_info(&self) -> Vec<ava_agent::stack::MCPServerInfo> {
+        self.stack().mcp_server_info().await
+    }
+
+    /// Reload MCP servers from config. Updates cached counts.
+    pub async fn reload_mcp(&mut self) -> std::result::Result<String, String> {
+        let (servers, tools) = self.stack().reload_mcp().await.map_err(|e| e.to_string())?;
+        self.mcp_server_count = servers;
+        self.mcp_tool_count = tools;
+        Ok(format!("MCP reloaded: {servers} servers, {tools} tools"))
+    }
+
+    /// Reload all tools (core + custom + MCP). Updates cached counts.
+    pub async fn reload_tools(&mut self) -> std::result::Result<String, String> {
+        let count = self.stack().reload_tools().await.map_err(|e| e.to_string())?;
+        self.mcp_server_count = self.stack().mcp_server_count().await;
+        self.mcp_tool_count = self.stack().mcp_tool_count().await;
+        Ok(format!("Reloaded {count} tools"))
+    }
+
+    /// Get tool list with source info.
+    pub async fn list_tools_with_source(
+        &self,
+    ) -> Vec<(ava_types::Tool, ava_tools::registry::ToolSource)> {
+        self.stack().tools.read().await.list_tools_with_source()
+    }
+
+    /// Create a lightweight `AgentState` without an `AgentStack` (for tests).
+    #[doc(hidden)]
+    pub fn test_new(provider: &str, model: &str) -> Self {
+        Self {
+            stack: None,
+            is_running: false,
+            current_turn: 0,
+            max_turns: 10,
+            tokens_used: TokenUsage::default(),
+            cost: 0.0,
+            activity: AgentActivity::Idle,
+            provider_name: provider.to_string(),
+            model_name: model.to_string(),
+            mcp_server_count: 0,
+            mcp_tool_count: 0,
+            tool_start: None,
+            workflow_phase: None,
+            workflow_iteration: None,
+            cancel: None,
+            task: None,
+        }
+    }
+
+    /// Create tool templates in project .ava/tools directory.
+    pub fn create_tool_templates(&self) -> std::result::Result<String, String> {
+        let dir = std::env::current_dir()
+            .unwrap_or_default()
+            .join(".ava")
+            .join("tools");
+        let created = ava_tools::core::custom_tool::create_tool_templates(&dir)
+            .map_err(|e| e.to_string())?;
+        if created.is_empty() {
+            Ok("Templates already exist in .ava/tools/".to_string())
+        } else {
+            let names: Vec<_> = created
+                .iter()
+                .filter_map(|p| p.file_name())
+                .map(|n| n.to_string_lossy().to_string())
+                .collect();
+            Ok(format!("Created templates: {}", names.join(", ")))
+        }
     }
 }

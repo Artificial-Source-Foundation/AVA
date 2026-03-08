@@ -22,6 +22,18 @@ pub use ollama::OllamaProvider;
 pub use openai::OpenAIProvider;
 pub use openrouter::OpenRouterProvider;
 
+/// Return the default base URL for a known provider name.
+pub fn base_url_for_provider(provider_name: &str) -> Option<&'static str> {
+    match provider_name {
+        "anthropic" => Some("https://api.anthropic.com"),
+        "openai" => Some("https://api.openai.com"),
+        "openrouter" => Some("https://openrouter.ai/api"),
+        "gemini" => Some("https://generativelanguage.googleapis.com"),
+        "ollama" => Some("http://localhost:11434"),
+        _ => None,
+    }
+}
+
 /// Create a provider by name from credentials, using the shared connection pool.
 ///
 /// For CLI agent providers (e.g., `cli:claude-code`), use a `ProviderFactory`
@@ -133,5 +145,22 @@ mod tests {
         let result = create_provider("cli:claude-code", "sonnet", &credentials, default_pool());
         let err = result.err().expect("should fail");
         assert!(err.to_string().contains("must be registered via ModelRouter"));
+    }
+
+    #[test]
+    fn base_url_for_known_providers() {
+        assert_eq!(
+            base_url_for_provider("anthropic"),
+            Some("https://api.anthropic.com")
+        );
+        assert_eq!(
+            base_url_for_provider("openai"),
+            Some("https://api.openai.com")
+        );
+        assert_eq!(
+            base_url_for_provider("openrouter"),
+            Some("https://openrouter.ai/api")
+        );
+        assert!(base_url_for_provider("unknown").is_none());
     }
 }

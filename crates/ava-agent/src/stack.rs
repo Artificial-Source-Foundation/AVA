@@ -2,18 +2,25 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use ava_codebase::CodebaseIndex;
+use ava_codebase::indexer::index_project;
 use ava_config::ConfigManager;
-use ava_context::{create_hybrid_condenser, CondenserConfig, ContextManager, Summarizer};
+use ava_context::{
+    create_hybrid_condenser_with_relevance, CondenserConfig, ContextManager, Summarizer,
+};
 use ava_llm::provider::{LLMProvider, SharedProvider};
 use ava_llm::ModelRouter;
-use ava_mcp::config::load_mcp_config;
+use ava_mcp::config::load_merged_mcp_config;
 use ava_mcp::manager::ExtensionManager;
 use ava_memory::MemorySystem;
 use ava_platform::StandardPlatform;
 use ava_session::SessionManager;
-use ava_tools::core::register_core_tools;
+use ava_tools::core::{
+    register_codebase_tools, register_core_tools, register_custom_tools, register_memory_tools,
+    register_session_tools,
+};
 use ava_tools::mcp_bridge::{MCPBridgeTool, MCPToolCaller};
-use ava_tools::registry::ToolRegistry;
+use ava_tools::registry::{ToolRegistry, ToolSource};
 use ava_types::{AvaError, Result, Session, ToolResult};
 use futures::StreamExt;
 use serde_json::Value;
@@ -51,22 +58,43 @@ impl MCPToolCaller for ExtensionManagerCaller {
     }
 }
 
+/// Tracks MCP runtime state — servers, tools, and the caller bridge.
+struct MCPRuntime {
+    caller: Arc<dyn MCPToolCaller>,
+    server_count: usize,
+    tool_count: usize,
+    tools_with_source: Vec<(String, ava_types::Tool)>,
+}
+
+/// Server info for display in TUI.
+#[derive(Debug, Clone)]
+pub struct MCPServerInfo {
+    pub name: String,
+    pub tool_count: usize,
+}
+
+/// Unified entrypoint composing LLM routing, tool registry, session/memory persistence,
+/// MCP integration, and codebase indexing into a single `run()` call.
 pub struct AgentStack {
     pub router: ModelRouter,
-    pub tools: Arc<ToolRegistry>,
-    pub session_manager: SessionManager,
-    pub memory: MemorySystem,
+    pub tools: Arc<RwLock<ToolRegistry>>,
+    pub session_manager: Arc<SessionManager>,
+    pub memory: Arc<MemorySystem>,
     pub config: ConfigManager,
     pub platform: Arc<StandardPlatform>,
+    pub codebase_index: Arc<RwLock<Option<Arc<CodebaseIndex>>>>,
     provider_override: RwLock<Option<String>>,
     model_override: RwLock<Option<String>>,
     max_turns: usize,
     yolo: bool,
     injected_provider: Option<Arc<dyn LLMProvider>>,
-    /// MCP extension manager (if any MCP servers are configured).
-    _mcp_caller: Option<Arc<dyn MCPToolCaller>>,
+    mcp: Arc<RwLock<Option<MCPRuntime>>>,
+    custom_tool_dirs: Vec<PathBuf>,
+    mcp_global_config: PathBuf,
+    mcp_project_config: PathBuf,
 }
 
+/// Configuration for constructing an [`AgentStack`] — data directory, provider/model overrides, and flags.
 pub struct AgentStackConfig {
     pub data_dir: PathBuf,
     pub provider: Option<String>,
@@ -76,6 +104,7 @@ pub struct AgentStackConfig {
     pub injected_provider: Option<Arc<dyn LLMProvider>>,
 }
 
+/// Result of a completed agent run — success flag, turn count, and final session transcript.
 #[derive(Debug)]
 pub struct AgentRunResult {
     pub success: bool,
@@ -107,42 +136,65 @@ impl AgentStack {
         let credentials_path = config.data_dir.join("credentials.json");
 
         let platform = Arc::new(StandardPlatform);
-        let mut registry = build_tool_registry(platform.clone());
-
-        // Load MCP servers (optional — no crash if mcp.json doesn't exist)
-        let mcp_config_path = config.data_dir.join("mcp.json");
-        let mcp_caller = match load_mcp_config(&mcp_config_path).await {
-            Ok(configs) if !configs.is_empty() => {
-                let mut manager = ExtensionManager::new();
-                manager.initialize(configs).await?;
-
-                let mcp_tools = manager.list_tools();
-                let caller: Arc<dyn MCPToolCaller> =
-                    Arc::new(ExtensionManagerCaller { manager });
-
-                for tool_def in mcp_tools {
-                    info!(tool = %tool_def.name, "Registering MCP tool");
-                    registry.register(MCPBridgeTool::new(tool_def, caller.clone()));
-                }
-
-                Some(caller)
-            }
-            Ok(_) => None,
-            Err(e) => {
-                warn!(error = %e, "Failed to load MCP config, continuing without MCP tools");
-                None
-            }
-        };
-
-        let tools = Arc::new(registry);
 
         let config_mgr = ConfigManager::load_from_paths(config_path, credentials_path).await?;
         let credentials = config_mgr.credentials().await;
         let router = ModelRouter::new(credentials);
 
-        let session_manager = SessionManager::new(&db_path)?;
-        let memory = MemorySystem::new(&db_path)
-            .map_err(|e| AvaError::DatabaseError(e.to_string()))?;
+        let session_manager = Arc::new(SessionManager::new(&db_path)?);
+        let memory = Arc::new(
+            MemorySystem::new(&db_path)
+                .map_err(|e| AvaError::DatabaseError(e.to_string()))?,
+        );
+
+        // Background codebase indexing
+        let codebase_index: Arc<RwLock<Option<Arc<CodebaseIndex>>>> =
+            Arc::new(RwLock::new(None));
+        let index_clone = codebase_index.clone();
+        let project_root = std::env::current_dir().unwrap_or_default();
+        tokio::spawn(async move {
+            match index_project(&project_root).await {
+                Ok(idx) => {
+                    *index_clone.write().await = Some(Arc::new(idx));
+                    info!("Codebase indexing complete");
+                }
+                Err(e) => warn!("Codebase indexing failed: {e}"),
+            }
+        });
+
+        // Pre-warm connection pool for the configured provider
+        let cfg = config_mgr.get().await;
+        let provider_name = config.provider.as_deref().unwrap_or(&cfg.llm.provider);
+        if let Some(base_url) = ava_llm::providers::base_url_for_provider(provider_name) {
+            router.pool().get_client(base_url).await;
+            info!(base_url, "Pre-warmed connection pool");
+        }
+
+        // Config paths
+        let mcp_global_config = config.data_dir.join("mcp.json");
+        let mcp_project_config = std::env::current_dir()
+            .unwrap_or_default()
+            .join(".ava")
+            .join("mcp.json");
+        let custom_tool_dirs = vec![
+            config.data_dir.join("tools"),
+            std::env::current_dir()
+                .unwrap_or_default()
+                .join(".ava")
+                .join("tools"),
+        ];
+
+        // Build registry
+        let mut registry = build_tool_registry(platform.clone());
+        register_memory_tools(&mut registry, memory.clone());
+        register_session_tools(&mut registry, session_manager.clone());
+        register_codebase_tools(&mut registry, codebase_index.clone());
+        register_custom_tools(&mut registry, &custom_tool_dirs);
+
+        // Load MCP servers (merged global + project)
+        let mcp_runtime = init_mcp(&mcp_global_config, &mcp_project_config, &mut registry).await;
+
+        let tools = Arc::new(RwLock::new(registry));
 
         Ok(Self {
             router,
@@ -151,18 +203,96 @@ impl AgentStack {
             memory,
             config: config_mgr,
             platform,
+            codebase_index,
             provider_override: RwLock::new(config.provider),
             model_override: RwLock::new(config.model),
             max_turns: config.max_turns,
             yolo: config.yolo,
             injected_provider: config.injected_provider,
-            _mcp_caller: mcp_caller,
+            mcp: Arc::new(RwLock::new(mcp_runtime)),
+            custom_tool_dirs,
+            mcp_global_config,
+            mcp_project_config,
         })
     }
 
     /// Whether this stack runs in yolo mode (skip tool permission checks).
     pub fn yolo(&self) -> bool {
         self.yolo
+    }
+
+    /// Number of connected MCP servers.
+    pub async fn mcp_server_count(&self) -> usize {
+        self.mcp.read().await.as_ref().map_or(0, |r| r.server_count)
+    }
+
+    /// Number of discovered MCP tools.
+    pub async fn mcp_tool_count(&self) -> usize {
+        self.mcp.read().await.as_ref().map_or(0, |r| r.tool_count)
+    }
+
+    /// Get info about connected MCP servers.
+    pub async fn mcp_server_info(&self) -> Vec<MCPServerInfo> {
+        let guard = self.mcp.read().await;
+        let runtime = match guard.as_ref() {
+            Some(r) => r,
+            None => return Vec::new(),
+        };
+
+        let mut servers: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+        for (server_name, _) in &runtime.tools_with_source {
+            *servers.entry(server_name.clone()).or_insert(0) += 1;
+        }
+
+        servers
+            .into_iter()
+            .map(|(name, tool_count)| MCPServerInfo { name, tool_count })
+            .collect()
+    }
+
+    /// Reload MCP servers from config files. Returns (server_count, tool_count).
+    pub async fn reload_mcp(&self) -> Result<(usize, usize)> {
+        let mut registry = self.tools.write().await;
+        // Remove existing MCP tools
+        registry.remove_by_source(|src| matches!(src, ToolSource::MCP { .. }));
+
+        let runtime =
+            init_mcp(&self.mcp_global_config, &self.mcp_project_config, &mut registry).await;
+        let counts = runtime
+            .as_ref()
+            .map_or((0, 0), |r| (r.server_count, r.tool_count));
+        *self.mcp.write().await = runtime;
+        Ok(counts)
+    }
+
+    /// Reload custom tools from TOML dirs. Returns the number of tools loaded.
+    pub async fn reload_custom_tools(&self) -> usize {
+        let mut registry = self.tools.write().await;
+        registry.remove_by_source(|src| matches!(src, ToolSource::Custom { .. }));
+        register_custom_tools(&mut registry, &self.custom_tool_dirs);
+        registry
+            .list_tools_with_source()
+            .iter()
+            .filter(|(_, src)| matches!(src, ToolSource::Custom { .. }))
+            .count()
+    }
+
+    /// Reload ALL tools (core + memory + session + codebase + custom + MCP).
+    pub async fn reload_tools(&self) -> Result<usize> {
+        let mut registry = build_tool_registry(self.platform.clone());
+        register_memory_tools(&mut registry, self.memory.clone());
+        register_session_tools(&mut registry, self.session_manager.clone());
+        register_codebase_tools(&mut registry, self.codebase_index.clone());
+        register_custom_tools(&mut registry, &self.custom_tool_dirs);
+
+        let runtime =
+            init_mcp(&self.mcp_global_config, &self.mcp_project_config, &mut registry).await;
+        let count = registry.tool_count();
+
+        *self.tools.write().await = registry;
+        *self.mcp.write().await = runtime;
+        Ok(count)
     }
 
     /// Switch the provider and model for subsequent runs.
@@ -195,6 +325,40 @@ impl AgentStack {
         (provider, model)
     }
 
+    /// Enrich goal with relevant memories for auto-context injection.
+    async fn enrich_goal_with_memories(&self, goal: &str) -> String {
+        let keywords = extract_goal_keywords(goal);
+        if keywords.is_empty() {
+            return goal.to_string();
+        }
+
+        let query = keywords.join(" ");
+        let memories = match self.memory.search(&query) {
+            Ok(m) => m,
+            Err(_) => return goal.to_string(),
+        };
+
+        if memories.is_empty() {
+            return goal.to_string();
+        }
+
+        let entries: Vec<String> = memories
+            .into_iter()
+            .take(5)
+            .map(|m| format!("- [{}]: {}", m.key, m.value))
+            .collect();
+
+        // Cap memory context at ~500 tokens (~2000 chars)
+        let memory_block = entries.join("\n");
+        let memory_block = if memory_block.len() > 2000 {
+            format!("{}...", &memory_block[..2000])
+        } else {
+            memory_block
+        };
+
+        format!("{goal}\n\nRelevant memories:\n{memory_block}")
+    }
+
     #[instrument(skip(self, event_tx, cancel), fields(max_turns))]
     pub async fn run(
         &self,
@@ -207,7 +371,31 @@ impl AgentStack {
             provider.clone()
         } else {
             let (provider_name, model_name) = self.current_model().await;
-            self.router.route_required(&provider_name, &model_name).await?
+            match self.router.route_required(&provider_name, &model_name).await {
+                Ok(p) => p,
+                Err(e) => {
+                    // Try fallback if configured
+                    let cfg = self.config.get().await;
+                    if let Some(fb) = &cfg.fallback {
+                        warn!(
+                            primary = %provider_name,
+                            fallback = %fb.provider,
+                            "Primary provider unavailable, using fallback"
+                        );
+                        if let Some(ref tx) = event_tx {
+                            let _ = tx.send(AgentEvent::Progress(format!(
+                                "Primary provider unavailable, using fallback: {}/{}",
+                                fb.provider, fb.model
+                            )));
+                        }
+                        self.router
+                            .route_required(&fb.provider, &fb.model)
+                            .await?
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
         };
 
         let turns_limit = if max_turns == 0 { self.max_turns } else { max_turns };
@@ -218,6 +406,16 @@ impl AgentStack {
             model: provider.model_name().to_string(),
             max_cost_usd: 10.0,
             loop_detection: true,
+            custom_system_prompt: None,
+        };
+
+        // Auto-context: inject relevant memories into the goal
+        let enriched_goal = self.enrich_goal_with_memories(goal).await;
+
+        // Relevance-aware condenser: extract pagerank scores if index is ready
+        let relevance_scores = {
+            let guard = self.codebase_index.read().await;
+            guard.as_ref().map(|idx| idx.pagerank.clone())
         };
 
         let summarizer: Arc<dyn Summarizer> = Arc::new(LlmSummarizer(provider.clone()));
@@ -226,15 +424,43 @@ impl AgentStack {
             target_tokens: config.token_limit * 3 / 4,
             ..Default::default()
         };
-        let condenser = create_hybrid_condenser(condenser_config.clone(), Some(summarizer));
+        let condenser = create_hybrid_condenser_with_relevance(
+            condenser_config.clone(),
+            Some(summarizer),
+            relevance_scores,
+        );
         let context = ContextManager::new_with_condenser(condenser_config, condenser);
+
+        // Build a fresh registry WITH MCP tools (fixes the bug where run() dropped them)
+        let mut registry = build_tool_registry(self.platform.clone());
+        register_memory_tools(&mut registry, self.memory.clone());
+        register_session_tools(&mut registry, self.session_manager.clone());
+        register_codebase_tools(&mut registry, self.codebase_index.clone());
+        register_custom_tools(&mut registry, &self.custom_tool_dirs);
+
+        // Re-register MCP tools from the runtime
+        {
+            let mcp_guard = self.mcp.read().await;
+            if let Some(ref runtime) = *mcp_guard {
+                for (server_name, tool_def) in &runtime.tools_with_source {
+                    let source = ToolSource::MCP {
+                        server: server_name.clone(),
+                    };
+                    registry.register_with_source(
+                        MCPBridgeTool::new(tool_def.clone(), runtime.caller.clone()),
+                        source,
+                    );
+                }
+            }
+        }
 
         let mut agent = AgentLoop::new(
             Box::new(SharedProvider::new(provider)),
-            build_tool_registry(self.platform.clone()),
+            registry,
             context,
             config,
         );
+        let goal = &enriched_goal;
 
         if let Some(tx) = event_tx {
             let mut stream = agent.run_streaming(goal).await;
@@ -256,7 +482,7 @@ impl AgentStack {
                             AgentEvent::Error(error) => {
                                 return Err(AvaError::AgentStopped { reason: error });
                             }
-                            AgentEvent::Progress(_) | AgentEvent::Token(_) | AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) => {}
+                            AgentEvent::Progress(_) | AgentEvent::Token(_) | AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } => {}
                         }
                     }
                 }
@@ -286,6 +512,79 @@ impl AgentStack {
             session,
         })
     }
+}
+
+/// Initialize MCP from merged global+project configs, registering bridge tools into the registry.
+async fn init_mcp(
+    global_config: &std::path::Path,
+    project_config: &std::path::Path,
+    registry: &mut ToolRegistry,
+) -> Option<MCPRuntime> {
+    match load_merged_mcp_config(global_config, project_config).await {
+        Ok(configs) if !configs.is_empty() => {
+            let mut manager = ExtensionManager::new();
+            if let Err(e) = manager.initialize(configs).await {
+                warn!(error = %e, "Failed to initialize MCP servers");
+                return None;
+            }
+
+            let server_count = manager.server_count();
+            let mcp_tools_with_server = manager.list_tools_with_server().to_vec();
+            let mcp_tools = manager.list_tools();
+            let caller: Arc<dyn MCPToolCaller> =
+                Arc::new(ExtensionManagerCaller { manager });
+
+            let mut tools_with_source = Vec::new();
+            for (server_name, mcp_tool) in &mcp_tools_with_server {
+                if let Some(tool_def) = mcp_tools.iter().find(|t| t.name == mcp_tool.name) {
+                    tools_with_source.push((server_name.clone(), tool_def.clone()));
+                }
+            }
+
+            let tool_count = tools_with_source.len();
+
+            for (server_name, tool_def) in &tools_with_source {
+                info!(tool = %tool_def.name, server = %server_name, "Registering MCP tool");
+                let source = ToolSource::MCP {
+                    server: server_name.clone(),
+                };
+                registry.register_with_source(
+                    MCPBridgeTool::new(tool_def.clone(), caller.clone()),
+                    source,
+                );
+            }
+
+            info!(servers = server_count, tools = tool_count, "MCP initialized");
+
+            Some(MCPRuntime {
+                caller,
+                server_count,
+                tool_count,
+                tools_with_source,
+            })
+        }
+        Ok(_) => None,
+        Err(e) => {
+            warn!(error = %e, "Failed to load MCP config, continuing without MCP tools");
+            None
+        }
+    }
+}
+
+const STOPWORDS: &[&str] = &[
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
+    "do", "does", "did", "will", "would", "could", "should", "may", "might", "can", "shall",
+    "to", "of", "in", "for", "on", "with", "at", "by", "from", "as", "into", "about", "it",
+    "its", "this", "that", "and", "or", "but", "not", "no", "so", "if", "then", "than", "too",
+    "very", "just", "how", "what", "which", "who", "when", "where", "why", "all", "each",
+    "me", "my", "i", "you", "your", "we", "our", "he", "she", "they", "them",
+];
+
+fn extract_goal_keywords(goal: &str) -> Vec<String> {
+    goal.split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| s.len() > 2 && !STOPWORDS.contains(&s.as_str()))
+        .collect()
 }
 
 fn build_tool_registry(platform: Arc<StandardPlatform>) -> ToolRegistry {

@@ -3,6 +3,8 @@ use crate::ui::layout::build_layout;
 use crate::widgets::composer::render_composer;
 use crate::widgets::message_list::render_message_list;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
@@ -39,29 +41,69 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
         ModalType::CommandPalette => render_command_palette(frame, popup_area, state),
         ModalType::SessionList => render_session_list(frame, popup_area, state),
         ModalType::ToolApproval => render_tool_approval(frame, popup_area, state),
+        ModalType::ModelSelector => render_model_selector(frame, popup_area, state),
+        ModalType::ToolList => {
+            crate::widgets::tool_list::render_tool_list(
+                frame,
+                popup_area,
+                &state.tool_list,
+                &state.theme,
+            );
+        }
     }
 }
 
 fn render_command_palette(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let items = state.command_palette.filtered();
-    let mut text = format!("> {}\n\n", state.command_palette.query);
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("> ", Style::default().fg(state.theme.primary)),
+            Span::styled(
+                &state.command_palette.query,
+                Style::default().fg(state.theme.text),
+            ),
+            Span::styled("_", Style::default().fg(state.theme.text_muted)),
+        ]),
+        Line::from(""),
+    ];
 
     for (idx, item) in items.iter().enumerate() {
-        let prefix = if idx == state.command_palette.selected {
-            "> "
+        let is_selected = idx == state.command_palette.selected;
+        let name_style = if is_selected {
+            Style::default()
+                .fg(state.theme.primary)
+                .add_modifier(Modifier::BOLD)
         } else {
-            "  "
+            Style::default().fg(state.theme.text)
         };
-        text.push_str(&format!(
-            "{}{} ({}) - {}\n",
-            prefix, item.name, item.hint, item.category
+        let prefix = if is_selected { "> " } else { "  " };
+
+        let mut spans = vec![
+            Span::styled(prefix, Style::default().fg(state.theme.primary)),
+            Span::styled(&item.name, name_style),
+        ];
+
+        if !item.hint.is_empty() {
+            spans.push(Span::styled(
+                format!("  ({})", item.hint),
+                Style::default().fg(state.theme.text_muted),
+            ));
+        }
+
+        spans.push(Span::styled(
+            format!("  {}", item.category),
+            Style::default().fg(state.theme.secondary),
         ));
+
+        lines.push(Line::from(spans));
     }
 
-    let widget = Paragraph::new(text).block(
+    let widget = Paragraph::new(lines).block(
         Block::default()
             .title("Command Palette")
-            .borders(Borders::ALL),
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(state.theme.border)),
     );
     frame.render_widget(widget, area);
 }
@@ -104,6 +146,63 @@ fn render_tool_approval(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         );
         frame.render_widget(widget, area);
     }
+}
+
+fn render_model_selector(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+    let selector = match state.model_selector {
+        Some(ref s) => s,
+        None => return,
+    };
+
+    let items = selector.filtered();
+    let current_model = &state.agent.model_name;
+
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled("> ", Style::default().fg(state.theme.primary)),
+            Span::styled(&selector.query, Style::default().fg(state.theme.text)),
+            Span::styled("_", Style::default().fg(state.theme.text_muted)),
+        ]),
+        Line::from(""),
+    ];
+
+    for (idx, item) in items.iter().enumerate() {
+        let is_selected = idx == selector.selected;
+        let is_current = item.model == *current_model
+            || format!("{}/{}", item.provider, item.model)
+                == format!("{}/{}", state.agent.provider_name, state.agent.model_name);
+
+        let name_style = if is_selected {
+            Style::default()
+                .fg(state.theme.primary)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(state.theme.text)
+        };
+
+        let prefix = if is_selected { "> " } else { "  " };
+        let marker = if is_current { " *" } else { "" };
+
+        let spans = vec![
+            Span::styled(prefix, Style::default().fg(state.theme.primary)),
+            Span::styled(&item.display, name_style),
+            Span::styled(
+                format!("  ({})", item.provider),
+                Style::default().fg(state.theme.text_muted),
+            ),
+            Span::styled(marker, Style::default().fg(state.theme.accent)),
+        ];
+
+        lines.push(Line::from(spans));
+    }
+
+    let widget = Paragraph::new(lines).block(
+        Block::default()
+            .title("Select Model")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(state.theme.border)),
+    );
+    frame.render_widget(widget, area);
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

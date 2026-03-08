@@ -211,6 +211,7 @@ mod tests {
             model: "mock".to_string(),
             max_cost_usd,
             loop_detection,
+            custom_system_prompt: None,
         }
     }
 

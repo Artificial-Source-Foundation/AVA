@@ -47,9 +47,10 @@ impl ToolSafetyProfile {
     }
 }
 
-/// Returns default safety profiles for all 6 core tools.
+/// Returns default safety profiles for all registered tools (18 total).
 pub fn core_tool_profiles() -> HashMap<String, ToolSafetyProfile> {
     let profiles = vec![
+        // Original 6 core tools
         ToolSafetyProfile::new(
             "read",
             [SafetyTag::ReadOnly],
@@ -86,6 +87,81 @@ pub fn core_tool_profiles() -> HashMap<String, ToolSafetyProfile> {
             RiskLevel::Medium,
             "Executes shell commands",
         ),
+        // Extended tools
+        ToolSafetyProfile::new(
+            "multiedit",
+            [SafetyTag::WriteFile],
+            RiskLevel::Low,
+            "Edits multiple files atomically",
+        ),
+        ToolSafetyProfile::new(
+            "apply_patch",
+            [SafetyTag::WriteFile],
+            RiskLevel::Medium,
+            "Applies unified diff patches to files",
+        ),
+        ToolSafetyProfile::new(
+            "test_runner",
+            [SafetyTag::ExecuteCommand],
+            RiskLevel::Low,
+            "Runs test suites",
+        ),
+        ToolSafetyProfile::new(
+            "lint",
+            [SafetyTag::ExecuteCommand],
+            RiskLevel::Low,
+            "Runs linters and formatters",
+        ),
+        ToolSafetyProfile::new(
+            "diagnostics",
+            [SafetyTag::ReadOnly],
+            RiskLevel::Safe,
+            "Retrieves LSP diagnostics",
+        ),
+        ToolSafetyProfile::new(
+            "codebase_search",
+            [SafetyTag::ReadOnly],
+            RiskLevel::Safe,
+            "Searches codebase index",
+        ),
+        // Memory tools
+        ToolSafetyProfile::new(
+            "remember",
+            [SafetyTag::WriteFile],
+            RiskLevel::Safe,
+            "Stores a memory entry",
+        ),
+        ToolSafetyProfile::new(
+            "recall",
+            [SafetyTag::ReadOnly],
+            RiskLevel::Safe,
+            "Recalls stored memories",
+        ),
+        ToolSafetyProfile::new(
+            "memory_search",
+            [SafetyTag::ReadOnly],
+            RiskLevel::Safe,
+            "Searches stored memories",
+        ),
+        // Session tools
+        ToolSafetyProfile::new(
+            "session_search",
+            [SafetyTag::ReadOnly],
+            RiskLevel::Safe,
+            "Searches session history",
+        ),
+        ToolSafetyProfile::new(
+            "session_list",
+            [SafetyTag::ReadOnly],
+            RiskLevel::Safe,
+            "Lists available sessions",
+        ),
+        ToolSafetyProfile::new(
+            "session_load",
+            [SafetyTag::ReadOnly],
+            RiskLevel::Safe,
+            "Loads a previous session",
+        ),
     ];
 
     profiles
@@ -120,10 +196,17 @@ mod tests {
     }
 
     #[test]
-    fn all_six_core_tools_present() {
+    fn all_core_tools_present() {
         let profiles = core_tool_profiles();
-        assert_eq!(profiles.len(), 6);
-        for name in &["read", "glob", "grep", "write", "edit", "bash"] {
+        assert_eq!(profiles.len(), 18);
+        let expected = [
+            "read", "glob", "grep", "write", "edit", "bash",
+            "multiedit", "apply_patch", "test_runner", "lint",
+            "diagnostics", "codebase_search",
+            "remember", "recall", "memory_search",
+            "session_search", "session_list", "session_load",
+        ];
+        for name in &expected {
             assert!(profiles.contains_key(*name), "missing profile for {name}");
         }
     }

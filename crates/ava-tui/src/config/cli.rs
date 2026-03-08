@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, Subcommand, ValueEnum};
 use tracing::debug;
 
 #[derive(Debug, Clone, Parser)]
@@ -46,70 +46,166 @@ pub struct CliArgs {
     /// Use multi-agent Commander mode instead of single AgentStack
     #[arg(long)]
     pub multi_agent: bool,
+
+    /// Run a workflow pipeline (plan-code-review, code-review, plan-code)
+    #[arg(long)]
+    pub workflow: Option<String>,
+
+    /// Enable continuous voice input (requires --features voice)
+    #[arg(long)]
+    pub voice: bool,
+
+    #[command(subcommand)]
+    pub command: Option<Command>,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum Command {
+    /// Review code changes using an LLM agent
+    Review(ReviewArgs),
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct ReviewArgs {
+    /// Review staged changes (git diff --staged)
+    #[arg(long)]
+    pub staged: bool,
+
+    /// Review a diff range (e.g. "main..HEAD", "abc123..def456")
+    #[arg(long)]
+    pub diff: Option<String>,
+
+    /// Review a specific commit
+    #[arg(long)]
+    pub commit: Option<String>,
+
+    /// Review working directory changes (unstaged)
+    #[arg(long)]
+    pub working: bool,
+
+    /// Output format
+    #[arg(long, value_enum, default_value = "text")]
+    pub format: ReviewFormat,
+
+    /// Focus area for the review
+    #[arg(long, default_value = "all")]
+    pub focus: String,
+
+    /// Fail (exit 1) when issues at or above this severity are found
+    #[arg(long, value_enum, default_value = "critical")]
+    pub fail_on: FailOnSeverity,
+
+    /// LLM provider to use
+    #[arg(long)]
+    pub provider: Option<String>,
+
+    /// LLM model to use
+    #[arg(long, short)]
+    pub model: Option<String>,
+
+    /// Maximum agent turns
+    #[arg(long, default_value_t = 10)]
+    pub max_turns: usize,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ReviewFormat {
+    Text,
+    Json,
+    Markdown,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum FailOnSeverity {
+    Critical,
+    Warning,
+    Suggestion,
+    Any,
+}
+
+impl FailOnSeverity {
+    pub fn to_severity(self) -> ava_commander::Severity {
+        match self {
+            Self::Critical => ava_commander::Severity::Critical,
+            Self::Warning => ava_commander::Severity::Warning,
+            Self::Suggestion => ava_commander::Severity::Suggestion,
+            Self::Any => ava_commander::Severity::Nitpick,
+        }
+    }
+}
+
+/// Resolve provider and model from multiple sources.
+/// Priority: explicit args > env vars > config file.
+pub async fn resolve_provider_model(
+    provider: Option<&str>,
+    model: Option<&str>,
+) -> color_eyre::Result<(Option<String>, Option<String>)> {
+    // Explicit args take precedence
+    if provider.is_some() || model.is_some() {
+        return Ok((provider.map(String::from), model.map(String::from)));
+    }
+
+    // Env vars next
+    let env_provider = std::env::var("AVA_PROVIDER").ok();
+    let env_model = std::env::var("AVA_MODEL").ok();
+    if env_provider.is_some() || env_model.is_some() {
+        debug!(?env_provider, ?env_model, "Using provider/model from env vars");
+        return Ok((env_provider, env_model));
+    }
+
+    // Try loading from config file
+    let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
+    let config_path = data_dir.join("config.yaml");
+
+    if config_path.exists() {
+        let content = tokio::fs::read_to_string(&config_path).await?;
+        if let Ok(config) = serde_yaml::from_str::<ava_config::Config>(&content) {
+            let provider = if config.llm.provider != "openai" {
+                debug!(provider = %config.llm.provider, "Loaded provider from config file");
+                Some(config.llm.provider)
+            } else if let Ok(value) = serde_yaml::from_str::<serde_json::Value>(&content) {
+                let has_provider = value
+                    .get("llm")
+                    .and_then(|l| l.get("provider"))
+                    .is_some();
+                if has_provider {
+                    debug!("Loaded provider 'openai' from config file");
+                    Some(config.llm.provider)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            let model = if config.llm.model != "gpt-4" {
+                debug!(model = %config.llm.model, "Loaded model from config file");
+                Some(config.llm.model)
+            } else if let Ok(value) = serde_yaml::from_str::<serde_json::Value>(&content) {
+                let has_model = value.get("llm").and_then(|l| l.get("model")).is_some();
+                if has_model {
+                    debug!("Loaded model 'gpt-4' from config file");
+                    Some(config.llm.model)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            if provider.is_some() {
+                return Ok((provider, model));
+            }
+        }
+    }
+
+    Ok((None, None))
 }
 
 impl CliArgs {
-    /// Resolve provider and model from CLI flags or config file (~/.ava/config.yaml).
-    ///
-    /// CLI flags take precedence. If neither is set, loads from the config file.
-    /// Returns `(provider, model)` where either may still be `None` if unconfigured.
+    /// Resolve provider and model from CLI flags, env vars, or config file.
     pub async fn resolve_provider_model(
         &self,
     ) -> color_eyre::Result<(Option<String>, Option<String>)> {
-        // CLI flags take precedence
-        if self.provider.is_some() || self.model.is_some() {
-            return Ok((self.provider.clone(), self.model.clone()));
-        }
-
-        // Try loading from config file
-        let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
-        let config_path = data_dir.join("config.yaml");
-
-        if config_path.exists() {
-            let content = tokio::fs::read_to_string(&config_path).await?;
-            if let Ok(config) = serde_yaml::from_str::<ava_config::Config>(&content) {
-                let provider = if config.llm.provider != "openai" {
-                    debug!(provider = %config.llm.provider, "Loaded provider from config file");
-                    Some(config.llm.provider)
-                } else {
-                    // Check if the user explicitly set "openai" vs it being the default
-                    // by looking at the raw YAML
-                    if let Ok(value) = serde_yaml::from_str::<serde_json::Value>(&content) {
-                        let has_provider = value
-                            .get("llm")
-                            .and_then(|l| l.get("provider"))
-                            .is_some();
-                        if has_provider {
-                            debug!("Loaded provider 'openai' from config file");
-                            Some(config.llm.provider)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    }
-                };
-                let model = if config.llm.model != "gpt-4" {
-                    debug!(model = %config.llm.model, "Loaded model from config file");
-                    Some(config.llm.model)
-                } else if let Ok(value) = serde_yaml::from_str::<serde_json::Value>(&content) {
-                    let has_model = value.get("llm").and_then(|l| l.get("model")).is_some();
-                    if has_model {
-                        debug!("Loaded model 'gpt-4' from config file");
-                        Some(config.llm.model)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                if provider.is_some() {
-                    return Ok((provider, model));
-                }
-            }
-        }
-
-        Ok((None, None))
+        resolve_provider_model(self.provider.as_deref(), self.model.as_deref()).await
     }
 }
 
@@ -124,4 +220,3 @@ Example ~/.ava/config.yaml:
 
 Or run with flags:
   ava --provider openrouter --model anthropic/claude-sonnet-4 \"your goal\"";
-

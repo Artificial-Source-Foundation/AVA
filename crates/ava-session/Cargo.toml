@@ -1,7 +1,8 @@
 [package]
 name = "ava-session"
-version = "2.0.0"
-edition = "2021"
+description = "Session persistence with SQLite storage"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 ava-types = { path = "../ava-types" }

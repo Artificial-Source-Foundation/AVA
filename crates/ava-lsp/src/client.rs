@@ -1,6 +1,9 @@
 use std::sync::atomic::{AtomicI64, Ordering};
 
-use lsp_types::{Diagnostic, GotoDefinitionParams, GotoDefinitionResponse, InitializeParams};
+use lsp_types::{
+    Diagnostic, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    InitializeParams, Location, ReferenceParams,
+};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::broadcast;
 
@@ -83,6 +86,152 @@ impl LspClient {
             )));
         }
         Ok(envelope.result)
+    }
+
+    pub fn hover_request(&self, params: HoverParams) -> Result<String> {
+        let payload = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": self.next_request_id(),
+            "method": "textDocument/hover",
+            "params": params,
+        });
+        Ok(payload.to_string())
+    }
+
+    pub fn parse_hover_response(&self, response_json: &str) -> Result<Option<Hover>> {
+        #[derive(serde::Deserialize)]
+        struct ResponseEnvelope {
+            result: Option<Hover>,
+            error: Option<ResponseError>,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct ResponseError {
+            code: i64,
+            message: String,
+        }
+
+        let envelope: ResponseEnvelope = serde_json::from_str(response_json)?;
+        if let Some(error) = envelope.error {
+            return Err(LspError::Protocol(format!(
+                "json-rpc error {}: {}",
+                error.code, error.message
+            )));
+        }
+        Ok(envelope.result)
+    }
+
+    pub fn references_request(&self, params: ReferenceParams) -> Result<String> {
+        let payload = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": self.next_request_id(),
+            "method": "textDocument/references",
+            "params": params,
+        });
+        Ok(payload.to_string())
+    }
+
+    pub fn parse_references_response(
+        &self,
+        response_json: &str,
+    ) -> Result<Option<Vec<Location>>> {
+        #[derive(serde::Deserialize)]
+        struct ResponseEnvelope {
+            result: Option<Vec<Location>>,
+            error: Option<ResponseError>,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct ResponseError {
+            code: i64,
+            message: String,
+        }
+
+        let envelope: ResponseEnvelope = serde_json::from_str(response_json)?;
+        if let Some(error) = envelope.error {
+            return Err(LspError::Protocol(format!(
+                "json-rpc error {}: {}",
+                error.code, error.message
+            )));
+        }
+        Ok(envelope.result)
+    }
+
+    pub fn pull_diagnostics_request(&self, uri: &str) -> Result<String> {
+        let payload = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": self.next_request_id(),
+            "method": "textDocument/diagnostic",
+            "params": {
+                "textDocument": { "uri": uri }
+            },
+        });
+        Ok(payload.to_string())
+    }
+
+    pub fn parse_diagnostics_response(
+        &self,
+        response_json: &str,
+    ) -> Result<Vec<Diagnostic>> {
+        #[derive(serde::Deserialize)]
+        struct ResponseEnvelope {
+            result: Option<DiagnosticResult>,
+            error: Option<ResponseError>,
+        }
+
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct DiagnosticResult {
+            #[serde(default)]
+            items: Vec<Diagnostic>,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct ResponseError {
+            code: i64,
+            message: String,
+        }
+
+        let envelope: ResponseEnvelope = serde_json::from_str(response_json)?;
+        if let Some(error) = envelope.error {
+            return Err(LspError::Protocol(format!(
+                "json-rpc error {}: {}",
+                error.code, error.message
+            )));
+        }
+        Ok(envelope.result.map(|r| r.items).unwrap_or_default())
+    }
+
+    pub async fn hover_via_transport<R, W>(
+        &self,
+        reader: &mut R,
+        writer: &mut W,
+        params: HoverParams,
+    ) -> Result<Option<Hover>>
+    where
+        R: AsyncRead + Unpin,
+        W: AsyncWrite + Unpin,
+    {
+        let payload = self.hover_request(params)?;
+        write_frame(writer, &payload).await?;
+        let response = read_frame(reader).await?;
+        self.parse_hover_response(&response)
+    }
+
+    pub async fn references_via_transport<R, W>(
+        &self,
+        reader: &mut R,
+        writer: &mut W,
+        params: ReferenceParams,
+    ) -> Result<Option<Vec<Location>>>
+    where
+        R: AsyncRead + Unpin,
+        W: AsyncWrite + Unpin,
+    {
+        let payload = self.references_request(params)?;
+        write_frame(writer, &payload).await?;
+        let response = read_frame(reader).await?;
+        self.parse_references_response(&response)
     }
 
     pub fn handle_notification(&self, notification_json: &str) -> Result<()> {
@@ -187,6 +336,114 @@ mod tests {
         .to_string();
         let result = client.parse_goto_definition_response(&json).unwrap();
         assert!(result.is_some());
+    }
+
+    #[test]
+    fn hover_payload_is_json_rpc() {
+        let client = LspClient::new();
+        let params = lsp_types::HoverParams {
+            text_document_position_params: lsp_types::TextDocumentPositionParams {
+                text_document: lsp_types::TextDocumentIdentifier {
+                    uri: "file:///tmp/main.rs".parse().unwrap(),
+                },
+                position: lsp_types::Position {
+                    line: 5,
+                    character: 10,
+                },
+            },
+            work_done_progress_params: Default::default(),
+        };
+        let msg = client.hover_request(params).unwrap();
+        assert!(msg.contains("\"method\":\"textDocument/hover\""));
+    }
+
+    #[test]
+    fn parse_hover_response_ok() {
+        let client = LspClient::new();
+        let json = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "contents": { "kind": "plaintext", "value": "fn hello()" }
+            }
+        })
+        .to_string();
+        let result = client.parse_hover_response(&json).unwrap();
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn references_payload_is_json_rpc() {
+        let client = LspClient::new();
+        let params = lsp_types::ReferenceParams {
+            text_document_position: lsp_types::TextDocumentPositionParams {
+                text_document: lsp_types::TextDocumentIdentifier {
+                    uri: "file:///tmp/main.rs".parse().unwrap(),
+                },
+                position: lsp_types::Position {
+                    line: 5,
+                    character: 10,
+                },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: lsp_types::ReferenceContext {
+                include_declaration: true,
+            },
+        };
+        let msg = client.references_request(params).unwrap();
+        assert!(msg.contains("\"method\":\"textDocument/references\""));
+    }
+
+    #[test]
+    fn parse_references_response_ok() {
+        let client = LspClient::new();
+        let json = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": [{
+                "uri": "file:///tmp/main.rs",
+                "range": {
+                    "start": {"line": 1, "character": 0},
+                    "end": {"line": 1, "character": 5}
+                }
+            }]
+        })
+        .to_string();
+        let result = client.parse_references_response(&json).unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn pull_diagnostics_request_is_json_rpc() {
+        let client = LspClient::new();
+        let msg = client
+            .pull_diagnostics_request("file:///tmp/main.rs")
+            .unwrap();
+        assert!(msg.contains("\"method\":\"textDocument/diagnostic\""));
+    }
+
+    #[test]
+    fn parse_diagnostics_response_ok() {
+        let client = LspClient::new();
+        let json = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+                "items": [{
+                    "range": {
+                        "start": {"line": 0, "character": 0},
+                        "end": {"line": 0, "character": 5}
+                    },
+                    "message": "unused variable",
+                    "severity": 2
+                }]
+            }
+        })
+        .to_string();
+        let result = client.parse_diagnostics_response(&json).unwrap();
+        assert_eq!(result.len(), 1);
     }
 
     #[tokio::test]

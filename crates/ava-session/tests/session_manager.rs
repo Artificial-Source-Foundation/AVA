@@ -88,3 +88,59 @@ fn delete_removes_session() {
         .expect_err("second delete should fail");
     assert!(error.to_string().contains("not found"));
 }
+
+#[test]
+fn save_load_roundtrip_preserves_tool_calls() {
+    let manager = SessionManager::new(temp_db_path("roundtrip_tools")).expect("manager should init");
+    let mut session = manager.create().expect("create should work");
+
+    let tc = ava_types::ToolCall {
+        id: "call_42".to_string(),
+        name: "read".to_string(),
+        arguments: serde_json::json!({"path": "/tmp/test.rs"}),
+    };
+    let mut assistant_msg = Message::new(Role::Assistant, "Reading file");
+    assistant_msg.tool_calls = vec![tc.clone()];
+    session.add_message(assistant_msg);
+
+    let mut tool_msg = Message::new(Role::Tool, "file contents here");
+    tool_msg.tool_results = vec![ava_types::ToolResult {
+        call_id: "call_42".to_string(),
+        content: "file contents here".to_string(),
+        is_error: false,
+    }];
+    session.add_message(tool_msg);
+
+    manager.save(&session).expect("save should work");
+
+    let loaded = manager
+        .get(session.id)
+        .expect("get should succeed")
+        .expect("session should exist");
+
+    assert_eq!(loaded.messages.len(), 2);
+    assert_eq!(loaded.messages[0].tool_calls.len(), 1);
+    assert_eq!(loaded.messages[0].tool_calls[0].id, "call_42");
+    assert_eq!(loaded.messages[0].tool_calls[0].name, "read");
+    assert_eq!(loaded.messages[1].tool_results.len(), 1);
+    assert_eq!(loaded.messages[1].tool_results[0].call_id, "call_42");
+    assert!(!loaded.messages[1].tool_results[0].is_error);
+}
+
+#[test]
+fn list_recent_with_many_sessions() {
+    let manager =
+        SessionManager::new(temp_db_path("many_sessions")).expect("manager should init");
+
+    for i in 0..100 {
+        let mut session = manager.create().expect("create should work");
+        session.add_message(Message::new(Role::User, format!("session {i}")));
+        manager.save(&session).expect("save should work");
+    }
+
+    let recent = manager.list_recent(10).expect("list_recent should work");
+    assert_eq!(recent.len(), 10);
+
+    // Should be most recent first
+    assert!(recent[0].messages[0].content.contains("session 99"));
+}

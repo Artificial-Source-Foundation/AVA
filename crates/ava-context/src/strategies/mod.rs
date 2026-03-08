@@ -3,10 +3,12 @@ use ava_types::Message;
 
 use crate::error::Result;
 
+pub mod relevance;
 mod sliding_window;
 pub mod summarization;
 mod tool_truncation;
 
+pub use relevance::RelevanceStrategy;
 pub use sliding_window::SlidingWindowStrategy;
 pub use summarization::SummarizationStrategy;
 pub use tool_truncation::ToolTruncationStrategy;

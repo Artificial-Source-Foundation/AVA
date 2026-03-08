@@ -1,3 +1,10 @@
+//! AVA Memory — persistent memory with SQLite and full-text search.
+//!
+//! This crate provides:
+//! - Key-value memory storage with timestamps
+//! - Full-text search via SQLite FTS5
+//! - Thread-safe concurrent access
+
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use std::path::{Path, PathBuf};
 
@@ -56,6 +63,11 @@ impl MemorySystem {
     }
 
     pub fn search(&self, query: &str) -> Result<Vec<Memory>> {
+        let sanitized = sanitize_fts_query(query);
+        if sanitized.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT m.id, m.key, m.value, m.created_at
@@ -65,7 +77,7 @@ impl MemorySystem {
              ORDER BY m.created_at DESC, m.id DESC",
         )?;
 
-        let rows = stmt.query_map(params![query], row_to_memory)?;
+        let rows = stmt.query_map(params![sanitized], row_to_memory)?;
         rows.collect()
     }
 
@@ -113,6 +125,25 @@ impl MemorySystem {
             END;",
         )
     }
+}
+
+/// Sanitize a user query for FTS5 by wrapping each word in double quotes,
+/// making all tokens literal and preventing FTS5 parse errors from special characters.
+fn sanitize_fts_query(query: &str) -> String {
+    query
+        .split_whitespace()
+        .map(|word| {
+            // Strip characters that are special to FTS5 even inside quotes
+            let clean: String = word.chars().filter(|c| *c != '"').collect();
+            if clean.is_empty() {
+                String::new()
+            } else {
+                format!("\"{clean}\"")
+            }
+        })
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn row_to_memory(row: &rusqlite::Row<'_>) -> Result<Memory> {
@@ -230,6 +261,33 @@ mod tests {
             .expect("memory should persist");
 
         assert_eq!(recalled.value, "first run");
+    }
+
+    #[test]
+    fn search_with_special_chars_does_not_crash() {
+        let (_dir, db_path) = make_db_path("special_chars_search");
+        let system = MemorySystem::new(&db_path).expect("memory system should initialize");
+
+        remember_values(
+            &system,
+            &[("note", "foo's bar baz implementation")],
+        );
+
+        // These contain FTS5 special chars that would crash without sanitization
+        let result = system.search("foo's bar & <baz>");
+        assert!(result.is_ok(), "search should not crash: {:?}", result.err());
+
+        // Also test unbalanced quotes and FTS5 operators
+        let result = system.search("\"unbalanced");
+        assert!(result.is_ok(), "unbalanced quote should not crash");
+
+        let result = system.search("AND OR NOT");
+        assert!(result.is_ok(), "FTS5 operators should not crash");
+
+        // Empty/whitespace-only query should return empty
+        let result = system.search("   ");
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
     }
 
     #[test]

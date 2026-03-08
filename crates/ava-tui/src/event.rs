@@ -16,6 +16,15 @@ pub enum AppEvent {
     Agent(AgentEvent),
     AgentDone(Result<ava_agent::stack::AgentRunResult, String>),
     TokenUsage(TokenUsage),
+    ShellResult(crate::state::messages::MessageKind, String),
+    /// Transcription complete — text ready to insert.
+    VoiceReady(String),
+    /// Voice pipeline error.
+    VoiceError(String),
+    /// Real-time microphone amplitude (0.0–1.0).
+    VoiceAmplitude(f32),
+    /// Silence detected — auto-stop recording.
+    VoiceSilenceDetected,
     Quit,
 }
 

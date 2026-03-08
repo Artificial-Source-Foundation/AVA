@@ -2,6 +2,20 @@
 
 All notable changes to AVA are documented in this file.
 
+## [2.1.0] - 2026-03-08
+
+Release polish, documentation, and E2E test matrix.
+
+### Added
+- E2E test matrix (`docs/development/test-matrix.md`) — 19 tools, 5 modes, 3 providers verified
+- Version badge and smoke test command in README
+
+### Changed
+- Workspace version bumped to 2.1.0
+- README refreshed with current architecture and test verification line
+- docs/README.md updated with test-matrix link and corrected sprint references
+- CLAUDE.md and AGENTS.md verified and updated with v2.1 version reference
+
 ## [2.0.0] - 2026-03-05
 
 ### Breaking Changes

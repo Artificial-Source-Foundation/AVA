@@ -1,7 +1,8 @@
 [package]
 name = "ava-llm"
-version = "2.0.0"
-edition = "2021"
+description = "Unified LLM provider interface with routing and circuit breaking"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 async-trait.workspace = true

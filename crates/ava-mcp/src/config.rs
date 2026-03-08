@@ -66,6 +66,27 @@ pub async fn load_mcp_config(path: &Path) -> Result<Vec<MCPServerConfig>> {
     Ok(config.servers)
 }
 
+/// Load and merge MCP configs from global and project paths.
+/// Project configs override global configs by server name.
+pub async fn load_merged_mcp_config(global: &Path, project: &Path) -> Result<Vec<MCPServerConfig>> {
+    let mut global_configs = load_mcp_config(global).await?;
+    let project_configs = load_mcp_config(project).await?;
+
+    if project_configs.is_empty() {
+        return Ok(global_configs);
+    }
+
+    // Project overrides global by server name
+    let project_names: std::collections::HashSet<&str> = project_configs
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect();
+
+    global_configs.retain(|c| !project_names.contains(c.name.as_str()));
+    global_configs.extend(project_configs);
+    Ok(global_configs)
+}
+
 /// Load MCP server configurations from a JSON string (useful for testing).
 pub fn parse_mcp_config(json: &str) -> Result<Vec<MCPServerConfig>> {
     let config: MCPConfigFile =
@@ -200,6 +221,74 @@ mod tests {
             .await
             .unwrap();
         assert!(configs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn merged_config_project_overrides_global() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global-mcp.json");
+        let project = dir.path().join("project-mcp.json");
+
+        tokio::fs::write(
+            &global,
+            r#"{"servers": [
+                {"name": "fs", "transport": {"type": "stdio", "command": "fs-server-v1"}},
+                {"name": "git", "transport": {"type": "stdio", "command": "git-server"}}
+            ]}"#,
+        )
+        .await
+        .unwrap();
+
+        tokio::fs::write(
+            &project,
+            r#"{"servers": [
+                {"name": "fs", "transport": {"type": "stdio", "command": "fs-server-v2"}}
+            ]}"#,
+        )
+        .await
+        .unwrap();
+
+        let configs = load_merged_mcp_config(&global, &project).await.unwrap();
+        assert_eq!(configs.len(), 2);
+
+        let fs_config = configs.iter().find(|c| c.name == "fs").unwrap();
+        match &fs_config.transport {
+            TransportType::Stdio { command, .. } => {
+                assert_eq!(command, "fs-server-v2"); // project overrides global
+            }
+            _ => panic!("expected stdio"),
+        }
+
+        assert!(configs.iter().any(|c| c.name == "git")); // global-only server kept
+    }
+
+    #[tokio::test]
+    async fn merged_config_empty_project_returns_global() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.json");
+        let project = dir.path().join("nonexistent.json");
+
+        tokio::fs::write(
+            &global,
+            r#"{"servers": [{"name": "test", "transport": {"type": "stdio", "command": "test"}}]}"#,
+        )
+        .await
+        .unwrap();
+
+        let configs = load_merged_mcp_config(&global, &project).await.unwrap();
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].name, "test");
+    }
+
+    #[test]
+    fn parse_invalid_json_returns_error() {
+        let result = parse_mcp_config("not valid json {{{");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        match err {
+            AvaError::SerializationError(_) => (),
+            other => panic!("expected SerializationError, got: {other}"),
+        }
     }
 
     #[test]

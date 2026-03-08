@@ -1,152 +1,170 @@
-# AVA
+# AVA v2.1
 
-> The Obsidian of AI Coding — Desktop AI coding app with a virtual dev team and community plugins
+> AI coding assistant — Rust CLI/TUI with multi-agent orchestration, code review, and MCP plugins
 
-A Tauri 2.0 + SolidJS desktop application for AI-assisted software development. AVA now runs a dual-stack backend during migration: the original `packages/core` monolith and the new extension-first `packages/core-v2` + `packages/extensions` stack. It includes autonomous agent execution, hierarchical **Team Lead + Senior Leads + Junior Devs + Validator** coordination, ~41 static tools (plus dynamic MCP and custom tools), and 16 LLM providers.
+A Rust-first AI coding assistant with an interactive TUI, autonomous agent execution, multi-agent workflows, code review, voice input, and a Tauri desktop app. 19 built-in tools plus dynamic MCP and custom tool support.
+
+Verified: All 19 tools, 5 modes, 3 providers pass E2E (2026-03-08). See [test matrix](docs/development/test-matrix.md).
 
 ## Quick Start
 
+### Rust CLI (primary)
+
 ```bash
-# Prerequisites: Node.js 20+, pnpm 10+, Rust toolchain
+# Prerequisites: Rust toolchain (rustup)
 
-# Clone and install
-git clone https://github.com/g0dxn4/AVA.git
+git clone https://github.com/ASF-GROUP/AVA.git
 cd AVA
-pnpm install
 
-# Optional: configure providers via .env
-cp .env.example .env
+# Interactive TUI
+cargo run --bin ava
 
-# Run desktop app
-npm run tauri dev
+# Smoke test (cheapest SOTA)
+cargo run --bin ava -- "Reply with SMOKE_OK" --headless --provider openrouter --model anthropic/claude-haiku-4.5 --max-turns 3
 
-# Build all packages + CLI
-pnpm build:all
+# Headless mode (batch/CI)
+cargo run --bin ava -- "refactor the auth module" --headless --provider openrouter --model anthropic/claude-sonnet-4
 
-# Run CLI
-node cli/dist/index.js --help  # (legacy — being replaced by Rust CLI: cargo run --bin ava)
+# JSON output (scripting)
+cargo run --bin ava -- "list all TODO comments" --headless --json
+
+# Code review
+cargo run --bin ava -- review --staged
+cargo run --bin ava -- review --diff main..HEAD --format markdown
+
+# Multi-agent workflow
+cargo run --bin ava -- "build the new API" --workflow plan-code-review
 ```
 
-## Current Status
+### Desktop app
 
-AVA has migrated to a **Rust-first architecture**. The Rust crates (`crates/`) are the primary development target. TypeScript packages (`packages/`) are retained for the Tauri desktop webview only.
+```bash
+# Prerequisites: Node.js 20+, pnpm 10+, Rust toolchain
+pnpm install
+npm run tauri dev
+```
 
-- `crates/` — ~21 Rust crates powering the CLI, agent runtime, and TUI (primary)
-- `packages/core-v2` provides the desktop runtime core.
-- `packages/extensions` contains desktop extension modules (providers, tools, permissions, prompts, context, validator, commander, git, memory, and more).
-- `packages/core` remains as a compatibility re-export shim.
+## CLI Flags & Subcommands
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the current execution plan.
+```
+ava [GOAL] [OPTIONS]
+  -c, --continue           Resume last session
+      --session <ID>       Resume a specific session
+  -m, --model <MODEL>      LLM model to use
+      --provider <NAME>    LLM provider (anthropic, openai, openrouter, gemini, ollama)
+      --max-turns <N>      Maximum agent turns (default: 20)
+      --yolo               Auto-approve all tool executions
+      --headless           Force headless mode (no TUI)
+      --json               Output NDJSON events (implies headless)
+      --multi-agent        Use Commander multi-agent mode
+      --workflow <NAME>    Run workflow pipeline (plan-code-review, code-review, plan-code)
+      --voice              Enable continuous voice input (requires --features voice)
+      --theme <NAME>       Theme name (default: "default")
+
+ava review [OPTIONS]
+      --staged             Review staged changes
+      --diff <RANGE>       Review a diff range (e.g. "main..HEAD")
+      --commit <SHA>       Review a specific commit
+      --working            Review unstaged working directory changes
+      --format <FMT>       Output format: text, json, markdown (default: text)
+      --focus <AREA>       Focus area for review (default: all)
+      --fail-on <LEVEL>    Exit 1 on issues at/above: critical, warning, suggestion, any
+      --provider <NAME>    LLM provider
+  -m, --model <MODEL>      LLM model
+      --max-turns <N>      Maximum turns (default: 10)
+```
 
 ## Architecture
 
 ```
-                    ┌─────────────┐
-                    │  Team Lead  │  Strategic Planning
-                    └──────┬──────┘
-                           │
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-        ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │ Sr. Lead │ │ Sr. Lead │ │ Sr. Lead │  Domain Specialists
-        │(Frontend)│ │(Backend) │ │(Testing) │
-        └────┬─────┘ └────┬─────┘ └────┬─────┘
-              │            │            │
-         Jr. Devs     Jr. Devs     Validator
-        (file-level)  (file-level)  (QA Gate)
+                   ┌──────────────┐
+                   │   ava-tui    │  CLI/TUI binary (Ratatui + Crossterm + Tokio)
+                   └──────┬───────┘
+                          │
+           ┌──────────────┼──────────────┐
+           ▼              ▼              ▼
+     ┌──────────┐  ┌───────────┐  ┌────────────┐
+     │ava-agent │  │ava-tools  │  │ava-session │
+     │(loop +   │  │(19 tools +│  │(SQLite +   │
+     │ reflect) │  │ MCP/custom│  │ FTS5)      │
+     └────┬─────┘  └───────────┘  └────────────┘
+          │
+     ┌────┴─────┐
+     │ ava-llm  │  6 providers (Anthropic, OpenAI, Gemini, OpenRouter, Ollama + mock)
+     └──────────┘
 ```
 
-## Tech Stack
+**Rust-first**: All CLI/agent code is Rust (~21 crates, ~49K lines). TypeScript is retained only for the Tauri desktop webview.
 
-| Layer | Technology |
-|-------|------------|
-| Desktop | Tauri 2.0 (Rust) — ~5MB app, 30MB RAM |
-| Frontend | SolidJS + TypeScript (~7KB runtime) |
-| Styling | Tailwind CSS v4 |
-| Database | SQLite via tauri-plugin-sql |
-| Tools | File ops via tauri-plugin-fs, shell via tauri-plugin-shell |
-| CLI/TUI | Pure Rust binary (Ratatui + Crossterm + Tokio) — primary interface |
+### Key crates
 
-## Project Structure
+| Crate | Purpose |
+|-------|---------|
+| `ava-tui` | CLI/TUI binary — the primary interface |
+| `ava-agent` | Agent execution loop, reflection, stuck detection |
+| `ava-llm` | LLM providers + connection pooling + circuit breaker |
+| `ava-tools` | Tool trait, registry, 19 built-in tools |
+| `ava-commander` | Multi-agent orchestration (Praxis), workflow pipelines, code review |
+| `ava-session` | Session persistence (SQLite + FTS5) |
+| `ava-memory` | Persistent memory/recall |
+| `ava-permissions` | Command classification, path safety, risk-based approval |
+| `ava-context` | Context window management + condensation strategies |
+| `ava-codebase` | Code indexing (BM25 + PageRank) |
+| `ava-mcp` | MCP (Model Context Protocol) client + config |
+| `ava-config` | Configuration + credentials management |
+| `ava-sandbox` | Command sandboxing (bwrap/sandbox-exec) |
+
+## Tool Surface (19 built-in)
+
+| Group | Count | Tools |
+|-------|------:|-------|
+| Core | 11 | read, write, edit, bash, glob, grep, multiedit, apply_patch, test_runner, lint, diagnostics |
+| Memory | 3 | remember, recall, memory_search |
+| Session | 3 | session_search, session_list, session_load |
+| Codebase | 1 | codebase_search |
+| Git | 1 | git_read (review subcommand) |
+
+Plus dynamic MCP tools and TOML custom tools (`~/.ava/tools/`, `.ava/tools/`).
+
+## Configuration
 
 ```
-crates/                    # ~21 Rust crates — PRIMARY codebase for CLI/agent
-src/                       # Tauri + SolidJS desktop app
-src-tauri/                 # Rust Tauri backend
-cli/                       # Legacy TS CLI (being replaced by crates/ava-tui)
-packages/                  # TypeScript — DESKTOP ONLY (do not use for CLI)
-├── core/                  # Compatibility re-export shim
-├── core-v2/               # Desktop runtime core (agent loop, tools, session, extension API)
-├── extensions/            # Desktop extension modules (providers, tools, modes, validator, etc.)
-├── platform-node/         # Node.js platform implementations
-└── platform-tauri/        # Tauri platform implementations
-docs/                      # Product, architecture, and implementation docs
+~/.ava/
+├── config.yaml          # Provider, model, and agent settings
+├── credentials.json     # API keys per provider
+├── mcp.json             # Global MCP server configuration
+└── tools/               # Custom TOML tool definitions
+
+.ava/                    # Project-level overrides
+├── mcp.json             # Project MCP config (overrides global by server name)
+└── tools/               # Project-specific custom tools
 ```
 
-### Backend Architecture
+Provider priority: `--provider/--model` flags > `AVA_PROVIDER`/`AVA_MODEL` env vars > `~/.ava/config.yaml`.
 
-The Rust crates (`crates/`) are the primary development target. TypeScript packages (`packages/`) are retained for the Tauri desktop webview only.
-
-- `crates/`: ~21 Rust crates (agent stack, TUI, LLM providers, tools, sessions, etc.)
-- `packages/core-v2`: desktop runtime core (agent, tools, extensions, session, config).
-- `packages/extensions`: desktop extension modules.
-- `packages/core`: compatibility re-export shim.
+LLM providers (Rust CLI): **Anthropic**, **OpenAI**, **Gemini**, **OpenRouter**, **Ollama** (5 built-in + external via OpenRouter gateway).
 
 ## Development Commands
 
 ```bash
-# Desktop app
+# Rust (primary)
+cargo test --workspace
+cargo clippy --workspace
+cargo run --bin ava
+
+# Desktop app (TypeScript + Tauri)
 npm run tauri dev
-
-# Build packages only
-pnpm build:packages
-
-# Build + run CLI
-pnpm build:cli
-node cli/dist/index.js --help  # (legacy — being replaced by Rust CLI: cargo run --bin ava)
-
-# Code quality
-npm run lint          # Oxlint + ESLint
-npm run format        # Biome format
-npx tsc --noEmit      # Type check
-
-# Testing
-npm run test          # Vitest watch
-npm run test:run      # Single run
-
-# Maintenance
-npm run knip          # Find dead code
-npm run analyze       # Bundle size
+npm run lint
+npm run format:check
+npx tsc --noEmit
+npm run test:run
 ```
-
-## Configuration
-
-API keys can be set via:
-1. **Settings UI** in the desktop app (stored in localStorage)
-2. **Environment variables** (see `.env.example`)
-3. **~/.ava/credentials.json** for CLI mode
-
-Supported providers (16):
-- **Anthropic** — Direct API or OAuth
-- **OpenAI** — Direct API or OAuth
-- **Google** — Direct API or OAuth
-- **OpenRouter** — Gateway to multiple models
-- **Azure OpenAI** — Direct API
-- **Mistral, Groq, DeepSeek, xAI, Cohere, Together, LiteLLM** — Direct APIs
-- **GLM, Kimi, Vertex** — Direct APIs
-- **Ollama** — Local models
-
-## Tooling Snapshot
-
-- Core-v2 ships the foundational tool set (`read`, `write`, `edit`, `bash`, `glob`, `grep`, `pty`).
-- Extensions add more capabilities (create/delete/apply_patch/multiedit, web tools, task/subagents, git/PR, memory, LSP, planning, and more).
-- Combined tool surface is ~41 static tools (plus dynamic MCP and custom tools).
 
 ## Contributing
 
-1. Check [docs/ROADMAP.md](docs/ROADMAP.md) for current phase
+1. Check [docs/development/roadmap.md](docs/development/roadmap.md) for current phase
 2. Read [CLAUDE.md](CLAUDE.md) for coding conventions
-3. Run `npm run lint && npx tsc --noEmit` before committing
+3. Run `cargo test --workspace && cargo clippy --workspace` before committing
 4. Commits use [Conventional Commits](https://conventionalcommits.org)
 
 ## License

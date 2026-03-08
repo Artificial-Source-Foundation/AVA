@@ -42,7 +42,11 @@ impl AnthropicProvider {
         });
 
         if let Some(system_message) = system {
-            body["system"] = json!(system_message);
+            body["system"] = json!([{
+                "type": "text",
+                "text": system_message,
+                "cache_control": {"type": "ephemeral"}
+            }]);
         }
 
         body
@@ -160,10 +164,12 @@ impl LLMProvider for AnthropicProvider {
 
         let content = common::parse_anthropic_completion_payload(&payload).unwrap_or_default();
         let tool_calls = common::parse_anthropic_tool_calls(&payload);
+        let usage = common::parse_usage(&payload);
 
         Ok(LLMResponse {
             content,
             tool_calls,
+            usage,
         })
     }
 }

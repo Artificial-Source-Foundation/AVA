@@ -1,78 +1,49 @@
 # AVA Documentation
 
-> Single source of truth for architecture, development, and troubleshooting.
-
-<!-- Last verified: 2026-03-07. Run 'npm run test:run && cargo test --workspace' to revalidate. -->
+> Last updated: 2026-03-08
 
 ## Quick Start
 
 | Document | Purpose |
 |----------|---------|
-| [CLAUDE.md](../CLAUDE.md) | **Primary reference** — architecture, conventions, quick commands |
-| [troubleshooting.md](troubleshooting.md) | Common issues and solutions |
-| [backend.md](backend.md) | Backend runtime overview |
+| [CLAUDE.md](../CLAUDE.md) | **Primary reference** — architecture, conventions, commands |
+| [AGENTS.md](../AGENTS.md) | AI agent instructions for working on AVA |
 
-## Architecture
+## Directory Index
 
-| Document | Description |
-|----------|-------------|
-| [architecture/README.md](architecture/README.md) | System components and data flow |
-| [backend/architecture-guide.md](backend/architecture-guide.md) | Detailed backend architecture |
-| [backend.md](backend.md) | Backend runtime model and extension index |
-| [CLAUDE.md](../CLAUDE.md) | Primary architecture reference (single source of truth) |
+```
+docs/
+├── architecture/       # How AVA is built (modules, data flow, backend, praxis)
+├── development/        # Active work (roadmap, sprints, benchmarks, research)
+│   ├── roadmap.md      # Sprint 11-50+ roadmap with phases and milestones
+│   ├── test-matrix.md  # E2E test matrix (19 tools, 5 modes, 3 providers)
+│   ├── sprints/        # Sprint prompts
+│   ├── benchmarks/     # Performance data and bug reports
+│   └── research/       # Competitor analysis and audits
+├── reference-code/     # Competitor source code notes (12 projects)
+├── troubleshooting/    # Common issues and fixes
+└── archives/           # Completed sprints, epics, old docs (historical only)
+```
 
-## Development
+## Key Documents
 
-| Document | Description |
-|----------|-------------|
-| [development/status/current-focus.md](development/status/current-focus.md) | Current development priorities |
-| [plugins/PLUGIN_SDK.md](plugins/PLUGIN_SDK.md) | Extension/plugin development guide |
-| [plugins/PLUGIN_TEMPLATE.md](plugins/PLUGIN_TEMPLATE.md) | Plugin template reference |
+### Development (Active)
+- [**Roadmap**](development/roadmap.md) — Sprint roadmap with phases, dependencies, milestones
+- [**E2E Test Matrix**](development/test-matrix.md) — 19 tools, 5 modes, 3 providers verified
+- [**Benchmark Report**](development/benchmarks/benchmark-2026-03.md) — AVA vs OpenCode performance
+- [**Bug Backlog**](development/benchmarks/sprint-32-bugs.md) — Known bugs and TUI gaps
+- [**Competitive Analysis (Rust)**](development/research/rust-competitive-analysis-2026-03.md) — 12-competitor architecture analysis
 
-## Backend Reference
+### Sprints
+- [Sprint 100](development/sprints/sprint-100-v2.1-release.md) — v2.1 release polish (current)
 
-| Document | Description |
-|----------|-------------|
-| [backend.md](backend.md) | Backend overview (~20 extensions, ~41 tools) |
-| [backend/modules.md](backend/modules.md) | Module organization |
-| [backend/test-coverage.md](backend/test-coverage.md) | Test coverage summary |
+### Architecture
+- [**Architecture Guide**](architecture/architecture-guide.md) — System architecture overview
+- [**Data Flow**](architecture/data-flow.md) — Request/response flow
+- [**Praxis**](architecture/praxis.md) — Multi-agent orchestration design
+- [**Modules**](architecture/modules.md) — Crate-level module overview
+- [**Backend**](architecture/backend.md) — Backend architecture details
 
-## Frontend Reference
-
-| Document | Description |
-|----------|-------------|
-| [frontend/README.md](frontend/README.md) | Frontend architecture |
-| [frontend/design-system.md](frontend/design-system.md) | UI/UX design system |
-
-## Project Planning
-
-| Document | Description |
-|----------|-------------|
-| [ROADMAP.md](ROADMAP.md) | Project roadmap and phase status |
-| [VISION.md](VISION.md) | Project vision and goals |
-| [plans/](plans/) | Sprint plans and designs |
-| [archives/](archives/) | Completed sprints and epics (historical reference) |
-
-## Research & Analysis
-
-| Document | Description |
-|----------|-------------|
-| [research/README.md](research/README.md) | Research index |
-| [research/competitive-analysis-2026-03.md](research/competitive-analysis-2026-03.md) | Competitive analysis |
-
-## Troubleshooting
-
-| Document | Description |
-|----------|-------------|
-| [troubleshooting.md](troubleshooting.md) | Common issues and fixes |
-
----
-
-## Status
-
-- **Architecture**: AVA v2.0 uses `packages/core-v2/` + `packages/extensions/` (20 built-in)
-- **Tool Surface**: ~41 tools across core, extended, git, memory, LSP, recall, and delegate categories
-- **Rust Integration**: 19 crates for compute/safety hotpaths
-- **Migration**: Complete — `packages/core/` is now a compatibility shim
-
-See [CLAUDE.md](../CLAUDE.md) for the definitive architecture reference.
+### Reference
+- [**Reference Code**](reference-code/) — Notes on 12 competitor codebases
+- [**Troubleshooting**](troubleshooting/) — Common issues and fixes

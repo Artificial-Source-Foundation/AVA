@@ -8,6 +8,9 @@ use serde_json::{json, Value};
 
 use crate::registry::Tool;
 
+/// Default maximum lines returned when no explicit `limit` is provided.
+const MAX_LINES_DEFAULT: usize = 2000;
+
 pub struct ReadTool {
     platform: Arc<dyn Platform>,
 }
@@ -71,13 +74,22 @@ impl Tool for ReadTool {
             .map(|(idx, line)| format!("{:>6}\t{line}", idx + 1))
             .collect();
 
-        if let Some(limit) = limit {
-            lines.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
+        let cap = limit
+            .map(|l| usize::try_from(l).unwrap_or(usize::MAX))
+            .unwrap_or(MAX_LINES_DEFAULT);
+        let truncated = lines.len() > cap;
+        lines.truncate(cap);
+
+        let mut content = lines.join("\n");
+        if truncated {
+            content.push_str(&format!(
+                "\n\n[Truncated: showing first {cap} lines. Use offset/limit to read more.]"
+            ));
         }
 
         Ok(ToolResult {
             call_id: String::new(),
-            content: lines.join("\n"),
+            content,
             is_error: false,
         })
     }

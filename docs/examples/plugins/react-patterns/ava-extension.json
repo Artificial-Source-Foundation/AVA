@@ -1,7 +1,0 @@
-{
-  "name": "react-patterns",
-  "version": "0.1.0",
-  "description": "Provides React component patterns guidance for .tsx/.jsx files",
-  "main": "dist/index.js",
-  "capabilities": ["commands"]
-}

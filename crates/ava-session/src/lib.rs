@@ -1,3 +1,10 @@
+//! AVA Session — session persistence with SQLite storage.
+//!
+//! This crate provides:
+//! - Session creation, saving, and loading
+//! - Message history management
+//! - Full-text search over sessions
+
 mod helpers;
 
 use std::path::{Path, PathBuf};

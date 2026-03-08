@@ -1,7 +1,8 @@
 [package]
 name = "ava-cli-providers"
-version = "2.0.0"
-edition = "2021"
+description = "External CLI agent integration and discovery"
+version.workspace = true
+edition.workspace = true
 
 [dependencies]
 async-trait.workspace = true

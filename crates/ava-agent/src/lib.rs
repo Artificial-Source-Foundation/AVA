@@ -1,4 +1,10 @@
-#[path = "loop.rs"]
+//! AVA Agent — core agent execution loop with tool calling and stuck detection.
+//!
+//! This crate implements the main agent loop that:
+//! - Sends messages to LLM providers via `ava-llm`
+//! - Parses and executes tool calls via `ava-tools`
+//! - Detects stuck states and terminates gracefully
+
 pub mod agent_loop;
 pub mod llm_trait;
 pub mod reflection;

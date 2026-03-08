@@ -1,3 +1,10 @@
+//! AVA Extensions — hook primitives and extension lifecycle management.
+//!
+//! This crate provides:
+//! - Hook registration and invocation system
+//! - Extension descriptors and manager
+//! - Native (shared library) and WASM extension loaders
+
 /// Hook primitives and registration for extension lifecycle integration.
 pub mod hook;
 /// Extension descriptors and registration manager.

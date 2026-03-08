@@ -1,7 +1,0 @@
-{
-  "name": "session-notes",
-  "version": "0.1.0",
-  "description": "Store and retrieve session notes via /notes command",
-  "main": "dist/index.js",
-  "capabilities": ["commands"]
-}

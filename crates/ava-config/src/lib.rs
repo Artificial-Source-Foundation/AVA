@@ -93,6 +93,43 @@ impl Default for FeaturesConfig {
     }
 }
 
+/// Fallback provider configuration for automatic failover
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FallbackConfig {
+    pub provider: String,
+    pub model: String,
+}
+
+/// Voice input configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoiceConfig {
+    /// Whisper model to use (e.g., "whisper-1" for API, "base" for local)
+    pub model: String,
+    /// Language hint for transcription (ISO 639-1, e.g., "en")
+    pub language: Option<String>,
+    /// RMS amplitude below which audio is considered silence (0.0–1.0)
+    pub silence_threshold: f32,
+    /// Seconds of continuous silence before auto-stop
+    pub silence_duration_secs: f32,
+    /// Maximum recording duration in seconds
+    pub max_duration_secs: u32,
+    /// Automatically submit transcribed text to the agent
+    pub auto_submit: bool,
+}
+
+impl Default for VoiceConfig {
+    fn default() -> Self {
+        Self {
+            model: "whisper-1".to_string(),
+            language: None,
+            silence_threshold: 0.01,
+            silence_duration_secs: 2.5,
+            max_duration_secs: 60,
+            auto_submit: false,
+        }
+    }
+}
+
 /// Main configuration struct
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
@@ -100,6 +137,10 @@ pub struct Config {
     pub editor: EditorConfig,
     pub ui: UiConfig,
     pub features: FeaturesConfig,
+    #[serde(default)]
+    pub fallback: Option<FallbackConfig>,
+    #[serde(default)]
+    pub voice: VoiceConfig,
 }
 
 /// Configuration manager with auto-reload support

@@ -1,3 +1,4 @@
+use ava_permissions::tags::{RiskLevel, SafetyTag};
 use ava_types::ToolCall;
 use std::collections::{HashSet, VecDeque};
 use tokio::sync::oneshot;
@@ -9,10 +10,19 @@ pub enum ToolApproval {
     Rejected(Option<String>),
 }
 
+/// Optional inspection result attached to approval requests for UI display.
+#[derive(Debug, Clone)]
+pub struct InspectionInfo {
+    pub risk_level: RiskLevel,
+    pub tags: Vec<SafetyTag>,
+    pub warnings: Vec<String>,
+}
+
 #[derive(Debug)]
 pub struct ApprovalRequest {
     pub call: ToolCall,
     pub approve_tx: oneshot::Sender<ToolApproval>,
+    pub inspection: Option<InspectionInfo>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

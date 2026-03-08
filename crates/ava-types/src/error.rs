@@ -24,6 +24,9 @@ pub enum AvaError {
     #[error("Model '{model}' not found for provider '{provider}'")]
     ModelNotFound { provider: String, model: String },
 
+    #[error("Provider '{provider}' is temporarily unavailable (circuit breaker open). Retry after cooldown")]
+    ProviderUnavailable { provider: String },
+
     // ── Structured tool errors ──────────────────────────────────────────
 
     #[error("Tool '{tool}' not found. Available tools: {available}")]
@@ -113,9 +116,9 @@ impl AvaError {
 
             AvaError::PermissionDenied(_) => ErrorCategory::Permission,
 
-            AvaError::ProviderError { .. } | AvaError::RateLimited { .. } => {
-                ErrorCategory::Provider
-            }
+            AvaError::ProviderError { .. }
+            | AvaError::RateLimited { .. }
+            | AvaError::ProviderUnavailable { .. } => ErrorCategory::Provider,
 
             AvaError::AgentStopped { .. } | AvaError::Cancelled => ErrorCategory::Agent,
         }
@@ -130,6 +133,7 @@ impl AvaError {
                 | AvaError::PlatformError(_)
                 | AvaError::RateLimited { .. }
                 | AvaError::ToolTimeout { .. }
+                | AvaError::ProviderUnavailable { .. }
         )
     }
 
@@ -168,6 +172,9 @@ impl AvaError {
                     "Context window exceeded ({current} > {limit} tokens). \
                      Use a larger model or break the task into smaller parts"
                 )
+            }
+            AvaError::ProviderUnavailable { provider } => {
+                format!("{provider} is temporarily unavailable (circuit breaker open)")
             }
             AvaError::AgentStopped { reason } => format!("Agent stopped: {reason}"),
             AvaError::Cancelled => "Agent run cancelled by user".to_string(),
@@ -309,6 +316,79 @@ mod tests {
         let err = AvaError::Cancelled;
         assert_eq!(err.category(), ErrorCategory::Agent);
         assert_eq!(err.to_string(), "Agent run cancelled by user");
+    }
+
+    #[test]
+    fn error_display_is_human_readable() {
+        let errors: Vec<AvaError> = vec![
+            AvaError::ToolError("test".to_string()),
+            AvaError::IoError("test".to_string()),
+            AvaError::SerializationError("test".to_string()),
+            AvaError::PlatformError("test".to_string()),
+            AvaError::ConfigError("test".to_string()),
+            AvaError::ValidationError("test".to_string()),
+            AvaError::DatabaseError("test".to_string()),
+            AvaError::TimeoutError("test".to_string()),
+            AvaError::NotFound("test".to_string()),
+            AvaError::PermissionDenied("test".to_string()),
+            AvaError::ProviderError {
+                provider: "test".to_string(),
+                message: "fail".to_string(),
+            },
+            AvaError::MissingApiKey {
+                provider: "test".to_string(),
+            },
+            AvaError::RateLimited {
+                provider: "test".to_string(),
+                retry_after_secs: 10,
+            },
+            AvaError::ModelNotFound {
+                provider: "test".to_string(),
+                model: "gpt-5".to_string(),
+            },
+            AvaError::ToolNotFound {
+                tool: "magic".to_string(),
+                available: "read".to_string(),
+            },
+            AvaError::ToolExecutionError {
+                tool: "bash".to_string(),
+                message: "oops".to_string(),
+            },
+            AvaError::ToolTimeout {
+                tool: "bash".to_string(),
+                timeout_secs: 60,
+            },
+            AvaError::ContextWindowExceeded {
+                current: 200_000,
+                limit: 128_000,
+            },
+            AvaError::ProviderUnavailable {
+                provider: "test".to_string(),
+            },
+            AvaError::AgentStopped {
+                reason: "cost".to_string(),
+            },
+            AvaError::Cancelled,
+        ];
+
+        for err in &errors {
+            let display = format!("{err}");
+            assert!(
+                !display.contains("AvaError::"),
+                "Display for {err:?} should not contain 'AvaError::': got '{display}'"
+            );
+            assert!(!display.is_empty(), "Display should not be empty");
+        }
+    }
+
+    #[test]
+    fn permission_denied_blocked_message() {
+        let err = AvaError::PermissionDenied("rm -rf / blocked by policy".to_string());
+        let msg = err.user_message();
+        assert!(
+            msg.contains("denied"),
+            "user_message should contain 'denied': got '{msg}'"
+        );
     }
 
     #[test]

@@ -17,6 +17,10 @@ pub enum Action {
     Cancel,
     Quit,
     YoloToggle,
+    ClearMessages,
+    ForceCompact,
+    Audit,
+    VoiceToggle,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -111,5 +115,6 @@ pub fn default_keybinds() -> HashMap<Action, Vec<KeyBinding>> {
         (Action::Cancel, vec![ctrl('c')]),
         (Action::Quit, vec![ctrl('d')]),
         (Action::YoloToggle, vec![ctrl('y')]),
+        (Action::VoiceToggle, vec![ctrl('v')]),
     ])
 }

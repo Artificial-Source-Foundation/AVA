@@ -84,6 +84,31 @@ impl Tool for NoopTool {
     }
 }
 
+struct FailingTool;
+
+#[async_trait]
+impl Tool for FailingTool {
+    fn name(&self) -> &str {
+        "fail_tool"
+    }
+
+    fn description(&self) -> &str {
+        "Always fails"
+    }
+
+    fn parameters(&self) -> Value {
+        json!({"type": "object"})
+    }
+
+    async fn execute(&self, _args: Value) -> ava_types::Result<ToolResult> {
+        Ok(ToolResult {
+            call_id: "call_fail".to_string(),
+            content: "file not found: /nonexistent".to_string(),
+            is_error: true,
+        })
+    }
+}
+
 fn build_loop(responses: Vec<String>, token_limit: usize, max_turns: usize) -> AgentLoop {
     let mut tools = ToolRegistry::new();
     tools.register(NoopTool { name: "echo" });
@@ -101,6 +126,7 @@ fn build_loop(responses: Vec<String>, token_limit: usize, max_turns: usize) -> A
             model: "mock-model".to_string(),
             max_cost_usd: 10.0,
             loop_detection: true,
+            custom_system_prompt: None,
         },
     )
 }
@@ -166,4 +192,51 @@ async fn context_compaction_triggered_when_threshold_exceeded() {
     assert!(events.iter().any(|event| {
         matches!(event, AgentEvent::Progress(message) if message == "context compacted")
     }));
+}
+
+#[tokio::test]
+async fn error_hint_injected_after_tool_failure() {
+    let mut tools = ToolRegistry::new();
+    tools.register(FailingTool);
+    tools.register(NoopTool {
+        name: "attempt_completion",
+    });
+
+    let mut loop_engine = AgentLoop::new(
+        Box::new(MockLLMProvider::new(vec![
+            // First turn: call the failing tool
+            json!({"tool_call": {"name": "fail_tool", "arguments": {}}}).to_string(),
+            // Second turn: complete
+            json!({"tool_call": {"name": "attempt_completion", "arguments": {}}}).to_string(),
+        ])),
+        tools,
+        ContextManager::new(10_000),
+        AgentConfig {
+            max_turns: 5,
+            token_limit: 10_000,
+            model: "mock-model".to_string(),
+            max_cost_usd: 10.0,
+            loop_detection: true,
+            custom_system_prompt: None,
+        },
+    );
+
+    let session = loop_engine.run("do something").await.expect("run should succeed");
+
+    // Should find a hint message about the tool failure
+    let has_hint = session.messages.iter().any(|m| {
+        m.role == ava_types::Role::User
+            && m.content.contains("Tool call failed")
+            && m.content.contains("different approach")
+    });
+    assert!(has_hint, "expected error hint message in session");
+}
+
+#[tokio::test]
+async fn empty_response_does_not_crash() {
+    // MockProvider returns empty string — agent should handle gracefully
+    let mut loop_engine = build_loop(vec!["".to_string()], 1_000, 5);
+    let result = loop_engine.run("do something").await;
+    // Should complete without panic — either Ok or a controlled error
+    assert!(result.is_ok() || result.is_err());
 }

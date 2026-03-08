@@ -1,9 +1,17 @@
 use std::collections::HashMap;
+use std::pin::Pin;
 
 use async_trait::async_trait;
 use ava_types::{AvaError, Result, Tool as ToolDefinition, ToolCall, ToolResult};
+use futures::Stream;
 use serde_json::Value;
 use tracing::instrument;
+
+/// Output from a tool execution — either complete or streaming.
+pub enum ToolOutput {
+    Complete(ToolResult),
+    Streaming(Pin<Box<dyn Stream<Item = String> + Send>>),
+}
 
 #[async_trait]
 pub trait Tool: Send + Sync {
@@ -11,8 +19,15 @@ pub trait Tool: Send + Sync {
     fn description(&self) -> &str;
     fn parameters(&self) -> Value;
     async fn execute(&self, args: Value) -> Result<ToolResult>;
+
+    /// Execute with optional streaming output. Default wraps `execute()`.
+    async fn execute_streaming(&self, args: Value) -> Result<ToolOutput> {
+        self.execute(args).await.map(ToolOutput::Complete)
+    }
 }
 
+/// Middleware that runs before and after tool execution for cross-cutting concerns
+/// such as sandboxing, reliability checks, and error recovery.
 #[async_trait]
 pub trait Middleware: Send + Sync {
     async fn before(&self, tool_call: &ToolCall) -> Result<()>;
@@ -22,9 +37,32 @@ pub trait Middleware: Send + Sync {
     async fn after(&self, tool_call: &ToolCall, result: &ToolResult) -> Result<ToolResult>;
 }
 
+/// Where a tool came from — used for grouping in `/tools` and selective reload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolSource {
+    BuiltIn,
+    MCP { server: String },
+    Custom { path: String },
+}
+
+impl std::fmt::Display for ToolSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::BuiltIn => write!(f, "built-in"),
+            Self::MCP { server } => write!(f, "mcp:{server}"),
+            Self::Custom { path } => write!(f, "custom:{path}"),
+        }
+    }
+}
+
+/// Central registry of available tools with middleware pipeline and source tracking.
+///
+/// Tools are registered with a [`ToolSource`] for grouping (built-in, MCP, custom).
+/// Middleware runs in insertion order around every tool execution.
 #[derive(Default)]
 pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn Tool>>,
+    sources: HashMap<String, ToolSource>,
     middleware: Vec<Box<dyn Middleware>>,
 }
 
@@ -37,7 +75,40 @@ impl ToolRegistry {
     where
         T: Tool + 'static,
     {
-        self.tools.insert(tool.name().to_string(), Box::new(tool));
+        let name = tool.name().to_string();
+        self.sources.insert(name.clone(), ToolSource::BuiltIn);
+        self.tools.insert(name, Box::new(tool));
+    }
+
+    pub fn register_with_source<T>(&mut self, tool: T, source: ToolSource)
+    where
+        T: Tool + 'static,
+    {
+        let name = tool.name().to_string();
+        self.sources.insert(name.clone(), source);
+        self.tools.insert(name, Box::new(tool));
+    }
+
+    pub fn unregister(&mut self, name: &str) {
+        self.tools.remove(name);
+        self.sources.remove(name);
+    }
+
+    /// Remove all tools matching a given source predicate.
+    pub fn remove_by_source<F>(&mut self, predicate: F)
+    where
+        F: Fn(&ToolSource) -> bool,
+    {
+        let to_remove: Vec<String> = self
+            .sources
+            .iter()
+            .filter(|(_, src)| predicate(src))
+            .map(|(name, _)| name.clone())
+            .collect();
+        for name in to_remove {
+            self.tools.remove(&name);
+            self.sources.remove(&name);
+        }
     }
 
     pub fn add_middleware<M>(&mut self, middleware: M)
@@ -87,5 +158,35 @@ impl ToolRegistry {
             .collect();
         tools.sort_by(|left, right| left.name.cmp(&right.name));
         tools
+    }
+
+    /// List tools with their source information.
+    pub fn list_tools_with_source(&self) -> Vec<(ToolDefinition, ToolSource)> {
+        let mut tools: Vec<(ToolDefinition, ToolSource)> = self
+            .tools
+            .values()
+            .map(|tool| {
+                let name = tool.name().to_string();
+                let source = self
+                    .sources
+                    .get(&name)
+                    .cloned()
+                    .unwrap_or(ToolSource::BuiltIn);
+                (
+                    ToolDefinition {
+                        name,
+                        description: tool.description().to_string(),
+                        parameters: tool.parameters(),
+                    },
+                    source,
+                )
+            })
+            .collect();
+        tools.sort_by(|a, b| a.0.name.cmp(&b.0.name));
+        tools
+    }
+
+    pub fn tool_count(&self) -> usize {
+        self.tools.len()
     }
 }

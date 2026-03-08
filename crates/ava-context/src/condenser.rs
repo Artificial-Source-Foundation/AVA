@@ -4,8 +4,8 @@ use ava_types::Message;
 
 use crate::error::{ContextError, Result};
 use crate::strategies::{
-    AsyncCondensationStrategy, CondensationStrategy, SlidingWindowStrategy, Summarizer,
-    SummarizationStrategy, ToolTruncationStrategy,
+    AsyncCondensationStrategy, CondensationStrategy, RelevanceStrategy, SlidingWindowStrategy,
+    Summarizer, SummarizationStrategy, ToolTruncationStrategy,
 };
 use crate::token_tracker::TokenTracker;
 use crate::types::{CondensationResult, CondenserConfig};
@@ -182,13 +182,31 @@ pub fn create_full_condenser(config: CondenserConfig) -> Condenser {
 
 /// Create a hybrid condenser with the 3-stage pipeline.
 /// If `summarizer` is `None` and `enable_summarization` is true, uses heuristic fallback.
+/// If `relevance_scores` is provided, inserts a relevance strategy between tool truncation
+/// and summarization.
 pub fn create_hybrid_condenser(
     config: CondenserConfig,
     summarizer: Option<Arc<dyn Summarizer>>,
 ) -> HybridCondenser {
-    let sync_strategies: Vec<Box<dyn CondensationStrategy>> = vec![Box::new(
+    create_hybrid_condenser_with_relevance(config, summarizer, None)
+}
+
+/// Create a hybrid condenser with optional relevance-aware scoring.
+pub fn create_hybrid_condenser_with_relevance(
+    config: CondenserConfig,
+    summarizer: Option<Arc<dyn Summarizer>>,
+    relevance_scores: Option<std::collections::HashMap<String, f64>>,
+) -> HybridCondenser {
+    let mut sync_strategies: Vec<Box<dyn CondensationStrategy>> = vec![Box::new(
         ToolTruncationStrategy::new(config.max_tool_content_chars),
     )];
+
+    if let Some(scores) = relevance_scores {
+        sync_strategies.push(Box::new(RelevanceStrategy::new(
+            scores,
+            config.preserve_recent_messages,
+        )));
+    }
 
     let async_strategies: Vec<Box<dyn AsyncCondensationStrategy>> = if config.enable_summarization {
         vec![Box::new(SummarizationStrategy::new(
@@ -224,10 +242,13 @@ mod tests {
     #[test]
     fn applies_strategies_when_over_limit() {
         let mut condenser = create_condenser(20);
-        let mut messages = vec![Message::new(Role::User, "x".repeat(200))];
+        // Use multi-word content so word-based token estimator counts enough tokens
+        let words = (0..100).map(|i| format!("word{i}")).collect::<Vec<_>>().join(" ");
+        let tool_words = (0..200).map(|i| format!("val{i}")).collect::<Vec<_>>().join(" ");
+        let mut messages = vec![Message::new(Role::User, words)];
         messages[0].tool_results.push(ToolResult {
             call_id: "1".to_string(),
-            content: "y".repeat(500),
+            content: tool_words,
             is_error: false,
         });
 

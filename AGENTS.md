@@ -1,5 +1,5 @@
-<!-- Last verified: 2026-03-07 -->
-# AI Coding Agent Instructions
+<!-- Last verified: 2026-03-08 -->
+# AI Coding Agent Instructions (v2.1)
 
 > Universal instructions for AI assistants working on AVA
 
@@ -8,11 +8,16 @@
 ## Quick Start
 
 ```bash
+# Rust (primary)
+cargo test --workspace
+cargo clippy --workspace
+
+# Desktop (TypeScript + Tauri)
 npm run tauri dev
 npm run lint
 npm run format:check
 npx tsc --noEmit
-npm run test
+npm run test:run
 ```
 
 Read first: `CLAUDE.md`
@@ -46,7 +51,7 @@ AVA/
 │   ├── ava-commander/   # Multi-agent orchestration
 │   ├── ava-session/     # Session persistence
 │   ├── ava-memory/      # Persistent memory/recall
-│   └── ...              # 12 more crates
+│   └── ...              # 13 more crates
 ├── packages/            # TypeScript — DESKTOP ONLY
 │   ├── core-v2/         # desktop orchestration kernel
 │   ├── extensions/      # desktop extension modules (20)
@@ -68,7 +73,8 @@ AVA/
 ### Important Counts
 
 - Rust crates: ~21
-- Tool surface: ~41
+- Built-in tools: 19 (11 core + 3 memory + 3 session + 1 codebase + 1 git)
+- Dynamic tools: MCP servers + TOML custom tools
 
 ---
 
@@ -137,11 +143,12 @@ Middleware priorities are contract-sensitive. Lower numeric priority runs earlie
 
 ## Before Committing
 
+- `cargo test --workspace`
+- `cargo clippy --workspace`
 - `npm run lint`
 - `npm run format:check`
 - `npx tsc --noEmit`
-- `npm run test`
-- `npm run tauri dev` (or `npm run tauri build` for release verification)
+- `npm run test:run`
 
 ---
 
@@ -162,8 +169,9 @@ node cli/dist/index.js run "your goal here" --provider openrouter --model <model
 
 ### Recommended models (via OpenRouter)
 
-| Model | ID | Best for | Cost |
+| Model | ID | Best for | Cost (input/output per M) |
 |-------|-----|----------|------|
+| **Gemini 3 Flash** | `google/gemini-3-flash-preview` | **Smoke tests, cheap SOTA** | $2 / $12 |
 | Codex 5.3 | `openai/gpt-5.3-codex` | Best OpenAI coding model | $1.75/M |
 | Claude Sonnet 4.6 | `anthropic/claude-sonnet-4.6` | General coding, tool use | $3/M |
 | Claude Opus 4.6 | `anthropic/claude-opus-4.6` | Complex tasks, code review | $5/M |
@@ -171,7 +179,7 @@ node cli/dist/index.js run "your goal here" --provider openrouter --model <model
 | GLM 5 | `z-ai/glm-5` | Budget bulk work, 200K context | $0.80/M |
 | GLM 4.5 Air | `z-ai/glm-4.5-air` | Free tier testing | FREE |
 
-For smoke tests, use `anthropic/claude-sonnet-4.6` or `openai/gpt-5.3-codex`.
+For smoke tests, use `anthropic/claude-haiku-4.5` ($1/$5, cheapest Western SOTA with full tool use).
 For quality verification, use `openai/gpt-5.3-codex` or `anthropic/claude-opus-4.6`.
 For budget/bulk work, use `moonshotai/kimi-k2.5` or `z-ai/glm-5`.
 
@@ -188,9 +196,11 @@ For budget/bulk work, use `moonshotai/kimi-k2.5` or `z-ai/glm-5`.
 
 ## Documentation Priority
 
-1. `CLAUDE.md`
-2. `docs/README.md`
-3. `docs/ROADMAP.md`
-4. `docs/VISION.md`
-5. `docs/development/opencode-comparison.md`
-6. `docs/reference-code/`
+1. `CLAUDE.md` — primary architecture reference
+2. `AGENTS.md` — AI agent instructions
+3. `docs/development/roadmap.md` — sprint roadmap (11-50+)
+4. `docs/development/sprints/` — current sprint prompts
+5. `docs/development/research/` — competitor analysis
+6. `docs/architecture/` — system design docs
+7. `docs/reference-code/` — competitor source code notes (12 projects)
+8. `docs/archives/` — historical only, don't reference for current work

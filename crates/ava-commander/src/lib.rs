@@ -1,3 +1,10 @@
+//! AVA Commander — multi-agent orchestration with domain-specific leads.
+//!
+//! This crate implements the commander pattern for coordinating multiple agents:
+//! - Domain-specific leads (Frontend, Backend, QA, etc.)
+//! - Worker spawning and task delegation
+//! - Event streaming and coordination
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,8 +26,14 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 pub mod events;
+pub mod review;
+pub mod workflow;
 
 pub use events::CommanderEvent;
+pub use review::{
+    DiffMode, ReviewContext, ReviewResult, ReviewVerdict, Severity,
+};
+pub use workflow::{Phase, PhaseRole, Workflow, WorkflowExecutor};
 
 pub struct Commander {
     leads: Vec<Lead>,
@@ -371,6 +384,7 @@ impl Lead {
                 model: model_name,
                 max_cost_usd: worker_budget.max_cost_usd,
                 loop_detection: true,
+                custom_system_prompt: None,
             },
         );
 
@@ -446,7 +460,7 @@ async fn run_worker(
             }
             AgentEvent::Complete(session) => return Ok(session),
             AgentEvent::Error(error) => return Err(AvaError::ToolError(error)),
-            AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) => {}
+            AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } => {}
         }
     }
 

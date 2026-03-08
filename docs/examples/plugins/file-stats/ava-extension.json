@@ -1,7 +1,0 @@
-{
-  "name": "file-stats",
-  "version": "0.1.0",
-  "description": "Returns line count, size, and language for a file",
-  "main": "dist/index.js",
-  "capabilities": ["tools"]
-}

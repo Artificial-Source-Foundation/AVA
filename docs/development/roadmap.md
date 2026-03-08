@@ -1,0 +1,95 @@
+# AVA Sprint Roadmap
+
+> Last updated: 2026-03-08
+
+## Completed (Sprints 11–50)
+
+| Sprint | Focus |
+|--------|-------|
+| 11–15 | Foundation (TypeScript core, extensions, desktop) |
+| 16a | Rust agent stack (core tools, AgentStack, sandbox) |
+| 16b | Ratatui TUI (8 features, 41 files) |
+| 16c | Credential store + provider auth |
+| 17 | Praxis v2 multi-agent hierarchy |
+| 18 | CLI agent providers |
+| 19 | Send-safe AgentStack + headless CLI |
+| 20 | Agent loop intelligence (system prompts, native tool calling, streaming) |
+| 21 | TUI polish (streaming render, tool approval, markdown, sessions) |
+| 22 | Praxis Commander E2E (SharedProvider, --multi-agent CLI) |
+| 23 | Code quality (runner split, stuck detection, /model switching) |
+| 24 | Competitive Rust architecture analysis |
+| 25 | Structured error types + RetryBudget |
+| 26 | Hybrid context compaction (3-stage pipeline) |
+| 27 | Two-layer client (ConnectionPool + send_with_retry) |
+| 28 | Tool monitoring (usage patterns, loop detection) |
+| 29 | Permission inspector (SafetyTag, RiskLevel, 3 policy presets) |
+| 30 | TUI token buffer (60fps) + structured tracing |
+| 31 | MCP Extension System (transport, client, config, manager, bridge) |
+| 32 | Integration testing + performance benchmark vs OpenCode |
+| 33 | Critical bug fixes (TUI 400, large file crash, empty turns, default config) |
+| 34a | TUI research — OpenCode & Codex CLI frontend deep-dive |
+| 34 | TUI parity (welcome screen, rich status bar, keyboard hints, command palette, model selector, ! shell, TTL messages) |
+| 35 | Agent intelligence mega (smart completion, token counting, chunk-aware truncation, prompt caching, circuit breaker, self-correction) |
+| 37 | Developer workflow mega (multiedit, apply-patch, test runner, lint, diagnostics, LSP client, word-level diffs) |
+| 41 | Context & memory mega (relevance-aware context, codebase auto-index, memory/session/codebase tools, auto-context injection) |
+| 39 | MCP expansion + TOML plugin system + tool discovery UI + hot-reload |
+| 43 | Performance (connection pre-warming, request pipelining, streaming tool results, cost tracker, provider fallback) |
+| 45 | Safety (command classifier, path safety, risk-aware approval UI, audit log, extended tool profiles) |
+| 46 | Multi-agent workflows (planner→coder→reviewer pipeline, feedback loops, workflow CLI) |
+| 47 | Code review agent (`ava review`, structured output, CI exit codes, env var config) |
+| 48 | Voice input (Whisper API + local, silence detection, Ctrl+V hotkey, --voice mode) |
+| 50a | Bug hunt (15 edge-case tests, error message audit) |
+| 50b | Headless E2E tests (12 real-provider integration tests) |
+| 50c | TUI interaction tests (10 TestBackend UI tests) |
+| 50d | Performance regression check + release build verification |
+| 50e | Documentation audit (CLAUDE.md, README, docs index, --help) |
+| 50f | DX hardening (split oversized files, eliminate unwraps, doc comments, workspace config) |
+| 99 | Codebase housekeeping (docs cleanup, crate doc comments, archives organized) |
+| 100 | v2.1 release documentation, test matrix, version bump |
+
+## Status: v2.1 Released
+
+All planned sprints are complete. Released as v2.1.0 on 2026-03-08.
+
+## Codebase Stats (as of Sprint 50)
+
+| Metric | Value |
+|--------|-------|
+| Rust crates | 21 |
+| Rust source files | 291 |
+| Lines of Rust | ~47,000 |
+| Tests | 595 |
+| Clippy | Clean |
+| Built-in tools | 19 |
+
+## Parallelism Guide (Historical)
+
+Sprints that ran simultaneously:
+- **34 + 35** (TUI vs agent core — zero overlap)
+- **37 + 41** (workflow tools vs context system)
+- **39 + 43 + 45** (extensibility vs performance vs safety — zero overlap)
+- **47 + 48** (code review vs voice — independent)
+- **50b + 50c + 50d + 50e + 50f** (all independent stabilization tracks)
+
+## Combined Sprints
+
+| Original | Combined Into | Reason |
+|----------|--------------|--------|
+| 35 + 36 + 43 (partial) | **Sprint 35** | All agent intelligence / ava-llm / ava-context — no file overlap |
+| 37 + 38 | **Sprint 37** | Developer workflow tools — all in ava-tools + ava-lsp |
+| 41 + 42 | **Sprint 41** | Context + memory — ava-codebase + ava-context + ava-memory + ava-session |
+| 39 + 40 | **Sprint 39** | Extensibility — MCP expansion + TOML plugins |
+| 43 + 44 | **Sprint 43** | Performance — connection, pipelining, streaming tools, fallback |
+
+## Milestones
+
+All milestones completed on **2026-03-07** (single-day sprint blitz).
+
+| Sprint Range | Focus |
+|-------------|-------|
+| 11–33 | Foundation → bug fixes |
+| 34–35 | TUI parity + agent intelligence |
+| 37–45 | Workflow, context, extensibility, performance, safety |
+| 46–48 | Differentiators (multi-agent, code review, voice) |
+| 50a–50f | Stabilization (tests, bugs, performance, docs, DX) |
+| 99–100 | Housekeeping + v2.1 release |

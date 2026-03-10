@@ -102,11 +102,12 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
         ModalType::ModelSelector => {
             if let Some(ref selector) = state.model_selector {
                 let config = SelectListConfig {
-                    title: "Select model".to_string(),
+                    title: "Switch Model".to_string(),
                     search_placeholder: "Search models...".to_string(),
                     keybinds: vec![
-                        KeybindHint { key: "enter".to_string(), label: "select".to_string() },
-                        KeybindHint { key: "esc".to_string(), label: "close".to_string() },
+                        KeybindHint { key: "\u{2191}\u{2193}".to_string(), label: "navigate".to_string() },
+                        KeybindHint { key: "Enter".to_string(), label: "select".to_string() },
+                        KeybindHint { key: "Esc".to_string(), label: "close".to_string() },
                     ],
                 };
                 render_select_list(frame, inner, &selector.list, &config, &state.theme);

@@ -137,8 +137,28 @@ impl<T: Clone> SelectListState<T> {
             return;
         }
         let line = self.line_map[self.selected];
-        if line < self.scroll_offset {
-            self.scroll_offset = line;
+
+        // When scrolling up, also reveal the section header above this item.
+        // If this is the first item in a section, the section header line sits
+        // at (line - 1) and possibly a blank separator at (line - 2). We detect
+        // "first in section" by checking whether the gap to the previous item
+        // is larger than 1 (meaning header/separator lines exist between them).
+        let effective_top = if self.selected == 0 {
+            // Very first item — always scroll to the absolute top so the
+            // first section header is visible.
+            0
+        } else {
+            let prev_line = self.line_map[self.selected - 1];
+            if line.saturating_sub(prev_line) > 1 {
+                // First item in a new section — show the section header line.
+                line.saturating_sub(1)
+            } else {
+                line
+            }
+        };
+
+        if effective_top < self.scroll_offset {
+            self.scroll_offset = effective_top;
         } else if line >= self.scroll_offset + viewport_height {
             self.scroll_offset = line.saturating_sub(viewport_height) + 1;
         }
@@ -600,13 +620,13 @@ pub fn render_select_list<T: Clone>(
             footer_spans.push(Span::styled(
                 hint.key.clone(),
                 Style::default()
-                    .fg(theme.text)
+                    .fg(theme.text_muted)
                     .bg(theme.bg_surface)
                     .add_modifier(Modifier::BOLD),
             ));
             footer_spans.push(Span::styled(
                 format!(" {}", hint.label),
-                Style::default().fg(theme.text_muted).bg(theme.bg_surface),
+                Style::default().fg(theme.text_dimmed).bg(theme.bg_surface),
             ));
         }
         let footer = Paragraph::new(Line::from(footer_spans))
@@ -769,6 +789,57 @@ mod tests {
         // line 6 should be visible: scroll_offset should be >= 4
         assert!(state.scroll_offset + 3 > 6);
         assert!(state.scroll_offset <= 6);
+    }
+
+    #[test]
+    fn scroll_up_to_first_item_shows_section_header() {
+        // Regression test: scrolling back up to the first item must
+        // reset scroll_offset to 0 so the section header is visible.
+        let mut state = SelectListState::new(make_items(&[
+            ("Section A", &["a1", "a2", "a3", "a4", "a5"]),
+            ("Section B", &["b1", "b2"]),
+        ]));
+
+        // line_map[0] == 1 (because line 0 is the "Section A" header)
+        assert_eq!(state.line_map[0], 1);
+
+        // Scroll down past the viewport, then back to the first item
+        let viewport = 3;
+        state.selected = 4; // a5
+        state.ensure_visible(viewport);
+        assert!(state.scroll_offset > 0);
+
+        // Now scroll back up to the very first item
+        state.selected = 0;
+        state.ensure_visible(viewport);
+        // scroll_offset must be 0, not 1 — the section header must be visible
+        assert_eq!(state.scroll_offset, 0);
+    }
+
+    #[test]
+    fn scroll_up_to_first_item_of_second_section_shows_header() {
+        let mut state = SelectListState::new(make_items(&[
+            ("Section A", &["a1", "a2"]),
+            ("Section B", &["b1", "b2"]),
+        ]));
+
+        // Layout:
+        // 0: Section A header
+        // 1: a1, 2: a2
+        // 3: blank
+        // 4: Section B header
+        // 5: b1, 6: b2
+        assert_eq!(state.line_map, vec![1, 2, 5, 6]);
+
+        let viewport = 3;
+        state.selected = 3; // b2 at line 6
+        state.ensure_visible(viewport);
+
+        // Now go to b1 (first in Section B, at line 5)
+        state.selected = 2; // b1
+        state.ensure_visible(viewport);
+        // Section B header is at line 4, so scroll_offset should show it
+        assert!(state.scroll_offset <= 4, "scroll_offset {} should be <= 4 to show Section B header", state.scroll_offset);
     }
 
     #[test]

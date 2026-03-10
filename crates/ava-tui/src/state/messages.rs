@@ -498,6 +498,15 @@ impl MessageState {
         self.unseen_count = 0;
     }
 
+    /// Returns the content of the last assistant message, if any.
+    pub fn last_assistant_content(&self) -> Option<&str> {
+        self.messages
+            .iter()
+            .rev()
+            .find(|m| matches!(m.kind, MessageKind::Assistant))
+            .map(|m| m.content.as_str())
+    }
+
     /// Reset scroll state (e.g. when switching sessions).
     pub fn reset_scroll(&mut self) {
         self.scroll_offset = 0;

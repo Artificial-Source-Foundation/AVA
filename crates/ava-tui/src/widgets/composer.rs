@@ -11,8 +11,8 @@ use ratatui::Frame;
 /// Design spec (Pencil):
 ///   Composer: bg=#1A1F2E, left bar 3px (#4D9EF6)
 ///   Content: padding=[12,16], gap=4, justify=center, layout=vertical
-///     Line 1: ❯ (bold) + input text, gap=8
-///     Line 2: provider (bold blue) + model name (muted), gap=12
+///     Line 1+: ❯ (bold) + input text (multi-line), gap=8
+///     Last line: provider (bold blue) + model name (muted), gap=12
 pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let bar_color = match state.voice.phase {
         VoicePhase::Recording => state.theme.error,
@@ -31,11 +31,11 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     // Design: content padding 16px → 2 chars after bar
     let pad = "  ";
 
-    // -- Line 1: Prompt --
-    let prompt_line = match state.voice.phase {
+    // Build prompt lines (potentially multi-line)
+    let prompt_lines: Vec<Line<'_>> = match state.voice.phase {
         VoicePhase::Recording => {
             let elapsed = state.voice.recording_duration();
-            Line::from(vec![
+            vec![Line::from(vec![
                 bar.clone(),
                 Span::raw(pad),
                 Span::styled(
@@ -48,9 +48,9 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                         .fg(state.theme.accent)
                         .add_modifier(Modifier::ITALIC),
                 ),
-            ])
+            ])]
         }
-        VoicePhase::Transcribing => Line::from(vec![
+        VoicePhase::Transcribing => vec![Line::from(vec![
             bar.clone(),
             Span::raw(pad),
             Span::styled(
@@ -63,38 +63,97 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                     .fg(state.theme.text_muted)
                     .add_modifier(Modifier::ITALIC),
             ),
-        ]),
+        ])],
         VoicePhase::Idle => {
-            let mut spans = vec![
-                bar.clone(),
-                Span::raw(pad),
-                Span::styled(
-                    "\u{276f} ",
-                    Style::default()
-                        .fg(state.theme.primary)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ];
             if state.input.buffer.is_empty() {
-                spans.push(Span::styled(
-                    "Type a message...",
-                    Style::default().fg(state.theme.text_dimmed),
-                ));
+                vec![Line::from(vec![
+                    bar.clone(),
+                    Span::raw(pad),
+                    Span::styled(
+                        "\u{276f} ",
+                        Style::default()
+                            .fg(state.theme.primary)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "Type a message... (Shift+Enter for newline)",
+                        Style::default().fg(state.theme.text_dimmed),
+                    ),
+                ])]
             } else {
-                spans.push(Span::styled(
-                    state.input.buffer.clone(),
-                    Style::default().fg(state.theme.text),
-                ));
-                spans.push(Span::styled(
-                    "\u{2588}",
-                    Style::default().fg(state.theme.text_muted),
-                ));
+                let (cursor_line, cursor_col) = state.input.cursor_line_col();
+                let input_lines: Vec<&str> = state.input.buffer.split('\n').collect();
+                let mut lines = Vec::with_capacity(input_lines.len());
+
+                for (i, line_text) in input_lines.iter().enumerate() {
+                    let prompt_char = if i == 0 { "\u{276f} " } else { "  " };
+                    let is_cursor_line = i == cursor_line;
+
+                    let mut spans = vec![
+                        bar.clone(),
+                        Span::raw(pad),
+                        Span::styled(
+                            prompt_char,
+                            Style::default()
+                                .fg(state.theme.primary)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ];
+
+                    if is_cursor_line {
+                        // Split text at cursor position to show block cursor
+                        let col = cursor_col.min(line_text.len());
+                        let before = &line_text[..col];
+                        let after = &line_text[col..];
+
+                        if !before.is_empty() {
+                            spans.push(Span::styled(
+                                before.to_string(),
+                                Style::default().fg(state.theme.text),
+                            ));
+                        }
+                        // Block cursor character
+                        if after.is_empty() {
+                            spans.push(Span::styled(
+                                "\u{2588}",
+                                Style::default().fg(state.theme.text_muted),
+                            ));
+                        } else {
+                            // Show cursor on the next character
+                            let mut char_end = 1;
+                            while char_end < after.len()
+                                && !after.is_char_boundary(char_end)
+                            {
+                                char_end += 1;
+                            }
+                            spans.push(Span::styled(
+                                after[..char_end].to_string(),
+                                Style::default()
+                                    .fg(state.theme.bg_elevated)
+                                    .bg(state.theme.text),
+                            ));
+                            if char_end < after.len() {
+                                spans.push(Span::styled(
+                                    after[char_end..].to_string(),
+                                    Style::default().fg(state.theme.text),
+                                ));
+                            }
+                        }
+                    } else {
+                        spans.push(Span::styled(
+                            line_text.to_string(),
+                            Style::default().fg(state.theme.text),
+                        ));
+                    }
+
+                    lines.push(Line::from(spans));
+                }
+                lines
             }
-            Line::from(spans)
         }
     };
 
-    // -- Line 2: Mode badge + model info --
+    // -- Model info line --
     let mode_color = match state.agent_mode {
         crate::state::agent::AgentMode::Code => state.theme.success,
         crate::state::agent::AgentMode::Plan => state.theme.primary,
@@ -127,9 +186,11 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
     frame.render_widget(bg, area);
 
-    // Center the 2 content lines vertically within the area
-    // Design: padding=[12,16], justifyContent=center
-    let content_lines = 2u16;
+    // Combine prompt lines + model info line
+    let mut all_lines = prompt_lines;
+    all_lines.push(model_info_line);
+
+    let content_lines = all_lines.len() as u16;
     let top_pad = area.height.saturating_sub(content_lines) / 2;
     let inner = Layout::default()
         .direction(Direction::Vertical)
@@ -140,7 +201,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         ])
         .split(area)[1];
 
-    let paragraph = Paragraph::new(vec![prompt_line, model_info_line])
+    let paragraph = Paragraph::new(all_lines)
         .style(Style::default().bg(state.theme.bg_elevated))
         .wrap(Wrap { trim: false });
     frame.render_widget(paragraph, inner);

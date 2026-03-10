@@ -23,6 +23,7 @@ pub enum Action {
     ForceCompact,
     Audit,
     VoiceToggle,
+    CopyLastResponse,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,5 +117,6 @@ pub fn default_keybinds() -> HashMap<Action, Vec<KeyBinding>> {
         (Action::Cancel, vec![ctrl('c')]),
         (Action::SessionList, vec![ctrl('l')]),
         (Action::VoiceToggle, vec![ctrl('v')]),
+        (Action::CopyLastResponse, vec![ctrl('y')]),
     ])
 }

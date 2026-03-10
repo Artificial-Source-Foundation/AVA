@@ -280,8 +280,41 @@ impl App {
                 None
             }
             "/compact" => {
-                self.set_status("Context compaction requested", StatusLevel::Info);
-                Some((MessageKind::System, "Context compaction requested".to_string()))
+                let input_tokens = self.state.agent.tokens_used.input;
+                let output_tokens = self.state.agent.tokens_used.output;
+                let total = input_tokens + output_tokens;
+                let msg_count = self.state.messages.messages.len();
+
+                if let Some(window) = self.state.agent.context_window {
+                    let pct = if window > 0 {
+                        (total as f64 / window as f64 * 100.0) as u64
+                    } else {
+                        0
+                    };
+                    let status = format!(
+                        "Context usage: {total} / {window} tokens ({pct}%)\n\
+                         Input: {input_tokens}, Output: {output_tokens}\n\
+                         Messages: {msg_count}\n\
+                         Tip: Use /clear to reset, or ask the agent to summarize the conversation."
+                    );
+                    self.set_status(
+                        format!("Context: {total}/{window} tokens ({pct}%)"),
+                        StatusLevel::Info,
+                    );
+                    Some((MessageKind::System, status))
+                } else {
+                    let status = format!(
+                        "Context usage: {total} tokens (window size unknown)\n\
+                         Input: {input_tokens}, Output: {output_tokens}\n\
+                         Messages: {msg_count}\n\
+                         Tip: Use /clear to reset, or ask the agent to summarize the conversation."
+                    );
+                    self.set_status(
+                        format!("Context: {total} tokens"),
+                        StatusLevel::Info,
+                    );
+                    Some((MessageKind::System, status))
+                }
             }
             "/think" => {
                 match arg {
@@ -312,11 +345,72 @@ impl App {
                 self.set_status(format!("Permissions: {label}"), StatusLevel::Info);
                 None
             }
+            "/theme" => {
+                match arg {
+                    Some(name) => {
+                        let names = Theme::all_names();
+                        if names.contains(&name) {
+                            self.state.theme = Theme::from_name(name);
+                            self.set_status(
+                                format!("Theme: {name}"),
+                                StatusLevel::Info,
+                            );
+                            Some((MessageKind::System, format!("Switched to theme: {name}")))
+                        } else {
+                            let available = names.join(", ");
+                            Some((
+                                MessageKind::Error,
+                                format!("Unknown theme: {name}. Available: {available}"),
+                            ))
+                        }
+                    }
+                    None => {
+                        let new_theme = self.state.theme.next();
+                        let name = new_theme.name;
+                        self.state.theme = new_theme;
+                        self.set_status(
+                            format!("Theme: {name}"),
+                            StatusLevel::Info,
+                        );
+                        Some((MessageKind::System, format!("Switched to theme: {name}")))
+                    }
+                }
+            }
+            "/commit" => {
+                let status_output = std::process::Command::new("git")
+                    .args(["status", "--short"])
+                    .output();
+
+                match status_output {
+                    Ok(result) => {
+                        let text = String::from_utf8_lossy(&result.stdout);
+                        if text.trim().is_empty() {
+                            Some((MessageKind::System, "Nothing to commit — working tree clean.".to_string()))
+                        } else {
+                            let line_count = text.lines().count();
+                            let output = format!(
+                                "Git status ({line_count} files):\n{text}\n\
+                                 To commit, ask the agent: \"commit these changes with message: ...\"\n\
+                                 Or use the bash tool: git add -A && git commit -m \"message\""
+                            );
+                            Some((MessageKind::System, output.trim_end().to_string()))
+                        }
+                    }
+                    Err(err) => {
+                        Some((MessageKind::Error, format!("Failed to run git status: {err}")))
+                    }
+                }
+            }
+            "/copy" => {
+                self.copy_last_response();
+                None
+            }
             "/help" => {
                 let help = "\
 Available commands:
   /model [provider/model]  — show or switch model
   /think [level]           — set thinking level (off/low/med/high/max)
+  /theme [name]            — cycle or switch theme (default/dracula/nord)
   /permissions             — toggle permission level
   /connect [provider]      — add provider credentials
   /providers               — show provider status
@@ -329,8 +423,10 @@ Available commands:
   /sessions                — session picker
   /status                  — show session info
   /diff                    — show git changes
+  /commit                  — show git status for committing
+  /copy                    — copy last response to clipboard
   /clear                   — clear chat
-  /compact                 — compact context
+  /compact                 — show context usage
   /help                    — show this help
 
 Keyboard shortcuts:
@@ -338,6 +434,7 @@ Keyboard shortcuts:
   Ctrl+K / Ctrl+/          — command palette
   Ctrl+M                   — model selector
   Ctrl+T                   — cycle thinking level
+  Ctrl+Y                   — copy last response to clipboard
   Ctrl+N                   — new session
   Ctrl+L                   — session picker
   Ctrl+S                   — toggle sidebar
@@ -417,12 +514,18 @@ Keyboard shortcuts:
                 self.set_status("Chat cleared", StatusLevel::Info);
             }
             Action::ForceCompact => {
-                self.set_status("Context compaction requested", StatusLevel::Info);
+                // Delegate to the /compact slash command for context usage display
+                if let Some((kind, msg)) = self.handle_slash_command("/compact") {
+                    self.state.messages.push(UiMessage::new(kind, msg));
+                }
             }
             Action::ScrollUp => self.state.messages.scroll_up(10),
             Action::ScrollDown => self.state.messages.scroll_down(10),
             Action::ScrollTop => self.state.messages.scroll_to_top(),
             Action::ScrollBottom => self.state.messages.scroll_to_bottom(),
+            Action::CopyLastResponse => {
+                self.copy_last_response();
+            }
             Action::Cancel => {
                 if self.state.agent.is_running {
                     self.state.agent.abort();

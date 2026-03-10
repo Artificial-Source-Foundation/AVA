@@ -163,4 +163,17 @@ impl Theme {
             _ => Self::default_theme(),
         }
     }
+
+    /// All available theme names in cycle order.
+    pub fn all_names() -> &'static [&'static str] {
+        &["default", "dracula", "nord"]
+    }
+
+    /// Return the next theme in cycle order after the current one.
+    pub fn next(&self) -> Self {
+        let names = Self::all_names();
+        let current_idx = names.iter().position(|&n| n == self.name).unwrap_or(0);
+        let next_idx = (current_idx + 1) % names.len();
+        Self::from_name(names[next_idx])
+    }
 }

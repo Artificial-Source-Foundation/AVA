@@ -55,6 +55,7 @@ chrono = "0.4"
 dirs = "5"
 unicode-width = "0.2"
 tempfile = "3"
+arboard = "3"
 
 [features]
 default = []

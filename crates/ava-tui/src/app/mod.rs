@@ -249,6 +249,43 @@ impl App {
         self.state.status_message = Some(StatusMessage::new(text, level));
     }
 
+    /// Copy the last assistant message content to the system clipboard.
+    pub(crate) fn copy_last_response(&mut self) {
+        match self.state.messages.last_assistant_content() {
+            Some(content) => {
+                let content = content.to_owned();
+                match arboard::Clipboard::new() {
+                    Ok(mut clipboard) => match clipboard.set_text(&content) {
+                        Ok(_) => {
+                            let preview_len = content.len().min(40);
+                            let preview: String = content.chars().take(preview_len).collect();
+                            let ellipsis = if content.len() > 40 { "..." } else { "" };
+                            self.set_status(
+                                format!("Copied to clipboard: \"{preview}{ellipsis}\""),
+                                StatusLevel::Info,
+                            );
+                        }
+                        Err(e) => {
+                            self.set_status(
+                                format!("Clipboard write failed: {e}"),
+                                StatusLevel::Error,
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        self.set_status(
+                            format!("Clipboard unavailable: {e}"),
+                            StatusLevel::Error,
+                        );
+                    }
+                }
+            }
+            None => {
+                self.set_status("No assistant message to copy", StatusLevel::Warn);
+            }
+        }
+    }
+
     fn handle_event(
         &mut self,
         event: AppEvent,
@@ -413,8 +450,21 @@ impl App {
                 }
                 Action::ScrollUp => self.state.messages.scroll_up(10),
                 Action::ScrollDown => self.state.messages.scroll_down(10),
-                Action::ScrollTop => self.state.messages.scroll_to_top(),
-                Action::ScrollBottom => self.state.messages.scroll_to_bottom(),
+                // Home/End: if input has content, move within line; otherwise scroll messages
+                Action::ScrollTop => {
+                    if !self.state.input.buffer.is_empty() {
+                        self.state.input.move_home();
+                    } else {
+                        self.state.messages.scroll_to_top();
+                    }
+                }
+                Action::ScrollBottom => {
+                    if !self.state.input.buffer.is_empty() {
+                        self.state.input.move_end();
+                    } else {
+                        self.state.messages.scroll_to_bottom();
+                    }
+                }
                 Action::ToggleSidebar => self.state.show_sidebar = !self.state.show_sidebar,
                 Action::ModeNext => {
                     self.state.agent_mode = self.state.agent_mode.cycle_next();
@@ -484,6 +534,9 @@ impl App {
                 Action::VoiceToggle => {
                     #[cfg(feature = "voice")]
                     self.toggle_voice(app_tx);
+                }
+                Action::CopyLastResponse => {
+                    self.copy_last_response();
                 }
                 _ => {}
             }
@@ -563,10 +616,20 @@ impl App {
                 self.state.input.insert_char(ch)
             }
             KeyCode::Backspace => self.state.input.delete_backward(),
+            KeyCode::Delete => self.state.input.delete_forward(),
             KeyCode::Left => self.state.input.move_left(),
             KeyCode::Right => self.state.input.move_right(),
-            KeyCode::Up => self.state.input.history_up(),
-            KeyCode::Down => self.state.input.history_down(),
+            // Up/Down: navigate within multi-line input first; fall through to history
+            KeyCode::Up => {
+                if !self.state.input.move_up() {
+                    self.state.input.history_up();
+                }
+            }
+            KeyCode::Down => {
+                if !self.state.input.move_down() {
+                    self.state.input.history_down();
+                }
+            }
             _ => {}
         }
 

@@ -474,13 +474,13 @@ pub fn render_select_list<T: Clone>(
                     if last_section.is_some() {
                         lines.push(Line::from(""));
                     }
-                    // Section header: uppercase, text_muted, spaced
+                    // Section header: uppercase, bold, text_dimmed (#505A6B)
                     let section_upper = section.to_uppercase();
                     lines.push(Line::from(vec![
                         Span::styled(
-                            format!(" {section_upper}"),
+                            format!("  {section_upper}"),
                             Style::default()
-                                .fg(theme.text_muted)
+                                .fg(theme.text_dimmed)
                                 .add_modifier(Modifier::BOLD),
                         ),
                     ]));
@@ -502,6 +502,12 @@ pub fn render_select_list<T: Clone>(
         } else {
             theme.text
         };
+        // Detail text on selected row: ~0.7 opacity dark on primary blue
+        let fg_detail = if is_selected {
+            Color::Rgb(31, 57, 88) // #1F3958 — 0.7 opacity #0B0E14 on #4D9EF6
+        } else {
+            theme.text_dimmed
+        };
 
         let mut spans: Vec<Span<'_>> = Vec::new();
 
@@ -511,7 +517,7 @@ pub fn render_select_list<T: Clone>(
                 spans.push(Span::styled(
                     " \u{25CF} ",
                     Style::default()
-                        .fg(if is_selected { Color::Rgb(11, 14, 20) } else { theme.accent })
+                        .fg(if is_selected { fg } else { theme.accent })
                         .bg(bg),
                 ));
             }
@@ -519,7 +525,7 @@ pub fn render_select_list<T: Clone>(
                 spans.push(Span::styled(
                     " \u{2713} ",
                     Style::default()
-                        .fg(if is_selected { Color::Rgb(11, 14, 20) } else { theme.success })
+                        .fg(if is_selected { fg } else { theme.success })
                         .bg(bg),
                 ));
             }
@@ -564,16 +570,16 @@ pub fn render_select_list<T: Clone>(
             let detail_style = match &item.status {
                 Some(ItemStatus::Connected(_)) => {
                     Style::default()
-                        .fg(if is_selected { Color::Rgb(11, 14, 20) } else { theme.accent })
+                        .fg(if is_selected { fg_detail } else { theme.accent })
                         .bg(bg)
                 }
                 Some(ItemStatus::Info(_)) => {
                     Style::default()
-                        .fg(if is_selected { Color::Rgb(11, 14, 20) } else { theme.text_muted })
+                        .fg(if is_selected { fg_detail } else { theme.text_muted })
                         .bg(bg)
                 }
                 _ => Style::default()
-                    .fg(if is_selected { Color::Rgb(11, 14, 20) } else { theme.text_dimmed })
+                    .fg(if is_selected { fg_detail } else { theme.text_dimmed })
                     .bg(bg),
             };
             spans.push(Span::styled(right_text, detail_style));
@@ -613,7 +619,7 @@ pub fn render_select_list<T: Clone>(
         for (i, hint) in config.keybinds.iter().enumerate() {
             if i > 0 {
                 footer_spans.push(Span::styled(
-                    "  ",
+                    "    ",
                     Style::default().bg(theme.bg_surface),
                 ));
             }

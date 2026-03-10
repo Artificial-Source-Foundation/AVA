@@ -197,7 +197,7 @@ fn render_body(
             args_str
         };
         let cmd_lines = textwrap_simple(&cmd_display, w.saturating_sub(4) as usize);
-        let cmd_height = (cmd_lines.len() as u16).min(6).max(1) + 2; // +2 for padding
+        let cmd_height = (cmd_lines.len() as u16).clamp(1, 6) + 2; // +2 for padding
         let cmd_area = Rect { x: inner.x, y, width: w, height: cmd_height };
 
         let cmd_bg = Block::default()

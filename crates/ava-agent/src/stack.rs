@@ -16,12 +16,14 @@ use ava_memory::MemorySystem;
 use ava_platform::StandardPlatform;
 use ava_session::SessionManager;
 use ava_tools::core::{
-    register_codebase_tools, register_core_tools, register_custom_tools, register_memory_tools,
-    register_session_tools,
+    register_core_tools, register_custom_tools, register_question_tool, register_task_tool,
+    register_todo_tools,
 };
+use ava_tools::core::question::QuestionBridge;
+use ava_tools::core::task::TaskSpawner;
 use ava_tools::mcp_bridge::{MCPBridgeTool, MCPToolCaller};
 use ava_tools::registry::{ToolRegistry, ToolSource};
-use ava_types::{AvaError, Result, Session, ThinkingLevel, ToolResult};
+use ava_types::{AvaError, Result, Role, Session, ThinkingLevel, TodoState, ToolResult};
 use futures::StreamExt;
 use serde_json::Value;
 use tokio::sync::{mpsc, RwLock};
@@ -31,7 +33,6 @@ use tracing::{info, instrument, warn};
 
 use crate::agent_loop::{AgentConfig, AgentEvent, AgentLoop};
 
-/// Wraps an `LLMProvider` into the `Summarizer` trait for context compaction.
 struct LlmSummarizer(Arc<dyn LLMProvider>);
 
 #[async_trait]
@@ -39,14 +40,10 @@ impl Summarizer for LlmSummarizer {
     async fn summarize(&self, text: &str) -> std::result::Result<String, String> {
         use ava_types::{Message, Role};
         let messages = vec![Message::new(Role::User, text.to_string())];
-        self.0
-            .generate(&messages)
-            .await
-            .map_err(|e| e.to_string())
+        self.0.generate(&messages).await.map_err(|e| e.to_string())
     }
 }
 
-/// Adapter implementing `MCPToolCaller` by delegating to `ExtensionManager`.
 struct ExtensionManagerCaller {
     manager: ExtensionManager,
 }
@@ -58,7 +55,6 @@ impl MCPToolCaller for ExtensionManagerCaller {
     }
 }
 
-/// Tracks MCP runtime state — servers, tools, and the caller bridge.
 struct MCPRuntime {
     caller: Arc<dyn MCPToolCaller>,
     server_count: usize,
@@ -66,15 +62,12 @@ struct MCPRuntime {
     tools_with_source: Vec<(String, ava_types::Tool)>,
 }
 
-/// Server info for display in TUI.
 #[derive(Debug, Clone)]
 pub struct MCPServerInfo {
     pub name: String,
     pub tool_count: usize,
 }
 
-/// Unified entrypoint composing LLM routing, tool registry, session/memory persistence,
-/// MCP integration, and codebase indexing into a single `run()` call.
 pub struct AgentStack {
     pub router: ModelRouter,
     pub tools: Arc<RwLock<ToolRegistry>>,
@@ -92,13 +85,13 @@ pub struct AgentStack {
     custom_tool_dirs: Vec<PathBuf>,
     mcp_global_config: PathBuf,
     mcp_project_config: PathBuf,
-    /// Current thinking level for extended reasoning (persisted per session).
     pub thinking_level: RwLock<ThinkingLevel>,
-    /// Mode-specific system prompt suffix (e.g., Plan mode read-only instructions).
     pub mode_prompt_suffix: RwLock<Option<String>>,
+    pub todo_state: TodoState,
+    /// Bridge for the question tool to communicate with the TUI.
+    question_bridge: QuestionBridge,
 }
 
-/// Configuration for constructing an [`AgentStack`] — data directory, provider/model overrides, and flags.
 pub struct AgentStackConfig {
     pub data_dir: PathBuf,
     pub provider: Option<String>,
@@ -108,7 +101,6 @@ pub struct AgentStackConfig {
     pub injected_provider: Option<Arc<dyn LLMProvider>>,
 }
 
-/// Result of a completed agent run — success flag, turn count, and final session transcript.
 #[derive(Debug)]
 pub struct AgentRunResult {
     pub success: bool,
@@ -130,7 +122,14 @@ impl Default for AgentStackConfig {
 }
 
 impl AgentStack {
-    pub async fn new(config: AgentStackConfig) -> Result<Self> {
+    /// Create a new `AgentStack`.
+    ///
+    /// Returns the stack and a receiver for question requests. The caller
+    /// (typically the TUI) should poll this receiver and present questions to the
+    /// user, sending answers back via the embedded oneshot channel.
+    pub async fn new(
+        config: AgentStackConfig,
+    ) -> Result<(Self, mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>)> {
         tokio::fs::create_dir_all(&config.data_dir)
             .await
             .map_err(|e| AvaError::IoError(e.to_string()))?;
@@ -147,13 +146,10 @@ impl AgentStack {
 
         let session_manager = Arc::new(SessionManager::new(&db_path)?);
         let memory = Arc::new(
-            MemorySystem::new(&db_path)
-                .map_err(|e| AvaError::DatabaseError(e.to_string()))?,
+            MemorySystem::new(&db_path).map_err(|e| AvaError::DatabaseError(e.to_string()))?,
         );
 
-        // Background codebase indexing
-        let codebase_index: Arc<RwLock<Option<Arc<CodebaseIndex>>>> =
-            Arc::new(RwLock::new(None));
+        let codebase_index: Arc<RwLock<Option<Arc<CodebaseIndex>>>> = Arc::new(RwLock::new(None));
         let index_clone = codebase_index.clone();
         let project_root = std::env::current_dir().unwrap_or_default();
         tokio::spawn(async move {
@@ -166,7 +162,6 @@ impl AgentStack {
             }
         });
 
-        // Pre-warm connection pool for the configured provider
         let cfg = config_mgr.get().await;
         let provider_name = config.provider.as_deref().unwrap_or(&cfg.llm.provider);
         if let Some(base_url) = ava_llm::providers::base_url_for_provider(provider_name) {
@@ -176,7 +171,6 @@ impl AgentStack {
             }
         }
 
-        // Config paths
         let mcp_global_config = config.data_dir.join("mcp.json");
         let mcp_project_config = std::env::current_dir()
             .unwrap_or_default()
@@ -190,81 +184,76 @@ impl AgentStack {
                 .join("tools"),
         ];
 
-        // Build registry
+        let todo_state = TodoState::new();
+        let (question_bridge, question_rx) = QuestionBridge::new();
+
         let mut registry = build_tool_registry(platform.clone());
-        register_memory_tools(&mut registry, memory.clone());
-        register_session_tools(&mut registry, session_manager.clone());
-        register_codebase_tools(&mut registry, codebase_index.clone());
+        register_todo_tools(&mut registry, todo_state.clone());
+        register_question_tool(&mut registry, question_bridge.clone());
         register_custom_tools(&mut registry, &custom_tool_dirs);
 
-        // Load MCP servers (merged global + project)
         let mcp_runtime = init_mcp(&mcp_global_config, &mcp_project_config, &mut registry).await;
-
         let tools = Arc::new(RwLock::new(registry));
 
-        Ok(Self {
-            router,
-            tools,
-            session_manager,
-            memory,
-            config: config_mgr,
-            platform,
-            codebase_index,
-            provider_override: RwLock::new(config.provider),
-            model_override: RwLock::new(config.model),
-            max_turns: config.max_turns,
-            yolo: config.yolo,
-            injected_provider: config.injected_provider,
-            mcp: Arc::new(RwLock::new(mcp_runtime)),
-            custom_tool_dirs,
-            mcp_global_config,
-            mcp_project_config,
-            thinking_level: RwLock::new(ThinkingLevel::Off),
-            mode_prompt_suffix: RwLock::new(None),
-        })
+        Ok((
+            Self {
+                router,
+                tools,
+                session_manager,
+                memory,
+                config: config_mgr,
+                platform,
+                codebase_index,
+                provider_override: RwLock::new(config.provider),
+                model_override: RwLock::new(config.model),
+                max_turns: config.max_turns,
+                yolo: config.yolo,
+                injected_provider: config.injected_provider,
+                mcp: Arc::new(RwLock::new(mcp_runtime)),
+                custom_tool_dirs,
+                mcp_global_config,
+                mcp_project_config,
+                thinking_level: RwLock::new(ThinkingLevel::Off),
+                mode_prompt_suffix: RwLock::new(None),
+                todo_state,
+                question_bridge,
+            },
+            question_rx,
+        ))
     }
 
-    /// Whether this stack runs in yolo mode (skip tool permission checks).
     pub fn yolo(&self) -> bool {
         self.yolo
     }
 
-    /// Number of connected MCP servers.
     pub async fn mcp_server_count(&self) -> usize {
         self.mcp.read().await.as_ref().map_or(0, |r| r.server_count)
     }
 
-    /// Number of discovered MCP tools.
     pub async fn mcp_tool_count(&self) -> usize {
         self.mcp.read().await.as_ref().map_or(0, |r| r.tool_count)
     }
 
-    /// Get info about connected MCP servers.
     pub async fn mcp_server_info(&self) -> Vec<MCPServerInfo> {
         let guard = self.mcp.read().await;
         let runtime = match guard.as_ref() {
             Some(r) => r,
             None => return Vec::new(),
         };
-
         let mut servers: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
         for (server_name, _) in &runtime.tools_with_source {
             *servers.entry(server_name.clone()).or_insert(0) += 1;
         }
-
         servers
             .into_iter()
             .map(|(name, tool_count)| MCPServerInfo { name, tool_count })
             .collect()
     }
 
-    /// Reload MCP servers from config files. Returns (server_count, tool_count).
     pub async fn reload_mcp(&self) -> Result<(usize, usize)> {
         let mut registry = self.tools.write().await;
-        // Remove existing MCP tools
         registry.remove_by_source(|src| matches!(src, ToolSource::MCP { .. }));
-
         let runtime =
             init_mcp(&self.mcp_global_config, &self.mcp_project_config, &mut registry).await;
         let counts = runtime
@@ -274,7 +263,6 @@ impl AgentStack {
         Ok(counts)
     }
 
-    /// Reload custom tools from TOML dirs. Returns the number of tools loaded.
     pub async fn reload_custom_tools(&self) -> usize {
         let mut registry = self.tools.write().await;
         registry.remove_by_source(|src| matches!(src, ToolSource::Custom { .. }));
@@ -286,68 +274,50 @@ impl AgentStack {
             .count()
     }
 
-    /// Reload ALL tools (core + memory + session + codebase + custom + MCP).
     pub async fn reload_tools(&self) -> Result<usize> {
         let mut registry = build_tool_registry(self.platform.clone());
-        register_memory_tools(&mut registry, self.memory.clone());
-        register_session_tools(&mut registry, self.session_manager.clone());
-        register_codebase_tools(&mut registry, self.codebase_index.clone());
+        register_todo_tools(&mut registry, self.todo_state.clone());
+        register_question_tool(&mut registry, self.question_bridge.clone());
         register_custom_tools(&mut registry, &self.custom_tool_dirs);
-
         let runtime =
             init_mcp(&self.mcp_global_config, &self.mcp_project_config, &mut registry).await;
         let count = registry.tool_count();
-
         *self.tools.write().await = registry;
         *self.mcp.write().await = runtime;
         Ok(count)
     }
 
-    /// Switch the provider and model for subsequent runs.
-    /// Validates that the provider/model combination can be routed.
-    /// Persists the choice per-project (`.ava/state.json`).
     #[instrument(skip(self))]
     pub async fn switch_model(&self, provider: &str, model: &str) -> Result<()> {
-        // Validate by attempting to route — this ensures credentials exist
         self.router.route_required(provider, model).await?;
-
         *self.provider_override.write().await = Some(provider.to_string());
         *self.model_override.write().await = Some(model.to_string());
-
-        // Persist per-project
         let project_root = std::env::current_dir().unwrap_or_default();
         let mut state = ava_config::ProjectState::load(&project_root);
         state.last_provider = Some(provider.to_string());
         state.last_model = Some(model.to_string());
         let _ = state.save(&project_root);
-
         Ok(())
     }
 
-    /// Set the mode-specific system prompt suffix.
     pub async fn set_mode_prompt_suffix(&self, suffix: Option<String>) {
         *self.mode_prompt_suffix.write().await = suffix;
     }
 
-    /// Set the thinking level.
     pub async fn set_thinking_level(&self, level: ThinkingLevel) {
         *self.thinking_level.write().await = level;
     }
 
-    /// Cycle thinking: Off → Low → Medium → High → Max → Off.
-    /// Returns the new level's label for status display.
     pub async fn cycle_thinking(&self) -> &'static str {
         let mut guard = self.thinking_level.write().await;
         *guard = guard.cycle();
         guard.label()
     }
 
-    /// Get current thinking level.
     pub async fn get_thinking_level(&self) -> ThinkingLevel {
         *self.thinking_level.read().await
     }
 
-    /// Get the current provider and model names.
     pub async fn current_model(&self) -> (String, String) {
         let cfg = self.config.get().await;
         let provider = self
@@ -365,37 +335,30 @@ impl AgentStack {
         (provider, model)
     }
 
-    /// Enrich goal with relevant memories for auto-context injection.
     async fn enrich_goal_with_memories(&self, goal: &str) -> String {
         let keywords = extract_goal_keywords(goal);
         if keywords.is_empty() {
             return goal.to_string();
         }
-
         let query = keywords.join(" ");
         let memories = match self.memory.search(&query) {
             Ok(m) => m,
             Err(_) => return goal.to_string(),
         };
-
         if memories.is_empty() {
             return goal.to_string();
         }
-
         let entries: Vec<String> = memories
             .into_iter()
             .take(5)
             .map(|m| format!("- [{}]: {}", m.key, m.value))
             .collect();
-
-        // Cap memory context at ~500 tokens (~2000 chars)
         let memory_block = entries.join("\n");
         let memory_block = if memory_block.len() > 2000 {
             format!("{}...", &memory_block[..2000])
         } else {
             memory_block
         };
-
         format!("{goal}\n\nRelevant memories:\n{memory_block}")
     }
 
@@ -415,7 +378,6 @@ impl AgentStack {
             match self.router.route_required(&provider_name, &model_name).await {
                 Ok(p) => p,
                 Err(e) => {
-                    // Try fallback if configured
                     let cfg = self.config.get().await;
                     if let Some(fb) = &cfg.fallback {
                         warn!(
@@ -429,9 +391,7 @@ impl AgentStack {
                                 fb.provider, fb.model
                             )));
                         }
-                        self.router
-                            .route_required(&fb.provider, &fb.model)
-                            .await?
+                        self.router.route_required(&fb.provider, &fb.model).await?
                     } else {
                         return Err(e);
                     }
@@ -440,7 +400,6 @@ impl AgentStack {
         };
 
         let turns_limit = if max_turns == 0 { self.max_turns } else { max_turns };
-
         let thinking = *self.thinking_level.read().await;
         let mode_suffix = self.mode_prompt_suffix.read().await.clone();
         let config = AgentConfig {
@@ -454,15 +413,11 @@ impl AgentStack {
             system_prompt_suffix: mode_suffix,
         };
 
-        // Auto-context: inject relevant memories into the goal
         let enriched_goal = self.enrich_goal_with_memories(goal).await;
-
-        // Relevance-aware condenser: extract pagerank scores if index is ready
         let relevance_scores = {
             let guard = self.codebase_index.read().await;
             guard.as_ref().map(|idx| idx.pagerank.clone())
         };
-
         let summarizer: Arc<dyn Summarizer> = Arc::new(LlmSummarizer(provider.clone()));
         let condenser_config = CondenserConfig {
             max_tokens: config.token_limit,
@@ -476,14 +431,19 @@ impl AgentStack {
         );
         let context = ContextManager::new_with_condenser(condenser_config, condenser);
 
-        // Build a fresh registry WITH MCP tools (fixes the bug where run() dropped them)
         let mut registry = build_tool_registry(self.platform.clone());
-        register_memory_tools(&mut registry, self.memory.clone());
-        register_session_tools(&mut registry, self.session_manager.clone());
-        register_codebase_tools(&mut registry, self.codebase_index.clone());
+        register_todo_tools(&mut registry, self.todo_state.clone());
+        register_question_tool(&mut registry, self.question_bridge.clone());
         register_custom_tools(&mut registry, &self.custom_tool_dirs);
 
-        // Re-register MCP tools from the runtime
+        let spawner: Arc<dyn TaskSpawner> = Arc::new(AgentTaskSpawner {
+            provider: provider.clone(),
+            platform: self.platform.clone(),
+            model_name: provider.model_name().to_string(),
+            max_turns: turns_limit,
+        });
+        register_task_tool(&mut registry, spawner);
+
         {
             let mcp_guard = self.mcp.read().await;
             if let Some(ref runtime) = *mcp_guard {
@@ -511,7 +471,6 @@ impl AgentStack {
         if let Some(tx) = event_tx {
             let mut stream = agent.run_streaming(goal).await;
             let mut final_session: Option<Session> = None;
-
             loop {
                 tokio::select! {
                     _ = cancel.cancelled() => {
@@ -533,13 +492,13 @@ impl AgentStack {
                     }
                 }
             }
-
-            let session = final_session
-                .ok_or_else(|| AvaError::ToolError(
-                "Agent stream ended unexpectedly without a completion event. \
-                 This may indicate the model returned no actionable response".to_string()
-            ))?;
-
+            let session = final_session.ok_or_else(|| {
+                AvaError::ToolError(
+                    "Agent stream ended unexpectedly without a completion event. \
+                     This may indicate the model returned no actionable response"
+                        .to_string(),
+                )
+            })?;
             return Ok(AgentRunResult {
                 success: true,
                 turns: session.messages.len(),
@@ -560,7 +519,63 @@ impl AgentStack {
     }
 }
 
-/// Initialize MCP from merged global+project configs, registering bridge tools into the registry.
+struct AgentTaskSpawner {
+    provider: Arc<dyn LLMProvider>,
+    platform: Arc<StandardPlatform>,
+    model_name: String,
+    max_turns: usize,
+}
+
+#[async_trait]
+impl TaskSpawner for AgentTaskSpawner {
+    async fn spawn(&self, prompt: &str) -> Result<String> {
+        info!(prompt_len = prompt.len(), "spawning sub-agent for task tool");
+        let mut registry = ToolRegistry::new();
+        register_core_tools(&mut registry, self.platform.clone());
+        registry.unregister("todo_write");
+        registry.unregister("todo_read");
+        let context = ContextManager::new(128_000);
+        let config = AgentConfig {
+            max_turns: self.max_turns.min(10),
+            token_limit: 128_000,
+            model: self.model_name.clone(),
+            max_cost_usd: 5.0,
+            loop_detection: true,
+            custom_system_prompt: Some(build_sub_agent_system_prompt()),
+            thinking_level: ThinkingLevel::Off,
+            system_prompt_suffix: None,
+        };
+        let mut agent = AgentLoop::new(
+            Box::new(SharedProvider::new(self.provider.clone())),
+            registry,
+            context,
+            config,
+        );
+        let session = agent.run(prompt).await?;
+        let result = session
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.role == Role::Assistant && !m.content.trim().is_empty())
+            .map(|m| m.content.clone())
+            .unwrap_or_else(|| "Sub-agent completed but produced no output.".to_string());
+        info!(result_len = result.len(), "sub-agent task completed");
+        Ok(result)
+    }
+}
+
+fn build_sub_agent_system_prompt() -> String {
+    "You are a sub-agent of AVA, an AI coding assistant. You have been given a specific task \
+     to complete autonomously. Work through the task step by step using the available tools.\n\n\
+     ## Rules\n\
+     - Read files before modifying them.\n\
+     - Prefer editing existing files over creating new ones.\n\
+     - Be thorough but efficient -- you have a limited number of turns.\n\
+     - When your task is complete, provide a clear summary of what you did as your final response.\n\
+     - Do NOT call attempt_completion -- simply respond with your final answer when done.\n"
+        .to_string()
+}
+
 async fn init_mcp(
     global_config: &std::path::Path,
     project_config: &std::path::Path,
@@ -573,22 +588,17 @@ async fn init_mcp(
                 warn!(error = %e, "Failed to initialize MCP servers");
                 return None;
             }
-
             let server_count = manager.server_count();
             let mcp_tools_with_server = manager.list_tools_with_server().to_vec();
             let mcp_tools = manager.list_tools();
-            let caller: Arc<dyn MCPToolCaller> =
-                Arc::new(ExtensionManagerCaller { manager });
-
+            let caller: Arc<dyn MCPToolCaller> = Arc::new(ExtensionManagerCaller { manager });
             let mut tools_with_source = Vec::new();
             for (server_name, mcp_tool) in &mcp_tools_with_server {
                 if let Some(tool_def) = mcp_tools.iter().find(|t| t.name == mcp_tool.name) {
                     tools_with_source.push((server_name.clone(), tool_def.clone()));
                 }
             }
-
             let tool_count = tools_with_source.len();
-
             for (server_name, tool_def) in &tools_with_source {
                 info!(tool = %tool_def.name, server = %server_name, "Registering MCP tool");
                 let source = ToolSource::MCP {
@@ -599,9 +609,7 @@ async fn init_mcp(
                     source,
                 );
             }
-
             info!(servers = server_count, tools = tool_count, "MCP initialized");
-
             Some(MCPRuntime {
                 caller,
                 server_count,

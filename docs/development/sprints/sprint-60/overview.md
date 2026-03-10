@@ -34,15 +34,15 @@ Three parallel tracks: (1) replace blocking `generate_with_tools()` with true st
 
 **03**: Chat UI rework — bordered input box with top border, left-border message styling with role-specific colors, enhanced welcome screen, consolidated status bars, scroll indicator, focus indicator.
 
-**04**: Agent Modes and Permission Levels — three execution modes (Code/Plan/Architect) with Tab/Shift+Tab cycling, permission levels replacing YOLO, and model-aware thinking display.
+**04**: Agent Modes and Permission Levels — two execution modes (Code/Plan) with Tab/Shift+Tab cycling, permission levels replacing YOLO, and model-aware thinking display. (Architect mode was added then removed in 60-09.)
 
 ### Sprint 60-04: Agent Modes & Permission Levels
 
 **Agent Modes** (`AgentMode` enum in `state/agent.rs`):
 - **Code** (default): Full tool access, no system prompt modification.
 - **Plan**: Read-only tools only. System prompt suffix constrains agent to read, glob, grep, codebase_search, diagnostics, session_search, session_list, recall, memory_search. No file modifications or command execution.
-- **Architect**: Plan-first mode. Agent analyzes codebase and presents implementation plan before making changes.
-- Tab/Shift+Tab cycles modes in composer. Mode badge `[Code]`/`[Plan]`/`[Architect]` rendered on composer line 2 with role-specific colors (green/blue/accent).
+- ~~**Architect**: Plan-first mode.~~ Removed in 60-09 — simplified to Code/Plan only.
+- Tab/Shift+Tab cycles modes in composer. Mode badge `[Code]`/`[Plan]` rendered on composer line 2 with role-specific colors (green/blue).
 - Mode prompt suffix stored in `AgentStack.mode_prompt_suffix: RwLock<Option<String>>`, read at each `run()` call and appended to system prompt via `AgentConfig.system_prompt_suffix`.
 
 **Permission Levels** (`PermissionLevel` enum in `state/permission.rs`):
@@ -79,5 +79,13 @@ Three parallel tracks: (1) replace blocking `generate_with_tools()` with true st
 ### Sprint 60-08: Tool Approval Modal Redesign
 
 - Redesigned tool approval modal to match Pencil design: clear header with tool name, structured body showing parameters, accept/reject buttons with keybind hints.
+
+### Sprint 60-09: Theme System & UI Polish
+
+- **Theme system**: 29 built-in themes with custom TOML theme support (`~/.ava/themes/`). Live preview on hover in theme selector modal.
+- **Contrast fixes**: Improved contrast across default, dracula, and nord themes.
+- **Paste collapsing**: Input of 5+ lines or 500+ characters collapses to a placeholder in the composer.
+- **Architect mode removed**: Simplified to two modes — Code and Plan (was Code/Plan/Architect).
+- **CI fixes**: Sidebar test fix, clippy clamp warning fix.
 
 ## Status: Complete

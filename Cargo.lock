@@ -482,12 +482,9 @@ version = "2.0.0"
 dependencies = [
  "async-stream",
  "async-trait",
- "ava-codebase",
- "ava-memory",
  "ava-permissions",
  "ava-platform",
  "ava-sandbox",
- "ava-session",
  "ava-types",
  "futures",
  "glob",
@@ -496,6 +493,7 @@ dependencies = [
  "grep-searcher",
  "ignore",
  "regex",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",
@@ -503,6 +501,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "url",
  "uuid",
 ]
 
@@ -548,6 +547,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "toml",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

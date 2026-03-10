@@ -4,7 +4,7 @@ use ava_agent::{AgentConfig, AgentEvent, AgentLoop};
 use ava_context::ContextManager;
 use ava_llm::provider::{LLMProvider, SharedProvider};
 use ava_platform::StandardPlatform;
-use ava_tools::core::{git_read::GitReadTool, register_core_tools};
+use ava_tools::core::register_core_tools;
 use ava_tools::registry::ToolRegistry;
 use futures::StreamExt;
 use regex::Regex;
@@ -445,8 +445,7 @@ pub async fn run_review_agent(
     max_turns: usize,
 ) -> Result<String, String> {
     let mut registry = ToolRegistry::new();
-    register_core_tools(&mut registry, platform.clone());
-    registry.register(GitReadTool::new(platform));
+    register_core_tools(&mut registry, platform);
 
     let config = AgentConfig {
         max_turns,

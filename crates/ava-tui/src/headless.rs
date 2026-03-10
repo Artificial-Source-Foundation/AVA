@@ -49,7 +49,7 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         return Err(eyre!(crate::config::cli::NO_PROVIDER_ERROR));
     }
 
-    let stack = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
         data_dir,
         provider,
         model,
@@ -151,7 +151,7 @@ async fn run_workflow(cli: CliArgs, goal: &str, workflow_name: &str) -> Result<(
         return Err(eyre!(crate::config::cli::NO_PROVIDER_ERROR));
     }
 
-    let stack = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
         data_dir,
         provider,
         model,
@@ -245,7 +245,7 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
     }
 
     // Build an AgentStack to get a resolved provider
-    let stack = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
         data_dir,
         provider,
         model,
@@ -431,7 +431,7 @@ async fn run_voice_loop(cli: CliArgs) -> Result<()> {
         eprintln!("[voice] Goal: {text}");
 
         // Run agent
-        let stack = AgentStack::new(AgentStackConfig {
+        let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
             data_dir: data_dir.clone(),
             provider: provider.clone(),
             model: model.clone(),

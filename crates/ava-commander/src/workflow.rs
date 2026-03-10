@@ -228,15 +228,12 @@ pub fn register_tools_for_role(role: &PhaseRole, platform: Arc<StandardPlatform>
             registry.register(ava_tools::core::read::ReadTool::new(platform.clone()));
             registry.register(ava_tools::core::glob::GlobTool::new());
             registry.register(ava_tools::core::grep::GrepTool::new());
-            registry.register(ava_tools::core::diagnostics::DiagnosticsTool::new(platform));
         }
         PhaseRole::Reviewer => {
-            // Read-only + diagnostics + lint
+            // Read-only tools
             registry.register(ava_tools::core::read::ReadTool::new(platform.clone()));
             registry.register(ava_tools::core::glob::GlobTool::new());
             registry.register(ava_tools::core::grep::GrepTool::new());
-            registry.register(ava_tools::core::diagnostics::DiagnosticsTool::new(platform.clone()));
-            registry.register(ava_tools::core::lint::LintTool::new(platform));
         }
         PhaseRole::Coder | PhaseRole::Tester | PhaseRole::Custom(_) => {
             register_core_tools(&mut registry, platform);

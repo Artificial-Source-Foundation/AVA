@@ -19,7 +19,7 @@ fn completion_response(result: &str) -> String {
 #[tokio::test]
 async fn agent_stack_new_initializes_components() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let stack = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
@@ -44,7 +44,7 @@ async fn agent_stack_run_with_mock_provider_completes() {
         "test-model",
         vec![completion_response("done")],
     ));
-    let stack = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         injected_provider: Some(provider),
         ..Default::default()
@@ -68,7 +68,7 @@ async fn agent_stack_run_honors_cancellation() {
         model: "slow-model".to_string(),
         delay: Duration::from_millis(250),
     });
-    let stack = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         injected_provider: Some(provider),
         ..Default::default()

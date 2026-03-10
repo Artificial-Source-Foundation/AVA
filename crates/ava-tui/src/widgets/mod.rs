@@ -12,6 +12,7 @@ pub mod session_list;
 pub mod slash_menu;
 pub mod streaming_text;
 pub mod token_buffer;
+pub mod todo_list;
 pub mod tool_approval;
 pub mod tool_list;
 pub mod welcome;

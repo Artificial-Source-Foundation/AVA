@@ -3,9 +3,8 @@ use std::sync::Arc;
 
 use ava_platform::StandardPlatform;
 use ava_tools::core::{
-    apply_patch::ApplyPatchTool, bash::BashTool, diagnostics::DiagnosticsTool, edit::EditTool,
-    glob::GlobTool, grep::GrepTool, lint::LintTool, multiedit::MultiEditTool, read::ReadTool,
-    test_runner::TestRunnerTool, write::WriteTool,
+    apply_patch::ApplyPatchTool, bash::BashTool, edit::EditTool,
+    glob::GlobTool, grep::GrepTool, read::ReadTool, write::WriteTool,
 };
 use ava_tools::registry::Tool;
 use serde_json::json;
@@ -281,65 +280,6 @@ async fn grep_tool_returns_empty_result() {
     assert!(result.content.trim().is_empty());
 }
 
-// --- MultiEdit Tool Tests ---
-
-#[tokio::test]
-async fn multiedit_applies_edits_across_files() {
-    let dir = tempdir().expect("tempdir");
-    let file_a = dir.path().join("a.txt");
-    let file_b = dir.path().join("b.txt");
-    tokio::fs::write(&file_a, "hello world\n").await.unwrap();
-    tokio::fs::write(&file_b, "foo bar\n").await.unwrap();
-
-    let tool = MultiEditTool::new(Arc::new(StandardPlatform));
-    let result = tool
-        .execute(json!({
-            "edits": [
-                { "path": file_a.to_string_lossy(), "old_text": "world", "new_text": "ava" },
-                { "path": file_b.to_string_lossy(), "old_text": "bar", "new_text": "baz" }
-            ]
-        }))
-        .await
-        .expect("multiedit executes");
-
-    assert!(result.content.contains("2 edits"));
-    assert!(result.content.contains("2 files"));
-    assert_eq!(tokio::fs::read_to_string(&file_a).await.unwrap(), "hello ava\n");
-    assert_eq!(tokio::fs::read_to_string(&file_b).await.unwrap(), "foo baz\n");
-}
-
-#[tokio::test]
-async fn multiedit_validation_failure_blocks_all_edits() {
-    let dir = tempdir().expect("tempdir");
-    let file_a = dir.path().join("a.txt");
-    tokio::fs::write(&file_a, "hello world\n").await.unwrap();
-
-    let tool = MultiEditTool::new(Arc::new(StandardPlatform));
-    let error = tool
-        .execute(json!({
-            "edits": [
-                { "path": file_a.to_string_lossy(), "old_text": "world", "new_text": "ava" },
-                { "path": file_a.to_string_lossy(), "old_text": "NOT_HERE", "new_text": "fail" }
-            ]
-        }))
-        .await
-        .expect_err("should fail validation");
-
-    assert!(error.to_string().contains("Validation failed"));
-    // Original file should be unchanged
-    assert_eq!(tokio::fs::read_to_string(&file_a).await.unwrap(), "hello world\n");
-}
-
-#[tokio::test]
-async fn multiedit_empty_edits_returns_error() {
-    let tool = MultiEditTool::new(Arc::new(StandardPlatform));
-    let error = tool
-        .execute(json!({ "edits": [] }))
-        .await
-        .expect_err("empty edits should error");
-    assert!(error.to_string().contains("must not be empty"));
-}
-
 // --- Apply Patch Tool Tests ---
 
 #[tokio::test]
@@ -415,60 +355,10 @@ async fn apply_patch_fuzzy_offset() {
     assert!(tokio::fs::read_to_string(&file).await.unwrap().contains("BETA"));
 }
 
-// --- Test Runner Tool Tests ---
-
-#[tokio::test]
-async fn test_runner_auto_detects_cargo() {
-    // We're in a Cargo project, so this should auto-detect
-    let tool = TestRunnerTool::new(Arc::new(StandardPlatform));
-    let result = tool
-        .execute(json!({ "filter": "healthcheck", "timeout": 30 }))
-        .await
-        .expect("test runner executes");
-
-    // Should run cargo test with filter
-    assert!(result.content.contains("\"passed\""));
-}
-
-#[tokio::test]
-async fn test_runner_timeout_enforcement() {
-    let tool = TestRunnerTool::new(Arc::new(StandardPlatform));
-    let error = tool
-        .execute(json!({
-            "command": "sleep 10",
-            "timeout": 1
-        }))
-        .await
-        .expect_err("should timeout");
-
-    assert!(error.to_string().contains("timed out"));
-}
-
-// --- Lint Tool Tests ---
-
-#[tokio::test]
-async fn lint_auto_detects_cargo_clippy() {
-    let tool = LintTool::new(Arc::new(StandardPlatform));
-    // Just verify it runs without crashing — clippy output varies
-    let result = tool.execute(json!({})).await;
-    // Should at least not panic, even if clippy has findings
-    assert!(result.is_ok() || result.is_err());
-}
-
-// --- Diagnostics Tool Tests ---
-
-#[tokio::test]
-async fn diagnostics_structured_output() {
-    let tool = DiagnosticsTool::new(Arc::new(StandardPlatform));
-    let result = tool.execute(json!({})).await.expect("diagnostics executes");
-    // Should return JSON with diagnostics array
-    assert!(result.content.contains("\"diagnostics\""));
-}
-
 // --- Tool Registry Tests ---
 
 #[test]
-fn new_tools_are_registered() {
+fn core_tools_are_registered() {
     use ava_tools::core::register_core_tools;
     use ava_tools::registry::ToolRegistry;
 
@@ -477,11 +367,13 @@ fn new_tools_are_registered() {
     let tools = registry.list_tools();
     let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
 
-    assert!(names.contains(&"multiedit"), "multiedit should be registered");
+    assert!(names.contains(&"read"), "read should be registered");
+    assert!(names.contains(&"write"), "write should be registered");
+    assert!(names.contains(&"edit"), "edit should be registered");
+    assert!(names.contains(&"bash"), "bash should be registered");
+    assert!(names.contains(&"glob"), "glob should be registered");
+    assert!(names.contains(&"grep"), "grep should be registered");
     assert!(names.contains(&"apply_patch"), "apply_patch should be registered");
-    assert!(names.contains(&"test_runner"), "test_runner should be registered");
-    assert!(names.contains(&"lint"), "lint should be registered");
-    assert!(names.contains(&"diagnostics"), "diagnostics should be registered");
 }
 
 #[tokio::test]

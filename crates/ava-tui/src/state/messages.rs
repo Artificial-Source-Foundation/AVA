@@ -298,8 +298,7 @@ impl UiMessage {
                 // Compact OpenCode-style: "▸ tool_name · args"
                 let tool_name = self.content.split_whitespace().next().unwrap_or("");
                 let icon_color = match tool_name {
-                    "edit" | "write" | "multiedit" | "apply_patch" | "bash" | "lint"
-                    | "test_runner" => theme.warning,
+                    "edit" | "write" | "apply_patch" | "bash" => theme.warning,
                     _ => theme.success,
                 };
                 let rest = self.content[tool_name.len()..].trim_start();

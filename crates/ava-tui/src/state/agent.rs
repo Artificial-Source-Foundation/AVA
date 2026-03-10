@@ -18,9 +18,8 @@ pub struct TokenUsage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AgentMode {
     #[default]
-    Code,      // Full tool access, standard execution
-    Plan,      // Read-only tools only, analysis/planning
-    Architect, // Plan first, then hand off to code (future)
+    Code, // Full tool access, standard execution
+    Plan, // Read-only tools only, analysis/planning
 }
 
 impl AgentMode {
@@ -28,24 +27,18 @@ impl AgentMode {
         match self {
             Self::Code => "Code",
             Self::Plan => "Plan",
-            Self::Architect => "Architect",
         }
     }
 
     pub fn cycle_next(&self) -> Self {
         match self {
             Self::Code => Self::Plan,
-            Self::Plan => Self::Architect,
-            Self::Architect => Self::Code,
+            Self::Plan => Self::Code,
         }
     }
 
     pub fn cycle_prev(&self) -> Self {
-        match self {
-            Self::Code => Self::Architect,
-            Self::Plan => Self::Code,
-            Self::Architect => Self::Plan,
-        }
+        self.cycle_next()
     }
 
     /// Returns mode-specific system prompt suffix, or None for Code mode.
@@ -54,14 +47,8 @@ impl AgentMode {
             Self::Code => None,
             Self::Plan => Some(
                 "You are in PLAN MODE (read-only). You may ONLY use read-only tools: \
-                 read, glob, grep, codebase_search, diagnostics, session_search, session_list, \
-                 recall, memory_search. You MUST NOT modify any files, execute commands, or make \
-                 changes. Focus on analysis, research, and creating a plan."
-            ),
-            Self::Architect => Some(
-                "You are in ARCHITECT MODE. First, analyze the codebase and create a detailed \
-                 implementation plan. Present the plan to the user. Do not implement changes \
-                 until the user approves the plan."
+                 read, glob, grep, todo_read. You MUST NOT modify any files, execute commands, \
+                 or make changes. Focus on analysis, research, and creating a plan."
             ),
         }
     }
@@ -137,7 +124,7 @@ impl AgentState {
         model: Option<String>,
         max_turns: usize,
         yolo: bool,
-    ) -> Result<Self> {
+    ) -> Result<(Self, tokio::sync::mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>)> {
         let provider_name = provider.clone().unwrap_or_else(|| "default".to_string());
         let model_name = model.clone().unwrap_or_else(|| "default".to_string());
 
@@ -149,14 +136,15 @@ impl AgentState {
             yolo,
             ..AgentStackConfig::default()
         };
-        let stack = Arc::new(AgentStack::new(config).await?);
+        let (agent_stack, question_rx) = AgentStack::new(config).await?;
+        let stack = Arc::new(agent_stack);
 
         let mcp_server_count = stack.mcp_server_count().await;
         let mcp_tool_count = stack.mcp_tool_count().await;
 
         let context_window = lookup_context_window(&provider_name, &model_name);
 
-        Ok(Self {
+        Ok((Self {
             stack: Some(stack),
             is_running: false,
             current_turn: 0,
@@ -176,13 +164,18 @@ impl AgentState {
             thinking_level: ThinkingLevel::Off,
             cancel: None,
             task: None,
-        })
+        }, question_rx))
     }
 
     fn stack(&self) -> std::result::Result<&Arc<AgentStack>, String> {
         self.stack
             .as_ref()
             .ok_or_else(|| "AgentStack not initialised".to_string())
+    }
+
+    /// Get the shared todo state from the agent stack (if initialized).
+    pub fn todo_state(&self) -> Option<ava_types::TodoState> {
+        self.stack.as_ref().map(|s| s.todo_state.clone())
     }
 
     pub fn start(

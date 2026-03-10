@@ -53,6 +53,13 @@ impl App {
                     ts.query.push_str(value);
                 }
             }
+            Some(ModalType::Question) => {
+                if let Some(ref mut q) = self.state.question {
+                    if q.options.is_empty() {
+                        q.input.push_str(value);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -75,6 +82,7 @@ impl App {
             ModalType::ToolList => self.handle_tool_list_key(key),
             ModalType::ProviderConnect => self.handle_provider_connect_key(key, app_tx),
             ModalType::ThemeSelector => self.handle_theme_selector_key(key),
+            ModalType::Question => self.handle_question_key(key),
         }
     }
 
@@ -550,6 +558,70 @@ impl App {
         false
     }
 
+    fn handle_question_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        let Some(ref mut q) = self.state.question else {
+            self.state.active_modal = None;
+            return false;
+        };
+
+        if q.options.is_empty() {
+            // Free-text input mode
+            match key.code {
+                KeyCode::Enter => {
+                    let answer = q.input.clone();
+                    if let Some(reply) = q.reply.take() {
+                        let _ = reply.send(answer);
+                    }
+                    self.state.question = None;
+                    self.state.active_modal = None;
+                }
+                KeyCode::Esc => {
+                    if let Some(reply) = q.reply.take() {
+                        let _ = reply.send(String::new());
+                    }
+                    self.state.question = None;
+                    self.state.active_modal = None;
+                }
+                KeyCode::Char(ch) => {
+                    q.input.push(ch);
+                }
+                KeyCode::Backspace => {
+                    q.input.pop();
+                }
+                _ => {}
+            }
+        } else {
+            // Options selection mode
+            match key.code {
+                KeyCode::Up => {
+                    q.selected = q.selected.saturating_sub(1);
+                }
+                KeyCode::Down => {
+                    if q.selected + 1 < q.options.len() {
+                        q.selected += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    let answer = q.options.get(q.selected).cloned().unwrap_or_default();
+                    if let Some(reply) = q.reply.take() {
+                        let _ = reply.send(answer);
+                    }
+                    self.state.question = None;
+                    self.state.active_modal = None;
+                }
+                KeyCode::Esc => {
+                    if let Some(reply) = q.reply.take() {
+                        let _ = reply.send(String::new());
+                    }
+                    self.state.question = None;
+                    self.state.active_modal = None;
+                }
+                _ => {}
+            }
+        }
+        false
+    }
+
     fn handle_theme_selector_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
         let selector = match self.state.theme_selector {
             Some(ref mut s) => s,
@@ -563,18 +635,32 @@ impl App {
         let action = handle_select_list_key(selector, key, vh);
         match action {
             SelectListAction::Cancelled => {
+                // Revert to the original theme saved before preview
+                if let Some(original) = self.state.theme_before_preview.take() {
+                    self.state.theme = original;
+                }
                 self.state.theme_selector = None;
                 self.state.active_modal = None;
             }
             SelectListAction::Selected => {
+                // Confirm the previewed theme
                 if let Some(name) = self.state.theme_selector.as_ref()
                     .and_then(|s| s.selected_value().cloned())
                 {
                     self.state.theme = Theme::from_name(&name);
                     self.set_status(format!("Theme: {name}"), StatusLevel::Info);
                 }
+                self.state.theme_before_preview = None;
                 self.state.theme_selector = None;
                 self.state.active_modal = None;
+            }
+            SelectListAction::Moved => {
+                // Live preview: apply the highlighted theme immediately
+                if let Some(name) = self.state.theme_selector.as_ref()
+                    .and_then(|s| s.selected_value().cloned())
+                {
+                    self.state.theme = Theme::from_name(&name);
+                }
             }
             _ => {}
         }

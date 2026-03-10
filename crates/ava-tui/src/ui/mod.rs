@@ -144,7 +144,73 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
                 render_select_list(frame, inner, selector, &config, &state.theme);
             }
         }
+        ModalType::Question => {
+            render_question_modal(frame, inner, state);
+        }
     }
+}
+
+fn render_question_modal(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+    use ratatui::style::Modifier;
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::Paragraph;
+
+    let Some(ref q) = state.question else { return };
+
+    let mut lines: Vec<Line<'_>> = Vec::new();
+
+    // Question text
+    lines.push(Line::from(Span::styled(
+        &q.question,
+        Style::default().fg(state.theme.text).add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
+
+    if q.options.is_empty() {
+        // Free-text input
+        lines.push(Line::from(Span::styled(
+            "Type your answer:",
+            Style::default().fg(state.theme.text_muted),
+        )));
+        lines.push(Line::from(""));
+
+        let cursor_line = format!("> {}_", q.input);
+        lines.push(Line::from(Span::styled(
+            cursor_line,
+            Style::default().fg(state.theme.accent),
+        )));
+    } else {
+        // Options list
+        for (i, opt) in q.options.iter().enumerate() {
+            let (prefix, style) = if i == q.selected {
+                ("> ", Style::default().fg(state.theme.accent).add_modifier(Modifier::BOLD))
+            } else {
+                ("  ", Style::default().fg(state.theme.text))
+            };
+            lines.push(Line::from(Span::styled(
+                format!("{prefix}{opt}"),
+                style,
+            )));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        if q.options.is_empty() {
+            "[Enter] submit  [Esc] decline"
+        } else {
+            "[↑↓] navigate  [Enter] select  [Esc] decline"
+        },
+        Style::default().fg(state.theme.text_muted),
+    )));
+
+    let title = "Agent Question";
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(state.theme.accent));
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
 }
 
 

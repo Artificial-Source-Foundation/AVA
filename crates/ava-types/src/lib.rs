@@ -9,12 +9,14 @@ pub mod context;
 pub mod error;
 pub mod message;
 pub mod session;
+pub mod todo;
 pub mod tool;
 
 pub use context::Context;
 pub use error::{AvaError, ErrorCategory, Result};
 pub use message::{Message, Role};
 pub use session::Session;
+pub use todo::{TodoItem, TodoPriority, TodoState, TodoStatus};
 pub use tool::{Tool, ToolCall, ToolResult};
 
 /// Token usage reported by an LLM provider after a request.

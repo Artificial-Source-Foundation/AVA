@@ -26,9 +26,8 @@ ava-types = { path = "../ava-types" }
 ava-platform = { path = "../ava-platform" }
 ava-sandbox = { path = "../ava-sandbox" }
 ava-permissions = { path = "../ava-permissions" }
-ava-memory = { path = "../ava-memory" }
-ava-session = { path = "../ava-session" }
-ava-codebase = { path = "../ava-codebase" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+url = "2"
 toml.workspace = true
 
 [dev-dependencies]

@@ -13,15 +13,11 @@ pub const READ_ONLY_TOOLS: &[&str] = &[
     "read",
     "glob",
     "grep",
-    "codebase_search",
-    "diagnostics",
-    "session_search",
-    "session_list",
-    "recall",
-    "memory_search",
     "hover",
     "references",
     "definition",
+    "web_fetch",
+    "todo_read",
 ];
 
 pub(super) fn truncate_tool_result(result: &mut ToolResult) {

@@ -52,10 +52,32 @@ pub struct AppState {
     pub tool_list: ToolListState,
     pub provider_connect: Option<ProviderConnectState>,
     pub theme_selector: Option<SelectListState<String>>,
+    /// Saved theme before opening theme selector (for live preview revert on Esc).
+    pub theme_before_preview: Option<Theme>,
     pub active_modal: Option<ModalType>,
     pub status_message: Option<StatusMessage>,
     pub voice: VoiceState,
     pub model_catalog: ava_config::CatalogState,
+    /// Cached snapshot of the agent's todo list for sidebar rendering.
+    pub todo_items: Vec<ava_types::TodoItem>,
+    /// Shared todo state handle (for async refresh).
+    pub todo_state: Option<ava_types::TodoState>,
+    /// Active question from the agent (question tool).
+    pub question: Option<QuestionState>,
+}
+
+/// State for the question modal shown when the agent uses the question tool.
+pub struct QuestionState {
+    /// The question text from the agent.
+    pub question: String,
+    /// Optional selectable choices.
+    pub options: Vec<String>,
+    /// Index of the currently selected option (when options are present).
+    pub selected: usize,
+    /// Free-text input buffer (when no options are present).
+    pub input: String,
+    /// Channel to send the user's answer back to the tool.
+    pub reply: Option<tokio::sync::oneshot::Sender<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +89,7 @@ pub enum ModalType {
     ToolList,
     ProviderConnect,
     ThemeSelector,
+    Question,
 }
 
 pub struct App {
@@ -81,6 +104,8 @@ pub struct App {
     transcriber: Option<Box<dyn crate::transcribe::Transcriber>>,
     #[cfg(feature = "voice")]
     voice_config: ava_config::VoiceConfig,
+    /// Receiver for question requests from the agent's question tool.
+    question_rx: Option<tokio::sync::mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>>,
 }
 
 impl App {
@@ -119,6 +144,10 @@ impl App {
         // Start background refresh every 60 min
         model_catalog.spawn_background_refresh();
 
+        let (agent, question_rx) = AgentState::new(data_dir, provider, model, cli.max_turns, cli.auto_approve)
+            .await?;
+        let todo_state = agent.todo_state();
+
         let state = AppState {
             theme: Theme::from_name(&cli.theme),
             messages: MessageState::default(),
@@ -126,8 +155,7 @@ impl App {
             session,
             permission,
             keybinds,
-            agent: AgentState::new(data_dir, provider, model, cli.max_turns, cli.auto_approve)
-                .await?,
+            agent,
             agent_mode: AgentMode::default(),
             show_sidebar: false,
             command_palette: CommandPaletteState::with_defaults(),
@@ -136,6 +164,7 @@ impl App {
             tool_list: ToolListState::default(),
             provider_connect: None,
             theme_selector: None,
+            theme_before_preview: None,
             active_modal: None,
             status_message: None,
             voice: VoiceState {
@@ -144,6 +173,9 @@ impl App {
                 ..VoiceState::default()
             },
             model_catalog,
+            todo_items: Vec::new(),
+            todo_state,
+            question: None,
         };
 
         Ok(Self {
@@ -158,6 +190,7 @@ impl App {
             transcriber: None,
             #[cfg(feature = "voice")]
             voice_config: ava_config::VoiceConfig::default(),
+            question_rx: Some(question_rx),
         })
     }
 
@@ -219,6 +252,9 @@ impl App {
             }
         }
 
+        // Take the question receiver so we can poll it in the event loop
+        let mut question_rx = self.question_rx.take();
+
         if let Some(goal) = self.pending_goal.take() {
             self.submit_goal(goal, app_tx.clone(), agent_tx.clone());
         }
@@ -229,6 +265,9 @@ impl App {
             tokio::select! {
                 Some(event) = app_rx.recv() => self.handle_event(event, app_tx.clone(), agent_tx.clone()),
                 Some(agent_event) = agent_rx.recv() => self.handle_event(AppEvent::Agent(agent_event), app_tx.clone(), agent_tx.clone()),
+                Some(req) = async { match question_rx.as_mut() { Some(rx) => rx.recv().await, None => None } } => {
+                    self.handle_event(AppEvent::Question(req), app_tx.clone(), agent_tx.clone());
+                },
                 else => break,
             }
 
@@ -290,27 +329,29 @@ impl App {
         }
     }
 
-    /// Open the theme selector modal.
+    /// Open the theme selector modal with live preview.
     pub(crate) fn open_theme_selector(&mut self) {
-        let current = self.state.theme.name;
+        let current = &self.state.theme.name;
         let items: Vec<SelectItem<String>> = Theme::all_names()
-            .iter()
-            .map(|&name| {
-                let status = if name == current {
+            .into_iter()
+            .map(|name| {
+                let status = if &name == current {
                     Some(crate::widgets::select_list::ItemStatus::Active)
                 } else {
                     None
                 };
                 SelectItem {
-                    title: name.to_string(),
+                    title: name.clone(),
                     detail: String::new(),
                     section: None,
                     status,
-                    value: name.to_string(),
+                    value: name,
                     enabled: true,
                 }
             })
             .collect();
+        // Save current theme so we can revert on Esc
+        self.state.theme_before_preview = Some(self.state.theme.clone());
         self.state.theme_selector = Some(SelectListState::new(items));
         self.state.active_modal = Some(ModalType::ThemeSelector);
     }
@@ -355,6 +396,10 @@ impl App {
                     if msg.is_expired() {
                         self.state.status_message = None;
                     }
+                }
+                // Refresh todo items from shared state (cheap sync read)
+                if let Some(ref todo_state) = self.state.todo_state {
+                    self.state.todo_items = todo_state.get();
                 }
             }
             AppEvent::Agent(agent_event) => {
@@ -448,6 +493,16 @@ impl App {
                     pc.screen = crate::widgets::provider_connect::ConnectScreen::List;
                     pc.message = Some(format!("Failed: {error}"));
                 }
+            }
+            AppEvent::Question(req) => {
+                self.state.question = Some(QuestionState {
+                    question: req.question,
+                    options: req.options.clone(),
+                    selected: 0,
+                    input: String::new(),
+                    reply: Some(req.reply),
+                });
+                self.state.active_modal = Some(ModalType::Question);
             }
         }
     }
@@ -759,10 +814,14 @@ impl App {
             tool_list: ToolListState::default(),
             provider_connect: None,
             theme_selector: None,
+            theme_before_preview: None,
             active_modal: None,
             status_message: None,
             voice: VoiceState::default(),
             model_catalog: ava_config::CatalogState::default(),
+            todo_items: Vec::new(),
+            todo_state: None,
+            question: None,
         };
 
         Self {
@@ -777,6 +836,7 @@ impl App {
             transcriber: None,
             #[cfg(feature = "voice")]
             voice_config: ava_config::VoiceConfig::default(),
+            question_rx: None,
         }
     }
 

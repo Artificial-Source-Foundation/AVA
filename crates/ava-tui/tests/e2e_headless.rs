@@ -47,7 +47,7 @@ async fn create_test_stack(temp_dir: &Path, api_key: &str) -> AgentStack {
         .await
         .unwrap();
 
-    AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
         data_dir: temp_dir.to_path_buf(),
         provider: Some("openrouter".to_string()),
         model: Some(MODEL.to_string()),
@@ -56,7 +56,8 @@ async fn create_test_stack(temp_dir: &Path, api_key: &str) -> AgentStack {
         ..Default::default()
     })
     .await
-    .expect("Failed to create AgentStack")
+    .expect("Failed to create AgentStack");
+    stack
 }
 
 /// Run the agent with a timeout, collecting all events.
@@ -287,29 +288,9 @@ async fn e2e_multi_tool() {
     );
 }
 
-#[tokio::test]
-async fn e2e_memory() {
-    let key = require_api_key();
-    if key.is_empty() { return; }
-
-    let uuid = Uuid::new_v4().to_string().replace('-', "")[..8].to_string();
-    let mem_key = format!("ava_test_{uuid}");
-
-    let temp = tempfile::tempdir().unwrap();
-    let stack = create_test_stack(temp.path(), &key).await;
-    let goal = format!(
-        "Use the remember tool to store the key '{mem_key}' with value 'test_value_123'. \
-         Then use the recall tool to retrieve it and tell me the value."
-    );
-    let (result, events) = run_with_timeout(stack, &goal, TIMEOUT_SECS).await;
-
-    assert!(result.success);
-    let text = collect_text(&events);
-    assert!(
-        text.contains("test_value_123"),
-        "Expected 'test_value_123' in recall response, got: {text}"
-    );
-}
+// Memory tools (remember/recall) removed from LLM-visible registration.
+// #[tokio::test]
+// async fn e2e_memory() { ... }
 
 #[tokio::test]
 async fn e2e_session_saved() {

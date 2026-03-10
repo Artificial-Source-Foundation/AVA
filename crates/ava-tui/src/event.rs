@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-#[derive(Debug)]
 pub enum AppEvent {
     Key(KeyEvent),
     Paste(String),
@@ -30,7 +29,39 @@ pub enum AppEvent {
     OAuthSuccess { provider: String, tokens: ava_auth::tokens::OAuthTokens },
     /// OAuth flow failed.
     OAuthError { provider: String, error: String },
+    /// Agent is asking the user a question via the question tool.
+    Question(ava_tools::core::question::QuestionRequest),
     Quit,
+}
+
+impl std::fmt::Debug for AppEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Key(k) => f.debug_tuple("Key").field(k).finish(),
+            Self::Paste(v) => f.debug_tuple("Paste").field(v).finish(),
+            Self::Resize(w, h) => f.debug_tuple("Resize").field(w).field(h).finish(),
+            Self::Mouse(m) => f.debug_tuple("Mouse").field(m).finish(),
+            Self::Tick => write!(f, "Tick"),
+            Self::Agent(e) => f.debug_tuple("Agent").field(e).finish(),
+            Self::AgentDone(r) => f.debug_tuple("AgentDone").field(r).finish(),
+            Self::TokenUsage(u) => f.debug_tuple("TokenUsage").field(u).finish(),
+            Self::ShellResult(k, c) => f.debug_tuple("ShellResult").field(k).field(c).finish(),
+            Self::VoiceReady(t) => f.debug_tuple("VoiceReady").field(t).finish(),
+            Self::VoiceError(e) => f.debug_tuple("VoiceError").field(e).finish(),
+            Self::VoiceAmplitude(a) => f.debug_tuple("VoiceAmplitude").field(a).finish(),
+            Self::VoiceSilenceDetected => write!(f, "VoiceSilenceDetected"),
+            Self::OAuthSuccess { provider, .. } => {
+                f.debug_struct("OAuthSuccess").field("provider", provider).finish()
+            }
+            Self::OAuthError { provider, error } => {
+                f.debug_struct("OAuthError").field("provider", provider).field("error", error).finish()
+            }
+            Self::Question(req) => {
+                f.debug_struct("Question").field("question", &req.question).finish()
+            }
+            Self::Quit => write!(f, "Quit"),
+        }
+    }
 }
 
 pub fn spawn_event_reader(tx: mpsc::UnboundedSender<AppEvent>) {

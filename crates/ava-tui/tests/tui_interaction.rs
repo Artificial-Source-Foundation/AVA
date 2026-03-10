@@ -126,11 +126,11 @@ fn slash_opens_inline_autocomplete() {
 #[test]
 fn sidebar_toggles() {
     let (mut app, _tmp) = make_app();
-    assert!(app.state.show_sidebar, "sidebar should start visible");
+    assert!(!app.state.show_sidebar, "sidebar should start hidden");
     press_ctrl(&mut app, 's');
-    assert!(!app.state.show_sidebar, "Ctrl+S should hide sidebar");
+    assert!(app.state.show_sidebar, "Ctrl+S should show sidebar");
     press_ctrl(&mut app, 's');
-    assert!(app.state.show_sidebar, "Ctrl+S again should show sidebar");
+    assert!(!app.state.show_sidebar, "Ctrl+S again should hide sidebar");
 }
 
 #[test]

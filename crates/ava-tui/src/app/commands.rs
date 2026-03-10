@@ -349,7 +349,7 @@ impl App {
                 match arg {
                     Some(name) => {
                         let names = Theme::all_names();
-                        if names.contains(&name) {
+                        if names.iter().any(|n| n == name) {
                             self.state.theme = Theme::from_name(name);
                             self.set_status(
                                 format!("Theme: {name}"),
@@ -425,7 +425,7 @@ Available commands:
   /help                    — show this help
 
 Keyboard shortcuts:
-  Tab / Shift+Tab          — cycle agent mode (Code/Plan/Architect)
+  Tab / Shift+Tab          — cycle agent mode (Code/Plan)
   Ctrl+K / Ctrl+/          — command palette
   Ctrl+M                   — model selector
   Ctrl+T                   — cycle thinking level

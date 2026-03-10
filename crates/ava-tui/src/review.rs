@@ -59,7 +59,7 @@ pub async fn run_review(args: ReviewArgs) -> Result<()> {
     }
 
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
-    let stack = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
         data_dir,
         provider,
         model,

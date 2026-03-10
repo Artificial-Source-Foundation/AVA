@@ -45,6 +45,7 @@ whisper-rs = { version = "0.12", optional = true }
 async-trait = { version = "0.1", optional = true }
 reqwest = { version = "0.12", features = ["json", "multipart"], optional = true }
 clap = { version = "4", features = ["derive"] }
+toml.workspace = true
 serde_yaml.workspace = true
 color-eyre = "0.6"
 tracing = "0.1"

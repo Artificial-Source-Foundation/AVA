@@ -211,10 +211,10 @@ Defines what the sandboxed process can access:
 
 ```rust
 pub struct SandboxPolicy {
-    pub read_paths: Vec<PathBuf>,     // Readable paths
-    pub write_paths: Vec<PathBuf>,    // Writable paths
-    pub network: bool,                // Network access allowed
-    pub env_passthrough: Vec<String>, // Environment variables to forward
+    pub read_only_paths: Vec<PathBuf>,  // Readable paths
+    pub writable_paths: Vec<PathBuf>,   // Writable paths
+    pub allow_network: bool,            // Network access allowed
+    pub allow_process_spawn: bool,      // Process spawning allowed
 }
 ```
 

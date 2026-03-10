@@ -67,6 +67,8 @@ Detailed documentation for individual crates lives in `crates/`:
 - [ava-auth](crates/ava-auth.md) -- OAuth and token exchange
 - [ava-types](crates/ava-types.md) -- Shared types
 - [ava-db](crates/ava-db.md) -- Database connection pool
+- [ava-extensions](crates/ava-extensions.md) -- Extension system (native + WASM)
+- [Small crates](crates/small-crates.md) -- ava-logger, ava-validator, ava-lsp, ava-cli-providers
 
 ## See Also
 

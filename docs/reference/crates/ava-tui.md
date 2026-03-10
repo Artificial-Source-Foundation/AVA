@@ -734,6 +734,34 @@ pub struct TokenBuffer {
 
 Thin wrapper: `render_message()` delegates to `UiMessage::to_lines()` for all rendering logic. The actual rendering (Markdown parsing, syntax highlighting, word wrapping, spinner animation) is implemented in `state/messages.rs`.
 
+### TodoList
+
+**File:** `src/widgets/todo_list.rs`
+
+Helper for sidebar rendering of todo items. Provides `has_incomplete(items)` which returns `true` if any item is not `Completed` or `Cancelled`. Used by sidebar to decide whether to show the Todos section.
+
+---
+
+## Rendering Pipeline
+
+**Directory:** `src/rendering/`
+
+Handles rich text rendering from LLM output to Ratatui `Line`/`Span` objects.
+
+### Markdown (`rendering/markdown.rs`)
+Converts Markdown to styled Ratatui lines using `pulldown-cmark`. Handles:
+- Headers (bold, sized)
+- Code blocks (syntax highlighted via `rendering/syntax.rs`)
+- Inline code, bold, italic, links
+- Lists (ordered and unordered)
+- Block quotes
+
+### Syntax Highlighting (`rendering/syntax.rs`)
+Uses `syntect` for syntax highlighting of code blocks. Lazy-loads syntax sets and themes. Maps syntect styles to Ratatui `Style` objects.
+
+### Diff Rendering (`rendering/diff.rs`)
+Renders unified diffs with word-level highlighting using the `similar` crate. Added/removed lines get distinct colors; word-level changes within lines are highlighted.
+
 ---
 
 ## UI Layout

@@ -17,7 +17,7 @@ pub struct MCPServerConfig {
 }
 ```
 
-`load_mcp_config(path)` loads from a TOML file. `load_merged_mcp_config(global, project)` merges global (`~/.ava/mcp.toml`) and project-level (`.ava/mcp.toml`) configs, with project overrides winning.
+`load_mcp_config(path)` loads from a JSON file. `load_merged_mcp_config(global, project)` merges global (`~/.ava/mcp.json`) and project-level (`.ava/mcp.json`) configs, with project overrides winning.
 
 ### Transport (`src/transport.rs`)
 
@@ -73,7 +73,8 @@ This allows AVA itself to act as an MCP server, exposing its tools to other MCP 
 
 | File | Lines | Purpose |
 |------|------:|---------|
-| `src/config.rs` | -- | MCPServerConfig, TOML loading, merge |
+| `src/config.rs` | -- | MCPServerConfig, JSON loading, merge |
+| `src/lib.rs` | -- | Crate root, re-exports |
 | `src/transport.rs` | -- | MCPTransport trait, Stdio/Http/InMemory/Framed |
 | `src/client.rs` | -- | MCPClient, initialize/list_tools/call_tool |
 | `src/manager.rs` | -- | ExtensionManager, multi-server aggregation |

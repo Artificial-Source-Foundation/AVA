@@ -93,6 +93,7 @@ pub struct AgentStack {
     pub platform: Arc<StandardPlatform>,
     pub codebase_index: Arc<RwLock<Option<Arc<CodebaseIndex>>>>,
     // ... runtime overrides, MCP, thinking, todos, question bridge, agents config
+    pub parent_session_id: RwLock<Option<String>>, // Set by TUI for sub-agent linking
 }
 ```
 

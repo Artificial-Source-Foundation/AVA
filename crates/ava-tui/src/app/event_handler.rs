@@ -8,8 +8,31 @@ impl App {
         _agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
     ) {
         match agent_event {
+            ava_agent::AgentEvent::Thinking(content) => {
+                // Accumulate thinking tokens into a single message
+                if let Some(last) = self.state.messages.messages.last_mut() {
+                    if matches!(last.kind, MessageKind::Thinking) {
+                        last.content.push_str(&content);
+                        last.is_streaming = true;
+                    } else {
+                        let mut msg = UiMessage::new(MessageKind::Thinking, content);
+                        msg.is_streaming = true;
+                        self.state.messages.push(msg);
+                    }
+                } else {
+                    let mut msg = UiMessage::new(MessageKind::Thinking, content);
+                    msg.is_streaming = true;
+                    self.state.messages.push(msg);
+                }
+            }
             ava_agent::AgentEvent::Token(chunk) => {
                 self.state.agent.activity = AgentActivity::Thinking;
+                // Mark any preceding thinking message as done streaming
+                if let Some(last) = self.state.messages.messages.last_mut() {
+                    if matches!(last.kind, MessageKind::Thinking) {
+                        last.is_streaming = false;
+                    }
+                }
                 self.token_buffer.push(&chunk);
                 // Ensure the streaming indicator is set on the current message
                 if let Some(last) = self.state.messages.messages.last_mut() {
@@ -26,10 +49,13 @@ impl App {
             ava_agent::AgentEvent::ToolCall(call) => {
                 // Force flush any buffered tokens before tool call
                 self.force_flush_token_buffer();
-                // Mark last assistant message as done streaming
+                // Mark last assistant/thinking message as done streaming
                 if let Some(last) = self.state.messages.messages.last_mut() {
-                    if matches!(last.kind, MessageKind::Assistant) {
+                    if matches!(last.kind, MessageKind::Assistant | MessageKind::Thinking) {
                         last.is_streaming = false;
+                        if matches!(last.kind, MessageKind::Assistant) && last.model_name.is_none() {
+                            last.model_name = Some(self.state.agent.model_name.clone());
+                        }
                     }
                 }
                 self.state.agent.activity = AgentActivity::ExecutingTool(call.name.clone());
@@ -61,22 +87,22 @@ impl App {
                     .push(UiMessage::new(MessageKind::ToolResult, result.content));
             }
             ava_agent::AgentEvent::Progress(progress) => {
-                // Parse turn info from progress messages
+                // Parse turn info from progress messages (internal state only, not displayed)
                 if let Some(turn_str) = progress.strip_prefix("turn ") {
                     if let Ok(turn) = turn_str.trim().parse::<usize>() {
                         self.state.agent.current_turn = turn;
                     }
                 }
-                self.state
-                    .messages
-                    .push(UiMessage::new(MessageKind::System, progress));
             }
             ava_agent::AgentEvent::Complete(_) => {
                 // Force flush any remaining buffered tokens
                 self.force_flush_token_buffer();
-                // Mark last assistant message as done streaming
+                // Mark last assistant message as done streaming and attach model info
                 if let Some(last) = self.state.messages.messages.last_mut() {
                     last.is_streaming = false;
+                    if matches!(last.kind, MessageKind::Assistant) && last.model_name.is_none() {
+                        last.model_name = Some(self.state.agent.model_name.clone());
+                    }
                 }
                 self.is_streaming.store(false, Ordering::Relaxed);
                 self.state.agent.is_running = false;
@@ -91,9 +117,12 @@ impl App {
             ava_agent::AgentEvent::Error(err) => {
                 // Force flush any remaining buffered tokens
                 self.force_flush_token_buffer();
-                // Mark last assistant message as done streaming
+                // Mark last assistant message as done streaming and attach model info
                 if let Some(last) = self.state.messages.messages.last_mut() {
                     last.is_streaming = false;
+                    if matches!(last.kind, MessageKind::Assistant) && last.model_name.is_none() {
+                        last.model_name = Some(self.state.agent.model_name.clone());
+                    }
                 }
                 self.state.agent.activity = AgentActivity::Idle;
                 self.state
@@ -165,6 +194,23 @@ impl App {
             return;
         }
 
+        // Build conversation history from previous UI messages for LLM context.
+        // Only include User and Assistant messages (tool calls/results/system are internal).
+        let history: Vec<ava_types::Message> = self
+            .state
+            .messages
+            .messages
+            .iter()
+            .filter_map(|ui_msg| {
+                let role = match ui_msg.kind {
+                    MessageKind::User => ava_types::Role::User,
+                    MessageKind::Assistant => ava_types::Role::Assistant,
+                    _ => return None,
+                };
+                Some(ava_types::Message::new(role, ui_msg.content.clone()))
+            })
+            .collect();
+
         self.state
             .messages
             .push(UiMessage::new(MessageKind::User, goal.clone()));
@@ -172,7 +218,7 @@ impl App {
         self.state.agent.activity = AgentActivity::Thinking;
         self.state
             .agent
-            .start(goal, self.state.agent.max_turns, app_tx, agent_tx);
+            .start(goal, self.state.agent.max_turns, app_tx, agent_tx, history);
     }
 
     pub(crate) fn toggle_voice(&mut self, app_tx: mpsc::UnboundedSender<AppEvent>) {

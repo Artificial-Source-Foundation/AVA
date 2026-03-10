@@ -2,7 +2,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::Instant;
 
-use ava_types::{AvaError, Result, TokenUsage, ToolCall};
+use ava_types::{AvaError, Result, StreamToolCall, ThinkingLevel, TokenUsage, ToolCall};
 use serde::Deserialize;
 use serde_json::Value;
 use tracing::warn;
@@ -17,6 +17,56 @@ pub(super) struct ToolCallEnvelope {
     arguments: Value,
     #[serde(default)]
     id: Option<String>,
+}
+
+/// Accumulates streaming tool call fragments into complete tool calls.
+pub(super) struct ToolCallAccumulator {
+    pub index: usize,
+    pub id: String,
+    pub name: String,
+    pub arguments_json: String,
+}
+
+pub(super) fn accumulate_tool_call(accumulators: &mut Vec<ToolCallAccumulator>, tc: &StreamToolCall) {
+    let acc = if let Some(acc) = accumulators.iter_mut().find(|a| a.index == tc.index) {
+        acc
+    } else {
+        accumulators.push(ToolCallAccumulator {
+            index: tc.index,
+            id: String::new(),
+            name: String::new(),
+            arguments_json: String::new(),
+        });
+        accumulators.last_mut().unwrap()
+    };
+    if let Some(ref id) = tc.id {
+        acc.id.clone_from(id);
+    }
+    if let Some(ref name) = tc.name {
+        acc.name.clone_from(name);
+    }
+    if let Some(ref args) = tc.arguments_delta {
+        acc.arguments_json.push_str(args);
+    }
+}
+
+pub(super) fn finalize_tool_calls(accumulators: Vec<ToolCallAccumulator>) -> Vec<ToolCall> {
+    accumulators
+        .into_iter()
+        .map(|acc| {
+            let arguments = serde_json::from_str(&acc.arguments_json)
+                .unwrap_or(serde_json::json!({}));
+            ToolCall {
+                id: if acc.id.is_empty() {
+                    Uuid::new_v4().to_string()
+                } else {
+                    acc.id
+                },
+                name: acc.name,
+                arguments,
+            }
+        })
+        .collect()
 }
 
 pub(super) fn parse_tool_calls(content: &str) -> Result<Vec<ToolCall>> {
@@ -82,8 +132,71 @@ impl AgentLoop {
             Ok((response, tool_calls, None))
         };
 
-        self.last_request_hash = Some(hash);
-        self.last_request_time = Some(Instant::now());
+        // Only set dedup hash when we got a non-empty response, so that
+        // empty responses (e.g. from format mismatches) don't prevent the
+        // next turn from making a real API call.
+        if let Ok((ref text, ref calls, _)) = result {
+            if !text.trim().is_empty() || !calls.is_empty() {
+                self.last_request_hash = Some(hash);
+                self.last_request_time = Some(Instant::now());
+            }
+        } else {
+            self.last_request_hash = Some(hash);
+            self.last_request_time = Some(Instant::now());
+        }
+
+        result
+    }
+
+    /// Like `generate_response` but uses thinking when configured.
+    pub(super) async fn generate_response_with_thinking(
+        &mut self,
+    ) -> Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
+        if self.config.thinking_level == ThinkingLevel::Off {
+            return self.generate_response().await;
+        }
+
+        // Dedup guard
+        let messages = self.context.get_messages();
+        let hash = {
+            let mut hasher = DefaultHasher::new();
+            if let Some(last) = messages.last() {
+                last.content.hash(&mut hasher);
+            }
+            hasher.finish()
+        };
+        if let (Some(prev_hash), Some(prev_time)) =
+            (self.last_request_hash, self.last_request_time)
+        {
+            if hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
+                warn!("Skipping duplicate request (same content within 2s)");
+                return Ok((String::new(), vec![], None));
+            }
+        }
+
+        let result = if self.llm.supports_tools() {
+            let tool_defs = self.tools.list_tools();
+            let response = self
+                .llm
+                .generate_with_thinking(messages, &tool_defs, self.config.thinking_level)
+                .await?;
+            Ok((response.content, response.tool_calls, response.usage))
+        } else {
+            let response = self.llm.generate(messages).await?;
+            let tool_calls = parse_tool_calls(&response)?;
+            Ok((response, tool_calls, None))
+        };
+
+        // Only set dedup hash for non-empty responses (see generate_response comment).
+        if let Ok((ref text, ref calls, _)) = result {
+            if !text.trim().is_empty() || !calls.is_empty() {
+                self.last_request_hash = Some(hash);
+                self.last_request_time = Some(Instant::now());
+            }
+        } else {
+            self.last_request_hash = Some(hash);
+            self.last_request_time = Some(Instant::now());
+        }
 
         result
     }

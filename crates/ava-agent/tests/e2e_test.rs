@@ -9,7 +9,7 @@ use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_commander::{Budget, Commander, CommanderConfig, Task, TaskType};
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
-use ava_types::{AvaError, Message, Result};
+use ava_types::{AvaError, Message, Result, StreamChunk};
 use futures::Stream;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -50,7 +50,7 @@ async fn full_agent_run_with_tool_calls() {
     let cancel = CancellationToken::new();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let result = stack
-        .run("Read hello.txt and write output", 10, Some(tx), cancel)
+        .run("Read hello.txt and write output", 10, Some(tx), cancel, Vec::new())
         .await
         .expect("run should succeed");
 
@@ -86,7 +86,7 @@ async fn agent_run_with_bash_tool() {
     .expect("stack init should succeed");
 
     let result = stack
-        .run("run bash", 10, None, CancellationToken::new())
+        .run("run bash", 10, None, CancellationToken::new(), Vec::new())
         .await
         .expect("run should succeed");
     assert!(result.success);
@@ -121,7 +121,7 @@ async fn agent_run_cancellation() {
     });
 
     let err = stack
-        .run("slow run", 5, None, cancel)
+        .run("slow run", 5, None, cancel, Vec::new())
         .await
         .expect_err("run should be cancelled");
     assert!(matches!(err, AvaError::Cancelled));
@@ -183,9 +183,9 @@ impl LLMProvider for SlowProvider {
     async fn generate_stream(
         &self,
         messages: &[Message],
-    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
         let out = self.generate(messages).await?;
-        Ok(Box::pin(futures::stream::iter(vec![out])))
+        Ok(Box::pin(futures::stream::iter(vec![StreamChunk::text(out)])))
     }
 
     fn estimate_tokens(&self, input: &str) -> usize {

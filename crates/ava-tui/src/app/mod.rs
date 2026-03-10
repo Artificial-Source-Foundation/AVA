@@ -52,6 +52,7 @@ pub struct AppState {
     pub active_modal: Option<ModalType>,
     pub status_message: Option<StatusMessage>,
     pub voice: VoiceState,
+    pub model_catalog: ava_config::CatalogState,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -105,6 +106,11 @@ impl App {
 
         let (provider, model) = cli.resolve_provider_model().await?;
 
+        // Load model catalog (cache-first, async fetch)
+        let model_catalog = ava_config::CatalogState::load().await;
+        // Start background refresh every 60 min
+        model_catalog.spawn_background_refresh();
+
         let state = AppState {
             theme: Theme::from_name(&cli.theme),
             messages: MessageState::default(),
@@ -114,7 +120,7 @@ impl App {
             keybinds,
             agent: AgentState::new(data_dir, provider, model, cli.max_turns, cli.yolo)
                 .await?,
-            show_sidebar: true,
+            show_sidebar: false,
             command_palette: CommandPaletteState::with_defaults(),
             session_list: SessionListState::default(),
             model_selector: None,
@@ -127,6 +133,7 @@ impl App {
                 continuous: cli.voice,
                 ..VoiceState::default()
             },
+            model_catalog,
         };
 
         Ok(Self {
@@ -146,7 +153,28 @@ impl App {
 
     pub async fn run(&mut self) -> Result<()> {
         enable_raw_mode()?;
-        execute!(stdout(), EnterAlternateScreen, crossterm::event::EnableBracketedPaste)?;
+        execute!(
+            stdout(),
+            EnterAlternateScreen,
+            crossterm::event::EnableBracketedPaste,
+            crossterm::event::EnableMouseCapture
+        )?;
+
+        // Install panic hook that restores the terminal before printing the panic.
+        // Without this, a panic leaves the terminal in raw/alternate-screen mode,
+        // making the error unreadable and the shell unusable.
+        let original_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let _ = disable_raw_mode();
+            let _ = execute!(
+                std::io::stdout(),
+                LeaveAlternateScreen,
+                crossterm::event::DisableBracketedPaste,
+                crossterm::event::DisableMouseCapture,
+                crossterm::cursor::Show
+            );
+            original_hook(info);
+        }));
 
         let backend = CrosstermBackend::new(stdout());
         let mut terminal = Terminal::new(backend)?;
@@ -168,6 +196,16 @@ impl App {
                     ava_types::Role::System => MessageKind::System,
                 };
                 self.state.messages.push(UiMessage::new(kind, msg.content.clone()));
+            }
+            // Restore model from session metadata
+            if let Some(meta) = session.metadata.as_object() {
+                let provider = meta.get("provider").and_then(|v| v.as_str());
+                let model = meta.get("model").and_then(|v| v.as_str());
+                if let (Some(p), Some(m)) = (provider, model) {
+                    let p = p.to_string();
+                    let m = m.to_string();
+                    let _ = self.state.agent.switch_model(&p, &m).await;
+                }
             }
         }
 
@@ -193,7 +231,8 @@ impl App {
         execute!(
             terminal.backend_mut(),
             LeaveAlternateScreen,
-            crossterm::event::DisableBracketedPaste
+            crossterm::event::DisableBracketedPaste,
+            crossterm::event::DisableMouseCapture
         )?;
         terminal.show_cursor()?;
 
@@ -218,8 +257,25 @@ impl App {
                 }
             }
             AppEvent::Key(_) => {}
-            AppEvent::Paste(value) => self.state.input.insert_str(&value),
+            AppEvent::Paste(value) => {
+                if self.state.active_modal.is_some() {
+                    self.handle_modal_paste(&value);
+                } else {
+                    self.state.input.insert_str(&value);
+                }
+            }
             AppEvent::Resize(_, _) => {}
+            AppEvent::Mouse(mouse) => {
+                use crossterm::event::MouseEventKind;
+                // Scroll the message list (not input history)
+                if self.state.active_modal.is_none() {
+                    match mouse.kind {
+                        MouseEventKind::ScrollUp => self.state.messages.scroll_up(3),
+                        MouseEventKind::ScrollDown => self.state.messages.scroll_down(3),
+                        _ => {}
+                    }
+                }
+            }
             AppEvent::Tick => {
                 self.flush_token_buffer();
                 // Expire TTL status messages
@@ -278,6 +334,49 @@ impl App {
                     self.stop_and_transcribe(app_tx);
                 }
             }
+            AppEvent::OAuthSuccess { provider, tokens } => {
+                // Store OAuth tokens in credentials
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        let mut store = ava_config::CredentialStore::load_default()
+                            .await
+                            .unwrap_or_default();
+                        store.set_oauth(
+                            &provider,
+                            &tokens.access_token,
+                            tokens.refresh_token.as_deref(),
+                            tokens.expires_at,
+                        );
+                        store.save_default().await
+                    })
+                });
+                match result {
+                    Ok(_) => {
+                        self.set_status(
+                            format!("Connected to {}", ava_config::provider_name(&provider)),
+                            StatusLevel::Info,
+                        );
+                    }
+                    Err(e) => {
+                        self.set_status(
+                            format!("Failed to save credentials: {e}"),
+                            StatusLevel::Error,
+                        );
+                    }
+                }
+                self.state.provider_connect = None;
+                self.state.active_modal = None;
+            }
+            AppEvent::OAuthError { provider, error } => {
+                self.set_status(
+                    format!("{}: {error}", ava_config::provider_name(&provider)),
+                    StatusLevel::Error,
+                );
+                if let Some(ref mut pc) = self.state.provider_connect {
+                    pc.screen = crate::widgets::provider_connect::ConnectScreen::List;
+                    pc.message = Some(format!("Failed: {error}"));
+                }
+            }
         }
     }
 
@@ -297,10 +396,13 @@ impl App {
             match action {
                 Action::Quit => return true,
                 Action::Cancel => {
+                    // OpenCode-style: Ctrl+C cancels agent → clears input → quits if empty
                     if self.state.agent.is_running {
                         self.state.agent.abort();
-                    } else {
+                    } else if !self.state.input.buffer.is_empty() {
                         self.state.input.clear();
+                    } else {
+                        return true;
                     }
                 }
                 Action::ScrollUp => self.state.messages.scroll_up(10),
@@ -319,12 +421,39 @@ impl App {
                 }
                 Action::CommandPalette => {
                     self.state.command_palette.open = true;
-                    self.state.command_palette.query.clear();
-                    self.state.command_palette.selected = 0;
+                    self.state.command_palette.list.query.clear();
+                    self.state.command_palette.list.selected = 0;
                     self.state.active_modal = Some(ModalType::CommandPalette);
                 }
                 Action::ModelSwitch => {
-                    self.state.model_selector = Some(ModelSelectorState::default());
+                    // Try async catalog path if tokio runtime available,
+                    // otherwise open with empty model list (will be populated on next open)
+                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        let (credentials, catalog) = tokio::task::block_in_place(|| {
+                            handle.block_on(async {
+                                let creds = ava_config::CredentialStore::load_default()
+                                    .await
+                                    .unwrap_or_default();
+                                let cat = self.state.model_catalog.get().await;
+                                (creds, cat)
+                            })
+                        });
+                        let mut effective = if catalog.is_empty() {
+                            ava_config::fallback_catalog()
+                        } else {
+                            catalog
+                        };
+                        effective.merge_fallback();
+                        self.state.model_selector = Some(ModelSelectorState::from_catalog(
+                            &effective,
+                            &credentials,
+                            &self.state.agent.recent_models,
+                            &self.state.agent.model_name,
+                            &self.state.agent.provider_name,
+                        ));
+                    } else {
+                        self.state.model_selector = Some(ModelSelectorState::default());
+                    }
                     self.state.active_modal = Some(ModalType::ModelSelector);
                 }
                 Action::NewSession => {
@@ -335,6 +464,9 @@ impl App {
                 Action::SessionList => {
                     self.execute_command_action(Action::SessionList);
                 }
+                Action::ToggleThinking => {
+                    self.state.agent.cycle_thinking();
+                }
                 Action::VoiceToggle => {
                     #[cfg(feature = "voice")]
                     self.toggle_voice(app_tx);
@@ -342,6 +474,50 @@ impl App {
                 _ => {}
             }
             return false;
+        }
+
+        // Handle slash menu input when autocomplete is visible
+        if self.state.input.has_slash_autocomplete() {
+            match key.code {
+                KeyCode::Esc => {
+                    self.state.input.dismiss_autocomplete();
+                    return false;
+                }
+                KeyCode::Up => {
+                    self.state.input.autocomplete_prev();
+                    return false;
+                }
+                KeyCode::Down => {
+                    self.state.input.autocomplete_next();
+                    return false;
+                }
+                KeyCode::Tab => {
+                    // Tab-complete the command name into the buffer
+                    if let Some(value) = self.state.input.autocomplete_selected_value() {
+                        let completed = format!("/{}", value);
+                        self.state.input.buffer = completed.clone();
+                        self.state.input.cursor = completed.len();
+                        self.state.input.autocomplete = None;
+                    }
+                    return false;
+                }
+                KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
+                    // Execute the selected slash command
+                    if let Some(value) = self.state.input.autocomplete_selected_value() {
+                        let cmd = format!("/{}", value);
+                        self.state.input.clear();
+                        if let Some((kind, msg)) = self.handle_slash_command(&cmd) {
+                            self.state
+                                .messages
+                                .push(UiMessage::new(kind, msg));
+                        }
+                    }
+                    return false;
+                }
+                _ => {
+                    // Fall through to normal input handling — typing filters the menu
+                }
+            }
         }
 
         // Handle normal input
@@ -352,16 +528,6 @@ impl App {
                 }
             }
             KeyCode::Enter => self.state.input.insert_char('\n'),
-            KeyCode::Char('/')
-                if key.modifiers == KeyModifiers::NONE
-                    && self.state.input.buffer.is_empty() =>
-            {
-                // '/' on empty input opens command palette
-                self.state.command_palette.open = true;
-                self.state.command_palette.query.clear();
-                self.state.command_palette.selected = 0;
-                self.state.active_modal = Some(ModalType::CommandPalette);
-            }
             KeyCode::Char(ch)
                 if key.modifiers == KeyModifiers::NONE
                     || key.modifiers == KeyModifiers::SHIFT =>
@@ -414,21 +580,34 @@ impl App {
         }
     }
 
-    fn finish_run(&mut self, result: ava_agent::stack::AgentRunResult) {
+    fn finish_run(&mut self, mut result: ava_agent::stack::AgentRunResult) {
         self.is_streaming.store(false, Ordering::Relaxed);
         self.state.agent.finish(&result);
 
+        // Mark last assistant message as done streaming
+        if let Some(last) = self.state.messages.messages.last_mut() {
+            if matches!(last.kind, MessageKind::Assistant) {
+                last.is_streaming = false;
+                if last.model_name.is_none() {
+                    last.model_name = Some(self.state.agent.model_name.clone());
+                }
+            }
+        }
+
+        // Store model info in session metadata before saving
+        if let Some(meta) = result.session.metadata.as_object_mut() {
+            meta.insert(
+                "provider".to_string(),
+                serde_json::Value::String(self.state.agent.provider_name.clone()),
+            );
+            meta.insert(
+                "model".to_string(),
+                serde_json::Value::String(self.state.agent.model_name.clone()),
+            );
+        }
+
         // Save session to SQLite
         self.state.session.save_session(&result.session);
-
-        self.state.messages.push(UiMessage::new(
-            MessageKind::System,
-            format!(
-                "Complete — {} turns, {}",
-                result.turns,
-                if result.success { "success" } else { "failed" }
-            ),
-        ));
     }
 }
 
@@ -446,7 +625,7 @@ impl App {
             permission: PermissionState::default(),
             keybinds: KeybindState::default(),
             agent: AgentState::test_new("test-provider", "test-model"),
-            show_sidebar: true,
+            show_sidebar: false,
             command_palette: CommandPaletteState::with_defaults(),
             session_list: SessionListState::default(),
             model_selector: None,
@@ -455,6 +634,7 @@ impl App {
             active_modal: None,
             status_message: None,
             voice: VoiceState::default(),
+            model_catalog: ava_config::CatalogState::default(),
         };
 
         Self {

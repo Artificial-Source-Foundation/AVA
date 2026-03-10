@@ -1,11 +1,6 @@
 use ava_tools::registry::ToolSource;
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
-use crate::state::theme::Theme;
+use crate::widgets::select_list::{SelectItem, SelectListState};
 
 #[derive(Debug, Clone)]
 pub struct ToolListItem {
@@ -16,129 +11,82 @@ pub struct ToolListItem {
 
 #[derive(Default)]
 pub struct ToolListState {
-    pub items: Vec<ToolListItem>,
-    pub selected: usize,
-    pub query: String,
-    pub scroll: usize,
+    pub list: SelectListState<String>,
 }
 
 impl ToolListState {
-    pub fn filtered(&self) -> Vec<&ToolListItem> {
-        if self.query.is_empty() {
-            self.items.iter().collect()
-        } else {
-            let q = self.query.to_lowercase();
-            self.items
-                .iter()
-                .filter(|item| {
-                    item.name.to_lowercase().contains(&q)
-                        || item.source.to_string().to_lowercase().contains(&q)
-                })
-                .collect()
+    pub fn from_items(items: Vec<ToolListItem>) -> Self {
+        let select_items = build_select_items(&items);
+        Self {
+            list: SelectListState::new(select_items),
         }
+    }
+
+    pub fn update_items(&mut self, items: Vec<ToolListItem>) {
+        let select_items = build_select_items(&items);
+        self.list.set_items(select_items);
     }
 }
 
-pub fn render_tool_list(frame: &mut Frame<'_>, area: Rect, state: &ToolListState, theme: &Theme) {
-    let filtered = state.filtered();
-
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("> ", Style::default().fg(theme.primary)),
-            Span::styled(&state.query, Style::default().fg(theme.text)),
-            Span::styled("_", Style::default().fg(theme.text_muted)),
-        ]),
-        Line::from(vec![Span::styled(
-            format!("{} tools", filtered.len()),
-            Style::default().fg(theme.text_muted),
-        )]),
-        Line::from(""),
-    ];
-
-    // Group tools by source
+fn build_select_items(items: &[ToolListItem]) -> Vec<SelectItem<String>> {
+    // Group by source for section headers
     let mut builtin = Vec::new();
     let mut mcp: std::collections::BTreeMap<String, Vec<&ToolListItem>> =
         std::collections::BTreeMap::new();
     let mut custom = Vec::new();
 
-    for item in &filtered {
+    for item in items {
         match &item.source {
-            ToolSource::BuiltIn => builtin.push(*item),
-            ToolSource::MCP { server } => mcp.entry(server.clone()).or_default().push(*item),
-            ToolSource::Custom { .. } => custom.push(*item),
+            ToolSource::BuiltIn => builtin.push(item),
+            ToolSource::MCP { server } => mcp.entry(server.clone()).or_default().push(item),
+            ToolSource::Custom { .. } => custom.push(item),
         }
     }
 
-    let mut flat_idx = 0usize;
+    let mut select_items = Vec::new();
 
-    // Built-in tools
-    if !builtin.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "Built-in",
-            Style::default()
-                .fg(theme.secondary)
-                .add_modifier(Modifier::BOLD),
-        )));
-        for item in &builtin {
-            lines.push(tool_line(item, flat_idx == state.selected, theme));
-            flat_idx += 1;
-        }
-        lines.push(Line::from(""));
+    for item in &builtin {
+        select_items.push(tool_to_select_item(item, "Core"));
     }
 
-    // MCP tools grouped by server
     for (server, tools) in &mcp {
-        lines.push(Line::from(Span::styled(
-            format!("MCP: {server}"),
-            Style::default()
-                .fg(theme.secondary)
-                .add_modifier(Modifier::BOLD),
-        )));
+        let section = format!("MCP: {server}");
         for item in tools {
-            lines.push(tool_line(item, flat_idx == state.selected, theme));
-            flat_idx += 1;
-        }
-        lines.push(Line::from(""));
-    }
-
-    // Custom tools
-    if !custom.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "Custom",
-            Style::default()
-                .fg(theme.secondary)
-                .add_modifier(Modifier::BOLD),
-        )));
-        for item in &custom {
-            lines.push(tool_line(item, flat_idx == state.selected, theme));
-            flat_idx += 1;
+            select_items.push(tool_to_select_item(item, &section));
         }
     }
 
-    let widget = Paragraph::new(lines).scroll((state.scroll as u16, 0));
-    frame.render_widget(widget, area);
+    for item in &custom {
+        select_items.push(tool_to_select_item(item, "Custom"));
+    }
+
+    select_items
 }
 
-fn tool_line<'a>(item: &ToolListItem, selected: bool, theme: &Theme) -> Line<'a> {
-    let name_style = if selected {
-        Style::default()
-            .fg(theme.primary)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme.text)
+fn tool_to_select_item(item: &ToolListItem, section: &str) -> SelectItem<String> {
+    // Show source badge + truncated description as detail
+    let badge = match &item.source {
+        ToolSource::BuiltIn => "[Built-in]".to_string(),
+        ToolSource::MCP { server } => format!("[MCP:{server}]"),
+        ToolSource::Custom { .. } => "[Custom]".to_string(),
     };
-    let prefix = if selected { "> " } else { "  " };
-
-    // Truncate description to keep it readable
-    let desc = if item.description.len() > 60 {
-        format!("{}...", &item.description[..57])
+    let desc = if item.description.len() > 40 {
+        format!("{}...", &item.description[..37])
     } else {
         item.description.clone()
     };
+    let detail = if desc.is_empty() {
+        badge
+    } else {
+        format!("{badge} {desc}")
+    };
 
-    Line::from(vec![
-        Span::styled(prefix.to_string(), Style::default().fg(theme.primary)),
-        Span::styled(item.name.clone(), name_style),
-        Span::styled(format!("  {desc}"), Style::default().fg(theme.text_muted)),
-    ])
+    SelectItem {
+        title: item.name.clone(),
+        detail,
+        section: Some(section.to_string()),
+        status: None,
+        value: item.name.clone(),
+        enabled: true,
+    }
 }

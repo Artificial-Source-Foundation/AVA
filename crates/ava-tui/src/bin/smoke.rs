@@ -36,7 +36,7 @@ async fn main() -> Result<()> {
 
     // AgentStack is Send — use tokio::spawn instead of spawn_local
     let handle = tokio::spawn(async move {
-        stack.run("Say hello", 3, Some(tx), cancel).await
+        stack.run("Say hello", 3, Some(tx), cancel, Vec::new()).await
     });
 
     while let Some(event) = rx.recv().await {
@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
             AgentEvent::ToolResult(tr) => eprintln!("[result: {}]", tr.content),
             AgentEvent::Progress(p) => eprintln!("[{p}]"),
             AgentEvent::Complete(_) => break,
-            AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } => {}
+            AgentEvent::Thinking(_) | AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } => {}
             AgentEvent::Error(e) => {
                 eprintln!("[error: {e}]");
                 break;

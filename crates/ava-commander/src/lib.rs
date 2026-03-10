@@ -385,6 +385,7 @@ impl Lead {
                 max_cost_usd: worker_budget.max_cost_usd,
                 loop_detection: true,
                 custom_system_prompt: None,
+                thinking_level: ava_types::ThinkingLevel::Off,
             },
         );
 
@@ -460,7 +461,7 @@ async fn run_worker(
             }
             AgentEvent::Complete(session) => return Ok(session),
             AgentEvent::Error(error) => return Err(AvaError::ToolError(error)),
-            AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } => {}
+            AgentEvent::Thinking(_) | AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } => {}
         }
     }
 

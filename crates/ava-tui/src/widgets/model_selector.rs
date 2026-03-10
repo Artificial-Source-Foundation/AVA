@@ -1,244 +1,271 @@
+use ava_config::model_catalog::ModelCatalog;
 use ava_config::CredentialStore;
-use nucleo::pattern::{CaseMatching, Normalization, Pattern};
-use nucleo::Matcher;
 
-#[derive(Debug, Clone)]
-pub struct ModelOption {
+use crate::widgets::select_list::{ItemStatus, SelectItem, SelectListState};
+
+#[derive(Debug, Clone, Default)]
+pub struct ModelValue {
     pub display: String,
     pub provider: String,
     pub model: String,
-    /// Cost string for display (e.g. "$3/$15", "free")
-    pub cost: String,
-    /// Section header this model belongs to
-    pub section: ModelSection,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelSection {
     Recent,
+    Copilot,
     Anthropic,
     OpenAI,
     OpenRouter,
     Gemini,
+    Alibaba,
+    ZAI,
+    Kimi,
+    MiniMax,
     Ollama,
-    NotConfigured(String),
 }
 
 impl ModelSection {
     pub fn label(&self) -> String {
         match self {
             Self::Recent => "Recent".to_string(),
+            Self::Copilot => "Copilot".to_string(),
             Self::Anthropic => "Anthropic".to_string(),
             Self::OpenAI => "OpenAI".to_string(),
             Self::OpenRouter => "OpenRouter".to_string(),
             Self::Gemini => "Gemini".to_string(),
-            Self::Ollama => "Ollama (local)".to_string(),
-            Self::NotConfigured(name) => format!("{name} (not configured)"),
+            Self::Alibaba => "Alibaba".to_string(),
+            Self::ZAI => "ZAI / ZhipuAI".to_string(),
+            Self::Kimi => "Kimi".to_string(),
+            Self::MiniMax => "MiniMax".to_string(),
+            Self::Ollama => "Ollama".to_string(),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ModelSelectorState {
-    pub query: String,
-    pub selected: usize,
-    pub models: Vec<ModelOption>,
-}
-
-impl Default for ModelSelectorState {
-    fn default() -> Self {
-        Self {
-            query: String::new(),
-            selected: 0,
-            models: fallback_models(),
-        }
-    }
+    pub list: SelectListState<ModelValue>,
+    pub current_model_key: String,
 }
 
 impl ModelSelectorState {
-    /// Build model list from configured providers and recent models.
-    pub fn from_credentials(credentials: &CredentialStore, recent: &[String]) -> Self {
-        let models = build_model_list(credentials, recent);
+    /// Build model list from dynamic catalog + configured providers + recent models.
+    pub fn from_catalog(
+        catalog: &ModelCatalog,
+        credentials: &CredentialStore,
+        recent: &[String],
+        current_model: &str,
+        current_provider: &str,
+    ) -> Self {
+        let items = build_select_items(catalog, credentials, recent, current_model, current_provider);
         Self {
-            query: String::new(),
-            selected: 0,
-            models,
+            list: SelectListState::new(items),
+            current_model_key: format!("{current_provider}/{current_model}"),
         }
     }
 
-    pub fn filtered(&self) -> Vec<&ModelOption> {
-        if self.query.trim().is_empty() {
-            return self.models.iter().collect();
-        }
-        let mut matcher = Matcher::new(nucleo::Config::DEFAULT);
-        let needle = Pattern::parse(
-            &self.query,
-            CaseMatching::Ignore,
-            Normalization::Smart,
-        );
-        let mut items: Vec<_> = self
-            .models
-            .iter()
-            .filter_map(|item| {
-                let mut buf = Vec::new();
-                let haystack = nucleo::Utf32Str::new(&item.display, &mut buf);
-                needle.score(haystack, &mut matcher).map(|score| (score, item))
-            })
-            .collect();
-        items.sort_by(|a, b| b.0.cmp(&a.0));
-        items.into_iter().map(|(_, item)| item).collect()
+    /// Legacy: build from credentials only (uses fallback catalog).
+    pub fn from_credentials(
+        credentials: &CredentialStore,
+        recent: &[String],
+        current_model: &str,
+        current_provider: &str,
+    ) -> Self {
+        let catalog = ava_config::fallback_catalog();
+        Self::from_catalog(&catalog, credentials, recent, current_model, current_provider)
     }
 
     pub fn reset(&mut self) {
-        self.query.clear();
-        self.selected = 0;
+        self.list.reset();
     }
 }
 
-/// Curated model catalog per provider with costs.
-struct CuratedModel {
-    display: &'static str,
-    model: &'static str,
-    cost: &'static str,
-}
-
-fn anthropic_models() -> Vec<CuratedModel> {
-    vec![
-        CuratedModel { display: "claude-opus-4.6", model: "claude-opus-4-6", cost: "$15/$75" },
-        CuratedModel { display: "claude-sonnet-4.6", model: "claude-sonnet-4-6", cost: "$3/$15" },
-        CuratedModel { display: "claude-haiku-4.5", model: "claude-haiku-4-5", cost: "$1/$5" },
-    ]
-}
-
-fn openai_models() -> Vec<CuratedModel> {
-    vec![
-        CuratedModel { display: "gpt-5.4", model: "gpt-5.4", cost: "$2.50/$15" },
-        CuratedModel { display: "gpt-5.3-codex", model: "gpt-5.3-codex", cost: "$1.75/$7" },
-        CuratedModel { display: "gpt-4o", model: "gpt-4o", cost: "$2.50/$10" },
-        CuratedModel { display: "gpt-4o-mini", model: "gpt-4o-mini", cost: "$0.15/$0.60" },
-    ]
-}
-
-fn gemini_models() -> Vec<CuratedModel> {
-    vec![
-        CuratedModel { display: "gemini-3-pro", model: "gemini-3-pro", cost: "$1.25/$5" },
-        CuratedModel { display: "gemini-3-flash", model: "gemini-3-flash", cost: "$0.10/$0.40" },
-        CuratedModel { display: "gemini-2.5-flash", model: "gemini-2.5-flash", cost: "$0.15/$0.60" },
-    ]
-}
-
-fn openrouter_models() -> Vec<CuratedModel> {
-    vec![
-        CuratedModel { display: "anthropic/claude-sonnet-4.6", model: "anthropic/claude-sonnet-4-6", cost: "$3/$15" },
-        CuratedModel { display: "anthropic/claude-haiku-4.5", model: "anthropic/claude-haiku-4-5", cost: "$1/$5" },
-        CuratedModel { display: "openai/gpt-4o", model: "openai/gpt-4o", cost: "$2.50/$10" },
-        CuratedModel { display: "openai/gpt-4o-mini", model: "openai/gpt-4o-mini", cost: "$0.15/$0.60" },
-        CuratedModel { display: "google/gemini-3-flash-preview", model: "google/gemini-3-flash-preview", cost: "$0.10/$0.40" },
-        CuratedModel { display: "moonshotai/kimi-k2.5", model: "moonshotai/kimi-k2.5", cost: "$0.14/$0.28" },
-    ]
-}
-
-type ProviderEntry = (&'static str, ModelSection, fn() -> Vec<CuratedModel>);
-
-fn build_model_list(credentials: &CredentialStore, recent: &[String]) -> Vec<ModelOption> {
-    let mut models = Vec::new();
+fn build_select_items(
+    catalog: &ModelCatalog,
+    credentials: &CredentialStore,
+    recent: &[String],
+    current_model: &str,
+    current_provider: &str,
+) -> Vec<SelectItem<ModelValue>> {
+    let mut items = Vec::new();
+    let current_key = format!("{current_provider}/{current_model}");
 
     // Recent models section
     for key in recent {
         if let Some((provider, model)) = key.split_once('/') {
-            models.push(ModelOption {
-                display: key.clone(),
-                provider: provider.to_string(),
-                model: model.to_string(),
-                cost: String::new(),
-                section: ModelSection::Recent,
+            let is_current = *key == current_key;
+            items.push(SelectItem {
+                title: key.clone(),
+                detail: String::new(),
+                section: Some(ModelSection::Recent.label()),
+                status: if is_current { Some(ItemStatus::Active) } else { None },
+                value: ModelValue {
+                    display: key.clone(),
+                    provider: provider.to_string(),
+                    model: model.to_string(),
+                },
+                enabled: true,
             });
         }
     }
 
-    // Provider sections
-    let providers: &[ProviderEntry] = &[
-        ("anthropic", ModelSection::Anthropic, anthropic_models),
-        ("openai", ModelSection::OpenAI, openai_models),
-        ("openrouter", ModelSection::OpenRouter, openrouter_models),
-        ("gemini", ModelSection::Gemini, gemini_models),
-    ];
+    // Provider sections from catalog
+    for &(_catalog_provider, ava_provider, section_fn) in PROVIDER_SECTIONS {
+        if ava_provider == "openrouter" {
+            let configured = credentials.get("openrouter").is_some_and(|c| {
+                !c.api_key.trim().is_empty() || c.is_oauth_configured()
+            });
+            if !configured {
+                continue;
+            }
+            let section = section_fn();
+            for provider_id in ["anthropic", "openai", "google"] {
+                for cm in catalog.models_for(cm_provider(provider_id)) {
+                    let or_display = format!("{}/{}", provider_id, cm.name);
+                    let model_id = cm.api_model_id("openrouter");
+                    let is_current = format!("openrouter/{model_id}") == current_key;
+                    items.push(SelectItem {
+                        title: or_display.clone(),
+                        detail: model_detail(&cm.cost_display(), cm.context_window),
+                        section: Some(section.label()),
+                        status: if is_current {
+                            Some(ItemStatus::Active)
+                        } else if cm.cost_display() == "free" {
+                            Some(ItemStatus::Info("free".to_string()))
+                        } else {
+                            None
+                        },
+                        value: ModelValue {
+                            display: or_display,
+                            provider: "openrouter".to_string(),
+                            model: model_id,
+                        },
+                        enabled: true,
+                    });
+                }
+            }
+            continue;
+        }
 
-    for &(provider_id, ref section, model_fn) in providers {
-        let configured = credentials.get(provider_id).is_some();
-        let section = if configured {
-            section.clone()
-        } else {
-            ModelSection::NotConfigured(ava_config::provider_name(provider_id))
-        };
+        let configured = credentials.get(ava_provider).is_some_and(|c| {
+            !c.api_key.trim().is_empty() || c.is_oauth_configured()
+        });
 
-        for cm in model_fn() {
-            models.push(ModelOption {
-                display: cm.display.to_string(),
-                provider: provider_id.to_string(),
-                model: cm.model.to_string(),
-                cost: cm.cost.to_string(),
-                section: section.clone(),
+        if !configured {
+            continue;
+        }
+
+        let section = section_fn();
+        let catalog_models = catalog.models_for(ava_provider);
+
+        for cm in catalog_models {
+            let model_id = cm.api_model_id(ava_provider);
+            let is_current = format!("{ava_provider}/{model_id}") == current_key;
+            items.push(SelectItem {
+                title: cm.name.clone(),
+                detail: model_detail(&cm.cost_display(), cm.context_window),
+                section: Some(section.label()),
+                status: if is_current {
+                    Some(ItemStatus::Active)
+                } else if cm.cost_display() == "free" {
+                    Some(ItemStatus::Info("free".to_string()))
+                } else {
+                    None
+                },
+                value: ModelValue {
+                    display: cm.name.clone(),
+                    provider: ava_provider.to_string(),
+                    model: model_id,
+                },
+                enabled: true,
             });
         }
     }
 
-    // Ollama is always "local" — no API key needed
-    models.push(ModelOption {
-        display: "llama3.3".to_string(),
-        provider: "ollama".to_string(),
-        model: "llama3.3".to_string(),
-        cost: "free".to_string(),
-        section: ModelSection::Ollama,
-    });
-    models.push(ModelOption {
-        display: "codestral".to_string(),
-        provider: "ollama".to_string(),
-        model: "codestral".to_string(),
-        cost: "free".to_string(),
-        section: ModelSection::Ollama,
-    });
+    // Ollama is always "local"
+    for (name, cost) in [
+        ("llama3.3", "free"),
+        ("codestral", "free"),
+        ("qwen2.5-coder", "free"),
+        ("devstral", "free"),
+    ] {
+        let is_current = format!("ollama/{name}") == current_key;
+        items.push(SelectItem {
+            title: name.to_string(),
+            detail: cost.to_string(),
+            section: Some(ModelSection::Ollama.label()),
+            status: if is_current {
+                Some(ItemStatus::Active)
+            } else {
+                Some(ItemStatus::Info("free".to_string()))
+            },
+            value: ModelValue {
+                display: name.to_string(),
+                provider: "ollama".to_string(),
+                model: name.to_string(),
+            },
+            enabled: true,
+        });
+    }
 
-    models
+    items
 }
 
-/// Fallback models when credentials can't be loaded.
-fn fallback_models() -> Vec<ModelOption> {
-    vec![
-        ModelOption {
-            display: "claude-sonnet-4".to_string(),
-            provider: "openrouter".to_string(),
-            model: "anthropic/claude-sonnet-4".to_string(),
-            cost: "$3/$15".to_string(),
-            section: ModelSection::OpenRouter,
-        },
-        ModelOption {
-            display: "claude-haiku-4-5".to_string(),
-            provider: "openrouter".to_string(),
-            model: "anthropic/claude-haiku-4-5".to_string(),
-            cost: "$1/$5".to_string(),
-            section: ModelSection::OpenRouter,
-        },
-        ModelOption {
-            display: "gpt-4o".to_string(),
-            provider: "openrouter".to_string(),
-            model: "openai/gpt-4o".to_string(),
-            cost: "$2.50/$10".to_string(),
-            section: ModelSection::OpenRouter,
-        },
-        ModelOption {
-            display: "gpt-4o-mini".to_string(),
-            provider: "openrouter".to_string(),
-            model: "openai/gpt-4o-mini".to_string(),
-            cost: "$0.15/$0.60".to_string(),
-            section: ModelSection::OpenRouter,
-        },
-        ModelOption {
-            display: "kimi-k2.5".to_string(),
-            provider: "openrouter".to_string(),
-            model: "moonshotai/kimi-k2.5".to_string(),
-            cost: "$0.14/$0.28".to_string(),
-            section: ModelSection::OpenRouter,
-        },
-    ]
+type ProviderEntry = (&'static str, &'static str, fn() -> ModelSection);
+
+const PROVIDER_SECTIONS: &[ProviderEntry] = &[
+    // Core providers
+    ("copilot", "copilot", || ModelSection::Copilot),
+    ("anthropic", "anthropic", || ModelSection::Anthropic),
+    ("openai", "openai", || ModelSection::OpenAI),
+    ("openrouter", "openrouter", || ModelSection::OpenRouter),
+    ("google", "gemini", || ModelSection::Gemini),
+    // Coding plan providers (subscription)
+    ("alibaba", "alibaba", || ModelSection::Alibaba),
+    ("alibaba-cn", "alibaba-cn", || ModelSection::Alibaba),
+    ("zai-coding-plan", "zai-coding-plan", || ModelSection::ZAI),
+    ("zhipuai-coding-plan", "zhipuai-coding-plan", || ModelSection::ZAI),
+    ("kimi-for-coding", "kimi-for-coding", || ModelSection::Kimi),
+    ("minimax-coding-plan", "minimax-coding-plan", || ModelSection::MiniMax),
+    ("minimax-cn-coding-plan", "minimax-cn-coding-plan", || ModelSection::MiniMax),
+];
+
+fn cm_provider(ava_provider: &str) -> &str {
+    match ava_provider {
+        "gemini" => "google",
+        other => other,
+    }
+}
+
+/// Format a context window size as a human-readable string (e.g., "200K", "1M").
+fn format_context_window(tokens: u64) -> String {
+    if tokens >= 1_000_000 {
+        let m = tokens as f64 / 1_000_000.0;
+        if m == m.floor() {
+            format!("{}M", m as u64)
+        } else {
+            format!("{:.1}M", m)
+        }
+    } else if tokens >= 1_000 {
+        let k = tokens as f64 / 1_000.0;
+        if k == k.floor() {
+            format!("{}K", k as u64)
+        } else {
+            format!("{:.1}K", k)
+        }
+    } else {
+        format!("{tokens}")
+    }
+}
+
+/// Build a detail string combining cost and context window.
+fn model_detail(cost: &str, context_window: Option<u64>) -> String {
+    let ctx = context_window.map(format_context_window);
+    match (cost.is_empty(), ctx) {
+        (false, Some(ctx)) => format!("{cost}  {ctx}"),
+        (false, None) => cost.to_string(),
+        (true, Some(ctx)) => ctx,
+        (true, None) => String::new(),
+    }
 }

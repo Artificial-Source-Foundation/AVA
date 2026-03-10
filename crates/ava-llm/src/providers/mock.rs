@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use ava_types::{AvaError, Message, Result};
+use ava_types::{AvaError, Message, Result, StreamChunk};
 use futures::stream;
 use futures::Stream;
 
@@ -40,9 +40,9 @@ impl LLMProvider for MockProvider {
     async fn generate_stream(
         &self,
         messages: &[Message],
-    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
         let output = self.generate(messages).await?;
-        Ok(Box::pin(stream::iter(vec![output])))
+        Ok(Box::pin(stream::iter(vec![StreamChunk::text(output)])))
     }
 
     fn estimate_tokens(&self, input: &str) -> usize {

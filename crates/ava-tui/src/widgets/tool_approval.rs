@@ -30,38 +30,89 @@ pub fn render_tool_approval_lines(
     theme: &Theme,
 ) -> Vec<Line<'static>> {
     let mut lines = vec![
+        // Header: warning icon + title
         Line::from(vec![
-            Span::styled("Tool: ", Style::default().fg(theme.text_muted)),
             Span::styled(
-                request.call.name.clone(),
-                Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                " \u{26A0}  Tool Approval Required",
+                Style::default()
+                    .fg(theme.warning)
+                    .add_modifier(Modifier::BOLD),
             ),
         ]),
-        Line::from(vec![
-            Span::styled("Args: ", Style::default().fg(theme.text_muted)),
-            Span::styled(
-                request.call.arguments.to_string(),
-                Style::default().fg(theme.text),
-            ),
-        ]),
+        Line::from(""),
     ];
 
-    // Show risk information if available
+    // TOOL section
+    lines.push(Line::from(Span::styled(
+        " TOOL",
+        Style::default()
+            .fg(theme.text_muted)
+            .add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(vec![
+        Span::styled("   ", Style::default()),
+        Span::styled(
+            request.call.name.clone(),
+            Style::default()
+                .fg(theme.warning)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    lines.push(Line::from(""));
+
+    // COMMAND section: show arguments in a code-style box
+    let args_str = request.call.arguments.to_string();
+    if !args_str.is_empty() && args_str != "{}" {
+        lines.push(Line::from(Span::styled(
+            " COMMAND",
+            Style::default()
+                .fg(theme.text_muted)
+                .add_modifier(Modifier::BOLD),
+        )));
+
+        // Wrap long argument strings
+        let display_args = if args_str.len() > 120 {
+            format!("{}...", &args_str[..117])
+        } else {
+            args_str
+        };
+        lines.push(Line::from(vec![
+            Span::styled("   ", Style::default().bg(theme.bg_deep)),
+            Span::styled(
+                display_args,
+                Style::default().fg(theme.success).bg(theme.bg_deep),
+            ),
+        ]));
+        lines.push(Line::from(""));
+    }
+
+    // RISK section
     if let Some(info) = &request.inspection {
         let color = risk_color(info.risk_level, theme);
-        let modifier = if info.risk_level >= RiskLevel::High {
+
+        lines.push(Line::from(Span::styled(
+            " RISK",
+            Style::default()
+                .fg(theme.text_muted)
+                .add_modifier(Modifier::BOLD),
+        )));
+
+        // Risk badge: [LEVEL] with colored background
+        let label = risk_label(info.risk_level);
+        let badge_modifier = if info.risk_level >= RiskLevel::High {
             Modifier::BOLD
         } else {
             Modifier::empty()
         };
         lines.push(Line::from(vec![
-            Span::styled("Risk: ", Style::default().fg(theme.text_muted)),
+            Span::styled("   ", Style::default()),
             Span::styled(
-                risk_label(info.risk_level),
-                Style::default().fg(color).add_modifier(modifier),
+                format!("[{label}]"),
+                Style::default().fg(color).add_modifier(badge_modifier),
             ),
         ]));
 
+        // Tags
         if !info.tags.is_empty() {
             let tag_str = info
                 .tags
@@ -69,54 +120,90 @@ pub fn render_tool_approval_lines(
                 .map(|t| format!("{t:?}"))
                 .collect::<Vec<_>>()
                 .join(", ");
-            lines.push(Line::from(Span::styled(
-                format!("Tags: {tag_str}"),
-                Style::default().fg(theme.text_dimmed),
-            )));
+            lines.push(Line::from(vec![
+                Span::styled("   ", Style::default()),
+                Span::styled(
+                    tag_str,
+                    Style::default().fg(theme.text_dimmed),
+                ),
+            ]));
         }
 
+        // Warnings
         for warning in &info.warnings {
-            lines.push(Line::from(Span::styled(
-                format!("  {warning}"),
-                Style::default().fg(theme.warning),
-            )));
+            lines.push(Line::from(vec![
+                Span::styled("   ", Style::default()),
+                Span::styled(
+                    warning.clone(),
+                    Style::default().fg(theme.warning),
+                ),
+            ]));
         }
+
+        lines.push(Line::from(""));
     }
 
-    lines.push(Line::from(Span::raw("")));
-
+    // Action buttons / stage
     match state.current_stage {
         ApprovalStage::Preview => {
             lines.push(Line::from(Span::styled(
-                "Press any key to continue...",
+                " Press any key to continue...",
                 Style::default().fg(theme.text_muted),
             )));
         }
         ApprovalStage::ActionSelect => {
-            let key_style = Style::default().fg(theme.text);
+            // Separator
+            lines.push(Line::from(""));
+
+            // Action hints row
+            let key_style = Style::default()
+                .fg(theme.text)
+                .add_modifier(Modifier::BOLD);
             let desc_style = Style::default().fg(theme.text_muted);
+
             lines.push(Line::from(vec![
-                Span::styled("[a]", key_style),
-                Span::styled(" Allow once  ", desc_style),
-                Span::styled("[s]", key_style),
-                Span::styled(" Allow for session", desc_style),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("[r]", key_style),
-                Span::styled(" Reject      ", desc_style),
-                Span::styled("[y]", key_style),
-                Span::styled(" YOLO mode", desc_style),
+                Span::styled(" a", key_style),
+                Span::styled(" approve  ", desc_style),
+                Span::styled("s", key_style),
+                Span::styled(" session  ", desc_style),
+                Span::styled("r", key_style),
+                Span::styled(" reject  ", desc_style),
+                Span::styled("y", key_style),
+                Span::styled(" yolo  ", desc_style),
+                Span::styled("Esc", key_style),
+                Span::styled(" cancel", desc_style),
             ]));
         }
         ApprovalStage::RejectionReason => {
             lines.push(Line::from(Span::styled(
-                "Rejection reason (optional):",
+                " Rejection reason (optional):",
                 Style::default().fg(theme.text_muted),
             )));
-            lines.push(Line::from(Span::styled(
-                state.rejection_input.clone(),
-                Style::default().fg(theme.text),
-            )));
+            let cursor = "\u{2588}";
+            lines.push(Line::from(vec![
+                Span::styled("   ", Style::default().bg(theme.bg_deep)),
+                Span::styled(
+                    state.rejection_input.clone(),
+                    Style::default().fg(theme.text).bg(theme.bg_deep),
+                ),
+                Span::styled(
+                    cursor,
+                    Style::default().fg(theme.primary).bg(theme.bg_deep),
+                ),
+            ]));
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    " Enter",
+                    Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" confirm  ", Style::default().fg(theme.text_muted)),
+                Span::styled(
+                    "Esc",
+                    Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(" cancel", Style::default().fg(theme.text_muted)),
+            ]));
         }
     }
     lines

@@ -6,6 +6,7 @@
 pub mod browser;
 pub mod callback;
 pub mod config;
+pub mod copilot;
 pub mod device_code;
 pub mod pkce;
 pub mod tokens;
@@ -50,133 +51,256 @@ pub enum AuthError {
     Other(String),
 }
 
+/// Provider group for display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderGroup {
+    Popular,
+    Other,
+}
+
 /// Provider metadata for auth flow selection.
 #[derive(Debug, Clone)]
 pub struct ProviderInfo {
     pub id: &'static str,
     pub name: &'static str,
-    pub auth_flow: AuthFlow,
+    /// Description shown next to name (e.g., "ChatGPT Plus/Pro or API key").
+    pub description: &'static str,
+    /// Supported auth flows. First is the default.
+    pub auth_flows: &'static [AuthFlow],
     pub env_var: Option<&'static str>,
     pub default_base_url: Option<&'static str>,
+    pub group: ProviderGroup,
+}
+
+impl ProviderInfo {
+    /// The credential store key (always the provider id).
+    pub fn cred_key(&self) -> &'static str {
+        self.id
+    }
+
+    /// Primary auth flow.
+    pub fn primary_flow(&self) -> AuthFlow {
+        self.auth_flows.first().copied().unwrap_or(AuthFlow::ApiKey)
+    }
+
+    /// Whether this provider supports multiple auth methods.
+    pub fn has_multiple_flows(&self) -> bool {
+        self.auth_flows.len() > 1
+    }
 }
 
 /// All supported providers with their auth metadata.
 pub fn all_providers() -> &'static [ProviderInfo] {
     &[
-        // OAuth providers (browser login)
+        // Popular providers
         ProviderInfo {
             id: "openai",
             name: "OpenAI",
-            auth_flow: AuthFlow::Pkce,
+            description: "ChatGPT Plus/Pro or API key",
+            auth_flows: &[AuthFlow::ApiKey, AuthFlow::Pkce],
             env_var: Some("OPENAI_API_KEY"),
             default_base_url: Some("https://api.openai.com/v1"),
+            group: ProviderGroup::Popular,
         },
         ProviderInfo {
             id: "copilot",
             name: "GitHub Copilot",
-            auth_flow: AuthFlow::DeviceCode,
+            description: "Free with Copilot subscription",
+            auth_flows: &[AuthFlow::DeviceCode],
             env_var: None,
-            default_base_url: None,
+            default_base_url: Some("https://api.individual.githubcopilot.com"),
+            group: ProviderGroup::Popular,
         },
-        // API key providers
         ProviderInfo {
             id: "anthropic",
             name: "Anthropic",
-            auth_flow: AuthFlow::ApiKey,
+            description: "Claude API key",
+            auth_flows: &[AuthFlow::ApiKey],
             env_var: Some("ANTHROPIC_API_KEY"),
             default_base_url: Some("https://api.anthropic.com"),
+            group: ProviderGroup::Popular,
         },
         ProviderInfo {
             id: "openrouter",
             name: "OpenRouter",
-            auth_flow: AuthFlow::ApiKey,
+            description: "",
+            auth_flows: &[AuthFlow::ApiKey],
             env_var: Some("OPENROUTER_API_KEY"),
             default_base_url: Some("https://openrouter.ai/api/v1"),
+            group: ProviderGroup::Popular,
         },
         ProviderInfo {
             id: "gemini",
             name: "Google Gemini",
-            auth_flow: AuthFlow::ApiKey,
+            description: "",
+            auth_flows: &[AuthFlow::ApiKey],
             env_var: Some("GEMINI_API_KEY"),
             default_base_url: None,
+            group: ProviderGroup::Popular,
         },
+        // Other providers
         ProviderInfo {
             id: "mistral",
             name: "Mistral",
-            auth_flow: AuthFlow::ApiKey,
+            description: "",
+            auth_flows: &[AuthFlow::ApiKey],
             env_var: Some("MISTRAL_API_KEY"),
             default_base_url: Some("https://api.mistral.ai/v1"),
+            group: ProviderGroup::Other,
         },
         ProviderInfo {
             id: "groq",
             name: "Groq",
-            auth_flow: AuthFlow::ApiKey,
+            description: "",
+            auth_flows: &[AuthFlow::ApiKey],
             env_var: Some("GROQ_API_KEY"),
             default_base_url: Some("https://api.groq.com/openai/v1"),
+            group: ProviderGroup::Other,
         },
         ProviderInfo {
             id: "xai",
             name: "xAI (Grok)",
-            auth_flow: AuthFlow::ApiKey,
+            description: "",
+            auth_flows: &[AuthFlow::ApiKey],
             env_var: Some("XAI_API_KEY"),
             default_base_url: Some("https://api.x.ai/v1"),
+            group: ProviderGroup::Other,
         },
         ProviderInfo {
             id: "deepinfra",
             name: "DeepInfra",
-            auth_flow: AuthFlow::ApiKey,
+            description: "",
+            auth_flows: &[AuthFlow::ApiKey],
             env_var: Some("DEEPINFRA_API_KEY"),
             default_base_url: Some("https://api.deepinfra.com/v1/openai"),
+            group: ProviderGroup::Other,
         },
         ProviderInfo {
             id: "together",
             name: "Together AI",
-            auth_flow: AuthFlow::ApiKey,
+            description: "",
+            auth_flows: &[AuthFlow::ApiKey],
             env_var: Some("TOGETHER_API_KEY"),
             default_base_url: Some("https://api.together.xyz/v1"),
+            group: ProviderGroup::Other,
         },
         ProviderInfo {
             id: "cerebras",
             name: "Cerebras",
-            auth_flow: AuthFlow::ApiKey,
+            description: "",
+            auth_flows: &[AuthFlow::ApiKey],
             env_var: Some("CEREBRAS_API_KEY"),
             default_base_url: Some("https://api.cerebras.ai/v1"),
+            group: ProviderGroup::Other,
         },
         ProviderInfo {
             id: "perplexity",
             name: "Perplexity",
-            auth_flow: AuthFlow::ApiKey,
+            description: "",
+            auth_flows: &[AuthFlow::ApiKey],
             env_var: Some("PERPLEXITY_API_KEY"),
             default_base_url: Some("https://api.perplexity.ai"),
+            group: ProviderGroup::Other,
         },
         ProviderInfo {
             id: "cohere",
             name: "Cohere",
-            auth_flow: AuthFlow::ApiKey,
+            description: "",
+            auth_flows: &[AuthFlow::ApiKey],
             env_var: Some("COHERE_API_KEY"),
             default_base_url: Some("https://api.cohere.ai/v1"),
+            group: ProviderGroup::Other,
         },
         ProviderInfo {
             id: "azure",
             name: "Azure OpenAI",
-            auth_flow: AuthFlow::ApiKey,
+            description: "",
+            auth_flows: &[AuthFlow::ApiKey],
             env_var: Some("AZURE_OPENAI_API_KEY"),
             default_base_url: None,
+            group: ProviderGroup::Other,
         },
         ProviderInfo {
             id: "bedrock",
             name: "AWS Bedrock",
-            auth_flow: AuthFlow::ApiKey,
+            description: "",
+            auth_flows: &[AuthFlow::ApiKey],
             env_var: Some("AWS_BEARER_TOKEN_BEDROCK"),
             default_base_url: None,
+            group: ProviderGroup::Other,
         },
-        // Local providers (no auth required)
         ProviderInfo {
             id: "ollama",
-            name: "Ollama (local)",
-            auth_flow: AuthFlow::ApiKey,
+            name: "Ollama",
+            description: "local",
+            auth_flows: &[AuthFlow::ApiKey],
             env_var: None,
             default_base_url: Some("http://localhost:11434"),
+            group: ProviderGroup::Other,
+        },
+        // Coding plan providers
+        ProviderInfo {
+            id: "alibaba",
+            name: "Alibaba Model Studio",
+            description: "Alibaba Cloud Coding Plan (International)",
+            auth_flows: &[AuthFlow::ApiKey],
+            env_var: Some("DASHSCOPE_API_KEY"),
+            default_base_url: Some("https://coding-intl.dashscope.aliyuncs.com/apps/anthropic/v1"),
+            group: ProviderGroup::Other,
+        },
+        ProviderInfo {
+            id: "alibaba-cn",
+            name: "Alibaba (China)",
+            description: "Alibaba Cloud Coding Plan (China mainland)",
+            auth_flows: &[AuthFlow::ApiKey],
+            env_var: Some("DASHSCOPE_API_KEY"),
+            default_base_url: Some("https://coding.dashscope.aliyuncs.com/apps/anthropic/v1"),
+            group: ProviderGroup::Other,
+        },
+        ProviderInfo {
+            id: "zai-coding-plan",
+            name: "Z.AI Coding Plan",
+            description: "ZhipuAI coding subscription (z.ai)",
+            auth_flows: &[AuthFlow::ApiKey],
+            env_var: Some("ZHIPU_API_KEY"),
+            default_base_url: Some("https://api.z.ai/api/coding/paas/v4"),
+            group: ProviderGroup::Other,
+        },
+        ProviderInfo {
+            id: "zhipuai-coding-plan",
+            name: "ZhipuAI Coding Plan",
+            description: "ZhipuAI coding subscription (bigmodel.cn)",
+            auth_flows: &[AuthFlow::ApiKey],
+            env_var: Some("ZHIPU_API_KEY"),
+            default_base_url: Some("https://open.bigmodel.cn/api/coding/paas/v4"),
+            group: ProviderGroup::Other,
+        },
+        ProviderInfo {
+            id: "kimi-for-coding",
+            name: "Kimi For Coding",
+            description: "Moonshot Kimi coding subscription",
+            auth_flows: &[AuthFlow::ApiKey],
+            env_var: Some("KIMI_API_KEY"),
+            default_base_url: Some("https://api.kimi.com/coding/v1"),
+            group: ProviderGroup::Other,
+        },
+        ProviderInfo {
+            id: "minimax-coding-plan",
+            name: "MiniMax Coding Plan",
+            description: "MiniMax coding subscription (minimax.io)",
+            auth_flows: &[AuthFlow::ApiKey],
+            env_var: Some("MINIMAX_API_KEY"),
+            default_base_url: Some("https://api.minimax.io/anthropic/v1"),
+            group: ProviderGroup::Other,
+        },
+        ProviderInfo {
+            id: "minimax-cn-coding-plan",
+            name: "MiniMax CN Coding Plan",
+            description: "MiniMax coding subscription (minimaxi.com)",
+            auth_flows: &[AuthFlow::ApiKey],
+            env_var: Some("MINIMAX_API_KEY"),
+            default_base_url: Some("https://api.minimaxi.com/anthropic/v1"),
+            group: ProviderGroup::Other,
         },
     ]
 }
@@ -191,7 +315,7 @@ pub async fn authenticate(provider_id: &str) -> Result<AuthResult, AuthError> {
     let info = provider_info(provider_id)
         .ok_or_else(|| AuthError::UnknownProvider(provider_id.to_string()))?;
 
-    match info.auth_flow {
+    match info.primary_flow() {
         AuthFlow::Pkce => {
             let cfg = oauth_config(provider_id)
                 .ok_or_else(|| AuthError::NoOAuthConfig(provider_id.to_string()))?;
@@ -233,20 +357,23 @@ mod tests {
 
     #[test]
     fn all_providers_has_expected_count() {
-        assert_eq!(all_providers().len(), 16);
+        assert_eq!(all_providers().len(), 23);
     }
 
     #[test]
     fn provider_info_lookup() {
         let info = provider_info("openai").unwrap();
         assert_eq!(info.name, "OpenAI");
-        assert_eq!(info.auth_flow, AuthFlow::Pkce);
+        assert!(info.has_multiple_flows());
+        assert_eq!(info.primary_flow(), AuthFlow::ApiKey);
+        assert!(info.auth_flows.contains(&AuthFlow::Pkce));
 
         let info = provider_info("copilot").unwrap();
-        assert_eq!(info.auth_flow, AuthFlow::DeviceCode);
+        assert_eq!(info.primary_flow(), AuthFlow::DeviceCode);
 
         let info = provider_info("anthropic").unwrap();
-        assert_eq!(info.auth_flow, AuthFlow::ApiKey);
+        assert_eq!(info.primary_flow(), AuthFlow::ApiKey);
+        assert!(!info.has_multiple_flows());
 
         assert!(provider_info("nonexistent").is_none());
     }
@@ -258,5 +385,14 @@ mod tests {
         deduped.sort();
         deduped.dedup();
         assert_eq!(ids.len(), deduped.len());
+    }
+
+    #[test]
+    fn popular_providers_come_first() {
+        let providers = all_providers();
+        let first_other = providers.iter().position(|p| p.group == ProviderGroup::Other).unwrap();
+        for p in &providers[..first_other] {
+            assert_eq!(p.group, ProviderGroup::Popular);
+        }
     }
 }

@@ -1,5 +1,6 @@
 use crate::event::AppEvent;
 use ava_agent::stack::{AgentRunResult, AgentStack, AgentStackConfig};
+use ava_types::ThinkingLevel;
 use color_eyre::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -41,6 +42,8 @@ pub struct AgentState {
     pub activity: AgentActivity,
     pub provider_name: String,
     pub model_name: String,
+    /// Context window size for the current model (from registry).
+    pub context_window: Option<usize>,
     pub mcp_server_count: usize,
     pub mcp_tool_count: usize,
     pub tool_start: Option<Instant>,
@@ -50,8 +53,28 @@ pub struct AgentState {
     pub workflow_iteration: Option<(usize, usize)>,
     /// Recently used models (most recent first, max 5).
     pub recent_models: Vec<String>,
+    /// Current thinking/reasoning level.
+    pub thinking_level: ThinkingLevel,
     cancel: Option<CancellationToken>,
     task: Option<tokio::task::JoinHandle<()>>,
+}
+
+/// Look up context window for a model from the compiled-in registry.
+/// Tries provider-specific lookup first, then falls back to model-only lookup.
+fn lookup_context_window(provider: &str, model: &str) -> Option<usize> {
+    let reg = ava_config::model_catalog::registry::registry();
+    // For openrouter models like "anthropic/claude-sonnet-4", strip the prefix
+    let model_id = model.rsplit_once('/').map(|(_, m)| m).unwrap_or(model);
+    // Try provider-specific match first (handles copilot, coding plan providers, etc.)
+    if let Some(m) = reg.find_for_provider(provider, model_id) {
+        return Some(m.limits.context_window);
+    }
+    // Fall back to global search (works for openrouter where provider is "openrouter"
+    // but the model ID contains the real provider)
+    if let Some(m) = reg.find(model_id) {
+        return Some(m.limits.context_window);
+    }
+    None
 }
 
 impl AgentState {
@@ -78,6 +101,8 @@ impl AgentState {
         let mcp_server_count = stack.mcp_server_count().await;
         let mcp_tool_count = stack.mcp_tool_count().await;
 
+        let context_window = lookup_context_window(&provider_name, &model_name);
+
         Ok(Self {
             stack: Some(stack),
             is_running: false,
@@ -88,19 +113,23 @@ impl AgentState {
             activity: AgentActivity::Idle,
             provider_name,
             model_name,
+            context_window,
             mcp_server_count,
             mcp_tool_count,
             tool_start: None,
             workflow_phase: None,
             workflow_iteration: None,
             recent_models: Vec::new(),
+            thinking_level: ThinkingLevel::Off,
             cancel: None,
             task: None,
         })
     }
 
-    fn stack(&self) -> &Arc<AgentStack> {
-        self.stack.as_ref().expect("AgentStack not initialised")
+    fn stack(&self) -> std::result::Result<&Arc<AgentStack>, String> {
+        self.stack
+            .as_ref()
+            .ok_or_else(|| "AgentStack not initialised".to_string())
     }
 
     pub fn start(
@@ -109,6 +138,7 @@ impl AgentState {
         max_turns: usize,
         app_tx: mpsc::UnboundedSender<AppEvent>,
         agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
+        history: Vec<ava_types::Message>,
     ) {
         let Some(stack) = self.stack.as_ref().map(Arc::clone) else {
             // No AgentStack (test mode) — mark running state but skip spawn
@@ -128,7 +158,7 @@ impl AgentState {
         self.activity = AgentActivity::Thinking;
 
         self.task = Some(tokio::spawn(async move {
-            let result = stack.run(&goal, max_turns, Some(agent_tx), run_cancel).await;
+            let result = stack.run(&goal, max_turns, Some(agent_tx), run_cancel, history).await;
             let mapped = result.map_err(|err| err.to_string());
             let _ = app_tx.send(AppEvent::AgentDone(mapped));
         }));
@@ -155,12 +185,13 @@ impl AgentState {
 
     /// Switch model at runtime. Returns Ok(description) or Err(message).
     pub async fn switch_model(&mut self, provider: &str, model: &str) -> std::result::Result<String, String> {
-        self.stack()
+        self.stack()?
             .switch_model(provider, model)
             .await
             .map_err(|e| e.to_string())?;
         self.provider_name = provider.to_string();
         self.model_name = model.to_string();
+        self.context_window = lookup_context_window(provider, model);
 
         // Track in recent models (most recent first, max 5)
         let key = format!("{provider}/{model}");
@@ -177,13 +208,13 @@ impl AgentState {
     }
 
     /// Get MCP server info for display.
-    pub async fn mcp_server_info(&self) -> Vec<ava_agent::stack::MCPServerInfo> {
-        self.stack().mcp_server_info().await
+    pub async fn mcp_server_info(&self) -> std::result::Result<Vec<ava_agent::stack::MCPServerInfo>, String> {
+        Ok(self.stack()?.mcp_server_info().await)
     }
 
     /// Reload MCP servers from config. Updates cached counts.
     pub async fn reload_mcp(&mut self) -> std::result::Result<String, String> {
-        let (servers, tools) = self.stack().reload_mcp().await.map_err(|e| e.to_string())?;
+        let (servers, tools) = self.stack()?.reload_mcp().await.map_err(|e| e.to_string())?;
         self.mcp_server_count = servers;
         self.mcp_tool_count = tools;
         Ok(format!("MCP reloaded: {servers} servers, {tools} tools"))
@@ -191,17 +222,44 @@ impl AgentState {
 
     /// Reload all tools (core + custom + MCP). Updates cached counts.
     pub async fn reload_tools(&mut self) -> std::result::Result<String, String> {
-        let count = self.stack().reload_tools().await.map_err(|e| e.to_string())?;
-        self.mcp_server_count = self.stack().mcp_server_count().await;
-        self.mcp_tool_count = self.stack().mcp_tool_count().await;
+        let stack = self.stack()?.clone();
+        let count = stack.reload_tools().await.map_err(|e| e.to_string())?;
+        self.mcp_server_count = stack.mcp_server_count().await;
+        self.mcp_tool_count = stack.mcp_tool_count().await;
         Ok(format!("Reloaded {count} tools"))
     }
 
     /// Get tool list with source info.
     pub async fn list_tools_with_source(
         &self,
-    ) -> Vec<(ava_types::Tool, ava_tools::registry::ToolSource)> {
-        self.stack().tools.read().await.list_tools_with_source()
+    ) -> std::result::Result<Vec<(ava_types::Tool, ava_tools::registry::ToolSource)>, String> {
+        Ok(self.stack()?.tools.read().await.list_tools_with_source())
+    }
+
+    /// Set thinking level and sync to agent stack.
+    pub fn set_thinking_level(&mut self, level: ThinkingLevel) {
+        self.thinking_level = level;
+        if let Some(stack) = &self.stack {
+            let stack = stack.clone();
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(stack.set_thinking_level(level))
+            });
+        }
+    }
+
+    /// Cycle thinking level and sync to agent stack. Returns the new level's label.
+    pub fn cycle_thinking(&mut self) -> &'static str {
+        self.thinking_level = self.thinking_level.cycle();
+        if let Some(stack) = &self.stack {
+            let stack = stack.clone();
+            let level = self.thinking_level;
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(stack.set_thinking_level(level))
+            });
+        }
+        self.thinking_level.label()
     }
 
     /// Create a lightweight `AgentState` without an `AgentStack` (for tests).
@@ -217,12 +275,14 @@ impl AgentState {
             activity: AgentActivity::Idle,
             provider_name: provider.to_string(),
             model_name: model.to_string(),
+            context_window: lookup_context_window(provider, model),
             mcp_server_count: 0,
             mcp_tool_count: 0,
             tool_start: None,
             workflow_phase: None,
             workflow_iteration: None,
             recent_models: Vec::new(),
+            thinking_level: ThinkingLevel::Off,
             cancel: None,
             task: None,
         }

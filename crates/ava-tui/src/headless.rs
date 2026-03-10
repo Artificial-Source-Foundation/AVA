@@ -73,13 +73,14 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let goal_owned = goal.to_string();
     let max_turns = cli.max_turns;
     let handle = tokio::spawn(async move {
-        stack.run(&goal_owned, max_turns, Some(tx), cancel).await
+        stack.run(&goal_owned, max_turns, Some(tx), cancel, Vec::new()).await
     });
 
     if json_mode {
         while let Some(event) = rx.recv().await {
             let json = match &event {
                 AgentEvent::Token(t) => serde_json::json!({"type": "token", "content": t}),
+                AgentEvent::Thinking(t) => serde_json::json!({"type": "thinking", "content": t}),
                 AgentEvent::ToolCall(tc) => {
                     serde_json::json!({"type": "tool_call", "tool": tc.name, "arguments": tc.arguments})
                 }
@@ -104,6 +105,7 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 AgentEvent::ToolResult(tr) => eprintln!("[result: {}]", tr.content),
                 AgentEvent::Progress(p) => eprintln!("[{p}]"),
                 AgentEvent::Complete(_) => break,
+                AgentEvent::Thinking(t) => eprintln!("[thinking: {t}]"),
                 AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } => {}
                 AgentEvent::Error(e) => {
                     eprintln!("[error: {e}]");
@@ -445,7 +447,7 @@ async fn run_voice_loop(cli: CliArgs) -> Result<()> {
         let goal = text.clone();
         let max_turns = cli.max_turns;
         let handle = tokio::spawn(async move {
-            stack.run(&goal, max_turns, Some(tx), agent_cancel).await
+            stack.run(&goal, max_turns, Some(tx), agent_cancel, Vec::new()).await
         });
 
         while let Some(event) = rx.recv().await {

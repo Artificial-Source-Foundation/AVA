@@ -39,8 +39,9 @@ async fn mock_provider_generate_and_stream() {
         .generate_stream(&[])
         .await
         .expect("stream should work");
-    let parts: Vec<String> = stream.collect().await;
-    assert_eq!(parts, vec!["second"]);
+    let parts: Vec<ava_types::StreamChunk> = stream.collect().await;
+    assert_eq!(parts.len(), 1);
+    assert_eq!(parts[0].text_content(), Some("second"));
 }
 
 #[test]

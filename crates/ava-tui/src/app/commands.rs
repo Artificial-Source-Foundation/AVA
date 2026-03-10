@@ -40,8 +40,9 @@ impl App {
                         ))
                     }
                 } else {
-                    let display = self.state.agent.current_model_display();
-                    Some((MessageKind::System, format!("Current model: {display}")))
+                    // Open model selector modal
+                    self.execute_command_action(Action::ModelSwitch);
+                    None
                 }
             }
             "/tools" => {
@@ -79,22 +80,19 @@ impl App {
                         let tools = tokio::task::block_in_place(|| {
                             tokio::runtime::Handle::current()
                                 .block_on(self.state.agent.list_tools_with_source())
-                        });
-                        self.state.tool_list = ToolListState {
-                            items: tools
-                                .into_iter()
-                                .map(|(def, src)| {
-                                    crate::widgets::tool_list::ToolListItem {
-                                        name: def.name,
-                                        description: def.description,
-                                        source: src,
-                                    }
-                                })
-                                .collect(),
-                            selected: 0,
-                            query: String::new(),
-                            scroll: 0,
-                        };
+                        })
+                        .unwrap_or_default();
+                        let tool_items: Vec<crate::widgets::tool_list::ToolListItem> = tools
+                            .into_iter()
+                            .map(|(def, src)| {
+                                crate::widgets::tool_list::ToolListItem {
+                                    name: def.name,
+                                    description: def.description,
+                                    source: src,
+                                }
+                            })
+                            .collect();
+                        self.state.tool_list = ToolListState::from_items(tool_items);
                         self.state.active_modal = Some(ModalType::ToolList);
                         None
                     }
@@ -122,7 +120,8 @@ impl App {
                         let servers = tokio::task::block_in_place(|| {
                             tokio::runtime::Handle::current()
                                 .block_on(self.state.agent.mcp_server_info())
-                        });
+                        })
+                        .unwrap_or_default();
                         if servers.is_empty() {
                             Some((MessageKind::System, "No MCP servers connected".to_string()))
                         } else {
@@ -217,6 +216,7 @@ impl App {
                     tokio::runtime::Handle::current()
                         .block_on(self.state.agent.list_tools_with_source())
                 })
+                .unwrap_or_default()
                 .len();
 
                 let mcp_count = self.state.agent.mcp_tool_count;
@@ -283,10 +283,34 @@ impl App {
                 self.set_status("Context compaction requested", StatusLevel::Info);
                 Some((MessageKind::System, "Context compaction requested".to_string()))
             }
+            "/think" => {
+                match arg {
+                    Some(level_str) => {
+                        if let Some(level) = ava_types::ThinkingLevel::from_str_loose(level_str) {
+                            self.state.agent.set_thinking_level(level);
+                            let label = level.label();
+                            Some((MessageKind::System, format!("Thinking level set to {label}")))
+                        } else {
+                            Some((MessageKind::Error,
+                                "Invalid level. Use: /think off|low|med|high|max".to_string()
+                            ))
+                        }
+                    }
+                    None => {
+                        let label = self.state.agent.cycle_thinking();
+                        Some((MessageKind::System, format!("Thinking level: {label}")))
+                    }
+                }
+            }
+            "/sessions" => {
+                self.execute_command_action(Action::SessionList);
+                None
+            }
             "/help" => {
                 let help = "\
 Available commands:
   /model [provider/model]  — show or switch model
+  /think [level]           — set thinking level (off/low/med/high/max)
   /connect [provider]      — add provider credentials
   /providers               — show provider status
   /disconnect <provider>   — remove provider credentials
@@ -295,6 +319,7 @@ Available commands:
   /tools init              — create tool templates
   /mcp [list]              — show MCP servers
   /mcp reload              — reload MCP config
+  /sessions                — session picker
   /status                  — show session info
   /diff                    — show git changes
   /clear                   — clear chat
@@ -304,11 +329,12 @@ Available commands:
 Keyboard shortcuts:
   Ctrl+K / Ctrl+/          — command palette
   Ctrl+M                   — model selector
+  Ctrl+T                   — cycle thinking level
   Ctrl+N                   — new session
+  Ctrl+L                   — session picker
   Ctrl+Y                   — toggle YOLO mode
   Ctrl+S                   — toggle sidebar
-  Ctrl+C                   — cancel / clear input
-  Ctrl+D                   — quit";
+  Ctrl+C                   — cancel / clear input / quit";
                 Some((MessageKind::System, help.to_string()))
             }
             _ => Some((MessageKind::Error, format!("Unknown command: {cmd}. Type /help for available commands."))),
@@ -318,15 +344,31 @@ Keyboard shortcuts:
     pub(crate) fn execute_command_action(&mut self, action: Action) {
         match action {
             Action::ModelSwitch => {
-                // Load credentials for dynamic model list
-                let credentials = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current()
-                        .block_on(ava_config::CredentialStore::load_default())
-                })
-                .unwrap_or_default();
-                self.state.model_selector = Some(ModelSelectorState::from_credentials(
+                // Load credentials + catalog for dynamic model list
+                let (credentials, catalog) = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        let creds = ava_config::CredentialStore::load_default()
+                            .await
+                            .unwrap_or_default();
+                        let cat = self.state.model_catalog.get().await;
+                        (creds, cat)
+                    })
+                });
+                // Use fallback catalog if dynamic fetch hasn't completed yet,
+                // then merge fallback entries for providers not in models.dev
+                // (copilot, coding plan providers, etc.)
+                let mut effective_catalog = if catalog.is_empty() {
+                    ava_config::fallback_catalog()
+                } else {
+                    catalog
+                };
+                effective_catalog.merge_fallback();
+                self.state.model_selector = Some(ModelSelectorState::from_catalog(
+                    &effective_catalog,
                     &credentials,
                     &self.state.agent.recent_models,
+                    &self.state.agent.model_name,
+                    &self.state.agent.provider_name,
                 ));
                 self.state.active_modal = Some(ModalType::ModelSelector);
             }
@@ -336,7 +378,9 @@ Keyboard shortcuts:
                 self.set_status("New session created", StatusLevel::Info);
             }
             Action::SessionList => {
-                let _ = self.state.session.list_recent(50);
+                if let Ok(sessions) = self.state.session.list_recent(50) {
+                    self.state.session_list.update_sessions(&sessions);
+                }
                 self.state.session_list.open = true;
                 self.state.active_modal = Some(ModalType::SessionList);
             }

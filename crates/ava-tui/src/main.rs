@@ -6,17 +6,22 @@ use ava_tui::review::run_review;
 use clap::Parser;
 use color_eyre::Result;
 use std::io::IsTerminal;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     color_eyre::install()?;
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_target(false)
-        .compact()
-        .init();
 
     let cli = CliArgs::parse();
+
+    let is_tui = cli.command.is_none()
+        && !cli.headless
+        && !cli.json
+        && std::io::stdout().is_terminal();
+
+    init_logging(is_tui);
 
     // Subcommand routing
     match cli.command.clone() {
@@ -25,10 +30,52 @@ async fn main() -> Result<()> {
         None => {}
     }
 
-    if cli.headless || cli.json || !std::io::stdout().is_terminal() {
+    if !is_tui {
         return run_headless(cli).await;
     }
 
     let mut app = App::new(cli).await?;
     app.run().await
+}
+
+/// Initialize logging:
+/// - **File**: Always writes debug+ logs to `~/.ava/logs/ava.log` (daily rotation)
+/// - **Stderr**: Only in headless/CLI mode, controlled by `RUST_LOG` (default: warn).
+///   NEVER enabled in TUI mode — stderr output corrupts the alternate screen.
+fn init_logging(is_tui: bool) {
+    let log_dir = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".ava")
+        .join("logs");
+
+    // File layer: always debug level, daily rolling
+    let file_appender = tracing_appender::rolling::daily(&log_dir, "ava.log");
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(file_appender)
+        .with_target(true)
+        .with_ansi(false)
+        .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG);
+
+    if is_tui {
+        // TUI mode: file only — no stderr output
+        tracing_subscriber::registry()
+            .with(file_layer)
+            .init();
+    } else {
+        // Headless/CLI mode: file + stderr
+        let stderr_layer = tracing_subscriber::fmt::layer()
+            .with_target(false)
+            .compact()
+            .with_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn")),
+            );
+
+        tracing_subscriber::registry()
+            .with(file_layer)
+            .with(stderr_layer)
+            .init();
+    }
+
+    tracing::info!("AVA logging initialized — tui={is_tui}, log dir: {}", log_dir.display());
 }

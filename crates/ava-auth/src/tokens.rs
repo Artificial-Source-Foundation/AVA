@@ -33,7 +33,7 @@ pub async fn exchange_code_for_tokens(
     pkce: &PkceParams,
 ) -> Result<OAuthTokens, AuthError> {
     let redirect_uri = format!(
-        "http://127.0.0.1:{}{}",
+        "http://localhost:{}{}",
         config.redirect_port, config.redirect_path
     );
 

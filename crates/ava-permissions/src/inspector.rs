@@ -28,7 +28,13 @@ pub struct InspectionContext {
     pub safety_profiles: HashMap<String, ToolSafetyProfile>,
 }
 
+/// Evaluates whether a tool call should be allowed, denied, or require user approval.
+///
+/// The inspection considers command classification, path safety, yolo mode,
+/// session approvals, policy rules, and risk level thresholds to produce an
+/// [`InspectionResult`] with the decision and risk metadata.
 pub trait PermissionInspector: Send + Sync {
+    /// Inspect a tool call and return the permission decision with risk metadata.
     fn inspect(
         &self,
         tool_name: &str,

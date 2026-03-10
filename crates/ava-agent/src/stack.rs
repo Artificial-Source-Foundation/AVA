@@ -21,7 +21,7 @@ use ava_tools::core::{
 };
 use ava_tools::mcp_bridge::{MCPBridgeTool, MCPToolCaller};
 use ava_tools::registry::{ToolRegistry, ToolSource};
-use ava_types::{AvaError, Result, Session, ToolResult};
+use ava_types::{AvaError, Result, Session, ThinkingLevel, ToolResult};
 use futures::StreamExt;
 use serde_json::Value;
 use tokio::sync::{mpsc, RwLock};
@@ -92,6 +92,8 @@ pub struct AgentStack {
     custom_tool_dirs: Vec<PathBuf>,
     mcp_global_config: PathBuf,
     mcp_project_config: PathBuf,
+    /// Current thinking level for extended reasoning (persisted per session).
+    pub thinking_level: RwLock<ThinkingLevel>,
 }
 
 /// Configuration for constructing an [`AgentStack`] — data directory, provider/model overrides, and flags.
@@ -166,8 +168,10 @@ impl AgentStack {
         let cfg = config_mgr.get().await;
         let provider_name = config.provider.as_deref().unwrap_or(&cfg.llm.provider);
         if let Some(base_url) = ava_llm::providers::base_url_for_provider(provider_name) {
-            router.pool().get_client(base_url).await;
-            info!(base_url, "Pre-warmed connection pool");
+            match router.pool().get_client(base_url).await {
+                Ok(_) => info!(base_url, "Pre-warmed connection pool"),
+                Err(e) => warn!(%e, base_url, "Failed to pre-warm connection pool"),
+            }
         }
 
         // Config paths
@@ -213,6 +217,7 @@ impl AgentStack {
             custom_tool_dirs,
             mcp_global_config,
             mcp_project_config,
+            thinking_level: RwLock::new(ThinkingLevel::Off),
         })
     }
 
@@ -297,6 +302,7 @@ impl AgentStack {
 
     /// Switch the provider and model for subsequent runs.
     /// Validates that the provider/model combination can be routed.
+    /// Persists the choice per-project (`.ava/state.json`).
     #[instrument(skip(self))]
     pub async fn switch_model(&self, provider: &str, model: &str) -> Result<()> {
         // Validate by attempting to route — this ensures credentials exist
@@ -304,7 +310,33 @@ impl AgentStack {
 
         *self.provider_override.write().await = Some(provider.to_string());
         *self.model_override.write().await = Some(model.to_string());
+
+        // Persist per-project
+        let project_root = std::env::current_dir().unwrap_or_default();
+        let mut state = ava_config::ProjectState::load(&project_root);
+        state.last_provider = Some(provider.to_string());
+        state.last_model = Some(model.to_string());
+        let _ = state.save(&project_root);
+
         Ok(())
+    }
+
+    /// Set the thinking level.
+    pub async fn set_thinking_level(&self, level: ThinkingLevel) {
+        *self.thinking_level.write().await = level;
+    }
+
+    /// Cycle thinking: Off → Low → Medium → High → Max → Off.
+    /// Returns the new level's label for status display.
+    pub async fn cycle_thinking(&self) -> &'static str {
+        let mut guard = self.thinking_level.write().await;
+        *guard = guard.cycle();
+        guard.label()
+    }
+
+    /// Get current thinking level.
+    pub async fn get_thinking_level(&self) -> ThinkingLevel {
+        *self.thinking_level.read().await
     }
 
     /// Get the current provider and model names.
@@ -359,13 +391,14 @@ impl AgentStack {
         format!("{goal}\n\nRelevant memories:\n{memory_block}")
     }
 
-    #[instrument(skip(self, event_tx, cancel), fields(max_turns))]
+    #[instrument(skip(self, event_tx, cancel, history), fields(max_turns))]
     pub async fn run(
         &self,
         goal: &str,
         max_turns: usize,
         event_tx: Option<mpsc::UnboundedSender<AgentEvent>>,
         cancel: CancellationToken,
+        history: Vec<ava_types::Message>,
     ) -> Result<AgentRunResult> {
         let provider = if let Some(provider) = &self.injected_provider {
             provider.clone()
@@ -400,6 +433,7 @@ impl AgentStack {
 
         let turns_limit = if max_turns == 0 { self.max_turns } else { max_turns };
 
+        let thinking = *self.thinking_level.read().await;
         let config = AgentConfig {
             max_turns: turns_limit,
             token_limit: 128_000,
@@ -407,6 +441,7 @@ impl AgentStack {
             max_cost_usd: 10.0,
             loop_detection: true,
             custom_system_prompt: None,
+            thinking_level: thinking,
         };
 
         // Auto-context: inject relevant memories into the goal
@@ -459,7 +494,8 @@ impl AgentStack {
             registry,
             context,
             config,
-        );
+        )
+        .with_history(history);
         let goal = &enriched_goal;
 
         if let Some(tx) = event_tx {
@@ -482,7 +518,7 @@ impl AgentStack {
                             AgentEvent::Error(error) => {
                                 return Err(AvaError::AgentStopped { reason: error });
                             }
-                            AgentEvent::Progress(_) | AgentEvent::Token(_) | AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } => {}
+                            AgentEvent::Thinking(_) | AgentEvent::Progress(_) | AgentEvent::Token(_) | AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } => {}
                         }
                     }
                 }

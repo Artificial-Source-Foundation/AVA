@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
-use ava_types::{AvaError, Message, Result};
+use ava_types::{AvaError, Message, Result, StreamChunk};
 use futures::Stream;
 use tokio_util::sync::CancellationToken;
 
@@ -53,7 +53,7 @@ async fn agent_stack_run_with_mock_provider_completes() {
     .expect("stack init should succeed");
 
     let result = stack
-        .run("finish task", 5, None, CancellationToken::new())
+        .run("finish task", 5, None, CancellationToken::new(), Vec::new())
         .await
         .expect("run should succeed");
 
@@ -84,7 +84,7 @@ async fn agent_stack_run_honors_cancellation() {
     });
 
     let err = stack
-        .run("slow task", 5, None, cancel)
+        .run("slow task", 5, None, cancel, Vec::new())
         .await
         .expect_err("run should be cancelled");
     assert!(matches!(err, AvaError::Cancelled));
@@ -105,9 +105,9 @@ impl LLMProvider for SlowProvider {
     async fn generate_stream(
         &self,
         messages: &[Message],
-    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
         let out = self.generate(messages).await?;
-        Ok(Box::pin(futures::stream::iter(vec![out])))
+        Ok(Box::pin(futures::stream::iter(vec![StreamChunk::text(out)])))
     }
 
     fn estimate_tokens(&self, input: &str) -> usize {

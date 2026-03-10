@@ -39,9 +39,11 @@ impl LLMProvider for MockLLMProvider {
     async fn generate_stream(
         &self,
         messages: &[Message],
-    ) -> ava_types::Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
+    ) -> ava_types::Result<Pin<Box<dyn Stream<Item = ava_types::StreamChunk> + Send>>> {
         let one = self.generate(messages).await?;
-        Ok(Box::pin(futures::stream::iter(vec![one])))
+        Ok(Box::pin(futures::stream::iter(vec![
+            ava_types::StreamChunk::text(one),
+        ])))
     }
 
     fn model_name(&self) -> &str {
@@ -127,6 +129,7 @@ fn build_loop(responses: Vec<String>, token_limit: usize, max_turns: usize) -> A
             max_cost_usd: 10.0,
             loop_detection: true,
             custom_system_prompt: None,
+            thinking_level: ava_types::ThinkingLevel::Off,
         },
     )
 }
@@ -218,6 +221,7 @@ async fn error_hint_injected_after_tool_failure() {
             max_cost_usd: 10.0,
             loop_detection: true,
             custom_system_prompt: None,
+            thinking_level: ava_types::ThinkingLevel::Off,
         },
     );
 

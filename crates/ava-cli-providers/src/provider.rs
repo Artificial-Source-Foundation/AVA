@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use ava_llm::provider::LLMProvider;
-use ava_types::{AvaError, Message, Result, Role};
+use ava_types::{AvaError, Message, Result, Role, StreamChunk};
 use futures::{Stream, StreamExt};
 use std::pin::Pin;
 
@@ -63,7 +63,7 @@ impl LLMProvider for CLIAgentLLMProvider {
     async fn generate_stream(
         &self,
         messages: &[Message],
-    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
         let (tx, rx) = tokio::sync::mpsc::channel(256);
         let prompt = messages_to_prompt(messages);
         let runner = self.runner.clone();
@@ -99,7 +99,7 @@ impl LLMProvider for CLIAgentLLMProvider {
 
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx).filter_map(|event| {
             futures::future::ready(match event {
-                CLIAgentEvent::Text { content } => Some(content),
+                CLIAgentEvent::Text { content } => Some(StreamChunk::text(content)),
                 _ => None,
             })
         });

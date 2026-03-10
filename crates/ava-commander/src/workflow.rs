@@ -471,6 +471,7 @@ async fn run_phase_worker(params: PhaseWorkerParams<'_>) -> ava_types::Result<Se
         max_cost_usd: budget.max_cost_usd,
         loop_detection: true,
         custom_system_prompt: Some(system_prompt),
+        thinking_level: ava_types::ThinkingLevel::Off,
     };
 
     let context = ContextManager::new(budget.max_tokens);

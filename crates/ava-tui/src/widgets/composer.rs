@@ -1,16 +1,43 @@
 use crate::app::AppState;
 use crate::state::voice::VoicePhase;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Wrap};
+use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Frame;
 
+/// Render the composer widget.
+///
+/// Design spec (Pencil):
+///   Composer: bg=#1A1F2E, left bar 3px (#4D9EF6)
+///   Content: padding=[12,16], gap=4, justify=center, layout=vertical
+///     Line 1: ❯ (bold) + input text, gap=8
+///     Line 2: provider (bold blue) + model name (muted), gap=12
 pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let line = match state.voice.phase {
+    let bar_color = match state.voice.phase {
+        VoicePhase::Recording => state.theme.error,
+        VoicePhase::Transcribing => state.theme.accent,
+        VoicePhase::Idle => {
+            if state.active_modal.is_some() {
+                state.theme.text_muted
+            } else {
+                state.theme.primary
+            }
+        }
+    };
+
+    // Design: 3px bar → 1 char full-block
+    let bar = Span::styled("\u{258E}", Style::default().fg(bar_color));
+    // Design: content padding 16px → 2 chars after bar
+    let pad = "  ";
+
+    // -- Line 1: Prompt --
+    let prompt_line = match state.voice.phase {
         VoicePhase::Recording => {
             let elapsed = state.voice.recording_duration();
             Line::from(vec![
+                bar.clone(),
+                Span::raw(pad),
                 Span::styled(
                     "\u{276f} ",
                     Style::default().fg(state.theme.accent),
@@ -24,6 +51,8 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             ])
         }
         VoicePhase::Transcribing => Line::from(vec![
+            bar.clone(),
+            Span::raw(pad),
             Span::styled(
                 "\u{276f} ",
                 Style::default().fg(state.theme.accent),
@@ -37,14 +66,18 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         ]),
         VoicePhase::Idle => {
             let mut spans = vec![
+                bar.clone(),
+                Span::raw(pad),
                 Span::styled(
                     "\u{276f} ",
-                    Style::default().fg(state.theme.text_muted),
+                    Style::default()
+                        .fg(state.theme.primary)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ];
             if state.input.buffer.is_empty() {
                 spans.push(Span::styled(
-                    "\u{2588}",
+                    "Type a message...",
                     Style::default().fg(state.theme.text_dimmed),
                 ));
             } else {
@@ -61,18 +94,43 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         }
     };
 
-    let widget = Paragraph::new(line)
-        .wrap(Wrap { trim: false });
-    frame.render_widget(widget, area);
-}
+    // -- Line 2: Model info --
+    // Design: provider (bold blue, fontSize=11) + model (muted, fontSize=11), gap=12 → 2 chars
+    let model_info_line = Line::from(vec![
+        bar,
+        Span::raw(pad),
+        Span::styled(
+            &state.agent.provider_name,
+            Style::default()
+                .fg(state.theme.primary)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  ", Style::default()),
+        Span::styled(
+            &state.agent.model_name,
+            Style::default().fg(state.theme.text_muted),
+        ),
+    ]);
 
-/// Render the thin separator line above the composer.
-pub fn render_separator(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let sep = "\u{2500}".repeat(area.width as usize);
-    let line = Line::from(Span::styled(
-        sep,
-        Style::default().fg(state.theme.border),
-    ));
-    let widget = Paragraph::new(line);
-    frame.render_widget(widget, area);
+    // Fill entire composer area with bg_elevated first
+    let bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
+    frame.render_widget(bg, area);
+
+    // Center the 2 content lines vertically within the area
+    // Design: padding=[12,16], justifyContent=center
+    let content_lines = 2u16;
+    let top_pad = area.height.saturating_sub(content_lines) / 2;
+    let inner = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(top_pad),
+            Constraint::Length(content_lines),
+            Constraint::Min(0),
+        ])
+        .split(area)[1];
+
+    let paragraph = Paragraph::new(vec![prompt_line, model_info_line])
+        .style(Style::default().bg(state.theme.bg_elevated))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(paragraph, inner);
 }

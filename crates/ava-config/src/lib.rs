@@ -11,12 +11,14 @@ use tokio::sync::RwLock;
 
 pub mod credential_commands;
 pub mod credentials;
+pub mod model_catalog;
 
 pub use credential_commands::{
     execute_credential_command, execute_credential_command_with_tester, provider_name, redact_key,
     CredentialCommand,
 };
 pub use credentials::{known_providers, standard_env_var, CredentialStore, ProviderCredential};
+pub use model_catalog::{CatalogModel, CatalogState, ModelCatalog, fallback_catalog};
 pub use ava_auth;
 
 /// LLM provider configuration
@@ -143,6 +145,37 @@ pub struct Config {
     pub fallback: Option<FallbackConfig>,
     #[serde(default)]
     pub voice: VoiceConfig,
+}
+
+/// Per-project ephemeral state (stored in `.ava/state.json` in the project root).
+/// Tracks the last used model and recent models for this specific project.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProjectState {
+    /// Last used provider in this project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_provider: Option<String>,
+    /// Last used model in this project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_model: Option<String>,
+}
+
+impl ProjectState {
+    /// Load project state from `.ava/state.json` relative to the given project root.
+    pub fn load(project_root: &std::path::Path) -> Self {
+        let path = project_root.join(".ava").join("state.json");
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|content| serde_json::from_str(&content).ok())
+            .unwrap_or_default()
+    }
+
+    /// Save project state to `.ava/state.json` relative to the given project root.
+    pub fn save(&self, project_root: &std::path::Path) -> std::result::Result<(), String> {
+        let dir = project_root.join(".ava");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let content = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
+        std::fs::write(dir.join("state.json"), content).map_err(|e| e.to_string())
+    }
 }
 
 /// Configuration manager with auto-reload support

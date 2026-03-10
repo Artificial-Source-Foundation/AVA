@@ -67,7 +67,7 @@ pub fn oauth_config(provider: &str) -> Option<&'static OAuthConfig> {
 
 /// Build the full authorization URL for a PKCE flow.
 pub fn build_auth_url(config: &OAuthConfig, pkce: &PkceParams) -> String {
-    let redirect_uri = format!("http://127.0.0.1:{}{}", config.redirect_port, config.redirect_path);
+    let redirect_uri = format!("http://localhost:{}{}", config.redirect_port, config.redirect_path);
     let scope = config.scopes.join(" ");
 
     let mut params = vec![

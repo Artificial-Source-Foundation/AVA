@@ -112,8 +112,8 @@ pub fn default_keybinds() -> HashMap<Action, Vec<KeyBinding>> {
         (Action::ToggleSidebar, vec![ctrl('s')]),
         (Action::ToggleThinking, vec![ctrl('t')]),
         (Action::Cancel, vec![ctrl('c')]),
-        (Action::Quit, vec![ctrl('d')]),
         (Action::YoloToggle, vec![ctrl('y')]),
+        (Action::SessionList, vec![ctrl('l')]),
         (Action::VoiceToggle, vec![ctrl('v')]),
     ])
 }

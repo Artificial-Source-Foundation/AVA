@@ -37,7 +37,7 @@ impl CircuitBreaker {
             STATE_CLOSED => true,
             STATE_OPEN => {
                 // Check if cooldown has elapsed
-                let last = self.last_failure.lock().unwrap();
+                let last = self.last_failure.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(last_time) = *last {
                     if last_time.elapsed() >= self.cooldown {
                         drop(last);
@@ -72,7 +72,7 @@ impl CircuitBreaker {
     /// Record a failed request.
     pub fn record_failure(&self) {
         let prev = self.failure_count.fetch_add(1, Ordering::AcqRel);
-        *self.last_failure.lock().unwrap() = Some(Instant::now());
+        *self.last_failure.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
 
         let state = self.state.load(Ordering::Acquire);
         if state == STATE_HALF_OPEN {

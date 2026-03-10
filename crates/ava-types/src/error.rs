@@ -5,72 +5,94 @@ use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, AvaError>;
 
+/// Unified error type for the AVA system.
+///
+/// Errors are organized into structured variants (with typed fields) and legacy
+/// string-payload variants (retained for backward compatibility). Use structured
+/// variants for new code. All variants support categorization via [`ErrorCategory`],
+/// retryability checking, and user-friendly message generation.
 #[derive(Error, Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum AvaError {
     // ── Structured provider/LLM errors ──────────────────────────────────
-
+    /// Generic provider API error (non-retryable).
     #[error("Provider '{provider}' error: {message}")]
     ProviderError { provider: String, message: String },
 
+    /// No API key found for the given provider in credentials.
     #[error("No API key configured for provider '{provider}'. Add your key to ~/.ava/credentials.json under providers.{provider}.api_key")]
     MissingApiKey { provider: String },
 
+    /// Provider returned HTTP 429 — retryable after the specified delay.
     #[error("Rate limited by {provider}. Retry after {retry_after_secs}s")]
     RateLimited {
         provider: String,
         retry_after_secs: u64,
     },
 
+    /// Requested model does not exist for the provider.
     #[error("Model '{model}' not found for provider '{provider}'")]
     ModelNotFound { provider: String, model: String },
 
+    /// Circuit breaker is open — provider had too many consecutive failures.
     #[error("Provider '{provider}' is temporarily unavailable (circuit breaker open). Retry after cooldown")]
     ProviderUnavailable { provider: String },
 
     // ── Structured tool errors ──────────────────────────────────────────
-
+    /// Tool name not found in the registry.
     #[error("Tool '{tool}' not found. Available tools: {available}")]
     ToolNotFound { tool: String, available: String },
 
+    /// Tool execution returned an error.
     #[error("Tool '{tool}' execution failed: {message}")]
     ToolExecutionError { tool: String, message: String },
 
+    /// Tool execution exceeded its time budget — retryable.
     #[error("Tool '{tool}' timed out after {timeout_secs}s")]
     ToolTimeout { tool: String, timeout_secs: u64 },
 
     // ── Structured context errors ───────────────────────────────────────
-
+    /// Message history exceeds the model's context window.
     #[error("Context window exceeded ({current} tokens > {limit} tokens). Consider using a model with larger context or breaking the task into smaller parts")]
     ContextWindowExceeded { current: usize, limit: usize },
 
     // ── Structured agent errors ─────────────────────────────────────────
-
+    /// Agent loop terminated (e.g., max turns, cost threshold, smart completion).
     #[error("Agent loop stopped: {reason}")]
     AgentStopped { reason: String },
 
+    /// User pressed Ctrl+C or otherwise cancelled the run.
     #[error("Agent run cancelled by user")]
     Cancelled,
 
     // ── Legacy string-payload variants (backward compat) ────────────────
-
+    /// Generic tool error (legacy — prefer `ToolExecutionError` for new code).
     #[error("Tool execution failed: {0}")]
     ToolError(String),
+    /// I/O error (file system, network socket, pipe).
     #[error("IO error: {0}")]
     IoError(String),
+    /// JSON/YAML serialization or deserialization failure.
     #[error("Serialization error: {0}")]
     SerializationError(String),
+    /// OS-level or platform abstraction error.
     #[error("Platform error: {0}")]
     PlatformError(String),
+    /// Configuration file or value error.
     #[error("Configuration error: {0}")]
     ConfigError(String),
+    /// Input validation failure.
     #[error("Validation error: {0}")]
     ValidationError(String),
+    /// SQLite or other database error.
     #[error("Database error: {0}")]
     DatabaseError(String),
+    /// Operation exceeded its time budget — retryable.
     #[error("Timeout error: {0}")]
     TimeoutError(String),
+    /// Requested resource not found.
     #[error("Not found: {0}")]
     NotFound(String),
+    /// Action blocked by permission policy or inspector.
     #[error("Permission denied: {0}")]
     PermissionDenied(String),
 }

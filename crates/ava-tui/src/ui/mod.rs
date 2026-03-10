@@ -1,10 +1,12 @@
 use crate::app::{AppState, ModalType};
 use crate::ui::layout::build_layout;
-use crate::widgets::composer::{render_composer, render_separator};
+use crate::widgets::autocomplete::AutocompleteTrigger;
+use crate::widgets::composer::render_composer;
 use crate::widgets::message_list::render_message_list;
+use crate::widgets::select_list::{render_select_list, KeybindHint, SelectListConfig};
+use crate::widgets::slash_menu::render_slash_menu;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
@@ -16,21 +18,32 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     // Advance spinner animation each frame
     state.messages.advance_spinner();
 
-    // Fill background with theme bg color
-    let bg_block = Block::default().style(Style::default().bg(state.theme.bg));
+    // Fill background with deepest bg color — sections layer on top
+    let bg_block = Block::default().style(Style::default().bg(state.theme.bg_deep));
     frame.render_widget(bg_block, frame.area());
 
-    let composer_h = layout::composer_height(&state.input.buffer, frame.area().width);
-    let split = build_layout(frame.area(), state.show_sidebar, composer_h);
+    let area = frame.area();
+    let composer_h = layout::composer_height(&state.input.buffer, area.width, area.height);
+    let split = build_layout(area, state.show_sidebar, composer_h);
+
+    // Composer bg (bars handle their own bg internally)
+    let composer_bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
+    frame.render_widget(composer_bg, split.composer);
 
     status_bar::render_top(frame, split.top_bar, state);
     render_message_list(frame, split.messages, state);
-    render_separator(frame, split.separator, state);
     render_composer(frame, split.composer, state);
     status_bar::render_context_bar(frame, split.context_bar, state);
 
     if let Some(sidebar_area) = split.sidebar {
         sidebar::render_sidebar(frame, sidebar_area, state);
+    }
+
+    // Render inline slash menu above the composer (not a modal)
+    if let Some(ref ac) = state.input.autocomplete {
+        if ac.trigger == AutocompleteTrigger::Slash && !ac.items.is_empty() {
+            render_slash_menu(frame, split.composer, ac, &state.theme);
+        }
     }
 
     // Render modals on top
@@ -43,7 +56,11 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
     let area = frame.area();
     let popup_area = centered_rect(60, 70, area);
 
-    // Clear background and add subtle elevated bg
+    // Dimmed backdrop
+    let backdrop = Block::default().style(Style::default().bg(state.theme.bg));
+    frame.render_widget(backdrop, area);
+
+    // Clear background and add elevated bg with border
     frame.render_widget(Clear, popup_area);
     let bg = Block::default()
         .style(Style::default().bg(state.theme.bg_elevated))
@@ -53,17 +70,51 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
     frame.render_widget(bg, popup_area);
 
     match modal {
-        ModalType::CommandPalette => render_command_palette(frame, inner, state),
-        ModalType::SessionList => render_session_list(frame, inner, state),
+        ModalType::CommandPalette => {
+            let config = SelectListConfig {
+                title: "Command Palette".to_string(),
+                search_placeholder: "Type a command...".to_string(),
+                keybinds: vec![
+                    KeybindHint { key: "enter".to_string(), label: "run".to_string() },
+                    KeybindHint { key: "esc".to_string(), label: "close".to_string() },
+                ],
+            };
+            render_select_list(frame, inner, &state.command_palette.list, &config, &state.theme);
+        }
+        ModalType::SessionList => {
+            let config = SelectListConfig {
+                title: "Switch Session".to_string(),
+                search_placeholder: "Search sessions...".to_string(),
+                keybinds: vec![
+                    KeybindHint { key: "enter".to_string(), label: "load".to_string() },
+                    KeybindHint { key: "esc".to_string(), label: "close".to_string() },
+                ],
+            };
+            render_select_list(frame, inner, &state.session_list.list, &config, &state.theme);
+        }
         ModalType::ToolApproval => render_tool_approval(frame, inner, state),
-        ModalType::ModelSelector => render_model_selector(frame, inner, state),
+        ModalType::ModelSelector => {
+            if let Some(ref selector) = state.model_selector {
+                let config = SelectListConfig {
+                    title: "Select model".to_string(),
+                    search_placeholder: "Search models...".to_string(),
+                    keybinds: vec![
+                        KeybindHint { key: "enter".to_string(), label: "select".to_string() },
+                        KeybindHint { key: "esc".to_string(), label: "close".to_string() },
+                    ],
+                };
+                render_select_list(frame, inner, &selector.list, &config, &state.theme);
+            }
+        }
         ModalType::ToolList => {
-            crate::widgets::tool_list::render_tool_list(
-                frame,
-                inner,
-                &state.tool_list,
-                &state.theme,
-            );
+            let config = SelectListConfig {
+                title: "Tools".to_string(),
+                search_placeholder: "Search tools...".to_string(),
+                keybinds: vec![
+                    KeybindHint { key: "esc".to_string(), label: "close".to_string() },
+                ],
+            };
+            render_select_list(frame, inner, &state.tool_list.list, &config, &state.theme);
         }
         ModalType::ProviderConnect => {
             crate::widgets::provider_connect::render_provider_connect(
@@ -75,162 +126,20 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
     }
 }
 
-fn render_command_palette(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let items = state.command_palette.filtered();
-
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("> ", Style::default().fg(state.theme.primary)),
-            Span::styled(
-                &state.command_palette.query,
-                Style::default().fg(state.theme.text),
-            ),
-            Span::styled("_", Style::default().fg(state.theme.text_dimmed)),
-        ]),
-        Line::from(""),
-    ];
-
-    for (idx, item) in items.iter().enumerate() {
-        let is_selected = idx == state.command_palette.selected;
-        let name_style = if is_selected {
-            Style::default()
-                .fg(state.theme.primary)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(state.theme.text)
-        };
-        let prefix = if is_selected { "> " } else { "  " };
-
-        let mut spans = vec![
-            Span::styled(prefix, Style::default().fg(state.theme.primary)),
-            Span::styled(&item.name, name_style),
-        ];
-
-        if !item.hint.is_empty() {
-            spans.push(Span::styled(
-                format!("  ({})", item.hint),
-                Style::default().fg(state.theme.text_muted),
-            ));
-        }
-
-        spans.push(Span::styled(
-            format!("  {}", item.category),
-            Style::default().fg(state.theme.text_dimmed),
-        ));
-
-        lines.push(Line::from(spans));
-    }
-
-    let widget = Paragraph::new(lines);
-    frame.render_widget(widget, area);
-}
-
-fn render_session_list(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let items = crate::widgets::session_list::filter_sessions(
-        &state.session.sessions,
-        &state.session_list.query,
-    );
-
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("> ", Style::default().fg(state.theme.primary)),
-            Span::styled(
-                &state.session_list.query,
-                Style::default().fg(state.theme.text),
-            ),
-            Span::styled("_", Style::default().fg(state.theme.text_dimmed)),
-        ]),
-        Line::from(""),
-    ];
-
-    for (idx, session) in items.iter().enumerate() {
-        let is_selected = idx == state.session_list.selected;
-        let prefix = if is_selected { "> " } else { "  " };
-        let name_style = if is_selected {
-            Style::default()
-                .fg(state.theme.primary)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(state.theme.text)
-        };
-
-        lines.push(Line::from(vec![
-            Span::styled(prefix, Style::default().fg(state.theme.primary)),
-            Span::styled(
-                format!("Session {}", &session.id.to_string()[..8]),
-                name_style,
-            ),
-            Span::styled(
-                format!("  {}", session.updated_at.format("%Y-%m-%d %H:%M")),
-                Style::default().fg(state.theme.text_muted),
-            ),
-        ]));
-    }
-
-    let widget = Paragraph::new(lines);
-    frame.render_widget(widget, area);
-}
-
 fn render_tool_approval(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     use crate::widgets::tool_approval::render_tool_approval_lines;
 
     if let Some(request) = state.permission.queue.front() {
+        // Fill with elevated background
+        let bg = Block::default()
+            .style(Style::default().bg(state.theme.bg_elevated));
+        frame.render_widget(bg, area);
+
         let lines = render_tool_approval_lines(request, &state.permission, &state.theme);
-        let widget = Paragraph::new(lines);
+        let widget = Paragraph::new(lines)
+            .style(Style::default().bg(state.theme.bg_elevated));
         frame.render_widget(widget, area);
     }
-}
-
-fn render_model_selector(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let selector = match state.model_selector {
-        Some(ref s) => s,
-        None => return,
-    };
-
-    let items = selector.filtered();
-    let current_model = &state.agent.model_name;
-
-    let mut lines = vec![
-        Line::from(vec![
-            Span::styled("> ", Style::default().fg(state.theme.primary)),
-            Span::styled(&selector.query, Style::default().fg(state.theme.text)),
-            Span::styled("_", Style::default().fg(state.theme.text_dimmed)),
-        ]),
-        Line::from(""),
-    ];
-
-    for (idx, item) in items.iter().enumerate() {
-        let is_selected = idx == selector.selected;
-        let is_current = item.model == *current_model
-            || format!("{}/{}", item.provider, item.model)
-                == format!("{}/{}", state.agent.provider_name, state.agent.model_name);
-
-        let name_style = if is_selected {
-            Style::default()
-                .fg(state.theme.primary)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(state.theme.text)
-        };
-
-        let prefix = if is_selected { "> " } else { "  " };
-        let marker = if is_current { " *" } else { "" };
-
-        let spans = vec![
-            Span::styled(prefix, Style::default().fg(state.theme.primary)),
-            Span::styled(&item.display, name_style),
-            Span::styled(
-                format!("  ({})", item.provider),
-                Style::default().fg(state.theme.text_muted),
-            ),
-            Span::styled(marker, Style::default().fg(state.theme.accent)),
-        ];
-
-        lines.push(Line::from(spans));
-    }
-
-    let widget = Paragraph::new(lines);
-    frame.render_widget(widget, area);
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

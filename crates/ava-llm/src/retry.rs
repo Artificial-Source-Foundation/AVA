@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use ava_types::AvaError;
+use rand::Rng;
 
 /// Budget-aware retry with exponential backoff.
 ///
@@ -37,9 +38,11 @@ impl RetryBudget {
 
         self.remaining -= 1;
         let attempt = self.max_retries - self.remaining; // 1-based
-        let delay = self
+        let exponential = self
             .base_delay
             .saturating_mul(1u32 << (attempt - 1).min(30));
+        let jitter_factor = rand::thread_rng().gen_range(0.8..=1.2);
+        let delay = exponential.mul_f64(jitter_factor);
         Some(delay.min(self.max_delay))
     }
 
@@ -86,23 +89,27 @@ mod tests {
     }
 
     #[test]
-    fn exponential_backoff() {
+    fn exponential_backoff_within_jitter_bounds() {
         let mut budget = RetryBudget::new(5)
             .with_delays(Duration::from_secs(1), Duration::from_secs(60));
 
         let err = AvaError::TimeoutError("test".to_string());
 
+        // With ±20% jitter, base 1s → [0.8, 1.2]
         let d1 = budget.should_retry(&err).unwrap();
-        assert_eq!(d1, Duration::from_secs(1)); // 1 * 2^0
+        assert!(d1 >= Duration::from_millis(800) && d1 <= Duration::from_millis(1200));
 
+        // base 2s → [1.6, 2.4]
         let d2 = budget.should_retry(&err).unwrap();
-        assert_eq!(d2, Duration::from_secs(2)); // 1 * 2^1
+        assert!(d2 >= Duration::from_millis(1600) && d2 <= Duration::from_millis(2400));
 
+        // base 4s → [3.2, 4.8]
         let d3 = budget.should_retry(&err).unwrap();
-        assert_eq!(d3, Duration::from_secs(4)); // 1 * 2^2
+        assert!(d3 >= Duration::from_millis(3200) && d3 <= Duration::from_millis(4800));
 
+        // base 8s → [6.4, 9.6]
         let d4 = budget.should_retry(&err).unwrap();
-        assert_eq!(d4, Duration::from_secs(8)); // 1 * 2^3
+        assert!(d4 >= Duration::from_millis(6400) && d4 <= Duration::from_millis(9600));
     }
 
     #[test]
@@ -116,6 +123,47 @@ mod tests {
         for _ in 0..8 {
             let delay = budget.should_retry(&err).unwrap();
             assert!(delay <= Duration::from_secs(10));
+        }
+    }
+
+    #[test]
+    fn retry_delays_have_jitter() {
+        let delays: Vec<Duration> = (0..20)
+            .map(|_| {
+                let mut budget = RetryBudget::new(5)
+                    .with_delays(Duration::from_millis(100), Duration::from_secs(30));
+                let error = AvaError::RateLimited {
+                    provider: "test".into(),
+                    retry_after_secs: 5,
+                };
+                budget.should_retry(&error).unwrap()
+            })
+            .collect();
+        let first = delays[0];
+        assert!(
+            delays.iter().any(|d| *d != first),
+            "Expected jitter but all delays were identical"
+        );
+    }
+
+    #[test]
+    fn retry_jitter_stays_within_bounds() {
+        for _ in 0..100 {
+            let mut budget = RetryBudget::new(5)
+                .with_delays(Duration::from_millis(1000), Duration::from_secs(60));
+            let error = AvaError::RateLimited {
+                provider: "test".into(),
+                retry_after_secs: 5,
+            };
+            let delay = budget.should_retry(&error).unwrap();
+            assert!(
+                delay >= Duration::from_millis(800),
+                "Delay too short: {delay:?}"
+            );
+            assert!(
+                delay <= Duration::from_millis(1200),
+                "Delay too long: {delay:?}"
+            );
         }
     }
 

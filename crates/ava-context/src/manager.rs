@@ -40,6 +40,16 @@ impl ContextManager {
         }
     }
 
+    /// Load initial conversation history into the context.
+    /// Messages are added in order and tracked for token counts.
+    /// Call this before `inject_system_prompt` / adding the goal.
+    pub fn load_history(&mut self, messages: Vec<Message>) {
+        for msg in messages {
+            self.tracker.add_message(&msg);
+            self.messages.push(msg);
+        }
+    }
+
     pub fn add_message(&mut self, message: Message) {
         self.tracker.add_message(&message);
         self.messages.push(message);

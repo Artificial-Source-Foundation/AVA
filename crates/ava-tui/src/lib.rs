@@ -5,8 +5,6 @@
 //! - Headless mode for scripting and automation
 //! - Session management and message history
 
-#![allow(dead_code)]
-
 pub mod app;
 pub mod auth;
 #[cfg(feature = "voice")]

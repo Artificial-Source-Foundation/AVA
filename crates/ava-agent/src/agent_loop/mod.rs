@@ -9,10 +9,10 @@ use std::time::Instant;
 use ava_context::ContextManager;
 use ava_tools::monitor::ToolExecution;
 use ava_tools::registry::ToolRegistry;
-use ava_types::{Message, Role, Session, ToolCall, ToolResult};
+use ava_types::{Message, Role, Session, ThinkingLevel, ToolCall, ToolResult};
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
-use tracing::{instrument, warn};
+use tracing::{debug, info, instrument, warn};
 
 use crate::llm_trait::LLMProvider;
 use crate::stuck::{StuckAction, StuckDetector};
@@ -32,6 +32,8 @@ pub struct AgentLoop {
     pub config: AgentConfig,
     pub(crate) last_request_hash: Option<u64>,
     pub(crate) last_request_time: Option<Instant>,
+    /// Conversation history from previous turns (injected after system prompt, before goal).
+    history: Vec<Message>,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -47,6 +49,9 @@ pub struct AgentConfig {
     /// Optional override for the system prompt. When set, replaces the default system prompt.
     #[serde(default)]
     pub custom_system_prompt: Option<String>,
+    /// Thinking/reasoning level for models that support extended thinking.
+    #[serde(default)]
+    pub thinking_level: ThinkingLevel,
 }
 
 fn default_max_cost() -> f64 {
@@ -61,6 +66,8 @@ fn default_loop_detection() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentEvent {
     Token(String),
+    /// Thinking/reasoning content from the model (displayed separately in UI).
+    Thinking(String),
     ToolCall(ToolCall),
     ToolResult(ToolResult),
     Progress(String),
@@ -88,7 +95,14 @@ impl AgentLoop {
             config,
             last_request_hash: None,
             last_request_time: None,
+            history: Vec::new(),
         }
+    }
+
+    /// Set conversation history to inject after the system prompt.
+    pub fn with_history(mut self, history: Vec<Message>) -> Self {
+        self.history = history;
+        self
     }
 
     /// Inject the system prompt into the context before the first turn.
@@ -110,12 +124,18 @@ impl AgentLoop {
 
         self.inject_system_prompt();
 
+        // Inject conversation history from previous turns
+        for msg in std::mem::take(&mut self.history) {
+            self.context.add_message(msg.clone());
+            session.add_message(msg);
+        }
+
         let goal_message = Message::new(Role::User, goal.to_string());
         self.context.add_message(goal_message.clone());
         session.add_message(goal_message);
 
         for _ in 0..self.config.max_turns {
-            let (response_text, tool_calls, _usage) = self.generate_response().await?;
+            let (response_text, tool_calls, _usage) = self.generate_response_with_thinking().await?;
 
             let assistant_message = Message::new(Role::Assistant, response_text.clone())
                 .with_tool_calls(tool_calls.clone());
@@ -198,6 +218,12 @@ impl AgentLoop {
 
             self.inject_system_prompt();
 
+            // Inject conversation history from previous turns
+            for msg in std::mem::take(&mut self.history) {
+                self.context.add_message(msg.clone());
+                session.add_message(msg);
+            }
+
             let goal_message = Message::new(Role::User, goal.clone());
             self.context.add_message(goal_message.clone());
             session.add_message(goal_message);
@@ -223,15 +249,89 @@ impl AgentLoop {
                     }
                 }
 
-                let (response_text, tool_calls) = if native_tools {
-                    let tool_defs = self.tools.list_tools();
-                    match self.llm.generate_with_tools(self.context.get_messages(), &tool_defs).await {
-                        Ok(response) => {
-                            if !response.content.is_empty() {
-                                yield AgentEvent::Token(response.content.clone());
+                let (response_text, tool_calls) = {
+                    info!(
+                        model = %self.config.model,
+                        turn = turn + 1,
+                        native_tools,
+                        thinking = %self.config.thinking_level,
+                        messages = self.context.get_messages().len(),
+                        "starting LLM stream request"
+                    );
+                    let stream_result = if native_tools {
+                        let tool_defs = self.tools.list_tools();
+                        if self.config.thinking_level != ThinkingLevel::Off {
+                            self.llm.generate_stream_with_thinking(
+                                self.context.get_messages(), &tool_defs, self.config.thinking_level,
+                            ).await
+                        } else {
+                            self.llm.generate_stream_with_tools(
+                                self.context.get_messages(), &tool_defs,
+                            ).await
+                        }
+                    } else {
+                        self.llm.generate_stream(self.context.get_messages()).await
+                    };
+
+                    match stream_result {
+                        Ok(mut stream) => {
+                            let mut full_text = String::new();
+                            let mut accumulated_tool_calls: Vec<response::ToolCallAccumulator> = Vec::new();
+                            let mut last_usage: Option<ava_types::TokenUsage> = None;
+                            let mut chunk_count: usize = 0;
+
+                            while let Some(chunk) = stream.next().await {
+                                chunk_count += 1;
+                                debug!(
+                                    chunk_count,
+                                    has_content = chunk.content.is_some(),
+                                    has_thinking = chunk.thinking.is_some(),
+                                    has_tool_call = chunk.tool_call.is_some(),
+                                    has_usage = chunk.usage.is_some(),
+                                    done = chunk.done,
+                                    "stream chunk received"
+                                );
+                                // Emit text tokens as they arrive
+                                if let Some(text) = chunk.text_content() {
+                                    full_text.push_str(text);
+                                    yield AgentEvent::Token(text.to_string());
+                                }
+                                // Emit thinking
+                                if let Some(ref thinking) = chunk.thinking {
+                                    if !thinking.is_empty() {
+                                        yield AgentEvent::Thinking(thinking.clone());
+                                    }
+                                }
+                                // Accumulate tool call fragments
+                                if let Some(ref tc) = chunk.tool_call {
+                                    response::accumulate_tool_call(&mut accumulated_tool_calls, tc);
+                                }
+                                // Capture usage (may arrive in message_start and message_delta)
+                                if let Some(ref usage) = chunk.usage {
+                                    if let Some(ref mut existing) = last_usage {
+                                        // Merge: Anthropic sends input in message_start, output in message_delta
+                                        if usage.input_tokens > 0 {
+                                            existing.input_tokens = usage.input_tokens;
+                                        }
+                                        if usage.output_tokens > 0 {
+                                            existing.output_tokens = usage.output_tokens;
+                                        }
+                                    } else {
+                                        last_usage = Some(usage.clone());
+                                    }
+                                }
                             }
+
+                            info!(
+                                chunk_count,
+                                text_len = full_text.len(),
+                                tool_calls = accumulated_tool_calls.len(),
+                                has_usage = last_usage.is_some(),
+                                "stream completed"
+                            );
+
                             // Emit token usage
-                            if let Some(usage) = &response.usage {
+                            if let Some(usage) = last_usage {
                                 let (in_rate, out_rate) = ava_llm::providers::common::model_pricing_usd_per_million(&self.config.model);
                                 let cost = ava_llm::providers::common::estimate_cost_usd(
                                     usage.input_tokens, usage.output_tokens, in_rate, out_rate,
@@ -242,36 +342,23 @@ impl AgentLoop {
                                     cost_usd: cost,
                                 };
                             }
-                            (response.content, response.tool_calls)
+
+                            // Convert accumulated tool calls or parse from text
+                            let tool_calls = if native_tools && !accumulated_tool_calls.is_empty() {
+                                response::finalize_tool_calls(accumulated_tool_calls)
+                            } else if !native_tools {
+                                parse_tool_calls(&full_text).unwrap_or_default()
+                            } else {
+                                vec![]
+                            };
+
+                            (full_text, tool_calls)
                         }
                         Err(error) => {
                             yield AgentEvent::Error(error.to_string());
                             return;
                         }
                     }
-                } else {
-                    let mut full_response = String::new();
-                    let stream_result = self.llm.generate_stream(self.context.get_messages()).await;
-                    match stream_result {
-                        Ok(mut stream) => {
-                            while let Some(chunk) = stream.next().await {
-                                full_response.push_str(&chunk);
-                                yield AgentEvent::Token(chunk);
-                            }
-                        }
-                        Err(error) => {
-                            yield AgentEvent::Error(error.to_string());
-                            return;
-                        }
-                    }
-                    let tool_calls = match parse_tool_calls(&full_response) {
-                        Ok(calls) => calls,
-                        Err(error) => {
-                            yield AgentEvent::Error(error.to_string());
-                            return;
-                        }
-                    };
-                    (full_response, tool_calls)
                 };
 
                 self.last_request_hash = Some(dedup_hash);
@@ -360,9 +447,20 @@ impl AgentLoop {
                     }
                 }
 
-                // Skip adding empty responses to context
+                // Skip adding empty responses to context — but don't set dedup
+                // hash so the next turn will still make a real API call instead
+                // of silently burning turns via the dedup guard.
                 if response_text.trim().is_empty() && tool_calls.is_empty() {
-                    continue;
+                    let msg = format!(
+                        "Provider returned empty response (model: {}, turn {}). \
+                         Possible API format mismatch. Run with RUST_LOG=debug for details.",
+                        self.config.model, turn + 1
+                    );
+                    warn!("{msg}");
+                    yield AgentEvent::Error(msg);
+                    self.last_request_hash = None;
+                    self.last_request_time = None;
+                    break;
                 }
 
                 let assistant_message = Message::new(Role::Assistant, response_text.clone())
@@ -442,6 +540,7 @@ mod tests {
             max_cost_usd: 1.0,
             loop_detection: true,
             custom_system_prompt: None,
+            thinking_level: ThinkingLevel::Off,
         };
         let llm = crate::tests::mock_llm();
 
@@ -464,6 +563,7 @@ mod tests {
             max_cost_usd: 10.0,
             loop_detection: true,
             custom_system_prompt: None,
+            thinking_level: ThinkingLevel::Off,
         };
         let llm = crate::tests::mock_llm();
 
@@ -489,6 +589,7 @@ mod tests {
             max_cost_usd: 10.0,
             loop_detection: true,
             custom_system_prompt: None,
+            thinking_level: ThinkingLevel::Off,
         };
         let llm = crate::tests::mock_llm();
 
@@ -523,6 +624,7 @@ mod tests {
             max_cost_usd: 10.0,
             loop_detection: true,
             custom_system_prompt: None,
+            thinking_level: ThinkingLevel::Off,
         };
         let llm = crate::tests::mock_llm();
 
@@ -563,6 +665,7 @@ mod tests {
             max_cost_usd: 0.0, // Zero threshold = immediate stop
             loop_detection: true,
             custom_system_prompt: None,
+            thinking_level: ThinkingLevel::Off,
         };
         let llm = crate::tests::mock_llm();
 
@@ -580,6 +683,7 @@ mod tests {
             max_cost_usd: 0.0,
             loop_detection: false,
             custom_system_prompt: None,
+            thinking_level: ThinkingLevel::Off,
         };
         let llm = crate::tests::mock_llm();
 

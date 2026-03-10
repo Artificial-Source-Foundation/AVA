@@ -1,3 +1,4 @@
+use ava_types::AvaError;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -50,17 +51,17 @@ impl ConnectionPool {
 
     /// Get or create a client for the given base URL.
     /// Clients are reused across providers with the same base URL.
-    pub async fn get_client(&self, base_url: &str) -> Arc<reqwest::Client> {
+    pub async fn get_client(&self, base_url: &str) -> Result<Arc<reqwest::Client>, AvaError> {
         // Fast path: read lock
         if let Some(client) = self.clients.read().await.get(base_url) {
-            return client.clone();
+            return Ok(client.clone());
         }
 
         // Slow path: write lock + create
         let mut clients = self.clients.write().await;
         // Double-check after acquiring write lock
         if let Some(client) = clients.get(base_url) {
-            return client.clone();
+            return Ok(client.clone());
         }
 
         let client = Arc::new(
@@ -70,11 +71,14 @@ impl ConnectionPool {
                 .pool_max_idle_per_host(self.pool_max_idle_per_host)
                 .pool_idle_timeout(self.keep_alive)
                 .build()
-                .expect("failed to build reqwest client"),
+                .map_err(|e| AvaError::ProviderError {
+                    provider: "http-pool".to_string(),
+                    message: format!("Failed to build HTTP client: {e}"),
+                })?,
         );
 
         clients.insert(base_url.to_string(), client.clone());
-        client
+        Ok(client)
     }
 
     pub async fn stats(&self) -> PoolStats {
@@ -94,8 +98,8 @@ mod tests {
     async fn same_base_url_returns_same_client() {
         let pool = ConnectionPool::new();
 
-        let c1 = pool.get_client("https://api.openai.com").await;
-        let c2 = pool.get_client("https://api.openai.com").await;
+        let c1 = pool.get_client("https://api.openai.com").await.unwrap();
+        let c2 = pool.get_client("https://api.openai.com").await.unwrap();
 
         assert!(Arc::ptr_eq(&c1, &c2));
     }
@@ -104,8 +108,8 @@ mod tests {
     async fn different_base_urls_return_different_clients() {
         let pool = ConnectionPool::new();
 
-        let c1 = pool.get_client("https://api.openai.com").await;
-        let c2 = pool.get_client("https://api.anthropic.com").await;
+        let c1 = pool.get_client("https://api.openai.com").await.unwrap();
+        let c2 = pool.get_client("https://api.anthropic.com").await.unwrap();
 
         assert!(!Arc::ptr_eq(&c1, &c2));
     }
@@ -117,8 +121,8 @@ mod tests {
         let stats = pool.stats().await;
         assert_eq!(stats.active_clients, 0);
 
-        pool.get_client("https://api.openai.com").await;
-        pool.get_client("https://openrouter.ai/api").await;
+        pool.get_client("https://api.openai.com").await.unwrap();
+        pool.get_client("https://openrouter.ai/api").await.unwrap();
 
         let stats = pool.stats().await;
         assert_eq!(stats.active_clients, 2);
@@ -132,7 +136,7 @@ mod tests {
             Duration::from_secs(60),
         );
 
-        let client = pool.get_client("https://example.com").await;
+        let client = pool.get_client("https://example.com").await.unwrap();
         assert!(Arc::strong_count(&client) >= 2); // pool + local
     }
 

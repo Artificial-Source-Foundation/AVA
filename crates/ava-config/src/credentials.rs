@@ -90,6 +90,10 @@ impl CredentialStore {
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
         for (provider, credential) in &store.providers {
+            // Skip placeholder check for OAuth-configured providers (api_key is empty by design)
+            if credential.is_oauth_configured() {
+                continue;
+            }
             if is_placeholder_key(&credential.api_key) {
                 return Err(AvaError::ConfigError(format!(
                     "Provider {provider} has placeholder API key in credentials file"
@@ -187,6 +191,31 @@ impl CredentialStore {
 
     pub fn set(&mut self, provider: &str, credential: ProviderCredential) {
         self.providers.insert(provider.to_string(), credential);
+    }
+
+    /// Set OAuth tokens for a provider, preserving existing API key/base_url.
+    pub fn set_oauth(
+        &mut self,
+        provider: &str,
+        access_token: &str,
+        refresh_token: Option<&str>,
+        expires_at: Option<u64>,
+    ) {
+        let mut cred = self.providers.get(provider).cloned().unwrap_or_else(|| {
+            ProviderCredential {
+                api_key: String::new(),
+                base_url: None,
+                org_id: None,
+                oauth_token: None,
+                oauth_refresh_token: None,
+                oauth_expires_at: None,
+                oauth_account_id: None,
+            }
+        });
+        cred.oauth_token = Some(access_token.to_string());
+        cred.oauth_refresh_token = refresh_token.map(String::from);
+        cred.oauth_expires_at = expires_at;
+        self.providers.insert(provider.to_string(), cred);
     }
 
     pub fn remove(&mut self, provider: &str) -> bool {

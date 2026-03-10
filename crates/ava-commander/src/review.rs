@@ -455,6 +455,7 @@ pub async fn run_review_agent(
         max_cost_usd: 5.0,
         loop_detection: true,
         custom_system_prompt: Some(system_prompt.to_string()),
+        thinking_level: ava_types::ThinkingLevel::Off,
     };
 
     let context = ContextManager::new(config.token_limit);

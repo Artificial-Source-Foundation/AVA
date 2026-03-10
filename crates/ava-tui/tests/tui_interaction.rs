@@ -109,13 +109,17 @@ fn command_palette_opens() {
 }
 
 #[test]
-fn slash_opens_command_palette() {
+fn slash_opens_inline_autocomplete() {
     let (mut app, _tmp) = make_app();
     press_char(&mut app, '/');
     assert_eq!(
-        app.state.active_modal,
-        Some(ModalType::CommandPalette),
-        "typing '/' on empty input should open command palette"
+        app.state.active_modal, None,
+        "typing '/' should NOT open a modal — it shows inline autocomplete"
+    );
+    assert_eq!(app.state.input.buffer, "/", "'/' should be typed into the buffer");
+    assert!(
+        app.state.input.has_slash_autocomplete(),
+        "slash autocomplete menu should be visible after typing '/'"
     );
 }
 

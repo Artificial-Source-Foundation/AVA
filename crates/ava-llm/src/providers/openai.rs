@@ -2,15 +2,27 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ava_types::{AvaError, Message, Result};
+use ava_types::{AvaError, Message, Result, StreamChunk, ThinkingLevel};
 use futures::{Stream, StreamExt};
 use serde_json::{json, Value};
 
 use tracing::instrument;
 
+use crate::circuit_breaker::CircuitBreaker;
 use crate::pool::ConnectionPool;
 use crate::provider::{LLMProvider, LLMResponse};
 use crate::providers::common;
+
+/// Thinking/reasoning format variants for OpenAI-compatible providers.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ThinkingFormat {
+    /// Standard OpenAI: `reasoning_effort` field
+    OpenAI,
+    /// DashScope (Alibaba): `enable_thinking: true` for reasoning models
+    DashScope,
+    /// ZAI/ZhipuAI: `thinking: { type: "enabled", clear_thinking: false }`
+    Zhipu,
+}
 
 #[derive(Clone)]
 pub struct OpenAIProvider {
@@ -18,6 +30,8 @@ pub struct OpenAIProvider {
     api_key: String,
     model: String,
     base_url: String,
+    thinking_format: ThinkingFormat,
+    circuit_breaker: Option<Arc<CircuitBreaker>>,
 }
 
 impl OpenAIProvider {
@@ -36,7 +50,56 @@ impl OpenAIProvider {
             api_key: api_key.into(),
             model: model.into(),
             base_url: base_url.into(),
+            thinking_format: ThinkingFormat::OpenAI,
+            circuit_breaker: Some(Arc::new(CircuitBreaker::default_provider())),
         }
+    }
+
+    /// Set the thinking format for this provider (DashScope, Zhipu, etc.).
+    pub fn with_thinking_format(mut self, format: ThinkingFormat) -> Self {
+        self.thinking_format = format;
+        self
+    }
+
+    /// Check if the current model supports reasoning/thinking.
+    /// Supports GPT-5.x, Codex, o3, o4, GLM, Qwen reasoning models.
+    fn supports_reasoning(&self) -> bool {
+        let model_lower = self.model.to_lowercase();
+        match self.thinking_format {
+            ThinkingFormat::OpenAI => {
+                model_lower.contains("gpt-5")
+                    || model_lower.contains("codex")
+                    || model_lower.starts_with("o3")
+                    || model_lower.starts_with("o4")
+            }
+            // DashScope: reasoning models (excluding kimi-k2-thinking which returns thinking by default)
+            ThinkingFormat::DashScope => {
+                !model_lower.contains("kimi-k2-thinking")
+                    && (model_lower.contains("qwen")
+                        || model_lower.contains("qwq")
+                        || model_lower.contains("deepseek-r1")
+                        || model_lower.contains("kimi"))
+            }
+            // ZAI/ZhipuAI: all GLM models support thinking
+            ThinkingFormat::Zhipu => true,
+        }
+    }
+
+    /// Whether this model supports the "xhigh" reasoning effort level.
+    /// Codex 5.2+, Codex 5.3+, GPT-5.3+ support xhigh per OpenCode's transform.ts.
+    fn supports_xhigh(&self) -> bool {
+        let model_lower = self.model.to_lowercase();
+        // Codex 5.2 or 5.3
+        if model_lower.contains("codex") {
+            return model_lower.contains("5.2") || model_lower.contains("5.3");
+        }
+        // GPT-5.3+
+        model_lower.contains("gpt-5.3") || model_lower.contains("gpt-5.4")
+    }
+
+    /// Return the maximum reasoning effort string for this model.
+    fn max_reasoning_effort(&self) -> &str {
+        if self.supports_xhigh() { "xhigh" } else { "high" }
     }
 
     pub fn build_request_body(&self, messages: &[Message], stream: bool) -> Value {
@@ -60,12 +123,80 @@ impl OpenAIProvider {
         body
     }
 
+    /// Build request body with reasoning support.
+    fn build_request_body_with_thinking(
+        &self,
+        messages: &[Message],
+        tools: &[ava_types::Tool],
+        stream: bool,
+        thinking: ThinkingLevel,
+    ) -> Value {
+        let mut body = self.build_request_body(messages, stream);
+
+        if !tools.is_empty() {
+            body["tools"] = json!(common::tools_to_openai_format(tools));
+        }
+
+        if thinking != ThinkingLevel::Off && self.supports_reasoning() {
+            match self.thinking_format {
+                ThinkingFormat::OpenAI => {
+                    // OpenAI reasoning effort API
+                    let effort = match thinking {
+                        ThinkingLevel::Off => unreachable!(),
+                        ThinkingLevel::Low => "low",
+                        ThinkingLevel::Medium => "medium",
+                        ThinkingLevel::High => "high",
+                        ThinkingLevel::Max => self.max_reasoning_effort(),
+                    };
+                    body["reasoning_effort"] = json!(effort);
+                    body["reasoning_summary"] = json!("auto");
+                    body["include"] = json!(["reasoning.encrypted_content"]);
+                }
+                ThinkingFormat::DashScope => {
+                    // Alibaba DashScope: enable_thinking field
+                    body["enable_thinking"] = json!(true);
+                }
+                ThinkingFormat::Zhipu => {
+                    // ZAI/ZhipuAI: thinking object with clear_thinking
+                    body["thinking"] = json!({
+                        "type": "enabled",
+                        "clear_thinking": false
+                    });
+                }
+            }
+        }
+
+        body
+    }
+
+    /// Parse reasoning content from OpenAI response.
+    fn parse_reasoning(&self, payload: &Value) -> Option<String> {
+        // OpenAI returns reasoning in message.reasoning_content or similar field
+        // The exact field may vary by model, try common locations
+        payload
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("message"))
+            .and_then(|message| {
+                message
+                    .get("reasoning_content")
+                    .or_else(|| message.get("reasoning"))
+            })
+            .and_then(Value::as_str)
+            .map(String::from)
+    }
+
     pub fn parse_response_payload(payload: &Value) -> Result<String> {
         common::parse_openai_completion_payload(payload)
     }
 
-    async fn client(&self) -> Arc<reqwest::Client> {
+    async fn client(&self) -> Result<Arc<reqwest::Client>> {
         self.pool.get_client(&self.base_url).await
+    }
+
+    async fn send_request(&self, request: reqwest::RequestBuilder) -> Result<reqwest::Response> {
+        common::send_with_retry_cb(request, "OpenAI", 3, self.circuit_breaker.as_deref()).await
     }
 }
 
@@ -73,13 +204,13 @@ impl OpenAIProvider {
 impl LLMProvider for OpenAIProvider {
     #[instrument(skip(self, messages), fields(model = %self.model))]
     async fn generate(&self, messages: &[Message]) -> Result<String> {
-        let client = self.client().await;
+        let client = self.client().await?;
         let request = client
             .post(format!("{}/v1/chat/completions", self.base_url))
             .bearer_auth(&self.api_key)
             .json(&self.build_request_body(messages, false));
 
-        let response = common::send_retrying(request, "OpenAI").await?;
+        let response = self.send_request(request).await?;
         let response = common::validate_status(response, "OpenAI").await?;
         let payload: Value = response
             .json()
@@ -93,29 +224,29 @@ impl LLMProvider for OpenAIProvider {
     async fn generate_stream(
         &self,
         messages: &[Message],
-    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
-        let client = self.client().await;
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        let client = self.client().await?;
         let request = client
             .post(format!("{}/v1/chat/completions", self.base_url))
             .bearer_auth(&self.api_key)
             .json(&self.build_request_body(messages, true));
 
-        let response = common::send_retrying(request, "OpenAI").await?;
+        let response = self.send_request(request).await?;
         let response = common::validate_status(response, "OpenAI").await?;
         let stream = response.bytes_stream().flat_map(|chunk| {
-            let content = chunk
+            let chunks = chunk
                 .ok()
                 .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
                 .map(|text| {
                     common::parse_sse_lines(&text)
                         .into_iter()
                         .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
-                        .filter_map(|payload| common::parse_openai_delta_payload(&payload))
+                        .filter_map(|payload| common::parse_openai_stream_chunk(&payload))
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
 
-            futures::stream::iter(content)
+            futures::stream::iter(chunks)
         });
 
         Ok(Box::pin(stream))
@@ -150,13 +281,13 @@ impl LLMProvider for OpenAIProvider {
             tool_count = tools.len(),
             "Sending generate_with_tools request"
         );
-        let client = self.client().await;
+        let client = self.client().await?;
         let request = client
             .post(format!("{}/v1/chat/completions", self.base_url))
             .bearer_auth(&self.api_key)
             .json(&body);
 
-        let response = common::send_retrying(request, "OpenAI").await?;
+        let response = self.send_request(request).await?;
         let response = common::validate_status(response, "OpenAI").await?;
         let payload: Value = response
             .json()
@@ -171,6 +302,146 @@ impl LLMProvider for OpenAIProvider {
             content,
             tool_calls,
             usage,
+            thinking: None,
+        })
+    }
+
+    #[instrument(skip(self, messages, tools), fields(model = %self.model))]
+    async fn generate_stream_with_tools(
+        &self,
+        messages: &[Message],
+        tools: &[ava_types::Tool],
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        let mut body = self.build_request_body_with_tools(messages, tools, true);
+        // Request usage in the final streaming chunk
+        body["stream_options"] = json!({"include_usage": true});
+        let client = self.client().await?;
+        let request = client
+            .post(format!("{}/v1/chat/completions", self.base_url))
+            .bearer_auth(&self.api_key)
+            .json(&body);
+
+        let response = self.send_request(request).await?;
+        let response = common::validate_status(response, "OpenAI").await?;
+        let stream = response.bytes_stream().flat_map(|chunk| {
+            let chunks = chunk
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+                .map(|text| {
+                    common::parse_sse_lines(&text)
+                        .into_iter()
+                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|payload| common::parse_openai_stream_chunk(&payload))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            futures::stream::iter(chunks)
+        });
+
+        Ok(Box::pin(stream))
+    }
+
+    #[instrument(skip(self, messages, tools), fields(model = %self.model, thinking = ?thinking))]
+    async fn generate_stream_with_thinking(
+        &self,
+        messages: &[Message],
+        tools: &[ava_types::Tool],
+        thinking: ThinkingLevel,
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        if !self.supports_reasoning() || thinking == ThinkingLevel::Off {
+            return self.generate_stream_with_tools(messages, tools).await;
+        }
+
+        let mut body = self.build_request_body_with_thinking(messages, tools, true, thinking);
+        body["stream_options"] = json!({"include_usage": true});
+        let client = self.client().await?;
+        let request = client
+            .post(format!("{}/v1/chat/completions", self.base_url))
+            .bearer_auth(&self.api_key)
+            .json(&body);
+
+        let response = self.send_request(request).await?;
+        let response = common::validate_status(response, "OpenAI").await?;
+        let stream = response.bytes_stream().flat_map(|chunk| {
+            let chunks = chunk
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+                .map(|text| {
+                    common::parse_sse_lines(&text)
+                        .into_iter()
+                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|payload| common::parse_openai_stream_chunk(&payload))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            futures::stream::iter(chunks)
+        });
+
+        Ok(Box::pin(stream))
+    }
+
+    fn supports_thinking(&self) -> bool {
+        self.supports_reasoning()
+    }
+
+    fn thinking_levels(&self) -> &[ThinkingLevel] {
+        if !self.supports_reasoning() {
+            &[]
+        } else if self.supports_xhigh() {
+            // Codex 5.2+, GPT-5.3+: support xhigh
+            &[
+                ThinkingLevel::Low,
+                ThinkingLevel::Medium,
+                ThinkingLevel::High,
+                ThinkingLevel::Max,
+            ]
+        } else {
+            &[
+                ThinkingLevel::Low,
+                ThinkingLevel::Medium,
+                ThinkingLevel::High,
+            ]
+        }
+    }
+
+    #[instrument(skip(self, messages, tools), fields(model = %self.model, thinking = ?thinking))]
+    async fn generate_with_thinking(
+        &self,
+        messages: &[Message],
+        tools: &[ava_types::Tool],
+        thinking: ThinkingLevel,
+    ) -> Result<LLMResponse> {
+        // For non-reasoning models, fall back to standard generate_with_tools
+        if !self.supports_reasoning() || thinking == ThinkingLevel::Off {
+            return self.generate_with_tools(messages, tools).await;
+        }
+
+        let body = self.build_request_body_with_thinking(messages, tools, false, thinking);
+        let client = self.client().await?;
+        let request = client
+            .post(format!("{}/v1/chat/completions", self.base_url))
+            .bearer_auth(&self.api_key)
+            .json(&body);
+
+        let response = self.send_request(request).await?;
+        let response = common::validate_status(response, "OpenAI").await?;
+        let payload: Value = response
+            .json()
+            .await
+            .map_err(|error| AvaError::SerializationError(error.to_string()))?;
+
+        let content = Self::parse_response_payload(&payload).unwrap_or_default();
+        let tool_calls = common::parse_openai_tool_calls(&payload);
+        let usage = common::parse_usage(&payload);
+        let thinking_content = self.parse_reasoning(&payload);
+
+        Ok(LLMResponse {
+            content,
+            tool_calls,
+            usage,
+            thinking: thinking_content,
         })
     }
 }

@@ -13,11 +13,20 @@ pub enum ToolOutput {
     Streaming(Pin<Box<dyn Stream<Item = String> + Send>>),
 }
 
+/// A tool that can be executed by the agent.
+///
+/// Implementations provide a name, description, JSON Schema parameters,
+/// and an async `execute` method. Tools are registered in a [`ToolRegistry`]
+/// and invoked by the agent loop when the LLM emits a tool call.
 #[async_trait]
 pub trait Tool: Send + Sync {
+    /// Unique tool name used in LLM tool-call payloads (e.g., "read", "bash").
     fn name(&self) -> &str;
+    /// Human-readable description shown to the LLM in the tool list.
     fn description(&self) -> &str;
+    /// JSON Schema describing the tool's input parameters.
     fn parameters(&self) -> Value;
+    /// Execute the tool with the given arguments, returning a result string.
     async fn execute(&self, args: Value) -> Result<ToolResult>;
 
     /// Execute with optional streaming output. Default wraps `execute()`.

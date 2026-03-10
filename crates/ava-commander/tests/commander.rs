@@ -10,7 +10,7 @@ use ava_commander::{
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
 use ava_platform::StandardPlatform;
-use ava_types::{Message, Result, Role};
+use ava_types::{Message, Result, Role, StreamChunk};
 use futures::Stream;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -518,9 +518,9 @@ impl LLMProvider for SlowProvider {
     async fn generate_stream(
         &self,
         messages: &[Message],
-    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
         let out = self.generate(messages).await?;
-        Ok(Box::pin(futures::stream::iter(vec![out])))
+        Ok(Box::pin(futures::stream::iter(vec![StreamChunk::text(out)])))
     }
 
     fn estimate_tokens(&self, input: &str) -> usize {

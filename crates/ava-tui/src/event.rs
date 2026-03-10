@@ -1,6 +1,6 @@
 use crate::state::agent::TokenUsage;
 use ava_agent::AgentEvent;
-use crossterm::event::{Event as CEvent, EventStream, KeyEvent};
+use crossterm::event::{Event as CEvent, EventStream, KeyEvent, MouseEvent, MouseEventKind};
 use futures::StreamExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -12,6 +12,7 @@ pub enum AppEvent {
     Key(KeyEvent),
     Paste(String),
     Resize(u16, u16),
+    Mouse(MouseEvent),
     Tick,
     Agent(AgentEvent),
     AgentDone(Result<ava_agent::stack::AgentRunResult, String>),
@@ -25,6 +26,10 @@ pub enum AppEvent {
     VoiceAmplitude(f32),
     /// Silence detected — auto-stop recording.
     VoiceSilenceDetected,
+    /// OAuth flow completed successfully.
+    OAuthSuccess { provider: String, tokens: ava_auth::tokens::OAuthTokens },
+    /// OAuth flow failed.
+    OAuthError { provider: String, error: String },
     Quit,
 }
 
@@ -41,6 +46,15 @@ pub fn spawn_event_reader(tx: mpsc::UnboundedSender<AppEvent>) {
                 }
                 Ok(CEvent::Resize(w, h)) => {
                     let _ = tx.send(AppEvent::Resize(w, h));
+                }
+                Ok(CEvent::Mouse(mouse)) => {
+                    // Only forward scroll events (not movement, clicks, etc.)
+                    if matches!(
+                        mouse.kind,
+                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                    ) {
+                        let _ = tx.send(AppEvent::Mouse(mouse));
+                    }
                 }
                 Ok(_) => {}
                 Err(_) => {

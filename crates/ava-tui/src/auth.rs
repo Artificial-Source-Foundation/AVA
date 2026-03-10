@@ -33,7 +33,7 @@ async fn auth_login(provider_id: &str) -> Result<()> {
 
     println!("Signing in to {}...", info.name);
 
-    match info.auth_flow {
+    match info.primary_flow() {
         AuthFlow::Pkce => {
             let result = ava_auth::authenticate(provider_id).await;
             match result {
@@ -162,7 +162,7 @@ async fn auth_logout(provider_id: &str) -> Result<()> {
 async fn auth_list() -> Result<()> {
     let store = CredentialStore::load_default().await.unwrap_or_default();
 
-    println!("{:<18} {:<12} {}", "PROVIDER", "AUTH", "STATUS");
+    println!("{:<18} {:<12} STATUS", "PROVIDER", "AUTH");
     println!("{}", "-".repeat(60));
 
     for info in ava_auth::all_providers() {

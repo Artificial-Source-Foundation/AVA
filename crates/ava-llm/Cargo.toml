@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 async-trait.workspace = true
+ava-auth = { path = "../ava-auth" }
 ava-config = { path = "../ava-config" }
 ava-types = { path = "../ava-types" }
 futures.workspace = true
@@ -15,4 +16,5 @@ serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+rand = "0.8"
 

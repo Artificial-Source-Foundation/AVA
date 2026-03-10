@@ -43,11 +43,12 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         )),
         Line::from(""),
         Line::from(Span::styled("Keys", label_style)),
-        Line::from(Span::styled("  Ctrl+/  palette", dim_style)),
-        Line::from(Span::styled("  Ctrl+D  quit", dim_style)),
-        Line::from(Span::styled("  Ctrl+C  cancel", dim_style)),
+        Line::from(Span::styled("  Ctrl+K  palette", dim_style)),
+        Line::from(Span::styled("  Ctrl+M  model", dim_style)),
         Line::from(Span::styled("  Ctrl+N  new session", dim_style)),
-        Line::from(Span::styled("  Ctrl+B  sidebar", dim_style)),
+        Line::from(Span::styled("  Ctrl+L  sessions", dim_style)),
+        Line::from(Span::styled("  Ctrl+S  sidebar", dim_style)),
+        Line::from(Span::styled("  Ctrl+C  cancel/quit", dim_style)),
     ];
 
     let widget = Paragraph::new(lines).block(

@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ava_types::{AvaError, Message, Result};
+use ava_types::{AvaError, Message, Result, StreamChunk};
 use futures::{Stream, StreamExt};
 use serde_json::{json, Value};
 
@@ -36,7 +36,7 @@ impl OllamaProvider {
         })
     }
 
-    async fn client(&self) -> Arc<reqwest::Client> {
+    async fn client(&self) -> Result<Arc<reqwest::Client>> {
         self.pool.get_client(&self.base_url).await
     }
 }
@@ -45,7 +45,7 @@ impl OllamaProvider {
 impl LLMProvider for OllamaProvider {
     #[instrument(skip(self, messages), fields(model = %self.model))]
     async fn generate(&self, messages: &[Message]) -> Result<String> {
-        let client = self.client().await;
+        let client = self.client().await?;
         let request = client
             .post(format!("{}/api/chat", self.base_url.trim_end_matches('/')))
             .json(&self.build_request_body(messages, false));
@@ -64,8 +64,8 @@ impl LLMProvider for OllamaProvider {
     async fn generate_stream(
         &self,
         messages: &[Message],
-    ) -> Result<Pin<Box<dyn Stream<Item = String> + Send>>> {
-        let client = self.client().await;
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        let client = self.client().await?;
         let request = client
             .post(format!("{}/api/chat", self.base_url.trim_end_matches('/')))
             .json(&self.build_request_body(messages, true));
@@ -73,24 +73,34 @@ impl LLMProvider for OllamaProvider {
         let response = common::send_retrying(request, "Ollama").await?;
         let response = common::validate_status(response, "Ollama").await?;
         let stream = response.bytes_stream().flat_map(|chunk| {
-            let content = chunk
+            let chunks = chunk
                 .ok()
                 .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
                 .map(|text| {
                     text.lines()
                         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
                         .filter_map(|payload| {
-                            payload
+                            let done = payload.get("done").and_then(Value::as_bool).unwrap_or(false);
+                            let content = payload
                                 .get("message")
                                 .and_then(|message| message.get("content"))
                                 .and_then(Value::as_str)
-                                .map(ToString::to_string)
+                                .map(ToString::to_string);
+                            if content.is_some() || done {
+                                Some(StreamChunk {
+                                    content,
+                                    done,
+                                    ..Default::default()
+                                })
+                            } else {
+                                None
+                            }
                         })
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
 
-            futures::stream::iter(content)
+            futures::stream::iter(chunks)
         });
 
         Ok(Box::pin(stream))

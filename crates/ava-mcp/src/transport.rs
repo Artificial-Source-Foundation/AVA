@@ -65,10 +65,18 @@ impl JsonRpcMessage {
 // MCPTransport trait
 // ---------------------------------------------------------------------------
 
+/// Bidirectional transport for MCP (Model Context Protocol) communication.
+///
+/// Implementations handle the framing and delivery of JSON-RPC messages
+/// between the host and an MCP server. Messages are sent and received
+/// sequentially — callers must not overlap `send`/`receive` calls.
 #[async_trait]
 pub trait MCPTransport: Send + Sync {
+    /// Send a JSON-RPC message to the MCP server.
     async fn send(&mut self, message: &JsonRpcMessage) -> Result<()>;
+    /// Receive the next JSON-RPC message from the MCP server.
     async fn receive(&mut self) -> Result<JsonRpcMessage>;
+    /// Shut down the transport, releasing resources (e.g., killing child process).
     async fn close(&mut self) -> Result<()>;
 }
 

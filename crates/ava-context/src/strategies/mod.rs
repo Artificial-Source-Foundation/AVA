@@ -13,8 +13,15 @@ pub use sliding_window::SlidingWindowStrategy;
 pub use summarization::SummarizationStrategy;
 pub use tool_truncation::ToolTruncationStrategy;
 
+/// Strategy for condensing a conversation to fit within a token budget.
+///
+/// Implementations reduce message history while preserving important context.
+/// The 3-stage pipeline applies strategies in order: tool truncation → sliding
+/// window → summarization/relevance scoring.
 pub trait CondensationStrategy: Send + Sync {
+    /// Strategy name for logging and diagnostics.
     fn name(&self) -> &'static str;
+    /// Condense `messages` to fit within `max_tokens`, returning the reduced set.
     fn condense(&self, messages: &[Message], max_tokens: usize) -> Result<Vec<Message>>;
 }
 

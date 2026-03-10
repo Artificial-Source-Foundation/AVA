@@ -1,8 +1,8 @@
 # AVA Sprint Roadmap
 
-> Last updated: 2026-03-08
+> Last updated: 2026-03-09 (Sprint 59 complete)
 
-## Completed (Sprints 11–50)
+## Completed (Sprints 11–59)
 
 | Sprint | Focus |
 |--------|-------|
@@ -47,18 +47,35 @@
 | 99 | Codebase housekeeping (docs cleanup, crate doc comments, archives organized) |
 | 100 | v2.1 release documentation, test matrix, version bump |
 
-## Status: v2.1 Released
+| 51a | TUI visual rework (capybara mascot, dark theme, status bar) |
+| 51b | TUI commands + auth (slash commands, command palette, keybinds) |
+| 52 | OAuth providers (OpenRouter OAuth, provider connect modal) |
+| 53 | Dynamic model catalog (models.dev API, curated whitelist, cache, ID mapping) |
+| 54 | Thinking/reasoning modes (per-provider variants, /think command, Ctrl+T cycle) |
+| 55 | Coding plan providers (Alibaba, ZAI, ZhipuAI, Kimi, MiniMax — 7 new providers) |
+| 56 | Codebase quality audit (6 parallel sub-agents, read-only, structured reports) |
+| 57 | Quality fixes — P0 critical (panics, tests, dead_code) + P1 high (docs, modularity) |
+| 58 | Modal system revamp — shared SelectList widget, scroll fix, visual redesign |
+| 59 | Provider mega — Copilot provider, provider verification, retry jitter ±20%, circuit breaker wiring, compiled-in model registry, rich StreamChunk, Alibaba Coding Plan fixes, context window display, error text wrapping, dedup guard fix |
 
-All planned sprints are complete. Released as v2.1.0 on 2026-03-08.
+## In Progress (Sprint 60)
 
-## Codebase Stats (as of Sprint 50)
+| Sprint | Focus | Status |
+|--------|-------|--------|
+| 60 | Streaming tool calls + Session/context UX | Planned |
+
+## Status: v2.1 Released + Active Development
+
+v2.1.0 released on 2026-03-08. Sprints 51-59 extended model intelligence, provider coverage, and quality. Sprint 60 focuses on streaming tool calls and session/context UX.
+
+## Codebase Stats (as of Sprint 59)
 
 | Metric | Value |
 |--------|-------|
-| Rust crates | 21 |
-| Rust source files | 291 |
-| Lines of Rust | ~47,000 |
-| Tests | 595 |
+| Rust crates | 22 |
+| Rust source files | ~320 |
+| Lines of Rust | ~45,000 |
+| Tests | ~820 |
 | Clippy | Clean |
 | Built-in tools | 19 |
 

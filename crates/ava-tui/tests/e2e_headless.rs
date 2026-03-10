@@ -70,7 +70,7 @@ async fn run_with_timeout(
     let goal = goal.to_string();
 
     let handle = tokio::spawn(async move {
-        stack.run(&goal, MAX_TURNS, Some(tx), cancel).await
+        stack.run(&goal, MAX_TURNS, Some(tx), cancel, Vec::new()).await
     });
 
     let mut events = Vec::new();

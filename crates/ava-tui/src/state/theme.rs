@@ -17,10 +17,13 @@ pub struct Theme {
     // Surfaces
     pub bg: Color,
     pub bg_elevated: Color,
+    pub bg_surface: Color,
+    pub bg_deep: Color,
     pub bg_user_message: Color,
     // Borders
     pub border: Color,
     pub border_active: Color,
+    pub border_subtle: Color,
     // Diff
     pub diff_added: Color,
     pub diff_removed: Color,
@@ -42,24 +45,27 @@ impl Theme {
     pub fn default_theme() -> Self {
         Self {
             name: "default",
-            // GitHub dark-inspired palette
-            primary: Color::Rgb(88, 166, 255),    // #58a6ff — blue
-            secondary: Color::Rgb(121, 192, 255),  // #79c0ff — light blue
-            accent: Color::Rgb(240, 136, 62),      // #f0883e — amber
-            success: Color::Rgb(63, 185, 80),      // #3fb950 — green
-            error: Color::Rgb(248, 81, 73),        // #f85149 — red
-            warning: Color::Rgb(210, 153, 34),     // #d29922 — gold
+            // Pencil design system palette
+            primary: Color::Rgb(77, 158, 246),     // #4D9EF6 — accent-primary
+            secondary: Color::Rgb(123, 97, 255),   // #7B61FF — accent-secondary (purple)
+            accent: Color::Rgb(251, 191, 36),      // #FBBF24 — accent-warning
+            success: Color::Rgb(52, 211, 153),     // #34D399 — accent-success
+            error: Color::Rgb(248, 113, 113),      // #F87171 — accent-error
+            warning: Color::Rgb(251, 191, 36),     // #FBBF24 — accent-warning
             // Text
-            text: Color::Rgb(230, 237, 243),       // #e6edf3 — soft white
-            text_muted: Color::Rgb(125, 133, 144), // #7d8590 — gray
-            text_dimmed: Color::Rgb(72, 79, 88),   // #484f58 — dark gray
+            text: Color::Rgb(232, 236, 241),       // #E8ECF1 — text-primary
+            text_muted: Color::Rgb(139, 149, 165), // #8B95A5 — text-secondary
+            text_dimmed: Color::Rgb(80, 90, 107),  // #505A6B — text-muted
             // Surfaces
-            bg: Color::Rgb(13, 17, 23),            // #0d1117
-            bg_elevated: Color::Rgb(22, 27, 34),   // #161b22
-            bg_user_message: Color::Rgb(22, 27, 34), // #161b22 — subtle tint
+            bg: Color::Rgb(11, 14, 20),            // #0B0E14 — bg-deep
+            bg_elevated: Color::Rgb(26, 31, 46),   // #1A1F2E — bg-elevated
+            bg_surface: Color::Rgb(19, 23, 32),    // #131720 — bg-surface
+            bg_deep: Color::Rgb(11, 14, 20),       // #0B0E14 — bg-deep
+            bg_user_message: Color::Rgb(26, 31, 46), // #1A1F2E — bg-elevated
             // Borders
-            border: Color::Rgb(48, 54, 61),        // #30363d
-            border_active: Color::Rgb(88, 166, 255), // #58a6ff
+            border: Color::Rgb(30, 36, 51),        // #1E2433 — border-subtle
+            border_active: Color::Rgb(77, 158, 246), // #4D9EF6 — accent-primary
+            border_subtle: Color::Rgb(30, 36, 51), // #1E2433 — border-subtle
             // Diff
             diff_added: Color::Rgb(63, 185, 80),   // #3fb950
             diff_removed: Color::Rgb(248, 81, 73), // #f85149
@@ -92,9 +98,12 @@ impl Theme {
             text_dimmed: Color::Rgb(68, 71, 90),   // current line
             bg: Color::Rgb(40, 42, 54),            // background
             bg_elevated: Color::Rgb(50, 52, 66),   // slightly lighter
+            bg_surface: Color::Rgb(60, 62, 76),    // header/footer bars
+            bg_deep: Color::Rgb(35, 37, 48),       // input fields, code blocks
             bg_user_message: Color::Rgb(50, 52, 66),
             border: Color::Rgb(68, 71, 90),        // current line
             border_active: Color::Rgb(139, 233, 253), // cyan
+            border_subtle: Color::Rgb(55, 57, 70), // subtle input borders
             diff_added: Color::Rgb(80, 250, 123),
             diff_removed: Color::Rgb(255, 85, 85),
             diff_context: Color::Rgb(98, 114, 164),
@@ -125,9 +134,12 @@ impl Theme {
             text_dimmed: Color::Rgb(59, 66, 82),   // nord2
             bg: Color::Rgb(46, 52, 64),            // nord0 polar night
             bg_elevated: Color::Rgb(59, 66, 82),   // nord2
+            bg_surface: Color::Rgb(67, 76, 94),    // nord3 — header/footer bars
+            bg_deep: Color::Rgb(41, 46, 56),       // darker than bg
             bg_user_message: Color::Rgb(59, 66, 82),
             border: Color::Rgb(67, 76, 94),        // nord3
             border_active: Color::Rgb(136, 192, 208), // nord8
+            border_subtle: Color::Rgb(55, 62, 76), // between nord1 and nord2
             diff_added: Color::Rgb(163, 190, 140), // nord14
             diff_removed: Color::Rgb(191, 97, 106), // nord11
             diff_context: Color::Rgb(129, 161, 193),

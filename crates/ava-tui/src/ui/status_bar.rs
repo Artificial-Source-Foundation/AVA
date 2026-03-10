@@ -3,6 +3,7 @@ use crate::state::agent::AgentActivity;
 use crate::state::messages::spinner_frame;
 use crate::state::voice::VoicePhase;
 use ratatui::layout::Rect;
+use ratatui::widgets::Block;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
@@ -77,50 +78,36 @@ fn format_elapsed(secs: u64) -> String {
     }
 }
 
+/// Design: horizontal padding 20px → 2 chars
+const H_PAD: &str = "  ";
+/// Design: gap between hint items 16px → 2 chars
+const ITEM_GAP: &str = "  ";
+
 // --- Top bar ---
+// Design: height=36, bg=#131720, padding=[0,20], justify=space_between
+// Left: AVA (bold blue) │ session_id (muted)
+// Right: permission mode badge
 
 pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    let sep = Span::styled(" \u{2502} ", Style::default().fg(state.theme.border));
+    let sep = Span::styled(" \u{2502} ", Style::default().fg(state.theme.text_dimmed));
 
-    let mut spans = vec![
+    let mut left_spans = vec![
+        Span::raw(H_PAD),
         Span::styled(
             "AVA",
             Style::default()
                 .fg(state.theme.primary)
                 .add_modifier(Modifier::BOLD),
         ),
-        sep.clone(),
-        Span::styled(
-            &state.agent.model_name,
-            Style::default().fg(state.theme.text),
-        ),
-        sep.clone(),
-        Span::styled(
-            format!(
-                "{}/{}",
-                format_tokens(state.agent.tokens_used.input),
-                format_tokens(state.agent.tokens_used.output),
-            ),
-            Style::default().fg(state.theme.text_muted),
-        ),
     ];
 
-    if state.agent.cost > 0.0 {
-        spans.push(sep.clone());
-        spans.push(Span::styled(
-            format!("${:.2}", state.agent.cost),
-            Style::default().fg(state.theme.text_muted),
-        ));
-    }
-
-    // MCP info
-    if state.agent.mcp_server_count > 0 {
-        spans.push(sep.clone());
-        spans.push(Span::styled(
-            format!(
-                "MCP: {} svr \u{2502} {} tools",
-                state.agent.mcp_server_count, state.agent.mcp_tool_count
-            ),
+    // Session ID
+    if let Some(ref session) = state.session.current_session {
+        left_spans.push(sep.clone());
+        let short_id = session.id.to_string();
+        let display = if short_id.len() > 8 { &short_id[..8] } else { &short_id };
+        left_spans.push(Span::styled(
+            display.to_string(),
             Style::default().fg(state.theme.text_muted),
         ));
     }
@@ -129,22 +116,22 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     match state.voice.phase {
         VoicePhase::Recording => {
             let elapsed = state.voice.recording_duration();
-            spans.push(sep.clone());
-            spans.push(Span::styled(
+            left_spans.push(sep.clone());
+            left_spans.push(Span::styled(
                 format!("REC {elapsed:.1}s"),
                 Style::default().fg(state.theme.error),
             ));
             let bars = (state.voice.amplitude * 25.0).min(5.0) as usize;
             let bar_str: String =
                 "\u{2588}".repeat(bars) + &"\u{2591}".repeat(5 - bars);
-            spans.push(Span::styled(
+            left_spans.push(Span::styled(
                 format!(" {bar_str}"),
                 Style::default().fg(state.theme.accent),
             ));
         }
         VoicePhase::Transcribing => {
-            spans.push(sep.clone());
-            spans.push(Span::styled(
+            left_spans.push(sep.clone());
+            left_spans.push(Span::styled(
                 "Transcribing...",
                 Style::default().fg(state.theme.accent),
             ));
@@ -159,30 +146,55 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             StatusLevel::Warn => state.theme.warning,
             StatusLevel::Error => state.theme.error,
         };
-        spans.push(sep.clone());
-        spans.push(Span::styled(&msg.text, Style::default().fg(color)));
+        left_spans.push(sep);
+        left_spans.push(Span::styled(&msg.text, Style::default().fg(color)));
     }
 
-    if state.permission.yolo_mode {
-        spans.push(Span::styled(
-            " YOLO",
-            Style::default()
-                .fg(state.theme.warning)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
+    // Right side: permission mode badge
+    let mode_text = if state.permission.yolo_mode {
+        "YOLO"
+    } else {
+        "standard"
+    };
+    let mode_style = if state.permission.yolo_mode {
+        Style::default()
+            .fg(state.theme.warning)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(state.theme.text_dimmed)
+    };
 
-    let left =
-        Paragraph::new(Line::from(spans)).style(Style::default().bg(state.theme.bg));
-    frame.render_widget(left, area);
+    // Calculate widths and fill gap
+    let left_width: usize = left_spans.iter().map(|s| s.content.len()).sum();
+    let right_width = mode_text.len() + H_PAD.len();
+    let gap = (area.width as usize).saturating_sub(left_width + right_width);
+
+    if gap > 0 {
+        left_spans.push(Span::raw(" ".repeat(gap)));
+    }
+    left_spans.push(Span::styled(mode_text, mode_style));
+    left_spans.push(Span::raw(H_PAD));
+
+    // Fill bg first, then render text centered vertically
+    let bg = ratatui::widgets::Block::default().style(Style::default().bg(state.theme.bg_surface));
+    frame.render_widget(bg, area);
+
+    // Center single line vertically in the 2-row area
+    let text_y = area.y + (area.height.saturating_sub(1)) / 2;
+    let text_area = Rect { x: area.x, y: text_y, width: area.width, height: 1 };
+    let widget = Paragraph::new(Line::from(left_spans));
+    frame.render_widget(widget, text_area);
 }
 
 // --- Context bar (below composer) ---
+// Design: height=28, bg=#131720, padding=[0,20], justify=space_between
+// Left: keyboard hints (key bold + desc dimmed, gap=16)
+// Right: tokens + cost + model badge (gap=16)
 
 pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let spinner_tick = state.messages.spinner_tick;
 
-    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut left_spans: Vec<Span<'static>> = vec![Span::raw(H_PAD)];
 
     // Show modal-specific hints
     if let Some(modal) = state.active_modal {
@@ -199,26 +211,9 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 ("Esc", "close"),
             ],
         };
-        for (i, (key, desc)) in hints.iter().enumerate() {
-            if i > 0 {
-                spans.push(Span::styled(
-                    "  ",
-                    Style::default().fg(state.theme.text_dimmed),
-                ));
-            }
-            spans.push(Span::styled(
-                key.to_string(),
-                Style::default()
-                    .fg(state.theme.text_muted)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled(
-                format!(" {desc}"),
-                Style::default().fg(state.theme.text_dimmed),
-            ));
-        }
+        render_hints(&mut left_spans, &hints, state);
     } else if state.agent.is_running {
-        // Show spinner + activity + interrupt hint
+        // Spinner + activity + interrupt hint
         let (activity, style) =
             if let AgentActivity::ExecutingTool(ref name) = state.agent.activity {
                 let elapsed_str = state
@@ -248,32 +243,44 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             };
 
         let frame_char = spinner_frame(spinner_tick);
-        spans.push(Span::styled(
+        left_spans.push(Span::styled(
             format!("{frame_char} "),
             Style::default().fg(state.theme.accent),
         ));
-        spans.push(Span::styled(activity, style));
+        left_spans.push(Span::styled(activity, style));
 
         // Workflow phase
         if let Some((idx, count, name)) = &state.agent.workflow_phase {
-            spans.push(Span::styled(
-                format!("  Phase {}/{}: {}", idx + 1, count, name),
+            left_spans.push(Span::styled(
+                format!("{ITEM_GAP}Phase {}/{}: {}", idx + 1, count, name),
                 Style::default().fg(state.theme.text_muted),
             ));
         }
 
-        spans.push(Span::styled(
-            "  esc interrupt",
+        left_spans.push(Span::raw(ITEM_GAP));
+        left_spans.push(Span::styled(
+            "esc",
+            Style::default()
+                .fg(state.theme.text_muted)
+                .add_modifier(Modifier::BOLD),
+        ));
+        left_spans.push(Span::styled(
+            " interrupt",
             Style::default().fg(state.theme.text_dimmed),
         ));
     } else {
-        // Idle — show permission mode
+        // Idle hints
+        let hints: &[(&str, &str)] =
+            &[("/", "commands"), ("Ctrl+M", "model"), ("Ctrl+K", "palette")];
+        render_hints(&mut left_spans, hints, state);
+
         if state.permission.yolo_mode {
-            spans.push(Span::styled(
+            left_spans.push(Span::raw(ITEM_GAP));
+            left_spans.push(Span::styled(
                 "\u{25b8}\u{25b8} ",
                 Style::default().fg(state.theme.warning),
             ));
-            spans.push(Span::styled(
+            left_spans.push(Span::styled(
                 "bypass permissions on",
                 Style::default()
                     .fg(state.theme.warning)
@@ -282,7 +289,95 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         }
     }
 
-    let widget =
-        Paragraph::new(Line::from(spans)).style(Style::default().bg(state.theme.bg));
-    frame.render_widget(widget, area);
+    // Right side: tokens, cost, model badge
+    let mut right_spans: Vec<Span<'static>> = Vec::new();
+
+    // Tokens
+    let token_text = {
+        let input = format_tokens(state.agent.tokens_used.input);
+        if let Some(ctx) = state.agent.context_window {
+            format!("{input}/{}", format_tokens(ctx))
+        } else {
+            input
+        }
+    };
+    if state.agent.tokens_used.input > 0 {
+        right_spans.push(Span::styled(
+            token_text,
+            Style::default().fg(state.theme.text_muted),
+        ));
+    }
+
+    // Cost
+    if state.agent.cost > 0.0 {
+        if !right_spans.is_empty() {
+            right_spans.push(Span::raw(ITEM_GAP));
+        }
+        right_spans.push(Span::styled(
+            format!("${:.2}", state.agent.cost),
+            Style::default().fg(state.theme.text_muted),
+        ));
+    }
+
+    // Model badge
+    if !right_spans.is_empty() {
+        right_spans.push(Span::raw(ITEM_GAP));
+    }
+    right_spans.push(Span::styled(
+        state.agent.model_name.clone(),
+        Style::default()
+            .fg(state.theme.primary)
+            .add_modifier(Modifier::BOLD),
+    ));
+
+    // Thinking level badge (shown when not Off)
+    if state.agent.thinking_level != ava_types::ThinkingLevel::Off {
+        right_spans.push(Span::raw(" "));
+        right_spans.push(Span::styled(
+            format!("thinking:{}", state.agent.thinking_level.label()),
+            Style::default().fg(state.theme.accent),
+        ));
+    }
+
+    // Fill gap between left and right
+    let left_width: usize = left_spans.iter().map(|s| s.content.len()).sum();
+    let right_width: usize =
+        right_spans.iter().map(|s| s.content.len()).sum::<usize>() + H_PAD.len();
+    let gap = (area.width as usize).saturating_sub(left_width + right_width);
+
+    let mut all_spans = left_spans;
+    if gap > 0 {
+        all_spans.push(Span::raw(" ".repeat(gap)));
+    }
+    all_spans.extend(right_spans);
+    all_spans.push(Span::raw(H_PAD));
+
+    // Fill bg first, then render text centered vertically
+    let bg = Block::default().style(Style::default().bg(state.theme.bg_surface));
+    frame.render_widget(bg, area);
+
+    // Pin text to bottom row — padding row sits between composer and text
+    let text_y = area.y + area.height.saturating_sub(1);
+    let text_area = Rect { x: area.x, y: text_y, width: area.width, height: 1 };
+    let widget = Paragraph::new(Line::from(all_spans));
+    frame.render_widget(widget, text_area);
+}
+
+/// Render a list of (key, description) hint pairs with consistent styling.
+fn render_hints(spans: &mut Vec<Span<'static>>, hints: &[(&str, &str)], state: &AppState) {
+    for (i, (key, desc)) in hints.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw(ITEM_GAP));
+        }
+        spans.push(Span::styled(
+            key.to_string(),
+            Style::default()
+                .fg(state.theme.text_muted)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!(" {desc}"),
+            Style::default().fg(state.theme.text_dimmed),
+        ));
+    }
 }

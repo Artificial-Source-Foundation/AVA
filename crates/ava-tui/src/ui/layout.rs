@@ -2,28 +2,64 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
 pub struct MainLayout {
     pub top_bar: Rect,
+    /// Messages area inset by content_margin on both sides.
     pub messages: Rect,
-    pub separator: Rect,
+    /// Full-width row for the messages section (for background fills).
+    pub messages_full: Rect,
     pub composer: Rect,
     pub context_bar: Rect,
     pub sidebar: Option<Rect>,
 }
 
 /// Calculate how many lines the composer needs based on buffer content.
-pub fn composer_height(buffer: &str, available_width: u16) -> u16 {
-    // Inner width = total width minus 2 ("❯ " prefix)
-    let inner_width = available_width.saturating_sub(2).max(1) as usize;
-    let text_len = buffer.len();
-    let lines = if text_len == 0 {
+///
+/// Content: prompt line + model info line = 2 lines minimum.
+/// Plus 1 line top/bottom padding for breathing room (design: padding=[12,16]).
+/// Multi-line input adds more prompt lines (capped at 8).
+/// Capped at 33% of terminal height.
+pub fn composer_height(buffer: &str, available_width: u16, terminal_height: u16) -> u16 {
+    // Inner width = total minus bar (1) + pad (2) + "❯ " (2)
+    let inner_width = available_width.saturating_sub(5).max(1) as usize;
+
+    let prompt_lines = if buffer.is_empty() {
         1
     } else {
-        ((text_len + inner_width - 1) / inner_width).max(1)
+        buffer
+            .split('\n')
+            .map(|line| {
+                let len = line.len();
+                if len == 0 {
+                    1usize
+                } else {
+                    len.div_ceil(inner_width).max(1)
+                }
+            })
+            .sum::<usize>()
+            .max(1)
     };
-    // Clamp to max 8 lines
-    lines.min(8) as u16
+
+    let prompt_h = prompt_lines.min(8) as u16;
+    // prompt lines + model info line + 1 top pad + 1 bottom pad
+    let content = prompt_h + 1;
+    let total = content + 2;
+    let max_height = (terminal_height / 3).max(4);
+    total.min(max_height)
+}
+
+/// Horizontal margin for the messages area.
+/// Design: padding=24px on 1440px frame ≈ 1.67%.
+pub fn content_margin(area_width: u16) -> u16 {
+    if area_width >= 120 {
+        3
+    } else if area_width >= 60 {
+        2
+    } else {
+        1
+    }
 }
 
 pub fn build_layout(area: Rect, show_sidebar: bool, composer_h: u16) -> MainLayout {
+    // Sidebar split (only Layout usage — horizontal is reliable)
     let (main, sidebar) = if show_sidebar && area.width > 120 {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
@@ -34,23 +70,59 @@ pub fn build_layout(area: Rect, show_sidebar: bool, composer_h: u16) -> MainLayo
         (area, None)
     };
 
-    let rows = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),          // top bar
-            Constraint::Min(1),            // messages
-            Constraint::Length(1),          // thin separator line
-            Constraint::Length(composer_h), // composer (borderless, just prompt)
-            Constraint::Length(1),          // context bar (activity/status)
-        ])
-        .split(main);
+    // Manual vertical layout — pinned to edges, no solver ambiguity.
+    // Design: Top Bar height=36px ≈ 2 rows, Context Bar height=28px ≈ 2 rows
+    let bar_h: u16 = 2;
+
+    // Top bar: rows 0..1
+    let top_bar = Rect {
+        x: main.x,
+        y: main.y,
+        width: main.width,
+        height: bar_h,
+    };
+
+    // Context bar: last 2 rows
+    let context_bar = Rect {
+        x: main.x,
+        y: main.y + main.height.saturating_sub(bar_h),
+        width: main.width,
+        height: bar_h,
+    };
+
+    // Composer: pinned above context bar
+    let clamped_composer_h = composer_h.min(main.height.saturating_sub(bar_h * 2 + 1)); // leave room for top + context + 1 msg row
+    let composer = Rect {
+        x: main.x,
+        y: context_bar.y.saturating_sub(clamped_composer_h),
+        width: main.width,
+        height: clamped_composer_h,
+    };
+
+    // Messages: fills between top bar and composer
+    let messages_y = main.y + bar_h;
+    let messages_h = composer.y.saturating_sub(messages_y);
+    let messages_full = Rect {
+        x: main.x,
+        y: messages_y,
+        width: main.width,
+        height: messages_h,
+    };
+
+    let margin = content_margin(main.width);
+    let messages = Rect {
+        x: messages_full.x.saturating_add(margin),
+        y: messages_full.y,
+        width: messages_full.width.saturating_sub(margin * 2),
+        height: messages_full.height,
+    };
 
     MainLayout {
-        top_bar: rows[0],
-        messages: rows[1],
-        separator: rows[2],
-        composer: rows[3],
-        context_bar: rows[4],
+        top_bar,
+        messages,
+        messages_full,
+        composer,
+        context_bar,
         sidebar,
     }
 }

@@ -85,3 +85,80 @@ impl Tool for CodebaseSearchTool {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn empty_index() -> Arc<RwLock<Option<Arc<CodebaseIndex>>>> {
+        Arc::new(RwLock::new(None))
+    }
+
+    #[test]
+    fn tool_metadata() {
+        let tool = CodebaseSearchTool::new(empty_index());
+        assert_eq!(tool.name(), "codebase_search");
+        assert!(!tool.description().is_empty());
+        let params = tool.parameters();
+        assert_eq!(params["required"], json!(["query"]));
+    }
+
+    #[tokio::test]
+    async fn returns_not_available_when_no_index() {
+        let tool = CodebaseSearchTool::new(empty_index());
+        let result = tool.execute(json!({"query": "hello"})).await.unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("not yet available"));
+    }
+
+    #[tokio::test]
+    async fn missing_query_errors() {
+        let tool = CodebaseSearchTool::new(empty_index());
+        let result = tool.execute(json!({})).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn with_index_empty_results() {
+        // Build a real index on a temp dir with no source files
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(dir.path().join("README.md"), "# Empty project")
+            .await
+            .unwrap();
+
+        let index = ava_codebase::indexer::index_project(dir.path()).await.unwrap();
+        let shared = Arc::new(RwLock::new(Some(Arc::new(index))));
+        let tool = CodebaseSearchTool::new(shared);
+
+        let result = tool
+            .execute(json!({"query": "nonexistent_symbol_xyz123"}))
+            .await
+            .unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("No results"));
+    }
+
+    #[tokio::test]
+    async fn with_index_finds_content() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(
+            dir.path().join("main.rs"),
+            "fn calculate_fibonacci(n: u64) -> u64 { if n <= 1 { n } else { calculate_fibonacci(n-1) + calculate_fibonacci(n-2) } }",
+        )
+        .await
+        .unwrap();
+
+        let index = ava_codebase::indexer::index_project(dir.path()).await.unwrap();
+        let shared = Arc::new(RwLock::new(Some(Arc::new(index))));
+        let tool = CodebaseSearchTool::new(shared);
+
+        let result = tool
+            .execute(json!({"query": "fibonacci"}))
+            .await
+            .unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("Found"));
+        assert!(result.content.contains("main.rs"));
+    }
+}

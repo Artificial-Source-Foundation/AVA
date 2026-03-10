@@ -212,6 +212,7 @@ mod tests {
             max_cost_usd,
             loop_detection,
             custom_system_prompt: None,
+            thinking_level: ava_types::ThinkingLevel::Off,
         }
     }
 

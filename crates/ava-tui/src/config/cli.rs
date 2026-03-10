@@ -179,13 +179,26 @@ pub async fn resolve_provider_model(
         return Ok((env_provider, env_model));
     }
 
-    // Try loading from config file
+    // Check per-project state (`.ava/state.json`) for last used model
+    let project_root = std::env::current_dir().unwrap_or_default();
+    let project_state = ava_config::ProjectState::load(&project_root);
+    if project_state.last_provider.is_some() {
+        debug!(
+            provider = ?project_state.last_provider,
+            model = ?project_state.last_model,
+            "Using last used provider/model from project state"
+        );
+        return Ok((project_state.last_provider, project_state.last_model));
+    }
+
+    // Try loading from global config file
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
     let config_path = data_dir.join("config.yaml");
 
     if config_path.exists() {
         let content = tokio::fs::read_to_string(&config_path).await?;
         if let Ok(config) = serde_yaml::from_str::<ava_config::Config>(&content) {
+            // Fall back to explicit llm.provider/llm.model config
             let provider = if config.llm.provider != "openai" {
                 debug!(provider = %config.llm.provider, "Loaded provider from config file");
                 Some(config.llm.provider)

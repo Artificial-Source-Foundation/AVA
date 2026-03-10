@@ -182,3 +182,123 @@ impl Tool for MemorySearchTool {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Returns (TempDir, Arc<MemorySystem>). The TempDir must be kept alive
+    /// for the duration of the test to prevent the database from being deleted.
+    fn test_memory() -> (tempfile::TempDir, Arc<MemorySystem>) {
+        let dir = tempfile::tempdir().unwrap();
+        let mem = Arc::new(MemorySystem::new(dir.path().join("test.db")).unwrap());
+        (dir, mem)
+    }
+
+    #[test]
+    fn remember_tool_metadata() {
+        let (_dir, mem) = test_memory();
+        let tool = RememberTool::new(mem);
+        assert_eq!(tool.name(), "remember");
+        assert!(!tool.description().is_empty());
+        let params = tool.parameters();
+        assert_eq!(params["required"], json!(["key", "value"]));
+    }
+
+    #[tokio::test]
+    async fn remember_stores_and_returns() {
+        let (_dir, mem) = test_memory();
+        let tool = RememberTool::new(mem);
+        let result = tool
+            .execute(json!({"key": "project", "value": "AVA"}))
+            .await
+            .unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("project"));
+        assert!(result.content.contains("AVA"));
+    }
+
+    #[tokio::test]
+    async fn remember_missing_key_errors() {
+        let (_dir, mem) = test_memory();
+        let tool = RememberTool::new(mem);
+        let result = tool.execute(json!({"value": "no key"})).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn recall_existing_key() {
+        let (_dir, mem) = test_memory();
+        mem.remember("lang", "Rust").unwrap();
+        let tool = RecallTool::new(mem);
+        let result = tool.execute(json!({"key": "lang"})).await.unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("Rust"));
+    }
+
+    #[tokio::test]
+    async fn recall_missing_key() {
+        let (_dir, mem) = test_memory();
+        let tool = RecallTool::new(mem);
+        let result = tool.execute(json!({"key": "nonexistent"})).await.unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("No memory found"));
+    }
+
+    #[tokio::test]
+    async fn recall_missing_arg_errors() {
+        let (_dir, mem) = test_memory();
+        let tool = RecallTool::new(mem);
+        let result = tool.execute(json!({})).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn search_finds_matches() {
+        let (_dir, mem) = test_memory();
+        mem.remember("greeting", "hello world").unwrap();
+        mem.remember("farewell", "goodbye world").unwrap();
+        let tool = MemorySearchTool::new(mem);
+        let result = tool.execute(json!({"query": "world"})).await.unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("Found"));
+    }
+
+    #[tokio::test]
+    async fn search_no_matches() {
+        let (_dir, mem) = test_memory();
+        mem.remember("key", "value").unwrap();
+        let tool = MemorySearchTool::new(mem);
+        let result = tool
+            .execute(json!({"query": "nonexistent_xyz"}))
+            .await
+            .unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("No memories matching"));
+    }
+
+    #[tokio::test]
+    async fn search_respects_limit() {
+        let (_dir, mem) = test_memory();
+        for i in 0..5 {
+            mem.remember(&format!("item{i}"), &format!("data {i}"))
+                .unwrap();
+        }
+        let tool = MemorySearchTool::new(mem);
+        let result = tool
+            .execute(json!({"query": "data", "limit": 2}))
+            .await
+            .unwrap();
+        assert!(!result.is_error);
+        assert!(result.content.contains("Found 2"));
+    }
+
+    #[tokio::test]
+    async fn search_missing_query_errors() {
+        let (_dir, mem) = test_memory();
+        let tool = MemorySearchTool::new(mem);
+        let result = tool.execute(json!({})).await;
+        assert!(result.is_err());
+    }
+}

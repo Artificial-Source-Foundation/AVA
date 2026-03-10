@@ -365,14 +365,9 @@ impl App {
                         }
                     }
                     None => {
-                        let new_theme = self.state.theme.next();
-                        let name = new_theme.name;
-                        self.state.theme = new_theme;
-                        self.set_status(
-                            format!("Theme: {name}"),
-                            StatusLevel::Info,
-                        );
-                        Some((MessageKind::System, format!("Switched to theme: {name}")))
+                        // Open theme selector modal
+                        self.open_theme_selector();
+                        None
                     }
                 }
             }

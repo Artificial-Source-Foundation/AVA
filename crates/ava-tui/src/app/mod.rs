@@ -19,6 +19,7 @@ use crate::widgets::command_palette::CommandPaletteState;
 use crate::widgets::model_selector::ModelSelectorState;
 use crate::widgets::provider_connect::ProviderConnectState;
 use crate::widgets::session_list::SessionListState;
+use crate::widgets::select_list::{SelectItem, SelectListState};
 use crate::widgets::tool_list::ToolListState;
 use crate::widgets::token_buffer::TokenBuffer;
 use color_eyre::eyre::Result;
@@ -50,6 +51,7 @@ pub struct AppState {
     pub model_selector: Option<ModelSelectorState>,
     pub tool_list: ToolListState,
     pub provider_connect: Option<ProviderConnectState>,
+    pub theme_selector: Option<SelectListState<String>>,
     pub active_modal: Option<ModalType>,
     pub status_message: Option<StatusMessage>,
     pub voice: VoiceState,
@@ -64,6 +66,7 @@ pub enum ModalType {
     ModelSelector,
     ToolList,
     ProviderConnect,
+    ThemeSelector,
 }
 
 pub struct App {
@@ -132,6 +135,7 @@ impl App {
             model_selector: None,
             tool_list: ToolListState::default(),
             provider_connect: None,
+            theme_selector: None,
             active_modal: None,
             status_message: None,
             voice: VoiceState {
@@ -284,6 +288,31 @@ impl App {
                 self.set_status("No assistant message to copy", StatusLevel::Warn);
             }
         }
+    }
+
+    /// Open the theme selector modal.
+    pub(crate) fn open_theme_selector(&mut self) {
+        let current = self.state.theme.name;
+        let items: Vec<SelectItem<String>> = Theme::all_names()
+            .iter()
+            .map(|&name| {
+                let status = if name == current {
+                    Some(crate::widgets::select_list::ItemStatus::Active)
+                } else {
+                    None
+                };
+                SelectItem {
+                    title: name.to_string(),
+                    detail: String::new(),
+                    section: None,
+                    status,
+                    value: name.to_string(),
+                    enabled: true,
+                }
+            })
+            .collect();
+        self.state.theme_selector = Some(SelectListState::new(items));
+        self.state.active_modal = Some(ModalType::ThemeSelector);
     }
 
     fn handle_event(
@@ -723,6 +752,7 @@ impl App {
             model_selector: None,
             tool_list: ToolListState::default(),
             provider_connect: None,
+            theme_selector: None,
             active_modal: None,
             status_message: None,
             voice: VoiceState::default(),

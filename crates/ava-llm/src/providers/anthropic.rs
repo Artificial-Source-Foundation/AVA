@@ -6,7 +6,7 @@ use ava_types::{AvaError, Message, Result, StreamChunk, ThinkingLevel};
 use futures::{Stream, StreamExt};
 use serde_json::{json, Value};
 
-use tracing::{debug, instrument, warn};
+use tracing::{debug, instrument, trace, warn};
 
 use crate::circuit_breaker::CircuitBreaker;
 use crate::pool::ConnectionPool;
@@ -453,9 +453,9 @@ fn sse_to_stream(
             .ok()
             .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
             .map(|text| {
-                debug!(provider = "Anthropic", third_party, "SSE raw: {text}");
+                trace!(provider = "Anthropic", third_party, "SSE raw: {text}");
                 let sse_lines = common::parse_sse_lines(&text);
-                debug!(provider = "Anthropic", third_party, lines = sse_lines.len(), "SSE parsed data lines");
+                trace!(provider = "Anthropic", third_party, lines = sse_lines.len(), "SSE parsed data lines");
                 sse_lines
                     .into_iter()
                     .filter_map(|line| {
@@ -469,7 +469,7 @@ fn sse_to_stream(
                         let event_type = payload.get("type").and_then(Value::as_str).unwrap_or("unknown");
                         let result = common::parse_anthropic_stream_chunk(&payload);
                         if result.is_none() && event_type != "ping" && event_type != "message_stop" {
-                            debug!(provider = "Anthropic", third_party, event_type, "SSE event produced no StreamChunk");
+                            trace!(provider = "Anthropic", third_party, event_type, "SSE event produced no StreamChunk");
                         }
                         result
                     })

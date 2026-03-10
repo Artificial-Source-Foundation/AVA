@@ -27,9 +27,9 @@ pub struct CliArgs {
     #[arg(long, default_value_t = 20)]
     pub max_turns: usize,
 
-    /// Auto-approve all tools
-    #[arg(long)]
-    pub yolo: bool,
+    /// Auto-approve all tools (except Critical)
+    #[arg(long, alias = "yolo")]
+    pub auto_approve: bool,
 
     /// Theme name
     #[arg(long, default_value = "default")]

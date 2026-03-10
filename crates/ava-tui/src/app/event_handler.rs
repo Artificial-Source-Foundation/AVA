@@ -1,4 +1,5 @@
 use super::*;
+use tracing::{debug, info};
 
 impl App {
     pub(crate) fn handle_agent_event(
@@ -47,6 +48,7 @@ impl App {
                 self.state.agent.cost += cost_usd;
             }
             ava_agent::AgentEvent::ToolCall(call) => {
+                debug!(tool = %call.name, "TUI received ToolCall");
                 // Force flush any buffered tokens before tool call
                 self.force_flush_token_buffer();
                 // Mark last assistant/thinking message as done streaming
@@ -62,7 +64,7 @@ impl App {
                 self.state.agent.tool_start = Some(std::time::Instant::now());
 
                 // Check if we need approval
-                if !self.state.permission.yolo_mode
+                if !self.state.permission.permission_level.is_auto_approve()
                     && !self.state.permission.session_approved.contains(&call.name)
                 {
                     let (tx, _rx) = tokio::sync::oneshot::channel();
@@ -95,6 +97,7 @@ impl App {
                 }
             }
             ava_agent::AgentEvent::Complete(_) => {
+                info!("TUI received AgentEvent::Complete — marking agent idle");
                 // Force flush any remaining buffered tokens
                 self.force_flush_token_buffer();
                 // Mark last assistant message as done streaming and attach model info
@@ -115,6 +118,7 @@ impl App {
             }
             ava_agent::AgentEvent::ToolStats(_) => {}
             ava_agent::AgentEvent::Error(err) => {
+                info!(error = %err, "TUI received AgentEvent::Error");
                 // Force flush any remaining buffered tokens
                 self.force_flush_token_buffer();
                 // Mark last assistant message as done streaming and attach model info

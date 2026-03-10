@@ -171,6 +171,7 @@ impl InputState {
                     AutocompleteItem::new("tools init", "Create tool templates"),
                     AutocompleteItem::new("mcp", "List MCP servers"),
                     AutocompleteItem::new("mcp reload", "Reload MCP config"),
+                    AutocompleteItem::new("permissions", "Toggle permission level"),
                 ],
             )
         } else if let Some(rest) = token.strip_prefix('@') {

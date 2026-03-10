@@ -14,6 +14,59 @@ pub struct TokenUsage {
     pub output: usize,
 }
 
+/// Agent execution mode — determines tool access and prompt behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AgentMode {
+    #[default]
+    Code,      // Full tool access, standard execution
+    Plan,      // Read-only tools only, analysis/planning
+    Architect, // Plan first, then hand off to code (future)
+}
+
+impl AgentMode {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Code => "Code",
+            Self::Plan => "Plan",
+            Self::Architect => "Architect",
+        }
+    }
+
+    pub fn cycle_next(&self) -> Self {
+        match self {
+            Self::Code => Self::Plan,
+            Self::Plan => Self::Architect,
+            Self::Architect => Self::Code,
+        }
+    }
+
+    pub fn cycle_prev(&self) -> Self {
+        match self {
+            Self::Code => Self::Architect,
+            Self::Plan => Self::Code,
+            Self::Architect => Self::Plan,
+        }
+    }
+
+    /// Returns mode-specific system prompt suffix, or None for Code mode.
+    pub fn prompt_suffix(&self) -> Option<&'static str> {
+        match self {
+            Self::Code => None,
+            Self::Plan => Some(
+                "You are in PLAN MODE (read-only). You may ONLY use read-only tools: \
+                 read, glob, grep, codebase_search, diagnostics, session_search, session_list, \
+                 recall, memory_search. You MUST NOT modify any files, execute commands, or make \
+                 changes. Focus on analysis, research, and creating a plan."
+            ),
+            Self::Architect => Some(
+                "You are in ARCHITECT MODE. First, analyze the codebase and create a detailed \
+                 implementation plan. Present the plan to the user. Do not implement changes \
+                 until the user approves the plan."
+            ),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub enum AgentActivity {
     #[default]
@@ -285,6 +338,18 @@ impl AgentState {
             thinking_level: ThinkingLevel::Off,
             cancel: None,
             task: None,
+        }
+    }
+
+    /// Sync the agent mode prompt suffix to the stack.
+    pub fn set_mode(&self, mode: super::agent::AgentMode) {
+        let suffix = mode.prompt_suffix().map(|s| s.to_string());
+        if let Some(stack) = &self.stack {
+            let stack = stack.clone();
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(stack.set_mode_prompt_suffix(suffix))
+            });
         }
     }
 

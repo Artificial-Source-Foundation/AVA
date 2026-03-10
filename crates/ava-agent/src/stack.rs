@@ -94,6 +94,8 @@ pub struct AgentStack {
     mcp_project_config: PathBuf,
     /// Current thinking level for extended reasoning (persisted per session).
     pub thinking_level: RwLock<ThinkingLevel>,
+    /// Mode-specific system prompt suffix (e.g., Plan mode read-only instructions).
+    pub mode_prompt_suffix: RwLock<Option<String>>,
 }
 
 /// Configuration for constructing an [`AgentStack`] — data directory, provider/model overrides, and flags.
@@ -218,6 +220,7 @@ impl AgentStack {
             mcp_global_config,
             mcp_project_config,
             thinking_level: RwLock::new(ThinkingLevel::Off),
+            mode_prompt_suffix: RwLock::new(None),
         })
     }
 
@@ -319,6 +322,11 @@ impl AgentStack {
         let _ = state.save(&project_root);
 
         Ok(())
+    }
+
+    /// Set the mode-specific system prompt suffix.
+    pub async fn set_mode_prompt_suffix(&self, suffix: Option<String>) {
+        *self.mode_prompt_suffix.write().await = suffix;
     }
 
     /// Set the thinking level.
@@ -434,6 +442,7 @@ impl AgentStack {
         let turns_limit = if max_turns == 0 { self.max_turns } else { max_turns };
 
         let thinking = *self.thinking_level.read().await;
+        let mode_suffix = self.mode_prompt_suffix.read().await.clone();
         let config = AgentConfig {
             max_turns: turns_limit,
             token_limit: 128_000,
@@ -442,6 +451,7 @@ impl AgentStack {
             loop_detection: true,
             custom_system_prompt: None,
             thinking_level: thinking,
+            system_prompt_suffix: mode_suffix,
         };
 
         // Auto-context: inject relevant memories into the goal

@@ -54,7 +54,7 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         provider,
         model,
         max_turns: cli.max_turns,
-        yolo: cli.yolo,
+        yolo: cli.auto_approve,
         ..Default::default()
     })
     .await?;
@@ -156,7 +156,7 @@ async fn run_workflow(cli: CliArgs, goal: &str, workflow_name: &str) -> Result<(
         provider,
         model,
         max_turns: cli.max_turns,
-        yolo: cli.yolo,
+        yolo: cli.auto_approve,
         ..Default::default()
     })
     .await?;
@@ -250,7 +250,7 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
         provider,
         model,
         max_turns: cli.max_turns,
-        yolo: cli.yolo,
+        yolo: cli.auto_approve,
         ..Default::default()
     })
     .await?;
@@ -436,7 +436,7 @@ async fn run_voice_loop(cli: CliArgs) -> Result<()> {
             provider: provider.clone(),
             model: model.clone(),
             max_turns: cli.max_turns,
-            yolo: cli.yolo,
+            yolo: cli.auto_approve,
             ..Default::default()
         })
         .await?;

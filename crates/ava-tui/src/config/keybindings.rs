@@ -50,7 +50,9 @@ fn parse_action(name: &str) -> Option<Action> {
         "toggle_thinking" => Some(Action::ToggleThinking),
         "cancel" => Some(Action::Cancel),
         "quit" => Some(Action::Quit),
-        "yolo_toggle" => Some(Action::YoloToggle),
+        "mode_next" => Some(Action::ModeNext),
+        "mode_prev" => Some(Action::ModePrev),
+        "permission_toggle" => Some(Action::PermissionToggle),
         _ => None,
     }
 }

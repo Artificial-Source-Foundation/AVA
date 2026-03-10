@@ -20,17 +20,17 @@ pub struct InspectionResult {
     pub warnings: Vec<String>,
 }
 
-/// Runtime context for permission inspection — workspace root, yolo mode, session approvals, and safety profiles.
+/// Runtime context for permission inspection — workspace root, auto-approve flag, session approvals, and safety profiles.
 pub struct InspectionContext {
     pub workspace_root: PathBuf,
-    pub yolo_mode: bool,
+    pub auto_approve: bool,
     pub session_approved: HashSet<String>,
     pub safety_profiles: HashMap<String, ToolSafetyProfile>,
 }
 
 /// Evaluates whether a tool call should be allowed, denied, or require user approval.
 ///
-/// The inspection considers command classification, path safety, yolo mode,
+/// The inspection considers command classification, path safety, auto-approve mode,
 /// session approvals, policy rules, and risk level thresholds to produce an
 /// [`InspectionResult`] with the decision and risk metadata.
 pub trait PermissionInspector: Send + Sync {
@@ -44,7 +44,7 @@ pub trait PermissionInspector: Send + Sync {
 }
 
 /// 9-step permission inspector that evaluates tool calls against command classification,
-/// path safety analysis, yolo mode, session approvals, and policy rules.
+/// path safety analysis, auto-approve mode, session approvals, and policy rules.
 pub struct DefaultInspector {
     permission_system: PermissionSystem,
     policy: PermissionPolicy,
@@ -66,8 +66,8 @@ impl PermissionInspector for DefaultInspector {
         arguments: &Value,
         context: &InspectionContext,
     ) -> InspectionResult {
-        // 1. For bash: run classifier FIRST, before yolo check
-        //    Critical/blocked commands must be denied regardless of yolo mode
+        // 1. For bash: run classifier FIRST, before auto-approve check
+        //    Critical/blocked commands must be denied regardless of auto-approve
         let mut risk_level;
         let mut tags: Vec<SafetyTag>;
         let mut warnings = Vec::new();
@@ -82,7 +82,7 @@ impl PermissionInspector for DefaultInspector {
             if let Some(command) = arguments.get("command").and_then(|v| v.as_str()) {
                 let classification = classify_bash_command(command);
 
-                // Blocked commands are ALWAYS denied, even in yolo mode
+                // Blocked commands are ALWAYS denied, even in auto-approve mode
                 if classification.blocked {
                     return InspectionResult {
                         action: Action::Deny,
@@ -134,11 +134,11 @@ impl PermissionInspector for DefaultInspector {
             }
         }
 
-        // 3. Yolo mode: allow everything EXCEPT what was already blocked above
-        if context.yolo_mode {
+        // 3. Auto-approve mode: allow everything EXCEPT what was already blocked above
+        if context.auto_approve {
             return InspectionResult {
                 action: Action::Allow,
-                reason: "yolo mode enabled".to_string(),
+                reason: "auto-approve enabled".to_string(),
                 risk_level,
                 tags,
                 warnings,
@@ -271,10 +271,10 @@ mod tests {
     use crate::tags::core_tool_profiles;
     use crate::Rule;
 
-    fn test_context(yolo: bool) -> InspectionContext {
+    fn test_context(auto_approve: bool) -> InspectionContext {
         InspectionContext {
             workspace_root: PathBuf::from("/workspace"),
-            yolo_mode: yolo,
+            auto_approve,
             session_approved: HashSet::new(),
             safety_profiles: core_tool_profiles(),
         }
@@ -285,10 +285,10 @@ mod tests {
         DefaultInspector::new(system, PermissionPolicy::standard())
     }
 
-    // === CRITICAL: Yolo mode still blocks dangerous commands ===
+    // === CRITICAL: Auto-approve mode still blocks dangerous commands ===
 
     #[test]
-    fn yolo_mode_blocks_rm_rf_root() {
+    fn auto_approve_blocks_rm_rf_root() {
         let inspector = default_inspector();
         let ctx = test_context(true);
         let result = inspector.inspect("bash", &serde_json::json!({"command": "rm -rf /"}), &ctx);
@@ -297,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn yolo_mode_blocks_sudo() {
+    fn auto_approve_blocks_sudo() {
         let inspector = default_inspector();
         let ctx = test_context(true);
         let result = inspector.inspect("bash", &serde_json::json!({"command": "sudo rm -rf /tmp"}), &ctx);
@@ -305,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn yolo_mode_blocks_fork_bomb() {
+    fn auto_approve_blocks_fork_bomb() {
         let inspector = default_inspector();
         let ctx = test_context(true);
         let result = inspector.inspect(
@@ -317,16 +317,16 @@ mod tests {
     }
 
     #[test]
-    fn yolo_mode_allows_safe_commands() {
+    fn auto_approve_allows_safe_commands() {
         let inspector = default_inspector();
         let ctx = test_context(true);
         let result = inspector.inspect("bash", &serde_json::json!({"command": "ls -la"}), &ctx);
         assert_eq!(result.action, Action::Allow);
-        assert!(result.reason.contains("yolo"));
+        assert!(result.reason.contains("auto-approve"));
     }
 
     #[test]
-    fn yolo_mode_allows_non_blocked_tools() {
+    fn auto_approve_allows_non_blocked_tools() {
         let inspector = default_inspector();
         let ctx = test_context(true);
         let result = inspector.inspect("read", &serde_json::json!({"path": "src/main.rs"}), &ctx);
@@ -418,7 +418,7 @@ mod tests {
     }
 
     #[test]
-    fn write_to_system_path_denied_in_yolo() {
+    fn write_to_system_path_denied_in_auto_approve() {
         let inspector = default_inspector();
         let ctx = test_context(true);
         let result = inspector.inspect(

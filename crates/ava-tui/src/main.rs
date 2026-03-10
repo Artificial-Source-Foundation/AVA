@@ -48,13 +48,18 @@ fn init_logging(is_tui: bool) {
         .join(".ava")
         .join("logs");
 
-    // File layer: always debug level, daily rolling
+    // File layer: AVA crates at debug, third-party at warn
     let file_appender = tracing_appender::rolling::daily(&log_dir, "ava.log");
+    let file_filter = tracing_subscriber::EnvFilter::new(
+        "warn,ava_agent=debug,ava_llm=debug,ava_tui=debug,ava_tools=debug,\
+         ava_commander=debug,ava_config=debug,ava_session=debug,ava_context=debug,\
+         ava_permissions=info,ava_mcp=info,ava_auth=info,ava_platform=info",
+    );
     let file_layer = tracing_subscriber::fmt::layer()
         .with_writer(file_appender)
         .with_target(true)
         .with_ansi(false)
-        .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG);
+        .with_filter(file_filter);
 
     if is_tui {
         // TUI mode: file only — no stderr output

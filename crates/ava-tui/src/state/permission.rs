@@ -32,12 +32,41 @@ pub enum ApprovalStage {
     RejectionReason,
 }
 
+/// Permission level — controls tool auto-approval behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PermissionLevel {
+    #[default]
+    Standard,    // Auto-approve reads+writes, ask for bash/commands
+    AutoApprove, // Auto-approve everything, only block Critical
+}
+
+impl PermissionLevel {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::AutoApprove => "auto-approve",
+        }
+    }
+
+    pub fn toggle(&self) -> Self {
+        match self {
+            Self::Standard => Self::AutoApprove,
+            Self::AutoApprove => Self::Standard,
+        }
+    }
+
+    /// Whether this level acts like the old "yolo" mode (auto-approve non-critical).
+    pub fn is_auto_approve(&self) -> bool {
+        matches!(self, Self::AutoApprove)
+    }
+}
+
 #[derive(Debug)]
 pub struct PermissionState {
     pub queue: VecDeque<ApprovalRequest>,
     pub current_stage: ApprovalStage,
     pub session_approved: HashSet<String>,
-    pub yolo_mode: bool,
+    pub permission_level: PermissionLevel,
     pub rejection_input: String,
 }
 
@@ -47,7 +76,7 @@ impl Default for PermissionState {
             queue: VecDeque::new(),
             current_stage: ApprovalStage::Preview,
             session_approved: HashSet::new(),
-            yolo_mode: false,
+            permission_level: PermissionLevel::Standard,
             rejection_input: String::new(),
         }
     }

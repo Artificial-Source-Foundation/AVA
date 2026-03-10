@@ -213,6 +213,7 @@ mod tests {
             loop_detection,
             custom_system_prompt: None,
             thinking_level: ava_types::ThinkingLevel::Off,
+            system_prompt_suffix: None,
         }
     }
 

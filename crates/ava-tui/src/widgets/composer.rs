@@ -94,11 +94,22 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         }
     };
 
-    // -- Line 2: Model info --
-    // Design: provider (bold blue, fontSize=11) + model (muted, fontSize=11), gap=12 → 2 chars
+    // -- Line 2: Mode badge + model info --
+    let mode_color = match state.agent_mode {
+        crate::state::agent::AgentMode::Code => state.theme.success,
+        crate::state::agent::AgentMode::Plan => state.theme.primary,
+        crate::state::agent::AgentMode::Architect => state.theme.accent,
+    };
     let model_info_line = Line::from(vec![
         bar,
         Span::raw(pad),
+        Span::styled(
+            format!("[{}]", state.agent_mode.label()),
+            Style::default()
+                .fg(mode_color)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  ", Style::default()),
         Span::styled(
             &state.agent.provider_name,
             Style::default()

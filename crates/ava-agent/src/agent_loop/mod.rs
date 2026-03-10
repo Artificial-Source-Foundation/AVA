@@ -12,7 +12,7 @@ use ava_tools::registry::ToolRegistry;
 use ava_types::{Message, Role, Session, ThinkingLevel, ToolCall, ToolResult};
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 use crate::llm_trait::LLMProvider;
 use crate::stuck::{StuckAction, StuckDetector};
@@ -52,6 +52,9 @@ pub struct AgentConfig {
     /// Thinking/reasoning level for models that support extended thinking.
     #[serde(default)]
     pub thinking_level: ThinkingLevel,
+    /// Optional suffix appended to the system prompt (e.g., mode-specific instructions).
+    #[serde(default)]
+    pub system_prompt_suffix: Option<String>,
 }
 
 fn default_max_cost() -> f64 {
@@ -107,13 +110,17 @@ impl AgentLoop {
 
     /// Inject the system prompt into the context before the first turn.
     fn inject_system_prompt(&mut self) {
-        let system = if let Some(ref custom) = self.config.custom_system_prompt {
+        let mut system = if let Some(ref custom) = self.config.custom_system_prompt {
             custom.clone()
         } else {
             let native = self.llm.supports_tools();
             let tool_defs = self.tools.list_tools();
             build_system_prompt(&tool_defs, native)
         };
+        if let Some(ref suffix) = self.config.system_prompt_suffix {
+            system.push_str("\n\n");
+            system.push_str(suffix);
+        }
         self.context.add_message(Message::new(Role::System, system));
     }
 
@@ -244,7 +251,7 @@ impl AgentLoop {
                 };
                 if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time) {
                     if dedup_hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
-                        warn!("Skipping duplicate request (same content within 2s)");
+                        warn!(turn = turn + 1, "Skipping duplicate request (same content within 2s)");
                         continue;
                     }
                 }
@@ -282,7 +289,7 @@ impl AgentLoop {
 
                             while let Some(chunk) = stream.next().await {
                                 chunk_count += 1;
-                                debug!(
+                                trace!(
                                     chunk_count,
                                     has_content = chunk.content.is_some(),
                                     has_thinking = chunk.thinking.is_some(),
@@ -412,6 +419,12 @@ impl AgentLoop {
                 }
 
                 // Stuck detection
+                debug!(
+                    text_len = response_text.len(),
+                    tool_calls = tool_calls.len(),
+                    tool_results = tool_results_collected.len(),
+                    "running stuck detection"
+                );
                 match detector.check(
                     &response_text,
                     &tool_calls,
@@ -470,6 +483,7 @@ impl AgentLoop {
 
                 // Natural completion: non-empty text with no tool calls = final answer
                 if tool_calls.is_empty() {
+                    info!(text_len = response_text.len(), "natural completion — no tool calls, emitting Complete");
                     yield AgentEvent::ToolStats(detector.tool_monitor().stats());
                     yield AgentEvent::Complete(session.clone());
                     return;
@@ -515,6 +529,7 @@ impl AgentLoop {
                 }
             }
 
+            info!("agent loop ended — max turns reached");
             yield AgentEvent::ToolStats(detector.tool_monitor().stats());
             yield AgentEvent::Progress("max turns reached".to_string());
             yield AgentEvent::Complete(session);
@@ -541,6 +556,7 @@ mod tests {
             loop_detection: true,
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
+            system_prompt_suffix: None,
         };
         let llm = crate::tests::mock_llm();
 
@@ -564,6 +580,7 @@ mod tests {
             loop_detection: true,
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
+            system_prompt_suffix: None,
         };
         let llm = crate::tests::mock_llm();
 
@@ -590,6 +607,7 @@ mod tests {
             loop_detection: true,
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
+            system_prompt_suffix: None,
         };
         let llm = crate::tests::mock_llm();
 
@@ -625,6 +643,7 @@ mod tests {
             loop_detection: true,
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
+            system_prompt_suffix: None,
         };
         let llm = crate::tests::mock_llm();
 
@@ -666,6 +685,7 @@ mod tests {
             loop_detection: true,
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
+            system_prompt_suffix: None,
         };
         let llm = crate::tests::mock_llm();
 
@@ -684,6 +704,7 @@ mod tests {
             loop_detection: false,
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
+            system_prompt_suffix: None,
         };
         let llm = crate::tests::mock_llm();
 

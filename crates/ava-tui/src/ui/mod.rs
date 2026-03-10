@@ -7,7 +7,7 @@ use crate::widgets::select_list::{render_select_list, KeybindHint, SelectListCon
 use crate::widgets::slash_menu::render_slash_menu;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear};
 use ratatui::Frame;
 
 pub mod layout;
@@ -92,7 +92,13 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
             };
             render_select_list(frame, inner, &state.session_list.list, &config, &state.theme);
         }
-        ModalType::ToolApproval => render_tool_approval(frame, inner, state),
+        ModalType::ToolApproval => {
+            if let Some(request) = state.permission.queue.front() {
+                crate::widgets::tool_approval::render_tool_approval(
+                    frame, popup_area, request, &state.permission, &state.theme,
+                );
+            }
+        }
         ModalType::ModelSelector => {
             if let Some(ref selector) = state.model_selector {
                 let config = SelectListConfig {
@@ -126,21 +132,6 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
     }
 }
 
-fn render_tool_approval(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
-    use crate::widgets::tool_approval::render_tool_approval_lines;
-
-    if let Some(request) = state.permission.queue.front() {
-        // Fill with elevated background
-        let bg = Block::default()
-            .style(Style::default().bg(state.theme.bg_elevated));
-        frame.render_widget(bg, area);
-
-        let lines = render_tool_approval_lines(request, &state.permission, &state.theme);
-        let widget = Paragraph::new(lines)
-            .style(Style::default().bg(state.theme.bg_elevated));
-        frame.render_widget(widget, area);
-    }
-}
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()

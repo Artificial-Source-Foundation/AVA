@@ -199,12 +199,12 @@ impl App {
                     self.state.permission.current_stage = ApprovalStage::RejectionReason;
                 }
                 KeyCode::Char('y') => {
-                    self.state.permission.yolo_mode = true;
+                    self.state.permission.permission_level = crate::state::permission::PermissionLevel::AutoApprove;
                     while !self.state.permission.queue.is_empty() {
                         self.state.permission.approve_current_once();
                     }
                     self.state.active_modal = None;
-                    self.set_status("YOLO mode enabled", StatusLevel::Info);
+                    self.set_status("Auto-approve enabled", StatusLevel::Info);
                 }
                 KeyCode::Esc => {
                     self.state.permission.reject_current();

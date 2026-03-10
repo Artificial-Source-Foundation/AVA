@@ -30,7 +30,7 @@ impl CommandPaletteState {
         let items = vec![
             // Agent
             make_item("Model", "Ctrl+M", "Agent", CommandExec::Action(Action::ModelSwitch)),
-            make_item("Toggle YOLO", "Ctrl+Y", "Agent", CommandExec::Action(Action::YoloToggle)),
+            make_item("Toggle Permissions", "", "Agent", CommandExec::Action(Action::PermissionToggle)),
             make_item("Compact Context", "", "Agent", CommandExec::Action(Action::ForceCompact)),
             // Session
             make_item("New Session", "Ctrl+N", "Session", CommandExec::Action(Action::NewSession)),

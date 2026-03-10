@@ -5,7 +5,7 @@ mod modals;
 use crate::config::cli::CliArgs;
 use crate::config::keybindings::load_keybind_overrides;
 use crate::event::{spawn_event_reader, spawn_tick_timer, AppEvent};
-use crate::state::agent::{AgentActivity, AgentState};
+use crate::state::agent::{AgentActivity, AgentMode, AgentState};
 use crate::state::input::InputState;
 use crate::state::keybinds::{Action, KeybindState};
 use crate::state::messages::{MessageKind, MessageState, UiMessage};
@@ -43,6 +43,7 @@ pub struct AppState {
     pub permission: PermissionState,
     pub keybinds: KeybindState,
     pub agent: AgentState,
+    pub agent_mode: AgentMode,
     pub show_sidebar: bool,
     pub command_palette: CommandPaletteState,
     pub session_list: SessionListState,
@@ -100,7 +101,11 @@ impl App {
         }
 
         let permission = PermissionState {
-            yolo_mode: cli.yolo,
+            permission_level: if cli.auto_approve {
+                crate::state::permission::PermissionLevel::AutoApprove
+            } else {
+                crate::state::permission::PermissionLevel::Standard
+            },
             ..PermissionState::default()
         };
 
@@ -118,8 +123,9 @@ impl App {
             session,
             permission,
             keybinds,
-            agent: AgentState::new(data_dir, provider, model, cli.max_turns, cli.yolo)
+            agent: AgentState::new(data_dir, provider, model, cli.max_turns, cli.auto_approve)
                 .await?,
+            agent_mode: AgentMode::default(),
             show_sidebar: false,
             command_palette: CommandPaletteState::with_defaults(),
             session_list: SessionListState::default(),
@@ -410,14 +416,22 @@ impl App {
                 Action::ScrollTop => self.state.messages.scroll_to_top(),
                 Action::ScrollBottom => self.state.messages.scroll_to_bottom(),
                 Action::ToggleSidebar => self.state.show_sidebar = !self.state.show_sidebar,
-                Action::YoloToggle => {
-                    self.state.permission.yolo_mode = !self.state.permission.yolo_mode;
-                    let msg = if self.state.permission.yolo_mode {
-                        "YOLO mode enabled"
-                    } else {
-                        "YOLO mode disabled"
-                    };
-                    self.set_status(msg, StatusLevel::Info);
+                Action::ModeNext => {
+                    self.state.agent_mode = self.state.agent_mode.cycle_next();
+                    self.state.agent.set_mode(self.state.agent_mode);
+                    self.set_status(format!("Mode: {}", self.state.agent_mode.label()), StatusLevel::Info);
+                }
+                Action::ModePrev => {
+                    self.state.agent_mode = self.state.agent_mode.cycle_prev();
+                    self.state.agent.set_mode(self.state.agent_mode);
+                    self.set_status(format!("Mode: {}", self.state.agent_mode.label()), StatusLevel::Info);
+                }
+                Action::PermissionToggle => {
+                    self.state.permission.permission_level = self.state.permission.permission_level.toggle();
+                    self.set_status(
+                        format!("Permissions: {}", self.state.permission.permission_level.label()),
+                        StatusLevel::Info,
+                    );
                 }
                 Action::CommandPalette => {
                     self.state.command_palette.open = true;
@@ -518,6 +532,20 @@ impl App {
                     // Fall through to normal input handling — typing filters the menu
                 }
             }
+        }
+
+        // Tab/Shift+Tab cycle agent modes when no autocomplete is active
+        if key.code == KeyCode::Tab && key.modifiers == KeyModifiers::NONE {
+            self.state.agent_mode = self.state.agent_mode.cycle_next();
+            self.state.agent.set_mode(self.state.agent_mode);
+            self.set_status(format!("Mode: {}", self.state.agent_mode.label()), StatusLevel::Info);
+            return false;
+        }
+        if key.code == KeyCode::BackTab {
+            self.state.agent_mode = self.state.agent_mode.cycle_prev();
+            self.state.agent.set_mode(self.state.agent_mode);
+            self.set_status(format!("Mode: {}", self.state.agent_mode.label()), StatusLevel::Info);
+            return false;
         }
 
         // Handle normal input
@@ -625,6 +653,7 @@ impl App {
             permission: PermissionState::default(),
             keybinds: KeybindState::default(),
             agent: AgentState::test_new("test-provider", "test-model"),
+            agent_mode: AgentMode::default(),
             show_sidebar: false,
             command_palette: CommandPaletteState::with_defaults(),
             session_list: SessionListState::default(),

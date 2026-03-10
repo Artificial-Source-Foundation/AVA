@@ -306,11 +306,18 @@ impl App {
                 self.execute_command_action(Action::SessionList);
                 None
             }
+            "/permissions" => {
+                self.state.permission.permission_level = self.state.permission.permission_level.toggle();
+                let label = self.state.permission.permission_level.label();
+                self.set_status(format!("Permissions: {label}"), StatusLevel::Info);
+                Some((MessageKind::System, format!("Permission level: {label}")))
+            }
             "/help" => {
                 let help = "\
 Available commands:
   /model [provider/model]  — show or switch model
   /think [level]           — set thinking level (off/low/med/high/max)
+  /permissions             — toggle permission level
   /connect [provider]      — add provider credentials
   /providers               — show provider status
   /disconnect <provider>   — remove provider credentials
@@ -327,12 +334,12 @@ Available commands:
   /help                    — show this help
 
 Keyboard shortcuts:
+  Tab / Shift+Tab          — cycle agent mode (Code/Plan/Architect)
   Ctrl+K / Ctrl+/          — command palette
   Ctrl+M                   — model selector
   Ctrl+T                   — cycle thinking level
   Ctrl+N                   — new session
   Ctrl+L                   — session picker
-  Ctrl+Y                   — toggle YOLO mode
   Ctrl+S                   — toggle sidebar
   Ctrl+C                   — cancel / clear input / quit";
                 Some((MessageKind::System, help.to_string()))
@@ -384,14 +391,22 @@ Keyboard shortcuts:
                 self.state.session_list.open = true;
                 self.state.active_modal = Some(ModalType::SessionList);
             }
-            Action::YoloToggle => {
-                self.state.permission.yolo_mode = !self.state.permission.yolo_mode;
-                let msg = if self.state.permission.yolo_mode {
-                    "YOLO mode enabled"
-                } else {
-                    "YOLO mode disabled"
-                };
-                self.set_status(msg, StatusLevel::Info);
+            Action::PermissionToggle => {
+                self.state.permission.permission_level = self.state.permission.permission_level.toggle();
+                self.set_status(
+                    format!("Permissions: {}", self.state.permission.permission_level.label()),
+                    StatusLevel::Info,
+                );
+            }
+            Action::ModeNext => {
+                self.state.agent_mode = self.state.agent_mode.cycle_next();
+                self.state.agent.set_mode(self.state.agent_mode);
+                self.set_status(format!("Mode: {}", self.state.agent_mode.label()), StatusLevel::Info);
+            }
+            Action::ModePrev => {
+                self.state.agent_mode = self.state.agent_mode.cycle_prev();
+                self.state.agent.set_mode(self.state.agent_mode);
+                self.set_status(format!("Mode: {}", self.state.agent_mode.label()), StatusLevel::Info);
             }
             Action::ToggleSidebar => {
                 self.state.show_sidebar = !self.state.show_sidebar;

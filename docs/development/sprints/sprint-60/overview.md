@@ -12,6 +12,11 @@ Three parallel tracks: (1) replace blocking `generate_with_tools()` with true st
 | 02 | `02-session-context-ux.md` | Implementation (mega) | Complete (already implemented) |
 | 03 | `03-chat-ui-rework.md` | Implementation (mega) | Complete |
 | 04 | Agent Modes & Permission Levels | Implementation | Complete |
+| 05 | Model Selector & Status Bar Polish | Bug fix + UI | Complete |
+| 06 | Multi-line Input & Clipboard | Feature | Complete |
+| 07 | New Slash Commands (/theme, /commit, /compact) | Feature | Complete |
+| 08 | Theme Selector Modal | Feature | Complete |
+| 09 | Tool Approval Modal Redesign | UI | Complete |
 
 ### Execution Order
 - **01 + 02 + 03** can run in **parallel** (zero file overlap: 01 touches provider layer + agent loop streaming, 02 touches TUI state + session + config, 03 touches TUI widgets + layout + styling)
@@ -52,5 +57,27 @@ Three parallel tracks: (1) replace blocking `generate_with_tools()` with true st
 - `model_supports_thinking()`: Claude, GPT-5, Gemini 2.5/3, o3/o4, DeepSeek-R1, QwQ, Kimi.
 - `model_supports_thinking_levels()`: Subset that accepts granular level params (excludes native thinkers like Kimi, DeepSeek-R1, QwQ).
 - Status bar badge: `thinking:{level}` for granular models, plain `thinking` for native thinkers.
+
+### Sprint 60-05: Model Selector & Status Bar Polish
+
+- **Model selector scroll fix**: Fixed scroll offset calculation in select_list widget.
+- **Footer hints**: Updated to match Pencil design mockups.
+- **Status bar cleanup**: Removed mode badge duplication — mode shown only in composer badge, not status bar.
+- **Select list styling**: Visual improvements to match design system.
+
+### Sprint 60-06: Multi-line Input & Clipboard
+
+- **Multi-line input**: Shift+Enter inserts newlines in composer. Cursor navigation works across lines (Up/Down within multi-line text, Home/End per line).
+- **Clipboard copy**: Ctrl+Y or `/copy` slash command copies last assistant message to system clipboard via `arboard` crate.
+
+### Sprint 60-07: New Slash Commands
+
+- `/theme`: Opens theme selector modal (SelectList-based).
+- `/commit`: Shows git status summary in chat.
+- `/compact`: Displays context window usage (tokens used / total).
+
+### Sprint 60-08: Tool Approval Modal Redesign
+
+- Redesigned tool approval modal to match Pencil design: clear header with tool name, structured body showing parameters, accept/reject buttons with keybind hints.
 
 ## Status: Complete

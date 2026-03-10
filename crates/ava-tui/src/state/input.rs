@@ -1,4 +1,13 @@
 use crate::widgets::autocomplete::{AutocompleteItem, AutocompleteState, AutocompleteTrigger};
+use std::collections::HashMap;
+
+/// Threshold for collapsing pasted text into a placeholder.
+const PASTE_LINE_THRESHOLD: usize = 5;
+const PASTE_CHAR_THRESHOLD: usize = 500;
+
+/// Regex-like prefix/suffix for paste placeholders.
+const PASTE_PREFIX: &str = "[Pasted Text: ";
+const PASTE_SUFFIX: &str = "]";
 
 #[derive(Debug, Default)]
 pub struct InputState {
@@ -8,6 +17,10 @@ pub struct InputState {
     pub history_index: Option<usize>,
     pub saved_input: String,
     pub autocomplete: Option<AutocompleteState>,
+    /// Maps placeholder string (e.g. "[Pasted Text: 42 lines]") to the full paste content.
+    pub pending_pastes: HashMap<String, String>,
+    /// Tracks how many times a given description has been used, for dedup numbering.
+    paste_counter: HashMap<String, usize>,
 }
 
 impl InputState {
@@ -53,6 +66,8 @@ impl InputState {
         self.buffer.clear();
         self.cursor = 0;
         self.autocomplete = None;
+        self.pending_pastes.clear();
+        self.paste_counter.clear();
     }
 
     pub fn move_left(&mut self) {
@@ -147,6 +162,101 @@ impl InputState {
         self.cursor = self.buffer.len();
     }
 
+    /// Handle a paste event. If the text exceeds the threshold (5+ lines or 500+ chars),
+    /// insert a compact placeholder and store the full content for later expansion.
+    /// Below the threshold, insert text directly.
+    pub fn handle_paste(&mut self, text: String) {
+        let line_count = text.lines().count();
+        let char_count = text.len();
+
+        if line_count >= PASTE_LINE_THRESHOLD || char_count >= PASTE_CHAR_THRESHOLD {
+            // Build description based on which threshold was hit
+            let desc = if line_count >= PASTE_LINE_THRESHOLD {
+                format!("{line_count} lines")
+            } else {
+                format!("{char_count} chars")
+            };
+
+            // Dedup: track how many times this description has been used
+            let count = self.paste_counter.entry(desc.clone()).or_insert(0);
+            *count += 1;
+            let placeholder = if *count > 1 {
+                format!("{PASTE_PREFIX}{desc} #{}{PASTE_SUFFIX}", *count)
+            } else {
+                format!("{PASTE_PREFIX}{desc}{PASTE_SUFFIX}")
+            };
+
+            self.pending_pastes.insert(placeholder.clone(), text);
+            self.insert_str(&placeholder);
+        } else {
+            self.insert_str(&text);
+        }
+    }
+
+    /// Expand all paste placeholders in the given buffer, replacing them with actual content.
+    pub fn expand_pastes(&self, buffer: &str) -> String {
+        let mut result = buffer.to_string();
+        for (placeholder, content) in &self.pending_pastes {
+            // Replace all occurrences (though normally each placeholder is unique)
+            result = result.replace(placeholder.as_str(), content.as_str());
+        }
+        result
+    }
+
+    /// Check if the cursor is inside or at the end of a paste placeholder.
+    /// Returns `Some((start, end))` byte range of the placeholder if found.
+    pub fn find_placeholder_at_cursor(&self) -> Option<(usize, usize)> {
+        // Search backward from cursor for the start of a placeholder
+        let before = &self.buffer[..self.cursor];
+        // Find the last '[Pasted Text: ' before or at cursor
+        if let Some(start_offset) = before.rfind(PASTE_PREFIX) {
+            // Find the closing ']' after the prefix
+            if let Some(end_rel) = self.buffer[start_offset..].find(PASTE_SUFFIX) {
+                let end = start_offset + end_rel + PASTE_SUFFIX.len();
+                // Cursor must be within the placeholder range (inclusive of end)
+                if self.cursor > start_offset && self.cursor <= end {
+                    let candidate = &self.buffer[start_offset..end];
+                    if self.pending_pastes.contains_key(candidate) {
+                        return Some((start_offset, end));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Delete backward, but if the cursor is inside/at-end-of a paste placeholder,
+    /// delete the entire placeholder atomically.
+    pub fn delete_backward_with_paste(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+        if let Some((start, end)) = self.find_placeholder_at_cursor() {
+            let placeholder = self.buffer[start..end].to_string();
+            self.pending_pastes.remove(&placeholder);
+            self.buffer.replace_range(start..end, "");
+            self.cursor = start;
+            self.refresh_autocomplete();
+        } else {
+            self.delete_backward();
+        }
+    }
+
+    /// Toggle expansion of a paste placeholder at the cursor position (Ctrl+O).
+    /// If the cursor is on a placeholder, expand it inline. Returns true if toggled.
+    pub fn toggle_paste_expansion(&mut self) -> bool {
+        if let Some((start, end)) = self.find_placeholder_at_cursor() {
+            let placeholder = self.buffer[start..end].to_string();
+            if let Some(content) = self.pending_pastes.remove(&placeholder) {
+                self.buffer.replace_range(start..end, &content);
+                self.cursor = start + content.len();
+                self.refresh_autocomplete();
+                return true;
+            }
+        }
+        false
+    }
+
     pub fn history_up(&mut self) {
         if self.history.is_empty() {
             return;
@@ -186,11 +296,14 @@ impl InputState {
             return None;
         }
 
-        self.history.push(trimmed.clone());
+        // Expand paste placeholders before submitting
+        let expanded = self.expand_pastes(&trimmed);
+
+        self.history.push(trimmed);
         self.history_index = None;
         self.saved_input.clear();
         self.clear();
-        Some(trimmed)
+        Some(expanded)
     }
 
     /// Returns true if a slash-triggered autocomplete menu is currently visible.
@@ -389,5 +502,154 @@ mod tests {
         input.insert_str("line1\nline2");
         let submitted = input.submit();
         assert_eq!(submitted, Some("line1\nline2".to_string()));
+    }
+
+    // --- Paste collapsing tests ---
+
+    #[test]
+    fn paste_small_text_inserts_directly() {
+        let mut input = InputState::default();
+        input.handle_paste("hello world".to_string());
+        assert_eq!(input.buffer, "hello world");
+        assert!(input.pending_pastes.is_empty());
+    }
+
+    #[test]
+    fn paste_below_both_thresholds_inserts_directly() {
+        let mut input = InputState::default();
+        // 4 lines, short text — below both thresholds
+        input.handle_paste("a\nb\nc\nd".to_string());
+        assert_eq!(input.buffer, "a\nb\nc\nd");
+        assert!(input.pending_pastes.is_empty());
+    }
+
+    #[test]
+    fn paste_many_lines_collapses() {
+        let mut input = InputState::default();
+        let text = "line1\nline2\nline3\nline4\nline5\nline6";
+        input.handle_paste(text.to_string());
+        assert_eq!(input.buffer, "[Pasted Text: 6 lines]");
+        assert_eq!(input.pending_pastes.len(), 1);
+        assert_eq!(
+            input.pending_pastes.get("[Pasted Text: 6 lines]"),
+            Some(&text.to_string())
+        );
+    }
+
+    #[test]
+    fn paste_long_single_line_collapses_by_chars() {
+        let mut input = InputState::default();
+        let text = "x".repeat(600);
+        input.handle_paste(text.clone());
+        assert_eq!(input.buffer, "[Pasted Text: 600 chars]");
+        assert_eq!(input.pending_pastes.len(), 1);
+        assert_eq!(
+            input.pending_pastes.get("[Pasted Text: 600 chars]"),
+            Some(&text)
+        );
+    }
+
+    #[test]
+    fn paste_dedup_numbering() {
+        let mut input = InputState::default();
+        // Both have 6 lines → same description
+        let text1 = "a\nb\nc\nd\ne\nf";
+        let text2 = "g\nh\ni\nj\nk\nl";
+        input.handle_paste(text1.to_string());
+        input.handle_paste(text2.to_string());
+
+        assert!(input.buffer.contains("[Pasted Text: 6 lines]"));
+        assert!(input.buffer.contains("[Pasted Text: 6 lines #2]"));
+        assert_eq!(input.pending_pastes.len(), 2);
+        assert_eq!(
+            input.pending_pastes.get("[Pasted Text: 6 lines]"),
+            Some(&text1.to_string())
+        );
+        assert_eq!(
+            input.pending_pastes.get("[Pasted Text: 6 lines #2]"),
+            Some(&text2.to_string())
+        );
+    }
+
+    #[test]
+    fn submit_expands_pastes() {
+        let mut input = InputState::default();
+        let text = "line1\nline2\nline3\nline4\nline5";
+        input.handle_paste(text.to_string());
+        input.insert_str(" and more");
+
+        let submitted = input.submit().unwrap();
+        assert!(submitted.contains("line1\nline2\nline3\nline4\nline5"));
+        assert!(submitted.contains("and more"));
+        // Placeholders should not appear in submitted text
+        assert!(!submitted.contains("[Pasted Text:"));
+    }
+
+    #[test]
+    fn backspace_deletes_placeholder_atomically() {
+        let mut input = InputState::default();
+        let text = "a\nb\nc\nd\ne\nf";
+        input.handle_paste(text.to_string());
+        // Cursor is at end of placeholder
+        assert!(input.buffer.starts_with("[Pasted Text:"));
+
+        input.delete_backward_with_paste();
+        assert_eq!(input.buffer, "");
+        assert!(input.pending_pastes.is_empty());
+        assert_eq!(input.cursor, 0);
+    }
+
+    #[test]
+    fn backspace_normal_when_not_on_placeholder() {
+        let mut input = InputState::default();
+        input.insert_str("hello");
+        input.delete_backward_with_paste();
+        assert_eq!(input.buffer, "hell");
+    }
+
+    #[test]
+    fn expand_pastes_in_buffer() {
+        let mut input = InputState::default();
+        let text = "line1\nline2\nline3\nline4\nline5";
+        input.handle_paste(text.to_string());
+        let expanded = input.expand_pastes(&input.buffer.clone());
+        assert_eq!(expanded, text);
+    }
+
+    #[test]
+    fn toggle_paste_expansion() {
+        let mut input = InputState::default();
+        let text = "line1\nline2\nline3\nline4\nline5";
+        input.handle_paste(text.to_string());
+        assert!(input.buffer.starts_with("[Pasted Text:"));
+
+        let toggled = input.toggle_paste_expansion();
+        assert!(toggled);
+        assert_eq!(input.buffer, text);
+        assert!(input.pending_pastes.is_empty());
+    }
+
+    #[test]
+    fn clear_resets_paste_state() {
+        let mut input = InputState::default();
+        input.handle_paste("a\nb\nc\nd\ne\nf".to_string());
+        assert!(!input.pending_pastes.is_empty());
+
+        input.clear();
+        assert!(input.pending_pastes.is_empty());
+        assert!(input.paste_counter.is_empty());
+        assert!(input.buffer.is_empty());
+    }
+
+    #[test]
+    fn paste_with_prefix_text() {
+        let mut input = InputState::default();
+        input.insert_str("Please review: ");
+        let text = "line1\nline2\nline3\nline4\nline5";
+        input.handle_paste(text.to_string());
+
+        assert!(input.buffer.starts_with("Please review: [Pasted Text:"));
+        let submitted = input.submit().unwrap();
+        assert!(submitted.starts_with("Please review: line1\nline2"));
     }
 }

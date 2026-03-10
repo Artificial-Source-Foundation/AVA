@@ -333,7 +333,7 @@ impl App {
                 if self.state.active_modal.is_some() {
                     self.handle_modal_paste(&value);
                 } else {
-                    self.state.input.insert_str(&value);
+                    self.state.input.handle_paste(value);
                 }
             }
             AppEvent::Resize(_, _) => {}
@@ -638,13 +638,19 @@ impl App {
                 }
             }
             KeyCode::Enter => self.state.input.insert_char('\n'),
+            // Ctrl+O: expand paste placeholder at cursor
+            KeyCode::Char('o') if key.modifiers == KeyModifiers::CONTROL => {
+                if self.state.input.toggle_paste_expansion() {
+                    self.set_status("Paste expanded inline", StatusLevel::Info);
+                }
+            }
             KeyCode::Char(ch)
                 if key.modifiers == KeyModifiers::NONE
                     || key.modifiers == KeyModifiers::SHIFT =>
             {
                 self.state.input.insert_char(ch)
             }
-            KeyCode::Backspace => self.state.input.delete_backward(),
+            KeyCode::Backspace => self.state.input.delete_backward_with_paste(),
             KeyCode::Delete => self.state.input.delete_forward(),
             KeyCode::Left => self.state.input.move_left(),
             KeyCode::Right => self.state.input.move_right(),

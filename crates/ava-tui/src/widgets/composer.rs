@@ -1,10 +1,67 @@
 use crate::app::AppState;
+use crate::state::input::InputState;
+use crate::state::theme::Theme;
 use crate::state::voice::VoicePhase;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::Frame;
+
+/// Split a line of text into spans, styling paste placeholders with accent color.
+fn styled_text_spans<'a>(text: &str, input: &InputState, theme: &Theme) -> Vec<Span<'a>> {
+    if input.pending_pastes.is_empty() {
+        return vec![Span::styled(
+            text.to_string(),
+            Style::default().fg(theme.text),
+        )];
+    }
+
+    let mut spans = Vec::new();
+    let mut remaining = text;
+
+    while !remaining.is_empty() {
+        // Find the earliest placeholder in the remaining text
+        let mut earliest: Option<(usize, &str)> = None;
+        for placeholder in input.pending_pastes.keys() {
+            if let Some(pos) = remaining.find(placeholder.as_str()) {
+                if earliest.is_none() || pos < earliest.unwrap().0 {
+                    earliest = Some((pos, placeholder.as_str()));
+                }
+            }
+        }
+
+        match earliest {
+            Some((pos, placeholder)) => {
+                // Text before the placeholder
+                if pos > 0 {
+                    spans.push(Span::styled(
+                        remaining[..pos].to_string(),
+                        Style::default().fg(theme.text),
+                    ));
+                }
+                // The placeholder itself — styled distinctly
+                spans.push(Span::styled(
+                    placeholder.to_string(),
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::ITALIC),
+                ));
+                remaining = &remaining[pos + placeholder.len()..];
+            }
+            None => {
+                // No more placeholders
+                spans.push(Span::styled(
+                    remaining.to_string(),
+                    Style::default().fg(theme.text),
+                ));
+                break;
+            }
+        }
+    }
+
+    spans
+}
 
 /// Render the composer widget.
 ///
@@ -107,10 +164,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                         let after = &line_text[col..];
 
                         if !before.is_empty() {
-                            spans.push(Span::styled(
-                                before.to_string(),
-                                Style::default().fg(state.theme.text),
-                            ));
+                            spans.extend(styled_text_spans(before, &state.input, &state.theme));
                         }
                         // Block cursor character
                         if after.is_empty() {
@@ -133,17 +187,11 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                                     .bg(state.theme.text),
                             ));
                             if char_end < after.len() {
-                                spans.push(Span::styled(
-                                    after[char_end..].to_string(),
-                                    Style::default().fg(state.theme.text),
-                                ));
+                                spans.extend(styled_text_spans(&after[char_end..], &state.input, &state.theme));
                             }
                         }
                     } else {
-                        spans.push(Span::styled(
-                            line_text.to_string(),
-                            Style::default().fg(state.theme.text),
-                        ));
+                        spans.extend(styled_text_spans(line_text, &state.input, &state.theme));
                     }
 
                     lines.push(Line::from(spans));

@@ -54,6 +54,7 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         provider,
         model,
         max_turns: cli.max_turns,
+        max_budget_usd: cli.max_budget_usd,
         yolo: cli.auto_approve,
         ..Default::default()
     })
@@ -94,6 +95,9 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 AgentEvent::TokenUsage { input_tokens, output_tokens, cost_usd } => {
                     serde_json::json!({"type": "token_usage", "input_tokens": input_tokens, "output_tokens": output_tokens, "cost_usd": cost_usd})
                 }
+                AgentEvent::SubAgentComplete { session_id, messages, description, .. } => {
+                    serde_json::json!({"type": "sub_agent_complete", "session_id": session_id, "description": description, "message_count": messages.len()})
+                }
             };
             println!("{json}");
         }
@@ -106,7 +110,7 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 AgentEvent::Progress(p) => eprintln!("[{p}]"),
                 AgentEvent::Complete(_) => break,
                 AgentEvent::Thinking(t) => eprintln!("[thinking: {t}]"),
-                AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } => {}
+                AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } | AgentEvent::SubAgentComplete { .. } => {}
                 AgentEvent::Error(e) => {
                     eprintln!("[error: {e}]");
                     break;
@@ -156,6 +160,7 @@ async fn run_workflow(cli: CliArgs, goal: &str, workflow_name: &str) -> Result<(
         provider,
         model,
         max_turns: cli.max_turns,
+        max_budget_usd: cli.max_budget_usd,
         yolo: cli.auto_approve,
         ..Default::default()
     })
@@ -166,8 +171,8 @@ async fn run_workflow(cli: CliArgs, goal: &str, workflow_name: &str) -> Result<(
 
     let budget = Budget {
         max_tokens: 128_000,
-        max_turns: cli.max_turns,
-        max_cost_usd: 10.0,
+        max_turns: if cli.max_turns == 0 { 200 } else { cli.max_turns },
+        max_cost_usd: if cli.max_budget_usd > 0.0 { cli.max_budget_usd } else { 10.0 },
     };
 
     let executor = WorkflowExecutor::new(workflow, budget, provider, platform);
@@ -250,6 +255,7 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
         provider,
         model,
         max_turns: cli.max_turns,
+        max_budget_usd: cli.max_budget_usd,
         yolo: cli.auto_approve,
         ..Default::default()
     })
@@ -261,8 +267,8 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let mut commander = Commander::new(CommanderConfig {
         budget: Budget {
             max_tokens: 128_000,
-            max_turns: cli.max_turns,
-            max_cost_usd: 10.0,
+            max_turns: if cli.max_turns == 0 { 200 } else { cli.max_turns },
+            max_cost_usd: if cli.max_budget_usd > 0.0 { cli.max_budget_usd } else { 10.0 },
         },
         default_provider: provider,
         domain_providers: HashMap::new(),
@@ -436,6 +442,7 @@ async fn run_voice_loop(cli: CliArgs) -> Result<()> {
             provider: provider.clone(),
             model: model.clone(),
             max_turns: cli.max_turns,
+            max_budget_usd: cli.max_budget_usd,
             yolo: cli.auto_approve,
             ..Default::default()
         })

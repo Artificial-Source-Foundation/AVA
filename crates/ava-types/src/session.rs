@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::message::Message;
+use crate::TokenUsage;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Session {
@@ -13,6 +14,9 @@ pub struct Session {
     pub updated_at: DateTime<Utc>,
     pub messages: Vec<Message>,
     pub metadata: serde_json::Value,
+    /// Accumulated token usage across all turns in this session.
+    #[serde(default)]
+    pub token_usage: TokenUsage,
 }
 
 impl Session {
@@ -24,6 +28,7 @@ impl Session {
             updated_at: now,
             messages: Vec::new(),
             metadata: serde_json::json!({}),
+            token_usage: TokenUsage::default(),
         }
     }
 

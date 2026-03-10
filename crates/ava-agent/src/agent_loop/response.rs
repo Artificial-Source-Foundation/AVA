@@ -127,6 +127,10 @@ impl AgentLoop {
                 .await?;
             Ok((response.content, response.tool_calls, response.usage))
         } else {
+            // Gap: LLMProvider::generate() returns Result<String>, so no token usage
+            // is available when the provider doesn't support native tool calling.
+            // Fixing this requires changing the trait signature to return a struct
+            // with both text and optional usage.
             let response = self.llm.generate(messages).await?;
             let tool_calls = parse_tool_calls(&response)?;
             Ok((response, tool_calls, None))
@@ -182,6 +186,10 @@ impl AgentLoop {
                 .await?;
             Ok((response.content, response.tool_calls, response.usage))
         } else {
+            // Gap: LLMProvider::generate() returns Result<String>, so no token usage
+            // is available when the provider doesn't support native tool calling.
+            // Fixing this requires changing the trait signature to return a struct
+            // with both text and optional usage.
             let response = self.llm.generate(messages).await?;
             let tool_calls = parse_tool_calls(&response)?;
             Ok((response, tool_calls, None))

@@ -6,6 +6,7 @@
 //! - Detects stuck states and terminates gracefully
 
 pub mod agent_loop;
+pub mod instructions;
 pub mod llm_trait;
 pub mod reflection;
 pub mod stack;
@@ -14,6 +15,7 @@ pub mod system_prompt;
 
 /// Reflection loop primitives for error analysis and auto-fix retries.
 pub use reflection::{ErrorKind, ReflectionAgent, ReflectionLoop, ToolExecutor, ToolResult};
+pub use instructions::{contextual_instructions_for_file, load_project_instructions};
 pub use {agent_loop::*, llm_trait::{LLMProvider, LLMResponse}};
 
 /// Returns whether the agent crate is reachable and responsive.

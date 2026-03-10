@@ -9,7 +9,7 @@ use std::time::Instant;
 use ava_context::ContextManager;
 use ava_tools::monitor::ToolExecution;
 use ava_tools::registry::ToolRegistry;
-use ava_types::{Message, Role, Session, ThinkingLevel, ToolCall, ToolResult};
+use ava_types::{Message, Role, Session, ThinkingLevel, TokenUsage, ToolCall, ToolResult};
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument, trace, warn};
@@ -39,7 +39,11 @@ pub struct AgentLoop {
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
+    /// Maximum number of turns (0 = unlimited).
     pub max_turns: usize,
+    /// Maximum budget in USD (0 = unlimited). CLI-level cost cap.
+    #[serde(default)]
+    pub max_budget_usd: f64,
     pub token_limit: usize,
     pub model: String,
     #[serde(default = "default_max_cost")]
@@ -82,6 +86,24 @@ pub enum AgentEvent {
         output_tokens: usize,
         cost_usd: f64,
     },
+    /// A sub-agent has completed its run. Contains the full conversation for
+    /// display/storage by the TUI.
+    SubAgentComplete {
+        /// The tool call ID that triggered this sub-agent.
+        call_id: String,
+        /// The sub-agent's session ID (persisted in the session store).
+        session_id: String,
+        /// The sub-agent's full conversation messages.
+        messages: Vec<Message>,
+        /// The task description/prompt given to the sub-agent.
+        description: String,
+        /// Total input tokens consumed by the sub-agent.
+        input_tokens: usize,
+        /// Total output tokens consumed by the sub-agent.
+        output_tokens: usize,
+        /// Estimated cost in USD for the sub-agent's LLM calls.
+        cost_usd: f64,
+    },
 }
 
 impl AgentLoop {
@@ -108,6 +130,31 @@ impl AgentLoop {
         self
     }
 
+    /// Merge token usage from a single turn into a running total.
+    fn merge_usage(total: &mut TokenUsage, usage: &Option<TokenUsage>) {
+        if let Some(u) = usage {
+            total.input_tokens += u.input_tokens;
+            total.output_tokens += u.output_tokens;
+            total.cache_read_tokens += u.cache_read_tokens;
+            total.cache_creation_tokens += u.cache_creation_tokens;
+        }
+    }
+
+    /// Inject a summary prompt and do one final LLM call so the agent can wrap up.
+    async fn force_summary(&mut self, session: &mut Session, prompt: &str, total_usage: &mut TokenUsage) {
+        let summary_msg = Message::new(Role::User, prompt.to_string());
+        self.context.add_message(summary_msg.clone());
+        session.add_message(summary_msg);
+        if let Ok((text, _, usage)) = self.generate_response_with_thinking().await {
+            Self::merge_usage(total_usage, &usage);
+            if !text.trim().is_empty() {
+                let msg = Message::new(Role::Assistant, text);
+                self.context.add_message(msg.clone());
+                session.add_message(msg);
+            }
+        }
+    }
+
     /// Inject the system prompt into the context before the first turn.
     fn inject_system_prompt(&mut self) {
         let mut system = if let Some(ref custom) = self.config.custom_system_prompt {
@@ -128,6 +175,7 @@ impl AgentLoop {
     pub async fn run(&mut self, goal: &str) -> ava_types::Result<Session> {
         let mut session = Session::new();
         let mut detector = StuckDetector::new();
+        let mut total_usage = TokenUsage::default();
 
         self.inject_system_prompt();
 
@@ -141,8 +189,33 @@ impl AgentLoop {
         self.context.add_message(goal_message.clone());
         session.add_message(goal_message);
 
-        for _ in 0..self.config.max_turns {
-            let (response_text, tool_calls, _usage) = self.generate_response_with_thinking().await?;
+        // max_turns == 0 means unlimited; use a very large sentinel
+        let effective_max = if self.config.max_turns == 0 { usize::MAX } else { self.config.max_turns };
+        let mut turn: usize = 0;
+
+        loop {
+            // --- Check turn limit ---
+            if self.config.max_turns > 0 && turn >= effective_max {
+                self.force_summary(&mut session, &format!(
+                    "You have reached the maximum number of turns ({}). Please summarize what you've accomplished and list any remaining work.",
+                    self.config.max_turns,
+                ), &mut total_usage).await;
+                break;
+            }
+
+            // --- Check budget limit ---
+            if self.config.max_budget_usd > 0.0 && detector.estimated_cost() > self.config.max_budget_usd {
+                self.force_summary(&mut session, &format!(
+                    "You have reached the budget limit (${:.2}). Please summarize what you've accomplished and list any remaining work.",
+                    self.config.max_budget_usd,
+                ), &mut total_usage).await;
+                break;
+            }
+
+            turn += 1;
+
+            let (response_text, tool_calls, usage) = self.generate_response_with_thinking().await?;
+            Self::merge_usage(&mut total_usage, &usage);
 
             let assistant_message = Message::new(Role::Assistant, response_text.clone())
                 .with_tool_calls(tool_calls.clone());
@@ -182,6 +255,7 @@ impl AgentLoop {
 
             // Natural completion: non-empty text with no tool calls = final answer
             if tool_calls.is_empty() {
+                session.token_usage = total_usage;
                 return Ok(session);
             }
 
@@ -206,10 +280,12 @@ impl AgentLoop {
             }
 
             if completion_requested {
+                session.token_usage = total_usage;
                 return Ok(session);
             }
         }
 
+        session.token_usage = total_usage;
         Ok(session)
     }
 
@@ -235,8 +311,56 @@ impl AgentLoop {
             self.context.add_message(goal_message.clone());
             session.add_message(goal_message);
 
-            for turn in 0..self.config.max_turns {
-                yield AgentEvent::Progress(format!("turn {}", turn + 1));
+            // max_turns == 0 means unlimited
+            let effective_max: usize = if self.config.max_turns == 0 { usize::MAX } else { self.config.max_turns };
+            let max_budget = self.config.max_budget_usd;
+            let mut turn: usize = 0;
+
+            loop {
+                // --- Check turn limit ---
+                if self.config.max_turns > 0 && turn >= effective_max {
+                    let summary_prompt = format!(
+                        "You have reached the maximum number of turns ({}). Please summarize what you've accomplished and list any remaining work.",
+                        self.config.max_turns,
+                    );
+                    let summary_msg = Message::new(Role::User, summary_prompt);
+                    self.context.add_message(summary_msg.clone());
+                    session.add_message(summary_msg);
+                    yield AgentEvent::Progress("turn limit reached — requesting summary".to_string());
+                    if let Ok((text, _, _)) = self.generate_response_with_thinking().await {
+                        if !text.trim().is_empty() {
+                            yield AgentEvent::Token(text.clone());
+                            let msg = Message::new(Role::Assistant, text);
+                            self.context.add_message(msg.clone());
+                            session.add_message(msg);
+                        }
+                    }
+                    break;
+                }
+
+                // --- Check budget limit ---
+                if max_budget > 0.0 && detector.estimated_cost() > max_budget {
+                    let summary_prompt = format!(
+                        "You have reached the budget limit (${:.2}). Please summarize what you've accomplished and list any remaining work.",
+                        max_budget,
+                    );
+                    let summary_msg = Message::new(Role::User, summary_prompt);
+                    self.context.add_message(summary_msg.clone());
+                    session.add_message(summary_msg);
+                    yield AgentEvent::Progress("budget limit reached — requesting summary".to_string());
+                    if let Ok((text, _, _)) = self.generate_response_with_thinking().await {
+                        if !text.trim().is_empty() {
+                            yield AgentEvent::Token(text.clone());
+                            let msg = Message::new(Role::Assistant, text);
+                            self.context.add_message(msg.clone());
+                            session.add_message(msg);
+                        }
+                    }
+                    break;
+                }
+
+                turn += 1;
+                yield AgentEvent::Progress(format!("turn {}", turn));
 
                 let native_tools = self.llm.supports_tools();
 
@@ -323,6 +447,12 @@ impl AgentLoop {
                                         if usage.output_tokens > 0 {
                                             existing.output_tokens = usage.output_tokens;
                                         }
+                                        if usage.cache_read_tokens > 0 {
+                                            existing.cache_read_tokens = usage.cache_read_tokens;
+                                        }
+                                        if usage.cache_creation_tokens > 0 {
+                                            existing.cache_creation_tokens = usage.cache_creation_tokens;
+                                        }
                                     } else {
                                         last_usage = Some(usage.clone());
                                     }
@@ -340,8 +470,8 @@ impl AgentLoop {
                             // Emit token usage
                             if let Some(usage) = last_usage {
                                 let (in_rate, out_rate) = ava_llm::providers::common::model_pricing_usd_per_million(&self.config.model);
-                                let cost = ava_llm::providers::common::estimate_cost_usd(
-                                    usage.input_tokens, usage.output_tokens, in_rate, out_rate,
+                                let cost = ava_llm::providers::common::estimate_cost_with_cache_usd(
+                                    &usage, in_rate, out_rate,
                                 );
                                 yield AgentEvent::TokenUsage {
                                     input_tokens: usage.input_tokens,
@@ -529,9 +659,8 @@ impl AgentLoop {
                 }
             }
 
-            info!("agent loop ended — max turns reached");
+            info!("agent loop ended");
             yield AgentEvent::ToolStats(detector.tool_monitor().stats());
-            yield AgentEvent::Progress("max turns reached".to_string());
             yield AgentEvent::Complete(session);
         })
     }
@@ -552,6 +681,7 @@ mod tests {
             max_turns: 10,
             token_limit: 128_000,
             model: "mock".to_string(),
+            max_budget_usd: 0.0,
             max_cost_usd: 1.0,
             loop_detection: true,
             custom_system_prompt: None,
@@ -576,6 +706,7 @@ mod tests {
             max_turns: 10,
             token_limit: 128_000,
             model: "mock".to_string(),
+            max_budget_usd: 0.0,
             max_cost_usd: 10.0,
             loop_detection: true,
             custom_system_prompt: None,
@@ -603,6 +734,7 @@ mod tests {
             max_turns: 10,
             token_limit: 128_000,
             model: "mock".to_string(),
+            max_budget_usd: 0.0,
             max_cost_usd: 10.0,
             loop_detection: true,
             custom_system_prompt: None,
@@ -639,6 +771,7 @@ mod tests {
             max_turns: 10,
             token_limit: 128_000,
             model: "mock".to_string(),
+            max_budget_usd: 0.0,
             max_cost_usd: 10.0,
             loop_detection: true,
             custom_system_prompt: None,
@@ -681,6 +814,7 @@ mod tests {
             max_turns: 10,
             token_limit: 128_000,
             model: "mock".to_string(),
+            max_budget_usd: 0.0,
             max_cost_usd: 0.0, // Zero threshold = immediate stop
             loop_detection: true,
             custom_system_prompt: None,
@@ -700,6 +834,7 @@ mod tests {
             max_turns: 10,
             token_limit: 128_000,
             model: "mock".to_string(),
+            max_budget_usd: 0.0,
             max_cost_usd: 0.0,
             loop_detection: false,
             custom_system_prompt: None,

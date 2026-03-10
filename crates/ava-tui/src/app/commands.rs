@@ -335,6 +335,10 @@ impl App {
                     }
                 }
             }
+            "/agents" => {
+                self.open_agent_list();
+                None
+            }
             "/sessions" => {
                 self.execute_command_action(Action::SessionList);
                 None
@@ -415,6 +419,7 @@ Available commands:
   /tools init              — create tool templates
   /mcp [list]              — show MCP servers
   /mcp reload              — reload MCP config
+  /agents                  — show sub-agent configuration
   /sessions                — session picker
   /status                  — show session info
   /diff                    — show git changes

@@ -53,6 +53,11 @@ impl App {
                     ts.query.push_str(value);
                 }
             }
+            Some(ModalType::AgentList) => {
+                if let Some(ref mut al) = self.state.agent_list {
+                    al.query.push_str(value);
+                }
+            }
             Some(ModalType::Question) => {
                 if let Some(ref mut q) = self.state.question {
                     if q.options.is_empty() {
@@ -82,6 +87,7 @@ impl App {
             ModalType::ToolList => self.handle_tool_list_key(key),
             ModalType::ProviderConnect => self.handle_provider_connect_key(key, app_tx),
             ModalType::ThemeSelector => self.handle_theme_selector_key(key),
+            ModalType::AgentList => self.handle_agent_list_key(key),
             ModalType::Question => self.handle_question_key(key),
         }
     }
@@ -554,6 +560,27 @@ impl App {
                 }
                 _ => {}
             },
+        }
+        false
+    }
+
+    fn handle_agent_list_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        let selector = match self.state.agent_list {
+            Some(ref mut s) => s,
+            None => {
+                self.state.active_modal = None;
+                return false;
+            }
+        };
+
+        let vh = list_viewport_height(modal_viewport_height());
+        let action = handle_select_list_key(selector, key, vh);
+        match action {
+            SelectListAction::Cancelled | SelectListAction::Selected => {
+                self.state.agent_list = None;
+                self.state.active_modal = None;
+            }
+            _ => {}
         }
         false
     }

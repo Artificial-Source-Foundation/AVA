@@ -25,6 +25,7 @@ ava-mcp = { path = "../ava-mcp" }
 ava-tools = { path = "../ava-tools" }
 ava-types = { path = "../ava-types" }
 dirs.workspace = true
+glob = "0.3"
 tracing.workspace = true
 tokio-util = { version = "0.7", features = ["rt"] }
 

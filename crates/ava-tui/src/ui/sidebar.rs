@@ -1,4 +1,4 @@
-use crate::app::AppState;
+use crate::app::{AppState, ViewMode};
 use crate::widgets::todo_list;
 use ava_types::TodoStatus;
 use ratatui::layout::Rect;
@@ -36,7 +36,11 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         Line::from(""),
         Line::from(Span::styled("Agent", label_style)),
         Line::from(Span::styled(
-            format!("  Turn {}/{}", state.agent.current_turn, state.agent.max_turns),
+            if state.agent.max_turns == 0 {
+                format!("  Turn {}", state.agent.current_turn)
+            } else {
+                format!("  Turn {}/{}", state.agent.current_turn, state.agent.max_turns)
+            },
             value_style,
         )),
         Line::from(Span::styled(
@@ -44,6 +48,82 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             value_style,
         )),
     ];
+
+    // Sub-agents section — only show when there are any sub-agents
+    if !state.agent.sub_agents.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("Sub-agents", label_style)));
+
+        let max_desc_len = area.width.saturating_sub(8) as usize;
+        let max_visible = 5;
+        let total = state.agent.sub_agents.len();
+        let skip = total.saturating_sub(max_visible);
+
+        // Show "+N more" indicator when there are hidden sub-agents
+        if skip > 0 {
+            lines.push(Line::from(Span::styled(
+                format!("  +{skip} more"),
+                Style::default().fg(state.theme.text_dimmed),
+            )));
+        }
+
+        for sa in state.agent.sub_agents.iter().skip(skip) {
+            let desc = if sa.description.len() > max_desc_len {
+                format!("{}...", &sa.description[..max_desc_len.saturating_sub(3)])
+            } else {
+                sa.description.clone()
+            };
+
+            if sa.is_running {
+                // Spinning indicator for running sub-agents
+                let elapsed = sa.started_at.elapsed().as_secs();
+                let spinner = match (elapsed / 1) % 4 {
+                    0 => "|",
+                    1 => "/",
+                    2 => "-",
+                    _ => "\\",
+                };
+                let stats = if sa.tool_count > 0 {
+                    format!(" ({} tools, {}s)", sa.tool_count, elapsed)
+                } else {
+                    format!(" ({}s)", elapsed)
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {spinner} "), Style::default().fg(Color::Yellow)),
+                    Span::styled(desc, value_style),
+                    Span::styled(stats, Style::default().fg(state.theme.text_dimmed)),
+                ]));
+            } else {
+                // Completed sub-agents: dimmed with stats
+                let secs = sa.elapsed.map(|d| d.as_secs()).unwrap_or(0);
+                let stats = if sa.tool_count > 0 {
+                    format!(" ({} tools, {}s)", sa.tool_count, secs)
+                } else {
+                    format!(" ({}s)", secs)
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "  \u{2713} ",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::DIM),
+                    ),
+                    Span::styled(
+                        desc,
+                        Style::default()
+                            .fg(state.theme.text_dimmed)
+                            .add_modifier(Modifier::DIM),
+                    ),
+                    Span::styled(
+                        stats,
+                        Style::default()
+                            .fg(state.theme.text_dimmed)
+                            .add_modifier(Modifier::DIM),
+                    ),
+                ]));
+            }
+        }
+    }
 
     // Todo section — only show when there are incomplete items
     if todo_list::has_incomplete(&state.todo_items) {
@@ -110,6 +190,9 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     lines.push(Line::from(Span::styled("  Ctrl+L  sessions", dim_style)));
     lines.push(Line::from(Span::styled("  Ctrl+S  sidebar", dim_style)));
     lines.push(Line::from(Span::styled("  Ctrl+C  cancel/quit", dim_style)));
+    if matches!(state.view_mode, ViewMode::SubAgent { .. }) {
+        lines.push(Line::from(Span::styled("  Esc     back (sub-agent)", dim_style)));
+    }
 
     let widget = Paragraph::new(lines).block(
         Block::default()

@@ -2,14 +2,14 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ava_types::{AvaError, Message, Result, StreamChunk};
+use ava_types::{AvaError, Message, Result, StreamChunk, Tool};
 use futures::{Stream, StreamExt};
 use serde_json::{json, Value};
 
 use tracing::instrument;
 
 use crate::pool::ConnectionPool;
-use crate::provider::LLMProvider;
+use crate::provider::{LLMProvider, LLMResponse};
 use crate::providers::common;
 
 #[derive(Clone)]
@@ -87,9 +87,15 @@ impl LLMProvider for OllamaProvider {
                                 .and_then(Value::as_str)
                                 .map(ToString::to_string);
                             if content.is_some() || done {
+                                let usage = if done {
+                                    common::parse_ollama_usage(&payload)
+                                } else {
+                                    None
+                                };
                                 Some(StreamChunk {
                                     content,
                                     done,
+                                    usage,
                                     ..Default::default()
                                 })
                             } else {
@@ -104,6 +110,35 @@ impl LLMProvider for OllamaProvider {
         });
 
         Ok(Box::pin(stream))
+    }
+
+    #[instrument(skip(self, messages, _tools), fields(model = %self.model))]
+    async fn generate_with_tools(
+        &self,
+        messages: &[Message],
+        _tools: &[Tool],
+    ) -> Result<LLMResponse> {
+        let client = self.client().await?;
+        let request = client
+            .post(format!("{}/api/chat", self.base_url.trim_end_matches('/')))
+            .json(&self.build_request_body(messages, false));
+
+        let response = common::send_retrying(request, "Ollama").await?;
+        let response = common::validate_status(response, "Ollama").await?;
+        let payload: Value = response
+            .json()
+            .await
+            .map_err(|error| AvaError::SerializationError(error.to_string()))?;
+
+        let content = common::parse_ollama_completion_payload(&payload)?;
+        let usage = common::parse_ollama_usage(&payload);
+
+        Ok(LLMResponse {
+            content,
+            tool_calls: Vec::new(),
+            usage,
+            thinking: None,
+        })
     }
 
     fn estimate_tokens(&self, input: &str) -> usize {

@@ -380,6 +380,7 @@ impl Lead {
             ContextManager::new(worker_budget.max_tokens),
             AgentConfig {
                 max_turns: worker_budget.max_turns,
+                max_budget_usd: 0.0,
                 token_limit: worker_budget.max_tokens,
                 model: model_name,
                 max_cost_usd: worker_budget.max_cost_usd,
@@ -462,7 +463,8 @@ async fn run_worker(
             }
             AgentEvent::Complete(session) => return Ok(session),
             AgentEvent::Error(error) => return Err(AvaError::ToolError(error)),
-            AgentEvent::Thinking(_) | AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } => {}
+            AgentEvent::Thinking(_) | AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } | AgentEvent::SubAgentComplete { .. } => {}
+
         }
     }
 

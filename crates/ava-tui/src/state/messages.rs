@@ -3,9 +3,10 @@ use crate::state::theme::Theme;
 use ratatui::layout::Alignment;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use std::time::Duration;
 use unicode_width::UnicodeWidthStr;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageKind {
     User,
     Assistant,
@@ -14,6 +15,26 @@ pub enum MessageKind {
     Thinking,
     Error,
     System,
+    SubAgent,
+}
+
+/// Extra data for sub-agent (task tool) messages.
+#[derive(Debug, Clone)]
+pub struct SubAgentData {
+    /// The task prompt/description sent to the sub-agent.
+    pub description: String,
+    /// Number of tools the sub-agent used (populated on completion).
+    pub tool_count: usize,
+    /// How long the sub-agent took (populated on completion).
+    pub duration: Option<Duration>,
+    /// Whether the sub-agent is still executing.
+    pub is_running: bool,
+    /// The tool call ID, used to match the ToolResult back.
+    pub call_id: String,
+    /// The sub-agent's session ID (set on completion via `SubAgentComplete` event).
+    pub session_id: Option<String>,
+    /// The sub-agent's full conversation as UI messages (set on completion).
+    pub session_messages: Vec<UiMessage>,
 }
 
 #[derive(Debug, Clone)]
@@ -25,6 +46,8 @@ pub struct UiMessage {
     pub model_name: Option<String>,
     /// Response time in seconds for assistant messages.
     pub response_time: Option<f64>,
+    /// Sub-agent metadata (only set for `MessageKind::SubAgent`).
+    pub sub_agent: Option<SubAgentData>,
 }
 
 /// Braille spinner frames for streaming/working animation.
@@ -51,6 +74,7 @@ impl UiMessage {
             is_streaming: false,
             model_name: None,
             response_time: None,
+            sub_agent: None,
         }
     }
 
@@ -63,6 +87,7 @@ impl UiMessage {
             MessageKind::Thinking => theme.primary,
             MessageKind::Error => theme.error,
             MessageKind::System => theme.text_dimmed,
+            MessageKind::SubAgent => theme.accent,
         }
     }
 
@@ -412,6 +437,248 @@ impl UiMessage {
                         .fg(theme.text_dimmed)
                         .add_modifier(Modifier::ITALIC),
                 )).alignment(Alignment::Center)]
+            }
+            MessageKind::SubAgent => {
+                let data = self.sub_agent.as_ref();
+                let description = data
+                    .map(|d| d.description.as_str())
+                    .unwrap_or(&self.content);
+                let is_running = data.map(|d| d.is_running).unwrap_or(false);
+
+                // Box drawing characters
+                let top_left = "\u{256d}"; // ╭
+                let top_right = "\u{256e}"; // ╮
+                let bot_left = "\u{2570}"; // ╰
+                let bot_right = "\u{256f}"; // ╯
+                let horiz = "\u{2500}"; // ─
+                let vert = "\u{2502}"; // │
+
+                // Calculate inner width: total width minus bar prefix (3) minus box border+padding on each side (2+1 left, 1+2 right = 6)
+                // Box: "│ " (2) content "│" (1) = 3 chars for box borders
+                // But we also have the left bar prefix (3 chars) prepended later.
+                // Available width inside the box for content:
+                let box_outer_width = if width > Self::BAR_PREFIX_WIDTH + 4 {
+                    (width - Self::BAR_PREFIX_WIDTH) as usize
+                } else {
+                    40 // fallback minimum
+                };
+                // Inner content width: box_outer_width minus "│ " (2) and " │" (2)
+                let inner_width = box_outer_width.saturating_sub(4);
+
+                let border_style = Style::default().fg(theme.border);
+                let accent_style = Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD);
+                let dimmed_style = Style::default().fg(theme.text_dimmed);
+
+                // Truncate description to fit inner width (minus icon + "Sub-agent: " prefix)
+                let prefix_len = 14; // icon(2) + "Sub-agent: "(11) + quote(1)
+                let max_desc = inner_width.saturating_sub(prefix_len + 1); // +1 for closing quote
+                let desc_display = if description.len() > max_desc && max_desc > 3 {
+                    format!("{}...", &description[..max_desc.saturating_sub(3)])
+                } else {
+                    description.to_string()
+                };
+
+                let mut result = Vec::new();
+
+                // ── Top border ──
+                let fill_len = box_outer_width.saturating_sub(2); // minus corners
+                let top_border = format!(
+                    "{top_left}{}{top_right}",
+                    horiz.repeat(fill_len)
+                );
+                result.push(Line::from(Span::styled(top_border, border_style)));
+
+                if is_running {
+                    // ── Header: spinner + "Sub-agent: description" ──
+                    let frame = spinner_frame(spinner_tick);
+                    let header_content_spans = vec![
+                        Span::styled(
+                            format!("{frame} "),
+                            Style::default().fg(theme.accent),
+                        ),
+                        Span::styled("Sub-agent: ", accent_style),
+                        Span::styled(
+                            desc_display.clone(),
+                            Style::default().fg(theme.text_muted),
+                        ),
+                    ];
+                    let header_text_width: usize = header_content_spans
+                        .iter()
+                        .map(|s| s.content.width())
+                        .sum();
+                    let header_pad = inner_width.saturating_sub(header_text_width);
+                    let mut header_line_spans = vec![
+                        Span::styled(format!("{vert} "), border_style),
+                    ];
+                    header_line_spans.extend(header_content_spans);
+                    header_line_spans.push(Span::styled(
+                        format!("{}{vert}", " ".repeat(header_pad)),
+                        border_style,
+                    ));
+                    result.push(Line::from(header_line_spans));
+                } else {
+                    // ── Header: checkmark + "Sub-agent: description" ──
+                    let tool_count = data.map(|d| d.tool_count).unwrap_or(0);
+                    let duration_str = data
+                        .and_then(|d| d.duration)
+                        .map(|d| format!("{:.1}s", d.as_secs_f64()))
+                        .unwrap_or_default();
+
+                    let header_content_spans = vec![
+                        Span::styled(
+                            "\u{2713} ",
+                            Style::default()
+                                .fg(theme.success)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled("Sub-agent: ", accent_style),
+                        Span::styled(
+                            desc_display.clone(),
+                            Style::default().fg(theme.text_muted),
+                        ),
+                    ];
+                    let header_text_width: usize = header_content_spans
+                        .iter()
+                        .map(|s| s.content.width())
+                        .sum();
+                    let header_pad = inner_width.saturating_sub(header_text_width);
+                    let mut header_line_spans = vec![
+                        Span::styled(format!("{vert} "), border_style),
+                    ];
+                    header_line_spans.extend(header_content_spans);
+                    header_line_spans.push(Span::styled(
+                        format!("{}{vert}", " ".repeat(header_pad)),
+                        border_style,
+                    ));
+                    result.push(Line::from(header_line_spans));
+
+                    // ── Stats line: "N tools, Xs" ──
+                    let stats = if !duration_str.is_empty() {
+                        format!("{tool_count} tools, {duration_str}")
+                    } else if tool_count > 0 {
+                        format!("{tool_count} tools")
+                    } else {
+                        String::new()
+                    };
+                    if !stats.is_empty() {
+                        let stats_width = stats.width();
+                        let stats_pad = inner_width.saturating_sub(stats_width);
+                        result.push(Line::from(vec![
+                            Span::styled(format!("{vert} "), border_style),
+                            Span::styled(stats, dimmed_style),
+                            Span::styled(
+                                format!("{}{vert}", " ".repeat(stats_pad)),
+                                border_style,
+                            ),
+                        ]));
+                    }
+
+                    // ── Result preview: first 3 lines ──
+                    if !self.content.is_empty() {
+                        // Inner separator: ├───┤
+                        let sep_fill = box_outer_width.saturating_sub(2);
+                        let sep = format!(
+                            "\u{251c}{}\u{2524}",
+                            horiz.repeat(sep_fill)
+                        );
+                        result.push(Line::from(Span::styled(sep, border_style)));
+
+                        let content_lines: Vec<&str> = self.content.lines().collect();
+                        let show_lines = 3;
+                        let truncated = content_lines.len() > show_lines;
+                        let display = if truncated {
+                            &content_lines[..show_lines]
+                        } else {
+                            &content_lines[..]
+                        };
+
+                        for line in display {
+                            // Truncate line to fit inner width
+                            let display_line = if line.width() > inner_width {
+                                let mut end = inner_width.saturating_sub(3);
+                                // Find a valid char boundary
+                                while end > 0 && !line.is_char_boundary(end) {
+                                    end -= 1;
+                                }
+                                format!("{}...", &line[..end])
+                            } else {
+                                line.to_string()
+                            };
+                            let line_width = display_line.width();
+                            let line_pad = inner_width.saturating_sub(line_width);
+                            result.push(Line::from(vec![
+                                Span::styled(format!("{vert} "), border_style),
+                                Span::styled(
+                                    display_line,
+                                    Style::default()
+                                        .fg(theme.text_dimmed)
+                                        .add_modifier(Modifier::DIM),
+                                ),
+                                Span::styled(
+                                    format!("{}{vert}", " ".repeat(line_pad)),
+                                    border_style,
+                                ),
+                            ]));
+                        }
+                        if truncated {
+                            let more_text = format!(
+                                "[+{} more lines]",
+                                content_lines.len() - show_lines
+                            );
+                            let more_width = more_text.width();
+                            let more_pad = inner_width.saturating_sub(more_width);
+                            result.push(Line::from(vec![
+                                Span::styled(format!("{vert} "), border_style),
+                                Span::styled(
+                                    more_text,
+                                    Style::default()
+                                        .fg(theme.text_dimmed)
+                                        .add_modifier(Modifier::DIM),
+                                ),
+                                Span::styled(
+                                    format!("{}{vert}", " ".repeat(more_pad)),
+                                    border_style,
+                                ),
+                            ]));
+                        }
+                    }
+
+                    // ── Hint line: only when sub-agent has viewable messages ──
+                    let has_conversation = data
+                        .map(|d| !d.session_messages.is_empty())
+                        .unwrap_or(false);
+                    if has_conversation {
+                        let msg_count = data.map(|d| d.session_messages.len()).unwrap_or(0);
+                        let hint = format!("[{msg_count} messages \u{2014} Enter to view]");
+                        let hint_width = hint.width();
+                        let hint_pad = inner_width.saturating_sub(hint_width);
+                        result.push(Line::from(vec![
+                            Span::styled(format!("{vert} "), border_style),
+                            Span::styled(
+                                hint,
+                                Style::default()
+                                    .fg(theme.accent)
+                                    .add_modifier(Modifier::DIM | Modifier::ITALIC),
+                            ),
+                            Span::styled(
+                                format!("{}{vert}", " ".repeat(hint_pad)),
+                                border_style,
+                            ),
+                        ]));
+                    }
+                }
+
+                // ── Bottom border ──
+                let bot_border = format!(
+                    "{bot_left}{}{bot_right}",
+                    horiz.repeat(box_outer_width.saturating_sub(2))
+                );
+                result.push(Line::from(Span::styled(bot_border, border_style)));
+
+                Self::prepend_bars(&mut result, bar_color, width);
+                result
             }
         };
 

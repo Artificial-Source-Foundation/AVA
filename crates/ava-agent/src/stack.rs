@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use ava_codebase::CodebaseIndex;
 use ava_codebase::indexer::index_project;
-use ava_config::ConfigManager;
+use ava_config::{AgentsConfig, ConfigManager};
 use ava_context::{
     create_hybrid_condenser_with_relevance, CondenserConfig, ContextManager, Summarizer,
 };
@@ -20,7 +20,7 @@ use ava_tools::core::{
     register_todo_tools,
 };
 use ava_tools::core::question::QuestionBridge;
-use ava_tools::core::task::TaskSpawner;
+use ava_tools::core::task::{TaskResult, TaskSpawner};
 use ava_tools::mcp_bridge::{MCPBridgeTool, MCPToolCaller};
 use ava_tools::registry::{ToolRegistry, ToolSource};
 use ava_types::{AvaError, Result, Role, Session, ThinkingLevel, TodoState, ToolResult};
@@ -79,6 +79,7 @@ pub struct AgentStack {
     provider_override: RwLock<Option<String>>,
     model_override: RwLock<Option<String>>,
     max_turns: usize,
+    max_budget_usd: f64,
     yolo: bool,
     injected_provider: Option<Arc<dyn LLMProvider>>,
     mcp: Arc<RwLock<Option<MCPRuntime>>>,
@@ -90,6 +91,11 @@ pub struct AgentStack {
     pub todo_state: TodoState,
     /// Bridge for the question tool to communicate with the TUI.
     question_bridge: QuestionBridge,
+    /// Sub-agent configuration loaded from agents.toml files.
+    agents_config: AgentsConfig,
+    /// Parent session ID for linking sub-agent sessions back to their parent.
+    /// Set by the TUI before calling `run()` so spawned sub-agents record lineage.
+    pub parent_session_id: RwLock<Option<String>>,
 }
 
 pub struct AgentStackConfig {
@@ -97,6 +103,7 @@ pub struct AgentStackConfig {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub max_turns: usize,
+    pub max_budget_usd: f64,
     pub yolo: bool,
     pub injected_provider: Option<Arc<dyn LLMProvider>>,
 }
@@ -114,7 +121,8 @@ impl Default for AgentStackConfig {
             data_dir: dirs::home_dir().unwrap_or_default().join(".ava"),
             provider: None,
             model: None,
-            max_turns: 20,
+            max_turns: 0,
+            max_budget_usd: 0.0,
             yolo: false,
             injected_provider: None,
         }
@@ -184,6 +192,14 @@ impl AgentStack {
                 .join("tools"),
         ];
 
+        let agents_config = AgentsConfig::load(
+            &config.data_dir.join("agents.toml"),
+            &std::env::current_dir()
+                .unwrap_or_default()
+                .join(".ava")
+                .join("agents.toml"),
+        );
+
         let todo_state = TodoState::new();
         let (question_bridge, question_rx) = QuestionBridge::new();
 
@@ -207,6 +223,7 @@ impl AgentStack {
                 provider_override: RwLock::new(config.provider),
                 model_override: RwLock::new(config.model),
                 max_turns: config.max_turns,
+                max_budget_usd: config.max_budget_usd,
                 yolo: config.yolo,
                 injected_provider: config.injected_provider,
                 mcp: Arc::new(RwLock::new(mcp_runtime)),
@@ -217,6 +234,8 @@ impl AgentStack {
                 mode_prompt_suffix: RwLock::new(None),
                 todo_state,
                 question_bridge,
+                agents_config,
+                parent_session_id: RwLock::new(None),
             },
             question_rx,
         ))
@@ -371,6 +390,7 @@ impl AgentStack {
         cancel: CancellationToken,
         history: Vec<ava_types::Message>,
     ) -> Result<AgentRunResult> {
+        let cfg = self.config.get().await;
         let provider = if let Some(provider) = &self.injected_provider {
             provider.clone()
         } else {
@@ -378,7 +398,6 @@ impl AgentStack {
             match self.router.route_required(&provider_name, &model_name).await {
                 Ok(p) => p,
                 Err(e) => {
-                    let cfg = self.config.get().await;
                     if let Some(fb) = &cfg.fallback {
                         warn!(
                             primary = %provider_name,
@@ -399,18 +418,37 @@ impl AgentStack {
             }
         };
 
-        let turns_limit = if max_turns == 0 { self.max_turns } else { max_turns };
+        // 0 = unlimited everywhere; explicit non-zero arg overrides stored config
+        let turns_limit = if max_turns > 0 {
+            max_turns
+        } else {
+            self.max_turns // may also be 0 (unlimited)
+        };
         let thinking = *self.thinking_level.read().await;
         let mode_suffix = self.mode_prompt_suffix.read().await.clone();
+
+        // Build system prompt suffix: mode instructions + project instructions
+        let project_instructions = crate::instructions::load_project_instructions_with_config(&cfg.instructions);
+        if let Some(ref pi) = project_instructions {
+            info!(bytes = pi.len(), "Loaded project instructions into system prompt");
+        }
+        let system_prompt_suffix = match (mode_suffix, project_instructions) {
+            (Some(mode), Some(proj)) => Some(format!("{mode}\n\n{proj}")),
+            (Some(mode), None) => Some(mode),
+            (None, Some(proj)) => Some(proj),
+            (None, None) => None,
+        };
+
         let config = AgentConfig {
             max_turns: turns_limit,
+            max_budget_usd: self.max_budget_usd,
             token_limit: 128_000,
             model: provider.model_name().to_string(),
             max_cost_usd: 10.0,
             loop_detection: true,
             custom_system_prompt: None,
             thinking_level: thinking,
-            system_prompt_suffix: mode_suffix,
+            system_prompt_suffix,
         };
 
         let enriched_goal = self.enrich_goal_with_memories(goal).await;
@@ -441,6 +479,13 @@ impl AgentStack {
             platform: self.platform.clone(),
             model_name: provider.model_name().to_string(),
             max_turns: turns_limit,
+            agents_config: self.agents_config.clone(),
+            event_tx: event_tx.clone(),
+            session_manager: Some(self.session_manager.clone()),
+            parent_session_id: {
+                let guard = self.parent_session_id.read().await;
+                guard.clone()
+            },
         });
         register_task_tool(&mut registry, spawner);
 
@@ -487,7 +532,7 @@ impl AgentStack {
                             AgentEvent::Error(error) => {
                                 return Err(AvaError::AgentStopped { reason: error });
                             }
-                            AgentEvent::Thinking(_) | AgentEvent::Progress(_) | AgentEvent::Token(_) | AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } => {}
+                            AgentEvent::Thinking(_) | AgentEvent::Progress(_) | AgentEvent::Token(_) | AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } | AgentEvent::SubAgentComplete { .. } => {}
                         }
                     }
                 }
@@ -524,26 +569,57 @@ struct AgentTaskSpawner {
     platform: Arc<StandardPlatform>,
     model_name: String,
     max_turns: usize,
+    agents_config: AgentsConfig,
+    /// Optional event sender to emit `SubAgentComplete` events for TUI consumption.
+    event_tx: Option<mpsc::UnboundedSender<AgentEvent>>,
+    /// Session manager for persisting sub-agent sessions.
+    session_manager: Option<Arc<SessionManager>>,
+    /// Parent session ID for linking sub-agent sessions.
+    parent_session_id: Option<String>,
 }
 
 #[async_trait]
 impl TaskSpawner for AgentTaskSpawner {
-    async fn spawn(&self, prompt: &str) -> Result<String> {
+    async fn spawn(&self, prompt: &str) -> Result<TaskResult> {
+        let resolved = self.agents_config.get_agent("task");
+
+        if !resolved.enabled {
+            return Err(AvaError::ToolError(
+                "Sub-agent 'task' is disabled in agents.toml".to_string(),
+            ));
+        }
+
         info!(prompt_len = prompt.len(), "spawning sub-agent for task tool");
         let mut registry = ToolRegistry::new();
         register_core_tools(&mut registry, self.platform.clone());
         registry.unregister("todo_write");
         registry.unregister("todo_read");
         let context = ContextManager::new(128_000);
+
+        // Use configured max_turns if set, but always cap at parent's max_turns.
+        let sub_max_turns = resolved
+            .max_turns
+            .unwrap_or(10)
+            .min(self.max_turns);
+
+        // Use configured prompt if set, otherwise fall back to default.
+        let system_prompt = resolved
+            .prompt
+            .unwrap_or_else(|| build_sub_agent_system_prompt());
+
+        // TODO: support model override from resolved.model — requires routing
+        // through ModelRouter which the spawner doesn't currently have access to.
+
         let config = AgentConfig {
-            max_turns: self.max_turns.min(10),
+            max_turns: sub_max_turns,
+            max_budget_usd: 0.0, // sub-agents don't get CLI budget
             token_limit: 128_000,
             model: self.model_name.clone(),
             max_cost_usd: 5.0,
             loop_detection: true,
-            custom_system_prompt: Some(build_sub_agent_system_prompt()),
+            custom_system_prompt: Some(system_prompt),
             thinking_level: ThinkingLevel::Off,
-            system_prompt_suffix: None,
+            system_prompt_suffix: crate::instructions::load_project_instructions(),
         };
         let mut agent = AgentLoop::new(
             Box::new(SharedProvider::new(self.provider.clone())),
@@ -551,16 +627,71 @@ impl TaskSpawner for AgentTaskSpawner {
             context,
             config,
         );
-        let session = agent.run(prompt).await?;
-        let result = session
+        let mut session = agent.run(prompt).await?;
+
+        // Set parent_id metadata so the session can be linked to the parent.
+        session.metadata["is_sub_agent"] = serde_json::Value::Bool(true);
+        if let Some(ref parent_id) = self.parent_session_id {
+            session.metadata["parent_id"] = serde_json::Value::String(parent_id.clone());
+        }
+
+        // Persist the sub-agent session if a session manager is available.
+        if let Some(ref sm) = self.session_manager {
+            if let Err(e) = sm.save(&session) {
+                warn!(error = %e, "Failed to persist sub-agent session");
+            }
+        }
+
+        let text = session
             .messages
             .iter()
             .rev()
             .find(|m| m.role == Role::Assistant && !m.content.trim().is_empty())
             .map(|m| m.content.clone())
             .unwrap_or_else(|| "Sub-agent completed but produced no output.".to_string());
-        info!(result_len = result.len(), "sub-agent task completed");
-        Ok(result)
+
+        let session_id = session.id.to_string();
+        let messages = session.messages.clone();
+        let description = prompt.to_string();
+
+        // Extract accumulated token usage from the sub-agent's session and compute cost.
+        let sub_input_tokens = session.token_usage.input_tokens;
+        let sub_output_tokens = session.token_usage.output_tokens;
+        let (in_rate, out_rate) = ava_llm::providers::common::model_pricing_usd_per_million(&self.model_name);
+        let sub_cost_usd = ava_llm::providers::common::estimate_cost_usd(
+            sub_input_tokens, sub_output_tokens, in_rate, out_rate,
+        );
+
+        info!(
+            result_len = text.len(),
+            session_id = %session_id,
+            message_count = messages.len(),
+            sub_input_tokens,
+            sub_output_tokens,
+            sub_cost_usd,
+            "sub-agent task completed"
+        );
+
+        // Emit SubAgentComplete event so the TUI can store the conversation.
+        // The call_id is not available here (it's set by the tool registry),
+        // so we use an empty string — the TUI matches by description instead.
+        if let Some(ref tx) = self.event_tx {
+            let _ = tx.send(AgentEvent::SubAgentComplete {
+                call_id: String::new(),
+                session_id: session_id.clone(),
+                messages: messages.clone(),
+                description: description.clone(),
+                input_tokens: sub_input_tokens,
+                output_tokens: sub_output_tokens,
+                cost_usd: sub_cost_usd,
+            });
+        }
+
+        Ok(TaskResult {
+            text,
+            session_id,
+            messages,
+        })
     }
 }
 

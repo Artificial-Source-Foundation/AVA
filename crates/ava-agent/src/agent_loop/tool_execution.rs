@@ -1,9 +1,11 @@
+use std::path::PathBuf;
 use std::time::Instant;
 
 use ava_tools::monitor::{hash_arguments, ToolExecution};
 use ava_types::{Message, Role, Session, ToolCall, ToolResult};
 
 use super::AgentLoop;
+use crate::instructions::contextual_instructions_for_file;
 use crate::stuck::StuckDetector;
 
 const MAX_TOOL_RESULT_BYTES: usize = 50_000;
@@ -111,6 +113,19 @@ impl AgentLoop {
             timestamp: start,
         };
         truncate_tool_result(&mut result);
+
+        // Append contextual AGENTS.md instructions for read tool results
+        if tool_call.name == "read" && !result.is_error {
+            if let Some(path_str) = tool_call.arguments.get("path").and_then(|v| v.as_str()) {
+                let file_path = PathBuf::from(path_str);
+                let project_root = std::env::current_dir().unwrap_or_default();
+                if let Some(instructions) = contextual_instructions_for_file(&file_path, &project_root) {
+                    result.content.push_str("\n\n---\n");
+                    result.content.push_str(&instructions);
+                }
+            }
+        }
+
         (result, execution)
     }
 

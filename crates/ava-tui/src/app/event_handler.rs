@@ -1,4 +1,5 @@
 use super::*;
+use crate::state::agent::SubAgentInfo;
 use tracing::{debug, info};
 
 impl App {
@@ -63,30 +64,105 @@ impl App {
                 self.state.agent.activity = AgentActivity::ExecutingTool(call.name.clone());
                 self.state.agent.tool_start = Some(std::time::Instant::now());
 
-                // Check if we need approval
-                if !self.state.permission.permission_level.is_auto_approve()
-                    && !self.state.permission.session_approved.contains(&call.name)
-                {
-                    let (tx, _rx) = tokio::sync::oneshot::channel();
-                    let request = crate::state::permission::ApprovalRequest {
-                        call: call.clone(),
-                        approve_tx: tx,
-                        inspection: None,
-                    };
-                    self.state.permission.enqueue(request);
-                    self.state.active_modal = Some(ModalType::ToolApproval);
+                // Track sub-agent spawns from the task tool
+                if call.name == "task" {
+                    let description = call.arguments
+                        .get("prompt")
+                        .and_then(|p| p.as_str())
+                        .map(String::from)
+                        .unwrap_or_else(|| "sub-agent task".to_string());
+                    self.state.agent.sub_agents.push(SubAgentInfo {
+                        description: description.clone(),
+                        is_running: true,
+                        tool_count: 0,
+                        current_tool: None,
+                        started_at: std::time::Instant::now(),
+                        elapsed: None,
+                        session_id: None,
+                        session_messages: Vec::new(),
+                    });
+
+                    // Create a SubAgent message instead of a regular ToolCall
+                    let mut msg = UiMessage::new(MessageKind::SubAgent, String::new());
+                    msg.is_streaming = true;
+                    msg.sub_agent = Some(crate::state::messages::SubAgentData {
+                        description,
+                        tool_count: 0,
+                        duration: None,
+                        is_running: true,
+                        call_id: call.id.clone(),
+                        session_id: None,
+                        session_messages: Vec::new(),
+                    });
+                    self.state.messages.push(msg);
+                } else {
+                    // Check if we need approval
+                    if !self.state.permission.permission_level.is_auto_approve()
+                        && !self.state.permission.session_approved.contains(&call.name)
+                    {
+                        let (tx, _rx) = tokio::sync::oneshot::channel();
+                        let request = crate::state::permission::ApprovalRequest {
+                            call: call.clone(),
+                            approve_tx: tx,
+                            inspection: None,
+                        };
+                        self.state.permission.enqueue(request);
+                        self.state.active_modal = Some(ModalType::ToolApproval);
+                    }
+                    self.state.messages.push(UiMessage::new(
+                        MessageKind::ToolCall,
+                        format!("{} {}", call.name, call.arguments),
+                    ));
                 }
-                self.state.messages.push(UiMessage::new(
-                    MessageKind::ToolCall,
-                    format!("{} {}", call.name, call.arguments),
-                ));
             }
             ava_agent::AgentEvent::ToolResult(result) => {
                 self.state.agent.activity = AgentActivity::Thinking;
                 self.state.agent.tool_start = None;
-                self.state
-                    .messages
-                    .push(UiMessage::new(MessageKind::ToolResult, result.content));
+
+                // Check if this result belongs to a running sub-agent (task tool)
+                let is_sub_agent_result = self.state.messages.messages.iter().any(|m| {
+                    matches!(m.kind, MessageKind::SubAgent)
+                        && m.sub_agent.as_ref().is_some_and(|d| {
+                            d.is_running && d.call_id == result.call_id
+                        })
+                });
+
+                if is_sub_agent_result {
+                    // Mark the sub-agent state as completed
+                    let sa_tool_count = if let Some(sa) = self.state.agent.sub_agents.iter_mut().rev().find(|s| s.is_running) {
+                        sa.is_running = false;
+                        sa.elapsed = Some(sa.started_at.elapsed());
+                        sa.current_tool = None;
+                        (sa.tool_count, sa.elapsed)
+                    } else {
+                        (0, None)
+                    };
+
+                    // Update the SubAgent UI message with result content and stats
+                    if let Some(msg) = self.state.messages.messages.iter_mut().rev().find(|m| {
+                        matches!(m.kind, MessageKind::SubAgent)
+                            && m.sub_agent.as_ref().is_some_and(|d| d.call_id == result.call_id)
+                    }) {
+                        msg.content = result.content;
+                        msg.is_streaming = false;
+                        if let Some(data) = msg.sub_agent.as_mut() {
+                            data.is_running = false;
+                            data.tool_count = sa_tool_count.0;
+                            data.duration = sa_tool_count.1;
+                        }
+                    }
+                } else {
+                    // Mark most recent running sub-agent as completed (non-task tool results)
+                    if let Some(sa) = self.state.agent.sub_agents.iter_mut().rev().find(|s| s.is_running) {
+                        sa.is_running = false;
+                        sa.elapsed = Some(sa.started_at.elapsed());
+                        sa.current_tool = None;
+                    }
+
+                    self.state
+                        .messages
+                        .push(UiMessage::new(MessageKind::ToolResult, result.content));
+                }
             }
             ava_agent::AgentEvent::Progress(progress) => {
                 // Parse turn info from progress messages (internal state only, not displayed)
@@ -114,6 +190,62 @@ impl App {
                 // Continuous voice: restart recording after agent completes
                 if self.state.voice.continuous && self.state.voice.phase == VoicePhase::Idle {
                     self.toggle_voice(app_tx.clone());
+                }
+            }
+            ava_agent::AgentEvent::SubAgentComplete {
+                call_id,
+                session_id,
+                messages,
+                description,
+                input_tokens,
+                output_tokens,
+                cost_usd,
+            } => {
+                debug!(
+                    session_id = %session_id,
+                    message_count = messages.len(),
+                    input_tokens,
+                    output_tokens,
+                    cost_usd,
+                    "TUI received SubAgentComplete"
+                );
+
+                // Accumulate sub-agent token usage into the parent's totals
+                self.state.agent.tokens_used.input += input_tokens;
+                self.state.agent.tokens_used.output += output_tokens;
+                self.state.agent.cost += cost_usd;
+
+                // Convert agent messages to UI messages for storage
+                let ui_messages: Vec<UiMessage> = messages
+                    .iter()
+                    .filter_map(|m| {
+                        let kind = match m.role {
+                            ava_types::Role::User => MessageKind::User,
+                            ava_types::Role::Assistant => MessageKind::Assistant,
+                            ava_types::Role::Tool => MessageKind::ToolResult,
+                            ava_types::Role::System => return None,
+                        };
+                        Some(UiMessage::new(kind, m.content.clone()))
+                    })
+                    .collect();
+
+                // Update the SubAgentInfo in agent state
+                if let Some(sa) = self.state.agent.sub_agents.iter_mut().rev().find(|s| {
+                    s.description == description
+                }) {
+                    sa.session_id = Some(session_id.clone());
+                    sa.session_messages = ui_messages.clone();
+                }
+
+                // Update the SubAgentData in the matching UI message
+                if let Some(msg) = self.state.messages.messages.iter_mut().rev().find(|m| {
+                    matches!(m.kind, MessageKind::SubAgent)
+                        && m.sub_agent.as_ref().is_some_and(|d| d.call_id == call_id)
+                }) {
+                    if let Some(data) = msg.sub_agent.as_mut() {
+                        data.session_id = Some(session_id);
+                        data.session_messages = ui_messages;
+                    }
                 }
             }
             ava_agent::AgentEvent::ToolStats(_) => {}
@@ -220,9 +352,15 @@ impl App {
             .push(UiMessage::new(MessageKind::User, goal.clone()));
         self.is_streaming.store(true, Ordering::Relaxed);
         self.state.agent.activity = AgentActivity::Thinking;
+        let parent_session_id = self
+            .state
+            .session
+            .current_session
+            .as_ref()
+            .map(|s| s.id.to_string());
         self.state
             .agent
-            .start(goal, self.state.agent.max_turns, app_tx, agent_tx, history);
+            .start(goal, self.state.agent.max_turns, app_tx, agent_tx, history, parent_session_id);
     }
 
     pub(crate) fn toggle_voice(&mut self, app_tx: mpsc::UnboundedSender<AppEvent>) {

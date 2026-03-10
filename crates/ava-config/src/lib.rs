@@ -9,6 +9,7 @@ use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::RwLock;
 
+pub mod agents;
 pub mod credential_commands;
 pub mod credentials;
 pub mod model_catalog;
@@ -18,6 +19,7 @@ pub use credential_commands::{
     CredentialCommand,
 };
 pub use credentials::{known_providers, standard_env_var, CredentialStore, ProviderCredential};
+pub use agents::AgentsConfig;
 pub use model_catalog::{CatalogModel, CatalogState, ModelCatalog, fallback_catalog};
 pub use ava_auth;
 
@@ -145,6 +147,18 @@ pub struct Config {
     pub fallback: Option<FallbackConfig>,
     #[serde(default)]
     pub voice: VoiceConfig,
+    /// Extra instruction file paths (relative to project root) or glob patterns.
+    /// These are loaded in addition to the standard instruction files (AGENTS.md, CLAUDE.md, etc.).
+    ///
+    /// Example in config.yaml:
+    /// ```yaml
+    /// instructions:
+    ///   - "docs/ai-rules.md"
+    ///   - "team/conventions.md"
+    ///   - ".github/CODING_STANDARDS.md"
+    /// ```
+    #[serde(default)]
+    pub instructions: Vec<String>,
 }
 
 /// Per-project ephemeral state (stored in `.ava/state.json` in the project root).

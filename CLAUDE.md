@@ -91,6 +91,18 @@ AVA/
 
 Total: 19 built-in tools + dynamic MCP tools + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
 
+## Project Instructions
+
+AVA auto-discovers instruction files and injects them into the agent's system prompt (`crates/ava-agent/src/instructions.rs`):
+
+1. `~/.ava/AGENTS.md` — global rules (all projects)
+2. `AGENTS.md` — project-level rules (root)
+3. `.ava/rules/*.md` — modular rule files (alphabetical)
+
+Also reads: `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md` for cross-tool compatibility.
+
+Format: plain markdown. No special syntax needed. Each file is prefixed with `# From: <filepath>` in the prompt. Paths are deduplicated by canonical path. Both main agent and sub-agents receive the instructions.
+
 ## Extensions Map (Desktop Only)
 
 The following 20 extensions are part of the **TypeScript desktop layer** (`packages/extensions/`). They do NOT apply to the Rust CLI.

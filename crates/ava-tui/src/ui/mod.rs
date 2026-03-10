@@ -130,6 +130,19 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
                 state,
             );
         }
+        ModalType::AgentList => {
+            if let Some(ref selector) = state.agent_list {
+                let config = SelectListConfig {
+                    title: "Sub-Agents".to_string(),
+                    search_placeholder: "Search agents...".to_string(),
+                    keybinds: vec![
+                        KeybindHint { key: "Esc".to_string(), label: "close".to_string() },
+                        KeybindHint { key: "hint".to_string(), label: "edit .ava/agents.toml to configure".to_string() },
+                    ],
+                };
+                render_select_list(frame, inner, selector, &config, &state.theme);
+            }
+        }
         ModalType::ThemeSelector => {
             if let Some(ref selector) = state.theme_selector {
                 let config = SelectListConfig {

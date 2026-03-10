@@ -22,6 +22,51 @@ pub struct SessionManager {
     db_path: PathBuf,
 }
 
+/// Generate a short descriptive title from a user message.
+///
+/// Rules:
+/// - If the message starts with a `/` command, use the command name (e.g. "/help" -> "/help")
+/// - Take the first line of the message
+/// - Truncate to ~50 chars at a word boundary
+/// - Strip leading/trailing whitespace
+///
+/// This is a simple heuristic approach. It can be swapped for an LLM-based
+/// titler later by replacing this function's body.
+pub fn generate_title(first_message: &str) -> String {
+    let trimmed = first_message.trim();
+    if trimmed.is_empty() {
+        return "Untitled session".to_string();
+    }
+
+    // If it starts with a slash command, use the command name + rest truncated
+    if trimmed.starts_with('/') {
+        let first_line = trimmed.lines().next().unwrap_or(trimmed);
+        return truncate_at_word_boundary(first_line, 50);
+    }
+
+    let first_line = trimmed.lines().next().unwrap_or(trimmed);
+    truncate_at_word_boundary(first_line, 50)
+}
+
+/// Truncate a string at a word boundary, appending "..." if truncated.
+fn truncate_at_word_boundary(s: &str, max_len: usize) -> String {
+    let s = s.trim();
+    if s.len() <= max_len {
+        return s.to_string();
+    }
+
+    // Find the last space before the limit
+    let truncated = &s[..max_len];
+    if let Some(last_space) = truncated.rfind(' ') {
+        // Don't truncate to less than half the max length
+        if last_space > max_len / 2 {
+            return format!("{}...", &s[..last_space]);
+        }
+    }
+    // No good word boundary found, hard truncate
+    format!("{}...", truncated.trim_end())
+}
+
 pub fn healthcheck() -> bool {
     true
 }
@@ -150,6 +195,31 @@ impl SessionManager {
         Ok(sessions)
     }
 
+    /// List all child sessions (sub-agent sessions) whose `parent_id` matches
+    /// the given session ID.
+    pub fn get_children(&self, parent_id: Uuid) -> Result<Vec<Session>> {
+        let conn = self.open_conn()?;
+        let mut stmt = conn
+            .prepare("SELECT id FROM sessions WHERE parent_id = ?1 ORDER BY created_at ASC")
+            .map_err(db_error)?;
+
+        let ids = stmt
+            .query_map(params![parent_id.to_string()], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(db_error)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(db_error)?;
+
+        let mut sessions = Vec::new();
+        for id in ids {
+            if let Some(session) = self.get_with_conn(&conn, parse_uuid(&id)?)? {
+                sessions.push(session);
+            }
+        }
+        Ok(sessions)
+    }
+
     pub fn delete(&self, id: Uuid) -> Result<()> {
         let conn = self.open_conn()?;
         conn.execute(
@@ -243,6 +313,7 @@ impl SessionManager {
             messages,
             metadata: serde_json::from_str(&metadata)
                 .map_err(|error| AvaError::SerializationError(error.to_string()))?,
+            token_usage: ava_types::TokenUsage::default(),
         }))
     }
 
@@ -253,5 +324,55 @@ impl SessionManager {
 
     fn open_conn(&self) -> Result<Connection> {
         Connection::open(&self.db_path).map_err(db_error)
+    }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::*;
+
+    #[test]
+    fn short_message_kept_as_is() {
+        assert_eq!(generate_title("Fix the login bug"), "Fix the login bug");
+    }
+
+    #[test]
+    fn empty_message_gives_untitled() {
+        assert_eq!(generate_title(""), "Untitled session");
+        assert_eq!(generate_title("   "), "Untitled session");
+    }
+
+    #[test]
+    fn multiline_uses_first_line() {
+        let msg = "Fix the login bug\nAlso update the tests\nAnd the docs";
+        assert_eq!(generate_title(msg), "Fix the login bug");
+    }
+
+    #[test]
+    fn long_message_truncated_at_word_boundary() {
+        let msg = "Implement a comprehensive user authentication system with OAuth2 support and JWT tokens";
+        let title = generate_title(msg);
+        assert!(title.len() <= 53, "title too long: {} chars", title.len()); // 50 + "..."
+        assert!(title.ends_with("..."));
+        // Should break at a word boundary
+        assert!(!title.contains("  "));
+    }
+
+    #[test]
+    fn slash_command_preserved() {
+        assert_eq!(generate_title("/help"), "/help");
+        assert_eq!(generate_title("/model openai/gpt-4"), "/model openai/gpt-4");
+    }
+
+    #[test]
+    fn whitespace_trimmed() {
+        assert_eq!(generate_title("  Hello world  "), "Hello world");
+    }
+
+    #[test]
+    fn exactly_50_chars_no_truncation() {
+        let msg = "a]".repeat(25); // 50 chars
+        let title = generate_title(&msg);
+        assert_eq!(title, msg);
     }
 }

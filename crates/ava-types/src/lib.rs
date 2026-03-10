@@ -20,10 +20,16 @@ pub use todo::{TodoItem, TodoPriority, TodoState, TodoStatus};
 pub use tool::{Tool, ToolCall, ToolResult};
 
 /// Token usage reported by an LLM provider after a request.
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TokenUsage {
     pub input_tokens: usize,
     pub output_tokens: usize,
+    /// Tokens read from prompt cache (Anthropic `cache_read_input_tokens`, OpenAI `cached_tokens`).
+    #[serde(default)]
+    pub cache_read_tokens: usize,
+    /// Tokens written to prompt cache (Anthropic `cache_creation_input_tokens`).
+    #[serde(default)]
+    pub cache_creation_tokens: usize,
 }
 
 /// A chunk from a streaming LLM response.
@@ -175,6 +181,7 @@ mod tests {
         let usage = TokenUsage {
             input_tokens: 100,
             output_tokens: 50,
+            ..Default::default()
         };
         let chunk = StreamChunk::with_usage(usage);
         assert!(chunk.done);

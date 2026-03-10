@@ -14,6 +14,22 @@ pub struct TokenUsage {
     pub output: usize,
 }
 
+/// Tracks the state of a sub-agent spawned by the task tool.
+#[derive(Debug, Clone)]
+pub struct SubAgentInfo {
+    pub description: String,
+    pub is_running: bool,
+    pub tool_count: usize,
+    pub current_tool: Option<String>,
+    pub started_at: Instant,
+    /// Duration of completed sub-agents (set when `is_running` becomes false).
+    pub elapsed: Option<std::time::Duration>,
+    /// The sub-agent's session ID (set on completion via `SubAgentComplete` event).
+    pub session_id: Option<String>,
+    /// The sub-agent's full conversation as UI messages (set on completion).
+    pub session_messages: Vec<crate::state::messages::UiMessage>,
+}
+
 /// Agent execution mode — determines tool access and prompt behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AgentMode {
@@ -95,6 +111,8 @@ pub struct AgentState {
     pub recent_models: Vec<String>,
     /// Current thinking/reasoning level.
     pub thinking_level: ThinkingLevel,
+    /// Sub-agents spawned by the task tool.
+    pub sub_agents: Vec<SubAgentInfo>,
     cancel: Option<CancellationToken>,
     task: Option<tokio::task::JoinHandle<()>>,
 }
@@ -162,6 +180,7 @@ impl AgentState {
             workflow_iteration: None,
             recent_models: Vec::new(),
             thinking_level: ThinkingLevel::Off,
+            sub_agents: Vec::new(),
             cancel: None,
             task: None,
         }, question_rx))
@@ -185,6 +204,7 @@ impl AgentState {
         app_tx: mpsc::UnboundedSender<AppEvent>,
         agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
         history: Vec<ava_types::Message>,
+        parent_session_id: Option<String>,
     ) {
         let Some(stack) = self.stack.as_ref().map(Arc::clone) else {
             // No AgentStack (test mode) — mark running state but skip spawn
@@ -204,6 +224,10 @@ impl AgentState {
         self.activity = AgentActivity::Thinking;
 
         self.task = Some(tokio::spawn(async move {
+            // Set parent session ID so sub-agents can link back to this session
+            if let Some(pid) = parent_session_id {
+                *stack.parent_session_id.write().await = Some(pid);
+            }
             let result = stack.run(&goal, max_turns, Some(agent_tx), run_cancel, history).await;
             let mapped = result.map_err(|err| err.to_string());
             let _ = app_tx.send(AppEvent::AgentDone(mapped));
@@ -341,7 +365,7 @@ impl AgentState {
             stack: None,
             is_running: false,
             current_turn: 0,
-            max_turns: 10,
+            max_turns: 0,
             tokens_used: TokenUsage::default(),
             cost: 0.0,
             activity: AgentActivity::Idle,
@@ -355,6 +379,7 @@ impl AgentState {
             workflow_iteration: None,
             recent_models: Vec::new(),
             thinking_level: ThinkingLevel::Off,
+            sub_agents: Vec::new(),
             cancel: None,
             task: None,
         }

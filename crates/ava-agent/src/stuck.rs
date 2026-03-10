@@ -37,6 +37,11 @@ impl StuckDetector {
         }
     }
 
+    /// Current estimated cost accumulated by this detector.
+    pub fn estimated_cost(&self) -> f64 {
+        self.estimated_cost
+    }
+
     /// Access the internal tool monitor for stats.
     pub fn tool_monitor(&self) -> &ToolMonitor {
         &self.tool_monitor
@@ -207,6 +212,7 @@ mod tests {
     fn make_config(max_cost_usd: f64, loop_detection: bool) -> AgentConfig {
         AgentConfig {
             max_turns: 10,
+            max_budget_usd: 0.0,
             token_limit: 128_000,
             model: "mock".to_string(),
             max_cost_usd,

@@ -52,9 +52,11 @@ pub struct AppState {
     pub tool_list: ToolListState,
     pub provider_connect: Option<ProviderConnectState>,
     pub theme_selector: Option<SelectListState<String>>,
+    pub agent_list: Option<SelectListState<String>>,
     /// Saved theme before opening theme selector (for live preview revert on Esc).
     pub theme_before_preview: Option<Theme>,
     pub active_modal: Option<ModalType>,
+    pub view_mode: ViewMode,
     pub status_message: Option<StatusMessage>,
     pub voice: VoiceState,
     pub model_catalog: ava_config::CatalogState,
@@ -80,6 +82,26 @@ pub struct QuestionState {
     pub reply: Option<tokio::sync::oneshot::Sender<String>>,
 }
 
+/// Determines which conversation is displayed in the message list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViewMode {
+    /// Show the main conversation.
+    Main,
+    /// Show a sub-agent's conversation.
+    SubAgent {
+        /// Index into `AgentState::sub_agents`.
+        agent_index: usize,
+        /// The sub-agent's description for the header breadcrumb.
+        description: String,
+    },
+}
+
+impl Default for ViewMode {
+    fn default() -> Self {
+        Self::Main
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModalType {
     CommandPalette,
@@ -89,6 +111,7 @@ pub enum ModalType {
     ToolList,
     ProviderConnect,
     ThemeSelector,
+    AgentList,
     Question,
 }
 
@@ -164,8 +187,10 @@ impl App {
             tool_list: ToolListState::default(),
             provider_connect: None,
             theme_selector: None,
+            agent_list: None,
             theme_before_preview: None,
             active_modal: None,
+            view_mode: ViewMode::default(),
             status_message: None,
             voice: VoiceState {
                 auto_submit: cli.voice,
@@ -200,7 +225,11 @@ impl App {
             stdout(),
             EnterAlternateScreen,
             crossterm::event::EnableBracketedPaste,
-            crossterm::event::EnableMouseCapture
+            crossterm::event::EnableMouseCapture,
+            crossterm::event::PushKeyboardEnhancementFlags(
+                crossterm::event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                    | crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+            )
         )?;
 
         // Install panic hook that restores the terminal before printing the panic.
@@ -214,6 +243,7 @@ impl App {
                 LeaveAlternateScreen,
                 crossterm::event::DisableBracketedPaste,
                 crossterm::event::DisableMouseCapture,
+                crossterm::event::PopKeyboardEnhancementFlags,
                 crossterm::cursor::Show
             );
             original_hook(info);
@@ -281,7 +311,8 @@ impl App {
             terminal.backend_mut(),
             LeaveAlternateScreen,
             crossterm::event::DisableBracketedPaste,
-            crossterm::event::DisableMouseCapture
+            crossterm::event::DisableMouseCapture,
+            crossterm::event::PopKeyboardEnhancementFlags
         )?;
         terminal.show_cursor()?;
 
@@ -290,6 +321,31 @@ impl App {
 
     pub(crate) fn set_status(&mut self, text: impl Into<String>, level: StatusLevel) {
         self.state.status_message = Some(StatusMessage::new(text, level));
+    }
+
+    /// Switch to viewing a sub-agent's conversation by its index in
+    /// `agent.sub_agents`. Returns `true` if the switch succeeded.
+    pub(crate) fn enter_sub_agent_view(&mut self, index: usize) -> bool {
+        if let Some(sa) = self.state.agent.sub_agents.get(index) {
+            if sa.session_messages.is_empty() {
+                self.set_status("Sub-agent has no messages yet", StatusLevel::Warn);
+                return false;
+            }
+            self.state.view_mode = ViewMode::SubAgent {
+                agent_index: index,
+                description: sa.description.clone(),
+            };
+            self.state.messages.reset_scroll();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Return to the main conversation view.
+    pub(crate) fn exit_sub_agent_view(&mut self) {
+        self.state.view_mode = ViewMode::Main;
+        self.state.messages.reset_scroll();
     }
 
     /// Copy the last assistant message content to the system clipboard.
@@ -327,6 +383,59 @@ impl App {
                 self.set_status("No assistant message to copy", StatusLevel::Warn);
             }
         }
+    }
+
+    /// Open the agent list modal showing sub-agent configuration from agents.toml.
+    pub(crate) fn open_agent_list(&mut self) {
+        let home = dirs::home_dir().unwrap_or_default();
+        let global_path = home.join(".ava").join("agents.toml");
+        let project_path = std::env::current_dir()
+            .unwrap_or_default()
+            .join(".ava")
+            .join("agents.toml");
+
+        let config = ava_config::AgentsConfig::load(&global_path, &project_path);
+
+        // Collect known agent types: always show "task", plus any explicitly configured
+        let mut agent_names: Vec<String> = vec!["task".to_string()];
+        for name in config.agents.keys() {
+            if !agent_names.contains(name) {
+                agent_names.push(name.clone());
+            }
+        }
+        agent_names.sort();
+
+        let items: Vec<SelectItem<String>> = agent_names
+            .iter()
+            .map(|name| {
+                let resolved = config.get_agent(name);
+                let status_text = if resolved.enabled { "enabled" } else { "disabled" };
+                let mut detail_parts: Vec<String> = vec![status_text.to_string()];
+                if let Some(ref model) = resolved.model {
+                    detail_parts.push(format!("model={model}"));
+                }
+                if let Some(turns) = resolved.max_turns {
+                    detail_parts.push(format!("max_turns={turns}"));
+                }
+                let detail = detail_parts.join("  ");
+                let status = if resolved.enabled {
+                    Some(crate::widgets::select_list::ItemStatus::Connected("enabled".to_string()))
+                } else {
+                    Some(crate::widgets::select_list::ItemStatus::Info("disabled".to_string()))
+                };
+                SelectItem {
+                    title: name.clone(),
+                    detail,
+                    section: Some("Sub-Agents".to_string()),
+                    status,
+                    value: name.clone(),
+                    enabled: true,
+                }
+            })
+            .collect();
+
+        self.state.agent_list = Some(SelectListState::new(items));
+        self.state.active_modal = Some(ModalType::AgentList);
     }
 
     /// Open the theme selector modal with live preview.
@@ -383,8 +492,8 @@ impl App {
                 // Scroll the message list (not input history)
                 if self.state.active_modal.is_none() {
                     match mouse.kind {
-                        MouseEventKind::ScrollUp => self.state.messages.scroll_up(3),
-                        MouseEventKind::ScrollDown => self.state.messages.scroll_down(3),
+                        MouseEventKind::ScrollUp => self.state.messages.scroll_up(1),
+                        MouseEventKind::ScrollDown => self.state.messages.scroll_down(1),
                         _ => {}
                     }
                 }
@@ -518,6 +627,12 @@ impl App {
             return self.handle_modal_key(modal, key, app_tx);
         }
 
+        // Escape exits sub-agent view when no modal is open
+        if key.code == KeyCode::Esc && matches!(self.state.view_mode, ViewMode::SubAgent { .. }) {
+            self.exit_sub_agent_view();
+            return false;
+        }
+
         // Handle global keybindings
         if let Some(action) = self.state.keybinds.action_for(key) {
             match action {
@@ -532,8 +647,14 @@ impl App {
                         return true;
                     }
                 }
-                Action::ScrollUp => self.state.messages.scroll_up(10),
-                Action::ScrollDown => self.state.messages.scroll_down(10),
+                Action::ScrollUp => {
+                    let half_page = (self.state.messages.visible_height / 2).max(1);
+                    self.state.messages.scroll_up(half_page);
+                }
+                Action::ScrollDown => {
+                    let half_page = (self.state.messages.visible_height / 2).max(1);
+                    self.state.messages.scroll_down(half_page);
+                }
                 // Home/End: if input has content, move within line; otherwise scroll messages
                 Action::ScrollTop => {
                     if !self.state.input.buffer.is_empty() {
@@ -688,6 +809,23 @@ impl App {
         // Handle normal input
         match key.code {
             KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
+                // If input is empty and there are completed sub-agents, enter the
+                // last one's conversation view.
+                if self.state.input.buffer.is_empty()
+                    && !self.state.agent.is_running
+                    && matches!(self.state.view_mode, ViewMode::Main)
+                {
+                    let last_completed = self
+                        .state
+                        .agent
+                        .sub_agents
+                        .iter()
+                        .rposition(|sa| !sa.is_running && !sa.session_messages.is_empty());
+                    if let Some(idx) = last_completed {
+                        self.enter_sub_agent_view(idx);
+                        return false;
+                    }
+                }
                 if let Some(goal) = self.state.input.submit() {
                     self.submit_goal(goal, app_tx, agent_tx);
                 }
@@ -709,14 +847,18 @@ impl App {
             KeyCode::Delete => self.state.input.delete_forward(),
             KeyCode::Left => self.state.input.move_left(),
             KeyCode::Right => self.state.input.move_right(),
-            // Up/Down: navigate within multi-line input first; fall through to history
+            // Up/Down: scroll messages when composer is empty; otherwise navigate input/history
             KeyCode::Up => {
-                if !self.state.input.move_up() {
+                if self.state.input.buffer.is_empty() {
+                    self.state.messages.scroll_up(1);
+                } else if !self.state.input.move_up() {
                     self.state.input.history_up();
                 }
             }
             KeyCode::Down => {
-                if !self.state.input.move_down() {
+                if self.state.input.buffer.is_empty() {
+                    self.state.messages.scroll_down(1);
+                } else if !self.state.input.move_down() {
                     self.state.input.history_down();
                 }
             }
@@ -775,7 +917,7 @@ impl App {
             }
         }
 
-        // Store model info in session metadata before saving
+        // Store model info and generate title in session metadata before saving
         if let Some(meta) = result.session.metadata.as_object_mut() {
             meta.insert(
                 "provider".to_string(),
@@ -785,6 +927,23 @@ impl App {
                 "model".to_string(),
                 serde_json::Value::String(self.state.agent.model_name.clone()),
             );
+
+            // Generate a title from the first user message if not already set
+            if !meta.contains_key("title") {
+                let first_user_msg = result
+                    .session
+                    .messages
+                    .iter()
+                    .find(|m| m.role == ava_types::Role::User)
+                    .map(|m| m.content.as_str());
+                if let Some(msg) = first_user_msg {
+                    let title = ava_session::generate_title(msg);
+                    meta.insert(
+                        "title".to_string(),
+                        serde_json::Value::String(title),
+                    );
+                }
+            }
         }
 
         // Save session to SQLite
@@ -814,8 +973,10 @@ impl App {
             tool_list: ToolListState::default(),
             provider_connect: None,
             theme_selector: None,
+            agent_list: None,
             theme_before_preview: None,
             active_modal: None,
+            view_mode: ViewMode::default(),
             status_message: None,
             voice: VoiceState::default(),
             model_catalog: ava_config::CatalogState::default(),
@@ -845,5 +1006,10 @@ impl App {
         let (app_tx, _) = mpsc::unbounded_channel();
         let (agent_tx, _) = mpsc::unbounded_channel();
         self.handle_key(key, app_tx, agent_tx)
+    }
+
+    /// Public wrapper around `handle_slash_command` for integration tests.
+    pub fn test_slash_command(&mut self, input: &str) -> Option<(MessageKind, String)> {
+        self.handle_slash_command(input)
     }
 }

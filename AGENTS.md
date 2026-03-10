@@ -72,9 +72,10 @@ AVA/
 
 ### Important Counts
 
-- Rust crates: ~21
+- Rust crates: ~22
 - Built-in tools: 19 (11 core + 3 memory + 3 session + 1 codebase + 1 git)
 - Dynamic tools: MCP servers + TOML custom tools
+- Project instructions: auto-discovered from `AGENTS.md`, `CLAUDE.md`, `.ava/rules/*.md`, etc.
 
 ---
 
@@ -138,6 +139,24 @@ Middleware priorities are contract-sensitive. Lower numeric priority runs earlie
 1. Implement in `packages/extensions/`
 2. Register on activation
 3. Optionally add Rust hotpath via `src-tauri/src/commands/`
+
+---
+
+## Project Instructions
+
+AVA auto-discovers instruction files at startup and injects them into the agent's system prompt. This means the contents of this file (`AGENTS.md`) are automatically loaded when AVA runs in this project.
+
+**Discovery order:**
+
+1. `~/.ava/AGENTS.md` — global user-level instructions (all projects)
+2. Project root: `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`
+3. `.ava/rules/*.md` — modular rule files, sorted alphabetically
+
+Files are plain markdown (no special syntax). Each is prefixed with `# From: <filepath>` in the prompt. Duplicate paths are deduplicated. Both the main agent and sub-agents receive these instructions.
+
+Cross-tool compatible: works with instruction files from Cursor, Claude Code, and GitHub Copilot.
+
+Implementation: `crates/ava-agent/src/instructions.rs`
 
 ---
 

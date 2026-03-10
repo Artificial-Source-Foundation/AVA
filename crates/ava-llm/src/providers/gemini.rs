@@ -183,9 +183,18 @@ impl LLMProvider for GeminiProvider {
                         .into_iter()
                         .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
                         .filter_map(|payload| {
-                            common::parse_gemini_completion_payload(&payload)
-                                .ok()
-                                .map(StreamChunk::text)
+                            let content = common::parse_gemini_completion_payload(&payload).ok();
+                            let usage = common::parse_gemini_usage(&payload);
+
+                            if content.is_some() || usage.is_some() {
+                                Some(StreamChunk {
+                                    content,
+                                    usage,
+                                    ..Default::default()
+                                })
+                            } else {
+                                None
+                            }
                         })
                         .collect::<Vec<_>>()
                 })
@@ -260,7 +269,7 @@ impl LLMProvider for GeminiProvider {
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
         let content = common::parse_gemini_completion_payload(&payload).unwrap_or_default();
-        let usage = common::parse_usage(&payload);
+        let usage = common::parse_gemini_usage(&payload);
         let thinking_content = self.parse_thinking(&payload);
 
         Ok(crate::provider::LLMResponse {

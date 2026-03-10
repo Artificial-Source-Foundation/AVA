@@ -1,10 +1,22 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ava_types::{AvaError, ToolResult};
+use ava_types::{AvaError, Message, ToolResult};
 use serde_json::{json, Value};
 
 use crate::registry::Tool;
+
+/// Result returned by a sub-agent task spawn, containing both the final
+/// response text and the full conversation session for storage/display.
+#[derive(Debug, Clone)]
+pub struct TaskResult {
+    /// The sub-agent's final response text (extracted from the last assistant message).
+    pub text: String,
+    /// Unique session ID for the sub-agent's conversation.
+    pub session_id: String,
+    /// The sub-agent's full conversation messages (all turns, tool calls, etc.).
+    pub messages: Vec<Message>,
+}
 
 /// Trait for spawning sub-agent runs from the task tool.
 ///
@@ -13,8 +25,9 @@ use crate::registry::Tool;
 /// access to AgentLoop and LLM infrastructure.
 #[async_trait]
 pub trait TaskSpawner: Send + Sync {
-    /// Spawn a sub-agent with the given prompt and return its final response text.
-    async fn spawn(&self, prompt: &str) -> ava_types::Result<String>;
+    /// Spawn a sub-agent with the given prompt and return a [`TaskResult`]
+    /// containing the final response text plus the full conversation.
+    async fn spawn(&self, prompt: &str) -> ava_types::Result<TaskResult>;
 }
 
 /// Tool that spawns a sub-agent to work on a task autonomously.
@@ -73,11 +86,11 @@ impl Tool for TaskTool {
             ));
         }
 
-        let result = self.spawner.spawn(prompt).await?;
+        let task_result = self.spawner.spawn(prompt).await?;
 
         Ok(ToolResult {
             call_id: String::new(),
-            content: result,
+            content: task_result.text,
             is_error: false,
         })
     }

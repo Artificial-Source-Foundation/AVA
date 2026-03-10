@@ -240,6 +240,7 @@ dependencies = [
  "criterion",
  "dirs",
  "futures",
+ "glob",
  "serde",
  "serde_json",
  "tempfile",
@@ -328,6 +329,7 @@ dependencies = [
  "serde_yaml",
  "tempfile",
  "tokio",
+ "toml",
  "tracing",
 ]
 

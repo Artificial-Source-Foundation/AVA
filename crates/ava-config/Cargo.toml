@@ -13,6 +13,7 @@ serde_yaml.workspace = true
 tokio.workspace = true
 dirs.workspace = true
 reqwest = { version = "0.12", features = ["json"] }
+toml.workspace = true
 tracing.workspace = true
 ava-types = { path = "../ava-types" }
 ava-auth = { path = "../ava-auth" }

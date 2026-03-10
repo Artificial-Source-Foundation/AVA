@@ -71,21 +71,27 @@ fn relative_date(dt: &chrono::DateTime<chrono::Utc>) -> String {
     }
 }
 
-/// Derive a session title from the first user message, truncated.
+/// Get the session title from metadata, or fall back to deriving one from the first user message.
 fn session_title(session: &Session) -> String {
+    // Check for a stored title in metadata first
+    if let Some(title) = session
+        .metadata
+        .as_object()
+        .and_then(|m| m.get("title"))
+        .and_then(|v| v.as_str())
+    {
+        if !title.is_empty() {
+            return title.to_string();
+        }
+    }
+
+    // Backward compat: derive title from first user message
     let first_user = session
         .messages
         .iter()
         .find(|m| m.role == ava_types::Role::User);
     match first_user {
-        Some(msg) => {
-            let line = msg.content.lines().next().unwrap_or(&msg.content);
-            if line.len() > 60 {
-                format!("{}...", &line[..57])
-            } else {
-                line.to_string()
-            }
-        }
+        Some(msg) => ava_session::generate_title(&msg.content),
         None => format!("Session {}", &session.id.to_string()[..8]),
     }
 }

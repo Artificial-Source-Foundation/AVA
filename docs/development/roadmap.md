@@ -62,7 +62,11 @@
 
 | Sprint | Focus | Status |
 |--------|-------|--------|
-| 60 | Streaming tool calls + Session/context UX | Planned |
+| 60 | Streaming tool calls + Session/context UX + Project instructions | In progress |
+
+### Sprint 60 Completed Items
+
+- **Project instructions system** — auto-discovers `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`, `~/.ava/AGENTS.md`, `.ava/rules/*.md` and injects into system prompt (`crates/ava-agent/src/instructions.rs`)
 
 ## Status: v2.1 Released + Active Development
 

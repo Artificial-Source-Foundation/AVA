@@ -23,9 +23,13 @@ pub struct CliArgs {
     #[arg(long)]
     pub provider: Option<String>,
 
-    /// Maximum agent turns
-    #[arg(long, default_value_t = 20)]
+    /// Maximum agent turns (0 = unlimited)
+    #[arg(long, default_value_t = 0)]
     pub max_turns: usize,
+
+    /// Maximum budget in USD (0 = unlimited)
+    #[arg(long, default_value_t = 0.0)]
+    pub max_budget_usd: f64,
 
     /// Auto-approve all tools (except Critical)
     #[arg(long, alias = "yolo")]

@@ -44,6 +44,8 @@ pub fn model_pricing_usd_per_million(model: &str) -> (f64, f64) {
 
 /// Parse token usage from an API response payload.
 /// Works for both OpenAI-style and Anthropic-style `usage` objects.
+/// Extracts cache tokens when present (Anthropic `cache_read_input_tokens` /
+/// `cache_creation_input_tokens`, OpenAI `prompt_tokens_details.cached_tokens`).
 pub fn parse_usage(payload: &Value) -> Option<ava_types::TokenUsage> {
     let usage = payload.get("usage")?;
     let input = usage
@@ -56,14 +58,71 @@ pub fn parse_usage(payload: &Value) -> Option<ava_types::TokenUsage> {
         .or_else(|| usage.get("completion_tokens"))
         .and_then(Value::as_u64)
         .unwrap_or(0) as usize;
+
+    // Anthropic cache fields
+    let cache_read = usage
+        .get("cache_read_input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let cache_creation = usage
+        .get("cache_creation_input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+
+    // OpenAI cache field: prompt_tokens_details.cached_tokens
+    let openai_cached = usage
+        .get("prompt_tokens_details")
+        .and_then(|d| d.get("cached_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+
     Some(ava_types::TokenUsage {
         input_tokens: input,
         output_tokens: output,
+        cache_read_tokens: cache_read.max(openai_cached),
+        cache_creation_tokens: cache_creation,
+    })
+}
+
+/// Parse token usage from a Gemini API response payload.
+/// Gemini uses `usageMetadata` with `promptTokenCount` / `candidatesTokenCount`.
+pub fn parse_gemini_usage(payload: &Value) -> Option<ava_types::TokenUsage> {
+    let meta = payload.get("usageMetadata")?;
+    let input = meta
+        .get("promptTokenCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let output = meta
+        .get("candidatesTokenCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let cached = meta
+        .get("cachedContentTokenCount")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    Some(ava_types::TokenUsage {
+        input_tokens: input,
+        output_tokens: output,
+        cache_read_tokens: cached,
+        cache_creation_tokens: 0,
     })
 }
 
 pub fn estimate_cost_usd(input_tokens: usize, output_tokens: usize, in_rate: f64, out_rate: f64) -> f64 {
     input_tokens as f64 / 1_000_000.0 * in_rate + output_tokens as f64 / 1_000_000.0 * out_rate
+}
+
+/// Estimate cost accounting for prompt cache token pricing.
+/// - Cache read tokens cost 10% of normal input rate.
+/// - Cache creation tokens cost 125% of normal input rate.
+/// - Non-cached input tokens are charged at the normal input rate.
+pub fn estimate_cost_with_cache_usd(usage: &ava_types::TokenUsage, in_rate: f64, out_rate: f64) -> f64 {
+    let m = 1_000_000.0;
+    let non_cached_input = usage.input_tokens.saturating_sub(usage.cache_read_tokens);
+    non_cached_input as f64 / m * in_rate
+        + usage.cache_read_tokens as f64 / m * in_rate * 0.1
+        + usage.cache_creation_tokens as f64 / m * in_rate * 1.25
+        + usage.output_tokens as f64 / m * out_rate
 }
 
 pub fn estimate_tokens(input: &str) -> usize {
@@ -198,6 +257,7 @@ pub fn parse_anthropic_stream_chunk(payload: &Value) -> Option<StreamChunk> {
                 ava_types::TokenUsage {
                     input_tokens: 0,
                     output_tokens: output,
+                    ..Default::default()
                 }
             });
             if usage.is_some() {
@@ -216,9 +276,13 @@ pub fn parse_anthropic_stream_chunk(payload: &Value) -> Option<StreamChunk> {
                 .and_then(|m| m.get("usage"))
                 .map(|u| {
                     let input = u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    let cache_read = u.get("cache_read_input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    let cache_creation = u.get("cache_creation_input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
                     ava_types::TokenUsage {
                         input_tokens: input,
                         output_tokens: 0,
+                        cache_read_tokens: cache_read,
+                        cache_creation_tokens: cache_creation,
                     }
                 });
             if usage.is_some() {
@@ -308,10 +372,17 @@ pub fn parse_openai_stream_chunk(payload: &Value) -> Option<StreamChunk> {
             .get("completion_tokens")
             .and_then(Value::as_u64)
             .unwrap_or(0) as usize;
+        let cached = usage
+            .get("prompt_tokens_details")
+            .and_then(|d| d.get("cached_tokens"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0) as usize;
         if input > 0 || output > 0 {
             chunk.usage = Some(ava_types::TokenUsage {
                 input_tokens: input,
                 output_tokens: output,
+                cache_read_tokens: cached,
+                cache_creation_tokens: 0,
             });
             has_data = true;
         }
@@ -327,6 +398,23 @@ pub fn parse_ollama_completion_payload(payload: &Value) -> Result<String> {
         .and_then(Value::as_str)
         .map(ToString::to_string)
         .ok_or_else(|| AvaError::SerializationError("missing Ollama completion content".to_string()))
+}
+
+/// Parse token usage from an Ollama API response payload.
+/// Ollama uses `prompt_eval_count` (input) and `eval_count` (output) at the top level.
+/// These appear in non-streaming responses and in the final streaming chunk (`done: true`).
+pub fn parse_ollama_usage(payload: &Value) -> Option<ava_types::TokenUsage> {
+    let input = payload.get("prompt_eval_count").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let output = payload.get("eval_count").and_then(Value::as_u64).unwrap_or(0) as usize;
+    if input == 0 && output == 0 {
+        return None;
+    }
+    Some(ava_types::TokenUsage {
+        input_tokens: input,
+        output_tokens: output,
+        cache_read_tokens: 0,
+        cache_creation_tokens: 0,
+    })
 }
 
 pub fn parse_gemini_completion_payload(payload: &Value) -> Result<String> {
@@ -798,6 +886,42 @@ mod tests {
         assert!(parse_ollama_completion_payload(&json!({"message": {"content": null}})).is_err());
     }
 
+    // ── parse_ollama_usage ──
+
+    #[test]
+    fn parse_ollama_usage_valid() {
+        let payload = json!({"prompt_eval_count": 120, "eval_count": 45, "done": true});
+        let u = parse_ollama_usage(&payload).unwrap();
+        assert_eq!(u.input_tokens, 120);
+        assert_eq!(u.output_tokens, 45);
+        assert_eq!(u.cache_read_tokens, 0);
+        assert_eq!(u.cache_creation_tokens, 0);
+    }
+
+    #[test]
+    fn parse_ollama_usage_missing() {
+        assert!(parse_ollama_usage(&json!({})).is_none());
+    }
+
+    #[test]
+    fn parse_ollama_usage_zeros() {
+        let payload = json!({"prompt_eval_count": 0, "eval_count": 0});
+        assert!(parse_ollama_usage(&payload).is_none());
+    }
+
+    #[test]
+    fn parse_ollama_usage_partial() {
+        let payload = json!({"prompt_eval_count": 50});
+        let u = parse_ollama_usage(&payload).unwrap();
+        assert_eq!(u.input_tokens, 50);
+        assert_eq!(u.output_tokens, 0);
+    }
+
+    #[test]
+    fn parse_ollama_usage_null() {
+        assert!(parse_ollama_usage(&json!(null)).is_none());
+    }
+
     // ── parse_gemini_completion_payload ──
 
     #[test]
@@ -1083,6 +1207,92 @@ mod tests {
         assert_eq!(parse_anthropic_completion_payload(&payload).unwrap(), "ok");
     }
 
+    // ── parse_usage cache tokens ──
+
+    #[test]
+    fn parse_usage_anthropic_cache_tokens() {
+        let payload = json!({
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "cache_creation_input_tokens": 200,
+                "cache_read_input_tokens": 150
+            }
+        });
+        let u = parse_usage(&payload).unwrap();
+        assert_eq!(u.input_tokens, 100);
+        assert_eq!(u.output_tokens, 50);
+        assert_eq!(u.cache_read_tokens, 150);
+        assert_eq!(u.cache_creation_tokens, 200);
+    }
+
+    #[test]
+    fn parse_usage_openai_cache_tokens() {
+        let payload = json!({
+            "usage": {
+                "prompt_tokens": 200,
+                "completion_tokens": 80,
+                "prompt_tokens_details": {
+                    "cached_tokens": 120
+                }
+            }
+        });
+        let u = parse_usage(&payload).unwrap();
+        assert_eq!(u.input_tokens, 200);
+        assert_eq!(u.output_tokens, 80);
+        assert_eq!(u.cache_read_tokens, 120);
+        assert_eq!(u.cache_creation_tokens, 0);
+    }
+
+    #[test]
+    fn parse_usage_no_cache_fields_default_zero() {
+        let payload = json!({"usage": {"input_tokens": 50, "output_tokens": 25}});
+        let u = parse_usage(&payload).unwrap();
+        assert_eq!(u.cache_read_tokens, 0);
+        assert_eq!(u.cache_creation_tokens, 0);
+    }
+
+    // ── estimate_cost_with_cache_usd ──
+
+    #[test]
+    fn estimate_cost_with_cache_no_cache() {
+        let usage = ava_types::TokenUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+        };
+        let cost = estimate_cost_with_cache_usd(&usage, 3.0, 15.0);
+        assert!((cost - 18.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn estimate_cost_with_cache_read_discount() {
+        // 1M input, 500k from cache read (10% rate), 500k normal
+        let usage = ava_types::TokenUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 0,
+            cache_read_tokens: 500_000,
+            cache_creation_tokens: 0,
+        };
+        // non-cached: 500k * 3.0/1M = 1.5, cached: 500k * 3.0*0.1/1M = 0.15
+        let cost = estimate_cost_with_cache_usd(&usage, 3.0, 15.0);
+        assert!((cost - 1.65).abs() < 1e-9);
+    }
+
+    #[test]
+    fn estimate_cost_with_cache_creation_surcharge() {
+        let usage = ava_types::TokenUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 1_000_000,
+        };
+        // non-cached: 1M * 3.0/1M = 3.0, creation: 1M * 3.0*1.25/1M = 3.75
+        let cost = estimate_cost_with_cache_usd(&usage, 3.0, 15.0);
+        assert!((cost - 6.75).abs() < 1e-9);
+    }
+
     #[test]
     fn all_parsers_handle_null_payload() {
         let null = json!(null);
@@ -1095,5 +1305,51 @@ mod tests {
         assert!(parse_openai_tool_calls(&null).is_empty());
         assert!(parse_anthropic_tool_calls(&null).is_empty());
         assert!(parse_usage(&null).is_none());
+        assert!(parse_gemini_usage(&null).is_none());
+        assert!(parse_ollama_usage(&null).is_none());
+    }
+
+    // ── parse_gemini_usage ──
+
+    #[test]
+    fn parse_gemini_usage_valid() {
+        let payload = json!({
+            "usageMetadata": {
+                "promptTokenCount": 150,
+                "candidatesTokenCount": 42
+            }
+        });
+        let u = parse_gemini_usage(&payload).unwrap();
+        assert_eq!(u.input_tokens, 150);
+        assert_eq!(u.output_tokens, 42);
+        assert_eq!(u.cache_read_tokens, 0);
+    }
+
+    #[test]
+    fn parse_gemini_usage_with_cached() {
+        let payload = json!({
+            "usageMetadata": {
+                "promptTokenCount": 200,
+                "candidatesTokenCount": 50,
+                "cachedContentTokenCount": 100
+            }
+        });
+        let u = parse_gemini_usage(&payload).unwrap();
+        assert_eq!(u.input_tokens, 200);
+        assert_eq!(u.output_tokens, 50);
+        assert_eq!(u.cache_read_tokens, 100);
+    }
+
+    #[test]
+    fn parse_gemini_usage_missing() {
+        assert!(parse_gemini_usage(&json!({})).is_none());
+    }
+
+    #[test]
+    fn parse_gemini_usage_partial_fields() {
+        let payload = json!({"usageMetadata": {"promptTokenCount": 10}});
+        let u = parse_gemini_usage(&payload).unwrap();
+        assert_eq!(u.input_tokens, 10);
+        assert_eq!(u.output_tokens, 0);
     }
 }

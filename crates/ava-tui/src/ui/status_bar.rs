@@ -1,4 +1,4 @@
-use crate::app::{AppState, ModalType};
+use crate::app::{AppState, ModalType, ViewMode};
 use crate::state::agent::AgentActivity;
 use crate::state::messages::spinner_frame;
 use crate::state::voice::VoicePhase;
@@ -268,12 +268,16 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             " interrupt",
             Style::default().fg(state.theme.text_dimmed),
         ));
+    } else if matches!(state.view_mode, ViewMode::SubAgent { .. }) {
+        // Sub-agent view hints
+        let hints: &[(&str, &str)] =
+            &[("Esc", "back to main"), ("PgUp/PgDn", "scroll")];
+        render_hints(&mut left_spans, hints, state);
     } else {
         // Idle hints
         let hints: &[(&str, &str)] =
             &[("/", "commands"), ("Ctrl+M", "model"), ("Ctrl+K", "palette")];
         render_hints(&mut left_spans, hints, state);
-
     }
 
     // Right side: tokens, cost, model badge

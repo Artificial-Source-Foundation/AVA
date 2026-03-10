@@ -315,6 +315,32 @@ impl AgentState {
         self.thinking_level.label()
     }
 
+    /// Check if the current model likely supports thinking/reasoning.
+    pub fn model_supports_thinking(&self) -> bool {
+        let m = self.model_name.to_lowercase();
+        m.contains("claude")
+            || m.contains("gpt-5")
+            || m.contains("gemini-2.5")
+            || m.contains("gemini-3")
+            || m.starts_with("o3")
+            || m.starts_with("o4")
+            || m.contains("deepseek-r1")
+            || m.contains("qwq")
+            || m.contains("kimi")
+    }
+
+    /// Check if the current model supports granular thinking levels (low/med/high/max).
+    /// Models that think natively (e.g. Kimi, DeepSeek-R1) don't accept level parameters.
+    pub fn model_supports_thinking_levels(&self) -> bool {
+        let m = self.model_name.to_lowercase();
+        m.contains("claude")
+            || m.contains("gpt-5")
+            || m.contains("gemini-2.5")
+            || m.contains("gemini-3")
+            || m.starts_with("o3")
+            || m.starts_with("o4")
+    }
+
     /// Create a lightweight `AgentState` without an `AgentStack` (for tests).
     #[doc(hidden)]
     pub fn test_new(provider: &str, model: &str) -> Self {

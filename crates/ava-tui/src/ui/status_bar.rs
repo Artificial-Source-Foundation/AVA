@@ -150,34 +150,28 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         left_spans.push(Span::styled(&msg.text, Style::default().fg(color)));
     }
 
-    // Right side: agent mode + permission badge
-    let mode_text = state.agent_mode.label();
-    let mode_style = match state.agent_mode {
-        crate::state::agent::AgentMode::Code => Style::default().fg(state.theme.success),
-        crate::state::agent::AgentMode::Plan => Style::default().fg(state.theme.primary),
-        crate::state::agent::AgentMode::Architect => Style::default().fg(state.theme.accent),
-    };
-
+    // Right side: auto-approve warning (if active)
     let perm_text = if state.permission.permission_level.is_auto_approve() {
-        " auto-approve"
+        "auto-approve"
     } else {
         ""
     };
-    let perm_style = Style::default()
-        .fg(state.theme.warning)
-        .add_modifier(Modifier::BOLD);
 
     // Calculate widths and fill gap
     let left_width: usize = left_spans.iter().map(|s| s.content.len()).sum();
-    let right_width = mode_text.len() + perm_text.len() + H_PAD.len();
+    let right_width = perm_text.len() + H_PAD.len();
     let gap = (area.width as usize).saturating_sub(left_width + right_width);
 
     if gap > 0 {
         left_spans.push(Span::raw(" ".repeat(gap)));
     }
-    left_spans.push(Span::styled(mode_text.to_string(), mode_style));
     if !perm_text.is_empty() {
-        left_spans.push(Span::styled(perm_text.to_string(), perm_style));
+        left_spans.push(Span::styled(
+            perm_text.to_string(),
+            Style::default()
+                .fg(state.theme.warning)
+                .add_modifier(Modifier::BOLD),
+        ));
     }
     left_spans.push(Span::raw(H_PAD));
 
@@ -280,19 +274,6 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             &[("/", "commands"), ("Ctrl+M", "model"), ("Ctrl+K", "palette")];
         render_hints(&mut left_spans, hints, state);
 
-        if state.permission.permission_level.is_auto_approve() {
-            left_spans.push(Span::raw(ITEM_GAP));
-            left_spans.push(Span::styled(
-                "\u{25b8}\u{25b8} ",
-                Style::default().fg(state.theme.warning),
-            ));
-            left_spans.push(Span::styled(
-                "auto-approve on",
-                Style::default()
-                    .fg(state.theme.warning)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        }
     }
 
     // Right side: tokens, cost, model badge
@@ -336,11 +317,18 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             .add_modifier(Modifier::BOLD),
     ));
 
-    // Thinking level badge (shown when not Off)
-    if state.agent.thinking_level != ava_types::ThinkingLevel::Off {
+    // Thinking badge: show level for models that support it, just "thinking" for native thinkers
+    if state.agent.thinking_level != ava_types::ThinkingLevel::Off
+        && state.agent.model_supports_thinking()
+    {
         right_spans.push(Span::raw(" "));
+        let badge = if state.agent.model_supports_thinking_levels() {
+            format!("thinking:{}", state.agent.thinking_level.label())
+        } else {
+            "thinking".to_string()
+        };
         right_spans.push(Span::styled(
-            format!("thinking:{}", state.agent.thinking_level.label()),
+            badge,
             Style::default().fg(state.theme.accent),
         ));
     }

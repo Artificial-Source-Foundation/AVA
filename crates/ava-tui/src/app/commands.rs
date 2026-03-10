@@ -310,7 +310,7 @@ impl App {
                 self.state.permission.permission_level = self.state.permission.permission_level.toggle();
                 let label = self.state.permission.permission_level.label();
                 self.set_status(format!("Permissions: {label}"), StatusLevel::Info);
-                Some((MessageKind::System, format!("Permission level: {label}")))
+                None
             }
             "/help" => {
                 let help = "\

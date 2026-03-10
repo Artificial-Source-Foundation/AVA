@@ -69,7 +69,8 @@ Typical runtime extension activation count is ~31:
 11. `ava-lsp` — Language Server Protocol
 12. `ava-mcp` — Model Context Protocol
 13. `ava-memory` — Persistent memory/recall
-14. `ava-permissions` — Permission system
+14. `ava-permissions` — Permission system (9-step DefaultInspector, PermissionPolicy, CommandClassifier, SafetyTag/RiskLevel)
+14b. `ava-auth` — OAuth, Copilot token exchange, PKCE
 15. `ava-platform` — Platform abstractions
 16. `ava-sandbox` — Command sandboxing
 17. `ava-session` — Session persistence
@@ -106,6 +107,17 @@ Common extension responsibilities include:
 - dynamic permission learning with dangerous-command safeguards
 - checkpoint refs for recovery before destructive actions
 - agent reliability middleware for stuck-loop and recovery handling
+
+### Rust CLI Permission Model
+
+The Rust CLI uses a two-level permission system:
+
+- **PermissionLevel** (`ava-tui/src/state/permission.rs`): `Standard` (default) or `AutoApprove` (replaces old `--yolo` flag, CLI flag `--auto-approve` with `--yolo` alias). Toggle at runtime via `/permissions` command.
+- **DefaultInspector** (`ava-permissions/src/inspector.rs`): 9-step evaluation — command classification, path safety, auto-approve check, session approvals, policy blocked/allowed tools, tag checks, risk threshold, static/dynamic rules. Critical commands (rm -rf /, sudo, fork bombs) are always blocked regardless of permission level.
+
+### Agent Modes
+
+Agent execution modes (`ava-tui/src/state/agent.rs`): `Code` (default, full tool access), `Plan` (read-only tools, analysis/planning), `Architect` (plan-first, then implement on approval). Mode-specific prompt suffix injected via `AgentStack.mode_prompt_suffix` into `AgentConfig.system_prompt_suffix`. Tab/Shift+Tab cycles modes in the TUI composer.
 
 ## Where To Read Next
 

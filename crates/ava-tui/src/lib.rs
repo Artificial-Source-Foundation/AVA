@@ -10,6 +10,7 @@ pub mod auth;
 #[cfg(feature = "voice")]
 pub mod audio;
 pub mod benchmark;
+pub mod benchmark_harness;
 pub mod benchmark_tasks;
 pub mod config;
 pub mod event;

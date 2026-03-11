@@ -21,6 +21,7 @@ async fn main() -> Result<()> {
         && !cli.headless
         && !cli.json
         && !cli.benchmark
+        && !cli.harness
         && std::io::stdout().is_terminal();
 
     init_logging(is_tui);
@@ -30,6 +31,33 @@ async fn main() -> Result<()> {
         Some(Command::Review(args)) => return run_review(args).await,
         Some(Command::Auth { action }) => return run_auth(action).await,
         None => {}
+    }
+
+    // Harnessed-pair benchmark mode
+    if cli.harness {
+        let director_str = cli.director.as_deref().ok_or_else(|| {
+            color_eyre::eyre::eyre!(
+                "Missing --director flag. Usage: ava --harness --director \"openrouter:anthropic/claude-opus-4.6\" --worker \"inception:mercury-2\""
+            )
+        })?;
+        let worker_str = cli.worker.as_deref().ok_or_else(|| {
+            color_eyre::eyre::eyre!(
+                "Missing --worker flag. Usage: ava --harness --director \"openrouter:anthropic/claude-opus-4.6\" --worker \"inception:mercury-2\""
+            )
+        })?;
+        let director_spec = ava_tui::benchmark_harness::parse_single_model_spec(director_str)?;
+        let worker_spec = ava_tui::benchmark_harness::parse_single_model_spec(worker_str)?;
+        let suite =
+            ava_tui::benchmark_tasks::BenchmarkSuite::from_str(&cli.suite).unwrap_or_else(|| {
+                eprintln!(
+                    "Warning: unknown suite '{}', defaulting to 'all'",
+                    cli.suite
+                );
+                ava_tui::benchmark_tasks::BenchmarkSuite::All
+            });
+        ava_tui::benchmark_harness::run_harness(director_spec, worker_spec, cli.max_turns, suite)
+            .await?;
+        return Ok(());
     }
 
     // Benchmark mode

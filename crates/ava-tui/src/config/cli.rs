@@ -75,6 +75,18 @@ pub struct CliArgs {
     #[arg(long, default_value = "all")]
     pub suite: String,
 
+    /// Run harnessed-pair benchmark (SOTA director + fast worker)
+    #[arg(long)]
+    pub harness: bool,
+
+    /// Director model spec for harness benchmark (e.g. "openrouter:anthropic/claude-opus-4.6")
+    #[arg(long)]
+    pub director: Option<String>,
+
+    /// Worker model spec for harness benchmark (e.g. "inception:mercury-2")
+    #[arg(long)]
+    pub worker: Option<String>,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }

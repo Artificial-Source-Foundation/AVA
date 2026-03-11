@@ -50,34 +50,34 @@
   - `pub fn healthcheck` at `ava-codebase/src/lib.rs:27`
   - `pub struct DependencyGraph` at `ava-codebase/src/graph.rs:6`
 
-### ❌ `ava-commander`
+### ❌ `ava-praxis`
 - Public items: 32
 - Documented: 8 / 32 (25.0%)
 - **Undocumented items** (24):
-  - `pub struct ReviewResult` at `ava-commander/src/review.rs:17`
-  - `pub struct ReviewIssue` at `ava-commander/src/review.rs:26`
-  - `pub enum Severity` at `ava-commander/src/review.rs:34`
-  - `pub enum ReviewVerdict` at `ava-commander/src/review.rs:68`
-  - `pub struct ReviewContext` at `ava-commander/src/review.rs:85`
-  - `pub struct DiffStats` at `ava-commander/src/review.rs:91`
-  - `pub enum DiffMode` at `ava-commander/src/review.rs:98`
-  - `pub async fn collect_diff` at `ava-commander/src/review.rs:130`
-  - `pub fn build_review_system_prompt` at `ava-commander/src/review.rs:187`
-  - `pub fn parse_review_output` at `ava-commander/src/review.rs:233`
-  - `pub fn format_text` at `ava-commander/src/review.rs:327`
-  - `pub fn format_json` at `ava-commander/src/review.rs:374`
-  - `pub fn format_markdown` at `ava-commander/src/review.rs:378`
-  - `pub fn determine_exit_code` at `ava-commander/src/review.rs:425`
-  - `pub async fn run_review_agent` at `ava-commander/src/review.rs:440`
-  - `pub enum CommanderEvent` at `ava-commander/src/events.rs:5`
-  - `pub struct Commander` at `ava-commander/src/lib.rs:38`
-  - `pub struct CommanderConfig` at `ava-commander/src/lib.rs:43`
-  - `pub struct Lead` at `ava-commander/src/lib.rs:78`
-  - `pub enum Domain` at `ava-commander/src/lib.rs:87`
-  - `pub struct Worker` at `ava-commander/src/lib.rs:97`
-  - `pub struct Budget` at `ava-commander/src/lib.rs:107`
-  - `pub struct Task` at `ava-commander/src/lib.rs:114`
-  - `pub enum TaskType` at `ava-commander/src/lib.rs:121`
+  - `pub struct ReviewResult` at `ava-praxis/src/review.rs:17`
+  - `pub struct ReviewIssue` at `ava-praxis/src/review.rs:26`
+  - `pub enum Severity` at `ava-praxis/src/review.rs:34`
+  - `pub enum ReviewVerdict` at `ava-praxis/src/review.rs:68`
+  - `pub struct ReviewContext` at `ava-praxis/src/review.rs:85`
+  - `pub struct DiffStats` at `ava-praxis/src/review.rs:91`
+  - `pub enum DiffMode` at `ava-praxis/src/review.rs:98`
+  - `pub async fn collect_diff` at `ava-praxis/src/review.rs:130`
+  - `pub fn build_review_system_prompt` at `ava-praxis/src/review.rs:187`
+  - `pub fn parse_review_output` at `ava-praxis/src/review.rs:233`
+  - `pub fn format_text` at `ava-praxis/src/review.rs:327`
+  - `pub fn format_json` at `ava-praxis/src/review.rs:374`
+  - `pub fn format_markdown` at `ava-praxis/src/review.rs:378`
+  - `pub fn determine_exit_code` at `ava-praxis/src/review.rs:425`
+  - `pub async fn run_review_agent` at `ava-praxis/src/review.rs:440`
+  - `pub enum PraxisEvent` at `ava-praxis/src/events.rs:5`
+  - `pub struct Director` at `ava-praxis/src/lib.rs:38`
+  - `pub struct DirectorConfig` at `ava-praxis/src/lib.rs:43`
+  - `pub struct Lead` at `ava-praxis/src/lib.rs:78`
+  - `pub enum Domain` at `ava-praxis/src/lib.rs:87`
+  - `pub struct Worker` at `ava-praxis/src/lib.rs:97`
+  - `pub struct Budget` at `ava-praxis/src/lib.rs:107`
+  - `pub struct Task` at `ava-praxis/src/lib.rs:114`
+  - `pub enum TaskType` at `ava-praxis/src/lib.rs:121`
 
 ### ✅ `ava-config`
 - Public items: 21
@@ -430,7 +430,7 @@ These are public traits, structs, enums (especially error types) that lack doc c
 - `pub trait EditStrategy` at `ava-tools/src/edit/strategies/mod.rs:11`
 
 ### 🔴 Error/Result Types (CRITICAL - consumers need to handle these)
-- `pub struct ReviewResult` at `ava-commander/src/review.rs:17`
+- `pub struct ReviewResult` at `ava-praxis/src/review.rs:17`
 - `pub enum LspError` at `ava-lsp/src/error.rs:6`
 - `pub enum AvaError` at `ava-types/src/error.rs:9`
 - `pub struct ToolResult` at `ava-types/src/tool.rs:20`
@@ -449,21 +449,21 @@ These are public traits, structs, enums (especially error types) that lack doc c
 
 ### 🟡 Public Structs/Enums (IMPORTANT - part of public API)
 - `pub struct LspClient` at `ava-lsp/src/client.rs:13`
-- `pub struct ReviewIssue` at `ava-commander/src/review.rs:26`
-- `pub enum Severity` at `ava-commander/src/review.rs:34`
-- `pub enum ReviewVerdict` at `ava-commander/src/review.rs:68`
-- `pub struct ReviewContext` at `ava-commander/src/review.rs:85`
-- `pub struct DiffStats` at `ava-commander/src/review.rs:91`
-- `pub enum DiffMode` at `ava-commander/src/review.rs:98`
-- `pub enum CommanderEvent` at `ava-commander/src/events.rs:5`
-- `pub struct Commander` at `ava-commander/src/lib.rs:38`
-- `pub struct CommanderConfig` at `ava-commander/src/lib.rs:43`
-- `pub struct Lead` at `ava-commander/src/lib.rs:78`
-- `pub enum Domain` at `ava-commander/src/lib.rs:87`
-- `pub struct Worker` at `ava-commander/src/lib.rs:97`
-- `pub struct Budget` at `ava-commander/src/lib.rs:107`
-- `pub struct Task` at `ava-commander/src/lib.rs:114`
-- `pub enum TaskType` at `ava-commander/src/lib.rs:121`
+- `pub struct ReviewIssue` at `ava-praxis/src/review.rs:26`
+- `pub enum Severity` at `ava-praxis/src/review.rs:34`
+- `pub enum ReviewVerdict` at `ava-praxis/src/review.rs:68`
+- `pub struct ReviewContext` at `ava-praxis/src/review.rs:85`
+- `pub struct DiffStats` at `ava-praxis/src/review.rs:91`
+- `pub enum DiffMode` at `ava-praxis/src/review.rs:98`
+- `pub enum PraxisEvent` at `ava-praxis/src/events.rs:5`
+- `pub struct Director` at `ava-praxis/src/lib.rs:38`
+- `pub struct DirectorConfig` at `ava-praxis/src/lib.rs:43`
+- `pub struct Lead` at `ava-praxis/src/lib.rs:78`
+- `pub enum Domain` at `ava-praxis/src/lib.rs:87`
+- `pub struct Worker` at `ava-praxis/src/lib.rs:97`
+- `pub struct Budget` at `ava-praxis/src/lib.rs:107`
+- `pub struct Task` at `ava-praxis/src/lib.rs:114`
+- `pub enum TaskType` at `ava-praxis/src/lib.rs:121`
 - `pub struct Message` at `ava-types/src/message.rs:10`
 - `pub enum Role` at `ava-types/src/message.rs:52`
 - `pub struct WasmLoader` at `ava-extensions/src/wasm_loader.rs:5`
@@ -623,12 +623,12 @@ These are public traits, structs, enums (especially error types) that lack doc c
 - `pub fn render_tool_list(...)` at `ava-tui/src/widgets/tool_list.rs:42`
 
 ### 🟡 Functions Returning `Result` (SHOULD document error conditions)
-- `pub async fn collect_diff(...)` at `ava-commander/src/review.rs:130`
-- `pub fn parse_review_output(...)` at `ava-commander/src/review.rs:233`
-- `pub fn format_text(...)` at `ava-commander/src/review.rs:327`
-- `pub fn format_json(...)` at `ava-commander/src/review.rs:374`
-- `pub fn format_markdown(...)` at `ava-commander/src/review.rs:378`
-- `pub fn determine_exit_code(...)` at `ava-commander/src/review.rs:425`
+- `pub async fn collect_diff(...)` at `ava-praxis/src/review.rs:130`
+- `pub fn parse_review_output(...)` at `ava-praxis/src/review.rs:233`
+- `pub fn format_text(...)` at `ava-praxis/src/review.rs:327`
+- `pub fn format_json(...)` at `ava-praxis/src/review.rs:374`
+- `pub fn format_markdown(...)` at `ava-praxis/src/review.rs:378`
+- `pub fn determine_exit_code(...)` at `ava-praxis/src/review.rs:425`
 - `pub fn decode_message(...)` at `ava-lsp/src/transport.rs:11`
 - `pub async fn write_frame(...)` at `ava-lsp/src/transport.rs:44`
 - `pub async fn read_frame(...)` at `ava-lsp/src/transport.rs:51`

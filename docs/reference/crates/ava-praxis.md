@@ -1,12 +1,12 @@
-# ava-commander
+# ava-praxis
 
 > Multi-agent orchestration with domain-specific leads, workflow pipelines, and code review.
 
 ## Overview
 
-`ava-commander` implements multi-agent coordination for AVA. It provides two orchestration modes:
+`ava-praxis` implements multi-agent coordination for AVA. It provides two orchestration modes:
 
-1. **Commander pattern** -- Domain-specific leads (Frontend, Backend, QA, etc.) that spawn workers and execute tasks in parallel, merging results into a combined session.
+1. **Director pattern** -- Domain-specific leads (Frontend, Backend, QA, etc.) that spawn workers and execute tasks in parallel, merging results into a combined session. Hierarchy: User (CEO) -> Director -> Leads -> Workers.
 2. **Workflow pipelines** -- Sequential multi-phase execution (Planner -> Coder -> Reviewer) with output chaining and feedback loops.
 
 The crate also includes a full-featured **code review agent** that collects git diffs, runs an LLM-powered review, and produces structured output with severity-tagged issues, verdicts, and multiple output formats.
@@ -16,7 +16,7 @@ All orchestration is built on top of `ava-agent::AgentLoop` -- each worker or ph
 ## Architecture
 
 ```
-Commander (lib.rs)                    WorkflowExecutor (workflow.rs)
+Director (lib.rs)                    WorkflowExecutor (workflow.rs)
     |                                     |
     v                                     v
 Lead[7 domains]                     Phase[N phases]
@@ -48,23 +48,23 @@ format_text/json/markdown()
 
 ## Key Types
 
-### Commander
-`crates/ava-commander/src/lib.rs:38`
+### Director
+`crates/ava-praxis/src/lib.rs:38`
 
 ```rust
-pub struct Commander {
+pub struct Director {
     leads: Vec<Lead>,
     budget: Budget,
 }
 ```
 
-The top-level orchestrator. Created with a `CommanderConfig` that specifies a default provider, optional per-domain providers, platform, and budget. On construction, it creates 7 domain leads (Frontend, Backend, QA, Research, Debug, Fullstack, DevOps).
+The top-level orchestrator. Created with a `DirectorConfig` that specifies a default provider, optional per-domain providers, platform, and budget. On construction, it creates 7 domain leads (Frontend, Backend, QA, Research, Debug, Fullstack, DevOps).
 
-### CommanderConfig
-`crates/ava-commander/src/lib.rs:43`
+### DirectorConfig
+`crates/ava-praxis/src/lib.rs:43`
 
 ```rust
-pub struct CommanderConfig {
+pub struct DirectorConfig {
     pub budget: Budget,
     pub default_provider: Arc<dyn LLMProvider>,
     pub domain_providers: HashMap<Domain, Arc<dyn LLMProvider>>,
@@ -76,7 +76,7 @@ pub struct CommanderConfig {
 - `apply_cli_tier_routes()` (feature-gated behind `cli-providers`) integrates CLI-discovered providers with `cli:` prefix routing.
 
 ### Domain
-`crates/ava-commander/src/lib.rs:87`
+`crates/ava-praxis/src/lib.rs:87`
 
 ```rust
 pub enum Domain {
@@ -90,7 +90,7 @@ pub enum Domain {
 }
 ```
 
-Used for task routing. The `pick_domain()` method (line 323) maps `TaskType` to `Domain`:
+Used for task routing. The `pick_domain()` method maps `TaskType` to `Domain`:
 
 | TaskType | Routed to Domain |
 |----------|-----------------|
@@ -102,7 +102,7 @@ Used for task routing. The `pick_domain()` method (line 323) maps `TaskType` to 
 | Simple | Fullstack |
 
 ### Lead
-`crates/ava-commander/src/lib.rs:78`
+`crates/ava-praxis/src/lib.rs:78`
 
 ```rust
 pub struct Lead {
@@ -114,13 +114,13 @@ pub struct Lead {
 }
 ```
 
-A domain-specific team lead that owns a provider and can spawn workers. `spawn_worker()` (line 363) creates a `Worker` with:
+A domain-specific team lead that owns a provider and can spawn workers. `spawn_worker()` creates a `Worker` with:
 - **Half the budget** of the parent (tokens, turns, cost) -- `max(1)` floor for turns/tokens.
 - A fresh `ToolRegistry` with core tools registered via the platform.
 - Its own `AgentLoop` wrapped in `Arc<Mutex<AgentLoop>>`.
 
 ### Worker
-`crates/ava-commander/src/lib.rs:97`
+`crates/ava-praxis/src/lib.rs:97`
 
 ```rust
 pub struct Worker {
@@ -136,7 +136,7 @@ pub struct Worker {
 Workers are `Clone` (via `Arc::clone` on the agent). Each worker runs its task description through its `AgentLoop` in streaming mode.
 
 ### Budget
-`crates/ava-commander/src/lib.rs:106`
+`crates/ava-praxis/src/lib.rs:106`
 
 ```rust
 pub struct Budget {
@@ -146,10 +146,10 @@ pub struct Budget {
 }
 ```
 
-Shared budget type used by Commander, Leads, Workers, and Workflows.
+Shared budget type used by Director, Leads, Workers, and Workflows.
 
 ### Task
-`crates/ava-commander/src/lib.rs:113`
+`crates/ava-praxis/src/lib.rs:113`
 
 ```rust
 pub struct Task {
@@ -159,8 +159,8 @@ pub struct Task {
 }
 ```
 
-### CommanderEvent
-`crates/ava-commander/src/events.rs:4`
+### PraxisEvent
+`crates/ava-praxis/src/events.rs:4`
 
 Events emitted during multi-agent execution for UI consumption:
 
@@ -181,7 +181,7 @@ Events emitted during multi-agent execution for UI consumption:
 ### Workflow Types
 
 #### Workflow
-`crates/ava-commander/src/workflow.rs:52`
+`crates/ava-praxis/src/workflow.rs:52`
 
 ```rust
 pub struct Workflow {
@@ -192,7 +192,7 @@ pub struct Workflow {
 ```
 
 #### Phase
-`crates/ava-commander/src/workflow.rs:43`
+`crates/ava-praxis/src/workflow.rs:43`
 
 ```rust
 pub struct Phase {
@@ -205,7 +205,7 @@ pub struct Phase {
 ```
 
 #### PhaseRole
-`crates/ava-commander/src/workflow.rs:21`
+`crates/ava-praxis/src/workflow.rs:21`
 
 ```rust
 pub enum PhaseRole {
@@ -220,7 +220,7 @@ pub enum PhaseRole {
 ### Review Types
 
 #### ReviewResult
-`crates/ava-commander/src/review.rs:17`
+`crates/ava-praxis/src/review.rs:17`
 
 ```rust
 pub struct ReviewResult {
@@ -233,7 +233,7 @@ pub struct ReviewResult {
 ```
 
 #### ReviewIssue
-`crates/ava-commander/src/review.rs:25`
+`crates/ava-praxis/src/review.rs:25`
 
 ```rust
 pub struct ReviewIssue {
@@ -245,7 +245,7 @@ pub struct ReviewIssue {
 ```
 
 #### ReviewVerdict
-`crates/ava-commander/src/review.rs:67`
+`crates/ava-praxis/src/review.rs:67`
 
 ```rust
 pub enum ReviewVerdict {
@@ -256,7 +256,7 @@ pub enum ReviewVerdict {
 ```
 
 #### DiffMode
-`crates/ava-commander/src/review.rs:98`
+`crates/ava-praxis/src/review.rs:98`
 
 ```rust
 pub enum DiffMode {
@@ -269,14 +269,14 @@ pub enum DiffMode {
 
 ## Flows
 
-### Commander: Delegate and Coordinate
+### Director: Delegate and Coordinate
 
-1. **Delegate** (`commander.delegate(task)`, line 193):
+1. **Delegate** (`director.delegate(task)`):
    - `pick_domain()` selects the appropriate domain based on `task.task_type`.
    - Finds the matching `Lead` and calls `spawn_worker()`.
-   - Worker gets half the commander's budget, a fresh tool registry with core tools, and its own `AgentLoop`.
+   - Worker gets half the director's budget, a fresh tool registry with core tools, and its own `AgentLoop`.
 
-2. **Coordinate** (`commander.coordinate(workers, cancel, event_tx)`, line 204):
+2. **Coordinate** (`director.coordinate(workers, cancel, event_tx)`):
    - All workers run **in parallel** via `join_all()`.
    - Each worker runs inside `tokio::select!` with cancellation and timeout support (timeout = `max_turns * 60` seconds).
    - Events are emitted as workers start, progress, complete, or fail.
@@ -287,16 +287,16 @@ pub enum DiffMode {
 
 ### Workflow Execution
 
-`WorkflowExecutor::execute()` at `crates/ava-commander/src/workflow.rs:306`:
+`WorkflowExecutor::execute()` at `crates/ava-praxis/src/workflow.rs:306`:
 
 1. **Budget division** -- Total turns and cost divided equally across phases.
 2. **Phase iteration** -- For each phase in order:
    - Build the phase goal: if `receives_prior_output` is true and there is prior output, prepend "Original goal: ... Output from previous phase: ..."
    - `run_phase_worker()` creates an `AgentLoop` with role-appropriate tools and system prompt, runs it in streaming mode with cancellation.
-   - `extract_phase_output()` (line 246) takes the last 2 assistant messages (capped at 4000 chars) as the phase output.
+   - `extract_phase_output()` takes the last 2 assistant messages (capped at 4000 chars) as the phase output.
    - Phase messages are added to the combined session with `[phase-{idx}: {name} ({role})]` markers.
 3. **Feedback loop** -- If the workflow has a `Reviewer` phase and `iteration < max_iterations`:
-   - `needs_revision()` (line 266) checks the reviewer output for revision signals ("fix", "bug", "missing", etc.) vs. approval signals ("lgtm", "approved").
+   - `needs_revision()` checks the reviewer output for revision signals ("fix", "bug", "missing", etc.) vs. approval signals ("lgtm", "approved").
    - If revision needed, the loop continues with the reviewer feedback as prior output for the next Coder phase.
 4. **Completion** -- `WorkflowComplete` event emitted with phase/iteration/turn counts.
 
@@ -308,11 +308,11 @@ pub enum DiffMode {
 | `code-review` | Coder -> Reviewer | 2 |
 | `plan-code` | Planner -> Coder | 1 |
 
-Resolved via `Workflow::from_name()` (line 141).
+Resolved via `Workflow::from_name()`.
 
 ### Tool Registration by Role
 
-`register_tools_for_role()` at `crates/ava-commander/src/workflow.rs:223`:
+`register_tools_for_role()` at `crates/ava-praxis/src/workflow.rs:223`:
 
 | Role | Tools |
 |------|-------|
@@ -324,24 +324,24 @@ Resolved via `Workflow::from_name()` (line 141).
 
 ### Code Review Flow
 
-`crates/ava-commander/src/review.rs`
+`crates/ava-praxis/src/review.rs`
 
-1. **Collect diff** (`collect_diff()`, line 130):
+1. **Collect diff** (`collect_diff()`):
    - Runs `git diff` (or `git show` for commits) via `tokio::process::Command`.
    - Truncates diffs larger than 50KB.
    - Parses `git diff --stat` output into `DiffStats` (file, insertions, deletions).
 
-2. **Build review prompt** (`build_review_system_prompt()`, line 187):
+2. **Build review prompt** (`build_review_system_prompt()`):
    - Takes a focus area: `"security"`, `"performance"`, `"bugs"`, `"style"`, or general.
    - Instructs the model to output structured feedback with `## Summary`, `## Issues`, `## Positives`, `## Verdict` sections.
    - Issues use `### [severity] file:line - description` format.
 
-3. **Run review agent** (`run_review_agent()`, line 440):
+3. **Run review agent** (`run_review_agent()`):
    - Creates an `AgentLoop` with core tools and the review system prompt.
    - Runs in streaming mode, printing tokens to stderr for live output.
    - Returns the raw text output.
 
-4. **Parse output** (`parse_review_output()`, line 233):
+4. **Parse output** (`parse_review_output()`):
    - Extracts `Summary`, `Issues`, `Positives`, `Verdict` sections via regex and string matching.
    - Issues parsed with regex: `### [severity] file:line - description`
    - Severity classified via `from_str_loose()`: "critical"/"error"/"bug" -> Critical, "warn" -> Warning, "suggest"/"improvement" -> Suggestion, else Nitpick.
@@ -353,20 +353,20 @@ Resolved via `Workflow::from_name()` (line 141).
    - `format_json()` -- Serialized `ReviewResult`
    - `format_markdown()` -- GitHub-compatible markdown
 
-6. **Exit code** (`determine_exit_code()`, line 425):
+6. **Exit code** (`determine_exit_code()`):
    - Returns 1 if any issue meets or exceeds the severity threshold, 0 otherwise.
    - Useful for CI integration.
 
 ## Configuration
 
-### Commander Budget
-Set via `CommanderConfig.budget`. Workers receive half the budget (floor of 1 for turns/tokens).
+### Director Budget
+Set via `DirectorConfig.budget`. Workers receive half the budget (floor of 1 for turns/tokens).
 
 ### Workflow Budget
 Set via `WorkflowExecutor::new()`. Divided equally across phases (per-phase turns = total / phase_count, per-phase cost = total / phase_count).
 
 ### Domain Provider Routing
-`CommanderConfig.domain_providers` maps `Domain` variants to specific LLM providers. Falls back to `default_provider` for unmapped domains.
+`DirectorConfig.domain_providers` maps `Domain` variants to specific LLM providers. Falls back to `default_provider` for unmapped domains.
 
 ### CLI Provider Integration (feature: `cli-providers`)
 When the `cli-providers` feature is enabled, `apply_cli_tier_routes()` discovers external CLI providers and routes domains with `cli:` prefixed names to them.
@@ -397,7 +397,7 @@ When the `cli-providers` feature is enabled, `apply_cli_tier_routes()` discovers
 ### Running a workflow
 
 ```rust
-use ava_commander::{Workflow, WorkflowExecutor, Budget};
+use ava_praxis::{Workflow, WorkflowExecutor, Budget};
 
 let workflow = Workflow::from_name("plan-code-review").unwrap();
 let budget = Budget {
@@ -420,32 +420,32 @@ let session = executor.execute(
 ).await?;
 ```
 
-### Using the Commander for parallel tasks
+### Using the Director for parallel tasks
 
 ```rust
-use ava_commander::{Commander, CommanderConfig, Budget, Task, TaskType};
+use ava_praxis::{Director, DirectorConfig, Budget, Task, TaskType};
 
-let config = CommanderConfig {
+let config = DirectorConfig {
     budget: Budget { max_tokens: 128_000, max_turns: 20, max_cost_usd: 5.0 },
     default_provider: provider.clone(),
     domain_providers: HashMap::new(),
     platform: Some(platform.clone()),
 };
 
-let mut commander = Commander::new(config);
-let worker = commander.delegate(Task {
+let mut director = Director::new(config);
+let worker = director.delegate(Task {
     description: "Add unit tests for the auth module".to_string(),
     task_type: TaskType::Testing,
     files: vec!["src/auth.rs".to_string()],
 })?;
 
-let session = commander.coordinate(vec![worker], cancel, event_tx).await?;
+let session = director.coordinate(vec![worker], cancel, event_tx).await?;
 ```
 
 ### Running a code review
 
 ```rust
-use ava_commander::review::*;
+use ava_praxis::review::*;
 
 let ctx = collect_diff(&DiffMode::Staged).await?;
 let system_prompt = build_review_system_prompt("security");

@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use ava_agent::stack::{AgentStack, AgentStackConfig};
-use ava_commander::review::{
+use ava_praxis::review::{
     build_review_system_prompt, collect_diff, determine_exit_code, format_json, format_markdown,
     format_text, parse_review_output, run_review_agent,
 };
-use ava_commander::DiffMode;
+use ava_praxis::DiffMode;
 use ava_platform::StandardPlatform;
 use color_eyre::eyre::{eyre, Result};
 

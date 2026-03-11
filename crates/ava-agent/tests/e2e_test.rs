@@ -6,7 +6,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use ava_agent::agent_loop::AgentEvent;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
-use ava_commander::{Budget, Commander, CommanderConfig, Task, TaskType};
+use ava_praxis::{Budget, Director, DirectorConfig, Task, TaskType};
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
 use ava_types::{AvaError, Message, Result, StreamChunk};
@@ -128,12 +128,12 @@ async fn agent_run_cancellation() {
 }
 
 #[tokio::test]
-async fn commander_multi_agent_coordination() {
+async fn director_multi_agent_coordination() {
     let provider = Arc::new(MockProvider::new(
         "test-model",
         vec![completion_response("a"), completion_response("b")],
     )) as Arc<dyn LLMProvider>;
-    let mut commander = Commander::new(CommanderConfig {
+    let mut director = Director::new(DirectorConfig {
         budget: Budget {
             max_tokens: 4_000,
             max_turns: 8,
@@ -144,14 +144,14 @@ async fn commander_multi_agent_coordination() {
         platform: None,
     });
 
-    let worker_a = commander
+    let worker_a = director
         .delegate(Task {
             description: "task a".to_string(),
             task_type: TaskType::Simple,
             files: vec![],
         })
         .expect("worker a");
-    let worker_b = commander
+    let worker_b = director
         .delegate(Task {
             description: "task b".to_string(),
             task_type: TaskType::Simple,
@@ -160,7 +160,7 @@ async fn commander_multi_agent_coordination() {
         .expect("worker b");
 
     let (tx, _rx) = mpsc::unbounded_channel();
-    let session = commander
+    let session = director
         .coordinate(vec![worker_a, worker_b], CancellationToken::new(), tx)
         .await
         .expect("coordination should succeed");

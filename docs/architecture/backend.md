@@ -59,7 +59,7 @@ Typical runtime extension activation count is ~31:
 1. `ava-agent` — Agent execution loop
 2. `ava-cli-providers` — CLI provider management
 3. `ava-codebase` — Code indexing and search
-4. `ava-commander` — Multi-agent orchestration (Praxis)
+4. `ava-praxis` — Multi-agent orchestration (Praxis)
 5. `ava-config` — Configuration management
 6. `ava-context` — Context window management
 7. `ava-db` — SQLite connection pool

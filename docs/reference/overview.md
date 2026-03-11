@@ -49,7 +49,7 @@ only for the Tauri desktop webview.
    | ava-config        |  Config files, credentials, model catalog
    | ava-mcp           |  MCP server client + transport
    | ava-extensions    |  Hook system, native/WASM extension loading
-   | ava-commander     |  Multi-agent orchestration (Praxis)
+   | ava-praxis     |  Multi-agent orchestration (Praxis)
    +-------------------+
 ```
 
@@ -62,7 +62,7 @@ only for the Tauri desktop webview.
 | `ava-agent` | Agent execution loop, stuck detection, system prompt, sub-agent spawning | `src/stack.rs`, `src/agent_loop/mod.rs` |
 | `ava-llm` | LLM provider trait, 7 providers, connection pool, retry, circuit breaker | `src/provider.rs`, `src/providers/` |
 | `ava-tools` | Tool trait, registry, middleware, 19 built-in tools, custom TOML tools | `src/registry.rs`, `src/core/` |
-| `ava-commander` | Multi-agent workflows (plan-code-review, etc.) | `src/workflow.rs` |
+| `ava-praxis` | Multi-agent workflows (plan-code-review, etc.) | `src/workflow.rs` |
 | `ava-cli-providers` | CLI provider resolution (cli:* prefix for external providers) | `src/provider.rs` |
 
 ### Data & Persistence

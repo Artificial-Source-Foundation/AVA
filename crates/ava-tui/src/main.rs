@@ -1,5 +1,6 @@
 use ava_tui::app::App;
 use ava_tui::auth::run_auth;
+use ava_tui::benchmark;
 use ava_tui::config::cli::{CliArgs, Command};
 use ava_tui::headless::run_headless;
 use ava_tui::review::run_review;
@@ -19,6 +20,7 @@ async fn main() -> Result<()> {
     let is_tui = cli.command.is_none()
         && !cli.headless
         && !cli.json
+        && !cli.benchmark
         && std::io::stdout().is_terminal();
 
     init_logging(is_tui);
@@ -28,6 +30,26 @@ async fn main() -> Result<()> {
         Some(Command::Review(args)) => return run_review(args).await,
         Some(Command::Auth { action }) => return run_auth(action).await,
         None => {}
+    }
+
+    // Benchmark mode
+    if cli.benchmark {
+        let specs = benchmark::parse_model_specs(
+            cli.provider.as_deref(),
+            cli.model.as_deref(),
+            cli.models.as_deref(),
+        )?;
+        let judge_specs = benchmark::parse_judge_specs(cli.judges.as_deref())?;
+        let suite =
+            ava_tui::benchmark_tasks::BenchmarkSuite::from_str(&cli.suite).unwrap_or_else(|| {
+                eprintln!(
+                    "Warning: unknown suite '{}', defaulting to 'all'",
+                    cli.suite
+                );
+                ava_tui::benchmark_tasks::BenchmarkSuite::All
+            });
+        benchmark::run_benchmark(specs, None, cli.max_turns, judge_specs, suite).await?;
+        return Ok(());
     }
 
     if !is_tui {
@@ -52,7 +74,7 @@ fn init_logging(is_tui: bool) {
     let file_appender = tracing_appender::rolling::daily(&log_dir, "ava.log");
     let file_filter = tracing_subscriber::EnvFilter::new(
         "warn,ava_agent=debug,ava_llm=debug,ava_tui=debug,ava_tools=debug,\
-         ava_commander=debug,ava_config=debug,ava_session=debug,ava_context=debug,\
+         ava_praxis=debug,ava_config=debug,ava_session=debug,ava_context=debug,\
          ava_permissions=info,ava_mcp=info,ava_auth=info,ava_platform=info",
     );
     let file_layer = tracing_subscriber::fmt::layer()
@@ -63,9 +85,7 @@ fn init_logging(is_tui: bool) {
 
     if is_tui {
         // TUI mode: file only — no stderr output
-        tracing_subscriber::registry()
-            .with(file_layer)
-            .init();
+        tracing_subscriber::registry().with(file_layer).init();
     } else {
         // Headless/CLI mode: file + stderr
         let stderr_layer = tracing_subscriber::fmt::layer()
@@ -82,5 +102,8 @@ fn init_logging(is_tui: bool) {
             .init();
     }
 
-    tracing::info!("AVA logging initialized — tui={is_tui}, log dir: {}", log_dir.display());
+    tracing::info!(
+        "AVA logging initialized — tui={is_tui}, log dir: {}",
+        log_dir.display()
+    );
 }

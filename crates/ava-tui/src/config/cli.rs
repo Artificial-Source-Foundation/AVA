@@ -47,8 +47,8 @@ pub struct CliArgs {
     #[arg(long)]
     pub json: bool,
 
-    /// Use multi-agent Commander mode instead of single AgentStack
-    #[arg(long)]
+    /// Use multi-agent Director mode (Praxis) instead of single AgentStack
+    #[arg(long, alias = "praxis")]
     pub multi_agent: bool,
 
     /// Run a workflow pipeline (plan-code-review, code-review, plan-code)
@@ -58,6 +58,22 @@ pub struct CliArgs {
     /// Enable continuous voice input (requires --features voice)
     #[arg(long)]
     pub voice: bool,
+
+    /// Run model benchmarks instead of normal operation
+    #[arg(long)]
+    pub benchmark: bool,
+
+    /// Models to benchmark in "provider:model,provider:model" format
+    #[arg(long)]
+    pub models: Option<String>,
+
+    /// LLM judge models for benchmark evaluation in "provider:model,provider:model" format
+    #[arg(long)]
+    pub judges: Option<String>,
+
+    /// Benchmark suite filter: speed, standard, frontier, all (default: all)
+    #[arg(long, default_value = "all")]
+    pub suite: String,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -154,12 +170,12 @@ pub enum FailOnSeverity {
 }
 
 impl FailOnSeverity {
-    pub fn to_severity(self) -> ava_commander::Severity {
+    pub fn to_severity(self) -> ava_praxis::Severity {
         match self {
-            Self::Critical => ava_commander::Severity::Critical,
-            Self::Warning => ava_commander::Severity::Warning,
-            Self::Suggestion => ava_commander::Severity::Suggestion,
-            Self::Any => ava_commander::Severity::Nitpick,
+            Self::Critical => ava_praxis::Severity::Critical,
+            Self::Warning => ava_praxis::Severity::Warning,
+            Self::Suggestion => ava_praxis::Severity::Suggestion,
+            Self::Any => ava_praxis::Severity::Nitpick,
         }
     }
 }

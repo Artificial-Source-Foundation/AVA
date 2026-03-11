@@ -72,7 +72,7 @@ data) + tests (~250 lines).
 | `agent_loop/execution.rs` | `execute_tool()`, `process_tool_calls()` | moderate |
 | Refactor | DRY up `run()`/`run_streaming()` shared logic into common helper | significant |
 
-#### `ava-commander/src/workflow.rs` — 652 lines
+#### `ava-praxis/src/workflow.rs` — 652 lines
 
 **Responsibilities:** `Workflow` types + `WorkflowExecutor` + prompt templates
 (~150 lines of inline strings) + preset definitions (`default_workflow()`,
@@ -86,7 +86,7 @@ data) + tests (~250 lines).
 | `workflow/executor.rs` | `WorkflowExecutor` implementation | moderate |
 | `workflow/types.rs` | `Workflow`, `Phase`, `PhaseRole` structs | trivial |
 
-#### `ava-commander/src/review.rs` — 637 lines
+#### `ava-praxis/src/review.rs` — 637 lines
 
 **Responsibilities:** Review types (`ReviewContext`, `ReviewResult`, `Severity`,
 `ReviewVerdict`) + diff collection (`collect_git_diff`) + prompt building +
@@ -136,9 +136,9 @@ convention.
 |------|-------|------------|
 | `ava-tui/src/widgets/provider_connect.rs` | 556 | Provider connection wizard — multi-step UI. Could split steps into sub-modules |
 | `ava-tools/tests/core_tools_test.rs` | 552 | Test file — large but acceptable |
-| `ava-commander/tests/commander.rs` | 537 | Test file — acceptable |
+| `ava-praxis/tests/commander.rs` | 537 | Test file — acceptable |
 | `ava-lsp/src/client.rs` | 482 | Single concern (LSP protocol). Many similar request methods — DRY with macro, but structurally fine |
-| `ava-commander/src/lib.rs` | 475 | Commander + types + builder. Could extract `types.rs` for Domain/Budget/Lead |
+| `ava-praxis/src/lib.rs` | 475 | Director + types + builder. Could extract `types.rs` for Domain/Budget/Lead |
 | `ava-tui/src/headless.rs` | 474 | Headless mode runner — single concern, acceptable |
 | `ava-mcp/src/transport.rs` | 472 | JSON-RPC types + transport trait. Single concern, acceptable |
 | `ava-permissions/src/classifier/mod.rs` | 456 | Permission classification — review for split opportunities |
@@ -260,10 +260,10 @@ Heavy-dep crates:
                      ava-mcp, ava-memory, ava-platform, ava-session,
                      ava-tools, ava-types
 
-  ava-commander(7) → ava-agent, ava-cli-providers, ava-context,
+  ava-praxis(7) → ava-agent, ava-cli-providers, ava-context,
                      ava-llm, ava-platform, ava-tools, ava-types
 
-  ava-tui (10)     → ava-agent, ava-auth, ava-commander, ava-config,
+  ava-tui (10)     → ava-agent, ava-auth, ava-praxis, ava-config,
                      ava-llm, ava-permissions, ava-platform,
                      ava-session, ava-tools, ava-types
 ```
@@ -273,7 +273,7 @@ Heavy-dep crates:
 ```
                     ava-tui (binary)
                    /       |        \
-          ava-commander  ava-agent  ava-config
+          ava-praxis  ava-agent  ava-config
            /    |           |    \       \
     ava-cli-providers  ava-tools  ava-llm  ava-auth
            |        /  |   |  \       \
@@ -332,7 +332,7 @@ The dependency graph is a clean DAG.
 ### Low priority
 
 8. **Decompose `Theme`** into sub-structs (28 fields → 5 groups)
-9. **Extract types from `ava-commander/src/lib.rs`** (Domain, Budget, Lead)
+9. **Extract types from `ava-praxis/src/lib.rs`** (Domain, Budget, Lead)
 10. **Extract config types from `ava-config/src/lib.rs`**
 
 ---

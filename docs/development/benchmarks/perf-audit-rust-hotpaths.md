@@ -1,7 +1,7 @@
 # Rust Hot-Path Performance Audit
 
 > **Audit date:** 2026-03-08
-> **Scope:** `crates/ava-agent/`, `crates/ava-llm/`, `crates/ava-tools/`, `crates/ava-tui/`, `crates/ava-commander/`
+> **Scope:** `crates/ava-agent/`, `crates/ava-llm/`, `crates/ava-tools/`, `crates/ava-tui/`, `crates/ava-praxis/`
 > **Focus:** Clone abuse, allocation patterns, async overhead, lock contention
 
 ---
@@ -125,9 +125,9 @@ The `after()` hook clones `ToolResult` on every tool execution. The middleware s
 
 **Fix:** Change `after()` signature to return `Option<ToolResult>` (None = pass-through unchanged) or take owned `ToolResult`.
 
-#### 8. Commander: message.clone() in session merging
+#### 8. Director: message.clone() in session merging
 
-**File:** `crates/ava-commander/src/lib.rs`
+**File:** `crates/ava-praxis/src/lib.rs`
 **Line:** 280
 
 ```rust
@@ -201,9 +201,9 @@ Serializes JSON Value to String for loop detection signature. Could use hash com
 
 Small string clone for UI activity indicator. Negligible.
 
-#### 17. Commander: worker field clones for events
+#### 17. Director: worker field clones for events
 
-**File:** `crates/ava-commander/src/lib.rs`
+**File:** `crates/ava-praxis/src/lib.rs`
 **Lines:** 218-219, 258
 
 `worker.lead.clone()` and `worker.task.description.clone()` for event emission. Infrequent.
@@ -363,7 +363,7 @@ The `route()` method reads credentials lock, drops it, then takes write lock on 
 
 #### 4. Commander workers: Arc<Mutex<AgentLoop>> per worker
 
-**File:** `crates/ava-commander/src/lib.rs`
+**File:** `crates/ava-praxis/src/lib.rs`
 **Line:** 100
 
 Each Worker has its own `Arc<Mutex<AgentLoop>>`. Lock held for entire worker lifetime in `run_worker()`, but no contention since workers don't share AgentLoops.
@@ -422,7 +422,7 @@ Each Worker has its own `Arc<Mutex<AgentLoop>>`. Lock held for entire worker lif
 - `crates/ava-tui/src/ui/mod.rs`
 - `crates/ava-tui/src/ui/status_bar.rs`
 - `crates/ava-tui/src/state/messages.rs`
-- `crates/ava-commander/src/lib.rs`
+- `crates/ava-praxis/src/lib.rs`
 
 ### Search patterns used
 

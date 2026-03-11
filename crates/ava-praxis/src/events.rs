@@ -2,7 +2,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize)]
-pub enum CommanderEvent {
+pub enum PraxisEvent {
     WorkerStarted {
         worker_id: Uuid,
         lead: String,

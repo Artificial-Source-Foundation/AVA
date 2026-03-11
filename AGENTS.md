@@ -29,7 +29,7 @@ Read first: `CLAUDE.md`
 AVA is a multi-agent AI coding assistant with desktop app and CLI.
 
 - **CLI/TUI**: Pure Rust binary (`crates/ava-tui/`) — Ratatui + Crossterm + Tokio
-- **Agent runtime**: Rust crates (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-commander/`)
+- **Agent runtime**: Rust crates (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-praxis/`)
 - **Desktop**: Tauri 2 (Rust backend + SolidJS frontend)
 - **Desktop orchestration**: `packages/core-v2/` + `packages/extensions/` (TypeScript, desktop only)
 
@@ -48,7 +48,7 @@ AVA/
 │   ├── ava-agent/       # Agent loop + reflection
 │   ├── ava-llm/         # LLM providers (6 built-in)
 │   ├── ava-tools/       # Tool trait + registry + core tools
-│   ├── ava-commander/   # Multi-agent orchestration
+│   ├── ava-praxis/   # Multi-agent orchestration
 │   ├── ava-session/     # Session persistence
 │   ├── ava-memory/      # Persistent memory/recall
 │   └── ...              # 13 more crates
@@ -67,7 +67,7 @@ AVA/
 
 - New tools → `crates/ava-tools/src/core/` (implement `Tool` trait)
 - New providers → `crates/ava-llm/src/providers/`
-- New agent features → `crates/ava-agent/` or `crates/ava-commander/`
+- New agent features → `crates/ava-agent/` or `crates/ava-praxis/`
 - TUI features → `crates/ava-tui/`
 
 ### Important Counts

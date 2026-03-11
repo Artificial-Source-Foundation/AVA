@@ -355,7 +355,7 @@ Persists last-used provider/model per project. Written by `switch_model()` (line
 ### Depended on by
 | Crate | Purpose |
 |-------|---------|
-| `ava-commander` | Multi-agent orchestration (creates `AgentLoop` instances for workers) |
+| `ava-praxis` | Multi-agent orchestration (creates `AgentLoop` instances for workers) |
 | `ava-tui` | TUI binary (creates and drives `AgentStack`) |
 
 ## Examples

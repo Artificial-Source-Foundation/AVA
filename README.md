@@ -106,7 +106,7 @@ ava review [OPTIONS]
 | `ava-agent` | Agent execution loop, reflection, stuck detection |
 | `ava-llm` | LLM providers + connection pooling + circuit breaker |
 | `ava-tools` | Tool trait, registry, 19 built-in tools |
-| `ava-commander` | Multi-agent orchestration (Praxis), workflow pipelines, code review |
+| `ava-praxis` | Multi-agent orchestration (Director pattern), workflow pipelines, code review |
 | `ava-session` | Session persistence (SQLite + FTS5) |
 | `ava-memory` | Persistent memory/recall |
 | `ava-permissions` | Command classification, path safety, risk-based approval |

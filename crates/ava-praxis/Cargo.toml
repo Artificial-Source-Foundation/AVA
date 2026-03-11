@@ -1,6 +1,6 @@
 [package]
-name = "ava-commander"
-description = "Multi-agent orchestration with domain-specific leads"
+name = "ava-praxis"
+description = "Multi-agent orchestration with domain-specific leads (Director pattern)"
 version.workspace = true
 edition.workspace = true
 

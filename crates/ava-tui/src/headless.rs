@@ -1,7 +1,7 @@
 use crate::config::cli::CliArgs;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_agent::AgentEvent;
-use ava_commander::{Budget, Commander, CommanderConfig, CommanderEvent, Task, TaskType, Workflow, WorkflowExecutor};
+use ava_praxis::{Budget, Director, DirectorConfig, PraxisEvent, Task, TaskType, Workflow, WorkflowExecutor};
 use ava_llm::provider::LLMProvider;
 use ava_platform::StandardPlatform;
 use color_eyre::eyre::{eyre, Result};
@@ -199,32 +199,32 @@ async fn run_workflow(cli: CliArgs, goal: &str, workflow_name: &str) -> Result<(
             println!("{json}");
         } else {
             match &event {
-                CommanderEvent::PhaseStarted { phase_index, phase_count, phase_name, role } => {
+                PraxisEvent::PhaseStarted { phase_index, phase_count, phase_name, role } => {
                     eprintln!("[workflow] Phase {}/{}: {} ({})", phase_index + 1, phase_count, phase_name, role);
                 }
-                CommanderEvent::PhaseCompleted { phase_index, phase_name, turns, output_preview } => {
+                PraxisEvent::PhaseCompleted { phase_index, phase_name, turns, output_preview } => {
                     eprintln!("[workflow] Phase {} ({}) complete — {} turns", phase_index + 1, phase_name, turns);
                     if !output_preview.is_empty() {
                         eprintln!("[workflow]   preview: {}", output_preview);
                     }
                 }
-                CommanderEvent::IterationStarted { iteration, max_iterations } => {
+                PraxisEvent::IterationStarted { iteration, max_iterations } => {
                     eprintln!("[workflow] Iteration {}/{}", iteration, max_iterations);
                 }
-                CommanderEvent::WorkflowComplete { phases_completed, total_phases, iterations, total_turns } => {
+                PraxisEvent::WorkflowComplete { phases_completed, total_phases, iterations, total_turns } => {
                     eprintln!(
                         "[workflow] Complete: {}/{} phases, {} iterations, {} turns",
                         phases_completed, total_phases, iterations, total_turns
                     );
                 }
-                CommanderEvent::WorkerToken { token, .. } => {
+                PraxisEvent::WorkerToken { token, .. } => {
                     print!("{token}");
                 }
-                CommanderEvent::WorkerProgress { turn, .. } => {
+                PraxisEvent::WorkerProgress { turn, .. } => {
                     eprintln!("[workflow] turn {turn}");
                 }
                 _ => {
-                    // Forward other commander events in JSON for debugging
+                    // Forward other praxis events in JSON for debugging
                 }
             }
         }
@@ -264,7 +264,7 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let provider = resolve_provider(&stack).await?;
 
     let platform = Arc::new(StandardPlatform);
-    let mut commander = Commander::new(CommanderConfig {
+    let mut director = Director::new(DirectorConfig {
         budget: Budget {
             max_tokens: 128_000,
             max_turns: if cli.max_turns == 0 { 200 } else { cli.max_turns },
@@ -281,7 +281,7 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
         files: vec![],
     };
 
-    let worker = commander.delegate(task)?;
+    let worker = director.delegate(task)?;
 
     let cancel = CancellationToken::new();
     let cancel_clone = cancel.clone();
@@ -295,7 +295,7 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let json_mode = cli.json;
 
     let handle = tokio::spawn(async move {
-        commander.coordinate(vec![worker], cancel, tx).await
+        director.coordinate(vec![worker], cancel, tx).await
     });
 
     // Stream events
@@ -305,29 +305,29 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
             println!("{json}");
         } else {
             match &event {
-                CommanderEvent::WorkerStarted { lead, task_description, .. } => {
-                    eprintln!("[commander] worker started: {lead} — {task_description}");
+                PraxisEvent::WorkerStarted { lead, task_description, .. } => {
+                    eprintln!("[director] worker started: {lead} — {task_description}");
                 }
-                CommanderEvent::WorkerProgress { turn, max_turns, .. } => {
-                    eprintln!("[commander] turn {turn}/{max_turns}");
+                PraxisEvent::WorkerProgress { turn, max_turns, .. } => {
+                    eprintln!("[director] turn {turn}/{max_turns}");
                 }
-                CommanderEvent::WorkerToken { token, .. } => {
+                PraxisEvent::WorkerToken { token, .. } => {
                     print!("{token}");
                 }
-                CommanderEvent::WorkerCompleted { success, turns, .. } => {
-                    eprintln!("[commander] worker completed: success={success}, turns={turns}");
+                PraxisEvent::WorkerCompleted { success, turns, .. } => {
+                    eprintln!("[director] worker completed: success={success}, turns={turns}");
                 }
-                CommanderEvent::WorkerFailed { error, .. } => {
-                    eprintln!("[commander] worker failed: {error}");
+                PraxisEvent::WorkerFailed { error, .. } => {
+                    eprintln!("[director] worker failed: {error}");
                 }
-                CommanderEvent::AllComplete { total_workers, succeeded, failed } => {
+                PraxisEvent::AllComplete { total_workers, succeeded, failed } => {
                     eprintln!(
-                        "[commander] all complete: {succeeded}/{total_workers} succeeded, {failed} failed"
+                        "[director] all complete: {succeeded}/{total_workers} succeeded, {failed} failed"
                     );
                 }
-                CommanderEvent::Summary { total_workers, succeeded, failed, total_turns } => {
+                PraxisEvent::Summary { total_workers, succeeded, failed, total_turns } => {
                     eprintln!(
-                        "[commander] summary: {succeeded}/{total_workers} workers, {total_turns} turns, {failed} failures"
+                        "[director] summary: {succeeded}/{total_workers} workers, {total_turns} turns, {failed} failures"
                     );
                 }
                 // Workflow events not expected in multi-agent mode

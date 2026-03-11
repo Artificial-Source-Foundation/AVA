@@ -44,7 +44,7 @@ ava-permissions = { path = "../crates/ava-permissions" }
 ava-extensions = { path = "../crates/ava-extensions" }
 ava-validator = { path = "../crates/ava-validator" }
 ava-agent = { path = "../crates/ava-agent" }
-ava-commander = { path = "../crates/ava-commander" }
+ava-praxis = { path = "../crates/ava-praxis" }
 ava-llm = { path = "../crates/ava-llm" }
 ava-mcp = { path = "../crates/ava-mcp" }
 ava-session = { path = "../crates/ava-session" }

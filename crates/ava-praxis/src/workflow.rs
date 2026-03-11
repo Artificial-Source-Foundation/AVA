@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
-use crate::events::CommanderEvent;
+use crate::events::PraxisEvent;
 use crate::Budget;
 
 /// Role a phase plays in a workflow pipeline.
@@ -307,7 +307,7 @@ impl WorkflowExecutor {
         &self,
         goal: &str,
         cancel: CancellationToken,
-        event_tx: mpsc::UnboundedSender<CommanderEvent>,
+        event_tx: mpsc::UnboundedSender<PraxisEvent>,
     ) -> ava_types::Result<Session> {
         let phase_count = self.workflow.phases.len();
         let per_phase_turns = (self.budget.max_turns / phase_count).max(1);
@@ -320,7 +320,7 @@ impl WorkflowExecutor {
 
         loop {
             iteration += 1;
-            let _ = event_tx.send(CommanderEvent::IterationStarted {
+            let _ = event_tx.send(PraxisEvent::IterationStarted {
                 iteration,
                 max_iterations: self.workflow.max_iterations,
             });
@@ -334,7 +334,7 @@ impl WorkflowExecutor {
                     break;
                 }
 
-                let _ = event_tx.send(CommanderEvent::PhaseStarted {
+                let _ = event_tx.send(PraxisEvent::PhaseStarted {
                     phase_index: phase_idx,
                     phase_count,
                     phase_name: phase.name.clone(),
@@ -393,7 +393,7 @@ impl WorkflowExecutor {
                     output.clone()
                 };
 
-                let _ = event_tx.send(CommanderEvent::PhaseCompleted {
+                let _ = event_tx.send(PraxisEvent::PhaseCompleted {
                     phase_index: phase_idx,
                     phase_name: phase.name.clone(),
                     turns,
@@ -422,7 +422,7 @@ impl WorkflowExecutor {
             }
 
             // Done — no more iterations needed
-            let _ = event_tx.send(CommanderEvent::WorkflowComplete {
+            let _ = event_tx.send(PraxisEvent::WorkflowComplete {
                 phases_completed,
                 total_phases: phase_count,
                 iterations: iteration,
@@ -444,7 +444,7 @@ struct PhaseWorkerParams<'a> {
     provider: Arc<dyn LLMProvider>,
     platform: Arc<StandardPlatform>,
     cancel: CancellationToken,
-    event_tx: mpsc::UnboundedSender<CommanderEvent>,
+    event_tx: mpsc::UnboundedSender<PraxisEvent>,
 }
 
 /// Run a single phase as an AgentLoop.
@@ -494,14 +494,14 @@ async fn run_phase_worker(params: PhaseWorkerParams<'_>) -> ava_types::Result<Se
                 // Forward relevant events
                 match &event {
                     AgentEvent::Token(token) => {
-                        let _ = event_tx.send(CommanderEvent::WorkerToken {
+                        let _ = event_tx.send(PraxisEvent::WorkerToken {
                             worker_id: uuid::Uuid::nil(),
                             token: token.clone(),
                         });
                     }
                     AgentEvent::Progress(msg) => {
                         if let Some(turn) = msg.strip_prefix("turn ").and_then(|s| s.parse::<usize>().ok()) {
-                            let _ = event_tx.send(CommanderEvent::WorkerProgress {
+                            let _ = event_tx.send(PraxisEvent::WorkerProgress {
                                 worker_id: uuid::Uuid::nil(),
                                 turn,
                                 max_turns: 0,

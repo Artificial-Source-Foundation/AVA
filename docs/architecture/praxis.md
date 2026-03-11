@@ -4,7 +4,7 @@
 Praxis is AVA's agent hierarchy system. Instead of a flat delegation model (one agent delegates to workers), Praxis implements a 3-tier structure:
 
 ```
-Commander → Leads → Workers
+Director → Leads → Workers
 ```
 
 Each tier has distinct responsibilities and tool access.
@@ -13,7 +13,7 @@ Each tier has distinct responsibilities and tool access.
 
 ## The 3 Tiers
 
-### Commander (1 agent)
+### Director (1 agent)
 - Plans and coordinates — **never writes code directly**
 - Only has `delegate_*` tools, `question`, and `attempt_completion`
 - Delegates to Leads (and the Planner/Architect workers for planning)
@@ -37,7 +37,7 @@ Each tier has distinct responsibilities and tool access.
 
 | Tier | Agent | Domain | Description |
 |------|-------|--------|-------------|
-| Commander | `commander` | fullstack | Plans and coordinates the team |
+| Director | `director` | fullstack | Plans and coordinates the team |
 | Lead | `frontend-lead` | frontend | Manages frontend development |
 | Lead | `backend-lead` | backend | Manages backend development |
 | Lead | `qa-lead` | testing | Manages testing and review |
@@ -59,7 +59,7 @@ Each tier has distinct responsibilities and tool access.
 User sends complex task
     │
     ▼
-Commander (plans)
+Director (plans)
     ├─→ delegate_planner → Planner returns TaskPlan
     ├─→ delegate_architect → Architect reviews plan (optional)
     │
@@ -71,12 +71,12 @@ Commander (plans)
     │       ├─→ delegate_coder → writes API routes
     │       └─→ delegate_debugger → fixes issues
     │
-    └─→ Commander reviews results → attempt_completion
+    └─→ Director reviews results → attempt_completion
 ```
 
 For simple tasks:
 ```
-Commander → delegate_fullstack-lead → delegate_coder → done
+Director → delegate_fullstack-lead → delegate_coder → done
 ```
 
 ---
@@ -96,7 +96,7 @@ Each agent can use a different model and provider. This enables cost optimizatio
 ```
 
 Typical cost optimization strategy:
-- **Commander**: Most capable model (Opus/Sonnet) — needs strong reasoning
+- **Director**: Most capable model (Opus/Sonnet) — needs strong reasoning
 - **Leads**: Mid-tier model (Sonnet) — delegation + light analysis
 - **Workers**: Mix based on task:
   - Coder: Sonnet (code quality matters)
@@ -114,7 +114,7 @@ interface AgentDefinition {
   name: string         // machine name
   displayName: string  // human-readable label
   description: string
-  tier: 'commander' | 'lead' | 'worker'
+  tier: 'director' | 'lead' | 'worker'
   systemPrompt: string
   tools: string[]      // concrete tool names
   delegates?: string[] // agent IDs this can delegate to
@@ -139,9 +139,9 @@ interface AgentDefinition {
 2. Click "+ New"
 3. Fill in:
    - **Name** and **Description**
-   - **Tier**: Worker, Lead, or Commander
+   - **Tier**: Worker, Lead, or Director
    - **Tools**: Select which tools this agent can use
-   - **Delegates**: (Leads/Commander only) Which agents it can delegate to
+   - **Delegates**: (Leads/Director only) Which agents it can delegate to
    - **Model**: Per-agent model selection
    - **Domain**: frontend, backend, testing, devops, fullstack
 4. Save
@@ -171,11 +171,11 @@ interface AgentDefinition {
 
 ## Planning Pipeline
 
-For complex tasks, the Commander uses a planning chain:
+For complex tasks, the Director uses a planning chain:
 
 1. **Planner** agent breaks the task into subtasks with file assignments
 2. **Architect** agent validates the plan (optional)
-3. Commander delegates subtasks to the appropriate leads
+3. Director delegates subtasks to the appropriate leads
 
 The Planner returns structured JSON:
 
@@ -296,7 +296,7 @@ After multi-lead execution, the aggregator (`commander/src/aggregator.ts`) combi
 
 ## Extension Integration
 
-Praxis is implemented as the `ava-commander` extension using the same `ExtensionAPI` as community plugins:
+Praxis is implemented as the `ava-praxis` extension using the same `ExtensionAPI` as community plugins:
 
 - `registerTool()` — registers `delegate_*` tools
 - `registerAgentMode()` — registers the `praxis` mode
@@ -304,8 +304,8 @@ Praxis is implemented as the `ava-commander` extension using the same `Extension
 - Settings sync — custom agents from Settings UI are registered on activation
 
 The `praxis` agent mode:
-- `filterTools()` — Commander only gets delegate + meta tools
-- `systemPrompt()` — Appends the Commander prompt with lead/worker docs
+- `filterTools()` — Director only gets delegate + meta tools
+- `systemPrompt()` — Appends the Director prompt with lead/worker docs
 
 ---
 
@@ -313,8 +313,8 @@ The `praxis` agent mode:
 
 To fall back to single-agent mode:
 
-1. **Settings UI**: Disable the Commander agent
-2. **Settings JSON**: Set `commander.enabled: false`
+1. **Settings UI**: Disable the Director agent
+2. **Settings JSON**: Set `director.enabled: false`
 3. **Programmatically**: The agent loop checks `getAgentModes().has('praxis')` — if absent, runs as a single agent with all tools
 
 When Praxis is disabled, AVA behaves like a standard single-agent coding assistant with direct tool access.

@@ -1,9 +1,11 @@
-//! AVA Commander — multi-agent orchestration with domain-specific leads.
+//! AVA Praxis — multi-agent orchestration with domain-specific leads.
 //!
-//! This crate implements the commander pattern for coordinating multiple agents:
+//! This crate implements the director pattern for coordinating multiple agents:
 //! - Domain-specific leads (Frontend, Backend, QA, etc.)
 //! - Worker spawning and task delegation
 //! - Event streaming and coordination
+//!
+//! Hierarchy: User (CEO) -> Director -> Leads -> Workers
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -29,25 +31,25 @@ pub mod events;
 pub mod review;
 pub mod workflow;
 
-pub use events::CommanderEvent;
+pub use events::PraxisEvent;
 pub use review::{
     DiffMode, ReviewContext, ReviewResult, ReviewVerdict, Severity,
 };
 pub use workflow::{Phase, PhaseRole, Workflow, WorkflowExecutor};
 
-pub struct Commander {
+pub struct Director {
     leads: Vec<Lead>,
     budget: Budget,
 }
 
-pub struct CommanderConfig {
+pub struct DirectorConfig {
     pub budget: Budget,
     pub default_provider: Arc<dyn LLMProvider>,
     pub domain_providers: HashMap<Domain, Arc<dyn LLMProvider>>,
     pub platform: Option<Arc<StandardPlatform>>,
 }
 
-impl CommanderConfig {
+impl DirectorConfig {
     pub fn provider_for(&self, domain: Domain) -> Arc<dyn LLMProvider> {
         self.domain_providers
             .get(&domain)
@@ -128,8 +130,8 @@ pub enum TaskType {
     Simple,
 }
 
-impl Commander {
-    pub fn new(config: CommanderConfig) -> Self {
+impl Director {
+    pub fn new(config: DirectorConfig) -> Self {
         let platform = config.platform.clone();
         let leads = vec![
             Lead::new(
@@ -205,7 +207,7 @@ impl Commander {
         &self,
         workers: Vec<Worker>,
         cancel: CancellationToken,
-        event_tx: mpsc::UnboundedSender<CommanderEvent>,
+        event_tx: mpsc::UnboundedSender<PraxisEvent>,
     ) -> Result<Session> {
         let futures = workers.into_iter().map(|worker| {
             let cancel = cancel.clone();
@@ -213,7 +215,7 @@ impl Commander {
             let timeout = Duration::from_secs((worker.budget.max_turns * 60) as u64);
 
             async move {
-                let _ = tx.send(CommanderEvent::WorkerStarted {
+                let _ = tx.send(PraxisEvent::WorkerStarted {
                     worker_id: worker.id,
                     lead: worker.lead.clone(),
                     task_description: worker.task.description.clone(),
@@ -241,14 +243,14 @@ impl Commander {
 
                 match &result {
                     Ok(session) => {
-                        let _ = tx.send(CommanderEvent::WorkerCompleted {
+                        let _ = tx.send(PraxisEvent::WorkerCompleted {
                             worker_id: worker.id,
                             success: true,
                             turns: session.messages.len(),
                         });
                     }
                     Err(error) => {
-                        let _ = tx.send(CommanderEvent::WorkerFailed {
+                        let _ = tx.send(PraxisEvent::WorkerFailed {
                             worker_id: worker.id,
                             error: error.to_string(),
                         });
@@ -304,13 +306,13 @@ impl Commander {
             ),
         ));
 
-        let _ = event_tx.send(CommanderEvent::AllComplete {
+        let _ = event_tx.send(PraxisEvent::AllComplete {
             total_workers: results.len(),
             succeeded,
             failed,
         });
 
-        let _ = event_tx.send(CommanderEvent::Summary {
+        let _ = event_tx.send(PraxisEvent::Summary {
             total_workers: results.len(),
             succeeded,
             failed,
@@ -439,7 +441,7 @@ impl Clone for Worker {
 
 async fn run_worker(
     worker: &Worker,
-    event_tx: mpsc::UnboundedSender<CommanderEvent>,
+    event_tx: mpsc::UnboundedSender<PraxisEvent>,
 ) -> Result<Session> {
     let mut agent = worker.agent.lock().await;
     let mut stream = agent.run_streaming(&worker.task.description).await;
@@ -448,7 +450,7 @@ async fn run_worker(
         match event {
             AgentEvent::Progress(progress) => {
                 if let Some(turn) = parse_turn(&progress) {
-                    let _ = event_tx.send(CommanderEvent::WorkerProgress {
+                    let _ = event_tx.send(PraxisEvent::WorkerProgress {
                         worker_id: worker.id,
                         turn,
                         max_turns: worker.budget.max_turns,
@@ -456,7 +458,7 @@ async fn run_worker(
                 }
             }
             AgentEvent::Token(token) => {
-                let _ = event_tx.send(CommanderEvent::WorkerToken {
+                let _ = event_tx.send(PraxisEvent::WorkerToken {
                     worker_id: worker.id,
                     token,
                 });

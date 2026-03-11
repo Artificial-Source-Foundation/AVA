@@ -15,7 +15,7 @@
 | 19 | Send-safe AgentStack + headless CLI |
 | 20 | Agent loop intelligence (system prompts, native tool calling, streaming) |
 | 21 | TUI polish (streaming render, tool approval, markdown, sessions) |
-| 22 | Praxis Commander E2E (SharedProvider, --multi-agent CLI) |
+| 22 | Praxis Director E2E (SharedProvider, --multi-agent CLI) |
 | 23 | Code quality (runner split, stuck detection, /model switching) |
 | 24 | Competitive Rust architecture analysis |
 | 25 | Structured error types + RetryBudget |

@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use ava_commander::{
-    Budget, Commander, CommanderConfig, CommanderEvent, Domain, Task, TaskType,
+use ava_praxis::{
+    Budget, Director, DirectorConfig, PraxisEvent, Domain, Task, TaskType,
 };
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
@@ -29,8 +29,8 @@ fn completion_response(result: &str) -> String {
     )
 }
 
-fn commander_with_default(provider: Arc<dyn LLMProvider>) -> Commander {
-    Commander::new(CommanderConfig {
+fn director_with_default(provider: Arc<dyn LLMProvider>) -> Director {
+    Director::new(DirectorConfig {
         budget: sample_budget(),
         default_provider: provider,
         domain_providers: HashMap::new(),
@@ -38,8 +38,8 @@ fn commander_with_default(provider: Arc<dyn LLMProvider>) -> Commander {
     })
 }
 
-fn commander_with_platform(provider: Arc<dyn LLMProvider>) -> Commander {
-    Commander::new(CommanderConfig {
+fn director_with_platform(provider: Arc<dyn LLMProvider>) -> Director {
+    Director::new(DirectorConfig {
         budget: sample_budget(),
         default_provider: provider,
         domain_providers: HashMap::new(),
@@ -53,9 +53,9 @@ fn commander_with_platform(provider: Arc<dyn LLMProvider>) -> Commander {
 fn delegation_routes_to_expected_domain() {
     let provider = Arc::new(MockProvider::new("default", vec![completion_response("ok")]))
         as Arc<dyn LLMProvider>;
-    let mut commander = commander_with_default(provider);
+    let mut director = director_with_default(provider);
 
-    let worker = commander
+    let worker = director
         .delegate(Task {
             description: "implement API endpoint".to_string(),
             task_type: TaskType::CodeGeneration,
@@ -63,7 +63,7 @@ fn delegation_routes_to_expected_domain() {
         })
         .expect("delegation should produce worker");
 
-    let lead = commander
+    let lead = director
         .leads()
         .iter()
         .find(|lead| lead.name() == worker.lead())
@@ -83,7 +83,7 @@ fn domain_routing_covers_all_task_types() {
         completion_response("6"),
         completion_response("7"),
     ])) as Arc<dyn LLMProvider>;
-    let mut commander = commander_with_default(provider);
+    let mut director = director_with_default(provider);
 
     let cases = vec![
         (TaskType::CodeGeneration, Domain::Backend),
@@ -96,7 +96,7 @@ fn domain_routing_covers_all_task_types() {
     ];
 
     for (task_type, expected_domain) in cases {
-        let worker = commander
+        let worker = director
             .delegate(Task {
                 description: format!("task for {:?}", task_type),
                 task_type,
@@ -104,7 +104,7 @@ fn domain_routing_covers_all_task_types() {
             })
             .expect("delegation should succeed");
 
-        let lead = commander
+        let lead = director
             .leads()
             .iter()
             .find(|lead| lead.name() == worker.lead())
@@ -126,8 +126,8 @@ fn domain_routing_covers_all_task_types() {
 fn budget_allocation_halves_top_level_budget() {
     let provider = Arc::new(MockProvider::new("default", vec![completion_response("ok")]))
         as Arc<dyn LLMProvider>;
-    let mut commander = commander_with_default(provider);
-    let worker = commander
+    let mut director = director_with_default(provider);
+    let worker = director
         .delegate(Task {
             description: "test suite".to_string(),
             task_type: TaskType::Testing,
@@ -152,14 +152,14 @@ fn worker_spawning_uses_domain_provider_model_name() {
     let mut overrides: HashMap<Domain, Arc<dyn LLMProvider>> = HashMap::new();
     overrides.insert(Domain::Backend, backend_provider);
 
-    let mut commander = Commander::new(CommanderConfig {
+    let mut director = Director::new(DirectorConfig {
         budget: sample_budget(),
         default_provider,
         domain_providers: overrides,
         platform: None,
     });
 
-    let worker = commander
+    let worker = director
         .delegate(Task {
             description: "build endpoint".to_string(),
             task_type: TaskType::CodeGeneration,
@@ -178,9 +178,9 @@ async fn single_worker_completes_successfully() {
         "default",
         vec![completion_response("done")],
     )) as Arc<dyn LLMProvider>;
-    let mut commander = commander_with_default(provider);
+    let mut director = director_with_default(provider);
 
-    let worker = commander
+    let worker = director
         .delegate(Task {
             description: "simple task".to_string(),
             task_type: TaskType::Simple,
@@ -191,22 +191,22 @@ async fn single_worker_completes_successfully() {
     let cancel = CancellationToken::new();
     let (tx, mut rx) = mpsc::unbounded_channel();
 
-    let session = commander
+    let session = director
         .coordinate(vec![worker], cancel, tx)
         .await
         .expect("coordinate should succeed");
 
     assert!(!session.messages.is_empty());
 
-    let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    let events: Vec<PraxisEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
     assert!(events
         .iter()
-        .any(|e| matches!(e, CommanderEvent::WorkerStarted { .. })));
+        .any(|e| matches!(e, PraxisEvent::WorkerStarted { .. })));
     assert!(events
         .iter()
-        .any(|e| matches!(e, CommanderEvent::WorkerCompleted { success: true, .. })));
+        .any(|e| matches!(e, PraxisEvent::WorkerCompleted { success: true, .. })));
     assert!(events.iter().any(
-        |e| matches!(e, CommanderEvent::AllComplete { total_workers: 1, succeeded: 1, failed: 0 })
+        |e| matches!(e, PraxisEvent::AllComplete { total_workers: 1, succeeded: 1, failed: 0 })
     ));
 }
 
@@ -218,15 +218,15 @@ async fn coordinate_runs_workers_and_merges_session_messages() {
         "default",
         vec![completion_response("a"), completion_response("b")],
     )) as Arc<dyn LLMProvider>;
-    let mut commander = commander_with_default(provider);
-    let worker_a = commander
+    let mut director = director_with_default(provider);
+    let worker_a = director
         .delegate(Task {
             description: "task a".to_string(),
             task_type: TaskType::Simple,
             files: vec![],
         })
         .expect("worker a should spawn");
-    let worker_b = commander
+    let worker_b = director
         .delegate(Task {
             description: "task b".to_string(),
             task_type: TaskType::Simple,
@@ -237,7 +237,7 @@ async fn coordinate_runs_workers_and_merges_session_messages() {
     let cancel = CancellationToken::new();
     let (tx, mut rx) = mpsc::unbounded_channel();
 
-    let session = commander
+    let session = director
         .coordinate(vec![worker_a, worker_b], cancel, tx)
         .await
         .expect("coordinate should succeed");
@@ -260,13 +260,13 @@ async fn coordinate_runs_workers_and_merges_session_messages() {
         .expect("should have summary message");
     assert!(summary.content.contains("workers successfully"));
 
-    let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    let events: Vec<PraxisEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
     assert!(events
         .iter()
-        .any(|event| matches!(event, CommanderEvent::AllComplete { .. })));
+        .any(|event| matches!(event, PraxisEvent::AllComplete { .. })));
     assert!(events
         .iter()
-        .any(|event| matches!(event, CommanderEvent::Summary { .. })));
+        .any(|event| matches!(event, PraxisEvent::Summary { .. })));
 }
 
 // --- Story 1: Cancellation ---
@@ -277,9 +277,9 @@ async fn cancellation_token_stops_workers() {
         delay: Duration::from_millis(200),
         model: "slow-model".to_string(),
     }) as Arc<dyn LLMProvider>;
-    let mut commander = commander_with_default(provider);
+    let mut director = director_with_default(provider);
 
-    let worker = commander
+    let worker = director
         .delegate(Task {
             description: "slow task".to_string(),
             task_type: TaskType::Simple,
@@ -295,7 +295,7 @@ async fn cancellation_token_stops_workers() {
     });
 
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let session = commander
+    let session = director
         .coordinate(vec![worker], cancel, tx)
         .await
         .expect("coordinate returns partial success session");
@@ -307,10 +307,10 @@ async fn cancellation_token_stops_workers() {
         .any(|m| m.content.contains("ERROR"));
     assert!(has_error || session.messages.is_empty());
 
-    let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    let events: Vec<PraxisEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
     assert!(events
         .iter()
-        .any(|event| matches!(event, CommanderEvent::WorkerFailed { .. })));
+        .any(|event| matches!(event, PraxisEvent::WorkerFailed { .. })));
 }
 
 // --- Story 1: Worker failure isolation ---
@@ -323,21 +323,21 @@ async fn one_worker_failure_isolated_from_successful_worker() {
     let mut overrides: HashMap<Domain, Arc<dyn LLMProvider>> = HashMap::new();
     overrides.insert(Domain::Backend, failing_backend);
 
-    let mut commander = Commander::new(CommanderConfig {
+    let mut director = Director::new(DirectorConfig {
         budget: sample_budget(),
         default_provider,
         domain_providers: overrides,
         platform: None,
     });
 
-    let good_worker = commander
+    let good_worker = director
         .delegate(Task {
             description: "simple success".to_string(),
             task_type: TaskType::Simple,
             files: vec![],
         })
         .expect("good worker");
-    let bad_worker = commander
+    let bad_worker = director
         .delegate(Task {
             description: "backend fail".to_string(),
             task_type: TaskType::CodeGeneration,
@@ -347,7 +347,7 @@ async fn one_worker_failure_isolated_from_successful_worker() {
 
     let cancel = CancellationToken::new();
     let (tx, mut rx) = mpsc::unbounded_channel();
-    let session = commander
+    let session = director
         .coordinate(vec![good_worker, bad_worker], cancel, tx)
         .await
         .expect("coordinate should still succeed");
@@ -361,11 +361,11 @@ async fn one_worker_failure_isolated_from_successful_worker() {
         .any(|m| m.role == Role::System && m.content.contains("ERROR"));
     assert!(has_error_msg, "failed worker error should be in session");
 
-    let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    let events: Vec<PraxisEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
     assert!(events.iter().any(|event| {
         matches!(
             event,
-            CommanderEvent::AllComplete {
+            PraxisEvent::AllComplete {
                 total_workers: 2,
                 succeeded: 1,
                 failed: 1
@@ -382,9 +382,9 @@ async fn event_stream_fires_in_order() {
         "default",
         vec![completion_response("ok")],
     )) as Arc<dyn LLMProvider>;
-    let mut commander = commander_with_default(provider);
+    let mut director = director_with_default(provider);
 
-    let worker = commander
+    let worker = director
         .delegate(Task {
             description: "ordered task".to_string(),
             task_type: TaskType::Simple,
@@ -395,29 +395,29 @@ async fn event_stream_fires_in_order() {
     let cancel = CancellationToken::new();
     let (tx, mut rx) = mpsc::unbounded_channel();
 
-    commander
+    director
         .coordinate(vec![worker], cancel, tx)
         .await
         .expect("coordinate should succeed");
 
-    let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    let events: Vec<PraxisEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
 
     // WorkerStarted must come before WorkerCompleted/WorkerFailed
     let started_idx = events
         .iter()
-        .position(|e| matches!(e, CommanderEvent::WorkerStarted { .. }))
+        .position(|e| matches!(e, PraxisEvent::WorkerStarted { .. }))
         .expect("should have WorkerStarted");
     let completed_idx = events
         .iter()
-        .position(|e| matches!(e, CommanderEvent::WorkerCompleted { .. }))
+        .position(|e| matches!(e, PraxisEvent::WorkerCompleted { .. }))
         .expect("should have WorkerCompleted");
     let all_complete_idx = events
         .iter()
-        .position(|e| matches!(e, CommanderEvent::AllComplete { .. }))
+        .position(|e| matches!(e, PraxisEvent::AllComplete { .. }))
         .expect("should have AllComplete");
     let summary_idx = events
         .iter()
-        .position(|e| matches!(e, CommanderEvent::Summary { .. }))
+        .position(|e| matches!(e, PraxisEvent::Summary { .. }))
         .expect("should have Summary");
 
     assert!(started_idx < completed_idx, "Started before Completed");
@@ -433,9 +433,9 @@ async fn worker_with_platform_has_core_tools() {
         "default",
         vec![completion_response("ok")],
     )) as Arc<dyn LLMProvider>;
-    let mut commander = commander_with_platform(provider);
+    let mut director = director_with_platform(provider);
 
-    let worker = commander
+    let worker = director
         .delegate(Task {
             description: "tooled task".to_string(),
             task_type: TaskType::Simple,
@@ -447,7 +447,7 @@ async fn worker_with_platform_has_core_tools() {
     let cancel = CancellationToken::new();
     let (tx, _rx) = mpsc::unbounded_channel();
 
-    let session = commander
+    let session = director
         .coordinate(vec![worker], cancel, tx)
         .await
         .expect("coordinate should succeed");
@@ -463,9 +463,9 @@ async fn summary_event_includes_total_turns() {
         "default",
         vec![completion_response("ok")],
     )) as Arc<dyn LLMProvider>;
-    let mut commander = commander_with_default(provider);
+    let mut director = director_with_default(provider);
 
-    let worker = commander
+    let worker = director
         .delegate(Task {
             description: "count turns".to_string(),
             task_type: TaskType::Simple,
@@ -476,18 +476,18 @@ async fn summary_event_includes_total_turns() {
     let cancel = CancellationToken::new();
     let (tx, mut rx) = mpsc::unbounded_channel();
 
-    commander
+    director
         .coordinate(vec![worker], cancel, tx)
         .await
         .expect("coordinate should succeed");
 
-    let events: Vec<CommanderEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+    let events: Vec<PraxisEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
     let summary = events
         .iter()
-        .find(|e| matches!(e, CommanderEvent::Summary { .. }))
+        .find(|e| matches!(e, PraxisEvent::Summary { .. }))
         .expect("should have Summary event");
 
-    if let CommanderEvent::Summary {
+    if let PraxisEvent::Summary {
         total_workers,
         succeeded,
         failed,

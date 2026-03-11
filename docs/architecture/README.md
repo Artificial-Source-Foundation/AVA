@@ -17,7 +17,7 @@ AVA/
 │   ├── ava-agent/            # Agent execution loop
 │   ├── ava-llm/              # LLM providers (6+ implementations)
 │   ├── ava-tools/            # Tool trait + registry (19 built-in tools)
-│   ├── ava-commander/        # Multi-agent orchestration (Praxis)
+│   ├── ava-praxis/        # Multi-agent orchestration (Praxis)
 │   └── ...                   # 16 more crates (session, memory, config, etc.)
 ├── packages/                 # TypeScript — DESKTOP ONLY
 │   ├── core-v2/              # Desktop orchestration kernel
@@ -47,7 +47,7 @@ AVA/
 | [backend.md](./backend.md) | Backend overview: Rust crates + TypeScript extensions |
 | [modules.md](./modules.md) | Module organization (core-v2, extensions, crates) |
 | [data-flow.md](./data-flow.md) | Desktop data flow (turn lifecycle, hooks) |
-| [praxis.md](./praxis.md) | Desktop agent hierarchy (Commander → Leads → Workers) |
+| [praxis.md](./praxis.md) | Desktop agent hierarchy (Director → Leads → Workers) |
 | [database-schema.md](./database-schema.md) | SQLite schema for session storage |
 
 ### Architecture Decisions
@@ -69,7 +69,7 @@ AVA/
 User types request
     │
     ▼
-Commander (AgentExecutor)
+Director (AgentExecutor)
     │ Analyzes task, creates plan
     │
     ├─→ Frontend Lead (Lead agent)
@@ -83,10 +83,10 @@ Commander (AgentExecutor)
     └─→ QA Lead (Lead agent)
         └─→ Reviewer Worker → code review
 
-Commander aggregates results and presents to user
+Director aggregates results and presents to user
 ```
 
-**Desktop only** — the Rust CLI uses Commander with workflow pipelines instead.
+**Desktop only** — the Rust CLI uses Director with workflow pipelines instead.
 
 ---
 

@@ -57,7 +57,7 @@ The execution kernel contains:
 1. `ava-agent` — Agent execution loop + reflection
 2. `ava-cli-providers` — CLI provider management
 3. `ava-codebase` — Code indexing (BM25 + PageRank)
-4. `ava-commander` — Multi-agent orchestration (Praxis)
+4. `ava-praxis` — Multi-agent orchestration (Praxis)
 5. `ava-config` — Configuration management
 6. `ava-context` — Context window management
 7. `ava-db` — SQLite connection pool

@@ -138,7 +138,7 @@
   - `types.rs` — 4 pub fns, data types
 - **Missing test scenarios:** Integration test indexing a real project; repomap generation E2E; PageRank on realistic graphs
 
-### ava-commander
+### ava-praxis
 - **Source files:** 4
 - **Inline tests:** 19
 - **Integration tests:** 17 (2 files: `commander.rs`, `workflow_test.rs`)

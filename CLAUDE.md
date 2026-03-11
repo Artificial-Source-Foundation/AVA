@@ -34,7 +34,7 @@ npm run tauri build
 AVA uses a **Rust-first architecture**. All new CLI/agent code MUST be Rust.
 
 - **CLI/TUI**: Pure Rust binary (`crates/ava-tui/`) — Ratatui + Crossterm + Tokio
-- **Agent runtime**: Rust (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-commander/`)
+- **Agent runtime**: Rust (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-praxis/`)
 - **Desktop frontend**: SolidJS + TypeScript (stays — Tauri requires web frontend)
 - **Desktop backend**: Rust via Tauri commands (`src-tauri/`)
 - **Legacy TS packages**: `packages/core-v2/` and `packages/extensions/` are desktop-only; do NOT add new features here
@@ -50,7 +50,7 @@ AVA/
 │   ├── ava-agent/            # Agent execution loop + reflection
 │   ├── ava-llm/              # LLM providers (Anthropic, OpenAI, Gemini, Ollama, OpenRouter)
 │   ├── ava-tools/            # Tool trait + registry + core tools (read/write/edit/bash/glob/grep)
-│   ├── ava-commander/        # Multi-agent orchestration (Praxis)
+│   ├── ava-praxis/        # Multi-agent orchestration (Praxis)
 │   ├── ava-session/          # Session persistence (SQLite + FTS5)
 │   ├── ava-memory/           # Persistent memory/recall
 │   ├── ava-config/           # Configuration management
@@ -139,7 +139,7 @@ The following 20 extensions are part of the **TypeScript desktop layer** (`packa
 
 - New tools → `crates/ava-tools/src/core/` (implement `Tool` trait)
 - New providers → `crates/ava-llm/src/providers/`
-- New agent features → `crates/ava-agent/` or `crates/ava-commander/`
+- New agent features → `crates/ava-agent/` or `crates/ava-praxis/`
 - TUI features → `crates/ava-tui/`
 - Configuration → `crates/ava-config/`
 
@@ -227,7 +227,7 @@ cargo run --bin ava -- "Reply with SMOKE_OK" --headless --provider openrouter --
 # Quality test
 cargo run --bin ava -- "goal" --headless --provider openrouter --model anthropic/claude-sonnet-4
 
-# Multi-agent / commander
+# Multi-agent / director (Praxis)
 cargo run --bin ava -- "goal" --headless --multi-agent --provider openrouter --model anthropic/claude-haiku-4.5
 
 # Workflow pipeline

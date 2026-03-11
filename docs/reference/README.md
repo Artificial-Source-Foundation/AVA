@@ -53,7 +53,7 @@ Detailed documentation for individual crates lives in `crates/`:
 - [ava-agent](crates/ava-agent.md) -- Agent execution loop and stack
 - [ava-llm](crates/ava-llm.md) -- LLM providers and connection pool
 - [ava-tools](crates/ava-tools.md) -- Tool trait, registry, built-in tools
-- [ava-commander](crates/ava-commander.md) -- Multi-agent orchestration
+- [ava-praxis](crates/ava-praxis.md) -- Multi-agent orchestration (Director pattern)
 - [ava-tui](crates/ava-tui.md) -- TUI binary and widgets
 - [ava-session](crates/ava-session.md) -- Session persistence
 - [ava-permissions](crates/ava-permissions.md) -- Permission system

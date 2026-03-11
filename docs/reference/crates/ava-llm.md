@@ -114,7 +114,7 @@ pub struct LLMResponse {
 
 **File:** `crates/ava-llm/src/provider.rs:130-210`
 
-A newtype wrapper around `Arc<dyn LLMProvider>` that itself implements `LLMProvider`. This allows a single provider instance to be shared between `ava-agent` (which takes `Box<dyn LLMProvider>`) and `ava-commander` (which needs a cloneable reference).
+A newtype wrapper around `Arc<dyn LLMProvider>` that itself implements `LLMProvider`. This allows a single provider instance to be shared between `ava-agent` (which takes `Box<dyn LLMProvider>`) and `ava-praxis` (which needs a cloneable reference).
 
 ```rust
 pub struct SharedProvider {

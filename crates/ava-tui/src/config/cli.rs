@@ -87,6 +87,10 @@ pub struct CliArgs {
     #[arg(long)]
     pub worker: Option<String>,
 
+    /// Import Aider Polyglot benchmark tasks from a local repo path
+    #[arg(long)]
+    pub import_polyglot: Option<String>,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }

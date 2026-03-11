@@ -1,11 +1,12 @@
 # AVA Model Benchmarking System
 
-AVA includes an internal model benchmarking system for evaluating LLM code quality, speed, and agent capabilities. It runs models through standardized Rust coding tasks and optionally uses a SOTA judge council for nuanced quality scoring.
+AVA includes a comprehensive internal model benchmarking system for evaluating LLM code quality, speed, agent capabilities, and cost efficiency. It runs models through 35 standardized tasks across 12 categories in 4 programming languages, with multi-tier validation and optional SOTA judge council scoring.
 
 **Source files:**
 - `crates/ava-tui/src/benchmark.rs` -- benchmark runner, metrics collection, judge evaluation
-- `crates/ava-tui/src/benchmark_tasks.rs` -- task definitions, test harnesses, setup code
-- `crates/ava-tui/src/config/cli.rs` -- CLI flags (`--benchmark`, `--models`, `--judges`)
+- `crates/ava-tui/src/benchmark_tasks.rs` -- 35 task definitions, test harnesses, setup code
+- `crates/ava-tui/src/benchmark_harness.rs` -- harnessed-pair benchmarking (SOTA director + fast worker)
+- `crates/ava-tui/src/config/cli.rs` -- CLI flags (`--benchmark`, `--models`, `--judges`, `--suite`, `--harness`)
 
 ## Directory Structure
 
@@ -31,11 +32,16 @@ Quality check: each task defines `expected_patterns` (regex). All patterns must 
 
 ### Tier 2: Compile and Test (Code Generation Tasks)
 
-For non-tool tasks that include a `TestHarness`, the runner extracts Rust code from the model's output (searching for ` ```rust ` fences, generic fences, bare function definitions, or anything containing `fn`), writes it to a temp file with the test harness appended, compiles with `rustc --edition 2021 --test`, and runs the binary.
+For non-tool tasks that include a `TestHarness`, the runner extracts code from the model's output, writes it to a temp file with the test harness appended, compiles, and runs tests. Supports multiple languages:
+
+- **Rust**: `rustc --edition 2021 --test` -- extracts from ` ```rust ` fences, generic fences, bare `fn` definitions
+- **Python**: `python3` -- extracts from ` ```python ` fences, parses unittest/pytest output
+- **JavaScript**: `node` -- extracts from ` ```javascript `/` ```typescript ` fences
+- **Go**: `go run` -- extracts from ` ```go ` fences
 
 Results: `compile_success`, `tests_passed`, `tests_total`, `compile_error`.
 
-The extraction logic auto-injects `use std::collections::HashMap` and `use std::hash::Hash` if the test harness references them but the model's code does not.
+The extraction logic auto-injects standard imports (e.g., `use std::collections::HashMap`) if the test harness references them but the model's code does not.
 
 ### Tier 3: Agentic Editing Tasks
 
@@ -57,41 +63,58 @@ When `--judges` is provided, each judge model scores every benchmark result on f
 | `correctness` | Does the code solve the task? Edge cases, boundary conditions. |
 | `code_quality` | Cleanliness, readability, structure, naming, modularity. |
 | `efficiency` | Algorithmic time and space complexity. |
-| `idiomatic` | Idiomatic Rust patterns -- ownership, error handling, iterators, type system. |
+| `idiomatic` | Idiomatic patterns -- ownership, error handling, iterators, type system. |
 
-Judges receive the original task prompt, the model's raw output (truncated to 4000 chars), compilation results, and test results. They use `ThinkingLevel::High` for deeper analysis:
+Judges use `ThinkingLevel::High` for deeper analysis:
 
 - Anthropic models: extended thinking (high budget)
 - OpenAI models: `reasoning_effort: "high"`
 - Gemini models: `reasoning_effort: "high"`
 - Other providers: graceful fallback to standard generation
 
-Scores from all judges are averaged per dimension, and a composite `average` is computed as the mean of all four dimensions.
-
 **Recommended judges** (SOTA council):
 - `openrouter:anthropic/claude-opus-4.6` -- extended thinking, highest quality
 - `openrouter:openai/gpt-5.4` -- strong all-rounder
 - `openrouter:google/gemini-3.1-pro-preview` -- best value frontier
 
-## Benchmark Suites (Planned)
+## Benchmark Suites
 
-The `--suite` flag (planned) will filter tasks by difficulty tier for fair comparisons within weight classes.
+The `--suite` flag filters tasks by difficulty tier for fair comparisons within weight classes.
 
 ### speed
 
-For speed/coding-specialist models. Includes single function generation tasks, basic tool use, and compile+test validation. Key metrics: TTFT, tokens/second, cost efficiency, judge scores on code quality.
+For speed/coding-specialist models. Includes single function generation, basic tool use, test generation, and compile+test validation.
 
-Tasks included: `is_palindrome`, `merge_sorted`, `lru_cache`, `bash_echo`, `read_cargo`.
+Tasks: `is_palindrome`, `merge_sorted`, `lru_cache`, `bash_echo`, `read_cargo`, `generate_tests_stack`, `generate_tests_parser`, `generate_tests_result`, plus multi-language tasks (Python, JS, Go).
 
 ### standard
 
-For mid-tier agent-capable models. All speed tasks plus bugfix tasks, constraint following, and self-correction.
+For mid-tier agent-capable models. All speed tasks plus bugfix tasks, constraint following, self-correction, security fixes, and advanced Rust.
 
-Tasks included: everything in speed, plus `bugfix_off_by_one`, `bugfix_lifetime`, `refactor_extract`, `multi_step_debug`, `constraint_edit`, `self_correct_compile`, `tool_efficiency`, `no_overengineer`, `error_recovery_loop`.
+Additional tasks: `bugfix_off_by_one`, `bugfix_lifetime`, `refactor_extract`, `multi_step_debug`, `constraint_edit`, `self_correct_compile`, `tool_efficiency`, `no_overengineer`, `error_recovery_loop`, `fix_sql_injection`, `fix_path_traversal`, `fix_integer_overflow`, `concurrent_counter`, `iterator_adapter`, `binary_tree`, `state_machine`.
 
 ### frontier
 
-For SOTA models. Everything including hard multi-step agentic workflows. All tasks from standard, evaluated with full judge council.
+For SOTA models. Everything including hard multi-file agentic workflows.
+
+Additional tasks: `cross_file_refactor`, `find_and_fix_across_files`.
+
+## Harnessed-Pair Benchmarking
+
+Tests whether a SOTA director model controlling a fast worker model outperforms either alone.
+
+```bash
+cargo run --bin ava -- --benchmark --harness \
+  --director "openrouter:anthropic/claude-opus-4.6" \
+  --worker "inception:mercury-2" \
+  --suite speed
+```
+
+**Architecture**: Uses AVA's Praxis multi-agent system. The director receives the task, plans the approach, delegates coding to the worker, and reviews the result.
+
+**Phases**: (1) Solo director runs, (2) Solo worker runs, (3) Harnessed pair runs. Results are compared across all three.
+
+**Key finding**: The harnessed pair can solve problems neither model solves alone (1+1=3 effect), while being faster than the director solo and more reliable than the worker solo.
 
 ## Model Categories and Fair Comparisons
 
@@ -101,7 +124,7 @@ Comparing fast/cheap coding models against each other:
 
 | Model | Provider | Price (in/out per 1M) | Notes |
 |---|---|---|---|
-| Mercury Coder | inception | $0.25/$0.75 | Diffusion LLM, ~1000 tok/s |
+| Mercury 2 | inception | $0.25/$0.75 | Diffusion LLM, ~1000 tok/s |
 | Claude Haiku 4.5 | openrouter | $1/$5 | Anthropic's fast model |
 | GPT-5.3 Codex | openrouter | $1.75/$14 | OpenAI coding specialist |
 | Gemini 3 Flash | openrouter | $0.50/$3 | Google's fast model |
@@ -130,45 +153,108 @@ SOTA models, also used as judges:
 | Gemini 3.1 Pro (high reasoning) | openrouter | Best value frontier, $2/$12 |
 | Kimi K2.5 | openrouter | Chinese frontier |
 
-## Task Catalog
+## Task Catalog (35 tasks)
 
-### Coding Tasks (Speed Suite)
+### Coding Tasks -- Rust (Speed Suite)
 
-| Task | Category | Difficulty | Tests | What It Tests |
-|---|---|---|---|---|
-| `is_palindrome` | Simple | Easy | 5 | Basic string manipulation -- case folding, non-alphanumeric filtering |
-| `merge_sorted` | Medium | Medium | 4 | Algorithm implementation -- O(n+m) merge of two sorted slices |
-| `lru_cache` | Hard | Hard | 3 | Complex data structure -- `LruCache<K, V>` with HashMap + ordering container, eviction policy, recency update |
+| Task | Category | Tests | What It Tests |
+|---|---|---|---|
+| `is_palindrome` | Simple | 5 | String manipulation -- case folding, non-alphanumeric filtering |
+| `merge_sorted` | Medium | 4 | Algorithm -- O(n+m) merge of two sorted slices |
+| `lru_cache` | Hard | 3 | Data structure -- HashMap + ordering container, O(1) get/put, eviction |
 
 ### Basic Tool Use (Speed Suite)
 
 | Task | Category | Tests | What It Tests |
 |---|---|---|---|
 | `bash_echo` | ToolUse | -- | Can the model invoke the bash tool and report output |
-| `read_cargo` | RealWorld | -- | Can the model read a file and extract structured info (workspace members) |
+| `read_cargo` | RealWorld | -- | Can the model read a file and extract structured info |
+
+### Test Generation (Speed Suite)
+
+Tasks where the model must generate unit tests for given code. Validates that model-written tests compile and pass against the real implementation.
+
+| Task | Category | Tests | What It Tests |
+|---|---|---|---|
+| `generate_tests_stack` | TestGeneration | 5+ | Write comprehensive tests for a `Stack<T>` (push, pop, peek, edge cases) |
+| `generate_tests_parser` | TestGeneration | 4+ | Write tests for a CSV parser (empty input, columns, whitespace) |
+| `generate_tests_result` | TestGeneration | 4+ | Write tests for a custom `Outcome<T,E>` type (map, unwrap, is_success) |
+
+### Advanced Rust (Standard Suite)
+
+| Task | Category | Tests | What It Tests |
+|---|---|---|---|
+| `concurrent_counter` | Hard | 3 | Thread-safe `Counter` with Arc/Mutex/Atomic, parallel increment |
+| `iterator_adapter` | Medium | 4 | Custom `Batched<I>` iterator adapter with trait extension |
+| `binary_tree` | Hard | 4 | Generic BST with insert, contains, min, in-order traversal |
+| `state_machine` | Medium | 4 | Turnstile state machine with Locked/Unlocked states and Coin/Push events |
+
+### Multi-Language Tasks (Speed Suite)
+
+**Python:**
+
+| Task | Category | Tests | What It Tests |
+|---|---|---|---|
+| `py_two_sum` | Simple | 3 | Classic two-sum with HashMap approach |
+| `py_flatten_nested` | Medium | 3 | Recursive nested list flattening |
+| `py_async_rate_limiter` | Hard | 2 | asyncio rate limiter with token bucket |
+
+**JavaScript:**
+
+| Task | Category | Tests | What It Tests |
+|---|---|---|---|
+| `js_debounce` | Medium | 2 | Debounce function with timer management |
+| `js_deep_clone` | Medium | 2 | Deep clone handling nested objects, arrays, dates |
+| `js_react_component` | Hard | 2 | React component with state, effects, event handlers |
+
+**Go:**
+
+| Task | Category | Tests | What It Tests |
+|---|---|---|---|
+| `go_reverse_linked_list` | Medium | 3 | Linked list reversal with pointer manipulation |
+| `go_concurrent_map` | Hard | 2 | Thread-safe map with sync.RWMutex |
 
 ### Agentic Editing (Standard Suite)
 
-These are Tier 3 tasks. The runner writes buggy files to `~/.ava/benchmarks/workspace/`, then the agent must use tools (read, edit, bash) to fix them. Post-run validation compiles the edited file with a test harness.
+Tier 3 tasks. The runner writes buggy files to the workspace, then the agent must use tools (read, edit, bash) to fix them.
 
 | Task | Category | Tests | What It Tests |
 |---|---|---|---|
-| `bugfix_off_by_one` | Agentic | 6 | Fix binary search off-by-one (`arr.len()` should be `arr.len() - 1`) |
-| `bugfix_lifetime` | Agentic | 3 | Fix missing Rust lifetime annotations on `longest()` and `Wrapper` struct |
-| `refactor_extract` | Agentic | 5 | Extract validation logic into a separate `pub fn validate()` function |
+| `bugfix_off_by_one` | Agentic | 6 | Fix binary search off-by-one (`arr.len()` → `arr.len() - 1`) |
+| `bugfix_lifetime` | Agentic | 3 | Fix missing Rust lifetime annotations |
+| `refactor_extract` | Agentic | 5 | Extract validation logic into separate function |
+
+### Security (Standard Suite)
+
+Tier 3 agentic tasks focused on finding and fixing security vulnerabilities.
+
+| Task | Category | Tests | What It Tests |
+|---|---|---|---|
+| `fix_sql_injection` | Security | 3 | Fix string-concatenation SQL, repair broken input sanitization |
+| `fix_path_traversal` | Security | 4 | Fix `../` path traversal, add null byte and `..` checks |
+| `fix_integer_overflow` | Security | 3 | Replace unchecked arithmetic with `checked_mul`/`checked_add` |
 
 ### Agent Quality (Standard/Frontier Suite)
 
-These tasks evaluate higher-order agent behaviors -- multi-step reasoning, constraint following, and self-correction.
+Higher-order agent behaviors -- multi-step reasoning, constraint following, and self-correction.
 
 | Task | Category | Tests | What It Tests |
 |---|---|---|---|
-| `multi_step_debug` | MultiStep | 3 | Read tests, find bug in `perimeter()`, fix it, verify with rustc. Tests multi-file navigation. |
-| `constraint_edit` | ConstraintFollowing | 5 | Implement `validate_email` only -- must leave `validate_phone` and `validate_url` as stubs. Tests selective editing discipline. |
-| `self_correct_compile` | SelfCorrection | 2 | Cache struct uses `HashMap` without importing it. Agent must compile, diagnose, add `use std::collections::HashMap`, re-verify. |
-| `tool_efficiency` | MultiStep | 2 | Navigate a multi-file project structure (`src/main.rs`, `lib.rs`, `utils.rs`, `config.rs`), find the config module, add a `timeout_seconds: u32` field with default 30. Tests exploration efficiency. |
-| `no_overengineer` | ConstraintFollowing | 2 | Add only a doc comment to `add()` function. Must not change the function body, add tests, or restructure. Tests restraint. |
-| `error_recovery_loop` | SelfCorrection | 2 | File imports `nonexistent_crate::Thing`. Agent must replace with `std::collections::HashMap` and fix all usages. Tests diagnosis and recovery from compile errors. |
+| `multi_step_debug` | MultiStep | 3 | Read tests → find bug → fix → verify. Multi-file navigation. |
+| `constraint_edit` | ConstraintFollowing | 5 | Implement one function only, leave others as stubs. Selective editing. |
+| `self_correct_compile` | SelfCorrection | 2 | Diagnose missing import, add it, re-verify. |
+| `tool_efficiency` | MultiStep | 2 | Navigate multi-file project, find config module, add field. |
+| `no_overengineer` | ConstraintFollowing | 2 | Add only a doc comment. Must not change function body. |
+| `error_recovery_loop` | SelfCorrection | 2 | Replace broken external dep with stdlib, fix all usages. |
+
+### Multi-File Navigation (Frontier Suite)
+
+Tier 3 agentic tasks requiring cross-file understanding and coordinated edits.
+
+| Task | Category | Tests | What It Tests |
+|---|---|---|---|
+| `cross_file_refactor` | Agentic | 2 | Extract function from lib.rs to utils.rs, update imports |
+| `find_and_fix_across_files` | Agentic | 2 | Fix wrong field name references in client.rs from config.rs |
 
 ## Metrics Captured
 
@@ -183,11 +269,12 @@ Every benchmark result (`BenchmarkResult`) captures:
 - `input_tokens` -- Total input tokens consumed
 - `output_tokens` -- Total output tokens generated
 - `cost_usd` -- Total cost in USD (from provider pricing)
+- `cost_per_task_usd` -- Cost for this task if it passed, None if failed (for cost-per-resolved analysis)
 
 ### Quality Metrics
 - `quality_pass` -- Whether all regex patterns matched (Tier 1)
 - `quality_details` -- Human-readable quality summary
-- `compile_success` -- Whether `rustc --test` succeeded (Tier 2/3)
+- `compile_success` -- Whether compilation succeeded (Tier 2/3)
 - `tests_passed` / `tests_total` -- Test pass rate (Tier 2/3)
 - `compile_error` -- Compiler error message if compilation failed
 
@@ -196,6 +283,10 @@ Every benchmark result (`BenchmarkResult`) captures:
 - `tool_calls_detail` -- List of tool names called (e.g., `["read", "edit", "bash"]`)
 - `turns_used` -- Number of assistant response turns consumed
 - `self_corrections` -- Number of times the model retried after a tool error
+- `tool_efficiency_score` -- Ratio of minimum expected tools to actual tools used (1.0 = perfect, lower = wasteful). Only for tool-using tasks with `expected_min_tools` set.
+
+### Consistency Metrics
+- `consistency_hash` -- Hash of the code output for variance tracking. Run the same benchmark multiple times to measure how consistently a model produces equivalent code.
 
 ### Judge Scores
 - `correctness` -- 0-10, averaged across all judges
@@ -204,6 +295,56 @@ Every benchmark result (`BenchmarkResult`) captures:
 - `idiomatic` -- 0-10, averaged across all judges
 - `average` -- Mean of the four dimension scores
 - `evaluations` -- Per-judge breakdown with individual scores and notes
+
+### Aggregate Report Metrics
+- `aggregate_cost_per_resolved` -- Total cost / number of resolved tasks (lower = better value)
+- `aggregate_tool_efficiency` -- Mean tool efficiency score across all tool-using tasks
+
+## External Benchmark Import
+
+AVA can import tasks from established industry benchmarks and run them with AVA's unique metrics overlay (cost-per-resolved, tool efficiency, consistency tracking).
+
+### Aider Polyglot Import
+
+The [Aider Polyglot Benchmark](https://github.com/Aider-AI/polyglot-benchmark) contains 225 Exercism problems across 6 languages. AVA imports exercises for supported languages (Rust, Python, JavaScript, Go) and converts them to `BenchmarkTask` format.
+
+**Source**: `crates/ava-tui/src/benchmark_import.rs`
+
+**How it works:**
+1. Clone the repo: `git clone https://github.com/Aider-AI/polyglot-benchmark ~/.ava/benchmarks/polyglot`
+2. The importer reads each exercise's `.docs/instructions.md` for the prompt and test file for the harness
+3. Rust `#[ignore]` attributes are stripped (Exercism uses them for progressive unlocking)
+4. Tasks get the `MultiLang` category and run through AVA's standard Tier 2 validation
+5. All of AVA's metrics apply: cost-per-resolved, tool efficiency, consistency hash, judge scores
+
+**What you get**: Industry-standard Aider Polyglot results PLUS AVA's unique efficiency metrics. Instead of just "72% pass rate", you get "72% at $0.03/resolved with 4.2 avg tool calls."
+
+### Future Imports (Planned)
+
+| Benchmark | Status | What It Adds |
+|---|---|---|
+| Aider Polyglot | Implemented | 225 Exercism problems, 6 languages |
+| BFCL v4 | Planned | 2,000+ tool calling scenarios |
+| SWE-bench Verified | Planned | 500 real GitHub issue resolutions (needs Docker) |
+| Multi-SWE-bench | Planned | 1,632 tasks across 7 languages |
+
+## What Makes AVA's Benchmark Different
+
+Most industry benchmarks (SWE-bench, HumanEval, LiveCodeBench) test code generation in isolation. AVA's benchmark is designed specifically for **coding agent evaluation**:
+
+1. **Tool-harness aware.** Tasks measure how models use tools (read, edit, bash, glob, grep), not just whether they produce correct code. A model that solves a problem in 3 tool calls is scored higher than one that takes 15.
+
+2. **Cost-normalized resolution.** `cost_per_task_usd` and `aggregate_cost_per_resolved` answer the real question: "how much does it cost to get a correct answer?" This enables fair comparison across price tiers.
+
+3. **Harnessed-pair evaluation.** No other public benchmark tests SOTA-director + fast-worker model combinations. This matches how agents are actually deployed in production.
+
+4. **Multi-tier validation.** Tier 1 (regex) catches gross errors fast. Tier 2 (compile+test) provides objective pass/fail. Tier 3 (agentic editing) validates real-world tool use. Judge council adds nuanced quality scoring.
+
+5. **Security and constraint following.** Dedicated task categories for security vulnerability fixing and constraint following (restraint, selective editing) -- critical skills for coding agents that most benchmarks ignore.
+
+6. **Variance tracking.** `consistency_hash` enables measuring how deterministic a model is across runs. High variance models are risky for production use even if they score well on average.
+
+7. **Multi-language coverage.** Rust, Python, JavaScript, and Go tasks ensure models aren't just good at one language.
 
 ## Usage
 
@@ -214,6 +355,11 @@ Every benchmark result (`BenchmarkResult`) captures:
 | `--benchmark` | Enable benchmark mode (replaces normal operation) |
 | `--models "p:m,p:m"` | Models to benchmark in `provider:model` format, comma-separated |
 | `--judges "p:m,p:m"` | Judge models for LLM-as-Judge evaluation (optional) |
+| `--suite speed\|standard\|frontier\|all` | Task suite (default: standard) |
+| `--harness` | Enable harnessed-pair benchmarking |
+| `--director "p:m"` | Director model for harness mode |
+| `--worker "p:m"` | Worker model for harness mode |
+| `--import-polyglot <path>` | Import Aider Polyglot tasks from a local repo clone |
 | `--provider` + `--model` | Alternative: single provider with comma-separated models |
 | `--max-turns N` | Max agent turns per task (default: 10 for tool tasks, 3 for code gen) |
 
@@ -221,35 +367,43 @@ Every benchmark result (`BenchmarkResult`) captures:
 
 ```bash
 # Quick speed comparison: Mercury vs Haiku
-cargo run --bin ava -- --benchmark \
-  --models "inception:mercury-coder-small,openrouter:anthropic/claude-haiku-4.5"
+cargo run --bin ava -- --benchmark --suite speed \
+  --models "inception:mercury-2,openrouter:anthropic/claude-haiku-4.5"
 
 # Speed tier shootout with judges
-cargo run --bin ava -- --benchmark \
-  --models "inception:mercury-coder-small,openrouter:anthropic/claude-haiku-4.5,openrouter:google/gemini-3-flash-preview" \
-  --judges "openrouter:anthropic/claude-opus-4.6,openrouter:openai/gpt-5.4,openrouter:google/gemini-3.1-pro-preview"
+cargo run --bin ava -- --benchmark --suite speed \
+  --models "inception:mercury-2,openrouter:anthropic/claude-haiku-4.5,openrouter:google/gemini-3-flash-preview" \
+  --judges "openrouter:anthropic/claude-opus-4.6,openrouter:openai/gpt-5.4"
 
 # Standard tier evaluation
-cargo run --bin ava -- --benchmark \
+cargo run --bin ava -- --benchmark --suite standard \
   --models "openrouter:anthropic/claude-sonnet-4"
 
-# Frontier evaluation
-cargo run --bin ava -- --benchmark \
-  --models "openrouter:anthropic/claude-opus-4.6"
+# Frontier evaluation with full judge council
+cargo run --bin ava -- --benchmark --suite frontier \
+  --models "openrouter:anthropic/claude-opus-4.6" \
+  --judges "openrouter:openai/gpt-5.4,openrouter:google/gemini-3.1-pro-preview"
 
-# Single provider shorthand (benchmarks two models from the same provider)
-cargo run --bin ava -- --benchmark \
-  --provider openrouter \
-  --model "anthropic/claude-haiku-4.5,anthropic/claude-sonnet-4"
+# Harnessed-pair: Opus directing Mercury
+cargo run --bin ava -- --benchmark --harness --suite speed \
+  --director "openrouter:anthropic/claude-opus-4.6" \
+  --worker "inception:mercury-2"
 
-# Results are saved to ~/.ava/benchmarks/bench-{timestamp}.json
+# All tasks across all languages
+cargo run --bin ava -- --benchmark --suite all \
+  --models "openrouter:anthropic/claude-sonnet-4"
+
+# Import Aider Polyglot benchmark (225 Exercism problems across 6 languages)
+git clone https://github.com/Aider-AI/polyglot-benchmark ~/.ava/benchmarks/polyglot
+cargo run --bin ava -- --benchmark --import-polyglot ~/.ava/benchmarks/polyglot \
+  --models "inception:mercury-2,openrouter:anthropic/claude-haiku-4.5"
 ```
 
 ### Output
 
-The runner prints a formatted comparison table to stderr during execution, showing per-task results with pass/fail status, timing, cost, and compile+test outcomes. Agent tasks also show tool call count, turns used, and self-corrections.
+The runner prints a formatted comparison table to stderr during execution, showing per-task results with pass/fail status, timing, cost, and compile+test outcomes. Agent tasks also show tool call count, turns used, self-corrections, and tool efficiency score.
 
-After all tasks complete, the full results are serialized to JSON and saved at `~/.ava/benchmarks/bench-{timestamp}.json`.
+After all tasks complete, the full results are serialized to JSON and saved at `~/.ava/benchmarks/bench-{timestamp}.json`. Aggregate metrics (cost-per-resolved, tool efficiency) are included in the report.
 
 ## Judge System Details
 
@@ -293,3 +447,5 @@ Benchmark runs use `AgentStack` with `yolo: true` (auto-approve all tool calls) 
 - **Objective + subjective.** Compile+test gives objective pass/fail. Judges add nuanced quality assessment that catches things like code style, unnecessary complexity, and non-idiomatic patterns.
 - **Agent behavior matters.** Tool efficiency, constraint following, and self-correction are as important as code correctness for an AI coding agent. A model that passes all tests but uses 15 tool calls where 3 would suffice is not as good as one that navigates efficiently.
 - **Cost awareness.** Track cost per task to evaluate quality-per-dollar, not just raw quality. A model at $0.25/M that scores 7/10 may be better value than one at $25/M that scores 9/10.
+- **Reproducibility.** Consistency hashing enables variance tracking across runs. A model that produces different code each time is less reliable for production use.
+- **Real-world relevance.** Security fixes, multi-file navigation, and cross-file refactoring reflect what coding agents actually do in practice.

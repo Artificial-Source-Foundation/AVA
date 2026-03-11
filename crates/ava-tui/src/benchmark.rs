@@ -18,7 +18,9 @@
 //!
 //! Judges automatically use `ThinkingLevel::High` for deeper analysis.
 
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
@@ -36,8 +38,9 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::benchmark_tasks::{
-    agent_quality_tasks, agentic_tasks, default_tasks, filter_tasks_by_suite, BenchmarkSuite,
-    BenchmarkTask, TestHarness,
+    advanced_rust_tasks, agent_quality_tasks, agentic_tasks, default_tasks,
+    filter_tasks_by_suite, go_tasks, multi_file_tasks, python_tasks, security_tasks,
+    test_generation_tasks, typescript_tasks, BenchmarkSuite, BenchmarkTask, Language, TestHarness,
 };
 
 /// A provider:model pair to benchmark.
@@ -115,6 +118,16 @@ pub struct BenchmarkResult {
     // Raw model output for judge evaluation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_output: Option<String>,
+    /// Cost per resolved task (None if task failed). Equals `cost_usd` for passing tasks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_per_task_usd: Option<f64>,
+    /// Ratio of minimum expected tools to actual tools used (1.0 = perfect, lower = wasteful).
+    /// Only populated for tool-using tasks with `expected_min_tools` set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_efficiency_score: Option<f64>,
+    /// Hash of the code output for variance tracking across runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consistency_hash: Option<String>,
 }
 
 /// Full benchmark suite results.
@@ -122,6 +135,12 @@ pub struct BenchmarkResult {
 pub struct BenchmarkReport {
     pub timestamp: String,
     pub results: Vec<BenchmarkResult>,
+    /// Total cost / number of resolved (passed) tasks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregate_cost_per_resolved: Option<f64>,
+    /// Mean tool efficiency across all tool-using tasks with efficiency scores.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregate_tool_efficiency: Option<f64>,
 }
 
 /// Parse a `--models` string like "openrouter:model1,openrouter:model2"
@@ -206,12 +225,16 @@ pub fn parse_judge_specs(judges_arg: Option<&str>) -> Result<Vec<ModelSpec>> {
 }
 
 /// Run the full benchmark suite.
+///
+/// `imported_tasks` contains externally imported tasks (e.g., from Aider Polyglot).
+/// They are appended to the built-in task list before suite filtering.
 pub async fn run_benchmark(
     specs: Vec<ModelSpec>,
     tasks: Option<Vec<BenchmarkTask>>,
     max_turns: usize,
     judge_specs: Vec<ModelSpec>,
     suite: BenchmarkSuite,
+    imported_tasks: Vec<BenchmarkTask>,
 ) -> Result<BenchmarkReport> {
     let max_turns = if max_turns == 0 { 10 } else { max_turns };
 
@@ -244,12 +267,23 @@ pub async fn run_benchmark(
         workspace_dir.display()
     );
 
-    // Build task list: default tasks + agentic tasks + agent quality tasks
+    // Build task list: all task categories
     let mut all_tasks = tasks.unwrap_or_else(default_tasks);
-    let tier3_tasks = agentic_tasks(&workspace_dir);
-    all_tasks.extend(tier3_tasks);
-    let quality_tasks = agent_quality_tasks(&workspace_dir);
-    all_tasks.extend(quality_tasks);
+    all_tasks.extend(agentic_tasks(&workspace_dir));
+    all_tasks.extend(agent_quality_tasks(&workspace_dir));
+    all_tasks.extend(python_tasks());
+    all_tasks.extend(typescript_tasks());
+    all_tasks.extend(go_tasks());
+    all_tasks.extend(security_tasks(&workspace_dir));
+    all_tasks.extend(test_generation_tasks());
+    all_tasks.extend(advanced_rust_tasks());
+    all_tasks.extend(multi_file_tasks(&workspace_dir));
+
+    // Append externally imported tasks (e.g., Aider Polyglot)
+    if !imported_tasks.is_empty() {
+        eprintln!("[benchmark] Adding {} imported tasks", imported_tasks.len());
+        all_tasks.extend(imported_tasks);
+    }
 
     // Filter by suite
     all_tasks = filter_tasks_by_suite(all_tasks, suite);
@@ -333,6 +367,9 @@ pub async fn run_benchmark(
                         turns_used: 0,
                         self_corrections: 0,
                         raw_output: None,
+                        cost_per_task_usd: None,
+                        tool_efficiency_score: None,
+                        consistency_hash: None,
                     });
                 }
             }
@@ -348,9 +385,33 @@ pub async fn run_benchmark(
         judge_outputs(&mut results, &judge_specs, &all_tasks).await;
     }
 
+    // Compute aggregate metrics
+    let total_cost: f64 = results.iter().map(|r| r.cost_usd).sum();
+    let resolved_count = results
+        .iter()
+        .filter(|r| r.compile_success.unwrap_or(r.quality_pass))
+        .count();
+    let aggregate_cost_per_resolved = if resolved_count > 0 {
+        Some(total_cost / resolved_count as f64)
+    } else {
+        None
+    };
+
+    let efficiency_scores: Vec<f64> = results
+        .iter()
+        .filter_map(|r| r.tool_efficiency_score)
+        .collect();
+    let aggregate_tool_efficiency = if !efficiency_scores.is_empty() {
+        Some(efficiency_scores.iter().sum::<f64>() / efficiency_scores.len() as f64)
+    } else {
+        None
+    };
+
     let report = BenchmarkReport {
         timestamp: chrono::Utc::now().to_rfc3339(),
         results,
+        aggregate_cost_per_resolved,
+        aggregate_tool_efficiency,
     };
 
     // Print formatted table
@@ -600,6 +661,36 @@ async fn run_single_task(
             (None, None, None, None)
         };
 
+    // Determine if the task passed (compile_success for code tasks, quality_pass for others)
+    let task_passed = compile_success.unwrap_or(quality_pass);
+
+    // cost_per_task_usd: only for resolved tasks
+    let cost_per_task_usd = if task_passed {
+        Some(cost_usd)
+    } else {
+        None
+    };
+
+    // tool_efficiency_score: ratio of minimum expected tools to actual tools used
+    let tool_efficiency_score = if let Some(min) = task.expected_min_tools {
+        if tool_calls_count > 0 {
+            Some(min as f64 / tool_calls_count as f64)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // consistency_hash: hash of the output for variance tracking across runs
+    let consistency_hash = if !total_output.trim().is_empty() {
+        let mut hasher = DefaultHasher::new();
+        total_output.hash(&mut hasher);
+        Some(format!("{:016x}", hasher.finish()))
+    } else {
+        None
+    };
+
     Ok(BenchmarkResult {
         task_name: task.name.to_string(),
         task_category: task.category.to_string(),
@@ -624,15 +715,33 @@ async fn run_single_task(
         turns_used,
         self_corrections,
         raw_output: Some(total_output),
+        cost_per_task_usd,
+        tool_efficiency_score,
+        consistency_hash,
     })
 }
 
-/// Extract Rust code from model output (```rust ... ``` or ``` ... ``` blocks).
-fn extract_rust_code(output: &str) -> Option<String> {
-    // Try ```rust blocks first
-    let re_rust = Regex::new(r"(?s)```rust\s*\n(.*?)```").ok()?;
-    if let Some(cap) = re_rust.captures(output) {
-        return Some(cap[1].to_string());
+/// Extract code from model output, aware of the target language.
+///
+/// Looks for fenced code blocks tagged with the appropriate language, then falls
+/// back to generic fenced blocks, then to language-specific heuristics.
+fn extract_code(output: &str, language: Language) -> Option<String> {
+    // Language-specific fenced block tags to try first
+    let lang_tags: &[&str] = match language {
+        Language::Rust => &["rust"],
+        Language::Python => &["python", "py"],
+        Language::JavaScript => &["javascript", "js", "jsx", "typescript", "ts", "tsx"],
+        Language::Go => &["go", "golang"],
+    };
+
+    // Try language-specific fenced blocks first
+    for tag in lang_tags {
+        let pattern = format!(r"(?s)```{}\s*\n(.*?)```", tag);
+        if let Some(re) = Regex::new(&pattern).ok() {
+            if let Some(cap) = re.captures(output) {
+                return Some(cap[1].to_string());
+            }
+        }
     }
 
     // Try generic ``` blocks
@@ -641,26 +750,81 @@ fn extract_rust_code(output: &str) -> Option<String> {
         return Some(cap[1].to_string());
     }
 
-    // Try to find code that looks like a function definition without fences
-    let re_fn = Regex::new(r"(?s)((?:use\s+.*?;\s*)*(?:pub\s+)?fn\s+\w+.*?\n\})").ok()?;
-    if let Some(cap) = re_fn.captures(output) {
-        return Some(cap[1].to_string());
-    }
-
-    // Last resort: if it looks like code (has fn keyword), use the whole thing
-    if output.contains("fn ") {
-        return Some(output.to_string());
+    // Language-specific heuristics for unfenced code
+    match language {
+        Language::Rust => {
+            // Try to find code that looks like a function definition without fences
+            let re_fn =
+                Regex::new(r"(?s)((?:use\s+.*?;\s*)*(?:pub\s+)?fn\s+\w+.*?\n\})").ok()?;
+            if let Some(cap) = re_fn.captures(output) {
+                return Some(cap[1].to_string());
+            }
+            if output.contains("fn ") {
+                return Some(output.to_string());
+            }
+        }
+        Language::Python => {
+            // Look for def or class definitions
+            let re_def = Regex::new(r"(?s)((?:import\s+.*\n|from\s+.*\n)*(?:def|class)\s+\w+.*)").ok()?;
+            if let Some(cap) = re_def.captures(output) {
+                return Some(cap[1].to_string());
+            }
+            if output.contains("def ") || output.contains("class ") {
+                return Some(output.to_string());
+            }
+        }
+        Language::JavaScript => {
+            // Look for function definitions or const/let assignments
+            let re_fn = Regex::new(r"(?s)((?:const|let|var|function)\s+\w+.*)").ok()?;
+            if let Some(cap) = re_fn.captures(output) {
+                return Some(cap[1].to_string());
+            }
+            if output.contains("function ") || output.contains("const ") {
+                return Some(output.to_string());
+            }
+        }
+        Language::Go => {
+            // Look for func or type definitions
+            let re_fn = Regex::new(r"(?s)((?:package\s+\w+\s*\n)?(?:import\s+.*\n)*(?:type|func)\s+\w+.*)").ok()?;
+            if let Some(cap) = re_fn.captures(output) {
+                return Some(cap[1].to_string());
+            }
+            if output.contains("func ") || output.contains("type ") {
+                return Some(output.to_string());
+            }
+        }
     }
 
     None
 }
 
+/// Backward-compatible wrapper for Rust code extraction (used in tests).
+#[cfg(test)]
+fn extract_rust_code(output: &str) -> Option<String> {
+    extract_code(output, Language::Rust)
+}
+
 /// Tier 2: Extract code from model output, write to temp file with tests, compile and run.
+///
+/// Dispatches to language-specific validation based on `harness.language`.
 async fn run_tier2_validation(
     model_output: &str,
     harness: &TestHarness,
 ) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
-    let Some(code) = extract_rust_code(model_output) else {
+    match harness.language {
+        Language::Rust => run_tier2_rust(model_output, harness).await,
+        Language::Python => run_tier2_python(model_output, harness).await,
+        Language::JavaScript => run_tier2_javascript(model_output, harness).await,
+        Language::Go => run_tier2_go(model_output, harness).await,
+    }
+}
+
+/// Tier 2 validation for Rust: compile with rustc --test, run the binary.
+async fn run_tier2_rust(
+    model_output: &str,
+    harness: &TestHarness,
+) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
+    let Some(code) = extract_code(model_output, Language::Rust) else {
         return (
             Some(false),
             None,
@@ -685,6 +849,254 @@ async fn run_tier2_validation(
     full_source.push_str(harness.test_code);
 
     compile_and_test(&full_source, harness.test_count).await
+}
+
+/// Tier 2 validation for Python: concatenate extracted code + test harness, run with python3.
+async fn run_tier2_python(
+    model_output: &str,
+    harness: &TestHarness,
+) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
+    let Some(code) = extract_code(model_output, Language::Python) else {
+        return (
+            Some(false),
+            None,
+            None,
+            Some("Could not extract Python code from output".to_string()),
+        );
+    };
+
+    let full_source = format!("{}\n{}", code, harness.test_code);
+    run_script("python3", &full_source, "py", harness.test_count).await
+}
+
+/// Tier 2 validation for JavaScript: concatenate extracted code + test harness, run with node.
+async fn run_tier2_javascript(
+    model_output: &str,
+    harness: &TestHarness,
+) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
+    let Some(code) = extract_code(model_output, Language::JavaScript) else {
+        return (
+            Some(false),
+            None,
+            None,
+            Some("Could not extract JavaScript code from output".to_string()),
+        );
+    };
+
+    let full_source = format!("{}\n{}", code, harness.test_code);
+    run_script("node", &full_source, "js", harness.test_count).await
+}
+
+/// Tier 2 validation for Go: wrap extracted code in package main with imports, run with `go run`.
+async fn run_tier2_go(
+    model_output: &str,
+    harness: &TestHarness,
+) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
+    let Some(code) = extract_code(model_output, Language::Go) else {
+        return (
+            Some(false),
+            None,
+            None,
+            Some("Could not extract Go code from output".to_string()),
+        );
+    };
+
+    // Build a single-file Go program. If the model already included `package main`,
+    // we skip adding it again; otherwise we wrap everything.
+    let mut full_source = String::new();
+
+    let has_package = code.contains("package ");
+
+    if !has_package {
+        full_source.push_str("package main\n\n");
+    }
+
+    // Gather required imports from both code and test harness
+    let combined = format!("{}\n{}", code, harness.test_code);
+    let mut imports: Vec<&str> = Vec::new();
+    if combined.contains("fmt.") && !combined.contains("\"fmt\"") {
+        imports.push("\"fmt\"");
+    }
+    if combined.contains("os.") && !combined.contains("\"os\"") {
+        imports.push("\"os\"");
+    }
+    if combined.contains("sync.") && !combined.contains("\"sync\"") {
+        imports.push("\"sync\"");
+    }
+
+    if !imports.is_empty() && !code.contains("import ") {
+        full_source.push_str("import (\n");
+        for imp in &imports {
+            full_source.push_str(&format!("    {}\n", imp));
+        }
+        full_source.push_str(")\n\n");
+    }
+
+    // Strip package/import lines from model code if we already added them
+    let code_lines: Vec<&str> = code.lines().collect();
+    let mut skip_import_block = false;
+    for line in &code_lines {
+        let trimmed = line.trim();
+        if !has_package && trimmed.starts_with("package ") {
+            continue;
+        }
+        if !has_package && trimmed == "import (" {
+            skip_import_block = true;
+            continue;
+        }
+        if skip_import_block {
+            if trimmed == ")" {
+                skip_import_block = false;
+            }
+            continue;
+        }
+        if !has_package && trimmed.starts_with("import ") && !trimmed.contains("(") {
+            continue;
+        }
+        full_source.push_str(line);
+        full_source.push('\n');
+    }
+
+    // Remove any `func main()` from the model code since the test harness provides one
+    let re_main = Regex::new(r"(?s)func\s+main\s*\(\s*\)\s*\{[^}]*\}").unwrap();
+    let source_without_main = re_main.replace_all(&full_source, "").to_string();
+
+    let final_source = format!("{}\n{}", source_without_main, harness.test_code);
+    run_script("go", &final_source, "go", harness.test_count).await
+}
+
+/// Run a script file with the given interpreter and check results.
+///
+/// For Go, uses `go run <file>`. For others, uses `<interpreter> <file>`.
+/// Returns the standard (compile_success, tests_passed, tests_total, error) tuple.
+async fn run_script(
+    interpreter: &str,
+    source: &str,
+    extension: &str,
+    expected_test_count: usize,
+) -> (Option<bool>, Option<usize>, Option<usize>, Option<String>) {
+    let temp_dir = match tempfile::tempdir() {
+        Ok(d) => d,
+        Err(e) => {
+            return (
+                Some(false),
+                None,
+                None,
+                Some(format!("Failed to create temp dir: {}", e)),
+            );
+        }
+    };
+
+    let filename = format!("bench_test.{}", extension);
+    let source_path = temp_dir.path().join(&filename);
+
+    if let Err(e) = tokio::fs::write(&source_path, source).await {
+        return (
+            Some(false),
+            None,
+            None,
+            Some(format!("Failed to write source: {}", e)),
+        );
+    }
+
+    // Build the command based on interpreter
+    let output = if interpreter == "go" {
+        tokio::process::Command::new("go")
+            .arg("run")
+            .arg(source_path.to_str().unwrap_or(&filename))
+            .current_dir(temp_dir.path())
+            .output()
+            .await
+    } else {
+        tokio::process::Command::new(interpreter)
+            .arg(source_path.to_str().unwrap_or(&filename))
+            .current_dir(temp_dir.path())
+            .output()
+            .await
+    };
+
+    let result = match output {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                Some(false),
+                None,
+                None,
+                Some(format!("Failed to run {} {}: {}", interpreter, filename, e)),
+            );
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
+
+    if result.status.success() {
+        // For Python unittest, parse "Ran N tests" from stderr
+        let tests_passed = if interpreter == "python3" {
+            parse_python_test_count(&stderr).unwrap_or(expected_test_count)
+        } else {
+            expected_test_count
+        };
+        (Some(true), Some(tests_passed), Some(tests_passed), None)
+    } else {
+        let error_output = if !stderr.is_empty() {
+            stderr.to_string()
+        } else {
+            stdout.to_string()
+        };
+        let error_msg = if error_output.len() > 500 {
+            format!("{}...", &error_output[..500])
+        } else {
+            error_output
+        };
+
+        // For Python, try to parse how many tests passed vs failed
+        if interpreter == "python3" {
+            let (passed, failed) = parse_python_test_results(&stderr);
+            if passed + failed > 0 {
+                return (
+                    Some(true),
+                    Some(passed),
+                    Some(passed + failed),
+                    Some(error_msg),
+                );
+            }
+        }
+
+        (
+            Some(false),
+            Some(0),
+            Some(expected_test_count),
+            Some(error_msg),
+        )
+    }
+}
+
+/// Parse "Ran N tests" from Python unittest output (printed to stderr).
+fn parse_python_test_count(output: &str) -> Option<usize> {
+    let re = Regex::new(r"Ran (\d+) test").ok()?;
+    re.captures(output)
+        .and_then(|cap| cap[1].parse::<usize>().ok())
+}
+
+/// Parse Python unittest failure details: "FAILED (failures=N)" or "OK".
+fn parse_python_test_results(output: &str) -> (usize, usize) {
+    let total = parse_python_test_count(output).unwrap_or(0);
+    if output.contains("OK") && !output.contains("FAILED") {
+        return (total, 0);
+    }
+    let re_fail = Regex::new(r"failures=(\d+)").ok();
+    let failures = re_fail
+        .and_then(|re| re.captures(output))
+        .and_then(|cap| cap[1].parse::<usize>().ok())
+        .unwrap_or(0);
+    let re_errors = Regex::new(r"errors=(\d+)").ok();
+    let errors = re_errors
+        .and_then(|re| re.captures(output))
+        .and_then(|cap| cap[1].parse::<usize>().ok())
+        .unwrap_or(0);
+    let failed = failures + errors;
+    (total.saturating_sub(failed), failed)
 }
 
 /// Tier 3: Read the agent-edited file, append tests, compile and run.
@@ -1437,6 +1849,16 @@ fn print_results_table(report: &BenchmarkReport, suite: BenchmarkSuite) {
             .sum::<f64>()
             / judge_results.len() as f64;
         summary.push_str(&format!(", avg judge score: {:.1}/10", avg_score));
+    }
+
+    // Aggregate cost per resolved task
+    if let Some(cpr) = report.aggregate_cost_per_resolved {
+        summary.push_str(&format!(", ${:.4}/resolved", cpr));
+    }
+
+    // Aggregate tool efficiency
+    if let Some(eff) = report.aggregate_tool_efficiency {
+        summary.push_str(&format!(", tool efficiency: {:.2}", eff));
     }
 
     println!("{}", summary);

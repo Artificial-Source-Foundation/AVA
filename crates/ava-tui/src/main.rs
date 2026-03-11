@@ -76,7 +76,16 @@ async fn main() -> Result<()> {
                 );
                 ava_tui::benchmark_tasks::BenchmarkSuite::All
             });
-        benchmark::run_benchmark(specs, None, cli.max_turns, judge_specs, suite).await?;
+
+        // Import external benchmark tasks if requested
+        let imported_tasks = if let Some(ref polyglot_path) = cli.import_polyglot {
+            ava_tui::benchmark_import::import_polyglot(std::path::Path::new(polyglot_path))?
+        } else {
+            Vec::new()
+        };
+
+        benchmark::run_benchmark(specs, None, cli.max_turns, judge_specs, suite, imported_tasks)
+            .await?;
         return Ok(());
     }
 

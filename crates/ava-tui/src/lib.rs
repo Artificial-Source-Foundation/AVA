@@ -11,6 +11,7 @@ pub mod auth;
 pub mod audio;
 pub mod benchmark;
 pub mod benchmark_harness;
+pub mod benchmark_import;
 pub mod benchmark_tasks;
 pub mod config;
 pub mod event;

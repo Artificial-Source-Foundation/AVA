@@ -29,8 +29,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::benchmark::{BenchmarkResult, ModelSpec};
 use crate::benchmark_tasks::{
-    agent_quality_tasks, agentic_tasks, default_tasks, filter_tasks_by_suite, BenchmarkSuite,
-    BenchmarkTask,
+    advanced_rust_tasks, agent_quality_tasks, agentic_tasks, default_tasks,
+    filter_tasks_by_suite, go_tasks, multi_file_tasks, python_tasks, security_tasks,
+    test_generation_tasks, typescript_tasks, BenchmarkSuite, BenchmarkTask,
 };
 
 /// Configuration for a harnessed-pair benchmark run.
@@ -154,10 +155,17 @@ pub async fn run_harness(
 
     eprintln!("[harness] Workspace: {}", workspace_dir.display());
 
-    // Build task list
+    // Build task list: all task categories
     let mut all_tasks = default_tasks();
     all_tasks.extend(agentic_tasks(&workspace_dir));
     all_tasks.extend(agent_quality_tasks(&workspace_dir));
+    all_tasks.extend(python_tasks());
+    all_tasks.extend(typescript_tasks());
+    all_tasks.extend(go_tasks());
+    all_tasks.extend(security_tasks(&workspace_dir));
+    all_tasks.extend(test_generation_tasks());
+    all_tasks.extend(advanced_rust_tasks());
+    all_tasks.extend(multi_file_tasks(&workspace_dir));
     all_tasks = filter_tasks_by_suite(all_tasks, suite);
 
     eprintln!("[harness] {} tasks to run", all_tasks.len());
@@ -359,6 +367,21 @@ async fn run_solo_task(
         0.0
     };
 
+    // Determine if the task passed
+    let task_passed = compile_success.unwrap_or(quality_pass);
+    let cost_per_task_usd = if task_passed { Some(cost_usd) } else { None };
+
+    // tool_efficiency_score
+    let tool_efficiency_score = if let Some(min) = task.expected_min_tools {
+        if tool_calls_count > 0 {
+            Some(min as f64 / tool_calls_count as f64)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     Ok(BenchmarkResult {
         task_name: task.name.to_string(),
         task_category: task.category.to_string(),
@@ -383,6 +406,9 @@ async fn run_solo_task(
         turns_used,
         self_corrections: 0,
         raw_output: None,
+        cost_per_task_usd,
+        tool_efficiency_score,
+        consistency_hash: None,
     })
 }
 
@@ -981,6 +1007,9 @@ fn make_error_result(task: &BenchmarkTask, spec: &ModelSpec, error: &str) -> Ben
         turns_used: 0,
         self_corrections: 0,
         raw_output: None,
+        cost_per_task_usd: None,
+        tool_efficiency_score: None,
+        consistency_hash: None,
     }
 }
 

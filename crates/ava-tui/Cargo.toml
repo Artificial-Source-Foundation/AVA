@@ -43,7 +43,7 @@ cpal = { version = "0.15", optional = true }
 hound = { version = "3.5", optional = true }
 whisper-rs = { version = "0.12", optional = true }
 async-trait = { version = "0.1", optional = true }
-reqwest = { version = "0.12", features = ["json", "multipart"], optional = true }
+reqwest = { version = "0.12", features = ["json", "multipart"] }
 regex = "1"
 clap = { version = "4", features = ["derive"] }
 toml.workspace = true
@@ -61,7 +61,7 @@ arboard = "3"
 
 [features]
 default = []
-voice = ["dep:cpal", "dep:hound", "dep:async-trait", "dep:reqwest"]
+voice = ["dep:cpal", "dep:hound", "dep:async-trait"]
 local-whisper = ["voice", "dep:whisper-rs"]
 
 [dev-dependencies]

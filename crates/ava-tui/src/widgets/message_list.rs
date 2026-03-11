@@ -9,6 +9,8 @@ use ratatui::Frame;
 
 pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
     // Determine which messages to render based on view mode.
+    // For BackgroundTask views, we need to copy from the shared state.
+    let bg_messages_owned: Vec<crate::state::messages::UiMessage>;
     let messages_source: &[crate::state::messages::UiMessage] = match &state.view_mode {
         ViewMode::Main => &state.messages.messages,
         ViewMode::SubAgent { agent_index, .. } => {
@@ -18,6 +20,18 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
                 &state.messages.messages
             }
         }
+        ViewMode::BackgroundTask { task_id, .. } => {
+            let bg = state.background.lock().unwrap();
+            if let Some(task) = bg.tasks.iter().find(|t| t.id == *task_id) {
+                bg_messages_owned = task.messages.clone();
+                drop(bg);
+                &bg_messages_owned
+            } else {
+                bg_messages_owned = Vec::new();
+                drop(bg);
+                &bg_messages_owned
+            }
+        }
     };
 
     // Empty state: show the welcome screen across the full area (main view only).
@@ -25,9 +39,14 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         if matches!(state.view_mode, ViewMode::Main) {
             render_welcome(frame, area, state);
         } else {
-            // Sub-agent with no messages — show a hint
+            // Sub-agent or background task with no messages — show a hint
+            let hint_text = if matches!(state.view_mode, ViewMode::BackgroundTask { .. }) {
+                "No output from this background task yet."
+            } else {
+                "No messages in this sub-agent conversation."
+            };
             let hint = Line::from(Span::styled(
-                "No messages in this sub-agent conversation.",
+                hint_text,
                 Style::default()
                     .fg(state.theme.text_dimmed)
                     .add_modifier(Modifier::ITALIC),
@@ -45,7 +64,55 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     // Top padding: 1 blank line between status bar and first message.
     lines.push(Line::raw(""));
 
-    // Add breadcrumb header when viewing a sub-agent conversation.
+    // Add breadcrumb header when viewing a background task or sub-agent conversation.
+    if let ViewMode::BackgroundTask { task_id, goal } = &state.view_mode {
+        let truncated_goal = if goal.len() > 55 {
+            format!("{}...", &goal[..52])
+        } else {
+            goal.clone()
+        };
+        let bg = state.background.lock().unwrap();
+        let status_str = if let Some(task) = bg.tasks.iter().find(|t| t.id == *task_id) {
+            format!(" ({})", task.status)
+        } else {
+            String::new()
+        };
+        drop(bg);
+        lines.push(Line::from(vec![
+            Span::styled(
+                "\u{2190} ",
+                Style::default()
+                    .fg(state.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "Main",
+                Style::default()
+                    .fg(state.theme.primary)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                " > ",
+                Style::default().fg(state.theme.text_dimmed),
+            ),
+            Span::styled(
+                format!("Task #{task_id}: {truncated_goal}"),
+                Style::default()
+                    .fg(state.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                status_str,
+                Style::default().fg(state.theme.text_muted),
+            ),
+        ]));
+        lines.push(Line::from(Span::styled(
+            "\u{2500}".repeat(area.width as usize),
+            Style::default().fg(state.theme.border),
+        )));
+        lines.push(Line::raw(""));
+    }
+
     if let ViewMode::SubAgent { description, .. } = &state.view_mode {
         let truncated_desc = if description.len() > 60 {
             format!("{}...", &description[..57])

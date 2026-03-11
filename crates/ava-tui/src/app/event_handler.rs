@@ -4,6 +4,52 @@ use crate::state::rewind::{snapshot_file, ChangeType, FileChange};
 use tracing::{debug, info};
 
 impl App {
+    /// Fire hooks asynchronously. Results are sent back via AppEvent::HookResult.
+    /// If no hooks are registered for the event, this is a no-op.
+    pub(crate) fn fire_hooks_async(
+        &self,
+        event: HookEvent,
+        context: HookContext,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
+    ) {
+        // Skip if no hooks are registered (avoids spawning for the common case)
+        if self.state.hooks.is_empty() {
+            return;
+        }
+        let registry = self.state.hooks.clone();
+        // Guard against missing Tokio runtime (e.g., in sync tests)
+        if tokio::runtime::Handle::try_current().is_err() {
+            return;
+        }
+        tokio::spawn(async move {
+            let (_, executions) = HookRunner::run_hooks(&registry, event.clone(), context).await;
+            for exec in &executions {
+                let _ = app_tx.send(AppEvent::HookResult {
+                    event: exec.event.clone(),
+                    result: exec.result.clone(),
+                    description: exec.description.clone(),
+                });
+            }
+        });
+    }
+
+    /// Build a HookContext with common session/model fields populated.
+    pub(crate) fn build_hook_context(&self, event: &HookEvent) -> HookContext {
+        let mut ctx = HookContext::for_event(event);
+        ctx.model = Some(self.state.agent.model_name.clone());
+        ctx.session_id = self
+            .state
+            .session
+            .current_session
+            .as_ref()
+            .map(|s| s.id.to_string());
+        ctx.tokens_used = Some(
+            self.state.agent.tokens_used.input + self.state.agent.tokens_used.output,
+        );
+        ctx.cost_usd = Some(self.state.agent.cost);
+        ctx
+    }
+
     pub(crate) fn handle_agent_event(
         &mut self,
         agent_event: ava_agent::AgentEvent,
@@ -51,6 +97,21 @@ impl App {
             }
             ava_agent::AgentEvent::ToolCall(call) => {
                 debug!(tool = %call.name, "TUI received ToolCall");
+
+                // Fire PreToolUse hooks asynchronously
+                {
+                    let mut ctx = self.build_hook_context(&HookEvent::PreToolUse);
+                    ctx.tool_name = Some(call.name.clone());
+                    ctx.tool_input = Some(call.arguments.clone());
+                    // Extract file_path from tool arguments for path_pattern matching
+                    ctx.file_path = call.arguments
+                        .get("file_path")
+                        .or_else(|| call.arguments.get("path"))
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    self.fire_hooks_async(HookEvent::PreToolUse, ctx, app_tx.clone());
+                }
+
                 // Force flush any buffered tokens before tool call
                 self.force_flush_token_buffer();
                 // Mark last assistant/thinking message as done streaming
@@ -72,6 +133,13 @@ impl App {
                         .and_then(|p| p.as_str())
                         .map(String::from)
                         .unwrap_or_else(|| "sub-agent task".to_string());
+
+                    // Fire SubagentStart hook
+                    {
+                        let mut ctx = self.build_hook_context(&HookEvent::SubagentStart);
+                        ctx.subagent_description = Some(description.clone());
+                        self.fire_hooks_async(HookEvent::SubagentStart, ctx, app_tx.clone());
+                    }
                     self.state.agent.sub_agents.push(SubAgentInfo {
                         description: description.clone(),
                         is_running: true,
@@ -139,6 +207,22 @@ impl App {
                 }
             }
             ava_agent::AgentEvent::ToolResult(result) => {
+                // Fire PostToolUse or PostToolUseFailure hooks
+                {
+                    let hook_event = if result.is_error {
+                        HookEvent::PostToolUseFailure
+                    } else {
+                        HookEvent::PostToolUse
+                    };
+                    let mut ctx = self.build_hook_context(&hook_event);
+                    // Extract tool name from the last ExecutingTool activity
+                    if let AgentActivity::ExecutingTool(ref name) = self.state.agent.activity {
+                        ctx.tool_name = Some(name.clone());
+                    }
+                    ctx.tool_output = Some(result.content.clone());
+                    self.fire_hooks_async(hook_event, ctx, app_tx.clone());
+                }
+
                 self.state.agent.activity = AgentActivity::Thinking;
                 self.state.agent.tool_start = None;
 
@@ -197,6 +281,13 @@ impl App {
             }
             ava_agent::AgentEvent::Complete(_) => {
                 info!("TUI received AgentEvent::Complete — marking agent idle");
+
+                // Fire Stop hooks
+                {
+                    let ctx = self.build_hook_context(&HookEvent::Stop);
+                    self.fire_hooks_async(HookEvent::Stop, ctx, app_tx.clone());
+                }
+
                 // Force flush any remaining buffered tokens
                 self.force_flush_token_buffer();
                 // Mark last assistant message as done streaming and attach model info
@@ -232,6 +323,13 @@ impl App {
                     cost_usd,
                     "TUI received SubAgentComplete"
                 );
+
+                // Fire SubagentStop hook
+                {
+                    let mut ctx = self.build_hook_context(&HookEvent::SubagentStop);
+                    ctx.subagent_description = Some(description.clone());
+                    self.fire_hooks_async(HookEvent::SubagentStop, ctx, app_tx.clone());
+                }
 
                 // Accumulate sub-agent token usage into the parent's totals
                 self.state.agent.tokens_used.input += input_tokens;
@@ -353,6 +451,15 @@ impl App {
             return;
         }
 
+        // Check if /bg set a pending background goal
+        if let Some(bg_goal) = self.pending_bg_goal.take() {
+            self.state
+                .messages
+                .push(UiMessage::new(MessageKind::User, goal));
+            self.launch_background_agent(bg_goal, app_tx);
+            return;
+        }
+
         // Handle custom slash commands — resolve prompt and redirect as agent goal
         if goal.starts_with('/') {
             if let Some(result) = self.try_resolve_custom_command(&goal) {
@@ -380,6 +487,13 @@ impl App {
             // If it starts with / but wasn't handled by handle_slash_command or custom
             // commands, it falls through to the agent (this handles unknown slash commands
             // that returned None from handle_slash_command for modal actions).
+        }
+
+        // Fire UserPromptSubmit hooks
+        {
+            let mut ctx = self.build_hook_context(&HookEvent::UserPromptSubmit);
+            ctx.prompt = Some(goal.clone());
+            self.fire_hooks_async(HookEvent::UserPromptSubmit, ctx, app_tx.clone());
         }
 
         // Build conversation history from previous UI messages for LLM context.

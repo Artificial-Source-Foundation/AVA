@@ -24,6 +24,7 @@ pub enum Action {
     Audit,
     VoiceToggle,
     CopyLastResponse,
+    BackgroundAgent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -118,5 +119,6 @@ pub fn default_keybinds() -> HashMap<Action, Vec<KeyBinding>> {
         (Action::SessionList, vec![ctrl('l')]),
         (Action::VoiceToggle, vec![ctrl('v')]),
         (Action::CopyLastResponse, vec![ctrl('y')]),
+        (Action::BackgroundAgent, vec![ctrl('b')]),
     ])
 }

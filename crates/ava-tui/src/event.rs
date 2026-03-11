@@ -31,6 +31,14 @@ pub enum AppEvent {
     OAuthError { provider: String, error: String },
     /// Agent is asking the user a question via the question tool.
     Question(ava_tools::core::question::QuestionRequest),
+    /// A background task completed or failed.
+    BackgroundTaskDone { task_id: usize, success: bool },
+    /// A hook execution completed (fired asynchronously).
+    HookResult {
+        event: crate::hooks::HookEvent,
+        result: crate::hooks::HookResult,
+        description: String,
+    },
     Quit,
 }
 
@@ -58,6 +66,18 @@ impl std::fmt::Debug for AppEvent {
             }
             Self::Question(req) => {
                 f.debug_struct("Question").field("question", &req.question).finish()
+            }
+            Self::BackgroundTaskDone { task_id, success } => {
+                f.debug_struct("BackgroundTaskDone")
+                    .field("task_id", task_id)
+                    .field("success", success)
+                    .finish()
+            }
+            Self::HookResult { event, description, .. } => {
+                f.debug_struct("HookResult")
+                    .field("event", event)
+                    .field("description", description)
+                    .finish()
             }
             Self::Quit => write!(f, "Quit"),
         }

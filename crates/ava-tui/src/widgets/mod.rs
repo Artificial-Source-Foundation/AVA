@@ -13,6 +13,7 @@ pub mod select_list;
 pub mod session_list;
 pub mod slash_menu;
 pub mod streaming_text;
+pub mod task_list_modal;
 pub mod token_buffer;
 pub mod todo_list;
 pub mod tool_approval;

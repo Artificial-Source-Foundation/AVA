@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod background;
 pub mod btw;
 pub mod custom_commands;
 pub mod input;

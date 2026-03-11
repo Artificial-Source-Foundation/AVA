@@ -9,9 +9,12 @@ pub mod app;
 pub mod auth;
 #[cfg(feature = "voice")]
 pub mod audio;
+pub mod benchmark;
+pub mod benchmark_tasks;
 pub mod config;
 pub mod event;
 pub mod headless;
+pub mod hooks;
 pub mod rendering;
 pub mod review;
 pub mod state;

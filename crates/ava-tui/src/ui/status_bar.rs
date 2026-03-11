@@ -150,6 +150,26 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         left_spans.push(Span::styled(&msg.text, Style::default().fg(color)));
     }
 
+    // Background task indicator
+    {
+        let bg = state.background.lock().unwrap();
+        let running = bg.running_count();
+        if running > 0 {
+            left_spans.push(Span::styled(
+                format!(" [BG: {running} running]"),
+                Style::default()
+                    .fg(state.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        } else if !bg.tasks.is_empty() {
+            let total = bg.tasks.len();
+            left_spans.push(Span::styled(
+                format!(" [BG: {total} tasks]"),
+                Style::default().fg(state.theme.text_dimmed),
+            ));
+        }
+    }
+
     // Right side: auto-approve warning (if active)
     let perm_text = if state.permission.permission_level.is_auto_approve() {
         "auto-approve"
@@ -268,8 +288,8 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             " interrupt",
             Style::default().fg(state.theme.text_dimmed),
         ));
-    } else if matches!(state.view_mode, ViewMode::SubAgent { .. }) {
-        // Sub-agent view hints
+    } else if matches!(state.view_mode, ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }) {
+        // Sub-agent or background task view hints
         let hints: &[(&str, &str)] =
             &[("Esc", "back to main"), ("PgUp/PgDn", "scroll")];
         render_hints(&mut left_spans, hints, state);

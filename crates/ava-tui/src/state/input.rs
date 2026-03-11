@@ -371,11 +371,17 @@ impl InputState {
                     AutocompleteItem::new("tools init", "Create tool templates"),
                     AutocompleteItem::new("mcp", "List MCP servers"),
                     AutocompleteItem::new("mcp reload", "Reload MCP config"),
+                    AutocompleteItem::new("bg", "Launch a goal as a background task"),
+                    AutocompleteItem::new("tasks", "Show background task list"),
                     AutocompleteItem::new("agents", "Show sub-agent configuration"),
                     AutocompleteItem::new("permissions", "Toggle permission level"),
                     AutocompleteItem::new("undo", "Rewind conversation/code to a previous point"),
                     AutocompleteItem::new("export", "Export conversation to file"),
                     AutocompleteItem::new("commands", "List/manage custom commands"),
+                    AutocompleteItem::new("hooks", "List/manage lifecycle hooks"),
+                    AutocompleteItem::new("hooks reload", "Reload hooks from disk"),
+                    AutocompleteItem::new("hooks init", "Create hook templates"),
+                    AutocompleteItem::new("hooks dry-run", "Simulate hook execution"),
                 ];
                 // Append custom command items
                 items.extend(self.custom_slash_items.clone());

@@ -398,7 +398,10 @@ Available commands:
   /export [filename]       — export conversation to file (.md or .json)
   /copy [all]              — copy last response (picks code block if multiple)
   /commands [list|reload|init] — manage custom slash commands
+  /hooks [list|reload|init|dry-run <event>] — manage lifecycle hooks
   /btw <question>          — ask a side question without interrupting the agent
+  /bg <goal>               — launch a goal as a background agent
+  /tasks                   — show background task list
   /clear                   — clear chat
   /compact [focus]          — compact conversation to save context window
   /help                    — show this help
@@ -407,6 +410,7 @@ Keyboard shortcuts:
   Tab / Shift+Tab          — cycle agent mode (Code/Plan)
   Ctrl+K / Ctrl+/          — command palette
   Ctrl+M                   — model selector
+  Ctrl+B                   — move running agent to background
   Ctrl+T                   — cycle thinking level
   Ctrl+Y                   — copy last response to clipboard
   Ctrl+N                   — new session
@@ -428,6 +432,32 @@ Keyboard shortcuts:
             }
             "/commands" => {
                 self.handle_commands_command(arg)
+            }
+            "/hooks" => {
+                self.handle_hooks_command(arg)
+            }
+            "/bg" => {
+                if let Some(goal) = arg {
+                    if goal.is_empty() {
+                        Some((
+                            MessageKind::Error,
+                            "Usage: /bg <goal> (e.g., /bg refactor the auth module)".to_string(),
+                        ))
+                    } else {
+                        // Store the goal and return None — submit_goal will check pending_bg_goal
+                        self.pending_bg_goal = Some(goal.to_string());
+                        None
+                    }
+                } else {
+                    Some((
+                        MessageKind::Error,
+                        "Usage: /bg <goal> (e.g., /bg refactor the auth module)".to_string(),
+                    ))
+                }
+            }
+            "/tasks" => {
+                self.state.active_modal = Some(super::ModalType::TaskList);
+                None
             }
             _ => {
                 // Check custom commands before reporting unknown
@@ -523,6 +553,121 @@ Keyboard shortcuts:
             Some(sub) => Some((
                 MessageKind::Error,
                 format!("Unknown /commands subcommand: {sub}. Use: list, reload, init"),
+            )),
+        }
+    }
+
+    /// Handle the `/hooks` built-in command.
+    fn handle_hooks_command(&mut self, arg: Option<&str>) -> Option<(MessageKind, String)> {
+        use crate::hooks::{HookContext, HookEvent, HookRegistry, HookRunner};
+
+        match arg {
+            Some("reload") => {
+                self.state.hooks.reload();
+                let count = self.state.hooks.len();
+                self.set_status(format!("Reloaded {count} hooks"), StatusLevel::Info);
+                Some((MessageKind::System, format!("Reloaded {count} hooks")))
+            }
+            Some("init") => {
+                match HookRegistry::create_templates() {
+                    Ok(msg) => {
+                        // Reload after creating templates
+                        self.state.hooks.reload();
+                        self.set_status(&msg, StatusLevel::Info);
+                        Some((MessageKind::System, msg))
+                    }
+                    Err(err) => {
+                        self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                        Some((MessageKind::Error, err))
+                    }
+                }
+            }
+            Some(sub) if sub.starts_with("dry-run") => {
+                // Parse: /hooks dry-run <event> [tool_name]
+                let rest = sub.strip_prefix("dry-run").unwrap_or("").trim();
+                let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+                let event_str = parts.first().copied().unwrap_or("");
+
+                if event_str.is_empty() {
+                    return Some((
+                        MessageKind::Error,
+                        "Usage: /hooks dry-run <event> [tool_name]\n\
+                         Events: PreToolUse, PostToolUse, PostToolUseFailure, SessionStart,\n\
+                         SessionEnd, Stop, SubagentStart, SubagentStop, Notification,\n\
+                         ConfigChange, PreCompact, PermissionRequest, PreModelSwitch,\n\
+                         PostModelSwitch, BudgetWarning, UserPromptSubmit"
+                            .to_string(),
+                    ));
+                }
+
+                let event = match HookEvent::from_str_loose(event_str) {
+                    Some(e) => e,
+                    None => {
+                        return Some((
+                            MessageKind::Error,
+                            format!("Unknown event: {event_str}. Use /hooks dry-run for list."),
+                        ));
+                    }
+                };
+
+                let mut ctx = HookContext::for_event(&event);
+                // Optional tool name for tool lifecycle events
+                if let Some(tool_name) = parts.get(1) {
+                    ctx.tool_name = Some(tool_name.to_string());
+                }
+                ctx.model = Some(self.state.agent.model_name.clone());
+
+                let lines = HookRunner::dry_run(&self.state.hooks, &event, &ctx);
+                if lines.is_empty() {
+                    Some((
+                        MessageKind::System,
+                        format!("No hooks would fire for {}", event.label()),
+                    ))
+                } else {
+                    let output = format!(
+                        "Hooks that would fire for {} ({}):\n{}",
+                        event.label(),
+                        lines.len(),
+                        lines.join("\n")
+                    );
+                    Some((MessageKind::System, output))
+                }
+            }
+            Some("list") | None => {
+                if self.state.hooks.is_empty() {
+                    Some((
+                        MessageKind::System,
+                        "No hooks loaded.\n\
+                         Add .toml files to .ava/hooks/ or ~/.ava/hooks/.\n\
+                         Run /hooks init to create example templates."
+                            .to_string(),
+                    ))
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(format!("Hooks ({}):", self.state.hooks.len()));
+                    for hook in self.state.hooks.iter() {
+                        let enabled = if hook.enabled { " " } else { "x" };
+                        let desc = hook
+                            .description
+                            .clone()
+                            .unwrap_or_else(|| "no description".to_string());
+                        let source = hook.source.label();
+                        let matcher = hook
+                            .matcher
+                            .as_deref()
+                            .map(|m| format!(" [{m}]"))
+                            .unwrap_or_default();
+                        lines.push(format!(
+                            "  [{enabled}] {}{matcher} — {desc} (pri {}, {source})",
+                            hook.event, hook.priority
+                        ));
+                    }
+                    Some((MessageKind::System, lines.join("\n")))
+                }
+            }
+            Some(sub) => Some((
+                MessageKind::Error,
+                format!("Unknown /hooks subcommand: {sub}. Use: list, reload, init, dry-run <event>"),
             )),
         }
     }

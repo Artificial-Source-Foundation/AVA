@@ -180,6 +180,12 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
                 frame, inner, &state.rewind, &state.theme,
             );
         }
+        ModalType::TaskList => {
+            let bg = state.background.lock().unwrap();
+            crate::widgets::task_list_modal::render_task_list(
+                frame, inner, &bg, &state.theme, state.messages.spinner_tick,
+            );
+        }
     }
 }
 

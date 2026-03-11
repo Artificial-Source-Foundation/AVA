@@ -4,46 +4,98 @@
 
 > AI coding assistant — Rust CLI/TUI with multi-agent orchestration, code review, and MCP plugins
 
+**Official domains:**
+[useava.dev](https://useava.dev) | [avacli.dev](https://avacli.dev) | [tryava.dev](https://tryava.dev) | [ava.engineering](https://ava.engineering)
+
 A Rust-first AI coding assistant with an interactive TUI, autonomous agent execution, multi-agent workflows, code review, voice input, and a Tauri desktop app. 19 built-in tools plus dynamic MCP and custom tool support.
 
 Verified: All 19 tools, 5 modes, 3 providers pass E2E (2026-03-08). See [test matrix](docs/development/test-matrix.md).
 
-## Quick Start
-
-### Rust CLI (primary)
+## Installation
 
 ```bash
-# Prerequisites: Rust toolchain (rustup)
+# Quick install (Linux/macOS)
+curl -fsSL https://raw.githubusercontent.com/ASF-GROUP/AVA/master/install.sh | sh
+```
 
+The installer detects your OS and architecture, downloads the latest release, verifies the SHA256 checksum, and installs `ava` to `~/.ava/bin/`.
+
+The CLI and TUI are a single Rust binary with zero runtime dependencies — no Node.js, no NPM, no Python. This eliminates an entire class of supply chain risks common in JavaScript-based tools.
+
+### Desktop App
+
+Download the desktop app from the [releases page](https://github.com/ASF-GROUP/AVA/releases).
+
+| Platform              | Download                            |
+|-----------------------|-------------------------------------|
+| macOS (Apple Silicon) | `AVA_aarch64-apple-darwin.dmg`      |
+| macOS (Intel)         | `AVA_x86_64-apple-darwin.dmg`       |
+| Windows               | `AVA_x86_64-pc-windows-msvc.exe`    |
+| Linux (x64)           | `.deb`, `.AppImage`, or `.rpm`      |
+
+### Build from Source
+
+If you prefer to audit the code yourself, build from source. This is the recommended path for security-conscious users.
+
+```bash
 git clone https://github.com/ASF-GROUP/AVA.git
 cd AVA
 
-# Interactive TUI
-cargo run --bin ava
+# Review the code, then run the full test suite
+cargo test --workspace
+cargo clippy --workspace
 
-# Smoke test (cheapest SOTA)
-cargo run --bin ava -- "Reply with SMOKE_OK" --headless --provider openrouter --model anthropic/claude-haiku-4.5 --max-turns 3
+# Build a release binary (~15MB)
+cargo build --release --bin ava
 
-# Headless mode (batch/CI)
-cargo run --bin ava -- "refactor the auth module" --headless --provider openrouter --model anthropic/claude-sonnet-4
+# The binary is at target/release/ava — copy it wherever you like
+cp target/release/ava ~/.local/bin/
 
-# JSON output (scripting)
-cargo run --bin ava -- "list all TODO comments" --headless --json
-
-# Code review
-cargo run --bin ava -- review --staged
-cargo run --bin ava -- review --diff main..HEAD --format markdown
-
-# Multi-agent workflow
-cargo run --bin ava -- "build the new API" --workflow plan-code-review
+# Or just run it directly
+./target/release/ava
 ```
 
-### Desktop app
+**Prerequisites**: [Rust toolchain](https://rustup.rs/) (1.75+). No Node.js required for the CLI.
+
+> Building from source lets you verify every line of code, run the full test suite (~820 tests), and confirm nothing unexpected is compiled in. See [SECURITY.md](SECURITY.md) for our security policy and vulnerability reporting process.
+
+### Desktop App (from source)
 
 ```bash
-# Prerequisites: Node.js 20+, pnpm 10+, Rust toolchain
+# Additional prerequisites: Node.js 20+, pnpm 10+
 pnpm install
-npm run tauri dev
+npm run tauri dev          # Development
+npm run tauri build        # Production build
+```
+
+## Quick Start
+
+```bash
+# Add your API key
+mkdir -p ~/.ava
+cat > ~/.ava/credentials.json << 'EOF'
+{
+  "providers": {
+    "openrouter": { "api_key": "YOUR_OPENROUTER_KEY" }
+  }
+}
+EOF
+
+# Launch the interactive TUI
+ava
+
+# Headless mode (batch/CI)
+ava "refactor the auth module" --headless --provider openrouter --model anthropic/claude-sonnet-4
+
+# JSON output (scripting)
+ava "list all TODO comments" --headless --json
+
+# Code review
+ava review --staged
+ava review --diff main..HEAD --format markdown
+
+# Multi-agent workflow
+ava "build the new API" --workflow plan-code-review
 ```
 
 ## CLI Flags & Subcommands

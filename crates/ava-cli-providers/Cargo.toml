@@ -3,6 +3,10 @@ name = "ava-cli-providers"
 description = "External CLI agent integration and discovery"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [dependencies]
 async-trait.workspace = true

@@ -9,8 +9,92 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build & Release (${{ matrix.platform }})
+  # ---------------------------------------------------------------------------
+  # Job 1: Standalone CLI binary (ava) — tarballs + SHA256 checksums
+  # ---------------------------------------------------------------------------
+  cli:
+    name: CLI (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            cross: false
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
+            cross: true
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            cross: false
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            cross: false
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            cross: false
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --locked
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-22.04' && !matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+
+      - name: Build CLI binary
+        shell: bash
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build --release --bin ava --target ${{ matrix.target }}
+          else
+            cargo build --release --bin ava --target ${{ matrix.target }}
+          fi
+
+      - name: Package tarball (unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          ARCHIVE="ava-${{ matrix.target }}.tar.gz"
+          tar -czf "$ARCHIVE" -C target/${{ matrix.target }}/release ava
+          shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Package tarball (windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: |
+          ARCHIVE="ava-${{ matrix.target }}.tar.gz"
+          tar -czf "$ARCHIVE" -C target/${{ matrix.target }}/release ava.exe
+          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Upload CLI release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            ${{ env.ARCHIVE }}
+            ${{ env.ARCHIVE }}.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Tauri desktop app installers (unchanged)
+  # ---------------------------------------------------------------------------
+  desktop:
+    name: Desktop (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:

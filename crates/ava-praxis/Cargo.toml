@@ -3,6 +3,10 @@ name = "ava-praxis"
 description = "Multi-agent orchestration with domain-specific leads (Director pattern)"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
 
 [dependencies]
 async-trait.workspace = true

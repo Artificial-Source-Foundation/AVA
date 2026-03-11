@@ -98,6 +98,22 @@ jobs:
       - name: Run Knip
         run: pnpm run knip
 
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Run cargo audit
+        run: cargo audit --deny warnings
+
   build:
     name: Build (${{ matrix.platform }})
     needs: [lint, typecheck]

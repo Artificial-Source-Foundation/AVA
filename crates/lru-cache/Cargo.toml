@@ -1,0 +1,8 @@
+[package]
+name = "lru-cache"
+version = "0.1.0"
+edition = "2021"
+authors = ["ASF Group"]
+license = "MIT"
+description = "Simple LRU cache implementation"
+publish = false

@@ -1,5 +1,6 @@
 use super::*;
 use crate::state::agent::SubAgentInfo;
+use crate::state::rewind::{snapshot_file, ChangeType, FileChange};
 use tracing::{debug, info};
 
 impl App {
@@ -109,6 +110,28 @@ impl App {
                         self.state.permission.enqueue(request);
                         self.state.active_modal = Some(ModalType::ToolApproval);
                     }
+                    // Snapshot files before write/edit/apply_patch for rewind
+                    if matches!(call.name.as_str(), "write" | "edit" | "apply_patch" | "multiedit") {
+                        let file_path = call.arguments
+                            .get("file_path")
+                            .or_else(|| call.arguments.get("path"))
+                            .and_then(|v| v.as_str())
+                            .map(String::from);
+                        if let Some(path) = file_path {
+                            let original = snapshot_file(&path);
+                            let change_type = if original.is_some() {
+                                ChangeType::Modified
+                            } else {
+                                ChangeType::Created
+                            };
+                            self.state.rewind.record_file_change(FileChange {
+                                path,
+                                original_content: original,
+                                change_type,
+                            });
+                        }
+                    }
+
                     self.state.messages.push(UiMessage::new(
                         MessageKind::ToolCall,
                         format!("{} {}", call.name, call.arguments),
@@ -330,6 +353,35 @@ impl App {
             return;
         }
 
+        // Handle custom slash commands — resolve prompt and redirect as agent goal
+        if goal.starts_with('/') {
+            if let Some(result) = self.try_resolve_custom_command(&goal) {
+                match result {
+                    Ok(resolved_prompt) => {
+                        // Show the original command as the user message
+                        self.state
+                            .messages
+                            .push(UiMessage::new(MessageKind::User, goal));
+                        // Submit the resolved prompt as the actual goal
+                        // (fall through to agent submission below with the resolved prompt)
+                        return self.submit_goal(resolved_prompt, app_tx, agent_tx);
+                    }
+                    Err(err) => {
+                        self.state
+                            .messages
+                            .push(UiMessage::new(MessageKind::User, goal));
+                        self.state
+                            .messages
+                            .push(UiMessage::new(MessageKind::Error, err));
+                        return;
+                    }
+                }
+            }
+            // If it starts with / but wasn't handled by handle_slash_command or custom
+            // commands, it falls through to the agent (this handles unknown slash commands
+            // that returned None from handle_slash_command for modal actions).
+        }
+
         // Build conversation history from previous UI messages for LLM context.
         // Only include User and Assistant messages (tool calls/results/system are internal).
         let history: Vec<ava_types::Message> = self
@@ -346,6 +398,10 @@ impl App {
                 Some(ava_types::Message::new(role, ui_msg.content.clone()))
             })
             .collect();
+
+        // Create a rewind checkpoint at the current message position
+        let msg_index = self.state.messages.messages.len();
+        self.state.rewind.create_checkpoint(msg_index, &goal);
 
         self.state
             .messages

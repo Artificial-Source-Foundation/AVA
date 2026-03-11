@@ -62,6 +62,8 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
     // Use a smaller popup for the copy picker
     let popup_area = if matches!(modal, ModalType::CopyPicker) {
         centered_rect(50, 40, area)
+    } else if matches!(modal, ModalType::Rewind) {
+        centered_rect(60, 60, area)
     } else {
         centered_rect(60, 70, area)
     };
@@ -172,6 +174,11 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
         }
         ModalType::CopyPicker => {
             render_copy_picker(frame, inner, state);
+        }
+        ModalType::Rewind => {
+            crate::widgets::rewind_modal::render_rewind_modal(
+                frame, inner, &state.rewind, &state.theme,
+            );
         }
     }
 }

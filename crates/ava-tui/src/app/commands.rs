@@ -397,6 +397,7 @@ Available commands:
   /commit                  — show git status for committing
   /export [filename]       — export conversation to file (.md or .json)
   /copy [all]              — copy last response (picks code block if multiple)
+  /commands [list|reload|init] — manage custom slash commands
   /btw <question>          — ask a side question without interrupting the agent
   /clear                   — clear chat
   /compact [focus]          — compact conversation to save context window
@@ -425,8 +426,125 @@ Keyboard shortcuts:
                     ))
                 }
             }
-            _ => Some((MessageKind::Error, format!("Unknown command: {cmd}. Type /help for available commands."))),
+            "/commands" => {
+                self.handle_commands_command(arg)
+            }
+            _ => {
+                // Check custom commands before reporting unknown
+                let cmd_name = cmd.trim_start_matches('/');
+                if self.state.custom_commands.find(cmd_name).is_some() {
+                    // Custom command found — signal redirect via None.
+                    // The caller (submit_goal) will call try_resolve_custom_command().
+                    None
+                } else {
+                    Some((MessageKind::Error, format!("Unknown command: {cmd}. Type /help for available commands.")))
+                }
+            }
         }
+    }
+
+    /// Try to resolve a custom command from user input.
+    /// Returns `Some(Ok(prompt))` if a custom command was found and resolved,
+    /// `Some(Err(msg))` if found but had a parameter error,
+    /// `None` if no custom command matched.
+    pub(crate) fn try_resolve_custom_command(&self, input: &str) -> Option<Result<String, String>> {
+        use crate::state::custom_commands::CustomCommandRegistry;
+
+        let trimmed = input.trim();
+        if !trimmed.starts_with('/') {
+            return None;
+        }
+
+        let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
+        let cmd_name = parts[0].trim_start_matches('/');
+        let args = parts.get(1).map(|s| s.trim()).unwrap_or("");
+
+        let custom_cmd = self.state.custom_commands.find(cmd_name)?;
+        Some(CustomCommandRegistry::resolve_prompt(custom_cmd, args))
+    }
+
+    /// Handle the `/commands` built-in command.
+    fn handle_commands_command(&mut self, arg: Option<&str>) -> Option<(MessageKind, String)> {
+        use crate::state::custom_commands::CustomCommandRegistry;
+
+        match arg {
+            Some("reload") => {
+                self.state.custom_commands.reload();
+                self.sync_custom_command_autocomplete();
+                let count = self.state.custom_commands.commands.len();
+                self.set_status(format!("Reloaded {count} custom commands"), StatusLevel::Info);
+                Some((MessageKind::System, format!("Reloaded {count} custom commands")))
+            }
+            Some("init") => {
+                match CustomCommandRegistry::create_templates() {
+                    Ok(msg) => {
+                        // Reload after creating templates
+                        self.state.custom_commands.reload();
+                        self.sync_custom_command_autocomplete();
+                        self.set_status(&msg, StatusLevel::Info);
+                        Some((MessageKind::System, msg))
+                    }
+                    Err(err) => {
+                        self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                        Some((MessageKind::Error, err))
+                    }
+                }
+            }
+            Some("list") | None => {
+                let commands = &self.state.custom_commands.commands;
+                if commands.is_empty() {
+                    Some((
+                        MessageKind::System,
+                        "No custom commands found.\n\
+                         Add .toml files to .ava/commands/ or ~/.ava/commands/.\n\
+                         Run /commands init to create an example."
+                            .to_string(),
+                    ))
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(format!("Custom commands ({}):", commands.len()));
+                    for cmd in commands {
+                        let source = cmd.source.label();
+                        let params = if cmd.params.is_empty() {
+                            String::new()
+                        } else {
+                            let param_names: Vec<&str> =
+                                cmd.params.iter().map(|p| p.name.as_str()).collect();
+                            format!(" [{}]", param_names.join(", "))
+                        };
+                        lines.push(format!(
+                            "  /{}{} — {} ({})",
+                            cmd.name, params, cmd.description, source
+                        ));
+                    }
+                    Some((MessageKind::System, lines.join("\n")))
+                }
+            }
+            Some(sub) => Some((
+                MessageKind::Error,
+                format!("Unknown /commands subcommand: {sub}. Use: list, reload, init"),
+            )),
+        }
+    }
+
+    /// Sync custom commands into the input autocomplete list.
+    pub(crate) fn sync_custom_command_autocomplete(&mut self) {
+        use crate::widgets::autocomplete::AutocompleteItem;
+
+        self.state.input.custom_slash_items = self
+            .state
+            .custom_commands
+            .commands
+            .iter()
+            .map(|cmd| {
+                let detail = if cmd.description.is_empty() {
+                    format!("Custom command ({})", cmd.source.label())
+                } else {
+                    cmd.description.clone()
+                };
+                AutocompleteItem::new(&cmd.name, detail)
+            })
+            .collect();
     }
 
     pub(crate) fn execute_command_action(&mut self, action: Action) {

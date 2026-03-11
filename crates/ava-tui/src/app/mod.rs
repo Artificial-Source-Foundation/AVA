@@ -7,10 +7,12 @@ use crate::config::keybindings::load_keybind_overrides;
 use crate::event::{spawn_event_reader, spawn_tick_timer, AppEvent};
 use crate::state::agent::{AgentActivity, AgentMode, AgentState};
 use crate::state::btw::BtwState;
+use crate::state::custom_commands::CustomCommandRegistry;
 use crate::state::input::InputState;
 use crate::state::keybinds::{Action, KeybindState};
 use crate::state::messages::{MessageKind, MessageState, UiMessage};
 use crate::state::permission::PermissionState;
+use crate::state::rewind::RewindState;
 use crate::state::session::SessionState;
 use crate::state::theme::Theme;
 use crate::state::voice::{VoicePhase, VoiceState};
@@ -71,6 +73,10 @@ pub struct AppState {
     pub copy_picker: Option<CopyPickerState>,
     /// State for the /btw side-conversation overlay.
     pub btw: BtwState,
+    /// Registry of user-defined slash commands from TOML files.
+    pub custom_commands: CustomCommandRegistry,
+    /// State for the rewind system (checkpoints + modal).
+    pub rewind: RewindState,
 }
 
 /// A fenced code block extracted from markdown content.
@@ -141,6 +147,7 @@ pub enum ModalType {
     AgentList,
     Question,
     CopyPicker,
+    Rewind,
 }
 
 pub struct App {
@@ -157,6 +164,8 @@ pub struct App {
     voice_config: ava_config::VoiceConfig,
     /// Receiver for question requests from the agent's question tool.
     question_rx: Option<tokio::sync::mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>>,
+    /// Timestamp of the last Esc press, for double-Esc detection.
+    last_esc_time: Option<std::time::Instant>,
 }
 
 impl App {
@@ -231,9 +240,11 @@ impl App {
             question: None,
             copy_picker: None,
             btw: BtwState::default(),
+            custom_commands: CustomCommandRegistry::load(),
+            rewind: RewindState::default(),
         };
 
-        Ok(Self {
+        let mut app = Self {
             state,
             should_quit: false,
             pending_goal: cli.goal.clone(),
@@ -246,7 +257,10 @@ impl App {
             #[cfg(feature = "voice")]
             voice_config: ava_config::VoiceConfig::default(),
             question_rx: Some(question_rx),
-        })
+            last_esc_time: None,
+        };
+        app.sync_custom_command_autocomplete();
+        Ok(app)
     }
 
     pub async fn run(&mut self) -> Result<()> {
@@ -547,6 +561,117 @@ impl App {
                 }
             }
         });
+    }
+
+    /// Open the rewind modal if there are checkpoints to rewind to.
+    pub(crate) fn open_rewind_modal(&mut self) {
+        if self.state.rewind.checkpoints.is_empty() {
+            self.set_status("No checkpoints to rewind to", StatusLevel::Warn);
+            return;
+        }
+        self.state.rewind.open();
+        self.state.active_modal = Some(ModalType::Rewind);
+    }
+
+    /// Execute the selected rewind action.
+    pub(crate) fn execute_rewind(&mut self, option: crate::state::rewind::RewindOption) {
+        use crate::state::rewind::RewindOption;
+
+        let checkpoint_idx = match self.state.rewind.checkpoints.len().checked_sub(1) {
+            Some(idx) => idx,
+            None => return,
+        };
+
+        let checkpoint = &self.state.rewind.checkpoints[checkpoint_idx];
+        let msg_index = checkpoint.message_index;
+        let preview: String = if checkpoint.message_preview.len() > 50 {
+            format!("{}...", &checkpoint.message_preview[..47])
+        } else {
+            checkpoint.message_preview.clone()
+        };
+
+        match option {
+            RewindOption::RestoreCodeAndConversation => {
+                // Restore files
+                let (file_count, errors) = self.state.rewind.restore_files_after(checkpoint_idx);
+                // Remove messages after checkpoint
+                if msg_index < self.state.messages.messages.len() {
+                    self.state.messages.messages.truncate(msg_index);
+                }
+                self.state.messages.reset_scroll();
+                // Remove checkpoints
+                self.state.rewind.truncate_after(checkpoint_idx);
+
+                let mut status = format!("Rewound to before: '{preview}'");
+                if file_count > 0 {
+                    status.push_str(&format!(" ({file_count} files restored)"));
+                }
+                if !errors.is_empty() {
+                    status.push_str(&format!(" ({} errors)", errors.len()));
+                }
+                self.state
+                    .messages
+                    .push(UiMessage::new(MessageKind::System, &status));
+                self.set_status(&status, StatusLevel::Info);
+            }
+            RewindOption::RestoreConversation => {
+                // Remove messages after checkpoint (keep files)
+                if msg_index < self.state.messages.messages.len() {
+                    self.state.messages.messages.truncate(msg_index);
+                }
+                self.state.messages.reset_scroll();
+                self.state.rewind.truncate_after(checkpoint_idx);
+
+                let status = format!("Rewound conversation to before: '{preview}'");
+                self.state
+                    .messages
+                    .push(UiMessage::new(MessageKind::System, &status));
+                self.set_status(&status, StatusLevel::Info);
+            }
+            RewindOption::RestoreCode => {
+                // Restore files only (keep conversation)
+                let (file_count, errors) = self.state.rewind.restore_files_after(checkpoint_idx);
+                // Clear file changes from the checkpoint but keep it
+                if let Some(cp) = self.state.rewind.checkpoints.get_mut(checkpoint_idx) {
+                    cp.file_changes.clear();
+                }
+
+                let mut status = format!("Restored {file_count} file(s) to before: '{preview}'");
+                if !errors.is_empty() {
+                    status.push_str(&format!(" ({} errors)", errors.len()));
+                }
+                self.state
+                    .messages
+                    .push(UiMessage::new(MessageKind::System, &status));
+                self.set_status(&status, StatusLevel::Info);
+            }
+            RewindOption::SummarizeFromHere => {
+                // Replace all messages before the checkpoint with a summary
+                if msg_index > 0 && msg_index <= self.state.messages.messages.len() {
+                    let summary_msg = UiMessage::new(
+                        MessageKind::System,
+                        format!(
+                            "--- Earlier conversation summarized ({msg_index} messages) ---\n\
+                             Last topic before summary: \"{preview}\""
+                        ),
+                    );
+                    // Keep messages from msg_index onward
+                    let kept: Vec<UiMessage> =
+                        self.state.messages.messages.drain(msg_index..).collect();
+                    self.state.messages.messages.clear();
+                    self.state.messages.messages.push(summary_msg);
+                    self.state.messages.messages.extend(kept);
+                    self.state.messages.reset_scroll();
+                }
+                self.set_status("Conversation summarized", StatusLevel::Info);
+            }
+            RewindOption::Cancel => {
+                // Do nothing
+            }
+        }
+
+        self.state.rewind.close();
+        self.state.active_modal = None;
     }
 
     /// Extract fenced code blocks from markdown content.
@@ -853,6 +978,18 @@ impl App {
         if key.code == KeyCode::Esc && matches!(self.state.view_mode, ViewMode::SubAgent { .. }) {
             self.exit_sub_agent_view();
             return false;
+        }
+
+        // Double-Esc detection: two Esc presses within 500ms opens rewind modal
+        if key.code == KeyCode::Esc && !self.state.agent.is_running {
+            if let Some(last) = self.last_esc_time {
+                if last.elapsed() < std::time::Duration::from_millis(500) {
+                    self.last_esc_time = None;
+                    self.open_rewind_modal();
+                    return false;
+                }
+            }
+            self.last_esc_time = Some(std::time::Instant::now());
         }
 
         // Handle global keybindings
@@ -1207,6 +1344,8 @@ impl App {
             question: None,
             copy_picker: None,
             btw: BtwState::default(),
+            custom_commands: CustomCommandRegistry::default(),
+            rewind: RewindState::default(),
         };
 
         Self {
@@ -1222,6 +1361,7 @@ impl App {
             #[cfg(feature = "voice")]
             voice_config: ava_config::VoiceConfig::default(),
             question_rx: None,
+            last_esc_time: None,
         }
     }
 

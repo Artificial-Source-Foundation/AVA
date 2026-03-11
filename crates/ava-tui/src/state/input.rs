@@ -21,6 +21,8 @@ pub struct InputState {
     pub pending_pastes: HashMap<String, String>,
     /// Tracks how many times a given description has been used, for dedup numbering.
     paste_counter: HashMap<String, usize>,
+    /// Additional slash-command autocomplete items from custom commands.
+    pub custom_slash_items: Vec<AutocompleteItem>,
 }
 
 impl InputState {
@@ -347,10 +349,8 @@ impl InputState {
         let token = before.split_whitespace().last().unwrap_or("");
 
         let (trigger, query, items) = if let Some(rest) = token.strip_prefix('/') {
-            (
-                AutocompleteTrigger::Slash,
-                rest.to_string(),
-                vec![
+            {
+                let mut items = vec![
                     AutocompleteItem::new("btw", "Ask a side question without interrupting the agent"),
                     AutocompleteItem::new("help", "Show available commands"),
                     AutocompleteItem::new("model", "Switch model"),
@@ -362,6 +362,7 @@ impl InputState {
                     AutocompleteItem::new("think", "Set thinking level"),
                     AutocompleteItem::new("theme", "Switch theme"),
                     AutocompleteItem::new("status", "Show session info"),
+                    AutocompleteItem::new("init", "Initialize AVA for this project"),
                     AutocompleteItem::new("diff", "Show git changes"),
                     AutocompleteItem::new("commit", "Show git status for committing"),
                     AutocompleteItem::new("providers", "Show provider status"),
@@ -372,9 +373,18 @@ impl InputState {
                     AutocompleteItem::new("mcp reload", "Reload MCP config"),
                     AutocompleteItem::new("agents", "Show sub-agent configuration"),
                     AutocompleteItem::new("permissions", "Toggle permission level"),
+                    AutocompleteItem::new("undo", "Rewind conversation/code to a previous point"),
                     AutocompleteItem::new("export", "Export conversation to file"),
-                ],
-            )
+                    AutocompleteItem::new("commands", "List/manage custom commands"),
+                ];
+                // Append custom command items
+                items.extend(self.custom_slash_items.clone());
+                (
+                    AutocompleteTrigger::Slash,
+                    rest.to_string(),
+                    items,
+                )
+            }
         } else if let Some(rest) = token.strip_prefix('@') {
             (
                 AutocompleteTrigger::AtMention,

@@ -65,6 +65,9 @@ impl App {
                     }
                 }
             }
+            Some(ModalType::Rewind) => {
+                // Rewind modal has no text input — ignore paste
+            }
             _ => {}
         }
     }
@@ -90,6 +93,7 @@ impl App {
             ModalType::AgentList => self.handle_agent_list_key(key),
             ModalType::Question => self.handle_question_key(key),
             ModalType::CopyPicker => self.handle_copy_picker_key(key),
+            ModalType::Rewind => self.handle_rewind_key(key),
         }
     }
 
@@ -694,6 +698,37 @@ impl App {
                 // Unrecognized key — put picker back
                 self.state.copy_picker = Some(picker);
             }
+        }
+        false
+    }
+
+    fn handle_rewind_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        use crate::state::rewind::RewindOption;
+
+        match key.code {
+            KeyCode::Esc => {
+                self.state.rewind.close();
+                self.state.active_modal = None;
+            }
+            KeyCode::Up => {
+                self.state.rewind.select_prev();
+            }
+            KeyCode::Down => {
+                self.state.rewind.select_next();
+            }
+            KeyCode::Enter => {
+                let option = self.state.rewind.selected();
+                self.execute_rewind(option);
+            }
+            KeyCode::Char('1') => self.execute_rewind(RewindOption::RestoreCodeAndConversation),
+            KeyCode::Char('2') => self.execute_rewind(RewindOption::RestoreConversation),
+            KeyCode::Char('3') => self.execute_rewind(RewindOption::RestoreCode),
+            KeyCode::Char('4') => self.execute_rewind(RewindOption::SummarizeFromHere),
+            KeyCode::Char('5') => {
+                self.state.rewind.close();
+                self.state.active_modal = None;
+            }
+            _ => {}
         }
         false
     }

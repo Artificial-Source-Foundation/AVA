@@ -21,7 +21,10 @@ fn help_returns_system_message() {
     assert!(result.is_some(), "/help should return Some");
     let (kind, msg) = result.unwrap();
     assert_eq!(kind, MessageKind::System);
-    assert!(msg.contains("Available commands:"), "help text should list commands");
+    assert!(
+        msg.contains("Available commands:"),
+        "help text should list commands"
+    );
     assert!(msg.contains("/model"), "help should mention /model");
     assert!(msg.contains("/clear"), "help should mention /clear");
     assert!(msg.contains("/help"), "help should mention /help");
@@ -34,10 +37,16 @@ fn help_returns_system_message() {
     assert!(msg.contains("/tools"), "help should mention /tools");
     assert!(msg.contains("/mcp"), "help should mention /mcp");
     assert!(msg.contains("/connect"), "help should mention /connect");
-    assert!(msg.contains("/disconnect"), "help should mention /disconnect");
+    assert!(
+        msg.contains("/disconnect"),
+        "help should mention /disconnect"
+    );
     assert!(msg.contains("/copy"), "help should mention /copy");
     assert!(msg.contains("/think"), "help should mention /think");
-    assert!(msg.contains("Keyboard shortcuts:"), "help should include keyboard shortcuts");
+    assert!(
+        msg.contains("Keyboard shortcuts:"),
+        "help should include keyboard shortcuts"
+    );
 }
 
 // ── /clear ───────────────────────────────────────────────────────────────
@@ -46,12 +55,18 @@ fn help_returns_system_message() {
 fn clear_returns_none_and_clears_messages() {
     let (mut app, _tmp) = make_app();
     // Add some messages first
-    app.state.messages.push(
-        ava_tui::state::messages::UiMessage::new(MessageKind::User, "hello".to_string()),
-    );
-    app.state.messages.push(
-        ava_tui::state::messages::UiMessage::new(MessageKind::Assistant, "hi".to_string()),
-    );
+    app.state
+        .messages
+        .push(ava_tui::state::messages::UiMessage::new(
+            MessageKind::User,
+            "hello".to_string(),
+        ));
+    app.state
+        .messages
+        .push(ava_tui::state::messages::UiMessage::new(
+            MessageKind::Assistant,
+            "hi".to_string(),
+        ));
     assert_eq!(app.state.messages.messages.len(), 2);
 
     let result = app.test_slash_command("/clear");
@@ -75,7 +90,9 @@ fn compact_with_no_messages_reports_nothing_to_compact() {
     assert_eq!(kind, MessageKind::System);
     // With no messages, should indicate nothing to compact or low usage
     assert!(
-        msg.to_lowercase().contains("no ") || msg.to_lowercase().contains("compact") || msg.to_lowercase().contains("empty"),
+        msg.to_lowercase().contains("no ")
+            || msg.to_lowercase().contains("compact")
+            || msg.to_lowercase().contains("empty"),
         "should indicate nothing to compact, got: {msg}"
     );
 }
@@ -95,7 +112,10 @@ fn compact_with_focus_instructions() {
 fn sessions_returns_none_and_opens_modal() {
     let (mut app, _tmp) = make_app();
     let result = app.test_slash_command("/sessions");
-    assert!(result.is_none(), "/sessions should return None (opens modal)");
+    assert!(
+        result.is_none(),
+        "/sessions should return None (opens modal)"
+    );
     assert_eq!(
         app.state.active_modal,
         Some(ModalType::SessionList),
@@ -109,7 +129,10 @@ fn sessions_returns_none_and_opens_modal() {
 fn theme_no_args_returns_none_and_opens_selector() {
     let (mut app, _tmp) = make_app();
     let result = app.test_slash_command("/theme");
-    assert!(result.is_none(), "/theme with no args should return None (opens modal)");
+    assert!(
+        result.is_none(),
+        "/theme with no args should return None (opens modal)"
+    );
     assert_eq!(
         app.state.active_modal,
         Some(ModalType::ThemeSelector),
@@ -271,8 +294,14 @@ fn model_with_invalid_format_returns_error() {
     assert!(result.is_some());
     let (kind, msg) = result.unwrap();
     assert_eq!(kind, MessageKind::Error);
-    assert!(msg.contains("Invalid format"), "should explain correct format");
-    assert!(msg.contains("provider/model"), "should show expected format");
+    assert!(
+        msg.contains("Invalid format"),
+        "should explain correct format"
+    );
+    assert!(
+        msg.contains("provider/model"),
+        "should show expected format"
+    );
 }
 
 // ── /disconnect ──────────────────────────────────────────────────────────
@@ -299,7 +328,10 @@ async fn status_returns_system_info() {
     let (kind, msg) = result.unwrap();
     assert_eq!(kind, MessageKind::System);
     assert!(msg.contains("Model:"), "should show model");
-    assert!(msg.contains("test-provider/test-model"), "should show test provider/model");
+    assert!(
+        msg.contains("test-provider/test-model"),
+        "should show test provider/model"
+    );
     assert!(msg.contains("Tokens:"), "should show tokens");
     assert!(msg.contains("Session:"), "should show session");
     assert!(msg.contains("Tools:"), "should show tools");
@@ -346,7 +378,10 @@ fn mcp_unknown_subcommand_returns_error() {
     assert!(result.is_some());
     let (kind, msg) = result.unwrap();
     assert_eq!(kind, MessageKind::Error);
-    assert!(msg.contains("Unknown /mcp subcommand"), "should say unknown subcommand");
+    assert!(
+        msg.contains("Unknown /mcp subcommand"),
+        "should say unknown subcommand"
+    );
     assert!(msg.contains("bogus"), "should echo the bad subcommand");
     assert!(msg.contains("list"), "should suggest valid subcommands");
     assert!(msg.contains("reload"), "should suggest valid subcommands");
@@ -368,7 +403,10 @@ fn copy_returns_none() {
 async fn connect_no_args_opens_provider_modal() {
     let (mut app, _tmp) = make_app();
     let result = app.test_slash_command("/connect");
-    assert!(result.is_none(), "/connect should return None (opens modal)");
+    assert!(
+        result.is_none(),
+        "/connect should return None (opens modal)"
+    );
     assert_eq!(
         app.state.active_modal,
         Some(ModalType::ProviderConnect),
@@ -421,7 +459,10 @@ fn unknown_command_returns_error() {
     assert!(result.is_some(), "unknown command should return Some");
     let (kind, msg) = result.unwrap();
     assert_eq!(kind, MessageKind::Error);
-    assert!(msg.contains("Unknown command"), "should say unknown command");
+    assert!(
+        msg.contains("Unknown command"),
+        "should say unknown command"
+    );
     assert!(msg.contains("/foobar"), "should echo the bad command");
     assert!(msg.contains("/help"), "should suggest /help");
 }
@@ -441,7 +482,10 @@ fn unknown_command_with_args() {
     let result = app.test_slash_command("/notreal some args");
     let (kind, msg) = result.unwrap();
     assert_eq!(kind, MessageKind::Error);
-    assert!(msg.contains("/notreal"), "should include just the command, not args");
+    assert!(
+        msg.contains("/notreal"),
+        "should include just the command, not args"
+    );
 }
 
 // ── non-slash input returns None ─────────────────────────────────────────
@@ -461,7 +505,10 @@ fn leading_whitespace_is_trimmed() {
     let (mut app, _tmp) = make_app();
     // Input with leading spaces: after trim, starts with /
     let result = app.test_slash_command("  /help  ");
-    assert!(result.is_some(), "trimmed input starting with / should be handled");
+    assert!(
+        result.is_some(),
+        "trimmed input starting with / should be handled"
+    );
     let (kind, _) = result.unwrap();
     assert_eq!(kind, MessageKind::System);
 }

@@ -1,9 +1,11 @@
 pub mod agent;
 pub mod btw;
+pub mod custom_commands;
 pub mod input;
 pub mod keybinds;
 pub mod messages;
 pub mod permission;
+pub mod rewind;
 pub mod session;
 pub mod theme;
 pub mod voice;

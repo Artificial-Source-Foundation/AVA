@@ -671,6 +671,33 @@
       "capabilities": { "tool_call": true, "streaming": true },
       "limits": { "context_window": 204800, "max_output": 131072 },
       "cost": { "input_per_million": 0.0, "output_per_million": 0.0 }
+    },
+    {
+      "id": "mercury-2",
+      "provider": "inception",
+      "name": "Mercury 2",
+      "aliases": ["mercury2"],
+      "capabilities": { "tool_call": true, "streaming": true },
+      "limits": { "context_window": 128000, "max_output": 50000 },
+      "cost": { "input_per_million": 0.25, "output_per_million": 0.75 }
+    },
+    {
+      "id": "mercury",
+      "provider": "inception",
+      "name": "Mercury",
+      "aliases": [],
+      "capabilities": { "tool_call": true, "streaming": true },
+      "limits": { "context_window": 128000, "max_output": 32000 },
+      "cost": { "input_per_million": 0.25, "output_per_million": 1.0 }
+    },
+    {
+      "id": "mercury-coder-small",
+      "provider": "inception",
+      "name": "Mercury Coder Small",
+      "aliases": ["mercury-coder"],
+      "capabilities": { "tool_call": true, "streaming": true },
+      "limits": { "context_window": 128000, "max_output": 32000 },
+      "cost": { "input_per_million": 0.25, "output_per_million": 0.75 }
     }
   ]
 }

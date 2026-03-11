@@ -106,6 +106,11 @@ pub struct AgentStackConfig {
     pub max_budget_usd: f64,
     pub yolo: bool,
     pub injected_provider: Option<Arc<dyn LLMProvider>>,
+    /// Override the working directory for the agent. When set, the agent uses
+    /// this path instead of `std::env::current_dir()` for project-root detection,
+    /// MCP config lookup, custom tool discovery, and codebase indexing. Useful for
+    /// benchmarks and sandboxed runs that should not touch the real project.
+    pub working_dir: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -125,6 +130,7 @@ impl Default for AgentStackConfig {
             max_budget_usd: 0.0,
             yolo: false,
             injected_provider: None,
+            working_dir: None,
         }
     }
 }
@@ -157,9 +163,14 @@ impl AgentStack {
             MemorySystem::new(&db_path).map_err(|e| AvaError::DatabaseError(e.to_string()))?,
         );
 
+        let effective_cwd = config
+            .working_dir
+            .clone()
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
         let codebase_index: Arc<RwLock<Option<Arc<CodebaseIndex>>>> = Arc::new(RwLock::new(None));
         let index_clone = codebase_index.clone();
-        let project_root = std::env::current_dir().unwrap_or_default();
+        let project_root = effective_cwd.clone();
         tokio::spawn(async move {
             match index_project(&project_root).await {
                 Ok(idx) => {
@@ -180,24 +191,15 @@ impl AgentStack {
         }
 
         let mcp_global_config = config.data_dir.join("mcp.json");
-        let mcp_project_config = std::env::current_dir()
-            .unwrap_or_default()
-            .join(".ava")
-            .join("mcp.json");
+        let mcp_project_config = effective_cwd.join(".ava").join("mcp.json");
         let custom_tool_dirs = vec![
             config.data_dir.join("tools"),
-            std::env::current_dir()
-                .unwrap_or_default()
-                .join(".ava")
-                .join("tools"),
+            effective_cwd.join(".ava").join("tools"),
         ];
 
         let agents_config = AgentsConfig::load(
             &config.data_dir.join("agents.toml"),
-            &std::env::current_dir()
-                .unwrap_or_default()
-                .join(".ava")
-                .join("agents.toml"),
+            &effective_cwd.join(".ava").join("agents.toml"),
         );
 
         let todo_state = TodoState::new();

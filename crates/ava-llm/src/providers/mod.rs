@@ -11,6 +11,7 @@ use crate::provider::LLMProvider;
 pub mod anthropic;
 pub mod copilot;
 pub mod gemini;
+pub mod inception;
 pub mod mock;
 pub mod ollama;
 pub mod openai;
@@ -19,6 +20,7 @@ pub mod openrouter;
 pub use anthropic::AnthropicProvider;
 pub use copilot::CopilotProvider;
 pub use gemini::GeminiProvider;
+pub use inception::InceptionProvider;
 pub use mock::MockProvider;
 pub use ollama::OllamaProvider;
 pub use openai::OpenAIProvider;
@@ -32,6 +34,7 @@ pub fn base_url_for_provider(provider_name: &str) -> Option<&'static str> {
         "openrouter" => Some("https://openrouter.ai/api"),
         "gemini" => Some("https://generativelanguage.googleapis.com"),
         "copilot" => Some("https://api.individual.githubcopilot.com"),
+        "inception" => Some("https://api.inceptionlabs.ai"),
         "ollama" => Some("http://localhost:11434"),
         "alibaba" => Some("https://coding-intl.dashscope.aliyuncs.com/apps/anthropic/v1"),
         "alibaba-cn" => Some("https://coding.dashscope.aliyuncs.com/apps/anthropic/v1"),
@@ -112,6 +115,25 @@ pub fn create_provider(
                 )))
             } else {
                 Ok(Box::new(OpenRouterProvider::new(pool, api_key, model)))
+            }
+        }
+        "inception" => {
+            let entry = credential
+                .ok_or_else(|| AvaError::MissingApiKey {
+                    provider: "inception".to_string(),
+                })?;
+            let api_key = entry
+                .effective_api_key()
+                .ok_or_else(|| AvaError::MissingApiKey {
+                    provider: "inception".to_string(),
+                })?
+                .to_string();
+            if let Some(base_url) = entry.base_url {
+                Ok(Box::new(InceptionProvider::with_base_url(
+                    pool, api_key, model, base_url,
+                )))
+            } else {
+                Ok(Box::new(InceptionProvider::new(pool, api_key, model)))
             }
         }
         "gemini" => {
@@ -203,7 +225,7 @@ pub fn create_provider(
         }
         _ => Err(AvaError::ProviderError {
             provider: provider_name.to_string(),
-            message: "unknown provider. Available: anthropic, openai, openrouter, copilot, gemini, ollama, \
+            message: "unknown provider. Available: anthropic, openai, openrouter, inception, copilot, gemini, ollama, \
                       alibaba, alibaba-cn, zai-coding-plan, zhipuai-coding-plan, kimi-for-coding, \
                       minimax-coding-plan, minimax-cn-coding-plan"
                 .to_string(),
@@ -322,6 +344,7 @@ mod tests {
             ("anthropic", "claude-sonnet-4"),
             ("openai", "gpt-4.1"),
             ("openrouter", "anthropic/claude-sonnet-4"),
+            ("inception", "mercury-2"),
             ("gemini", "gemini-2.5-pro"),
             ("ollama", "llama3.3"),
             ("alibaba", "qwen3.5-plus"),
@@ -353,6 +376,7 @@ mod tests {
             "anthropic",
             "openai",
             "openrouter",
+            "inception",
             "gemini",
             "copilot",
             "ollama",
@@ -406,6 +430,24 @@ mod tests {
             create_provider("minimax-coding-plan", "MiniMax-M2", &creds, default_pool()).unwrap();
         assert_eq!(provider.model_name(), "MiniMax-M2");
         assert!(provider.supports_tools());
+    }
+
+    #[test]
+    fn inception_creates_provider_with_correct_model() {
+        let creds = mock_creds_for(&["inception"]);
+        let provider =
+            create_provider("inception", "mercury-2", &creds, default_pool()).unwrap();
+        assert_eq!(provider.model_name(), "mercury-2");
+        assert!(provider.supports_tools());
+        assert!(!provider.supports_thinking());
+    }
+
+    #[test]
+    fn inception_resolves_mercury_coder_alias() {
+        let creds = mock_creds_for(&["inception"]);
+        let provider =
+            create_provider("inception", "mercury-coder", &creds, default_pool()).unwrap();
+        assert_eq!(provider.model_name(), "mercury-coder-small");
     }
 
     #[test]

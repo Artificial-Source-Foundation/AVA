@@ -364,10 +364,13 @@ impl AgentLoop {
 
                 let native_tools = self.llm.supports_tools();
 
-                // Dedup guard
+                // Dedup guard — hash last message content + message count so
+                // context growth (new tool results) breaks the dedup even if
+                // the last message content is identical (e.g. same compile error).
                 let dedup_hash = {
                     let msgs = self.context.get_messages();
                     let mut hasher = DefaultHasher::new();
+                    msgs.len().hash(&mut hasher);
                     if let Some(last) = msgs.last() {
                         last.content.hash(&mut hasher);
                     }

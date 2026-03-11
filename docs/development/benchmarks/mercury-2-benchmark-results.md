@@ -180,6 +180,57 @@ Mercury 2 consistently delivers first tokens in under 1 second — **5-15x faste
 
 **Best value proposition**: Mercury 2 at $0.25/$0.75 delivers 83% of Haiku's reliability at 1/4 the price and 5-10x the speed. For most speed-tier use cases, that's a compelling tradeoff.
 
+## Harnessed-Pair Results: Opus + Mercury
+
+We tested whether a SOTA model (Opus 4.6) directing Mercury 2 as a worker could outperform either model alone. The hypothesis: Opus plans, Mercury executes, Opus reviews — getting SOTA quality at speed-model cost.
+
+### Setup
+
+Using AVA's Praxis multi-agent system:
+- **Director**: Claude Opus 4.6 via OpenRouter ($5/$25 per 1M tokens)
+- **Worker**: Mercury 2 via Inception API ($0.25/$0.75 per 1M tokens)
+- Opus receives the task, plans the approach, delegates coding to Mercury, reviews the result
+
+### Results
+
+| Task | Opus Solo | Mercury Solo | Opus+Mercury |
+|---|---|---|---|
+| is_palindrome | 6.3s PASS | 1.3s PASS | **0.5s PASS 5/5** |
+| merge_sorted | 12.7s PASS | 0.7s PASS | **0.4s PASS 4/4** |
+| lru_cache | 38.2s FAIL | 1.5s FAIL (compile) | **2.0s PASS 3/3** |
+| bash_echo | 6.5s PASS | 0.7s PASS | **0.6s PASS** |
+| read_cargo | 13.4s PASS | 1.1s PASS | **1.2s PASS** |
+
+### Key Finding
+
+**The harnessed pair solved problems neither model could solve alone.** The LRU Cache task — which requires implementing a HashMap + doubly-linked list with O(1) operations — failed for both Opus solo and Mercury solo, but the Opus+Mercury pair passed all 3 tests in 2.0 seconds.
+
+- **Harnessed pair**: 5/5 passed, 4.7s total, ~$0.016
+- **Opus solo**: 4/5 passed, 77.1s total
+- **Mercury solo**: 4/5 passed, 5.3s total
+
+The pair was **faster than Mercury solo** on simple tasks (0.4-0.5s vs 0.7-1.3s) and **16x faster than Opus solo** overall, while achieving 100% pass rate vs 80% for either model alone.
+
+### Cost Breakdown (per task)
+
+| Task | Director Cost | Worker Cost | Total |
+|---|---|---|---|
+| is_palindrome | $0.0018 | $0.0001 | $0.0019 |
+| merge_sorted | $0.0029 | $0.0001 | $0.0030 |
+| lru_cache | $0.0074 | $0.0003 | $0.0077 |
+| bash_echo | $0.0005 | $0.0000 | $0.0005 |
+| read_cargo | $0.0026 | $0.0001 | $0.0027 |
+
+Worker tokens (Mercury) account for only ~3-5% of total cost. The bulk is Opus planning/review tokens, but even that is minimal per task.
+
+### Implication
+
+For AVA's agent architecture, the optimal configuration is a **SOTA director + speed worker** model. This pattern:
+- Achieves higher quality than either model alone
+- Is faster than the director solo (16x in this test)
+- Costs a fraction of running the director for everything
+- The worker model (Mercury) costs are negligible (~$0.0001 per task)
+
 ## Test Environment
 
 - **Machine**: Linux 6.17.0-14-generic

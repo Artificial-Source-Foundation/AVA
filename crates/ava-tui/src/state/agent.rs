@@ -186,7 +186,7 @@ impl AgentState {
         }, question_rx))
     }
 
-    fn stack(&self) -> std::result::Result<&Arc<AgentStack>, String> {
+    pub(crate) fn stack(&self) -> std::result::Result<&Arc<AgentStack>, String> {
         self.stack
             .as_ref()
             .ok_or_else(|| "AgentStack not initialised".to_string())

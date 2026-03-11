@@ -50,11 +50,21 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     if let Some(modal) = state.active_modal {
         render_modal(frame, state, modal);
     }
+
+    // Render /btw overlay on top of everything (including modals)
+    if state.btw.pending || state.btw.response.is_some() {
+        crate::widgets::btw_overlay::render_btw_overlay(frame, &state.btw, &state.theme);
+    }
 }
 
 fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
     let area = frame.area();
-    let popup_area = centered_rect(60, 70, area);
+    // Use a smaller popup for the copy picker
+    let popup_area = if matches!(modal, ModalType::CopyPicker) {
+        centered_rect(50, 40, area)
+    } else {
+        centered_rect(60, 70, area)
+    };
 
     // Dimmed backdrop
     let backdrop = Block::default().style(Style::default().bg(state.theme.bg));
@@ -160,6 +170,9 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
         ModalType::Question => {
             render_question_modal(frame, inner, state);
         }
+        ModalType::CopyPicker => {
+            render_copy_picker(frame, inner, state);
+        }
     }
 }
 
@@ -226,6 +239,68 @@ fn render_question_modal(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     frame.render_widget(paragraph, area);
 }
 
+
+fn render_copy_picker(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+    use ratatui::style::Modifier;
+    use ratatui::text::{Line, Span};
+    use ratatui::widgets::Paragraph;
+
+    let Some(ref picker) = state.copy_picker else { return };
+
+    let mut lines: Vec<Line<'_>> = Vec::new();
+
+    // Title
+    lines.push(Line::from(Span::styled(
+        "Copy Code Block",
+        Style::default().fg(state.theme.text).add_modifier(Modifier::BOLD),
+    )));
+    lines.push(Line::from(""));
+
+    // List code blocks (up to 9)
+    for (i, block) in picker.blocks.iter().enumerate().take(9) {
+        let lang = if block.language.is_empty() {
+            "code".to_string()
+        } else {
+            block.language.clone()
+        };
+        let line_count = block.content.lines().count();
+        let label = format!(
+            "  {}. {} (lines {}-{}, {} lines)",
+            i + 1,
+            lang,
+            block.start_line,
+            block.end_line,
+            line_count,
+        );
+        lines.push(Line::from(Span::styled(
+            label,
+            Style::default().fg(state.theme.text),
+        )));
+    }
+
+    lines.push(Line::from(""));
+
+    // "Copy entire response" option
+    lines.push(Line::from(Span::styled(
+        "  a. Copy entire response",
+        Style::default().fg(state.theme.accent),
+    )));
+
+    lines.push(Line::from(""));
+
+    // Hint
+    lines.push(Line::from(Span::styled(
+        "Press 1-9 to copy, Esc to cancel",
+        Style::default().fg(state.theme.text_muted),
+    )));
+
+    let block = Block::default()
+        .title(" Copy Code Block ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(state.theme.border));
+    let paragraph = Paragraph::new(lines).block(block);
+    frame.render_widget(paragraph, area);
+}
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()

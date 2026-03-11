@@ -351,13 +351,14 @@ impl InputState {
                 AutocompleteTrigger::Slash,
                 rest.to_string(),
                 vec![
+                    AutocompleteItem::new("btw", "Ask a side question without interrupting the agent"),
                     AutocompleteItem::new("help", "Show available commands"),
                     AutocompleteItem::new("model", "Switch model"),
                     AutocompleteItem::new("sessions", "Session picker"),
                     AutocompleteItem::new("tools", "List all tools"),
                     AutocompleteItem::new("connect", "Add provider credentials"),
                     AutocompleteItem::new("clear", "Clear chat"),
-                    AutocompleteItem::new("compact", "Show context usage"),
+                    AutocompleteItem::new("compact", "Compact conversation to save context window"),
                     AutocompleteItem::new("think", "Set thinking level"),
                     AutocompleteItem::new("theme", "Switch theme"),
                     AutocompleteItem::new("status", "Show session info"),
@@ -371,6 +372,7 @@ impl InputState {
                     AutocompleteItem::new("mcp reload", "Reload MCP config"),
                     AutocompleteItem::new("agents", "Show sub-agent configuration"),
                     AutocompleteItem::new("permissions", "Toggle permission level"),
+                    AutocompleteItem::new("export", "Export conversation to file"),
                 ],
             )
         } else if let Some(rest) = token.strip_prefix('@') {

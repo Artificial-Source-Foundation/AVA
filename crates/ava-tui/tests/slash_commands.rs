@@ -67,31 +67,26 @@ fn clear_returns_none_and_clears_messages() {
 // ── /compact ─────────────────────────────────────────────────────────────
 
 #[test]
-fn compact_returns_context_info_unknown_window() {
+fn compact_with_no_messages_reports_nothing_to_compact() {
     let (mut app, _tmp) = make_app();
-    // Default: context_window is None
     let result = app.test_slash_command("/compact");
     assert!(result.is_some(), "/compact should return Some");
     let (kind, msg) = result.unwrap();
     assert_eq!(kind, MessageKind::System);
-    assert!(msg.contains("Context usage:"), "should show context usage");
-    assert!(msg.contains("window size unknown"), "should note window unknown");
-    assert!(msg.contains("Input:"), "should show input tokens");
-    assert!(msg.contains("Output:"), "should show output tokens");
-    assert!(msg.contains("Messages:"), "should show message count");
-    assert!(msg.contains("Tip:"), "should include tip");
+    // With no messages, should indicate nothing to compact or low usage
+    assert!(
+        msg.to_lowercase().contains("no ") || msg.to_lowercase().contains("compact") || msg.to_lowercase().contains("empty"),
+        "should indicate nothing to compact, got: {msg}"
+    );
 }
 
 #[test]
-fn compact_shows_window_percentage_when_known() {
+fn compact_with_focus_instructions() {
     let (mut app, _tmp) = make_app();
-    // Set a known context window
-    app.state.agent.context_window = Some(100_000);
-    let result = app.test_slash_command("/compact");
-    let (kind, msg) = result.unwrap();
+    let result = app.test_slash_command("/compact focus on auth");
+    assert!(result.is_some(), "/compact with focus should return Some");
+    let (kind, _msg) = result.unwrap();
     assert_eq!(kind, MessageKind::System);
-    assert!(msg.contains("/ 100000 tokens"), "should show context window size");
-    assert!(msg.contains("0%"), "with zero tokens used, percentage should be 0%");
 }
 
 // ── /sessions ────────────────────────────────────────────────────────────

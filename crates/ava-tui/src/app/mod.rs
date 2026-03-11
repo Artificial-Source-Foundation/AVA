@@ -6,6 +6,7 @@ use crate::config::cli::CliArgs;
 use crate::config::keybindings::load_keybind_overrides;
 use crate::event::{spawn_event_reader, spawn_tick_timer, AppEvent};
 use crate::state::agent::{AgentActivity, AgentMode, AgentState};
+use crate::state::btw::BtwState;
 use crate::state::input::InputState;
 use crate::state::keybinds::{Action, KeybindState};
 use crate::state::messages::{MessageKind, MessageState, UiMessage};
@@ -66,6 +67,32 @@ pub struct AppState {
     pub todo_state: Option<ava_types::TodoState>,
     /// Active question from the agent (question tool).
     pub question: Option<QuestionState>,
+    /// Active copy picker state (shown when multiple code blocks in last response).
+    pub copy_picker: Option<CopyPickerState>,
+    /// State for the /btw side-conversation overlay.
+    pub btw: BtwState,
+}
+
+/// A fenced code block extracted from markdown content.
+#[derive(Debug, Clone)]
+pub struct CodeBlock {
+    /// Language tag (e.g., "rust", "bash"), or empty string if none.
+    pub language: String,
+    /// The code content (without the fence lines).
+    pub content: String,
+    /// Approximate starting line number in the original message.
+    pub start_line: usize,
+    /// Approximate ending line number in the original message.
+    pub end_line: usize,
+}
+
+/// State for the code block copy picker modal.
+#[derive(Debug, Clone)]
+pub struct CopyPickerState {
+    /// The extracted code blocks.
+    pub blocks: Vec<CodeBlock>,
+    /// The full response content (for "copy all").
+    pub full_content: String,
 }
 
 /// State for the question modal shown when the agent uses the question tool.
@@ -113,6 +140,7 @@ pub enum ModalType {
     ThemeSelector,
     AgentList,
     Question,
+    CopyPicker,
 }
 
 pub struct App {
@@ -201,6 +229,8 @@ impl App {
             todo_items: Vec::new(),
             todo_state,
             question: None,
+            copy_picker: None,
+            btw: BtwState::default(),
         };
 
         Ok(Self {
@@ -349,40 +379,212 @@ impl App {
     }
 
     /// Copy the last assistant message content to the system clipboard.
-    pub(crate) fn copy_last_response(&mut self) {
+    /// If `force_all` is true, always copies the entire response.
+    /// Otherwise, if there are multiple code blocks, shows a picker modal.
+    pub(crate) fn copy_last_response_with_mode(&mut self, force_all: bool) {
         match self.state.messages.last_assistant_content() {
             Some(content) => {
                 let content = content.to_owned();
-                match arboard::Clipboard::new() {
-                    Ok(mut clipboard) => match clipboard.set_text(&content) {
-                        Ok(_) => {
-                            let preview_len = content.len().min(40);
-                            let preview: String = content.chars().take(preview_len).collect();
-                            let ellipsis = if content.len() > 40 { "..." } else { "" };
-                            self.set_status(
-                                format!("Copied to clipboard: \"{preview}{ellipsis}\""),
-                                StatusLevel::Info,
-                            );
-                        }
-                        Err(e) => {
-                            self.set_status(
-                                format!("Clipboard write failed: {e}"),
-                                StatusLevel::Error,
-                            );
-                        }
-                    },
-                    Err(e) => {
-                        self.set_status(
-                            format!("Clipboard unavailable: {e}"),
-                            StatusLevel::Error,
-                        );
+                if !force_all {
+                    let blocks = Self::extract_code_blocks(&content);
+                    if blocks.len() > 1 {
+                        // Show picker modal
+                        self.state.copy_picker = Some(CopyPickerState {
+                            blocks,
+                            full_content: content,
+                        });
+                        self.state.active_modal = Some(ModalType::CopyPicker);
+                        return;
                     }
                 }
+                self.copy_to_clipboard(&content, None);
             }
             None => {
                 self.set_status("No assistant message to copy", StatusLevel::Warn);
             }
         }
+    }
+
+    /// Legacy entry point — used by Ctrl+Y and Action::CopyLastResponse.
+    pub(crate) fn copy_last_response(&mut self) {
+        self.copy_last_response_with_mode(false);
+    }
+
+    /// Actually write text to the system clipboard and show a status message.
+    pub(crate) fn copy_to_clipboard(&mut self, text: &str, label: Option<String>) {
+        match arboard::Clipboard::new() {
+            Ok(mut clipboard) => match clipboard.set_text(text) {
+                Ok(_) => {
+                    let status = if let Some(lbl) = label {
+                        lbl
+                    } else {
+                        let preview_len = text.len().min(40);
+                        let preview: String = text.chars().take(preview_len).collect();
+                        let ellipsis = if text.len() > 40 { "..." } else { "" };
+                        format!("Copied to clipboard: \"{preview}{ellipsis}\"")
+                    };
+                    self.set_status(status, StatusLevel::Info);
+                }
+                Err(e) => {
+                    self.set_status(
+                        format!("Clipboard write failed: {e}"),
+                        StatusLevel::Error,
+                    );
+                }
+            },
+            Err(e) => {
+                self.set_status(
+                    format!("Clipboard unavailable: {e}"),
+                    StatusLevel::Error,
+                );
+            }
+        }
+    }
+
+    /// Spawn a lightweight LLM call for a `/btw` side question.
+    ///
+    /// The response renders in a dismissible overlay and never enters message history.
+    /// Works concurrently with a running agent by using a separate tokio task.
+    pub(crate) fn handle_btw_query(&mut self, question: String) {
+        // Collect current conversation context (User + Assistant messages only)
+        let history: Vec<ava_types::Message> = self
+            .state
+            .messages
+            .messages
+            .iter()
+            .filter_map(|ui_msg| {
+                let role = match ui_msg.kind {
+                    MessageKind::User => ava_types::Role::User,
+                    MessageKind::Assistant => ava_types::Role::Assistant,
+                    _ => return None,
+                };
+                Some(ava_types::Message::new(role, ui_msg.content.clone()))
+            })
+            .collect();
+
+        // Get a provider via the agent stack's router
+        let stack = match self.state.agent.stack() {
+            Ok(s) => Arc::clone(s),
+            Err(msg) => {
+                self.set_status(format!("Cannot run /btw: {msg}"), StatusLevel::Error);
+                return;
+            }
+        };
+
+        let provider_name = self.state.agent.provider_name.clone();
+        let model_name = self.state.agent.model_name.clone();
+
+        self.state.btw.pending = true;
+        self.state.btw.response = None;
+        self.set_status("Thinking about your side question...", StatusLevel::Info);
+
+        let question_clone = question.clone();
+
+        // We need to send the result back via an AppEvent. Find the app_tx.
+        // The event loop is driven by app_rx, so we need a sender. We'll use
+        // a dedicated channel approach: create a oneshot and spawn a task that
+        // sends on app_tx. But we don't have app_tx here. Instead, we'll stash
+        // the result in a shared state via an Arc<Mutex>.
+        // Actually, the simplest approach: use the app_tx from the event loop.
+        // We can't access it here, but we can store a clone on the App struct.
+        // For now, let's use a lighter approach: write to a shared slot that
+        // the tick handler checks.
+
+        // Use a shared slot that the tick handler polls
+        let btw_result: Arc<std::sync::Mutex<Option<crate::state::btw::BtwResponse>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let btw_result_clone = Arc::clone(&btw_result);
+        self.state.btw.pending_result = Some(btw_result);
+
+        tokio::spawn(async move {
+            // Build messages: system + history + the btw question
+            let mut messages = Vec::with_capacity(history.len() + 2);
+            messages.push(ava_types::Message::new(
+                ava_types::Role::System,
+                "Answer this side question briefly and directly. You have access to \
+                 the conversation context but no tools. Keep your answer concise."
+                    .to_string(),
+            ));
+            messages.extend(history);
+            messages.push(ava_types::Message::new(
+                ava_types::Role::User,
+                question_clone.clone(),
+            ));
+
+            // Resolve a provider instance from the router
+            let result = stack.router.route_required(&provider_name, &model_name).await;
+            match result {
+                Ok(provider) => {
+                    match provider.generate(&messages).await {
+                        Ok(answer) => {
+                            let response = crate::state::btw::BtwResponse {
+                                question: question_clone,
+                                answer,
+                            };
+                            if let Ok(mut slot) = btw_result_clone.lock() {
+                                *slot = Some(response);
+                            }
+                        }
+                        Err(e) => {
+                            let response = crate::state::btw::BtwResponse {
+                                question: question_clone,
+                                answer: format!("Error: {e}"),
+                            };
+                            if let Ok(mut slot) = btw_result_clone.lock() {
+                                *slot = Some(response);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    let response = crate::state::btw::BtwResponse {
+                        question: question_clone,
+                        answer: format!("Provider error: {e}"),
+                    };
+                    if let Ok(mut slot) = btw_result_clone.lock() {
+                        *slot = Some(response);
+                    }
+                }
+            }
+        });
+    }
+
+    /// Extract fenced code blocks from markdown content.
+    pub(crate) fn extract_code_blocks(content: &str) -> Vec<CodeBlock> {
+        let mut blocks = Vec::new();
+        let mut in_block = false;
+        let mut current_lang = String::new();
+        let mut current_content = String::new();
+        let mut start_line = 0usize;
+
+        for (i, line) in content.lines().enumerate() {
+            let trimmed = line.trim();
+            if !in_block && trimmed.starts_with("```") {
+                in_block = true;
+                current_lang = trimmed[3..].trim().to_string();
+                current_content.clear();
+                start_line = i + 1; // 1-indexed for display
+            } else if in_block && trimmed.starts_with("```") {
+                in_block = false;
+                // Remove trailing newline if present
+                if current_content.ends_with('\n') {
+                    current_content.pop();
+                }
+                blocks.push(CodeBlock {
+                    language: current_lang.clone(),
+                    content: current_content.clone(),
+                    start_line: start_line + 1,
+                    end_line: i,
+                });
+            } else if in_block {
+                if !current_content.is_empty() {
+                    current_content.push('\n');
+                }
+                current_content.push_str(line);
+            }
+        }
+
+        blocks
     }
 
     /// Open the agent list modal showing sub-agent configuration from agents.toml.
@@ -510,6 +712,15 @@ impl App {
                 if let Some(ref todo_state) = self.state.todo_state {
                     self.state.todo_items = todo_state.get();
                 }
+                // Poll for /btw side-question results
+                let btw_ready = self.state.btw.pending_result.as_ref().and_then(|slot| {
+                    slot.try_lock().ok().and_then(|mut guard| guard.take())
+                });
+                if let Some(response) = btw_ready {
+                    self.state.btw.pending = false;
+                    self.state.btw.response = Some(response);
+                    self.state.btw.pending_result = None;
+                }
             }
             AppEvent::Agent(agent_event) => {
                 self.handle_agent_event(agent_event, app_tx, agent_tx);
@@ -622,6 +833,17 @@ impl App {
         app_tx: mpsc::UnboundedSender<AppEvent>,
         agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
     ) -> bool {
+        // Dismiss the /btw overlay if it is visible (Space, Enter, Esc)
+        if self.state.btw.response.is_some() {
+            match key.code {
+                KeyCode::Char(' ') | KeyCode::Enter | KeyCode::Esc => {
+                    self.state.btw.response = None;
+                    return false;
+                }
+                _ => {}
+            }
+        }
+
         // Handle modal-specific input first
         if let Some(modal) = self.state.active_modal {
             return self.handle_modal_key(modal, key, app_tx);
@@ -983,6 +1205,8 @@ impl App {
             todo_items: Vec::new(),
             todo_state: None,
             question: None,
+            copy_picker: None,
+            btw: BtwState::default(),
         };
 
         Self {

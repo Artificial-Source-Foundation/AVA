@@ -1,4 +1,5 @@
 use super::*;
+use chrono::Local;
 
 impl App {
     /// Handle slash commands. Returns Some((kind, message)) if handled, None if not a slash command.
@@ -280,41 +281,7 @@ impl App {
                 None
             }
             "/compact" => {
-                let input_tokens = self.state.agent.tokens_used.input;
-                let output_tokens = self.state.agent.tokens_used.output;
-                let total = input_tokens + output_tokens;
-                let msg_count = self.state.messages.messages.len();
-
-                if let Some(window) = self.state.agent.context_window {
-                    let pct = if window > 0 {
-                        (total as f64 / window as f64 * 100.0) as u64
-                    } else {
-                        0
-                    };
-                    let status = format!(
-                        "Context usage: {total} / {window} tokens ({pct}%)\n\
-                         Input: {input_tokens}, Output: {output_tokens}\n\
-                         Messages: {msg_count}\n\
-                         Tip: Use /clear to reset, or ask the agent to summarize the conversation."
-                    );
-                    self.set_status(
-                        format!("Context: {total}/{window} tokens ({pct}%)"),
-                        StatusLevel::Info,
-                    );
-                    Some((MessageKind::System, status))
-                } else {
-                    let status = format!(
-                        "Context usage: {total} tokens (window size unknown)\n\
-                         Input: {input_tokens}, Output: {output_tokens}\n\
-                         Messages: {msg_count}\n\
-                         Tip: Use /clear to reset, or ask the agent to summarize the conversation."
-                    );
-                    self.set_status(
-                        format!("Context: {total} tokens"),
-                        StatusLevel::Info,
-                    );
-                    Some((MessageKind::System, status))
-                }
+                self.run_compact(arg)
             }
             "/think" => {
                 match arg {
@@ -400,8 +367,12 @@ impl App {
                     }
                 }
             }
+            "/export" => {
+                self.export_conversation(arg)
+            }
             "/copy" => {
-                self.copy_last_response();
+                let force_all = arg.map(|a| a.eq_ignore_ascii_case("all")).unwrap_or(false);
+                self.copy_last_response_with_mode(force_all);
                 None
             }
             "/help" => {
@@ -424,9 +395,11 @@ Available commands:
   /status                  — show session info
   /diff                    — show git changes
   /commit                  — show git status for committing
-  /copy                    — copy last response to clipboard
+  /export [filename]       — export conversation to file (.md or .json)
+  /copy [all]              — copy last response (picks code block if multiple)
+  /btw <question>          — ask a side question without interrupting the agent
   /clear                   — clear chat
-  /compact                 — show context usage
+  /compact [focus]          — compact conversation to save context window
   /help                    — show this help
 
 Keyboard shortcuts:
@@ -440,6 +413,17 @@ Keyboard shortcuts:
   Ctrl+S                   — toggle sidebar
   Ctrl+C                   — cancel / clear input / quit";
                 Some((MessageKind::System, help.to_string()))
+            }
+            "/btw" => {
+                if let Some(question) = arg {
+                    self.handle_btw_query(question.to_string());
+                    None
+                } else {
+                    Some((
+                        MessageKind::Error,
+                        "Usage: /btw <question> (e.g., /btw what does the retry logic do?)".to_string(),
+                    ))
+                }
             }
             _ => Some((MessageKind::Error, format!("Unknown command: {cmd}. Type /help for available commands."))),
         }
@@ -536,5 +520,410 @@ Keyboard shortcuts:
             }
             _ => {}
         }
+    }
+
+    /// Export the current conversation to a file (markdown or JSON).
+    fn export_conversation(&self, filename_arg: Option<&str>) -> Option<(MessageKind, String)> {
+        let messages = &self.state.messages.messages;
+        if messages.is_empty() {
+            return Some((MessageKind::Error, "No messages to export.".to_string()));
+        }
+
+        let now = Local::now();
+        let model = self.state.agent.current_model_display();
+        let session_name = self
+            .state
+            .session
+            .current_session
+            .as_ref()
+            .map(|s| format!("{}", s.id))
+            .unwrap_or_else(|| now.format("%Y-%m-%d").to_string());
+
+        // Determine filename
+        let filename = match filename_arg {
+            Some(name) => name.to_string(),
+            None => now.format("ava-session-%Y-%m-%d-%H-%M.md").to_string(),
+        };
+
+        let is_json = filename.ends_with(".json");
+        let msg_count = messages.len();
+
+        let content = if is_json {
+            self.export_as_json(messages, &session_name, &model, &now)
+        } else {
+            self.export_as_markdown(messages, &session_name, &model, &now)
+        };
+
+        // Write to current working directory
+        let path = std::env::current_dir()
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join(&filename);
+
+        match std::fs::write(&path, content) {
+            Ok(()) => {
+                let display_path = path.display();
+                Some((
+                    MessageKind::System,
+                    format!("Exported conversation to {display_path} ({msg_count} messages)"),
+                ))
+            }
+            Err(err) => Some((
+                MessageKind::Error,
+                format!("Failed to export: {err}"),
+            )),
+        }
+    }
+
+    fn export_as_markdown(
+        &self,
+        messages: &[UiMessage],
+        session_name: &str,
+        model: &str,
+        now: &chrono::DateTime<Local>,
+    ) -> String {
+        let mut out = String::new();
+        let date_str = now.format("%Y-%m-%d %H:%M:%S").to_string();
+        let msg_count = messages.len();
+
+        out.push_str(&format!("# AVA Session — {session_name}\n"));
+        out.push_str(&format!("Model: {model}\n"));
+        out.push_str(&format!("Date: {date_str}\n"));
+        out.push_str(&format!("Messages: {msg_count}\n"));
+        out.push_str("\n---\n\n");
+
+        for msg in messages {
+            match msg.kind {
+                MessageKind::User => {
+                    out.push_str("## User\n");
+                    out.push_str(&msg.content);
+                    out.push_str("\n\n---\n\n");
+                }
+                MessageKind::Assistant => {
+                    out.push_str("## Assistant\n");
+                    out.push_str(&msg.content);
+                    out.push_str("\n\n---\n\n");
+                }
+                MessageKind::ToolCall => {
+                    let tool_name = msg.content.split_whitespace().next().unwrap_or("unknown");
+                    let rest = msg.content[tool_name.len()..].trim_start();
+                    out.push_str(&format!("## Tool Call: {tool_name}\n"));
+                    if !rest.is_empty() {
+                        out.push_str("```yaml\n");
+                        out.push_str(rest);
+                        out.push_str("\n```\n");
+                    }
+                    out.push('\n');
+                }
+                MessageKind::ToolResult => {
+                    out.push_str("## Tool Result\n");
+                    // Truncate tool results to 500 chars
+                    if msg.content.len() > 500 {
+                        out.push_str(&msg.content[..500]);
+                        out.push_str("\n... (truncated)\n");
+                    } else {
+                        out.push_str(&msg.content);
+                        out.push('\n');
+                    }
+                    out.push_str("\n---\n\n");
+                }
+                MessageKind::Thinking => {
+                    out.push_str("## Thinking\n");
+                    out.push_str(&msg.content);
+                    out.push_str("\n\n");
+                }
+                MessageKind::Error => {
+                    out.push_str(&format!("**Error:** {}\n\n", msg.content));
+                }
+                MessageKind::System => {
+                    out.push_str(&format!("*{system}*\n\n", system = msg.content));
+                }
+                MessageKind::SubAgent => {
+                    out.push_str("## Sub-Agent\n");
+                    out.push_str(&msg.content);
+                    out.push_str("\n\n---\n\n");
+                }
+            }
+        }
+
+        out
+    }
+
+    fn export_as_json(
+        &self,
+        messages: &[UiMessage],
+        session_name: &str,
+        model: &str,
+        now: &chrono::DateTime<Local>,
+    ) -> String {
+        let date_str = now.to_rfc3339();
+
+        let json_messages: Vec<serde_json::Value> = messages
+            .iter()
+            .map(|msg| {
+                let role = match msg.kind {
+                    MessageKind::User => "user",
+                    MessageKind::Assistant => "assistant",
+                    MessageKind::ToolCall => "tool_call",
+                    MessageKind::ToolResult => "tool_result",
+                    MessageKind::Thinking => "thinking",
+                    MessageKind::Error => "error",
+                    MessageKind::System => "system",
+                    MessageKind::SubAgent => "sub_agent",
+                };
+
+                let mut obj = serde_json::json!({
+                    "role": role,
+                    "content": msg.content,
+                });
+
+                // Add tool name for tool calls
+                if msg.kind == MessageKind::ToolCall {
+                    let tool_name = msg.content.split_whitespace().next().unwrap_or("unknown");
+                    let rest = msg.content[tool_name.len()..].trim_start();
+                    obj["name"] = serde_json::json!(tool_name);
+                    obj["input"] = serde_json::json!(rest);
+                }
+
+                // Add model name for assistant messages
+                if let Some(ref model_name) = msg.model_name {
+                    obj["model"] = serde_json::json!(model_name);
+                }
+
+                obj
+            })
+            .collect();
+
+        let export = serde_json::json!({
+            "session": session_name,
+            "model": model,
+            "date": date_str,
+            "messages": json_messages,
+        });
+
+        serde_json::to_string_pretty(&export).unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"))
+    }
+
+    /// Run the `/compact` command: condense conversation messages to save context window.
+    ///
+    /// Converts UI messages to ava_types::Message, estimates token counts,
+    /// applies the sliding window condensation strategy, then replaces the UI
+    /// message list with a summary message followed by the surviving messages.
+    ///
+    /// If `focus` is provided, messages containing the focus keywords are
+    /// prioritized (kept even when older messages are dropped).
+    fn run_compact(&mut self, focus: Option<&str>) -> Option<(MessageKind, String)> {
+        use ava_context::strategies::CondensationStrategy;
+        use ava_context::{SlidingWindowStrategy, ToolTruncationStrategy};
+
+        let ui_messages = &self.state.messages.messages;
+        if ui_messages.is_empty() {
+            return Some((
+                MessageKind::System,
+                "Nothing to compact -- conversation is empty.".to_string(),
+            ));
+        }
+
+        // Convert UI messages to ava_types::Message for token estimation
+        let typed_messages: Vec<ava_types::Message> = ui_messages
+            .iter()
+            .map(|ui| {
+                let role = match ui.kind {
+                    MessageKind::User => ava_types::Role::User,
+                    MessageKind::Assistant => ava_types::Role::Assistant,
+                    MessageKind::ToolCall => ava_types::Role::Assistant,
+                    MessageKind::ToolResult => ava_types::Role::Tool,
+                    MessageKind::Thinking => ava_types::Role::Assistant,
+                    MessageKind::Error => ava_types::Role::System,
+                    MessageKind::System => ava_types::Role::System,
+                    MessageKind::SubAgent => ava_types::Role::Assistant,
+                };
+                ava_types::Message::new(role, &ui.content)
+            })
+            .collect();
+
+        // Estimate tokens before compaction
+        let before_tokens: usize = typed_messages
+            .iter()
+            .map(ava_context::estimate_tokens_for_message)
+            .sum();
+        let before_count = ui_messages.len();
+
+        // Determine context window and check if compaction is needed
+        let context_window = self.state.agent.context_window.unwrap_or(128_000);
+        let usage_pct = before_tokens as f64 / context_window as f64 * 100.0;
+
+        // If usage is below 50%, compaction is not needed (unless forced with focus)
+        if usage_pct < 50.0 && focus.is_none() {
+            self.set_status(
+                format!("Context: {}% -- no compaction needed", usage_pct as u64),
+                StatusLevel::Info,
+            );
+            return Some((
+                MessageKind::System,
+                format!(
+                    "Context usage is low ({:.0}%), no compaction needed.\n\
+                     {before_tokens} tokens across {before_count} messages.",
+                    usage_pct,
+                ),
+            ));
+        }
+
+        // Target: keep ~50% of context window (or 75% of current tokens if smaller)
+        let target_tokens = (context_window / 2).min(before_tokens * 3 / 4);
+
+        // Stage 1: Truncate large tool results
+        let truncated = ToolTruncationStrategy::default()
+            .condense(&typed_messages, target_tokens)
+            .unwrap_or_else(|_| typed_messages.clone());
+
+        // Stage 2: Sliding window -- drop oldest messages that don't fit
+        let condensed = SlidingWindowStrategy
+            .condense(&truncated, target_tokens)
+            .unwrap_or_else(|_| truncated);
+
+        // If focus keywords are provided, check which messages to preserve.
+        // We keep any message whose content contains a focus keyword, even if
+        // sliding window would have dropped it.
+        let final_messages = if let Some(focus_text) = focus {
+            let keywords: Vec<&str> = focus_text.split_whitespace().collect();
+            let mut kept_indices: Vec<bool> = vec![false; typed_messages.len()];
+
+            // Mark messages that survived sliding window
+            let condensed_set: std::collections::HashSet<String> =
+                condensed.iter().map(|m| m.content.clone()).collect();
+            for (i, msg) in typed_messages.iter().enumerate() {
+                if condensed_set.contains(&msg.content) {
+                    kept_indices[i] = true;
+                }
+            }
+
+            // Also keep messages matching focus keywords
+            for (i, msg) in typed_messages.iter().enumerate() {
+                if !kept_indices[i] {
+                    let content_lower = msg.content.to_lowercase();
+                    if keywords
+                        .iter()
+                        .any(|kw| content_lower.contains(&kw.to_lowercase()))
+                    {
+                        kept_indices[i] = true;
+                    }
+                }
+            }
+
+            // Rebuild: collect kept messages, re-estimate tokens, drop oldest if still over budget
+            let mut focused: Vec<ava_types::Message> = typed_messages
+                .iter()
+                .zip(kept_indices.iter())
+                .filter(|(_, &kept)| kept)
+                .map(|(m, _)| m.clone())
+                .collect();
+
+            // If we're still over budget, trim from the front (oldest)
+            let mut total: usize = focused
+                .iter()
+                .map(ava_context::estimate_tokens_for_message)
+                .sum();
+            while total > target_tokens && focused.len() > 1 {
+                let removed = focused.remove(0);
+                total -= ava_context::estimate_tokens_for_message(&removed);
+            }
+            focused
+        } else {
+            condensed
+        };
+
+        // Estimate tokens after compaction
+        let after_tokens: usize = final_messages
+            .iter()
+            .map(ava_context::estimate_tokens_for_message)
+            .sum();
+        let after_count = final_messages.len();
+        let saved_tokens = before_tokens.saturating_sub(after_tokens);
+        let dropped_count = before_count.saturating_sub(after_count);
+
+        if dropped_count == 0 {
+            self.set_status("Already compact".to_string(), StatusLevel::Info);
+            return Some((
+                MessageKind::System,
+                format!(
+                    "Conversation is already compact.\n\
+                     {before_tokens} tokens across {before_count} messages.",
+                ),
+            ));
+        }
+
+        // Build a summary of what was removed
+        let summary = if let Some(focus_text) = focus {
+            format!(
+                "Compacted conversation (focus: \"{focus_text}\"). \
+                 Saved ~{saved_tokens} tokens (was {before_tokens}, now {after_tokens}). \
+                 Dropped {dropped_count} messages, kept {after_count}."
+            )
+        } else {
+            format!(
+                "Compacted conversation. \
+                 Saved ~{saved_tokens} tokens (was {before_tokens}, now {after_tokens}). \
+                 Dropped {dropped_count} messages, kept {after_count}."
+            )
+        };
+
+        // Map condensed ava_types::Message back to UI messages.
+        // We match by content to find the original UI message (preserving kind, model_name, etc.)
+        // For messages that were truncated (tool results), we use the truncated content.
+        let mut new_ui_messages: Vec<UiMessage> = Vec::with_capacity(after_count + 1);
+
+        // Add compaction summary as first message
+        new_ui_messages.push(UiMessage::new(MessageKind::System, &summary));
+
+        // Match each surviving message back to the original UI message
+        for condensed_msg in &final_messages {
+            // Find the best matching original UI message by content
+            let matching_ui = ui_messages
+                .iter()
+                .find(|ui| {
+                    // Exact match
+                    ui.content == condensed_msg.content
+                })
+                .or_else(|| {
+                    // Partial match (for truncated tool results)
+                    ui_messages.iter().find(|ui| {
+                        condensed_msg.content.len() > 10
+                            && ui.content.starts_with(
+                                &condensed_msg.content
+                                    [..condensed_msg.content.len().min(50)],
+                            )
+                    })
+                });
+
+            if let Some(original) = matching_ui {
+                let mut rebuilt = original.clone();
+                // If the content was truncated by the strategy, use the truncated version
+                if rebuilt.content != condensed_msg.content {
+                    rebuilt.content = condensed_msg.content.clone();
+                }
+                rebuilt.is_streaming = false;
+                new_ui_messages.push(rebuilt);
+            } else {
+                // Fallback: create a new UI message with the condensed content
+                let kind = match condensed_msg.role {
+                    ava_types::Role::User => MessageKind::User,
+                    ava_types::Role::Assistant => MessageKind::Assistant,
+                    ava_types::Role::Tool => MessageKind::ToolResult,
+                    ava_types::Role::System => MessageKind::System,
+                };
+                new_ui_messages.push(UiMessage::new(kind, &condensed_msg.content));
+            }
+        }
+
+        // Replace the UI message list
+        self.state.messages.messages = new_ui_messages;
+        self.state.messages.reset_scroll();
+
+        self.set_status(
+            format!("Compacted: saved ~{saved_tokens} tokens"),
+            StatusLevel::Info,
+        );
+        // Return None because we already inserted the summary message directly
+        None
     }
 }

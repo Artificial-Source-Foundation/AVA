@@ -76,6 +76,33 @@ export const EOL = '\n'
 export const randomUUID = (): string => globalThis.crypto.randomUUID()
 export const randomBytes = (size: number): Uint8Array =>
   globalThis.crypto.getRandomValues(new Uint8Array(size))
+export const createHash = (algorithm: string) => {
+  let data = ''
+  return {
+    update(input: string) {
+      data += input
+      return this
+    },
+    digest(_encoding?: string) {
+      // Simple hash stub for browser context — not cryptographically secure
+      let hash = 0
+      for (let i = 0; i < data.length; i++) {
+        hash = (hash << 5) - hash + data.charCodeAt(i)
+        hash |= 0
+      }
+      return Math.abs(hash).toString(16).padStart(8, '0')
+    },
+    algorithm,
+  }
+}
+
+// util
+export const promisify =
+  (fn: (...args: unknown[]) => unknown) =>
+  (...args: unknown[]) =>
+    new Promise((resolve, reject) => {
+      fn(...args, (err: unknown, result: unknown) => (err ? reject(err) : resolve(result)))
+    })
 
 // url
 export const fileURLToPath = (url: string): string => url.replace('file://', '')
@@ -244,6 +271,8 @@ const _all: Record<string, unknown> = {
   EOL,
   randomUUID,
   randomBytes,
+  createHash,
+  promisify,
   fileURLToPath,
   pathToFileURL,
   Buffer,

@@ -52,9 +52,13 @@ docs/
 - [Sprint 62](development/sprints/sprint-62/overview.md) — Cost and runtime foundations
 - [Sprint 62 Execution Checklist](development/sprints/sprint-62/execution-checklist.md) — Agent-ready implementation order, verification, and risks
 - [Sprint 63](development/sprints/sprint-63/overview.md) — Execution and ecosystem foundations
+- [Sprint 63 Execution Checklist](development/sprints/sprint-63/execution-checklist.md) — Agent-ready implementation order, verification, and risks
 - [Sprint 64](development/sprints/sprint-64/overview.md) — Knowledge and context foundations
+- [Sprint 64 Execution Checklist](development/sprints/sprint-64/execution-checklist.md) — Agent-ready implementation order, verification, and risks
 - [Sprint 65](development/sprints/sprint-65/overview.md) — Agent coordination backend
+- [Sprint 65 Execution Checklist](development/sprints/sprint-65/execution-checklist.md) — Agent-ready implementation order, verification, and risks
 - [Sprint 66](development/sprints/sprint-66/overview.md) — Optional capability backends
+- [Sprint 66 Execution Checklist](development/sprints/sprint-66/execution-checklist.md) — Agent-ready implementation order, verification, and risks
 - [Archived Sprints](development/sprints/archive/) — Implemented sprint docs for Sprint 53 through Sprint 61
 
 ### Architecture

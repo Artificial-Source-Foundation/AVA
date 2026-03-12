@@ -8,9 +8,9 @@ Improve backend coordination primitives for agents, workflows, and artifacts bef
 
 | ID | Priority | Name | Outcome |
 |----|----------|------|---------|
-| B50 | P3 | Agent team peer communication | Let parallel agents exchange structured information laterally |
-| B59 | P3 | Agent artifacts system | Persist agent-generated artifacts for review/reuse |
 | B49 | P3 | Spec-driven development | Add structured specs/tasks as backend workflow objects |
+| B59 | P3 | Agent artifacts system | Persist agent-generated artifacts for review/reuse |
+| B50 | P3 | Agent team peer communication | Let parallel agents exchange structured information laterally |
 | B76 | P3 | Agent Client Protocol (ACP) | Define a backend protocol boundary for external agent interoperability |
 
 ## Why This Sprint

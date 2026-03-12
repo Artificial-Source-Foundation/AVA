@@ -121,7 +121,8 @@ impl MessageQueueDisplay {
 
     /// Remove steering items (cleared on delivery or hard abort).
     pub fn clear_steering(&mut self) {
-        self.items.retain(|i| !matches!(i.tier, MessageTier::Steering));
+        self.items
+            .retain(|i| !matches!(i.tier, MessageTier::Steering));
     }
 }
 
@@ -500,7 +501,10 @@ impl InputState {
         let (trigger, query, items) = if let Some(rest) = token.strip_prefix('/') {
             {
                 let mut items = vec![
-                    AutocompleteItem::new("btw", "Ask a side question without interrupting the agent"),
+                    AutocompleteItem::new(
+                        "btw",
+                        "Ask a side question without interrupting the agent",
+                    ),
                     AutocompleteItem::new("help", "Show available commands"),
                     AutocompleteItem::new("model", "Switch model"),
                     AutocompleteItem::new("sessions", "Session picker"),
@@ -513,10 +517,16 @@ impl InputState {
                     AutocompleteItem::new("status", "Show session info"),
                     AutocompleteItem::new("init", "Initialize AVA for this project"),
                     AutocompleteItem::new("diff", "Show git changes"),
-                    AutocompleteItem::new("commit", "Show git status for committing"),
+                    AutocompleteItem::new(
+                        "commit",
+                        "Inspect commit readiness and suggest a message",
+                    ),
                     AutocompleteItem::new("providers", "Show provider status"),
                     AutocompleteItem::new("disconnect", "Remove provider credentials"),
-                    AutocompleteItem::new("credentials", "Manage provider API keys (list/add/remove)"),
+                    AutocompleteItem::new(
+                        "credentials",
+                        "Manage provider API keys (list/add/remove)",
+                    ),
                     AutocompleteItem::new("tools reload", "Reload tools from disk"),
                     AutocompleteItem::new("tools init", "Create tool templates"),
                     AutocompleteItem::new("mcp", "List MCP servers"),
@@ -541,11 +551,7 @@ impl InputState {
                 ];
                 // Append custom command items
                 items.extend(self.custom_slash_items.clone());
-                (
-                    AutocompleteTrigger::Slash,
-                    rest.to_string(),
-                    items,
-                )
+                (AutocompleteTrigger::Slash, rest.to_string(), items)
             }
         } else if let Some(rest) = token.strip_prefix('@') {
             {
@@ -575,11 +581,7 @@ impl InputState {
                     items = scan_project_files(query, prefix == "folder:");
                 }
 
-                (
-                    AutocompleteTrigger::AtMention,
-                    query.to_string(),
-                    items,
-                )
+                (AutocompleteTrigger::AtMention, query.to_string(), items)
             }
         } else {
             self.autocomplete = None;

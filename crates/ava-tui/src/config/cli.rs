@@ -79,6 +79,10 @@ pub struct CliArgs {
     #[arg(long, default_value = "all")]
     pub suite: String,
 
+    /// Benchmark language filter: rust, python, js, go (comma-separated, default: all)
+    #[arg(long)]
+    pub language: Option<String>,
+
     /// Run harnessed-pair benchmark (SOTA director + fast worker)
     #[arg(long)]
     pub harness: bool,

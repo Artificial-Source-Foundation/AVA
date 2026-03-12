@@ -84,7 +84,20 @@ async fn main() -> Result<()> {
             Vec::new()
         };
 
-        benchmark::run_benchmark(specs, None, cli.max_turns, judge_specs, suite, imported_tasks)
+        let language_filter = cli.language.as_deref().map(|lang_str| {
+            lang_str
+                .split(',')
+                .filter_map(|s| {
+                    let s = s.trim();
+                    ava_tui::benchmark_tasks::Language::parse_str(s).or_else(|| {
+                        eprintln!("Warning: unknown language '{}', skipping", s);
+                        None
+                    })
+                })
+                .collect::<Vec<_>>()
+        });
+
+        benchmark::run_benchmark(specs, None, cli.max_turns, judge_specs, suite, imported_tasks, language_filter)
             .await?;
         return Ok(());
     }

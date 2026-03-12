@@ -235,6 +235,7 @@ pub async fn run_benchmark(
     judge_specs: Vec<ModelSpec>,
     suite: BenchmarkSuite,
     imported_tasks: Vec<BenchmarkTask>,
+    language_filter: Option<Vec<Language>>,
 ) -> Result<BenchmarkReport> {
     let max_turns = if max_turns == 0 { 10 } else { max_turns };
 
@@ -287,6 +288,13 @@ pub async fn run_benchmark(
 
     // Filter by suite
     all_tasks = filter_tasks_by_suite(all_tasks, suite);
+
+    // Filter by language
+    if let Some(ref langs) = language_filter {
+        all_tasks = all_tasks.into_iter().filter(|t| langs.contains(&t.language())).collect();
+        let lang_names: Vec<_> = langs.iter().map(|l| l.to_string()).collect();
+        eprintln!("[benchmark] Language filter: {}", lang_names.join(", "));
+    }
 
     let mut results = Vec::new();
     let total_runs = all_tasks.len() * specs.len();

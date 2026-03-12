@@ -42,6 +42,7 @@ Likely areas:
 Likely areas:
 
 - `crates/ava-auth/`
+- `crates/ava-config/`
 - `crates/ava-llm/`
 - provider settings/config plumbing
 
@@ -76,6 +77,8 @@ Likely areas:
 - No deep semantic indexing work
 
 ## Suggested Execution Order
+
+This is a priority order, not a strict serial dependency chain. `B64` and `B63` can run in parallel, then feed `B47`, with `B40` closing the loop in the UI.
 
 1. `B64` Thinking budget configuration
 2. `B63` Dynamic API key resolution

@@ -89,6 +89,8 @@ pub struct AgentStack {
     mcp_project_config: PathBuf,
     pub thinking_level: RwLock<ThinkingLevel>,
     pub mode_prompt_suffix: RwLock<Option<String>>,
+    /// When true, agent is in Plan mode — write/edit restricted to .ava/plans/*.md.
+    pub plan_mode: RwLock<bool>,
     pub todo_state: TodoState,
     /// Bridge for the question tool to communicate with the TUI.
     question_bridge: QuestionBridge,
@@ -235,6 +237,7 @@ impl AgentStack {
                 mcp_project_config,
                 thinking_level: RwLock::new(ThinkingLevel::Off),
                 mode_prompt_suffix: RwLock::new(None),
+                plan_mode: RwLock::new(false),
                 todo_state,
                 question_bridge,
                 agents_config,
@@ -320,6 +323,10 @@ impl AgentStack {
 
     pub async fn set_mode_prompt_suffix(&self, suffix: Option<String>) {
         *self.mode_prompt_suffix.write().await = suffix;
+    }
+
+    pub async fn set_plan_mode(&self, enabled: bool) {
+        *self.plan_mode.write().await = enabled;
     }
 
     pub async fn set_thinking_level(&self, level: ThinkingLevel) {
@@ -433,6 +440,7 @@ impl AgentStack {
             self.max_turns // may also be 0 (unlimited)
         };
         let thinking = *self.thinking_level.read().await;
+        let plan_mode = *self.plan_mode.read().await;
         let mode_suffix = self.mode_prompt_suffix.read().await.clone();
 
         // Build system prompt suffix: mode instructions + project instructions
@@ -458,6 +466,7 @@ impl AgentStack {
             thinking_level: thinking,
             system_prompt_suffix,
             extended_tools: false,
+            plan_mode,
         };
 
         let enriched_goal = self.enrich_goal_with_memories(goal).await;
@@ -736,6 +745,7 @@ impl TaskSpawner for AgentTaskSpawner {
             thinking_level: ThinkingLevel::Off,
             system_prompt_suffix: crate::instructions::load_project_instructions(),
             extended_tools: true, // sub-agents get full tool access
+            plan_mode: false,
         };
         let mut agent = AgentLoop::new(
             Box::new(SharedProvider::new(self.provider.clone())),

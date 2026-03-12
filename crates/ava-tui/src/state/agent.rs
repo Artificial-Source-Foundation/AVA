@@ -64,9 +64,17 @@ impl AgentMode {
         match self {
             Self::Code => None,
             Self::Plan => Some(
-                "You are in PLAN MODE (read-only). You may ONLY use read-only tools: \
-                 read, glob, grep, todo_read. You MUST NOT modify any files, execute commands, \
-                 or make changes. Focus on analysis, research, and creating a plan."
+                "You are in Plan mode. You can analyze code, create plans, and write plan documents \
+                 to .ava/plans/*.md. You cannot modify source code files or run destructive commands. \
+                 Use read, glob, grep, and todo_read freely. You may ONLY use the write tool to create \
+                 files under the .ava/plans/ directory with a .md extension.\n\n\
+                 When creating a plan, structure it with:\n\
+                 - **Goal**: What the plan aims to achieve\n\
+                 - **Analysis**: Current state and findings\n\
+                 - **Steps**: Numbered implementation steps\n\
+                 - **Files to modify**: List of files that will need changes\n\
+                 - **Risks**: Potential issues and mitigations\n\n\
+                 When your plan is complete, the user can switch to Code mode to implement it."
             ),
         }
     }
@@ -400,14 +408,17 @@ impl AgentState {
         }
     }
 
-    /// Sync the agent mode prompt suffix to the stack.
+    /// Sync the agent mode prompt suffix and plan_mode flag to the stack.
     pub fn set_mode(&self, mode: super::agent::AgentMode) {
         let suffix = mode.prompt_suffix().map(|s| s.to_string());
+        let is_plan = matches!(mode, super::agent::AgentMode::Plan);
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
             tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(stack.set_mode_prompt_suffix(suffix))
+                tokio::runtime::Handle::current().block_on(async {
+                    stack.set_mode_prompt_suffix(suffix).await;
+                    stack.set_plan_mode(is_plan).await;
+                })
             });
         }
     }

@@ -458,6 +458,7 @@ pub async fn run_review_agent(
         thinking_level: ava_types::ThinkingLevel::Off,
         system_prompt_suffix: None,
         extended_tools: true,
+        plan_mode: false,
     };
 
     let context = ContextManager::new(config.token_limit);

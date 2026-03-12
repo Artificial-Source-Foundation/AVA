@@ -4,6 +4,7 @@ pub mod command_palette;
 pub mod composer;
 pub mod dialog;
 pub mod diff_preview;
+pub mod mention_picker;
 pub mod message;
 pub mod message_list;
 pub mod model_selector;

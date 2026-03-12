@@ -25,6 +25,7 @@ use crate::widgets::model_selector::ModelSelectorState;
 use crate::widgets::provider_connect::ProviderConnectState;
 use crate::widgets::session_list::SessionListState;
 use crate::widgets::select_list::{SelectItem, SelectListState};
+use crate::widgets::diff_preview::DiffPreviewState;
 use crate::widgets::tool_list::ToolListState;
 use crate::widgets::token_buffer::TokenBuffer;
 use color_eyre::eyre::Result;
@@ -78,6 +79,8 @@ pub struct AppState {
     pub btw: BtwState,
     /// Registry of user-defined slash commands from TOML files.
     pub custom_commands: CustomCommandRegistry,
+    /// State for the diff preview modal (per-hunk accept/reject).
+    pub diff_preview: Option<DiffPreviewState>,
     /// State for the rewind system (checkpoints + modal).
     pub rewind: RewindState,
     /// Shared background task state.
@@ -158,6 +161,7 @@ pub enum ModalType {
     CopyPicker,
     Rewind,
     TaskList,
+    DiffPreview,
 }
 
 pub struct App {
@@ -255,6 +259,7 @@ impl App {
             copy_picker: None,
             btw: BtwState::default(),
             custom_commands: CustomCommandRegistry::load(),
+            diff_preview: None,
             rewind: RewindState::default(),
             background: background::new_shared(),
             hooks: HookRegistry::load(),
@@ -1466,6 +1471,63 @@ impl App {
             }
         }
 
+        // Handle @-mention autocomplete when picker is visible
+        if self.state.input.has_mention_autocomplete() {
+            match key.code {
+                KeyCode::Esc => {
+                    self.state.input.autocomplete = None;
+                    return false;
+                }
+                KeyCode::Up => {
+                    self.state.input.autocomplete_prev();
+                    return false;
+                }
+                KeyCode::Down => {
+                    self.state.input.autocomplete_next();
+                    return false;
+                }
+                KeyCode::Tab | KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
+                    // Accept the selected mention
+                    if let Some(value) = self.state.input.autocomplete_selected_value() {
+                        let is_folder = value.ends_with('/');
+                        let is_codebase = value.starts_with("codebase:");
+                        let attachment = if is_codebase {
+                            let query = value.strip_prefix("codebase:").unwrap_or(&value);
+                            ava_types::ContextAttachment::CodebaseQuery {
+                                query: query.to_string(),
+                            }
+                        } else if is_folder {
+                            ava_types::ContextAttachment::Folder {
+                                path: std::path::PathBuf::from(value.trim_end_matches('/')),
+                            }
+                        } else {
+                            ava_types::ContextAttachment::File {
+                                path: std::path::PathBuf::from(&value),
+                            }
+                        };
+
+                        // Remove the @partial from the buffer
+                        let before_cursor = &self.state.input.buffer[..self.state.input.cursor];
+                        if let Some(at_pos) = before_cursor.rfind('@') {
+                            let after_cursor = self.state.input.buffer[self.state.input.cursor..].to_string();
+                            self.state.input.buffer = format!(
+                                "{}{}",
+                                &self.state.input.buffer[..at_pos],
+                                after_cursor,
+                            );
+                            self.state.input.cursor = at_pos;
+                        }
+                        self.state.input.autocomplete = None;
+                        self.state.input.add_attachment(attachment);
+                    }
+                    return false;
+                }
+                _ => {
+                    // Fall through to normal input handling — typing filters the picker
+                }
+            }
+        }
+
         // Tab/Shift+Tab cycle agent modes when no autocomplete is active
         if key.code == KeyCode::Tab && key.modifiers == KeyModifiers::NONE {
             self.state.agent_mode = self.state.agent_mode.cycle_next();
@@ -1666,6 +1728,7 @@ impl App {
             copy_picker: None,
             btw: BtwState::default(),
             custom_commands: CustomCommandRegistry::default(),
+            diff_preview: None,
             rewind: RewindState::default(),
             background: background::new_shared(),
             hooks: HookRegistry::load(),

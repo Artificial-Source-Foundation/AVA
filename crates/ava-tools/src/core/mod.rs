@@ -7,6 +7,7 @@ pub mod edit;
 pub mod git_read;
 pub mod glob;
 pub mod grep;
+pub mod hashline;
 pub mod lint;
 pub mod multiedit;
 pub mod question;
@@ -24,10 +25,14 @@ use ava_platform::Platform;
 use crate::registry::{ToolRegistry, ToolTier};
 
 /// Register the 6 default tools that are always sent to the LLM.
+///
+/// A shared [`hashline::HashlineCache`] is created and passed to both the
+/// read and edit tools so that hash-anchored edits work across tool calls.
 pub fn register_default_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platform>) {
-    registry.register(read::ReadTool::new(platform.clone()));
+    let hashline_cache = hashline::new_cache();
+    registry.register(read::ReadTool::new(platform.clone(), hashline_cache.clone()));
     registry.register(write::WriteTool::new(platform.clone()));
-    registry.register(edit::EditTool::new(platform.clone()));
+    registry.register(edit::EditTool::new(platform.clone(), hashline_cache));
     registry.register(bash::BashTool::new(platform.clone()));
     registry.register(glob::GlobTool::new());
     registry.register(grep::GrepTool::new());

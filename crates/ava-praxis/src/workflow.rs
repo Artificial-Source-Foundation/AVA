@@ -225,13 +225,15 @@ pub fn register_tools_for_role(role: &PhaseRole, platform: Arc<StandardPlatform>
     match role {
         PhaseRole::Planner => {
             // Read-only tools
-            registry.register(ava_tools::core::read::ReadTool::new(platform.clone()));
+            let cache = ava_tools::core::hashline::new_cache();
+            registry.register(ava_tools::core::read::ReadTool::new(platform.clone(), cache));
             registry.register(ava_tools::core::glob::GlobTool::new());
             registry.register(ava_tools::core::grep::GrepTool::new());
         }
         PhaseRole::Reviewer => {
             // Read-only tools
-            registry.register(ava_tools::core::read::ReadTool::new(platform.clone()));
+            let cache = ava_tools::core::hashline::new_cache();
+            registry.register(ava_tools::core::read::ReadTool::new(platform.clone(), cache));
             registry.register(ava_tools::core::glob::GlobTool::new());
             registry.register(ava_tools::core::grep::GrepTool::new());
         }
@@ -472,6 +474,7 @@ async fn run_phase_worker(params: PhaseWorkerParams<'_>) -> ava_types::Result<Se
         thinking_level: ava_types::ThinkingLevel::Off,
         system_prompt_suffix: None,
         extended_tools: true,
+        plan_mode: false,
     };
 
     let context = ContextManager::new(budget.max_tokens);

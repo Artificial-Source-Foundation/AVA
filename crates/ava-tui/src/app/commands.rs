@@ -498,6 +498,64 @@ impl App {
                     ))
                 }
             }
+            "/plan" => {
+                if matches!(self.state.agent_mode, AgentMode::Plan) {
+                    Some((MessageKind::System, "Already in Plan mode.".to_string()))
+                } else {
+                    self.state.agent_mode = AgentMode::Plan;
+                    self.state.agent.set_mode(self.state.agent_mode);
+                    self.set_status("Mode: Plan", StatusLevel::Info);
+                    Some((MessageKind::System, "Switched to Plan mode \u{2014} will write plans to .ava/plans/".to_string()))
+                }
+            }
+            "/code" => {
+                if matches!(self.state.agent_mode, AgentMode::Code) {
+                    Some((MessageKind::System, "Already in Code mode.".to_string()))
+                } else {
+                    self.state.agent_mode = AgentMode::Code;
+                    self.state.agent.set_mode(self.state.agent_mode);
+                    self.set_status("Mode: Code", StatusLevel::Info);
+                    Some((MessageKind::System, "Switched to Code mode \u{2014} plan files at .ava/plans/".to_string()))
+                }
+            }
+            "/plans" => {
+                let plans_dir = std::env::current_dir()
+                    .unwrap_or_default()
+                    .join(".ava")
+                    .join("plans");
+                if !plans_dir.exists() {
+                    Some((MessageKind::System, "No plans found. Switch to Plan mode and ask the agent to create a plan.".to_string()))
+                } else {
+                    match std::fs::read_dir(&plans_dir) {
+                        Ok(entries) => {
+                            let mut files: Vec<String> = entries
+                                .filter_map(|e| e.ok())
+                                .filter(|e| {
+                                    e.path().extension().and_then(|ext| ext.to_str()) == Some("md")
+                                })
+                                .map(|e| {
+                                    let name = e.file_name().to_string_lossy().to_string();
+                                    let size = e.metadata().map(|m| m.len()).unwrap_or(0);
+                                    format!("  {name} ({size} bytes)")
+                                })
+                                .collect();
+                            files.sort();
+                            if files.is_empty() {
+                                Some((MessageKind::System, "No plan files in .ava/plans/. Switch to Plan mode to create one.".to_string()))
+                            } else {
+                                Some((MessageKind::System, format!(
+                                    "Plans ({} files):\n{}",
+                                    files.len(),
+                                    files.join("\n")
+                                )))
+                            }
+                        }
+                        Err(err) => {
+                            Some((MessageKind::Error, format!("Failed to read .ava/plans/: {err}")))
+                        }
+                    }
+                }
+            }
             "/help" => {
                 let help = "\
 Available commands:
@@ -522,6 +580,9 @@ Available commands:
   /export [filename]       — export conversation to file (.md or .json)
   /copy [all]              — copy last response (picks code block if multiple)
   /image <path>            — attach image to next message (png/jpg/gif/webp)
+  /plan                    — switch to Plan mode
+  /code                    — switch to Code mode
+  /plans                   — list plan files in .ava/plans/
   /commands [list|reload|init] — manage custom slash commands
   /hooks [list|reload|init|dry-run <event>] — manage lifecycle hooks
   /btw <question>          — ask a side question without interrupting the agent

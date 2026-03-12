@@ -133,6 +133,7 @@ fn build_loop(responses: Vec<String>, token_limit: usize, max_turns: usize) -> A
             thinking_level: ava_types::ThinkingLevel::Off,
             system_prompt_suffix: None,
             extended_tools: false,
+            plan_mode: false,
         },
     )
 }
@@ -228,6 +229,7 @@ async fn error_hint_injected_after_tool_failure() {
             thinking_level: ava_types::ThinkingLevel::Off,
             system_prompt_suffix: None,
             extended_tools: false,
+            plan_mode: false,
         },
     );
 

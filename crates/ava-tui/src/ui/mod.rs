@@ -2,6 +2,7 @@ use crate::app::{AppState, ModalType};
 use crate::ui::layout::build_layout;
 use crate::widgets::autocomplete::AutocompleteTrigger;
 use crate::widgets::composer::render_composer;
+use crate::widgets::mention_picker::render_mention_picker;
 use crate::widgets::message_list::render_message_list;
 use crate::widgets::select_list::{render_select_list, KeybindHint, SelectListConfig};
 use crate::widgets::slash_menu::render_slash_menu;
@@ -39,10 +40,12 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         sidebar::render_sidebar(frame, sidebar_area, state);
     }
 
-    // Render inline slash menu above the composer (not a modal)
+    // Render inline slash menu or mention picker above the composer (not a modal)
     if let Some(ref ac) = state.input.autocomplete {
         if ac.trigger == AutocompleteTrigger::Slash && !ac.items.is_empty() {
             render_slash_menu(frame, split.composer, ac, &state.theme);
+        } else if ac.trigger == AutocompleteTrigger::AtMention && !ac.items.is_empty() {
+            render_mention_picker(frame, split.composer, ac, &state.theme);
         }
     }
 
@@ -59,8 +62,10 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
 
 fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
     let area = frame.area();
-    // Use a smaller popup for the copy picker
-    let popup_area = if matches!(modal, ModalType::CopyPicker) {
+    // Use a smaller popup for the copy picker, larger for diff preview
+    let popup_area = if matches!(modal, ModalType::DiffPreview) {
+        centered_rect(85, 90, area)
+    } else if matches!(modal, ModalType::CopyPicker) {
         centered_rect(50, 40, area)
     } else if matches!(modal, ModalType::Rewind) {
         centered_rect(60, 60, area)
@@ -185,6 +190,13 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
             crate::widgets::task_list_modal::render_task_list(
                 frame, inner, &bg, &state.theme, state.messages.spinner_tick,
             );
+        }
+        ModalType::DiffPreview => {
+            if let Some(ref preview) = state.diff_preview {
+                crate::widgets::diff_preview::render_diff_preview(
+                    frame, popup_area, preview, &state.theme,
+                );
+            }
         }
     }
 }

@@ -68,6 +68,9 @@ pub struct AgentConfig {
     /// default tools. Extended tools are always *executable* regardless of this flag.
     #[serde(default)]
     pub extended_tools: bool,
+    /// When true, restrict write/edit tools to `.ava/plans/*.md` paths only (Plan mode).
+    #[serde(default)]
+    pub plan_mode: bool,
 }
 
 fn default_max_cost() -> f64 {
@@ -794,6 +797,7 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             system_prompt_suffix: None,
             extended_tools: false,
+            plan_mode: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -820,6 +824,7 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             system_prompt_suffix: None,
             extended_tools: false,
+            plan_mode: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -849,6 +854,7 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             system_prompt_suffix: None,
             extended_tools: false,
+            plan_mode: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -887,6 +893,7 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             system_prompt_suffix: None,
             extended_tools: false,
+            plan_mode: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -931,6 +938,7 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             system_prompt_suffix: None,
             extended_tools: false,
+            plan_mode: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -952,6 +960,7 @@ mod tests {
             thinking_level: ThinkingLevel::Off,
             system_prompt_suffix: None,
             extended_tools: false,
+            plan_mode: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -1003,5 +1012,118 @@ mod tests {
         assert!(json.contains("1000"));
         assert!(json.contains("200"));
         assert!(json.contains("0.015"));
+    }
+
+    // --- Plan mode tests ---
+
+    #[test]
+    fn plan_mode_allows_write_to_plan_dir() {
+        use tool_execution::check_plan_mode_tool;
+        let tc = ToolCall {
+            id: "1".to_string(),
+            name: "write".to_string(),
+            arguments: serde_json::json!({"path": ".ava/plans/my-plan.md", "content": "# Plan"}),
+        };
+        assert!(check_plan_mode_tool(&tc).is_none());
+    }
+
+    #[test]
+    fn plan_mode_allows_write_to_nested_plan_dir() {
+        use tool_execution::check_plan_mode_tool;
+        let tc = ToolCall {
+            id: "1".to_string(),
+            name: "write".to_string(),
+            arguments: serde_json::json!({"path": "/home/user/project/.ava/plans/refactor.md", "content": "# Plan"}),
+        };
+        assert!(check_plan_mode_tool(&tc).is_none());
+    }
+
+    #[test]
+    fn plan_mode_blocks_write_to_source_files() {
+        use tool_execution::check_plan_mode_tool;
+        let tc = ToolCall {
+            id: "1".to_string(),
+            name: "write".to_string(),
+            arguments: serde_json::json!({"path": "src/main.rs", "content": "fn main() {}"}),
+        };
+        let result = check_plan_mode_tool(&tc);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("Plan mode"));
+    }
+
+    #[test]
+    fn plan_mode_blocks_write_to_non_md_in_plan_dir() {
+        use tool_execution::check_plan_mode_tool;
+        let tc = ToolCall {
+            id: "1".to_string(),
+            name: "write".to_string(),
+            arguments: serde_json::json!({"path": ".ava/plans/script.sh", "content": "#!/bin/bash"}),
+        };
+        let result = check_plan_mode_tool(&tc);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("Plan mode"));
+    }
+
+    #[test]
+    fn plan_mode_blocks_bash() {
+        use tool_execution::check_plan_mode_tool;
+        let tc = ToolCall {
+            id: "1".to_string(),
+            name: "bash".to_string(),
+            arguments: serde_json::json!({"command": "rm -rf /"}),
+        };
+        let result = check_plan_mode_tool(&tc);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("bash is not available"));
+    }
+
+    #[test]
+    fn plan_mode_allows_read_tools() {
+        use tool_execution::check_plan_mode_tool;
+        for tool_name in &["read", "glob", "grep", "codebase_search", "todo_read"] {
+            let tc = ToolCall {
+                id: "1".to_string(),
+                name: tool_name.to_string(),
+                arguments: serde_json::json!({"path": "src/main.rs"}),
+            };
+            assert!(
+                check_plan_mode_tool(&tc).is_none(),
+                "{tool_name} should be allowed in plan mode"
+            );
+        }
+    }
+
+    #[test]
+    fn plan_mode_blocks_edit_to_source() {
+        use tool_execution::check_plan_mode_tool;
+        let tc = ToolCall {
+            id: "1".to_string(),
+            name: "edit".to_string(),
+            arguments: serde_json::json!({"path": "src/lib.rs", "old_string": "a", "new_string": "b"}),
+        };
+        let result = check_plan_mode_tool(&tc);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn plan_mode_allows_attempt_completion() {
+        use tool_execution::check_plan_mode_tool;
+        let tc = ToolCall {
+            id: "1".to_string(),
+            name: "attempt_completion".to_string(),
+            arguments: serde_json::json!({"result": "Plan complete."}),
+        };
+        assert!(check_plan_mode_tool(&tc).is_none());
+    }
+
+    #[test]
+    fn is_plan_path_validates_correctly() {
+        use tool_execution::is_plan_path;
+        assert!(is_plan_path(".ava/plans/my-plan.md"));
+        assert!(is_plan_path("/home/user/.ava/plans/refactor.md"));
+        assert!(!is_plan_path(".ava/plans/script.sh"));
+        assert!(!is_plan_path("src/main.rs"));
+        assert!(!is_plan_path(".ava/config.toml"));
+        assert!(!is_plan_path(".ava/plans/")); // no filename
     }
 }

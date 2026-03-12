@@ -19,6 +19,111 @@ pub use session::Session;
 pub use todo::{TodoItem, TodoPriority, TodoState, TodoStatus};
 pub use tool::{Tool, ToolCall, ToolResult};
 
+// --- Context attachment types (B35: @-mention scoping) ---
+
+/// A context attachment resolved from an @-mention in the composer.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ContextAttachment {
+    /// Attach the contents of a specific file.
+    File { path: std::path::PathBuf },
+    /// Attach a listing of files in a directory.
+    Folder { path: std::path::PathBuf },
+    /// Run a codebase search and attach results.
+    CodebaseQuery { query: String },
+}
+
+impl ContextAttachment {
+    /// Short display label for badges (e.g. "src/main.rs", "src/", "search:foo").
+    pub fn label(&self) -> String {
+        match self {
+            Self::File { path } => path.display().to_string(),
+            Self::Folder { path } => format!("{}/", path.display()),
+            Self::CodebaseQuery { query } => format!("search:{query}"),
+        }
+    }
+
+    /// Prefix used in the composer text (e.g. "@file:", "@folder:", "@codebase:").
+    pub fn mention_prefix(&self) -> &'static str {
+        match self {
+            Self::File { .. } => "@file:",
+            Self::Folder { .. } => "@folder:",
+            Self::CodebaseQuery { .. } => "@codebase:",
+        }
+    }
+}
+
+/// Parse @-mention strings from user input text.
+/// Returns (attachments, cleaned_text) where cleaned_text has @mentions stripped.
+///
+/// Recognized forms:
+///   `@file:path/to/file`   — explicit file
+///   `@folder:path/to/dir`  — explicit folder
+///   `@codebase:query`      — codebase search
+///   `@path/to/file.rs`     — bare file (must contain `/` or `.`)
+///   `@path/to/dir/`        — bare folder (trailing `/`)
+pub fn parse_mentions(text: &str) -> (Vec<ContextAttachment>, String) {
+    let mut attachments = Vec::new();
+    let mut cleaned_parts: Vec<&str> = Vec::new();
+
+    // Split by whitespace, preserving positions for reconstruction
+    let mut last_end = 0;
+    let words: Vec<(usize, &str)> = text
+        .split_whitespace()
+        .map(|word| {
+            let start = text[last_end..].find(word).unwrap() + last_end;
+            last_end = start + word.len();
+            (start, word)
+        })
+        .collect();
+
+    for (_start, word) in &words {
+        if let Some(rest) = word.strip_prefix('@') {
+            if let Some(attachment) = try_parse_mention(rest) {
+                attachments.push(attachment);
+                continue; // Skip this word in cleaned output
+            }
+        }
+        cleaned_parts.push(word);
+    }
+
+    let cleaned = cleaned_parts.join(" ");
+    (attachments, cleaned)
+}
+
+fn try_parse_mention(token: &str) -> Option<ContextAttachment> {
+    // Explicit prefixes
+    if let Some(path_str) = token.strip_prefix("file:") {
+        if !path_str.is_empty() {
+            return Some(ContextAttachment::File {
+                path: std::path::PathBuf::from(path_str),
+            });
+        }
+    } else if let Some(path_str) = token.strip_prefix("folder:") {
+        if !path_str.is_empty() {
+            return Some(ContextAttachment::Folder {
+                path: std::path::PathBuf::from(path_str),
+            });
+        }
+    } else if let Some(query) = token.strip_prefix("codebase:") {
+        if !query.is_empty() {
+            return Some(ContextAttachment::CodebaseQuery {
+                query: query.to_string(),
+            });
+        }
+    } else if !token.is_empty() && (token.contains('/') || token.contains('.')) {
+        // Bare mention — must look like a path (contains / or .)
+        if token.ends_with('/') {
+            return Some(ContextAttachment::Folder {
+                path: std::path::PathBuf::from(token.trim_end_matches('/')),
+            });
+        }
+        return Some(ContextAttachment::File {
+            path: std::path::PathBuf::from(token),
+        });
+    }
+    None
+}
+
 // --- Mid-stream messaging types ---
 
 /// Tier classification for messages sent while the agent is running.
@@ -299,5 +404,125 @@ mod tests {
 
         assert_eq!(ThinkingLevel::from_str_loose("invalid"), None);
         assert_eq!(ThinkingLevel::from_str_loose(""), None);
+    }
+
+    // --- Context attachment / mention parsing tests ---
+
+    #[test]
+    fn parse_file_mention() {
+        let (attachments, cleaned) = parse_mentions("fix @file:src/main.rs please");
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(
+            attachments[0],
+            ContextAttachment::File {
+                path: std::path::PathBuf::from("src/main.rs")
+            }
+        );
+        assert_eq!(cleaned, "fix please");
+    }
+
+    #[test]
+    fn parse_bare_file_mention() {
+        let (attachments, cleaned) = parse_mentions("look at @src/lib.rs");
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(
+            attachments[0],
+            ContextAttachment::File {
+                path: std::path::PathBuf::from("src/lib.rs")
+            }
+        );
+        assert_eq!(cleaned, "look at");
+    }
+
+    #[test]
+    fn parse_folder_mention() {
+        let (attachments, cleaned) = parse_mentions("review @folder:src/widgets please");
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(
+            attachments[0],
+            ContextAttachment::Folder {
+                path: std::path::PathBuf::from("src/widgets")
+            }
+        );
+        assert_eq!(cleaned, "review please");
+    }
+
+    #[test]
+    fn parse_bare_folder_mention_trailing_slash() {
+        let (attachments, cleaned) = parse_mentions("check @src/widgets/");
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(
+            attachments[0],
+            ContextAttachment::Folder {
+                path: std::path::PathBuf::from("src/widgets")
+            }
+        );
+        assert_eq!(cleaned, "check");
+    }
+
+    #[test]
+    fn parse_codebase_mention() {
+        let (attachments, cleaned) = parse_mentions("find @codebase:error_handling patterns");
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(
+            attachments[0],
+            ContextAttachment::CodebaseQuery {
+                query: "error_handling".to_string()
+            }
+        );
+        assert_eq!(cleaned, "find patterns");
+    }
+
+    #[test]
+    fn parse_multiple_mentions() {
+        let (attachments, cleaned) =
+            parse_mentions("compare @file:a.rs and @file:b.rs");
+        assert_eq!(attachments.len(), 2);
+        assert_eq!(
+            attachments[0],
+            ContextAttachment::File {
+                path: std::path::PathBuf::from("a.rs")
+            }
+        );
+        assert_eq!(
+            attachments[1],
+            ContextAttachment::File {
+                path: std::path::PathBuf::from("b.rs")
+            }
+        );
+        assert_eq!(cleaned, "compare and");
+    }
+
+    #[test]
+    fn parse_no_mentions() {
+        let (attachments, cleaned) = parse_mentions("just a normal message");
+        assert!(attachments.is_empty());
+        assert_eq!(cleaned, "just a normal message");
+    }
+
+    #[test]
+    fn parse_email_not_a_mention() {
+        // @ followed by nothing valid should pass through
+        let (attachments, cleaned) = parse_mentions("contact user@ for info");
+        assert!(attachments.is_empty());
+        assert_eq!(cleaned, "contact user@ for info");
+    }
+
+    #[test]
+    fn context_attachment_label() {
+        let f = ContextAttachment::File {
+            path: std::path::PathBuf::from("src/main.rs"),
+        };
+        assert_eq!(f.label(), "src/main.rs");
+
+        let d = ContextAttachment::Folder {
+            path: std::path::PathBuf::from("src"),
+        };
+        assert_eq!(d.label(), "src/");
+
+        let q = ContextAttachment::CodebaseQuery {
+            query: "error".to_string(),
+        };
+        assert_eq!(q.label(), "search:error");
     }
 }

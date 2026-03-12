@@ -236,6 +236,38 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     // Combine prompt lines + queue display + model info line
     let mut all_lines = prompt_lines;
 
+    // Show context attachments as badges
+    if !state.input.attachments.is_empty() {
+        let bar_a = Span::styled("\u{258E}", Style::default().fg(state.theme.accent));
+        for attachment in &state.input.attachments {
+            let badge = match attachment {
+                ava_types::ContextAttachment::File { .. } => "[@file]",
+                ava_types::ContextAttachment::Folder { .. } => "[@folder]",
+                ava_types::ContextAttachment::CodebaseQuery { .. } => "[@search]",
+            };
+            let label = attachment.label();
+            let truncated = if label.len() > 45 {
+                format!("...{}", &label[label.len() - 42..])
+            } else {
+                label
+            };
+            all_lines.push(Line::from(vec![
+                bar_a.clone(),
+                Span::raw(pad),
+                Span::styled(
+                    badge,
+                    Style::default()
+                        .fg(state.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(" {truncated}"),
+                    Style::default().fg(state.theme.text_muted),
+                ),
+            ]));
+        }
+    }
+
     // Show pending queued messages between input and model info
     if !state.input.queue_display.is_empty() {
         let bar_q = Span::styled("\u{258E}", Style::default().fg(state.theme.text_dimmed));

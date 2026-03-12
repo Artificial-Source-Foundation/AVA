@@ -4,7 +4,7 @@ use std::sync::Arc;
 use ava_platform::StandardPlatform;
 use ava_tools::core::{
     apply_patch::ApplyPatchTool, bash::BashTool, edit::EditTool,
-    glob::GlobTool, grep::GrepTool, read::ReadTool, write::WriteTool,
+    glob::GlobTool, grep::GrepTool, hashline, read::ReadTool, write::WriteTool,
 };
 use ava_tools::registry::Tool;
 use serde_json::json;
@@ -18,7 +18,7 @@ async fn read_tool_reads_file_with_line_numbers() {
         .await
         .expect("write test file");
 
-    let tool = ReadTool::new(Arc::new(StandardPlatform));
+    let tool = ReadTool::new(Arc::new(StandardPlatform), hashline::new_cache());
     let result = tool
         .execute(json!({"path": path.to_string_lossy().to_string()}))
         .await
@@ -38,7 +38,7 @@ async fn read_tool_applies_offset_and_limit() {
         .await
         .expect("write test file");
 
-    let tool = ReadTool::new(Arc::new(StandardPlatform));
+    let tool = ReadTool::new(Arc::new(StandardPlatform), hashline::new_cache());
     let result = tool
         .execute(json!({
             "path": path.to_string_lossy().to_string(),
@@ -55,7 +55,7 @@ async fn read_tool_applies_offset_and_limit() {
 
 #[tokio::test]
 async fn read_tool_errors_on_missing_file() {
-    let tool = ReadTool::new(Arc::new(StandardPlatform));
+    let tool = ReadTool::new(Arc::new(StandardPlatform), hashline::new_cache());
     let error = tool
         .execute(json!({"path": "/tmp/definitely-missing-ava-tools-file.txt"}))
         .await
@@ -107,7 +107,7 @@ async fn edit_tool_exact_match_replacement() {
         .await
         .expect("seed file");
 
-    let tool = EditTool::new(Arc::new(StandardPlatform));
+    let tool = EditTool::new(Arc::new(StandardPlatform), hashline::new_cache());
     let result = tool
         .execute(json!({
             "path": path.to_string_lossy().to_string(),
@@ -129,7 +129,7 @@ async fn edit_tool_uses_multi_strategy_fallback() {
         .await
         .expect("seed file");
 
-    let tool = EditTool::new(Arc::new(StandardPlatform));
+    let tool = EditTool::new(Arc::new(StandardPlatform), hashline::new_cache());
     let result = tool
         .execute(json!({
             "path": path.to_string_lossy().to_string(),
@@ -151,7 +151,7 @@ async fn edit_tool_errors_when_no_match_found() {
         .await
         .expect("seed file");
 
-    let tool = EditTool::new(Arc::new(StandardPlatform));
+    let tool = EditTool::new(Arc::new(StandardPlatform), hashline::new_cache());
     let error = tool
         .execute(json!({
             "path": path.to_string_lossy().to_string(),
@@ -471,7 +471,7 @@ async fn read_large_file_truncates_at_default_limit() {
     let content: String = (1..=5000).map(|i| format!("line {i}\n")).collect();
     tokio::fs::write(&path, &content).await.expect("write");
 
-    let tool = ReadTool::new(Arc::new(StandardPlatform));
+    let tool = ReadTool::new(Arc::new(StandardPlatform), hashline::new_cache());
     let result = tool
         .execute(json!({"path": path.to_string_lossy().to_string()}))
         .await
@@ -492,7 +492,7 @@ async fn read_explicit_limit_overrides_default() {
     let content: String = (1..=5000).map(|i| format!("line {i}\n")).collect();
     tokio::fs::write(&path, &content).await.expect("write");
 
-    let tool = ReadTool::new(Arc::new(StandardPlatform));
+    let tool = ReadTool::new(Arc::new(StandardPlatform), hashline::new_cache());
     let result = tool
         .execute(json!({
             "path": path.to_string_lossy().to_string(),
@@ -528,4 +528,204 @@ fn missing_tool_returns_tool_not_found_error() {
 #[test]
 fn tests_reference_tempfile_paths_as_expected() {
     assert!(Path::new(".").exists());
+}
+
+// --- Hashline Tests (integration) ---
+
+#[tokio::test]
+async fn read_tool_hash_lines_adds_hash_prefixes() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("hash.txt");
+    tokio::fs::write(&path, "alpha\nbeta\ngamma\n")
+        .await
+        .expect("write");
+
+    let cache = hashline::new_cache();
+    let tool = ReadTool::new(Arc::new(StandardPlatform), cache.clone());
+    let result = tool
+        .execute(json!({
+            "path": path.to_string_lossy().to_string(),
+            "hash_lines": true
+        }))
+        .await
+        .expect("read executes");
+
+    // Each line should have [hash] prefix
+    let h_alpha = hashline::hash_line("alpha");
+    let h_beta = hashline::hash_line("beta");
+    assert!(result.content.contains(&format!("[{h_alpha}] alpha")));
+    assert!(result.content.contains(&format!("[{h_beta}] beta")));
+
+    // Cache should be populated
+    let cache_guard = cache.read().unwrap();
+    let entries = cache_guard.get(&path).expect("cache should have file");
+    assert_eq!(entries.len(), 3);
+    assert_eq!(entries[0].content, "alpha");
+    assert_eq!(entries[1].content, "beta");
+}
+
+#[tokio::test]
+async fn read_tool_no_hash_lines_unchanged() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("nohash.txt");
+    tokio::fs::write(&path, "alpha\nbeta\n")
+        .await
+        .expect("write");
+
+    let cache = hashline::new_cache();
+    let tool = ReadTool::new(Arc::new(StandardPlatform), cache.clone());
+    let result = tool
+        .execute(json!({"path": path.to_string_lossy().to_string()}))
+        .await
+        .expect("read executes");
+
+    // Should NOT have hash prefixes
+    assert!(!result.content.contains("["));
+    assert!(result.content.contains("     1\talpha"));
+
+    // Cache should NOT be populated
+    let cache_guard = cache.read().unwrap();
+    assert!(cache_guard.get(&path).is_none());
+}
+
+#[tokio::test]
+async fn edit_tool_hashline_anchored_edit() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("hashline_edit.txt");
+    let content = "fn main() {\n    println!(\"hello\");\n}\n";
+    tokio::fs::write(&path, content).await.expect("write");
+
+    let cache = hashline::new_cache();
+    // First, read with hash_lines to populate cache
+    let read_tool = ReadTool::new(Arc::new(StandardPlatform), cache.clone());
+    read_tool
+        .execute(json!({
+            "path": path.to_string_lossy().to_string(),
+            "hash_lines": true
+        }))
+        .await
+        .expect("read executes");
+
+    // Now edit using hash anchors
+    let h = hashline::hash_line("    println!(\"hello\");");
+    let old_text = format!("[{h}]     println!(\"hello\");");
+
+    let edit_tool = EditTool::new(Arc::new(StandardPlatform), cache);
+    let result = edit_tool
+        .execute(json!({
+            "path": path.to_string_lossy().to_string(),
+            "old_text": old_text,
+            "new_text": "    println!(\"world\");"
+        }))
+        .await
+        .expect("edit executes");
+
+    assert!(result.content.contains("hashline+"));
+    let updated = tokio::fs::read_to_string(&path).await.unwrap();
+    assert!(updated.contains("println!(\"world\")"));
+    assert!(!updated.contains("println!(\"hello\")"));
+}
+
+#[tokio::test]
+async fn edit_tool_stale_hashline_rejected() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("stale.txt");
+    tokio::fs::write(&path, "original line\n").await.expect("write");
+
+    let cache = hashline::new_cache();
+    // Read to populate cache
+    let read_tool = ReadTool::new(Arc::new(StandardPlatform), cache.clone());
+    read_tool
+        .execute(json!({
+            "path": path.to_string_lossy().to_string(),
+            "hash_lines": true
+        }))
+        .await
+        .expect("read executes");
+
+    // Modify the file behind the cache's back
+    tokio::fs::write(&path, "modified line\n").await.expect("write");
+
+    // Try to edit using stale hash
+    let h = hashline::hash_line("original line");
+    let old_text = format!("[{h}] original line");
+
+    let edit_tool = EditTool::new(Arc::new(StandardPlatform), cache);
+    let error = edit_tool
+        .execute(json!({
+            "path": path.to_string_lossy().to_string(),
+            "old_text": old_text,
+            "new_text": "replacement"
+        }))
+        .await
+        .expect_err("stale edit should fail");
+
+    // The hash still exists in cache (same hash for "original line"),
+    // but the edit tool re-reads the file from disk. The hashline resolution
+    // itself succeeds (hash found, content matches cached), but the resolved
+    // text "original line" won't match in the new file content "modified line\n".
+    // So it falls through to "No matching edit strategy found" rather than stale detection.
+    // Stale detection happens when hash is found but content DIFFERS from what LLM sent.
+    assert!(error.to_string().contains("No matching"));
+}
+
+#[tokio::test]
+async fn edit_tool_falls_back_without_hashes() {
+    // When no hash prefixes are in old_text, normal edit cascade works
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("fallback.txt");
+    tokio::fs::write(&path, "hello world\n").await.expect("write");
+
+    let cache = hashline::new_cache();
+    let edit_tool = EditTool::new(Arc::new(StandardPlatform), cache);
+    let result = edit_tool
+        .execute(json!({
+            "path": path.to_string_lossy().to_string(),
+            "old_text": "world",
+            "new_text": "ava"
+        }))
+        .await
+        .expect("edit executes");
+
+    // Should use normal exact_match, not hashline
+    assert!(result.content.contains("exact_match"));
+    assert!(!result.content.contains("hashline"));
+}
+
+#[tokio::test]
+async fn edit_tool_strips_hashes_from_new_text() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("strip_new.txt");
+    let content = "fn foo() {\n    bar();\n}\n";
+    tokio::fs::write(&path, content).await.expect("write");
+
+    let cache = hashline::new_cache();
+    let read_tool = ReadTool::new(Arc::new(StandardPlatform), cache.clone());
+    read_tool
+        .execute(json!({
+            "path": path.to_string_lossy().to_string(),
+            "hash_lines": true
+        }))
+        .await
+        .expect("read executes");
+
+    let h = hashline::hash_line("    bar();");
+    let old_text = format!("[{h}]     bar();");
+    // LLM might copy hash prefix into new_text too
+    let new_text = format!("[{h}]     baz();");
+
+    let edit_tool = EditTool::new(Arc::new(StandardPlatform), cache);
+    edit_tool
+        .execute(json!({
+            "path": path.to_string_lossy().to_string(),
+            "old_text": old_text,
+            "new_text": new_text
+        }))
+        .await
+        .expect("edit executes");
+
+    let updated = tokio::fs::read_to_string(&path).await.unwrap();
+    // Hash prefix should be stripped from the written content
+    assert!(updated.contains("    baz();"));
+    assert!(!updated.contains("["));
 }

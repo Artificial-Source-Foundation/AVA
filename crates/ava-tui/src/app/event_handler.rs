@@ -493,6 +493,31 @@ impl App {
             // that returned None from handle_slash_command for modal actions).
         }
 
+        // Resolve @-mentions: parse mentions from goal text and resolve attachments.
+        // Also consume any attachments added via the autocomplete picker.
+        let (mut mention_attachments, cleaned_goal) = ava_types::parse_mentions(&goal);
+        // Merge picker attachments (those added via Tab/Enter in the mention picker)
+        let picker_attachments = std::mem::take(&mut self.state.input.attachments);
+        mention_attachments.extend(picker_attachments);
+
+        // Build the final goal with context blocks prepended
+        let goal = if mention_attachments.is_empty() {
+            goal
+        } else {
+            let context_block = resolve_attachments(&mention_attachments);
+            let user_text = if cleaned_goal.is_empty() {
+                // All text was @mentions — use a default prompt
+                "Please review the attached context.".to_string()
+            } else {
+                cleaned_goal
+            };
+            if context_block.is_empty() {
+                user_text
+            } else {
+                format!("{context_block}\n\n{user_text}")
+            }
+        };
+
         // Fire UserPromptSubmit hooks
         {
             let mut ctx = self.build_hook_context(&HookEvent::UserPromptSubmit);
@@ -694,4 +719,90 @@ impl App {
             let _ = app_tx;
         }
     }
+}
+
+/// Resolve context attachments into a text block to prepend to the goal.
+fn resolve_attachments(attachments: &[ava_types::ContextAttachment]) -> String {
+    let mut blocks = Vec::new();
+    let cwd = std::env::current_dir().unwrap_or_default();
+
+    for attachment in attachments {
+        match attachment {
+            ava_types::ContextAttachment::File { path } => {
+                let full_path = if path.is_absolute() {
+                    path.clone()
+                } else {
+                    cwd.join(path)
+                };
+                match std::fs::read_to_string(&full_path) {
+                    Ok(content) => {
+                        // Truncate very large files
+                        let truncated = if content.len() > 50_000 {
+                            format!("{}... [truncated, {} bytes total]", &content[..50_000], content.len())
+                        } else {
+                            content
+                        };
+                        blocks.push(format!(
+                            "<context source=\"{}\">\n{}\n</context>",
+                            path.display(),
+                            truncated
+                        ));
+                    }
+                    Err(e) => {
+                        blocks.push(format!(
+                            "<context source=\"{}\" error=\"{}\" />",
+                            path.display(),
+                            e
+                        ));
+                    }
+                }
+            }
+            ava_types::ContextAttachment::Folder { path } => {
+                let full_path = if path.is_absolute() {
+                    path.clone()
+                } else {
+                    cwd.join(path)
+                };
+                match std::fs::read_dir(&full_path) {
+                    Ok(entries) => {
+                        let mut listing = Vec::new();
+                        let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+                        entries.sort_by_key(|e| e.file_name());
+                        for entry in entries.iter().take(100) {
+                            let name = entry.file_name();
+                            let is_dir = entry.path().is_dir();
+                            let suffix = if is_dir { "/" } else { "" };
+                            listing.push(format!("  {}{}", name.to_string_lossy(), suffix));
+                        }
+                        if entries.len() > 100 {
+                            listing.push(format!("  ... and {} more", entries.len() - 100));
+                        }
+                        blocks.push(format!(
+                            "<context source=\"{}/\" type=\"directory\">\n{}\n</context>",
+                            path.display(),
+                            listing.join("\n")
+                        ));
+                    }
+                    Err(e) => {
+                        blocks.push(format!(
+                            "<context source=\"{}/\" error=\"{}\" />",
+                            path.display(),
+                            e
+                        ));
+                    }
+                }
+            }
+            ava_types::ContextAttachment::CodebaseQuery { query } => {
+                // For codebase queries, we inject the query as a search directive.
+                // The agent will use its codebase_search tool for actual searching.
+                blocks.push(format!(
+                    "<context type=\"codebase_search\" query=\"{query}\">\n\
+                     Please search the codebase for: {query}\n\
+                     </context>"
+                ));
+            }
+        }
+    }
+
+    blocks.join("\n\n")
 }

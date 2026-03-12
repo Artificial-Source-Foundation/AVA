@@ -221,6 +221,7 @@ mod tests {
             thinking_level: ava_types::ThinkingLevel::Off,
             system_prompt_suffix: None,
             extended_tools: false,
+            plan_mode: false,
         }
     }
 

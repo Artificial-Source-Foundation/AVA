@@ -1,6 +1,93 @@
 use crate::widgets::autocomplete::{AutocompleteItem, AutocompleteState, AutocompleteTrigger};
-use ava_types::MessageTier;
+use ava_types::{ContextAttachment, MessageTier};
 use std::collections::HashMap;
+use std::path::Path;
+
+/// Directories to skip when scanning project files.
+const SKIP_DIRS: &[&str] = &[
+    ".git",
+    "node_modules",
+    "target",
+    ".next",
+    "dist",
+    "build",
+    "__pycache__",
+    ".cache",
+    ".venv",
+    "venv",
+];
+
+/// Maximum depth for recursive file scanning.
+const MAX_SCAN_DEPTH: usize = 4;
+/// Maximum number of results to return.
+const MAX_SCAN_RESULTS: usize = 50;
+
+/// Scan project files from the current directory, returning autocomplete items.
+/// If `folders_only` is true, only directories are returned.
+fn scan_project_files(query: &str, folders_only: bool) -> Vec<AutocompleteItem> {
+    let cwd = match std::env::current_dir() {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut results = Vec::new();
+    scan_dir_recursive(&cwd, &cwd, query, folders_only, 0, &mut results);
+    results.truncate(MAX_SCAN_RESULTS);
+    results
+}
+
+fn scan_dir_recursive(
+    base: &Path,
+    dir: &Path,
+    _query: &str,
+    folders_only: bool,
+    depth: usize,
+    results: &mut Vec<AutocompleteItem>,
+) {
+    if depth > MAX_SCAN_DEPTH || results.len() >= MAX_SCAN_RESULTS {
+        return;
+    }
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+    entries.sort_by_key(|e| e.file_name());
+
+    for entry in entries {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        // Skip hidden dirs and known large dirs
+        if name_str.starts_with('.') && name_str != ".ava" {
+            continue;
+        }
+        if SKIP_DIRS.contains(&name_str.as_ref()) {
+            continue;
+        }
+
+        let path = entry.path();
+        let rel = path
+            .strip_prefix(base)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .to_string();
+
+        let is_dir = path.is_dir();
+
+        if is_dir {
+            let display = format!("{rel}/");
+            let detail = "folder".to_string();
+            results.push(AutocompleteItem::new(display, detail));
+            scan_dir_recursive(base, &path, _query, folders_only, depth + 1, results);
+        } else if !folders_only {
+            let detail = "file".to_string();
+            results.push(AutocompleteItem::new(rel, detail));
+        }
+    }
+}
 
 /// A pending queued message shown in the composer queue display.
 #[derive(Debug, Clone)]
@@ -62,6 +149,8 @@ pub struct InputState {
     pub custom_slash_items: Vec<AutocompleteItem>,
     /// Display state for queued mid-stream messages.
     pub queue_display: MessageQueueDisplay,
+    /// Context attachments from @-mentions (resolved on submit).
+    pub attachments: Vec<ContextAttachment>,
 }
 
 impl InputState {
@@ -109,6 +198,7 @@ impl InputState {
         self.autocomplete = None;
         self.pending_pastes.clear();
         self.paste_counter.clear();
+        self.attachments.clear();
     }
 
     pub fn move_left(&mut self) {
@@ -355,6 +445,26 @@ impl InputState {
         )
     }
 
+    /// Returns true if an @-mention autocomplete menu is currently visible.
+    pub fn has_mention_autocomplete(&self) -> bool {
+        matches!(
+            self.autocomplete,
+            Some(ref ac) if ac.trigger == AutocompleteTrigger::AtMention && !ac.items.is_empty()
+        )
+    }
+
+    /// Add a context attachment and insert the mention text into the buffer.
+    pub fn add_attachment(&mut self, attachment: ContextAttachment) {
+        self.attachments.push(attachment);
+    }
+
+    /// Remove a context attachment by index.
+    pub fn remove_attachment(&mut self, index: usize) {
+        if index < self.attachments.len() {
+            self.attachments.remove(index);
+        }
+    }
+
     /// Dismiss the autocomplete menu and clear the input buffer.
     pub fn dismiss_autocomplete(&mut self) {
         self.autocomplete = None;
@@ -414,6 +524,9 @@ impl InputState {
                     AutocompleteItem::new("bg", "Launch a goal as a background task"),
                     AutocompleteItem::new("tasks", "Show background task list"),
                     AutocompleteItem::new("agents", "Show sub-agent configuration"),
+                    AutocompleteItem::new("plan", "Switch to Plan mode"),
+                    AutocompleteItem::new("code", "Switch to Code mode"),
+                    AutocompleteItem::new("plans", "List plan files"),
                     AutocompleteItem::new("permissions", "Toggle permission level"),
                     AutocompleteItem::new("undo", "Rewind conversation/code to a previous point"),
                     AutocompleteItem::new("export", "Export conversation to file"),
@@ -435,14 +548,39 @@ impl InputState {
                 )
             }
         } else if let Some(rest) = token.strip_prefix('@') {
-            (
-                AutocompleteTrigger::AtMention,
-                rest.to_string(),
-                vec![
-                    AutocompleteItem::new("README.md", "Include file in context"),
-                    AutocompleteItem::new("AGENTS.md", "Include file in context"),
-                ],
-            )
+            {
+                // Strip type prefix if present for the search query
+                let (prefix, query) = if let Some(q) = rest.strip_prefix("file:") {
+                    ("file:", q)
+                } else if let Some(q) = rest.strip_prefix("folder:") {
+                    ("folder:", q)
+                } else if let Some(q) = rest.strip_prefix("codebase:") {
+                    ("codebase:", q)
+                } else {
+                    ("", rest)
+                };
+
+                let mut items = Vec::new();
+
+                if prefix == "codebase:" {
+                    // For codebase queries, show a single item prompting the search
+                    if !query.is_empty() {
+                        items.push(AutocompleteItem::new(
+                            format!("codebase:{query}"),
+                            "Search codebase".to_string(),
+                        ));
+                    }
+                } else {
+                    // Scan files/folders from cwd
+                    items = scan_project_files(query, prefix == "folder:");
+                }
+
+                (
+                    AutocompleteTrigger::AtMention,
+                    query.to_string(),
+                    items,
+                )
+            }
         } else {
             self.autocomplete = None;
             return;
@@ -713,5 +851,66 @@ mod tests {
         assert!(input.buffer.starts_with("Please review: [Pasted Text:"));
         let submitted = input.submit().unwrap();
         assert!(submitted.starts_with("Please review: line1\nline2"));
+    }
+
+    // --- @-mention / attachment tests ---
+
+    #[test]
+    fn at_triggers_mention_autocomplete() {
+        let mut input = InputState::default();
+        input.insert_char('@');
+        // Should trigger AtMention autocomplete (items may be empty if no files match)
+        assert!(matches!(
+            input.autocomplete,
+            Some(ref ac) if ac.trigger == AutocompleteTrigger::AtMention
+        ));
+    }
+
+    #[test]
+    fn add_and_remove_attachment() {
+        let mut input = InputState::default();
+        let attachment = ava_types::ContextAttachment::File {
+            path: std::path::PathBuf::from("src/main.rs"),
+        };
+        input.add_attachment(attachment.clone());
+        assert_eq!(input.attachments.len(), 1);
+        assert_eq!(input.attachments[0], attachment);
+
+        input.remove_attachment(0);
+        assert!(input.attachments.is_empty());
+    }
+
+    #[test]
+    fn clear_resets_attachments() {
+        let mut input = InputState::default();
+        input.add_attachment(ava_types::ContextAttachment::File {
+            path: std::path::PathBuf::from("test.rs"),
+        });
+        assert!(!input.attachments.is_empty());
+        input.clear();
+        assert!(input.attachments.is_empty());
+    }
+
+    #[test]
+    fn has_mention_autocomplete_when_at_typed() {
+        let mut input = InputState::default();
+        input.insert_char('@');
+        // Even if no files match the empty query, the autocomplete should be AtMention type
+        let is_at = matches!(
+            input.autocomplete,
+            Some(ref ac) if ac.trigger == AutocompleteTrigger::AtMention
+        );
+        assert!(is_at);
+    }
+
+    #[test]
+    fn submit_clears_attachments() {
+        let mut input = InputState::default();
+        input.insert_str("hello");
+        input.add_attachment(ava_types::ContextAttachment::File {
+            path: std::path::PathBuf::from("test.rs"),
+        });
+        let _ = input.submit();
+        assert!(input.attachments.is_empty());
     }
 }

@@ -1,10 +1,11 @@
 use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 
 use ava_platform::StandardPlatform;
 use ava_tools::core::{
-    apply_patch::ApplyPatchTool, bash::BashTool, edit::EditTool,
-    glob::GlobTool, grep::GrepTool, hashline, read::ReadTool, write::WriteTool,
+    apply_patch::ApplyPatchTool, bash::BashTool, edit::EditTool, glob::GlobTool, grep::GrepTool,
+    hashline, multiedit::MultiEditTool, read::ReadTool, write::WriteTool,
 };
 use ava_tools::registry::Tool;
 use serde_json::json;
@@ -79,7 +80,10 @@ async fn write_tool_writes_file_and_creates_parent_directories() {
         .expect("write executes");
 
     assert!(result.content.contains("Wrote"));
-    assert_eq!(tokio::fs::read_to_string(&path).await.expect("read back"), "hello from write");
+    assert_eq!(
+        tokio::fs::read_to_string(&path).await.expect("read back"),
+        "hello from write"
+    );
 }
 
 #[tokio::test]
@@ -96,7 +100,10 @@ async fn write_tool_overwrites_existing_file() {
     .await
     .expect("write executes");
 
-    assert_eq!(tokio::fs::read_to_string(&path).await.expect("read back"), "after");
+    assert_eq!(
+        tokio::fs::read_to_string(&path).await.expect("read back"),
+        "after"
+    );
 }
 
 #[tokio::test]
@@ -118,7 +125,10 @@ async fn edit_tool_exact_match_replacement() {
         .expect("edit executes");
 
     assert!(result.content.contains("exact_match"));
-    assert_eq!(tokio::fs::read_to_string(&path).await.expect("read back"), "hello ava\n");
+    assert_eq!(
+        tokio::fs::read_to_string(&path).await.expect("read back"),
+        "hello ava\n"
+    );
 }
 
 #[tokio::test]
@@ -140,7 +150,46 @@ async fn edit_tool_uses_multi_strategy_fallback() {
         .expect("edit executes");
 
     assert!(result.content.contains("flexible_match"));
-    assert_eq!(tokio::fs::read_to_string(&path).await.expect("read back"), "delta\n");
+    assert_eq!(
+        tokio::fs::read_to_string(&path).await.expect("read back"),
+        "delta\n"
+    );
+}
+
+#[tokio::test]
+async fn multiedit_reports_ghost_snapshot_count() {
+    let dir = tempdir().expect("tempdir");
+    run_git(dir.path(), &["init"]);
+
+    let path = dir.path().join("edit_multi.txt");
+    tokio::fs::write(&path, "alpha\nbeta\n")
+        .await
+        .expect("seed file");
+
+    let tool = MultiEditTool::new(Arc::new(StandardPlatform));
+    let result = tool
+        .execute(json!({
+            "edits": [
+                {
+                    "path": path.to_string_lossy().to_string(),
+                    "old_text": "alpha",
+                    "new_text": "gamma"
+                },
+                {
+                    "path": path.to_string_lossy().to_string(),
+                    "old_text": "beta",
+                    "new_text": "delta"
+                }
+            ]
+        }))
+        .await
+        .expect("multiedit executes");
+
+    assert!(result.content.contains("ghost snapshots: 1"));
+    assert_eq!(
+        tokio::fs::read_to_string(&path).await.expect("read back"),
+        "gamma\ndelta\n"
+    );
 }
 
 #[tokio::test]
@@ -206,8 +255,12 @@ async fn glob_tool_matches_patterns_and_respects_path() {
     let dir = tempdir().expect("tempdir");
     let src = dir.path().join("src");
     tokio::fs::create_dir_all(&src).await.expect("mkdir");
-    tokio::fs::write(src.join("a.rs"), "a").await.expect("write");
-    tokio::fs::write(src.join("b.txt"), "b").await.expect("write");
+    tokio::fs::write(src.join("a.rs"), "a")
+        .await
+        .expect("write");
+    tokio::fs::write(src.join("b.txt"), "b")
+        .await
+        .expect("write");
 
     let tool = GlobTool::new();
     let result = tool
@@ -327,8 +380,14 @@ async fn apply_patch_multi_file() {
         .expect("patch applies");
 
     assert!(result.content.contains("2 files"));
-    assert!(tokio::fs::read_to_string(&file_a).await.unwrap().contains("gamma"));
-    assert!(tokio::fs::read_to_string(&file_b).await.unwrap().contains("three"));
+    assert!(tokio::fs::read_to_string(&file_a)
+        .await
+        .unwrap()
+        .contains("gamma"));
+    assert!(tokio::fs::read_to_string(&file_b)
+        .await
+        .unwrap()
+        .contains("three"));
 }
 
 #[tokio::test]
@@ -341,9 +400,7 @@ async fn apply_patch_fuzzy_offset() {
         .unwrap();
 
     let path = file.to_string_lossy();
-    let patch = format!(
-        "--- {path}\n+++ {path}\n@@ -1,3 +1,3 @@\n alpha\n-beta\n+BETA\n gamma\n",
-    );
+    let patch = format!("--- {path}\n+++ {path}\n@@ -1,3 +1,3 @@\n alpha\n-beta\n+BETA\n gamma\n",);
 
     let tool = ApplyPatchTool::new(Arc::new(StandardPlatform));
     let result = tool
@@ -352,7 +409,10 @@ async fn apply_patch_fuzzy_offset() {
         .expect("fuzzy patch applies");
 
     assert!(result.content.contains("Applied 1 hunks"));
-    assert!(tokio::fs::read_to_string(&file).await.unwrap().contains("BETA"));
+    assert!(tokio::fs::read_to_string(&file)
+        .await
+        .unwrap()
+        .contains("BETA"));
 }
 
 // --- Tool Registry Tests ---
@@ -373,7 +433,10 @@ fn core_tools_are_registered() {
     assert!(names.contains(&"bash"), "bash should be registered");
     assert!(names.contains(&"glob"), "glob should be registered");
     assert!(names.contains(&"grep"), "grep should be registered");
-    assert!(names.contains(&"apply_patch"), "apply_patch should be registered");
+    assert!(
+        names.contains(&"apply_patch"),
+        "apply_patch should be registered"
+    );
 }
 
 #[test]
@@ -385,15 +448,22 @@ fn default_tools_gives_6_tools() {
     register_default_tools(&mut registry, Arc::new(StandardPlatform));
 
     let all = registry.list_tools();
-    assert_eq!(all.len(), 6, "default tier should have exactly 6 tools, got: {:?}",
-        all.iter().map(|t| t.name.as_str()).collect::<Vec<_>>());
+    assert_eq!(
+        all.len(),
+        6,
+        "default tier should have exactly 6 tools, got: {:?}",
+        all.iter().map(|t| t.name.as_str()).collect::<Vec<_>>()
+    );
 
     let default_only = registry.list_tools_for_tiers(&[ToolTier::Default]);
     assert_eq!(default_only.len(), 6);
 
     let names: Vec<&str> = default_only.iter().map(|t| t.name.as_str()).collect();
     for expected in &["read", "write", "edit", "bash", "glob", "grep"] {
-        assert!(names.contains(expected), "{expected} should be in default tools");
+        assert!(
+            names.contains(expected),
+            "{expected} should be in default tools"
+        );
     }
 }
 
@@ -407,8 +477,12 @@ fn extended_registration_gives_all_13_tools() {
     register_extended_tools(&mut registry, Arc::new(StandardPlatform));
 
     let all = registry.list_tools();
-    assert_eq!(all.len(), 13, "default + extended should have 13 tools, got: {:?}",
-        all.iter().map(|t| t.name.as_str()).collect::<Vec<_>>());
+    assert_eq!(
+        all.len(),
+        13,
+        "default + extended should have 13 tools, got: {:?}",
+        all.iter().map(|t| t.name.as_str()).collect::<Vec<_>>()
+    );
 
     // Default tier only should still give 6
     let default_only = registry.list_tools_for_tiers(&[ToolTier::Default]);
@@ -424,8 +498,19 @@ fn extended_registration_gives_all_13_tools() {
 
     // Verify extended tools are present
     let ext_names: Vec<&str> = extended_only.iter().map(|t| t.name.as_str()).collect();
-    for expected in &["apply_patch", "web_fetch", "multiedit", "test_runner", "lint", "diagnostics", "git"] {
-        assert!(ext_names.contains(expected), "{expected} should be in extended tools");
+    for expected in &[
+        "apply_patch",
+        "web_fetch",
+        "multiedit",
+        "test_runner",
+        "lint",
+        "diagnostics",
+        "git",
+    ] {
+        assert!(
+            ext_names.contains(expected),
+            "{expected} should be in extended tools"
+        );
     }
 }
 
@@ -441,7 +526,10 @@ fn extended_tools_are_executable_regardless_of_tier_filter() {
     // Listing with default-only filter should not include apply_patch
     let default_only = registry.list_tools_for_tiers(&[ToolTier::Default]);
     let names: Vec<&str> = default_only.iter().map(|t| t.name.as_str()).collect();
-    assert!(!names.contains(&"apply_patch"), "apply_patch should not be in default-only listing");
+    assert!(
+        !names.contains(&"apply_patch"),
+        "apply_patch should not be in default-only listing"
+    );
 
     // But execute should still work for apply_patch (it's registered, just filtered from prompt)
     let tool_call = ava_types::ToolCall {
@@ -458,7 +546,10 @@ fn extended_tools_are_executable_regardless_of_tier_filter() {
         Ok(_) => {} // tool executed successfully (unlikely with invalid patch)
         Err(e) => {
             let msg = e.to_string();
-            assert!(!msg.contains("not found"), "apply_patch should be executable even when filtered from prompt, got: {msg}");
+            assert!(
+                !msg.contains("not found"),
+                "apply_patch should be executable even when filtered from prompt, got: {msg}"
+            );
         }
     }
 }
@@ -480,9 +571,19 @@ async fn read_large_file_truncates_at_default_limit() {
     // Should be capped at 2000 lines + truncation notice
     let output_lines: Vec<&str> = result.content.lines().collect();
     // 2000 content lines + 1 empty line + 1 truncation notice = ~2002
-    assert!(output_lines.len() <= 2003, "output should be ~2002 lines, got {}", output_lines.len());
-    assert!(result.content.contains("[Truncated:"), "should contain truncation notice");
-    assert!(result.content.contains("2000 lines"), "should mention 2000 lines");
+    assert!(
+        output_lines.len() <= 2003,
+        "output should be ~2002 lines, got {}",
+        output_lines.len()
+    );
+    assert!(
+        result.content.contains("[Truncated:"),
+        "should contain truncation notice"
+    );
+    assert!(
+        result.content.contains("2000 lines"),
+        "should mention 2000 lines"
+    );
 }
 
 #[tokio::test]
@@ -528,6 +629,21 @@ fn missing_tool_returns_tool_not_found_error() {
 #[test]
 fn tests_reference_tempfile_paths_as_expected() {
     assert!(Path::new(".").exists());
+}
+
+fn run_git(repo: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .output()
+        .expect("git command should run");
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 // --- Hashline Tests (integration) ---
@@ -630,7 +746,9 @@ async fn edit_tool_hashline_anchored_edit() {
 async fn edit_tool_stale_hashline_rejected() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("stale.txt");
-    tokio::fs::write(&path, "original line\n").await.expect("write");
+    tokio::fs::write(&path, "original line\n")
+        .await
+        .expect("write");
 
     let cache = hashline::new_cache();
     // Read to populate cache
@@ -644,7 +762,9 @@ async fn edit_tool_stale_hashline_rejected() {
         .expect("read executes");
 
     // Modify the file behind the cache's back
-    tokio::fs::write(&path, "modified line\n").await.expect("write");
+    tokio::fs::write(&path, "modified line\n")
+        .await
+        .expect("write");
 
     // Try to edit using stale hash
     let h = hashline::hash_line("original line");
@@ -674,7 +794,9 @@ async fn edit_tool_falls_back_without_hashes() {
     // When no hash prefixes are in old_text, normal edit cascade works
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("fallback.txt");
-    tokio::fs::write(&path, "hello world\n").await.expect("write");
+    tokio::fs::write(&path, "hello world\n")
+        .await
+        .expect("write");
 
     let cache = hashline::new_cache();
     let edit_tool = EditTool::new(Arc::new(StandardPlatform), cache);

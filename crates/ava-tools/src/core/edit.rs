@@ -8,12 +8,14 @@ use serde_json::{json, Value};
 
 use crate::core::hashline::{self, HashlineCache};
 use crate::edit::{EditEngine, EditRequest};
+use crate::git::GhostSnapshotter;
 use crate::registry::Tool;
 
 pub struct EditTool {
     platform: Arc<dyn Platform>,
     engine: EditEngine,
     hashline_cache: HashlineCache,
+    snapshotter: GhostSnapshotter,
 }
 
 impl EditTool {
@@ -22,6 +24,7 @@ impl EditTool {
             platform,
             engine: EditEngine::new(),
             hashline_cache,
+            snapshotter: GhostSnapshotter::new(),
         }
     }
 }
@@ -111,12 +114,22 @@ impl Tool for EditTool {
             (result.content, strategy)
         };
 
+        let snapshot_note = match self
+            .snapshotter
+            .snapshot_file_before_write(file_path, &original)
+            .await
+        {
+            Ok(Some(snapshot)) => format!("; ghost snapshot {}", snapshot.ref_name),
+            Ok(None) => String::new(),
+            Err(err) => format!("; ghost snapshot unavailable ({err})"),
+        };
+
         self.platform.write_file(file_path, &updated).await?;
 
         let change_lines = line_diff_count(&original, &updated);
         Ok(ToolResult {
             call_id: String::new(),
-            content: format!("Applied {strategy}; changed {change_lines} lines"),
+            content: format!("Applied {strategy}; changed {change_lines} lines{snapshot_note}"),
             is_error: false,
         })
     }
@@ -133,9 +146,10 @@ impl EditTool {
         path: &str,
         old_text: &str,
     ) -> ava_types::Result<Option<String>> {
-        let cache = self.hashline_cache.read().map_err(|e| {
-            AvaError::ToolError(format!("hashline cache lock poisoned: {e}"))
-        })?;
+        let cache = self
+            .hashline_cache
+            .read()
+            .map_err(|e| AvaError::ToolError(format!("hashline cache lock poisoned: {e}")))?;
 
         let path_buf = PathBuf::from(path);
         let entries = match cache.get(&path_buf) {
@@ -153,11 +167,9 @@ impl EditTool {
                 "Stale file: hash [{hash}] expected \"{expected}\" but file now has \"{actual}\". \
                  Re-read the file with hash_lines to get fresh hashes."
             ))),
-            Err(hashline::HashlineError::HashNotFound(hash)) => Err(AvaError::ToolError(
-                format!(
-                    "Hash [{hash}] not found in cache. Read the file with hash_lines first."
-                ),
-            )),
+            Err(hashline::HashlineError::HashNotFound(hash)) => Err(AvaError::ToolError(format!(
+                "Hash [{hash}] not found in cache. Read the file with hash_lines first."
+            ))),
         }
     }
 }

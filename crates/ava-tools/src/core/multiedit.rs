@@ -8,11 +8,13 @@ use ava_types::{AvaError, ToolResult};
 use serde_json::{json, Value};
 
 use crate::edit::{EditEngine, EditRequest};
+use crate::git::GhostSnapshotter;
 use crate::registry::Tool;
 
 pub struct MultiEditTool {
     platform: Arc<dyn Platform>,
     engine: EditEngine,
+    snapshotter: GhostSnapshotter,
 }
 
 impl MultiEditTool {
@@ -20,6 +22,7 @@ impl MultiEditTool {
         Self {
             platform,
             engine: EditEngine::new(),
+            snapshotter: GhostSnapshotter::new(),
         }
     }
 }
@@ -56,10 +59,9 @@ impl Tool for MultiEditTool {
     }
 
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
-        let edits = args
-            .get("edits")
-            .and_then(Value::as_array)
-            .ok_or_else(|| AvaError::ValidationError("missing required field: edits".to_string()))?;
+        let edits = args.get("edits").and_then(Value::as_array).ok_or_else(|| {
+            AvaError::ValidationError("missing required field: edits".to_string())
+        })?;
 
         if edits.is_empty() {
             return Err(AvaError::ValidationError(
@@ -74,12 +76,18 @@ impl Tool for MultiEditTool {
                 .get("path")
                 .and_then(Value::as_str)
                 .ok_or_else(|| AvaError::ValidationError("edit missing field: path".to_string()))?;
-            let old_text = edit.get("old_text").and_then(Value::as_str).ok_or_else(|| {
-                AvaError::ValidationError("edit missing field: old_text".to_string())
-            })?;
-            let new_text = edit.get("new_text").and_then(Value::as_str).ok_or_else(|| {
-                AvaError::ValidationError("edit missing field: new_text".to_string())
-            })?;
+            let old_text = edit
+                .get("old_text")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    AvaError::ValidationError("edit missing field: old_text".to_string())
+                })?;
+            let new_text = edit
+                .get("new_text")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    AvaError::ValidationError("edit missing field: new_text".to_string())
+                })?;
             parsed.push((path, old_text, new_text));
         }
 
@@ -106,7 +114,8 @@ impl Tool for MultiEditTool {
             // Validate each edit can be applied sequentially
             let mut working = content.clone();
             for (old_text, new_text) in edits_for_file {
-                let request = EditRequest::new(working.clone(), old_text.to_string(), new_text.to_string());
+                let request =
+                    EditRequest::new(working.clone(), old_text.to_string(), new_text.to_string());
                 match self.engine.apply(&request) {
                     Ok(result) => working = result.content,
                     Err(_) => {
@@ -134,11 +143,14 @@ impl Tool for MultiEditTool {
         // Apply pass: all edits validated, now apply and write
         let mut total_edits = 0usize;
         let file_count = by_file.len();
+        let mut snapshot_count = 0usize;
+        let mut snapshot_warnings: Vec<String> = Vec::new();
 
         for (path, edits_for_file) in &by_file {
-            let mut working = file_contents.remove(path).ok_or_else(|| {
+            let original = file_contents.remove(path).ok_or_else(|| {
                 AvaError::ToolError(format!("{path}: file content missing after validation"))
             })?;
+            let mut working = original.clone();
             for (old_text, new_text) in edits_for_file {
                 let request = EditRequest::new(working, old_text.to_string(), new_text.to_string());
                 let result = self.engine.apply(&request).map_err(|e| {
@@ -147,12 +159,34 @@ impl Tool for MultiEditTool {
                 working = result.content;
                 total_edits += 1;
             }
+            match self
+                .snapshotter
+                .snapshot_file_before_write(Path::new(path), &original)
+                .await
+            {
+                Ok(Some(_)) => snapshot_count += 1,
+                Ok(None) => {}
+                Err(err) => {
+                    snapshot_warnings.push(format!("{path}: {err}"));
+                }
+            }
             self.platform.write_file(Path::new(path), &working).await?;
         }
 
+        let snapshot_note = if snapshot_warnings.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "; ghost snapshot unavailable ({})",
+                snapshot_warnings.join("; ")
+            )
+        };
+
         Ok(ToolResult {
             call_id: String::new(),
-            content: format!("Applied {total_edits} edits across {file_count} files"),
+            content: format!(
+                "Applied {total_edits} edits across {file_count} files; ghost snapshots: {snapshot_count}{snapshot_note}"
+            ),
             is_error: false,
         })
     }

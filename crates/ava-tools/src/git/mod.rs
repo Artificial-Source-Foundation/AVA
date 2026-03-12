@@ -2,6 +2,10 @@ use serde::Deserialize;
 use thiserror::Error;
 use tokio::process::Command;
 
+mod snapshot;
+
+pub use snapshot::{GhostSnapshot, GhostSnapshotter, GHOST_SNAPSHOT_PREFIX};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitAction {
     Commit(Vec<String>),

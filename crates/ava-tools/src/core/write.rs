@@ -44,12 +44,9 @@ impl Tool for WriteTool {
             .get("path")
             .and_then(Value::as_str)
             .ok_or_else(|| AvaError::ValidationError("missing required field: path".to_string()))?;
-        let content = args
-            .get("content")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                AvaError::ValidationError("missing required field: content".to_string())
-            })?;
+        let content = args.get("content").and_then(Value::as_str).ok_or_else(|| {
+            AvaError::ValidationError("missing required field: content".to_string())
+        })?;
 
         let file_path = Path::new(path);
         if let Some(parent) = file_path.parent() {
@@ -58,6 +55,9 @@ impl Tool for WriteTool {
                 .map_err(|e| AvaError::IoError(e.to_string()))?;
         }
 
+        // B66 currently snapshots edit-heavy replacement flows (`edit`/`multiedit`).
+        // Plain `write` stays unsnapshotted in this conservative slice until we
+        // settle broader snapshot coverage and cleanup behavior.
         self.platform.write_file(file_path, content).await?;
 
         Ok(ToolResult {

@@ -2,11 +2,13 @@ use crate::edit::error::EditError;
 use crate::edit::request::EditRequest;
 
 mod advanced;
+mod relative_indent;
 
 pub use advanced::{
     BlockAnchorStrategy, IndentationAwareStrategy, LineNumberStrategy, MultiOccurrenceStrategy,
     RegexMatchStrategy, TokenBoundaryStrategy,
 };
+pub use relative_indent::RelativeIndentStrategy;
 
 pub trait EditStrategy: Send + Sync {
     fn name(&self) -> &'static str;

@@ -11,7 +11,7 @@ pub use request::EditRequest;
 pub use strategies::{
     BlockAnchorStrategy, EditStrategy, ExactMatchStrategy, FlexibleMatchStrategy,
     IndentationAwareStrategy, LineNumberStrategy, MultiOccurrenceStrategy, RegexMatchStrategy,
-    TokenBoundaryStrategy,
+    RelativeIndentStrategy, TokenBoundaryStrategy,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +30,7 @@ impl Default for EditEngine {
             strategies: vec![
                 Box::new(ExactMatchStrategy),
                 Box::new(FlexibleMatchStrategy),
+                Box::new(RelativeIndentStrategy),
                 Box::new(BlockAnchorStrategy),
                 Box::new(RegexMatchStrategy),
                 Box::new(FuzzyMatchStrategy::new()),
@@ -69,9 +70,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn engine_has_nine_strategies() {
+    fn engine_has_ten_strategies() {
         let engine = EditEngine::new();
-        assert_eq!(engine.strategy_count(), 9);
+        assert_eq!(engine.strategy_count(), 10);
     }
 
     #[test]

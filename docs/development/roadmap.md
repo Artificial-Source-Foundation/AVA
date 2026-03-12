@@ -1,6 +1,6 @@
 # AVA Sprint Roadmap
 
-> Last updated: 2026-03-09 (Sprint 59 complete)
+> Last updated: 2026-03-11 (Sprint 60 in progress, B34 implemented)
 
 ## Completed (Sprints 11–59)
 
@@ -67,6 +67,7 @@
 ### Sprint 60 Completed Items
 
 - **Project instructions system** — auto-discovers `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`, `~/.ava/AGENTS.md`, `.ava/rules/*.md` and injects into system prompt (`crates/ava-agent/src/instructions.rs`)
+- **B34: Three-tier mid-stream messaging** — `MessageQueue` with steering/follow-up/post-complete pipelines (12 tests). Agent loop polls steering between tool calls, skips remaining tools on steer. Follow-up loop after task. Post-complete grouped pipeline (G1, G2, G3...) after all work. TUI keybinds: Enter=steer, Alt+Enter=follow-up, Ctrl+Alt+Enter=post-complete. CLI flags: `--follow-up`, `--later`, `--later-group`. Slash commands: `/later`, `/queue`.
 
 ## Status: v2.1 Released + Active Development
 

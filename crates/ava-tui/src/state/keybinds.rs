@@ -25,6 +25,10 @@ pub enum Action {
     VoiceToggle,
     CopyLastResponse,
     BackgroundAgent,
+    /// Submit a follow-up message (Tier 2) while the agent is running.
+    SubmitFollowUp,
+    /// Submit a post-complete message (Tier 3) while the agent is running.
+    SubmitPostComplete,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,5 +124,19 @@ pub fn default_keybinds() -> HashMap<Action, Vec<KeyBinding>> {
         (Action::VoiceToggle, vec![ctrl('v')]),
         (Action::CopyLastResponse, vec![ctrl('y')]),
         (Action::BackgroundAgent, vec![ctrl('b')]),
+        (
+            Action::SubmitFollowUp,
+            vec![KeyBinding {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::ALT,
+            }],
+        ),
+        (
+            Action::SubmitPostComplete,
+            vec![KeyBinding {
+                code: KeyCode::Enter,
+                modifiers: KeyModifiers::ALT.union(KeyModifiers::CONTROL),
+            }],
+        ),
     ])
 }

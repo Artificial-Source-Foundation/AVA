@@ -568,7 +568,7 @@ async fn run_single_task(
     let start = Instant::now();
     let handle = tokio::spawn(async move {
         stack
-            .run(&goal, effective_turns, Some(tx), cancel, Vec::new())
+            .run(&goal, effective_turns, Some(tx), cancel, Vec::new(), None)
             .await
     });
 
@@ -737,7 +737,7 @@ fn extract_code(output: &str, language: Language) -> Option<String> {
     // Try language-specific fenced blocks first
     for tag in lang_tags {
         let pattern = format!(r"(?s)```{}\s*\n(.*?)```", tag);
-        if let Some(re) = Regex::new(&pattern).ok() {
+        if let Ok(re) = Regex::new(&pattern) {
             if let Some(cap) = re.captures(output) {
                 return Some(cap[1].to_string());
             }

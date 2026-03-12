@@ -198,6 +198,103 @@ impl App {
                     ))
                 }
             }
+            "/credentials" => {
+                match arg {
+                    Some("list") | None => {
+                        let result = tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(async {
+                                let store = ava_config::CredentialStore::load_default()
+                                    .await
+                                    .unwrap_or_default();
+                                ava_config::execute_credential_command(
+                                    ava_config::CredentialCommand::List,
+                                    &mut store.clone(),
+                                )
+                                .await
+                            })
+                        });
+                        match result {
+                            Ok(msg) => Some((MessageKind::System, format!("Credentials:\n{msg}"))),
+                            Err(err) => Some((MessageKind::Error, format!("Failed: {err}"))),
+                        }
+                    }
+                    Some(sub) if sub.starts_with("add ") || sub.starts_with("set ") => {
+                        let rest = sub.split_once(' ').map(|x| x.1).unwrap_or("");
+                        let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+                        if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+                            let provider = parts[0].to_lowercase();
+                            let api_key = parts[1].to_string();
+                            let result = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current().block_on(async {
+                                    let mut store = ava_config::CredentialStore::load_default()
+                                        .await
+                                        .unwrap_or_default();
+                                    ava_config::execute_credential_command(
+                                        ava_config::CredentialCommand::Set {
+                                            provider,
+                                            api_key,
+                                            base_url: None,
+                                        },
+                                        &mut store,
+                                    )
+                                    .await
+                                })
+                            });
+                            match result {
+                                Ok(msg) => {
+                                    self.set_status(&msg, StatusLevel::Info);
+                                    Some((MessageKind::System, msg))
+                                }
+                                Err(err) => {
+                                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                                    Some((MessageKind::Error, format!("Failed: {err}")))
+                                }
+                            }
+                        } else {
+                            Some((
+                                MessageKind::Error,
+                                "Usage: /credentials add <provider> <api_key>".to_string(),
+                            ))
+                        }
+                    }
+                    Some(sub) if sub.starts_with("remove ") || sub.starts_with("rm ") => {
+                        let provider = sub.split_once(' ').map(|x| x.1).unwrap_or("").trim().to_lowercase();
+                        if provider.is_empty() {
+                            Some((
+                                MessageKind::Error,
+                                "Usage: /credentials remove <provider>".to_string(),
+                            ))
+                        } else {
+                            let result = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current().block_on(async {
+                                    let mut store = ava_config::CredentialStore::load_default()
+                                        .await
+                                        .unwrap_or_default();
+                                    ava_config::execute_credential_command(
+                                        ava_config::CredentialCommand::Remove { provider },
+                                        &mut store,
+                                    )
+                                    .await
+                                })
+                            });
+                            match result {
+                                Ok(msg) => {
+                                    self.set_status(&msg, StatusLevel::Info);
+                                    Some((MessageKind::System, msg))
+                                }
+                                Err(err) => {
+                                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                                    Some((MessageKind::Error, format!("Failed: {err}")))
+                                }
+                            }
+                        }
+                    }
+                    Some(sub) => Some((
+                        MessageKind::Error,
+                        format!("Unknown /credentials subcommand: {sub}. Use: list, add <provider> <key>, remove <provider>"),
+                    )),
+                }
+            }
             "/status" => {
                 let model = self.state.agent.current_model_display();
                 let tokens_in = self.state.agent.tokens_used.input;
@@ -385,6 +482,7 @@ Available commands:
   /connect [provider]      — add provider credentials
   /providers               — show provider status
   /disconnect <provider>   — remove provider credentials
+  /credentials [list|add|remove] — manage provider API keys (redacted)
   /tools                   — list all tools
   /tools reload            — reload tools from disk
   /tools init              — create tool templates
@@ -458,6 +556,51 @@ Keyboard shortcuts:
             "/tasks" => {
                 self.state.active_modal = Some(super::ModalType::TaskList);
                 None
+            }
+            "/later" => {
+                if let Some(text) = arg {
+                    if text.is_empty() {
+                        Some((MessageKind::Error, "Usage: /later <message> — queue a post-complete message".to_string()))
+                    } else {
+                        // Parse optional group: /later 2 message
+                        let (group, message) = if let Some(rest) = text.strip_prefix(|c: char| c.is_ascii_digit()) {
+                            let num_str = format!("{}{}", &text[..1], rest.chars().take_while(|c| c.is_ascii_digit()).collect::<String>());
+                            let after = text[num_str.len()..].trim();
+                            if after.is_empty() {
+                                (1, text.to_string()) // Just a number, treat as message
+                            } else {
+                                (num_str.parse().unwrap_or(1), after.to_string())
+                            }
+                        } else {
+                            (1, text.to_string())
+                        };
+                        self.send_queued_message(message, ava_types::MessageTier::PostComplete { group });
+                        None // send_queued_message already displays the message
+                    }
+                } else {
+                    Some((MessageKind::Error, "Usage: /later <message> — queue a post-complete message".to_string()))
+                }
+            }
+            "/queue" => {
+                if self.state.input.queue_display.is_empty() {
+                    Some((MessageKind::System, "No messages queued.".to_string()))
+                } else {
+                    let mut lines = Vec::new();
+                    for item in &self.state.input.queue_display.items {
+                        let badge = match &item.tier {
+                            ava_types::MessageTier::Steering => "[S]".to_string(),
+                            ava_types::MessageTier::FollowUp => "[F]".to_string(),
+                            ava_types::MessageTier::PostComplete { group } => format!("[G{group}]"),
+                        };
+                        let truncated = if item.text.len() > 60 {
+                            format!("{}...", &item.text[..57])
+                        } else {
+                            item.text.clone()
+                        };
+                        lines.push(format!("{badge} {truncated}"));
+                    }
+                    Some((MessageKind::System, format!("Queued messages:\n{}", lines.join("\n"))))
+                }
             }
             _ => {
                 // Check custom commands before reporting unknown
@@ -1042,7 +1185,7 @@ Keyboard shortcuts:
         // Stage 2: Sliding window -- drop oldest messages that don't fit
         let condensed = SlidingWindowStrategy
             .condense(&truncated, target_tokens)
-            .unwrap_or_else(|_| truncated);
+            .unwrap_or(truncated);
 
         // If focus keywords are provided, check which messages to preserve.
         // We keep any message whose content contains a focus keyword, even if

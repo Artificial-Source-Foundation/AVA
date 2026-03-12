@@ -1,7 +1,6 @@
 pub mod apply_patch;
 pub mod bash;
-// codebase_search: source retained but not compiled (crate dep removed)
-// pub mod codebase_search;
+pub mod claude_code;
 pub mod custom_tool;
 pub mod diagnostics;
 pub mod edit;
@@ -9,15 +8,9 @@ pub mod git_read;
 pub mod glob;
 pub mod grep;
 pub mod lint;
-// memory: source retained but not compiled (crate dep removed)
-// pub mod memory;
 pub mod multiedit;
 pub mod question;
 pub mod read;
-// session_ops: source retained but not compiled (crate dep removed)
-// pub mod session_ops;
-// session_search: source retained but not compiled (crate dep removed)
-// pub mod session_search;
 pub mod task;
 pub mod test_runner;
 pub mod todo;
@@ -64,6 +57,17 @@ pub fn register_question_tool(
     bridge: question::QuestionBridge,
 ) {
     registry.register(question::QuestionTool::new(bridge));
+}
+
+/// Register the claude_code tool with the given configuration.
+///
+/// Always registers the tool; `execute()` returns a clear error if the
+/// `claude` binary is not installed.
+pub fn register_claude_code_tool(
+    registry: &mut ToolRegistry,
+    config: ava_config::ClaudeCodeConfig,
+) {
+    registry.register(claude_code::ClaudeCodeTool::new(config));
 }
 
 pub fn register_custom_tools(registry: &mut ToolRegistry, dirs: &[std::path::PathBuf]) {

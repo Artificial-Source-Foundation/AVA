@@ -71,7 +71,9 @@ async fn run_with_timeout(
     let goal = goal.to_string();
 
     let handle = tokio::spawn(async move {
-        stack.run(&goal, MAX_TURNS, Some(tx), cancel, Vec::new()).await
+        stack
+            .run(&goal, MAX_TURNS, Some(tx), cancel, Vec::new(), None)
+            .await
     });
 
     let mut events = Vec::new();
@@ -85,14 +87,11 @@ async fn run_with_timeout(
         .await
         .ok(); // timeout just stops collection
 
-    let result = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        handle,
-    )
-    .await
-    .expect("Agent task timed out")
-    .expect("Agent task panicked")
-    .expect("Agent run failed");
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), handle)
+        .await
+        .expect("Agent task timed out")
+        .expect("Agent task panicked")
+        .expect("Agent run failed");
 
     (result, events)
 }
@@ -111,7 +110,9 @@ fn collect_text(events: &[AgentEvent]) -> String {
 
 /// Check if any ToolCall event matches a tool name.
 fn has_tool_call(events: &[AgentEvent], tool_name: &str) -> bool {
-    events.iter().any(|e| matches!(e, AgentEvent::ToolCall(tc) if tc.name == tool_name))
+    events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::ToolCall(tc) if tc.name == tool_name))
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -119,11 +120,18 @@ fn has_tool_call(events: &[AgentEvent], tool_name: &str) -> bool {
 #[tokio::test]
 async fn e2e_simple_question() {
     let key = require_api_key();
-    if key.is_empty() { return; }
+    if key.is_empty() {
+        return;
+    }
 
     let temp = tempfile::tempdir().unwrap();
     let stack = create_test_stack(temp.path(), &key).await;
-    let (result, events) = run_with_timeout(stack, "What is 2+2? Answer with just the number.", TIMEOUT_SECS).await;
+    let (result, events) = run_with_timeout(
+        stack,
+        "What is 2+2? Answer with just the number.",
+        TIMEOUT_SECS,
+    )
+    .await;
 
     assert!(result.success);
     let text = collect_text(&events);
@@ -133,7 +141,9 @@ async fn e2e_simple_question() {
 #[tokio::test]
 async fn e2e_read_file() {
     let key = require_api_key();
-    if key.is_empty() { return; }
+    if key.is_empty() {
+        return;
+    }
 
     let temp = tempfile::tempdir().unwrap();
     let stack = create_test_stack(temp.path(), &key).await;
@@ -150,18 +160,23 @@ async fn e2e_read_file() {
 #[tokio::test]
 async fn e2e_write_file() {
     let key = require_api_key();
-    if key.is_empty() { return; }
+    if key.is_empty() {
+        return;
+    }
 
     let uuid = Uuid::new_v4();
     let path = format!("/tmp/ava-e2e-{uuid}.txt");
 
     let temp = tempfile::tempdir().unwrap();
     let stack = create_test_stack(temp.path(), &key).await;
-    let goal = format!("Create the file {path} with the exact content 'hello from ava'. Use the write tool.");
+    let goal = format!(
+        "Create the file {path} with the exact content 'hello from ava'. Use the write tool."
+    );
     let (result, _events) = run_with_timeout(stack, &goal, TIMEOUT_SECS).await;
 
     assert!(result.success);
-    let content = tokio::fs::read_to_string(&path).await
+    let content = tokio::fs::read_to_string(&path)
+        .await
         .unwrap_or_else(|_| panic!("File {path} should exist"));
     assert!(
         content.contains("hello from ava"),
@@ -175,7 +190,9 @@ async fn e2e_write_file() {
 #[tokio::test]
 async fn e2e_edit_file() {
     let key = require_api_key();
-    if key.is_empty() { return; }
+    if key.is_empty() {
+        return;
+    }
 
     let uuid = Uuid::new_v4();
     let path = format!("/tmp/ava-e2e-edit-{uuid}.txt");
@@ -188,7 +205,8 @@ async fn e2e_edit_file() {
     let (result, _events) = run_with_timeout(stack, &goal, TIMEOUT_SECS).await;
 
     assert!(result.success);
-    let content = tokio::fs::read_to_string(&path).await
+    let content = tokio::fs::read_to_string(&path)
+        .await
         .unwrap_or_else(|_| panic!("File {path} should exist"));
     assert!(
         content.contains("bar"),
@@ -202,7 +220,9 @@ async fn e2e_edit_file() {
 #[tokio::test]
 async fn e2e_glob() {
     let key = require_api_key();
-    if key.is_empty() { return; }
+    if key.is_empty() {
+        return;
+    }
 
     let temp = tempfile::tempdir().unwrap();
     let stack = create_test_stack(temp.path(), &key).await;
@@ -210,7 +230,8 @@ async fn e2e_glob() {
         stack,
         "Use the glob tool to list all Cargo.toml files under the crates/ directory. Be brief.",
         TIMEOUT_SECS,
-    ).await;
+    )
+    .await;
 
     assert!(result.success);
     assert!(has_tool_call(&events, "glob"), "Expected glob tool call");
@@ -224,7 +245,9 @@ async fn e2e_glob() {
 #[tokio::test]
 async fn e2e_grep() {
     let key = require_api_key();
-    if key.is_empty() { return; }
+    if key.is_empty() {
+        return;
+    }
 
     let temp = tempfile::tempdir().unwrap();
     let stack = create_test_stack(temp.path(), &key).await;
@@ -246,7 +269,9 @@ async fn e2e_grep() {
 #[tokio::test]
 async fn e2e_bash() {
     let key = require_api_key();
-    if key.is_empty() { return; }
+    if key.is_empty() {
+        return;
+    }
 
     let temp = tempfile::tempdir().unwrap();
     let stack = create_test_stack(temp.path(), &key).await;
@@ -254,7 +279,8 @@ async fn e2e_bash() {
         stack,
         "Run this bash command: echo 'ava-e2e-test'. Tell me the output.",
         TIMEOUT_SECS,
-    ).await;
+    )
+    .await;
 
     assert!(result.success);
     assert!(has_tool_call(&events, "bash"), "Expected bash tool call");
@@ -268,7 +294,9 @@ async fn e2e_bash() {
 #[tokio::test]
 async fn e2e_multi_tool() {
     let key = require_api_key();
-    if key.is_empty() { return; }
+    if key.is_empty() {
+        return;
+    }
 
     let temp = tempfile::tempdir().unwrap();
     let stack = create_test_stack(temp.path(), &key).await;
@@ -276,11 +304,15 @@ async fn e2e_multi_tool() {
         stack,
         "First read Cargo.toml, then use grep to search for 'ava' in it. Summarize briefly.",
         TIMEOUT_SECS,
-    ).await;
+    )
+    .await;
 
     assert!(result.success);
     // Should have used at least one tool
-    let tool_calls: Vec<_> = events.iter().filter(|e| matches!(e, AgentEvent::ToolCall(_))).collect();
+    let tool_calls: Vec<_> = events
+        .iter()
+        .filter(|e| matches!(e, AgentEvent::ToolCall(_)))
+        .collect();
     assert!(
         !tool_calls.is_empty(),
         "Expected at least 1 tool call, got {}",
@@ -295,7 +327,9 @@ async fn e2e_multi_tool() {
 #[tokio::test]
 async fn e2e_session_saved() {
     let key = require_api_key();
-    if key.is_empty() { return; }
+    if key.is_empty() {
+        return;
+    }
 
     let temp = tempfile::tempdir().unwrap();
     let stack = create_test_stack(temp.path(), &key).await;
@@ -307,20 +341,23 @@ async fn e2e_session_saved() {
     assert!(result.success);
 
     // Save the session (run() doesn't auto-save)
-    session_mgr.save(&result.session).expect("Failed to save session");
+    session_mgr
+        .save(&result.session)
+        .expect("Failed to save session");
 
-    let recent = session_mgr.list_recent(10).expect("Failed to list sessions");
-    assert!(
-        !recent.is_empty(),
-        "Expected at least one saved session"
-    );
+    let recent = session_mgr
+        .list_recent(10)
+        .expect("Failed to list sessions");
+    assert!(!recent.is_empty(), "Expected at least one saved session");
     assert_eq!(recent[0].id, result.session.id);
 }
 
 #[tokio::test]
 async fn e2e_cost_tracking() {
     let key = require_api_key();
-    if key.is_empty() { return; }
+    if key.is_empty() {
+        return;
+    }
 
     let temp = tempfile::tempdir().unwrap();
     let stack = create_test_stack(temp.path(), &key).await;
@@ -333,14 +370,19 @@ async fn e2e_cost_tracking() {
     assert!(
         !usage_events.is_empty(),
         "Expected at least one TokenUsage event, got events: {:?}",
-        events.iter().map(std::mem::discriminant).collect::<Vec<_>>()
+        events
+            .iter()
+            .map(std::mem::discriminant)
+            .collect::<Vec<_>>()
     );
 }
 
 #[tokio::test]
 async fn e2e_completion() {
     let key = require_api_key();
-    if key.is_empty() { return; }
+    if key.is_empty() {
+        return;
+    }
 
     let temp = tempfile::tempdir().unwrap();
     let stack = create_test_stack(temp.path(), &key).await;

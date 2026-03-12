@@ -19,6 +19,26 @@ pub use session::Session;
 pub use todo::{TodoItem, TodoPriority, TodoState, TodoStatus};
 pub use tool::{Tool, ToolCall, ToolResult};
 
+// --- Mid-stream messaging types ---
+
+/// Tier classification for messages sent while the agent is running.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MessageTier {
+    /// Tier 1: High-priority steering — injected after current tool, skips remaining tools.
+    Steering,
+    /// Tier 2: Follow-up — injected after agent finishes current task.
+    FollowUp,
+    /// Tier 3: Post-complete — runs in grouped pipeline stages after agent says "done".
+    PostComplete { group: u32 },
+}
+
+/// A user message queued for delivery to the agent while it is running.
+#[derive(Debug, Clone)]
+pub struct QueuedMessage {
+    pub text: String,
+    pub tier: MessageTier,
+}
+
 /// Token usage reported by an LLM provider after a request.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TokenUsage {

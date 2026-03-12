@@ -1,5 +1,5 @@
-/// Rewind system — allows users to revert conversation and/or file changes
-/// to any previous checkpoint (created at each user message submission).
+//! Rewind system — allows users to revert conversation and/or file changes
+//! to any previous checkpoint (created at each user message submission).
 
 /// Tracks what kind of change was made to a file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,7 +84,7 @@ impl RewindOption {
 }
 
 /// State for the rewind modal and checkpoint tracking.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct RewindState {
     /// All checkpoints created during this session.
     pub checkpoints: Vec<Checkpoint>,
@@ -92,16 +92,6 @@ pub struct RewindState {
     pub active: bool,
     /// Which of the 5 options is currently selected (0-4).
     pub selected_option: usize,
-}
-
-impl Default for RewindState {
-    fn default() -> Self {
-        Self {
-            checkpoints: Vec::new(),
-            active: false,
-            selected_option: 0,
-        }
-    }
 }
 
 impl RewindState {

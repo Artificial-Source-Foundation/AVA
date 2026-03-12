@@ -91,6 +91,18 @@ pub struct CliArgs {
     #[arg(long)]
     pub import_polyglot: Option<String>,
 
+    /// Follow-up messages to run after the main task completes (Tier 2, repeatable)
+    #[arg(long = "follow-up")]
+    pub follow_up: Vec<String>,
+
+    /// Post-complete messages to run after everything (Tier 3, auto-assigns groups)
+    #[arg(long)]
+    pub later: Vec<String>,
+
+    /// Post-complete messages with explicit group numbers: --later-group 1 "review code"
+    #[arg(long = "later-group", num_args = 2, value_names = ["GROUP", "MESSAGE"])]
+    pub later_group: Vec<String>,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }

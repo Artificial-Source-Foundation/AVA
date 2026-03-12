@@ -1,6 +1,6 @@
 use crate::event::AppEvent;
 use ava_agent::stack::{AgentRunResult, AgentStack, AgentStackConfig};
-use ava_types::ThinkingLevel;
+use ava_types::{QueuedMessage, ThinkingLevel};
 use color_eyre::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -28,6 +28,8 @@ pub struct SubAgentInfo {
     pub session_id: Option<String>,
     /// The sub-agent's full conversation as UI messages (set on completion).
     pub session_messages: Vec<crate::state::messages::UiMessage>,
+    /// Provider powering this sub-agent (e.g. "claude-code"). `None` means native AVA.
+    pub provider: Option<String>,
 }
 
 /// Agent execution mode — determines tool access and prompt behavior.
@@ -115,6 +117,9 @@ pub struct AgentState {
     pub sub_agents: Vec<SubAgentInfo>,
     cancel: Option<CancellationToken>,
     task: Option<tokio::task::JoinHandle<()>>,
+    /// Sender for mid-stream user messages (steering, follow-up, post-complete).
+    /// Set when the agent is started; cleared when it finishes.
+    pub message_tx: Option<mpsc::UnboundedSender<QueuedMessage>>,
 }
 
 /// Look up context window for a model from the compiled-in registry.
@@ -183,6 +188,7 @@ impl AgentState {
             sub_agents: Vec::new(),
             cancel: None,
             task: None,
+            message_tx: None,
         }, question_rx))
     }
 
@@ -223,12 +229,16 @@ impl AgentState {
         self.max_turns = max_turns;
         self.activity = AgentActivity::Thinking;
 
+        // Create message queue for mid-stream messaging
+        let (message_queue, message_sender) = stack.create_message_queue();
+        self.message_tx = Some(message_sender);
+
         self.task = Some(tokio::spawn(async move {
             // Set parent session ID so sub-agents can link back to this session
             if let Some(pid) = parent_session_id {
                 *stack.parent_session_id.write().await = Some(pid);
             }
-            let result = stack.run(&goal, max_turns, Some(agent_tx), run_cancel, history).await;
+            let result = stack.run(&goal, max_turns, Some(agent_tx), run_cancel, history, Some(message_queue)).await;
             let mapped = result.map_err(|err| err.to_string());
             let _ = app_tx.send(AppEvent::AgentDone(mapped));
         }));
@@ -244,6 +254,7 @@ impl AgentState {
         }
         self.is_running = false;
         self.activity = AgentActivity::Idle;
+        self.message_tx = None;
     }
 
     pub fn finish(&mut self, _result: &AgentRunResult) {
@@ -251,6 +262,7 @@ impl AgentState {
         self.activity = AgentActivity::Idle;
         self.cancel = None;
         self.task = None;
+        self.message_tx = None;
     }
 
     /// Switch model at runtime. Returns Ok(description) or Err(message).
@@ -382,6 +394,7 @@ impl AgentState {
             sub_agents: Vec::new(),
             cancel: None,
             task: None,
+            message_tx: None,
         }
     }
 

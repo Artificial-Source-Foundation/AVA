@@ -18,6 +18,3 @@ pub use pool::ConnectionPool;
 pub use provider::LLMProvider;
 pub use router::{ModelRouter, ProviderFactory};
 
-pub fn healthcheck() -> bool {
-    true
-}

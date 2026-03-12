@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_codebase::indexer::index_project;
-use ava_context::{create_condenser, CondenserConfig, create_hybrid_condenser};
+use ava_context::{create_condenser, create_hybrid_condenser, CondenserConfig};
 use ava_llm::providers::MockProvider;
 use ava_llm::ConnectionPool;
 use ava_platform::StandardPlatform;
@@ -106,10 +106,8 @@ async fn bench_codebase_indexing() {
 
 #[tokio::test]
 async fn bench_session_create_and_list() {
-    let db_path = std::env::temp_dir().join(format!(
-        "ava-bench-session-{}.sqlite",
-        uuid::Uuid::new_v4()
-    ));
+    let db_path =
+        std::env::temp_dir().join(format!("ava-bench-session-{}.sqlite", uuid::Uuid::new_v4()));
     let manager = SessionManager::new(&db_path).expect("session manager");
 
     let start = Instant::now();
@@ -168,9 +166,9 @@ async fn bench_connection_pool() {
     let pool = ConnectionPool::new();
 
     let start = Instant::now();
-    pool.get_client("https://api.anthropic.com").await;
-    pool.get_client("https://api.openai.com").await;
-    pool.get_client("https://openrouter.ai/api").await;
+    let _ = pool.get_client("https://api.anthropic.com").await;
+    let _ = pool.get_client("https://api.openai.com").await;
+    let _ = pool.get_client("https://openrouter.ai/api").await;
     let elapsed = start.elapsed();
 
     println!("[bench] connection_pool: {elapsed:?} (3 clients created)");

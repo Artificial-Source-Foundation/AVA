@@ -24,16 +24,3 @@ pub struct CodebaseIndex {
     pub pagerank: HashMap<String, f64>,
 }
 
-pub fn healthcheck() -> bool {
-    true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn healthcheck_returns_true() {
-        assert!(healthcheck());
-    }
-}

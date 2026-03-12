@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
         let director_spec = ava_tui::benchmark_harness::parse_single_model_spec(director_str)?;
         let worker_spec = ava_tui::benchmark_harness::parse_single_model_spec(worker_str)?;
         let suite =
-            ava_tui::benchmark_tasks::BenchmarkSuite::from_str(&cli.suite).unwrap_or_else(|| {
+            ava_tui::benchmark_tasks::BenchmarkSuite::parse_str(&cli.suite).unwrap_or_else(|| {
                 eprintln!(
                     "Warning: unknown suite '{}', defaulting to 'all'",
                     cli.suite
@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
         )?;
         let judge_specs = benchmark::parse_judge_specs(cli.judges.as_deref())?;
         let suite =
-            ava_tui::benchmark_tasks::BenchmarkSuite::from_str(&cli.suite).unwrap_or_else(|| {
+            ava_tui::benchmark_tasks::BenchmarkSuite::parse_str(&cli.suite).unwrap_or_else(|| {
                 eprintln!(
                     "Warning: unknown suite '{}', defaulting to 'all'",
                     cli.suite

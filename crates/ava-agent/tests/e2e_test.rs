@@ -50,7 +50,7 @@ async fn full_agent_run_with_tool_calls() {
     let cancel = CancellationToken::new();
     let (tx, mut rx) = mpsc::unbounded_channel();
     let result = stack
-        .run("Read hello.txt and write output", 10, Some(tx), cancel, Vec::new())
+        .run("Read hello.txt and write output", 10, Some(tx), cancel, Vec::new(), None)
         .await
         .expect("run should succeed");
 
@@ -86,7 +86,7 @@ async fn agent_run_with_bash_tool() {
     .expect("stack init should succeed");
 
     let result = stack
-        .run("run bash", 10, None, CancellationToken::new(), Vec::new())
+        .run("run bash", 10, None, CancellationToken::new(), Vec::new(), None)
         .await
         .expect("run should succeed");
     assert!(result.success);
@@ -121,7 +121,7 @@ async fn agent_run_cancellation() {
     });
 
     let err = stack
-        .run("slow run", 5, None, cancel, Vec::new())
+        .run("slow run", 5, None, cancel, Vec::new(), None)
         .await
         .expect_err("run should be cancelled");
     assert!(matches!(err, AvaError::Cancelled));

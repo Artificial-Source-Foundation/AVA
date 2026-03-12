@@ -123,9 +123,10 @@ pub struct QuestionState {
 }
 
 /// Determines which conversation is displayed in the message list.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ViewMode {
     /// Show the main conversation.
+    #[default]
     Main,
     /// Show a sub-agent's conversation.
     SubAgent {
@@ -141,12 +142,6 @@ pub enum ViewMode {
         /// Goal description for the header breadcrumb.
         goal: String,
     },
-}
-
-impl Default for ViewMode {
-    fn default() -> Self {
-        Self::Main
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -558,7 +553,7 @@ impl App {
             });
 
             let result = stack
-                .run(&goal, max_turns, Some(agent_event_tx), cancel, Vec::new())
+                .run(&goal, max_turns, Some(agent_event_tx), cancel, Vec::new(), None)
                 .await;
 
             // Wait for collector to drain
@@ -619,12 +614,6 @@ impl App {
         } else {
             false
         }
-    }
-
-    /// Return to the main conversation view.
-    pub(crate) fn exit_sub_agent_view(&mut self) {
-        self.state.view_mode = ViewMode::Main;
-        self.state.messages.reset_scroll();
     }
 
     /// Copy the last assistant message content to the system clipboard.
@@ -1290,6 +1279,8 @@ impl App {
                     // OpenCode-style: Ctrl+C cancels agent → clears input → quits if empty
                     if self.state.agent.is_running {
                         self.state.agent.abort();
+                        // Clear steering from queue display, but keep follow-up and post-complete
+                        self.state.input.queue_display.clear_steering();
                     } else if !self.state.input.buffer.is_empty() {
                         self.state.input.clear();
                     } else {
@@ -1399,6 +1390,30 @@ impl App {
                         self.set_status("No running agent to background (use /bg <goal>)", StatusLevel::Warn);
                     }
                 }
+                Action::SubmitFollowUp => {
+                    if self.state.agent.is_running {
+                        if let Some(text) = self.state.input.submit() {
+                            self.send_queued_message(text, ava_types::MessageTier::FollowUp);
+                        }
+                    } else {
+                        // When not running, Alt+Enter inserts newline
+                        self.state.input.insert_char('\n');
+                    }
+                }
+                Action::SubmitPostComplete => {
+                    if self.state.agent.is_running {
+                        if let Some(text) = self.state.input.submit() {
+                            // Auto-assign to current group
+                            let group = self.state.agent.message_tx
+                                .as_ref()
+                                .map(|_| 1u32) // Default group 1
+                                .unwrap_or(1);
+                            self.send_queued_message(text, ava_types::MessageTier::PostComplete { group });
+                        }
+                    } else {
+                        self.set_status("No running agent — post-complete messages require a running agent", StatusLevel::Warn);
+                    }
+                }
                 _ => {}
             }
             return false;
@@ -1465,25 +1480,31 @@ impl App {
         // Handle normal input
         match key.code {
             KeyCode::Enter if key.modifiers == KeyModifiers::NONE => {
-                // If input is empty and there are completed sub-agents, enter the
-                // last one's conversation view.
-                if self.state.input.buffer.is_empty()
-                    && !self.state.agent.is_running
-                    && matches!(self.state.view_mode, ViewMode::Main)
-                {
-                    let last_completed = self
-                        .state
-                        .agent
-                        .sub_agents
-                        .iter()
-                        .rposition(|sa| !sa.is_running && !sa.session_messages.is_empty());
-                    if let Some(idx) = last_completed {
-                        self.enter_sub_agent_view(idx);
-                        return false;
+                if self.state.agent.is_running {
+                    // Tier 1: Steering — inject after current tool, skip remaining
+                    if let Some(text) = self.state.input.submit() {
+                        self.send_queued_message(text, ava_types::MessageTier::Steering);
                     }
-                }
-                if let Some(goal) = self.state.input.submit() {
-                    self.submit_goal(goal, app_tx, agent_tx);
+                } else {
+                    // If input is empty and there are completed sub-agents, enter the
+                    // last one's conversation view.
+                    if self.state.input.buffer.is_empty()
+                        && matches!(self.state.view_mode, ViewMode::Main)
+                    {
+                        let last_completed = self
+                            .state
+                            .agent
+                            .sub_agents
+                            .iter()
+                            .rposition(|sa| !sa.is_running && !sa.session_messages.is_empty());
+                        if let Some(idx) = last_completed {
+                            self.enter_sub_agent_view(idx);
+                            return false;
+                        }
+                    }
+                    if let Some(goal) = self.state.input.submit() {
+                        self.submit_goal(goal, app_tx, agent_tx);
+                    }
                 }
             }
             KeyCode::Enter => self.state.input.insert_char('\n'),

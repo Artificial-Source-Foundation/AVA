@@ -1,5 +1,5 @@
-/// Render the rewind modal — shows rewind options with context about what
-/// will be restored.
+//! Render the rewind modal — shows rewind options with context about what
+//! will be restored.
 
 use crate::state::rewind::{RewindOption, RewindState};
 use crate::state::theme::Theme;

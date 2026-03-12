@@ -298,7 +298,7 @@ async fn run_solo_task(
     let start = Instant::now();
     let handle = tokio::spawn(async move {
         stack
-            .run(&goal, effective_turns, Some(tx), cancel, Vec::new())
+            .run(&goal, effective_turns, Some(tx), cancel, Vec::new(), None)
             .await
     });
 
@@ -632,7 +632,8 @@ async fn run_harness_task(
     // Rough estimation: director uses ~20% of total output for planning/review,
     // worker uses ~80% for actual code generation. Input tokens are estimated from prompt.
     let total_chars = total_output.len();
-    let est_director_output = dir_provider_ref.estimate_tokens(&total_output[..total_chars.min(total_chars / 5).max(1)]);
+    let dir_slice_end = if total_chars == 0 { 0 } else { (total_chars / 5).max(1) };
+    let est_director_output = dir_provider_ref.estimate_tokens(&total_output[..dir_slice_end]);
     let est_worker_output = wrk_provider_ref.estimate_tokens(&total_output);
     let est_input = dir_provider_ref.estimate_tokens(&task.prompt);
 

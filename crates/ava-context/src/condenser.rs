@@ -170,16 +170,6 @@ pub fn create_condenser(max_tokens: usize) -> Condenser {
     )
 }
 
-pub fn create_full_condenser(config: CondenserConfig) -> Condenser {
-    Condenser::new(
-        config.clone(),
-        vec![
-            Box::new(ToolTruncationStrategy::new(config.max_tool_content_chars)),
-            Box::new(SlidingWindowStrategy),
-        ],
-    )
-}
-
 /// Create a hybrid condenser with the 3-stage pipeline.
 /// If `summarizer` is `None` and `enable_summarization` is true, uses heuristic fallback.
 /// If `relevance_scores` is provided, inserts a relevance strategy between tool truncation

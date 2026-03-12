@@ -1,6 +1,7 @@
 use super::*;
 use crate::state::agent::SubAgentInfo;
 use crate::state::rewind::{snapshot_file, ChangeType, FileChange};
+use ava_types::{MessageTier, QueuedMessage};
 use tracing::{debug, info};
 
 impl App {
@@ -149,6 +150,7 @@ impl App {
                         elapsed: None,
                         session_id: None,
                         session_messages: Vec::new(),
+                        provider: None,
                     });
 
                     // Create a SubAgent message instead of a regular ToolCall
@@ -300,6 +302,8 @@ impl App {
                 self.is_streaming.store(false, Ordering::Relaxed);
                 self.state.agent.is_running = false;
                 self.state.agent.activity = AgentActivity::Idle;
+                // Clear the queue display (all messages have been delivered)
+                self.state.input.queue_display.clear();
 
                 // Continuous voice: restart recording after agent completes
                 if self.state.voice.continuous && self.state.voice.phase == VoicePhase::Idle {
@@ -531,6 +535,45 @@ impl App {
         self.state
             .agent
             .start(goal, self.state.agent.max_turns, app_tx, agent_tx, history, parent_session_id);
+    }
+
+    /// Send a mid-stream message to the running agent via the message queue.
+    pub(crate) fn send_queued_message(&mut self, text: String, tier: MessageTier) {
+        let label = match &tier {
+            MessageTier::Steering => "steering",
+            MessageTier::FollowUp => "follow-up",
+            MessageTier::PostComplete { group } => {
+                // Can't return a &str from format!, so we handle display below
+                let _ = group;
+                "post-complete"
+            }
+        };
+
+        if let Some(ref tx) = self.state.agent.message_tx {
+            let msg = QueuedMessage {
+                text: text.clone(),
+                tier: tier.clone(),
+            };
+            if tx.send(msg).is_ok() {
+                // Add to UI queue display
+                self.state.input.queue_display.push(text.clone(), tier.clone());
+                // Show user message in chat with a tier badge
+                let badge = match &tier {
+                    MessageTier::Steering => "[S]".to_string(),
+                    MessageTier::FollowUp => "[F]".to_string(),
+                    MessageTier::PostComplete { group } => format!("[G{group}]"),
+                };
+                self.state.messages.push(UiMessage::new(
+                    MessageKind::User,
+                    format!("{badge} {text}"),
+                ));
+                self.set_status(format!("Queued {label} message"), StatusLevel::Info);
+            } else {
+                self.set_status(format!("Failed to queue {label} message — agent may have finished"), StatusLevel::Error);
+            }
+        } else {
+            self.set_status("No running agent to send messages to", StatusLevel::Warn);
+        }
     }
 
     pub(crate) fn toggle_voice(&mut self, app_tx: mpsc::UnboundedSender<AppEvent>) {

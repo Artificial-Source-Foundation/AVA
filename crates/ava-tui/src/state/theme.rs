@@ -1376,7 +1376,7 @@ impl Theme {
 
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "toml") {
+            if path.extension().is_some_and(|ext| ext == "toml") {
                 match Self::load_custom(&path) {
                     Ok(theme) => themes.push(theme),
                     Err(e) => {

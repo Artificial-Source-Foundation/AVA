@@ -74,10 +74,22 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 sa.description.clone()
             };
 
+            // [CC] badge for claude-code-powered sub-agents
+            let cc_badge: Vec<Span<'_>> = if sa.provider.as_deref() == Some("claude-code") {
+                vec![Span::styled(
+                    "[CC] ",
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                )]
+            } else {
+                vec![]
+            };
+
             if sa.is_running {
                 // Spinning indicator for running sub-agents
                 let elapsed = sa.started_at.elapsed().as_secs();
-                let spinner = match (elapsed / 1) % 4 {
+                let spinner = match elapsed % 4 {
                     0 => "|",
                     1 => "/",
                     2 => "-",
@@ -88,11 +100,13 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 } else {
                     format!(" ({}s)", elapsed)
                 };
-                lines.push(Line::from(vec![
+                let mut spans = vec![
                     Span::styled(format!("  {spinner} "), Style::default().fg(Color::Yellow)),
-                    Span::styled(desc, value_style),
-                    Span::styled(stats, Style::default().fg(state.theme.text_dimmed)),
-                ]));
+                ];
+                spans.extend(cc_badge);
+                spans.push(Span::styled(desc, value_style));
+                spans.push(Span::styled(stats, Style::default().fg(state.theme.text_dimmed)));
+                lines.push(Line::from(spans));
             } else {
                 // Completed sub-agents: dimmed with stats
                 let secs = sa.elapsed.map(|d| d.as_secs()).unwrap_or(0);
@@ -101,26 +115,36 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 } else {
                     format!(" ({}s)", secs)
                 };
-                lines.push(Line::from(vec![
+                let dim_modifier = Modifier::DIM;
+                let mut spans = vec![
                     Span::styled(
                         "  \u{2713} ",
                         Style::default()
                             .fg(Color::Green)
-                            .add_modifier(Modifier::DIM),
+                            .add_modifier(dim_modifier),
                     ),
-                    Span::styled(
-                        desc,
+                ];
+                if sa.provider.as_deref() == Some("claude-code") {
+                    spans.push(Span::styled(
+                        "[CC] ",
                         Style::default()
-                            .fg(state.theme.text_dimmed)
-                            .add_modifier(Modifier::DIM),
-                    ),
-                    Span::styled(
-                        stats,
-                        Style::default()
-                            .fg(state.theme.text_dimmed)
-                            .add_modifier(Modifier::DIM),
-                    ),
-                ]));
+                            .fg(Color::Magenta)
+                            .add_modifier(dim_modifier),
+                    ));
+                }
+                spans.push(Span::styled(
+                    desc,
+                    Style::default()
+                        .fg(state.theme.text_dimmed)
+                        .add_modifier(dim_modifier),
+                ));
+                spans.push(Span::styled(
+                    stats,
+                    Style::default()
+                        .fg(state.theme.text_dimmed)
+                        .add_modifier(dim_modifier),
+                ));
+                lines.push(Line::from(spans));
             }
         }
     }

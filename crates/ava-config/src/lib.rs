@@ -12,6 +12,7 @@ use tokio::sync::RwLock;
 pub mod agents;
 pub mod credential_commands;
 pub mod credentials;
+pub mod keychain;
 pub mod model_catalog;
 
 pub use credential_commands::{
@@ -19,6 +20,7 @@ pub use credential_commands::{
     CredentialCommand,
 };
 pub use credentials::{known_providers, standard_env_var, CredentialStore, ProviderCredential};
+pub use keychain::{KeychainManager, MigrationResult, redact_key_for_log};
 pub use agents::AgentsConfig;
 pub use model_catalog::{CatalogModel, CatalogState, ModelCatalog, fallback_catalog};
 pub use ava_auth;
@@ -136,6 +138,54 @@ impl Default for VoiceConfig {
     }
 }
 
+/// Claude Code integration configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeCodeConfig {
+    /// Path to claude binary (None = auto-detect via PATH)
+    #[serde(default)]
+    pub binary_path: Option<PathBuf>,
+    /// Whether to persist CC sessions (default: false)
+    #[serde(default)]
+    pub session_persistence: bool,
+    /// Default max turns per invocation
+    #[serde(default = "claude_code_default_max_turns")]
+    pub default_max_turns: u32,
+    /// Default max budget per invocation in USD
+    #[serde(default = "claude_code_default_max_budget")]
+    pub default_max_budget_usd: f64,
+    /// Default allowed tools for CC
+    #[serde(default = "claude_code_default_allowed_tools")]
+    pub default_allowed_tools: Vec<String>,
+}
+
+fn claude_code_default_max_turns() -> u32 {
+    10
+}
+
+fn claude_code_default_max_budget() -> f64 {
+    5.0
+}
+
+fn claude_code_default_allowed_tools() -> Vec<String> {
+    vec![
+        "Read".to_string(),
+        "Grep".to_string(),
+        "Glob".to_string(),
+    ]
+}
+
+impl Default for ClaudeCodeConfig {
+    fn default() -> Self {
+        Self {
+            binary_path: None,
+            session_persistence: false,
+            default_max_turns: claude_code_default_max_turns(),
+            default_max_budget_usd: claude_code_default_max_budget(),
+            default_allowed_tools: claude_code_default_allowed_tools(),
+        }
+    }
+}
+
 /// Main configuration struct
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
@@ -147,6 +197,9 @@ pub struct Config {
     pub fallback: Option<FallbackConfig>,
     #[serde(default)]
     pub voice: VoiceConfig,
+    /// Claude Code integration settings
+    #[serde(default)]
+    pub claude_code: Option<ClaudeCodeConfig>,
     /// Extra instruction file paths (relative to project root) or glob patterns.
     /// These are loaded in addition to the standard instruction files (AGENTS.md, CLAUDE.md, etc.).
     ///

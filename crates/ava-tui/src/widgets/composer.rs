@@ -233,8 +233,48 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
     frame.render_widget(bg, area);
 
-    // Combine prompt lines + model info line
+    // Combine prompt lines + queue display + model info line
     let mut all_lines = prompt_lines;
+
+    // Show pending queued messages between input and model info
+    if !state.input.queue_display.is_empty() {
+        let bar_q = Span::styled("\u{258E}", Style::default().fg(state.theme.text_dimmed));
+        for item in &state.input.queue_display.items {
+            let (badge, badge_color) = match &item.tier {
+                ava_types::MessageTier::Steering => ("[S]", state.theme.warning),
+                ava_types::MessageTier::FollowUp => ("[F]", state.theme.accent),
+                ava_types::MessageTier::PostComplete { group } => {
+                    // We can't return a &str from format!, but we handle it below
+                    let _ = group;
+                    ("[G]", state.theme.text_muted)
+                }
+            };
+            let badge_text = match &item.tier {
+                ava_types::MessageTier::PostComplete { group } => format!("[G{group}]"),
+                _ => badge.to_string(),
+            };
+            let truncated = if item.text.len() > 50 {
+                format!("{}...", &item.text[..47])
+            } else {
+                item.text.clone()
+            };
+            all_lines.push(Line::from(vec![
+                bar_q.clone(),
+                Span::raw(pad),
+                Span::styled(
+                    badge_text,
+                    Style::default()
+                        .fg(badge_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(" {truncated}"),
+                    Style::default().fg(state.theme.text_dimmed),
+                ),
+            ]));
+        }
+    }
+
     all_lines.push(model_info_line);
 
     let content_lines = all_lines.len() as u16;

@@ -78,7 +78,10 @@ fn enter_submits_input() {
     }
     press(&mut app, KeyCode::Enter);
     // Buffer should be cleared after submit
-    assert!(app.state.input.buffer.is_empty(), "input should be cleared after Enter");
+    assert!(
+        app.state.input.buffer.is_empty(),
+        "input should be cleared after Enter"
+    );
     // A user message should have been added
     assert!(
         !app.state.messages.messages.is_empty(),
@@ -116,7 +119,10 @@ fn slash_opens_inline_autocomplete() {
         app.state.active_modal, None,
         "typing '/' should NOT open a modal — it shows inline autocomplete"
     );
-    assert_eq!(app.state.input.buffer, "/", "'/' should be typed into the buffer");
+    assert_eq!(
+        app.state.input.buffer, "/",
+        "'/' should be typed into the buffer"
+    );
     assert!(
         app.state.input.has_slash_autocomplete(),
         "slash autocomplete menu should be visible after typing '/'"
@@ -152,16 +158,13 @@ fn escape_closes_modal() {
     assert_eq!(app.state.active_modal, Some(ModalType::CommandPalette));
     // Press Escape
     press(&mut app, KeyCode::Esc);
-    assert_eq!(
-        app.state.active_modal, None,
-        "Esc should close the modal"
-    );
+    assert_eq!(app.state.active_modal, None, "Esc should close the modal");
 }
 
 #[test]
 fn tool_approval_shows_risk() {
-    use ava_tui::state::permission::{ApprovalRequest, InspectionInfo};
     use ava_permissions::tags::{RiskLevel, SafetyTag};
+    use ava_tui::state::permission::{ApprovalRequest, InspectionInfo};
 
     let (mut app, _tmp) = make_app();
 

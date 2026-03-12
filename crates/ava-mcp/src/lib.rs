@@ -20,6 +20,3 @@ pub use transport::{
     JsonRpcError, JsonRpcMessage, MCPTransport, StdioTransport,
 };
 
-pub fn healthcheck() -> bool {
-    true
-}

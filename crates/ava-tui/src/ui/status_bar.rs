@@ -277,6 +277,18 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             ));
         }
 
+        // Queue count indicator
+        let queue_count = state.input.queue_display.total_count();
+        if queue_count > 0 {
+            left_spans.push(Span::raw(ITEM_GAP));
+            left_spans.push(Span::styled(
+                format!("[{queue_count} queued]"),
+                Style::default()
+                    .fg(state.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        }
+
         left_spans.push(Span::raw(ITEM_GAP));
         left_spans.push(Span::styled(
             "esc",

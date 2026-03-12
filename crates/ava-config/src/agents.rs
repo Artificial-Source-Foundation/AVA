@@ -44,6 +44,16 @@ pub struct AgentOverride {
     pub max_turns: Option<usize>,
     /// Custom system prompt for this agent type.
     pub prompt: Option<String>,
+    /// Provider for this agent. Default uses AVA's native agent loop.
+    /// Set to "claude-code" to use Claude Code as the runtime.
+    #[serde(default)]
+    pub provider: Option<String>,
+    /// Allowed tools when using claude-code provider (CC's tools, not AVA's).
+    #[serde(default)]
+    pub allowed_tools: Option<Vec<String>>,
+    /// Max budget in USD for claude-code provider.
+    #[serde(default)]
+    pub max_budget_usd: Option<f64>,
 }
 
 /// Fully resolved configuration for a specific agent, after merging
@@ -54,6 +64,12 @@ pub struct ResolvedAgent {
     pub model: Option<String>,
     pub max_turns: Option<usize>,
     pub prompt: Option<String>,
+    /// Provider for this agent (e.g. "claude-code"). `None` means native AVA agent loop.
+    pub provider: Option<String>,
+    /// Allowed tools when using an external provider like claude-code.
+    pub allowed_tools: Option<Vec<String>>,
+    /// Max budget in USD for external provider agents.
+    pub max_budget_usd: Option<f64>,
 }
 
 fn default_true() -> bool {
@@ -130,6 +146,15 @@ impl AgentsConfig {
             if project_override.prompt.is_some() {
                 entry.prompt = project_override.prompt;
             }
+            if project_override.provider.is_some() {
+                entry.provider = project_override.provider;
+            }
+            if project_override.allowed_tools.is_some() {
+                entry.allowed_tools = project_override.allowed_tools;
+            }
+            if project_override.max_budget_usd.is_some() {
+                entry.max_budget_usd = project_override.max_budget_usd;
+            }
         }
 
         Self { defaults, agents }
@@ -144,12 +169,18 @@ impl AgentsConfig {
                 model: over.model.clone().or_else(|| self.defaults.model.clone()),
                 max_turns: over.max_turns.or(self.defaults.max_turns),
                 prompt: over.prompt.clone(),
+                provider: over.provider.clone(),
+                allowed_tools: over.allowed_tools.clone(),
+                max_budget_usd: over.max_budget_usd,
             },
             None => ResolvedAgent {
                 enabled: self.defaults.enabled,
                 model: self.defaults.model.clone(),
                 max_turns: self.defaults.max_turns,
                 prompt: None,
+                provider: None,
+                allowed_tools: None,
+                max_budget_usd: None,
             },
         }
     }
@@ -384,6 +415,96 @@ max_turns = 10
         );
         assert_eq!(unknown.max_turns, Some(10));
         assert!(unknown.prompt.is_none());
+    }
+
+    #[test]
+    fn test_claude_code_provider() {
+        let tmp = TempDir::new().unwrap();
+        let global = write_toml(
+            tmp.path(),
+            "global.toml",
+            r#"
+[defaults]
+model = "anthropic/claude-haiku-4.5"
+max_turns = 10
+
+[agents.code-reviewer]
+provider = "claude-code"
+prompt = "You are a security code reviewer."
+allowed_tools = ["Read", "Grep", "Glob"]
+max_turns = 15
+max_budget_usd = 0.50
+"#,
+        );
+        let project = tmp.path().join("project.toml");
+
+        let config = AgentsConfig::load(&global, &project);
+        let reviewer = config.get_agent("code-reviewer");
+
+        assert!(reviewer.enabled);
+        assert_eq!(reviewer.provider.as_deref(), Some("claude-code"));
+        assert_eq!(
+            reviewer.allowed_tools.as_deref(),
+            Some(&["Read".to_string(), "Grep".to_string(), "Glob".to_string()][..])
+        );
+        assert_eq!(reviewer.max_turns, Some(15));
+        assert_eq!(reviewer.max_budget_usd, Some(0.50));
+        assert!(reviewer.prompt.as_deref().unwrap().contains("security"));
+    }
+
+    #[test]
+    fn test_claude_code_provider_project_override() {
+        let tmp = TempDir::new().unwrap();
+        let global = write_toml(
+            tmp.path(),
+            "global.toml",
+            r#"
+[agents.refactorer]
+provider = "claude-code"
+allowed_tools = ["Read", "Edit", "Bash"]
+max_budget_usd = 2.00
+"#,
+        );
+        let project = write_toml(
+            tmp.path(),
+            "project.toml",
+            r#"
+[agents.refactorer]
+max_budget_usd = 5.00
+allowed_tools = ["Read", "Edit", "Bash", "Glob", "Grep"]
+"#,
+        );
+
+        let config = AgentsConfig::load(&global, &project);
+        let refactorer = config.get_agent("refactorer");
+
+        // Provider preserved from global
+        assert_eq!(refactorer.provider.as_deref(), Some("claude-code"));
+        // Budget overridden by project
+        assert_eq!(refactorer.max_budget_usd, Some(5.00));
+        // Allowed tools overridden by project
+        assert_eq!(refactorer.allowed_tools.as_ref().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn test_native_agent_has_no_provider() {
+        let tmp = TempDir::new().unwrap();
+        let global = write_toml(
+            tmp.path(),
+            "global.toml",
+            r#"
+[agents.task]
+max_turns = 10
+"#,
+        );
+        let project = tmp.path().join("project.toml");
+
+        let config = AgentsConfig::load(&global, &project);
+        let task = config.get_agent("task");
+
+        assert!(task.provider.is_none());
+        assert!(task.allowed_tools.is_none());
+        assert!(task.max_budget_usd.is_none());
     }
 
     #[test]

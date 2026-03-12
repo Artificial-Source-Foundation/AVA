@@ -13,17 +13,3 @@ pub mod mcp_bridge;
 pub mod monitor;
 pub mod permission_middleware;
 pub mod registry;
-
-pub fn healthcheck() -> bool {
-    true
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn healthcheck_returns_true() {
-        assert!(healthcheck());
-    }
-}

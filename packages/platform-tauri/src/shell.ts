@@ -103,6 +103,12 @@ export class TauriShell implements IShell {
 
     // Kill function with graceful escalation
     const killFn = () => {
+      // Note: killProcessGroup is not supported by Tauri
+      // Warn regardless of process state so callers know the flag was ignored
+      if (options?.killProcessGroup) {
+        console.warn('killProcessGroup is not supported on Tauri platform')
+      }
+
       if (finished) return
 
       // Clear inactivity timer
@@ -117,12 +123,6 @@ export class TauriShell implements IShell {
       } else {
         // If child hasn't spawned yet, kill after it does
         childPromise.then((child) => child.kill())
-      }
-
-      // Note: killProcessGroup is not supported by Tauri
-      // This is a limitation of the platform
-      if (options?.killProcessGroup) {
-        console.warn('killProcessGroup is not supported on Tauri platform')
       }
     }
 

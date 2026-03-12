@@ -23,7 +23,7 @@ use ava_tools::core::question::QuestionBridge;
 use ava_tools::core::task::{TaskResult, TaskSpawner};
 use ava_tools::mcp_bridge::{MCPBridgeTool, MCPToolCaller};
 use ava_tools::registry::{ToolRegistry, ToolSource};
-use ava_types::{AvaError, Result, Role, Session, ThinkingLevel, TodoState, ToolResult};
+use ava_types::{AvaError, QueuedMessage, Result, Role, Session, ThinkingLevel, TodoState, ToolResult};
 use futures::StreamExt;
 use serde_json::Value;
 use tokio::sync::{mpsc, RwLock};
@@ -80,6 +80,7 @@ pub struct AgentStack {
     model_override: RwLock<Option<String>>,
     max_turns: usize,
     max_budget_usd: f64,
+    #[allow(dead_code)] // Field retained for future use; accessor removed as dead code
     yolo: bool,
     injected_provider: Option<Arc<dyn LLMProvider>>,
     mcp: Arc<RwLock<Option<MCPRuntime>>>,
@@ -243,10 +244,6 @@ impl AgentStack {
         ))
     }
 
-    pub fn yolo(&self) -> bool {
-        self.yolo
-    }
-
     pub async fn mcp_server_count(&self) -> usize {
         self.mcp.read().await.as_ref().map_or(0, |r| r.server_count)
     }
@@ -339,6 +336,12 @@ impl AgentStack {
         *self.thinking_level.read().await
     }
 
+    /// Create a message queue for mid-stream messaging.
+    /// Returns the queue (to pass into `run()`) and the sender (for the TUI to send messages).
+    pub fn create_message_queue(&self) -> (crate::message_queue::MessageQueue, mpsc::UnboundedSender<QueuedMessage>) {
+        crate::message_queue::MessageQueue::new()
+    }
+
     pub async fn current_model(&self) -> (String, String) {
         let cfg = self.config.get().await;
         let provider = self
@@ -383,7 +386,7 @@ impl AgentStack {
         format!("{goal}\n\nRelevant memories:\n{memory_block}")
     }
 
-    #[instrument(skip(self, event_tx, cancel, history), fields(max_turns))]
+    #[instrument(skip(self, event_tx, cancel, history, message_queue), fields(max_turns))]
     pub async fn run(
         &self,
         goal: &str,
@@ -391,6 +394,7 @@ impl AgentStack {
         event_tx: Option<mpsc::UnboundedSender<AgentEvent>>,
         cancel: CancellationToken,
         history: Vec<ava_types::Message>,
+        message_queue: Option<crate::message_queue::MessageQueue>,
     ) -> Result<AgentRunResult> {
         let cfg = self.config.get().await;
         let provider = if let Some(provider) = &self.injected_provider {
@@ -513,39 +517,140 @@ impl AgentStack {
             config,
         )
         .with_history(history);
+
+        // Attach message queue if provided (enables steering/follow-up/post-complete)
+        let mut queue = message_queue;
+        if let Some(q) = queue.take() {
+            agent = agent.with_message_queue(q);
+        }
+
         let goal = &enriched_goal;
 
         if let Some(tx) = event_tx {
-            let mut stream = agent.run_streaming(goal).await;
-            let mut final_session: Option<Session> = None;
-            loop {
-                tokio::select! {
-                    _ = cancel.cancelled() => {
-                        return Err(AvaError::Cancelled);
-                    }
-                    maybe_event = stream.next() => {
-                        let Some(event) = maybe_event else { break; };
-                        let _ = tx.send(event.clone());
-                        match event {
-                            AgentEvent::Complete(session) => {
-                                final_session = Some(session);
-                                break;
+            // --- Helper: run agent streaming and collect until Complete ---
+            async fn run_streaming_until_complete(
+                agent: &mut AgentLoop,
+                goal_str: &str,
+                tx: &mpsc::UnboundedSender<AgentEvent>,
+                cancel: &CancellationToken,
+            ) -> Result<Session> {
+                let mut stream = agent.run_streaming(goal_str).await;
+                let mut final_session: Option<Session> = None;
+                loop {
+                    tokio::select! {
+                        _ = cancel.cancelled() => {
+                            return Err(AvaError::Cancelled);
+                        }
+                        maybe_event = stream.next() => {
+                            let Some(event) = maybe_event else { break; };
+                            let _ = tx.send(event.clone());
+                            match event {
+                                AgentEvent::Complete(session) => {
+                                    final_session = Some(session);
+                                    break;
+                                }
+                                AgentEvent::Error(error) => {
+                                    return Err(AvaError::AgentStopped { reason: error });
+                                }
+                                _ => {}
                             }
-                            AgentEvent::Error(error) => {
-                                return Err(AvaError::AgentStopped { reason: error });
-                            }
-                            AgentEvent::Thinking(_) | AgentEvent::Progress(_) | AgentEvent::Token(_) | AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } | AgentEvent::SubAgentComplete { .. } => {}
                         }
                     }
                 }
+                final_session.ok_or_else(|| {
+                    AvaError::ToolError(
+                        "Agent stream ended unexpectedly without a completion event. \
+                         This may indicate the model returned no actionable response"
+                            .to_string(),
+                    )
+                })
             }
-            let session = final_session.ok_or_else(|| {
-                AvaError::ToolError(
-                    "Agent stream ended unexpectedly without a completion event. \
-                     This may indicate the model returned no actionable response"
-                        .to_string(),
-                )
-            })?;
+
+            // --- Primary run ---
+            let mut session = run_streaming_until_complete(&mut agent, goal, &tx, &cancel).await?;
+
+            // --- Follow-up loop (Tier 2): check for queued follow-up messages ---
+            // Discard any leftover steering messages — they are only meaningful while
+            // tools are executing and should not leak into the follow-up phase.
+            if let Some(ref mut queue) = agent.message_queue {
+                queue.poll();
+                queue.clear_steering();
+            }
+            loop {
+                let follow_ups = {
+                    match agent.message_queue {
+                        Some(ref mut queue) => {
+                            queue.poll();
+                            if queue.has_follow_up() {
+                                queue.drain_follow_up()
+                            } else {
+                                break;
+                            }
+                        }
+                        None => break,
+                    }
+                };
+                for text in follow_ups {
+                    if cancel.is_cancelled() {
+                        return Err(AvaError::Cancelled);
+                    }
+                    let prefixed = format!("[User follow-up] {text}");
+                    let _ = tx.send(AgentEvent::Progress(format!("follow-up: {text}")));
+
+                    // run_streaming will inject this as the goal message, so we only
+                    // need to send the prefixed version as the goal — no manual injection.
+                    session = run_streaming_until_complete(&mut agent, &prefixed, &tx, &cancel).await?;
+                }
+            }
+
+            // --- Post-complete pipeline loop (Tier 3): run grouped stages ---
+            loop {
+                let group_data = {
+                    match agent.message_queue {
+                        Some(ref mut queue) => {
+                            queue.poll();
+                            match queue.next_post_complete_group() {
+                                Some(pair) => pair,
+                                None => break,
+                            }
+                        }
+                        None => break,
+                    }
+                };
+                let (group_id, messages) = group_data;
+
+                if cancel.is_cancelled() {
+                    if let Some(ref mut queue) = agent.message_queue {
+                        queue.finish_post_complete_group();
+                    }
+                    return Err(AvaError::Cancelled);
+                }
+
+                // Combine all messages from this group into a single goal
+                let combined = messages.join("\n\n");
+                let prefixed = format!("[User post-complete (group {group_id})] {combined}");
+                let msg_count = messages.len();
+                let _ = tx.send(AgentEvent::Progress(
+                    format!("post-complete group {group_id}: {msg_count} message(s)"),
+                ));
+
+                // run_streaming will inject this as the goal message — no manual injection.
+                let group_result = run_streaming_until_complete(&mut agent, &prefixed, &tx, &cancel).await;
+
+                if let Some(ref mut queue) = agent.message_queue {
+                    queue.finish_post_complete_group();
+                    queue.advance_post_group();
+                }
+
+                match group_result {
+                    Ok(s) => session = s,
+                    Err(e) => {
+                        info!(group_id, error = %e, "post-complete group failed");
+                        // Continue to next group on failure
+                    }
+                }
+            }
+
             return Ok(AgentRunResult {
                 success: true,
                 turns: session.messages.len(),
@@ -607,7 +712,7 @@ impl TaskSpawner for AgentTaskSpawner {
         // Use configured prompt if set, otherwise fall back to default.
         let system_prompt = resolved
             .prompt
-            .unwrap_or_else(|| build_sub_agent_system_prompt());
+            .unwrap_or_else(build_sub_agent_system_prompt);
 
         // TODO: support model override from resolved.model — requires routing
         // through ModelRouter which the spawner doesn't currently have access to.
@@ -780,10 +885,9 @@ fn build_tool_registry(platform: Arc<StandardPlatform>) -> ToolRegistry {
     registry
 }
 
-#[cfg(test)]
 const _: () = {
-    fn assert_send<T: Send>() {}
-    fn check() {
-        assert_send::<AgentStack>();
+    fn _assert_send<T: Send>() {}
+    fn _check() {
+        _assert_send::<AgentStack>();
     }
 };

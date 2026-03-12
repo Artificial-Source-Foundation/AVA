@@ -67,10 +67,6 @@ fn truncate_at_word_boundary(s: &str, max_len: usize) -> String {
     format!("{}...", truncated.trim_end())
 }
 
-pub fn healthcheck() -> bool {
-    true
-}
-
 impl SessionManager {
     pub fn new(path: impl AsRef<Path>) -> Result<Self> {
         let manager = Self {

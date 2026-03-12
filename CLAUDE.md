@@ -41,6 +41,18 @@ AVA uses a **Rust-first architecture**. All new CLI/agent code MUST be Rust.
 
 The TypeScript layer (`packages/`) is retained only for the Tauri desktop webview. The CLI is 100% Rust — no Node.js dependency.
 
+### Mid-Stream Messaging
+
+Three-tier message queue for interacting with the agent while it runs:
+
+| Tier | TUI Trigger | Headless Flag | Injection Point |
+|------|-------------|---------------|-----------------|
+| **Steering** | Enter | (stdin) | After current tool — skips remaining tools |
+| **Follow-up** | Alt+Enter | `--follow-up` | After agent completes current task |
+| **Post-complete** | Ctrl+Alt+Enter | `--later` / `--later-group` | After agent stops — grouped pipeline (G1, G2, G3...) |
+
+Commands: `/later` (add post-complete message), `/queue` (view/manage pending messages). Status bar shows `[N queued]`.
+
 ## Project Structure
 
 ```text
@@ -232,6 +244,11 @@ cargo run --bin ava -- "goal" --headless --multi-agent --provider openrouter --m
 
 # Workflow pipeline
 cargo run --bin ava -- "goal" --headless --workflow plan-code-review --provider openrouter --model anthropic/claude-haiku-4.5
+
+# Mid-stream messaging (headless)
+cargo run --bin ava -- "goal" --headless --follow-up "also run tests" --provider openrouter --model anthropic/claude-haiku-4.5
+cargo run --bin ava -- "goal" --headless --later "commit when done" --provider openrouter --model anthropic/claude-haiku-4.5
+cargo run --bin ava -- "goal" --headless --later "review" --later-group 2 "commit" --provider openrouter --model anthropic/claude-haiku-4.5
 ```
 
 **Default test model**: `anthropic/claude-haiku-4.5` ($1/$5 per M tokens — cheapest Western SOTA with full tool use support).

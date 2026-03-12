@@ -8,6 +8,7 @@
 pub mod agent_loop;
 pub mod instructions;
 pub mod llm_trait;
+pub mod message_queue;
 pub mod reflection;
 pub mod stack;
 pub mod stuck;
@@ -18,20 +19,9 @@ pub use reflection::{ErrorKind, ReflectionAgent, ReflectionLoop, ToolExecutor, T
 pub use instructions::{contextual_instructions_for_file, load_project_instructions};
 pub use {agent_loop::*, llm_trait::{LLMProvider, LLMResponse}};
 
-/// Returns whether the agent crate is reachable and responsive.
-pub fn healthcheck() -> bool {
-    true
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::healthcheck;
     use std::sync::Arc;
-
-    #[test]
-    fn healthcheck_returns_true() {
-        assert!(healthcheck());
-    }
 
     /// Create a mock LLM provider for stuck detection tests.
     pub fn mock_llm() -> Arc<dyn crate::llm_trait::LLMProvider> {

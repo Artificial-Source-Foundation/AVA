@@ -7,6 +7,12 @@ use crate::registry::Tool;
 
 pub struct WebFetchTool;
 
+impl Default for WebFetchTool {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl WebFetchTool {
     pub fn new() -> Self {
         Self

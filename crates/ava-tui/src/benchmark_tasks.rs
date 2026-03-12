@@ -18,7 +18,7 @@ pub enum BenchmarkSuite {
 
 impl BenchmarkSuite {
     /// Parse from a string (case-insensitive).
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "speed" => Some(Self::Speed),
             "standard" => Some(Self::Standard),
@@ -1877,20 +1877,6 @@ pub fn format_output(val: i32) -> String {
 }
 "#;
 
-/// Setup code for cross-file refactor: utils.rs (written as secondary file by harness).
-#[allow(dead_code)]
-const MULTI_FILE_REFACTOR_UTILS: &str = "// Utility functions\n";
-
-/// Setup code for cross-file refactor: main.rs (written as secondary file by harness).
-#[allow(dead_code)]
-const MULTI_FILE_REFACTOR_MAIN: &str = r#"mod lib;
-
-fn main() {
-    let result = lib::process(3, 4);
-    println!("{}", lib::format_output(result));
-}
-"#;
-
 /// Test harness for cross-file refactor — validates against combined lib.rs + utils.rs.
 const MULTI_FILE_REFACTOR_TESTS: &str = r#"
 #[cfg(test)]
@@ -1905,25 +1891,6 @@ mod tests {
     #[test]
     fn test_format_output() {
         assert_eq!(format_output(38), "Result: 38");
-    }
-}
-"#;
-
-/// Setup code for find-and-fix across files: config.rs (written as secondary file by harness).
-#[allow(dead_code)]
-const MULTI_FILE_CONFIG: &str = r#"pub struct Config {
-    pub max_retries: u32,
-    pub timeout_ms: u64,
-    pub verbose: bool,
-}
-
-impl Config {
-    pub fn default() -> Self {
-        Self {
-            max_retries: 3,
-            timeout_ms: 5000,
-            verbose: false,
-        }
     }
 }
 "#;

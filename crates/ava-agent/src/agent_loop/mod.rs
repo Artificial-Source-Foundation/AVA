@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument, trace, warn};
 
 use crate::llm_trait::LLMProvider;
+use crate::message_queue::MessageQueue;
 use crate::stuck::{StuckAction, StuckDetector};
 use crate::system_prompt::build_system_prompt;
 
@@ -34,6 +35,8 @@ pub struct AgentLoop {
     pub(crate) last_request_time: Option<Instant>,
     /// Conversation history from previous turns (injected after system prompt, before goal).
     history: Vec<Message>,
+    /// Optional message queue for mid-stream user messaging (steering, follow-up, post-complete).
+    pub message_queue: Option<MessageQueue>,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -121,12 +124,19 @@ impl AgentLoop {
             last_request_hash: None,
             last_request_time: None,
             history: Vec::new(),
+            message_queue: None,
         }
     }
 
     /// Set conversation history to inject after the system prompt.
     pub fn with_history(mut self, history: Vec<Message>) -> Self {
         self.history = history;
+        self
+    }
+
+    /// Attach a message queue for mid-stream user messaging.
+    pub fn with_message_queue(mut self, queue: MessageQueue) -> Self {
+        self.message_queue = Some(queue);
         self
     }
 
@@ -156,7 +166,13 @@ impl AgentLoop {
     }
 
     /// Inject the system prompt into the context before the first turn.
+    /// Inject the system prompt if one hasn't been added yet.
+    /// Idempotent: calling this multiple times (e.g., follow-up runs) is safe.
     fn inject_system_prompt(&mut self) {
+        // Skip if system prompt already present (follow-up / post-complete reuse the context)
+        if self.context.get_messages().iter().any(|m| m.role == Role::System) {
+            return;
+        }
         let mut system = if let Some(ref custom) = self.config.custom_system_prompt {
             custom.clone()
         } else {
@@ -504,8 +520,11 @@ impl AgentLoop {
                 self.last_request_hash = Some(dedup_hash);
                 self.last_request_time = Some(Instant::now());
 
-                // Execute tools: read-only in parallel, write sequentially
+                // Execute tools: read-only in parallel, write sequentially.
+                // Between tool executions, poll the message queue for steering messages.
+                // If steering is detected, skip remaining tools.
                 let mut tool_results_collected = Vec::new();
+                let mut steering_triggered = false;
                 {
                     let mut read_calls: Vec<(usize, &ToolCall)> = Vec::new();
                     let mut write_calls: Vec<(usize, &ToolCall)> = Vec::new();
@@ -536,10 +555,52 @@ impl AgentLoop {
                         }
                     }
 
-                    // Write tools sequentially
-                    for (i, tc) in &write_calls {
-                        let (result, execution) = self.execute_tool_call_timed(tc).await;
-                        indexed_results.push((*i, result, execution));
+                    // Poll for steering after read-only batch
+                    if let Some(ref mut queue) = self.message_queue {
+                        queue.poll();
+                        if queue.has_steering() {
+                            steering_triggered = true;
+                        }
+                    }
+
+                    // Write tools sequentially — check steering between each
+                    if !steering_triggered {
+                        for (i, tc) in &write_calls {
+                            let (result, execution) = self.execute_tool_call_timed(tc).await;
+                            indexed_results.push((*i, result, execution));
+
+                            // Poll for steering after each write tool
+                            if let Some(ref mut queue) = self.message_queue {
+                                queue.poll();
+                                if queue.has_steering() {
+                                    steering_triggered = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // If steering was triggered, add skip results for remaining write tools
+                    if steering_triggered {
+                        let executed_indices: std::collections::HashSet<usize> =
+                            indexed_results.iter().map(|(i, _, _)| *i).collect();
+                        for (i, tc) in &write_calls {
+                            if !executed_indices.contains(i) {
+                                let skip_result = ToolResult {
+                                    call_id: tc.id.clone(),
+                                    content: "Skipped due to steering message.".to_string(),
+                                    is_error: true,
+                                };
+                                let execution = ToolExecution {
+                                    tool_name: tc.name.clone(),
+                                    arguments_hash: ava_tools::monitor::hash_arguments(&tc.arguments),
+                                    success: false,
+                                    duration: std::time::Duration::ZERO,
+                                    timestamp: Instant::now(),
+                                };
+                                indexed_results.push((*i, skip_result, execution));
+                            }
+                        }
                     }
 
                     // Sort by original index and emit results
@@ -636,15 +697,34 @@ impl AgentLoop {
                     }
                 }
 
-                // Inject a self-correction hint for the first error
-                if let Some(err_result) = tool_results_collected.iter().find(|r| r.is_error) {
-                    let first_line = err_result.content.lines().next().unwrap_or("unknown error");
-                    let hint = format!(
-                        "Tool call failed: {first_line}. Try a different approach — don't repeat the same call."
-                    );
-                    let hint_msg = Message::new(Role::User, hint);
-                    self.context.add_message(hint_msg.clone());
-                    session.add_message(hint_msg);
+                // Inject a self-correction hint for the first error (skip if steering overrides)
+                if !steering_triggered {
+                    if let Some(err_result) = tool_results_collected.iter().find(|r| r.is_error) {
+                        let first_line = err_result.content.lines().next().unwrap_or("unknown error");
+                        let hint = format!(
+                            "Tool call failed: {first_line}. Try a different approach — don't repeat the same call."
+                        );
+                        let hint_msg = Message::new(Role::User, hint);
+                        self.context.add_message(hint_msg.clone());
+                        session.add_message(hint_msg);
+                    }
+                }
+
+                // Steering injection: if steering was triggered, inject all steering
+                // messages as user turns and skip to the next LLM call.
+                if steering_triggered {
+                    if let Some(ref mut queue) = self.message_queue {
+                        let steering_msgs = queue.drain_steering();
+                        for text in steering_msgs {
+                            let prefixed = format!("[User steering] {text}");
+                            yield AgentEvent::Progress(format!("steering: {text}"));
+                            let msg = Message::new(Role::User, prefixed);
+                            self.context.add_message(msg.clone());
+                            session.add_message(msg);
+                        }
+                    }
+                    // Continue to next turn — the LLM will see the steering message
+                    continue;
                 }
 
                 if self.context.should_compact() {

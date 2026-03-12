@@ -155,11 +155,10 @@ fn row_to_memory(row: &rusqlite::Row<'_>) -> Result<Memory> {
     })
 }
 
-#[cfg(test)]
 const _: () = {
-    fn assert_send_sync<T: Send + Sync>() {}
-    fn check() {
-        assert_send_sync::<MemorySystem>();
+    fn _assert_send_sync<T: Send + Sync>() {}
+    fn _check() {
+        _assert_send_sync::<MemorySystem>();
     }
 };
 

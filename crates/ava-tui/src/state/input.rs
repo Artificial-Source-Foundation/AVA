@@ -1,5 +1,42 @@
 use crate::widgets::autocomplete::{AutocompleteItem, AutocompleteState, AutocompleteTrigger};
+use ava_types::MessageTier;
 use std::collections::HashMap;
+
+/// A pending queued message shown in the composer queue display.
+#[derive(Debug, Clone)]
+pub struct QueuedDisplayItem {
+    pub text: String,
+    pub tier: MessageTier,
+}
+
+/// UI-side queue display state for mid-stream messages.
+#[derive(Debug, Default, Clone)]
+pub struct MessageQueueDisplay {
+    pub items: Vec<QueuedDisplayItem>,
+}
+
+impl MessageQueueDisplay {
+    pub fn push(&mut self, text: String, tier: MessageTier) {
+        self.items.push(QueuedDisplayItem { text, tier });
+    }
+
+    pub fn clear(&mut self) {
+        self.items.clear();
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+
+    pub fn total_count(&self) -> usize {
+        self.items.len()
+    }
+
+    /// Remove steering items (cleared on delivery or hard abort).
+    pub fn clear_steering(&mut self) {
+        self.items.retain(|i| !matches!(i.tier, MessageTier::Steering));
+    }
+}
 
 /// Threshold for collapsing pasted text into a placeholder.
 const PASTE_LINE_THRESHOLD: usize = 5;
@@ -23,6 +60,8 @@ pub struct InputState {
     paste_counter: HashMap<String, usize>,
     /// Additional slash-command autocomplete items from custom commands.
     pub custom_slash_items: Vec<AutocompleteItem>,
+    /// Display state for queued mid-stream messages.
+    pub queue_display: MessageQueueDisplay,
 }
 
 impl InputState {
@@ -367,6 +406,7 @@ impl InputState {
                     AutocompleteItem::new("commit", "Show git status for committing"),
                     AutocompleteItem::new("providers", "Show provider status"),
                     AutocompleteItem::new("disconnect", "Remove provider credentials"),
+                    AutocompleteItem::new("credentials", "Manage provider API keys (list/add/remove)"),
                     AutocompleteItem::new("tools reload", "Reload tools from disk"),
                     AutocompleteItem::new("tools init", "Create tool templates"),
                     AutocompleteItem::new("mcp", "List MCP servers"),
@@ -382,6 +422,8 @@ impl InputState {
                     AutocompleteItem::new("hooks reload", "Reload hooks from disk"),
                     AutocompleteItem::new("hooks init", "Create hook templates"),
                     AutocompleteItem::new("hooks dry-run", "Simulate hook execution"),
+                    AutocompleteItem::new("later", "Queue a post-complete message (Tier 3)"),
+                    AutocompleteItem::new("queue", "Show queued messages"),
                 ];
                 // Append custom command items
                 items.extend(self.custom_slash_items.clone());

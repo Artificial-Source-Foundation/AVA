@@ -276,6 +276,10 @@ impl LLMProvider for CopilotProvider {
         &self.model
     }
 
+    fn provider_kind(&self) -> crate::message_transform::ProviderKind {
+        crate::message_transform::ProviderKind::Copilot
+    }
+
     fn supports_tools(&self) -> bool {
         true
     }

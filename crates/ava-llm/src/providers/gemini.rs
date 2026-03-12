@@ -219,6 +219,10 @@ impl LLMProvider for GeminiProvider {
         &self.model
     }
 
+    fn provider_kind(&self) -> crate::message_transform::ProviderKind {
+        crate::message_transform::ProviderKind::Gemini
+    }
+
     fn supports_thinking(&self) -> bool {
         self.supports_thinking_mode()
     }

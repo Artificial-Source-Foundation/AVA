@@ -9,7 +9,7 @@ use std::time::Instant;
 use ava_context::ContextManager;
 use ava_tools::monitor::ToolExecution;
 use ava_tools::registry::ToolRegistry;
-use ava_types::{Message, Role, Session, ThinkingLevel, TokenUsage, ToolCall, ToolResult};
+use ava_types::{ImageContent, Message, Role, Session, ThinkingLevel, TokenUsage, ToolCall, ToolResult};
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument, trace, warn};
@@ -37,6 +37,8 @@ pub struct AgentLoop {
     history: Vec<Message>,
     /// Optional message queue for mid-stream user messaging (steering, follow-up, post-complete).
     pub message_queue: Option<MessageQueue>,
+    /// Images to attach to the first user (goal) message.
+    images: Vec<ImageContent>,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -62,6 +64,10 @@ pub struct AgentConfig {
     /// Optional suffix appended to the system prompt (e.g., mode-specific instructions).
     #[serde(default)]
     pub system_prompt_suffix: Option<String>,
+    /// When true, include extended-tier tools in the system prompt alongside
+    /// default tools. Extended tools are always *executable* regardless of this flag.
+    #[serde(default)]
+    pub extended_tools: bool,
 }
 
 fn default_max_cost() -> f64 {
@@ -125,6 +131,7 @@ impl AgentLoop {
             last_request_time: None,
             history: Vec::new(),
             message_queue: None,
+            images: Vec::new(),
         }
     }
 
@@ -137,6 +144,12 @@ impl AgentLoop {
     /// Attach a message queue for mid-stream user messaging.
     pub fn with_message_queue(mut self, queue: MessageQueue) -> Self {
         self.message_queue = Some(queue);
+        self
+    }
+
+    /// Attach images to the first user (goal) message for multimodal input.
+    pub fn with_images(mut self, images: Vec<ImageContent>) -> Self {
+        self.images = images;
         self
     }
 
@@ -177,7 +190,7 @@ impl AgentLoop {
             custom.clone()
         } else {
             let native = self.llm.supports_tools();
-            let tool_defs = self.tools.list_tools();
+            let tool_defs = self.active_tool_defs();
             build_system_prompt(&tool_defs, native)
         };
         if let Some(ref suffix) = self.config.system_prompt_suffix {
@@ -201,7 +214,12 @@ impl AgentLoop {
             session.add_message(msg);
         }
 
-        let goal_message = Message::new(Role::User, goal.to_string());
+        let goal_images = std::mem::take(&mut self.images);
+        let goal_message = if goal_images.is_empty() {
+            Message::new(Role::User, goal.to_string())
+        } else {
+            Message::new(Role::User, goal.to_string()).with_images(goal_images)
+        };
         self.context.add_message(goal_message.clone());
         session.add_message(goal_message);
 
@@ -323,7 +341,12 @@ impl AgentLoop {
                 session.add_message(msg);
             }
 
-            let goal_message = Message::new(Role::User, goal.clone());
+            let goal_images = std::mem::take(&mut self.images);
+            let goal_message = if goal_images.is_empty() {
+                Message::new(Role::User, goal.clone())
+            } else {
+                Message::new(Role::User, goal.clone()).with_images(goal_images)
+            };
             self.context.add_message(goal_message.clone());
             session.add_message(goal_message);
 
@@ -409,7 +432,7 @@ impl AgentLoop {
                         "starting LLM stream request"
                     );
                     let stream_result = if native_tools {
-                        let tool_defs = self.tools.list_tools();
+                        let tool_defs = self.active_tool_defs();
                         if self.config.thinking_level != ThinkingLevel::Off {
                             self.llm.generate_stream_with_thinking(
                                 self.context.get_messages(), &tool_defs, self.config.thinking_level,
@@ -770,6 +793,7 @@ mod tests {
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
             system_prompt_suffix: None,
+            extended_tools: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -795,6 +819,7 @@ mod tests {
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
             system_prompt_suffix: None,
+            extended_tools: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -823,6 +848,7 @@ mod tests {
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
             system_prompt_suffix: None,
+            extended_tools: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -860,6 +886,7 @@ mod tests {
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
             system_prompt_suffix: None,
+            extended_tools: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -903,6 +930,7 @@ mod tests {
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
             system_prompt_suffix: None,
+            extended_tools: false,
         };
         let llm = crate::tests::mock_llm();
 
@@ -923,6 +951,7 @@ mod tests {
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
             system_prompt_suffix: None,
+            extended_tools: false,
         };
         let llm = crate::tests::mock_llm();
 

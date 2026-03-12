@@ -98,6 +98,55 @@ jobs:
       - name: Run Knip
         run: pnpm run knip
 
+  # ---------------------------------------------------------------------------
+  # Rust CI
+  # ---------------------------------------------------------------------------
+  rust-fmt:
+    name: Rust Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+  rust-clippy:
+    name: Rust Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo registry & build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run clippy
+        run: cargo clippy --workspace -- -D warnings
+
+  rust-test:
+    name: Rust Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry & build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --workspace
+
   security:
     name: Security Audit
     runs-on: ubuntu-latest
@@ -116,7 +165,7 @@ jobs:
 
   build:
     name: Build (${{ matrix.platform }})
-    needs: [lint, typecheck]
+    needs: [lint, typecheck, rust-fmt, rust-clippy]
     strategy:
       fail-fast: false
       matrix:

@@ -72,7 +72,7 @@ async fn run_with_timeout(
 
     let handle = tokio::spawn(async move {
         stack
-            .run(&goal, MAX_TURNS, Some(tx), cancel, Vec::new(), None)
+            .run(&goal, MAX_TURNS, Some(tx), cancel, Vec::new(), None, Vec::new())
             .await
     });
 

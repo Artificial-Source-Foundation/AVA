@@ -21,17 +21,51 @@ use std::sync::Arc;
 
 use ava_platform::Platform;
 
-use crate::registry::ToolRegistry;
+use crate::registry::{ToolRegistry, ToolTier};
 
-pub fn register_core_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platform>) {
+/// Register the 6 default tools that are always sent to the LLM.
+pub fn register_default_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platform>) {
     registry.register(read::ReadTool::new(platform.clone()));
     registry.register(write::WriteTool::new(platform.clone()));
     registry.register(edit::EditTool::new(platform.clone()));
     registry.register(bash::BashTool::new(platform.clone()));
     registry.register(glob::GlobTool::new());
     registry.register(grep::GrepTool::new());
-    registry.register(apply_patch::ApplyPatchTool::new(platform.clone()));
-    registry.register(web_fetch::WebFetchTool::new());
+}
+
+/// Register extended tools (available but not sent to the LLM by default).
+///
+/// These tools are always *executable* — the tier only controls whether their
+/// definitions are included in the system prompt sent to the LLM.
+pub fn register_extended_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platform>) {
+    registry.register_with_tier(
+        apply_patch::ApplyPatchTool::new(platform.clone()),
+        ToolTier::Extended,
+    );
+    registry.register_with_tier(web_fetch::WebFetchTool::new(), ToolTier::Extended);
+    registry.register_with_tier(
+        multiedit::MultiEditTool::new(platform.clone()),
+        ToolTier::Extended,
+    );
+    registry.register_with_tier(
+        test_runner::TestRunnerTool::new(platform.clone()),
+        ToolTier::Extended,
+    );
+    registry.register_with_tier(
+        lint::LintTool::new(platform.clone()),
+        ToolTier::Extended,
+    );
+    registry.register_with_tier(
+        diagnostics::DiagnosticsTool::new(platform.clone()),
+        ToolTier::Extended,
+    );
+    registry.register_with_tier(git_read::GitReadTool::new(platform), ToolTier::Extended);
+}
+
+/// Register all core tools (default + extended). Backwards-compatible alias.
+pub fn register_core_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platform>) {
+    register_default_tools(registry, platform.clone());
+    register_extended_tools(registry, platform);
 }
 
 /// Register the task tool with a spawner that can create sub-agent runs.

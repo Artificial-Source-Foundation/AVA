@@ -55,6 +55,10 @@ pub struct CliArgs {
     #[arg(long)]
     pub workflow: Option<String>,
 
+    /// Attach image files to the prompt (repeatable). Supported: png, jpg, jpeg, gif, webp
+    #[arg(long)]
+    pub image: Vec<String>,
+
     /// Enable continuous voice input (requires --features voice)
     #[arg(long)]
     pub voice: bool,

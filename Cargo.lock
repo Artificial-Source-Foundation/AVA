@@ -582,6 +582,7 @@ dependencies = [
 name = "ava-types"
 version = "2.0.0"
 dependencies = [
+ "base64",
  "chrono",
  "serde",
  "serde_json",

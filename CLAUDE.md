@@ -91,17 +91,18 @@ AVA/
 └── tests/
 ```
 
-## Tool Surface (19 built-in)
+## Tool Surface (13 built-in, tiered)
 
-| Group | Count | Tools |
+Tools are organized into tiers. Only **Default** tools are sent to the LLM by default; Extended tools are registered and executable but not included in the system prompt unless `extended_tools` is enabled.
+
+| Tier | Count | Tools |
 |---|---:|---|
-| Core | 11 | read, write, edit, bash, glob, grep, multiedit, apply_patch, test_runner, lint, diagnostics |
-| Memory | 3 | remember, recall, memory_search |
-| Session | 3 | session_search, session_list, session_load |
-| Codebase | 1 | codebase_search |
-| Git | 1 | git_read (review subcommand only) |
+| Default | 6 | read, write, edit, bash, glob, grep |
+| Extended | 7 | apply_patch, web_fetch, multiedit, test_runner, lint, diagnostics, git |
 
-Total: 19 built-in tools + dynamic MCP tools + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
+Additional tools are registered separately (todo_read/write, question, task, codebase_search, memory tools, session tools) and always available when their dependencies are initialized.
+
+Total: 13 core built-in tools + dynamic MCP tools + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
 
 ## Project Instructions
 

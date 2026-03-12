@@ -203,6 +203,7 @@ impl AgentState {
         self.stack.as_ref().map(|s| s.todo_state.clone())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         &mut self,
         goal: String,
@@ -211,6 +212,7 @@ impl AgentState {
         agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
         history: Vec<ava_types::Message>,
         parent_session_id: Option<String>,
+        images: Vec<ava_types::ImageContent>,
     ) {
         let Some(stack) = self.stack.as_ref().map(Arc::clone) else {
             // No AgentStack (test mode) — mark running state but skip spawn
@@ -238,7 +240,7 @@ impl AgentState {
             if let Some(pid) = parent_session_id {
                 *stack.parent_session_id.write().await = Some(pid);
             }
-            let result = stack.run(&goal, max_turns, Some(agent_tx), run_cancel, history, Some(message_queue)).await;
+            let result = stack.run(&goal, max_turns, Some(agent_tx), run_cancel, history, Some(message_queue), images).await;
             let mapped = result.map_err(|err| err.to_string());
             let _ = app_tx.send(AppEvent::AgentDone(mapped));
         }));

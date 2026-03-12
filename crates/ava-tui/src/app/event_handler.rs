@@ -534,7 +534,7 @@ impl App {
             .map(|s| s.id.to_string());
         self.state
             .agent
-            .start(goal, self.state.agent.max_turns, app_tx, agent_tx, history, parent_session_id);
+            .start(goal, self.state.agent.max_turns, app_tx, agent_tx, history, parent_session_id, std::mem::take(&mut self.pending_images));
     }
 
     /// Send a mid-stream message to the running agent via the message queue.

@@ -178,6 +178,8 @@ pub struct App {
     last_esc_time: Option<std::time::Instant>,
     /// Pending background goal from `/bg` command (consumed in submit_goal).
     pub(crate) pending_bg_goal: Option<String>,
+    /// Images pending attachment to the next user message.
+    pub(crate) pending_images: Vec<ava_types::ImageContent>,
 }
 
 impl App {
@@ -273,6 +275,7 @@ impl App {
             question_rx: Some(question_rx),
             last_esc_time: None,
             pending_bg_goal: None,
+            pending_images: Vec::new(),
         };
         app.sync_custom_command_autocomplete();
         Ok(app)
@@ -553,7 +556,7 @@ impl App {
             });
 
             let result = stack
-                .run(&goal, max_turns, Some(agent_event_tx), cancel, Vec::new(), None)
+                .run(&goal, max_turns, Some(agent_event_tx), cancel, Vec::new(), None, Vec::new())
                 .await;
 
             // Wait for collector to drain
@@ -1683,6 +1686,7 @@ impl App {
             question_rx: None,
             last_esc_time: None,
             pending_bg_goal: None,
+            pending_images: Vec::new(),
         }
     }
 

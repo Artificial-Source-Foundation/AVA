@@ -14,7 +14,7 @@ pub mod tool;
 
 pub use context::Context;
 pub use error::{AvaError, ErrorCategory, Result};
-pub use message::{Message, Role};
+pub use message::{ImageContent, ImageMediaType, Message, Role};
 pub use session::Session;
 pub use todo::{TodoItem, TodoPriority, TodoState, TodoStatus};
 pub use tool::{Tool, ToolCall, ToolResult};

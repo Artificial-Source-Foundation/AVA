@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
     // AgentStack is Send — use tokio::spawn instead of spawn_local
     let handle = tokio::spawn(async move {
         stack
-            .run("Say hello", 3, Some(tx), cancel, Vec::new(), None)
+            .run("Say hello", 3, Some(tx), cancel, Vec::new(), None, Vec::new())
             .await
     });
 

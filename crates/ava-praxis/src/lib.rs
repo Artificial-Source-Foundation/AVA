@@ -390,6 +390,7 @@ impl Lead {
                 custom_system_prompt: None,
                 thinking_level: ava_types::ThinkingLevel::Off,
                 system_prompt_suffix: None,
+                extended_tools: true,
             },
         );
 

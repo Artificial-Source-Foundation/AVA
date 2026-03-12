@@ -5,6 +5,8 @@ use async_trait::async_trait;
 use ava_types::{Message, Result, StreamChunk, StreamToolCall, ThinkingLevel, TokenUsage, Tool, ToolCall};
 use futures::Stream;
 
+use crate::message_transform::{normalize_messages, ProviderKind};
+
 /// Response from an LLM that may include both text content and native tool calls.
 #[derive(Debug, Clone, Default)]
 pub struct LLMResponse {
@@ -36,6 +38,12 @@ pub trait LLMProvider: Send + Sync {
     fn estimate_cost(&self, input_tokens: usize, output_tokens: usize) -> f64;
     /// The model identifier string (e.g., "claude-sonnet-4-6").
     fn model_name(&self) -> &str;
+
+    /// The provider family for cross-provider message normalization.
+    /// Override this in provider implementations; defaults to `OpenAI` (most common).
+    fn provider_kind(&self) -> ProviderKind {
+        ProviderKind::OpenAI
+    }
 
     /// Whether this provider supports native tool calling via the API.
     fn supports_tools(&self) -> bool {
@@ -125,6 +133,113 @@ pub trait LLMProvider: Send + Sync {
     }
 }
 
+/// Wrapper that normalizes messages for cross-provider compatibility before
+/// delegating to the inner provider. Use this when switching providers
+/// mid-conversation or for provider fallback.
+///
+/// ```rust,ignore
+/// let provider = create_provider("openai", "gpt-4.1", &creds, pool)?;
+/// let normalizing = NormalizingProvider::new(provider);
+/// // Messages from an Anthropic conversation will be automatically
+/// // normalized before being sent to OpenAI.
+/// normalizing.generate_with_tools(&messages, &tools).await?;
+/// ```
+pub struct NormalizingProvider {
+    inner: Box<dyn LLMProvider>,
+}
+
+impl NormalizingProvider {
+    pub fn new(inner: Box<dyn LLMProvider>) -> Self {
+        Self { inner }
+    }
+
+    fn normalize(&self, messages: &[Message]) -> Vec<Message> {
+        normalize_messages(messages, self.inner.provider_kind())
+    }
+}
+
+#[async_trait]
+impl LLMProvider for NormalizingProvider {
+    async fn generate(&self, messages: &[Message]) -> Result<String> {
+        let normalized = self.normalize(messages);
+        self.inner.generate(&normalized).await
+    }
+
+    async fn generate_stream(
+        &self,
+        messages: &[Message],
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        let normalized = self.normalize(messages);
+        self.inner.generate_stream(&normalized).await
+    }
+
+    fn estimate_tokens(&self, input: &str) -> usize {
+        self.inner.estimate_tokens(input)
+    }
+
+    fn estimate_cost(&self, input_tokens: usize, output_tokens: usize) -> f64 {
+        self.inner.estimate_cost(input_tokens, output_tokens)
+    }
+
+    fn model_name(&self) -> &str {
+        self.inner.model_name()
+    }
+
+    fn provider_kind(&self) -> ProviderKind {
+        self.inner.provider_kind()
+    }
+
+    fn supports_tools(&self) -> bool {
+        self.inner.supports_tools()
+    }
+
+    async fn generate_with_tools(
+        &self,
+        messages: &[Message],
+        tools: &[Tool],
+    ) -> Result<LLMResponse> {
+        let normalized = self.normalize(messages);
+        self.inner.generate_with_tools(&normalized, tools).await
+    }
+
+    fn supports_thinking(&self) -> bool {
+        self.inner.supports_thinking()
+    }
+
+    fn thinking_levels(&self) -> &[ThinkingLevel] {
+        self.inner.thinking_levels()
+    }
+
+    async fn generate_with_thinking(
+        &self,
+        messages: &[Message],
+        tools: &[Tool],
+        thinking: ThinkingLevel,
+    ) -> Result<LLMResponse> {
+        let normalized = self.normalize(messages);
+        self.inner.generate_with_thinking(&normalized, tools, thinking).await
+    }
+
+    async fn generate_stream_with_tools(
+        &self,
+        messages: &[Message],
+        tools: &[Tool],
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        let normalized = self.normalize(messages);
+        self.inner.generate_stream_with_tools(&normalized, tools).await
+    }
+
+    async fn generate_stream_with_thinking(
+        &self,
+        messages: &[Message],
+        tools: &[Tool],
+        thinking: ThinkingLevel,
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        let normalized = self.normalize(messages);
+        self.inner.generate_stream_with_thinking(&normalized, tools, thinking).await
+    }
+}
+
 /// Wrapper that delegates all `LLMProvider` methods to an `Arc<dyn LLMProvider>`.
 /// Allows sharing a single provider across multiple consumers that need `Box<dyn LLMProvider>`.
 pub struct SharedProvider {
@@ -160,6 +275,10 @@ impl LLMProvider for SharedProvider {
 
     fn model_name(&self) -> &str {
         self.inner.model_name()
+    }
+
+    fn provider_kind(&self) -> ProviderKind {
+        self.inner.provider_kind()
     }
 
     fn supports_tools(&self) -> bool {

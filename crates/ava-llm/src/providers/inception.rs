@@ -85,6 +85,10 @@ impl LLMProvider for InceptionProvider {
         self.inner.model_name()
     }
 
+    fn provider_kind(&self) -> crate::message_transform::ProviderKind {
+        crate::message_transform::ProviderKind::Inception
+    }
+
     fn supports_tools(&self) -> bool {
         true
     }

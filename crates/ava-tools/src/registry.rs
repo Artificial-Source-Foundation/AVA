@@ -46,6 +46,20 @@ pub trait Middleware: Send + Sync {
     async fn after(&self, tool_call: &ToolCall, result: &ToolResult) -> Result<ToolResult>;
 }
 
+/// Which tier a tool belongs to — controls whether it's included in the LLM prompt.
+///
+/// All tiers are always *executable*; the tier only affects which tool definitions
+/// are sent to the LLM in the system prompt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum ToolTier {
+    /// Always sent to the LLM (read, write, edit, bash, glob, grep).
+    Default,
+    /// Only sent when extended tools are enabled (apply_patch, web_fetch, multiedit, etc.).
+    Extended,
+    /// Plugin tools (MCP, custom TOML) — sent when registered.
+    Plugin,
+}
+
 /// Where a tool came from — used for grouping in `/tools` and selective reload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolSource {
@@ -72,6 +86,7 @@ impl std::fmt::Display for ToolSource {
 pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn Tool>>,
     sources: HashMap<String, ToolSource>,
+    tiers: HashMap<String, ToolTier>,
     middleware: Vec<Box<dyn Middleware>>,
 }
 
@@ -86,6 +101,19 @@ impl ToolRegistry {
     {
         let name = tool.name().to_string();
         self.sources.insert(name.clone(), ToolSource::BuiltIn);
+        self.tiers.insert(name.clone(), ToolTier::Default);
+        self.tools.insert(name, Box::new(tool));
+    }
+
+    /// Register a tool with a specific tier. The tier controls whether the tool
+    /// definition is sent to the LLM; it does not affect executability.
+    pub fn register_with_tier<T>(&mut self, tool: T, tier: ToolTier)
+    where
+        T: Tool + 'static,
+    {
+        let name = tool.name().to_string();
+        self.sources.insert(name.clone(), ToolSource::BuiltIn);
+        self.tiers.insert(name.clone(), tier);
         self.tools.insert(name, Box::new(tool));
     }
 
@@ -94,13 +122,19 @@ impl ToolRegistry {
         T: Tool + 'static,
     {
         let name = tool.name().to_string();
+        let tier = match &source {
+            ToolSource::BuiltIn => ToolTier::Default,
+            ToolSource::MCP { .. } | ToolSource::Custom { .. } => ToolTier::Plugin,
+        };
         self.sources.insert(name.clone(), source);
+        self.tiers.insert(name.clone(), tier);
         self.tools.insert(name, Box::new(tool));
     }
 
     pub fn unregister(&mut self, name: &str) {
         self.tools.remove(name);
         self.sources.remove(name);
+        self.tiers.remove(name);
     }
 
     /// Remove all tools matching a given source predicate.
@@ -117,6 +151,7 @@ impl ToolRegistry {
         for name in to_remove {
             self.tools.remove(&name);
             self.sources.remove(&name);
+            self.tiers.remove(&name);
         }
     }
 
@@ -159,6 +194,30 @@ impl ToolRegistry {
         let mut tools: Vec<ToolDefinition> = self
             .tools
             .values()
+            .map(|tool| ToolDefinition {
+                name: tool.name().to_string(),
+                description: tool.description().to_string(),
+                parameters: tool.parameters(),
+            })
+            .collect();
+        tools.sort_by(|left, right| left.name.cmp(&right.name));
+        tools
+    }
+
+    /// List only tools matching the given tiers. Used to control which tool
+    /// definitions are sent to the LLM in the system prompt.
+    pub fn list_tools_for_tiers(&self, tiers: &[ToolTier]) -> Vec<ToolDefinition> {
+        let mut tools: Vec<ToolDefinition> = self
+            .tools
+            .values()
+            .filter(|tool| {
+                let tier = self
+                    .tiers
+                    .get(tool.name())
+                    .copied()
+                    .unwrap_or(ToolTier::Default);
+                tiers.contains(&tier)
+            })
             .map(|tool| ToolDefinition {
                 name: tool.name().to_string(),
                 description: tool.description().to_string(),

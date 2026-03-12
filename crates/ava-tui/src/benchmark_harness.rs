@@ -298,7 +298,7 @@ async fn run_solo_task(
     let start = Instant::now();
     let handle = tokio::spawn(async move {
         stack
-            .run(&goal, effective_turns, Some(tx), cancel, Vec::new(), None)
+            .run(&goal, effective_turns, Some(tx), cancel, Vec::new(), None, Vec::new())
             .await
     });
 

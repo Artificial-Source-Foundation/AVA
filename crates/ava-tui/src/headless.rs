@@ -5,7 +5,7 @@ use ava_agent::AgentEvent;
 use ava_praxis::{Budget, Director, DirectorConfig, PraxisEvent, Task, TaskType, Workflow, WorkflowExecutor};
 use ava_llm::provider::LLMProvider;
 use ava_platform::StandardPlatform;
-use ava_types::{MessageTier, QueuedMessage};
+use ava_types::{ImageContent, MessageTier, QueuedMessage};
 use color_eyre::eyre::{eyre, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -86,8 +86,9 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
 
     let goal_owned = goal.to_string();
     let max_turns = cli.max_turns;
+    let cli_images = load_cli_images(&cli.image);
     let handle = tokio::spawn(async move {
-        stack.run(&goal_owned, max_turns, Some(tx), cancel, Vec::new(), Some(message_queue)).await
+        stack.run(&goal_owned, max_turns, Some(tx), cancel, Vec::new(), Some(message_queue), cli_images).await
     });
 
     if json_mode {
@@ -362,6 +363,24 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
     }
 
     std::process::exit(if success { 0 } else { 1 });
+}
+
+/// Load images from CLI --image paths. Logs warnings and skips files that fail.
+fn load_cli_images(paths: &[String]) -> Vec<ImageContent> {
+    let mut images = Vec::new();
+    for path_str in paths {
+        let path = std::path::Path::new(path_str);
+        match ImageContent::from_file(path) {
+            Ok(img) => {
+                debug!(path = %path.display(), media_type = %img.media_type, "Loaded image for prompt");
+                images.push(img);
+            }
+            Err(e) => {
+                eprintln!("[warning] {e}");
+            }
+        }
+    }
+    images
 }
 
 /// Pre-populate the message queue from CLI flags (--follow-up, --later, --later-group).
@@ -649,7 +668,7 @@ async fn run_voice_loop(cli: CliArgs) -> Result<()> {
         let goal = text.clone();
         let max_turns = cli.max_turns;
         let handle = tokio::spawn(async move {
-            stack.run(&goal, max_turns, Some(tx), agent_cancel, Vec::new(), None).await
+            stack.run(&goal, max_turns, Some(tx), agent_cancel, Vec::new(), None, Vec::new()).await
         });
 
         while let Some(event) = rx.recv().await {

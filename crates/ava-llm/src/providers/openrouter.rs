@@ -133,6 +133,10 @@ impl LLMProvider for OpenRouterProvider {
         self.inner.model_name()
     }
 
+    fn provider_kind(&self) -> crate::message_transform::ProviderKind {
+        crate::message_transform::ProviderKind::OpenRouter
+    }
+
     fn supports_tools(&self) -> bool {
         true
     }

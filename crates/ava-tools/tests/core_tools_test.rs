@@ -376,6 +376,93 @@ fn core_tools_are_registered() {
     assert!(names.contains(&"apply_patch"), "apply_patch should be registered");
 }
 
+#[test]
+fn default_tools_gives_6_tools() {
+    use ava_tools::core::register_default_tools;
+    use ava_tools::registry::{ToolRegistry, ToolTier};
+
+    let mut registry = ToolRegistry::new();
+    register_default_tools(&mut registry, Arc::new(StandardPlatform));
+
+    let all = registry.list_tools();
+    assert_eq!(all.len(), 6, "default tier should have exactly 6 tools, got: {:?}",
+        all.iter().map(|t| t.name.as_str()).collect::<Vec<_>>());
+
+    let default_only = registry.list_tools_for_tiers(&[ToolTier::Default]);
+    assert_eq!(default_only.len(), 6);
+
+    let names: Vec<&str> = default_only.iter().map(|t| t.name.as_str()).collect();
+    for expected in &["read", "write", "edit", "bash", "glob", "grep"] {
+        assert!(names.contains(expected), "{expected} should be in default tools");
+    }
+}
+
+#[test]
+fn extended_registration_gives_all_13_tools() {
+    use ava_tools::core::{register_default_tools, register_extended_tools};
+    use ava_tools::registry::{ToolRegistry, ToolTier};
+
+    let mut registry = ToolRegistry::new();
+    register_default_tools(&mut registry, Arc::new(StandardPlatform));
+    register_extended_tools(&mut registry, Arc::new(StandardPlatform));
+
+    let all = registry.list_tools();
+    assert_eq!(all.len(), 13, "default + extended should have 13 tools, got: {:?}",
+        all.iter().map(|t| t.name.as_str()).collect::<Vec<_>>());
+
+    // Default tier only should still give 6
+    let default_only = registry.list_tools_for_tiers(&[ToolTier::Default]);
+    assert_eq!(default_only.len(), 6);
+
+    // Extended tier only should give 7
+    let extended_only = registry.list_tools_for_tiers(&[ToolTier::Extended]);
+    assert_eq!(extended_only.len(), 7);
+
+    // Both tiers should give 13
+    let both = registry.list_tools_for_tiers(&[ToolTier::Default, ToolTier::Extended]);
+    assert_eq!(both.len(), 13);
+
+    // Verify extended tools are present
+    let ext_names: Vec<&str> = extended_only.iter().map(|t| t.name.as_str()).collect();
+    for expected in &["apply_patch", "web_fetch", "multiedit", "test_runner", "lint", "diagnostics", "git"] {
+        assert!(ext_names.contains(expected), "{expected} should be in extended tools");
+    }
+}
+
+#[test]
+fn extended_tools_are_executable_regardless_of_tier_filter() {
+    use ava_tools::core::{register_default_tools, register_extended_tools};
+    use ava_tools::registry::{ToolRegistry, ToolTier};
+
+    let mut registry = ToolRegistry::new();
+    register_default_tools(&mut registry, Arc::new(StandardPlatform));
+    register_extended_tools(&mut registry, Arc::new(StandardPlatform));
+
+    // Listing with default-only filter should not include apply_patch
+    let default_only = registry.list_tools_for_tiers(&[ToolTier::Default]);
+    let names: Vec<&str> = default_only.iter().map(|t| t.name.as_str()).collect();
+    assert!(!names.contains(&"apply_patch"), "apply_patch should not be in default-only listing");
+
+    // But execute should still work for apply_patch (it's registered, just filtered from prompt)
+    let tool_call = ava_types::ToolCall {
+        id: "call_1".to_string(),
+        name: "apply_patch".to_string(),
+        arguments: serde_json::json!({"patch": "invalid"}),
+    };
+    // We expect an error because the patch is invalid, but NOT a ToolNotFound error
+    let result = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(registry.execute(tool_call));
+    // The tool should be found and executed (even if it returns an error for bad input)
+    match result {
+        Ok(_) => {} // tool executed successfully (unlikely with invalid patch)
+        Err(e) => {
+            let msg = e.to_string();
+            assert!(!msg.contains("not found"), "apply_patch should be executable even when filtered from prompt, got: {msg}");
+        }
+    }
+}
+
 #[tokio::test]
 async fn read_large_file_truncates_at_default_limit() {
     let dir = tempdir().expect("tempdir");

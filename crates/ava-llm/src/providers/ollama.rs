@@ -152,4 +152,8 @@ impl LLMProvider for OllamaProvider {
     fn model_name(&self) -> &str {
         &self.model
     }
+
+    fn provider_kind(&self) -> crate::message_transform::ProviderKind {
+        crate::message_transform::ProviderKind::Ollama
+    }
 }

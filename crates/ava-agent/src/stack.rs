@@ -16,8 +16,8 @@ use ava_memory::MemorySystem;
 use ava_platform::StandardPlatform;
 use ava_session::SessionManager;
 use ava_tools::core::{
-    register_core_tools, register_custom_tools, register_question_tool, register_task_tool,
-    register_todo_tools,
+    register_core_tools, register_custom_tools, register_default_tools, register_extended_tools,
+    register_question_tool, register_task_tool, register_todo_tools,
 };
 use ava_tools::core::question::QuestionBridge;
 use ava_tools::core::task::{TaskResult, TaskSpawner};
@@ -386,7 +386,8 @@ impl AgentStack {
         format!("{goal}\n\nRelevant memories:\n{memory_block}")
     }
 
-    #[instrument(skip(self, event_tx, cancel, history, message_queue), fields(max_turns))]
+    #[allow(clippy::too_many_arguments)]
+    #[instrument(skip(self, event_tx, cancel, history, message_queue, images), fields(max_turns))]
     pub async fn run(
         &self,
         goal: &str,
@@ -395,6 +396,7 @@ impl AgentStack {
         cancel: CancellationToken,
         history: Vec<ava_types::Message>,
         message_queue: Option<crate::message_queue::MessageQueue>,
+        images: Vec<ava_types::ImageContent>,
     ) -> Result<AgentRunResult> {
         let cfg = self.config.get().await;
         let provider = if let Some(provider) = &self.injected_provider {
@@ -455,6 +457,7 @@ impl AgentStack {
             custom_system_prompt: None,
             thinking_level: thinking,
             system_prompt_suffix,
+            extended_tools: false,
         };
 
         let enriched_goal = self.enrich_goal_with_memories(goal).await;
@@ -517,6 +520,11 @@ impl AgentStack {
             config,
         )
         .with_history(history);
+
+        // Attach images if provided (multimodal input)
+        if !images.is_empty() {
+            agent = agent.with_images(images);
+        }
 
         // Attach message queue if provided (enables steering/follow-up/post-complete)
         let mut queue = message_queue;
@@ -727,6 +735,7 @@ impl TaskSpawner for AgentTaskSpawner {
             custom_system_prompt: Some(system_prompt),
             thinking_level: ThinkingLevel::Off,
             system_prompt_suffix: crate::instructions::load_project_instructions(),
+            extended_tools: true, // sub-agents get full tool access
         };
         let mut agent = AgentLoop::new(
             Box::new(SharedProvider::new(self.provider.clone())),
@@ -881,7 +890,8 @@ fn extract_goal_keywords(goal: &str) -> Vec<String> {
 
 fn build_tool_registry(platform: Arc<StandardPlatform>) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
-    register_core_tools(&mut registry, platform);
+    register_default_tools(&mut registry, platform.clone());
+    register_extended_tools(&mut registry, platform);
     registry
 }
 

@@ -296,6 +296,7 @@ impl SessionManager {
                     tool_calls,
                     tool_results,
                     tool_call_id: None,
+                    images: Vec::new(),
                 })
             })
             .map_err(db_error)?

@@ -472,6 +472,32 @@ impl App {
                 self.copy_last_response_with_mode(force_all);
                 None
             }
+            "/image" => {
+                if let Some(path_str) = arg {
+                    let path = std::path::Path::new(path_str);
+                    match ava_types::ImageContent::from_file(path) {
+                        Ok(img) => {
+                            self.pending_images.push(img);
+                            let count = self.pending_images.len();
+                            self.set_status(
+                                format!("Image attached ({count} pending). Type your prompt and press Enter."),
+                                StatusLevel::Info,
+                            );
+                            Some((MessageKind::System, format!(
+                                "Attached image: {} ({}). {count} image(s) pending — send a message to include them.",
+                                path.display(), path.extension().and_then(|e| e.to_str()).unwrap_or("unknown")
+                            )))
+                        }
+                        Err(e) => {
+                            Some((MessageKind::Error, e))
+                        }
+                    }
+                } else {
+                    Some((MessageKind::Error,
+                        "Usage: /image <path>\nSupported formats: png, jpg, jpeg, gif, webp\nExample: /image screenshot.png".to_string()
+                    ))
+                }
+            }
             "/help" => {
                 let help = "\
 Available commands:
@@ -495,6 +521,7 @@ Available commands:
   /commit                  — show git status for committing
   /export [filename]       — export conversation to file (.md or .json)
   /copy [all]              — copy last response (picks code block if multiple)
+  /image <path>            — attach image to next message (png/jpg/gif/webp)
   /commands [list|reload|init] — manage custom slash commands
   /hooks [list|reload|init|dry-run <event>] — manage lifecycle hooks
   /btw <question>          — ask a side question without interrupting the agent

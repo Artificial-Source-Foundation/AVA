@@ -8,6 +8,8 @@ use serde_json::Value;
 use tracing::warn;
 use uuid::Uuid;
 
+use ava_tools::registry::ToolTier;
+
 use super::AgentLoop;
 
 #[derive(Debug, Deserialize)]
@@ -96,6 +98,16 @@ pub(super) fn parse_tool_calls(content: &str) -> Result<Vec<ToolCall>> {
 }
 
 impl AgentLoop {
+    /// Return the tool definitions that should be sent to the LLM, respecting
+    /// the `extended_tools` config flag to filter by tier.
+    pub(super) fn active_tool_defs(&self) -> Vec<ava_types::Tool> {
+        if self.config.extended_tools {
+            self.tools.list_tools_for_tiers(&[ToolTier::Default, ToolTier::Extended, ToolTier::Plugin])
+        } else {
+            self.tools.list_tools_for_tiers(&[ToolTier::Default, ToolTier::Plugin])
+        }
+    }
+
     /// Generate a response, using native tool calling when the provider supports it.
     /// Returns (response_text, tool_calls, usage).
     pub(super) async fn generate_response(
@@ -120,7 +132,7 @@ impl AgentLoop {
         }
 
         let result = if self.llm.supports_tools() {
-            let tool_defs = self.tools.list_tools();
+            let tool_defs = self.active_tool_defs();
             let response = self
                 .llm
                 .generate_with_tools(messages, &tool_defs)
@@ -179,7 +191,7 @@ impl AgentLoop {
         }
 
         let result = if self.llm.supports_tools() {
-            let tool_defs = self.tools.list_tools();
+            let tool_defs = self.active_tool_defs();
             let response = self
                 .llm
                 .generate_with_thinking(messages, &tool_defs, self.config.thinking_level)

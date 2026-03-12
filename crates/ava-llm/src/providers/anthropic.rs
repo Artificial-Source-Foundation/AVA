@@ -264,6 +264,10 @@ impl LLMProvider for AnthropicProvider {
         &self.model
     }
 
+    fn provider_kind(&self) -> crate::message_transform::ProviderKind {
+        crate::message_transform::ProviderKind::Anthropic
+    }
+
     fn supports_tools(&self) -> bool {
         true
     }

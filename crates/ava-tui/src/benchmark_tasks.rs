@@ -50,6 +50,19 @@ pub enum Language {
     Go,
 }
 
+impl Language {
+    /// Parse from a string (case-insensitive).
+    pub fn parse_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "rust" | "rs" => Some(Self::Rust),
+            "python" | "py" => Some(Self::Python),
+            "javascript" | "js" | "typescript" | "ts" => Some(Self::JavaScript),
+            "go" | "golang" => Some(Self::Go),
+            _ => None,
+        }
+    }
+}
+
 impl std::fmt::Display for Language {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -175,6 +188,13 @@ pub struct BenchmarkTask {
     /// Minimum expected number of tool calls for efficiency scoring.
     /// Only meaningful for tool-using tasks. Used to compute `tool_efficiency_score`.
     pub expected_min_tools: Option<u32>,
+}
+
+impl BenchmarkTask {
+    /// Returns the programming language for this task (from test harness, defaults to Rust).
+    pub fn language(&self) -> Language {
+        self.test_harness.as_ref().map_or(Language::Rust, |h| h.language)
+    }
 }
 
 /// Returns the default set of benchmark tasks.

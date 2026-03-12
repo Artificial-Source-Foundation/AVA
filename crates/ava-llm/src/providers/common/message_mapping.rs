@@ -58,6 +58,25 @@ pub fn map_messages_openai(messages: &[Message]) -> Vec<Value> {
                 });
             }
 
+            // If user message has images, use content parts format
+            if message.role == Role::User && !message.images.is_empty() {
+                let mut content: Vec<Value> = Vec::new();
+                if !message.content.is_empty() {
+                    content.push(json!({"type": "text", "text": message.content}));
+                }
+                for img in &message.images {
+                    let data_url = format!("data:{};base64,{}", img.media_type.as_mime(), img.data);
+                    content.push(json!({
+                        "type": "image_url",
+                        "image_url": { "url": data_url }
+                    }));
+                }
+                return json!({
+                    "role": map_role(&message.role),
+                    "content": content,
+                });
+            }
+
             json!({
                 "role": map_role(&message.role),
                 "content": message.content,
@@ -111,6 +130,26 @@ pub fn map_messages_anthropic(messages: &[Message]) -> (Option<String>, Vec<Valu
             "user"
         };
 
+        // If user message has images, use content blocks format
+        if message.role == Role::User && !message.images.is_empty() {
+            let mut content: Vec<Value> = Vec::new();
+            if !message.content.is_empty() {
+                content.push(json!({"type": "text", "text": message.content}));
+            }
+            for img in &message.images {
+                content.push(json!({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": img.media_type.as_mime(),
+                        "data": img.data,
+                    }
+                }));
+            }
+            mapped.push(json!({"role": role, "content": content}));
+            continue;
+        }
+
         mapped.push(json!({
             "role": role,
             "content": message.content,
@@ -133,6 +172,27 @@ pub fn map_messages_gemini_parts(messages: &[Message]) -> (Option<Value>, Vec<Va
     for message in messages {
         if message.role == Role::System {
             system_parts.push(json!({"text": message.content}));
+            continue;
+        }
+
+        // If user message has images, add image parts
+        if message.role == Role::User && !message.images.is_empty() {
+            let mut parts: Vec<Value> = Vec::new();
+            if !message.content.is_empty() {
+                parts.push(json!({"text": message.content}));
+            }
+            for img in &message.images {
+                parts.push(json!({
+                    "inlineData": {
+                        "mimeType": img.media_type.as_mime(),
+                        "data": img.data,
+                    }
+                }));
+            }
+            mapped.push(json!({
+                "role": "user",
+                "parts": parts,
+            }));
             continue;
         }
 
@@ -419,5 +479,140 @@ mod tests {
         assert_eq!(mapped[0]["role"], "user");
         assert_eq!(mapped[1]["role"], "model");
         assert_eq!(mapped[2]["role"], "user");
+    }
+
+    // ── Image content tests ──
+
+    use ava_types::{ImageContent, ImageMediaType};
+
+    fn user_msg_with_image(content: &str, data: &str, media_type: ImageMediaType) -> Message {
+        Message::new(Role::User, content)
+            .with_images(vec![ImageContent::new(data, media_type)])
+    }
+
+    // ── Anthropic image tests ──
+
+    #[test]
+    fn anthropic_user_message_with_image() {
+        let messages = vec![user_msg_with_image("describe this", "abc123", ImageMediaType::Png)];
+        let (_, mapped) = map_messages_anthropic(&messages);
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0]["role"], "user");
+        let content = mapped[0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "describe this");
+        assert_eq!(content[1]["type"], "image");
+        assert_eq!(content[1]["source"]["type"], "base64");
+        assert_eq!(content[1]["source"]["media_type"], "image/png");
+        assert_eq!(content[1]["source"]["data"], "abc123");
+    }
+
+    #[test]
+    fn anthropic_user_message_image_only() {
+        let messages = vec![
+            Message::new(Role::User, "")
+                .with_images(vec![ImageContent::new("imgdata", ImageMediaType::Jpeg)]),
+        ];
+        let (_, mapped) = map_messages_anthropic(&messages);
+        let content = mapped[0]["content"].as_array().unwrap();
+        // No text block when content is empty
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0]["type"], "image");
+        assert_eq!(content[0]["source"]["media_type"], "image/jpeg");
+    }
+
+    #[test]
+    fn anthropic_user_message_multiple_images() {
+        let messages = vec![
+            Message::new(Role::User, "compare these")
+                .with_images(vec![
+                    ImageContent::new("img1", ImageMediaType::Png),
+                    ImageContent::new("img2", ImageMediaType::WebP),
+                ]),
+        ];
+        let (_, mapped) = map_messages_anthropic(&messages);
+        let content = mapped[0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 3); // text + 2 images
+        assert_eq!(content[1]["source"]["media_type"], "image/png");
+        assert_eq!(content[2]["source"]["media_type"], "image/webp");
+    }
+
+    // ── OpenAI image tests ──
+
+    #[test]
+    fn openai_user_message_with_image() {
+        let messages = vec![user_msg_with_image("what is this?", "abc123", ImageMediaType::Png)];
+        let mapped = map_messages_openai(&messages);
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0]["role"], "user");
+        let content = mapped[0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[0]["text"], "what is this?");
+        assert_eq!(content[1]["type"], "image_url");
+        assert_eq!(
+            content[1]["image_url"]["url"],
+            "data:image/png;base64,abc123"
+        );
+    }
+
+    #[test]
+    fn openai_user_message_image_jpeg() {
+        let messages = vec![user_msg_with_image("photo", "jpegdata", ImageMediaType::Jpeg)];
+        let mapped = map_messages_openai(&messages);
+        let content = mapped[0]["content"].as_array().unwrap();
+        assert_eq!(
+            content[1]["image_url"]["url"],
+            "data:image/jpeg;base64,jpegdata"
+        );
+    }
+
+    // ── Gemini image tests ──
+
+    #[test]
+    fn gemini_user_message_with_image() {
+        let messages = vec![user_msg_with_image("analyze this", "abc123", ImageMediaType::Gif)];
+        let (_, mapped) = map_messages_gemini_parts(&messages);
+        assert_eq!(mapped.len(), 1);
+        assert_eq!(mapped[0]["role"], "user");
+        let parts = mapped[0]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0]["text"], "analyze this");
+        assert_eq!(parts[1]["inlineData"]["mimeType"], "image/gif");
+        assert_eq!(parts[1]["inlineData"]["data"], "abc123");
+    }
+
+    #[test]
+    fn gemini_user_message_image_only() {
+        let messages = vec![
+            Message::new(Role::User, "")
+                .with_images(vec![ImageContent::new("webpdata", ImageMediaType::WebP)]),
+        ];
+        let (_, mapped) = map_messages_gemini_parts(&messages);
+        let parts = mapped[0]["parts"].as_array().unwrap();
+        assert_eq!(parts.len(), 1); // no text part
+        assert_eq!(parts[0]["inlineData"]["mimeType"], "image/webp");
+    }
+
+    // ── No images → standard format ──
+
+    #[test]
+    fn no_images_preserves_standard_format() {
+        let messages = vec![msg(Role::User, "plain text")];
+
+        // OpenAI
+        let mapped = map_messages_openai(&messages);
+        assert_eq!(mapped[0]["content"], "plain text");
+        assert!(mapped[0]["content"].is_string()); // not an array
+
+        // Anthropic
+        let (_, mapped) = map_messages_anthropic(&messages);
+        assert_eq!(mapped[0]["content"], "plain text");
+        assert!(mapped[0]["content"].is_string());
+
+        // Gemini
+        let (_, mapped) = map_messages_gemini_parts(&messages);
+        assert_eq!(mapped[0]["parts"][0]["text"], "plain text");
     }
 }

@@ -53,7 +53,7 @@ async fn agent_stack_run_with_mock_provider_completes() {
     .expect("stack init should succeed");
 
     let result = stack
-        .run("finish task", 5, None, CancellationToken::new(), Vec::new(), None)
+        .run("finish task", 5, None, CancellationToken::new(), Vec::new(), None, Vec::new())
         .await
         .expect("run should succeed");
 
@@ -84,7 +84,7 @@ async fn agent_stack_run_honors_cancellation() {
     });
 
     let err = stack
-        .run("slow task", 5, None, cancel, Vec::new(), None)
+        .run("slow task", 5, None, cancel, Vec::new(), None, Vec::new())
         .await
         .expect_err("run should be cancelled");
     assert!(matches!(err, AvaError::Cancelled));

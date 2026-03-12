@@ -428,7 +428,7 @@ impl App {
         &mut self,
         goal: String,
         app_tx: mpsc::UnboundedSender<AppEvent>,
-        agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
+        _agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
     ) {
         // Handle shell commands (! prefix)
         if let Some(cmd) = goal.strip_prefix('!') {
@@ -504,7 +504,7 @@ impl App {
                             .push(UiMessage::new(MessageKind::User, goal));
                         // Submit the resolved prompt as the actual goal
                         // (fall through to agent submission below with the resolved prompt)
-                        return self.submit_goal(resolved_prompt, app_tx, agent_tx);
+                        return self.submit_goal(resolved_prompt, app_tx, _agent_tx);
                     }
                     Err(err) => {
                         self.state

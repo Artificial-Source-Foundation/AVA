@@ -288,10 +288,7 @@ pub async fn run_benchmark(
 
     // Filter by language
     if let Some(ref langs) = language_filter {
-        all_tasks = all_tasks
-            .into_iter()
-            .filter(|t| langs.contains(&t.language()))
-            .collect();
+        all_tasks.retain(|t| langs.contains(&t.language()));
         let lang_names: Vec<_> = langs.iter().map(|l| l.to_string()).collect();
         eprintln!("[benchmark] Language filter: {}", lang_names.join(", "));
     }

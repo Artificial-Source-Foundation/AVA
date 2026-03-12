@@ -349,37 +349,35 @@ impl App {
                                 MessageKind::Error,
                                 "Usage: /credentials remove <provider>".to_string(),
                             ))
+                        } else if let Some(tx) = app_tx.clone() {
+                            self.set_status(format!("Removing credentials for {provider}..."), StatusLevel::Info);
+                            self.spawn_credential_command(
+                                ava_config::CredentialCommand::Remove { provider },
+                                Self::format_standard_credential_result,
+                                tx,
+                            );
+                            None
                         } else {
-                            if let Some(tx) = app_tx.clone() {
-                                self.set_status(format!("Removing credentials for {provider}..."), StatusLevel::Info);
-                                self.spawn_credential_command(
-                                    ava_config::CredentialCommand::Remove { provider },
-                                    Self::format_standard_credential_result,
-                                    tx,
-                                );
-                                None
-                            } else {
-                                let result = tokio::task::block_in_place(|| {
-                                    tokio::runtime::Handle::current().block_on(async {
-                                        let mut store = ava_config::CredentialStore::load_default()
-                                            .await
-                                            .unwrap_or_default();
-                                        ava_config::execute_credential_command(
-                                            ava_config::CredentialCommand::Remove { provider },
-                                            &mut store,
-                                        )
+                            let result = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current().block_on(async {
+                                    let mut store = ava_config::CredentialStore::load_default()
                                         .await
-                                    })
-                                });
-                                match result {
-                                    Ok(msg) => {
-                                        self.set_status(&msg, StatusLevel::Info);
-                                        Some((MessageKind::System, msg))
-                                    }
-                                    Err(err) => {
-                                        self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                                        Some((MessageKind::Error, format!("Failed: {err}")))
-                                    }
+                                        .unwrap_or_default();
+                                    ava_config::execute_credential_command(
+                                        ava_config::CredentialCommand::Remove { provider },
+                                        &mut store,
+                                    )
+                                    .await
+                                })
+                            });
+                            match result {
+                                Ok(msg) => {
+                                    self.set_status(&msg, StatusLevel::Info);
+                                    Some((MessageKind::System, msg))
+                                }
+                                Err(err) => {
+                                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                                    Some((MessageKind::Error, format!("Failed: {err}")))
                                 }
                             }
                         }

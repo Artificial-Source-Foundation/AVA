@@ -9,7 +9,9 @@ use std::time::Instant;
 use ava_context::ContextManager;
 use ava_tools::monitor::ToolExecution;
 use ava_tools::registry::ToolRegistry;
-use ava_types::{ImageContent, Message, Role, Session, ThinkingLevel, TokenUsage, ToolCall, ToolResult};
+use ava_types::{
+    ImageContent, Message, Role, Session, ThinkingLevel, TokenUsage, ToolCall, ToolResult,
+};
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument, trace, warn};
@@ -19,8 +21,9 @@ use crate::message_queue::MessageQueue;
 use crate::stuck::{StuckAction, StuckDetector};
 use crate::system_prompt::build_system_prompt;
 
-pub use tool_execution::READ_ONLY_TOOLS;
 use response::parse_tool_calls;
+use tool_execution::has_validation_failure;
+pub use tool_execution::READ_ONLY_TOOLS;
 
 /// Core agent execution loop that orchestrates LLM calls, tool execution, and stuck detection.
 ///
@@ -71,6 +74,34 @@ pub struct AgentConfig {
     /// When true, restrict write/edit tools to `.ava/plans/*.md` paths only (Plan mode).
     #[serde(default)]
     pub plan_mode: bool,
+    /// Optional post-edit validation steps run after successful write/edit tools.
+    #[serde(default)]
+    pub post_edit_validation: Option<PostEditValidationConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PostEditValidationConfig {
+    /// Run the existing extended-tier `lint` tool after successful edits.
+    #[serde(default)]
+    pub lint: bool,
+    /// Run the existing extended-tier `test_runner` tool after successful edits.
+    #[serde(default)]
+    pub tests: bool,
+    /// Optional custom lint command passed through to the lint tool.
+    #[serde(default)]
+    pub lint_command: Option<String>,
+    /// Optional custom test command passed through to the test_runner tool.
+    #[serde(default)]
+    pub test_command: Option<String>,
+    /// Timeout in seconds for post-edit test execution.
+    #[serde(default = "default_post_edit_test_timeout_secs")]
+    pub test_timeout_secs: u64,
+}
+
+impl PostEditValidationConfig {
+    pub fn enabled(&self) -> bool {
+        self.lint || self.tests
+    }
 }
 
 fn default_max_cost() -> f64 {
@@ -79,6 +110,10 @@ fn default_max_cost() -> f64 {
 
 fn default_loop_detection() -> bool {
     true
+}
+
+fn default_post_edit_test_timeout_secs() -> u64 {
+    60
 }
 
 /// Events emitted during streaming agent execution for UI consumption.
@@ -167,7 +202,12 @@ impl AgentLoop {
     }
 
     /// Inject a summary prompt and do one final LLM call so the agent can wrap up.
-    async fn force_summary(&mut self, session: &mut Session, prompt: &str, total_usage: &mut TokenUsage) {
+    async fn force_summary(
+        &mut self,
+        session: &mut Session,
+        prompt: &str,
+        total_usage: &mut TokenUsage,
+    ) {
         let summary_msg = Message::new(Role::User, prompt.to_string());
         self.context.add_message(summary_msg.clone());
         session.add_message(summary_msg);
@@ -186,7 +226,12 @@ impl AgentLoop {
     /// Idempotent: calling this multiple times (e.g., follow-up runs) is safe.
     fn inject_system_prompt(&mut self) {
         // Skip if system prompt already present (follow-up / post-complete reuse the context)
-        if self.context.get_messages().iter().any(|m| m.role == Role::System) {
+        if self
+            .context
+            .get_messages()
+            .iter()
+            .any(|m| m.role == Role::System)
+        {
             return;
         }
         let mut system = if let Some(ref custom) = self.config.custom_system_prompt {
@@ -227,7 +272,11 @@ impl AgentLoop {
         session.add_message(goal_message);
 
         // max_turns == 0 means unlimited; use a very large sentinel
-        let effective_max = if self.config.max_turns == 0 { usize::MAX } else { self.config.max_turns };
+        let effective_max = if self.config.max_turns == 0 {
+            usize::MAX
+        } else {
+            self.config.max_turns
+        };
         let mut turn: usize = 0;
 
         loop {
@@ -241,7 +290,9 @@ impl AgentLoop {
             }
 
             // --- Check budget limit ---
-            if self.config.max_budget_usd > 0.0 && detector.estimated_cost() > self.config.max_budget_usd {
+            if self.config.max_budget_usd > 0.0
+                && detector.estimated_cost() > self.config.max_budget_usd
+            {
                 self.force_summary(&mut session, &format!(
                     "You have reached the budget limit (${:.2}). Please summarize what you've accomplished and list any remaining work.",
                     self.config.max_budget_usd,
@@ -257,7 +308,9 @@ impl AgentLoop {
             let assistant_message = Message::new(Role::Assistant, response_text.clone())
                 .with_tool_calls(tool_calls.clone());
 
-            let tool_results = self.execute_tool_calls_tracked(&tool_calls, &mut detector).await;
+            let tool_results = self
+                .execute_tool_calls_tracked(&tool_calls, &mut detector)
+                .await;
 
             match detector.check(
                 &response_text,
@@ -296,16 +349,20 @@ impl AgentLoop {
                 return Ok(session);
             }
 
-            let completion_requested =
-                tool_calls.iter().any(|call| call.name == "attempt_completion");
+            let completion_requested = tool_calls
+                .iter()
+                .any(|call| call.name == "attempt_completion");
 
             self.add_tool_results(&tool_calls, &tool_results, &mut session);
 
             // Inject a self-correction hint for the first error (avoids flooding)
-            if let Some(err_result) = tool_results.iter().find(|r| r.is_error) {
-                let first_line = err_result.content.lines().next().unwrap_or("unknown error");
+            if let Some(err_result) = tool_results
+                .iter()
+                .find(|result| result.is_error || has_validation_failure(result))
+            {
+                let (prefix, first_line) = correction_hint_parts(err_result);
                 let hint = format!(
-                    "Tool call failed: {first_line}. Try a different approach — don't repeat the same call."
+                    "{prefix}: {first_line}. Try a different approach — don't repeat the same call."
                 );
                 let hint_msg = Message::new(Role::User, hint);
                 self.context.add_message(hint_msg.clone());
@@ -725,10 +782,13 @@ impl AgentLoop {
 
                 // Inject a self-correction hint for the first error (skip if steering overrides)
                 if !steering_triggered {
-                    if let Some(err_result) = tool_results_collected.iter().find(|r| r.is_error) {
-                        let first_line = err_result.content.lines().next().unwrap_or("unknown error");
+                    if let Some(err_result) = tool_results_collected
+                        .iter()
+                        .find(|result| result.is_error || has_validation_failure(result))
+                    {
+                        let (prefix, first_line) = correction_hint_parts(err_result);
                         let hint = format!(
-                            "Tool call failed: {first_line}. Try a different approach — don't repeat the same call."
+                            "{prefix}: {first_line}. Try a different approach — don't repeat the same call."
                         );
                         let hint_msg = Message::new(Role::User, hint);
                         self.context.add_message(hint_msg.clone());
@@ -775,6 +835,24 @@ impl AgentLoop {
     }
 }
 
+fn correction_hint_parts(result: &ToolResult) -> (&'static str, &str) {
+    if result.is_error {
+        (
+            "Tool call failed",
+            result.content.lines().next().unwrap_or("unknown error"),
+        )
+    } else {
+        (
+            "Post-edit validation failed",
+            result
+                .content
+                .lines()
+                .find(|line| line.starts_with("- "))
+                .unwrap_or("validation failed"),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -798,6 +876,7 @@ mod tests {
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
+            post_edit_validation: None,
         };
         let llm = crate::tests::mock_llm();
 
@@ -825,6 +904,7 @@ mod tests {
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
+            post_edit_validation: None,
         };
         let llm = crate::tests::mock_llm();
 
@@ -855,6 +935,7 @@ mod tests {
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
+            post_edit_validation: None,
         };
         let llm = crate::tests::mock_llm();
 
@@ -867,7 +948,7 @@ mod tests {
         for i in 0..2 {
             let action = detector.check(
                 &format!("reading {i}"),
-                &[call.clone()],
+                std::slice::from_ref(&call),
                 &[],
                 &config,
                 llm.as_ref(),
@@ -875,7 +956,13 @@ mod tests {
             assert!(matches!(action, StuckAction::Continue));
         }
 
-        let action = detector.check("reading again", &[call.clone()], &[], &config, llm.as_ref());
+        let action = detector.check(
+            "reading again",
+            std::slice::from_ref(&call),
+            &[],
+            &config,
+            llm.as_ref(),
+        );
         assert!(matches!(action, StuckAction::InjectMessage(_)));
     }
 
@@ -894,6 +981,7 @@ mod tests {
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
+            post_edit_validation: None,
         };
         let llm = crate::tests::mock_llm();
 
@@ -907,7 +995,7 @@ mod tests {
             let action = detector.check(
                 &format!("trying {i}"),
                 &[],
-                &[error_result.clone()],
+                std::slice::from_ref(&error_result),
                 &config,
                 llm.as_ref(),
             );
@@ -917,7 +1005,7 @@ mod tests {
         let action = detector.check(
             "trying again",
             &[],
-            &[error_result.clone()],
+            std::slice::from_ref(&error_result),
             &config,
             llm.as_ref(),
         );
@@ -939,6 +1027,7 @@ mod tests {
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
+            post_edit_validation: None,
         };
         let llm = crate::tests::mock_llm();
 
@@ -961,6 +1050,7 @@ mod tests {
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
+            post_edit_validation: None,
         };
         let llm = crate::tests::mock_llm();
 

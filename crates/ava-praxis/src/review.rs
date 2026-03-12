@@ -231,7 +231,8 @@ Be concise. Focus on substance over style unless reviewing for style specificall
 // ── Output parsing ─────────────────────────────────────────────────
 
 pub fn parse_review_output(text: &str) -> ReviewResult {
-    let summary = extract_section(text, "Summary").unwrap_or_else(|| text.lines().take(3).collect::<Vec<_>>().join("\n"));
+    let summary = extract_section(text, "Summary")
+        .unwrap_or_else(|| text.lines().take(3).collect::<Vec<_>>().join("\n"));
     let issues = parse_issues(text);
     let positives = extract_list_section(text, "Positives");
     let verdict = parse_verdict(text);
@@ -278,7 +279,9 @@ fn parse_issues(text: &str) -> Vec<ReviewIssue> {
         let severity = Severity::from_str_loose(caps.get(1).map_or("", |m| m.as_str()));
         let file = caps.get(2).map(|m| m.as_str().to_string());
         let line = caps.get(3).and_then(|m| m.as_str().parse().ok());
-        let description = caps.get(4).map_or(String::new(), |m| m.as_str().trim().to_string());
+        let description = caps
+            .get(4)
+            .map_or(String::new(), |m| m.as_str().trim().to_string());
 
         issues.push(ReviewIssue {
             severity,
@@ -331,7 +334,11 @@ pub fn format_text(result: &ReviewResult) -> String {
     out.push_str(&format!("  {}\n", result.summary));
 
     if !result.issues.is_empty() {
-        out.push_str(&format!("\n  Issues ({})\n  {}\n", result.issues.len(), "─".repeat(60)));
+        out.push_str(&format!(
+            "\n  Issues ({})\n  {}\n",
+            result.issues.len(),
+            "─".repeat(60)
+        ));
         for issue in &result.issues {
             let location = match (&issue.file, issue.line) {
                 (Some(f), Some(l)) => format!("{f}:{l}"),
@@ -347,11 +354,17 @@ pub fn format_text(result: &ReviewResult) -> String {
             if location.is_empty() {
                 out.push_str(&format!("  {severity_tag} {}\n", issue.description));
             } else {
-                out.push_str(&format!("  {severity_tag} {location} — {}\n", issue.description));
+                out.push_str(&format!(
+                    "  {severity_tag} {location} — {}\n",
+                    issue.description
+                ));
             }
         }
     } else {
-        out.push_str(&format!("\n  Issues\n  {}\n  No issues found.\n", "─".repeat(60)));
+        out.push_str(&format!(
+            "\n  Issues\n  {}\n  No issues found.\n",
+            "─".repeat(60)
+        ));
     }
 
     if !result.positives.is_empty() {
@@ -459,6 +472,7 @@ pub async fn run_review_agent(
         system_prompt_suffix: None,
         extended_tools: true,
         plan_mode: false,
+        post_edit_validation: None,
     };
 
     let context = ContextManager::new(config.token_limit);
@@ -589,14 +603,12 @@ APPROVE"#;
     fn exit_code_with_threshold() {
         let result = ReviewResult {
             summary: String::new(),
-            issues: vec![
-                ReviewIssue {
-                    severity: Severity::Warning,
-                    file: None,
-                    line: None,
-                    description: "test".to_string(),
-                },
-            ],
+            issues: vec![ReviewIssue {
+                severity: Severity::Warning,
+                file: None,
+                line: None,
+                description: "test".to_string(),
+            }],
             positives: vec![],
             verdict: ReviewVerdict::Comment,
             raw_output: String::new(),

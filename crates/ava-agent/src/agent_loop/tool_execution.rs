@@ -3,12 +3,15 @@ use std::time::Instant;
 
 use ava_tools::monitor::{hash_arguments, ToolExecution};
 use ava_types::{Message, Role, Session, ToolCall, ToolResult};
+use serde_json::{json, Value};
 
 use super::AgentLoop;
 use crate::instructions::contextual_instructions_for_file;
 use crate::stuck::StuckDetector;
 
 const MAX_TOOL_RESULT_BYTES: usize = 50_000;
+const POST_EDIT_VALIDATION_TOOLS: &[&str] = &["edit", "multiedit", "write", "apply_patch"];
+const VALIDATION_FAILURE_MARKER: &str = "[post-edit validation status: failed]";
 
 /// Tools that are safe to execute concurrently (no side effects).
 pub const READ_ONLY_TOOLS: &[&str] = &[
@@ -124,11 +127,14 @@ impl AgentLoop {
                 is_error: true,
             },
         };
+        let tool_failed = result.is_error;
+        self.append_post_edit_validation(tool_call, &mut result)
+            .await;
         let duration = start.elapsed();
         let execution = ToolExecution {
             tool_name: tool_call.name.clone(),
             arguments_hash: hash_arguments(&tool_call.arguments),
-            success: !result.is_error,
+            success: !tool_failed,
             duration,
             timestamp: start,
         };
@@ -139,7 +145,9 @@ impl AgentLoop {
             if let Some(path_str) = tool_call.arguments.get("path").and_then(|v| v.as_str()) {
                 let file_path = PathBuf::from(path_str);
                 let project_root = std::env::current_dir().unwrap_or_default();
-                if let Some(instructions) = contextual_instructions_for_file(&file_path, &project_root) {
+                if let Some(instructions) =
+                    contextual_instructions_for_file(&file_path, &project_root)
+                {
                     result.content.push_str("\n\n---\n");
                     result.content.push_str(&instructions);
                 }
@@ -147,6 +155,94 @@ impl AgentLoop {
         }
 
         (result, execution)
+    }
+
+    async fn append_post_edit_validation(&self, tool_call: &ToolCall, result: &mut ToolResult) {
+        if result.is_error || !POST_EDIT_VALIDATION_TOOLS.contains(&tool_call.name.as_str()) {
+            return;
+        }
+
+        let Some(config) = self
+            .config
+            .post_edit_validation
+            .as_ref()
+            .filter(|config| config.enabled())
+        else {
+            return;
+        };
+
+        let summary = self.run_post_edit_validation(tool_call, config).await;
+        if summary.lines.is_empty() {
+            return;
+        }
+
+        result.content.push_str("\n\n[post-edit validation]\n");
+        result.content.push_str(&summary.lines.join("\n"));
+        if summary.failed {
+            result.content.push('\n');
+            result.content.push_str(VALIDATION_FAILURE_MARKER);
+        }
+    }
+
+    async fn run_post_edit_validation(
+        &self,
+        tool_call: &ToolCall,
+        config: &super::PostEditValidationConfig,
+    ) -> ValidationSummary {
+        let mut summary = ValidationSummary::default();
+        let validation_paths = validation_paths(tool_call);
+
+        if config.lint {
+            let lint_paths = if validation_paths.is_empty() {
+                vec![None]
+            } else {
+                validation_paths.iter().cloned().map(Some).collect()
+            };
+
+            for path in lint_paths {
+                let mut args = serde_json::Map::new();
+                if let Some(command) = &config.lint_command {
+                    args.insert("command".to_string(), Value::String(command.clone()));
+                }
+                if let Some(path) = path {
+                    args.insert("path".to_string(), Value::String(path));
+                }
+                summary.push(format_validation_result(
+                    "lint",
+                    self.run_validation_tool("lint", Value::Object(args)).await,
+                ));
+            }
+        }
+
+        if config.tests {
+            let mut args = serde_json::Map::new();
+            if let Some(command) = &config.test_command {
+                args.insert("command".to_string(), Value::String(command.clone()));
+            }
+            args.insert("timeout".to_string(), json!(config.test_timeout_secs));
+            summary.push(format_validation_result(
+                "tests",
+                self.run_validation_tool("test_runner", Value::Object(args))
+                    .await,
+            ));
+        }
+
+        summary
+    }
+
+    async fn run_validation_tool(
+        &self,
+        name: &str,
+        arguments: Value,
+    ) -> Result<ToolResult, String> {
+        self.tools
+            .execute(ToolCall {
+                id: format!("post-edit-validation-{name}"),
+                name: name.to_string(),
+                arguments,
+            })
+            .await
+            .map_err(|error| error.to_string())
     }
 
     /// Add tool results to context and session.
@@ -173,6 +269,143 @@ impl AgentLoop {
     }
 }
 
+#[derive(Default)]
+struct ValidationSummary {
+    lines: Vec<String>,
+    failed: bool,
+}
+
+impl ValidationSummary {
+    fn push(&mut self, line: ValidationLine) {
+        self.failed |= line.failed;
+        self.lines.push(line.text);
+    }
+}
+
+struct ValidationLine {
+    text: String,
+    failed: bool,
+}
+
+pub(super) fn has_validation_failure(result: &ToolResult) -> bool {
+    result.content.contains(VALIDATION_FAILURE_MARKER)
+}
+
+fn validation_paths(tool_call: &ToolCall) -> Vec<String> {
+    if let Some(path) = tool_call
+        .arguments
+        .get("path")
+        .and_then(|value| value.as_str())
+        .map(ToOwned::to_owned)
+    {
+        return vec![path];
+    }
+
+    if tool_call.name == "apply_patch" {
+        let patch = tool_call
+            .arguments
+            .get("patch")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        let strip = tool_call
+            .arguments
+            .get("strip")
+            .and_then(Value::as_u64)
+            .unwrap_or(1) as usize;
+        return extract_apply_patch_paths(patch, strip);
+    }
+
+    Vec::new()
+}
+
+fn extract_apply_patch_paths(patch: &str, strip: usize) -> Vec<String> {
+    let mut paths = Vec::new();
+    let lines: Vec<&str> = patch.lines().collect();
+
+    for window in lines.windows(2) {
+        if let [old_line, new_line] = window {
+            if old_line.starts_with("--- ") {
+                if let Some(raw_path) = new_line.strip_prefix("+++ ") {
+                    let path = strip_patch_path(raw_path, strip);
+                    if !paths.contains(&path) {
+                        paths.push(path);
+                    }
+                }
+            }
+        }
+    }
+
+    paths
+}
+
+fn strip_patch_path(path: &str, strip: usize) -> String {
+    if strip == 0 {
+        return path.to_string();
+    }
+
+    let parts: Vec<&str> = path.splitn(strip + 1, '/').collect();
+    if parts.len() > strip {
+        parts[strip].to_string()
+    } else {
+        path.to_string()
+    }
+}
+
+fn format_validation_result(label: &str, result: Result<ToolResult, String>) -> ValidationLine {
+    match result {
+        Ok(result) => {
+            let text = match label {
+                "lint" => format_lint_validation_line(&result),
+                "tests" => format_test_validation_line(&result),
+                _ => format!("- {label}: completed"),
+            };
+            ValidationLine {
+                text,
+                failed: result.is_error,
+            }
+        }
+        Err(error) => ValidationLine {
+            text: format!("- {label}: unavailable ({error})"),
+            failed: false,
+        },
+    }
+}
+
+fn format_lint_validation_line(result: &ToolResult) -> String {
+    let payload = serde_json::from_str::<Value>(&result.content).ok();
+    let errors = payload
+        .as_ref()
+        .and_then(|value| value.get("errors"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let warnings = payload
+        .as_ref()
+        .and_then(|value| value.get("warnings"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+
+    if result.is_error {
+        format!("- lint: failed ({errors} errors, {warnings} warnings)")
+    } else {
+        format!("- lint: passed ({errors} errors, {warnings} warnings)")
+    }
+}
+
+fn format_test_validation_line(result: &ToolResult) -> String {
+    let payload = serde_json::from_str::<Value>(&result.content).ok();
+    let exit_code = payload
+        .as_ref()
+        .and_then(|value| value.get("exit_code"))
+        .and_then(Value::as_i64)
+        .unwrap_or_default();
+
+    if result.is_error {
+        format!("- tests: failed (exit code {exit_code})")
+    } else {
+        "- tests: passed".to_string()
+    }
+}
+
 /// Tools that can modify files.
 const WRITE_TOOLS: &[&str] = &["write", "edit", "multiedit", "apply_patch"];
 
@@ -189,7 +422,11 @@ pub fn check_plan_mode_tool(tool_call: &ToolCall) -> Option<String> {
     }
 
     // Allow read-only tools unconditionally
-    if READ_ONLY_TOOLS.contains(&name) || name == "codebase_search" || name == "todo_read" || name == "todo_write" {
+    if READ_ONLY_TOOLS.contains(&name)
+        || name == "codebase_search"
+        || name == "todo_read"
+        || name == "todo_write"
+    {
         return None;
     }
 
@@ -209,7 +446,13 @@ pub fn check_plan_mode_tool(tool_call: &ToolCall) -> Option<String> {
                 PathBuf::from(path_str).parent().map(|p| p.to_path_buf())
             } else {
                 let cwd = std::env::current_dir().unwrap_or_default();
-                Some(cwd.join(PathBuf::from(path_str).parent().unwrap_or(std::path::Path::new(""))))
+                Some(
+                    cwd.join(
+                        PathBuf::from(path_str)
+                            .parent()
+                            .unwrap_or(std::path::Path::new("")),
+                    ),
+                )
             };
             if let Some(dir) = plan_dir {
                 let _ = std::fs::create_dir_all(&dir);

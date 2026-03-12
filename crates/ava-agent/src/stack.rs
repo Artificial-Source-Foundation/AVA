@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ava_codebase::CodebaseIndex;
 use ava_codebase::indexer::index_project;
+use ava_codebase::CodebaseIndex;
 use ava_config::{AgentsConfig, ConfigManager};
 use ava_context::{
     create_hybrid_condenser_with_relevance, CondenserConfig, ContextManager, Summarizer,
@@ -15,15 +15,17 @@ use ava_mcp::manager::ExtensionManager;
 use ava_memory::MemorySystem;
 use ava_platform::StandardPlatform;
 use ava_session::SessionManager;
+use ava_tools::core::question::QuestionBridge;
+use ava_tools::core::task::{TaskResult, TaskSpawner};
 use ava_tools::core::{
     register_core_tools, register_custom_tools, register_default_tools, register_extended_tools,
     register_question_tool, register_task_tool, register_todo_tools,
 };
-use ava_tools::core::question::QuestionBridge;
-use ava_tools::core::task::{TaskResult, TaskSpawner};
 use ava_tools::mcp_bridge::{MCPBridgeTool, MCPToolCaller};
 use ava_tools::registry::{ToolRegistry, ToolSource};
-use ava_types::{AvaError, QueuedMessage, Result, Role, Session, ThinkingLevel, TodoState, ToolResult};
+use ava_types::{
+    AvaError, QueuedMessage, Result, Role, Session, ThinkingLevel, TodoState, ToolResult,
+};
 use futures::StreamExt;
 use serde_json::Value;
 use tokio::sync::{mpsc, RwLock};
@@ -146,7 +148,10 @@ impl AgentStack {
     /// user, sending answers back via the embedded oneshot channel.
     pub async fn new(
         config: AgentStackConfig,
-    ) -> Result<(Self, mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>)> {
+    ) -> Result<(
+        Self,
+        mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>,
+    )> {
         tokio::fs::create_dir_all(&config.data_dir)
             .await
             .map_err(|e| AvaError::IoError(e.to_string()))?;
@@ -275,8 +280,12 @@ impl AgentStack {
     pub async fn reload_mcp(&self) -> Result<(usize, usize)> {
         let mut registry = self.tools.write().await;
         registry.remove_by_source(|src| matches!(src, ToolSource::MCP { .. }));
-        let runtime =
-            init_mcp(&self.mcp_global_config, &self.mcp_project_config, &mut registry).await;
+        let runtime = init_mcp(
+            &self.mcp_global_config,
+            &self.mcp_project_config,
+            &mut registry,
+        )
+        .await;
         let counts = runtime
             .as_ref()
             .map_or((0, 0), |r| (r.server_count, r.tool_count));
@@ -300,8 +309,12 @@ impl AgentStack {
         register_todo_tools(&mut registry, self.todo_state.clone());
         register_question_tool(&mut registry, self.question_bridge.clone());
         register_custom_tools(&mut registry, &self.custom_tool_dirs);
-        let runtime =
-            init_mcp(&self.mcp_global_config, &self.mcp_project_config, &mut registry).await;
+        let runtime = init_mcp(
+            &self.mcp_global_config,
+            &self.mcp_project_config,
+            &mut registry,
+        )
+        .await;
         let count = registry.tool_count();
         *self.tools.write().await = registry;
         *self.mcp.write().await = runtime;
@@ -345,7 +358,12 @@ impl AgentStack {
 
     /// Create a message queue for mid-stream messaging.
     /// Returns the queue (to pass into `run()`) and the sender (for the TUI to send messages).
-    pub fn create_message_queue(&self) -> (crate::message_queue::MessageQueue, mpsc::UnboundedSender<QueuedMessage>) {
+    pub fn create_message_queue(
+        &self,
+    ) -> (
+        crate::message_queue::MessageQueue,
+        mpsc::UnboundedSender<QueuedMessage>,
+    ) {
         crate::message_queue::MessageQueue::new()
     }
 
@@ -394,7 +412,10 @@ impl AgentStack {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[instrument(skip(self, event_tx, cancel, history, message_queue, images), fields(max_turns))]
+    #[instrument(
+        skip(self, event_tx, cancel, history, message_queue, images),
+        fields(max_turns)
+    )]
     pub async fn run(
         &self,
         goal: &str,
@@ -410,7 +431,11 @@ impl AgentStack {
             provider.clone()
         } else {
             let (provider_name, model_name) = self.current_model().await;
-            match self.router.route_required(&provider_name, &model_name).await {
+            match self
+                .router
+                .route_required(&provider_name, &model_name)
+                .await
+            {
                 Ok(p) => p,
                 Err(e) => {
                     if let Some(fb) = &cfg.fallback {
@@ -444,9 +469,13 @@ impl AgentStack {
         let mode_suffix = self.mode_prompt_suffix.read().await.clone();
 
         // Build system prompt suffix: mode instructions + project instructions
-        let project_instructions = crate::instructions::load_project_instructions_with_config(&cfg.instructions);
+        let project_instructions =
+            crate::instructions::load_project_instructions_with_config(&cfg.instructions);
         if let Some(ref pi) = project_instructions {
-            info!(bytes = pi.len(), "Loaded project instructions into system prompt");
+            info!(
+                bytes = pi.len(),
+                "Loaded project instructions into system prompt"
+            );
         }
         let system_prompt_suffix = match (mode_suffix, project_instructions) {
             (Some(mode), Some(proj)) => Some(format!("{mode}\n\n{proj}")),
@@ -467,6 +496,7 @@ impl AgentStack {
             system_prompt_suffix,
             extended_tools: false,
             plan_mode,
+            post_edit_validation: None,
         };
 
         let enriched_goal = self.enrich_goal_with_memories(goal).await;
@@ -616,7 +646,8 @@ impl AgentStack {
 
                     // run_streaming will inject this as the goal message, so we only
                     // need to send the prefixed version as the goal — no manual injection.
-                    session = run_streaming_until_complete(&mut agent, &prefixed, &tx, &cancel).await?;
+                    session =
+                        run_streaming_until_complete(&mut agent, &prefixed, &tx, &cancel).await?;
                 }
             }
 
@@ -647,12 +678,13 @@ impl AgentStack {
                 let combined = messages.join("\n\n");
                 let prefixed = format!("[User post-complete (group {group_id})] {combined}");
                 let msg_count = messages.len();
-                let _ = tx.send(AgentEvent::Progress(
-                    format!("post-complete group {group_id}: {msg_count} message(s)"),
-                ));
+                let _ = tx.send(AgentEvent::Progress(format!(
+                    "post-complete group {group_id}: {msg_count} message(s)"
+                )));
 
                 // run_streaming will inject this as the goal message — no manual injection.
-                let group_result = run_streaming_until_complete(&mut agent, &prefixed, &tx, &cancel).await;
+                let group_result =
+                    run_streaming_until_complete(&mut agent, &prefixed, &tx, &cancel).await;
 
                 if let Some(ref mut queue) = agent.message_queue {
                     queue.finish_post_complete_group();
@@ -713,7 +745,10 @@ impl TaskSpawner for AgentTaskSpawner {
             ));
         }
 
-        info!(prompt_len = prompt.len(), "spawning sub-agent for task tool");
+        info!(
+            prompt_len = prompt.len(),
+            "spawning sub-agent for task tool"
+        );
         let mut registry = ToolRegistry::new();
         register_core_tools(&mut registry, self.platform.clone());
         registry.unregister("todo_write");
@@ -721,10 +756,7 @@ impl TaskSpawner for AgentTaskSpawner {
         let context = ContextManager::new(128_000);
 
         // Use configured max_turns if set, but always cap at parent's max_turns.
-        let sub_max_turns = resolved
-            .max_turns
-            .unwrap_or(10)
-            .min(self.max_turns);
+        let sub_max_turns = resolved.max_turns.unwrap_or(10).min(self.max_turns);
 
         // Use configured prompt if set, otherwise fall back to default.
         let system_prompt = resolved
@@ -746,6 +778,7 @@ impl TaskSpawner for AgentTaskSpawner {
             system_prompt_suffix: crate::instructions::load_project_instructions(),
             extended_tools: true, // sub-agents get full tool access
             plan_mode: false,
+            post_edit_validation: None,
         };
         let mut agent = AgentLoop::new(
             Box::new(SharedProvider::new(self.provider.clone())),
@@ -783,9 +816,13 @@ impl TaskSpawner for AgentTaskSpawner {
         // Extract accumulated token usage from the sub-agent's session and compute cost.
         let sub_input_tokens = session.token_usage.input_tokens;
         let sub_output_tokens = session.token_usage.output_tokens;
-        let (in_rate, out_rate) = ava_llm::providers::common::model_pricing_usd_per_million(&self.model_name);
+        let (in_rate, out_rate) =
+            ava_llm::providers::common::model_pricing_usd_per_million(&self.model_name);
         let sub_cost_usd = ava_llm::providers::common::estimate_cost_usd(
-            sub_input_tokens, sub_output_tokens, in_rate, out_rate,
+            sub_input_tokens,
+            sub_output_tokens,
+            in_rate,
+            out_rate,
         );
 
         info!(
@@ -866,7 +903,11 @@ async fn init_mcp(
                     source,
                 );
             }
-            info!(servers = server_count, tools = tool_count, "MCP initialized");
+            info!(
+                servers = server_count,
+                tools = tool_count,
+                "MCP initialized"
+            );
             Some(MCPRuntime {
                 caller,
                 server_count,
@@ -884,11 +925,11 @@ async fn init_mcp(
 
 const STOPWORDS: &[&str] = &[
     "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
-    "do", "does", "did", "will", "would", "could", "should", "may", "might", "can", "shall",
-    "to", "of", "in", "for", "on", "with", "at", "by", "from", "as", "into", "about", "it",
-    "its", "this", "that", "and", "or", "but", "not", "no", "so", "if", "then", "than", "too",
-    "very", "just", "how", "what", "which", "who", "when", "where", "why", "all", "each",
-    "me", "my", "i", "you", "your", "we", "our", "he", "she", "they", "them",
+    "do", "does", "did", "will", "would", "could", "should", "may", "might", "can", "shall", "to",
+    "of", "in", "for", "on", "with", "at", "by", "from", "as", "into", "about", "it", "its",
+    "this", "that", "and", "or", "but", "not", "no", "so", "if", "then", "than", "too", "very",
+    "just", "how", "what", "which", "who", "when", "where", "why", "all", "each", "me", "my", "i",
+    "you", "your", "we", "our", "he", "she", "they", "them",
 ];
 
 fn extract_goal_keywords(goal: &str) -> Vec<String> {

@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use ava_agent::agent_loop::{AgentConfig, AgentEvent, AgentLoop};
+use ava_agent::agent_loop::{AgentConfig, AgentEvent, AgentLoop, PostEditValidationConfig};
 use ava_agent::LLMProvider;
 use ava_context::ContextManager;
 use ava_tools::registry::{Tool, ToolRegistry};
@@ -111,6 +111,36 @@ impl Tool for FailingTool {
     }
 }
 
+#[derive(Clone)]
+struct RecordingTool {
+    name: &'static str,
+    calls: Arc<Mutex<Vec<Value>>>,
+    result: ToolResult,
+}
+
+#[async_trait]
+impl Tool for RecordingTool {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn description(&self) -> &str {
+        "Recording tool"
+    }
+
+    fn parameters(&self) -> Value {
+        json!({"type": "object"})
+    }
+
+    async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
+        self.calls
+            .lock()
+            .expect("recording tool lock poisoned")
+            .push(args);
+        Ok(self.result.clone())
+    }
+}
+
 fn build_loop(responses: Vec<String>, token_limit: usize, max_turns: usize) -> AgentLoop {
     let mut tools = ToolRegistry::new();
     tools.register(NoopTool { name: "echo" });
@@ -134,6 +164,7 @@ fn build_loop(responses: Vec<String>, token_limit: usize, max_turns: usize) -> A
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
+            post_edit_validation: None,
         },
     )
 }
@@ -149,13 +180,14 @@ async fn completion_detection_stops_loop() {
         5,
     );
 
-    let session = loop_engine.run("finish now").await.expect("run should succeed");
-    assert!(
-        session
-            .messages
-            .iter()
-            .any(|message| message.content.contains("attempt_completion"))
-    );
+    let session = loop_engine
+        .run("finish now")
+        .await
+        .expect("run should succeed");
+    assert!(session
+        .messages
+        .iter()
+        .any(|message| message.content.contains("attempt_completion")));
 }
 
 #[tokio::test]
@@ -183,7 +215,8 @@ async fn context_compaction_triggered_when_threshold_exceeded() {
     // Second response completes via attempt_completion.
     let long_tool_response = json!({
         "tool_call": {"name": "echo", "arguments": {"data": "x".repeat(800)}},
-    }).to_string();
+    })
+    .to_string();
     let mut loop_engine = build_loop(
         vec![
             long_tool_response,
@@ -230,10 +263,14 @@ async fn error_hint_injected_after_tool_failure() {
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
+            post_edit_validation: None,
         },
     );
 
-    let session = loop_engine.run("do something").await.expect("run should succeed");
+    let session = loop_engine
+        .run("do something")
+        .await
+        .expect("run should succeed");
 
     // Should find a hint message about the tool failure
     let has_hint = session.messages.iter().any(|m| {
@@ -251,4 +288,277 @@ async fn empty_response_does_not_crash() {
     let result = loop_engine.run("do something").await;
     // Should complete without panic — either Ok or a controlled error
     assert!(result.is_ok() || result.is_err());
+}
+
+#[tokio::test]
+async fn post_edit_validation_runs_opt_in_lint_after_edit() {
+    let lint_calls = Arc::new(Mutex::new(Vec::new()));
+
+    let mut tools = ToolRegistry::new();
+    tools.register(RecordingTool {
+        name: "edit",
+        calls: Arc::new(Mutex::new(Vec::new())),
+        result: ToolResult {
+            call_id: "call_edit".to_string(),
+            content: "Applied exact_match; changed 1 lines".to_string(),
+            is_error: false,
+        },
+    });
+    tools.register(RecordingTool {
+        name: "lint",
+        calls: lint_calls.clone(),
+        result: ToolResult {
+            call_id: "call_lint".to_string(),
+            content: json!({
+                "warnings": 1,
+                "errors": 0,
+                "output": "warning: demo",
+                "fixed": false,
+            })
+            .to_string(),
+            is_error: false,
+        },
+    });
+    tools.register(NoopTool {
+        name: "attempt_completion",
+    });
+
+    let mut loop_engine = AgentLoop::new(
+        Box::new(MockLLMProvider::new(vec![
+            json!({
+                "tool_call": {
+                    "name": "edit",
+                    "arguments": {"path": "src/lib.rs", "old_text": "a", "new_text": "b"}
+                }
+            })
+            .to_string(),
+            json!({"tool_call": {"name": "attempt_completion", "arguments": {}}}).to_string(),
+        ])),
+        tools,
+        ContextManager::new(10_000),
+        AgentConfig {
+            max_turns: 5,
+            token_limit: 10_000,
+            model: "mock-model".to_string(),
+            max_budget_usd: 0.0,
+            max_cost_usd: 10.0,
+            loop_detection: true,
+            custom_system_prompt: None,
+            thinking_level: ava_types::ThinkingLevel::Off,
+            system_prompt_suffix: None,
+            extended_tools: false,
+            plan_mode: false,
+            post_edit_validation: Some(PostEditValidationConfig {
+                lint: true,
+                tests: false,
+                lint_command: None,
+                test_command: None,
+                test_timeout_secs: 60,
+            }),
+        },
+    );
+
+    let session = loop_engine
+        .run("edit and validate")
+        .await
+        .expect("run should succeed");
+
+    let calls = lint_calls.lock().expect("lint calls lock poisoned");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].get("path").and_then(Value::as_str),
+        Some("src/lib.rs")
+    );
+
+    let tool_message = session
+        .messages
+        .iter()
+        .find(|message| {
+            message.role == ava_types::Role::Tool && message.content.contains("Applied exact_match")
+        })
+        .expect("tool message should be present");
+    assert!(tool_message.content.contains("[post-edit validation]"));
+    assert!(tool_message
+        .content
+        .contains("- lint: passed (0 errors, 1 warnings)"));
+}
+
+#[tokio::test]
+async fn post_edit_validation_keeps_tool_success_distinct_when_tests_fail() {
+    let test_calls = Arc::new(Mutex::new(Vec::new()));
+    let mut tools = ToolRegistry::new();
+    tools.register(RecordingTool {
+        name: "edit",
+        calls: Arc::new(Mutex::new(Vec::new())),
+        result: ToolResult {
+            call_id: "call_edit".to_string(),
+            content: "Applied exact_match; changed 1 lines".to_string(),
+            is_error: false,
+        },
+    });
+    tools.register(RecordingTool {
+        name: "test_runner",
+        calls: test_calls.clone(),
+        result: ToolResult {
+            call_id: "call_test".to_string(),
+            content: json!({
+                "passed": false,
+                "exit_code": 101,
+                "output": "tests failed",
+            })
+            .to_string(),
+            is_error: true,
+        },
+    });
+    tools.register(NoopTool {
+        name: "attempt_completion",
+    });
+
+    let mut loop_engine = AgentLoop::new(
+        Box::new(MockLLMProvider::new(vec![
+            json!({
+                "tool_call": {
+                    "name": "edit",
+                    "arguments": {"path": "src/lib.rs", "old_text": "a", "new_text": "b"}
+                }
+            })
+            .to_string(),
+            json!({"tool_call": {"name": "attempt_completion", "arguments": {}}}).to_string(),
+        ])),
+        tools,
+        ContextManager::new(10_000),
+        AgentConfig {
+            max_turns: 5,
+            token_limit: 10_000,
+            model: "mock-model".to_string(),
+            max_budget_usd: 0.0,
+            max_cost_usd: 10.0,
+            loop_detection: true,
+            custom_system_prompt: None,
+            thinking_level: ava_types::ThinkingLevel::Off,
+            system_prompt_suffix: None,
+            extended_tools: false,
+            plan_mode: false,
+            post_edit_validation: Some(PostEditValidationConfig {
+                lint: false,
+                tests: true,
+                lint_command: None,
+                test_command: None,
+                test_timeout_secs: 60,
+            }),
+        },
+    );
+
+    let session = loop_engine
+        .run("edit and validate")
+        .await
+        .expect("run should succeed");
+
+    let tool_message = session
+        .messages
+        .iter()
+        .find(|message| {
+            message.role == ava_types::Role::Tool && message.content.contains("Applied exact_match")
+        })
+        .expect("tool message should be present");
+    assert!(tool_message
+        .content
+        .contains("- tests: failed (exit code 101)"));
+    assert!(!tool_message.content.contains("Tool call failed:"));
+
+    let calls = test_calls.lock().expect("test calls lock poisoned");
+    assert_eq!(calls.len(), 1);
+
+    let has_hint = session.messages.iter().any(|message| {
+        message.role == ava_types::Role::User
+            && message.content.contains("Post-edit validation failed")
+            && message.content.contains("- tests: failed (exit code 101)")
+    });
+    assert!(
+        has_hint,
+        "validation failures should trigger the existing self-correction hint"
+    );
+}
+
+#[tokio::test]
+async fn post_edit_validation_scopes_lint_for_apply_patch_paths() {
+    let lint_calls = Arc::new(Mutex::new(Vec::new()));
+
+    let mut tools = ToolRegistry::new();
+    tools.register(RecordingTool {
+        name: "apply_patch",
+        calls: Arc::new(Mutex::new(Vec::new())),
+        result: ToolResult {
+            call_id: "call_patch".to_string(),
+            content: "Applied 1 hunks to 1 files.".to_string(),
+            is_error: false,
+        },
+    });
+    tools.register(RecordingTool {
+        name: "lint",
+        calls: lint_calls.clone(),
+        result: ToolResult {
+            call_id: "call_lint".to_string(),
+            content: json!({
+                "warnings": 0,
+                "errors": 0,
+                "output": "",
+                "fixed": false,
+            })
+            .to_string(),
+            is_error: false,
+        },
+    });
+    tools.register(NoopTool {
+        name: "attempt_completion",
+    });
+
+    let mut loop_engine = AgentLoop::new(
+        Box::new(MockLLMProvider::new(vec![
+            json!({
+                "tool_call": {
+                    "name": "apply_patch",
+                    "arguments": {
+                        "patch": "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -1 +1 @@\n-old\n+new\n"
+                    }
+                }
+            })
+            .to_string(),
+            json!({"tool_call": {"name": "attempt_completion", "arguments": {}}}).to_string(),
+        ])),
+        tools,
+        ContextManager::new(10_000),
+        AgentConfig {
+            max_turns: 5,
+            token_limit: 10_000,
+            model: "mock-model".to_string(),
+            max_budget_usd: 0.0,
+            max_cost_usd: 10.0,
+            loop_detection: true,
+            custom_system_prompt: None,
+            thinking_level: ava_types::ThinkingLevel::Off,
+            system_prompt_suffix: None,
+            extended_tools: false,
+            plan_mode: false,
+            post_edit_validation: Some(PostEditValidationConfig {
+                lint: true,
+                tests: false,
+                lint_command: None,
+                test_command: None,
+                test_timeout_secs: 60,
+            }),
+        },
+    );
+
+    loop_engine
+        .run("patch and validate")
+        .await
+        .expect("run should succeed");
+
+    let calls = lint_calls.lock().expect("lint calls lock poisoned");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].get("path").and_then(Value::as_str),
+        Some("src/lib.rs")
+    );
 }

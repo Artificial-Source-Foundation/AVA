@@ -164,8 +164,10 @@ pub fn build_phase_system_prompt(role: &PhaseRole, tools: &[Tool], native_tools:
              ```\n\n",
         );
         for tool in tools {
-            s.push_str(&format!("### {}\n{}\nParameters: {}\n\n",
-                tool.name, tool.description,
+            s.push_str(&format!(
+                "### {}\n{}\nParameters: {}\n\n",
+                tool.name,
+                tool.description,
                 serde_json::to_string(&tool.parameters).unwrap_or_else(|_| "{}".to_string()),
             ));
         }
@@ -226,14 +228,20 @@ pub fn register_tools_for_role(role: &PhaseRole, platform: Arc<StandardPlatform>
         PhaseRole::Planner => {
             // Read-only tools
             let cache = ava_tools::core::hashline::new_cache();
-            registry.register(ava_tools::core::read::ReadTool::new(platform.clone(), cache));
+            registry.register(ava_tools::core::read::ReadTool::new(
+                platform.clone(),
+                cache,
+            ));
             registry.register(ava_tools::core::glob::GlobTool::new());
             registry.register(ava_tools::core::grep::GrepTool::new());
         }
         PhaseRole::Reviewer => {
             // Read-only tools
             let cache = ava_tools::core::hashline::new_cache();
-            registry.register(ava_tools::core::read::ReadTool::new(platform.clone(), cache));
+            registry.register(ava_tools::core::read::ReadTool::new(
+                platform.clone(),
+                cache,
+            ));
             registry.register(ava_tools::core::glob::GlobTool::new());
             registry.register(ava_tools::core::grep::GrepTool::new());
         }
@@ -255,7 +263,11 @@ pub fn extract_phase_output(session: &Session) -> String {
         .map(|m| m.content.as_str())
         .collect();
 
-    let output = assistant_msgs.into_iter().rev().collect::<Vec<_>>().join("\n\n");
+    let output = assistant_msgs
+        .into_iter()
+        .rev()
+        .collect::<Vec<_>>()
+        .join("\n\n");
 
     if output.len() > 4000 {
         format!("{}...", &output[..4000])
@@ -276,8 +288,19 @@ pub fn needs_revision(output: &str) -> bool {
 
     // Revision signals
     let revision = [
-        "fix", "bug", "issue", "error", "missing", "incorrect", "wrong",
-        "should", "must", "needs", "change", "update", "improve",
+        "fix",
+        "bug",
+        "issue",
+        "error",
+        "missing",
+        "incorrect",
+        "wrong",
+        "should",
+        "must",
+        "needs",
+        "change",
+        "update",
+        "improve",
     ];
     revision.iter().any(|s| lower.contains(s))
 }
@@ -326,7 +349,11 @@ impl WorkflowExecutor {
                 iteration,
                 max_iterations: self.workflow.max_iterations,
             });
-            info!(iteration, max = self.workflow.max_iterations, "Starting workflow iteration");
+            info!(
+                iteration,
+                max = self.workflow.max_iterations,
+                "Starting workflow iteration"
+            );
 
             let mut phases_completed = 0;
 
@@ -377,13 +404,20 @@ impl WorkflowExecutor {
                 .await?;
 
                 let output = extract_phase_output(&session);
-                let turns = session.messages.iter().filter(|m| m.role == Role::Assistant).count();
+                let turns = session
+                    .messages
+                    .iter()
+                    .filter(|m| m.role == Role::Assistant)
+                    .count();
                 total_turns += turns;
 
                 // Add phase marker to combined session
                 combined_session.add_message(ava_types::Message::new(
                     Role::System,
-                    format!("[phase-{}: {} ({})] — {} turns", phase_idx, phase.name, phase.role, turns),
+                    format!(
+                        "[phase-{}: {} ({})] — {} turns",
+                        phase_idx, phase.name, phase.role, turns
+                    ),
                 ));
                 for msg in &session.messages {
                     combined_session.add_message(msg.clone());
@@ -412,7 +446,11 @@ impl WorkflowExecutor {
             }
 
             // Only loop if there's a Reviewer phase and it requested revisions
-            let has_reviewer = self.workflow.phases.iter().any(|p| p.role == PhaseRole::Reviewer);
+            let has_reviewer = self
+                .workflow
+                .phases
+                .iter()
+                .any(|p| p.role == PhaseRole::Reviewer);
             if has_reviewer && iteration < self.workflow.max_iterations {
                 if let Some(ref output) = prior_output {
                     if needs_revision(output) {
@@ -452,8 +490,14 @@ struct PhaseWorkerParams<'a> {
 /// Run a single phase as an AgentLoop.
 async fn run_phase_worker(params: PhaseWorkerParams<'_>) -> ava_types::Result<Session> {
     let PhaseWorkerParams {
-        role, system_prompt_override, goal, budget,
-        provider, platform, cancel, event_tx,
+        role,
+        system_prompt_override,
+        goal,
+        budget,
+        provider,
+        platform,
+        cancel,
+        event_tx,
     } = params;
     let registry = register_tools_for_role(role, platform);
     let tool_defs = registry.list_tools();
@@ -475,6 +519,7 @@ async fn run_phase_worker(params: PhaseWorkerParams<'_>) -> ava_types::Result<Se
         system_prompt_suffix: None,
         extended_tools: true,
         plan_mode: false,
+        post_edit_validation: None,
     };
 
     let context = ContextManager::new(budget.max_tokens);
@@ -525,9 +570,8 @@ async fn run_phase_worker(params: PhaseWorkerParams<'_>) -> ava_types::Result<Se
         }
     }
 
-    session.ok_or_else(|| {
-        ava_types::AvaError::ToolError("Phase ended without completion".to_string())
-    })
+    session
+        .ok_or_else(|| ava_types::AvaError::ToolError("Phase ended without completion".to_string()))
 }
 
 #[cfg(test)]
@@ -571,7 +615,9 @@ mod tests {
     fn needs_revision_detects_issues() {
         assert!(needs_revision("There is a bug in the error handling"));
         assert!(needs_revision("You should fix the missing validation"));
-        assert!(needs_revision("Several issues found with the implementation"));
+        assert!(needs_revision(
+            "Several issues found with the implementation"
+        ));
         assert!(needs_revision("The error handling needs improvement"));
     }
 
@@ -592,11 +638,20 @@ mod tests {
     fn extract_phase_output_gets_last_assistant_messages() {
         let mut session = Session::new();
         session.add_message(ava_types::Message::new(Role::User, "goal".to_string()));
-        session.add_message(ava_types::Message::new(Role::Assistant, "first response".to_string()));
+        session.add_message(ava_types::Message::new(
+            Role::Assistant,
+            "first response".to_string(),
+        ));
         session.add_message(ava_types::Message::new(Role::User, "continue".to_string()));
-        session.add_message(ava_types::Message::new(Role::Assistant, "second response".to_string()));
+        session.add_message(ava_types::Message::new(
+            Role::Assistant,
+            "second response".to_string(),
+        ));
         session.add_message(ava_types::Message::new(Role::User, "more".to_string()));
-        session.add_message(ava_types::Message::new(Role::Assistant, "third response".to_string()));
+        session.add_message(ava_types::Message::new(
+            Role::Assistant,
+            "third response".to_string(),
+        ));
 
         let output = extract_phase_output(&session);
         assert!(output.contains("second response"));

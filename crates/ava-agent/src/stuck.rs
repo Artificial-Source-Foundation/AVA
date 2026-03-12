@@ -222,6 +222,7 @@ mod tests {
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
+            post_edit_validation: None,
         }
     }
 
@@ -270,11 +271,23 @@ mod tests {
         };
 
         for i in 0..2 {
-            let action = detector.check(&format!("r{i}"), &[call.clone()], &[], &config, llm.as_ref());
+            let action = detector.check(
+                &format!("r{i}"),
+                std::slice::from_ref(&call),
+                &[],
+                &config,
+                llm.as_ref(),
+            );
             assert!(matches!(action, StuckAction::Continue));
         }
 
-        let action = detector.check("r2", &[call.clone()], &[], &config, llm.as_ref());
+        let action = detector.check(
+            "r2",
+            std::slice::from_ref(&call),
+            &[],
+            &config,
+            llm.as_ref(),
+        );
         assert!(matches!(action, StuckAction::InjectMessage(_)));
     }
 
@@ -291,11 +304,17 @@ mod tests {
         };
 
         for i in 0..2 {
-            let action = detector.check(&format!("e{i}"), &[], &[err.clone()], &config, llm.as_ref());
+            let action = detector.check(
+                &format!("e{i}"),
+                &[],
+                std::slice::from_ref(&err),
+                &config,
+                llm.as_ref(),
+            );
             assert!(matches!(action, StuckAction::Continue));
         }
 
-        let action = detector.check("e2", &[], &[err.clone()], &config, llm.as_ref());
+        let action = detector.check("e2", &[], std::slice::from_ref(&err), &config, llm.as_ref());
         assert!(matches!(action, StuckAction::InjectMessage(_)));
     }
 
@@ -347,7 +366,9 @@ mod tests {
         }
 
         let action = detector.check("checking", &[], &[], &config, llm.as_ref());
-        assert!(matches!(action, StuckAction::InjectMessage(ref msg) if msg.contains("alternating")));
+        assert!(
+            matches!(action, StuckAction::InjectMessage(ref msg) if msg.contains("alternating"))
+        );
     }
 
     #[test]
@@ -371,7 +392,9 @@ mod tests {
         }
 
         let action = detector.check("checking", &[], &[], &config, llm.as_ref());
-        assert!(matches!(action, StuckAction::InjectMessage(ref msg) if msg.contains("error rate")));
+        assert!(
+            matches!(action, StuckAction::InjectMessage(ref msg) if msg.contains("error rate"))
+        );
     }
 
     #[test]

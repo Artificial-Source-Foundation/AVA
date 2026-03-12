@@ -28,7 +28,10 @@ async fn agent_stack_new_initializes_components() {
     .expect("stack init should succeed");
 
     let tools = stack.tools.read().await.list_tools();
-    let names = tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>();
+    let names = tools
+        .iter()
+        .map(|tool| tool.name.as_str())
+        .collect::<Vec<_>>();
     assert!(names.contains(&"read"));
     assert!(names.contains(&"write"));
     assert!(names.contains(&"edit"));
@@ -53,7 +56,15 @@ async fn agent_stack_run_with_mock_provider_completes() {
     .expect("stack init should succeed");
 
     let result = stack
-        .run("finish task", 5, None, CancellationToken::new(), Vec::new(), None, Vec::new())
+        .run(
+            "finish task",
+            5,
+            None,
+            CancellationToken::new(),
+            Vec::new(),
+            None,
+            Vec::new(),
+        )
         .await
         .expect("run should succeed");
 
@@ -116,7 +127,7 @@ prompt = "Custom task prompt."
     // Verify the agents_config was loaded by checking it's reflected in the stack.
     // We can't access agents_config directly (it's private), but we can verify
     // the stack was created successfully with the config file present.
-    assert!(stack.tools.read().await.list_tools().len() > 0);
+    assert!(!stack.tools.read().await.list_tools().is_empty());
 }
 
 #[tokio::test]
@@ -133,7 +144,7 @@ async fn test_agents_config_defaults_without_file() {
     .expect("stack init should succeed without agents.toml");
 
     // Stack should initialize fine even without agents.toml
-    assert!(stack.tools.read().await.list_tools().len() > 0);
+    assert!(!stack.tools.read().await.list_tools().is_empty());
 }
 
 struct SlowProvider {
@@ -153,7 +164,9 @@ impl LLMProvider for SlowProvider {
         messages: &[Message],
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
         let out = self.generate(messages).await?;
-        Ok(Box::pin(futures::stream::iter(vec![StreamChunk::text(out)])))
+        Ok(Box::pin(futures::stream::iter(vec![StreamChunk::text(
+            out,
+        )])))
     }
 
     fn estimate_tokens(&self, input: &str) -> usize {

@@ -32,9 +32,7 @@ pub mod review;
 pub mod workflow;
 
 pub use events::PraxisEvent;
-pub use review::{
-    DiffMode, ReviewContext, ReviewResult, ReviewVerdict, Severity,
-};
+pub use review::{DiffMode, ReviewContext, ReviewResult, ReviewVerdict, Severity};
 pub use workflow::{Phase, PhaseRole, Workflow, WorkflowExecutor};
 
 pub struct Director {
@@ -274,7 +272,12 @@ impl Director {
                     // Add a separator message attributing this group to the worker
                     let header = Message::new(
                         Role::System,
-                        format!("[worker-{}: {}] — {} messages", worker_id, lead_name, session.messages.len()),
+                        format!(
+                            "[worker-{}: {}] — {} messages",
+                            worker_id,
+                            lead_name,
+                            session.messages.len()
+                        ),
                     );
                     combined.add_message(header);
 
@@ -392,6 +395,7 @@ impl Lead {
                 system_prompt_suffix: None,
                 extended_tools: true,
                 plan_mode: false,
+                post_edit_validation: None,
             },
         );
 
@@ -467,8 +471,12 @@ async fn run_worker(
             }
             AgentEvent::Complete(session) => return Ok(session),
             AgentEvent::Error(error) => return Err(AvaError::ToolError(error)),
-            AgentEvent::Thinking(_) | AgentEvent::ToolCall(_) | AgentEvent::ToolResult(_) | AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } | AgentEvent::SubAgentComplete { .. } => {}
-
+            AgentEvent::Thinking(_)
+            | AgentEvent::ToolCall(_)
+            | AgentEvent::ToolResult(_)
+            | AgentEvent::ToolStats(_)
+            | AgentEvent::TokenUsage { .. }
+            | AgentEvent::SubAgentComplete { .. } => {}
         }
     }
 

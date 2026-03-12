@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-08. Run 'npm run test:run && cargo test --workspace' to revalidate. -->
+<!-- Last verified: 2026-03-12. Run 'npm run test:run && cargo test --workspace' to revalidate. -->
 
 # AVA Architecture & Conventions (v2.1)
 
@@ -57,14 +57,15 @@ Commands: `/later` (add post-complete message), `/queue` (view/manage pending me
 
 ```text
 AVA/
-├── crates/                   # ~21 Rust crates (agent stack + TUI + services)
+├── crates/                   # ~20 Rust crates (agent stack + TUI + services)
 │   ├── ava-tui/              # CLI/TUI binary (Ratatui) — THE primary interface
 │   ├── ava-agent/            # Agent execution loop + reflection
-│   ├── ava-llm/              # LLM providers (Anthropic, OpenAI, Gemini, Ollama, OpenRouter)
+│   ├── ava-llm/              # LLM providers (Anthropic, OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception)
 │   ├── ava-tools/            # Tool trait + registry + core tools (read/write/edit/bash/glob/grep)
 │   ├── ava-praxis/        # Multi-agent orchestration (Praxis)
 │   ├── ava-session/          # Session persistence (SQLite + FTS5)
 │   ├── ava-memory/           # Persistent memory/recall
+│   ├── ava-auth/             # Credential and auth flows
 │   ├── ava-config/           # Configuration management
 │   ├── ava-permissions/      # Tool permission checks
 │   ├── ava-sandbox/          # Command sandboxing (bwrap/sandbox-exec)
@@ -73,9 +74,7 @@ AVA/
 │   ├── ava-codebase/         # Code indexing (BM25 + PageRank)
 │   ├── ava-db/               # SQLite connection pool
 │   ├── ava-types/            # Shared types
-│   ├── ava-logger/           # Structured logging
 │   ├── ava-validator/        # Validation utilities
-│   ├── ava-lsp/              # LSP client integration
 │   ├── ava-mcp/              # MCP (Model Context Protocol) support
 │   ├── ava-extensions/       # Extension system
 │   └── ava-cli-providers/    # CLI provider resolution
@@ -91,18 +90,22 @@ AVA/
 └── tests/
 ```
 
-## Tool Surface (13 built-in, tiered)
+## Tool Surface (13 core built-in, tiered)
 
 Tools are organized into tiers. Only **Default** tools are sent to the LLM by default; Extended tools are registered and executable but not included in the system prompt unless `extended_tools` is enabled.
+
+Tool philosophy: keep the default surface as lean as possible. AVA's out-of-the-box default set should stay capped at 6 tools (`read`, `write`, `edit`, `bash`, `glob`, `grep`). New tool capabilities should normally ship as **Extended**, MCP, plugin, or custom tools rather than expanding the default set.
 
 | Tier | Count | Tools |
 |---|---:|---|
 | Default | 6 | read, write, edit, bash, glob, grep |
 | Extended | 7 | apply_patch, web_fetch, multiedit, test_runner, lint, diagnostics, git |
 
+Plugin-tier capabilities should normally ship via MCP servers or TOML custom tools, not by expanding the compiled default tool surface.
+
 Additional tools are registered separately (todo_read/write, question, task, codebase_search, memory tools, session tools) and always available when their dependencies are initialized.
 
-Total: 13 core built-in tools + dynamic MCP tools + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
+Total: 13 core built-in tools + always-available tasking/session helpers + dynamic MCP tools + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
 
 ## Project Instructions
 
@@ -202,11 +205,12 @@ Register middleware via `ToolRegistry::add_middleware()` (Rust) or `api.addToolM
 
 ### Add a Tool (Rust)
 
-1. Create `crates/ava-tools/src/core/{tool_name}.rs`
-2. Implement `Tool` trait (`name`, `description`, `parameters`, `execute`)
-3. Register in `crates/ava-tools/src/core/mod.rs` → `register_core_tools()`
-4. Add tests in `crates/ava-tools/tests/`
-5. `cargo test -p ava-tools`
+1. Decide the tier first. New tools should normally be `Extended`; only expand the default 6 with a strong justification.
+2. Create `crates/ava-tools/src/core/{tool_name}.rs`
+3. Implement `Tool` trait (`name`, `description`, `parameters`, `execute`)
+4. Register in `crates/ava-tools/src/core/mod.rs` → `register_core_tools()` using the appropriate tiering path
+5. Add tests in `crates/ava-tools/tests/`
+6. `cargo test -p ava-tools`
 
 ### Add an LLM Provider (Rust)
 
@@ -258,9 +262,12 @@ cargo run --bin ava -- "goal" --headless --later "review" --later-group 2 "commi
 
 1. `CLAUDE.md` (this file) — architecture, conventions, commands
 2. `AGENTS.md` — AI agent instructions
-3. `docs/development/roadmap.md` — sprint roadmap (11-50+)
-4. `docs/development/test-matrix.md` — E2E test verification
-5. `docs/development/sprints/` — sprint prompts
-6. `docs/development/research/` — competitor analysis
-7. `docs/architecture/` — system design docs
-8. `docs/reference-code/` — competitor source code notes (12 projects)
+3. `docs/development/roadmap.md` — sprint roadmap (11-66+) and active delivery lanes
+4. `docs/development/backlog.md` — active backlog and validation status
+5. `docs/development/epics.md` — completed and planned epics
+6. `docs/development/v3-plan.md` — paired backend/frontend plan toward v3
+7. `docs/development/test-matrix.md` — E2E test verification
+8. `docs/development/sprints/` — sprint prompts
+9. `docs/development/research/` — competitor analysis
+10. `docs/architecture/` — system design docs
+11. `docs/reference-code/` — competitor source code notes (12 projects)

@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-08 -->
+<!-- Last verified: 2026-03-12 -->
 # AI Coding Agent Instructions (v2.1)
 
 > Universal instructions for AI assistants working on AVA
@@ -46,7 +46,7 @@ AVA/
 ├── crates/              # Rust crates — PRIMARY codebase for CLI/agent
 │   ├── ava-tui/         # CLI/TUI binary (Ratatui)
 │   ├── ava-agent/       # Agent loop + reflection
-│   ├── ava-llm/         # LLM providers (6 built-in)
+│   ├── ava-llm/         # LLM providers (Anthropic, OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception)
 │   ├── ava-tools/       # Tool trait + registry + core tools
 │   ├── ava-praxis/   # Multi-agent orchestration
 │   ├── ava-session/     # Session persistence
@@ -72,10 +72,19 @@ AVA/
 
 ### Important Counts
 
-- Rust crates: ~22
-- Built-in tools: 19 (11 core + 3 memory + 3 session + 1 codebase + 1 git)
+- Rust crates: ~20
+- Core built-in tools: 13 (6 default + 7 extended), plus task/session/memory helpers and dynamic MCP/custom tools
 - Dynamic tools: MCP servers + TOML custom tools
 - Project instructions: auto-discovered from `AGENTS.md`, `CLAUDE.md`, `.ava/rules/*.md`, etc.
+
+### Lean Tool Surface
+
+AVA should stay lean by default.
+
+- Keep the out-of-the-box default tool set capped at 6: `read`, `write`, `edit`, `bash`, `glob`, `grep`
+- New tool ideas should default to `Extended`, MCP, plugin, or custom-tool delivery
+- Only promote a tool into the default 6 when it is broadly useful, low-risk, and clearly worth the extra prompt/tool-surface cost
+- Prefer configuration and opt-in capability over shipping a large built-in default tool catalog
 
 ---
 
@@ -123,10 +132,11 @@ Middleware priorities are contract-sensitive. Lower numeric priority runs earlie
 
 ### Add Tool (Rust)
 
-1. Create `crates/ava-tools/src/core/{tool_name}.rs`
-2. Implement `Tool` trait (`name`, `description`, `parameters`, `execute`)
-3. Register in `register_core_tools()`
-4. Add tests, run `cargo test -p ava-tools`
+1. Decide the tier first. New tools should default to `Extended`; only propose joining the default 6 when the tool is broadly useful, low-risk, and worth the prompt cost.
+2. Create `crates/ava-tools/src/core/{tool_name}.rs`
+3. Implement `Tool` trait (`name`, `description`, `parameters`, `execute`)
+4. Register in `register_core_tools()` using the appropriate tiering path
+5. Add tests, run `cargo test -p ava-tools`
 
 ### Add LLM Provider (Rust)
 
@@ -217,9 +227,12 @@ For budget/bulk work, use `moonshotai/kimi-k2.5` or `z-ai/glm-5`.
 
 1. `CLAUDE.md` — primary architecture reference
 2. `AGENTS.md` — AI agent instructions
-3. `docs/development/roadmap.md` — sprint roadmap (11-50+)
-4. `docs/development/sprints/` — current sprint prompts
-5. `docs/development/research/` — competitor analysis
-6. `docs/architecture/` — system design docs
-7. `docs/reference-code/` — competitor source code notes (12 projects)
-8. `docs/archives/` — historical only, don't reference for current work
+3. `docs/development/roadmap.md` — sprint roadmap (11-66+) and active delivery lanes
+4. `docs/development/backlog.md` — active backlog and validation status
+5. `docs/development/epics.md` — completed and planned epics
+6. `docs/development/v3-plan.md` — paired backend/frontend plan toward v3
+7. `docs/development/sprints/` — current sprint prompts
+8. `docs/development/research/` — competitor analysis
+9. `docs/architecture/` — system design docs
+10. `docs/reference-code/` — competitor source code notes (12 projects)
+11. `docs/archives/` — historical only, don't reference for current work

@@ -1,6 +1,6 @@
 # AVA Documentation
 
-> Last updated: 2026-03-11
+> Last updated: 2026-03-12
 
 **Official sites:**
 [useava.dev](https://useava.dev) | [avacli.dev](https://avacli.dev) | [tryava.dev](https://tryava.dev) | [ava.engineering](https://ava.engineering)
@@ -18,9 +18,13 @@
 docs/
 ├── architecture/       # How AVA is built (modules, data flow, backend, praxis)
 ├── development/        # Active work (roadmap, sprints, benchmarks, research)
-│   ├── roadmap.md      # Sprint 11-50+ roadmap with phases and milestones
+│   ├── roadmap.md      # Sprint roadmap (11-66+), v3 lanes, and status
+│   ├── backlog.md      # Active backlog and validation status
+│   ├── epics.md        # Completed and planned backend/frontend epics
+│   ├── v3-plan.md      # Paired backend + UX delivery plan toward v3
 │   ├── test-matrix.md  # E2E test matrix (19 tools, 5 modes, 3 providers)
-│   ├── sprints/        # Sprint prompts
+│   ├── sprints/        # Active sprint prompts
+│   │   └── archive/    # Implemented sprint docs
 │   ├── benchmarks/     # Performance data and bug reports
 │   └── research/       # Competitor analysis and audits
 ├── reference-code/     # Competitor source code notes (12 projects)
@@ -32,13 +36,21 @@ docs/
 
 ### Development (Active)
 - [**Roadmap**](development/roadmap.md) — Sprint roadmap with phases, dependencies, milestones
+- [**Backlog**](development/backlog.md) — Active backlog, validation queue, and execution order
+- [**Epics**](development/epics.md) — Completed epics plus planned v3 backend/frontend lanes
+- [**v3 Plan**](development/v3-plan.md) — Paired backend and UX plan toward v3
 - [**E2E Test Matrix**](development/test-matrix.md) — 19 tools, 5 modes, 3 providers verified
 - [**Benchmark Report**](development/benchmarks/benchmark-2026-03.md) — AVA vs OpenCode performance
 - [**Bug Backlog**](development/benchmarks/sprint-32-bugs.md) — Known bugs and TUI gaps
 - [**Competitive Analysis (Rust)**](development/research/rust-competitive-analysis-2026-03.md) — 12-competitor architecture analysis
 
 ### Sprints
-- [Sprint 100](development/sprints/sprint-100-v2.1-release.md) — v2.1 release polish (current)
+- [Sprint 62](development/sprints/sprint-62/overview.md) — Cost and runtime foundations
+- [Sprint 63](development/sprints/sprint-63/overview.md) — Execution and ecosystem foundations
+- [Sprint 64](development/sprints/sprint-64/overview.md) — Knowledge and context foundations
+- [Sprint 65](development/sprints/sprint-65/overview.md) — Agent coordination backend
+- [Sprint 66](development/sprints/sprint-66/overview.md) — Optional capability backends
+- [Archived Sprints](development/sprints/archive/) — Implemented sprint docs for Sprint 53 through Sprint 61
 
 ### Architecture
 - [**Architecture Guide**](architecture/architecture-guide.md) — System architecture overview

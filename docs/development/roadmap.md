@@ -1,6 +1,6 @@
 # AVA Sprint Roadmap
 
-> Last updated: 2026-03-11 (Sprint 60 in progress, B34 implemented)
+> Last updated: 2026-03-12 (Sprints 60-61 implemented; Sprint 62-66 docs verified as planning-only on master; reference corpus refreshed; v3 planning lanes defined)
 
 ## Completed (Sprints 11–59)
 
@@ -58,31 +58,81 @@
 | 58 | Modal system revamp — shared SelectList widget, scroll fix, visual redesign |
 | 59 | Provider mega — Copilot provider, provider verification, retry jitter ±20%, circuit breaker wiring, compiled-in model registry, rich StreamChunk, Alibaba Coding Plan fixes, context window display, error text wrapping, dedup guard fix |
 
-## In Progress (Sprint 60)
+## Recently Completed (Sprints 60-61)
 
 | Sprint | Focus | Status |
 |--------|-------|--------|
-| 60 | Streaming tool calls + Session/context UX + Project instructions | In progress |
+| 60 | Streaming tool calls + session/context UX + project instructions + TUI workflow polish | Implemented in code; manual validation ongoing |
+| 61 | Reliable edit loop (`B67`, `B54`, `B37`, `B66`) | Implemented in code; backend/command-level tested; full manual TUI validation still pending |
 
 ### Sprint 60 Completed Items
 
 - **Project instructions system** — auto-discovers `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`, `~/.ava/AGENTS.md`, `.ava/rules/*.md` and injects into system prompt (`crates/ava-agent/src/instructions.rs`)
 - **B34: Three-tier mid-stream messaging** — `MessageQueue` with steering/follow-up/post-complete pipelines (12 tests). Agent loop polls steering between tool calls, skips remaining tools on steer. Follow-up loop after task. Post-complete grouped pipeline (G1, G2, G3...) after all work. TUI keybinds: Enter=steer, Alt+Enter=follow-up, Ctrl+Alt+Enter=post-complete. CLI flags: `--follow-up`, `--later`, `--later-group`. Slash commands: `/later`, `/queue`.
+- **Sprint 60 core interaction fixes** — streaming tool-call rendering, persistent conversation history, chat scroll fixes, session sidebar/resume flow, and last-model persistence landed in code and are reflected in the Sprint 60 prompt set.
+- **Sprint 60 TUI workflow additions** — `/btw`, rewind, `/export`, `/compact`, `/init`, custom slash commands, `/copy`, hooks, background agents, and Claude Code subagent support are implemented in code and remain tracked in `docs/development/backlog.md` as pending manual testing.
+- **Sprint 60 shipped backlog closures** — B81 tool surface rationalization, B62 cross-provider message normalization, B60 Rust CI, B43 image input, B51 hash-anchored edits, B35 mention scoping, B36 diff preview, B70 Plan mode file writes, and B31 praxis rename/director are all recorded as completed in the backlog.
+
+## Active v3 Delivery Lanes
+
+v3 is the point where the current active backlog is intentionally burned down, validated, and reorganized into a cleaner release story.
+
+As of this pass, Sprint 62-66 have planning docs in the repo, but there is no merged git evidence on `master` that those sprints are implemented yet.
+
+### Backend Lane (Rust-first)
+
+| Sprint | Focus | Status |
+|--------|-------|--------|
+| 62 | Cost + runtime foundations (`B64`, `B63`, `B47`, `B40`) | Planned |
+| 63 | Execution + ecosystem foundations (`B65`, `B39`, `B61`, `B71`, `B45`) | Planned |
+| 64 | Knowledge + context foundations (`B38`, `B57`, `B58`, `B48`) | Planned |
+| 65 | Agent coordination backend (`B50`, `B59`, `B49`, `B76`) | Planned |
+| 66 | Optional capability backends (`B44`, `B52`, `B53`, `B69`) | Planned (Extended/plugin-first) |
+
+### Frontend / UX Lane (paired with the backend lane)
+
+| Track | Focus | Paired Backend Sprint |
+|-------|-------|-----------------------|
+| FE-A | Ambient awareness (`context %`, modular footer, duration/cost visibility) | 62 |
+| FE-B | Conversation clarity (tool grouping, inline diffs, quieter streaming) | 62 |
+| FE-C | Session and history UX (session search, rewind preview, session stats) | 63 |
+| FE-D | Praxis chat UX (`B26` composer entry, worker visibility, task status) | 65 |
+| FE-E | Input + discoverability (shortcut help, richer command discovery, long-input polish) | 64 |
+| FE-F | Desktop parity follow-through for proven TUI patterns | 66 |
+
+### Ordering Notes
+
+- `B26` remains the highest-priority open UI-facing item and should land before or together with Sprint 65's coordination work.
+- Sprints 60 and 61 are now treated as done-for-planning and live in the sprint archive while their manual validation notes remain tracked in the backlog.
+- The backend lane stays Rust-first; the frontend lane is limited to TUI and desktop surfaces for already-approved backend capabilities.
+
+Detailed sprint planning docs live in:
+
+- `docs/development/sprints/sprint-62/overview.md`
+- `docs/development/sprints/sprint-63/overview.md`
+- `docs/development/sprints/sprint-64/overview.md`
+- `docs/development/sprints/sprint-65/overview.md`
+- `docs/development/sprints/sprint-66/overview.md`
+
+Archived implemented sprint docs live in:
+
+- `docs/development/sprints/archive/sprint-60/overview.md`
+- `docs/development/sprints/archive/sprint-61/overview.md`
 
 ## Status: v2.1 Released + Active Development
 
-v2.1.0 released on 2026-03-08. Sprints 51-59 extended model intelligence, provider coverage, and quality. Sprint 60 focuses on streaming tool calls and session/context UX.
+v2.1.0 released on 2026-03-08. Sprints 51-61 materially improved model intelligence, provider coverage, reliability, streaming UX, and workflow safety. Current follow-through is manual TUI validation for recently landed work, backlog cleanup, paired backend/frontend planning toward v3, and using the refreshed reference corpus to keep AVA competitive with OpenCode, Codex CLI, Goose, Gemini CLI, Cline, OpenHands, Continue, Zed, and others. Sprint 62-66 remain roadmap targets rather than completed implementation on `master`.
 
-## Codebase Stats (as of Sprint 59)
+## Codebase Stats (lightweight repo snapshot)
 
 | Metric | Value |
 |--------|-------|
-| Rust crates | 22 |
-| Rust source files | ~320 |
-| Lines of Rust | ~45,000 |
-| Tests | ~820 |
+| Rust crates | 20 |
+| Rust source files | 266 |
+| Lines of Rust | ~70,000 |
+| Tracked test files | 338 |
 | Clippy | Clean |
-| Built-in tools | 19 |
+| Core built-in tools | 13 (6 default + 7 extended) |
 
 ## Parallelism Guide (Historical)
 

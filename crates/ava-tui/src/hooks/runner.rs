@@ -77,9 +77,7 @@ impl HookRunner {
                     command,
                     timeout,
                     cwd,
-                } => {
-                    Self::run_command(command, *timeout, cwd.as_deref(), &context_json).await
-                }
+                } => Self::run_command(command, *timeout, cwd.as_deref(), &context_json).await,
                 HookAction::Http {
                     url,
                     headers,
@@ -249,10 +247,7 @@ impl HookRunner {
                     debug!(url = %url, status = %status, "webhook succeeded");
                     HookResult::Allow
                 } else {
-                    let body = response
-                        .text()
-                        .await
-                        .unwrap_or_else(|_| String::new());
+                    let body = response.text().await.unwrap_or_else(|_| String::new());
                     let msg = format!("Webhook returned {status}: {body}");
                     warn!(url = %url, status = %status, "webhook failed");
                     HookResult::Error(msg)
@@ -303,11 +298,7 @@ impl HookRunner {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max])
-    }
+    crate::text_utils::truncate_display(s, max)
 }
 
 #[cfg(test)]
@@ -356,7 +347,11 @@ mod tests {
 
     #[tokio::test]
     async fn command_hook_exit_2_blocks() {
-        let registry = make_registry(vec![echo_hook("PreToolUse", "echo 'blocked' >&2; exit 2", 100)]);
+        let registry = make_registry(vec![echo_hook(
+            "PreToolUse",
+            "echo 'blocked' >&2; exit 2",
+            100,
+        )]);
         let ctx = HookContext::for_event(&HookEvent::PreToolUse);
         // No matcher, so it matches all tool calls
         let (result, execs) = HookRunner::run_hooks(&registry, HookEvent::PreToolUse, ctx).await;
@@ -416,8 +411,8 @@ mod tests {
     #[tokio::test]
     async fn block_stops_remaining_hooks() {
         let registry = make_registry(vec![
-            echo_hook("PreToolUse", "exit 2", 10),   // blocks
-            echo_hook("PreToolUse", "exit 0", 100),  // should not run
+            echo_hook("PreToolUse", "exit 2", 10),  // blocks
+            echo_hook("PreToolUse", "exit 0", 100), // should not run
         ]);
         let ctx = HookContext::for_event(&HookEvent::PreToolUse);
         let (result, execs) = HookRunner::run_hooks(&registry, HookEvent::PreToolUse, ctx).await;

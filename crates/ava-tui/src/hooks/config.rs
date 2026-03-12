@@ -193,9 +193,7 @@ impl HookRegistry {
                 h.enabled
                     && HookEvent::from_str_loose(&h.event)
                         .map(|e| e == *event)
-                        .unwrap_or_else(|| {
-                            h.event.eq_ignore_ascii_case(event_label)
-                        })
+                        .unwrap_or_else(|| h.event.eq_ignore_ascii_case(event_label))
             })
             .collect();
         matching.sort_by_key(|h| h.priority);
@@ -257,8 +255,7 @@ impl HookRegistry {
     /// Create sample hook files in `.ava/hooks/`.
     pub fn create_templates() -> Result<String, String> {
         let dir = PathBuf::from(".ava").join("hooks");
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("Failed to create .ava/hooks/: {e}"))?;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create .ava/hooks/: {e}"))?;
 
         let mut created = Vec::new();
 
@@ -363,7 +360,11 @@ timeout = 5
         if created.is_empty() {
             Err("Hook templates already exist in .ava/hooks/".to_string())
         } else {
-            Ok(format!("Created {} hook templates:\n  {}", created.len(), created.join("\n  ")))
+            Ok(format!(
+                "Created {} hook templates:\n  {}",
+                created.len(),
+                created.join("\n  ")
+            ))
         }
     }
 }
@@ -471,7 +472,12 @@ timeout = 10
         assert!(config.enabled);
         assert!(matches!(config.action, HookAction::Command { .. }));
 
-        if let HookAction::Command { command, timeout, cwd } = &config.action {
+        if let HookAction::Command {
+            command,
+            timeout,
+            cwd,
+        } = &config.action
+        {
             assert_eq!(command, "cargo fmt");
             assert_eq!(*timeout, 10);
             assert!(cwd.is_none());
@@ -494,10 +500,18 @@ Authorization = "Bearer token"
         let config: HookConfig = toml::from_str(toml_str).unwrap();
         assert!(matches!(config.action, HookAction::Http { .. }));
 
-        if let HookAction::Http { url, headers, timeout } = &config.action {
+        if let HookAction::Http {
+            url,
+            headers,
+            timeout,
+        } = &config.action
+        {
             assert_eq!(url, "https://hooks.example.com/ava");
             assert_eq!(*timeout, 5);
-            assert_eq!(headers.get("Authorization"), Some(&"Bearer token".to_string()));
+            assert_eq!(
+                headers.get("Authorization"),
+                Some(&"Bearer token".to_string())
+            );
         }
     }
 

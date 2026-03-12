@@ -29,9 +29,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::benchmark::{BenchmarkResult, ModelSpec};
 use crate::benchmark_tasks::{
-    advanced_rust_tasks, agent_quality_tasks, agentic_tasks, default_tasks,
-    filter_tasks_by_suite, go_tasks, multi_file_tasks, python_tasks, security_tasks,
-    test_generation_tasks, typescript_tasks, BenchmarkSuite, BenchmarkTask,
+    advanced_rust_tasks, agent_quality_tasks, agentic_tasks, default_tasks, filter_tasks_by_suite,
+    go_tasks, multi_file_tasks, python_tasks, security_tasks, test_generation_tasks,
+    typescript_tasks, BenchmarkSuite, BenchmarkTask,
 };
 
 /// Configuration for a harnessed-pair benchmark run.
@@ -298,7 +298,15 @@ async fn run_solo_task(
     let start = Instant::now();
     let handle = tokio::spawn(async move {
         stack
-            .run(&goal, effective_turns, Some(tx), cancel, Vec::new(), None, Vec::new())
+            .run(
+                &goal,
+                effective_turns,
+                Some(tx),
+                cancel,
+                Vec::new(),
+                None,
+                Vec::new(),
+            )
             .await
     });
 
@@ -511,9 +519,7 @@ async fn run_harness_task(
     max_turns: usize,
     workspace_dir: &Path,
 ) -> Result<HarnessResult> {
-    let credentials = CredentialStore::load_default()
-        .await
-        .unwrap_or_default();
+    let credentials = CredentialStore::load_default().await.unwrap_or_default();
     let pool = Arc::new(ConnectionPool::new());
 
     // Create providers
@@ -574,7 +580,8 @@ async fn run_harness_task(
         files: vec![],
     };
 
-    let worker = director.delegate(praxis_task)
+    let worker = director
+        .delegate(praxis_task)
         .map_err(|e| eyre!("Failed to delegate task: {}", e))?;
 
     let cancel = CancellationToken::new();
@@ -590,9 +597,7 @@ async fn run_harness_task(
 
     let start = Instant::now();
 
-    let handle = tokio::spawn(async move {
-        director.coordinate(vec![worker], cancel, tx).await
-    });
+    let handle = tokio::spawn(async move { director.coordinate(vec![worker], cancel, tx).await });
 
     // Collect metrics from events
     let mut total_output = String::new();
@@ -621,7 +626,8 @@ async fn run_harness_task(
     let total_time_ms = start.elapsed().as_millis() as u64;
 
     // Wait for handle
-    let session = handle.await?
+    let session = handle
+        .await?
         .map_err(|e| eyre!("Director coordination failed: {}", e))?;
 
     // Estimate token usage and costs from the providers
@@ -632,7 +638,11 @@ async fn run_harness_task(
     // Rough estimation: director uses ~20% of total output for planning/review,
     // worker uses ~80% for actual code generation. Input tokens are estimated from prompt.
     let total_chars = total_output.len();
-    let dir_slice_end = if total_chars == 0 { 0 } else { (total_chars / 5).max(1) };
+    let dir_slice_end = if total_chars == 0 {
+        0
+    } else {
+        (total_chars / 5).max(1)
+    };
     let est_director_output = dir_provider_ref.estimate_tokens(&total_output[..dir_slice_end]);
     let est_worker_output = wrk_provider_ref.estimate_tokens(&total_output);
     let est_input = dir_provider_ref.estimate_tokens(&task.prompt);
@@ -881,7 +891,11 @@ async fn compile_and_test(
     if test_result.status.success() {
         (
             Some(true),
-            Some(if tests_passed > 0 { tests_passed } else { total }),
+            Some(if tests_passed > 0 {
+                tests_passed
+            } else {
+                total
+            }),
             Some(total),
             None,
         )
@@ -916,65 +930,80 @@ async fn setup_agentic_file(temp_dir: &Path, task_name: &str, setup_code: &str) 
     match task_name {
         "bugfix_off_by_one" => {
             let path = temp_dir.join("binary_search.rs");
-            tokio::fs::write(&path, setup_code).await
+            tokio::fs::write(&path, setup_code)
+                .await
                 .map_err(|e| eyre!("Failed to write {}: {}", path.display(), e))?;
         }
         "bugfix_lifetime" => {
             let path = temp_dir.join("lifetime_fix.rs");
-            tokio::fs::write(&path, setup_code).await
+            tokio::fs::write(&path, setup_code)
+                .await
                 .map_err(|e| eyre!("Failed to write {}: {}", path.display(), e))?;
         }
         "refactor_extract" => {
             let path = temp_dir.join("refactor.rs");
-            tokio::fs::write(&path, setup_code).await
+            tokio::fs::write(&path, setup_code)
+                .await
                 .map_err(|e| eyre!("Failed to write {}: {}", path.display(), e))?;
         }
         "multi_step_debug" => {
             let dir = temp_dir.join("multi_step_debug");
-            tokio::fs::create_dir_all(&dir).await
+            tokio::fs::create_dir_all(&dir)
+                .await
                 .map_err(|e| eyre!("Failed to create dir {}: {}", dir.display(), e))?;
             let lib_path = dir.join("lib.rs");
-            tokio::fs::write(&lib_path, setup_code).await
+            tokio::fs::write(&lib_path, setup_code)
+                .await
                 .map_err(|e| eyre!("Failed to write {}: {}", lib_path.display(), e))?;
             let tests_path = dir.join("tests.rs");
             let test_content = "mod lib;\n\n#[test]\nfn test_area() {\n    assert!((lib::area(3.0, 4.0) - 12.0).abs() < 1e-9);\n}\n\n#[test]\nfn test_perimeter() {\n    assert!((lib::perimeter(3.0, 4.0) - 14.0).abs() < 1e-9);\n}\n\n#[test]\nfn test_diagonal() {\n    assert!((lib::diagonal(3.0, 4.0) - 5.0).abs() < 1e-9);\n}\n";
-            tokio::fs::write(&tests_path, test_content).await
+            tokio::fs::write(&tests_path, test_content)
+                .await
                 .map_err(|e| eyre!("Failed to write {}: {}", tests_path.display(), e))?;
         }
         "constraint_edit" => {
             let path = temp_dir.join("validators.rs");
-            tokio::fs::write(&path, setup_code).await
+            tokio::fs::write(&path, setup_code)
+                .await
                 .map_err(|e| eyre!("Failed to write {}: {}", path.display(), e))?;
         }
         "self_correct_compile" => {
             let path = temp_dir.join("cache.rs");
-            tokio::fs::write(&path, setup_code).await
+            tokio::fs::write(&path, setup_code)
+                .await
                 .map_err(|e| eyre!("Failed to write {}: {}", path.display(), e))?;
         }
         "tool_efficiency" => {
             let src_dir = temp_dir.join("tool_efficiency").join("src");
-            tokio::fs::create_dir_all(&src_dir).await
+            tokio::fs::create_dir_all(&src_dir)
+                .await
                 .map_err(|e| eyre!("Failed to create dir {}: {}", src_dir.display(), e))?;
             let main_code = "mod lib;\n\nfn main() {\n    let cfg = lib::config::Config::default();\n    let msg = lib::utils::greet(&cfg.name);\n    println!(\"{}\", msg);\n}\n";
             let lib_code = "pub mod utils;\npub mod config;\n";
             let utils_code = "/// Greets a user by name.\npub fn greet(name: &str) -> String {\n    format!(\"Hello, {}!\", name)\n}\n\n/// Formats a duration in seconds into a human-readable string.\npub fn format_duration(seconds: u64) -> String {\n    if seconds < 60 {\n        format!(\"{}s\", seconds)\n    } else if seconds < 3600 {\n        format!(\"{}m {}s\", seconds / 60, seconds % 60)\n    } else {\n        format!(\"{}h {}m\", seconds / 3600, (seconds % 3600) / 60)\n    }\n}\n";
-            tokio::fs::write(src_dir.join("main.rs"), main_code).await
+            tokio::fs::write(src_dir.join("main.rs"), main_code)
+                .await
                 .map_err(|e| eyre!("Failed to write main.rs: {}", e))?;
-            tokio::fs::write(src_dir.join("lib.rs"), lib_code).await
+            tokio::fs::write(src_dir.join("lib.rs"), lib_code)
+                .await
                 .map_err(|e| eyre!("Failed to write lib.rs: {}", e))?;
-            tokio::fs::write(src_dir.join("utils.rs"), utils_code).await
+            tokio::fs::write(src_dir.join("utils.rs"), utils_code)
+                .await
                 .map_err(|e| eyre!("Failed to write utils.rs: {}", e))?;
-            tokio::fs::write(src_dir.join("config.rs"), setup_code).await
+            tokio::fs::write(src_dir.join("config.rs"), setup_code)
+                .await
                 .map_err(|e| eyre!("Failed to write config.rs: {}", e))?;
         }
         "no_overengineer" => {
             let path = temp_dir.join("math.rs");
-            tokio::fs::write(&path, setup_code).await
+            tokio::fs::write(&path, setup_code)
+                .await
                 .map_err(|e| eyre!("Failed to write {}: {}", path.display(), e))?;
         }
         "error_recovery_loop" => {
             let path = temp_dir.join("broken.rs");
-            tokio::fs::write(&path, setup_code).await
+            tokio::fs::write(&path, setup_code)
+                .await
                 .map_err(|e| eyre!("Failed to write {}: {}", path.display(), e))?;
         }
         _ => {}
@@ -1024,10 +1053,7 @@ fn print_harness_table(report: &HarnessReport) {
     println!();
     println!("=======================================================================");
     println!("           AVA Harnessed-Pair Benchmark Results");
-    println!(
-        "           Director: {} | Worker: {}",
-        dir_name, wrk_name
-    );
+    println!("           Director: {} | Worker: {}", dir_name, wrk_name);
     println!("           {}", &report.timestamp[..19]);
     println!("=======================================================================");
 
@@ -1050,9 +1076,7 @@ fn print_harness_table(report: &HarnessReport) {
             .as_ref()
             .and_then(|v| v.iter().find(|r| r.task_name == *task_name));
 
-        let category = harness_r
-            .map(|r| r.task_category.as_str())
-            .unwrap_or("?");
+        let category = harness_r.map(|r| r.task_category.as_str()).unwrap_or("?");
 
         println!();
         println!("  Task: {} [{}]", task_name, category);
@@ -1236,7 +1260,8 @@ fn print_harness_table(report: &HarnessReport) {
     );
 
     if dir_total_cost > 0.0 {
-        let overall_savings = ((dir_total_cost - harness_total_cost) / dir_total_cost * 100.0).max(0.0);
+        let overall_savings =
+            ((dir_total_cost - harness_total_cost) / dir_total_cost * 100.0).max(0.0);
         println!(
             "  Overall cost savings vs {} solo: {:.0}%",
             dir_name, overall_savings,
@@ -1295,13 +1320,19 @@ mod tests {
 
     #[test]
     fn test_short_model_name() {
-        assert_eq!(short_model_name("anthropic/claude-opus-4.6"), "claude-opus-4.6");
+        assert_eq!(
+            short_model_name("anthropic/claude-opus-4.6"),
+            "claude-opus-4.6"
+        );
         assert_eq!(short_model_name("mercury-2"), "mercury-2");
     }
 
     #[test]
     fn test_check_patterns() {
-        assert!(check_patterns("fn is_palindrome() -> bool", &[r"fn\s+is_palindrome", r"-> bool"]));
+        assert!(check_patterns(
+            "fn is_palindrome() -> bool",
+            &[r"fn\s+is_palindrome", r"-> bool"]
+        ));
         assert!(!check_patterns("fn other()", &[r"fn\s+is_palindrome"]));
         assert!(!check_patterns("", &[r"anything"]));
     }

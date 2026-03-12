@@ -80,6 +80,10 @@ impl SessionManager {
         Ok(Session::new())
     }
 
+    pub fn db_path(&self) -> &Path {
+        &self.db_path
+    }
+
     pub fn save(&self, session: &Session) -> Result<()> {
         let mut conn = self.open_conn()?;
         let tx = conn.transaction().map_err(db_error)?;

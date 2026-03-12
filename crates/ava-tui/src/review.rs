@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use ava_agent::stack::{AgentStack, AgentStackConfig};
+use ava_platform::StandardPlatform;
 use ava_praxis::review::{
     build_review_system_prompt, collect_diff, determine_exit_code, format_json, format_markdown,
     format_text, parse_review_output, run_review_agent,
 };
 use ava_praxis::DiffMode;
-use ava_platform::StandardPlatform;
 use color_eyre::eyre::{eyre, Result};
 
 use crate::config::cli::{ReviewArgs, ReviewFormat};
@@ -37,9 +37,7 @@ pub async fn run_review(args: ReviewArgs) -> Result<()> {
 
     // 3. Collect diff
     eprintln!("[review] Collecting diff...");
-    let review_context = collect_diff(&mode)
-        .await
-        .map_err(|e| eyre!("{e}"))?;
+    let review_context = collect_diff(&mode).await.map_err(|e| eyre!("{e}"))?;
 
     eprintln!(
         "[review] {} file(s) changed, {} bytes of diff",
@@ -48,11 +46,9 @@ pub async fn run_review(args: ReviewArgs) -> Result<()> {
     );
 
     // 4. Resolve provider
-    let (provider, model) = crate::config::cli::resolve_provider_model(
-        args.provider.as_deref(),
-        args.model.as_deref(),
-    )
-    .await?;
+    let (provider, model) =
+        crate::config::cli::resolve_provider_model(args.provider.as_deref(), args.model.as_deref())
+            .await?;
 
     if provider.is_none() {
         return Err(eyre!(crate::config::cli::NO_PROVIDER_ERROR));

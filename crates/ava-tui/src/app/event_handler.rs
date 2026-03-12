@@ -44,9 +44,8 @@ impl App {
             .current_session
             .as_ref()
             .map(|s| s.id.to_string());
-        ctx.tokens_used = Some(
-            self.state.agent.tokens_used.input + self.state.agent.tokens_used.output,
-        );
+        ctx.tokens_used =
+            Some(self.state.agent.tokens_used.input + self.state.agent.tokens_used.output);
         ctx.cost_usd = Some(self.state.agent.cost);
         ctx
     }
@@ -91,7 +90,11 @@ impl App {
                     }
                 }
             }
-            ava_agent::AgentEvent::TokenUsage { input_tokens, output_tokens, cost_usd } => {
+            ava_agent::AgentEvent::TokenUsage {
+                input_tokens,
+                output_tokens,
+                cost_usd,
+            } => {
                 self.state.agent.tokens_used.input += input_tokens;
                 self.state.agent.tokens_used.output += output_tokens;
                 self.state.agent.cost += cost_usd;
@@ -105,7 +108,8 @@ impl App {
                     ctx.tool_name = Some(call.name.clone());
                     ctx.tool_input = Some(call.arguments.clone());
                     // Extract file_path from tool arguments for path_pattern matching
-                    ctx.file_path = call.arguments
+                    ctx.file_path = call
+                        .arguments
                         .get("file_path")
                         .or_else(|| call.arguments.get("path"))
                         .and_then(|v| v.as_str())
@@ -119,7 +123,8 @@ impl App {
                 if let Some(last) = self.state.messages.messages.last_mut() {
                     if matches!(last.kind, MessageKind::Assistant | MessageKind::Thinking) {
                         last.is_streaming = false;
-                        if matches!(last.kind, MessageKind::Assistant) && last.model_name.is_none() {
+                        if matches!(last.kind, MessageKind::Assistant) && last.model_name.is_none()
+                        {
                             last.model_name = Some(self.state.agent.model_name.clone());
                         }
                     }
@@ -129,7 +134,8 @@ impl App {
 
                 // Track sub-agent spawns from the task tool
                 if call.name == "task" {
-                    let description = call.arguments
+                    let description = call
+                        .arguments
                         .get("prompt")
                         .and_then(|p| p.as_str())
                         .map(String::from)
@@ -181,8 +187,12 @@ impl App {
                         self.state.active_modal = Some(ModalType::ToolApproval);
                     }
                     // Snapshot files before write/edit/apply_patch for rewind
-                    if matches!(call.name.as_str(), "write" | "edit" | "apply_patch" | "multiedit") {
-                        let file_path = call.arguments
+                    if matches!(
+                        call.name.as_str(),
+                        "write" | "edit" | "apply_patch" | "multiedit"
+                    ) {
+                        let file_path = call
+                            .arguments
                             .get("file_path")
                             .or_else(|| call.arguments.get("path"))
                             .and_then(|v| v.as_str())
@@ -231,14 +241,21 @@ impl App {
                 // Check if this result belongs to a running sub-agent (task tool)
                 let is_sub_agent_result = self.state.messages.messages.iter().any(|m| {
                     matches!(m.kind, MessageKind::SubAgent)
-                        && m.sub_agent.as_ref().is_some_and(|d| {
-                            d.is_running && d.call_id == result.call_id
-                        })
+                        && m.sub_agent
+                            .as_ref()
+                            .is_some_and(|d| d.is_running && d.call_id == result.call_id)
                 });
 
                 if is_sub_agent_result {
                     // Mark the sub-agent state as completed
-                    let sa_tool_count = if let Some(sa) = self.state.agent.sub_agents.iter_mut().rev().find(|s| s.is_running) {
+                    let sa_tool_count = if let Some(sa) = self
+                        .state
+                        .agent
+                        .sub_agents
+                        .iter_mut()
+                        .rev()
+                        .find(|s| s.is_running)
+                    {
                         sa.is_running = false;
                         sa.elapsed = Some(sa.started_at.elapsed());
                         sa.current_tool = None;
@@ -250,7 +267,9 @@ impl App {
                     // Update the SubAgent UI message with result content and stats
                     if let Some(msg) = self.state.messages.messages.iter_mut().rev().find(|m| {
                         matches!(m.kind, MessageKind::SubAgent)
-                            && m.sub_agent.as_ref().is_some_and(|d| d.call_id == result.call_id)
+                            && m.sub_agent
+                                .as_ref()
+                                .is_some_and(|d| d.call_id == result.call_id)
                     }) {
                         msg.content = result.content;
                         msg.is_streaming = false;
@@ -262,7 +281,14 @@ impl App {
                     }
                 } else {
                     // Mark most recent running sub-agent as completed (non-task tool results)
-                    if let Some(sa) = self.state.agent.sub_agents.iter_mut().rev().find(|s| s.is_running) {
+                    if let Some(sa) = self
+                        .state
+                        .agent
+                        .sub_agents
+                        .iter_mut()
+                        .rev()
+                        .find(|s| s.is_running)
+                    {
                         sa.is_running = false;
                         sa.elapsed = Some(sa.started_at.elapsed());
                         sa.current_tool = None;
@@ -355,9 +381,14 @@ impl App {
                     .collect();
 
                 // Update the SubAgentInfo in agent state
-                if let Some(sa) = self.state.agent.sub_agents.iter_mut().rev().find(|s| {
-                    s.description == description
-                }) {
+                if let Some(sa) = self
+                    .state
+                    .agent
+                    .sub_agents
+                    .iter_mut()
+                    .rev()
+                    .find(|s| s.description == description)
+                {
                     sa.session_id = Some(session_id.clone());
                     sa.session_messages = ui_messages.clone();
                 }
@@ -436,10 +467,8 @@ impl App {
                         let _ = app_tx_clone.send(AppEvent::ShellResult(kind, content));
                     }
                     Err(e) => {
-                        let _ = app_tx_clone.send(AppEvent::ShellResult(
-                            MessageKind::Error,
-                            e.to_string(),
-                        ));
+                        let _ = app_tx_clone
+                            .send(AppEvent::ShellResult(MessageKind::Error, e.to_string()));
                     }
                 }
             });
@@ -447,7 +476,7 @@ impl App {
         }
 
         // Handle slash commands
-        if let Some((kind, msg)) = self.handle_slash_command(&goal) {
+        if let Some((kind, msg)) = self.handle_slash_command(&goal, Some(app_tx.clone())) {
             self.state
                 .messages
                 .push(UiMessage::new(MessageKind::User, goal));
@@ -557,9 +586,17 @@ impl App {
             .current_session
             .as_ref()
             .map(|s| s.id.to_string());
-        self.state
-            .agent
-            .start(goal, self.state.agent.max_turns, app_tx, agent_tx, history, parent_session_id, std::mem::take(&mut self.pending_images));
+        let run_id = self.allocate_run_id();
+        self.foreground_run_id = Some(run_id);
+        self.state.agent.start(
+            run_id,
+            goal,
+            self.state.agent.max_turns,
+            app_tx,
+            history,
+            parent_session_id,
+            std::mem::take(&mut self.pending_images),
+        );
     }
 
     /// Send a mid-stream message to the running agent via the message queue.
@@ -581,20 +618,25 @@ impl App {
             };
             if tx.send(msg).is_ok() {
                 // Add to UI queue display
-                self.state.input.queue_display.push(text.clone(), tier.clone());
+                self.state
+                    .input
+                    .queue_display
+                    .push(text.clone(), tier.clone());
                 // Show user message in chat with a tier badge
                 let badge = match &tier {
                     MessageTier::Steering => "[S]".to_string(),
                     MessageTier::FollowUp => "[F]".to_string(),
                     MessageTier::PostComplete { group } => format!("[G{group}]"),
                 };
-                self.state.messages.push(UiMessage::new(
-                    MessageKind::User,
-                    format!("{badge} {text}"),
-                ));
+                self.state
+                    .messages
+                    .push(UiMessage::new(MessageKind::User, format!("{badge} {text}")));
                 self.set_status(format!("Queued {label} message"), StatusLevel::Info);
             } else {
-                self.set_status(format!("Failed to queue {label} message — agent may have finished"), StatusLevel::Error);
+                self.set_status(
+                    format!("Failed to queue {label} message — agent may have finished"),
+                    StatusLevel::Error,
+                );
             }
         } else {
             self.set_status("No running agent to send messages to", StatusLevel::Warn);
@@ -657,10 +699,7 @@ impl App {
     pub(crate) fn stop_and_transcribe(&mut self, app_tx: mpsc::UnboundedSender<AppEvent>) {
         #[cfg(feature = "voice")]
         {
-            let wav = self
-                .audio_recorder
-                .as_mut()
-                .and_then(|r| r.stop().ok());
+            let wav = self.audio_recorder.as_mut().and_then(|r| r.stop().ok());
 
             self.audio_recorder = None;
 
@@ -676,9 +715,16 @@ impl App {
                         tokio::spawn(async move {
                             match crate::transcribe::create_transcriber(&config).await {
                                 Ok(transcriber) => {
-                                    match transcriber.transcribe(wav_data, config.language.as_deref()).await {
-                                        Ok(text) => { let _ = tx.send(AppEvent::VoiceReady(text)); }
-                                        Err(e) => { let _ = tx.send(AppEvent::VoiceError(e.to_string())); }
+                                    match transcriber
+                                        .transcribe(wav_data, config.language.as_deref())
+                                        .await
+                                    {
+                                        Ok(text) => {
+                                            let _ = tx.send(AppEvent::VoiceReady(text));
+                                        }
+                                        Err(e) => {
+                                            let _ = tx.send(AppEvent::VoiceError(e.to_string()));
+                                        }
                                     }
                                 }
                                 Err(e) => {
@@ -694,9 +740,16 @@ impl App {
                         tokio::spawn(async move {
                             match crate::transcribe::create_transcriber(&config).await {
                                 Ok(transcriber) => {
-                                    match transcriber.transcribe(wav_data, config.language.as_deref()).await {
-                                        Ok(text) => { let _ = tx.send(AppEvent::VoiceReady(text)); }
-                                        Err(e) => { let _ = tx.send(AppEvent::VoiceError(e.to_string())); }
+                                    match transcriber
+                                        .transcribe(wav_data, config.language.as_deref())
+                                        .await
+                                    {
+                                        Ok(text) => {
+                                            let _ = tx.send(AppEvent::VoiceReady(text));
+                                        }
+                                        Err(e) => {
+                                            let _ = tx.send(AppEvent::VoiceError(e.to_string()));
+                                        }
                                     }
                                 }
                                 Err(e) => {
@@ -737,8 +790,14 @@ fn resolve_attachments(attachments: &[ava_types::ContextAttachment]) -> String {
                 match std::fs::read_to_string(&full_path) {
                     Ok(content) => {
                         // Truncate very large files
-                        let truncated = if content.len() > 50_000 {
-                            format!("{}... [truncated, {} bytes total]", &content[..50_000], content.len())
+                        let (safe_slice, was_truncated) =
+                            crate::text_utils::truncate_bytes_safe(&content, 50_000);
+                        let truncated = if was_truncated {
+                            format!(
+                                "{}... [truncated, {} bytes total]",
+                                safe_slice,
+                                content.len()
+                            )
                         } else {
                             content
                         };

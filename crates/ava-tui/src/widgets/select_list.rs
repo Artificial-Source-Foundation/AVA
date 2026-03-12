@@ -220,11 +220,7 @@ impl<T: Clone> SelectListState<T> {
             return (0..self.items.len()).collect();
         }
         let mut matcher = Matcher::new(nucleo::Config::DEFAULT);
-        let needle = Pattern::parse(
-            &self.query,
-            CaseMatching::Ignore,
-            Normalization::Smart,
-        );
+        let needle = Pattern::parse(&self.query, CaseMatching::Ignore, Normalization::Smart);
         let mut scored: Vec<_> = self
             .items
             .iter()
@@ -232,7 +228,9 @@ impl<T: Clone> SelectListState<T> {
             .filter_map(|(idx, item)| {
                 let mut buf = Vec::new();
                 let haystack = nucleo::Utf32Str::new(&item.title, &mut buf);
-                needle.score(haystack, &mut matcher).map(|score| (score, idx))
+                needle
+                    .score(haystack, &mut matcher)
+                    .map(|score| (score, idx))
             })
             .collect();
         scored.sort_by(|a, b| b.0.cmp(&a.0));
@@ -382,31 +380,25 @@ pub fn render_select_list<T: Clone>(
     // --- Header bar: bg_surface background, title left, [Esc] right ---
     {
         // Fill header background
-        let header_bg = Block::default()
-            .style(Style::default().bg(theme.bg_surface));
+        let header_bg = Block::default().style(Style::default().bg(theme.bg_surface));
         frame.render_widget(header_bg, header_area);
 
-        let title_text = vec![
-            Span::styled(
-                format!(" {}", config.title),
-                Style::default()
-                    .fg(theme.text)
-                    .bg(theme.bg_surface)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ];
-        let esc_text = vec![
-            Span::styled(
-                "[Esc] ",
-                Style::default().fg(theme.text_dimmed).bg(theme.bg_surface),
-            ),
-        ];
+        let title_text = vec![Span::styled(
+            format!(" {}", config.title),
+            Style::default()
+                .fg(theme.text)
+                .bg(theme.bg_surface)
+                .add_modifier(Modifier::BOLD),
+        )];
+        let esc_text = vec![Span::styled(
+            "[Esc] ",
+            Style::default().fg(theme.text_dimmed).bg(theme.bg_surface),
+        )];
 
         // Title on line 1 (vertically centered in 3-line header)
         let title_line = Rect::new(header_area.x, header_area.y + 1, header_area.width / 2, 1);
         frame.render_widget(
-            Paragraph::new(Line::from(title_text))
-                .style(Style::default().bg(theme.bg_surface)),
+            Paragraph::new(Line::from(title_text)).style(Style::default().bg(theme.bg_surface)),
             title_line,
         );
         let esc_line = Rect::new(
@@ -449,11 +441,21 @@ pub fn render_select_list<T: Clone>(
         } else {
             theme.text
         };
-        let cursor = if state.query.is_empty() { "" } else { "\u{2588}" };
+        let cursor = if state.query.is_empty() {
+            ""
+        } else {
+            "\u{2588}"
+        };
 
         let search_line = Line::from(vec![
-            Span::styled(" \u{1F50D} ", Style::default().fg(theme.text_dimmed).bg(theme.bg_deep)),
-            Span::styled(search_display, Style::default().fg(search_fg).bg(theme.bg_deep)),
+            Span::styled(
+                " \u{1F50D} ",
+                Style::default().fg(theme.text_dimmed).bg(theme.bg_deep),
+            ),
+            Span::styled(
+                search_display,
+                Style::default().fg(search_fg).bg(theme.bg_deep),
+            ),
             Span::styled(cursor, Style::default().fg(theme.primary).bg(theme.bg_deep)),
         ]);
         frame.render_widget(
@@ -476,14 +478,12 @@ pub fn render_select_list<T: Clone>(
                     }
                     // Section header: uppercase, bold, text_dimmed (#505A6B)
                     let section_upper = section.to_uppercase();
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("  {section_upper}"),
-                            Style::default()
-                                .fg(theme.text_dimmed)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]));
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("  {section_upper}"),
+                        Style::default()
+                            .fg(theme.text_dimmed)
+                            .add_modifier(Modifier::BOLD),
+                    )]));
                     last_section = Some(section);
                 }
             }
@@ -530,10 +530,7 @@ pub fn render_select_list<T: Clone>(
                 ));
             }
             _ => {
-                spans.push(Span::styled(
-                    "   ",
-                    Style::default().bg(bg),
-                ));
+                spans.push(Span::styled("   ", Style::default().bg(bg)));
             }
         }
 
@@ -568,18 +565,22 @@ pub fn render_select_list<T: Clone>(
             spans.push(Span::styled(" ".repeat(padding), Style::default().bg(bg)));
 
             let detail_style = match &item.status {
-                Some(ItemStatus::Connected(_)) => {
-                    Style::default()
-                        .fg(if is_selected { fg_detail } else { theme.accent })
-                        .bg(bg)
-                }
-                Some(ItemStatus::Info(_)) => {
-                    Style::default()
-                        .fg(if is_selected { fg_detail } else { theme.text_muted })
-                        .bg(bg)
-                }
+                Some(ItemStatus::Connected(_)) => Style::default()
+                    .fg(if is_selected { fg_detail } else { theme.accent })
+                    .bg(bg),
+                Some(ItemStatus::Info(_)) => Style::default()
+                    .fg(if is_selected {
+                        fg_detail
+                    } else {
+                        theme.text_muted
+                    })
+                    .bg(bg),
                 _ => Style::default()
-                    .fg(if is_selected { fg_detail } else { theme.text_dimmed })
+                    .fg(if is_selected {
+                        fg_detail
+                    } else {
+                        theme.text_dimmed
+                    })
                     .bg(bg),
             };
             spans.push(Span::styled(right_text, detail_style));
@@ -609,19 +610,14 @@ pub fn render_select_list<T: Clone>(
 
     // --- Sticky footer: bg_surface background, keybind hints ---
     if !config.keybinds.is_empty() {
-        let footer_bg = Block::default()
-            .style(Style::default().bg(theme.bg_surface));
+        let footer_bg = Block::default().style(Style::default().bg(theme.bg_surface));
         frame.render_widget(footer_bg, footer_area);
 
-        let mut footer_spans: Vec<Span<'_>> = vec![
-            Span::styled(" ", Style::default().bg(theme.bg_surface)),
-        ];
+        let mut footer_spans: Vec<Span<'_>> =
+            vec![Span::styled(" ", Style::default().bg(theme.bg_surface))];
         for (i, hint) in config.keybinds.iter().enumerate() {
             if i > 0 {
-                footer_spans.push(Span::styled(
-                    "    ",
-                    Style::default().bg(theme.bg_surface),
-                ));
+                footer_spans.push(Span::styled("    ", Style::default().bg(theme.bg_surface)));
             }
             footer_spans.push(Span::styled(
                 hint.key.clone(),
@@ -635,14 +631,9 @@ pub fn render_select_list<T: Clone>(
                 Style::default().fg(theme.text_dimmed).bg(theme.bg_surface),
             ));
         }
-        let footer = Paragraph::new(Line::from(footer_spans))
-            .style(Style::default().bg(theme.bg_surface));
-        let footer_text_area = Rect::new(
-            footer_area.x,
-            footer_area.y + 1,
-            footer_area.width,
-            1,
-        );
+        let footer =
+            Paragraph::new(Line::from(footer_spans)).style(Style::default().bg(theme.bg_surface));
+        let footer_text_area = Rect::new(footer_area.x, footer_area.y + 1, footer_area.width, 1);
         frame.render_widget(footer, footer_text_area);
     }
 }
@@ -845,7 +836,11 @@ mod tests {
         state.selected = 2; // b1
         state.ensure_visible(viewport);
         // Section B header is at line 4, so scroll_offset should show it
-        assert!(state.scroll_offset <= 4, "scroll_offset {} should be <= 4 to show Section B header", state.scroll_offset);
+        assert!(
+            state.scroll_offset <= 4,
+            "scroll_offset {} should be <= 4 to show Section B header",
+            state.scroll_offset
+        );
     }
 
     #[test]
@@ -857,7 +852,7 @@ mod tests {
 
         // When searching, sections are hidden
         state.type_char('a'); // matches "apple" (and possibly others)
-        // Line map should have no section header offsets
+                              // Line map should have no section header offsets
         for (i, &line) in state.line_map.iter().enumerate() {
             assert_eq!(line, i, "Without sections, line should equal index");
         }

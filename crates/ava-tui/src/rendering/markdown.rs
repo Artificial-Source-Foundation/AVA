@@ -135,7 +135,11 @@ pub fn markdown_to_lines(md: &str, theme: &Theme) -> Vec<Line<'static>> {
                     styles.pop();
                 }
             }
-            Event::Start(Tag::Link { link_type, dest_url, .. }) => {
+            Event::Start(Tag::Link {
+                link_type,
+                dest_url,
+                ..
+            }) => {
                 if !matches!(link_type, LinkType::Autolink) {
                     link_url = dest_url.to_string();
                 }
@@ -184,7 +188,9 @@ pub fn markdown_to_lines(md: &str, theme: &Theme) -> Vec<Line<'static>> {
                     styles.pop();
                 }
             }
-            Event::End(TagEnd::Strong) | Event::End(TagEnd::Emphasis) | Event::End(TagEnd::Strikethrough) => {
+            Event::End(TagEnd::Strong)
+            | Event::End(TagEnd::Emphasis)
+            | Event::End(TagEnd::Strikethrough) => {
                 if styles.len() > 1 {
                     styles.pop();
                 }
@@ -220,10 +226,7 @@ fn finalize_line(
     if blockquote_depth > 0 {
         let mut prefixed = Vec::with_capacity(spans.len() + 1);
         let prefix = "\u{2502} ".repeat(blockquote_depth as usize);
-        prefixed.push(Span::styled(
-            prefix,
-            Style::default().fg(theme.success),
-        ));
+        prefixed.push(Span::styled(prefix, Style::default().fg(theme.success)));
         prefixed.extend(spans);
         Line::from(prefixed)
     } else {

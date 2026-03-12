@@ -1,6 +1,6 @@
-use ava_permissions::tags::RiskLevel;
 use crate::state::permission::{ApprovalRequest, ApprovalStage, PermissionState};
 use crate::state::theme::Theme;
+use ava_permissions::tags::RiskLevel;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -57,10 +57,7 @@ pub fn render_tool_approval(
     let header_h = 3u16;
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(header_h),
-            Constraint::Min(0),
-        ])
+        .constraints([Constraint::Length(header_h), Constraint::Min(0)])
         .split(Rect {
             x: area.x + 1,
             y: area.y + 1,
@@ -92,15 +89,10 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
 
     // Left: ⚠ Tool Approval Required
     let left = Line::from(vec![
-        Span::styled(
-            "\u{26A0} ",
-            Style::default().fg(theme.warning),
-        ),
+        Span::styled("\u{26A0} ", Style::default().fg(theme.warning)),
         Span::styled(
             "Tool Approval Required",
-            Style::default()
-                .fg(theme.text)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
     ]);
 
@@ -110,7 +102,12 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
 
     // Render left text centered vertically
     let text_y = inner.y + (inner.height.saturating_sub(1)) / 2;
-    let left_area = Rect { x: inner.x, y: text_y, width: inner.width.saturating_sub(right_width + 1), height: 1 };
+    let left_area = Rect {
+        x: inner.x,
+        y: text_y,
+        width: inner.width.saturating_sub(right_width + 1),
+        height: 1,
+    };
     frame.render_widget(Paragraph::new(left), left_area);
 
     // Render right text
@@ -159,7 +156,12 @@ fn render_body(
                 .fg(theme.text_muted)
                 .add_modifier(Modifier::BOLD),
         ))),
-        Rect { x: inner.x, y, width: w, height: 1 },
+        Rect {
+            x: inner.x,
+            y,
+            width: w,
+            height: 1,
+        },
     );
     y += 1;
 
@@ -171,7 +173,12 @@ fn render_body(
                 .fg(theme.warning)
                 .add_modifier(Modifier::BOLD),
         ))),
-        Rect { x: inner.x, y, width: w, height: 1 },
+        Rect {
+            x: inner.x,
+            y,
+            width: w,
+            height: 1,
+        },
     );
     y += 2; // gap
 
@@ -186,19 +193,25 @@ fn render_body(
                     .fg(theme.text_muted)
                     .add_modifier(Modifier::BOLD),
             ))),
-            Rect { x: inner.x, y, width: w, height: 1 },
+            Rect {
+                x: inner.x,
+                y,
+                width: w,
+                height: 1,
+            },
         );
         y += 1;
 
         // Code box: bg_deep with border, green text
-        let cmd_display = if args_str.len() > 200 {
-            format!("{}...", &args_str[..197])
-        } else {
-            args_str
-        };
+        let cmd_display = crate::text_utils::truncate_display(&args_str, 200);
         let cmd_lines = textwrap_simple(&cmd_display, w.saturating_sub(4) as usize);
         let cmd_height = (cmd_lines.len() as u16).clamp(1, 6) + 2; // +2 for padding
-        let cmd_area = Rect { x: inner.x, y, width: w, height: cmd_height };
+        let cmd_area = Rect {
+            x: inner.x,
+            y,
+            width: w,
+            height: cmd_height,
+        };
 
         let cmd_bg = Block::default()
             .style(Style::default().bg(theme.bg_deep))
@@ -235,20 +248,21 @@ fn render_body(
                     .fg(theme.text_muted)
                     .add_modifier(Modifier::BOLD),
             ))),
-            Rect { x: inner.x, y, width: w, height: 1 },
+            Rect {
+                x: inner.x,
+                y,
+                width: w,
+                height: 1,
+            },
         );
         y += 1;
 
         // Risk badge + description on same line
         let label = risk_label(info.risk_level);
-        let mut risk_spans: Vec<Span<'static>> = vec![
-            Span::styled(
-                format!(" {label} "),
-                Style::default()
-                    .fg(color)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ];
+        let mut risk_spans: Vec<Span<'static>> = vec![Span::styled(
+            format!(" {label} "),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        )];
 
         // Add first warning as description
         if let Some(warning) = info.warnings.first() {
@@ -259,7 +273,12 @@ fn render_body(
         }
         frame.render_widget(
             Paragraph::new(Line::from(risk_spans)),
-            Rect { x: inner.x, y, width: w, height: 1 },
+            Rect {
+                x: inner.x,
+                y,
+                width: w,
+                height: 1,
+            },
         );
         y += 1;
 
@@ -270,7 +289,12 @@ fn render_body(
                     format!("  {warning}"),
                     Style::default().fg(theme.warning),
                 ))),
-                Rect { x: inner.x, y, width: w, height: 1 },
+                Rect {
+                    x: inner.x,
+                    y,
+                    width: w,
+                    height: 1,
+                },
             );
             y += 1;
         }
@@ -280,16 +304,21 @@ fn render_body(
     // --- Button row (bottom of body) ---
     let btn_y = (inner.y + inner.height).saturating_sub(1);
     if btn_y > y {
-        render_buttons(frame, Rect { x: inner.x, y: btn_y, width: w, height: 1 }, permission, theme);
+        render_buttons(
+            frame,
+            Rect {
+                x: inner.x,
+                y: btn_y,
+                width: w,
+                height: 1,
+            },
+            permission,
+            theme,
+        );
     }
 }
 
-fn render_buttons(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    permission: &PermissionState,
-    theme: &Theme,
-) {
+fn render_buttons(frame: &mut Frame<'_>, area: Rect, permission: &PermissionState, theme: &Theme) {
     match permission.current_stage {
         ApprovalStage::Preview => {
             frame.render_widget(
@@ -303,17 +332,41 @@ fn render_buttons(
         ApprovalStage::ActionSelect => {
             // Right-aligned button hints
             let buttons = Line::from(vec![
-                Span::styled("r", Style::default().fg(theme.error).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "r",
+                    Style::default()
+                        .fg(theme.error)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" Reject", Style::default().fg(theme.error)),
                 Span::raw("  "),
-                Span::styled("s", Style::default().fg(theme.text_dimmed).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "s",
+                    Style::default()
+                        .fg(theme.text_dimmed)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" Allow session", Style::default().fg(theme.text_dimmed)),
                 Span::raw("  "),
-                Span::styled("a", Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)),
-                Span::styled(" Approve", Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "a",
+                    Style::default()
+                        .fg(theme.primary)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " Approve",
+                    Style::default()
+                        .fg(theme.primary)
+                        .add_modifier(Modifier::BOLD),
+                ),
             ]);
-            // Right-align by calculating width
-            let btn_width: usize = buttons.spans.iter().map(|s| s.content.len()).sum();
+            // Right-align by calculating display width
+            let btn_width: usize = buttons
+                .spans
+                .iter()
+                .map(|s| crate::text_utils::span_display_width(s))
+                .sum();
             let offset = (area.width as usize).saturating_sub(btn_width);
             let btn_area = Rect {
                 x: area.x + offset as u16,
@@ -332,9 +385,15 @@ fn render_buttons(
                 ),
                 Span::styled("\u{2588}", Style::default().fg(theme.primary)),
                 Span::raw("  "),
-                Span::styled("Enter", Style::default().fg(theme.text).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Enter",
+                    Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" confirm  ", Style::default().fg(theme.text_muted)),
-                Span::styled("Esc", Style::default().fg(theme.text).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Esc",
+                    Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" cancel", Style::default().fg(theme.text_muted)),
             ]);
             frame.render_widget(Paragraph::new(line), area);
@@ -342,23 +401,32 @@ fn render_buttons(
     }
 }
 
-/// Simple text wrapping by character count.
+/// Simple text wrapping by display width (terminal columns).
 fn textwrap_simple(text: &str, width: usize) -> Vec<String> {
+    use unicode_width::UnicodeWidthChar;
+
     if width == 0 {
         return vec![text.to_string()];
     }
     let mut lines = Vec::new();
     for line in text.lines() {
-        if line.len() <= width {
+        if crate::text_utils::display_width(line) <= width {
             lines.push(line.to_string());
         } else {
-            let mut remaining = line;
-            while remaining.len() > width {
-                lines.push(remaining[..width].to_string());
-                remaining = &remaining[width..];
+            let mut current = String::new();
+            let mut current_width = 0;
+            for ch in line.chars() {
+                let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+                if current_width + cw > width && !current.is_empty() {
+                    lines.push(current);
+                    current = String::new();
+                    current_width = 0;
+                }
+                current.push(ch);
+                current_width += cw;
             }
-            if !remaining.is_empty() {
-                lines.push(remaining.to_string());
+            if !current.is_empty() {
+                lines.push(current);
             }
         }
     }

@@ -197,10 +197,7 @@ impl AudioRecorder {
 
         // Resample to 16kHz if needed
         let (final_samples, final_rate) = if self.sample_rate != 16000 {
-            (
-                resample(&samples, self.sample_rate, 16000),
-                16000u32,
-            )
+            (resample(&samples, self.sample_rate, 16000), 16000u32)
         } else {
             (samples, self.sample_rate)
         };

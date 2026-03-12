@@ -1,8 +1,8 @@
 use super::*;
-use ava_auth::config::AuthFlow;
 use crate::widgets::command_palette::CommandExec;
 use crate::widgets::provider_connect::{ConnectField, ConnectScreen};
 use crate::widgets::select_list::{handle_select_list_key, list_viewport_height, SelectListAction};
+use ava_auth::config::AuthFlow;
 use std::time::Instant;
 
 /// Estimate the model selector viewport height (70% of terminal, minus border).
@@ -83,8 +83,8 @@ impl App {
         }
 
         match modal {
-            ModalType::CommandPalette => self.handle_command_palette_key(key),
-            ModalType::SessionList => self.handle_session_list_key(key),
+            ModalType::CommandPalette => self.handle_command_palette_key(key, app_tx.clone()),
+            ModalType::SessionList => self.handle_session_list_key(key, app_tx),
             ModalType::ToolApproval => self.handle_tool_approval_key(key),
             ModalType::ModelSelector => self.handle_model_selector_key(key, app_tx),
             ModalType::ToolList => self.handle_tool_list_key(key),
@@ -99,7 +99,11 @@ impl App {
         }
     }
 
-    fn handle_command_palette_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+    fn handle_command_palette_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
+    ) -> bool {
         let vh = list_viewport_height(modal_viewport_height());
         let action = handle_select_list_key(&mut self.state.command_palette.list, key, vh);
         match action {
@@ -114,16 +118,16 @@ impl App {
                             let action = *action;
                             self.state.command_palette.open = false;
                             self.state.active_modal = None;
-                            self.execute_command_action(action);
+                            self.execute_command_action(action, Some(app_tx.clone()));
                         }
                         CommandExec::Slash(cmd) => {
                             let cmd = cmd.clone();
                             self.state.command_palette.open = false;
                             self.state.active_modal = None;
-                            if let Some((kind, msg)) = self.handle_slash_command(&cmd) {
-                                self.state
-                                    .messages
-                                    .push(UiMessage::new(kind, msg));
+                            if let Some((kind, msg)) =
+                                self.handle_slash_command(&cmd, Some(app_tx.clone()))
+                            {
+                                self.state.messages.push(UiMessage::new(kind, msg));
                             }
                         }
                     }
@@ -137,7 +141,11 @@ impl App {
         false
     }
 
-    fn handle_session_list_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+    fn handle_session_list_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
+    ) -> bool {
         let vh = list_viewport_height(modal_viewport_height());
         let action = handle_select_list_key(&mut self.state.session_list.list, key, vh);
         match action {
@@ -153,40 +161,8 @@ impl App {
                         self.state.messages.messages.clear();
                         self.state.messages.reset_scroll();
                         self.set_status("New session created", StatusLevel::Info);
-                    } else if self.state.session.switch_to(session_id).is_ok() {
-                        self.state.messages.messages.clear();
-                        self.state.messages.reset_scroll();
-                        if let Some(ref session) = self.state.session.current_session {
-                            for msg in &session.messages {
-                                let kind = match msg.role {
-                                    ava_types::Role::User => MessageKind::User,
-                                    ava_types::Role::Assistant => MessageKind::Assistant,
-                                    ava_types::Role::Tool => MessageKind::ToolResult,
-                                    ava_types::Role::System => MessageKind::System,
-                                };
-                                self.state.messages.push(UiMessage::new(kind, msg.content.clone()));
-                            }
-                            // Restore model from session metadata
-                            if let Some(meta) = session.metadata.as_object() {
-                                let provider = meta.get("provider").and_then(|v| v.as_str());
-                                let model = meta.get("model").and_then(|v| v.as_str());
-                                if let (Some(p), Some(m)) = (provider, model) {
-                                    let result = tokio::task::block_in_place(|| {
-                                        tokio::runtime::Handle::current().block_on(
-                                            self.state.agent.switch_model(p, m),
-                                        )
-                                    });
-                                    if let Ok(desc) = result {
-                                        self.set_status(
-                                            format!("Session loaded — model: {desc}"),
-                                            StatusLevel::Info,
-                                        );
-                                        return false;
-                                    }
-                                }
-                            }
-                        }
-                        self.set_status("Session loaded", StatusLevel::Info);
+                    } else {
+                        self.spawn_session_load(session_id, app_tx.clone());
                     }
                 }
                 self.state.session_list.open = false;
@@ -226,7 +202,8 @@ impl App {
                     self.state.permission.current_stage = ApprovalStage::RejectionReason;
                 }
                 KeyCode::Char('y') => {
-                    self.state.permission.permission_level = crate::state::permission::PermissionLevel::AutoApprove;
+                    self.state.permission.permission_level =
+                        crate::state::permission::PermissionLevel::AutoApprove;
                     while !self.state.permission.queue.is_empty() {
                         self.state.permission.approve_current_once();
                     }
@@ -267,7 +244,7 @@ impl App {
     fn handle_model_selector_key(
         &mut self,
         key: crossterm::event::KeyEvent,
-        _app_tx: mpsc::UnboundedSender<AppEvent>,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
     ) -> bool {
         let selector = match self.state.model_selector {
             Some(ref mut s) => s,
@@ -285,35 +262,21 @@ impl App {
                 self.state.active_modal = None;
             }
             SelectListAction::Selected => {
-                let Some(selector) = self.state.model_selector.as_ref() else { return false; };
+                let Some(selector) = self.state.model_selector.as_ref() else {
+                    return false;
+                };
                 if let Some(mv) = selector.list.selected_value() {
                     let provider = mv.provider.clone();
                     let model = mv.model.clone();
                     let display = mv.display.clone();
-
-                    let result = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(
-                            self.state.agent.switch_model(&provider, &model),
-                        )
-                    });
-
-                    match result {
-                        Ok(_) => {
-                            self.set_status(
-                                format!("Switched to {display}"),
-                                StatusLevel::Info,
-                            );
-                        }
-                        Err(err) => {
-                            self.set_status(
-                                format!("Failed: {err}"),
-                                StatusLevel::Error,
-                            );
-                        }
-                    }
+                    self.spawn_model_switch(
+                        provider,
+                        model,
+                        display,
+                        crate::event::ModelSwitchContext::Selector,
+                        app_tx,
+                    );
                 }
-                self.state.model_selector = None;
-                self.state.active_modal = None;
             }
             _ => {}
         }
@@ -329,7 +292,11 @@ impl App {
         false
     }
 
-    fn handle_provider_connect_key(&mut self, key: crossterm::event::KeyEvent, app_tx: mpsc::UnboundedSender<AppEvent>) -> bool {
+    fn handle_provider_connect_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
+    ) -> bool {
         let state = match self.state.provider_connect {
             Some(ref mut s) => s,
             None => {
@@ -345,39 +312,29 @@ impl App {
                     if state.list.query.is_empty() {
                         if let Some(provider) = state.selected_provider() {
                             let provider_id = provider.id.clone();
-                            let result = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current().block_on(async {
-                                    let mut store = ava_config::CredentialStore::load_default()
-                                        .await
-                                        .unwrap_or_default();
-                                    ava_config::execute_credential_command(
-                                        ava_config::CredentialCommand::Remove {
-                                            provider: provider_id,
-                                        },
-                                        &mut store,
-                                    )
+                            let tx = app_tx.clone();
+                            tokio::spawn(async move {
+                                let mut store = ava_config::CredentialStore::load_default()
                                     .await
-                                })
-                            });
-                            match result {
-                                Ok(msg) => {
-                                    self.set_status(&msg, StatusLevel::Info);
-                                    let credentials = tokio::task::block_in_place(|| {
-                                        tokio::runtime::Handle::current()
-                                            .block_on(ava_config::CredentialStore::load_default())
-                                    })
                                     .unwrap_or_default();
-                                    if let Some(ref mut pc) = self.state.provider_connect {
-                                        *pc = ProviderConnectState::from_credentials(&credentials);
-                                    }
-                                }
-                                Err(err) => {
-                                    self.set_status(
+                                let result = ava_config::execute_credential_command(
+                                    ava_config::CredentialCommand::Remove {
+                                        provider: provider_id,
+                                    },
+                                    &mut store,
+                                )
+                                .await;
+                                let next_state = ProviderConnectState::from_credentials(&store);
+                                let _ = tx.send(AppEvent::ProviderConnectFinished(match result {
+                                    Ok(status) => crate::event::ProviderConnectResult::Refreshed {
+                                        state: next_state,
+                                        status,
+                                    },
+                                    Err(err) => crate::event::ProviderConnectResult::InlineError(
                                         format!("Failed: {err}"),
-                                        StatusLevel::Error,
-                                    );
-                                }
-                            }
+                                    ),
+                                }));
+                            });
                             return false;
                         }
                     }
@@ -386,27 +343,23 @@ impl App {
                     if state.list.query.is_empty() {
                         if let Some(provider) = state.selected_provider() {
                             let provider_id = provider.id.clone();
-                            let result = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current().block_on(async {
-                                    let mut store = ava_config::CredentialStore::load_default()
-                                        .await
-                                        .unwrap_or_default();
-                                    ava_config::execute_credential_command(
-                                        ava_config::CredentialCommand::Test {
-                                            provider: provider_id,
-                                        },
-                                        &mut store,
-                                    )
+                            let tx = app_tx.clone();
+                            tokio::spawn(async move {
+                                let mut store = ava_config::CredentialStore::load_default()
                                     .await
-                                })
+                                    .unwrap_or_default();
+                                let result = ava_config::execute_credential_command(
+                                    ava_config::CredentialCommand::Test {
+                                        provider: provider_id,
+                                    },
+                                    &mut store,
+                                )
+                                .await
+                                .map_err(|err| err.to_string());
+                                let _ = tx.send(AppEvent::ProviderConnectFinished(
+                                    crate::event::ProviderConnectResult::Tested(result),
+                                ));
                             });
-                            match result {
-                                Ok(msg) => self.set_status(&msg, StatusLevel::Info),
-                                Err(err) => self.set_status(
-                                    format!("Test failed: {err}"),
-                                    StatusLevel::Error,
-                                ),
-                            }
                             return false;
                         }
                     }
@@ -439,7 +392,10 @@ impl App {
                     _ => {}
                 }
             }
-            ConnectScreen::AuthMethodChoice { provider_id, selected } => {
+            ConnectScreen::AuthMethodChoice {
+                provider_id,
+                selected,
+            } => {
                 let flows: Vec<AuthFlow> = ava_auth::provider_info(provider_id)
                     .map(|i| i.auth_flows.to_vec())
                     .unwrap_or_else(|| vec![AuthFlow::ApiKey]);
@@ -447,49 +403,65 @@ impl App {
 
                 match key.code {
                     KeyCode::Esc => {
-                        let Some(state) = self.state.provider_connect.as_mut() else { return false; };
+                        let Some(state) = self.state.provider_connect.as_mut() else {
+                            return false;
+                        };
                         state.screen = ConnectScreen::List;
                         state.message = None;
                     }
                     KeyCode::Down => {
-                        let Some(state) = self.state.provider_connect.as_mut() else { return false; };
-                        if let ConnectScreen::AuthMethodChoice { selected, .. } = &mut state.screen {
+                        let Some(state) = self.state.provider_connect.as_mut() else {
+                            return false;
+                        };
+                        if let ConnectScreen::AuthMethodChoice { selected, .. } = &mut state.screen
+                        {
                             *selected = (*selected + 1) % flows.len();
                         }
                     }
                     KeyCode::Up => {
-                        let Some(state) = self.state.provider_connect.as_mut() else { return false; };
-                        if let ConnectScreen::AuthMethodChoice { selected, .. } = &mut state.screen {
+                        let Some(state) = self.state.provider_connect.as_mut() else {
+                            return false;
+                        };
+                        if let ConnectScreen::AuthMethodChoice { selected, .. } = &mut state.screen
+                        {
                             *selected = selected.saturating_sub(1);
                         }
                     }
                     KeyCode::Enter => {
                         if let Some(&flow) = flows.get(sel) {
                             let pid = provider_id.clone();
-                            let Some(state) = self.state.provider_connect.as_mut() else { return false; };
+                            let Some(state) = self.state.provider_connect.as_mut() else {
+                                return false;
+                            };
                             Self::start_auth_flow(state, &pid, flow, &app_tx);
                         }
                     }
                     _ => {}
                 }
-            },
+            }
             ConnectScreen::Configure(provider_id) => match key.code {
                 KeyCode::Esc => {
-                    let Some(state) = self.state.provider_connect.as_mut() else { return false; };
+                    let Some(state) = self.state.provider_connect.as_mut() else {
+                        return false;
+                    };
                     state.screen = ConnectScreen::List;
                     state.key_input.clear();
                     state.base_url_input.clear();
                     state.message = None;
                 }
                 KeyCode::Tab | KeyCode::BackTab => {
-                    let Some(state) = self.state.provider_connect.as_mut() else { return false; };
+                    let Some(state) = self.state.provider_connect.as_mut() else {
+                        return false;
+                    };
                     state.active_field = match state.active_field {
                         ConnectField::ApiKey => ConnectField::BaseUrl,
                         ConnectField::BaseUrl => ConnectField::ApiKey,
                     };
                 }
                 KeyCode::Enter => {
-                    let Some(state) = self.state.provider_connect.as_mut() else { return false; };
+                    let Some(state) = self.state.provider_connect.as_mut() else {
+                        return false;
+                    };
                     let api_key = state.key_input.clone();
                     let base_url = if state.base_url_input.trim().is_empty() {
                         None
@@ -503,62 +475,66 @@ impl App {
                         return false;
                     }
 
-                    let result = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(async {
-                            let mut store = ava_config::CredentialStore::load_default()
-                                .await
-                                .unwrap_or_default();
-                            ava_config::execute_credential_command(
-                                ava_config::CredentialCommand::Set {
-                                    provider: provider.clone(),
-                                    api_key,
-                                    base_url,
-                                },
-                                &mut store,
-                            )
+                    let tx = app_tx.clone();
+                    tokio::spawn(async move {
+                        let mut store = ava_config::CredentialStore::load_default()
                             .await
-                        })
+                            .unwrap_or_default();
+                        let result = ava_config::execute_credential_command(
+                            ava_config::CredentialCommand::Set {
+                                provider: provider.clone(),
+                                api_key,
+                                base_url,
+                            },
+                            &mut store,
+                        )
+                        .await
+                        .map_err(|err| err.to_string());
+                        let _ = tx.send(AppEvent::ProviderConnectFinished(
+                            crate::event::ProviderConnectResult::Saved(result),
+                        ));
                     });
-
-                    match result {
-                        Ok(msg) => {
-                            self.set_status(&msg, StatusLevel::Info);
-                            self.state.provider_connect = None;
-                            self.state.active_modal = None;
-                        }
-                        Err(err) => {
-                            if let Some(ref mut pc) = self.state.provider_connect {
-                                pc.message = Some(format!("Failed: {err}"));
-                            }
-                        }
-                    }
                 }
                 KeyCode::Char(ch) => {
-                    let Some(state) = self.state.provider_connect.as_mut() else { return false; };
+                    let Some(state) = self.state.provider_connect.as_mut() else {
+                        return false;
+                    };
                     match state.active_field {
                         ConnectField::ApiKey => state.key_input.push(ch),
                         ConnectField::BaseUrl => state.base_url_input.push(ch),
                     }
                 }
                 KeyCode::Backspace => {
-                    let Some(state) = self.state.provider_connect.as_mut() else { return false; };
+                    let Some(state) = self.state.provider_connect.as_mut() else {
+                        return false;
+                    };
                     match state.active_field {
-                        ConnectField::ApiKey => { state.key_input.pop(); }
-                        ConnectField::BaseUrl => { state.base_url_input.pop(); }
+                        ConnectField::ApiKey => {
+                            state.key_input.pop();
+                        }
+                        ConnectField::BaseUrl => {
+                            state.base_url_input.pop();
+                        }
                     }
                 }
                 _ => {}
             },
             ConnectScreen::OAuthBrowser { .. } => {
                 if key.code == KeyCode::Esc {
-                    let Some(state) = self.state.provider_connect.as_mut() else { return false; };
+                    let Some(state) = self.state.provider_connect.as_mut() else {
+                        return false;
+                    };
                     state.screen = ConnectScreen::List;
                     state.message = Some("OAuth flow cancelled".to_string());
                 }
             }
-            ConnectScreen::DeviceCode { verification_uri, .. } => match key.code {
+            ConnectScreen::DeviceCode {
+                verification_uri, ..
+            } => match key.code {
                 KeyCode::Esc => {
-                    let Some(state) = self.state.provider_connect.as_mut() else { return false; };
+                    let Some(state) = self.state.provider_connect.as_mut() else {
+                        return false;
+                    };
                     state.screen = ConnectScreen::List;
                     state.message = Some("Device code flow cancelled".to_string());
                 }
@@ -674,7 +650,9 @@ impl App {
                 let line_count = picker.full_content.lines().count();
                 self.copy_to_clipboard(
                     &picker.full_content,
-                    Some(format!("Copied entire response ({line_count} lines) to clipboard")),
+                    Some(format!(
+                        "Copied entire response ({line_count} lines) to clipboard"
+                    )),
                 );
             }
             KeyCode::Char(ch) if ch.is_ascii_digit() && ch != '0' => {
@@ -687,9 +665,7 @@ impl App {
                         &block.language
                     };
                     let line_count = block.content.lines().count();
-                    let label = format!(
-                        "Copied {lang} block ({line_count} lines) to clipboard"
-                    );
+                    let label = format!("Copied {lang} block ({line_count} lines) to clipboard");
                     self.copy_to_clipboard(&block.content, Some(label));
                 } else {
                     // Index out of range — put picker back
@@ -757,7 +733,10 @@ impl App {
             }
             SelectListAction::Selected => {
                 // Confirm the previewed theme
-                if let Some(name) = self.state.theme_selector.as_ref()
+                if let Some(name) = self
+                    .state
+                    .theme_selector
+                    .as_ref()
                     .and_then(|s| s.selected_value().cloned())
                 {
                     self.state.theme = Theme::from_name(&name);
@@ -769,7 +748,10 @@ impl App {
             }
             SelectListAction::Moved => {
                 // Live preview: apply the highlighted theme immediately
-                if let Some(name) = self.state.theme_selector.as_ref()
+                if let Some(name) = self
+                    .state
+                    .theme_selector
+                    .as_ref()
                     .and_then(|s| s.selected_value().cloned())
                 {
                     self.state.theme = Theme::from_name(&name);
@@ -913,17 +895,32 @@ impl App {
                                     extra_params: &[],
                                     flow: AuthFlow::Pkce,
                                 };
-                                match ava_auth::tokens::exchange_code_for_tokens(&cfg, &callback.code, &pkce).await {
+                                match ava_auth::tokens::exchange_code_for_tokens(
+                                    &cfg,
+                                    &callback.code,
+                                    &pkce,
+                                )
+                                .await
+                                {
                                     Ok(tokens) => {
-                                        let _ = tx.send(AppEvent::OAuthSuccess { provider: pid, tokens });
+                                        let _ = tx.send(AppEvent::OAuthSuccess {
+                                            provider: pid,
+                                            tokens,
+                                        });
                                     }
                                     Err(e) => {
-                                        let _ = tx.send(AppEvent::OAuthError { provider: pid, error: e.to_string() });
+                                        let _ = tx.send(AppEvent::OAuthError {
+                                            provider: pid,
+                                            error: e.to_string(),
+                                        });
                                     }
                                 }
                             }
                             Err(e) => {
-                                let _ = tx.send(AppEvent::OAuthError { provider: pid, error: e.to_string() });
+                                let _ = tx.send(AppEvent::OAuthError {
+                                    provider: pid,
+                                    error: e.to_string(),
+                                });
                             }
                         }
                     });
@@ -938,68 +935,97 @@ impl App {
             }
             AuthFlow::DeviceCode => {
                 let pid = provider_id.to_string();
-                let result = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async {
-                        if let Some(cfg) = ava_auth::config::oauth_config(&pid) {
-                            ava_auth::device_code::request_device_code(cfg).await
-                        } else {
-                            Err(ava_auth::AuthError::NoOAuthConfig(pid.clone()))
-                        }
-                    })
-                });
-                match result {
-                    Ok(device) => {
-                        let tx = app_tx.clone();
-                        let poll_pid = pid.clone();
-                        let device_code = device.device_code.clone();
-                        let interval = device.interval;
-                        let expires = device.expires_in;
-                        tokio::spawn(async move {
-                            if let Some(cfg) = ava_auth::config::oauth_config(&poll_pid) {
-                                match ava_auth::device_code::poll_device_code(cfg, &device_code, interval, expires).await {
-                                    Ok(Some(tokens)) => {
-                                        let _ = tx.send(AppEvent::OAuthSuccess { provider: poll_pid, tokens });
-                                    }
-                                    Ok(None) => {
-                                        let _ = tx.send(AppEvent::OAuthError { provider: poll_pid, error: "Device code expired".to_string() });
-                                    }
-                                    Err(e) => {
-                                        let _ = tx.send(AppEvent::OAuthError { provider: poll_pid, error: e.to_string() });
+                state.message = Some("Requesting device code...".to_string());
+                let tx = app_tx.clone();
+                tokio::spawn(async move {
+                    let Some(cfg) = ava_auth::config::oauth_config(&pid) else {
+                        let _ = tx.send(AppEvent::ProviderConnectFinished(
+                            crate::event::ProviderConnectResult::InlineError(format!(
+                                "Failed: {}",
+                                ava_auth::AuthError::NoOAuthConfig(pid.clone())
+                            )),
+                        ));
+                        return;
+                    };
+
+                    match ava_auth::device_code::request_device_code(cfg).await {
+                        Ok(device) => {
+                            let poll_tx = tx.clone();
+                            let poll_pid = pid.clone();
+                            let device_code = device.device_code.clone();
+                            let interval = device.interval;
+                            let expires = device.expires_in;
+                            tokio::spawn(async move {
+                                if let Some(cfg) = ava_auth::config::oauth_config(&poll_pid) {
+                                    match ava_auth::device_code::poll_device_code(
+                                        cfg,
+                                        &device_code,
+                                        interval,
+                                        expires,
+                                    )
+                                    .await
+                                    {
+                                        Ok(Some(tokens)) => {
+                                            let _ = poll_tx.send(AppEvent::OAuthSuccess {
+                                                provider: poll_pid,
+                                                tokens,
+                                            });
+                                        }
+                                        Ok(None) => {
+                                            let _ = poll_tx.send(AppEvent::OAuthError {
+                                                provider: poll_pid,
+                                                error: "Device code expired".to_string(),
+                                            });
+                                        }
+                                        Err(e) => {
+                                            let _ = poll_tx.send(AppEvent::OAuthError {
+                                                provider: poll_pid,
+                                                error: e.to_string(),
+                                            });
+                                        }
                                     }
                                 }
-                            }
-                        });
+                            });
 
-                        state.screen = ConnectScreen::DeviceCode {
-                            provider_id: pid,
-                            user_code: device.user_code,
-                            verification_uri: device.verification_uri,
-                            started: Instant::now(),
-                        };
-                        state.message = None;
+                            let _ = tx.send(AppEvent::ProviderConnectFinished(
+                                crate::event::ProviderConnectResult::DeviceCodeReady {
+                                    provider_id: pid,
+                                    device,
+                                },
+                            ));
+                        }
+                        Err(err) => {
+                            let _ = tx.send(AppEvent::ProviderConnectFinished(
+                                crate::event::ProviderConnectResult::InlineError(format!(
+                                    "Failed: {err}"
+                                )),
+                            ));
+                        }
                     }
-                    Err(err) => {
-                        state.message = Some(format!("Failed: {err}"));
-                    }
-                }
+                });
             }
             AuthFlow::ApiKey => {
-                let base_url = {
-                    let credentials = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current()
-                            .block_on(ava_config::CredentialStore::load_default())
-                    });
-                    credentials
-                        .ok()
-                        .and_then(|c| c.get(provider_id))
-                        .and_then(|c| c.base_url)
-                        .unwrap_or_default()
-                };
                 state.screen = ConnectScreen::Configure(provider_id.to_string());
                 state.key_input.clear();
-                state.base_url_input = base_url;
+                state.base_url_input.clear();
                 state.active_field = ConnectField::ApiKey;
-                state.message = None;
+                state.message = Some("Loading provider settings...".to_string());
+                let tx = app_tx.clone();
+                let provider_id = provider_id.to_string();
+                tokio::spawn(async move {
+                    let base_url = ava_config::CredentialStore::load_default()
+                        .await
+                        .ok()
+                        .and_then(|c| c.get(&provider_id))
+                        .and_then(|c| c.base_url)
+                        .unwrap_or_default();
+                    let _ = tx.send(AppEvent::ProviderConnectFinished(
+                        crate::event::ProviderConnectResult::ConfigureLoaded {
+                            provider_id,
+                            base_url,
+                        },
+                    ));
+                });
             }
         }
     }

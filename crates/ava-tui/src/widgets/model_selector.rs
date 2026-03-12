@@ -58,7 +58,13 @@ impl ModelSelectorState {
         current_model: &str,
         current_provider: &str,
     ) -> Self {
-        let items = build_select_items(catalog, credentials, recent, current_model, current_provider);
+        let items = build_select_items(
+            catalog,
+            credentials,
+            recent,
+            current_model,
+            current_provider,
+        );
         Self {
             list: SelectListState::new(items),
             current_model_key: format!("{current_provider}/{current_model}"),
@@ -73,7 +79,13 @@ impl ModelSelectorState {
         current_provider: &str,
     ) -> Self {
         let catalog = ava_config::fallback_catalog();
-        Self::from_catalog(&catalog, credentials, recent, current_model, current_provider)
+        Self::from_catalog(
+            &catalog,
+            credentials,
+            recent,
+            current_model,
+            current_provider,
+        )
     }
 
     pub fn reset(&mut self) {
@@ -99,7 +111,11 @@ fn build_select_items(
                 title: key.clone(),
                 detail: String::new(),
                 section: Some(ModelSection::Recent.label()),
-                status: if is_current { Some(ItemStatus::Active) } else { None },
+                status: if is_current {
+                    Some(ItemStatus::Active)
+                } else {
+                    None
+                },
                 value: ModelValue {
                     display: key.clone(),
                     provider: provider.to_string(),
@@ -113,9 +129,9 @@ fn build_select_items(
     // Provider sections from catalog
     for &(_catalog_provider, ava_provider, section_fn) in PROVIDER_SECTIONS {
         if ava_provider == "openrouter" {
-            let configured = credentials.get("openrouter").is_some_and(|c| {
-                !c.api_key.trim().is_empty() || c.is_oauth_configured()
-            });
+            let configured = credentials
+                .get("openrouter")
+                .is_some_and(|c| !c.api_key.trim().is_empty() || c.is_oauth_configured());
             if !configured {
                 continue;
             }
@@ -148,9 +164,9 @@ fn build_select_items(
             continue;
         }
 
-        let configured = credentials.get(ava_provider).is_some_and(|c| {
-            !c.api_key.trim().is_empty() || c.is_oauth_configured()
-        });
+        let configured = credentials
+            .get(ava_provider)
+            .is_some_and(|c| !c.api_key.trim().is_empty() || c.is_oauth_configured());
 
         if !configured {
             continue;
@@ -225,10 +241,16 @@ const PROVIDER_SECTIONS: &[ProviderEntry] = &[
     ("alibaba", "alibaba", || ModelSection::Alibaba),
     ("alibaba-cn", "alibaba-cn", || ModelSection::Alibaba),
     ("zai-coding-plan", "zai-coding-plan", || ModelSection::ZAI),
-    ("zhipuai-coding-plan", "zhipuai-coding-plan", || ModelSection::ZAI),
+    ("zhipuai-coding-plan", "zhipuai-coding-plan", || {
+        ModelSection::ZAI
+    }),
     ("kimi-for-coding", "kimi-for-coding", || ModelSection::Kimi),
-    ("minimax-coding-plan", "minimax-coding-plan", || ModelSection::MiniMax),
-    ("minimax-cn-coding-plan", "minimax-cn-coding-plan", || ModelSection::MiniMax),
+    ("minimax-coding-plan", "minimax-coding-plan", || {
+        ModelSection::MiniMax
+    }),
+    ("minimax-cn-coding-plan", "minimax-cn-coding-plan", || {
+        ModelSection::MiniMax
+    }),
 ];
 
 fn cm_provider(ava_provider: &str) -> &str {

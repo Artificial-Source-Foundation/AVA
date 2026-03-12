@@ -164,9 +164,18 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &AppSta
                 title: "Connect a provider".to_string(),
                 search_placeholder: "Search providers...".to_string(),
                 keybinds: vec![
-                    KeybindHint { key: "enter".to_string(), label: "connect".to_string() },
-                    KeybindHint { key: "d".to_string(), label: "disconnect".to_string() },
-                    KeybindHint { key: "t".to_string(), label: "test".to_string() },
+                    KeybindHint {
+                        key: "enter".to_string(),
+                        label: "connect".to_string(),
+                    },
+                    KeybindHint {
+                        key: "d".to_string(),
+                        label: "disconnect".to_string(),
+                    },
+                    KeybindHint {
+                        key: "t".to_string(),
+                        label: "test".to_string(),
+                    },
                 ],
             };
             render_select_list(frame, area, &pc.list, &config, &state.theme);
@@ -219,7 +228,10 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &AppSta
                 };
 
                 lines.push(Line::from(vec![
-                    Span::styled(if is_sel { "> " } else { "  " }, Style::default().fg(state.theme.primary)),
+                    Span::styled(
+                        if is_sel { "> " } else { "  " },
+                        Style::default().fg(state.theme.primary),
+                    ),
                     Span::styled(label, name_style),
                     Span::styled(
                         format!("  {hint}"),
@@ -252,7 +264,9 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &AppSta
             let key_active = pc.active_field == ConnectField::ApiKey;
             let key_indicator = if key_active { "\u{25B8} " } else { "  " };
             let key_label_style = if key_active {
-                Style::default().fg(state.theme.primary).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(state.theme.primary)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(state.theme.text_muted)
             };
@@ -289,7 +303,9 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &AppSta
             let url_active = pc.active_field == ConnectField::BaseUrl;
             let url_indicator = if url_active { "\u{25B8} " } else { "  " };
             let url_label_style = if url_active {
-                Style::default().fg(state.theme.primary).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(state.theme.primary)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(state.theme.text_muted)
             };
@@ -421,7 +437,10 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &AppSta
                 Line::from(""),
                 Line::from(vec![
                     Span::styled("[Enter] ", Style::default().fg(state.theme.text_muted)),
-                    Span::styled("Open browser  ", Style::default().fg(state.theme.text_dimmed)),
+                    Span::styled(
+                        "Open browser  ",
+                        Style::default().fg(state.theme.text_dimmed),
+                    ),
                     Span::styled("[Esc] ", Style::default().fg(state.theme.text_muted)),
                     Span::styled("Cancel", Style::default().fg(state.theme.text_dimmed)),
                 ]),
@@ -479,11 +498,5 @@ fn spinner_char(elapsed: u64) -> char {
 }
 
 fn truncate_url(url: &str, max_len: usize) -> String {
-    if url.len() <= max_len {
-        url.to_string()
-    } else if max_len > 3 {
-        format!("{}...", &url[..max_len - 3])
-    } else {
-        "...".to_string()
-    }
+    crate::text_utils::truncate_display(url, max_len)
 }

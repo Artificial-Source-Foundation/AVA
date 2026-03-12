@@ -20,9 +20,7 @@ pub fn render_task_list(
     // Title
     lines.push(Line::from(Span::styled(
         "Background Tasks",
-        Style::default()
-            .fg(theme.text)
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
 
@@ -87,7 +85,10 @@ pub fn render_task_list(
 
             lines.push(Line::from(vec![
                 Span::styled(prefix.to_string(), prefix_style),
-                Span::styled(format!("#{:<3}", task.id), Style::default().fg(theme.text_dimmed)),
+                Span::styled(
+                    format!("#{:<3}", task.id),
+                    Style::default().fg(theme.text_dimmed),
+                ),
                 Span::styled(format!("{icon} "), icon_style),
                 Span::styled(status_str.to_string(), status_style),
                 Span::styled(format!("\"{goal}\""), goal_style),
@@ -101,9 +102,21 @@ pub fn render_task_list(
 
     // Summary line
     lines.push(Line::from(""));
-    let running = bg_state.tasks.iter().filter(|t| t.status == TaskStatus::Running).count();
-    let completed = bg_state.tasks.iter().filter(|t| t.status == TaskStatus::Completed).count();
-    let failed = bg_state.tasks.iter().filter(|t| t.status == TaskStatus::Failed).count();
+    let running = bg_state
+        .tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Running)
+        .count();
+    let completed = bg_state
+        .tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Completed)
+        .count();
+    let failed = bg_state
+        .tasks
+        .iter()
+        .filter(|t| t.status == TaskStatus::Failed)
+        .count();
     let total_tokens = bg_state.total_tokens();
     let total_cost = bg_state.total_cost();
 

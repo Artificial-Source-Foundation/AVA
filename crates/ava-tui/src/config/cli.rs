@@ -231,7 +231,11 @@ pub async fn resolve_provider_model(
     let env_provider = std::env::var("AVA_PROVIDER").ok();
     let env_model = std::env::var("AVA_MODEL").ok();
     if env_provider.is_some() || env_model.is_some() {
-        debug!(?env_provider, ?env_model, "Using provider/model from env vars");
+        debug!(
+            ?env_provider,
+            ?env_model,
+            "Using provider/model from env vars"
+        );
         return Ok((env_provider, env_model));
     }
 
@@ -259,10 +263,7 @@ pub async fn resolve_provider_model(
                 debug!(provider = %config.llm.provider, "Loaded provider from config file");
                 Some(config.llm.provider)
             } else if let Ok(value) = serde_yaml::from_str::<serde_json::Value>(&content) {
-                let has_provider = value
-                    .get("llm")
-                    .and_then(|l| l.get("provider"))
-                    .is_some();
+                let has_provider = value.get("llm").and_then(|l| l.get("provider")).is_some();
                 if has_provider {
                     debug!("Loaded provider 'openai' from config file");
                     Some(config.llm.provider)

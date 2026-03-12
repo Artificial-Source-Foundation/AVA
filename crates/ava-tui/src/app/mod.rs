@@ -21,13 +21,13 @@ use crate::state::voice::{VoicePhase, VoiceState};
 use crate::ui;
 use crate::ui::status_bar::{StatusLevel, StatusMessage};
 use crate::widgets::command_palette::CommandPaletteState;
+use crate::widgets::diff_preview::DiffPreviewState;
 use crate::widgets::model_selector::ModelSelectorState;
 use crate::widgets::provider_connect::ProviderConnectState;
-use crate::widgets::session_list::SessionListState;
 use crate::widgets::select_list::{SelectItem, SelectListState};
-use crate::widgets::diff_preview::DiffPreviewState;
-use crate::widgets::tool_list::ToolListState;
+use crate::widgets::session_list::SessionListState;
 use crate::widgets::token_buffer::TokenBuffer;
+use crate::widgets::tool_list::ToolListState;
 use color_eyre::eyre::Result;
 use crossterm::event::{KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
@@ -36,6 +36,7 @@ use crossterm::terminal::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use std::collections::HashMap;
 use std::io::stdout;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -177,13 +178,17 @@ pub struct App {
     #[cfg(feature = "voice")]
     voice_config: ava_config::VoiceConfig,
     /// Receiver for question requests from the agent's question tool.
-    question_rx: Option<tokio::sync::mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>>,
+    question_rx:
+        Option<tokio::sync::mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>>,
     /// Timestamp of the last Esc press, for double-Esc detection.
     last_esc_time: Option<std::time::Instant>,
     /// Pending background goal from `/bg` command (consumed in submit_goal).
     pub(crate) pending_bg_goal: Option<String>,
     /// Images pending attachment to the next user message.
     pub(crate) pending_images: Vec<ava_types::ImageContent>,
+    next_run_id: u64,
+    foreground_run_id: Option<u64>,
+    background_run_routes: HashMap<u64, usize>,
 }
 
 impl App {
@@ -222,8 +227,8 @@ impl App {
         // Start background refresh every 60 min
         model_catalog.spawn_background_refresh();
 
-        let (agent, question_rx) = AgentState::new(data_dir, provider, model, cli.max_turns, cli.auto_approve)
-            .await?;
+        let (agent, question_rx) =
+            AgentState::new(data_dir, provider, model, cli.max_turns, cli.auto_approve).await?;
         let todo_state = agent.todo_state();
 
         let state = AppState {
@@ -281,6 +286,9 @@ impl App {
             last_esc_time: None,
             pending_bg_goal: None,
             pending_images: Vec::new(),
+            next_run_id: 1,
+            foreground_run_id: None,
+            background_run_routes: HashMap::new(),
         };
         app.sync_custom_command_autocomplete();
         Ok(app)
@@ -321,7 +329,7 @@ impl App {
         terminal.clear()?;
 
         let (app_tx, mut app_rx) = mpsc::unbounded_channel();
-        let (agent_tx, mut agent_rx) = mpsc::unbounded_channel();
+        let (agent_tx, _agent_rx) = mpsc::unbounded_channel();
 
         spawn_event_reader(app_tx.clone());
         spawn_tick_timer(app_tx.clone(), Arc::clone(&self.is_streaming));
@@ -335,7 +343,9 @@ impl App {
                     ava_types::Role::Tool => MessageKind::ToolResult,
                     ava_types::Role::System => MessageKind::System,
                 };
-                self.state.messages.push(UiMessage::new(kind, msg.content.clone()));
+                self.state
+                    .messages
+                    .push(UiMessage::new(kind, msg.content.clone()));
             }
             // Restore model from session metadata
             if let Some(meta) = session.metadata.as_object() {
@@ -357,11 +367,25 @@ impl App {
         }
 
         loop {
+            let draw_start = std::time::Instant::now();
             terminal.draw(|frame| ui::render(frame, &mut self.state))?;
+            let draw_elapsed = draw_start.elapsed();
+            if draw_elapsed.as_millis() > 32 {
+                // Only log when a frame exceeds ~2× the 60fps budget (16ms)
+                tracing::warn!(
+                    duration_ms = draw_elapsed.as_millis() as u64,
+                    pending_tokens = self.token_buffer.pending_len(),
+                    "slow frame render"
+                );
+            } else {
+                tracing::trace!(
+                    duration_ms = draw_elapsed.as_millis() as u64,
+                    "frame render"
+                );
+            }
 
             tokio::select! {
                 Some(event) = app_rx.recv() => self.handle_event(event, app_tx.clone(), agent_tx.clone()),
-                Some(agent_event) = agent_rx.recv() => self.handle_event(AppEvent::Agent(agent_event), app_tx.clone(), agent_tx.clone()),
                 Some(req) = async { match question_rx.as_mut() { Some(rx) => rx.recv().await, None => None } } => {
                     self.handle_event(AppEvent::Question(req), app_tx.clone(), agent_tx.clone());
                 },
@@ -389,9 +413,9 @@ impl App {
     /// Move the currently running agent to the background.
     /// The agent continues running; its events are routed to a BackgroundTask.
     pub(crate) fn background_current_agent(&mut self, _app_tx: mpsc::UnboundedSender<AppEvent>) {
-        if !self.state.agent.is_running {
+        let Some(run_id) = self.foreground_run_id else {
             return;
-        }
+        };
 
         // Derive a goal from the last user message
         let goal = self
@@ -422,15 +446,10 @@ impl App {
             id
         };
 
-        // Take the cancel token and task handle from the agent
-        // The agent task is already running — we just need to stop routing
-        // events to the foreground. We do this by marking the agent as not running
-        // in the TUI state. The tokio task continues and sends AgentDone to app_tx.
-        // We intercept AgentDone for this task via the task_id.
+        self.background_run_routes.insert(run_id, task_id);
+        self.foreground_run_id = None;
 
-        // Mark foreground agent as idle
-        self.state.agent.is_running = false;
-        self.state.agent.activity = AgentActivity::Idle;
+        self.state.agent.detach_run();
         self.is_streaming.store(false, Ordering::Relaxed);
 
         // Clear chat for a fresh conversation
@@ -442,29 +461,10 @@ impl App {
         self.state.agent.cost = 0.0;
         self.state.agent.current_turn = 0;
         self.state.agent.sub_agents.clear();
-
-        // The existing agent task will continue sending events. Since agent.is_running
-        // is false, Token/ToolCall events will still update messages — but we've cleared
-        // them. We need a way to intercept. The simplest approach: the agent task will
-        // send AgentDone when it finishes. We use a background monitor task that listens.
-        //
-        // NOTE: Because we can't easily redirect the existing agent_rx channel,
-        // the remaining events from the backgrounded agent will be handled normally
-        // by handle_agent_event. Since messages are cleared, new tokens/tool calls
-        // from the background agent will appear in the foreground. This is a known
-        // limitation. For a clean implementation, we'd need a per-agent event channel.
-        //
-        // Workaround: We track the background task_id and in the tick handler we
-        // will mark it complete when the agent finishes.
-
-        // Store the background task_id for event routing
-        // We'll add this as a field we can check in handle_agent_event
-        self.set_status(format!("Task #{task_id} moved to background"), StatusLevel::Info);
-
-        // For now, the backgrounded agent will still send events to the main channel.
-        // We cannot easily reroute mid-stream without significant refactoring.
-        // The key behavior: when AgentDone fires, we mark the background task complete.
-        // We store the active background task_id to intercept the AgentDone event.
+        self.set_status(
+            format!("Task #{task_id} moved to background"),
+            StatusLevel::Info,
+        );
     }
 
     /// Launch a new agent in the background with the given goal.
@@ -476,7 +476,10 @@ impl App {
         let stack = match self.state.agent.stack() {
             Ok(s) => Arc::clone(s),
             Err(msg) => {
-                self.set_status(format!("Cannot launch background agent: {msg}"), StatusLevel::Error);
+                self.set_status(
+                    format!("Cannot launch background agent: {msg}"),
+                    StatusLevel::Error,
+                );
                 return;
             }
         };
@@ -488,103 +491,46 @@ impl App {
         };
 
         let max_turns = self.state.agent.max_turns;
+        let run_id = self.allocate_run_id();
+        self.background_run_routes.insert(run_id, task_id);
         let app_tx_clone = app_tx;
 
         tokio::spawn(async move {
             let (agent_event_tx, mut agent_event_rx) = mpsc::unbounded_channel();
             let cancel = tokio_util::sync::CancellationToken::new();
 
-            // Spawn event collector
-            let bg_state_events = Arc::clone(&bg_state);
-            let collector_task_id = task_id;
+            let relay_tx = app_tx_clone.clone();
             let collector_handle = tokio::spawn(async move {
                 while let Some(event) = agent_event_rx.recv().await {
-                    let mut bg = bg_state_events.lock().unwrap();
-                    match event {
-                        ava_agent::AgentEvent::Token(chunk) => {
-                            // Accumulate into last assistant message or create new
-                            if let Some(task) = bg.tasks.iter_mut().find(|t| t.id == collector_task_id) {
-                                if let Some(last) = task.messages.last_mut() {
-                                    if matches!(last.kind, crate::state::messages::MessageKind::Assistant) {
-                                        last.content.push_str(&chunk);
-                                        continue;
-                                    }
-                                }
-                                task.messages.push(crate::state::messages::UiMessage::new(
-                                    crate::state::messages::MessageKind::Assistant,
-                                    chunk,
-                                ));
-                            }
-                        }
-                        ava_agent::AgentEvent::TokenUsage { input_tokens, output_tokens, cost_usd } => {
-                            bg.add_tokens(collector_task_id, input_tokens, output_tokens, cost_usd);
-                        }
-                        ava_agent::AgentEvent::ToolCall(call) => {
-                            bg.append_message(
-                                collector_task_id,
-                                crate::state::messages::UiMessage::new(
-                                    crate::state::messages::MessageKind::ToolCall,
-                                    format!("{} {}", call.name, call.arguments),
-                                ),
-                            );
-                        }
-                        ava_agent::AgentEvent::ToolResult(result) => {
-                            bg.append_message(
-                                collector_task_id,
-                                crate::state::messages::UiMessage::new(
-                                    crate::state::messages::MessageKind::ToolResult,
-                                    result.content,
-                                ),
-                            );
-                        }
-                        ava_agent::AgentEvent::Error(err) => {
-                            bg.append_message(
-                                collector_task_id,
-                                crate::state::messages::UiMessage::new(
-                                    crate::state::messages::MessageKind::Error,
-                                    err,
-                                ),
-                            );
-                        }
-                        ava_agent::AgentEvent::Thinking(content) => {
-                            bg.append_message(
-                                collector_task_id,
-                                crate::state::messages::UiMessage::new(
-                                    crate::state::messages::MessageKind::Thinking,
-                                    content,
-                                ),
-                            );
-                        }
-                        _ => {}
-                    }
+                    let _ = relay_tx.send(AppEvent::AgentRunEvent { run_id, event });
                 }
             });
 
             let result = stack
-                .run(&goal, max_turns, Some(agent_event_tx), cancel, Vec::new(), None, Vec::new())
+                .run(
+                    &goal,
+                    max_turns,
+                    Some(agent_event_tx),
+                    cancel,
+                    Vec::new(),
+                    None,
+                    Vec::new(),
+                )
                 .await;
 
             // Wait for collector to drain
             let _ = collector_handle.await;
 
-            let success = result.is_ok();
-            {
-                let mut bg = bg_state.lock().unwrap();
-                if success {
-                    bg.complete_task(task_id);
-                } else {
-                    let err = result.err().map(|e| e.to_string()).unwrap_or_default();
-                    bg.fail_task(task_id, err);
-                }
-            }
-
-            let _ = app_tx_clone.send(crate::event::AppEvent::BackgroundTaskDone {
-                task_id,
-                success,
+            let _ = app_tx_clone.send(AppEvent::AgentRunDone {
+                run_id,
+                result: result.map_err(|err| err.to_string()),
             });
         });
 
-        self.set_status(format!("Task #{task_id} launched in background"), StatusLevel::Info);
+        self.set_status(
+            format!("Task #{task_id} launched in background"),
+            StatusLevel::Info,
+        );
     }
 
     /// Enter the background task view (read-only).
@@ -603,6 +549,467 @@ impl App {
 
     pub(crate) fn set_status(&mut self, text: impl Into<String>, level: StatusLevel) {
         self.state.status_message = Some(StatusMessage::new(text, level));
+    }
+
+    pub(crate) fn allocate_run_id(&mut self) -> u64 {
+        let run_id = self.next_run_id;
+        self.next_run_id += 1;
+        run_id
+    }
+
+    pub(crate) fn spawn_model_selector_load(&self, app_tx: mpsc::UnboundedSender<AppEvent>) {
+        let catalog_state = self.state.model_catalog.clone();
+        let recent_models = self.state.agent.recent_models.clone();
+        let current_model = self.state.agent.model_name.clone();
+        let current_provider = self.state.agent.provider_name.clone();
+        tokio::spawn(async move {
+            let credentials = ava_config::CredentialStore::load_default()
+                .await
+                .unwrap_or_default();
+            let catalog = catalog_state.get().await;
+            let mut effective_catalog = if catalog.is_empty() {
+                ava_config::fallback_catalog()
+            } else {
+                catalog
+            };
+            effective_catalog.merge_fallback();
+            let selector = ModelSelectorState::from_catalog(
+                &effective_catalog,
+                &credentials,
+                &recent_models,
+                &current_model,
+                &current_provider,
+            );
+            let _ = app_tx.send(AppEvent::ModelSelectorLoaded(Ok(selector)));
+        });
+    }
+
+    pub(crate) fn spawn_model_switch(
+        &self,
+        provider: String,
+        model: String,
+        display: String,
+        context: crate::event::ModelSwitchContext,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
+    ) {
+        let Some(stack) = self.state.agent.stack_handle() else {
+            let _ = app_tx.send(AppEvent::ModelSwitchFinished(
+                crate::event::ModelSwitchResult {
+                    provider,
+                    model,
+                    display,
+                    result: Err("AgentStack not initialised".to_string()),
+                    context,
+                },
+            ));
+            return;
+        };
+
+        tokio::spawn(async move {
+            let result = stack
+                .switch_model(&provider, &model)
+                .await
+                .map(|_| ())
+                .map_err(|err| err.to_string());
+            let _ = app_tx.send(AppEvent::ModelSwitchFinished(
+                crate::event::ModelSwitchResult {
+                    provider,
+                    model,
+                    display,
+                    result,
+                    context,
+                },
+            ));
+        });
+    }
+
+    pub(crate) fn spawn_tool_list_load(&self, app_tx: mpsc::UnboundedSender<AppEvent>) {
+        let Some(stack) = self.state.agent.stack_handle() else {
+            let _ = app_tx.send(AppEvent::ToolListLoaded(Err(
+                "AgentStack not initialised".to_string()
+            )));
+            return;
+        };
+
+        tokio::spawn(async move {
+            let result = stack
+                .tools
+                .read()
+                .await
+                .list_tools_with_source()
+                .into_iter()
+                .map(|(def, source)| crate::widgets::tool_list::ToolListItem {
+                    name: def.name,
+                    description: def.description,
+                    source,
+                })
+                .collect();
+            let _ = app_tx.send(AppEvent::ToolListLoaded(Ok(result)));
+        });
+    }
+
+    pub(crate) fn spawn_tools_reload(&self, app_tx: mpsc::UnboundedSender<AppEvent>) {
+        let Some(stack) = self.state.agent.stack_handle() else {
+            let _ = app_tx.send(AppEvent::CommandMessage(
+                crate::event::CommandMessageResult {
+                    kind: MessageKind::Error,
+                    content: "Failed to reload tools: AgentStack not initialised".to_string(),
+                    status: Some((
+                        StatusLevel::Error,
+                        "Failed: AgentStack not initialised".to_string(),
+                    )),
+                },
+            ));
+            return;
+        };
+
+        tokio::spawn(async move {
+            let result = stack.reload_tools().await.map_err(|err| err.to_string());
+            let (kind, content, status) = match result {
+                Ok(count) => {
+                    let msg = format!("Reloaded {count} tools");
+                    (
+                        MessageKind::System,
+                        msg.clone(),
+                        Some((StatusLevel::Info, msg)),
+                    )
+                }
+                Err(err) => (
+                    MessageKind::Error,
+                    format!("Failed to reload tools: {err}"),
+                    Some((StatusLevel::Error, format!("Failed: {err}"))),
+                ),
+            };
+            let _ = app_tx.send(AppEvent::CommandMessage(
+                crate::event::CommandMessageResult {
+                    kind,
+                    content,
+                    status,
+                },
+            ));
+        });
+    }
+
+    pub(crate) fn spawn_mcp_server_list(&self, app_tx: mpsc::UnboundedSender<AppEvent>) {
+        let Some(stack) = self.state.agent.stack_handle() else {
+            let _ = app_tx.send(AppEvent::McpServersLoaded(Err(
+                "AgentStack not initialised".to_string(),
+            )));
+            return;
+        };
+
+        tokio::spawn(async move {
+            let servers = stack.mcp_server_info().await;
+            let _ = app_tx.send(AppEvent::McpServersLoaded(Ok(servers)));
+        });
+    }
+
+    pub(crate) fn spawn_mcp_reload(&self, app_tx: mpsc::UnboundedSender<AppEvent>) {
+        let Some(stack) = self.state.agent.stack_handle() else {
+            let _ = app_tx.send(AppEvent::CommandMessage(
+                crate::event::CommandMessageResult {
+                    kind: MessageKind::Error,
+                    content: "Failed to reload MCP: AgentStack not initialised".to_string(),
+                    status: Some((
+                        StatusLevel::Error,
+                        "Failed: AgentStack not initialised".to_string(),
+                    )),
+                },
+            ));
+            return;
+        };
+
+        tokio::spawn(async move {
+            let result = stack.reload_mcp().await.map_err(|err| err.to_string());
+            let (kind, content, status) = match result {
+                Ok((servers, tools)) => {
+                    let msg = format!("MCP reloaded: {servers} servers, {tools} tools");
+                    (
+                        MessageKind::System,
+                        msg.clone(),
+                        Some((StatusLevel::Info, msg)),
+                    )
+                }
+                Err(err) => (
+                    MessageKind::Error,
+                    err.clone(),
+                    Some((StatusLevel::Error, format!("Failed: {err}"))),
+                ),
+            };
+            let _ = app_tx.send(AppEvent::CommandMessage(
+                crate::event::CommandMessageResult {
+                    kind,
+                    content,
+                    status,
+                },
+            ));
+        });
+    }
+
+    pub(crate) fn spawn_credential_command(
+        &self,
+        command: ava_config::CredentialCommand,
+        format: fn(Result<String, String>) -> crate::event::CommandMessageResult,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
+    ) {
+        tokio::spawn(async move {
+            let mut store = ava_config::CredentialStore::load_default()
+                .await
+                .unwrap_or_default();
+            let result = ava_config::execute_credential_command(command, &mut store)
+                .await
+                .map_err(|err| err.to_string());
+            let _ = app_tx.send(AppEvent::CommandMessage(format(result)));
+        });
+    }
+
+    pub(crate) fn spawn_status_message(&self, app_tx: mpsc::UnboundedSender<AppEvent>) {
+        let Some(stack) = self.state.agent.stack_handle() else {
+            let _ = app_tx.send(AppEvent::CommandMessage(
+                crate::event::CommandMessageResult {
+                    kind: MessageKind::Error,
+                    content: "Failed to inspect status: AgentStack not initialised".to_string(),
+                    status: Some((
+                        StatusLevel::Error,
+                        "Failed: AgentStack not initialised".to_string(),
+                    )),
+                },
+            ));
+            return;
+        };
+
+        let model = self.state.agent.current_model_display();
+        let tokens_in = self.state.agent.tokens_used.input;
+        let tokens_out = self.state.agent.tokens_used.output;
+        let cost = self.state.agent.cost;
+        let turn = self.state.agent.current_turn;
+        let session_id = self
+            .state
+            .session
+            .current_session
+            .as_ref()
+            .map(|s| s.id.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let mcp_count = self.state.agent.mcp_tool_count;
+        let cwd = std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        tokio::spawn(async move {
+            let tool_count = stack.tools.read().await.list_tools_with_source().len();
+            let status = format!(
+                "Model: {model}\n\
+                 Tokens: {tokens_in} in / {tokens_out} out (${cost:.2})\n\
+                 Session: {session_id} ({turn} turns)\n\
+                 Tools: {tool_count} total ({mcp_count} MCP)\n\
+                 Working directory: {cwd}"
+            );
+            let _ = app_tx.send(AppEvent::CommandMessage(
+                crate::event::CommandMessageResult {
+                    kind: MessageKind::System,
+                    content: status,
+                    status: None,
+                },
+            ));
+        });
+    }
+
+    pub(crate) fn spawn_commit_prep(&self, app_tx: mpsc::UnboundedSender<AppEvent>) {
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(crate::app::commands::handle_commit_command)
+                .await
+                .unwrap_or_else(|err| {
+                    (
+                        MessageKind::Error,
+                        format!("Failed to inspect commit readiness: {err}"),
+                    )
+                });
+            let _ = app_tx.send(AppEvent::CommandMessage(
+                crate::event::CommandMessageResult {
+                    kind: result.0,
+                    content: result.1,
+                    status: None,
+                },
+            ));
+        });
+    }
+
+    pub(crate) fn spawn_provider_connect_load(
+        &self,
+        provider: Option<String>,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
+    ) {
+        tokio::spawn(async move {
+            let credentials = ava_config::CredentialStore::load_default()
+                .await
+                .unwrap_or_default();
+            let state = if let Some(provider) = provider {
+                ProviderConnectState::for_provider(&credentials, &provider)
+            } else {
+                ProviderConnectState::from_credentials(&credentials)
+            };
+            let _ = app_tx.send(AppEvent::ProviderConnectLoaded(Ok(state)));
+        });
+    }
+
+    pub(crate) fn spawn_session_list_load(&self, app_tx: mpsc::UnboundedSender<AppEvent>) {
+        let db_path = self.state.session.db_path().to_path_buf();
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let manager =
+                    ava_session::SessionManager::new(&db_path).map_err(|err| err.to_string())?;
+                manager.list_recent(50).map_err(|err| err.to_string())
+            })
+            .await
+            .map_err(|err| err.to_string())
+            .and_then(|result| result);
+            let _ = app_tx.send(AppEvent::SessionListLoaded(result));
+        });
+    }
+
+    pub(crate) fn spawn_session_load(
+        &self,
+        session_id: uuid::Uuid,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
+    ) {
+        let db_path = self.state.session.db_path().to_path_buf();
+        tokio::spawn(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let manager =
+                    ava_session::SessionManager::new(&db_path).map_err(|err| err.to_string())?;
+                let session = manager
+                    .get(session_id)
+                    .map_err(|err| err.to_string())?
+                    .ok_or_else(|| format!("Session {session_id} not found"))?;
+                let restore_model = session.metadata.as_object().and_then(|meta| {
+                    Some((
+                        meta.get("provider")?.as_str()?.to_string(),
+                        meta.get("model")?.as_str()?.to_string(),
+                    ))
+                });
+                Ok(crate::event::SessionLoadResult {
+                    session,
+                    restore_model,
+                })
+            })
+            .await
+            .map_err(|err| err.to_string())
+            .and_then(
+                |result: std::result::Result<crate::event::SessionLoadResult, String>| result,
+            );
+            let _ = app_tx.send(AppEvent::SessionLoaded(result));
+        });
+    }
+
+    pub(crate) fn route_agent_event(
+        &mut self,
+        run_id: u64,
+        agent_event: ava_agent::AgentEvent,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
+        agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
+    ) {
+        if self.foreground_run_id == Some(run_id) {
+            self.handle_agent_event(agent_event, app_tx, agent_tx);
+            return;
+        }
+
+        if let Some(task_id) = self.background_run_routes.get(&run_id).copied() {
+            self.handle_background_agent_event(task_id, agent_event);
+        }
+    }
+
+    pub(crate) fn finish_routed_run(
+        &mut self,
+        run_id: u64,
+        result: std::result::Result<ava_agent::stack::AgentRunResult, String>,
+    ) {
+        if self.foreground_run_id == Some(run_id) {
+            self.foreground_run_id = None;
+            match result {
+                Ok(run) => self.finish_run(run),
+                Err(err) => {
+                    self.is_streaming.store(false, Ordering::Relaxed);
+                    self.state.agent.is_running = false;
+                    self.state.agent.activity = AgentActivity::Idle;
+                    self.state
+                        .messages
+                        .push(UiMessage::new(MessageKind::Error, err));
+                }
+            }
+            return;
+        }
+
+        let Some(task_id) = self.background_run_routes.remove(&run_id) else {
+            return;
+        };
+
+        match result {
+            Ok(_) => {
+                self.state.background.lock().unwrap().complete_task(task_id);
+                self.set_status(
+                    format!("Background task #{task_id} completed"),
+                    StatusLevel::Info,
+                );
+            }
+            Err(err) => {
+                self.state
+                    .background
+                    .lock()
+                    .unwrap()
+                    .fail_task(task_id, err.clone());
+                self.set_status(
+                    format!("Background task #{task_id} failed"),
+                    StatusLevel::Error,
+                );
+            }
+        }
+    }
+
+    fn handle_background_agent_event(&mut self, task_id: usize, event: ava_agent::AgentEvent) {
+        let mut bg = self.state.background.lock().unwrap();
+        match event {
+            ava_agent::AgentEvent::Token(chunk) => {
+                if let Some(task) = bg.tasks.iter_mut().find(|t| t.id == task_id) {
+                    if let Some(last) = task.messages.last_mut() {
+                        if matches!(last.kind, MessageKind::Assistant) {
+                            last.content.push_str(&chunk);
+                            return;
+                        }
+                    }
+                    task.messages
+                        .push(UiMessage::new(MessageKind::Assistant, chunk));
+                }
+            }
+            ava_agent::AgentEvent::Thinking(content) => {
+                bg.append_message(task_id, UiMessage::new(MessageKind::Thinking, content));
+            }
+            ava_agent::AgentEvent::TokenUsage {
+                input_tokens,
+                output_tokens,
+                cost_usd,
+            } => {
+                bg.add_tokens(task_id, input_tokens, output_tokens, cost_usd);
+            }
+            ava_agent::AgentEvent::ToolCall(call) => {
+                bg.append_message(
+                    task_id,
+                    UiMessage::new(
+                        MessageKind::ToolCall,
+                        format!("{} {}", call.name, call.arguments),
+                    ),
+                );
+            }
+            ava_agent::AgentEvent::ToolResult(result) => {
+                bg.append_message(
+                    task_id,
+                    UiMessage::new(MessageKind::ToolResult, result.content),
+                );
+            }
+            ava_agent::AgentEvent::Error(err) => {
+                bg.append_message(task_id, UiMessage::new(MessageKind::Error, err));
+            }
+            _ => {}
+        }
     }
 
     /// Switch to viewing a sub-agent's conversation by its index in
@@ -672,17 +1079,11 @@ impl App {
                     self.set_status(status, StatusLevel::Info);
                 }
                 Err(e) => {
-                    self.set_status(
-                        format!("Clipboard write failed: {e}"),
-                        StatusLevel::Error,
-                    );
+                    self.set_status(format!("Clipboard write failed: {e}"), StatusLevel::Error);
                 }
             },
             Err(e) => {
-                self.set_status(
-                    format!("Clipboard unavailable: {e}"),
-                    StatusLevel::Error,
-                );
+                self.set_status(format!("Clipboard unavailable: {e}"), StatusLevel::Error);
             }
         }
     }
@@ -758,30 +1159,31 @@ impl App {
             ));
 
             // Resolve a provider instance from the router
-            let result = stack.router.route_required(&provider_name, &model_name).await;
+            let result = stack
+                .router
+                .route_required(&provider_name, &model_name)
+                .await;
             match result {
-                Ok(provider) => {
-                    match provider.generate(&messages).await {
-                        Ok(answer) => {
-                            let response = crate::state::btw::BtwResponse {
-                                question: question_clone,
-                                answer,
-                            };
-                            if let Ok(mut slot) = btw_result_clone.lock() {
-                                *slot = Some(response);
-                            }
-                        }
-                        Err(e) => {
-                            let response = crate::state::btw::BtwResponse {
-                                question: question_clone,
-                                answer: format!("Error: {e}"),
-                            };
-                            if let Ok(mut slot) = btw_result_clone.lock() {
-                                *slot = Some(response);
-                            }
+                Ok(provider) => match provider.generate(&messages).await {
+                    Ok(answer) => {
+                        let response = crate::state::btw::BtwResponse {
+                            question: question_clone,
+                            answer,
+                        };
+                        if let Ok(mut slot) = btw_result_clone.lock() {
+                            *slot = Some(response);
                         }
                     }
-                }
+                    Err(e) => {
+                        let response = crate::state::btw::BtwResponse {
+                            question: question_clone,
+                            answer: format!("Error: {e}"),
+                        };
+                        if let Ok(mut slot) = btw_result_clone.lock() {
+                            *slot = Some(response);
+                        }
+                    }
+                },
                 Err(e) => {
                     let response = crate::state::btw::BtwResponse {
                         question: question_clone,
@@ -816,11 +1218,7 @@ impl App {
 
         let checkpoint = &self.state.rewind.checkpoints[checkpoint_idx];
         let msg_index = checkpoint.message_index;
-        let preview: String = if checkpoint.message_preview.len() > 50 {
-            format!("{}...", &checkpoint.message_preview[..47])
-        } else {
-            checkpoint.message_preview.clone()
-        };
+        let preview: String = crate::text_utils::truncate_display(&checkpoint.message_preview, 50);
 
         match option {
             RewindOption::RestoreCodeAndConversation => {
@@ -968,7 +1366,11 @@ impl App {
             .iter()
             .map(|name| {
                 let resolved = config.get_agent(name);
-                let status_text = if resolved.enabled { "enabled" } else { "disabled" };
+                let status_text = if resolved.enabled {
+                    "enabled"
+                } else {
+                    "disabled"
+                };
                 let mut detail_parts: Vec<String> = vec![status_text.to_string()];
                 if let Some(ref model) = resolved.model {
                     detail_parts.push(format!("model={model}"));
@@ -978,9 +1380,13 @@ impl App {
                 }
                 let detail = detail_parts.join("  ");
                 let status = if resolved.enabled {
-                    Some(crate::widgets::select_list::ItemStatus::Connected("enabled".to_string()))
+                    Some(crate::widgets::select_list::ItemStatus::Connected(
+                        "enabled".to_string(),
+                    ))
                 } else {
-                    Some(crate::widgets::select_list::ItemStatus::Info("disabled".to_string()))
+                    Some(crate::widgets::select_list::ItemStatus::Info(
+                        "disabled".to_string(),
+                    ))
                 };
                 SelectItem {
                     title: name.clone(),
@@ -1096,32 +1502,250 @@ impl App {
                     }
                 }
                 // Poll for /btw side-question results
-                let btw_ready = self.state.btw.pending_result.as_ref().and_then(|slot| {
-                    slot.try_lock().ok().and_then(|mut guard| guard.take())
-                });
+                let btw_ready = self
+                    .state
+                    .btw
+                    .pending_result
+                    .as_ref()
+                    .and_then(|slot| slot.try_lock().ok().and_then(|mut guard| guard.take()));
                 if let Some(response) = btw_ready {
                     self.state.btw.pending = false;
                     self.state.btw.response = Some(response);
                     self.state.btw.pending_result = None;
                 }
             }
-            AppEvent::Agent(agent_event) => {
-                self.handle_agent_event(agent_event, app_tx, agent_tx);
+            AppEvent::AgentRunEvent { run_id, event } => {
+                self.route_agent_event(run_id, event, app_tx, agent_tx);
             }
-            AppEvent::AgentDone(result) => match result {
-                Ok(run) => self.finish_run(run),
-                Err(err) => {
-                    self.is_streaming.store(false, Ordering::Relaxed);
-                    self.state.agent.is_running = false;
-                    self.state.agent.activity = AgentActivity::Idle;
-                    self.state
-                        .messages
-                        .push(UiMessage::new(MessageKind::Error, err));
-                }
-            },
+            AppEvent::AgentRunDone { run_id, result } => {
+                self.finish_routed_run(run_id, result);
+            }
             AppEvent::TokenUsage(usage) => {
                 self.state.agent.tokens_used = usage;
             }
+            AppEvent::ModelSelectorLoaded(result) => match result {
+                Ok(selector) => {
+                    self.state.model_selector = Some(selector);
+                }
+                Err(err) => {
+                    self.set_status(format!("Failed to load models: {err}"), StatusLevel::Error)
+                }
+            },
+            AppEvent::ModelSwitchFinished(result) => match result.result {
+                Ok(()) => {
+                    let desc = self
+                        .state
+                        .agent
+                        .apply_switched_model(&result.provider, &result.model);
+                    match result.context {
+                        crate::event::ModelSwitchContext::Selector => {
+                            self.state.model_selector = None;
+                            self.state.active_modal = None;
+                            self.set_status(
+                                format!("Switched to {}", result.display),
+                                StatusLevel::Info,
+                            );
+                        }
+                        crate::event::ModelSwitchContext::SessionRestore => {
+                            self.set_status(
+                                format!("Session loaded - model: {desc}"),
+                                StatusLevel::Info,
+                            );
+                        }
+                        crate::event::ModelSwitchContext::SlashCommand => {
+                            self.set_status(format!("Switched to {desc}"), StatusLevel::Info);
+                            self.state.messages.push(UiMessage::new(
+                                MessageKind::System,
+                                format!("Switched to {desc}"),
+                            ));
+                        }
+                    }
+                }
+                Err(err) => {
+                    let status = format!("Failed: {err}");
+                    match result.context {
+                        crate::event::ModelSwitchContext::Selector => {
+                            self.state.model_selector = None;
+                            self.state.active_modal = None;
+                        }
+                        crate::event::ModelSwitchContext::SlashCommand => {
+                            self.state.messages.push(UiMessage::new(
+                                MessageKind::Error,
+                                format!("Failed to switch model: {err}"),
+                            ));
+                        }
+                        crate::event::ModelSwitchContext::SessionRestore => {}
+                    }
+                    self.set_status(status, StatusLevel::Error);
+                }
+            },
+            AppEvent::ToolListLoaded(result) => match result {
+                Ok(items) => {
+                    let count = items.len();
+                    self.state.tool_list = ToolListState::from_items(items);
+                    self.set_status(format!("Loaded {count} tools"), StatusLevel::Info);
+                }
+                Err(err) => {
+                    self.set_status(format!("Failed to load tools: {err}"), StatusLevel::Error)
+                }
+            },
+            AppEvent::McpServersLoaded(result) => match result {
+                Ok(servers) => {
+                    let count = servers.len();
+                    let content = if servers.is_empty() {
+                        "No MCP servers connected".to_string()
+                    } else {
+                        let lines: Vec<String> = servers
+                            .iter()
+                            .map(|server| {
+                                format!("  {} ({} tools)", server.name, server.tool_count)
+                            })
+                            .collect();
+                        format!("MCP servers ({}):\n{}", servers.len(), lines.join("\n"))
+                    };
+                    self.set_status(format!("Loaded {count} MCP servers"), StatusLevel::Info);
+                    self.state
+                        .messages
+                        .push(UiMessage::new(MessageKind::System, content));
+                }
+                Err(err) => self.set_status(
+                    format!("Failed to load MCP servers: {err}"),
+                    StatusLevel::Error,
+                ),
+            },
+            AppEvent::CommandMessage(result) => {
+                if let Some((level, text)) = result.status {
+                    self.set_status(text, level);
+                }
+                self.state
+                    .messages
+                    .push(UiMessage::new(result.kind, result.content));
+            }
+            AppEvent::SessionListLoaded(result) => match result {
+                Ok(sessions) => {
+                    self.state.session_list.update_sessions(&sessions);
+                }
+                Err(err) => self.set_status(
+                    format!("Failed to load sessions: {err}"),
+                    StatusLevel::Error,
+                ),
+            },
+            AppEvent::SessionLoaded(result) => match result {
+                Ok(loaded) => {
+                    self.state.session.current_session = Some(loaded.session.clone());
+                    self.state.messages.messages.clear();
+                    self.state.messages.reset_scroll();
+                    for msg in &loaded.session.messages {
+                        let kind = match msg.role {
+                            ava_types::Role::User => MessageKind::User,
+                            ava_types::Role::Assistant => MessageKind::Assistant,
+                            ava_types::Role::Tool => MessageKind::ToolResult,
+                            ava_types::Role::System => MessageKind::System,
+                        };
+                        self.state
+                            .messages
+                            .push(UiMessage::new(kind, msg.content.clone()));
+                    }
+                    if let Some((provider, model)) = loaded.restore_model {
+                        self.spawn_model_switch(
+                            provider,
+                            model,
+                            self.state.agent.current_model_display(),
+                            crate::event::ModelSwitchContext::SessionRestore,
+                            app_tx,
+                        );
+                    } else {
+                        self.set_status("Session loaded", StatusLevel::Info);
+                    }
+                }
+                Err(err) => {
+                    self.set_status(format!("Failed to load session: {err}"), StatusLevel::Error)
+                }
+            },
+            AppEvent::ProviderConnectLoaded(result) => match result {
+                Ok(state) => {
+                    self.state.provider_connect = Some(state);
+                }
+                Err(err) => self.set_status(
+                    format!("Failed to load providers: {err}"),
+                    StatusLevel::Error,
+                ),
+            },
+            AppEvent::ProviderConnectFinished(result) => match result {
+                crate::event::ProviderConnectResult::Loaded(state) => {
+                    self.state.provider_connect = Some(state);
+                }
+                crate::event::ProviderConnectResult::Refreshed { state, status } => {
+                    self.state.provider_connect = Some(state);
+                    self.set_status(status, StatusLevel::Info);
+                }
+                crate::event::ProviderConnectResult::Tested(result) => match result {
+                    Ok(msg) => self.set_status(&msg, StatusLevel::Info),
+                    Err(err) => self.set_status(format!("Test failed: {err}"), StatusLevel::Error),
+                },
+                crate::event::ProviderConnectResult::Saved(result) => match result {
+                    Ok(msg) => {
+                        self.set_status(&msg, StatusLevel::Info);
+                        self.state.provider_connect = None;
+                        self.state.active_modal = None;
+                    }
+                    Err(err) => {
+                        if let Some(ref mut pc) = self.state.provider_connect {
+                            pc.message = Some(format!("Failed: {err}"));
+                        }
+                    }
+                },
+                crate::event::ProviderConnectResult::OAuthStored { provider, result } => {
+                    match result {
+                        Ok(()) => {
+                            self.set_status(
+                                format!("Connected to {}", ava_config::provider_name(&provider)),
+                                StatusLevel::Info,
+                            );
+                            self.state.provider_connect = None;
+                            self.state.active_modal = None;
+                        }
+                        Err(err) => {
+                            self.set_status(
+                                format!("Failed to save credentials: {err}"),
+                                StatusLevel::Error,
+                            );
+                        }
+                    }
+                }
+                crate::event::ProviderConnectResult::ConfigureLoaded {
+                    provider_id,
+                    base_url,
+                } => {
+                    if let Some(ref mut pc) = self.state.provider_connect {
+                        pc.screen =
+                            crate::widgets::provider_connect::ConnectScreen::Configure(provider_id);
+                        pc.key_input.clear();
+                        pc.base_url_input = base_url;
+                        pc.active_field = crate::widgets::provider_connect::ConnectField::ApiKey;
+                        pc.message = None;
+                    }
+                }
+                crate::event::ProviderConnectResult::DeviceCodeReady {
+                    provider_id,
+                    device,
+                } => {
+                    if let Some(ref mut pc) = self.state.provider_connect {
+                        pc.screen = crate::widgets::provider_connect::ConnectScreen::DeviceCode {
+                            provider_id,
+                            user_code: device.user_code,
+                            verification_uri: device.verification_uri,
+                            started: std::time::Instant::now(),
+                        };
+                        pc.message = None;
+                    }
+                }
+                crate::event::ProviderConnectResult::InlineError(err) => {
+                    if let Some(ref mut pc) = self.state.provider_connect {
+                        pc.message = Some(err);
+                    }
+                }
+            },
             AppEvent::ShellResult(kind, content) => {
                 self.state.messages.push(UiMessage::new(kind, content));
             }
@@ -1148,44 +1772,32 @@ impl App {
             AppEvent::VoiceAmplitude(amp) => {
                 self.state.voice.amplitude = amp;
             }
-            AppEvent::VoiceSilenceDetected => {
+            AppEvent::VoiceSilenceDetected =>
+            {
                 #[cfg(feature = "voice")]
                 if self.state.voice.phase == VoicePhase::Recording {
                     self.stop_and_transcribe(app_tx);
                 }
             }
             AppEvent::OAuthSuccess { provider, tokens } => {
-                // Store OAuth tokens in credentials
-                let result = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async {
-                        let mut store = ava_config::CredentialStore::load_default()
-                            .await
-                            .unwrap_or_default();
-                        store.set_oauth(
-                            &provider,
-                            &tokens.access_token,
-                            tokens.refresh_token.as_deref(),
-                            tokens.expires_at,
-                        );
-                        store.save_default().await
-                    })
+                let tx = app_tx.clone();
+                tokio::spawn(async move {
+                    let mut store = ava_config::CredentialStore::load_default()
+                        .await
+                        .unwrap_or_default();
+                    store.set_oauth(
+                        &provider,
+                        &tokens.access_token,
+                        tokens.refresh_token.as_deref(),
+                        tokens.expires_at,
+                    );
+                    let _ = tx.send(AppEvent::ProviderConnectFinished(
+                        crate::event::ProviderConnectResult::OAuthStored {
+                            provider,
+                            result: store.save_default().await.map_err(|err| err.to_string()),
+                        },
+                    ));
                 });
-                match result {
-                    Ok(_) => {
-                        self.set_status(
-                            format!("Connected to {}", ava_config::provider_name(&provider)),
-                            StatusLevel::Info,
-                        );
-                    }
-                    Err(e) => {
-                        self.set_status(
-                            format!("Failed to save credentials: {e}"),
-                            StatusLevel::Error,
-                        );
-                    }
-                }
-                self.state.provider_connect = None;
-                self.state.active_modal = None;
             }
             AppEvent::OAuthError { provider, error } => {
                 self.set_status(
@@ -1207,34 +1819,26 @@ impl App {
                 });
                 self.state.active_modal = Some(ModalType::Question);
             }
-            AppEvent::BackgroundTaskDone { task_id, success } => {
-                let status = if success { "completed" } else { "failed" };
-                self.set_status(
-                    format!("Background task #{task_id} {status}"),
-                    if success { StatusLevel::Info } else { StatusLevel::Error },
-                );
-            }
-            AppEvent::HookResult { event, result, description } => {
-                match result {
-                    HookResult::Block(reason) => {
-                        self.set_status(
-                            format!("Hook blocked {event}: {reason}"),
-                            StatusLevel::Error,
-                        );
-                        debug!(hook = %description, event = %event, reason = %reason, "hook blocked action");
-                    }
-                    HookResult::Error(msg) => {
-                        self.set_status(
-                            format!("Hook error ({event}): {msg}"),
-                            StatusLevel::Error,
-                        );
-                        debug!(hook = %description, event = %event, error = %msg, "hook error");
-                    }
-                    HookResult::Allow => {
-                        debug!(hook = %description, event = %event, "hook allowed");
-                    }
+            AppEvent::HookResult {
+                event,
+                result,
+                description,
+            } => match result {
+                HookResult::Block(reason) => {
+                    self.set_status(
+                        format!("Hook blocked {event}: {reason}"),
+                        StatusLevel::Error,
+                    );
+                    debug!(hook = %description, event = %event, reason = %reason, "hook blocked action");
                 }
-            }
+                HookResult::Error(msg) => {
+                    self.set_status(format!("Hook error ({event}): {msg}"), StatusLevel::Error);
+                    debug!(hook = %description, event = %event, error = %msg, "hook error");
+                }
+                HookResult::Allow => {
+                    debug!(hook = %description, event = %event, "hook allowed");
+                }
+            },
         }
     }
 
@@ -1261,7 +1865,12 @@ impl App {
         }
 
         // Escape exits sub-agent or background task view when no modal is open
-        if key.code == KeyCode::Esc && matches!(self.state.view_mode, ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }) {
+        if key.code == KeyCode::Esc
+            && matches!(
+                self.state.view_mode,
+                ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
+            )
+        {
             self.state.view_mode = ViewMode::Main;
             self.state.messages.reset_scroll();
             return false;
@@ -1322,17 +1931,27 @@ impl App {
                 Action::ModeNext => {
                     self.state.agent_mode = self.state.agent_mode.cycle_next();
                     self.state.agent.set_mode(self.state.agent_mode);
-                    self.set_status(format!("Mode: {}", self.state.agent_mode.label()), StatusLevel::Info);
+                    self.set_status(
+                        format!("Mode: {}", self.state.agent_mode.label()),
+                        StatusLevel::Info,
+                    );
                 }
                 Action::ModePrev => {
                     self.state.agent_mode = self.state.agent_mode.cycle_prev();
                     self.state.agent.set_mode(self.state.agent_mode);
-                    self.set_status(format!("Mode: {}", self.state.agent_mode.label()), StatusLevel::Info);
+                    self.set_status(
+                        format!("Mode: {}", self.state.agent_mode.label()),
+                        StatusLevel::Info,
+                    );
                 }
                 Action::PermissionToggle => {
-                    self.state.permission.permission_level = self.state.permission.permission_level.toggle();
+                    self.state.permission.permission_level =
+                        self.state.permission.permission_level.toggle();
                     self.set_status(
-                        format!("Permissions: {}", self.state.permission.permission_level.label()),
+                        format!(
+                            "Permissions: {}",
+                            self.state.permission.permission_level.label()
+                        ),
                         StatusLevel::Info,
                     );
                 }
@@ -1343,35 +1962,7 @@ impl App {
                     self.state.active_modal = Some(ModalType::CommandPalette);
                 }
                 Action::ModelSwitch => {
-                    // Try async catalog path if tokio runtime available,
-                    // otherwise open with empty model list (will be populated on next open)
-                    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                        let (credentials, catalog) = tokio::task::block_in_place(|| {
-                            handle.block_on(async {
-                                let creds = ava_config::CredentialStore::load_default()
-                                    .await
-                                    .unwrap_or_default();
-                                let cat = self.state.model_catalog.get().await;
-                                (creds, cat)
-                            })
-                        });
-                        let mut effective = if catalog.is_empty() {
-                            ava_config::fallback_catalog()
-                        } else {
-                            catalog
-                        };
-                        effective.merge_fallback();
-                        self.state.model_selector = Some(ModelSelectorState::from_catalog(
-                            &effective,
-                            &credentials,
-                            &self.state.agent.recent_models,
-                            &self.state.agent.model_name,
-                            &self.state.agent.provider_name,
-                        ));
-                    } else {
-                        self.state.model_selector = Some(ModelSelectorState::default());
-                    }
-                    self.state.active_modal = Some(ModalType::ModelSelector);
+                    self.execute_command_action(Action::ModelSwitch, Some(app_tx.clone()));
                 }
                 Action::NewSession => {
                     let _ = self.state.session.create_session();
@@ -1379,7 +1970,7 @@ impl App {
                     self.set_status("New session created", StatusLevel::Info);
                 }
                 Action::SessionList => {
-                    self.execute_command_action(Action::SessionList);
+                    self.execute_command_action(Action::SessionList, Some(app_tx.clone()));
                 }
                 Action::ToggleThinking => {
                     self.state.agent.cycle_thinking();
@@ -1395,7 +1986,10 @@ impl App {
                     if self.state.agent.is_running {
                         self.background_current_agent(app_tx.clone());
                     } else {
-                        self.set_status("No running agent to background (use /bg <goal>)", StatusLevel::Warn);
+                        self.set_status(
+                            "No running agent to background (use /bg <goal>)",
+                            StatusLevel::Warn,
+                        );
                     }
                 }
                 Action::SubmitFollowUp => {
@@ -1412,14 +2006,23 @@ impl App {
                     if self.state.agent.is_running {
                         if let Some(text) = self.state.input.submit() {
                             // Auto-assign to current group
-                            let group = self.state.agent.message_tx
+                            let group = self
+                                .state
+                                .agent
+                                .message_tx
                                 .as_ref()
                                 .map(|_| 1u32) // Default group 1
                                 .unwrap_or(1);
-                            self.send_queued_message(text, ava_types::MessageTier::PostComplete { group });
+                            self.send_queued_message(
+                                text,
+                                ava_types::MessageTier::PostComplete { group },
+                            );
                         }
                     } else {
-                        self.set_status("No running agent — post-complete messages require a running agent", StatusLevel::Warn);
+                        self.set_status(
+                            "No running agent — post-complete messages require a running agent",
+                            StatusLevel::Warn,
+                        );
                     }
                 }
                 _ => {}
@@ -1457,10 +2060,10 @@ impl App {
                     if let Some(value) = self.state.input.autocomplete_selected_value() {
                         let cmd = format!("/{}", value);
                         self.state.input.clear();
-                        if let Some((kind, msg)) = self.handle_slash_command(&cmd) {
-                            self.state
-                                .messages
-                                .push(UiMessage::new(kind, msg));
+                        if let Some((kind, msg)) =
+                            self.handle_slash_command(&cmd, Some(app_tx.clone()))
+                        {
+                            self.state.messages.push(UiMessage::new(kind, msg));
                         }
                     }
                     return false;
@@ -1509,12 +2112,10 @@ impl App {
                         // Remove the @partial from the buffer
                         let before_cursor = &self.state.input.buffer[..self.state.input.cursor];
                         if let Some(at_pos) = before_cursor.rfind('@') {
-                            let after_cursor = self.state.input.buffer[self.state.input.cursor..].to_string();
-                            self.state.input.buffer = format!(
-                                "{}{}",
-                                &self.state.input.buffer[..at_pos],
-                                after_cursor,
-                            );
+                            let after_cursor =
+                                self.state.input.buffer[self.state.input.cursor..].to_string();
+                            self.state.input.buffer =
+                                format!("{}{}", &self.state.input.buffer[..at_pos], after_cursor,);
                             self.state.input.cursor = at_pos;
                         }
                         self.state.input.autocomplete = None;
@@ -1532,13 +2133,19 @@ impl App {
         if key.code == KeyCode::Tab && key.modifiers == KeyModifiers::NONE {
             self.state.agent_mode = self.state.agent_mode.cycle_next();
             self.state.agent.set_mode(self.state.agent_mode);
-            self.set_status(format!("Mode: {}", self.state.agent_mode.label()), StatusLevel::Info);
+            self.set_status(
+                format!("Mode: {}", self.state.agent_mode.label()),
+                StatusLevel::Info,
+            );
             return false;
         }
         if key.code == KeyCode::BackTab {
             self.state.agent_mode = self.state.agent_mode.cycle_prev();
             self.state.agent.set_mode(self.state.agent_mode);
-            self.set_status(format!("Mode: {}", self.state.agent_mode.label()), StatusLevel::Info);
+            self.set_status(
+                format!("Mode: {}", self.state.agent_mode.label()),
+                StatusLevel::Info,
+            );
             return false;
         }
 
@@ -1580,8 +2187,7 @@ impl App {
                 }
             }
             KeyCode::Char(ch)
-                if key.modifiers == KeyModifiers::NONE
-                    || key.modifiers == KeyModifiers::SHIFT =>
+                if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
             {
                 self.state.input.insert_char(ch)
             }
@@ -1612,7 +2218,17 @@ impl App {
 
     /// Flush buffered tokens to the message list (called on tick).
     fn flush_token_buffer(&mut self) {
+        let metrics_before = self.token_buffer.metrics().clone();
         if let Some(buffered) = self.token_buffer.flush() {
+            let m = self.token_buffer.metrics();
+            if m.backlog_flush_count > metrics_before.backlog_flush_count {
+                debug!(
+                    bytes = buffered.len(),
+                    total_backlog_flushes = m.backlog_flush_count,
+                    peak_pending = m.peak_pending_bytes,
+                    "adaptive backlog flush"
+                );
+            }
             self.append_buffered_tokens(buffered);
         }
     }
@@ -1680,10 +2296,7 @@ impl App {
                     .map(|m| m.content.as_str());
                 if let Some(msg) = first_user_msg {
                     let title = ava_session::generate_title(msg);
-                    meta.insert(
-                        "title".to_string(),
-                        serde_json::Value::String(title),
-                    );
+                    meta.insert("title".to_string(), serde_json::Value::String(title));
                 }
             }
         }
@@ -1750,6 +2363,9 @@ impl App {
             last_esc_time: None,
             pending_bg_goal: None,
             pending_images: Vec::new(),
+            next_run_id: 1,
+            foreground_run_id: None,
+            background_run_routes: HashMap::new(),
         }
     }
 
@@ -1762,6 +2378,114 @@ impl App {
 
     /// Public wrapper around `handle_slash_command` for integration tests.
     pub fn test_slash_command(&mut self, input: &str) -> Option<(MessageKind, String)> {
-        self.handle_slash_command(input)
+        self.handle_slash_command(input, None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn backgrounded_run_events_stay_out_of_foreground() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("data.db");
+        let mut app = App::test_new(&db_path);
+        let (app_tx, _) = mpsc::unbounded_channel();
+        let (agent_tx, _) = mpsc::unbounded_channel();
+
+        app.state.agent.is_running = true;
+        app.foreground_run_id = Some(42);
+        app.state
+            .messages
+            .push(UiMessage::new(MessageKind::User, "ship it"));
+
+        app.background_current_agent(app_tx.clone());
+
+        assert!(app.state.messages.messages.is_empty());
+        assert_eq!(app.foreground_run_id, None);
+        assert_eq!(app.background_run_routes.get(&42), Some(&1));
+
+        app.handle_event(
+            AppEvent::AgentRunEvent {
+                run_id: 42,
+                event: ava_agent::AgentEvent::Thinking("working".to_string()),
+            },
+            app_tx.clone(),
+            agent_tx.clone(),
+        );
+        app.handle_event(
+            AppEvent::AgentRunEvent {
+                run_id: 42,
+                event: ava_agent::AgentEvent::Token("done".to_string()),
+            },
+            app_tx.clone(),
+            agent_tx.clone(),
+        );
+
+        assert!(app.state.messages.messages.is_empty());
+        let bg = app.state.background.lock().unwrap();
+        let task = bg.tasks.iter().find(|task| task.id == 1).expect("task");
+        assert_eq!(task.messages.len(), 3);
+        assert_eq!(task.messages[0].kind, MessageKind::User);
+        assert_eq!(task.messages[1].kind, MessageKind::Thinking);
+        assert_eq!(task.messages[2].kind, MessageKind::Assistant);
+        assert_eq!(task.messages[2].content, "done");
+        drop(bg);
+
+        app.handle_event(
+            AppEvent::AgentRunDone {
+                run_id: 42,
+                result: Ok(ava_agent::stack::AgentRunResult {
+                    success: true,
+                    turns: 1,
+                    session: ava_types::Session::new(),
+                }),
+            },
+            app_tx,
+            agent_tx,
+        );
+
+        let bg = app.state.background.lock().unwrap();
+        let task = bg.tasks.iter().find(|task| task.id == 1).expect("task");
+        assert_eq!(task.status, crate::state::background::TaskStatus::Completed);
+        assert!(!app.background_run_routes.contains_key(&42));
+    }
+
+    #[test]
+    fn model_switch_result_updates_state_and_closes_modal() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("data.db");
+        let mut app = App::test_new(&db_path);
+        let (app_tx, _) = mpsc::unbounded_channel();
+        let (agent_tx, _) = mpsc::unbounded_channel();
+
+        app.state.model_selector = Some(ModelSelectorState::default());
+        app.state.active_modal = Some(ModalType::ModelSelector);
+
+        app.handle_event(
+            AppEvent::ModelSwitchFinished(crate::event::ModelSwitchResult {
+                provider: "openrouter".to_string(),
+                model: "anthropic/claude-sonnet-4".to_string(),
+                display: "Claude Sonnet".to_string(),
+                result: Ok(()),
+                context: crate::event::ModelSwitchContext::Selector,
+            }),
+            app_tx,
+            agent_tx,
+        );
+
+        assert_eq!(app.state.agent.provider_name, "openrouter");
+        assert_eq!(app.state.agent.model_name, "anthropic/claude-sonnet-4");
+        assert!(app.state.model_selector.is_none());
+        assert!(app.state.active_modal.is_none());
+        assert_eq!(
+            app.state
+                .status_message
+                .as_ref()
+                .map(|msg| msg.text.as_str()),
+            Some("Switched to Claude Sonnet")
+        );
     }
 }

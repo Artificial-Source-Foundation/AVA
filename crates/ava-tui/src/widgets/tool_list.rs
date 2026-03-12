@@ -70,11 +70,7 @@ fn tool_to_select_item(item: &ToolListItem, section: &str) -> SelectItem<String>
         ToolSource::MCP { server } => format!("[MCP:{server}]"),
         ToolSource::Custom { .. } => "[Custom]".to_string(),
     };
-    let desc = if item.description.len() > 40 {
-        format!("{}...", &item.description[..37])
-    } else {
-        item.description.clone()
-    };
+    let desc = crate::text_utils::truncate_display(&item.description, 40);
     let detail = if desc.is_empty() {
         badge
     } else {

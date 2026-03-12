@@ -75,7 +75,11 @@ pub fn render_mention_picker(
         let is_folder = item.value.ends_with('/');
 
         // Icon for file vs folder
-        let icon = if is_folder { "\u{1F4C1} " } else { "\u{1F4C4} " };
+        let icon = if is_folder {
+            "\u{1F4C1} "
+        } else {
+            "\u{1F4C4} "
+        };
         let icon_style = Style::default().fg(fg).bg(bg);
 
         let mut spans: Vec<Span<'_>> = Vec::new();
@@ -83,10 +87,7 @@ pub fn render_mention_picker(
         spans.push(Span::styled(icon.to_string(), icon_style));
         spans.push(Span::styled(
             item.value.clone(),
-            Style::default()
-                .fg(fg)
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
         ));
 
         // Right-align the detail
@@ -95,10 +96,7 @@ pub fn render_mention_picker(
         let detail = &item.detail;
         if !detail.is_empty() && inner_width > left_len + detail.len() + 2 {
             let padding = inner_width - left_len - detail.len();
-            spans.push(Span::styled(
-                " ".repeat(padding),
-                Style::default().bg(bg),
-            ));
+            spans.push(Span::styled(" ".repeat(padding), Style::default().bg(bg)));
             spans.push(Span::styled(
                 detail.clone(),
                 Style::default().fg(detail_fg).bg(bg),

@@ -178,9 +178,7 @@ impl DiffPreviewState {
             // Check if all hunks for this file are accepted
             let all_file_hunks: Vec<&DiffHunk> =
                 self.hunks.iter().filter(|h| &h.file == file).collect();
-            let all_accepted = all_file_hunks
-                .iter()
-                .all(|h| h.accepted == Some(true));
+            let all_accepted = all_file_hunks.iter().all(|h| h.accepted == Some(true));
 
             if all_accepted {
                 // All hunks accepted — use the proposed content directly
@@ -204,8 +202,16 @@ impl DiffPreviewState {
 
     /// Summary counts across all hunks.
     pub fn total_stats(&self) -> (usize, usize, usize, usize) {
-        let accepted = self.hunks.iter().filter(|h| h.accepted == Some(true)).count();
-        let rejected = self.hunks.iter().filter(|h| h.accepted == Some(false)).count();
+        let accepted = self
+            .hunks
+            .iter()
+            .filter(|h| h.accepted == Some(true))
+            .count();
+        let rejected = self
+            .hunks
+            .iter()
+            .filter(|h| h.accepted == Some(false))
+            .count();
         let undecided = self.hunks.iter().filter(|h| h.accepted.is_none()).count();
         (self.hunks.len(), accepted, rejected, undecided)
     }
@@ -440,31 +446,21 @@ pub fn render_diff_preview(
     render_footer(frame, chunks[2], state, theme);
 }
 
-fn render_header(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    state: &DiffPreviewState,
-    theme: &Theme,
-) {
+fn render_header(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, theme: &Theme) {
     let (total, accepted, rejected, undecided) = state.total_stats();
     let file_count = state.file_count();
 
     let title_spans = vec![
         Span::styled(
             "Diff Preview",
-            Style::default()
-                .fg(theme.text)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("  {file_count} file(s), {total} hunk(s)"),
             Style::default().fg(theme.text_muted),
         ),
         Span::raw("  "),
-        Span::styled(
-            format!("{accepted}"),
-            Style::default().fg(theme.diff_added),
-        ),
+        Span::styled(format!("{accepted}"), Style::default().fg(theme.diff_added)),
         Span::styled(
             format!("/{rejected}"),
             Style::default().fg(theme.diff_removed),
@@ -501,12 +497,7 @@ fn render_header(
     );
 }
 
-fn render_hunks(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    state: &DiffPreviewState,
-    theme: &Theme,
-) {
+fn render_hunks(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, theme: &Theme) {
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut current_file: Option<&PathBuf> = None;
 
@@ -552,10 +543,7 @@ fn render_hunks(
                     .fg(theme.diff_removed)
                     .add_modifier(Modifier::BOLD),
             ),
-            None => Span::styled(
-                " \u{25CB} ",
-                Style::default().fg(theme.text_muted),
-            ),
+            None => Span::styled(" \u{25CB} ", Style::default().fg(theme.text_muted)),
         };
 
         let hunk_header_style = if is_selected {
@@ -582,11 +570,7 @@ fn render_hunks(
                 hunk_header_style,
             ),
             Span::styled(
-                format!(
-                    "  +{} -{} ",
-                    hunk.additions(),
-                    hunk.deletions()
-                ),
+                format!("  +{} -{} ", hunk.additions(), hunk.deletions()),
                 Style::default().fg(theme.text_muted),
             ),
         ]));
@@ -610,10 +594,7 @@ fn render_hunks(
                     .fg(theme.diff_removed)
                     .bg(theme.diff_removed_bg)
             };
-            lines.push(Line::from(Span::styled(
-                format!("  -{line}"),
-                style,
-            )));
+            lines.push(Line::from(Span::styled(format!("  -{line}"), style)));
         }
 
         // Added lines
@@ -627,10 +608,7 @@ fn render_hunks(
                     .fg(theme.diff_added)
                     .bg(theme.diff_added_bg)
             };
-            lines.push(Line::from(Span::styled(
-                format!("  +{line}"),
-                style,
-            )));
+            lines.push(Line::from(Span::styled(format!("  +{line}"), style)));
         }
 
         // Context after
@@ -660,12 +638,7 @@ fn render_hunks(
     frame.render_widget(paragraph, area);
 }
 
-fn render_footer(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    _state: &DiffPreviewState,
-    theme: &Theme,
-) {
+fn render_footer(frame: &mut Frame<'_>, area: Rect, _state: &DiffPreviewState, theme: &Theme) {
     // Separator
     let sep = "\u{2500}".repeat(area.width.saturating_sub(2) as usize);
     frame.render_widget(
@@ -683,21 +656,57 @@ fn render_footer(
 
     // Keybind hints
     let hints = vec![
-        Span::styled("y", Style::default().fg(theme.diff_added).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "y",
+            Style::default()
+                .fg(theme.diff_added)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" accept  ", Style::default().fg(theme.text_muted)),
-        Span::styled("n", Style::default().fg(theme.diff_removed).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "n",
+            Style::default()
+                .fg(theme.diff_removed)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" reject  ", Style::default().fg(theme.text_muted)),
-        Span::styled("a", Style::default().fg(theme.diff_added).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "a",
+            Style::default()
+                .fg(theme.diff_added)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" accept all  ", Style::default().fg(theme.text_muted)),
-        Span::styled("d", Style::default().fg(theme.diff_removed).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "d",
+            Style::default()
+                .fg(theme.diff_removed)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" reject all  ", Style::default().fg(theme.text_muted)),
-        Span::styled("j/k", Style::default().fg(theme.text).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "j/k",
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" nav  ", Style::default().fg(theme.text_muted)),
-        Span::styled("Tab", Style::default().fg(theme.text).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Tab",
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" file  ", Style::default().fg(theme.text_muted)),
-        Span::styled("Enter", Style::default().fg(theme.primary).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Enter",
+            Style::default()
+                .fg(theme.primary)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" apply  ", Style::default().fg(theme.text_muted)),
-        Span::styled("Esc", Style::default().fg(theme.error).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Esc",
+            Style::default()
+                .fg(theme.error)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" cancel", Style::default().fg(theme.text_muted)),
     ];
 
@@ -717,7 +726,11 @@ mod tests {
     use super::*;
 
     fn make_state(old: &str, new: &str) -> DiffPreviewState {
-        DiffPreviewState::new(vec![(PathBuf::from("test.rs"), old.to_string(), new.to_string())])
+        DiffPreviewState::new(vec![(
+            PathBuf::from("test.rs"),
+            old.to_string(),
+            new.to_string(),
+        )])
     }
 
     #[test]
@@ -819,8 +832,16 @@ mod tests {
     #[test]
     fn multi_file_hunks() {
         let changes = vec![
-            (PathBuf::from("a.rs"), "foo\n".to_string(), "bar\n".to_string()),
-            (PathBuf::from("b.rs"), "baz\n".to_string(), "qux\n".to_string()),
+            (
+                PathBuf::from("a.rs"),
+                "foo\n".to_string(),
+                "bar\n".to_string(),
+            ),
+            (
+                PathBuf::from("b.rs"),
+                "baz\n".to_string(),
+                "qux\n".to_string(),
+            ),
         ];
         let state = DiffPreviewState::new(changes);
         assert_eq!(state.hunks.len(), 2);

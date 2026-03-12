@@ -92,27 +92,55 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
                 title: "Command Palette".to_string(),
                 search_placeholder: "Type a command...".to_string(),
                 keybinds: vec![
-                    KeybindHint { key: "enter".to_string(), label: "run".to_string() },
-                    KeybindHint { key: "esc".to_string(), label: "close".to_string() },
+                    KeybindHint {
+                        key: "enter".to_string(),
+                        label: "run".to_string(),
+                    },
+                    KeybindHint {
+                        key: "esc".to_string(),
+                        label: "close".to_string(),
+                    },
                 ],
             };
-            render_select_list(frame, inner, &state.command_palette.list, &config, &state.theme);
+            render_select_list(
+                frame,
+                inner,
+                &state.command_palette.list,
+                &config,
+                &state.theme,
+            );
         }
         ModalType::SessionList => {
             let config = SelectListConfig {
                 title: "Switch Session".to_string(),
                 search_placeholder: "Search sessions...".to_string(),
                 keybinds: vec![
-                    KeybindHint { key: "enter".to_string(), label: "load".to_string() },
-                    KeybindHint { key: "esc".to_string(), label: "close".to_string() },
+                    KeybindHint {
+                        key: "enter".to_string(),
+                        label: "load".to_string(),
+                    },
+                    KeybindHint {
+                        key: "esc".to_string(),
+                        label: "close".to_string(),
+                    },
                 ],
             };
-            render_select_list(frame, inner, &state.session_list.list, &config, &state.theme);
+            render_select_list(
+                frame,
+                inner,
+                &state.session_list.list,
+                &config,
+                &state.theme,
+            );
         }
         ModalType::ToolApproval => {
             if let Some(request) = state.permission.queue.front() {
                 crate::widgets::tool_approval::render_tool_approval(
-                    frame, popup_area, request, &state.permission, &state.theme,
+                    frame,
+                    popup_area,
+                    request,
+                    &state.permission,
+                    &state.theme,
                 );
             }
         }
@@ -122,9 +150,18 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
                     title: "Switch Model".to_string(),
                     search_placeholder: "Search models...".to_string(),
                     keybinds: vec![
-                        KeybindHint { key: "\u{2191}\u{2193}".to_string(), label: "navigate".to_string() },
-                        KeybindHint { key: "Enter".to_string(), label: "select".to_string() },
-                        KeybindHint { key: "Esc".to_string(), label: "close".to_string() },
+                        KeybindHint {
+                            key: "\u{2191}\u{2193}".to_string(),
+                            label: "navigate".to_string(),
+                        },
+                        KeybindHint {
+                            key: "Enter".to_string(),
+                            label: "select".to_string(),
+                        },
+                        KeybindHint {
+                            key: "Esc".to_string(),
+                            label: "close".to_string(),
+                        },
                     ],
                 };
                 render_select_list(frame, inner, &selector.list, &config, &state.theme);
@@ -134,18 +171,15 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
             let config = SelectListConfig {
                 title: "Tools".to_string(),
                 search_placeholder: "Search tools...".to_string(),
-                keybinds: vec![
-                    KeybindHint { key: "esc".to_string(), label: "close".to_string() },
-                ],
+                keybinds: vec![KeybindHint {
+                    key: "esc".to_string(),
+                    label: "close".to_string(),
+                }],
             };
             render_select_list(frame, inner, &state.tool_list.list, &config, &state.theme);
         }
         ModalType::ProviderConnect => {
-            crate::widgets::provider_connect::render_provider_connect(
-                frame,
-                inner,
-                state,
-            );
+            crate::widgets::provider_connect::render_provider_connect(frame, inner, state);
         }
         ModalType::AgentList => {
             if let Some(ref selector) = state.agent_list {
@@ -153,8 +187,14 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
                     title: "Sub-Agents".to_string(),
                     search_placeholder: "Search agents...".to_string(),
                     keybinds: vec![
-                        KeybindHint { key: "Esc".to_string(), label: "close".to_string() },
-                        KeybindHint { key: "hint".to_string(), label: "edit .ava/agents.toml to configure".to_string() },
+                        KeybindHint {
+                            key: "Esc".to_string(),
+                            label: "close".to_string(),
+                        },
+                        KeybindHint {
+                            key: "hint".to_string(),
+                            label: "edit .ava/agents.toml to configure".to_string(),
+                        },
                     ],
                 };
                 render_select_list(frame, inner, selector, &config, &state.theme);
@@ -166,9 +206,18 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
                     title: "Switch Theme".to_string(),
                     search_placeholder: "Search themes...".to_string(),
                     keybinds: vec![
-                        KeybindHint { key: "\u{2191}\u{2193}".to_string(), label: "navigate".to_string() },
-                        KeybindHint { key: "Enter".to_string(), label: "select".to_string() },
-                        KeybindHint { key: "Esc".to_string(), label: "close".to_string() },
+                        KeybindHint {
+                            key: "\u{2191}\u{2193}".to_string(),
+                            label: "navigate".to_string(),
+                        },
+                        KeybindHint {
+                            key: "Enter".to_string(),
+                            label: "select".to_string(),
+                        },
+                        KeybindHint {
+                            key: "Esc".to_string(),
+                            label: "close".to_string(),
+                        },
                     ],
                 };
                 render_select_list(frame, inner, selector, &config, &state.theme);
@@ -182,19 +231,29 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
         }
         ModalType::Rewind => {
             crate::widgets::rewind_modal::render_rewind_modal(
-                frame, inner, &state.rewind, &state.theme,
+                frame,
+                inner,
+                &state.rewind,
+                &state.theme,
             );
         }
         ModalType::TaskList => {
             let bg = state.background.lock().unwrap();
             crate::widgets::task_list_modal::render_task_list(
-                frame, inner, &bg, &state.theme, state.messages.spinner_tick,
+                frame,
+                inner,
+                &bg,
+                &state.theme,
+                state.messages.spinner_tick,
             );
         }
         ModalType::DiffPreview => {
             if let Some(ref preview) = state.diff_preview {
                 crate::widgets::diff_preview::render_diff_preview(
-                    frame, popup_area, preview, &state.theme,
+                    frame,
+                    popup_area,
+                    preview,
+                    &state.theme,
                 );
             }
         }
@@ -213,7 +272,9 @@ fn render_question_modal(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     // Question text
     lines.push(Line::from(Span::styled(
         &q.question,
-        Style::default().fg(state.theme.text).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(state.theme.text)
+            .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
 
@@ -234,14 +295,16 @@ fn render_question_modal(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         // Options list
         for (i, opt) in q.options.iter().enumerate() {
             let (prefix, style) = if i == q.selected {
-                ("> ", Style::default().fg(state.theme.accent).add_modifier(Modifier::BOLD))
+                (
+                    "> ",
+                    Style::default()
+                        .fg(state.theme.accent)
+                        .add_modifier(Modifier::BOLD),
+                )
             } else {
                 ("  ", Style::default().fg(state.theme.text))
             };
-            lines.push(Line::from(Span::styled(
-                format!("{prefix}{opt}"),
-                style,
-            )));
+            lines.push(Line::from(Span::styled(format!("{prefix}{opt}"), style)));
         }
     }
 
@@ -264,20 +327,23 @@ fn render_question_modal(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     frame.render_widget(paragraph, area);
 }
 
-
 fn render_copy_picker(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     use ratatui::style::Modifier;
     use ratatui::text::{Line, Span};
     use ratatui::widgets::Paragraph;
 
-    let Some(ref picker) = state.copy_picker else { return };
+    let Some(ref picker) = state.copy_picker else {
+        return;
+    };
 
     let mut lines: Vec<Line<'_>> = Vec::new();
 
     // Title
     lines.push(Line::from(Span::styled(
         "Copy Code Block",
-        Style::default().fg(state.theme.text).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(state.theme.text)
+            .add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
 

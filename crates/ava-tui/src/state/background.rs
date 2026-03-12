@@ -47,7 +47,12 @@ impl BackgroundTask {
     pub fn elapsed_display(&self) -> String {
         let secs = self.elapsed().as_secs();
         if secs >= 3600 {
-            format!("{}h {:02}m {:02}s", secs / 3600, (secs % 3600) / 60, secs % 60)
+            format!(
+                "{}h {:02}m {:02}s",
+                secs / 3600,
+                (secs % 3600) / 60,
+                secs % 60
+            )
         } else if secs >= 60 {
             format!("{}m {:02}s", secs / 60, secs % 60)
         } else {
@@ -55,13 +60,9 @@ impl BackgroundTask {
         }
     }
 
-    /// Truncated goal for display (max chars).
+    /// Truncated goal for display (max display columns).
     pub fn goal_display(&self, max_len: usize) -> String {
-        if self.goal.len() > max_len && max_len > 3 {
-            format!("{}...", &self.goal[..max_len - 3])
-        } else {
-            self.goal.clone()
-        }
+        crate::text_utils::truncate_display(&self.goal, max_len)
     }
 }
 
@@ -114,10 +115,7 @@ impl BackgroundState {
             task.status = TaskStatus::Completed;
             task.completed_at = Some(Instant::now());
             let elapsed = task.elapsed_display();
-            self.notification = Some((
-                format!("Task #{id} completed ({elapsed})"),
-                Instant::now(),
-            ));
+            self.notification = Some((format!("Task #{id} completed ({elapsed})"), Instant::now()));
         }
     }
 
@@ -127,15 +125,15 @@ impl BackgroundState {
             task.completed_at = Some(Instant::now());
             task.error = Some(error);
             let elapsed = task.elapsed_display();
-            self.notification = Some((
-                format!("Task #{id} failed ({elapsed})"),
-                Instant::now(),
-            ));
+            self.notification = Some((format!("Task #{id} failed ({elapsed})"), Instant::now()));
         }
     }
 
     pub fn running_count(&self) -> usize {
-        self.tasks.iter().filter(|t| t.status == TaskStatus::Running).count()
+        self.tasks
+            .iter()
+            .filter(|t| t.status == TaskStatus::Running)
+            .count()
     }
 
     pub fn append_message(&mut self, id: usize, msg: UiMessage) {
@@ -154,7 +152,10 @@ impl BackgroundState {
 
     /// Total tokens across all tasks.
     pub fn total_tokens(&self) -> usize {
-        self.tasks.iter().map(|t| t.tokens_input + t.tokens_output).sum()
+        self.tasks
+            .iter()
+            .map(|t| t.tokens_input + t.tokens_output)
+            .sum()
     }
 
     /// Total cost across all tasks.

@@ -51,6 +51,10 @@ impl SessionState {
         Ok(self.manager.search(query)?)
     }
 
+    pub fn db_path(&self) -> &Path {
+        self.manager.db_path()
+    }
+
     /// Save a completed agent session to the database.
     pub fn save_session(&mut self, session: &Session) {
         if let Err(e) = self.manager.save(session) {

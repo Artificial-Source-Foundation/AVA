@@ -155,7 +155,10 @@ impl AgentState {
         model: Option<String>,
         max_turns: usize,
         yolo: bool,
-    ) -> Result<(Self, tokio::sync::mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>)> {
+    ) -> Result<(
+        Self,
+        tokio::sync::mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>,
+    )> {
         let provider_name = provider.clone().unwrap_or_else(|| "default".to_string());
         let model_name = model.clone().unwrap_or_else(|| "default".to_string());
 
@@ -175,35 +178,42 @@ impl AgentState {
 
         let context_window = lookup_context_window(&provider_name, &model_name);
 
-        Ok((Self {
-            stack: Some(stack),
-            is_running: false,
-            current_turn: 0,
-            max_turns,
-            tokens_used: TokenUsage::default(),
-            cost: 0.0,
-            activity: AgentActivity::Idle,
-            provider_name,
-            model_name,
-            context_window,
-            mcp_server_count,
-            mcp_tool_count,
-            tool_start: None,
-            workflow_phase: None,
-            workflow_iteration: None,
-            recent_models: Vec::new(),
-            thinking_level: ThinkingLevel::Off,
-            sub_agents: Vec::new(),
-            cancel: None,
-            task: None,
-            message_tx: None,
-        }, question_rx))
+        Ok((
+            Self {
+                stack: Some(stack),
+                is_running: false,
+                current_turn: 0,
+                max_turns,
+                tokens_used: TokenUsage::default(),
+                cost: 0.0,
+                activity: AgentActivity::Idle,
+                provider_name,
+                model_name,
+                context_window,
+                mcp_server_count,
+                mcp_tool_count,
+                tool_start: None,
+                workflow_phase: None,
+                workflow_iteration: None,
+                recent_models: Vec::new(),
+                thinking_level: ThinkingLevel::Off,
+                sub_agents: Vec::new(),
+                cancel: None,
+                task: None,
+                message_tx: None,
+            },
+            question_rx,
+        ))
     }
 
     pub(crate) fn stack(&self) -> std::result::Result<&Arc<AgentStack>, String> {
         self.stack
             .as_ref()
             .ok_or_else(|| "AgentStack not initialised".to_string())
+    }
+
+    pub(crate) fn stack_handle(&self) -> Option<Arc<AgentStack>> {
+        self.stack.as_ref().map(Arc::clone)
     }
 
     /// Get the shared todo state from the agent stack (if initialized).
@@ -214,10 +224,10 @@ impl AgentState {
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         &mut self,
+        run_id: u64,
         goal: String,
         max_turns: usize,
         app_tx: mpsc::UnboundedSender<AppEvent>,
-        agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
         history: Vec<ava_types::Message>,
         parent_session_id: Option<String>,
         images: Vec<ava_types::ImageContent>,
@@ -244,13 +254,35 @@ impl AgentState {
         self.message_tx = Some(message_sender);
 
         self.task = Some(tokio::spawn(async move {
+            let (agent_tx, mut agent_rx) = mpsc::unbounded_channel();
+            let app_events = app_tx.clone();
+            let relay = tokio::spawn(async move {
+                while let Some(event) = agent_rx.recv().await {
+                    let _ = app_events.send(AppEvent::AgentRunEvent { run_id, event });
+                }
+            });
+
             // Set parent session ID so sub-agents can link back to this session
             if let Some(pid) = parent_session_id {
                 *stack.parent_session_id.write().await = Some(pid);
             }
-            let result = stack.run(&goal, max_turns, Some(agent_tx), run_cancel, history, Some(message_queue), images).await;
+            let result = stack
+                .run(
+                    &goal,
+                    max_turns,
+                    Some(agent_tx),
+                    run_cancel,
+                    history,
+                    Some(message_queue),
+                    images,
+                )
+                .await;
+            let _ = relay.await;
             let mapped = result.map_err(|err| err.to_string());
-            let _ = app_tx.send(AppEvent::AgentDone(mapped));
+            let _ = app_tx.send(AppEvent::AgentRunDone {
+                run_id,
+                result: mapped,
+            });
         }));
         self.cancel = Some(cancel);
     }
@@ -275,8 +307,23 @@ impl AgentState {
         self.message_tx = None;
     }
 
+    pub fn detach_run(&mut self) {
+        self.is_running = false;
+        self.activity = AgentActivity::Idle;
+        self.cancel = None;
+        self.task = None;
+        self.message_tx = None;
+        self.tool_start = None;
+        self.workflow_phase = None;
+        self.workflow_iteration = None;
+    }
+
     /// Switch model at runtime. Returns Ok(description) or Err(message).
-    pub async fn switch_model(&mut self, provider: &str, model: &str) -> std::result::Result<String, String> {
+    pub async fn switch_model(
+        &mut self,
+        provider: &str,
+        model: &str,
+    ) -> std::result::Result<String, String> {
         self.stack()?
             .switch_model(provider, model)
             .await
@@ -294,19 +341,38 @@ impl AgentState {
         Ok(format!("{provider}/{model}"))
     }
 
+    pub fn apply_switched_model(&mut self, provider: &str, model: &str) -> String {
+        self.provider_name = provider.to_string();
+        self.model_name = model.to_string();
+        self.context_window = lookup_context_window(provider, model);
+
+        let key = format!("{provider}/{model}");
+        self.recent_models.retain(|m| m != &key);
+        self.recent_models.insert(0, key);
+        self.recent_models.truncate(5);
+
+        format!("{provider}/{model}")
+    }
+
     /// Get current provider/model description.
     pub fn current_model_display(&self) -> String {
         format!("{}/{}", self.provider_name, self.model_name)
     }
 
     /// Get MCP server info for display.
-    pub async fn mcp_server_info(&self) -> std::result::Result<Vec<ava_agent::stack::MCPServerInfo>, String> {
+    pub async fn mcp_server_info(
+        &self,
+    ) -> std::result::Result<Vec<ava_agent::stack::MCPServerInfo>, String> {
         Ok(self.stack()?.mcp_server_info().await)
     }
 
     /// Reload MCP servers from config. Updates cached counts.
     pub async fn reload_mcp(&mut self) -> std::result::Result<String, String> {
-        let (servers, tools) = self.stack()?.reload_mcp().await.map_err(|e| e.to_string())?;
+        let (servers, tools) = self
+            .stack()?
+            .reload_mcp()
+            .await
+            .map_err(|e| e.to_string())?;
         self.mcp_server_count = servers;
         self.mcp_tool_count = tools;
         Ok(format!("MCP reloaded: {servers} servers, {tools} tools"))
@@ -333,9 +399,8 @@ impl AgentState {
         self.thinking_level = level;
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(stack.set_thinking_level(level))
+            tokio::spawn(async move {
+                stack.set_thinking_level(level).await;
             });
         }
     }
@@ -346,9 +411,8 @@ impl AgentState {
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
             let level = self.thinking_level;
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(stack.set_thinking_level(level))
+            tokio::spawn(async move {
+                stack.set_thinking_level(level).await;
             });
         }
         self.thinking_level.label()
@@ -414,11 +478,9 @@ impl AgentState {
         let is_plan = matches!(mode, super::agent::AgentMode::Plan);
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    stack.set_mode_prompt_suffix(suffix).await;
-                    stack.set_plan_mode(is_plan).await;
-                })
+            tokio::spawn(async move {
+                stack.set_mode_prompt_suffix(suffix).await;
+                stack.set_plan_mode(is_plan).await;
             });
         }
     }
@@ -429,8 +491,8 @@ impl AgentState {
             .unwrap_or_default()
             .join(".ava")
             .join("tools");
-        let created = ava_tools::core::custom_tool::create_tool_templates(&dir)
-            .map_err(|e| e.to_string())?;
+        let created =
+            ava_tools::core::custom_tool::create_tool_templates(&dir).map_err(|e| e.to_string())?;
         if created.is_empty() {
             Ok("Templates already exist in .ava/tools/".to_string())
         } else {

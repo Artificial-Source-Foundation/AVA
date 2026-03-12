@@ -4,7 +4,11 @@ use std::collections::BTreeSet;
 
 impl App {
     /// Handle slash commands. Returns Some((kind, message)) if handled, None if not a slash command.
-    pub(crate) fn handle_slash_command(&mut self, input: &str) -> Option<(MessageKind, String)> {
+    pub(crate) fn handle_slash_command(
+        &mut self,
+        input: &str,
+        app_tx: Option<mpsc::UnboundedSender<AppEvent>>,
+    ) -> Option<(MessageKind, String)> {
         let trimmed = input.trim();
         if !trimmed.starts_with('/') {
             return None;
@@ -21,19 +25,32 @@ impl App {
                     if let Some((provider, model)) = model_str.split_once('/') {
                         let provider = provider.to_string();
                         let model = model.to_string();
-                        let result = tokio::task::block_in_place(|| {
-                            tokio::runtime::Handle::current().block_on(
-                                self.state.agent.switch_model(&provider, &model)
-                            )
-                        });
-                        match result {
-                            Ok(desc) => {
-                                self.set_status(format!("Switched to {desc}"), StatusLevel::Info);
-                                Some((MessageKind::System, format!("Switched to {desc}")))
-                            }
-                            Err(err) => {
-                                self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                                Some((MessageKind::Error, format!("Failed to switch model: {err}")))
+                        if let Some(tx) = app_tx.clone() {
+                            let display = format!("{provider}/{model}");
+                            self.set_status(format!("Switching to {display}..."), StatusLevel::Info);
+                            self.spawn_model_switch(
+                                provider,
+                                model,
+                                display,
+                                crate::event::ModelSwitchContext::SlashCommand,
+                                tx,
+                            );
+                            None
+                        } else {
+                            let result = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current().block_on(
+                                    self.state.agent.switch_model(&provider, &model)
+                                )
+                            });
+                            match result {
+                                Ok(desc) => {
+                                    self.set_status(format!("Switched to {desc}"), StatusLevel::Info);
+                                    Some((MessageKind::System, format!("Switched to {desc}")))
+                                }
+                                Err(err) => {
+                                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                                    Some((MessageKind::Error, format!("Failed to switch model: {err}")))
+                                }
                             }
                         }
                     } else {
@@ -43,25 +60,31 @@ impl App {
                     }
                 } else {
                     // Open model selector modal
-                    self.execute_command_action(Action::ModelSwitch);
+                    self.execute_command_action(Action::ModelSwitch, app_tx.clone());
                     None
                 }
             }
             "/tools" => {
                 match arg {
                     Some("reload") => {
-                        let result = tokio::task::block_in_place(|| {
-                            tokio::runtime::Handle::current()
-                                .block_on(self.state.agent.reload_tools())
-                        });
-                        match result {
-                            Ok(msg) => {
-                                self.set_status(&msg, StatusLevel::Info);
-                                Some((MessageKind::System, msg))
-                            }
-                            Err(err) => {
-                                self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                                Some((MessageKind::Error, err))
+                        if let Some(tx) = app_tx.clone() {
+                            self.set_status("Reloading tools...", StatusLevel::Info);
+                            self.spawn_tools_reload(tx);
+                            None
+                        } else {
+                            let result = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current()
+                                    .block_on(self.state.agent.reload_tools())
+                            });
+                            match result {
+                                Ok(msg) => {
+                                    self.set_status(&msg, StatusLevel::Info);
+                                    Some((MessageKind::System, msg))
+                                }
+                                Err(err) => {
+                                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                                    Some((MessageKind::Error, err))
+                                }
                             }
                         }
                     }
@@ -79,23 +102,29 @@ impl App {
                     }
                     _ => {
                         // Show tool list modal
-                        let tools = tokio::task::block_in_place(|| {
-                            tokio::runtime::Handle::current()
-                                .block_on(self.state.agent.list_tools_with_source())
-                        })
-                        .unwrap_or_default();
-                        let tool_items: Vec<crate::widgets::tool_list::ToolListItem> = tools
-                            .into_iter()
-                            .map(|(def, src)| {
-                                crate::widgets::tool_list::ToolListItem {
-                                    name: def.name,
-                                    description: def.description,
-                                    source: src,
-                                }
-                            })
-                            .collect();
-                        self.state.tool_list = ToolListState::from_items(tool_items);
                         self.state.active_modal = Some(ModalType::ToolList);
+                        if let Some(tx) = app_tx.clone() {
+                            self.state.tool_list = ToolListState::default();
+                            self.set_status("Loading tools...", StatusLevel::Info);
+                            self.spawn_tool_list_load(tx);
+                        } else {
+                            let tools = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current()
+                                    .block_on(self.state.agent.list_tools_with_source())
+                            })
+                            .unwrap_or_default();
+                            let tool_items: Vec<crate::widgets::tool_list::ToolListItem> = tools
+                                .into_iter()
+                                .map(|(def, src)| {
+                                    crate::widgets::tool_list::ToolListItem {
+                                        name: def.name,
+                                        description: def.description,
+                                        source: src,
+                                    }
+                                })
+                                .collect();
+                            self.state.tool_list = ToolListState::from_items(tool_items);
+                        }
                         None
                     }
                 }
@@ -103,42 +132,54 @@ impl App {
             "/mcp" => {
                 match arg {
                     Some("reload") => {
-                        let result = tokio::task::block_in_place(|| {
-                            tokio::runtime::Handle::current()
-                                .block_on(self.state.agent.reload_mcp())
-                        });
-                        match result {
-                            Ok(msg) => {
-                                self.set_status(&msg, StatusLevel::Info);
-                                Some((MessageKind::System, msg))
-                            }
-                            Err(err) => {
-                                self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                                Some((MessageKind::Error, err))
+                        if let Some(tx) = app_tx.clone() {
+                            self.set_status("Reloading MCP...", StatusLevel::Info);
+                            self.spawn_mcp_reload(tx);
+                            None
+                        } else {
+                            let result = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current()
+                                    .block_on(self.state.agent.reload_mcp())
+                            });
+                            match result {
+                                Ok(msg) => {
+                                    self.set_status(&msg, StatusLevel::Info);
+                                    Some((MessageKind::System, msg))
+                                }
+                                Err(err) => {
+                                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                                    Some((MessageKind::Error, err))
+                                }
                             }
                         }
                     }
                     Some("list") | None => {
-                        let servers = tokio::task::block_in_place(|| {
-                            tokio::runtime::Handle::current()
-                                .block_on(self.state.agent.mcp_server_info())
-                        })
-                        .unwrap_or_default();
-                        if servers.is_empty() {
-                            Some((MessageKind::System, "No MCP servers connected".to_string()))
+                        if let Some(tx) = app_tx.clone() {
+                            self.set_status("Loading MCP servers...", StatusLevel::Info);
+                            self.spawn_mcp_server_list(tx);
+                            None
                         } else {
-                            let lines: Vec<String> = servers
-                                .iter()
-                                .map(|s| format!("  {} ({} tools)", s.name, s.tool_count))
-                                .collect();
-                            Some((
-                                MessageKind::System,
-                                format!(
-                                    "MCP servers ({}):\n{}",
-                                    servers.len(),
-                                    lines.join("\n")
-                                ),
-                            ))
+                            let servers = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current()
+                                    .block_on(self.state.agent.mcp_server_info())
+                            })
+                            .unwrap_or_default();
+                            if servers.is_empty() {
+                                Some((MessageKind::System, "No MCP servers connected".to_string()))
+                            } else {
+                                let lines: Vec<String> = servers
+                                    .iter()
+                                    .map(|s| format!("  {} ({} tools)", s.name, s.tool_count))
+                                    .collect();
+                                Some((
+                                    MessageKind::System,
+                                    format!(
+                                        "MCP servers ({}):\n{}",
+                                        servers.len(),
+                                        lines.join("\n")
+                                    ),
+                                ))
+                            }
                         }
                     }
                     Some(sub) => Some((
@@ -148,21 +189,30 @@ impl App {
                 }
             }
             "/connect" | "/providers" => {
-                let credentials = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current()
-                        .block_on(ava_config::CredentialStore::load_default())
-                })
-                .unwrap_or_default();
-
-                if let Some(provider) = arg {
-                    // Direct configure for specific provider
-                    let provider = provider.to_lowercase();
-                    self.state.provider_connect =
-                        Some(ProviderConnectState::for_provider(&credentials, &provider));
+                if let Some(tx) = app_tx.clone() {
+                    self.state.provider_connect = Some(ProviderConnectState::from_credentials(
+                        &ava_config::CredentialStore::default(),
+                    ));
+                    if let Some(provider) = arg {
+                        let provider = provider.to_lowercase();
+                        self.spawn_provider_connect_load(Some(provider), tx);
+                    } else {
+                        self.spawn_provider_connect_load(None, tx);
+                    }
                 } else {
-                    // Show provider list
-                    self.state.provider_connect =
-                        Some(ProviderConnectState::from_credentials(&credentials));
+                    let credentials = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current()
+                            .block_on(ava_config::CredentialStore::load_default())
+                    })
+                    .unwrap_or_default();
+                    self.state.provider_connect = if let Some(provider) = arg {
+                        Some(ProviderConnectState::for_provider(
+                            &credentials,
+                            &provider.to_lowercase(),
+                        ))
+                    } else {
+                        Some(ProviderConnectState::from_credentials(&credentials))
+                    };
                 }
                 self.state.active_modal = Some(ModalType::ProviderConnect);
                 None
@@ -170,26 +220,36 @@ impl App {
             "/disconnect" => {
                 if let Some(provider) = arg {
                     let provider = provider.to_lowercase();
-                    let result = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(async {
-                            let mut store = ava_config::CredentialStore::load_default()
+                    if let Some(tx) = app_tx.clone() {
+                        self.set_status(format!("Disconnecting {provider}..."), StatusLevel::Info);
+                        self.spawn_credential_command(
+                            ava_config::CredentialCommand::Remove { provider },
+                            Self::format_standard_credential_result,
+                            tx,
+                        );
+                        None
+                    } else {
+                        let result = tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current().block_on(async {
+                                let mut store = ava_config::CredentialStore::load_default()
+                                    .await
+                                    .unwrap_or_default();
+                                ava_config::execute_credential_command(
+                                    ava_config::CredentialCommand::Remove { provider },
+                                    &mut store,
+                                )
                                 .await
-                                .unwrap_or_default();
-                            ava_config::execute_credential_command(
-                                ava_config::CredentialCommand::Remove { provider },
-                                &mut store,
-                            )
-                            .await
-                        })
-                    });
-                    match result {
-                        Ok(msg) => {
-                            self.set_status(&msg, StatusLevel::Info);
-                            Some((MessageKind::System, msg))
-                        }
-                        Err(err) => {
-                            self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                            Some((MessageKind::Error, format!("Failed: {err}")))
+                            })
+                        });
+                        match result {
+                            Ok(msg) => {
+                                self.set_status(&msg, StatusLevel::Info);
+                                Some((MessageKind::System, msg))
+                            }
+                            Err(err) => {
+                                self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                                Some((MessageKind::Error, format!("Failed: {err}")))
+                            }
                         }
                     }
                 } else {
@@ -202,21 +262,31 @@ impl App {
             "/credentials" => {
                 match arg {
                     Some("list") | None => {
-                        let result = tokio::task::block_in_place(|| {
-                            tokio::runtime::Handle::current().block_on(async {
-                                let store = ava_config::CredentialStore::load_default()
+                        if let Some(tx) = app_tx.clone() {
+                            self.set_status("Loading credentials...", StatusLevel::Info);
+                            self.spawn_credential_command(
+                                ava_config::CredentialCommand::List,
+                                Self::format_credentials_list_result,
+                                tx,
+                            );
+                            None
+                        } else {
+                            let result = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current().block_on(async {
+                                    let store = ava_config::CredentialStore::load_default()
+                                        .await
+                                        .unwrap_or_default();
+                                    ava_config::execute_credential_command(
+                                        ava_config::CredentialCommand::List,
+                                        &mut store.clone(),
+                                    )
                                     .await
-                                    .unwrap_or_default();
-                                ava_config::execute_credential_command(
-                                    ava_config::CredentialCommand::List,
-                                    &mut store.clone(),
-                                )
-                                .await
-                            })
-                        });
-                        match result {
-                            Ok(msg) => Some((MessageKind::System, format!("Credentials:\n{msg}"))),
-                            Err(err) => Some((MessageKind::Error, format!("Failed: {err}"))),
+                                })
+                            });
+                            match result {
+                                Ok(msg) => Some((MessageKind::System, format!("Credentials:\n{msg}"))),
+                                Err(err) => Some((MessageKind::Error, format!("Failed: {err}"))),
+                            }
                         }
                     }
                     Some(sub) if sub.starts_with("add ") || sub.starts_with("set ") => {
@@ -225,30 +295,44 @@ impl App {
                         if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
                             let provider = parts[0].to_lowercase();
                             let api_key = parts[1].to_string();
-                            let result = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current().block_on(async {
-                                    let mut store = ava_config::CredentialStore::load_default()
+                            if let Some(tx) = app_tx.clone() {
+                                self.set_status(format!("Saving credentials for {provider}..."), StatusLevel::Info);
+                                self.spawn_credential_command(
+                                    ava_config::CredentialCommand::Set {
+                                        provider,
+                                        api_key,
+                                        base_url: None,
+                                    },
+                                    Self::format_standard_credential_result,
+                                    tx,
+                                );
+                                None
+                            } else {
+                                let result = tokio::task::block_in_place(|| {
+                                    tokio::runtime::Handle::current().block_on(async {
+                                        let mut store = ava_config::CredentialStore::load_default()
+                                            .await
+                                            .unwrap_or_default();
+                                        ava_config::execute_credential_command(
+                                            ava_config::CredentialCommand::Set {
+                                                provider,
+                                                api_key,
+                                                base_url: None,
+                                            },
+                                            &mut store,
+                                        )
                                         .await
-                                        .unwrap_or_default();
-                                    ava_config::execute_credential_command(
-                                        ava_config::CredentialCommand::Set {
-                                            provider,
-                                            api_key,
-                                            base_url: None,
-                                        },
-                                        &mut store,
-                                    )
-                                    .await
-                                })
-                            });
-                            match result {
-                                Ok(msg) => {
-                                    self.set_status(&msg, StatusLevel::Info);
-                                    Some((MessageKind::System, msg))
-                                }
-                                Err(err) => {
-                                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                                    Some((MessageKind::Error, format!("Failed: {err}")))
+                                    })
+                                });
+                                match result {
+                                    Ok(msg) => {
+                                        self.set_status(&msg, StatusLevel::Info);
+                                        Some((MessageKind::System, msg))
+                                    }
+                                    Err(err) => {
+                                        self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                                        Some((MessageKind::Error, format!("Failed: {err}")))
+                                    }
                                 }
                             }
                         } else {
@@ -266,26 +350,36 @@ impl App {
                                 "Usage: /credentials remove <provider>".to_string(),
                             ))
                         } else {
-                            let result = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current().block_on(async {
-                                    let mut store = ava_config::CredentialStore::load_default()
+                            if let Some(tx) = app_tx.clone() {
+                                self.set_status(format!("Removing credentials for {provider}..."), StatusLevel::Info);
+                                self.spawn_credential_command(
+                                    ava_config::CredentialCommand::Remove { provider },
+                                    Self::format_standard_credential_result,
+                                    tx,
+                                );
+                                None
+                            } else {
+                                let result = tokio::task::block_in_place(|| {
+                                    tokio::runtime::Handle::current().block_on(async {
+                                        let mut store = ava_config::CredentialStore::load_default()
+                                            .await
+                                            .unwrap_or_default();
+                                        ava_config::execute_credential_command(
+                                            ava_config::CredentialCommand::Remove { provider },
+                                            &mut store,
+                                        )
                                         .await
-                                        .unwrap_or_default();
-                                    ava_config::execute_credential_command(
-                                        ava_config::CredentialCommand::Remove { provider },
-                                        &mut store,
-                                    )
-                                    .await
-                                })
-                            });
-                            match result {
-                                Ok(msg) => {
-                                    self.set_status(&msg, StatusLevel::Info);
-                                    Some((MessageKind::System, msg))
-                                }
-                                Err(err) => {
-                                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                                    Some((MessageKind::Error, format!("Failed: {err}")))
+                                    })
+                                });
+                                match result {
+                                    Ok(msg) => {
+                                        self.set_status(&msg, StatusLevel::Info);
+                                        Some((MessageKind::System, msg))
+                                    }
+                                    Err(err) => {
+                                        self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                                        Some((MessageKind::Error, format!("Failed: {err}")))
+                                    }
                                 }
                             }
                         }
@@ -297,6 +391,11 @@ impl App {
                 }
             }
             "/status" => {
+                if let Some(app_tx) = app_tx {
+                    self.spawn_status_message(app_tx);
+                    return None;
+                }
+
                 let model = self.state.agent.current_model_display();
                 let tokens_in = self.state.agent.tokens_used.input;
                 let tokens_out = self.state.agent.tokens_used.output;
@@ -405,7 +504,7 @@ impl App {
                 None
             }
             "/sessions" => {
-                self.execute_command_action(Action::SessionList);
+                self.execute_command_action(Action::SessionList, app_tx.clone());
                 None
             }
             "/permissions" => {
@@ -441,6 +540,11 @@ impl App {
                 }
             }
             "/commit" => {
+                if let Some(app_tx) = app_tx {
+                    self.spawn_commit_prep(app_tx);
+                    return None;
+                }
+
                 let result = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async {
                         tokio::task::spawn_blocking(handle_commit_command).await
@@ -671,11 +775,7 @@ Keyboard shortcuts:
                             ava_types::MessageTier::FollowUp => "[F]".to_string(),
                             ava_types::MessageTier::PostComplete { group } => format!("[G{group}]"),
                         };
-                        let truncated = if item.text.len() > 60 {
-                            format!("{}...", &item.text[..57])
-                        } else {
-                            item.text.clone()
-                        };
+                        let truncated = crate::text_utils::truncate_display(&item.text, 60);
                         lines.push(format!("{badge} {truncated}"));
                     }
                     Some((MessageKind::System, format!("Queued messages:\n{}", lines.join("\n"))))
@@ -922,36 +1022,42 @@ Keyboard shortcuts:
             .collect();
     }
 
-    pub(crate) fn execute_command_action(&mut self, action: Action) {
+    pub(crate) fn execute_command_action(
+        &mut self,
+        action: Action,
+        app_tx: Option<mpsc::UnboundedSender<AppEvent>>,
+    ) {
         match action {
             Action::ModelSwitch => {
-                // Load credentials + catalog for dynamic model list
-                let (credentials, catalog) = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async {
-                        let creds = ava_config::CredentialStore::load_default()
-                            .await
-                            .unwrap_or_default();
-                        let cat = self.state.model_catalog.get().await;
-                        (creds, cat)
-                    })
-                });
-                // Use fallback catalog if dynamic fetch hasn't completed yet,
-                // then merge fallback entries for providers not in models.dev
-                // (copilot, coding plan providers, etc.)
-                let mut effective_catalog = if catalog.is_empty() {
-                    ava_config::fallback_catalog()
+                if let Some(tx) = app_tx {
+                    self.state.model_selector = Some(ModelSelectorState::default());
+                    self.state.active_modal = Some(ModalType::ModelSelector);
+                    self.spawn_model_selector_load(tx);
                 } else {
-                    catalog
-                };
-                effective_catalog.merge_fallback();
-                self.state.model_selector = Some(ModelSelectorState::from_catalog(
-                    &effective_catalog,
-                    &credentials,
-                    &self.state.agent.recent_models,
-                    &self.state.agent.model_name,
-                    &self.state.agent.provider_name,
-                ));
-                self.state.active_modal = Some(ModalType::ModelSelector);
+                    let (credentials, catalog) = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(async {
+                            let creds = ava_config::CredentialStore::load_default()
+                                .await
+                                .unwrap_or_default();
+                            let cat = self.state.model_catalog.get().await;
+                            (creds, cat)
+                        })
+                    });
+                    let mut effective_catalog = if catalog.is_empty() {
+                        ava_config::fallback_catalog()
+                    } else {
+                        catalog
+                    };
+                    effective_catalog.merge_fallback();
+                    self.state.model_selector = Some(ModelSelectorState::from_catalog(
+                        &effective_catalog,
+                        &credentials,
+                        &self.state.agent.recent_models,
+                        &self.state.agent.model_name,
+                        &self.state.agent.provider_name,
+                    ));
+                    self.state.active_modal = Some(ModalType::ModelSelector);
+                }
             }
             Action::NewSession => {
                 let _ = self.state.session.create_session();
@@ -959,11 +1065,14 @@ Keyboard shortcuts:
                 self.set_status("New session created", StatusLevel::Info);
             }
             Action::SessionList => {
-                if let Ok(sessions) = self.state.session.list_recent(50) {
-                    self.state.session_list.update_sessions(&sessions);
-                }
+                self.state.session_list.update_sessions(&[]);
                 self.state.session_list.open = true;
                 self.state.active_modal = Some(ModalType::SessionList);
+                if let Some(tx) = app_tx {
+                    self.spawn_session_list_load(tx);
+                } else if let Ok(sessions) = self.state.session.list_recent(50) {
+                    self.state.session_list.update_sessions(&sessions);
+                }
             }
             Action::PermissionToggle => {
                 self.state.permission.permission_level =
@@ -1002,7 +1111,7 @@ Keyboard shortcuts:
             }
             Action::ForceCompact => {
                 // Delegate to the /compact slash command for context usage display
-                if let Some((kind, msg)) = self.handle_slash_command("/compact") {
+                if let Some((kind, msg)) = self.handle_slash_command("/compact", app_tx.clone()) {
                     self.state.messages.push(UiMessage::new(kind, msg));
                 }
             }
@@ -1022,6 +1131,40 @@ Keyboard shortcuts:
                 self.should_quit = true;
             }
             _ => {}
+        }
+    }
+
+    fn format_standard_credential_result(
+        result: Result<String, String>,
+    ) -> crate::event::CommandMessageResult {
+        match result {
+            Ok(msg) => crate::event::CommandMessageResult {
+                kind: MessageKind::System,
+                content: msg.clone(),
+                status: Some((StatusLevel::Info, msg)),
+            },
+            Err(err) => crate::event::CommandMessageResult {
+                kind: MessageKind::Error,
+                content: format!("Failed: {err}"),
+                status: Some((StatusLevel::Error, format!("Failed: {err}"))),
+            },
+        }
+    }
+
+    fn format_credentials_list_result(
+        result: Result<String, String>,
+    ) -> crate::event::CommandMessageResult {
+        match result {
+            Ok(msg) => crate::event::CommandMessageResult {
+                kind: MessageKind::System,
+                content: format!("Credentials:\n{msg}"),
+                status: Some((StatusLevel::Info, "Credentials loaded".to_string())),
+            },
+            Err(err) => crate::event::CommandMessageResult {
+                kind: MessageKind::Error,
+                content: format!("Failed: {err}"),
+                status: Some((StatusLevel::Error, format!("Failed: {err}"))),
+            },
         }
     }
 
@@ -1116,12 +1259,12 @@ Keyboard shortcuts:
                 }
                 MessageKind::ToolResult => {
                     out.push_str("## Tool Result\n");
-                    // Truncate tool results to 500 chars
-                    if msg.content.len() > 500 {
-                        out.push_str(&msg.content[..500]);
+                    // Truncate tool results to 500 display columns
+                    let content_truncated = crate::text_utils::truncate_display(&msg.content, 500);
+                    out.push_str(&content_truncated);
+                    if content_truncated.len() != msg.content.len() {
                         out.push_str("\n... (truncated)\n");
                     } else {
-                        out.push_str(&msg.content);
                         out.push('\n');
                     }
                     out.push_str("\n---\n\n");
@@ -1427,7 +1570,7 @@ Keyboard shortcuts:
     }
 }
 
-fn handle_commit_command() -> (MessageKind, String) {
+pub(super) fn handle_commit_command() -> (MessageKind, String) {
     if !git_command_succeeds(["rev-parse", "--is-inside-work-tree"]) {
         return (
             MessageKind::Error,
@@ -1703,6 +1846,10 @@ fn normalize_status_path(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{suggest_scope, CommitPrepStatus, GitStatusEntry};
+    use crate::app::{App, ModalType};
+    use crate::event::{AppEvent, ModelSwitchContext};
+    use tempfile::tempdir;
+    use tokio::sync::mpsc;
 
     #[test]
     fn commit_prep_counts_status_groups() {
@@ -1741,5 +1888,45 @@ mod tests {
     fn commit_prep_uses_rename_destination_for_scope() {
         let entry = GitStatusEntry::parse("R  old/name.rs -> new/name.rs").unwrap();
         assert_eq!(suggest_scope(&[&entry]), "new/name.rs");
+    }
+
+    #[tokio::test]
+    async fn slash_model_switch_uses_async_event_when_sender_available() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("data.db");
+        let mut app = App::test_new(&db_path);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let result = app.handle_slash_command("/model openrouter/test-model", Some(tx));
+
+        assert!(result.is_none());
+        match rx.recv().await {
+            Some(AppEvent::ModelSwitchFinished(result)) => {
+                assert_eq!(result.provider, "openrouter");
+                assert_eq!(result.model, "test-model");
+                assert!(matches!(result.context, ModelSwitchContext::SlashCommand));
+                assert!(result.result.is_err());
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn slash_tools_opens_modal_and_loads_async() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("data.db");
+        let mut app = App::test_new(&db_path);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let result = app.handle_slash_command("/tools", Some(tx));
+
+        assert!(result.is_none());
+        assert!(matches!(app.state.active_modal, Some(ModalType::ToolList)));
+        match rx.recv().await {
+            Some(AppEvent::ToolListLoaded(Err(err))) => {
+                assert!(err.contains("AgentStack not initialised"));
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
     }
 }

@@ -97,11 +97,7 @@ pub struct RewindState {
 impl RewindState {
     /// Create a new checkpoint for a user message.
     pub fn create_checkpoint(&mut self, message_index: usize, message_content: &str) {
-        let preview = if message_content.len() > 80 {
-            format!("{}...", &message_content[..77])
-        } else {
-            message_content.to_string()
-        };
+        let preview = crate::text_utils::truncate_display(message_content, 80);
         // Replace newlines with spaces for the preview
         let preview = preview.replace('\n', " ");
 

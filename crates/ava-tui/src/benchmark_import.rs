@@ -166,8 +166,8 @@ fn read_instructions(exercise_dir: &Path) -> Result<String> {
 /// Read the test file and count test functions.
 fn read_test_file(exercise_dir: &Path, language: Language) -> Result<(String, usize)> {
     let test_path = find_test_file(exercise_dir, language)?;
-    let content =
-        std::fs::read_to_string(&test_path).map_err(|e| eyre!("Failed to read test file: {}", e))?;
+    let content = std::fs::read_to_string(&test_path)
+        .map_err(|e| eyre!("Failed to read test file: {}", e))?;
 
     let test_count = count_tests(&content, language);
     if test_count == 0 {
@@ -231,30 +231,24 @@ fn find_test_file(exercise_dir: &Path, language: Language) -> Result<PathBuf> {
 fn count_tests(content: &str, language: Language) -> usize {
     match language {
         Language::Rust => content.matches("#[test]").count(),
-        Language::Python => {
-            content
-                .lines()
-                .filter(|l| {
-                    let trimmed = l.trim();
-                    trimmed.starts_with("def test_") || trimmed.starts_with("async def test_")
-                })
-                .count()
-        }
-        Language::JavaScript => {
-            content
-                .lines()
-                .filter(|l| {
-                    let trimmed = l.trim();
-                    trimmed.starts_with("it(") || trimmed.starts_with("test(")
-                })
-                .count()
-        }
-        Language::Go => {
-            content
-                .lines()
-                .filter(|l| l.trim().starts_with("func Test"))
-                .count()
-        }
+        Language::Python => content
+            .lines()
+            .filter(|l| {
+                let trimmed = l.trim();
+                trimmed.starts_with("def test_") || trimmed.starts_with("async def test_")
+            })
+            .count(),
+        Language::JavaScript => content
+            .lines()
+            .filter(|l| {
+                let trimmed = l.trim();
+                trimmed.starts_with("it(") || trimmed.starts_with("test(")
+            })
+            .count(),
+        Language::Go => content
+            .lines()
+            .filter(|l| l.trim().starts_with("func Test"))
+            .count(),
     }
 }
 

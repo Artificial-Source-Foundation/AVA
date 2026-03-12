@@ -90,20 +90,14 @@ pub fn render_slash_menu(
         ));
         spans.push(Span::styled(
             item.value.clone(),
-            Style::default()
-                .fg(fg)
-                .bg(bg)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
         ));
 
         // Right-align the description
         let left_len = prefix.len();
         if !detail.is_empty() && inner_width > left_len + detail.len() + 2 {
             let padding = inner_width - left_len - detail.len();
-            spans.push(Span::styled(
-                " ".repeat(padding),
-                Style::default().bg(bg),
-            ));
+            spans.push(Span::styled(" ".repeat(padding), Style::default().bg(bg)));
             spans.push(Span::styled(
                 detail.clone(),
                 Style::default().fg(detail_fg).bg(bg),

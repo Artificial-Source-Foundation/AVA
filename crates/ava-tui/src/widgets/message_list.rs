@@ -66,11 +66,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
 
     // Add breadcrumb header when viewing a background task or sub-agent conversation.
     if let ViewMode::BackgroundTask { task_id, goal } = &state.view_mode {
-        let truncated_goal = if goal.len() > 55 {
-            format!("{}...", &goal[..52])
-        } else {
-            goal.clone()
-        };
+        let truncated_goal = crate::text_utils::truncate_display(goal, 55);
         let bg = state.background.lock().unwrap();
         let status_str = if let Some(task) = bg.tasks.iter().find(|t| t.id == *task_id) {
             format!(" ({})", task.status)
@@ -91,20 +87,14 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
                     .fg(state.theme.primary)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                " > ",
-                Style::default().fg(state.theme.text_dimmed),
-            ),
+            Span::styled(" > ", Style::default().fg(state.theme.text_dimmed)),
             Span::styled(
                 format!("Task #{task_id}: {truncated_goal}"),
                 Style::default()
                     .fg(state.theme.accent)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                status_str,
-                Style::default().fg(state.theme.text_muted),
-            ),
+            Span::styled(status_str, Style::default().fg(state.theme.text_muted)),
         ]));
         lines.push(Line::from(Span::styled(
             "\u{2500}".repeat(area.width as usize),
@@ -114,11 +104,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     }
 
     if let ViewMode::SubAgent { description, .. } = &state.view_mode {
-        let truncated_desc = if description.len() > 60 {
-            format!("{}...", &description[..57])
-        } else {
-            description.clone()
-        };
+        let truncated_desc = crate::text_utils::truncate_display(description, 60);
         lines.push(Line::from(vec![
             Span::styled(
                 "\u{2190} ",
@@ -132,10 +118,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
                     .fg(state.theme.primary)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                " > ",
-                Style::default().fg(state.theme.text_dimmed),
-            ),
+            Span::styled(" > ", Style::default().fg(state.theme.text_dimmed)),
             Span::styled(
                 format!("Sub-agent: {truncated_desc}"),
                 Style::default()
@@ -154,7 +137,12 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         if i > 0 {
             lines.push(Line::raw(""));
         }
-        lines.extend(render_message(message, &state.theme, spinner_tick, area.width));
+        lines.extend(render_message(
+            message,
+            &state.theme,
+            spinner_tick,
+            area.width,
+        ));
     }
 
     // Bottom padding: 1 blank line between last message and composer.
@@ -178,8 +166,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         state.messages.scroll_offset = max_offset;
     }
 
-    let widget = Paragraph::new(lines)
-        .scroll((state.messages.scroll_offset, 0));
+    let widget = Paragraph::new(lines).scroll((state.messages.scroll_offset, 0));
     frame.render_widget(widget, area);
 
     // Render scroll indicator when not at bottom (content overflows).

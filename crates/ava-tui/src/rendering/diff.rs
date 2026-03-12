@@ -25,8 +25,7 @@ pub fn render_diff(old: &str, new: &str, theme: &Theme) -> Vec<Line<'static>> {
                 if i + 1 < changes.len() && changes[i + 1].tag() == ChangeTag::Insert {
                     let old_line = change.value().trim_end_matches('\n');
                     let new_line = changes[i + 1].value().trim_end_matches('\n');
-                    let (del_spans, add_spans) =
-                        word_level_spans(old_line, new_line, theme);
+                    let (del_spans, add_spans) = word_level_spans(old_line, new_line, theme);
                     lines.push(Line::from(del_spans));
                     lines.push(Line::from(add_spans));
                     i += 2;
@@ -116,8 +115,12 @@ mod tests {
         assert!(del.len() >= 2);
         assert!(add.len() >= 2);
         // Check that bold modifier is present on changed words
-        let bold_del = del.iter().any(|s| s.style.add_modifier.contains(Modifier::BOLD));
-        let bold_add = add.iter().any(|s| s.style.add_modifier.contains(Modifier::BOLD));
+        let bold_del = del
+            .iter()
+            .any(|s| s.style.add_modifier.contains(Modifier::BOLD));
+        let bold_add = add
+            .iter()
+            .any(|s| s.style.add_modifier.contains(Modifier::BOLD));
         assert!(bold_del, "delete line should have bold highlighted word");
         assert!(bold_add, "add line should have bold highlighted word");
     }

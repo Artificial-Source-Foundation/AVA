@@ -60,7 +60,12 @@ pub fn render_welcome(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     // Right-justify labels: "Model" and "cwd" both get 6-char label columns.
     // Pad the shorter line so both have equal total width for correct center alignment.
     let label_width = 6; // "Model " and "  cwd " are both 6 chars
-    let model_line_content = format!("{:>width$} {}", "Model", &model_display, width = label_width - 1);
+    let model_line_content = format!(
+        "{:>width$} {}",
+        "Model",
+        &model_display,
+        width = label_width - 1
+    );
     let cwd_line_content = format!("{:>width$} {}", "cwd", &cwd, width = label_width - 1);
     let model_line_len = model_line_content.len();
     let cwd_line_len = cwd_line_content.len();
@@ -72,10 +77,12 @@ pub fn render_welcome(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             Style::default().fg(theme.text_dimmed),
         ),
         Span::styled(
-            format!("{:<width$}", model_display, width = max_info_width - label_width),
-            Style::default()
-                .fg(theme.text)
-                .add_modifier(Modifier::BOLD),
+            format!(
+                "{:<width$}",
+                model_display,
+                width = max_info_width - label_width
+            ),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
     ]));
     lines.push(Line::from(vec![
@@ -104,9 +111,7 @@ pub fn render_welcome(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         // Design gap: 12px → 1 blank line
         lines.push(Line::from(""));
 
-        let key_style = Style::default()
-            .fg(theme.text)
-            .add_modifier(Modifier::BOLD);
+        let key_style = Style::default().fg(theme.text).add_modifier(Modifier::BOLD);
         let desc_style = Style::default().fg(theme.text_muted);
 
         let grid: &[(&str, &str, &str, &str)] = &[

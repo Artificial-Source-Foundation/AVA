@@ -9,12 +9,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
-pub fn render_rewind_modal(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    rewind: &RewindState,
-    theme: &Theme,
-) {
+pub fn render_rewind_modal(frame: &mut Frame<'_>, area: Rect, rewind: &RewindState, theme: &Theme) {
     let mut lines: Vec<Line<'_>> = Vec::new();
 
     // Title
@@ -34,12 +29,9 @@ pub fn render_rewind_modal(
         )));
         lines.push(Line::from(""));
 
-        // Truncate preview to first 50 chars for the display
-        let preview = if checkpoint.message_preview.len() > 50 {
-            format!("\"{}...\"", &checkpoint.message_preview[..47])
-        } else {
-            format!("\"{}\"", &checkpoint.message_preview)
-        };
+        // Truncate preview to first 50 display columns
+        let truncated = crate::text_utils::truncate_display(&checkpoint.message_preview, 50);
+        let preview = format!("\"{truncated}\"");
         lines.push(Line::from(Span::styled(
             format!("  {preview}"),
             Style::default()

@@ -75,7 +75,9 @@ impl Transcriber for WhisperApiClient {
             .timeout(std::time::Duration::from_secs(30))
             .send()
             .await
-            .map_err(|e| ava_types::AvaError::IoError(format!("Whisper API request failed: {e}")))?;
+            .map_err(|e| {
+                ava_types::AvaError::IoError(format!("Whisper API request failed: {e}"))
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -140,7 +142,8 @@ impl Transcriber for LocalWhisper {
             let ctx = whisper_rs::WhisperContext::new(&model_path.to_string_lossy())
                 .map_err(|e| ava_types::AvaError::ToolError(format!("Whisper init: {e}")))?;
 
-            let mut params = whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
+            let mut params =
+                whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
             if let Some(ref lang) = language {
                 params.set_language(Some(lang));
             }
@@ -158,12 +161,15 @@ impl Transcriber for LocalWhisper {
                 .map(|s| s as f32 / i16::MAX as f32)
                 .collect();
 
-            let mut state = ctx.create_state()
+            let mut state = ctx
+                .create_state()
                 .map_err(|e| ava_types::AvaError::ToolError(format!("Whisper state: {e}")))?;
-            state.full(params, &samples)
+            state
+                .full(params, &samples)
                 .map_err(|e| ava_types::AvaError::ToolError(format!("Whisper run: {e}")))?;
 
-            let num_segments = state.full_n_segments()
+            let num_segments = state
+                .full_n_segments()
                 .map_err(|e| ava_types::AvaError::ToolError(format!("Whisper segments: {e}")))?;
             let mut text = String::new();
             for i in 0..num_segments {
@@ -182,9 +188,7 @@ impl Transcriber for LocalWhisper {
 /// Create a transcriber based on configuration.
 ///
 /// Prefers local Whisper if the model file exists, otherwise falls back to API.
-pub async fn create_transcriber(
-    config: &ava_config::VoiceConfig,
-) -> Result<Box<dyn Transcriber>> {
+pub async fn create_transcriber(config: &ava_config::VoiceConfig) -> Result<Box<dyn Transcriber>> {
     #[cfg(feature = "local-whisper")]
     {
         let model_path = dirs::home_dir()

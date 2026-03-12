@@ -52,8 +52,8 @@ pub struct UiMessage {
 
 /// Braille spinner frames for streaming/working animation.
 pub const SPINNER_FRAMES: &[&str] = &[
-    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}",
-    "\u{2827}", "\u{2807}", "\u{280f}",
+    "\u{280b}", "\u{2819}", "\u{2839}", "\u{2838}", "\u{283c}", "\u{2834}", "\u{2826}", "\u{2827}",
+    "\u{2807}", "\u{280f}",
 ];
 
 /// Returns the current spinner frame based on a tick counter.
@@ -96,11 +96,7 @@ impl UiMessage {
 
     /// Prepend a colored left bar + padding to each line, then manually
     /// wrap so that every visual row carries its own bar prefix.
-    fn prepend_bars(
-        lines: &mut Vec<Line<'static>>,
-        color: ratatui::style::Color,
-        width: u16,
-    ) {
+    fn prepend_bars(lines: &mut Vec<Line<'static>>, color: ratatui::style::Color, width: u16) {
         let content_width = if width > Self::BAR_PREFIX_WIDTH {
             (width - Self::BAR_PREFIX_WIDTH) as usize
         } else {
@@ -131,10 +127,7 @@ impl UiMessage {
     /// Break a sequence of spans into multiple rows, each fitting within
     /// `max_width` display columns. Splits on word boundaries when possible,
     /// falling back to character-level splits for long words.
-    fn wrap_line_spans(
-        spans: Vec<Span<'static>>,
-        max_width: usize,
-    ) -> Vec<Vec<Span<'static>>> {
+    fn wrap_line_spans(spans: Vec<Span<'static>>, max_width: usize) -> Vec<Vec<Span<'static>>> {
         if max_width == 0 {
             return vec![spans];
         }
@@ -202,10 +195,7 @@ impl UiMessage {
                         // Force at least one char to avoid infinite loop.
                         let ch = remaining.chars().next().unwrap();
                         let clen = ch.len_utf8();
-                        current_row.push(Span::styled(
-                            remaining[..clen].to_owned(),
-                            style,
-                        ));
+                        current_row.push(Span::styled(remaining[..clen].to_owned(), style));
                         remaining = &remaining[clen..];
                         rows.push(std::mem::take(&mut current_row));
                         current_width = 0;
@@ -305,9 +295,10 @@ impl UiMessage {
                     .content
                     .lines()
                     .map(|l| {
-                        Line::from(vec![
-                            Span::styled(l.to_owned(), Style::default().fg(theme.text)),
-                        ])
+                        Line::from(vec![Span::styled(
+                            l.to_owned(),
+                            Style::default().fg(theme.text),
+                        )])
                     })
                     .collect();
                 if result.is_empty() {
@@ -328,10 +319,7 @@ impl UiMessage {
                 };
                 let rest = self.content[tool_name.len()..].trim_start();
                 let mut spans = vec![
-                    Span::styled(
-                        "\u{25b8} ",
-                        Style::default().fg(icon_color),
-                    ),
+                    Span::styled("\u{25b8} ", Style::default().fg(icon_color)),
                     Span::styled(
                         format!("{tool_name} "),
                         Style::default()
@@ -385,29 +373,19 @@ impl UiMessage {
                 let style = Style::default()
                     .fg(theme.text_dimmed)
                     .add_modifier(Modifier::ITALIC);
-                let dot = Span::styled(
-                    "\u{25cf} ",
-                    Style::default().fg(theme.primary),
-                );
+                let dot = Span::styled("\u{25cf} ", Style::default().fg(theme.primary));
 
                 if self.content.is_empty() {
-                    let mut result = vec![Line::from(vec![
-                        dot,
-                        Span::styled("Thinking...", style),
-                    ])];
+                    let mut result =
+                        vec![Line::from(vec![dot, Span::styled("Thinking...", style)])];
                     Self::prepend_bars(&mut result, bar_color, width);
                     result
                 } else {
                     // Header line
-                    let mut result = vec![Line::from(vec![
-                        dot,
-                        Span::styled("Thinking", style),
-                    ])];
+                    let mut result = vec![Line::from(vec![dot, Span::styled("Thinking", style)])];
                     // Full thinking content, split by newlines
                     for text_line in self.content.lines() {
-                        result.push(Line::from(vec![
-                            Span::styled(text_line.to_string(), style),
-                        ]));
+                        result.push(Line::from(vec![Span::styled(text_line.to_string(), style)]));
                     }
                     Self::prepend_bars(&mut result, bar_color, width);
                     result
@@ -421,10 +399,7 @@ impl UiMessage {
                             .fg(theme.error)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(
-                        self.content.clone(),
-                        Style::default().fg(theme.error),
-                    ),
+                    Span::styled(self.content.clone(), Style::default().fg(theme.error)),
                 ])];
                 Self::prepend_bars(&mut result, bar_color, width);
                 result
@@ -436,7 +411,8 @@ impl UiMessage {
                     Style::default()
                         .fg(theme.text_dimmed)
                         .add_modifier(Modifier::ITALIC),
-                )).alignment(Alignment::Center)]
+                ))
+                .alignment(Alignment::Center)]
             }
             MessageKind::SubAgent => {
                 let data = self.sub_agent.as_ref();
@@ -474,44 +450,28 @@ impl UiMessage {
                 // Truncate description to fit inner width (minus icon + "Sub-agent: " prefix)
                 let prefix_len = 14; // icon(2) + "Sub-agent: "(11) + quote(1)
                 let max_desc = inner_width.saturating_sub(prefix_len + 1); // +1 for closing quote
-                let desc_display = if description.len() > max_desc && max_desc > 3 {
-                    format!("{}...", &description[..max_desc.saturating_sub(3)])
-                } else {
-                    description.to_string()
-                };
+                let desc_display = crate::text_utils::truncate_display(description, max_desc);
 
                 let mut result = Vec::new();
 
                 // ── Top border ──
                 let fill_len = box_outer_width.saturating_sub(2); // minus corners
-                let top_border = format!(
-                    "{top_left}{}{top_right}",
-                    horiz.repeat(fill_len)
-                );
+                let top_border = format!("{top_left}{}{top_right}", horiz.repeat(fill_len));
                 result.push(Line::from(Span::styled(top_border, border_style)));
 
                 if is_running {
                     // ── Header: spinner + "Sub-agent: description" ──
                     let frame = spinner_frame(spinner_tick);
                     let header_content_spans = vec![
-                        Span::styled(
-                            format!("{frame} "),
-                            Style::default().fg(theme.accent),
-                        ),
+                        Span::styled(format!("{frame} "), Style::default().fg(theme.accent)),
                         Span::styled("Sub-agent: ", accent_style),
-                        Span::styled(
-                            desc_display.clone(),
-                            Style::default().fg(theme.text_muted),
-                        ),
+                        Span::styled(desc_display.clone(), Style::default().fg(theme.text_muted)),
                     ];
-                    let header_text_width: usize = header_content_spans
-                        .iter()
-                        .map(|s| s.content.width())
-                        .sum();
+                    let header_text_width: usize =
+                        header_content_spans.iter().map(|s| s.content.width()).sum();
                     let header_pad = inner_width.saturating_sub(header_text_width);
-                    let mut header_line_spans = vec![
-                        Span::styled(format!("{vert} "), border_style),
-                    ];
+                    let mut header_line_spans =
+                        vec![Span::styled(format!("{vert} "), border_style)];
                     header_line_spans.extend(header_content_spans);
                     header_line_spans.push(Span::styled(
                         format!("{}{vert}", " ".repeat(header_pad)),
@@ -534,19 +494,13 @@ impl UiMessage {
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled("Sub-agent: ", accent_style),
-                        Span::styled(
-                            desc_display.clone(),
-                            Style::default().fg(theme.text_muted),
-                        ),
+                        Span::styled(desc_display.clone(), Style::default().fg(theme.text_muted)),
                     ];
-                    let header_text_width: usize = header_content_spans
-                        .iter()
-                        .map(|s| s.content.width())
-                        .sum();
+                    let header_text_width: usize =
+                        header_content_spans.iter().map(|s| s.content.width()).sum();
                     let header_pad = inner_width.saturating_sub(header_text_width);
-                    let mut header_line_spans = vec![
-                        Span::styled(format!("{vert} "), border_style),
-                    ];
+                    let mut header_line_spans =
+                        vec![Span::styled(format!("{vert} "), border_style)];
                     header_line_spans.extend(header_content_spans);
                     header_line_spans.push(Span::styled(
                         format!("{}{vert}", " ".repeat(header_pad)),
@@ -568,10 +522,7 @@ impl UiMessage {
                         result.push(Line::from(vec![
                             Span::styled(format!("{vert} "), border_style),
                             Span::styled(stats, dimmed_style),
-                            Span::styled(
-                                format!("{}{vert}", " ".repeat(stats_pad)),
-                                border_style,
-                            ),
+                            Span::styled(format!("{}{vert}", " ".repeat(stats_pad)), border_style),
                         ]));
                     }
 
@@ -579,10 +530,7 @@ impl UiMessage {
                     if !self.content.is_empty() {
                         // Inner separator: ├───┤
                         let sep_fill = box_outer_width.saturating_sub(2);
-                        let sep = format!(
-                            "\u{251c}{}\u{2524}",
-                            horiz.repeat(sep_fill)
-                        );
+                        let sep = format!("\u{251c}{}\u{2524}", horiz.repeat(sep_fill));
                         result.push(Line::from(Span::styled(sep, border_style)));
 
                         let content_lines: Vec<&str> = self.content.lines().collect();
@@ -623,10 +571,8 @@ impl UiMessage {
                             ]));
                         }
                         if truncated {
-                            let more_text = format!(
-                                "[+{} more lines]",
-                                content_lines.len() - show_lines
-                            );
+                            let more_text =
+                                format!("[+{} more lines]", content_lines.len() - show_lines);
                             let more_width = more_text.width();
                             let more_pad = inner_width.saturating_sub(more_width);
                             result.push(Line::from(vec![
@@ -662,10 +608,7 @@ impl UiMessage {
                                     .fg(theme.accent)
                                     .add_modifier(Modifier::DIM | Modifier::ITALIC),
                             ),
-                            Span::styled(
-                                format!("{}{vert}", " ".repeat(hint_pad)),
-                                border_style,
-                            ),
+                            Span::styled(format!("{}{vert}", " ".repeat(hint_pad)), border_style),
                         ]));
                     }
                 }

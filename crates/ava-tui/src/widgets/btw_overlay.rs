@@ -26,9 +26,7 @@ pub fn render_btw_overlay(frame: &mut Frame<'_>, btw: &BtwState, theme: &Theme) 
     let popup = centered_rect(55, 60, area);
 
     // Dimmed backdrop
-    let backdrop = Block::default().style(
-        Style::default().bg(ratatui::style::Color::Rgb(0, 0, 0)),
-    );
+    let backdrop = Block::default().style(Style::default().bg(ratatui::style::Color::Rgb(0, 0, 0)));
     frame.render_widget(backdrop, area);
 
     // Clear and draw the overlay box
@@ -53,7 +51,7 @@ pub fn render_btw_overlay(frame: &mut Frame<'_>, btw: &BtwState, theme: &Theme) 
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3), // question
-            Constraint::Min(1),   // answer
+            Constraint::Min(1),    // answer
             Constraint::Length(1), // footer
         ])
         .split(inner);
@@ -67,9 +65,7 @@ pub fn render_btw_overlay(frame: &mut Frame<'_>, btw: &BtwState, theme: &Theme) 
             .map(|l| {
                 Line::from(Span::styled(
                     l,
-                    Style::default()
-                        .fg(theme.text)
-                        .add_modifier(Modifier::BOLD),
+                    Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
                 ))
             })
             .collect::<Vec<_>>(),
@@ -86,23 +82,17 @@ pub fn render_btw_overlay(frame: &mut Frame<'_>, btw: &BtwState, theme: &Theme) 
     let footer = Line::from(vec![
         Span::styled(
             "Space",
-            Style::default()
-                .fg(theme.text)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
         Span::styled(" / ", Style::default().fg(theme.text_muted)),
         Span::styled(
             "Enter",
-            Style::default()
-                .fg(theme.text)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
         Span::styled(" / ", Style::default().fg(theme.text_muted)),
         Span::styled(
             "Esc",
-            Style::default()
-                .fg(theme.text)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
         Span::styled(" to dismiss", Style::default().fg(theme.text_muted)),
     ]);

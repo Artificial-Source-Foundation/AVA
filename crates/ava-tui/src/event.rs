@@ -1,5 +1,12 @@
 use crate::state::agent::TokenUsage;
+use crate::state::messages::MessageKind;
+use crate::ui::status_bar::StatusLevel;
+use crate::widgets::model_selector::ModelSelectorState;
+use crate::widgets::provider_connect::ProviderConnectState;
+use crate::widgets::tool_list::ToolListItem;
+use ava_agent::stack::MCPServerInfo;
 use ava_agent::AgentEvent;
+use ava_types::Session;
 use crossterm::event::{Event as CEvent, EventStream, KeyEvent, MouseEvent, MouseEventKind};
 use futures::StreamExt;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -7,15 +14,83 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+#[derive(Debug)]
+pub enum ModelSwitchContext {
+    Selector,
+    SessionRestore,
+    SlashCommand,
+}
+
+#[derive(Debug)]
+pub struct ModelSwitchResult {
+    pub provider: String,
+    pub model: String,
+    pub display: String,
+    pub result: Result<(), String>,
+    pub context: ModelSwitchContext,
+}
+
+#[derive(Debug)]
+pub struct SessionLoadResult {
+    pub session: Session,
+    pub restore_model: Option<(String, String)>,
+}
+
+#[derive(Debug)]
+pub struct CommandMessageResult {
+    pub kind: MessageKind,
+    pub content: String,
+    pub status: Option<(StatusLevel, String)>,
+}
+
+#[derive(Debug)]
+pub enum ProviderConnectResult {
+    Loaded(ProviderConnectState),
+    Refreshed {
+        state: ProviderConnectState,
+        status: String,
+    },
+    Tested(Result<String, String>),
+    Saved(Result<String, String>),
+    OAuthStored {
+        provider: String,
+        result: Result<(), String>,
+    },
+    ConfigureLoaded {
+        provider_id: String,
+        base_url: String,
+    },
+    DeviceCodeReady {
+        provider_id: String,
+        device: ava_auth::device_code::DeviceCodeResponse,
+    },
+    InlineError(String),
+}
+
 pub enum AppEvent {
     Key(KeyEvent),
     Paste(String),
     Resize(u16, u16),
     Mouse(MouseEvent),
     Tick,
-    Agent(AgentEvent),
-    AgentDone(Result<ava_agent::stack::AgentRunResult, String>),
+    AgentRunEvent {
+        run_id: u64,
+        event: AgentEvent,
+    },
+    AgentRunDone {
+        run_id: u64,
+        result: Result<ava_agent::stack::AgentRunResult, String>,
+    },
     TokenUsage(TokenUsage),
+    ModelSelectorLoaded(Result<ModelSelectorState, String>),
+    ModelSwitchFinished(ModelSwitchResult),
+    ToolListLoaded(Result<Vec<ToolListItem>, String>),
+    McpServersLoaded(Result<Vec<MCPServerInfo>, String>),
+    CommandMessage(CommandMessageResult),
+    SessionListLoaded(Result<Vec<Session>, String>),
+    SessionLoaded(Result<SessionLoadResult, String>),
+    ProviderConnectLoaded(Result<ProviderConnectState, String>),
+    ProviderConnectFinished(ProviderConnectResult),
     ShellResult(crate::state::messages::MessageKind, String),
     /// Transcription complete — text ready to insert.
     VoiceReady(String),
@@ -26,13 +101,17 @@ pub enum AppEvent {
     /// Silence detected — auto-stop recording.
     VoiceSilenceDetected,
     /// OAuth flow completed successfully.
-    OAuthSuccess { provider: String, tokens: ava_auth::tokens::OAuthTokens },
+    OAuthSuccess {
+        provider: String,
+        tokens: ava_auth::tokens::OAuthTokens,
+    },
     /// OAuth flow failed.
-    OAuthError { provider: String, error: String },
+    OAuthError {
+        provider: String,
+        error: String,
+    },
     /// Agent is asking the user a question via the question tool.
     Question(ava_tools::core::question::QuestionRequest),
-    /// A background task completed or failed.
-    BackgroundTaskDone { task_id: usize, success: bool },
     /// A hook execution completed (fired asynchronously).
     HookResult {
         event: crate::hooks::HookEvent,
@@ -50,35 +129,55 @@ impl std::fmt::Debug for AppEvent {
             Self::Resize(w, h) => f.debug_tuple("Resize").field(w).field(h).finish(),
             Self::Mouse(m) => f.debug_tuple("Mouse").field(m).finish(),
             Self::Tick => write!(f, "Tick"),
-            Self::Agent(e) => f.debug_tuple("Agent").field(e).finish(),
-            Self::AgentDone(r) => f.debug_tuple("AgentDone").field(r).finish(),
+            Self::AgentRunEvent { run_id, event } => f
+                .debug_struct("AgentRunEvent")
+                .field("run_id", run_id)
+                .field("event", event)
+                .finish(),
+            Self::AgentRunDone { run_id, result } => f
+                .debug_struct("AgentRunDone")
+                .field("run_id", run_id)
+                .field("result", result)
+                .finish(),
             Self::TokenUsage(u) => f.debug_tuple("TokenUsage").field(u).finish(),
+            Self::ModelSelectorLoaded(r) => f.debug_tuple("ModelSelectorLoaded").field(r).finish(),
+            Self::ModelSwitchFinished(r) => f.debug_tuple("ModelSwitchFinished").field(r).finish(),
+            Self::ToolListLoaded(r) => f.debug_tuple("ToolListLoaded").field(r).finish(),
+            Self::McpServersLoaded(r) => f.debug_tuple("McpServersLoaded").field(r).finish(),
+            Self::CommandMessage(r) => f.debug_tuple("CommandMessage").field(r).finish(),
+            Self::SessionListLoaded(r) => f.debug_tuple("SessionListLoaded").field(r).finish(),
+            Self::SessionLoaded(r) => f.debug_tuple("SessionLoaded").field(r).finish(),
+            Self::ProviderConnectLoaded(r) => {
+                f.debug_tuple("ProviderConnectLoaded").field(r).finish()
+            }
+            Self::ProviderConnectFinished(r) => {
+                f.debug_tuple("ProviderConnectFinished").field(r).finish()
+            }
             Self::ShellResult(k, c) => f.debug_tuple("ShellResult").field(k).field(c).finish(),
             Self::VoiceReady(t) => f.debug_tuple("VoiceReady").field(t).finish(),
             Self::VoiceError(e) => f.debug_tuple("VoiceError").field(e).finish(),
             Self::VoiceAmplitude(a) => f.debug_tuple("VoiceAmplitude").field(a).finish(),
             Self::VoiceSilenceDetected => write!(f, "VoiceSilenceDetected"),
-            Self::OAuthSuccess { provider, .. } => {
-                f.debug_struct("OAuthSuccess").field("provider", provider).finish()
-            }
-            Self::OAuthError { provider, error } => {
-                f.debug_struct("OAuthError").field("provider", provider).field("error", error).finish()
-            }
-            Self::Question(req) => {
-                f.debug_struct("Question").field("question", &req.question).finish()
-            }
-            Self::BackgroundTaskDone { task_id, success } => {
-                f.debug_struct("BackgroundTaskDone")
-                    .field("task_id", task_id)
-                    .field("success", success)
-                    .finish()
-            }
-            Self::HookResult { event, description, .. } => {
-                f.debug_struct("HookResult")
-                    .field("event", event)
-                    .field("description", description)
-                    .finish()
-            }
+            Self::OAuthSuccess { provider, .. } => f
+                .debug_struct("OAuthSuccess")
+                .field("provider", provider)
+                .finish(),
+            Self::OAuthError { provider, error } => f
+                .debug_struct("OAuthError")
+                .field("provider", provider)
+                .field("error", error)
+                .finish(),
+            Self::Question(req) => f
+                .debug_struct("Question")
+                .field("question", &req.question)
+                .finish(),
+            Self::HookResult {
+                event, description, ..
+            } => f
+                .debug_struct("HookResult")
+                .field("event", event)
+                .field("description", description)
+                .finish(),
             Self::Quit => write!(f, "Quit"),
         }
     }

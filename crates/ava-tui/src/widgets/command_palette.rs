@@ -29,31 +29,111 @@ impl CommandPaletteState {
     pub fn with_defaults() -> Self {
         let items = vec![
             // Agent
-            make_item("Model", "Ctrl+M", "Agent", CommandExec::Action(Action::ModelSwitch)),
-            make_item("Toggle Permissions", "", "Agent", CommandExec::Action(Action::PermissionToggle)),
-            make_item("Compact Context", "", "Agent", CommandExec::Action(Action::ForceCompact)),
+            make_item(
+                "Model",
+                "Ctrl+M",
+                "Agent",
+                CommandExec::Action(Action::ModelSwitch),
+            ),
+            make_item(
+                "Toggle Permissions",
+                "",
+                "Agent",
+                CommandExec::Action(Action::PermissionToggle),
+            ),
+            make_item(
+                "Compact Context",
+                "",
+                "Agent",
+                CommandExec::Action(Action::ForceCompact),
+            ),
             // Session
-            make_item("New Session", "Ctrl+N", "Session", CommandExec::Action(Action::NewSession)),
-            make_item("Switch Session", "", "Session", CommandExec::Action(Action::SessionList)),
+            make_item(
+                "New Session",
+                "Ctrl+N",
+                "Session",
+                CommandExec::Action(Action::NewSession),
+            ),
+            make_item(
+                "Switch Session",
+                "",
+                "Session",
+                CommandExec::Action(Action::SessionList),
+            ),
             // Chat
-            make_item("Clear Chat", "", "Chat", CommandExec::Action(Action::ClearMessages)),
+            make_item(
+                "Clear Chat",
+                "",
+                "Chat",
+                CommandExec::Action(Action::ClearMessages),
+            ),
             // Provider
-            make_item("Connect Provider", "", "Provider", CommandExec::Slash("/connect".to_string())),
-            make_item("Provider Status", "", "Provider", CommandExec::Slash("/providers".to_string())),
+            make_item(
+                "Connect Provider",
+                "",
+                "Provider",
+                CommandExec::Slash("/connect".to_string()),
+            ),
+            make_item(
+                "Provider Status",
+                "",
+                "Provider",
+                CommandExec::Slash("/providers".to_string()),
+            ),
             // Tools
-            make_item("List Tools", "", "Tools", CommandExec::Slash("/tools".to_string())),
-            make_item("Reload Tools", "", "Tools", CommandExec::Slash("/tools reload".to_string())),
+            make_item(
+                "List Tools",
+                "",
+                "Tools",
+                CommandExec::Slash("/tools".to_string()),
+            ),
+            make_item(
+                "Reload Tools",
+                "",
+                "Tools",
+                CommandExec::Slash("/tools reload".to_string()),
+            ),
             // MCP
-            make_item("List MCP Servers", "", "MCP", CommandExec::Slash("/mcp".to_string())),
-            make_item("Reload MCP Config", "", "MCP", CommandExec::Slash("/mcp reload".to_string())),
+            make_item(
+                "List MCP Servers",
+                "",
+                "MCP",
+                CommandExec::Slash("/mcp".to_string()),
+            ),
+            make_item(
+                "Reload MCP Config",
+                "",
+                "MCP",
+                CommandExec::Slash("/mcp reload".to_string()),
+            ),
             // Info
-            make_item("Status", "", "Info", CommandExec::Slash("/status".to_string())),
-            make_item("Git Diff", "", "Info", CommandExec::Slash("/diff".to_string())),
+            make_item(
+                "Status",
+                "",
+                "Info",
+                CommandExec::Slash("/status".to_string()),
+            ),
+            make_item(
+                "Git Diff",
+                "",
+                "Info",
+                CommandExec::Slash("/diff".to_string()),
+            ),
             make_item("Help", "", "Info", CommandExec::Slash("/help".to_string())),
             // Security
-            make_item("Audit Log", "", "Security", CommandExec::Action(Action::Audit)),
+            make_item(
+                "Audit Log",
+                "",
+                "Security",
+                CommandExec::Action(Action::Audit),
+            ),
             // UI
-            make_item("Toggle Sidebar", "Ctrl+S", "UI", CommandExec::Action(Action::ToggleSidebar)),
+            make_item(
+                "Toggle Sidebar",
+                "Ctrl+S",
+                "UI",
+                CommandExec::Action(Action::ToggleSidebar),
+            ),
             // App
             make_item("Quit", "Ctrl+D", "App", CommandExec::Action(Action::Quit)),
         ];

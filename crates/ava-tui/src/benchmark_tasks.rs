@@ -124,7 +124,10 @@ impl TaskCategory {
             Self::Simple | Self::Medium | Self::Hard | Self::ToolUse | Self::RealWorld => {
                 BenchmarkSuite::Speed
             }
-            Self::Agentic | Self::ConstraintFollowing | Self::SelfCorrection | Self::MultiLang
+            Self::Agentic
+            | Self::ConstraintFollowing
+            | Self::SelfCorrection
+            | Self::MultiLang
             | Self::Security => BenchmarkSuite::Standard,
             Self::MultiStep => BenchmarkSuite::Frontier,
             Self::TestGeneration => BenchmarkSuite::Speed,
@@ -137,7 +140,10 @@ impl TaskCategory {
 /// Speed includes only speed-tier tasks.
 /// Standard includes speed + standard tasks.
 /// Frontier and All include everything.
-pub fn filter_tasks_by_suite(tasks: Vec<BenchmarkTask>, suite: BenchmarkSuite) -> Vec<BenchmarkTask> {
+pub fn filter_tasks_by_suite(
+    tasks: Vec<BenchmarkTask>,
+    suite: BenchmarkSuite,
+) -> Vec<BenchmarkTask> {
     match suite {
         BenchmarkSuite::All | BenchmarkSuite::Frontier => tasks,
         BenchmarkSuite::Standard => tasks
@@ -193,7 +199,9 @@ pub struct BenchmarkTask {
 impl BenchmarkTask {
     /// Returns the programming language for this task (from test harness, defaults to Rust).
     pub fn language(&self) -> Language {
-        self.test_harness.as_ref().map_or(Language::Rust, |h| h.language)
+        self.test_harness
+            .as_ref()
+            .map_or(Language::Rust, |h| h.language)
     }
 }
 

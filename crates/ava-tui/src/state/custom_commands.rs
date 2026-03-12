@@ -313,8 +313,7 @@ mod tests {
     #[test]
     fn resolve_prompt_with_positional_args() {
         let cmd = sample_command();
-        let result =
-            CustomCommandRegistry::resolve_prompt(&cmd, "security high").unwrap();
+        let result = CustomCommandRegistry::resolve_prompt(&cmd, "security high").unwrap();
         assert_eq!(
             result,
             "Review code with focus on security at severity high"
@@ -368,8 +367,12 @@ mod tests {
 
     #[test]
     fn tokenize_quoted_strings() {
-        let tokens = CustomCommandRegistry::tokenize(r#"focus="security and performance" severity=high"#);
-        assert_eq!(tokens, vec!["focus=security and performance", "severity=high"]);
+        let tokens =
+            CustomCommandRegistry::tokenize(r#"focus="security and performance" severity=high"#);
+        assert_eq!(
+            tokens,
+            vec!["focus=security and performance", "severity=high"]
+        );
     }
 
     #[test]

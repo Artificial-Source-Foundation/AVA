@@ -68,9 +68,8 @@ async fn auth_login(provider_id: &str) -> Result<()> {
             }
         }
         AuthFlow::DeviceCode => {
-            let cfg = ava_auth::config::oauth_config(provider_id).ok_or_else(|| {
-                color_eyre::eyre::eyre!("No OAuth config for {provider_id}")
-            })?;
+            let cfg = ava_auth::config::oauth_config(provider_id)
+                .ok_or_else(|| color_eyre::eyre::eyre!("No OAuth config for {provider_id}"))?;
 
             let device = ava_auth::device_code::request_device_code(cfg).await?;
             println!();
@@ -172,9 +171,7 @@ async fn auth_list() -> Result<()> {
                 let token = c.oauth_token.as_deref().unwrap_or("");
                 (format!("OAuth ({})", redact_key(token)), "oauth")
             }
-            Some(c) if !c.api_key.trim().is_empty() => {
-                (redact_key(&c.api_key), "api_key")
-            }
+            Some(c) if !c.api_key.trim().is_empty() => (redact_key(&c.api_key), "api_key"),
             Some(c) if info.id == "ollama" && c.base_url.is_some() => {
                 (c.base_url.clone().unwrap_or_default(), "local")
             }
@@ -190,12 +187,7 @@ async fn auth_list() -> Result<()> {
             "\u{2717}"
         };
 
-        println!(
-            "{icon} {:<16} {:<12} {}",
-            info.name,
-            auth_type,
-            status,
-        );
+        println!("{icon} {:<16} {:<12} {}", info.name, auth_type, status,);
     }
 
     Ok(())

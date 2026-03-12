@@ -191,11 +191,26 @@ mod tests {
 
     #[test]
     fn parse_case_insensitive() {
-        assert_eq!(HookEvent::from_str_loose("pretooluse"), Some(HookEvent::PreToolUse));
-        assert_eq!(HookEvent::from_str_loose("PRETOOLUSE"), Some(HookEvent::PreToolUse));
-        assert_eq!(HookEvent::from_str_loose("PreToolUse"), Some(HookEvent::PreToolUse));
-        assert_eq!(HookEvent::from_str_loose("pre_tool_use"), Some(HookEvent::PreToolUse));
-        assert_eq!(HookEvent::from_str_loose("pre-tool-use"), Some(HookEvent::PreToolUse));
+        assert_eq!(
+            HookEvent::from_str_loose("pretooluse"),
+            Some(HookEvent::PreToolUse)
+        );
+        assert_eq!(
+            HookEvent::from_str_loose("PRETOOLUSE"),
+            Some(HookEvent::PreToolUse)
+        );
+        assert_eq!(
+            HookEvent::from_str_loose("PreToolUse"),
+            Some(HookEvent::PreToolUse)
+        );
+        assert_eq!(
+            HookEvent::from_str_loose("pre_tool_use"),
+            Some(HookEvent::PreToolUse)
+        );
+        assert_eq!(
+            HookEvent::from_str_loose("pre-tool-use"),
+            Some(HookEvent::PreToolUse)
+        );
     }
 
     #[test]

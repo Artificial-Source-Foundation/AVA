@@ -1,7 +1,7 @@
 use crate::widgets::autocomplete::{AutocompleteItem, AutocompleteState, AutocompleteTrigger};
 use ava_types::{ContextAttachment, MessageTier};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Directories to skip when scanning project files.
 const SKIP_DIRS: &[&str] = &[
@@ -89,6 +89,44 @@ fn scan_dir_recursive(
     }
 }
 
+/// Cached results from a project file scan, keyed by (cwd, folders_only).
+/// Avoids re-scanning the filesystem on every keystroke within an `@`-mention session.
+#[derive(Debug, Default)]
+struct MentionFileCache {
+    /// The working directory at the time of the scan.
+    cwd: Option<PathBuf>,
+    /// Whether the scan was folders-only.
+    folders_only: bool,
+    /// The full (unfiltered) scan results.
+    items: Vec<AutocompleteItem>,
+}
+
+impl MentionFileCache {
+    /// Return cached items if the cache key matches, otherwise re-scan and update.
+    fn get_or_scan(&mut self, folders_only: bool) -> &[AutocompleteItem] {
+        let current_cwd = std::env::current_dir().ok();
+
+        let hit =
+            self.cwd.is_some() && self.cwd == current_cwd && self.folders_only == folders_only;
+
+        if !hit {
+            // Cache miss: perform the filesystem scan once.
+            // Pass empty query — we collect everything and filter later.
+            self.items = scan_project_files("", folders_only);
+            self.cwd = current_cwd;
+            self.folders_only = folders_only;
+        }
+
+        &self.items
+    }
+
+    /// Discard cached data so the next access triggers a fresh scan.
+    fn invalidate(&mut self) {
+        self.cwd = None;
+        self.items.clear();
+    }
+}
+
 /// A pending queued message shown in the composer queue display.
 #[derive(Debug, Clone)]
 pub struct QueuedDisplayItem {
@@ -152,6 +190,8 @@ pub struct InputState {
     pub queue_display: MessageQueueDisplay,
     /// Context attachments from @-mentions (resolved on submit).
     pub attachments: Vec<ContextAttachment>,
+    /// Cached project file scan results for @-mention autocomplete.
+    mention_cache: MentionFileCache,
 }
 
 impl InputState {
@@ -200,6 +240,7 @@ impl InputState {
         self.pending_pastes.clear();
         self.paste_counter.clear();
         self.attachments.clear();
+        self.mention_cache.invalidate();
     }
 
     pub fn move_left(&mut self) {
@@ -469,6 +510,7 @@ impl InputState {
     /// Dismiss the autocomplete menu and clear the input buffer.
     pub fn dismiss_autocomplete(&mut self) {
         self.autocomplete = None;
+        self.mention_cache.invalidate();
         self.clear();
     }
 
@@ -577,14 +619,16 @@ impl InputState {
                         ));
                     }
                 } else {
-                    // Scan files/folders from cwd
-                    items = scan_project_files(query, prefix == "folder:");
+                    // Use cached scan results — only re-scans when cwd or mode changes.
+                    let folders_only = prefix == "folder:";
+                    items = self.mention_cache.get_or_scan(folders_only).to_vec();
                 }
 
                 (AutocompleteTrigger::AtMention, query.to_string(), items)
             }
         } else {
             self.autocomplete = None;
+            self.mention_cache.invalidate();
             return;
         };
 
@@ -914,5 +958,201 @@ mod tests {
         });
         let _ = input.submit();
         assert!(input.attachments.is_empty());
+    }
+
+    // --- Mention file cache tests ---
+
+    #[test]
+    fn mention_cache_populated_on_first_at() {
+        let mut input = InputState::default();
+        input.insert_char('@');
+        // After the first @, the cache should be populated (cwd set).
+        assert!(
+            input.mention_cache.cwd.is_some(),
+            "cache cwd should be set after first @ trigger"
+        );
+    }
+
+    #[test]
+    fn mention_cache_reused_on_subsequent_keystrokes() {
+        let mut input = InputState::default();
+        input.insert_char('@');
+        // Snapshot the cache state after first scan
+        let cwd_after_first = input.mention_cache.cwd.clone();
+        let items_len_first = input.mention_cache.items.len();
+
+        // Type more characters — should reuse cache, not rescan
+        input.insert_char('s');
+        assert_eq!(
+            input.mention_cache.cwd, cwd_after_first,
+            "cache cwd should not change on refinement keystroke"
+        );
+        assert_eq!(
+            input.mention_cache.items.len(),
+            items_len_first,
+            "cache item count should stay the same (filter is in AutocompleteState, not cache)"
+        );
+
+        input.insert_char('r');
+        assert_eq!(input.mention_cache.cwd, cwd_after_first);
+        assert_eq!(input.mention_cache.items.len(), items_len_first);
+    }
+
+    #[test]
+    fn mention_cache_invalidated_on_clear() {
+        let mut input = InputState::default();
+        input.insert_char('@');
+        assert!(input.mention_cache.cwd.is_some());
+
+        input.clear();
+        assert!(
+            input.mention_cache.cwd.is_none(),
+            "cache should be invalidated after clear()"
+        );
+        assert!(input.mention_cache.items.is_empty());
+    }
+
+    #[test]
+    fn mention_cache_invalidated_when_leaving_at_context() {
+        let mut input = InputState::default();
+        input.insert_char('@');
+        assert!(input.mention_cache.cwd.is_some());
+
+        // Simulate clearing buffer and typing a non-@ token
+        input.buffer.clear();
+        input.cursor = 0;
+        input.insert_str("hello");
+        // After typing a plain word, the else branch fires and invalidates cache
+        assert!(
+            input.mention_cache.cwd.is_none(),
+            "cache should be invalidated when no longer in @ context"
+        );
+    }
+
+    #[test]
+    fn mention_cache_invalidated_on_dismiss() {
+        let mut input = InputState::default();
+        input.insert_char('@');
+        assert!(input.mention_cache.cwd.is_some());
+
+        input.dismiss_autocomplete();
+        assert!(
+            input.mention_cache.cwd.is_none(),
+            "cache should be invalidated on dismiss_autocomplete"
+        );
+    }
+
+    #[test]
+    fn mention_cache_respects_folders_only_mode_switch() {
+        let mut input = InputState::default();
+
+        // Start with general @ (folders_only = false)
+        input.insert_char('@');
+        assert!(!input.mention_cache.folders_only);
+        let items_general = input.mention_cache.items.len();
+
+        // Clear and switch to folder: prefix
+        input.buffer.clear();
+        input.cursor = 0;
+        input.mention_cache.invalidate();
+        input.insert_str("@folder:");
+        assert!(
+            input.mention_cache.folders_only,
+            "cache should reflect folders_only = true for @folder: prefix"
+        );
+        // The folder-only scan should have <= items compared to general
+        assert!(input.mention_cache.items.len() <= items_general);
+    }
+
+    #[test]
+    fn mention_cache_query_filtering_preserves_full_cache() {
+        let mut input = InputState::default();
+        input.insert_char('@');
+        let full_cache_len = input.mention_cache.items.len();
+
+        // Type a query that likely filters down the visible items
+        input.insert_str("zzz_unlikely_match");
+
+        // The cache itself should still hold all items (filtering is in AutocompleteState)
+        assert_eq!(
+            input.mention_cache.items.len(),
+            full_cache_len,
+            "cache should hold all items; filtering happens in AutocompleteState"
+        );
+
+        // But the autocomplete visible items should be filtered (possibly empty)
+        if let Some(ref ac) = input.autocomplete {
+            assert!(
+                ac.items.len() <= full_cache_len,
+                "autocomplete items should be filtered subset of cache"
+            );
+        }
+    }
+
+    #[test]
+    fn mention_cache_codebase_prefix_does_not_use_cache() {
+        let mut input = InputState::default();
+        input.insert_str("@codebase:query");
+
+        // codebase: prefix should not populate the file cache
+        // (it uses a synthetic single item, not file scanning)
+        assert!(
+            input.mention_cache.cwd.is_none(),
+            "codebase: queries should not populate the file scan cache"
+        );
+    }
+
+    #[test]
+    fn mention_cache_survives_backspace_within_at_session() {
+        let mut input = InputState::default();
+        input.insert_str("@src");
+        let cwd_snapshot = input.mention_cache.cwd.clone();
+        let cache_len = input.mention_cache.items.len();
+        assert!(cwd_snapshot.is_some());
+
+        // Backspace one char — still in @ context
+        input.delete_backward();
+        assert_eq!(input.buffer, "@sr");
+        assert_eq!(
+            input.mention_cache.cwd, cwd_snapshot,
+            "cache should survive backspace within @ session"
+        );
+        assert_eq!(input.mention_cache.items.len(), cache_len);
+
+        // Backspace again
+        input.delete_backward();
+        assert_eq!(input.buffer, "@s");
+        assert_eq!(input.mention_cache.cwd, cwd_snapshot);
+
+        // Backspace to just "@"
+        input.delete_backward();
+        assert_eq!(input.buffer, "@");
+        assert_eq!(input.mention_cache.cwd, cwd_snapshot);
+    }
+
+    #[test]
+    fn mention_cache_invalidated_when_at_deleted() {
+        let mut input = InputState::default();
+        input.insert_char('@');
+        assert!(input.mention_cache.cwd.is_some());
+
+        // Delete the @ itself
+        input.delete_backward();
+        assert_eq!(input.buffer, "");
+        assert!(
+            input.mention_cache.cwd.is_none(),
+            "cache should be invalidated when @ is deleted"
+        );
+    }
+
+    #[test]
+    fn slash_autocomplete_does_not_populate_mention_cache() {
+        let mut input = InputState::default();
+        input.insert_char('/');
+        assert!(
+            input.mention_cache.cwd.is_none(),
+            "slash commands should not populate mention file cache"
+        );
+        assert!(input.mention_cache.items.is_empty());
     }
 }

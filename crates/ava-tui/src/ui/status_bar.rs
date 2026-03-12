@@ -3,9 +3,9 @@ use crate::state::agent::AgentActivity;
 use crate::state::messages::spinner_frame;
 use crate::state::voice::VoicePhase;
 use ratatui::layout::Rect;
-use ratatui::widgets::Block;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
+use ratatui::widgets::Block;
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use std::time::Instant;
@@ -105,7 +105,11 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     if let Some(ref session) = state.session.current_session {
         left_spans.push(sep.clone());
         let short_id = session.id.to_string();
-        let display = if short_id.len() > 8 { &short_id[..8] } else { &short_id };
+        let display = if short_id.len() > 8 {
+            &short_id[..8]
+        } else {
+            &short_id
+        };
         left_spans.push(Span::styled(
             display.to_string(),
             Style::default().fg(state.theme.text_muted),
@@ -122,8 +126,7 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 Style::default().fg(state.theme.error),
             ));
             let bars = (state.voice.amplitude * 25.0).min(5.0) as usize;
-            let bar_str: String =
-                "\u{2588}".repeat(bars) + &"\u{2591}".repeat(5 - bars);
+            let bar_str: String = "\u{2588}".repeat(bars) + &"\u{2591}".repeat(5 - bars);
             left_spans.push(Span::styled(
                 format!(" {bar_str}"),
                 Style::default().fg(state.theme.accent),
@@ -178,8 +181,11 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     };
 
     // Calculate widths and fill gap
-    let left_width: usize = left_spans.iter().map(|s| s.content.len()).sum();
-    let right_width = perm_text.len() + H_PAD.len();
+    let left_width: usize = left_spans
+        .iter()
+        .map(|s| crate::text_utils::span_display_width(s))
+        .sum();
+    let right_width = crate::text_utils::display_width(perm_text) + H_PAD.len();
     let gap = (area.width as usize).saturating_sub(left_width + right_width);
 
     if gap > 0 {
@@ -201,7 +207,12 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     // Center single line vertically in the 2-row area
     let text_y = area.y + (area.height.saturating_sub(1)) / 2;
-    let text_area = Rect { x: area.x, y: text_y, width: area.width, height: 1 };
+    let text_area = Rect {
+        x: area.x,
+        y: text_y,
+        width: area.width,
+        height: 1,
+    };
     let widget = Paragraph::new(Line::from(left_spans));
     frame.render_widget(widget, text_area);
 }
@@ -234,33 +245,33 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         render_hints(&mut left_spans, &hints, state);
     } else if state.agent.is_running {
         // Spinner + activity + interrupt hint
-        let (activity, style) =
-            if let AgentActivity::ExecutingTool(ref name) = state.agent.activity {
-                let elapsed_str = state
-                    .agent
-                    .tool_start
-                    .map(|start| {
-                        let secs = start.elapsed().as_secs();
-                        format!(" ({})", format_elapsed(secs))
-                    })
-                    .unwrap_or_default();
-                let is_slow = state
-                    .agent
-                    .tool_start
-                    .map(|start| start.elapsed().as_secs() >= 30)
-                    .unwrap_or(false);
-                let s = if is_slow {
-                    Style::default().fg(state.theme.warning)
-                } else {
-                    Style::default().fg(state.theme.accent)
-                };
-                (format!("{name}{elapsed_str}"), s)
+        let (activity, style) = if let AgentActivity::ExecutingTool(ref name) = state.agent.activity
+        {
+            let elapsed_str = state
+                .agent
+                .tool_start
+                .map(|start| {
+                    let secs = start.elapsed().as_secs();
+                    format!(" ({})", format_elapsed(secs))
+                })
+                .unwrap_or_default();
+            let is_slow = state
+                .agent
+                .tool_start
+                .map(|start| start.elapsed().as_secs() >= 30)
+                .unwrap_or(false);
+            let s = if is_slow {
+                Style::default().fg(state.theme.warning)
             } else {
-                (
-                    state.agent.activity.to_string(),
-                    Style::default().fg(state.theme.accent),
-                )
+                Style::default().fg(state.theme.accent)
             };
+            (format!("{name}{elapsed_str}"), s)
+        } else {
+            (
+                state.agent.activity.to_string(),
+                Style::default().fg(state.theme.accent),
+            )
+        };
 
         let frame_char = spinner_frame(spinner_tick);
         left_spans.push(Span::styled(
@@ -300,15 +311,20 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             " interrupt",
             Style::default().fg(state.theme.text_dimmed),
         ));
-    } else if matches!(state.view_mode, ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }) {
+    } else if matches!(
+        state.view_mode,
+        ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
+    ) {
         // Sub-agent or background task view hints
-        let hints: &[(&str, &str)] =
-            &[("Esc", "back to main"), ("PgUp/PgDn", "scroll")];
+        let hints: &[(&str, &str)] = &[("Esc", "back to main"), ("PgUp/PgDn", "scroll")];
         render_hints(&mut left_spans, hints, state);
     } else {
         // Idle hints
-        let hints: &[(&str, &str)] =
-            &[("/", "commands"), ("Ctrl+M", "model"), ("Ctrl+K", "palette")];
+        let hints: &[(&str, &str)] = &[
+            ("/", "commands"),
+            ("Ctrl+M", "model"),
+            ("Ctrl+K", "palette"),
+        ];
         render_hints(&mut left_spans, hints, state);
     }
 
@@ -363,16 +379,19 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         } else {
             "thinking".to_string()
         };
-        right_spans.push(Span::styled(
-            badge,
-            Style::default().fg(state.theme.accent),
-        ));
+        right_spans.push(Span::styled(badge, Style::default().fg(state.theme.accent)));
     }
 
     // Fill gap between left and right
-    let left_width: usize = left_spans.iter().map(|s| s.content.len()).sum();
-    let right_width: usize =
-        right_spans.iter().map(|s| s.content.len()).sum::<usize>() + H_PAD.len();
+    let left_width: usize = left_spans
+        .iter()
+        .map(|s| crate::text_utils::span_display_width(s))
+        .sum();
+    let right_width: usize = right_spans
+        .iter()
+        .map(|s| crate::text_utils::span_display_width(s))
+        .sum::<usize>()
+        + H_PAD.len();
     let gap = (area.width as usize).saturating_sub(left_width + right_width);
 
     let mut all_spans = left_spans;
@@ -388,7 +407,12 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     // Pin text to bottom row — padding row sits between composer and text
     let text_y = area.y + area.height.saturating_sub(1);
-    let text_area = Rect { x: area.x, y: text_y, width: area.width, height: 1 };
+    let text_area = Rect {
+        x: area.x,
+        y: text_y,
+        width: area.width,
+        height: 1,
+    };
     let widget = Paragraph::new(Line::from(all_spans));
     frame.render_widget(widget, text_area);
 }

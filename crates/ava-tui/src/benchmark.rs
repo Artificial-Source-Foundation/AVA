@@ -38,9 +38,9 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::benchmark_tasks::{
-    advanced_rust_tasks, agent_quality_tasks, agentic_tasks, default_tasks,
-    filter_tasks_by_suite, go_tasks, multi_file_tasks, python_tasks, security_tasks,
-    test_generation_tasks, typescript_tasks, BenchmarkSuite, BenchmarkTask, Language, TestHarness,
+    advanced_rust_tasks, agent_quality_tasks, agentic_tasks, default_tasks, filter_tasks_by_suite,
+    go_tasks, multi_file_tasks, python_tasks, security_tasks, test_generation_tasks,
+    typescript_tasks, BenchmarkSuite, BenchmarkTask, Language, TestHarness,
 };
 
 /// A provider:model pair to benchmark.
@@ -263,10 +263,7 @@ pub async fn run_benchmark(
             .map_err(|e| eyre!("Failed to copy Cargo.toml to workspace: {}", e))?;
     }
 
-    eprintln!(
-        "[benchmark] Workspace: {}",
-        workspace_dir.display()
-    );
+    eprintln!("[benchmark] Workspace: {}", workspace_dir.display());
 
     // Build task list: all task categories
     let mut all_tasks = tasks.unwrap_or_else(default_tasks);
@@ -291,7 +288,10 @@ pub async fn run_benchmark(
 
     // Filter by language
     if let Some(ref langs) = language_filter {
-        all_tasks = all_tasks.into_iter().filter(|t| langs.contains(&t.language())).collect();
+        all_tasks = all_tasks
+            .into_iter()
+            .filter(|t| langs.contains(&t.language()))
+            .collect();
         let lang_names: Vec<_> = langs.iter().map(|l| l.to_string()).collect();
         eprintln!("[benchmark] Language filter: {}", lang_names.join(", "));
     }
@@ -576,7 +576,15 @@ async fn run_single_task(
     let start = Instant::now();
     let handle = tokio::spawn(async move {
         stack
-            .run(&goal, effective_turns, Some(tx), cancel, Vec::new(), None, Vec::new())
+            .run(
+                &goal,
+                effective_turns,
+                Some(tx),
+                cancel,
+                Vec::new(),
+                None,
+                Vec::new(),
+            )
             .await
     });
 
@@ -673,11 +681,7 @@ async fn run_single_task(
     let task_passed = compile_success.unwrap_or(quality_pass);
 
     // cost_per_task_usd: only for resolved tasks
-    let cost_per_task_usd = if task_passed {
-        Some(cost_usd)
-    } else {
-        None
-    };
+    let cost_per_task_usd = if task_passed { Some(cost_usd) } else { None };
 
     // tool_efficiency_score: ratio of minimum expected tools to actual tools used
     let tool_efficiency_score = if let Some(min) = task.expected_min_tools {
@@ -762,8 +766,7 @@ fn extract_code(output: &str, language: Language) -> Option<String> {
     match language {
         Language::Rust => {
             // Try to find code that looks like a function definition without fences
-            let re_fn =
-                Regex::new(r"(?s)((?:use\s+.*?;\s*)*(?:pub\s+)?fn\s+\w+.*?\n\})").ok()?;
+            let re_fn = Regex::new(r"(?s)((?:use\s+.*?;\s*)*(?:pub\s+)?fn\s+\w+.*?\n\})").ok()?;
             if let Some(cap) = re_fn.captures(output) {
                 return Some(cap[1].to_string());
             }
@@ -773,7 +776,8 @@ fn extract_code(output: &str, language: Language) -> Option<String> {
         }
         Language::Python => {
             // Look for def or class definitions
-            let re_def = Regex::new(r"(?s)((?:import\s+.*\n|from\s+.*\n)*(?:def|class)\s+\w+.*)").ok()?;
+            let re_def =
+                Regex::new(r"(?s)((?:import\s+.*\n|from\s+.*\n)*(?:def|class)\s+\w+.*)").ok()?;
             if let Some(cap) = re_def.captures(output) {
                 return Some(cap[1].to_string());
             }
@@ -793,7 +797,9 @@ fn extract_code(output: &str, language: Language) -> Option<String> {
         }
         Language::Go => {
             // Look for func or type definitions
-            let re_fn = Regex::new(r"(?s)((?:package\s+\w+\s*\n)?(?:import\s+.*\n)*(?:type|func)\s+\w+.*)").ok()?;
+            let re_fn =
+                Regex::new(r"(?s)((?:package\s+\w+\s*\n)?(?:import\s+.*\n)*(?:type|func)\s+\w+.*)")
+                    .ok()?;
             if let Some(cap) = re_fn.captures(output) {
                 return Some(cap[1].to_string());
             }

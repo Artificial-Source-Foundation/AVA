@@ -1,4 +1,5 @@
 use crate::app::{AppState, ViewMode};
+use crate::text_utils::truncate_display;
 use crate::widgets::todo_list;
 use ava_types::TodoStatus;
 use ratatui::layout::Rect;
@@ -27,19 +28,34 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         Line::from(Span::styled(format!("  {session_label}"), value_style)),
         Line::from(""),
         Line::from(Span::styled("Provider", label_style)),
-        Line::from(Span::styled(format!("  {}", state.agent.provider_name), value_style)),
-        Line::from(Span::styled(format!("  {}", state.agent.model_name), value_style)),
+        Line::from(Span::styled(
+            format!("  {}", state.agent.provider_name),
+            value_style,
+        )),
+        Line::from(Span::styled(
+            format!("  {}", state.agent.model_name),
+            value_style,
+        )),
         Line::from(""),
         Line::from(Span::styled("Tokens", label_style)),
-        Line::from(Span::styled(format!("  in:  {}", state.agent.tokens_used.input), value_style)),
-        Line::from(Span::styled(format!("  out: {}", state.agent.tokens_used.output), value_style)),
+        Line::from(Span::styled(
+            format!("  in:  {}", state.agent.tokens_used.input),
+            value_style,
+        )),
+        Line::from(Span::styled(
+            format!("  out: {}", state.agent.tokens_used.output),
+            value_style,
+        )),
         Line::from(""),
         Line::from(Span::styled("Agent", label_style)),
         Line::from(Span::styled(
             if state.agent.max_turns == 0 {
                 format!("  Turn {}", state.agent.current_turn)
             } else {
-                format!("  Turn {}/{}", state.agent.current_turn, state.agent.max_turns)
+                format!(
+                    "  Turn {}/{}",
+                    state.agent.current_turn, state.agent.max_turns
+                )
             },
             value_style,
         )),
@@ -68,11 +84,7 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         }
 
         for sa in state.agent.sub_agents.iter().skip(skip) {
-            let desc = if sa.description.len() > max_desc_len {
-                format!("{}...", &sa.description[..max_desc_len.saturating_sub(3)])
-            } else {
-                sa.description.clone()
-            };
+            let desc = truncate_display(&sa.description, max_desc_len);
 
             // [CC] badge for claude-code-powered sub-agents
             let cc_badge: Vec<Span<'_>> = if sa.provider.as_deref() == Some("claude-code") {
@@ -100,12 +112,16 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 } else {
                     format!(" ({}s)", elapsed)
                 };
-                let mut spans = vec![
-                    Span::styled(format!("  {spinner} "), Style::default().fg(Color::Yellow)),
-                ];
+                let mut spans = vec![Span::styled(
+                    format!("  {spinner} "),
+                    Style::default().fg(Color::Yellow),
+                )];
                 spans.extend(cc_badge);
                 spans.push(Span::styled(desc, value_style));
-                spans.push(Span::styled(stats, Style::default().fg(state.theme.text_dimmed)));
+                spans.push(Span::styled(
+                    stats,
+                    Style::default().fg(state.theme.text_dimmed),
+                ));
                 lines.push(Line::from(spans));
             } else {
                 // Completed sub-agents: dimmed with stats
@@ -116,14 +132,10 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                     format!(" ({}s)", secs)
                 };
                 let dim_modifier = Modifier::DIM;
-                let mut spans = vec![
-                    Span::styled(
-                        "  \u{2713} ",
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(dim_modifier),
-                    ),
-                ];
+                let mut spans = vec![Span::styled(
+                    "  \u{2713} ",
+                    Style::default().fg(Color::Green).add_modifier(dim_modifier),
+                )];
                 if sa.provider.as_deref() == Some("claude-code") {
                     spans.push(Span::styled(
                         "[CC] ",
@@ -164,14 +176,8 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                         .fg(Color::Green)
                         .add_modifier(Modifier::DIM),
                 ),
-                TodoStatus::InProgress => (
-                    "\u{25CF}",
-                    Style::default().fg(Color::Yellow),
-                ),
-                TodoStatus::Pending => (
-                    "\u{25CB}",
-                    Style::default().fg(state.theme.text),
-                ),
+                TodoStatus::InProgress => ("\u{25CF}", Style::default().fg(Color::Yellow)),
+                TodoStatus::Pending => ("\u{25CB}", Style::default().fg(state.theme.text)),
                 TodoStatus::Cancelled => (
                     "\u{2717}",
                     Style::default()
@@ -185,11 +191,7 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 _ => "",
             };
 
-            let display = if item.content.len() > max_content_len {
-                format!("{}...", &item.content[..max_content_len.saturating_sub(3)])
-            } else {
-                item.content.clone()
-            };
+            let display = truncate_display(&item.content, max_content_len);
 
             if priority_prefix.is_empty() {
                 lines.push(Line::from(vec![
@@ -215,7 +217,10 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     lines.push(Line::from(Span::styled("  Ctrl+S  sidebar", dim_style)));
     lines.push(Line::from(Span::styled("  Ctrl+C  cancel/quit", dim_style)));
     if matches!(state.view_mode, ViewMode::SubAgent { .. }) {
-        lines.push(Line::from(Span::styled("  Esc     back (sub-agent)", dim_style)));
+        lines.push(Line::from(Span::styled(
+            "  Esc     back (sub-agent)",
+            dim_style,
+        )));
     }
 
     let widget = Paragraph::new(lines).block(

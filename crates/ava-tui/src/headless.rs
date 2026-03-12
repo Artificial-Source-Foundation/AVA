@@ -2,9 +2,11 @@ use crate::config::cli::CliArgs;
 use ava_agent::message_queue::MessageQueue;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_agent::AgentEvent;
-use ava_praxis::{Budget, Director, DirectorConfig, PraxisEvent, Task, TaskType, Workflow, WorkflowExecutor};
 use ava_llm::provider::LLMProvider;
 use ava_platform::StandardPlatform;
+use ava_praxis::{
+    Budget, Director, DirectorConfig, PraxisEvent, Task, TaskType, Workflow, WorkflowExecutor,
+};
 use ava_types::{ImageContent, MessageTier, QueuedMessage};
 use color_eyre::eyre::{eyre, Result};
 use std::collections::HashMap;
@@ -88,7 +90,17 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let max_turns = cli.max_turns;
     let cli_images = load_cli_images(&cli.image);
     let handle = tokio::spawn(async move {
-        stack.run(&goal_owned, max_turns, Some(tx), cancel, Vec::new(), Some(message_queue), cli_images).await
+        stack
+            .run(
+                &goal_owned,
+                max_turns,
+                Some(tx),
+                cancel,
+                Vec::new(),
+                Some(message_queue),
+                cli_images,
+            )
+            .await
     });
 
     if json_mode {
@@ -106,10 +118,19 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 AgentEvent::Complete(_) => serde_json::json!({"type": "complete"}),
                 AgentEvent::Error(e) => serde_json::json!({"type": "error", "message": e}),
                 AgentEvent::ToolStats(s) => serde_json::json!({"type": "tool_stats", "stats": s}),
-                AgentEvent::TokenUsage { input_tokens, output_tokens, cost_usd } => {
+                AgentEvent::TokenUsage {
+                    input_tokens,
+                    output_tokens,
+                    cost_usd,
+                } => {
                     serde_json::json!({"type": "token_usage", "input_tokens": input_tokens, "output_tokens": output_tokens, "cost_usd": cost_usd})
                 }
-                AgentEvent::SubAgentComplete { session_id, messages, description, .. } => {
+                AgentEvent::SubAgentComplete {
+                    session_id,
+                    messages,
+                    description,
+                    ..
+                } => {
                     serde_json::json!({"type": "sub_agent_complete", "session_id": session_id, "description": description, "message_count": messages.len()})
                 }
             };
@@ -124,7 +145,9 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 AgentEvent::Progress(p) => eprintln!("[{p}]"),
                 AgentEvent::Complete(_) => break,
                 AgentEvent::Thinking(t) => eprintln!("[thinking: {t}]"),
-                AgentEvent::ToolStats(_) | AgentEvent::TokenUsage { .. } | AgentEvent::SubAgentComplete { .. } => {}
+                AgentEvent::ToolStats(_)
+                | AgentEvent::TokenUsage { .. }
+                | AgentEvent::SubAgentComplete { .. } => {}
                 AgentEvent::Error(e) => {
                     eprintln!("[error: {e}]");
                     break;
@@ -146,10 +169,7 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
             })
         );
     } else {
-        eprintln!(
-            "[Done] success={}, turns={}",
-            result.success, result.turns
-        );
+        eprintln!("[Done] success={}, turns={}", result.success, result.turns);
     }
 
     std::process::exit(if result.success { 0 } else { 1 });
@@ -185,8 +205,16 @@ async fn run_workflow(cli: CliArgs, goal: &str, workflow_name: &str) -> Result<(
 
     let budget = Budget {
         max_tokens: 128_000,
-        max_turns: if cli.max_turns == 0 { 200 } else { cli.max_turns },
-        max_cost_usd: if cli.max_budget_usd > 0.0 { cli.max_budget_usd } else { 10.0 },
+        max_turns: if cli.max_turns == 0 {
+            200
+        } else {
+            cli.max_turns
+        },
+        max_cost_usd: if cli.max_budget_usd > 0.0 {
+            cli.max_budget_usd
+        } else {
+            10.0
+        },
     };
 
     let executor = WorkflowExecutor::new(workflow, budget, provider, platform);
@@ -203,9 +231,7 @@ async fn run_workflow(cli: CliArgs, goal: &str, workflow_name: &str) -> Result<(
     let json_mode = cli.json;
     let goal_owned = goal.to_string();
 
-    let handle = tokio::spawn(async move {
-        executor.execute(&goal_owned, cancel, tx).await
-    });
+    let handle = tokio::spawn(async move { executor.execute(&goal_owned, cancel, tx).await });
 
     while let Some(event) = rx.recv().await {
         if json_mode {
@@ -213,19 +239,48 @@ async fn run_workflow(cli: CliArgs, goal: &str, workflow_name: &str) -> Result<(
             println!("{json}");
         } else {
             match &event {
-                PraxisEvent::PhaseStarted { phase_index, phase_count, phase_name, role } => {
-                    eprintln!("[workflow] Phase {}/{}: {} ({})", phase_index + 1, phase_count, phase_name, role);
+                PraxisEvent::PhaseStarted {
+                    phase_index,
+                    phase_count,
+                    phase_name,
+                    role,
+                } => {
+                    eprintln!(
+                        "[workflow] Phase {}/{}: {} ({})",
+                        phase_index + 1,
+                        phase_count,
+                        phase_name,
+                        role
+                    );
                 }
-                PraxisEvent::PhaseCompleted { phase_index, phase_name, turns, output_preview } => {
-                    eprintln!("[workflow] Phase {} ({}) complete — {} turns", phase_index + 1, phase_name, turns);
+                PraxisEvent::PhaseCompleted {
+                    phase_index,
+                    phase_name,
+                    turns,
+                    output_preview,
+                } => {
+                    eprintln!(
+                        "[workflow] Phase {} ({}) complete — {} turns",
+                        phase_index + 1,
+                        phase_name,
+                        turns
+                    );
                     if !output_preview.is_empty() {
                         eprintln!("[workflow]   preview: {}", output_preview);
                     }
                 }
-                PraxisEvent::IterationStarted { iteration, max_iterations } => {
+                PraxisEvent::IterationStarted {
+                    iteration,
+                    max_iterations,
+                } => {
                     eprintln!("[workflow] Iteration {}/{}", iteration, max_iterations);
                 }
-                PraxisEvent::WorkflowComplete { phases_completed, total_phases, iterations, total_turns } => {
+                PraxisEvent::WorkflowComplete {
+                    phases_completed,
+                    total_phases,
+                    iterations,
+                    total_turns,
+                } => {
                     eprintln!(
                         "[workflow] Complete: {}/{} phases, {} iterations, {} turns",
                         phases_completed, total_phases, iterations, total_turns
@@ -249,7 +304,11 @@ async fn run_workflow(cli: CliArgs, goal: &str, workflow_name: &str) -> Result<(
 
     if !json_mode {
         println!();
-        eprintln!("[Done] success={}, messages={}", success, session.messages.len());
+        eprintln!(
+            "[Done] success={}, messages={}",
+            success,
+            session.messages.len()
+        );
     }
 
     std::process::exit(if success { 0 } else { 1 });
@@ -281,8 +340,16 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let mut director = Director::new(DirectorConfig {
         budget: Budget {
             max_tokens: 128_000,
-            max_turns: if cli.max_turns == 0 { 200 } else { cli.max_turns },
-            max_cost_usd: if cli.max_budget_usd > 0.0 { cli.max_budget_usd } else { 10.0 },
+            max_turns: if cli.max_turns == 0 {
+                200
+            } else {
+                cli.max_turns
+            },
+            max_cost_usd: if cli.max_budget_usd > 0.0 {
+                cli.max_budget_usd
+            } else {
+                10.0
+            },
         },
         default_provider: provider,
         domain_providers: HashMap::new(),
@@ -308,9 +375,7 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let json_mode = cli.json;
 
-    let handle = tokio::spawn(async move {
-        director.coordinate(vec![worker], cancel, tx).await
-    });
+    let handle = tokio::spawn(async move { director.coordinate(vec![worker], cancel, tx).await });
 
     // Stream events
     while let Some(event) = rx.recv().await {
@@ -319,10 +384,16 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
             println!("{json}");
         } else {
             match &event {
-                PraxisEvent::WorkerStarted { lead, task_description, .. } => {
+                PraxisEvent::WorkerStarted {
+                    lead,
+                    task_description,
+                    ..
+                } => {
                     eprintln!("[director] worker started: {lead} — {task_description}");
                 }
-                PraxisEvent::WorkerProgress { turn, max_turns, .. } => {
+                PraxisEvent::WorkerProgress {
+                    turn, max_turns, ..
+                } => {
                     eprintln!("[director] turn {turn}/{max_turns}");
                 }
                 PraxisEvent::WorkerToken { token, .. } => {
@@ -334,12 +405,21 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 PraxisEvent::WorkerFailed { error, .. } => {
                     eprintln!("[director] worker failed: {error}");
                 }
-                PraxisEvent::AllComplete { total_workers, succeeded, failed } => {
+                PraxisEvent::AllComplete {
+                    total_workers,
+                    succeeded,
+                    failed,
+                } => {
                     eprintln!(
                         "[director] all complete: {succeeded}/{total_workers} succeeded, {failed} failed"
                     );
                 }
-                PraxisEvent::Summary { total_workers, succeeded, failed, total_turns } => {
+                PraxisEvent::Summary {
+                    total_workers,
+                    succeeded,
+                    failed,
+                    total_turns,
+                } => {
                     eprintln!(
                         "[director] summary: {succeeded}/{total_workers} workers, {total_turns} turns, {failed} failures"
                     );
@@ -668,7 +748,17 @@ async fn run_voice_loop(cli: CliArgs) -> Result<()> {
         let goal = text.clone();
         let max_turns = cli.max_turns;
         let handle = tokio::spawn(async move {
-            stack.run(&goal, max_turns, Some(tx), agent_cancel, Vec::new(), None, Vec::new()).await
+            stack
+                .run(
+                    &goal,
+                    max_turns,
+                    Some(tx),
+                    agent_cancel,
+                    Vec::new(),
+                    None,
+                    Vec::new(),
+                )
+                .await
         });
 
         while let Some(event) = rx.recv().await {
@@ -767,28 +857,33 @@ mod tests {
 
     #[test]
     fn test_parse_json_steering() {
-        let msg = parse_json_stdin_message(r#"{"tier": "steering", "text": "change approach"}"#).unwrap();
+        let msg =
+            parse_json_stdin_message(r#"{"tier": "steering", "text": "change approach"}"#).unwrap();
         assert_eq!(msg.tier, MessageTier::Steering);
         assert_eq!(msg.text, "change approach");
     }
 
     #[test]
     fn test_parse_json_follow_up() {
-        let msg = parse_json_stdin_message(r#"{"tier": "follow-up", "text": "run tests"}"#).unwrap();
+        let msg =
+            parse_json_stdin_message(r#"{"tier": "follow-up", "text": "run tests"}"#).unwrap();
         assert_eq!(msg.tier, MessageTier::FollowUp);
         assert_eq!(msg.text, "run tests");
     }
 
     #[test]
     fn test_parse_json_post_complete_with_group() {
-        let msg = parse_json_stdin_message(r#"{"tier": "post-complete", "text": "commit", "group": 3}"#).unwrap();
+        let msg =
+            parse_json_stdin_message(r#"{"tier": "post-complete", "text": "commit", "group": 3}"#)
+                .unwrap();
         assert_eq!(msg.tier, MessageTier::PostComplete { group: 3 });
         assert_eq!(msg.text, "commit");
     }
 
     #[test]
     fn test_parse_json_defaults_group_to_1() {
-        let msg = parse_json_stdin_message(r#"{"tier": "post-complete", "text": "review"}"#).unwrap();
+        let msg =
+            parse_json_stdin_message(r#"{"tier": "post-complete", "text": "review"}"#).unwrap();
         assert_eq!(msg.tier, MessageTier::PostComplete { group: 1 });
     }
 
@@ -860,7 +955,12 @@ mod tests {
         let cli = CliArgs {
             follow_up: vec![],
             later: vec![],
-            later_group: vec!["3".to_string(), "final step".to_string(), "1".to_string(), "first step".to_string()],
+            later_group: vec![
+                "3".to_string(),
+                "final step".to_string(),
+                "1".to_string(),
+                "first step".to_string(),
+            ],
             ..default_cli()
         };
         let (mut queue, tx) = MessageQueue::new();
@@ -896,6 +996,14 @@ mod tests {
     /// Minimal CliArgs for tests — only the mid-stream fields matter.
     fn default_cli() -> CliArgs {
         use clap::Parser;
-        CliArgs::parse_from(["ava", "test-goal", "--headless", "--provider", "mock", "--model", "test"])
+        CliArgs::parse_from([
+            "ava",
+            "test-goal",
+            "--headless",
+            "--provider",
+            "mock",
+            "--model",
+            "test",
+        ])
     }
 }

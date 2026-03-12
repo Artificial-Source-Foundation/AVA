@@ -95,10 +95,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             vec![Line::from(vec![
                 bar.clone(),
                 Span::raw(pad),
-                Span::styled(
-                    "\u{276f} ",
-                    Style::default().fg(state.theme.accent),
-                ),
+                Span::styled("\u{276f} ", Style::default().fg(state.theme.accent)),
                 Span::styled(
                     format!("Listening... ({elapsed:.1}s)"),
                     Style::default()
@@ -110,10 +107,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         VoicePhase::Transcribing => vec![Line::from(vec![
             bar.clone(),
             Span::raw(pad),
-            Span::styled(
-                "\u{276f} ",
-                Style::default().fg(state.theme.accent),
-            ),
+            Span::styled("\u{276f} ", Style::default().fg(state.theme.accent)),
             Span::styled(
                 "Transcribing...",
                 Style::default()
@@ -175,9 +169,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                         } else {
                             // Show cursor on the next character
                             let mut char_end = 1;
-                            while char_end < after.len()
-                                && !after.is_char_boundary(char_end)
-                            {
+                            while char_end < after.len() && !after.is_char_boundary(char_end) {
                                 char_end += 1;
                             }
                             spans.push(Span::styled(
@@ -187,7 +179,11 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                                     .bg(state.theme.text),
                             ));
                             if char_end < after.len() {
-                                spans.extend(styled_text_spans(&after[char_end..], &state.input, &state.theme));
+                                spans.extend(styled_text_spans(
+                                    &after[char_end..],
+                                    &state.input,
+                                    &state.theme,
+                                ));
                             }
                         }
                     } else {
@@ -211,9 +207,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         Span::raw(pad),
         Span::styled(
             format!("[{}]", state.agent_mode.label()),
-            Style::default()
-                .fg(mode_color)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(mode_color).add_modifier(Modifier::BOLD),
         ),
         Span::styled("  ", Style::default()),
         Span::styled(
@@ -246,11 +240,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 ava_types::ContextAttachment::CodebaseQuery { .. } => "[@search]",
             };
             let label = attachment.label();
-            let truncated = if label.len() > 45 {
-                format!("...{}", &label[label.len() - 42..])
-            } else {
-                label
-            };
+            let truncated = crate::text_utils::truncate_display_start(&label, 45);
             all_lines.push(Line::from(vec![
                 bar_a.clone(),
                 Span::raw(pad),
@@ -285,11 +275,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 ava_types::MessageTier::PostComplete { group } => format!("[G{group}]"),
                 _ => badge.to_string(),
             };
-            let truncated = if item.text.len() > 50 {
-                format!("{}...", &item.text[..47])
-            } else {
-                item.text.clone()
-            };
+            let truncated = crate::text_utils::truncate_display(&item.text, 50);
             all_lines.push(Line::from(vec![
                 bar_q.clone(),
                 Span::raw(pad),

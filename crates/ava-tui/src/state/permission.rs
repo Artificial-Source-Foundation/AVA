@@ -36,7 +36,7 @@ pub enum ApprovalStage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PermissionLevel {
     #[default]
-    Standard,    // Auto-approve reads+writes, ask for bash/commands
+    Standard, // Auto-approve reads+writes, ask for bash/commands
     AutoApprove, // Auto-approve everything, only block Critical
 }
 

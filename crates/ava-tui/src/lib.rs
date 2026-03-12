@@ -6,9 +6,9 @@
 //! - Session management and message history
 
 pub mod app;
-pub mod auth;
 #[cfg(feature = "voice")]
 pub mod audio;
+pub mod auth;
 pub mod benchmark;
 pub mod benchmark_harness;
 pub mod benchmark_import;
@@ -20,6 +20,7 @@ pub mod hooks;
 pub mod rendering;
 pub mod review;
 pub mod state;
+pub mod text_utils;
 #[cfg(feature = "voice")]
 pub mod transcribe;
 pub mod ui;

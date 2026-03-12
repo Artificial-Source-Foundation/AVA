@@ -29,7 +29,10 @@ pub(super) struct ToolCallAccumulator {
     pub arguments_json: String,
 }
 
-pub(super) fn accumulate_tool_call(accumulators: &mut Vec<ToolCallAccumulator>, tc: &StreamToolCall) {
+pub(super) fn accumulate_tool_call(
+    accumulators: &mut Vec<ToolCallAccumulator>,
+    tc: &StreamToolCall,
+) {
     let acc = if let Some(acc) = accumulators.iter_mut().find(|a| a.index == tc.index) {
         acc
     } else {
@@ -56,8 +59,8 @@ pub(super) fn finalize_tool_calls(accumulators: Vec<ToolCallAccumulator>) -> Vec
     accumulators
         .into_iter()
         .map(|acc| {
-            let arguments = serde_json::from_str(&acc.arguments_json)
-                .unwrap_or(serde_json::json!({}));
+            let arguments =
+                serde_json::from_str(&acc.arguments_json).unwrap_or(serde_json::json!({}));
             ToolCall {
                 id: if acc.id.is_empty() {
                     Uuid::new_v4().to_string()
@@ -102,9 +105,14 @@ impl AgentLoop {
     /// the `extended_tools` config flag to filter by tier.
     pub(super) fn active_tool_defs(&self) -> Vec<ava_types::Tool> {
         if self.config.extended_tools {
-            self.tools.list_tools_for_tiers(&[ToolTier::Default, ToolTier::Extended, ToolTier::Plugin])
+            self.tools.list_tools_for_tiers(&[
+                ToolTier::Default,
+                ToolTier::Extended,
+                ToolTier::Plugin,
+            ])
         } else {
-            self.tools.list_tools_for_tiers(&[ToolTier::Default, ToolTier::Plugin])
+            self.tools
+                .list_tools_for_tiers(&[ToolTier::Default, ToolTier::Plugin])
         }
     }
 
@@ -122,8 +130,7 @@ impl AgentLoop {
             }
             hasher.finish()
         };
-        if let (Some(prev_hash), Some(prev_time)) =
-            (self.last_request_hash, self.last_request_time)
+        if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time)
         {
             if hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
                 warn!("Skipping duplicate request (same content within 2s)");
@@ -133,10 +140,7 @@ impl AgentLoop {
 
         let result = if self.llm.supports_tools() {
             let tool_defs = self.active_tool_defs();
-            let response = self
-                .llm
-                .generate_with_tools(messages, &tool_defs)
-                .await?;
+            let response = self.llm.generate_with_tools(messages, &tool_defs).await?;
             Ok((response.content, response.tool_calls, response.usage))
         } else {
             // Gap: LLMProvider::generate() returns Result<String>, so no token usage
@@ -181,8 +185,7 @@ impl AgentLoop {
             }
             hasher.finish()
         };
-        if let (Some(prev_hash), Some(prev_time)) =
-            (self.last_request_hash, self.last_request_time)
+        if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time)
         {
             if hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
                 warn!("Skipping duplicate request (same content within 2s)");

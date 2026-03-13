@@ -57,9 +57,8 @@ pub struct KeychainManager {
 impl KeychainManager {
     /// Create a new KeychainManager, probing OS keychain availability.
     pub fn new() -> Result<Self> {
-        let home = dirs::home_dir().ok_or_else(|| {
-            AvaError::ConfigError("Could not resolve home directory".to_string())
-        })?;
+        let home = dirs::home_dir()
+            .ok_or_else(|| AvaError::ConfigError("Could not resolve home directory".to_string()))?;
         let encrypted_path = home.join(".ava").join(ENCRYPTED_FILE);
         let os_keychain_available = probe_os_keychain();
 
@@ -219,9 +218,7 @@ impl KeychainManager {
         }
 
         let count = store.providers.len();
-        info!(
-            "Migrating {count} provider credentials from plaintext to secure storage"
-        );
+        info!("Migrating {count} provider credentials from plaintext to secure storage");
 
         // Store each credential
         for (provider, credential) in &store.providers {
@@ -243,9 +240,9 @@ impl KeychainManager {
         }
 
         // Remove plaintext file
-        tokio::fs::remove_file(plaintext_path)
-            .await
-            .map_err(|e| AvaError::IoError(format!("Failed to remove plaintext credentials: {e}")))?;
+        tokio::fs::remove_file(plaintext_path).await.map_err(|e| {
+            AvaError::IoError(format!("Failed to remove plaintext credentials: {e}"))
+        })?;
 
         info!("Migration complete — removed plaintext credentials file");
         Ok(MigrationResult::Migrated { count })
@@ -278,8 +275,7 @@ impl KeychainManager {
 
     fn save_encrypted_store(&self, store: &CredentialStore) -> Result<()> {
         if let Some(parent) = self.encrypted_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| AvaError::IoError(e.to_string()))?;
+            std::fs::create_dir_all(parent).map_err(|e| AvaError::IoError(e.to_string()))?;
         }
 
         let password = get_master_password(true)?;
@@ -484,8 +480,8 @@ fn encrypt_store(store: &CredentialStore, password: &str) -> Result<EncryptedEnv
     use rand::RngCore;
     use sha2::Sha256;
 
-    let plaintext = serde_json::to_string(store)
-        .map_err(|e| AvaError::SerializationError(e.to_string()))?;
+    let plaintext =
+        serde_json::to_string(store).map_err(|e| AvaError::SerializationError(e.to_string()))?;
 
     // Generate random salt and nonce
     let mut salt = [0u8; SALT_SIZE];
@@ -548,13 +544,11 @@ fn decrypt_store(envelope: &EncryptedEnvelope, password: &str) -> Result<Credent
     let cipher = Aes256Gcm::new_from_slice(&key)
         .map_err(|e| AvaError::ConfigError(format!("AES key init failed: {e}")))?;
     let nonce = Nonce::from_slice(&nonce_bytes);
-    let plaintext = cipher
-        .decrypt(nonce, ciphertext.as_ref())
-        .map_err(|_| {
-            AvaError::ConfigError(
-                "Decryption failed — wrong master password or corrupted file".to_string(),
-            )
-        })?;
+    let plaintext = cipher.decrypt(nonce, ciphertext.as_ref()).map_err(|_| {
+        AvaError::ConfigError(
+            "Decryption failed — wrong master password or corrupted file".to_string(),
+        )
+    })?;
 
     let store: CredentialStore = serde_json::from_slice(&plaintext)
         .map_err(|e| AvaError::SerializationError(format!("Invalid decrypted JSON: {e}")))?;
@@ -593,6 +587,12 @@ mod tests {
 
     /// Tests that use AVA_MASTER_PASSWORD must hold this lock to avoid races.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     #[test]
     fn redact_key_for_log_short_keys() {
@@ -698,7 +698,7 @@ mod tests {
     #[cfg(feature = "keychain")]
     #[test]
     fn encrypted_file_roundtrip() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env();
         let dir = tempfile::TempDir::new().unwrap();
         let enc_path = dir.path().join("credentials.enc");
 
@@ -735,42 +735,45 @@ mod tests {
     }
 
     #[cfg(feature = "keychain")]
-    #[tokio::test]
-    async fn migration_from_plaintext() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        let dir = tempfile::TempDir::new().unwrap();
-        let plaintext_path = dir.path().join("credentials.json");
-        let enc_path = dir.path().join("credentials.enc");
+    #[test]
+    fn migration_from_plaintext() {
+        let _guard = lock_env();
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let dir = tempfile::TempDir::new().unwrap();
+            let plaintext_path = dir.path().join("credentials.json");
+            let enc_path = dir.path().join("credentials.enc");
 
-        // Create a plaintext credentials file
-        let mut store = CredentialStore::default();
-        store.set(
-            "openai",
-            ProviderCredential {
-                api_key: "sk-migrate-test".to_string(),
-                base_url: None,
-                org_id: None,
-                oauth_token: None,
-                oauth_refresh_token: None,
-                oauth_expires_at: None,
-                oauth_account_id: None,
-            },
-        );
-        store.save(&plaintext_path).await.unwrap();
+            let mut store = CredentialStore::default();
+            store.set(
+                "openai",
+                ProviderCredential {
+                    api_key: "sk-migrate-test".to_string(),
+                    base_url: None,
+                    org_id: None,
+                    oauth_token: None,
+                    oauth_refresh_token: None,
+                    oauth_expires_at: None,
+                    oauth_account_id: None,
+                },
+            );
+            store.save(&plaintext_path).await.unwrap();
 
-        std::env::set_var("AVA_MASTER_PASSWORD", "migration-test-pw");
+            std::env::set_var("AVA_MASTER_PASSWORD", "migration-test-pw");
 
-        let manager = KeychainManager::with_path(enc_path);
-        let result = manager.migrate_from_plaintext(&plaintext_path).await.unwrap();
+            let manager = KeychainManager::with_path(enc_path);
+            let result = manager
+                .migrate_from_plaintext(&plaintext_path)
+                .await
+                .unwrap();
 
-        assert_eq!(result, MigrationResult::Migrated { count: 1 });
-        assert!(!plaintext_path.exists(), "plaintext file should be deleted");
+            assert_eq!(result, MigrationResult::Migrated { count: 1 });
+            assert!(!plaintext_path.exists(), "plaintext file should be deleted");
 
-        // Verify the migrated credential
-        let retrieved = manager.retrieve("openai").unwrap().unwrap();
-        assert_eq!(retrieved.api_key, "sk-migrate-test");
+            let retrieved = manager.retrieve("openai").unwrap().unwrap();
+            assert_eq!(retrieved.api_key, "sk-migrate-test");
 
-        std::env::remove_var("AVA_MASTER_PASSWORD");
+            std::env::remove_var("AVA_MASTER_PASSWORD");
+        });
     }
 
     #[cfg(feature = "keychain")]
@@ -788,7 +791,7 @@ mod tests {
     #[cfg(feature = "keychain")]
     #[test]
     fn load_all_and_store_all() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env();
         let dir = tempfile::TempDir::new().unwrap();
         let enc_path = dir.path().join("credentials.enc");
 

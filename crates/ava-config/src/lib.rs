@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::RwLock;
+use uuid::Uuid;
 
 pub mod agents;
 pub mod credential_commands;
@@ -18,11 +19,53 @@ pub mod thinking;
 
 pub use agents::AgentsConfig;
 pub use ava_auth;
+
+pub(crate) async fn write_file_atomic(path: &Path, content: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .await
+            .map_err(|e| AvaError::IoError(e.to_string()))?;
+    }
+
+    let file_name = path.file_name().ok_or_else(|| {
+        AvaError::IoError(format!(
+            "Could not determine file name for {}",
+            path.display()
+        ))
+    })?;
+    let temp_path = path.with_file_name(format!(
+        ".{}.{}.tmp",
+        file_name.to_string_lossy(),
+        Uuid::new_v4()
+    ));
+
+    fs::write(&temp_path, content)
+        .await
+        .map_err(|e| AvaError::IoError(e.to_string()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let perms = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(&temp_path, perms)
+            .map_err(|e| AvaError::IoError(e.to_string()))?;
+    }
+
+    fs::rename(&temp_path, path)
+        .await
+        .map_err(|e| AvaError::IoError(e.to_string()))?;
+
+    Ok(())
+}
 pub use credential_commands::{
     execute_credential_command, execute_credential_command_with_tester, provider_name, redact_key,
     CredentialCommand,
 };
-pub use credentials::{known_providers, standard_env_var, CredentialStore, ProviderCredential};
+pub use credentials::{
+    known_providers, standard_env_var, CredentialStore, PendingProviderRefresh, ProviderCredential,
+    ProviderCredentialState,
+};
 pub use keychain::{redact_key_for_log, KeychainManager, MigrationResult};
 pub use model_catalog::{fallback_catalog, CatalogModel, CatalogState, ModelCatalog};
 pub use thinking::{ProviderThinkingBudgetConfig, ThinkingBudgetConfig};
@@ -312,19 +355,7 @@ impl ConfigManager {
         let config = self.config.read().await;
         let content = serde_yaml::to_string(&*config)
             .map_err(|e| AvaError::SerializationError(e.to_string()))?;
-
-        // Ensure directory exists
-        if let Some(parent) = self.config_path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(|e| AvaError::IoError(e.to_string()))?;
-        }
-
-        fs::write(&self.config_path, content)
-            .await
-            .map_err(|e| AvaError::IoError(e.to_string()))?;
-
-        Ok(())
+        write_file_atomic(&self.config_path, &content).await
     }
 
     /// Save credentials to file

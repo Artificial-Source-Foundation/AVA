@@ -177,6 +177,8 @@ pub fn extract_account_id(id_token: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     fn make_jwt(payload: &serde_json::Value) -> String {
         let header = URL_SAFE_NO_PAD.encode(b"{}");
@@ -219,7 +221,52 @@ mod tests {
 
     #[test]
     fn decode_invalid_jwt_fails() {
-        assert!(decode_jwt_payload("not.a.valid-jwt-but-three-parts").is_err()
-            || decode_jwt_payload("not-a-jwt").is_err());
+        assert!(
+            decode_jwt_payload("not.a.valid-jwt-but-three-parts").is_err()
+                || decode_jwt_payload("not-a-jwt").is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn refresh_token_posts_refresh_grant_and_parses_tokens() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0; 4096];
+            let read = socket.read(&mut buf).await.unwrap();
+            let request = String::from_utf8_lossy(&buf[..read]);
+            assert!(request.contains("grant_type=refresh_token"));
+            assert!(request.contains("refresh_token=refresh-123"));
+            assert!(request.contains("client_id=test-client"));
+
+            let body =
+                r#"{"access_token":"new-access","refresh_token":"new-refresh","expires_in":1200}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+
+        let config = OAuthConfig {
+            client_id: "test-client",
+            authorization_url: "https://example.com/auth",
+            token_url: Box::leak(format!("http://{addr}/token").into_boxed_str()),
+            scopes: &[],
+            redirect_port: 0,
+            redirect_path: "",
+            extra_params: &[],
+            flow: crate::config::AuthFlow::Pkce,
+        };
+
+        let tokens = refresh_token(&config, "refresh-123").await.unwrap();
+        assert_eq!(tokens.access_token, "new-access");
+        assert_eq!(tokens.refresh_token.as_deref(), Some("new-refresh"));
+        assert!(tokens.expires_at.is_some());
+
+        server.await.unwrap();
     }
 }

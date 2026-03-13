@@ -7,6 +7,7 @@
 
 pub mod circuit_breaker;
 pub mod credential_test;
+mod dynamic_provider;
 pub mod message_transform;
 pub mod pool;
 pub mod provider;

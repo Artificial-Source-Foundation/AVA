@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet};
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 
 use ava_types::{AvaError, Result};
 use serde::{Deserialize, Serialize};
 use tokio::fs;
-
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use tracing::warn;
 
 /// Per-provider credential entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +76,19 @@ pub struct CredentialStore {
     pub providers: HashMap<String, ProviderCredential>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PendingProviderRefresh {
+    pub existing: ProviderCredential,
+    pub refresh_token: String,
+    pub config: &'static ava_auth::config::OAuthConfig,
+}
+
+#[derive(Debug, Clone)]
+pub enum ProviderCredentialState {
+    Ready(Option<ProviderCredential>),
+    RefreshNeeded(PendingProviderRefresh),
+}
+
 impl CredentialStore {
     pub async fn load(path: &Path) -> Result<Self> {
         if !path.exists() {
@@ -109,27 +122,10 @@ impl CredentialStore {
     }
 
     pub async fn save(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .await
-                .map_err(|error| AvaError::IoError(error.to_string()))?;
-        }
-
         let content = serde_json::to_string_pretty(self)
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
-        fs::write(path, content)
-            .await
-            .map_err(|error| AvaError::IoError(error.to_string()))?;
-
-        #[cfg(unix)]
-        {
-            let perms = std::fs::Permissions::from_mode(0o600);
-            std::fs::set_permissions(path, perms)
-                .map_err(|error| AvaError::IoError(error.to_string()))?;
-        }
-
-        Ok(())
+        crate::write_file_atomic(path, &content).await
     }
 
     pub async fn save_default(&self) -> Result<()> {
@@ -143,50 +139,136 @@ impl CredentialStore {
     /// 2) Standard provider env var (e.g. OPENAI_API_KEY)
     /// 3) File credential
     pub fn get(&self, provider: &str) -> Option<ProviderCredential> {
-        let provider_key = provider.to_ascii_uppercase().replace('-', "_");
-        let ava_env = format!("AVA_{provider_key}_API_KEY");
-
-        if let Ok(api_key) = std::env::var(&ava_env) {
-            let api_key = api_key.trim().to_string();
-            if !api_key.is_empty() && !is_placeholder_key(&api_key) {
-                let mut credential = self.providers.get(provider).cloned().unwrap_or_else(|| {
-                    ProviderCredential {
-                        api_key: String::new(),
-                        base_url: None,
-                        org_id: None,
-                        oauth_token: None,
-                        oauth_refresh_token: None,
-                        oauth_expires_at: None,
-                        oauth_account_id: None,
-                    }
-                });
-                credential.api_key = api_key;
-                return Some(credential);
-            }
-        }
-
-        if let Some(standard_env) = standard_env_var(provider) {
-            if let Ok(api_key) = std::env::var(standard_env) {
-                let api_key = api_key.trim().to_string();
-                if !api_key.is_empty() && !is_placeholder_key(&api_key) {
-                    let mut credential = self.providers.get(provider).cloned().unwrap_or_else(|| {
-                        ProviderCredential {
-                            api_key: String::new(),
-                            base_url: None,
-                            org_id: None,
-                            oauth_token: None,
-                            oauth_refresh_token: None,
-                            oauth_expires_at: None,
-                            oauth_account_id: None,
-                        }
-                    });
-                    credential.api_key = api_key;
-                    return Some(credential);
-                }
-            }
+        if let Some(credential) = env_override_credential(provider, self.providers.get(provider)) {
+            return Some(credential);
         }
 
         self.providers.get(provider).cloned()
+    }
+
+    pub fn provider_credential_state(&self, provider: &str) -> ProviderCredentialState {
+        if let Some(credential) = env_override_credential(provider, self.providers.get(provider)) {
+            return ProviderCredentialState::Ready(Some(credential));
+        }
+
+        let Some(existing) = self.providers.get(provider).cloned() else {
+            return ProviderCredentialState::Ready(None);
+        };
+
+        if !existing.is_oauth_configured() || !existing.is_oauth_expired() {
+            return ProviderCredentialState::Ready(Some(existing));
+        }
+
+        let Some(refresh_token) = existing.oauth_refresh_token.clone() else {
+            return ProviderCredentialState::Ready(Some(existing));
+        };
+
+        let Some(config) = ava_auth::config::oauth_config(provider) else {
+            return ProviderCredentialState::Ready(Some(existing));
+        };
+
+        ProviderCredentialState::RefreshNeeded(PendingProviderRefresh {
+            existing,
+            refresh_token,
+            config,
+        })
+    }
+
+    pub fn apply_refreshed_provider_tokens(
+        &mut self,
+        provider: &str,
+        expected: &ProviderCredential,
+        refreshed_tokens: ava_auth::tokens::OAuthTokens,
+    ) -> Option<ProviderCredential> {
+        if let Some(credential) = env_override_credential(provider, self.providers.get(provider)) {
+            return Some(credential);
+        }
+
+        let current = self.providers.get(provider).cloned()?;
+        if current.oauth_token != expected.oauth_token
+            || current.oauth_refresh_token != expected.oauth_refresh_token
+            || current.oauth_expires_at != expected.oauth_expires_at
+        {
+            return Some(current);
+        }
+
+        let mut refreshed = current;
+        refreshed.oauth_token = Some(refreshed_tokens.access_token);
+        refreshed.oauth_refresh_token = refreshed_tokens
+            .refresh_token
+            .or(refreshed.oauth_refresh_token.clone());
+        refreshed.oauth_expires_at = refreshed_tokens.expires_at;
+        if let Some(id_token) = refreshed_tokens.id_token.as_deref() {
+            refreshed.oauth_account_id = ava_auth::tokens::extract_account_id(id_token)
+                .or(refreshed.oauth_account_id.clone());
+        }
+
+        self.providers
+            .insert(provider.to_string(), refreshed.clone());
+        Some(refreshed)
+    }
+
+    pub async fn resolve_provider_credentials(
+        &mut self,
+        provider: &str,
+        persist_path: Option<&Path>,
+    ) -> Result<Option<ProviderCredential>> {
+        self.resolve_provider_credentials_with_refresher(
+            provider,
+            persist_path,
+            |config, refresh_token| Box::pin(refresh_oauth_tokens(config, refresh_token)),
+        )
+        .await
+    }
+
+    async fn resolve_provider_credentials_with_refresher<F>(
+        &mut self,
+        provider: &str,
+        persist_path: Option<&Path>,
+        refresher: F,
+    ) -> Result<Option<ProviderCredential>>
+    where
+        F: for<'a> Fn(
+            &'a ava_auth::config::OAuthConfig,
+            &'a str,
+        ) -> Pin<
+            Box<
+                dyn Future<
+                        Output = std::result::Result<
+                            ava_auth::tokens::OAuthTokens,
+                            ava_auth::AuthError,
+                        >,
+                    > + Send
+                    + 'a,
+            >,
+        >,
+    {
+        let refresh = match self.provider_credential_state(provider) {
+            ProviderCredentialState::Ready(credential) => return Ok(credential),
+            ProviderCredentialState::RefreshNeeded(refresh) => refresh,
+        };
+
+        let refreshed_tokens = match refresher(refresh.config, &refresh.refresh_token).await {
+            Ok(tokens) => tokens,
+            Err(error) if !refresh.existing.api_key.trim().is_empty() => {
+                warn!(provider, %error, "OAuth refresh failed; falling back to static API key");
+                return Ok(Some(refresh.existing));
+            }
+            Err(error) => {
+                return Err(AvaError::ConfigError(format!(
+                    "Failed to refresh OAuth credential for {provider}: {error}"
+                )))
+            }
+        };
+
+        let refreshed =
+            self.apply_refreshed_provider_tokens(provider, &refresh.existing, refreshed_tokens);
+
+        if let Some(path) = persist_path {
+            self.save(path).await?;
+        }
+
+        Ok(refreshed)
     }
 
     pub fn set(&mut self, provider: &str, credential: ProviderCredential) {
@@ -201,17 +283,19 @@ impl CredentialStore {
         refresh_token: Option<&str>,
         expires_at: Option<u64>,
     ) {
-        let mut cred = self.providers.get(provider).cloned().unwrap_or_else(|| {
-            ProviderCredential {
-                api_key: String::new(),
-                base_url: None,
-                org_id: None,
-                oauth_token: None,
-                oauth_refresh_token: None,
-                oauth_expires_at: None,
-                oauth_account_id: None,
-            }
-        });
+        let mut cred =
+            self.providers
+                .get(provider)
+                .cloned()
+                .unwrap_or_else(|| ProviderCredential {
+                    api_key: String::new(),
+                    base_url: None,
+                    org_id: None,
+                    oauth_token: None,
+                    oauth_refresh_token: None,
+                    oauth_expires_at: None,
+                    oauth_account_id: None,
+                });
         cred.oauth_token = Some(access_token.to_string());
         cred.oauth_refresh_token = refresh_token.map(String::from);
         cred.oauth_expires_at = expires_at;
@@ -270,6 +354,55 @@ impl CredentialStore {
     }
 }
 
+fn env_override_credential(
+    provider: &str,
+    base: Option<&ProviderCredential>,
+) -> Option<ProviderCredential> {
+    let provider_key = provider.to_ascii_uppercase().replace('-', "_");
+    let ava_env = format!("AVA_{provider_key}_API_KEY");
+
+    if let Ok(api_key) = std::env::var(&ava_env) {
+        let api_key = api_key.trim().to_string();
+        if !api_key.is_empty() && !is_placeholder_key(&api_key) {
+            let mut credential = base.cloned().unwrap_or_else(empty_credential);
+            credential.api_key = api_key;
+            return Some(credential);
+        }
+    }
+
+    if let Some(standard_env) = standard_env_var(provider) {
+        if let Ok(api_key) = std::env::var(standard_env) {
+            let api_key = api_key.trim().to_string();
+            if !api_key.is_empty() && !is_placeholder_key(&api_key) {
+                let mut credential = base.cloned().unwrap_or_else(empty_credential);
+                credential.api_key = api_key;
+                return Some(credential);
+            }
+        }
+    }
+
+    None
+}
+
+fn empty_credential() -> ProviderCredential {
+    ProviderCredential {
+        api_key: String::new(),
+        base_url: None,
+        org_id: None,
+        oauth_token: None,
+        oauth_refresh_token: None,
+        oauth_expires_at: None,
+        oauth_account_id: None,
+    }
+}
+
+async fn refresh_oauth_tokens(
+    config: &ava_auth::config::OAuthConfig,
+    refresh_token: &str,
+) -> std::result::Result<ava_auth::tokens::OAuthTokens, ava_auth::AuthError> {
+    ava_auth::tokens::refresh_token(config, refresh_token).await
+}
+
 pub fn known_providers() -> &'static [&'static str] {
     &[
         "anthropic",
@@ -320,10 +453,17 @@ fn is_placeholder_key(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
     use std::sync::Mutex;
     use tempfile::TempDir;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 
     fn sample_credential(key: &str) -> ProviderCredential {
         ProviderCredential {
@@ -382,7 +522,7 @@ mod tests {
 
     #[test]
     fn env_var_fallback() {
-        let _guard = ENV_LOCK.lock().unwrap();
+        let _guard = lock_env();
         let mut store = CredentialStore::default();
         store.set("envcredtest", sample_credential("file-key"));
 
@@ -423,5 +563,99 @@ mod tests {
 
         let store = CredentialStore::load(&path).await.unwrap();
         assert!(store.providers().is_empty());
+    }
+
+    #[tokio::test]
+    async fn credentials_refresh_expired_oauth_tokens_before_returning_provider() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("credentials.json");
+
+        let mut store = CredentialStore::default();
+        store.set(
+            "openai",
+            ProviderCredential {
+                api_key: String::new(),
+                base_url: None,
+                org_id: None,
+                oauth_token: Some("expired-token".to_string()),
+                oauth_refresh_token: Some("refresh-token".to_string()),
+                oauth_expires_at: Some(1),
+                oauth_account_id: None,
+            },
+        );
+
+        let resolved = store
+            .resolve_provider_credentials_with_refresher(
+                "openai",
+                Some(&path),
+                |_config, refresh_token| {
+                    let refresh_token = refresh_token.to_string();
+                    Box::pin(async move {
+                        assert_eq!(refresh_token, "refresh-token");
+                        Ok(ava_auth::tokens::OAuthTokens {
+                            access_token: "fresh-token".to_string(),
+                            refresh_token: Some("fresh-refresh".to_string()),
+                            expires_at: Some(999_999_999),
+                            id_token: Some({
+                                let header =
+                                    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"{}");
+                                let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                                    .encode(br#"{"chatgpt_account_id":"acct-123"}"#);
+                                let sig =
+                                    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b"sig");
+                                format!("{header}.{payload}.{sig}")
+                            }),
+                        })
+                    })
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(resolved.oauth_token.as_deref(), Some("fresh-token"));
+        assert_eq!(
+            resolved.oauth_refresh_token.as_deref(),
+            Some("fresh-refresh")
+        );
+        assert_eq!(resolved.oauth_account_id.as_deref(), Some("acct-123"));
+
+        let persisted = CredentialStore::load(&path).await.unwrap();
+        let persisted_openai = persisted.get("openai").unwrap();
+        assert_eq!(persisted_openai.oauth_token.as_deref(), Some("fresh-token"));
+    }
+
+    #[tokio::test]
+    async fn credentials_preserve_static_api_key_when_refresh_fails() {
+        let mut store = CredentialStore::default();
+        store.set(
+            "openai",
+            ProviderCredential {
+                api_key: "static-key".to_string(),
+                base_url: None,
+                org_id: None,
+                oauth_token: Some("expired-token".to_string()),
+                oauth_refresh_token: Some("refresh-token".to_string()),
+                oauth_expires_at: Some(1),
+                oauth_account_id: None,
+            },
+        );
+
+        let resolved = store
+            .resolve_provider_credentials_with_refresher(
+                "openai",
+                None,
+                |_config, _refresh_token| {
+                    Box::pin(
+                        async move { Err(ava_auth::AuthError::RefreshFailed("boom".to_string())) },
+                    )
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(resolved.effective_api_key(), Some("static-key"));
+        assert_eq!(resolved.oauth_token.as_deref(), Some("expired-token"));
     }
 }

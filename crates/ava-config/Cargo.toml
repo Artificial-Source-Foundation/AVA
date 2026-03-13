@@ -26,6 +26,7 @@ base64 = { version = "0.22", optional = true }
 rpassword = { version = "7", optional = true }
 ava-types = { path = "../ava-types" }
 ava-auth = { path = "../ava-auth" }
+uuid.workspace = true
 
 [features]
 default = ["keychain"]

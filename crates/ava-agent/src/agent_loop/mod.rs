@@ -7,6 +7,7 @@ use std::pin::Pin;
 use std::time::Instant;
 
 use ava_context::ContextManager;
+use ava_llm::ThinkingConfig;
 use ava_tools::monitor::ToolExecution;
 use ava_tools::registry::ToolRegistry;
 use ava_types::{
@@ -64,6 +65,9 @@ pub struct AgentConfig {
     /// Thinking/reasoning level for models that support extended thinking.
     #[serde(default)]
     pub thinking_level: ThinkingLevel,
+    /// Optional quantitative cap for providers that support explicit thinking budgets.
+    #[serde(default)]
+    pub thinking_budget_tokens: Option<u32>,
     /// Optional suffix appended to the system prompt (e.g., mode-specific instructions).
     #[serde(default)]
     pub system_prompt_suffix: Option<String>,
@@ -316,6 +320,7 @@ impl AgentLoop {
                 &response_text,
                 &tool_calls,
                 &tool_results,
+                usage.as_ref(),
                 &self.config,
                 self.llm.as_ref(),
             ) {
@@ -482,7 +487,7 @@ impl AgentLoop {
                     }
                 }
 
-                let (response_text, tool_calls) = {
+                let (response_text, tool_calls, usage) = {
                     info!(
                         model = %self.config.model,
                         turn = turn + 1,
@@ -494,9 +499,27 @@ impl AgentLoop {
                     let stream_result = if native_tools {
                         let tool_defs = self.active_tool_defs();
                         if self.config.thinking_level != ThinkingLevel::Off {
-                            self.llm.generate_stream_with_thinking(
-                                self.context.get_messages(), &tool_defs, self.config.thinking_level,
-                            ).await
+                            let thinking = ThinkingConfig::new(
+                                self.config.thinking_level,
+                                self.config.thinking_budget_tokens,
+                            );
+                            let resolved = self.llm.resolve_thinking_config(thinking);
+                            if let Some(fallback) = resolved.fallback {
+                                warn!(
+                                    requested_budget = thinking.budget_tokens,
+                                    applied_budget = resolved.applied.budget_tokens,
+                                    ?fallback,
+                                    model = %self.config.model,
+                                    "provider could not fully honor requested thinking budget"
+                                );
+                            }
+                            self.llm
+                                .generate_stream_with_thinking_config(
+                                    self.context.get_messages(),
+                                    &tool_defs,
+                                    thinking,
+                                )
+                                .await
                         } else {
                             self.llm.generate_stream_with_tools(
                                 self.context.get_messages(), &tool_defs,
@@ -570,7 +593,7 @@ impl AgentLoop {
                             );
 
                             // Emit token usage
-                            if let Some(usage) = last_usage {
+                            if let Some(usage) = last_usage.clone() {
                                 let (in_rate, out_rate) = ava_llm::providers::common::model_pricing_usd_per_million(&self.config.model);
                                 let cost = ava_llm::providers::common::estimate_cost_with_cache_usd(
                                     &usage, in_rate, out_rate,
@@ -591,7 +614,7 @@ impl AgentLoop {
                                 vec![]
                             };
 
-                            (full_text, tool_calls)
+                            (full_text, tool_calls, last_usage)
                         }
                         Err(error) => {
                             yield AgentEvent::Error(error.to_string());
@@ -706,6 +729,7 @@ impl AgentLoop {
                     &response_text,
                     &tool_calls,
                     &tool_results_collected,
+                    usage.as_ref(),
                     &self.config,
                     self.llm.as_ref(),
                 ) {
@@ -873,6 +897,7 @@ mod tests {
             loop_detection: true,
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
+            thinking_budget_tokens: None,
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
@@ -881,11 +906,11 @@ mod tests {
         let llm = crate::tests::mock_llm();
 
         // First empty: continue
-        let action = detector.check("", &[], &[], &config, llm.as_ref());
+        let action = detector.check("", &[], &[], None, &config, llm.as_ref());
         assert!(matches!(action, StuckAction::Continue));
 
         // Second empty: stop
-        let action = detector.check("", &[], &[], &config, llm.as_ref());
+        let action = detector.check("", &[], &[], None, &config, llm.as_ref());
         assert!(matches!(action, StuckAction::Stop(_)));
     }
 
@@ -901,6 +926,7 @@ mod tests {
             loop_detection: true,
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
+            thinking_budget_tokens: None,
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
@@ -909,14 +935,14 @@ mod tests {
         let llm = crate::tests::mock_llm();
 
         for i in 0..2 {
-            let action = detector.check("same response", &[], &[], &config, llm.as_ref());
+            let action = detector.check("same response", &[], &[], None, &config, llm.as_ref());
             assert!(
                 matches!(action, StuckAction::Continue),
                 "iteration {i} should continue"
             );
         }
 
-        let action = detector.check("same response", &[], &[], &config, llm.as_ref());
+        let action = detector.check("same response", &[], &[], None, &config, llm.as_ref());
         assert!(matches!(action, StuckAction::Stop(_)));
     }
 
@@ -932,6 +958,7 @@ mod tests {
             loop_detection: true,
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
+            thinking_budget_tokens: None,
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
@@ -950,6 +977,7 @@ mod tests {
                 &format!("reading {i}"),
                 std::slice::from_ref(&call),
                 &[],
+                None,
                 &config,
                 llm.as_ref(),
             );
@@ -960,6 +988,7 @@ mod tests {
             "reading again",
             std::slice::from_ref(&call),
             &[],
+            None,
             &config,
             llm.as_ref(),
         );
@@ -978,6 +1007,7 @@ mod tests {
             loop_detection: true,
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
+            thinking_budget_tokens: None,
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
@@ -996,6 +1026,7 @@ mod tests {
                 &format!("trying {i}"),
                 &[],
                 std::slice::from_ref(&error_result),
+                None,
                 &config,
                 llm.as_ref(),
             );
@@ -1006,6 +1037,7 @@ mod tests {
             "trying again",
             &[],
             std::slice::from_ref(&error_result),
+            None,
             &config,
             llm.as_ref(),
         );
@@ -1024,6 +1056,7 @@ mod tests {
             loop_detection: true,
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
+            thinking_budget_tokens: None,
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
@@ -1031,7 +1064,7 @@ mod tests {
         };
         let llm = crate::tests::mock_llm();
 
-        let action = detector.check("hello", &[], &[], &config, llm.as_ref());
+        let action = detector.check("hello", &[], &[], None, &config, llm.as_ref());
         assert!(matches!(action, StuckAction::Stop(_)));
     }
 
@@ -1047,6 +1080,7 @@ mod tests {
             loop_detection: false,
             custom_system_prompt: None,
             thinking_level: ThinkingLevel::Off,
+            thinking_budget_tokens: None,
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
@@ -1055,7 +1089,7 @@ mod tests {
         let llm = crate::tests::mock_llm();
 
         // Would normally trigger cost stop, but detection is disabled
-        let action = detector.check("hello", &[], &[], &config, llm.as_ref());
+        let action = detector.check("hello", &[], &[], None, &config, llm.as_ref());
         assert!(matches!(action, StuckAction::Continue));
     }
 

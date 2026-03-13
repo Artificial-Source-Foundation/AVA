@@ -1,5 +1,5 @@
 use ava_tools::monitor::ToolMonitor;
-use ava_types::{ToolCall, ToolResult};
+use ava_types::{TokenUsage, ToolCall, ToolResult};
 
 use crate::agent_loop::AgentConfig;
 use crate::llm_trait::LLMProvider;
@@ -68,6 +68,7 @@ impl StuckDetector {
         response_text: &str,
         tool_calls: &[ToolCall],
         tool_results: &[ToolResult],
+        usage: Option<&TokenUsage>,
         config: &AgentConfig,
         llm: &dyn LLMProvider,
     ) -> StuckAction {
@@ -78,8 +79,16 @@ impl StuckDetector {
         self.turn_count += 1;
 
         // Update cost estimate
-        let input_tokens = llm.estimate_tokens(response_text);
-        self.estimated_cost += llm.estimate_cost(input_tokens, input_tokens);
+        let turn_cost = if let Some(usage) = usage {
+            let conservative_input_tokens = usage
+                .input_tokens
+                .saturating_add(usage.cache_creation_tokens);
+            llm.estimate_cost(conservative_input_tokens, usage.output_tokens)
+        } else {
+            let output_tokens = llm.estimate_tokens(response_text);
+            llm.estimate_cost(0, output_tokens)
+        };
+        self.estimated_cost += turn_cost;
 
         // 1. Empty response detection (2 consecutive)
         if response_text.trim().is_empty() && tool_calls.is_empty() {
@@ -219,6 +228,7 @@ mod tests {
             loop_detection,
             custom_system_prompt: None,
             thinking_level: ava_types::ThinkingLevel::Off,
+            thinking_budget_tokens: None,
             system_prompt_suffix: None,
             extended_tools: false,
             plan_mode: false,
@@ -236,10 +246,10 @@ mod tests {
         let config = make_config(1.0, true);
         let llm = mock_llm();
 
-        let action = detector.check("", &[], &[], &config, llm.as_ref());
+        let action = detector.check("", &[], &[], None, &config, llm.as_ref());
         assert!(matches!(action, StuckAction::Continue));
 
-        let action = detector.check("", &[], &[], &config, llm.as_ref());
+        let action = detector.check("", &[], &[], None, &config, llm.as_ref());
         assert!(matches!(action, StuckAction::Stop(_)));
     }
 
@@ -250,11 +260,11 @@ mod tests {
         let llm = mock_llm();
 
         for i in 0..2 {
-            let action = detector.check("same", &[], &[], &config, llm.as_ref());
+            let action = detector.check("same", &[], &[], None, &config, llm.as_ref());
             assert!(matches!(action, StuckAction::Continue), "iteration {i}");
         }
 
-        let action = detector.check("same", &[], &[], &config, llm.as_ref());
+        let action = detector.check("same", &[], &[], None, &config, llm.as_ref());
         assert!(matches!(action, StuckAction::Stop(_)));
     }
 
@@ -275,6 +285,7 @@ mod tests {
                 &format!("r{i}"),
                 std::slice::from_ref(&call),
                 &[],
+                None,
                 &config,
                 llm.as_ref(),
             );
@@ -285,6 +296,7 @@ mod tests {
             "r2",
             std::slice::from_ref(&call),
             &[],
+            None,
             &config,
             llm.as_ref(),
         );
@@ -308,13 +320,21 @@ mod tests {
                 &format!("e{i}"),
                 &[],
                 std::slice::from_ref(&err),
+                None,
                 &config,
                 llm.as_ref(),
             );
             assert!(matches!(action, StuckAction::Continue));
         }
 
-        let action = detector.check("e2", &[], std::slice::from_ref(&err), &config, llm.as_ref());
+        let action = detector.check(
+            "e2",
+            &[],
+            std::slice::from_ref(&err),
+            None,
+            &config,
+            llm.as_ref(),
+        );
         assert!(matches!(action, StuckAction::InjectMessage(_)));
     }
 
@@ -324,7 +344,7 @@ mod tests {
         let config = make_config(0.0, true);
         let llm = mock_llm();
 
-        let action = detector.check("hello", &[], &[], &config, llm.as_ref());
+        let action = detector.check("hello", &[], &[], None, &config, llm.as_ref());
         assert!(matches!(action, StuckAction::Stop(_)));
     }
 
@@ -334,7 +354,7 @@ mod tests {
         let config = make_config(0.0, false);
         let llm = mock_llm();
 
-        let action = detector.check("hello", &[], &[], &config, llm.as_ref());
+        let action = detector.check("hello", &[], &[], None, &config, llm.as_ref());
         assert!(matches!(action, StuckAction::Continue));
     }
 
@@ -365,7 +385,7 @@ mod tests {
             });
         }
 
-        let action = detector.check("checking", &[], &[], &config, llm.as_ref());
+        let action = detector.check("checking", &[], &[], None, &config, llm.as_ref());
         assert!(
             matches!(action, StuckAction::InjectMessage(ref msg) if msg.contains("alternating"))
         );
@@ -391,7 +411,7 @@ mod tests {
             });
         }
 
-        let action = detector.check("checking", &[], &[], &config, llm.as_ref());
+        let action = detector.check("checking", &[], &[], None, &config, llm.as_ref());
         assert!(
             matches!(action, StuckAction::InjectMessage(ref msg) if msg.contains("error rate"))
         );
@@ -405,11 +425,44 @@ mod tests {
 
         // 5 turns with no tool calls — use different responses to avoid identical response detection
         for i in 0..4 {
-            let action = detector.check(&format!("thinking {i}"), &[], &[], &config, llm.as_ref());
+            let action = detector.check(
+                &format!("thinking {i}"),
+                &[],
+                &[],
+                None,
+                &config,
+                llm.as_ref(),
+            );
             assert!(matches!(action, StuckAction::Continue), "turn {i}");
         }
 
-        let action = detector.check("thinking 4", &[], &[], &config, llm.as_ref());
+        let action = detector.check("thinking 4", &[], &[], None, &config, llm.as_ref());
         assert!(matches!(action, StuckAction::InjectMessage(ref msg) if msg.contains("progress")));
+    }
+
+    #[test]
+    fn cost_threshold_prefers_usage_over_response_text_estimate() {
+        let mut detector = StuckDetector::new();
+        let config = make_config(0.01, true);
+        let llm = mock_llm();
+        let response_text = "x".repeat(10_000);
+        let usage = TokenUsage {
+            input_tokens: 10,
+            output_tokens: 20,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+        };
+
+        let action = detector.check(
+            &response_text,
+            &[],
+            &[],
+            Some(&usage),
+            &config,
+            llm.as_ref(),
+        );
+
+        assert!(matches!(action, StuckAction::Continue));
+        assert!(detector.estimated_cost() < 0.01);
     }
 }

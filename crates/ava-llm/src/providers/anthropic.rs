@@ -12,6 +12,7 @@ use crate::circuit_breaker::CircuitBreaker;
 use crate::pool::ConnectionPool;
 use crate::provider::{LLMProvider, LLMResponse};
 use crate::providers::common;
+use crate::thinking::{ResolvedThinkingConfig, ThinkingBudgetFallback, ThinkingConfig};
 
 const ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com";
 
@@ -37,7 +38,11 @@ pub struct AnthropicProvider {
 }
 
 impl AnthropicProvider {
-    pub fn new(pool: Arc<ConnectionPool>, api_key: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(
+        pool: Arc<ConnectionPool>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
         Self {
             pool,
             api_key: api_key.into(),
@@ -121,28 +126,45 @@ impl AnthropicProvider {
         stream: bool,
         thinking: ThinkingLevel,
     ) -> Value {
+        self.build_request_body_with_thinking_config(
+            messages,
+            tools,
+            stream,
+            ThinkingConfig::new(thinking, None),
+        )
+    }
+
+    fn build_request_body_with_thinking_config(
+        &self,
+        messages: &[Message],
+        tools: &[ava_types::Tool],
+        stream: bool,
+        thinking: ThinkingConfig,
+    ) -> Value {
         let mut body = self.build_request_body(messages, stream);
-        
+        let resolved = self.resolve_thinking_config(thinking);
+
         if !tools.is_empty() {
             body["tools"] = json!(common::tools_to_anthropic_format(tools));
         }
 
-        if thinking != ThinkingLevel::Off && self.is_kimi_thinking_model() {
+        if resolved.applied.level != ThinkingLevel::Off && self.is_kimi_thinking_model() {
             // Kimi K2.5 thinking: type "enabled" with budgetTokens
-            // budgetTokens = min(16000, max_output/2 - 1)
-            let max_output = body["max_tokens"].as_u64().unwrap_or(4096);
-            let budget = std::cmp::min(16000, max_output / 2 - 1);
+            let budget = resolved.applied.budget_tokens.unwrap_or(16000);
             body["thinking"] = json!({ "type": "enabled", "budgetTokens": budget });
 
-            if self.max_tokens < 16000 {
-                body["max_tokens"] = json!(16000);
+            let minimum_output =
+                usize::try_from(budget.saturating_add(1)).unwrap_or(self.max_tokens);
+            if self.max_tokens < minimum_output {
+                body["max_tokens"] = json!(minimum_output);
             }
-        } else if thinking != ThinkingLevel::Off && self.supports_adaptive_thinking() {
+        } else if resolved.applied.level != ThinkingLevel::Off && self.supports_adaptive_thinking()
+        {
             // Anthropic adaptive thinking API:
             // - thinking.type = "adaptive"
             // - output_config.effort = "low" | "medium" | "high" | "max"
             // Note: budget_tokens is NOT used with adaptive mode (it's for type: "enabled")
-            let effort = match thinking {
+            let effort = match resolved.applied.level {
                 ThinkingLevel::Off => unreachable!(),
                 ThinkingLevel::Low => "low",
                 ThinkingLevel::Medium => "medium",
@@ -173,7 +195,7 @@ impl AnthropicProvider {
             .filter_map(|block| block.get("thinking").and_then(Value::as_str))
             .map(String::from)
             .collect();
-        
+
         if thinking_parts.is_empty() {
             None
         } else {
@@ -222,7 +244,8 @@ impl LLMProvider for AnthropicProvider {
     #[instrument(skip(self, messages), fields(model = %self.model))]
     async fn generate(&self, messages: &[Message]) -> Result<String> {
         let client = self.client().await?;
-        let request = self.build_request(&client)
+        let request = self
+            .build_request(&client)
             .json(&self.build_request_body(messages, false));
 
         let response = self.send_request(request).await?;
@@ -232,7 +255,11 @@ impl LLMProvider for AnthropicProvider {
             .await
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
-        debug!(provider = "Anthropic", third_party = self.third_party, "raw response payload: {payload}");
+        debug!(
+            provider = "Anthropic",
+            third_party = self.third_party,
+            "raw response payload: {payload}"
+        );
 
         common::parse_anthropic_completion_payload(&payload)
     }
@@ -243,7 +270,8 @@ impl LLMProvider for AnthropicProvider {
         messages: &[Message],
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
         let client = self.client().await?;
-        let request = self.build_request(&client)
+        let request = self
+            .build_request(&client)
             .json(&self.build_request_body(messages, true));
 
         let response = self.send_request(request).await?;
@@ -289,10 +317,18 @@ impl LLMProvider for AnthropicProvider {
             .await
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
-        debug!(provider = "Anthropic", third_party = self.third_party, "raw response payload: {payload}");
+        debug!(
+            provider = "Anthropic",
+            third_party = self.third_party,
+            "raw response payload: {payload}"
+        );
 
         let content = common::parse_anthropic_completion_payload(&payload).unwrap_or_else(|e| {
-            warn!(provider = "Anthropic", third_party = self.third_party, "failed to parse completion: {e}");
+            warn!(
+                provider = "Anthropic",
+                third_party = self.third_party,
+                "failed to parse completion: {e}"
+            );
             String::new()
         });
         let tool_calls = common::parse_anthropic_tool_calls(&payload);
@@ -341,11 +377,38 @@ impl LLMProvider for AnthropicProvider {
         tools: &[ava_types::Tool],
         thinking: ThinkingLevel,
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
-        if (!self.supports_adaptive_thinking() && !self.is_kimi_thinking_model()) || thinking == ThinkingLevel::Off {
+        if (!self.supports_adaptive_thinking() && !self.is_kimi_thinking_model())
+            || thinking == ThinkingLevel::Off
+        {
             return self.generate_stream_with_tools(messages, tools).await;
         }
 
         let body = self.build_request_body_with_thinking(messages, tools, true, thinking);
+        let client = self.client().await?;
+        let mut request = self.build_request(&client);
+        if !self.third_party {
+            request = request.header("anthropic-beta", "interleaved-thinking-2025-05-14");
+        }
+        let request = request.json(&body);
+
+        let response = self.send_request(request).await?;
+        let response = common::validate_status(response, "Anthropic").await?;
+        Ok(Box::pin(sse_to_stream(response, self.third_party)))
+    }
+
+    async fn generate_stream_with_thinking_config(
+        &self,
+        messages: &[Message],
+        tools: &[ava_types::Tool],
+        thinking: ThinkingConfig,
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        if (!self.supports_adaptive_thinking() && !self.is_kimi_thinking_model())
+            || !thinking.is_enabled()
+        {
+            return self.generate_stream_with_tools(messages, tools).await;
+        }
+
+        let body = self.build_request_body_with_thinking_config(messages, tools, true, thinking);
         let client = self.client().await?;
         let mut request = self.build_request(&client);
         if !self.third_party {
@@ -378,6 +441,33 @@ impl LLMProvider for AnthropicProvider {
         }
     }
 
+    fn resolve_thinking_config(&self, config: ThinkingConfig) -> ResolvedThinkingConfig {
+        if !config.is_enabled() {
+            return ResolvedThinkingConfig::disabled();
+        }
+
+        if self.is_kimi_thinking_model() {
+            let default_budget = 16000;
+            let requested_budget = config.budget_tokens.unwrap_or(default_budget);
+            let applied_budget = requested_budget.min(default_budget);
+            let fallback =
+                (requested_budget != applied_budget).then_some(ThinkingBudgetFallback::Clamped {
+                    requested: requested_budget,
+                    applied: applied_budget,
+                });
+            return ResolvedThinkingConfig::quantitative_from(config, applied_budget, fallback);
+        }
+
+        if self.supports_adaptive_thinking() {
+            let fallback = config
+                .budget_tokens
+                .map(|_| ThinkingBudgetFallback::Ignored);
+            return ResolvedThinkingConfig::qualitative(config, fallback);
+        }
+
+        ResolvedThinkingConfig::unsupported(config)
+    }
+
     #[instrument(skip(self, messages, tools), fields(model = %self.model, thinking = ?thinking))]
     async fn generate_with_thinking(
         &self,
@@ -386,7 +476,9 @@ impl LLMProvider for AnthropicProvider {
         thinking: ThinkingLevel,
     ) -> Result<LLMResponse> {
         // For non-thinking models, fall back to standard generate_with_tools
-        if (!self.supports_adaptive_thinking() && !self.is_kimi_thinking_model()) || thinking == ThinkingLevel::Off {
+        if (!self.supports_adaptive_thinking() && !self.is_kimi_thinking_model())
+            || thinking == ThinkingLevel::Off
+        {
             return self.generate_with_tools(messages, tools).await;
         }
 
@@ -405,7 +497,11 @@ impl LLMProvider for AnthropicProvider {
             .await
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
-        debug!(provider = "Anthropic", third_party = self.third_party, "raw thinking response payload: {payload}");
+        debug!(
+            provider = "Anthropic",
+            third_party = self.third_party,
+            "raw thinking response payload: {payload}"
+        );
 
         // When thinking is enabled, content blocks come in order: thinking, text, tool_use
         // We need to find the text block specifically, not just the first block
@@ -444,6 +540,63 @@ impl LLMProvider for AnthropicProvider {
             thinking: thinking_content,
         })
     }
+
+    async fn generate_with_thinking_config(
+        &self,
+        messages: &[Message],
+        tools: &[ava_types::Tool],
+        thinking: ThinkingConfig,
+    ) -> Result<LLMResponse> {
+        if (!self.supports_adaptive_thinking() && !self.is_kimi_thinking_model())
+            || !thinking.is_enabled()
+        {
+            return self.generate_with_tools(messages, tools).await;
+        }
+
+        let body = self.build_request_body_with_thinking_config(messages, tools, false, thinking);
+        let client = self.client().await?;
+        let mut request = self.build_request(&client);
+        if !self.third_party {
+            request = request.header("anthropic-beta", "interleaved-thinking-2025-05-14");
+        }
+        let request = request.json(&body);
+
+        let response = self.send_request(request).await?;
+        let response = common::validate_status(response, "Anthropic").await?;
+        let payload: Value = response
+            .json()
+            .await
+            .map_err(|error| AvaError::SerializationError(error.to_string()))?;
+
+        debug!(
+            provider = "Anthropic",
+            third_party = self.third_party,
+            "raw thinking response payload: {payload}"
+        );
+
+        let content = payload
+            .get("content")
+            .and_then(Value::as_array)
+            .and_then(|content| {
+                content
+                    .iter()
+                    .find(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+                    .and_then(|block| block.get("text").and_then(Value::as_str))
+                    .map(String::from)
+            })
+            .unwrap_or_default();
+
+        let tool_calls = common::parse_anthropic_tool_calls(&payload);
+        let usage = common::parse_usage(&payload);
+        let thinking_content = self.parse_thinking(&payload);
+
+        Ok(LLMResponse {
+            content,
+            tool_calls,
+            usage,
+            thinking: thinking_content,
+        })
+    }
 }
 
 /// Convert a reqwest SSE response into a `Stream<Item = StreamChunk>`.
@@ -459,21 +612,38 @@ fn sse_to_stream(
             .map(|text| {
                 trace!(provider = "Anthropic", third_party, "SSE raw: {text}");
                 let sse_lines = common::parse_sse_lines(&text);
-                trace!(provider = "Anthropic", third_party, lines = sse_lines.len(), "SSE parsed data lines");
+                trace!(
+                    provider = "Anthropic",
+                    third_party,
+                    lines = sse_lines.len(),
+                    "SSE parsed data lines"
+                );
                 sse_lines
                     .into_iter()
                     .filter_map(|line| {
                         let parsed = serde_json::from_str::<Value>(&line);
                         if let Err(ref e) = parsed {
-                            warn!(provider = "Anthropic", third_party, "SSE JSON parse error: {e} — line: {line}");
+                            warn!(
+                                provider = "Anthropic",
+                                third_party, "SSE JSON parse error: {e} — line: {line}"
+                            );
                         }
                         parsed.ok()
                     })
                     .filter_map(|payload| {
-                        let event_type = payload.get("type").and_then(Value::as_str).unwrap_or("unknown");
+                        let event_type = payload
+                            .get("type")
+                            .and_then(Value::as_str)
+                            .unwrap_or("unknown");
                         let result = common::parse_anthropic_stream_chunk(&payload);
-                        if result.is_none() && event_type != "ping" && event_type != "message_stop" {
-                            trace!(provider = "Anthropic", third_party, event_type, "SSE event produced no StreamChunk");
+                        if result.is_none() && event_type != "ping" && event_type != "message_stop"
+                        {
+                            trace!(
+                                provider = "Anthropic",
+                                third_party,
+                                event_type,
+                                "SSE event produced no StreamChunk"
+                            );
                         }
                         result
                     })
@@ -492,6 +662,38 @@ mod tests {
 
     fn pool() -> Arc<ConnectionPool> {
         Arc::new(ConnectionPool::new())
+    }
+
+    #[test]
+    fn kimi_thinking_budget_honors_requested_budget() {
+        let provider = AnthropicProvider::with_base_url(
+            pool(),
+            "test-key",
+            "kimi-k2.5",
+            "https://api.kimi.com/coding/v1",
+        );
+        let config = ThinkingConfig::new(ThinkingLevel::High, Some(9_000));
+
+        let resolved = provider.resolve_thinking_config(config);
+        assert_eq!(resolved.applied.budget_tokens, Some(9_000));
+
+        let body = provider.build_request_body_with_thinking_config(
+            &[Message::new(ava_types::Role::User, "test")],
+            &[],
+            false,
+            config,
+        );
+        assert_eq!(body["thinking"]["budgetTokens"], json!(9_000));
+    }
+
+    #[test]
+    fn adaptive_thinking_budget_falls_back_to_effort_only() {
+        let provider = AnthropicProvider::new(pool(), "test-key", "claude-sonnet-4.6");
+        let config = ThinkingConfig::new(ThinkingLevel::High, Some(12_000));
+
+        let resolved = provider.resolve_thinking_config(config);
+        assert_eq!(resolved.applied.budget_tokens, None);
+        assert_eq!(resolved.fallback, Some(ThinkingBudgetFallback::Ignored));
     }
 
     #[test]

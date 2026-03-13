@@ -2,10 +2,13 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ava_types::{Message, Result, StreamChunk, StreamToolCall, ThinkingLevel, TokenUsage, Tool, ToolCall};
+use ava_types::{
+    Message, Result, StreamChunk, StreamToolCall, ThinkingLevel, TokenUsage, Tool, ToolCall,
+};
 use futures::Stream;
 
 use crate::message_transform::{normalize_messages, ProviderKind};
+use crate::thinking::{ResolvedThinkingConfig, ThinkingBudgetFallback, ThinkingConfig};
 
 /// Response from an LLM that may include both text content and native tool calls.
 #[derive(Debug, Clone, Default)]
@@ -77,6 +80,23 @@ pub trait LLMProvider: Send + Sync {
         &[]
     }
 
+    /// Resolve a requested thinking config into the provider-specific settings
+    /// the runtime can safely apply.
+    fn resolve_thinking_config(&self, config: ThinkingConfig) -> ResolvedThinkingConfig {
+        if !config.is_enabled() {
+            return ResolvedThinkingConfig::disabled();
+        }
+
+        if !self.supports_thinking() {
+            return ResolvedThinkingConfig::unsupported(config);
+        }
+
+        let fallback = config
+            .budget_tokens
+            .map(|_| ThinkingBudgetFallback::Ignored);
+        ResolvedThinkingConfig::qualitative(config, fallback)
+    }
+
     /// Generate with tools AND thinking level.
     /// Default falls back to generate_with_tools ignoring thinking.
     async fn generate_with_thinking(
@@ -87,6 +107,17 @@ pub trait LLMProvider: Send + Sync {
     ) -> Result<LLMResponse> {
         // Default: ignore thinking level
         self.generate_with_tools(messages, tools).await
+    }
+
+    /// Generate with tools and a provider-specific thinking configuration.
+    async fn generate_with_thinking_config(
+        &self,
+        messages: &[Message],
+        tools: &[Tool],
+        config: ThinkingConfig,
+    ) -> Result<LLMResponse> {
+        self.generate_with_thinking(messages, tools, config.level)
+            .await
     }
 
     /// Streaming generation with tool definitions.
@@ -130,6 +161,17 @@ pub trait LLMProvider: Send + Sync {
         _thinking: ThinkingLevel,
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
         self.generate_stream_with_tools(messages, tools).await
+    }
+
+    /// Streaming generation with tools and a provider-specific thinking configuration.
+    async fn generate_stream_with_thinking_config(
+        &self,
+        messages: &[Message],
+        tools: &[Tool],
+        config: ThinkingConfig,
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        self.generate_stream_with_thinking(messages, tools, config.level)
+            .await
     }
 }
 
@@ -210,6 +252,10 @@ impl LLMProvider for NormalizingProvider {
         self.inner.thinking_levels()
     }
 
+    fn resolve_thinking_config(&self, config: ThinkingConfig) -> ResolvedThinkingConfig {
+        self.inner.resolve_thinking_config(config)
+    }
+
     async fn generate_with_thinking(
         &self,
         messages: &[Message],
@@ -217,7 +263,21 @@ impl LLMProvider for NormalizingProvider {
         thinking: ThinkingLevel,
     ) -> Result<LLMResponse> {
         let normalized = self.normalize(messages);
-        self.inner.generate_with_thinking(&normalized, tools, thinking).await
+        self.inner
+            .generate_with_thinking(&normalized, tools, thinking)
+            .await
+    }
+
+    async fn generate_with_thinking_config(
+        &self,
+        messages: &[Message],
+        tools: &[Tool],
+        config: ThinkingConfig,
+    ) -> Result<LLMResponse> {
+        let normalized = self.normalize(messages);
+        self.inner
+            .generate_with_thinking_config(&normalized, tools, config)
+            .await
     }
 
     async fn generate_stream_with_tools(
@@ -226,7 +286,9 @@ impl LLMProvider for NormalizingProvider {
         tools: &[Tool],
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
         let normalized = self.normalize(messages);
-        self.inner.generate_stream_with_tools(&normalized, tools).await
+        self.inner
+            .generate_stream_with_tools(&normalized, tools)
+            .await
     }
 
     async fn generate_stream_with_thinking(
@@ -236,7 +298,21 @@ impl LLMProvider for NormalizingProvider {
         thinking: ThinkingLevel,
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
         let normalized = self.normalize(messages);
-        self.inner.generate_stream_with_thinking(&normalized, tools, thinking).await
+        self.inner
+            .generate_stream_with_thinking(&normalized, tools, thinking)
+            .await
+    }
+
+    async fn generate_stream_with_thinking_config(
+        &self,
+        messages: &[Message],
+        tools: &[Tool],
+        config: ThinkingConfig,
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        let normalized = self.normalize(messages);
+        self.inner
+            .generate_stream_with_thinking_config(&normalized, tools, config)
+            .await
     }
 }
 
@@ -301,13 +377,30 @@ impl LLMProvider for SharedProvider {
         self.inner.thinking_levels()
     }
 
+    fn resolve_thinking_config(&self, config: ThinkingConfig) -> ResolvedThinkingConfig {
+        self.inner.resolve_thinking_config(config)
+    }
+
     async fn generate_with_thinking(
         &self,
         messages: &[Message],
         tools: &[Tool],
         thinking: ThinkingLevel,
     ) -> Result<LLMResponse> {
-        self.inner.generate_with_thinking(messages, tools, thinking).await
+        self.inner
+            .generate_with_thinking(messages, tools, thinking)
+            .await
+    }
+
+    async fn generate_with_thinking_config(
+        &self,
+        messages: &[Message],
+        tools: &[Tool],
+        config: ThinkingConfig,
+    ) -> Result<LLMResponse> {
+        self.inner
+            .generate_with_thinking_config(messages, tools, config)
+            .await
     }
 
     async fn generate_stream_with_tools(
@@ -324,6 +417,19 @@ impl LLMProvider for SharedProvider {
         tools: &[Tool],
         thinking: ThinkingLevel,
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
-        self.inner.generate_stream_with_thinking(messages, tools, thinking).await
+        self.inner
+            .generate_stream_with_thinking(messages, tools, thinking)
+            .await
+    }
+
+    async fn generate_stream_with_thinking_config(
+        &self,
+        messages: &[Message],
+        tools: &[Tool],
+        config: ThinkingConfig,
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        self.inner
+            .generate_stream_with_thinking_config(messages, tools, config)
+            .await
     }
 }

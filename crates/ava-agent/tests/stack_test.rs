@@ -6,8 +6,11 @@ use async_trait::async_trait;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
+use ava_llm::ThinkingConfig;
 use ava_types::{AvaError, Message, Result, StreamChunk};
 use futures::Stream;
+use tokio::sync::mpsc;
+use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 fn completion_response(result: &str) -> String {
@@ -152,6 +155,20 @@ struct SlowProvider {
     delay: Duration,
 }
 
+struct RecordingThinkingProvider {
+    model: String,
+    recorded: Arc<Mutex<Vec<ThinkingConfig>>>,
+}
+
+impl RecordingThinkingProvider {
+    fn new(model: &str, recorded: Arc<Mutex<Vec<ThinkingConfig>>>) -> Self {
+        Self {
+            model: model.to_string(),
+            recorded,
+        }
+    }
+}
+
 #[async_trait]
 impl LLMProvider for SlowProvider {
     async fn generate(&self, _messages: &[Message]) -> Result<String> {
@@ -180,4 +197,131 @@ impl LLMProvider for SlowProvider {
     fn model_name(&self) -> &str {
         &self.model
     }
+}
+
+#[async_trait]
+impl LLMProvider for RecordingThinkingProvider {
+    async fn generate(&self, _messages: &[Message]) -> Result<String> {
+        Ok(completion_response("recorded"))
+    }
+
+    async fn generate_stream(
+        &self,
+        messages: &[Message],
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        let out = self.generate(messages).await?;
+        Ok(Box::pin(futures::stream::iter(vec![StreamChunk::text(
+            out,
+        )])))
+    }
+
+    async fn generate_stream_with_thinking_config(
+        &self,
+        messages: &[Message],
+        _tools: &[ava_types::Tool],
+        config: ThinkingConfig,
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        self.recorded.lock().await.push(config);
+        self.generate_stream(messages).await
+    }
+
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
+    fn supports_thinking(&self) -> bool {
+        true
+    }
+
+    fn estimate_tokens(&self, input: &str) -> usize {
+        input.len() / 4
+    }
+
+    fn estimate_cost(&self, _input_tokens: usize, _output_tokens: usize) -> f64 {
+        0.0
+    }
+
+    fn model_name(&self) -> &str {
+        &self.model
+    }
+}
+
+#[tokio::test]
+async fn configured_thinking_budget_reaches_streaming_runtime_provider() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        r#"
+llm:
+  provider: gemini
+  model: gemini-2.5-pro
+  api_key: null
+  max_tokens: 4096
+  temperature: 0.7
+  thinking_budgets:
+    providers:
+      gemini:
+        models:
+          gemini-2.5-pro: 12345
+editor:
+  default_editor: vscode
+  tab_size: 4
+  use_spaces: true
+ui:
+  theme: dark
+  font_size: 14
+  show_line_numbers: true
+features:
+  enable_git: true
+  enable_lsp: true
+  enable_mcp: true
+voice:
+  model: whisper-1
+  language: null
+  silence_threshold: 0.01
+  silence_duration_secs: 2.5
+  max_duration_secs: 60
+  auto_submit: false
+instructions: []
+"#,
+    )
+    .expect("write config");
+
+    let recorded = Arc::new(Mutex::new(Vec::new()));
+    let provider = Arc::new(RecordingThinkingProvider::new(
+        "gemini-2.5-pro",
+        recorded.clone(),
+    ));
+    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        injected_provider: Some(provider),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    stack
+        .set_thinking_level(ava_types::ThinkingLevel::High)
+        .await;
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+    let result = stack
+        .run(
+            "finish task",
+            5,
+            Some(event_tx),
+            CancellationToken::new(),
+            Vec::new(),
+            None,
+            Vec::new(),
+        )
+        .await
+        .expect("run should succeed");
+
+    assert!(result.success);
+    while event_rx.try_recv().is_ok() {}
+
+    let configs = recorded.lock().await;
+    assert_eq!(configs.len(), 1);
+    assert_eq!(configs[0].level, ava_types::ThinkingLevel::High);
+    assert_eq!(configs[0].budget_tokens, Some(12_345));
 }

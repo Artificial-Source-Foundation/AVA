@@ -392,6 +392,7 @@ impl Lead {
                 loop_detection: true,
                 custom_system_prompt: None,
                 thinking_level: ava_types::ThinkingLevel::Off,
+                thinking_budget_tokens: None,
                 system_prompt_suffix: None,
                 extended_tools: true,
                 plan_mode: false,

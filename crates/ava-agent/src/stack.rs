@@ -427,10 +427,12 @@ impl AgentStack {
         images: Vec<ava_types::ImageContent>,
     ) -> Result<AgentRunResult> {
         let cfg = self.config.get().await;
+        let mut resolved_provider_name = self.current_model().await.0;
         let provider = if let Some(provider) = &self.injected_provider {
             provider.clone()
         } else {
             let (provider_name, model_name) = self.current_model().await;
+            resolved_provider_name = provider_name.clone();
             match self
                 .router
                 .route_required(&provider_name, &model_name)
@@ -450,6 +452,7 @@ impl AgentStack {
                                 fb.provider, fb.model
                             )));
                         }
+                        resolved_provider_name = fb.provider.clone();
                         self.router.route_required(&fb.provider, &fb.model).await?
                     } else {
                         return Err(e);
@@ -465,6 +468,10 @@ impl AgentStack {
             self.max_turns // may also be 0 (unlimited)
         };
         let thinking = *self.thinking_level.read().await;
+        let thinking_budget_tokens = cfg
+            .llm
+            .thinking_budgets
+            .resolve(&resolved_provider_name, provider.model_name());
         let plan_mode = *self.plan_mode.read().await;
         let mode_suffix = self.mode_prompt_suffix.read().await.clone();
 
@@ -493,6 +500,7 @@ impl AgentStack {
             loop_detection: true,
             custom_system_prompt: None,
             thinking_level: thinking,
+            thinking_budget_tokens,
             system_prompt_suffix,
             extended_tools: false,
             plan_mode,
@@ -775,6 +783,7 @@ impl TaskSpawner for AgentTaskSpawner {
             loop_detection: true,
             custom_system_prompt: Some(system_prompt),
             thinking_level: ThinkingLevel::Off,
+            thinking_budget_tokens: None,
             system_prompt_suffix: crate::instructions::load_project_instructions(),
             extended_tools: true, // sub-agents get full tool access
             plan_mode: false,

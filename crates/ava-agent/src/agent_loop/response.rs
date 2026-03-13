@@ -2,6 +2,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::time::Instant;
 
+use ava_llm::ThinkingConfig;
 use ava_types::{AvaError, Result, StreamToolCall, ThinkingLevel, TokenUsage, ToolCall};
 use serde::Deserialize;
 use serde_json::Value;
@@ -195,9 +196,23 @@ impl AgentLoop {
 
         let result = if self.llm.supports_tools() {
             let tool_defs = self.active_tool_defs();
+            let thinking = ThinkingConfig::new(
+                self.config.thinking_level,
+                self.config.thinking_budget_tokens,
+            );
+            let resolved = self.llm.resolve_thinking_config(thinking);
+            if let Some(fallback) = resolved.fallback {
+                warn!(
+                    requested_budget = thinking.budget_tokens,
+                    applied_budget = resolved.applied.budget_tokens,
+                    ?fallback,
+                    model = %self.config.model,
+                    "provider could not fully honor requested thinking budget"
+                );
+            }
             let response = self
                 .llm
-                .generate_with_thinking(messages, &tool_defs, self.config.thinking_level)
+                .generate_with_thinking_config(messages, &tool_defs, thinking)
                 .await?;
             Ok((response.content, response.tool_calls, response.usage))
         } else {

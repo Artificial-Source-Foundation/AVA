@@ -469,6 +469,7 @@ pub async fn run_review_agent(
         loop_detection: true,
         custom_system_prompt: Some(system_prompt.to_string()),
         thinking_level: ava_types::ThinkingLevel::Off,
+        thinking_budget_tokens: None,
         system_prompt_suffix: None,
         extended_tools: true,
         plan_mode: false,

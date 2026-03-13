@@ -14,16 +14,18 @@ pub mod credential_commands;
 pub mod credentials;
 pub mod keychain;
 pub mod model_catalog;
+pub mod thinking;
 
+pub use agents::AgentsConfig;
+pub use ava_auth;
 pub use credential_commands::{
     execute_credential_command, execute_credential_command_with_tester, provider_name, redact_key,
     CredentialCommand,
 };
 pub use credentials::{known_providers, standard_env_var, CredentialStore, ProviderCredential};
-pub use keychain::{KeychainManager, MigrationResult, redact_key_for_log};
-pub use agents::AgentsConfig;
-pub use model_catalog::{CatalogModel, CatalogState, ModelCatalog, fallback_catalog};
-pub use ava_auth;
+pub use keychain::{redact_key_for_log, KeychainManager, MigrationResult};
+pub use model_catalog::{fallback_catalog, CatalogModel, CatalogState, ModelCatalog};
+pub use thinking::{ProviderThinkingBudgetConfig, ThinkingBudgetConfig};
 
 /// LLM provider configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -33,6 +35,8 @@ pub struct LlmConfig {
     pub api_key: Option<String>,
     pub max_tokens: usize,
     pub temperature: f32,
+    #[serde(default)]
+    pub thinking_budgets: ThinkingBudgetConfig,
 }
 
 impl Default for LlmConfig {
@@ -43,6 +47,7 @@ impl Default for LlmConfig {
             api_key: None,
             max_tokens: 4096,
             temperature: 0.7,
+            thinking_budgets: ThinkingBudgetConfig::default(),
         }
     }
 }
@@ -167,11 +172,7 @@ fn claude_code_default_max_budget() -> f64 {
 }
 
 fn claude_code_default_allowed_tools() -> Vec<String> {
-    vec![
-        "Read".to_string(),
-        "Grep".to_string(),
-        "Glob".to_string(),
-    ]
+    vec!["Read".to_string(), "Grep".to_string(), "Glob".to_string()]
 }
 
 impl Default for ClaudeCodeConfig {
@@ -281,6 +282,8 @@ impl ConfigManager {
         } else {
             Config::default()
         };
+        let mut config = config;
+        config.llm.thinking_budgets.normalize_keys();
 
         let credentials = CredentialStore::load(&credentials_path).await?;
 
@@ -294,9 +297,8 @@ impl ConfigManager {
 
     /// Get default configuration path based on platform
     fn default_config_path() -> Result<PathBuf> {
-        let config_dir = dirs::config_dir().ok_or_else(|| {
-            AvaError::ConfigError("Could not find config directory".to_string())
-        })?;
+        let config_dir = dirs::config_dir()
+            .ok_or_else(|| AvaError::ConfigError("Could not find config directory".to_string()))?;
 
         Ok(config_dir.join("ava").join("config.yaml"))
     }
@@ -359,6 +361,8 @@ impl ConfigManager {
         } else {
             Config::default()
         };
+        let mut new_config = new_config;
+        new_config.llm.thinking_budgets.normalize_keys();
 
         let mut config = self.config.write().await;
         *config = new_config;

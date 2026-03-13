@@ -12,6 +12,7 @@ use crate::circuit_breaker::CircuitBreaker;
 use crate::pool::ConnectionPool;
 use crate::provider::LLMProvider;
 use crate::providers::common;
+use crate::thinking::{ResolvedThinkingConfig, ThinkingBudgetFallback, ThinkingConfig};
 
 const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com";
 
@@ -24,7 +25,11 @@ pub struct GeminiProvider {
 }
 
 impl GeminiProvider {
-    pub fn new(pool: Arc<ConnectionPool>, api_key: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(
+        pool: Arc<ConnectionPool>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
         Self {
             pool,
             api_key: api_key.into(),
@@ -68,19 +73,19 @@ impl GeminiProvider {
         body
     }
 
-    /// Build request body with thinking support.
-    fn build_request_body_with_thinking(
+    fn build_request_body_with_thinking_config(
         &self,
         messages: &[Message],
-        thinking: ThinkingLevel,
+        thinking: ThinkingConfig,
     ) -> Value {
         let mut body = self.build_request_body(messages);
+        let resolved = self.resolve_thinking_config(thinking);
 
-        if thinking != ThinkingLevel::Off && self.supports_thinking_mode() {
+        if resolved.applied.level != ThinkingLevel::Off && self.supports_thinking_mode() {
             if self.is_gemini3() {
                 // Gemini 3.x uses thinkingLevel: "low" | "high"
                 // Gemini 3.1+ also supports "medium"
-                let level = match thinking {
+                let level = match resolved.applied.level {
                     ThinkingLevel::Off => unreachable!(),
                     ThinkingLevel::Low | ThinkingLevel::Medium => "low",
                     ThinkingLevel::High | ThinkingLevel::Max => "high",
@@ -92,14 +97,15 @@ impl GeminiProvider {
                 });
             } else {
                 // Gemini 2.5 uses thinkingBudget
-                // Low=4000, Medium=8000, High=16000, Max=24576 (Gemini 2.5 max)
-                let budget = match thinking {
-                    ThinkingLevel::Off => unreachable!(),
-                    ThinkingLevel::Low => 4000,
-                    ThinkingLevel::Medium => 8000,
-                    ThinkingLevel::High => 16000,
-                    ThinkingLevel::Max => 24576,
-                };
+                let budget = resolved.applied.budget_tokens.unwrap_or_else(|| {
+                    match resolved.applied.level {
+                        ThinkingLevel::Off => unreachable!(),
+                        ThinkingLevel::Low => 4000,
+                        ThinkingLevel::Medium => 8000,
+                        ThinkingLevel::High => 16000,
+                        ThinkingLevel::Max => 24576,
+                    }
+                });
 
                 body["thinkingConfig"] = json!({
                     "includeThoughts": true,
@@ -174,7 +180,7 @@ impl LLMProvider for GeminiProvider {
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, "Gemini").await?;
-        let stream = response.bytes_stream().flat_map(|chunk| {
+        let stream = response.bytes_stream().flat_map(move |chunk| {
             let chunks = chunk
                 .ok()
                 .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
@@ -240,6 +246,39 @@ impl LLMProvider for GeminiProvider {
         }
     }
 
+    fn resolve_thinking_config(&self, config: ThinkingConfig) -> ResolvedThinkingConfig {
+        if !config.is_enabled() {
+            return ResolvedThinkingConfig::disabled();
+        }
+
+        if !self.supports_thinking_mode() {
+            return ResolvedThinkingConfig::unsupported(config);
+        }
+
+        if self.is_gemini3() {
+            let fallback = config
+                .budget_tokens
+                .map(|_| ThinkingBudgetFallback::Ignored);
+            return ResolvedThinkingConfig::qualitative(config, fallback);
+        }
+
+        let default_budget = match config.level {
+            ThinkingLevel::Off => 0,
+            ThinkingLevel::Low => 4000,
+            ThinkingLevel::Medium => 8000,
+            ThinkingLevel::High => 16000,
+            ThinkingLevel::Max => 24576,
+        };
+        let requested_budget = config.budget_tokens.unwrap_or(default_budget);
+        let applied_budget = requested_budget.min(24576);
+        let fallback =
+            (requested_budget != applied_budget).then_some(ThinkingBudgetFallback::Clamped {
+                requested: requested_budget,
+                applied: applied_budget,
+            });
+        ResolvedThinkingConfig::quantitative_from(config, applied_budget, fallback)
+    }
+
     #[instrument(skip(self, messages), fields(model = %self.model, thinking = ?thinking))]
     async fn generate_with_thinking(
         &self,
@@ -247,8 +286,18 @@ impl LLMProvider for GeminiProvider {
         tools: &[ava_types::Tool],
         thinking: ThinkingLevel,
     ) -> Result<crate::provider::LLMResponse> {
-        // For non-thinking models, fall back to standard generate (Gemini doesn't have native tool support)
-        if !self.supports_thinking_mode() || thinking == ThinkingLevel::Off {
+        self.generate_with_thinking_config(messages, tools, ThinkingConfig::new(thinking, None))
+            .await
+    }
+
+    async fn generate_with_thinking_config(
+        &self,
+        messages: &[Message],
+        tools: &[ava_types::Tool],
+        thinking: ThinkingConfig,
+    ) -> Result<crate::provider::LLMResponse> {
+        let _ = tools;
+        if !self.supports_thinking_mode() || !thinking.is_enabled() {
             let content = self.generate(messages).await?;
             return Ok(crate::provider::LLMResponse {
                 content,
@@ -258,7 +307,7 @@ impl LLMProvider for GeminiProvider {
             });
         }
 
-        let body = self.build_request_body_with_thinking(messages, thinking);
+        let body = self.build_request_body_with_thinking_config(messages, thinking);
         let client = self.client().await?;
         let request = client
             .post(self.generate_url())
@@ -282,6 +331,76 @@ impl LLMProvider for GeminiProvider {
             usage,
             thinking: thinking_content,
         })
+    }
+
+    #[instrument(skip(self, messages), fields(model = %self.model, thinking = ?thinking))]
+    async fn generate_stream_with_thinking(
+        &self,
+        messages: &[Message],
+        tools: &[ava_types::Tool],
+        thinking: ThinkingLevel,
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        self.generate_stream_with_thinking_config(
+            messages,
+            tools,
+            ThinkingConfig::new(thinking, None),
+        )
+        .await
+    }
+
+    async fn generate_stream_with_thinking_config(
+        &self,
+        messages: &[Message],
+        tools: &[ava_types::Tool],
+        thinking: ThinkingConfig,
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        let _ = tools;
+        if !self.supports_thinking_mode() || !thinking.is_enabled() {
+            return self.generate_stream(messages).await;
+        }
+
+        let client = self.client().await?;
+        let request = client
+            .post(self.stream_url())
+            .header("x-goog-api-key", &self.api_key)
+            .json(&self.build_request_body_with_thinking_config(messages, thinking));
+
+        let response = self.send_request(request).await?;
+        let response = common::validate_status(response, "Gemini").await?;
+        let provider = self.clone();
+        let stream = response.bytes_stream().flat_map(move |chunk| {
+            let provider = provider.clone();
+            let chunks = chunk
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
+                .map(|text| {
+                    common::parse_sse_lines(&text)
+                        .into_iter()
+                        .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
+                        .filter_map(|payload| {
+                            let content = common::parse_gemini_completion_payload(&payload).ok();
+                            let usage = common::parse_gemini_usage(&payload);
+                            let thinking = provider.parse_thinking(&payload);
+
+                            if content.is_some() || usage.is_some() || thinking.is_some() {
+                                Some(StreamChunk {
+                                    content,
+                                    usage,
+                                    thinking,
+                                    ..Default::default()
+                                })
+                            } else {
+                                None
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            futures::stream::iter(chunks)
+        });
+
+        Ok(Box::pin(stream))
     }
 }
 
@@ -337,11 +456,13 @@ mod tests {
         assert!(p.supports_thinking_mode());
         assert!(!p.is_gemini3());
 
-        let body = p.build_request_body_with_thinking(
+        let body = p.build_request_body_with_thinking_config(
             &[Message::new(ava_types::Role::User, "test")],
-            ThinkingLevel::High,
+            ThinkingConfig::new(ThinkingLevel::High, None),
         );
-        let config = body.get("thinkingConfig").expect("should have thinkingConfig");
+        let config = body
+            .get("thinkingConfig")
+            .expect("should have thinkingConfig");
         assert_eq!(config["includeThoughts"], json!(true));
         assert_eq!(config["thinkingBudget"], json!(16000));
     }
@@ -352,11 +473,13 @@ mod tests {
         assert!(p.supports_thinking_mode());
         assert!(p.is_gemini3());
 
-        let body = p.build_request_body_with_thinking(
+        let body = p.build_request_body_with_thinking_config(
             &[Message::new(ava_types::Role::User, "test")],
-            ThinkingLevel::High,
+            ThinkingConfig::new(ThinkingLevel::High, None),
         );
-        let config = body.get("thinkingConfig").expect("should have thinkingConfig");
+        let config = body
+            .get("thinkingConfig")
+            .expect("should have thinkingConfig");
         assert_eq!(config["includeThoughts"], json!(true));
         assert_eq!(config["thinkingLevel"], json!("high"));
     }
@@ -364,11 +487,37 @@ mod tests {
     #[test]
     fn thinking_config_off_no_config() {
         let p = test_provider("gemini-2.5-pro");
-        let body = p.build_request_body_with_thinking(
+        let body = p.build_request_body_with_thinking_config(
             &[Message::new(ava_types::Role::User, "test")],
-            ThinkingLevel::Off,
+            ThinkingConfig::new(ThinkingLevel::Off, None),
         );
         assert!(body.get("thinkingConfig").is_none());
+    }
+
+    #[test]
+    fn thinking_budget_config_gemini25_honors_quantitative_budget() {
+        let p = test_provider("gemini-2.5-pro");
+        let config = ThinkingConfig::new(ThinkingLevel::Low, Some(12_345));
+
+        let resolved = p.resolve_thinking_config(config);
+        assert_eq!(resolved.applied.budget_tokens, Some(12_345));
+        assert!(resolved.fallback.is_none());
+
+        let body = p.build_request_body_with_thinking_config(
+            &[Message::new(ava_types::Role::User, "test")],
+            config,
+        );
+        assert_eq!(body["thinkingConfig"]["thinkingBudget"], json!(12_345));
+    }
+
+    #[test]
+    fn thinking_budget_config_gemini3_falls_back_to_levels() {
+        let p = test_provider("gemini-3-pro-preview");
+        let config = ThinkingConfig::new(ThinkingLevel::High, Some(8_000));
+
+        let resolved = p.resolve_thinking_config(config);
+        assert_eq!(resolved.applied.budget_tokens, None);
+        assert_eq!(resolved.fallback, Some(ThinkingBudgetFallback::Ignored));
     }
 
     #[test]
@@ -439,9 +588,9 @@ mod tests {
             (ThinkingLevel::High, 16000),
             (ThinkingLevel::Max, 24576),
         ] {
-            let body = p.build_request_body_with_thinking(
+            let body = p.build_request_body_with_thinking_config(
                 &[Message::new(ava_types::Role::User, "x")],
-                level,
+                ThinkingConfig::new(level, None),
             );
             let budget = body["thinkingConfig"]["thinkingBudget"].as_u64().unwrap();
             assert_eq!(budget, expected_budget, "wrong budget for {level:?}");

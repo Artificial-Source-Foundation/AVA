@@ -99,6 +99,19 @@ impl App {
                 self.state.agent.tokens_used.output += output_tokens;
                 self.state.agent.cost += cost_usd;
             }
+            ava_agent::AgentEvent::BudgetWarning {
+                threshold_percent,
+                current_cost_usd,
+                max_budget_usd,
+            } => {
+                self.set_status(
+                    format!(
+                        "Budget warning: {}% used (${:.2} / ${:.2})",
+                        threshold_percent, current_cost_usd, max_budget_usd
+                    ),
+                    StatusLevel::Warn,
+                );
+            }
             ava_agent::AgentEvent::ToolCall(call) => {
                 debug!(tool = %call.name, "TUI received ToolCall");
 

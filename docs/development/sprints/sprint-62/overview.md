@@ -1,5 +1,7 @@
 # Sprint 62: Cost and Runtime Foundations
 
+> Status: implemented on `master`; backend/workspace verification complete; manual TUI/provider validation still pending.
+
 ## Goal
 
 Give AVA stronger cost controls and more reliable provider/runtime behavior so longer sessions are predictable and cheaper to operate.

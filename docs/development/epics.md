@@ -34,19 +34,18 @@
 |--------|-------|--------|
 | 61 | `B67`, `B54`, `B37`, `B66` safer edit -> validate -> commit flow | Implemented; manual validation remains |
 
-## Planned v3 Backend Epics
-
 ### E5: Cost and Runtime Controls (Sprint 62)
 
-| Item | Description |
-|------|-------------|
-| `B64` | Thinking budget configuration |
-| `B63` | Dynamic API key resolution |
-| `B47` | Cost-aware model routing |
-| `B40` | Budget alerts and cost dashboard |
+| Sprint | Focus | Status |
+|--------|-------|--------|
+| 62 | `B64`, `B63`, `B47`, `B40` stronger budgeting, credential refresh, routing, and cost visibility | Implemented; manual validation remains |
+
+## Planned v3 Backend Epics
 
 ### E6: Execution and Ecosystem Foundations (Sprint 63)
 
+| Item | Description |
+|------|-------------|
 | Item | Description |
 |------|-------------|
 | `B65` | Pluggable backend operations |

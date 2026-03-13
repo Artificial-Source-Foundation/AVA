@@ -12,7 +12,8 @@ v3 is the milestone where the current active backlog is intentionally burned dow
 - v2.1.0 is released.
 - Sprint 60 is implemented and awaiting manual validation follow-through.
 - Sprint 61 is implemented, merged, and backend-tested.
-- Sprint 62-66 currently exist as planning docs only; they are not merged implementation milestones on `master` yet.
+- Sprint 62 is implemented on `master` and backend/workspace-tested.
+- Sprint 63-66 currently remain planning docs only on `master`.
 - The active backlog is now mostly backend/platform work plus one major UI-facing gap: `B26` Praxis in chat composer.
 - The local reference corpus under `docs/reference-code/` has been refreshed and now reflects newer upstream states across OpenCode, Codex CLI, Goose, Gemini CLI, Cline, OpenHands, Continue, Zed, and others.
 

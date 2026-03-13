@@ -476,6 +476,7 @@ async fn run_worker(
             | AgentEvent::ToolCall(_)
             | AgentEvent::ToolResult(_)
             | AgentEvent::ToolStats(_)
+            | AgentEvent::BudgetWarning { .. }
             | AgentEvent::TokenUsage { .. }
             | AgentEvent::SubAgentComplete { .. } => {}
         }

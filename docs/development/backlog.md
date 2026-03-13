@@ -1,6 +1,6 @@
 # AVA Backlog
 
-> Last updated: 2026-03-12
+> Last updated: 2026-03-12 (after Sprint 62 implementation and verification on `master`)
 > Related: `docs/development/roadmap.md`, `docs/development/epics.md`, `docs/development/v3-plan.md`
 
 > Items waiting for sprint assignment. Completed items moved to bottom.
@@ -19,21 +19,17 @@ v3 planning now runs in two lanes:
 ### Next
 
 1. `B26` Praxis in chat composer — only open `P1`, and the clearest missing bridge between AVA's backend multi-agent work and the TUI.
-2. `B64` Thinking budget configuration — smallest high-value cost-control feature and the cleanest entry into Sprint 62.
-3. `B63` Dynamic API key resolution — reliability prerequisite for OAuth-backed providers and long sessions.
-4. `B47` Cost-aware model routing — high-leverage differentiator once normalization and budget controls are in place.
-5. `B40` Budget alerts + cost dashboard — closes the loop for the cost/runtime epic.
+2. `B65` Pluggable backend operations — foundational abstraction for future remote execution, isolated workers, and safer Praxis expansion.
+3. `B39` Background agents on branches — safer background execution through git worktree isolation.
+4. `B61` Dev tooling setup — accelerates future work and improves day-to-day development quality.
+5. `B71` Skill discovery — strong ecosystem leverage without expanding the default tool surface.
 
 ### Soon
 
-6. `B65` Pluggable backend operations — foundational abstraction for future remote execution, isolated workers, and safer Praxis expansion.
-7. `B39` Background agents on branches — safer background execution through git worktree isolation.
-8. `B61` Dev tooling setup — accelerates future work and improves day-to-day development quality.
-9. `B71` Skill discovery — strong ecosystem leverage without expanding the default tool surface.
-10. `B45` File watcher mode — high workflow value, but needs careful UX design to avoid noise.
-11. `B38` Auto-learned project memories — strong long-session productivity upside once reliability work settles.
-12. `B57` Multi-repo context — valuable after the single-repo knowledge lane is better defined.
-13. `B48` Change impact analysis — best timed after the knowledge/indexing work is clearer.
+6. `B45` File watcher mode — high workflow value, but needs careful UX design to avoid noise.
+7. `B38` Auto-learned project memories — strong long-session productivity upside once reliability work settles.
+8. `B57` Multi-repo context — valuable after the single-repo knowledge lane is better defined.
+9. `B48` Change impact analysis — best timed after the knowledge/indexing work is clearer.
 
 ### Later
 
@@ -80,15 +76,6 @@ These items are worth keeping, but likely need tighter scoping before implementa
 
 ## Recommended Next 3 Backend Sprints
 
-### Sprint 62 — Cost + Runtime Foundations
-
-- `B64` Thinking budget configuration
-- `B63` Dynamic API key resolution
-- `B47` Cost-aware model routing
-- `B40` Budget alerts + cost dashboard
-
-Goal: give users much stronger cost control and runtime reliability across providers.
-
 ### Sprint 63 — Execution + Ecosystem Foundations
 
 - `B65` Pluggable backend operations
@@ -108,6 +95,15 @@ Goal: strengthen the execution substrate, improve development velocity, and expa
 
 Goal: turn AVA's existing codebase/context primitives into a clearer competitive advantage for long sessions and larger workspaces.
 
+### Sprint 65 — Agent Coordination Backend
+
+- `B49` Spec-driven development
+- `B59` Agent artifacts system
+- `B50` Agent team peer communication
+- `B76` Agent Client Protocol (ACP)
+
+Goal: finish the coordination substrate after execution and knowledge foundations settle.
+
 ## Open
 
 | ID | Priority | Title | Notes |
@@ -116,13 +112,11 @@ Goal: turn AVA's existing codebase/context primitives into a clearer competitive
 | B26 | P1 | Praxis in chat composer | Expose Praxis multi-agent orchestration from chat — `/praxis` or `/team` command spawns Director → Leads → Workers pipeline from the composer without `--praxis` CLI flag. Workers visible in sidebar, results merged into main session. Two tiers: Full (Director → Leads → Workers for complex refactors) and Lite (Director → Workers for quick parallel tasks). Builds on ava-praxis crate. Current status: underlying `ava-praxis` backend, `PraxisEvent` stream, and headless `--multi-agent`/`--praxis` path exist; missing interactive TUI composer wiring, live sidebar worker updates, and merge-back into the active session. |
 | B38 | P2 | Auto-learned project memories | Beyond manual AGENTS.md — system auto-detects patterns (preferred frameworks, coding style, common imports, test patterns) and stores them. Windsurf's praised "Memories" feature. `ava-memory` currently only has manual `remember/recall`. Add: pattern detector that observes tool results + user corrections, builds project profile over time. |
 | B39 | P2 | Background agents on branches | Background agents (`/bg`) should optionally work on isolated git branches. `git worktree add` for isolation, merge back on completion. Currently background agents share the working tree. |
-| B40 | P2 | Budget alerts + cost dashboard | Cost is displayed in status bar but no alerts. Add: configurable budget threshold (warn at 80%, hard stop at 100%), per-session cost breakdown in `/cost` command, cumulative daily/weekly tracking. |
 | B41 | P3 | Session templates | Save conversation patterns as reusable templates — system prompt + tool set + follow-up pipeline. `/template save security-review`, `/template load security-review`. Store in `.ava/templates/`. |
 | B42 | P3 | Custom agent modes/personas | Beyond Code/Plan — let users define custom modes in config with specific system prompts, tool permissions, and model overrides. `/mode create reviewer` with TOML config. agents.toml already has `prompt` field per agent but TUI only exposes Code/Plan. |
 | B44 | P2 | Web search capability | **Default policy: Extended, not core.** Zero-config web search for docs, APIs, error messages. Gemini CLI has this free via Google. Add `web_search` as an opt-in Extended tool using DuckDuckGo/SearXNG (no API key) or configurable provider. Currently only `web_fetch` exists (needs a URL). |
 | B45 | P2 | File watcher mode | Watch for file saves and comment-driven prompts (`// ava: fix this`). Aider's praised feature. Bridges TUI and editor — user edits in their IDE, AVA picks up changes automatically. `notify` crate for filesystem events. |
 | B46 | P2 | Plugin/skill marketplace | `ava plugin install <name>` to add community tools, hooks, MCP configs, agent presets. Registry hosted on GitHub or custom. AVA has the extension API but no discovery/install mechanism. Claude Code has 9K+ plugins. |
-| B47 | P2 | Cost-aware model routing | Route cheap tasks (grep, read) to fast/cheap models, expensive reasoning to expensive models. Novel — no competitor does this. AVA's multi-agent + multi-provider architecture is uniquely positioned. Per-tool-type model config in agents.toml. |
 | B48 | P2 | Change impact analysis | Before applying edits, show blast radius: importing files, covering tests, affected CI pipelines. Leverages existing LSP integration + codebase index (PageRank). Novel — no competitor has this. |
 | B49 | P3 | Spec-driven development | Generate requirements.md/design.md/tasks.md specs before coding (Kiro's approach). `/spec` command creates structured specs from prompt, specs become source of truth. Beyond simple Plan mode. |
 | B50 | P3 | Agent team peer communication | Lateral mailbox between parallel agents (not just top-down Praxis hierarchy). Claude Code Agent Teams model — agents negotiate conflicts, share type definitions, flag blockers to peers. Upgrade to ava-praxis. |
@@ -134,8 +128,6 @@ Goal: turn AVA's existing codebase/context primitives into a clearer competitive
 | B58 | P3 | Semantic codebase indexing | Beyond BM25/PageRank — embedding-based semantic search. Augment's Context Engine showed +70% agent performance improvement. Use local embeddings (all-MiniLM-L6-v2) or provider API. Upgrade ava-codebase. |
 | B59 | P3 | Agent artifacts system | Agents produce tangible deliverables (plans, diffs, screenshots, reports) that users review with inline comments. Antigravity's "Google Docs-style comments on agent output" pattern. |
 | B61 | P2 | Dev tooling setup | Add `cargo-nextest` (parallel tests), `cargo-llvm-cov` (coverage), `cargo-outdated`, pre-commit hooks (`fmt` + `clippy`), `clippy.toml` for custom thresholds. Research doc available from tooling audit. |
-| B63 | P2 | Dynamic API key resolution | Callback to refresh expiring OAuth tokens (e.g. GitHub Copilot) mid-run. Currently credentials loaded once at startup. Add `refresh_api_key()` trait method to provider, called at request time. Pi-Mono's `getApiKey` pattern. |
-| B64 | P2 | Thinking budget configuration | Per-provider and per-model configurable max token cap for extended thinking. Complements existing thinking level (Ctrl+T off/low/medium/high/xhigh) — level is qualitative, budget is quantitative hard cap. Configurable in settings/agents.toml. Pi-Mono's `thinkingBudgets`. |
 | B65 | P2 | Pluggable backend operations | Trait-based tool execution — `Backend` trait with `LocalBackend` default, future `SshBackend`/`DockerBackend`. Enables Praxis workers to execute tools on remote machines/containers. Refactor bash/read/write/edit to use trait. Unblocks remote multi-agent (B26) and background agents on branches (B39). Pi-Mono's `EditOperations`/`BashOperations` pattern. |
 | B68 | P2 | Batch tool | **Default policy: Extended, not core.** Explicit parallel tool execution — LLM calls `batch` with up to 25 tool invocations, deduplicates, returns combined results. Extends beyond implicit read-only parallelism. OpenCode's `batch` tool pattern. |
 | B69 | P2 | Code search tool | **Tier: Plugin.** Semantic code search across public repositories — find API usage examples, patterns, SDK usage. Beyond local `codebase_search` (BM25) and `grep` (regex). Could use Exa, Sourcegraph, or GitHub Code Search API. Pairs with B44 (web search). Implement as MCP server. OpenCode's `codesearch` pattern. |
@@ -158,6 +150,10 @@ Goal: turn AVA's existing codebase/context primitives into a clearer competitive
 | B54 | Sprint 61 | Auto lint+test after edits | Code complete — opt-in post-edit validation after `edit`, `multiedit`, `write`, and `apply_patch`, reusing Extended-tier `lint` and `test_runner`. Validation failures remain distinct from tool execution failures. Needs user-facing config/UX polish and live testing. |
 | B37 | Sprint 61 | Smart `/commit` with LLM message generation | Code complete — `/commit` now inspects git readiness, shows staged/unstaged summaries, diff stats, recent commit style, and suggests a commit message without auto-committing. Needs manual TUI validation plus optional richer LLM-backed message generation/staging assistance. |
 | B66 | Sprint 61 | Ghost snapshots | Code complete — hidden git-backed blob snapshot refs are created before `edit` and `multiedit`, giving lightweight pre-edit recovery on the backend. Needs snapshot cleanup/retention decisions, broader coverage review, and richer restore UX such as `/restore`. |
+| B64 | Sprint 62 | Thinking budget configuration | Code complete — per-provider/per-model quantitative thinking budgets now resolve through config, reach the runtime/provider request layer, and degrade safely when providers cannot honor requested budgets. Workspace-tested; needs live provider validation and UX polish around fallback/clamping visibility. |
+| B63 | Sprint 62 | Dynamic API key resolution | Code complete — request-time credential refresh now supports expiring OAuth-backed providers, falls back to static API keys when appropriate, and avoids holding the global credential store lock across refresh I/O. Workspace-tested; needs live OAuth refresh validation and broader direct-provider call-site review. |
+| B47 | Sprint 62 | Cost-aware model routing | Code complete — configurable cheap/capable routing now auto-selects explainable routes, works for OpenRouter-backed users, and persists routing metadata for downstream visibility. Workspace-tested; needs real-session validation and fuller nested/sub-agent route reporting. |
+| B40 | Sprint 62 | Budget alerts + cost dashboard | Code complete — cumulative budget telemetry, threshold warnings, session cost summaries, headless spend output, and lightweight routing/cost visibility now reuse shared accounting/session metadata. Workspace-tested; needs manual TUI validation and possible follow-up for richer `/cost` analytics. |
 | B34 | Sprint 60 | Three-tier mid-stream messaging | Code complete — `MessageQueue` with steering/follow-up/post-complete pipelines (12 tests), agent loop polls steering between tool calls, skip remaining tools on steer, follow-up loop after task, post-complete group pipeline after all work. TUI: Enter=steer, Alt+Enter=follow-up, Ctrl+Alt+Enter=post-complete. `/later` + `/queue` commands. Composer shows queue items with tier badges. Status bar `[N queued]`. Ctrl+C clears steering but preserves follow-up/post-complete. Needs live testing with real agent runs. |
 | B33 | Sprint 60 | Claude Code as subagent | Phase 1+2 code complete — `claude_code` tool in ava-tools (18 tests), `[CC]` sidebar badge, `ClaudeCodeConfig` in ava-config, `provider`/`allowed_tools`/`max_budget_usd` in agents.toml. `.env_remove("CLAUDECODE")` for nested invocation. Tool NOT pre-activated — requires explicit enable in providers modal. Test script: `scripts/test-claude-code-integration.sh`. Design doc: `docs/architecture/claude-code-integration.md`. Needs: live CLI testing (outside CC session), provider modal wiring (Phase 3). Stream subagent module (`claude_code_stream.rs`) was removed as dead code — streaming subagent support would need reimplementation when Phase 2 is wired in. |
 | B24 | Sprint 60-03 | Hooks system — lifecycle automation | Code complete — 16 events, 3 action types (Command/HTTP/Prompt), TOML config in `.ava/hooks/` + `~/.ava/hooks/`, priority ordering, path matchers, dry-run mode. Needs live testing with real hook files. |

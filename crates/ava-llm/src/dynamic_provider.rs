@@ -13,6 +13,7 @@ use tracing::warn;
 use crate::pool::ConnectionPool;
 use crate::provider::{LLMProvider, LLMResponse};
 use crate::providers::{common, create_provider};
+use crate::thinking::ThinkingConfig;
 
 type ProviderRefreshLock = Arc<Mutex<()>>;
 type ProviderRefreshLocks = Arc<Mutex<HashMap<String, ProviderRefreshLock>>>;
@@ -133,7 +134,7 @@ pub(crate) async fn resolve_credentials_snapshot(
 
     let updated_snapshot = {
         let mut credentials = credentials.write().await;
-        let _ = credentials.apply_refreshed_provider_tokens(
+        let _refreshed = credentials.apply_refreshed_provider_tokens(
             provider_name,
             &refresh.existing,
             refreshed_tokens,
@@ -242,6 +243,30 @@ impl LLMProvider for DynamicCredentialProvider {
         self.provider_for_request()
             .await?
             .generate_stream_with_thinking(messages, tools, thinking)
+            .await
+    }
+
+    async fn generate_with_thinking_config(
+        &self,
+        messages: &[Message],
+        tools: &[Tool],
+        config: ThinkingConfig,
+    ) -> Result<LLMResponse> {
+        self.provider_for_request()
+            .await?
+            .generate_with_thinking_config(messages, tools, config)
+            .await
+    }
+
+    async fn generate_stream_with_thinking_config(
+        &self,
+        messages: &[Message],
+        tools: &[Tool],
+        config: ThinkingConfig,
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        self.provider_for_request()
+            .await?
+            .generate_stream_with_thinking_config(messages, tools, config)
             .await
     }
 }

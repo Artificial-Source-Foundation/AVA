@@ -94,8 +94,6 @@ impl Default for LlmConfig {
             api_key: None,
             max_tokens: 4096,
             temperature: 0.7,
-            thinking_budgets: ThinkingBudgetConfig::default(),
-            routing: RoutingConfig::default(),
             routing: RoutingConfig::default(),
             thinking_budgets: ThinkingBudgetConfig::default(),
         }
@@ -320,7 +318,7 @@ impl ConfigManager {
 
     /// Load configuration and credentials from specific paths
     pub async fn load_from_paths(config_path: PathBuf, credentials_path: PathBuf) -> Result<Self> {
-        let mut config = if config_path.exists() {
+        let config = if config_path.exists() {
             let content = fs::read_to_string(&config_path)
                 .await
                 .map_err(|e| AvaError::IoError(e.to_string()))?;
@@ -389,7 +387,7 @@ impl ConfigManager {
 
     /// Reload configuration from disk
     pub async fn reload(&self) -> Result<()> {
-        let mut new_config = if self.config_path.exists() {
+        let new_config = if self.config_path.exists() {
             let content = fs::read_to_string(&self.config_path)
                 .await
                 .map_err(|e| AvaError::IoError(e.to_string()))?;

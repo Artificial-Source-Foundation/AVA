@@ -20,7 +20,7 @@ pub use credential_test::{default_model_for_provider, test_provider_credentials}
 pub use message_transform::{normalize_messages, ProviderKind};
 pub use pool::ConnectionPool;
 pub use provider::{LLMProvider, NormalizingProvider};
-pub use router::{ModelRouter, ProviderFactory};
+pub use router::{ModelRouter, ProviderFactory, RouteDecision, RouteRequirements, RouteSource};
 pub use thinking::{
     ResolvedThinkingConfig, ThinkingBudgetFallback, ThinkingBudgetSupport, ThinkingConfig,
 };

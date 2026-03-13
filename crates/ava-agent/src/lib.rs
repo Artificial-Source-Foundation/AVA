@@ -10,14 +10,18 @@ pub mod instructions;
 pub mod llm_trait;
 pub mod message_queue;
 pub mod reflection;
+pub mod routing;
 pub mod stack;
 pub mod stuck;
 pub mod system_prompt;
 
+pub use instructions::{contextual_instructions_for_file, load_project_instructions};
 /// Reflection loop primitives for error analysis and auto-fix retries.
 pub use reflection::{ErrorKind, ReflectionAgent, ReflectionLoop, ToolExecutor, ToolResult};
-pub use instructions::{contextual_instructions_for_file, load_project_instructions};
-pub use {agent_loop::*, llm_trait::{LLMProvider, LLMResponse}};
+pub use {
+    agent_loop::*,
+    llm_trait::{LLMProvider, LLMResponse},
+};
 
 #[cfg(test)]
 pub(crate) mod tests {

@@ -15,6 +15,7 @@ pub mod credential_commands;
 pub mod credentials;
 pub mod keychain;
 pub mod model_catalog;
+pub mod routing;
 pub mod thinking;
 
 pub use agents::AgentsConfig;
@@ -68,6 +69,7 @@ pub use credentials::{
 };
 pub use keychain::{redact_key_for_log, KeychainManager, MigrationResult};
 pub use model_catalog::{fallback_catalog, CatalogModel, CatalogState, ModelCatalog};
+pub use routing::{RoutingConfig, RoutingMode, RoutingProfile, RoutingTarget, RoutingTargets};
 pub use thinking::{ProviderThinkingBudgetConfig, ThinkingBudgetConfig};
 
 /// LLM provider configuration
@@ -80,6 +82,8 @@ pub struct LlmConfig {
     pub temperature: f32,
     #[serde(default)]
     pub thinking_budgets: ThinkingBudgetConfig,
+    #[serde(default)]
+    pub routing: RoutingConfig,
 }
 
 impl Default for LlmConfig {
@@ -90,6 +94,9 @@ impl Default for LlmConfig {
             api_key: None,
             max_tokens: 4096,
             temperature: 0.7,
+            thinking_budgets: ThinkingBudgetConfig::default(),
+            routing: RoutingConfig::default(),
+            routing: RoutingConfig::default(),
             thinking_budgets: ThinkingBudgetConfig::default(),
         }
     }
@@ -313,7 +320,7 @@ impl ConfigManager {
 
     /// Load configuration and credentials from specific paths
     pub async fn load_from_paths(config_path: PathBuf, credentials_path: PathBuf) -> Result<Self> {
-        let config = if config_path.exists() {
+        let mut config = if config_path.exists() {
             let content = fs::read_to_string(&config_path)
                 .await
                 .map_err(|e| AvaError::IoError(e.to_string()))?;
@@ -326,6 +333,7 @@ impl ConfigManager {
             Config::default()
         };
         let mut config = config;
+        config.llm.routing.normalize();
         config.llm.thinking_budgets.normalize_keys();
 
         let credentials = CredentialStore::load(&credentials_path).await?;
@@ -381,7 +389,7 @@ impl ConfigManager {
 
     /// Reload configuration from disk
     pub async fn reload(&self) -> Result<()> {
-        let new_config = if self.config_path.exists() {
+        let mut new_config = if self.config_path.exists() {
             let content = fs::read_to_string(&self.config_path)
                 .await
                 .map_err(|e| AvaError::IoError(e.to_string()))?;
@@ -393,6 +401,7 @@ impl ConfigManager {
             Config::default()
         };
         let mut new_config = new_config;
+        new_config.llm.routing.normalize();
         new_config.llm.thinking_budgets.normalize_keys();
 
         let mut config = self.config.write().await;
@@ -581,5 +590,37 @@ mod tests {
             .unwrap();
         let credentials = manager.credentials().await;
         assert!(credentials.providers().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_routing_config_is_normalized_on_load() {
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("config.yaml");
+        let credentials_path = temp_dir.path().join("credentials.json");
+
+        let mut config = Config::default();
+        config.llm.provider = "anthropic".to_string();
+        config.llm.model = "claude-sonnet-4.6".to_string();
+        config.llm.routing.mode = RoutingMode::Conservative;
+        config.llm.routing.targets.cheap.provider = Some(" OpenAI ".to_string());
+        config.llm.routing.targets.cheap.model = Some(" gpt-4o-mini ".to_string());
+        fs::write(&config_path, serde_yaml::to_string(&config).unwrap())
+            .await
+            .unwrap();
+
+        let manager = ConfigManager::load_from_paths(config_path, credentials_path)
+            .await
+            .unwrap();
+        let config = manager.get().await;
+
+        assert_eq!(config.llm.routing.mode, RoutingMode::Conservative);
+        assert_eq!(
+            config.llm.routing.targets.cheap.provider.as_deref(),
+            Some("openai")
+        );
+        assert_eq!(
+            config.llm.routing.targets.cheap.model.as_deref(),
+            Some("gpt-4o-mini")
+        );
     }
 }

@@ -9,7 +9,7 @@ use ava_context::{
     create_hybrid_condenser_with_relevance, CondenserConfig, ContextManager, Summarizer,
 };
 use ava_llm::provider::{LLMProvider, SharedProvider};
-use ava_llm::ModelRouter;
+use ava_llm::{ModelRouter, RouteDecision, RouteSource};
 use ava_mcp::config::load_merged_mcp_config;
 use ava_mcp::manager::ExtensionManager;
 use ava_memory::MemorySystem;
@@ -34,6 +34,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
 
 use crate::agent_loop::{AgentConfig, AgentEvent, AgentLoop};
+use crate::routing::analyze_task;
 
 struct LlmSummarizer(Arc<dyn LLMProvider>);
 
@@ -80,6 +81,7 @@ pub struct AgentStack {
     pub codebase_index: Arc<RwLock<Option<Arc<CodebaseIndex>>>>,
     provider_override: RwLock<Option<String>>,
     model_override: RwLock<Option<String>>,
+    routing_locked: RwLock<bool>,
     max_turns: usize,
     max_budget_usd: f64,
     #[allow(dead_code)] // Field retained for future use; accessor removed as dead code
@@ -190,6 +192,14 @@ impl AgentStack {
         });
 
         let cfg = config_mgr.get().await;
+        let routing_locked = config
+            .provider
+            .as_deref()
+            .is_some_and(|provider| provider != cfg.llm.provider)
+            || config
+                .model
+                .as_deref()
+                .is_some_and(|model| model != cfg.llm.model);
         let provider_name = config.provider.as_deref().unwrap_or(&cfg.llm.provider);
         if let Some(base_url) = ava_llm::providers::base_url_for_provider(provider_name) {
             match router.pool().get_client(base_url).await {
@@ -232,6 +242,7 @@ impl AgentStack {
                 codebase_index,
                 provider_override: RwLock::new(config.provider),
                 model_override: RwLock::new(config.model),
+                routing_locked: RwLock::new(routing_locked),
                 max_turns: config.max_turns,
                 max_budget_usd: config.max_budget_usd,
                 yolo: config.yolo,
@@ -326,6 +337,7 @@ impl AgentStack {
         self.router.route_required(provider, model).await?;
         *self.provider_override.write().await = Some(provider.to_string());
         *self.model_override.write().await = Some(model.to_string());
+        *self.routing_locked.write().await = true;
         let project_root = std::env::current_dir().unwrap_or_default();
         let mut state = ava_config::ProjectState::load(&project_root);
         state.last_provider = Some(provider.to_string());
@@ -384,6 +396,67 @@ impl AgentStack {
         (provider, model)
     }
 
+    pub async fn resolve_model_route(
+        &self,
+        goal: &str,
+        images: &[ava_types::ImageContent],
+    ) -> Result<RouteDecision> {
+        let cfg = self.config.get().await;
+        let (provider, model) = self.current_model().await;
+        let thinking = *self.thinking_level.read().await;
+        let plan_mode = *self.plan_mode.read().await;
+        let intent = analyze_task(goal, images, thinking, plan_mode);
+        let intent_reasons = intent.reasons.clone();
+
+        if *self.routing_locked.read().await {
+            let mut reasons = intent.reasons;
+            reasons
+                .push("provider/model override is locked; skipping automatic routing".to_string());
+            return Ok(RouteDecision::fixed(
+                provider,
+                model,
+                intent.profile,
+                RouteSource::ManualOverride,
+                reasons,
+            ));
+        }
+
+        let mut decision = self
+            .router
+            .decide_route(
+                &provider,
+                &model,
+                &cfg.llm.routing,
+                intent.profile,
+                intent.requirements,
+            )
+            .await;
+        if !intent_reasons.is_empty() {
+            let mut reasons = intent_reasons;
+            reasons.extend(decision.reasons);
+            decision.reasons = reasons;
+        }
+        Ok(decision)
+    }
+
+    fn attach_route_metadata(session: &mut Session, decision: &RouteDecision) {
+        session.metadata["routing"] = serde_json::json!({
+            "provider": decision.provider,
+            "model": decision.model,
+            "displayModel": decision.display_model,
+            "profile": match decision.profile {
+                ava_config::RoutingProfile::Cheap => "cheap",
+                ava_config::RoutingProfile::Capable => "capable",
+            },
+            "source": decision.source.as_str(),
+            "reasons": decision.reasons,
+            "costPerMillion": {
+                "input": decision.cost_input_per_million,
+                "output": decision.cost_output_per_million,
+            }
+        });
+    }
+
     async fn enrich_goal_with_memories(&self, goal: &str) -> String {
         let keywords = extract_goal_keywords(goal);
         if keywords.is_empty() {
@@ -428,21 +501,34 @@ impl AgentStack {
     ) -> Result<AgentRunResult> {
         let cfg = self.config.get().await;
         let mut resolved_provider_name = self.current_model().await.0;
+        let route_decision = if self.injected_provider.is_none() {
+            Some(self.resolve_model_route(goal, &images).await?)
+        } else {
+            None
+        };
+        let mut applied_route_decision = route_decision.clone();
+        if let (Some(tx), Some(decision)) = (&event_tx, &route_decision) {
+            let _ = tx.send(AgentEvent::Progress(format!(
+                "{}: {}",
+                decision.summary(),
+                decision.reasons.join("; ")
+            )));
+        }
         let provider = if let Some(provider) = &self.injected_provider {
             provider.clone()
         } else {
-            let (provider_name, model_name) = self.current_model().await;
-            resolved_provider_name = provider_name.clone();
+            let decision = route_decision.as_ref().expect("route decision exists");
+            resolved_provider_name = decision.provider.clone();
             match self
                 .router
-                .route_required(&provider_name, &model_name)
+                .route_required(&decision.provider, &decision.model)
                 .await
             {
                 Ok(p) => p,
                 Err(e) => {
                     if let Some(fb) = &cfg.fallback {
                         warn!(
-                            primary = %provider_name,
+                            primary = %decision.provider,
                             fallback = %fb.provider,
                             "Primary provider unavailable, using fallback"
                         );
@@ -453,6 +539,16 @@ impl AgentStack {
                             )));
                         }
                         resolved_provider_name = fb.provider.clone();
+                        applied_route_decision = Some(RouteDecision::fixed(
+                            fb.provider.clone(),
+                            fb.model.clone(),
+                            decision.profile,
+                            RouteSource::Fallback,
+                            vec![format!(
+                                "routed model was unavailable; fell back to {}/{}",
+                                fb.provider, fb.model
+                            )],
+                        ));
                         self.router.route_required(&fb.provider, &fb.model).await?
                     } else {
                         return Err(e);
@@ -708,6 +804,9 @@ impl AgentStack {
                 }
             }
 
+            if let Some(decision) = applied_route_decision.as_ref() {
+                Self::attach_route_metadata(&mut session, decision);
+            }
             return Ok(AgentRunResult {
                 success: true,
                 turns: session.messages.len(),
@@ -719,6 +818,11 @@ impl AgentStack {
             value = agent.run(goal) => value,
             _ = cancel.cancelled() => Err(AvaError::Cancelled),
         }?;
+
+        let mut session = session;
+        if let Some(decision) = applied_route_decision.as_ref() {
+            Self::attach_route_metadata(&mut session, decision);
+        }
 
         Ok(AgentRunResult {
             success: true,

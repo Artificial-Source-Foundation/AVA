@@ -4,8 +4,11 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
+use ava_config::{Config, CredentialStore, ProviderCredential, RoutingMode};
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
+use ava_llm::RouteSource;
+use ava_llm::ThinkingConfig;
 use ava_llm::ThinkingConfig;
 use ava_types::{AvaError, Message, Result, StreamChunk};
 use futures::Stream;
@@ -17,6 +20,40 @@ fn completion_response(result: &str) -> String {
     format!(
         r#"{{"tool_calls":[{{"name":"attempt_completion","arguments":{{"result":"{result}"}}}}]}}"#
     )
+}
+
+async fn write_credentials(dir: &tempfile::TempDir, providers: &[&str]) {
+    let mut store = CredentialStore::default();
+    for provider in providers {
+        store.set(
+            provider,
+            ProviderCredential {
+                api_key: format!("{provider}-key"),
+                base_url: None,
+                org_id: None,
+                oauth_token: None,
+                oauth_refresh_token: None,
+                oauth_expires_at: None,
+                oauth_account_id: None,
+            },
+        );
+    }
+    store
+        .save(&dir.path().join("credentials.json"))
+        .await
+        .unwrap();
+}
+
+fn write_routing_config(dir: &tempfile::TempDir) {
+    let mut config = Config::default();
+    config.llm.provider = "anthropic".to_string();
+    config.llm.model = "claude-sonnet-4.6".to_string();
+    config.llm.routing.mode = RoutingMode::Conservative;
+    std::fs::write(
+        dir.path().join("config.yaml"),
+        serde_json::to_string(&config).unwrap(),
+    )
+    .unwrap();
 }
 
 #[tokio::test]
@@ -148,6 +185,54 @@ async fn test_agents_config_defaults_without_file() {
 
     // Stack should initialize fine even without agents.toml
     assert!(!stack.tools.read().await.list_tools().is_empty());
+}
+
+#[tokio::test]
+async fn agent_stack_resolve_model_route_prefers_cheap_model_when_enabled() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_routing_config(&dir);
+    write_credentials(&dir, &["anthropic", "openai"]).await;
+
+    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    let decision = stack
+        .resolve_model_route("Summarize this diff in two bullets.", &[])
+        .await
+        .expect("route resolution should succeed");
+
+    assert_eq!(decision.source, RouteSource::PolicyAuto);
+    assert_eq!(decision.provider, "openai");
+    assert_eq!(decision.display_model, "gpt-4o-mini");
+}
+
+#[tokio::test]
+async fn agent_stack_resolve_model_route_respects_manual_override_lock() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    write_routing_config(&dir);
+    write_credentials(&dir, &["anthropic", "openai"]).await;
+
+    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        provider: Some("openai".to_string()),
+        model: Some("gpt-5.3-codex".to_string()),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    let decision = stack
+        .resolve_model_route("Summarize this diff in two bullets.", &[])
+        .await
+        .expect("route resolution should succeed");
+
+    assert_eq!(decision.source, RouteSource::ManualOverride);
+    assert_eq!(decision.provider, "openai");
+    assert_eq!(decision.display_model, "gpt-5.3-codex");
 }
 
 struct SlowProvider {

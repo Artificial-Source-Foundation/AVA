@@ -261,6 +261,10 @@ pub struct Config {
     /// ```
     #[serde(default)]
     pub instructions: Vec<String>,
+    /// Additional repository roots to index alongside the current project root.
+    /// Paths may be absolute or relative to the active working directory.
+    #[serde(default)]
+    pub workspace_roots: Vec<String>,
 }
 
 /// Per-project ephemeral state (stored in `.ava/state.json` in the project root).

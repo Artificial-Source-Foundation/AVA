@@ -8,6 +8,10 @@
 use rusqlite::{params, Connection, OptionalExtension, Result};
 use std::path::{Path, PathBuf};
 
+mod learned;
+
+pub use learned::{LearnedMemory, LearnedMemoryStatus};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Memory {
     pub id: i64,
@@ -93,6 +97,44 @@ impl MemorySystem {
         rows.collect()
     }
 
+    pub fn observe_learned_pattern(
+        &self,
+        key: &str,
+        value: &str,
+        source_excerpt: &str,
+        confidence: f64,
+    ) -> Result<LearnedMemory> {
+        let conn = self.conn()?;
+        learned::upsert_observation(&conn, key, value, source_excerpt, confidence)
+    }
+
+    pub fn set_learned_status(
+        &self,
+        id: i64,
+        status: LearnedMemoryStatus,
+    ) -> Result<Option<LearnedMemory>> {
+        let conn = self.conn()?;
+        learned::set_status(&conn, id, status)
+    }
+
+    pub fn list_learned(
+        &self,
+        status: Option<LearnedMemoryStatus>,
+        limit: usize,
+    ) -> Result<Vec<LearnedMemory>> {
+        let conn = self.conn()?;
+        learned::list(&conn, status, limit)
+    }
+
+    pub fn search_confirmed_learned(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<LearnedMemory>> {
+        let conn = self.conn()?;
+        learned::search_confirmed(&conn, query, limit)
+    }
+
     fn init_schema(&self) -> Result<()> {
         let conn = self.conn()?;
         conn.execute_batch(
@@ -122,7 +164,26 @@ impl MemorySystem {
                 INSERT INTO memories_fts(memories_fts, rowid, value)
                 VALUES ('delete', old.id, old.value);
                 INSERT INTO memories_fts(rowid, value) VALUES (new.id, new.value);
-            END;",
+            END;
+
+            CREATE TABLE IF NOT EXISTS learned_memories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                source_excerpt TEXT NOT NULL,
+                observed_count INTEGER NOT NULL DEFAULT 1,
+                confidence REAL NOT NULL DEFAULT 0.0,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                UNIQUE(key, value)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_learned_memories_status
+              ON learned_memories(status);
+
+            CREATE INDEX IF NOT EXISTS idx_learned_memories_updated_at
+              ON learned_memories(updated_at);",
         )
     }
 }
@@ -164,7 +225,7 @@ const _: () = {
 
 #[cfg(test)]
 mod tests {
-    use super::{Memory, MemorySystem};
+    use super::{LearnedMemoryStatus, Memory, MemorySystem};
     use tempfile::{tempdir, TempDir};
 
     fn make_db_path(test_name: &str) -> (TempDir, std::path::PathBuf) {
@@ -316,5 +377,154 @@ mod tests {
         let r2 = system.recall("thread2").unwrap().expect("thread2 value");
         assert_eq!(r1.value, "value1");
         assert_eq!(r2.value, "value2");
+    }
+
+    #[test]
+    fn learned_pattern_promotes_to_confirmed_after_repeated_observation() {
+        let (_dir, db_path) = make_db_path("learned_promote");
+        let system = MemorySystem::new(&db_path).expect("memory system should initialize");
+
+        let first = system
+            .observe_learned_pattern(
+                "preference.testing",
+                "prefer integration tests",
+                "prefer integration tests for boundaries",
+                0.8,
+            )
+            .expect("first observation should be stored");
+        assert_eq!(first.status, LearnedMemoryStatus::Pending);
+
+        let second = system
+            .observe_learned_pattern(
+                "preference.testing",
+                "prefer integration tests",
+                "prefer integration tests for boundaries",
+                0.8,
+            )
+            .expect("second observation should update row");
+
+        assert_eq!(second.status, LearnedMemoryStatus::Confirmed);
+        assert_eq!(second.observed_count, 2);
+    }
+
+    #[test]
+    fn learned_review_controls_allow_rejection() {
+        let (_dir, db_path) = make_db_path("learned_review_controls");
+        let system = MemorySystem::new(&db_path).expect("memory system should initialize");
+
+        let learned = system
+            .observe_learned_pattern(
+                "preference.style",
+                "always run clippy",
+                "always run clippy before commit",
+                0.85,
+            )
+            .expect("observation should succeed");
+
+        let rejected = system
+            .set_learned_status(learned.id, LearnedMemoryStatus::Rejected)
+            .expect("status update should succeed")
+            .expect("row should exist");
+
+        assert_eq!(rejected.status, LearnedMemoryStatus::Rejected);
+
+        let observed_again = system
+            .observe_learned_pattern(
+                "preference.style",
+                "always run clippy",
+                "always run clippy before commit",
+                0.9,
+            )
+            .expect("observation after rejection should succeed");
+
+        assert_eq!(observed_again.status, LearnedMemoryStatus::Rejected);
+        assert_eq!(observed_again.observed_count, rejected.observed_count);
+    }
+
+    #[test]
+    fn learned_search_returns_confirmed_only() {
+        let (_dir, db_path) = make_db_path("learned_confirmed_only");
+        let system = MemorySystem::new(&db_path).expect("memory system should initialize");
+
+        let _pending = system
+            .observe_learned_pattern(
+                "preference.framework",
+                "prefer solidjs",
+                "prefer solidjs components",
+                0.8,
+            )
+            .expect("pending row");
+
+        let _confirmed = system
+            .observe_learned_pattern(
+                "preference.testing",
+                "prefer integration tests",
+                "prefer integration tests",
+                0.8,
+            )
+            .expect("first confirm row");
+        let _confirmed = system
+            .observe_learned_pattern(
+                "preference.testing",
+                "prefer integration tests",
+                "prefer integration tests",
+                0.8,
+            )
+            .expect("second confirm row");
+
+        let found = system
+            .search_confirmed_learned("prefer", 10)
+            .expect("search should succeed");
+
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].value, "prefer integration tests");
+        assert_eq!(found[0].status, LearnedMemoryStatus::Confirmed);
+    }
+
+    #[test]
+    fn pattern_detector_promotes_only_after_repeat_observation() {
+        let (_dir, db_path) = make_db_path("pattern_detector_repeat");
+        let system = MemorySystem::new(&db_path).expect("memory system should initialize");
+
+        let first = system
+            .observe_learned_pattern(
+                "preference.general",
+                "prefer concise commit messages",
+                "prefer concise commit messages",
+                0.75,
+            )
+            .expect("first observation should succeed");
+        assert_eq!(first.status, LearnedMemoryStatus::Pending);
+
+        let second = system
+            .observe_learned_pattern(
+                "preference.general",
+                "prefer concise commit messages",
+                "prefer concise commit messages",
+                0.75,
+            )
+            .expect("second observation should succeed");
+        assert_eq!(second.status, LearnedMemoryStatus::Confirmed);
+    }
+
+    #[test]
+    fn learned_search_escapes_like_wildcards() {
+        let (_dir, db_path) = make_db_path("learned_like_escape");
+        let system = MemorySystem::new(&db_path).expect("memory system should initialize");
+
+        let _ = system
+            .observe_learned_pattern("preference.general", "prefer rust", "prefer rust", 0.8)
+            .expect("first observation");
+        let _ = system
+            .observe_learned_pattern("preference.general", "prefer rust", "prefer rust", 0.8)
+            .expect("second observation");
+
+        let found = system
+            .search_confirmed_learned("%", 10)
+            .expect("search should succeed");
+        assert!(
+            found.is_empty(),
+            "literal wildcard should not match all rows"
+        );
     }
 }

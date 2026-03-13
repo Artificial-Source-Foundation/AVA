@@ -27,12 +27,30 @@ use tokio::sync::{mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+pub mod acp;
+pub mod acp_handler;
+pub mod acp_transport;
+pub mod artifact;
+pub mod artifact_store;
+pub mod conflict;
 pub mod events;
+pub mod mailbox;
 pub mod review;
+pub mod spec;
+pub mod spec_workflow;
 pub mod workflow;
 
+pub use acp::{AcpError, AcpMethod, AcpRequest, AcpResponse};
+pub use acp_handler::AcpHandler;
+pub use acp_transport::InProcessAcpTransport;
+pub use artifact::{Artifact, ArtifactKind};
+pub use artifact_store::{ArtifactStore, FileArtifactStore};
+pub use conflict::{ConflictDetector, ConflictReport, WorkerIntent};
 pub use events::PraxisEvent;
+pub use mailbox::{Mailbox, PeerMessage, PeerMessageKind};
 pub use review::{DiffMode, ReviewContext, ReviewResult, ReviewVerdict, Severity};
+pub use spec::{SpecDocument, SpecStatus, SpecStore, SpecTask};
+pub use spec_workflow::build_spec_goal;
 pub use workflow::{Phase, PhaseRole, Workflow, WorkflowExecutor};
 
 pub struct Director {

@@ -1,4 +1,6 @@
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use regex::Regex;
 use tokio::fs;
@@ -26,11 +28,75 @@ const SOURCE_EXTENSIONS: &[&str] = &[
     "json", "md",
 ];
 
+static RUST_USE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"use\s+(\w+(?:::\w+)*)").expect("valid rust use regex"));
+static JS_IMPORT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"import\s+.*?\s+from\s+['"]([^'"]+)['"]"#).expect("valid js import regex")
+});
+static JS_REQUIRE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"require\(\s*['"]([^'"]+)['"]\s*\)"#).expect("valid js require regex")
+});
+static PY_IMPORT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^import\s+(\S+)").expect("valid py import regex"));
+static PY_FROM_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^from\s+(\S+)\s+import").expect("valid py from regex"));
+
 /// Index a project directory, building a search index, dependency graph, and PageRank scores.
 pub async fn index_project(root: &Path) -> Result<CodebaseIndex> {
+    let roots = vec![root.to_path_buf()];
+    index_roots(&roots, false).await
+}
+
+/// Index multiple project roots into one composite index.
+/// Result paths are repo-qualified as `<repo_name>:<relative_path>`.
+pub async fn index_workspace(roots: &[PathBuf]) -> Result<CodebaseIndex> {
+    index_roots(roots, true).await
+}
+
+async fn index_roots(roots: &[PathBuf], qualify_repo_paths: bool) -> Result<CodebaseIndex> {
     let search = SearchIndex::new()?;
     let mut graph = DependencyGraph::new();
+    #[cfg(feature = "semantic")]
+    let mut semantic = crate::semantic::SemanticIndex::new();
 
+    let mut repo_names = HashSet::new();
+    for (idx, root) in roots.iter().enumerate() {
+        if !root.is_dir() {
+            continue;
+        }
+        let repo_name = repo_label(root, idx + 1, &mut repo_names);
+        index_single_root(
+            root,
+            &repo_name,
+            qualify_repo_paths,
+            &search,
+            &mut graph,
+            #[cfg(feature = "semantic")]
+            &mut semantic,
+        )
+        .await;
+    }
+
+    search.commit()?;
+    let pagerank = calculate_pagerank(&graph, 0.85, 20);
+
+    Ok(CodebaseIndex {
+        search,
+        graph,
+        pagerank,
+        #[cfg(feature = "semantic")]
+        semantic: Some(semantic),
+    })
+}
+
+async fn index_single_root(
+    root: &Path,
+    repo_name: &str,
+    qualify_repo_paths: bool,
+    search: &SearchIndex,
+    graph: &mut DependencyGraph,
+    #[cfg(feature = "semantic")] semantic: &mut crate::semantic::SemanticIndex,
+) {
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let mut entries = match fs::read_dir(&dir).await {
@@ -69,24 +135,49 @@ pub async fn index_project(root: &Path) -> Result<CodebaseIndex> {
                 .to_string_lossy()
                 .to_string();
 
-            search.add_document(&SearchDocument::new(&relative, &content))?;
-            graph.add_file(&relative);
+            let qualified_path = if qualify_repo_paths {
+                format!("{repo_name}:{relative}")
+            } else {
+                relative
+            };
+
+            if search
+                .add_document(&SearchDocument::new(&qualified_path, &content))
+                .is_err()
+            {
+                continue;
+            }
+            graph.add_file(&qualified_path);
+            #[cfg(feature = "semantic")]
+            semantic.add_document(&qualified_path, &content);
 
             let imports = parse_imports(&content, ext);
             for imp in imports {
-                graph.add_dependency(&relative, &imp);
+                graph.add_dependency(&qualified_path, &imp);
             }
         }
     }
+}
 
-    search.commit()?;
-    let pagerank = calculate_pagerank(&graph, 0.85, 20);
+fn repo_label(root: &Path, ordinal: usize, used: &mut HashSet<String>) -> String {
+    let base = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("repo");
 
-    Ok(CodebaseIndex {
-        search,
-        graph,
-        pagerank,
-    })
+    if used.insert(base.to_string()) {
+        return base.to_string();
+    }
+
+    let mut suffix = ordinal;
+    loop {
+        let candidate = format!("{base}-{suffix}");
+        if used.insert(candidate.clone()) {
+            return candidate;
+        }
+        suffix += 1;
+    }
 }
 
 fn parse_imports(content: &str, ext: &str) -> Vec<String> {
@@ -99,8 +190,8 @@ fn parse_imports(content: &str, ext: &str) -> Vec<String> {
 }
 
 fn parse_rust_imports(content: &str) -> Vec<String> {
-    let re = Regex::new(r"use\s+(\w+(?:::\w+)*)").unwrap();
-    re.captures_iter(content)
+    RUST_USE_RE
+        .captures_iter(content)
         .filter_map(|cap| {
             let path = cap.get(1)?.as_str();
             let crate_name = path.split("::").next()?;
@@ -116,16 +207,13 @@ fn parse_rust_imports(content: &str) -> Vec<String> {
 }
 
 fn parse_js_imports(content: &str) -> Vec<String> {
-    let import_re = Regex::new(r#"import\s+.*?\s+from\s+['"]([^'"]+)['"]"#).unwrap();
-    let require_re = Regex::new(r#"require\(\s*['"]([^'"]+)['"]\s*\)"#).unwrap();
-
     let mut imports = Vec::new();
-    for cap in import_re.captures_iter(content) {
+    for cap in JS_IMPORT_RE.captures_iter(content) {
         if let Some(m) = cap.get(1) {
             imports.push(m.as_str().to_string());
         }
     }
-    for cap in require_re.captures_iter(content) {
+    for cap in JS_REQUIRE_RE.captures_iter(content) {
         if let Some(m) = cap.get(1) {
             imports.push(m.as_str().to_string());
         }
@@ -134,18 +222,15 @@ fn parse_js_imports(content: &str) -> Vec<String> {
 }
 
 fn parse_python_imports(content: &str) -> Vec<String> {
-    let import_re = Regex::new(r"^import\s+(\S+)").unwrap();
-    let from_re = Regex::new(r"^from\s+(\S+)\s+import").unwrap();
-
     let mut imports = Vec::new();
     for line in content.lines() {
         let trimmed = line.trim();
-        if let Some(cap) = import_re.captures(trimmed) {
+        if let Some(cap) = PY_IMPORT_RE.captures(trimmed) {
             if let Some(m) = cap.get(1) {
                 imports.push(m.as_str().to_string());
             }
         }
-        if let Some(cap) = from_re.captures(trimmed) {
+        if let Some(cap) = PY_FROM_RE.captures(trimmed) {
             if let Some(m) = cap.get(1) {
                 imports.push(m.as_str().to_string());
             }
@@ -224,5 +309,73 @@ const x = require("lodash");"#;
             .search(&crate::SearchQuery::new("hello"))
             .unwrap();
         assert!(!hits.is_empty());
+        assert!(hits[0].path.ends_with("src/main.rs") || hits[0].path.ends_with("src/lib.rs"));
+    }
+
+    #[tokio::test]
+    async fn workspace_index_qualifies_repo_paths() {
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+
+        fs::write(dir_a.path().join("a.rs"), "fn alpha() {} // token_alpha")
+            .await
+            .unwrap();
+        fs::write(dir_b.path().join("b.rs"), "fn beta() {} // token_beta")
+            .await
+            .unwrap();
+
+        let roots = vec![dir_a.path().to_path_buf(), dir_b.path().to_path_buf()];
+        let index = index_workspace(&roots).await.unwrap();
+        let hits = index
+            .search
+            .search(&crate::SearchQuery::new("token_beta"))
+            .unwrap();
+
+        assert!(!hits.is_empty());
+        assert!(hits.iter().any(|hit| hit.path.contains(':')));
+    }
+
+    #[tokio::test]
+    async fn workspace_search_spans_multiple_roots() {
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+
+        fs::write(dir_a.path().join("lib.rs"), "shared_token alpha")
+            .await
+            .unwrap();
+        fs::write(dir_b.path().join("main.rs"), "shared_token beta")
+            .await
+            .unwrap();
+
+        let roots = vec![dir_a.path().to_path_buf(), dir_b.path().to_path_buf()];
+        let index = index_workspace(&roots).await.unwrap();
+        let hits = index
+            .search
+            .search(&crate::SearchQuery::new("shared_token").with_max_results(10))
+            .unwrap();
+
+        assert!(hits.len() >= 2);
+    }
+
+    #[cfg(feature = "semantic")]
+    #[tokio::test]
+    async fn semantic_workspace_index_builds_semantic_store() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(
+            dir.path().join("semantic.rs"),
+            "vector embedding retrieval for search relevance",
+        )
+        .await
+        .unwrap();
+
+        let roots = vec![dir.path().to_path_buf()];
+        let index = index_workspace(&roots).await.unwrap();
+        let semantic_hits = index
+            .semantic
+            .as_ref()
+            .expect("semantic index")
+            .search("embedding retrieval", 5);
+
+        assert!(!semantic_hits.is_empty());
     }
 }

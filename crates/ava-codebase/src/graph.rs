@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::Direction;
 
 #[derive(Debug, Default)]
 pub struct DependencyGraph {
@@ -54,8 +55,7 @@ impl DependencyGraph {
             return Vec::new();
         };
         self.graph
-            .node_indices()
-            .filter(|&n| self.graph.find_edge(n, target).is_some())
+            .neighbors_directed(target, Direction::Incoming)
             .map(|n| self.graph[n].clone())
             .collect()
     }

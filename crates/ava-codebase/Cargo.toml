@@ -15,5 +15,9 @@ petgraph = "0.6"
 tokio = { workspace = true, features = ["fs", "rt"] }
 regex = "1"
 
+[features]
+default = []
+semantic = []
+
 [dev-dependencies]
 tempfile.workspace = true

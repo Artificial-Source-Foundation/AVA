@@ -12,8 +12,13 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
+use uuid::Uuid;
 
+use crate::artifact::Artifact;
+use crate::artifact_store::ArtifactStore;
 use crate::events::PraxisEvent;
+use crate::spec::SpecDocument;
+use crate::spec_workflow::build_spec_goal;
 use crate::Budget;
 
 /// Role a phase plays in a workflow pipeline.
@@ -270,10 +275,22 @@ pub fn extract_phase_output(session: &Session) -> String {
         .join("\n\n");
 
     if output.len() > 4000 {
-        format!("{}...", &output[..4000])
+        format!("{}...", truncate_to_char_boundary(&output, 4000))
     } else {
         output
     }
+}
+
+fn truncate_to_char_boundary(input: &str, max_bytes: usize) -> &str {
+    if input.len() <= max_bytes {
+        return input;
+    }
+
+    let mut end = max_bytes;
+    while end > 0 && !input.is_char_boundary(end) {
+        end -= 1;
+    }
+    &input[..end]
 }
 
 /// Check if reviewer output indicates revisions are needed.
@@ -333,6 +350,62 @@ impl WorkflowExecutor {
         goal: &str,
         cancel: CancellationToken,
         event_tx: mpsc::UnboundedSender<PraxisEvent>,
+    ) -> ava_types::Result<Session> {
+        self.execute_internal(goal, None, cancel, event_tx, None)
+            .await
+    }
+
+    pub async fn execute_with_artifacts(
+        &self,
+        goal: &str,
+        spec_id: Option<Uuid>,
+        cancel: CancellationToken,
+        event_tx: mpsc::UnboundedSender<PraxisEvent>,
+        artifacts: &mut ArtifactStore,
+    ) -> ava_types::Result<Session> {
+        self.execute_internal(goal, spec_id, cancel, event_tx, Some(artifacts))
+            .await
+    }
+
+    pub async fn execute_spec(
+        &self,
+        spec: &SpecDocument,
+        cancel: CancellationToken,
+        event_tx: mpsc::UnboundedSender<PraxisEvent>,
+        artifacts: Option<&mut ArtifactStore>,
+    ) -> ava_types::Result<Session> {
+        let _ = event_tx.send(PraxisEvent::SpecWorkflowStarted {
+            spec_id: spec.id,
+            workflow_name: self.workflow.name.clone(),
+        });
+
+        let goal = build_spec_goal(spec);
+        let session = self
+            .execute_internal(&goal, Some(spec.id), cancel, event_tx.clone(), artifacts)
+            .await?;
+
+        let turns = session
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::Assistant)
+            .count();
+
+        let _ = event_tx.send(PraxisEvent::SpecWorkflowCompleted {
+            spec_id: spec.id,
+            workflow_name: self.workflow.name.clone(),
+            turns,
+        });
+
+        Ok(session)
+    }
+
+    async fn execute_internal(
+        &self,
+        goal: &str,
+        spec_id: Option<Uuid>,
+        cancel: CancellationToken,
+        event_tx: mpsc::UnboundedSender<PraxisEvent>,
+        mut artifacts: Option<&mut ArtifactStore>,
     ) -> ava_types::Result<Session> {
         let phase_count = self.workflow.phases.len();
         let per_phase_turns = (self.budget.max_turns / phase_count).max(1);
@@ -424,7 +497,7 @@ impl WorkflowExecutor {
                 }
 
                 let preview = if output.len() > 200 {
-                    format!("{}...", &output[..200])
+                    format!("{}...", truncate_to_char_boundary(&output, 200))
                 } else {
                     output.clone()
                 };
@@ -435,6 +508,26 @@ impl WorkflowExecutor {
                     turns,
                     output_preview: preview,
                 });
+
+                if let Some(store) = artifacts.as_deref_mut() {
+                    let artifact = Artifact::workflow_phase(
+                        phase.name.clone(),
+                        phase.role.to_string(),
+                        output.clone(),
+                        spec_id,
+                    );
+                    let artifact_id = artifact.id;
+                    let kind = format!("{:?}", artifact.kind);
+                    let producer = artifact.producer.clone();
+                    let title = artifact.title.clone();
+                    store.add(artifact);
+                    let _ = event_tx.send(PraxisEvent::ArtifactCreated {
+                        artifact_id,
+                        kind,
+                        producer,
+                        title,
+                    });
+                }
 
                 prior_output = Some(output);
                 phases_completed += 1;
@@ -468,6 +561,25 @@ impl WorkflowExecutor {
                 iterations: iteration,
                 total_turns,
             });
+
+            if let Some(store) = artifacts.as_deref_mut() {
+                let summary = format!(
+                    "Completed workflow '{}' in {} iteration(s), {} turns, {} phase(s)",
+                    self.workflow.name, iteration, total_turns, phases_completed
+                );
+                let artifact = Artifact::workflow_summary(&self.workflow.name, summary, spec_id);
+                let artifact_id = artifact.id;
+                let kind = format!("{:?}", artifact.kind);
+                let producer = artifact.producer.clone();
+                let title = artifact.title.clone();
+                store.add(artifact);
+                let _ = event_tx.send(PraxisEvent::ArtifactCreated {
+                    artifact_id,
+                    kind,
+                    producer,
+                    title,
+                });
+            }
             break;
         }
 
@@ -669,6 +781,13 @@ mod tests {
         let output = extract_phase_output(&session);
         assert!(output.len() <= 4004); // 4000 + "..."
         assert!(output.ends_with("..."));
+    }
+
+    #[test]
+    fn truncate_to_char_boundary_handles_unicode() {
+        let input = "a😀b";
+        let truncated = truncate_to_char_boundary(input, 2);
+        assert_eq!(truncated, "a");
     }
 
     #[test]

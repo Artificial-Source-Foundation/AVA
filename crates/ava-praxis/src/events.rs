@@ -60,4 +60,42 @@ pub enum PraxisEvent {
         iterations: usize,
         total_turns: usize,
     },
+    SpecCreated {
+        spec_id: Uuid,
+        title: String,
+    },
+    SpecStatusChanged {
+        spec_id: Uuid,
+        from: String,
+        to: String,
+    },
+    SpecWorkflowStarted {
+        spec_id: Uuid,
+        workflow_name: String,
+    },
+    SpecWorkflowCompleted {
+        spec_id: Uuid,
+        workflow_name: String,
+        turns: usize,
+    },
+    ArtifactCreated {
+        artifact_id: Uuid,
+        kind: String,
+        producer: String,
+        title: String,
+    },
+    PeerMessageSent {
+        message_id: Uuid,
+        from_worker: Uuid,
+        to_worker: Uuid,
+        kind: String,
+    },
+    ConflictDetected {
+        workers: (Uuid, Uuid),
+        overlapping_files: Vec<String>,
+    },
+    AcpRequestHandled {
+        method: String,
+        success: bool,
+    },
 }

@@ -468,7 +468,7 @@ fn default_tools_gives_6_tools() {
 }
 
 #[test]
-fn extended_registration_gives_all_13_tools() {
+fn extended_registration_gives_all_17_tools() {
     use ava_tools::core::{register_default_tools, register_extended_tools};
     use ava_tools::registry::{ToolRegistry, ToolTier};
 
@@ -479,8 +479,8 @@ fn extended_registration_gives_all_13_tools() {
     let all = registry.list_tools();
     assert_eq!(
         all.len(),
-        13,
-        "default + extended should have 13 tools, got: {:?}",
+        17,
+        "default + extended should have 17 tools, got: {:?}",
         all.iter().map(|t| t.name.as_str()).collect::<Vec<_>>()
     );
 
@@ -488,13 +488,13 @@ fn extended_registration_gives_all_13_tools() {
     let default_only = registry.list_tools_for_tiers(&[ToolTier::Default]);
     assert_eq!(default_only.len(), 6);
 
-    // Extended tier only should give 7
+    // Extended tier only should give 11
     let extended_only = registry.list_tools_for_tiers(&[ToolTier::Extended]);
-    assert_eq!(extended_only.len(), 7);
+    assert_eq!(extended_only.len(), 11);
 
-    // Both tiers should give 13
+    // Both tiers should give 17
     let both = registry.list_tools_for_tiers(&[ToolTier::Default, ToolTier::Extended]);
-    assert_eq!(both.len(), 13);
+    assert_eq!(both.len(), 17);
 
     // Verify extended tools are present
     let ext_names: Vec<&str> = extended_only.iter().map(|t| t.name.as_str()).collect();
@@ -506,6 +506,10 @@ fn extended_registration_gives_all_13_tools() {
         "lint",
         "diagnostics",
         "git",
+        "web_search",
+        "ast_ops",
+        "lsp_ops",
+        "code_search",
     ] {
         assert!(
             ext_names.contains(expected),

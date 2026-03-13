@@ -267,6 +267,7 @@ dependencies = [
  "ava-llm",
  "ava-mcp",
  "ava-memory",
+ "ava-permissions",
  "ava-platform",
  "ava-praxis",
  "ava-session",
@@ -503,6 +504,7 @@ version = "2.0.0"
 dependencies = [
  "async-stream",
  "async-trait",
+ "ava-codebase",
  "ava-config",
  "ava-permissions",
  "ava-platform",

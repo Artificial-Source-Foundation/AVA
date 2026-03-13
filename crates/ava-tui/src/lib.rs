@@ -19,6 +19,7 @@ pub mod headless;
 pub mod hooks;
 pub mod rendering;
 pub mod review;
+pub mod session_summary;
 pub mod state;
 pub mod text_utils;
 #[cfg(feature = "voice")]

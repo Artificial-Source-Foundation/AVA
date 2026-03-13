@@ -125,6 +125,13 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 } => {
                     serde_json::json!({"type": "token_usage", "input_tokens": input_tokens, "output_tokens": output_tokens, "cost_usd": cost_usd})
                 }
+                AgentEvent::BudgetWarning {
+                    threshold_percent,
+                    current_cost_usd,
+                    max_budget_usd,
+                } => {
+                    serde_json::json!({"type": "budget_warning", "threshold_percent": threshold_percent, "current_cost_usd": current_cost_usd, "max_budget_usd": max_budget_usd})
+                }
                 AgentEvent::SubAgentComplete {
                     session_id,
                     messages,
@@ -145,6 +152,13 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 AgentEvent::Progress(p) => eprintln!("[{p}]"),
                 AgentEvent::Complete(_) => break,
                 AgentEvent::Thinking(t) => eprintln!("[thinking: {t}]"),
+                AgentEvent::BudgetWarning {
+                    threshold_percent,
+                    current_cost_usd,
+                    max_budget_usd,
+                } => eprintln!(
+                    "[budget warning: ${current_cost_usd:.2}/${max_budget_usd:.2} ({threshold_percent}%)]"
+                ),
                 AgentEvent::ToolStats(_)
                 | AgentEvent::TokenUsage { .. }
                 | AgentEvent::SubAgentComplete { .. } => {}
@@ -158,6 +172,8 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
     }
 
     let result = handle.await??;
+    let cost_summary = crate::session_summary::cost_summary(&result.session);
+    let route_summary = crate::session_summary::route_summary(&result.session);
 
     if json_mode {
         println!(
@@ -166,10 +182,36 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 "type": "summary",
                 "success": result.success,
                 "turns": result.turns,
+                "costSummary": cost_summary.map(|summary| serde_json::json!({
+                    "totalUsd": summary.total_usd,
+                    "budgetUsd": summary.budget_usd,
+                    "inputTokens": summary.input_tokens,
+                    "outputTokens": summary.output_tokens,
+                })),
+                "routing": route_summary,
             })
         );
     } else {
-        eprintln!("[Done] success={}, turns={}", result.success, result.turns);
+        let spend = cost_summary.map(|summary| match summary.budget_usd {
+            Some(budget) if budget > 0.0 => {
+                format!(
+                    " cost=${:.2}/${budget:.2} tokens={} in/{} out",
+                    summary.total_usd, summary.input_tokens, summary.output_tokens
+                )
+            }
+            _ => format!(
+                " cost=${:.2} tokens={} in/{} out",
+                summary.total_usd, summary.input_tokens, summary.output_tokens
+            ),
+        });
+        let route = route_summary.map(|summary| format!(" route={summary}"));
+        eprintln!(
+            "[Done] success={}, turns={}{}{}",
+            result.success,
+            result.turns,
+            spend.unwrap_or_default(),
+            route.unwrap_or_default(),
+        );
     }
 
     std::process::exit(if result.success { 0 } else { 1 });

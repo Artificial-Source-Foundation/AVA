@@ -26,6 +26,11 @@ use response::parse_tool_calls;
 use tool_execution::has_validation_failure;
 pub use tool_execution::READ_ONLY_TOOLS;
 
+fn usage_cost_usd(model: &str, usage: &TokenUsage) -> f64 {
+    let (in_rate, out_rate) = ava_llm::providers::common::model_pricing_usd_per_million(model);
+    ava_llm::providers::common::estimate_cost_with_cache_usd(usage, in_rate, out_rate)
+}
+
 /// Core agent execution loop that orchestrates LLM calls, tool execution, and stuck detection.
 ///
 /// Supports both synchronous (`run`) and streaming (`run_streaming`) execution modes.
@@ -136,6 +141,11 @@ pub enum AgentEvent {
         input_tokens: usize,
         output_tokens: usize,
         cost_usd: f64,
+    },
+    BudgetWarning {
+        threshold_percent: u8,
+        current_cost_usd: f64,
+        max_budget_usd: f64,
     },
     /// A sub-agent has completed its run. Contains the full conversation for
     /// display/storage by the TUI.
@@ -257,6 +267,7 @@ impl AgentLoop {
         let mut session = Session::new();
         let mut detector = StuckDetector::new();
         let mut total_usage = TokenUsage::default();
+        let mut total_cost_usd = 0.0;
 
         self.inject_system_prompt();
 
@@ -294,9 +305,7 @@ impl AgentLoop {
             }
 
             // --- Check budget limit ---
-            if self.config.max_budget_usd > 0.0
-                && detector.estimated_cost() > self.config.max_budget_usd
-            {
+            if self.config.max_budget_usd > 0.0 && total_cost_usd >= self.config.max_budget_usd {
                 self.force_summary(&mut session, &format!(
                     "You have reached the budget limit (${:.2}). Please summarize what you've accomplished and list any remaining work.",
                     self.config.max_budget_usd,
@@ -308,6 +317,9 @@ impl AgentLoop {
 
             let (response_text, tool_calls, usage) = self.generate_response_with_thinking().await?;
             Self::merge_usage(&mut total_usage, &usage);
+            if let Some(ref usage) = usage {
+                total_cost_usd += usage_cost_usd(&self.config.model, usage);
+            }
 
             let assistant_message = Message::new(Role::Assistant, response_text.clone())
                 .with_tool_calls(tool_calls.clone());
@@ -397,6 +409,7 @@ impl AgentLoop {
         Box::pin(async_stream::stream! {
             let mut session = Session::new();
             let mut detector = StuckDetector::new();
+            let mut total_cost_usd = 0.0;
 
             self.inject_system_prompt();
 
@@ -443,7 +456,7 @@ impl AgentLoop {
                 }
 
                 // --- Check budget limit ---
-                if max_budget > 0.0 && detector.estimated_cost() > max_budget {
+                if max_budget > 0.0 && total_cost_usd >= max_budget {
                     let summary_prompt = format!(
                         "You have reached the budget limit (${:.2}). Please summarize what you've accomplished and list any remaining work.",
                         max_budget,
@@ -594,10 +607,8 @@ impl AgentLoop {
 
                             // Emit token usage
                             if let Some(usage) = last_usage.clone() {
-                                let (in_rate, out_rate) = ava_llm::providers::common::model_pricing_usd_per_million(&self.config.model);
-                                let cost = ava_llm::providers::common::estimate_cost_with_cache_usd(
-                                    &usage, in_rate, out_rate,
-                                );
+                                let cost = usage_cost_usd(&self.config.model, &usage);
+                                total_cost_usd += cost;
                                 yield AgentEvent::TokenUsage {
                                     input_tokens: usage.input_tokens,
                                     output_tokens: usage.output_tokens,

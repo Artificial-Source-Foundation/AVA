@@ -127,6 +127,118 @@ pub struct AgentRunResult {
     pub session: Session,
 }
 
+#[derive(Debug, Default)]
+struct BudgetTelemetry {
+    input_tokens: usize,
+    output_tokens: usize,
+    total_cost_usd: f64,
+    max_budget_usd: f64,
+    last_alert_threshold_percent: Option<u8>,
+    emitted_thresholds: Vec<u8>,
+    skipped_follow_up_messages: usize,
+    skipped_post_complete_groups: usize,
+    skipped_post_complete_messages: usize,
+}
+
+impl BudgetTelemetry {
+    const ALERT_THRESHOLDS: [u8; 3] = [50, 75, 90];
+
+    fn new(max_budget_usd: f64) -> Self {
+        Self {
+            max_budget_usd,
+            ..Self::default()
+        }
+    }
+
+    fn observe(&mut self, event: &AgentEvent) -> Vec<AgentEvent> {
+        match event {
+            AgentEvent::TokenUsage {
+                input_tokens,
+                output_tokens,
+                cost_usd,
+            } => {
+                self.input_tokens += input_tokens;
+                self.output_tokens += output_tokens;
+                self.total_cost_usd += cost_usd;
+            }
+            AgentEvent::SubAgentComplete {
+                input_tokens,
+                output_tokens,
+                cost_usd,
+                ..
+            } => {
+                self.input_tokens += input_tokens;
+                self.output_tokens += output_tokens;
+                self.total_cost_usd += cost_usd;
+            }
+            _ => return Vec::new(),
+        }
+
+        if self.max_budget_usd <= 0.0 {
+            return Vec::new();
+        }
+
+        let percent_used = self.total_cost_usd / self.max_budget_usd * 100.0;
+        let mut warnings = Vec::new();
+        for threshold in Self::ALERT_THRESHOLDS {
+            if percent_used >= f64::from(threshold) && !self.emitted_thresholds.contains(&threshold)
+            {
+                self.emitted_thresholds.push(threshold);
+                self.last_alert_threshold_percent = Some(threshold);
+                warnings.push(AgentEvent::BudgetWarning {
+                    threshold_percent: threshold,
+                    current_cost_usd: self.total_cost_usd,
+                    max_budget_usd: self.max_budget_usd,
+                });
+            }
+        }
+        warnings
+    }
+
+    fn attach_to_session(&self, session: &mut Session) {
+        session.metadata["costSummary"] = serde_json::json!({
+            "totalUsd": self.total_cost_usd,
+            "budgetUsd": (self.max_budget_usd > 0.0).then_some(self.max_budget_usd),
+            "inputTokens": self.input_tokens,
+            "outputTokens": self.output_tokens,
+            "lastAlertThresholdPercent": self.last_alert_threshold_percent,
+            "skippedQueuedFollowUps": self.skipped_follow_up_messages,
+            "skippedQueuedPostCompleteGroups": self.skipped_post_complete_groups,
+            "skippedQueuedPostCompleteMessages": self.skipped_post_complete_messages,
+        });
+    }
+
+    fn remaining_budget_usd(&self) -> Option<f64> {
+        if self.max_budget_usd <= 0.0 {
+            None
+        } else {
+            Some((self.max_budget_usd - self.total_cost_usd).max(0.0))
+        }
+    }
+
+    fn budget_exhausted(&self) -> bool {
+        self.remaining_budget_usd()
+            .is_some_and(|remaining| remaining <= 0.0)
+    }
+
+    fn budget_status_label(&self) -> String {
+        if self.max_budget_usd > 0.0 {
+            format!("${:.2}/${:.2}", self.total_cost_usd, self.max_budget_usd)
+        } else {
+            format!("${:.2}", self.total_cost_usd)
+        }
+    }
+
+    fn record_skipped_follow_up_messages(&mut self, count: usize) {
+        self.skipped_follow_up_messages += count;
+    }
+
+    fn record_skipped_post_complete_group(&mut self, message_count: usize) {
+        self.skipped_post_complete_groups += 1;
+        self.skipped_post_complete_messages += message_count;
+    }
+}
+
 impl Default for AgentStackConfig {
     fn default() -> Self {
         Self {
@@ -684,7 +796,9 @@ impl AgentStack {
                 goal_str: &str,
                 tx: &mpsc::UnboundedSender<AgentEvent>,
                 cancel: &CancellationToken,
+                telemetry: &mut BudgetTelemetry,
             ) -> Result<Session> {
+                agent.config.max_budget_usd = telemetry.remaining_budget_usd().unwrap_or(0.0);
                 let mut stream = agent.run_streaming(goal_str).await;
                 let mut final_session: Option<Session> = None;
                 loop {
@@ -694,16 +808,25 @@ impl AgentStack {
                         }
                         maybe_event = stream.next() => {
                             let Some(event) = maybe_event else { break; };
-                            let _ = tx.send(event.clone());
+                            let warnings = telemetry.observe(&event);
                             match event {
-                                AgentEvent::Complete(session) => {
+                                AgentEvent::Complete(mut session) => {
+                                    telemetry.attach_to_session(&mut session);
+                                    let complete = AgentEvent::Complete(session.clone());
+                                    let _ = tx.send(complete);
                                     final_session = Some(session);
                                     break;
                                 }
                                 AgentEvent::Error(error) => {
+                                    let _ = tx.send(AgentEvent::Error(error.clone()));
                                     return Err(AvaError::AgentStopped { reason: error });
                                 }
-                                _ => {}
+                                other => {
+                                    let _ = tx.send(other);
+                                }
+                            }
+                            for warning in warnings {
+                                let _ = tx.send(warning);
                             }
                         }
                     }
@@ -717,8 +840,12 @@ impl AgentStack {
                 })
             }
 
+            let mut telemetry = BudgetTelemetry::new(self.max_budget_usd);
+
             // --- Primary run ---
-            let mut session = run_streaming_until_complete(&mut agent, goal, &tx, &cancel).await?;
+            let mut session =
+                run_streaming_until_complete(&mut agent, goal, &tx, &cancel, &mut telemetry)
+                    .await?;
 
             // --- Follow-up loop (Tier 2): check for queued follow-up messages ---
             // Discard any leftover steering messages — they are only meaningful while
@@ -741,17 +868,35 @@ impl AgentStack {
                         None => break,
                     }
                 };
-                for text in follow_ups {
+                let follow_up_count = follow_ups.len();
+                for (index, text) in follow_ups.into_iter().enumerate() {
                     if cancel.is_cancelled() {
                         return Err(AvaError::Cancelled);
+                    }
+                    if telemetry.budget_exhausted() {
+                        let remaining = follow_up_count.saturating_sub(index);
+                        telemetry.record_skipped_follow_up_messages(remaining);
+                        let _ = tx.send(AgentEvent::Progress(
+                            format!(
+                                "budget exhausted at {} — skipping {remaining} queued follow-up message(s)",
+                                telemetry.budget_status_label()
+                            ),
+                        ));
+                        break;
                     }
                     let prefixed = format!("[User follow-up] {text}");
                     let _ = tx.send(AgentEvent::Progress(format!("follow-up: {text}")));
 
                     // run_streaming will inject this as the goal message, so we only
                     // need to send the prefixed version as the goal — no manual injection.
-                    session =
-                        run_streaming_until_complete(&mut agent, &prefixed, &tx, &cancel).await?;
+                    session = run_streaming_until_complete(
+                        &mut agent,
+                        &prefixed,
+                        &tx,
+                        &cancel,
+                        &mut telemetry,
+                    )
+                    .await?;
                 }
             }
 
@@ -777,6 +922,19 @@ impl AgentStack {
                     }
                     return Err(AvaError::Cancelled);
                 }
+                if telemetry.budget_exhausted() {
+                    telemetry.record_skipped_post_complete_group(messages.len());
+                    let _ = tx.send(AgentEvent::Progress(format!(
+                        "budget exhausted at {} — skipping post-complete group {group_id} ({} message(s))",
+                        telemetry.budget_status_label(),
+                        messages.len()
+                    )));
+                    if let Some(ref mut queue) = agent.message_queue {
+                        queue.finish_post_complete_group();
+                        queue.advance_post_group();
+                    }
+                    continue;
+                }
 
                 // Combine all messages from this group into a single goal
                 let combined = messages.join("\n\n");
@@ -787,8 +945,14 @@ impl AgentStack {
                 )));
 
                 // run_streaming will inject this as the goal message — no manual injection.
-                let group_result =
-                    run_streaming_until_complete(&mut agent, &prefixed, &tx, &cancel).await;
+                let group_result = run_streaming_until_complete(
+                    &mut agent,
+                    &prefixed,
+                    &tx,
+                    &cancel,
+                    &mut telemetry,
+                )
+                .await;
 
                 if let Some(ref mut queue) = agent.message_queue {
                     queue.finish_post_complete_group();
@@ -804,6 +968,7 @@ impl AgentStack {
                 }
             }
 
+            telemetry.attach_to_session(&mut session);
             if let Some(decision) = applied_route_decision.as_ref() {
                 Self::attach_route_metadata(&mut session, decision);
             }

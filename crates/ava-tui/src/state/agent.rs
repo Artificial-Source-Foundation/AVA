@@ -1,6 +1,6 @@
 use crate::event::AppEvent;
 use ava_agent::stack::{AgentRunResult, AgentStack, AgentStackConfig};
-use ava_types::{QueuedMessage, ThinkingLevel};
+use ava_types::{QueuedMessage, Session, ThinkingLevel};
 use color_eyre::Result;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,6 +12,13 @@ use tokio_util::sync::CancellationToken;
 pub struct TokenUsage {
     pub input: usize,
     pub output: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BudgetAlertState {
+    pub threshold_percent: u8,
+    pub spent_usd: f64,
+    pub budget_usd: f64,
 }
 
 /// Tracks the state of a sub-agent spawned by the task tool.
@@ -103,8 +110,10 @@ pub struct AgentState {
     pub is_running: bool,
     pub current_turn: usize,
     pub max_turns: usize,
+    pub max_budget_usd: f64,
     pub tokens_used: TokenUsage,
     pub cost: f64,
+    pub latest_budget_alert: Option<BudgetAlertState>,
     pub activity: AgentActivity,
     pub provider_name: String,
     pub model_name: String,
@@ -154,6 +163,7 @@ impl AgentState {
         provider: Option<String>,
         model: Option<String>,
         max_turns: usize,
+        max_budget_usd: f64,
         yolo: bool,
     ) -> Result<(
         Self,
@@ -167,6 +177,7 @@ impl AgentState {
             provider,
             model,
             max_turns,
+            max_budget_usd,
             yolo,
             ..AgentStackConfig::default()
         };
@@ -184,8 +195,10 @@ impl AgentState {
                 is_running: false,
                 current_turn: 0,
                 max_turns,
+                max_budget_usd,
                 tokens_used: TokenUsage::default(),
                 cost: 0.0,
+                latest_budget_alert: None,
                 activity: AgentActivity::Idle,
                 provider_name,
                 model_name,
@@ -297,6 +310,58 @@ impl AgentState {
         self.is_running = false;
         self.activity = AgentActivity::Idle;
         self.message_tx = None;
+    }
+
+    pub fn clear_session_metrics(&mut self) {
+        self.current_turn = 0;
+        self.tokens_used = TokenUsage::default();
+        self.cost = 0.0;
+        self.latest_budget_alert = None;
+        self.sub_agents.clear();
+    }
+
+    pub fn record_budget_alert(&mut self, threshold_percent: u8, spent_usd: f64, budget_usd: f64) {
+        self.max_budget_usd = budget_usd;
+        self.latest_budget_alert = Some(BudgetAlertState {
+            threshold_percent,
+            spent_usd,
+            budget_usd,
+        });
+    }
+
+    pub fn apply_session_summary(&mut self, session: &Session) {
+        let summary = crate::session_summary::cost_summary(session);
+
+        self.tokens_used = TokenUsage {
+            input: if session.token_usage.input_tokens > 0 {
+                session.token_usage.input_tokens
+            } else {
+                summary.map(|value| value.input_tokens).unwrap_or_default()
+            },
+            output: if session.token_usage.output_tokens > 0 {
+                session.token_usage.output_tokens
+            } else {
+                summary.map(|value| value.output_tokens).unwrap_or_default()
+            },
+        };
+
+        self.cost = summary.map(|value| value.total_usd).unwrap_or(0.0);
+
+        self.max_budget_usd = summary
+            .and_then(|value| value.budget_usd)
+            .unwrap_or(self.max_budget_usd);
+
+        self.latest_budget_alert = match (
+            summary.and_then(|value| value.last_alert_threshold_percent),
+            self.max_budget_usd > 0.0,
+        ) {
+            (Some(threshold_percent), true) => Some(BudgetAlertState {
+                threshold_percent,
+                spent_usd: self.cost,
+                budget_usd: self.max_budget_usd,
+            }),
+            _ => None,
+        };
     }
 
     pub fn finish(&mut self, _result: &AgentRunResult) {
@@ -452,8 +517,10 @@ impl AgentState {
             is_running: false,
             current_turn: 0,
             max_turns: 0,
+            max_budget_usd: 0.0,
             tokens_used: TokenUsage::default(),
             cost: 0.0,
+            latest_budget_alert: None,
             activity: AgentActivity::Idle,
             provider_name: provider.to_string(),
             model_name: model.to_string(),
@@ -503,5 +570,95 @@ impl AgentState {
                 .collect();
             Ok(format!("Created templates: {}", names.join(", ")))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ava_types::Session;
+
+    #[test]
+    fn apply_session_summary_restores_budget_metrics() {
+        let mut state = AgentState::test_new("openrouter", "anthropic/claude-sonnet-4");
+        let mut session = Session::new();
+        session.token_usage.input_tokens = 1200;
+        session.token_usage.output_tokens = 340;
+        session.metadata = serde_json::json!({
+            "costSummary": {
+                "totalUsd": 0.42,
+                "budgetUsd": 1.0,
+                "lastAlertThresholdPercent": 75
+            }
+        });
+
+        state.apply_session_summary(&session);
+
+        assert_eq!(state.tokens_used.input, 1200);
+        assert_eq!(state.tokens_used.output, 340);
+        assert!((state.cost - 0.42).abs() < f64::EPSILON);
+        assert!((state.max_budget_usd - 1.0).abs() < f64::EPSILON);
+        assert_eq!(
+            state
+                .latest_budget_alert
+                .map(|alert| alert.threshold_percent),
+            Some(75)
+        );
+    }
+
+    #[test]
+    fn apply_session_summary_uses_persisted_cost_summary_tokens_when_needed() {
+        let mut state = AgentState::test_new("openrouter", "anthropic/claude-sonnet-4");
+        state.max_budget_usd = 2.0;
+
+        let session = Session::new().with_metadata(serde_json::json!({
+            "costSummary": {
+                "totalUsd": 0.08,
+                "inputTokens": 512,
+                "outputTokens": 128
+            }
+        }));
+
+        state.apply_session_summary(&session);
+
+        assert_eq!(state.tokens_used.input, 512);
+        assert_eq!(state.tokens_used.output, 128);
+        assert!((state.cost - 0.08).abs() < f64::EPSILON);
+        assert!((state.max_budget_usd - 2.0).abs() < f64::EPSILON);
+        assert!(state.latest_budget_alert.is_none());
+    }
+
+    #[test]
+    fn clear_session_metrics_resets_budget_state() {
+        let mut state = AgentState::test_new("test", "model");
+        state.tokens_used = TokenUsage {
+            input: 10,
+            output: 5,
+        };
+        state.cost = 0.25;
+        state.latest_budget_alert = Some(BudgetAlertState {
+            threshold_percent: 50,
+            spent_usd: 0.25,
+            budget_usd: 0.5,
+        });
+        state.sub_agents.push(SubAgentInfo {
+            description: "demo".to_string(),
+            is_running: false,
+            tool_count: 0,
+            current_tool: None,
+            started_at: Instant::now(),
+            elapsed: None,
+            session_id: None,
+            session_messages: Vec::new(),
+            provider: None,
+        });
+
+        state.clear_session_metrics();
+
+        assert_eq!(state.tokens_used.input, 0);
+        assert_eq!(state.tokens_used.output, 0);
+        assert_eq!(state.cost, 0.0);
+        assert!(state.latest_budget_alert.is_none());
+        assert!(state.sub_agents.is_empty());
     }
 }

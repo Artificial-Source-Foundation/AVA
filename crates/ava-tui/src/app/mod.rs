@@ -191,6 +191,61 @@ pub struct App {
     background_run_routes: HashMap<u64, usize>,
 }
 
+struct StatusSummary {
+    model: String,
+    tokens_in: usize,
+    tokens_out: usize,
+    cost: f64,
+    max_budget_usd: f64,
+    latest_budget_alert: Option<u8>,
+    session_id: String,
+    turn: usize,
+    tool_count: usize,
+    mcp_count: usize,
+    cwd: String,
+    route_summary: Option<String>,
+}
+
+impl StatusSummary {
+    fn render(&self) -> String {
+        let spend = if self.max_budget_usd > 0.0 {
+            let percent = (self.cost / self.max_budget_usd * 100.0).round() as u64;
+            format!(
+                "${:.2} / ${:.2} ({percent}%)",
+                self.cost, self.max_budget_usd
+            )
+        } else {
+            format!("${:.2}", self.cost)
+        };
+        let budget_alert = self
+            .latest_budget_alert
+            .map(|threshold| format!("\nBudget alert: crossed {threshold}% threshold"))
+            .unwrap_or_default();
+        let route = self
+            .route_summary
+            .as_ref()
+            .map(|summary| format!("\nRouting: {summary}"))
+            .unwrap_or_default();
+
+        format!(
+            "Model: {}\n\
+             Tokens: {} in / {} out\n\
+             Spend: {spend}{budget_alert}{route}\n\
+             Session: {} ({} turns)\n\
+             Tools: {} total ({} MCP)\n\
+             Working directory: {}",
+            self.model,
+            self.tokens_in,
+            self.tokens_out,
+            self.session_id,
+            self.turn,
+            self.tool_count,
+            self.mcp_count,
+            self.cwd,
+        )
+    }
+}
+
 impl App {
     pub async fn new(cli: CliArgs) -> Result<Self> {
         let data_dir = dirs::home_dir()
@@ -227,8 +282,15 @@ impl App {
         // Start background refresh every 60 min
         model_catalog.spawn_background_refresh();
 
-        let (agent, question_rx) =
-            AgentState::new(data_dir, provider, model, cli.max_turns, cli.auto_approve).await?;
+        let (agent, question_rx) = AgentState::new(
+            data_dir,
+            provider,
+            model,
+            cli.max_turns,
+            cli.max_budget_usd,
+            cli.auto_approve,
+        )
+        .await?;
         let todo_state = agent.todo_state();
 
         let state = AppState {
@@ -336,6 +398,7 @@ impl App {
 
         // Load session messages if resuming
         if let Some(ref session) = self.state.session.current_session {
+            self.state.agent.apply_session_summary(session);
             for msg in &session.messages {
                 let kind = match msg.role {
                     ava_types::Role::User => MessageKind::User,
@@ -457,10 +520,7 @@ impl App {
         self.state.messages.reset_scroll();
 
         // Reset token counters for the new foreground session
-        self.state.agent.tokens_used = crate::state::agent::TokenUsage::default();
-        self.state.agent.cost = 0.0;
-        self.state.agent.current_turn = 0;
-        self.state.agent.sub_agents.clear();
+        self.state.agent.clear_session_metrics();
         self.set_status(
             format!("Task #{task_id} moved to background"),
             StatusLevel::Info,
@@ -562,7 +622,8 @@ impl App {
         let recent_models = self.state.agent.recent_models.clone();
         let current_model = self.state.agent.model_name.clone();
         let current_provider = self.state.agent.provider_name.clone();
-        tokio::spawn(async move {
+        let app_tx_for_load = app_tx.clone();
+        let load = async move {
             let credentials = ava_config::CredentialStore::load_default()
                 .await
                 .unwrap_or_default();
@@ -580,8 +641,21 @@ impl App {
                 &current_model,
                 &current_provider,
             );
-            let _ = app_tx.send(AppEvent::ModelSelectorLoaded(Ok(selector)));
-        });
+            let _ = app_tx_for_load.send(AppEvent::ModelSelectorLoaded(Ok(selector)));
+        };
+
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::spawn(load);
+        } else if let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            runtime.block_on(load);
+        } else {
+            let _ = app_tx.send(AppEvent::ModelSelectorLoaded(Err(
+                "Failed to start runtime for model selector".to_string(),
+            )));
+        }
     }
 
     pub(crate) fn spawn_model_switch(
@@ -778,32 +852,15 @@ impl App {
             return;
         };
 
-        let model = self.state.agent.current_model_display();
-        let tokens_in = self.state.agent.tokens_used.input;
-        let tokens_out = self.state.agent.tokens_used.output;
-        let cost = self.state.agent.cost;
-        let turn = self.state.agent.current_turn;
-        let session_id = self
-            .state
-            .session
-            .current_session
-            .as_ref()
-            .map(|s| s.id.to_string())
-            .unwrap_or_else(|| "none".to_string());
-        let mcp_count = self.state.agent.mcp_tool_count;
-        let cwd = std::env::current_dir()
-            .map(|p| p.display().to_string())
-            .unwrap_or_else(|_| "unknown".to_string());
+        let base_summary = self.build_status_summary(0);
 
         tokio::spawn(async move {
             let tool_count = stack.tools.read().await.list_tools_with_source().len();
-            let status = format!(
-                "Model: {model}\n\
-                 Tokens: {tokens_in} in / {tokens_out} out (${cost:.2})\n\
-                 Session: {session_id} ({turn} turns)\n\
-                 Tools: {tool_count} total ({mcp_count} MCP)\n\
-                 Working directory: {cwd}"
-            );
+            let status = StatusSummary {
+                tool_count,
+                ..base_summary
+            }
+            .render();
             let _ = app_tx.send(AppEvent::CommandMessage(
                 crate::event::CommandMessageResult {
                     kind: MessageKind::System,
@@ -812,6 +869,43 @@ impl App {
                 },
             ));
         });
+    }
+
+    pub(crate) fn current_route_summary(&self) -> Option<String> {
+        self.state
+            .session
+            .current_session
+            .as_ref()
+            .and_then(crate::session_summary::route_summary)
+    }
+
+    fn build_status_summary(&self, tool_count: usize) -> StatusSummary {
+        StatusSummary {
+            model: self.state.agent.current_model_display(),
+            tokens_in: self.state.agent.tokens_used.input,
+            tokens_out: self.state.agent.tokens_used.output,
+            cost: self.state.agent.cost,
+            max_budget_usd: self.state.agent.max_budget_usd,
+            latest_budget_alert: self
+                .state
+                .agent
+                .latest_budget_alert
+                .map(|alert| alert.threshold_percent),
+            session_id: self
+                .state
+                .session
+                .current_session
+                .as_ref()
+                .map(|session| session.id.to_string())
+                .unwrap_or_else(|| "none".to_string()),
+            turn: self.state.agent.current_turn,
+            tool_count,
+            mcp_count: self.state.agent.mcp_tool_count,
+            cwd: std::env::current_dir()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|_| "unknown".to_string()),
+            route_summary: self.current_route_summary(),
+        }
     }
 
     pub(crate) fn spawn_commit_prep(&self, app_tx: mpsc::UnboundedSender<AppEvent>) {
@@ -1633,6 +1727,7 @@ impl App {
             AppEvent::SessionLoaded(result) => match result {
                 Ok(loaded) => {
                     self.state.session.current_session = Some(loaded.session.clone());
+                    self.state.agent.apply_session_summary(&loaded.session);
                     self.state.messages.messages.clear();
                     self.state.messages.reset_scroll();
                     for msg in &loaded.session.messages {
@@ -1966,6 +2061,7 @@ impl App {
                 }
                 Action::NewSession => {
                     let _ = self.state.session.create_session();
+                    self.state.agent.clear_session_metrics();
                     self.state.messages.messages.clear();
                     self.set_status("New session created", StatusLevel::Info);
                 }
@@ -2284,6 +2380,21 @@ impl App {
             meta.insert(
                 "model".to_string(),
                 serde_json::Value::String(self.state.agent.model_name.clone()),
+            );
+            meta.insert(
+                "costSummary".to_string(),
+                serde_json::json!({
+                    "totalUsd": self.state.agent.cost,
+                    "budgetUsd": (self.state.agent.max_budget_usd > 0.0)
+                        .then_some(self.state.agent.max_budget_usd),
+                    "inputTokens": self.state.agent.tokens_used.input,
+                    "outputTokens": self.state.agent.tokens_used.output,
+                    "lastAlertThresholdPercent": self
+                        .state
+                        .agent
+                        .latest_budget_alert
+                        .map(|alert| alert.threshold_percent),
+                }),
             );
 
             // Generate a title from the first user message if not already set

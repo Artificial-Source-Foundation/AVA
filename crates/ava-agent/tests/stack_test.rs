@@ -3,14 +3,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use ava_agent::message_queue::MessageQueue;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_config::{Config, CredentialStore, ProviderCredential, RoutingMode};
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
 use ava_llm::RouteSource;
 use ava_llm::ThinkingConfig;
-use ava_llm::ThinkingConfig;
-use ava_types::{AvaError, Message, Result, StreamChunk};
+use ava_types::{AvaError, Message, MessageTier, QueuedMessage, Result, StreamChunk, TokenUsage};
 use futures::Stream;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex;
@@ -235,6 +235,161 @@ async fn agent_stack_resolve_model_route_respects_manual_override_lock() {
     assert_eq!(decision.display_model, "gpt-5.3-codex");
 }
 
+#[tokio::test]
+async fn streaming_run_emits_budget_warning_and_persists_cost_summary() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let provider = Arc::new(UsageProvider::new(
+        "claude-sonnet-4",
+        completion_response("done"),
+        TokenUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+        },
+    ));
+    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        injected_provider: Some(provider),
+        max_budget_usd: 0.01,
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let result = stack
+        .run(
+            "finish task",
+            5,
+            Some(tx),
+            CancellationToken::new(),
+            Vec::new(),
+            None,
+            Vec::new(),
+        )
+        .await
+        .expect("run should succeed");
+
+    let mut saw_budget_warning = false;
+    while let Ok(event) = rx.try_recv() {
+        if matches!(event, ava_agent::AgentEvent::BudgetWarning { .. }) {
+            saw_budget_warning = true;
+            break;
+        }
+    }
+
+    assert!(
+        saw_budget_warning,
+        "expected at least one budget warning event"
+    );
+    let summary = result
+        .session
+        .metadata
+        .get("costSummary")
+        .and_then(|value| value.as_object())
+        .expect("cost summary metadata should be present");
+    assert!(
+        summary
+            .get("totalUsd")
+            .and_then(|value| value.as_f64())
+            .unwrap_or_default()
+            > 0.0
+    );
+    assert_eq!(
+        summary
+            .get("lastAlertThresholdPercent")
+            .and_then(|value| value.as_u64()),
+        Some(90)
+    );
+}
+
+#[tokio::test]
+async fn follow_up_budget_uses_cumulative_spend() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let provider = Arc::new(UsageProvider::new(
+        "claude-sonnet-4",
+        completion_response("done"),
+        TokenUsage {
+            input_tokens: 2_000,
+            output_tokens: 1_000,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+        },
+    ));
+    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        injected_provider: Some(provider),
+        max_budget_usd: 0.02,
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    let (queue, sender) = MessageQueue::new();
+    sender
+        .send(QueuedMessage {
+            tier: MessageTier::FollowUp,
+            text: "run one more thing".to_string(),
+        })
+        .expect("follow-up should enqueue");
+
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let result = stack
+        .run(
+            "finish task",
+            5,
+            Some(tx),
+            CancellationToken::new(),
+            Vec::new(),
+            Some(queue),
+            Vec::new(),
+        )
+        .await
+        .expect("run should succeed");
+
+    let mut saw_follow_up_progress = false;
+    let mut saw_follow_up_skip = false;
+    while let Ok(event) = rx.try_recv() {
+        if let ava_agent::AgentEvent::Progress(message) = event {
+            if message.contains("follow-up: run one more thing") {
+                saw_follow_up_progress = true;
+            }
+            if message.contains("budget exhausted") && message.contains("follow-up") {
+                saw_follow_up_skip = true;
+            }
+        }
+    }
+
+    assert!(
+        !saw_follow_up_progress,
+        "follow-up should not run after budget is exhausted"
+    );
+    assert!(
+        saw_follow_up_skip,
+        "expected skip progress when follow-up is blocked by cumulative budget"
+    );
+    assert!(
+        result
+            .session
+            .messages
+            .iter()
+            .all(|message| !message.content.contains("[User follow-up]")),
+        "follow-up message should not be injected once cumulative budget is exhausted"
+    );
+    let summary = result
+        .session
+        .metadata
+        .get("costSummary")
+        .and_then(|value| value.as_object())
+        .expect("cost summary metadata should be present");
+    assert_eq!(
+        summary
+            .get("skippedQueuedFollowUps")
+            .and_then(|value| value.as_u64()),
+        Some(1)
+    );
+}
 struct SlowProvider {
     model: String,
     delay: Duration,
@@ -254,6 +409,21 @@ impl RecordingThinkingProvider {
     }
 }
 
+struct UsageProvider {
+    model: String,
+    response: String,
+    usage: TokenUsage,
+}
+
+impl UsageProvider {
+    fn new(model: &str, response: String, usage: TokenUsage) -> Self {
+        Self {
+            model: model.to_string(),
+            response,
+            usage,
+        }
+    }
+}
 #[async_trait]
 impl LLMProvider for SlowProvider {
     async fn generate(&self, _messages: &[Message]) -> Result<String> {
@@ -409,4 +579,33 @@ instructions: []
     assert_eq!(configs.len(), 1);
     assert_eq!(configs[0].level, ava_types::ThinkingLevel::High);
     assert_eq!(configs[0].budget_tokens, Some(12_345));
+}
+
+#[async_trait]
+impl LLMProvider for UsageProvider {
+    async fn generate(&self, _messages: &[Message]) -> Result<String> {
+        Ok(self.response.clone())
+    }
+
+    async fn generate_stream(
+        &self,
+        _messages: &[Message],
+    ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        Ok(Box::pin(futures::stream::iter(vec![
+            StreamChunk::text(self.response.clone()),
+            StreamChunk::with_usage(self.usage.clone()),
+        ])))
+    }
+
+    fn estimate_tokens(&self, input: &str) -> usize {
+        input.len() / 4
+    }
+
+    fn estimate_cost(&self, _input_tokens: usize, _output_tokens: usize) -> f64 {
+        0.0
+    }
+
+    fn model_name(&self) -> &str {
+        &self.model
+    }
 }

@@ -394,40 +394,13 @@ impl App {
                     return None;
                 }
 
-                let model = self.state.agent.current_model_display();
-                let tokens_in = self.state.agent.tokens_used.input;
-                let tokens_out = self.state.agent.tokens_used.output;
-                let cost = self.state.agent.cost;
-                let turn = self.state.agent.current_turn;
-
-                let session_id = self
-                    .state
-                    .session
-                    .current_session
-                    .as_ref()
-                    .map(|s| format!("{}", s.id))
-                    .unwrap_or_else(|| "none".to_string());
-
                 let tool_count = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current()
                         .block_on(self.state.agent.list_tools_with_source())
                 })
                 .unwrap_or_default()
                 .len();
-
-                let mcp_count = self.state.agent.mcp_tool_count;
-
-                let cwd = std::env::current_dir()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_else(|_| "unknown".to_string());
-
-                let status = format!(
-                    "Model: {model}\n\
-                     Tokens: {tokens_in} in / {tokens_out} out (${cost:.2})\n\
-                     Session: {session_id} ({turn} turns)\n\
-                     Tools: {tool_count} total ({mcp_count} MCP)\n\
-                     Working directory: {cwd}"
-                );
+                let status = self.build_status_summary(tool_count).render();
                 Some((MessageKind::System, status))
             }
             "/diff" => {
@@ -543,18 +516,23 @@ impl App {
                     return None;
                 }
 
-                let result = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async {
-                        tokio::task::spawn_blocking(handle_commit_command).await
-                    })
-                });
+                match tokio::runtime::Handle::try_current() {
+                    Ok(handle) => {
+                        let result = tokio::task::block_in_place(|| {
+                            handle.block_on(async {
+                                tokio::task::spawn_blocking(handle_commit_command).await
+                            })
+                        });
 
-                match result {
-                    Ok(output) => Some(output),
-                    Err(err) => Some((
-                        MessageKind::Error,
-                        format!("Failed to inspect commit readiness: {err}"),
-                    )),
+                        match result {
+                            Ok(output) => Some(output),
+                            Err(err) => Some((
+                                MessageKind::Error,
+                                format!("Failed to inspect commit readiness: {err}"),
+                            )),
+                        }
+                    }
+                    Err(_) => Some(handle_commit_command()),
                 }
             }
             "/export" => {
@@ -1059,6 +1037,7 @@ Keyboard shortcuts:
             }
             Action::NewSession => {
                 let _ = self.state.session.create_session();
+                self.state.agent.clear_session_metrics();
                 self.state.messages.messages.clear();
                 self.set_status("New session created", StatusLevel::Info);
             }

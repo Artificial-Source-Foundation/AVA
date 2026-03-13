@@ -32,12 +32,19 @@ impl SessionListState {
             let title = session_title(s);
             let msg_count = s.messages.len();
             let relative = relative_date(&s.updated_at);
-            let detail = format!(
-                "{} msg{}  {}",
+            let mut detail_parts = vec![format!(
+                "{} msg{}",
                 msg_count,
-                if msg_count == 1 { "" } else { "s" },
-                relative,
-            );
+                if msg_count == 1 { "" } else { "s" }
+            )];
+            if let Some(cost) = session_cost_detail(s) {
+                detail_parts.push(cost);
+            }
+            if let Some(route) = session_route_detail(s) {
+                detail_parts.push(route);
+            }
+            detail_parts.push(relative);
+            let detail = detail_parts.join("  ");
             SelectItem {
                 title,
                 detail,
@@ -93,5 +100,60 @@ fn session_title(session: &Session) -> String {
     match first_user {
         Some(msg) => ava_session::generate_title(&msg.content),
         None => format!("Session {}", &session.id.to_string()[..8]),
+    }
+}
+
+fn session_cost_detail(session: &Session) -> Option<String> {
+    let summary = crate::session_summary::cost_summary(session)?;
+    Some(match summary.budget_usd {
+        Some(budget) if budget > 0.0 => format!("${:.2}/${budget:.2}", summary.total_usd),
+        _ => format!("${:.2}", summary.total_usd),
+    })
+}
+
+fn session_route_detail(session: &Session) -> Option<String> {
+    crate::session_summary::route_summary(session).map(|summary| {
+        summary
+            .split(" via ")
+            .next()
+            .unwrap_or(summary.as_str())
+            .to_string()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ava_types::{Message, Role};
+
+    #[test]
+    fn session_details_include_cost_and_route_summary() {
+        let mut state = SessionListState::default();
+        let session = Session::new().with_metadata(serde_json::json!({
+            "title": "Budget run",
+            "costSummary": {
+                "totalUsd": 0.42,
+                "budgetUsd": 1.0
+            },
+            "routing": {
+                "profile": "cheap"
+            }
+        }));
+
+        state.update_sessions(&[session]);
+
+        let detail = &state.list.items[1].detail;
+        assert!(detail.contains("$0.42/$1.00"));
+        assert!(detail.contains("cheap route"));
+    }
+
+    #[test]
+    fn session_title_falls_back_to_first_user_message() {
+        let mut session = Session::new();
+        session.add_message(Message::new(Role::User, "Investigate budget alerts"));
+
+        let title = session_title(&session);
+
+        assert!(title.contains("Investigate budget alerts"));
     }
 }

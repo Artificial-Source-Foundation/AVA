@@ -1,11 +1,74 @@
 use crate::app::{AppState, ViewMode};
-use crate::widgets::message::render_message;
+use crate::state::messages::{MessageKind, UiMessage};
+use crate::widgets::message::{render_action_group, render_message};
 use crate::widgets::welcome::render_welcome;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
+
+enum RenderBlock<'a> {
+    Message(&'a UiMessage),
+    ActionGroup {
+        messages: Vec<&'a UiMessage>,
+        active: bool,
+    },
+}
+
+fn derive_blocks(messages: &[UiMessage]) -> Vec<RenderBlock<'_>> {
+    let mut blocks = Vec::new();
+    let mut current_group: Vec<&UiMessage> = Vec::new();
+
+    for message in messages {
+        if matches!(
+            message.kind,
+            MessageKind::ToolCall | MessageKind::ToolResult
+        ) {
+            current_group.push(message);
+            continue;
+        }
+
+        if !current_group.is_empty() {
+            blocks.push(RenderBlock::ActionGroup {
+                messages: std::mem::take(&mut current_group),
+                active: false,
+            });
+        }
+
+        blocks.push(RenderBlock::Message(message));
+    }
+
+    if !current_group.is_empty() {
+        blocks.push(RenderBlock::ActionGroup {
+            messages: current_group,
+            active: true,
+        });
+    }
+
+    blocks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derive_blocks_groups_consecutive_tool_messages() {
+        let messages = vec![
+            UiMessage::new(MessageKind::User, "search this"),
+            UiMessage::new(MessageKind::ToolCall, "grep foo"),
+            UiMessage::new(MessageKind::ToolResult, "matched"),
+            UiMessage::new(MessageKind::Assistant, "done"),
+        ];
+
+        let blocks = derive_blocks(&messages);
+        assert_eq!(blocks.len(), 3);
+        assert!(matches!(blocks[0], RenderBlock::Message(_)));
+        assert!(matches!(blocks[1], RenderBlock::ActionGroup { .. }));
+        assert!(matches!(blocks[2], RenderBlock::Message(_)));
+    }
+}
 
 pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
     // Determine which messages to render based on view mode.
@@ -133,16 +196,27 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         lines.push(Line::raw(""));
     }
 
-    for (i, message) in messages_source.iter().enumerate() {
+    let blocks = derive_blocks(messages_source);
+
+    for (i, block) in blocks.iter().enumerate() {
         if i > 0 {
             lines.push(Line::raw(""));
         }
-        lines.extend(render_message(
-            message,
-            &state.theme,
-            spinner_tick,
-            area.width,
-        ));
+        match block {
+            RenderBlock::Message(message) => lines.extend(render_message(
+                message,
+                &state.theme,
+                spinner_tick,
+                area.width,
+            )),
+            RenderBlock::ActionGroup { messages, active } => lines.extend(render_action_group(
+                messages,
+                &state.theme,
+                spinner_tick,
+                area.width,
+                *active,
+            )),
+        }
     }
 
     // Bottom padding: 1 blank line between last message and composer.

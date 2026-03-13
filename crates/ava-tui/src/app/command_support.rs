@@ -1,0 +1,357 @@
+use super::*;
+
+impl App {
+    pub(crate) fn try_resolve_custom_command(&self, input: &str) -> Option<Result<String, String>> {
+        use crate::state::custom_commands::CustomCommandRegistry;
+
+        let trimmed = input.trim();
+        if !trimmed.starts_with('/') {
+            return None;
+        }
+
+        let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
+        let cmd_name = parts[0].trim_start_matches('/');
+        let args = parts.get(1).map(|s| s.trim()).unwrap_or("");
+
+        let custom_cmd = self.state.custom_commands.find(cmd_name)?;
+        Some(CustomCommandRegistry::resolve_prompt(custom_cmd, args))
+    }
+
+    pub(super) fn handle_commands_command(
+        &mut self,
+        arg: Option<&str>,
+    ) -> Option<(MessageKind, String)> {
+        use crate::state::custom_commands::CustomCommandRegistry;
+
+        match arg {
+            Some("reload") => {
+                self.state.custom_commands.reload();
+                self.sync_custom_command_autocomplete();
+                let count = self.state.custom_commands.commands.len();
+                self.set_status(
+                    format!("Reloaded {count} custom commands"),
+                    StatusLevel::Info,
+                );
+                Some((
+                    MessageKind::System,
+                    format!("Reloaded {count} custom commands"),
+                ))
+            }
+            Some("init") => match CustomCommandRegistry::create_templates() {
+                Ok(msg) => {
+                    self.state.custom_commands.reload();
+                    self.sync_custom_command_autocomplete();
+                    self.set_status(&msg, StatusLevel::Info);
+                    Some((MessageKind::System, msg))
+                }
+                Err(err) => {
+                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                    Some((MessageKind::Error, err))
+                }
+            },
+            Some("list") | None => {
+                let commands = &self.state.custom_commands.commands;
+                if commands.is_empty() {
+                    Some((
+                        MessageKind::System,
+                        "No custom commands found.\nAdd .toml files to .ava/commands/ or ~/.ava/commands/.\nRun /commands init to create an example.".to_string(),
+                    ))
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(format!("Custom commands ({}):", commands.len()));
+                    for cmd in commands {
+                        let source = cmd.source.label();
+                        let params = if cmd.params.is_empty() {
+                            String::new()
+                        } else {
+                            let param_names: Vec<&str> =
+                                cmd.params.iter().map(|p| p.name.as_str()).collect();
+                            format!(" [{}]", param_names.join(", "))
+                        };
+                        lines.push(format!(
+                            "  /{}{} -- {} ({})",
+                            cmd.name, params, cmd.description, source
+                        ));
+                    }
+                    Some((MessageKind::System, lines.join("\n")))
+                }
+            }
+            Some(sub) => Some((
+                MessageKind::Error,
+                format!("Unknown /commands subcommand: {sub}. Use: list, reload, init"),
+            )),
+        }
+    }
+
+    pub(super) fn handle_hooks_command(
+        &mut self,
+        arg: Option<&str>,
+    ) -> Option<(MessageKind, String)> {
+        use crate::hooks::{HookContext, HookEvent, HookRegistry, HookRunner};
+
+        match arg {
+            Some("reload") => {
+                self.state.hooks.reload();
+                let count = self.state.hooks.len();
+                self.set_status(format!("Reloaded {count} hooks"), StatusLevel::Info);
+                Some((MessageKind::System, format!("Reloaded {count} hooks")))
+            }
+            Some("init") => match HookRegistry::create_templates() {
+                Ok(msg) => {
+                    self.state.hooks.reload();
+                    self.set_status(&msg, StatusLevel::Info);
+                    Some((MessageKind::System, msg))
+                }
+                Err(err) => {
+                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                    Some((MessageKind::Error, err))
+                }
+            },
+            Some(sub) if sub.starts_with("dry-run") => {
+                let rest = sub.strip_prefix("dry-run").unwrap_or("").trim();
+                let parts: Vec<&str> = rest.splitn(2, ' ').collect();
+                let event_str = parts.first().copied().unwrap_or("");
+
+                if event_str.is_empty() {
+                    return Some((
+                        MessageKind::Error,
+                        "Usage: /hooks dry-run <event> [tool_name]\nEvents: PreToolUse, PostToolUse, PostToolUseFailure, SessionStart,\nSessionEnd, Stop, SubagentStart, SubagentStop, Notification,\nConfigChange, PreCompact, PermissionRequest, PreModelSwitch,\nPostModelSwitch, BudgetWarning, UserPromptSubmit"
+                            .to_string(),
+                    ));
+                }
+
+                let event = match HookEvent::from_str_loose(event_str) {
+                    Some(e) => e,
+                    None => {
+                        return Some((
+                            MessageKind::Error,
+                            format!("Unknown event: {event_str}. Use /hooks dry-run for list."),
+                        ));
+                    }
+                };
+
+                let mut ctx = HookContext::for_event(&event);
+                if let Some(tool_name) = parts.get(1) {
+                    ctx.tool_name = Some(tool_name.to_string());
+                }
+                ctx.model = Some(self.state.agent.model_name.clone());
+
+                let lines = HookRunner::dry_run(&self.state.hooks, &event, &ctx);
+                if lines.is_empty() {
+                    Some((
+                        MessageKind::System,
+                        format!("No hooks would fire for {}", event.label()),
+                    ))
+                } else {
+                    let output = format!(
+                        "Hooks that would fire for {} ({}):\n{}",
+                        event.label(),
+                        lines.len(),
+                        lines.join("\n")
+                    );
+                    Some((MessageKind::System, output))
+                }
+            }
+            Some("list") | None => {
+                if self.state.hooks.is_empty() {
+                    Some((
+                        MessageKind::System,
+                        "No hooks loaded.\nAdd .toml files to .ava/hooks/ or ~/.ava/hooks/.\nRun /hooks init to create example templates.".to_string(),
+                    ))
+                } else {
+                    let mut lines = Vec::new();
+                    lines.push(format!("Hooks ({}):", self.state.hooks.len()));
+                    for hook in self.state.hooks.iter() {
+                        let enabled = if hook.enabled { " " } else { "x" };
+                        let desc = hook
+                            .description
+                            .clone()
+                            .unwrap_or_else(|| "no description".to_string());
+                        let source = hook.source.label();
+                        let matcher = hook
+                            .matcher
+                            .as_deref()
+                            .map(|m| format!(" [{m}]"))
+                            .unwrap_or_default();
+                        lines.push(format!(
+                            "  [{enabled}] {}{matcher} -- {desc} (pri {}, {source})",
+                            hook.event, hook.priority
+                        ));
+                    }
+                    Some((MessageKind::System, lines.join("\n")))
+                }
+            }
+            Some(sub) => Some((
+                MessageKind::Error,
+                format!(
+                    "Unknown /hooks subcommand: {sub}. Use: list, reload, init, dry-run <event>"
+                ),
+            )),
+        }
+    }
+
+    pub(crate) fn sync_custom_command_autocomplete(&mut self) {
+        use crate::widgets::autocomplete::AutocompleteItem;
+
+        self.state.input.custom_slash_items = self
+            .state
+            .custom_commands
+            .commands
+            .iter()
+            .map(|cmd| {
+                let detail = if cmd.description.is_empty() {
+                    format!("Custom command ({})", cmd.source.label())
+                } else {
+                    cmd.description.clone()
+                };
+                AutocompleteItem::new(&cmd.name, detail)
+            })
+            .collect();
+    }
+
+    pub(crate) fn execute_command_action(
+        &mut self,
+        action: Action,
+        app_tx: Option<mpsc::UnboundedSender<AppEvent>>,
+    ) {
+        match action {
+            Action::ModelSwitch => {
+                if let Some(tx) = app_tx {
+                    self.state.model_selector = Some(ModelSelectorState::default());
+                    self.state.active_modal = Some(ModalType::ModelSelector);
+                    self.spawn_model_selector_load(tx);
+                } else {
+                    let (credentials, catalog) = tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(async {
+                            let creds = ava_config::CredentialStore::load_default()
+                                .await
+                                .unwrap_or_default();
+                            let cat = self.state.model_catalog.get().await;
+                            (creds, cat)
+                        })
+                    });
+                    let mut effective_catalog = if catalog.is_empty() {
+                        ava_config::fallback_catalog()
+                    } else {
+                        catalog
+                    };
+                    effective_catalog.merge_fallback();
+                    self.state.model_selector = Some(ModelSelectorState::from_catalog(
+                        &effective_catalog,
+                        &credentials,
+                        &self.state.agent.recent_models,
+                        &self.state.agent.model_name,
+                        &self.state.agent.provider_name,
+                    ));
+                    self.state.active_modal = Some(ModalType::ModelSelector);
+                }
+            }
+            Action::NewSession => {
+                let _ = self.state.session.create_session();
+                self.state.agent.clear_session_metrics();
+                self.state.messages.messages.clear();
+                self.set_status("New session created", StatusLevel::Info);
+            }
+            Action::SessionList => {
+                self.state.session_list.update_sessions(&[]);
+                self.state.session_list.open = true;
+                self.state.active_modal = Some(ModalType::SessionList);
+                if let Some(tx) = app_tx {
+                    self.spawn_session_list_load(tx);
+                } else if let Ok(sessions) = self.state.session.list_recent(50) {
+                    self.state.session_list.update_sessions(&sessions);
+                }
+            }
+            Action::PermissionToggle => {
+                self.state.permission.permission_level =
+                    self.state.permission.permission_level.toggle();
+                self.set_status(
+                    format!(
+                        "Permissions: {}",
+                        self.state.permission.permission_level.label()
+                    ),
+                    StatusLevel::Info,
+                );
+            }
+            Action::ModeNext => {
+                self.state.agent_mode = self.state.agent_mode.cycle_next();
+                self.state.agent.set_mode(self.state.agent_mode);
+                self.set_status(
+                    format!("Mode: {}", self.state.agent_mode.label()),
+                    StatusLevel::Info,
+                );
+            }
+            Action::ModePrev => {
+                self.state.agent_mode = self.state.agent_mode.cycle_prev();
+                self.state.agent.set_mode(self.state.agent_mode);
+                self.set_status(
+                    format!("Mode: {}", self.state.agent_mode.label()),
+                    StatusLevel::Info,
+                );
+            }
+            Action::ToggleSidebar => {
+                self.state.show_sidebar = !self.state.show_sidebar;
+            }
+            Action::ClearMessages => {
+                self.state.messages.messages.clear();
+                self.state.messages.reset_scroll();
+                self.set_status("Chat cleared", StatusLevel::Info);
+            }
+            Action::ForceCompact => {
+                if let Some((kind, msg)) = self.handle_slash_command("/compact", app_tx.clone()) {
+                    self.state.messages.push(UiMessage::new(kind, msg));
+                }
+            }
+            Action::ScrollUp => self.state.messages.scroll_up(10),
+            Action::ScrollDown => self.state.messages.scroll_down(10),
+            Action::ScrollTop => self.state.messages.scroll_to_top(),
+            Action::ScrollBottom => self.state.messages.scroll_to_bottom(),
+            Action::CopyLastResponse => {
+                self.copy_last_response();
+            }
+            Action::Cancel => {
+                if self.state.agent.is_running {
+                    self.state.agent.abort();
+                }
+            }
+            Action::Quit => {
+                self.should_quit = true;
+            }
+            _ => {}
+        }
+    }
+
+    pub(super) fn format_standard_credential_result(
+        result: Result<String, String>,
+    ) -> crate::event::CommandMessageResult {
+        match result {
+            Ok(msg) => crate::event::CommandMessageResult {
+                kind: MessageKind::System,
+                content: msg.clone(),
+                status: Some((StatusLevel::Info, msg)),
+            },
+            Err(err) => crate::event::CommandMessageResult {
+                kind: MessageKind::Error,
+                content: format!("Failed: {err}"),
+                status: Some((StatusLevel::Error, format!("Failed: {err}"))),
+            },
+        }
+    }
+
+    pub(super) fn format_credentials_list_result(
+        result: Result<String, String>,
+    ) -> crate::event::CommandMessageResult {
+        match result {
+            Ok(msg) => crate::event::CommandMessageResult {
+                kind: MessageKind::System,
+                content: format!("Credentials:\n{msg}"),
+                status: Some((StatusLevel::Info, "Credentials loaded".to_string())),
+            },
+            Err(err) => crate::event::CommandMessageResult {
+                kind: MessageKind::Error,
+                content: format!("Failed: {err}"),
+                status: Some((StatusLevel::Error, format!("Failed: {err}"))),
+            },
+        }
+    }
+}

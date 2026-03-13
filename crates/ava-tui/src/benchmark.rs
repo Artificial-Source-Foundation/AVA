@@ -548,7 +548,7 @@ async fn run_single_task(
 
     let effective_turns = if task.needs_tools { max_turns } else { 3 };
 
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir,
         provider: Some(spec.provider.clone()),
         model: Some(spec.model.clone()),

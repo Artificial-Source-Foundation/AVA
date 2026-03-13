@@ -273,7 +273,7 @@ async fn run_solo_task(
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
     let effective_turns = if task.needs_tools { max_turns } else { 3 };
 
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir,
         provider: Some(spec.provider.clone()),
         model: Some(spec.model.clone()),

@@ -55,6 +55,7 @@ async fn bench_agent_stack_startup() {
     let start = Instant::now();
     let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
+        working_dir: Some(dir.path().to_path_buf()),
         injected_provider: Some(mock),
         ..Default::default()
     })

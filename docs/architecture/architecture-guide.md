@@ -67,7 +67,7 @@ When adding middleware, document the chosen priority and expected interactions.
 ## 5) Current Topology Summary
 
 - Built-in extensions: ~20
-- Tool surface: ~41
+- Built-in tools by default: 6, with 7 additional extended tools available when enabled
 - `packages/core/`: compatibility re-export layer (not primary implementation target)
 - Typical runtime extension count: ~31 (20 feature + 16 providers - 4 disabled: lsp, mcp, server, litellm)
 

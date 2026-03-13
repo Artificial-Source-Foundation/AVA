@@ -43,6 +43,7 @@ coverage/
 # Temp files
 *.tmp
 *.temp
+.tmp/
 
 # Reference code (cloned repos for inspiration)
 docs/reference-code/
@@ -61,42 +62,5 @@ test-results/
 .ava/
 
 # Benchmark scratch artifacts (generated code from model benchmark runs)
-# These leak from ~/.ava/benchmarks/workspace into project root
+# Keep compiled Rust library artifacts out of the working tree.
 *.rlib
-/broken
-/cache
-/lifetime_fix
-/refactor
-/safemap/
-/is_palindrome.rs
-/merge_sorted.rs
-/lru_cache.rs
-/lru_cache_new.rs
-/bst.rs
-/counter.rs
-/counter_test.rs
-/turnstile.rs
-/batch_iterator.rs
-/csv_tests.rs
-/test.rs
-/test_broken.rs
-/two_sum.py
-/rate_limiter.py
-/test_flatten.py
-/debounce.js
-/SearchFilter.js
-/SearchFilter.tsx
-/reverse_list.go
-/safe_map.go
-/safemap.go
-/tests/outcome_tests.rs
-/src/bst.rs
-/src/counter.rs
-/src/lib.rs
-crates/ava-tools/src/core/bst.rs
-crates/ava-tools/src/core/counter.rs
-crates/ava-tools/src/core/lru_cache.rs
-crates/ava-tools/src/core/merge_sorted.rs
-crates/ava-tools/src/core/turnstile.rs
-crates/ava-types/src/batched.rs
-crates/ava-types/src/merge.rs

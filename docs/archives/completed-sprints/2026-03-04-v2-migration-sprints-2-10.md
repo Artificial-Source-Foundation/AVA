@@ -309,7 +309,7 @@ git commit -m "test(sprint-9): move e2e to real backend and close flaky regressi
 ### Task 9: Sprint 10 - Docs and Ship
 
 **Files:**
-- Modify: `CLAUDE.md`, `docs/backend.md`, architecture docs, troubleshooting docs, `MEMORY.md`
+- Modify: `CLAUDE.md`, `docs/backend.md`, architecture docs, troubleshooting docs, `docs/archives/project-history/memory-snapshot-v2.md`
 - Delete: `BACKEND-SPRINT-BACKLOG-2026.md`, `BACKEND-SPRINT-BACKLOG-2026-AGGRESSIVE.md`, `rust-migration-boundaries.md`, `rust-backend-epic4-architecture.md`
 - Modify: all `package.json` and `Cargo.toml` version fields
 - Create/Modify: `CHANGELOG.md`
@@ -338,7 +338,7 @@ Expected: Successful desktop production build.
 **Step 6: Reviewer gate and final commit**
 
 ```bash
-git add CLAUDE.md docs MEMORY.md CHANGELOG.md package.json Cargo.toml
+git add CLAUDE.md docs CHANGELOG.md package.json Cargo.toml
 git rm BACKEND-SPRINT-BACKLOG-2026.md BACKEND-SPRINT-BACKLOG-2026-AGGRESSIVE.md rust-migration-boundaries.md rust-backend-epic4-architecture.md
 git commit -m "chore(sprint-10): finalize docs, version 2.0.0, and ship artifacts"
 ```

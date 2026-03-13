@@ -52,31 +52,30 @@ The execution kernel contains:
 
 ### Rust Crates (`crates/`) — CLI/Agent Stack
 
-21 Rust crates for the new CLI and agent runtime:
+20 Rust crates currently make up the CLI and agent runtime:
 
 1. `ava-agent` — Agent execution loop + reflection
-2. `ava-cli-providers` — CLI provider management
-3. `ava-codebase` — Code indexing (BM25 + PageRank)
-4. `ava-praxis` — Multi-agent orchestration (Praxis)
+2. `ava-auth` — OAuth and credential flows
+3. `ava-cli-providers` — CLI provider management
+4. `ava-codebase` — Code indexing (BM25 + PageRank)
 5. `ava-config` — Configuration management
 6. `ava-context` — Context window management
 7. `ava-db` — SQLite connection pool
 8. `ava-extensions` — Extension system
-9. `ava-llm` — LLM providers (6+ providers)
-10. `ava-logger` — Structured logging
-11. `ava-lsp` — Language Server Protocol
-12. `ava-mcp` — Model Context Protocol
-13. `ava-memory` — Persistent memory/recall
-14. `ava-permissions` — Permission system
-15. `ava-platform` — Platform abstractions (fs, shell)
-16. `ava-sandbox` — Command sandboxing (bwrap/sandbox-exec)
-17. `ava-session` — Session persistence (SQLite + FTS5)
-18. `ava-tools` — Tool trait + registry + core tools
-19. `ava-tui` — CLI/TUI binary (Ratatui + Crossterm)
-20. `ava-types` — Shared types
-21. `ava-validator` — Validation pipeline
+9. `ava-llm` — LLM providers (Anthropic, Copilot, Gemini, Inception, Ollama, OpenAI, OpenRouter, mock)
+10. `ava-mcp` — Model Context Protocol
+11. `ava-memory` — Persistent memory/recall
+12. `ava-permissions` — Permission system
+13. `ava-platform` — Platform abstractions (fs, shell)
+14. `ava-praxis` — Multi-agent orchestration (Praxis)
+15. `ava-sandbox` — Command sandboxing (bwrap/sandbox-exec)
+16. `ava-session` — Session persistence (SQLite + FTS5)
+17. `ava-tools` — Tool trait + registry + tiered core tools
+18. `ava-tui` — CLI/TUI binary (Ratatui + Crossterm)
+19. `ava-types` — Shared types
+20. `ava-validator` — Validation pipeline
 
-**Tool Surface**: ~41 tools (read, write, edit, bash, glob, grep, multiedit, task, websearch, memory tools, LSP tools, delegate tools, etc.)
+**Tool surface**: 6 built-in tools by default, 7 extended tools when enabled, plus separately-registered task/todo/question helpers and dynamic MCP/custom tools.
 
 ## Migration Notes
 

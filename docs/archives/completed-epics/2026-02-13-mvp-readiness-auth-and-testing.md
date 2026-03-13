@@ -85,7 +85,7 @@
 ### Task 5: Establish autonomous validation workflow
 
 **Files:**
-- Create: `scripts/verify-mvp.sh`
+- Create: `scripts/testing/verify-mvp.sh`
 - Modify: `package.json`
 - Modify: `docs/development/sprints/mvp-test-matrix.md`
 
@@ -93,7 +93,7 @@
 - Script runs lint + typecheck + test run in sequence with clear failure exits.
 
 **Step 2: Add package script alias**
-- Add `"verify:mvp": "bash scripts/verify-mvp.sh"`.
+- Add `"verify:mvp": "bash scripts/testing/verify-mvp.sh"`.
 
 **Step 3: Run and capture baseline output**
 - Run: `npm run verify:mvp`

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Release build verification and performance benchmarks for AVA.
 #
-# Usage: ./scripts/benchmark.sh
+# Usage: ./scripts/benchmarks/release-benchmark.sh
 #
 # Measures:
 #   1. Release binary size (target < 25 MB)

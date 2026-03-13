@@ -29,14 +29,15 @@ only for the Tauri desktop webview.
    +------+------+  +-----+------+   +------+------+
           |                |                 |
           |         +------v------+   +------v------+
-          |         |  Providers  |   |  19 built-in|
+           |         |  Providers  |   |  6 + 7      |
           |         |  anthropic  |   |  + MCP      |
           |         |  openai     |   |  + custom   |
           |         |  gemini     |   +-------------+
-          |         |  ollama     |
-          |         |  openrouter |
-          |         |  copilot    |
-          |         +-------------+
+           |         |  ollama     |
+           |         |  openrouter |
+           |         |  copilot    |
+           |         |  inception  |
+           |         +-------------+
           |
    +------v-----------+
    | Supporting Crates |
@@ -53,15 +54,15 @@ only for the Tauri desktop webview.
    +-------------------+
 ```
 
-## The 22 Crates
+## The 20 Crates
 
 ### Core Runtime
 
 | Crate | Purpose | Key File |
 |---|---|---|
 | `ava-agent` | Agent execution loop, stuck detection, system prompt, sub-agent spawning | `src/stack.rs`, `src/agent_loop/mod.rs` |
-| `ava-llm` | LLM provider trait, 7 providers, connection pool, retry, circuit breaker | `src/provider.rs`, `src/providers/` |
-| `ava-tools` | Tool trait, registry, middleware, 19 built-in tools, custom TOML tools | `src/registry.rs`, `src/core/` |
+| `ava-llm` | LLM provider trait, 7 built-in providers plus a mock provider for tests, connection pool, retry, circuit breaker | `src/provider.rs`, `src/providers/` |
+| `ava-tools` | Tool trait, registry, middleware, 6 built-in tools by default plus 7 extended tools, custom TOML tools | `src/registry.rs`, `src/core/` |
 | `ava-praxis` | Multi-agent workflows (plan-code-review, etc.) | `src/workflow.rs` |
 | `ava-cli-providers` | CLI provider resolution (cli:* prefix for external providers) | `src/provider.rs` |
 
@@ -103,9 +104,7 @@ only for the Tauri desktop webview.
 | Crate | Purpose | Key File |
 |---|---|---|
 | `ava-types` | Shared types: Message, Session, Tool, TokenUsage, StreamChunk, AvaError | `src/lib.rs` |
-| `ava-logger` | Structured logging setup | `src/lib.rs` |
 | `ava-validator` | Validation utilities | `src/lib.rs` |
-| `ava-lsp` | LSP client integration | `src/lib.rs` |
 
 ## Data Flow
 

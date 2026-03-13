@@ -41,7 +41,7 @@ Likely files:
 Verification:
 
 ```bash
-bash scripts/check.sh
+bash scripts/dev/check.sh
 cargo nextest run --workspace
 cargo clippy --workspace
 ```

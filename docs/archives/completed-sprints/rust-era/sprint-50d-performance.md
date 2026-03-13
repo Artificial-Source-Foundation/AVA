@@ -32,7 +32,7 @@ Create a benchmark script that measures key metrics.
 
 **Implementation:**
 - File: `crates/ava-tui/tests/bench_performance.rs` (NEW)
-- Or a script: `scripts/benchmark.sh` (NEW)
+- Or a script: `scripts/benchmarks/release-benchmark.sh` (NEW)
 
 ### Metrics to Measure
 

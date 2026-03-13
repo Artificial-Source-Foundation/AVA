@@ -25,7 +25,7 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "verify:mvp": "bash scripts/verify-mvp.sh",
+    "verify:mvp": "bash scripts/testing/verify-mvp.sh",
     "docs:drift": "node scripts/docs/check-doc-drift.mjs",
     "knip": "knip",
     "knip:fix": "knip --fix",

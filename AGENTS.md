@@ -73,7 +73,8 @@ AVA/
 ### Important Counts
 
 - Rust crates: ~20
-- Core built-in tools: 13 (6 default + 7 extended), plus task/session/memory helpers and dynamic MCP/custom tools
+- Built-in tools by default: 6 (`read`, `write`, `edit`, `bash`, `glob`, `grep`)
+- Extended opt-in tools: 7 (`apply_patch`, `web_fetch`, `multiedit`, `test_runner`, `lint`, `diagnostics`, `git`)
 - Dynamic tools: MCP servers + TOML custom tools
 - Project instructions: auto-discovered from `AGENTS.md`, `CLAUDE.md`, `.ava/rules/*.md`, etc.
 

@@ -3,16 +3,16 @@
 import fs from 'node:fs'
 
 const targets = [
-  'docs/ROADMAP.md',
-  'docs/frontend/backlog.md',
-  'docs/backend/backlog.md',
-  'docs/development/epics/sprint-1.6-testing-hardening.md',
-  'docs/development/epics/plugin-ecosystem-ux-integration.md',
-  'docs/development/backlogs/integration-backlog.md',
-  'docs/development/status/current-focus.md',
-  'docs/development/sprints/2026-S1.6-testing-hardening-closeout.md',
-  'docs/development/sprints/2026-S2.3-plugin-ux-wiring.md',
-  'docs/development/sprints/2026-DX-1-docs-architecture-hardening.md',
+  'docs/development/roadmap.md',
+  'docs/development/backlog.md',
+  'docs/development/epics.md',
+  'docs/development/v3-plan.md',
+  'docs/archives/ROADMAP.md',
+  'docs/archives/completed-sprints/backlog.md',
+  'docs/archives/completed-sprints/integration-backlog.md',
+  'docs/archives/completed-sprints/2026-S2.3-plugin-ux-wiring.md',
+  'docs/archives/completed-epics/plugin-ecosystem-ux-integration.md',
+  'docs/archives/completed-epics/sprint-1.6-testing-hardening.md',
 ]
 
 const checks = [

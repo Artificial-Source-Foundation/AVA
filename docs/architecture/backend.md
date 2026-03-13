@@ -2,7 +2,7 @@
 
 # Backend Overview
 
-> **Note**: AVA is migrating to a Rust-first architecture. This document describes the hybrid state during transition.
+> **Note**: AVA is now Rust-first for CLI and agent development. This document describes the current hybrid repository where the desktop layer still retains TypeScript orchestration modules.
 >
 > - **New CLI/agent features**: Write in `crates/` (Rust)
 > - **Desktop extensions**: Still in `packages/core-v2/` + `packages/extensions/` (TypeScript)
@@ -21,8 +21,9 @@ AVA runs a hybrid backend:
 
 ## Current Shape
 
-- Built-in extensions: ~20
-- Tool surface: ~41 tools
+- Built-in extensions: ~20 desktop extension modules
+- Rust crates: 20 under `crates/`
+- Built-in tools by default: 6, with 7 additional extended tools available when enabled, plus task/todo/question helpers and dynamic MCP/custom tools
 
 ### Runtime Extension Count
 
@@ -54,30 +55,28 @@ Typical runtime extension activation count is ~31:
 - tools-extended
 - validator
 
-### Rust Crate Index (21)
+### Rust Crate Index (20)
 
 1. `ava-agent` — Agent execution loop
-2. `ava-cli-providers` — CLI provider management
-3. `ava-codebase` — Code indexing and search
-4. `ava-praxis` — Multi-agent orchestration (Praxis)
+2. `ava-auth` — OAuth, Copilot token exchange, PKCE
+3. `ava-cli-providers` — CLI provider management
+4. `ava-codebase` — Code indexing and search
 5. `ava-config` — Configuration management
 6. `ava-context` — Context window management
 7. `ava-db` — SQLite connection pool
 8. `ava-extensions` — Extension system
 9. `ava-llm` — LLM providers and clients
-10. `ava-logger` — Structured logging
-11. `ava-lsp` — Language Server Protocol
-12. `ava-mcp` — Model Context Protocol
-13. `ava-memory` — Persistent memory/recall
-14. `ava-permissions` — Permission system (9-step DefaultInspector, PermissionPolicy, CommandClassifier, SafetyTag/RiskLevel)
-14b. `ava-auth` — OAuth, Copilot token exchange, PKCE
-15. `ava-platform` — Platform abstractions
-16. `ava-sandbox` — Command sandboxing
-17. `ava-session` — Session persistence
-18. `ava-tools` — Tool trait and registry
-19. `ava-tui` — CLI/TUI binary (Ratatui)
-20. `ava-types` — Shared types
-21. `ava-validator` — Validation pipeline
+10. `ava-mcp` — Model Context Protocol
+11. `ava-memory` — Persistent memory/recall
+12. `ava-permissions` — Permission system (9-step DefaultInspector, PermissionPolicy, CommandClassifier, SafetyTag/RiskLevel)
+13. `ava-platform` — Platform abstractions
+14. `ava-praxis` — Multi-agent orchestration (Praxis)
+15. `ava-sandbox` — Command sandboxing
+16. `ava-session` — Session persistence
+17. `ava-tools` — Tool trait and registry
+18. `ava-tui` — CLI/TUI binary (Ratatui)
+19. `ava-types` — Shared types
+20. `ava-validator` — Validation pipeline
 
 See `crates/` directory for source. Run `cargo test --workspace` for test status.
 

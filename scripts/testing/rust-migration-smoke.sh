@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 AVA_SCRIPT="$ROOT_DIR/cli/src/index.ts"
 AVA=(npx tsx "$AVA_SCRIPT")
 TMP_DIR="$ROOT_DIR/.tmp/rust-migration-smoke-$$"

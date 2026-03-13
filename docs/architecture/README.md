@@ -12,11 +12,11 @@ AVA uses a **Rust-first architecture** with a hybrid backend:
 
 ```
 AVA/
-├── crates/                   # Rust crates — PRIMARY for CLI/agent (21 crates)
+├── crates/                   # Rust crates — PRIMARY for CLI/agent (20 crates)
 │   ├── ava-tui/              # CLI/TUI binary (Ratatui + Crossterm)
 │   ├── ava-agent/            # Agent execution loop
-│   ├── ava-llm/              # LLM providers (6+ implementations)
-│   ├── ava-tools/            # Tool trait + registry (19 built-in tools)
+│   ├── ava-llm/              # LLM providers (7 built-in + mock)
+│   ├── ava-tools/            # Tool trait + registry (6 built-in + 7 extended tools)
 │   ├── ava-praxis/        # Multi-agent orchestration (Praxis)
 │   └── ...                   # 16 more crates (session, memory, config, etc.)
 ├── packages/                 # TypeScript — DESKTOP ONLY
@@ -90,17 +90,14 @@ Director aggregates results and presents to user
 
 ---
 
-## Tool Surface (19 built-in)
+## Tool Surface
 
 | Group | Count | Tools |
 |-------|------:|-------|
-| Core | 11 | read, write, edit, bash, glob, grep, multiedit, apply_patch, test_runner, lint, diagnostics |
-| Memory | 3 | remember, recall, memory_search |
-| Session | 3 | session_search, session_list, session_load |
-| Codebase | 1 | codebase_search |
-| Git | 1 | git_read (review subcommand) |
+| Built-in | 6 | read, write, edit, bash, glob, grep |
+| Extended | 7 | apply_patch, web_fetch, multiedit, test_runner, lint, diagnostics, git |
 
-Plus dynamic MCP tools and TOML custom tools (`~/.ava/tools/`, `.ava/tools/`).
+Additional runtime helpers such as `task`, `question`, and todo tools are registered separately. Dynamic MCP tools and TOML custom tools remain supported.
 
 ---
 

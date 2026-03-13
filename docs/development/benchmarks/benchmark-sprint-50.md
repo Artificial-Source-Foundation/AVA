@@ -26,7 +26,7 @@ No performance regressions detected. All metrics within targets. Memory stays un
 |---|---|---|---|
 | Cold start (AgentStack) | 2ms* | ~170ms (debug) | Expected — sprint 32 measured release build |
 | Idle memory | 7.8 MB | ~46 MB (debug) | Expected — debug symbols + unoptimized |
-| Binary size | 17 MB | TBD (run `scripts/benchmark.sh` for release) | — |
+| Binary size | 17 MB | TBD (run `scripts/benchmarks/release-benchmark.sh` for release) | — |
 
 *Sprint 32 numbers were release-optimized. Debug build numbers are naturally higher.
 
@@ -40,7 +40,7 @@ No performance regressions detected. All metrics within targets. Memory stays un
 ## Automated Checks
 
 - **Benchmark tests**: `cargo test -p ava-tui --test bench_performance -- --nocapture`
-- **Release verification**: `./scripts/benchmark.sh` (builds release, checks binary size, --help latency, clean env handling)
+- **Release verification**: `./scripts/benchmarks/release-benchmark.sh` (builds release, checks binary size, --help latency, clean env handling)
 
 ## Test File
 

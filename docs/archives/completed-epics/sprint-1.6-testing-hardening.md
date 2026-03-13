@@ -26,7 +26,7 @@ Ship a high-confidence MVP baseline by hardening auth flow reliability, chat str
   - `src/components/settings/tabs/PluginsTab.smoke.test.tsx`
   - `packages/core/src/extensions/manager.test.ts`
 - MVP verification command pipeline added and passing:
-  - `scripts/verify-mvp.sh`
+  - `scripts/testing/verify-mvp.sh`
   - `npm run verify:mvp`
 - Chat streaming micro-jitter stabilization completed for stream start/end transitions.
 

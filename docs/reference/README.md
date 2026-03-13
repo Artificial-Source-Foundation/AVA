@@ -6,7 +6,7 @@ and AI agents understand the architecture.
 
 ## Architecture
 
-- [Architecture Overview](overview.md) -- What AVA is, how the 22 crates
+- [Architecture Overview](overview.md) -- What AVA is, how the 20 crates
   relate, data flow from user input to response, key design decisions
 
 ## Systems
@@ -68,7 +68,7 @@ Detailed documentation for individual crates lives in `crates/`:
 - [ava-types](crates/ava-types.md) -- Shared types
 - [ava-db](crates/ava-db.md) -- Database connection pool
 - [ava-extensions](crates/ava-extensions.md) -- Extension system (native + WASM)
-- [Small crates](crates/small-crates.md) -- ava-logger, ava-validator, ava-lsp, ava-cli-providers
+- [Small crates](crates/small-crates.md) -- ava-db, ava-types, ava-validator, ava-cli-providers
 
 ## See Also
 

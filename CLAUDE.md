@@ -90,7 +90,7 @@ AVA/
 └── tests/
 ```
 
-## Tool Surface (13 core built-in, tiered)
+## Tool Surface (6 built-in + 7 extended)
 
 Tools are organized into tiers. Only **Default** tools are sent to the LLM by default; Extended tools are registered and executable but not included in the system prompt unless `extended_tools` is enabled.
 
@@ -105,7 +105,7 @@ Plugin-tier capabilities should normally ship via MCP servers or TOML custom too
 
 Additional tools are registered separately (todo_read/write, question, task, codebase_search, memory tools, session tools) and always available when their dependencies are initialized.
 
-Total: 13 core built-in tools + always-available tasking/session helpers + dynamic MCP tools + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
+Total: 6 built-in tools by default, 7 extended opt-in tools, plus always-available tasking/session helpers + dynamic MCP tools + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
 
 ## Project Instructions
 

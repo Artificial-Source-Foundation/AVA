@@ -7,9 +7,9 @@
 **Official domains:**
 [useava.dev](https://useava.dev) | [avacli.dev](https://avacli.dev) | [tryava.dev](https://tryava.dev) | [ava.engineering](https://ava.engineering)
 
-A Rust-first AI coding assistant with an interactive TUI, autonomous agent execution, multi-agent workflows, code review, voice input, and a Tauri desktop app. 19 built-in tools plus dynamic MCP and custom tool support.
+A Rust-first AI coding assistant with an interactive TUI, autonomous agent execution, multi-agent workflows, code review, voice input, and a Tauri desktop app. It ships with 6 built-in tools by default, plus 7 extended opt-in tools, tasking helpers, and dynamic MCP/custom tool support.
 
-Verified: All 19 tools, 5 modes, 3 providers pass E2E (2026-03-08). See [test matrix](docs/development/test-matrix.md).
+Verified: Core tool tiers, review flow, and runtime modes are tracked in the [test matrix](docs/development/test-matrix.md).
 
 ## Installation
 
@@ -57,7 +57,7 @@ cp target/release/ava ~/.local/bin/
 
 **Prerequisites**: [Rust toolchain](https://rustup.rs/) (1.75+). No Node.js required for the CLI.
 
-> Building from source lets you verify every line of code, run the full test suite (~820 tests), and confirm nothing unexpected is compiled in. See [SECURITY.md](SECURITY.md) for our security policy and vulnerability reporting process.
+> Building from source lets you verify every line of code, run the full test suite, and confirm nothing unexpected is compiled in. See [SECURITY.md](SECURITY.md) for our security policy and vulnerability reporting process.
 
 ### Desktop App (from source)
 
@@ -139,16 +139,16 @@ ava review [OPTIONS]
            ▼              ▼              ▼
      ┌──────────┐  ┌───────────┐  ┌────────────┐
      │ava-agent │  │ava-tools  │  │ava-session │
-     │(loop +   │  │(19 tools +│  │(SQLite +   │
+     │(loop +   │  │(6 built-in│  │(SQLite +   │
      │ reflect) │  │ MCP/custom│  │ FTS5)      │
      └────┬─────┘  └───────────┘  └────────────┘
           │
      ┌────┴─────┐
-     │ ava-llm  │  6 providers (Anthropic, OpenAI, Gemini, OpenRouter, Ollama + mock)
+     │ ava-llm  │  7 built-in providers + mock test provider
      └──────────┘
 ```
 
-**Rust-first**: All CLI/agent code is Rust (~21 crates, ~49K lines). TypeScript is retained only for the Tauri desktop webview.
+**Rust-first**: All CLI/agent code is Rust (20 crates, ~77K lines of Rust across `crates/`). TypeScript is retained only for the Tauri desktop webview.
 
 ### Key crates
 
@@ -157,7 +157,7 @@ ava review [OPTIONS]
 | `ava-tui` | CLI/TUI binary — the primary interface |
 | `ava-agent` | Agent execution loop, reflection, stuck detection |
 | `ava-llm` | LLM providers + connection pooling + circuit breaker |
-| `ava-tools` | Tool trait, registry, 19 built-in tools |
+| `ava-tools` | Tool trait, registry, 6 built-in tools + 7 extended tools |
 | `ava-praxis` | Multi-agent orchestration (Director pattern), workflow pipelines, code review |
 | `ava-session` | Session persistence (SQLite + FTS5) |
 | `ava-memory` | Persistent memory/recall |
@@ -168,17 +168,14 @@ ava review [OPTIONS]
 | `ava-config` | Configuration + credentials management |
 | `ava-sandbox` | Command sandboxing (bwrap/sandbox-exec) |
 
-## Tool Surface (19 built-in)
+## Tool Surface
 
 | Group | Count | Tools |
 |-------|------:|-------|
-| Core | 11 | read, write, edit, bash, glob, grep, multiedit, apply_patch, test_runner, lint, diagnostics |
-| Memory | 3 | remember, recall, memory_search |
-| Session | 3 | session_search, session_list, session_load |
-| Codebase | 1 | codebase_search |
-| Git | 1 | git_read (review subcommand) |
+| Built-in | 6 | read, write, edit, bash, glob, grep |
+| Extended | 7 | apply_patch, web_fetch, multiedit, test_runner, lint, diagnostics, git |
 
-Plus dynamic MCP tools and TOML custom tools (`~/.ava/tools/`, `.ava/tools/`).
+Additional tools such as `task`, `todo_read`, `todo_write`, and `question` are registered separately when their runtime dependencies are available. Dynamic MCP tools and TOML custom tools are also supported via `~/.ava/tools/` and `.ava/tools/`.
 
 ## Configuration
 
@@ -196,7 +193,7 @@ Plus dynamic MCP tools and TOML custom tools (`~/.ava/tools/`, `.ava/tools/`).
 
 Provider priority: `--provider/--model` flags > `AVA_PROVIDER`/`AVA_MODEL` env vars > `~/.ava/config.yaml`.
 
-LLM providers (Rust CLI): **Anthropic**, **OpenAI**, **Gemini**, **OpenRouter**, **Ollama** (5 built-in + external via OpenRouter gateway).
+LLM providers (Rust CLI): **Anthropic**, **Copilot**, **Gemini**, **Inception**, **Ollama**, **OpenAI**, and **OpenRouter**, plus a mock provider used in tests.
 
 ## Development Commands
 

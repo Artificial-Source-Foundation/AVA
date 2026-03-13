@@ -1,5 +1,7 @@
 # Documentation Coverage Audit
 
+> Historical snapshot from 2026-03-08. This audit predates later crate removals and inventory cleanup; use current architecture docs for live crate counts and module inventory.
+
 ## Summary
 - **Total public items**: 482
 - **Documented**: 189 (39.2%)

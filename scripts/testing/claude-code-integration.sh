@@ -5,7 +5,7 @@
 # If CLAUDECODE=1 is set, CC will silently refuse to produce output.
 #
 # Usage:
-#   ./scripts/test-claude-code-integration.sh
+#   ./scripts/testing/claude-code-integration.sh
 #
 # Prerequisites:
 #   - Claude Code CLI installed and authenticated (`claude` on PATH)
@@ -33,7 +33,7 @@ echo ""
 if [[ "${CLAUDECODE:-}" == "1" ]]; then
     echo -e "${RED}ERROR: Running inside a Claude Code session (CLAUDECODE=1).${NC}"
     echo "These tests must be run from a normal terminal."
-    echo "Open a new terminal and run: ./scripts/test-claude-code-integration.sh"
+    echo "Open a new terminal and run: ./scripts/testing/claude-code-integration.sh"
     exit 1
 fi
 

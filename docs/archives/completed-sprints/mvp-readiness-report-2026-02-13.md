@@ -16,7 +16,7 @@ This pass focused on MVP confidence for auth reliability, chat flow reliability,
   - `src/components/settings/tabs/PluginsTab.smoke.test.tsx`
   - lifecycle regression case in `packages/core/src/extensions/manager.test.ts`
 - Added autonomous MVP verification command pipeline:
-  - `scripts/verify-mvp.sh`
+  - `scripts/testing/verify-mvp.sh`
   - `package.json` -> `verify:mvp`
 - Synced sprint and roadmap/backlog docs:
   - `docs/development/sprints/sprint-1.6-testing.md`

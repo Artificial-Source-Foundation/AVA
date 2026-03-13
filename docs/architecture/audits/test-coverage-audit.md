@@ -1,5 +1,7 @@
 # Test Coverage Audit — AVA Rust Crates
 
+> Historical snapshot from 2026-03-08. This audit predates later crate removals and inventory cleanup; use `CLAUDE.md`, `AGENTS.md`, and `docs/development/roadmap.md` for current crate counts and active module inventory.
+
 **Audit date:** 2026-03-08
 **Auditor:** code-reviewer-subagent (claude-opus-4.6)
 **Scope:** All 22 crates in `crates/`

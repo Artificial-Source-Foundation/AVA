@@ -2,7 +2,9 @@
 
 > Verified 2026-03-08 on `anthropic/claude-haiku-4.5` via OpenRouter
 
-## Tool Tests (19/19)
+## Tool Tests (13 core tools)
+
+This matrix tracks the default and extended tools exposed through the main tool registry. Runtime helpers such as `task`, `todo_*`, and `question` are registered separately, and historical references to memory/session/codebase tools reflect earlier architecture snapshots rather than the current default tool inventory.
 
 | # | Tool | Status | Test Description |
 |---|------|--------|------------------|
@@ -17,14 +19,8 @@
 | 9 | test_runner | PASS | Cargo test execution |
 | 10 | lint | PASS | Clippy lint results |
 | 11 | diagnostics | PASS | Compiler diagnostics |
-| 12 | remember | PASS | Store key-value memory |
-| 13 | recall | PASS | Retrieve stored memory |
-| 14 | memory_search | PASS | Query memory by keyword |
-| 15 | session_list | PASS | List sessions (empty = correct) |
-| 16 | session_search | PASS | Search sessions by query |
-| 17 | session_load | N/A | Requires existing session ID |
-| 18 | codebase_search | PASS | BM25+PageRank symbol search |
-| 19 | git_read | PASS | Review-only (via `ava review`) |
+| 12 | web_fetch | PASS | Remote fetch with output limits |
+| 13 | git | PASS | Review-only git access (via `ava review`) |
 
 ## Mode Tests (5/5)
 

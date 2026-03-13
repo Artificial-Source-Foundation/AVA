@@ -409,7 +409,7 @@ Searches the codebase index for files matching a query (BM25 ranked, via `ava-co
 - Returns `"not yet available"` if index is still building
 - Results include path, score, and snippet
 
-### git (git_read)
+### git (read-only)
 
 **File:** `crates/ava-tools/src/core/git_read.rs`
 

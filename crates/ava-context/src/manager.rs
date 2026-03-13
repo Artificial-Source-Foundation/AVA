@@ -70,8 +70,7 @@ impl ContextManager {
     }
 
     pub fn should_compact(&self) -> bool {
-        let threshold =
-            (self.token_limit as f32 * self.compaction_threshold_pct) as usize;
+        let threshold = (self.token_limit as f32 * self.compaction_threshold_pct) as usize;
         self.token_count() > threshold
     }
 

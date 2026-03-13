@@ -62,6 +62,7 @@ dirs = "5"
 unicode-width = "0.2"
 tempfile = "3"
 arboard = "3"
+notify = "6"
 
 [features]
 default = []

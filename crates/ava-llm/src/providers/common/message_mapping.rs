@@ -261,7 +261,10 @@ mod tests {
 
     #[test]
     fn openai_assistant_with_tool_calls() {
-        let messages = vec![assistant_with_tool_calls("Reading file", vec![sample_tool_call()])];
+        let messages = vec![assistant_with_tool_calls(
+            "Reading file",
+            vec![sample_tool_call()],
+        )];
         let mapped = map_messages_openai(&messages);
         assert_eq!(mapped[0]["role"], "assistant");
         assert_eq!(mapped[0]["content"], "Reading file");
@@ -323,10 +326,7 @@ mod tests {
 
     #[test]
     fn anthropic_extracts_system() {
-        let messages = vec![
-            msg(Role::System, "You are helpful"),
-            msg(Role::User, "hi"),
-        ];
+        let messages = vec![msg(Role::System, "You are helpful"), msg(Role::User, "hi")];
         let (system, mapped) = map_messages_anthropic(&messages);
         assert_eq!(system.unwrap(), "You are helpful");
         assert_eq!(mapped.len(), 1);
@@ -403,10 +403,7 @@ mod tests {
 
     #[test]
     fn gemini_extracts_system_instruction() {
-        let messages = vec![
-            msg(Role::System, "Be concise"),
-            msg(Role::User, "hi"),
-        ];
+        let messages = vec![msg(Role::System, "Be concise"), msg(Role::User, "hi")];
         let (system, mapped) = map_messages_gemini_parts(&messages);
         let sys = system.unwrap();
         assert_eq!(sys["parts"][0]["text"], "Be concise");
@@ -486,15 +483,18 @@ mod tests {
     use ava_types::{ImageContent, ImageMediaType};
 
     fn user_msg_with_image(content: &str, data: &str, media_type: ImageMediaType) -> Message {
-        Message::new(Role::User, content)
-            .with_images(vec![ImageContent::new(data, media_type)])
+        Message::new(Role::User, content).with_images(vec![ImageContent::new(data, media_type)])
     }
 
     // ── Anthropic image tests ──
 
     #[test]
     fn anthropic_user_message_with_image() {
-        let messages = vec![user_msg_with_image("describe this", "abc123", ImageMediaType::Png)];
+        let messages = vec![user_msg_with_image(
+            "describe this",
+            "abc123",
+            ImageMediaType::Png,
+        )];
         let (_, mapped) = map_messages_anthropic(&messages);
         assert_eq!(mapped.len(), 1);
         assert_eq!(mapped[0]["role"], "user");
@@ -510,10 +510,8 @@ mod tests {
 
     #[test]
     fn anthropic_user_message_image_only() {
-        let messages = vec![
-            Message::new(Role::User, "")
-                .with_images(vec![ImageContent::new("imgdata", ImageMediaType::Jpeg)]),
-        ];
+        let messages = vec![Message::new(Role::User, "")
+            .with_images(vec![ImageContent::new("imgdata", ImageMediaType::Jpeg)])];
         let (_, mapped) = map_messages_anthropic(&messages);
         let content = mapped[0]["content"].as_array().unwrap();
         // No text block when content is empty
@@ -524,13 +522,10 @@ mod tests {
 
     #[test]
     fn anthropic_user_message_multiple_images() {
-        let messages = vec![
-            Message::new(Role::User, "compare these")
-                .with_images(vec![
-                    ImageContent::new("img1", ImageMediaType::Png),
-                    ImageContent::new("img2", ImageMediaType::WebP),
-                ]),
-        ];
+        let messages = vec![Message::new(Role::User, "compare these").with_images(vec![
+            ImageContent::new("img1", ImageMediaType::Png),
+            ImageContent::new("img2", ImageMediaType::WebP),
+        ])];
         let (_, mapped) = map_messages_anthropic(&messages);
         let content = mapped[0]["content"].as_array().unwrap();
         assert_eq!(content.len(), 3); // text + 2 images
@@ -542,7 +537,11 @@ mod tests {
 
     #[test]
     fn openai_user_message_with_image() {
-        let messages = vec![user_msg_with_image("what is this?", "abc123", ImageMediaType::Png)];
+        let messages = vec![user_msg_with_image(
+            "what is this?",
+            "abc123",
+            ImageMediaType::Png,
+        )];
         let mapped = map_messages_openai(&messages);
         assert_eq!(mapped.len(), 1);
         assert_eq!(mapped[0]["role"], "user");
@@ -559,7 +558,11 @@ mod tests {
 
     #[test]
     fn openai_user_message_image_jpeg() {
-        let messages = vec![user_msg_with_image("photo", "jpegdata", ImageMediaType::Jpeg)];
+        let messages = vec![user_msg_with_image(
+            "photo",
+            "jpegdata",
+            ImageMediaType::Jpeg,
+        )];
         let mapped = map_messages_openai(&messages);
         let content = mapped[0]["content"].as_array().unwrap();
         assert_eq!(
@@ -572,7 +575,11 @@ mod tests {
 
     #[test]
     fn gemini_user_message_with_image() {
-        let messages = vec![user_msg_with_image("analyze this", "abc123", ImageMediaType::Gif)];
+        let messages = vec![user_msg_with_image(
+            "analyze this",
+            "abc123",
+            ImageMediaType::Gif,
+        )];
         let (_, mapped) = map_messages_gemini_parts(&messages);
         assert_eq!(mapped.len(), 1);
         assert_eq!(mapped[0]["role"], "user");
@@ -585,10 +592,8 @@ mod tests {
 
     #[test]
     fn gemini_user_message_image_only() {
-        let messages = vec![
-            Message::new(Role::User, "")
-                .with_images(vec![ImageContent::new("webpdata", ImageMediaType::WebP)]),
-        ];
+        let messages = vec![Message::new(Role::User, "")
+            .with_images(vec![ImageContent::new("webpdata", ImageMediaType::WebP)])];
         let (_, mapped) = map_messages_gemini_parts(&messages);
         let parts = mapped[0]["parts"].as_array().unwrap();
         assert_eq!(parts.len(), 1); // no text part

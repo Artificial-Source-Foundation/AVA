@@ -23,4 +23,3 @@ pub struct CodebaseIndex {
     pub graph: DependencyGraph,
     pub pagerank: HashMap<String, f64>,
 }
-

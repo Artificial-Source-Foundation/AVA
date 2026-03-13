@@ -63,13 +63,12 @@ impl CopilotProvider {
         }
 
         // Exchange for new token
-        let token =
-            ava_auth::copilot::exchange_copilot_token(&self.github_oauth_token)
-                .await
-                .map_err(|e| AvaError::ProviderError {
-                    provider: "copilot".to_string(),
-                    message: e.to_string(),
-                })?;
+        let token = ava_auth::copilot::exchange_copilot_token(&self.github_oauth_token)
+            .await
+            .map_err(|e| AvaError::ProviderError {
+                provider: "copilot".to_string(),
+                message: e.to_string(),
+            })?;
 
         // Pre-warm the connection pool for the resolved endpoint
         let _ = self.pool.get_client(&token.api_endpoint).await;
@@ -93,15 +92,21 @@ impl CopilotProvider {
         let mut headers = HeaderMap::new();
         headers.insert(
             "Authorization",
-            HeaderValue::from_str(&format!("Bearer {token}")).unwrap_or_else(|_| {
-                HeaderValue::from_static("Bearer invalid")
-            }),
+            HeaderValue::from_str(&format!("Bearer {token}"))
+                .unwrap_or_else(|_| HeaderValue::from_static("Bearer invalid")),
         );
-        headers.insert("X-Initiator", HeaderValue::from_static(
-            if initiator == "user" { "user" } else { "agent" }
-        ));
-        headers.insert("Openai-Intent", HeaderValue::from_static("conversation-edits"));
-        headers.insert("User-Agent", HeaderValue::from_static("GitHubCopilotChat/0.35.0"));
+        headers.insert(
+            "X-Initiator",
+            HeaderValue::from_static(if initiator == "user" { "user" } else { "agent" }),
+        );
+        headers.insert(
+            "Openai-Intent",
+            HeaderValue::from_static("conversation-edits"),
+        );
+        headers.insert(
+            "User-Agent",
+            HeaderValue::from_static("GitHubCopilotChat/0.35.0"),
+        );
         headers.insert("Editor-Version", HeaderValue::from_static("vscode/1.107.0"));
         headers.insert(
             "Editor-Plugin-Version",
@@ -505,13 +510,27 @@ mod tests {
     fn build_headers_contains_required_fields() {
         let headers = CopilotProvider::build_headers("test-token", "user");
 
-        assert!(headers.get("Authorization").unwrap().to_str().unwrap().contains("Bearer test-token"));
+        assert!(headers
+            .get("Authorization")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("Bearer test-token"));
         assert_eq!(headers.get("X-Initiator").unwrap(), "user");
         assert_eq!(headers.get("Openai-Intent").unwrap(), "conversation-edits");
-        assert_eq!(headers.get("User-Agent").unwrap(), "GitHubCopilotChat/0.35.0");
+        assert_eq!(
+            headers.get("User-Agent").unwrap(),
+            "GitHubCopilotChat/0.35.0"
+        );
         assert_eq!(headers.get("Editor-Version").unwrap(), "vscode/1.107.0");
-        assert_eq!(headers.get("Editor-Plugin-Version").unwrap(), "copilot-chat/0.35.0");
-        assert_eq!(headers.get("Copilot-Integration-Id").unwrap(), "vscode-chat");
+        assert_eq!(
+            headers.get("Editor-Plugin-Version").unwrap(),
+            "copilot-chat/0.35.0"
+        );
+        assert_eq!(
+            headers.get("Copilot-Integration-Id").unwrap(),
+            "vscode-chat"
+        );
     }
 
     #[test]
@@ -627,7 +646,8 @@ mod tests {
         let provider = CopilotProvider::new(pool, "token", "claude-sonnet-4");
 
         let messages = vec![Message::new(Role::User, "Hello")];
-        let body = provider.build_request_body_with_thinking(&messages, &[], false, ThinkingLevel::Medium);
+        let body =
+            provider.build_request_body_with_thinking(&messages, &[], false, ThinkingLevel::Medium);
 
         assert_eq!(body["reasoning_effort"], "medium");
     }
@@ -638,7 +658,8 @@ mod tests {
         let provider = CopilotProvider::new(pool, "token", "claude-sonnet-4");
 
         let messages = vec![Message::new(Role::User, "Hello")];
-        let body = provider.build_request_body_with_thinking(&messages, &[], false, ThinkingLevel::Off);
+        let body =
+            provider.build_request_body_with_thinking(&messages, &[], false, ThinkingLevel::Off);
 
         assert!(body.get("reasoning_effort").is_none());
     }
@@ -649,7 +670,8 @@ mod tests {
         let provider = CopilotProvider::new(pool, "token", "o3");
 
         let messages = vec![Message::new(Role::User, "Hello")];
-        let body = provider.build_request_body_with_thinking(&messages, &[], false, ThinkingLevel::Max);
+        let body =
+            provider.build_request_body_with_thinking(&messages, &[], false, ThinkingLevel::Max);
 
         assert_eq!(body["reasoning_effort"], "high");
     }
@@ -660,7 +682,8 @@ mod tests {
         let provider = CopilotProvider::new(pool, "token", "gpt-4o");
 
         let messages = vec![Message::new(Role::User, "Hello")];
-        let body = provider.build_request_body_with_thinking(&messages, &[], false, ThinkingLevel::High);
+        let body =
+            provider.build_request_body_with_thinking(&messages, &[], false, ThinkingLevel::High);
 
         assert!(body.get("reasoning_effort").is_none());
     }

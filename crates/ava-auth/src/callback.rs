@@ -120,9 +120,7 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         drop(listener);
 
-        let server = tokio::spawn(async move {
-            listen_for_callback(port, "/callback", 5).await
-        });
+        let server = tokio::spawn(async move { listen_for_callback(port, "/callback", 5).await });
 
         // Give server a moment to bind
         tokio::time::sleep(Duration::from_millis(50)).await;

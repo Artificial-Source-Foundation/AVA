@@ -104,7 +104,10 @@ fn parse_rust_imports(content: &str) -> Vec<String> {
         .filter_map(|cap| {
             let path = cap.get(1)?.as_str();
             let crate_name = path.split("::").next()?;
-            if matches!(crate_name, "std" | "core" | "alloc" | "self" | "super" | "crate") {
+            if matches!(
+                crate_name,
+                "std" | "core" | "alloc" | "self" | "super" | "crate"
+            ) {
                 return None;
             }
             Some(crate_name.to_string())

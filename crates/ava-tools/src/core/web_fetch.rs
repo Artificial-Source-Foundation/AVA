@@ -31,8 +31,8 @@ fn is_blocked_url(url: &str) -> Result<(), AvaError> {
     }
 
     // Parse URL to extract host
-    let parsed = url::Url::parse(url)
-        .map_err(|e| AvaError::ValidationError(format!("Invalid URL: {e}")))?;
+    let parsed =
+        url::Url::parse(url).map_err(|e| AvaError::ValidationError(format!("Invalid URL: {e}")))?;
 
     let host = parsed
         .host_str()
@@ -207,20 +207,17 @@ impl Tool for WebFetchTool {
             while truncate_at > 0 && !processed.is_char_boundary(truncate_at) {
                 truncate_at -= 1;
             }
-            (
-                format!("{}[truncated]", &processed[..truncate_at]),
-                true,
-            )
+            (format!("{}[truncated]", &processed[..truncate_at]), true)
         } else {
             (processed, false)
         };
 
         // Build result with metadata
-        let mut meta = format!(
-            "URL: {final_url}\nStatus: {status}\nContent-Type: {content_type}"
-        );
+        let mut meta = format!("URL: {final_url}\nStatus: {status}\nContent-Type: {content_type}");
         if truncated {
-            meta.push_str(&format!("\nNote: Response truncated to {max_length} characters"));
+            meta.push_str(&format!(
+                "\nNote: Response truncated to {max_length} characters"
+            ));
         }
         if status >= 400 {
             meta.push_str(&format!("\nWarning: Non-success status code {status}"));
@@ -311,7 +308,9 @@ mod tests {
     #[tokio::test]
     async fn blocked_url_errors() {
         let tool = WebFetchTool::new();
-        let result = tool.execute(json!({"url": "http://localhost/secret"})).await;
+        let result = tool
+            .execute(json!({"url": "http://localhost/secret"}))
+            .await;
         assert!(result.is_err());
     }
 }

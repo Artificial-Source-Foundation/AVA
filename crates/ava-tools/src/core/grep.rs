@@ -49,12 +49,9 @@ impl Tool for GrepTool {
     }
 
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
-        let pattern = args
-            .get("pattern")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                AvaError::ValidationError("missing required field: pattern".to_string())
-            })?;
+        let pattern = args.get("pattern").and_then(Value::as_str).ok_or_else(|| {
+            AvaError::ValidationError("missing required field: pattern".to_string())
+        })?;
         let path = args.get("path").and_then(Value::as_str).unwrap_or(".");
         let include = args.get("include").and_then(Value::as_str);
 
@@ -64,9 +61,7 @@ impl Tool for GrepTool {
             .transpose()
             .map_err(|e| AvaError::ValidationError(format!("invalid include pattern: {e}")))?;
 
-        let mut searcher: Searcher = SearcherBuilder::new()
-            .line_number(true)
-            .build();
+        let mut searcher: Searcher = SearcherBuilder::new().line_number(true).build();
 
         let mut matches = Vec::new();
         let walker = WalkBuilder::new(path)
@@ -81,11 +76,7 @@ impl Tool for GrepTool {
                 Ok(d) => d,
                 Err(_) => continue,
             };
-            if !dent
-                .file_type()
-                .map(|kind| kind.is_file())
-                .unwrap_or(false)
-            {
+            if !dent.file_type().map(|kind| kind.is_file()).unwrap_or(false) {
                 continue;
             }
 

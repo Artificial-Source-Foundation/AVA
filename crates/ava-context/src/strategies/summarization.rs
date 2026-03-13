@@ -36,7 +36,9 @@ impl SummarizationStrategy {
         for msg in messages {
             // Extract file paths (common patterns: /path/to/file, ./relative)
             for word in msg.content.split_whitespace() {
-                let trimmed = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-');
+                let trimmed = word.trim_matches(|c: char| {
+                    !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-'
+                });
                 if (trimmed.starts_with('/') || trimmed.starts_with("./"))
                     && trimmed.len() > 2
                     && !file_paths.contains(&trimmed.to_string())
@@ -76,10 +78,7 @@ impl SummarizationStrategy {
         }
 
         let mut lines = Vec::new();
-        lines.push(format!(
-            "[Summary of {} previous messages]",
-            messages.len()
-        ));
+        lines.push(format!("[Summary of {} previous messages]", messages.len()));
 
         if !file_paths.is_empty() {
             let paths: Vec<_> = file_paths.iter().take(20).cloned().collect();
@@ -258,8 +257,7 @@ mod tests {
             Message::new(Role::User, "msg4"),
             Message::new(Role::User, "msg5"),
         ];
-        let (system, old, recent) =
-            SummarizationStrategy::partition_messages(&messages, 3, 2);
+        let (system, old, recent) = SummarizationStrategy::partition_messages(&messages, 3, 2);
         assert_eq!(system.len(), 1);
         assert_eq!(system[0].content, "system prompt");
         assert_eq!(old.len(), 3);

@@ -70,9 +70,9 @@ impl Tool for TodoWriteTool {
             ava_types::AvaError::ValidationError("missing required field: todos".into())
         })?;
 
-        let todos_arr = todos_val.as_array().ok_or_else(|| {
-            ava_types::AvaError::ValidationError("todos must be an array".into())
-        })?;
+        let todos_arr = todos_val
+            .as_array()
+            .ok_or_else(|| ava_types::AvaError::ValidationError("todos must be an array".into()))?;
 
         let mut items = Vec::with_capacity(todos_arr.len());
         for (i, entry) in todos_arr.iter().enumerate() {
@@ -86,14 +86,11 @@ impl Tool for TodoWriteTool {
                 })?
                 .to_string();
 
-            let status_str = entry
-                .get("status")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    ava_types::AvaError::ValidationError(format!(
-                        "todos[{i}]: missing required field: status"
-                    ))
-                })?;
+            let status_str = entry.get("status").and_then(Value::as_str).ok_or_else(|| {
+                ava_types::AvaError::ValidationError(format!(
+                    "todos[{i}]: missing required field: status"
+                ))
+            })?;
 
             let status = match status_str {
                 "pending" => TodoStatus::Pending,
@@ -143,8 +140,7 @@ impl Tool for TodoWriteTool {
             .filter(|t| !matches!(t.status, TodoStatus::Completed | TodoStatus::Cancelled))
             .count();
 
-        let list_json = serde_json::to_string_pretty(&items)
-            .unwrap_or_else(|_| "[]".to_string());
+        let list_json = serde_json::to_string_pretty(&items).unwrap_or_else(|_| "[]".to_string());
 
         Ok(ToolResult {
             call_id: String::new(),
@@ -203,8 +199,7 @@ impl Tool for TodoReadTool {
             .filter(|t| !matches!(t.status, TodoStatus::Completed | TodoStatus::Cancelled))
             .count();
 
-        let list_json = serde_json::to_string_pretty(&items)
-            .unwrap_or_else(|_| "[]".to_string());
+        let list_json = serde_json::to_string_pretty(&items).unwrap_or_else(|_| "[]".to_string());
 
         Ok(ToolResult {
             call_id: String::new(),

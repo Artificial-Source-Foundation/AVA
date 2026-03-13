@@ -15,6 +15,10 @@ const PROJECT_ROOT_FILES: &[&str] = &[
     ".github/copilot-instructions.md",
 ];
 
+/// Supported skill directories for zero-config interoperability.
+/// Order defines precedence within each scope (global/project).
+const SKILL_DIRS: &[&str] = &[".claude/skills", ".agents/skills", ".ava/skills"];
+
 /// Load project instructions from the current working directory and global config.
 /// Returns `None` if no instruction files are found.
 /// Each file's content is prefixed with `# From: <filepath>` header.
@@ -39,7 +43,11 @@ fn load_from_root(root: &Path, home: Option<&Path>) -> Option<String> {
 }
 
 /// Internal implementation that accepts explicit root, home, and extra instruction paths.
-fn load_from_root_with_extras(root: &Path, home: Option<&Path>, extra_paths: &[String]) -> Option<String> {
+fn load_from_root_with_extras(
+    root: &Path,
+    home: Option<&Path>,
+    extra_paths: &[String],
+) -> Option<String> {
     let mut seen = HashSet::new();
     let mut sections = Vec::new();
 
@@ -121,6 +129,10 @@ fn load_from_root_with_extras(root: &Path, home: Option<&Path>, extra_paths: &[S
         }
     }
 
+    // 5. Skill discovery (global first, then project).
+    // Supported roots: .claude/skills, .agents/skills, .ava/skills
+    load_skill_sections(root, home, &mut seen, &mut sections);
+
     if sections.is_empty() {
         return None;
     }
@@ -130,6 +142,91 @@ fn load_from_root_with_extras(root: &Path, home: Option<&Path>, extra_paths: &[S
         "# Project Instructions\n\nFollow the instructions below for this project.\n\n{}",
         content
     ))
+}
+
+/// Load discovered skill files as additional instruction sections.
+/// Skill files are discovered from both global and project scopes.
+fn load_skill_sections(
+    root: &Path,
+    home: Option<&Path>,
+    seen: &mut HashSet<PathBuf>,
+    sections: &mut Vec<String>,
+) {
+    if let Some(home) = home {
+        for skill_dir in SKILL_DIRS {
+            collect_skill_files(&home.join(skill_dir), sections, seen);
+        }
+    }
+
+    for skill_dir in SKILL_DIRS {
+        collect_skill_files(&root.join(skill_dir), sections, seen);
+    }
+}
+
+/// Collect SKILL.md files from a skill directory.
+/// Supported layout:
+/// - <dir>/SKILL.md
+/// - <dir>/<skill-name>/SKILL.md
+fn collect_skill_files(skill_dir: &Path, sections: &mut Vec<String>, seen: &mut HashSet<PathBuf>) {
+    if !skill_dir.is_dir() {
+        return;
+    }
+
+    let direct_skill = skill_dir.join("SKILL.md");
+    try_load_skill_file(&direct_skill, seen, sections);
+
+    if let Ok(entries) = fs::read_dir(skill_dir) {
+        let mut nested_skill_files: Vec<PathBuf> = entries
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .map(|dir| dir.join("SKILL.md"))
+            .filter(|path| path.is_file())
+            .collect();
+        nested_skill_files.sort();
+
+        for skill_file in nested_skill_files {
+            try_load_skill_file(&skill_file, seen, sections);
+        }
+    }
+}
+
+/// Try to load a skill file and append it as a section.
+/// Deduplicates by canonical path and strips optional YAML frontmatter.
+fn try_load_skill_file(path: &Path, seen: &mut HashSet<PathBuf>, sections: &mut Vec<String>) {
+    let canonical = match fs::canonicalize(path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    if !seen.insert(canonical) {
+        tracing::debug!("skipping duplicate instruction file: {}", path.display());
+        return;
+    }
+
+    let content = match fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        tracing::debug!("skipping empty instruction file: {}", path.display());
+        return;
+    }
+
+    let (_, body) = parse_frontmatter(trimmed);
+    let body = body.trim();
+    if body.is_empty() {
+        tracing::debug!(
+            "skipping empty instruction file (after frontmatter): {}",
+            path.display()
+        );
+        return;
+    }
+
+    tracing::debug!("loaded instruction file: {}", path.display());
+    sections.push(format!("# From: {}\n\n{}", path.display(), body));
 }
 
 /// Parse optional YAML frontmatter from markdown content.
@@ -236,7 +333,10 @@ fn try_load_rule_file(
 
     let body = body.trim();
     if body.is_empty() {
-        tracing::debug!("skipping empty instruction file (after frontmatter): {}", path.display());
+        tracing::debug!(
+            "skipping empty instruction file (after frontmatter): {}",
+            path.display()
+        );
         return;
     }
 
@@ -370,11 +470,8 @@ mod tests {
         // Create a symlink from ~/.ava/AGENTS.md -> project/AGENTS.md
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(
-                tmp.path().join("AGENTS.md"),
-                ava_dir.join("AGENTS.md"),
-            )
-            .unwrap();
+            std::os::unix::fs::symlink(tmp.path().join("AGENTS.md"), ava_dir.join("AGENTS.md"))
+                .unwrap();
 
             let result = load_from_root(tmp.path(), Some(fake_home.path()));
             let text = result.unwrap();
@@ -392,7 +489,10 @@ mod tests {
         fs::write(tmp.path().join("CLAUDE.md"), "   \n  \t  ").unwrap();
 
         let result = load_from_root(tmp.path(), None);
-        assert!(result.is_none(), "empty/whitespace-only files should be skipped");
+        assert!(
+            result.is_none(),
+            "empty/whitespace-only files should be skipped"
+        );
     }
 
     #[test]
@@ -506,7 +606,10 @@ mod tests {
     fn test_parse_frontmatter_basic() {
         let content = "---\npaths:\n  - \"**/*.py\"\n  - \"scripts/**\"\n---\nBody text.";
         let (paths, body) = parse_frontmatter(content);
-        assert_eq!(paths, Some(vec!["**/*.py".to_string(), "scripts/**".to_string()]));
+        assert_eq!(
+            paths,
+            Some(vec!["**/*.py".to_string(), "scripts/**".to_string()])
+        );
         assert_eq!(body.trim(), "Body text.");
     }
 
@@ -545,7 +648,11 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let custom_dir = tmp.path().join("team");
         fs::create_dir_all(&custom_dir).unwrap();
-        fs::write(custom_dir.join("conventions.md"), "Use snake_case everywhere.").unwrap();
+        fs::write(
+            custom_dir.join("conventions.md"),
+            "Use snake_case everywhere.",
+        )
+        .unwrap();
 
         let extras = vec!["team/conventions.md".to_string()];
         let result = load_from_root_with_extras(tmp.path(), None, &extras);
@@ -574,8 +681,14 @@ mod tests {
         let result = load_from_root_with_extras(tmp.path(), None, &extras);
         assert!(result.is_some());
         let text = result.unwrap();
-        assert!(text.contains("First rule."), "rule1.md should be loaded via glob");
-        assert!(text.contains("Second rule."), "rule2.md should be loaded via glob");
+        assert!(
+            text.contains("First rule."),
+            "rule1.md should be loaded via glob"
+        );
+        assert!(
+            text.contains("Second rule."),
+            "rule2.md should be loaded via glob"
+        );
         assert!(
             !text.contains("Not a markdown file."),
             "notes.txt should not match *.md glob"
@@ -588,7 +701,10 @@ mod tests {
         // No files created — the extra path points to a nonexistent file
         let extras = vec!["nonexistent/file.md".to_string()];
         let result = load_from_root_with_extras(tmp.path(), None, &extras);
-        assert!(result.is_none(), "Missing extra files should be silently skipped");
+        assert!(
+            result.is_none(),
+            "Missing extra files should be silently skipped"
+        );
     }
 
     #[test]
@@ -602,7 +718,92 @@ mod tests {
         assert!(result.is_some());
         let text = result.unwrap();
         let count = text.matches("Standard rules.").count();
-        assert_eq!(count, 1, "Same file referenced as standard and extra should appear only once");
+        assert_eq!(
+            count, 1,
+            "Same file referenced as standard and extra should appear only once"
+        );
+    }
+
+    #[test]
+    fn test_skill_discovery_project_dirs() {
+        let tmp = TempDir::new().unwrap();
+
+        let rust_skill = tmp.path().join(".ava").join("skills").join("rust");
+        let test_skill = tmp.path().join(".claude").join("skills").join("testing");
+        fs::create_dir_all(&rust_skill).unwrap();
+        fs::create_dir_all(&test_skill).unwrap();
+
+        fs::write(rust_skill.join("SKILL.md"), "Use idiomatic Rust patterns.").unwrap();
+        fs::write(
+            test_skill.join("SKILL.md"),
+            "Prefer integration tests for boundaries.",
+        )
+        .unwrap();
+
+        let result = load_from_root(tmp.path(), None);
+        assert!(result.is_some());
+        let text = result.unwrap();
+        assert!(text.contains("Use idiomatic Rust patterns."));
+        assert!(text.contains("Prefer integration tests for boundaries."));
+    }
+
+    #[test]
+    fn test_skill_discovery_global_then_project_precedence() {
+        let tmp = TempDir::new().unwrap();
+        let fake_home = TempDir::new().unwrap();
+
+        let global_skill = fake_home
+            .path()
+            .join(".agents")
+            .join("skills")
+            .join("global");
+        let project_skill = tmp.path().join(".agents").join("skills").join("project");
+        fs::create_dir_all(&global_skill).unwrap();
+        fs::create_dir_all(&project_skill).unwrap();
+
+        fs::write(global_skill.join("SKILL.md"), "Global skill guidance.").unwrap();
+        fs::write(project_skill.join("SKILL.md"), "Project skill guidance.").unwrap();
+
+        let result = load_from_root(tmp.path(), Some(fake_home.path()));
+        assert!(result.is_some());
+        let text = result.unwrap();
+
+        let global_pos = text.find("Global skill guidance.").unwrap();
+        let project_pos = text.find("Project skill guidance.").unwrap();
+        assert!(
+            global_pos < project_pos,
+            "Global skills should load before project skills"
+        );
+    }
+
+    #[test]
+    fn test_skill_discovery_ignores_non_skill_markdown() {
+        let tmp = TempDir::new().unwrap();
+        let skill_dir = tmp.path().join(".ava").join("skills").join("misc");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(skill_dir.join("README.md"), "This should not load.").unwrap();
+
+        let result = load_from_root(tmp.path(), None);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_skill_discovery_strips_frontmatter() {
+        let tmp = TempDir::new().unwrap();
+        let skill_dir = tmp.path().join(".claude").join("skills").join("react");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: React Patterns\ndescription: React guidance\n---\nUse composition-first patterns.",
+        )
+        .unwrap();
+
+        let result = load_from_root(tmp.path(), None);
+        assert!(result.is_some());
+        let text = result.unwrap();
+        assert!(text.contains("Use composition-first patterns."));
+        assert!(!text.contains("name: React Patterns"));
+        assert!(!text.contains("description: React guidance"));
     }
 
     // --- contextual_instructions_for_file tests ---
@@ -615,10 +816,7 @@ mod tests {
         fs::write(api_dir.join("AGENTS.md"), "Use REST conventions.").unwrap();
         fs::write(api_dir.join("handler.rs"), "fn handle() {}").unwrap();
 
-        let result = contextual_instructions_for_file(
-            &api_dir.join("handler.rs"),
-            tmp.path(),
-        );
+        let result = contextual_instructions_for_file(&api_dir.join("handler.rs"), tmp.path());
         assert!(result.is_some());
         let text = result.unwrap();
         assert!(text.contains("Use REST conventions."));
@@ -635,10 +833,7 @@ mod tests {
         fs::write(src_dir.join("AGENTS.md"), "Source-level rules.").unwrap();
         fs::write(api_dir.join("handler.rs"), "fn handle() {}").unwrap();
 
-        let result = contextual_instructions_for_file(
-            &api_dir.join("handler.rs"),
-            tmp.path(),
-        );
+        let result = contextual_instructions_for_file(&api_dir.join("handler.rs"), tmp.path());
         assert!(result.is_some());
         let text = result.unwrap();
         assert!(
@@ -657,10 +852,7 @@ mod tests {
         fs::write(tmp.path().join("AGENTS.md"), "Should NOT appear.").unwrap();
         fs::write(subdir.join("main.rs"), "fn main() {}").unwrap();
 
-        let result = contextual_instructions_for_file(
-            &subdir.join("main.rs"),
-            &project_root,
-        );
+        let result = contextual_instructions_for_file(&subdir.join("main.rs"), &project_root);
         assert!(
             result.is_none(),
             "Should not find AGENTS.md above project root"
@@ -675,11 +867,11 @@ mod tests {
         fs::write(subdir.join("main.rs"), "fn main() {}").unwrap();
         // No AGENTS.md anywhere
 
-        let result = contextual_instructions_for_file(
-            &subdir.join("main.rs"),
-            tmp.path(),
+        let result = contextual_instructions_for_file(&subdir.join("main.rs"), tmp.path());
+        assert!(
+            result.is_none(),
+            "Should return None when no AGENTS.md exists"
         );
-        assert!(result.is_none(), "Should return None when no AGENTS.md exists");
     }
 
     #[test]
@@ -693,10 +885,7 @@ mod tests {
         fs::write(api_dir.join("AGENTS.md"), "API-specific rules.").unwrap();
         fs::write(api_dir.join("handler.rs"), "fn handle() {}").unwrap();
 
-        let result = contextual_instructions_for_file(
-            &api_dir.join("handler.rs"),
-            tmp.path(),
-        );
+        let result = contextual_instructions_for_file(&api_dir.join("handler.rs"), tmp.path());
         assert!(result.is_some());
         let text = result.unwrap();
         assert!(
@@ -719,10 +908,7 @@ mod tests {
         fs::write(tmp.path().join("AGENTS.md"), "Root instructions.").unwrap();
         fs::write(subdir.join("main.rs"), "fn main() {}").unwrap();
 
-        let result = contextual_instructions_for_file(
-            &subdir.join("main.rs"),
-            tmp.path(),
-        );
+        let result = contextual_instructions_for_file(&subdir.join("main.rs"), tmp.path());
         assert!(result.is_some());
         let text = result.unwrap();
         assert!(

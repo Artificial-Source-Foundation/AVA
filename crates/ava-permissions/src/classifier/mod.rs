@@ -150,8 +150,8 @@ fn classify_single_command(command: &str) -> CommandClassification {
     }
 
     // Try tree-sitter for word extraction
-    let words = extract_words_treesitter(command)
-        .unwrap_or_else(|| extract_words_heuristic(command));
+    let words =
+        extract_words_treesitter(command).unwrap_or_else(|| extract_words_heuristic(command));
 
     let first_word = words.first().map(|s| s.as_str()).unwrap_or("");
 

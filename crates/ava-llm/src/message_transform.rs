@@ -59,7 +59,11 @@ impl ProviderKind {
     /// Infer provider kind from a provider name string.
     pub fn from_provider_name(name: &str) -> Self {
         match name {
-            "anthropic" | "alibaba" | "alibaba-cn" | "kimi-for-coding" | "minimax-coding-plan"
+            "anthropic"
+            | "alibaba"
+            | "alibaba-cn"
+            | "kimi-for-coding"
+            | "minimax-coding-plan"
             | "minimax-cn-coding-plan" => Self::Anthropic,
             "openai" | "zai-coding-plan" | "zhipuai-coding-plan" => Self::OpenAI,
             "gemini" => Self::Gemini,
@@ -496,10 +500,7 @@ mod tests {
         let id1 = "x".repeat(100);
         let id2 = "y".repeat(150);
         let messages = vec![
-            assistant_with_tool_calls(
-                "",
-                vec![tc(&id1, "read_file"), tc(&id2, "write_file")],
-            ),
+            assistant_with_tool_calls("", vec![tc(&id1, "read_file"), tc(&id2, "write_file")]),
             tool_result("result1", &id1),
             tool_result("result2", &id2),
         ];
@@ -508,14 +509,8 @@ mod tests {
         let norm_id2 = &result[0].tool_calls[1].id;
         assert!(norm_id1.len() <= MAX_TOOL_CALL_ID_LEN);
         assert!(norm_id2.len() <= MAX_TOOL_CALL_ID_LEN);
-        assert_eq!(
-            result[1].tool_call_id.as_deref(),
-            Some(norm_id1.as_str())
-        );
-        assert_eq!(
-            result[2].tool_call_id.as_deref(),
-            Some(norm_id2.as_str())
-        );
+        assert_eq!(result[1].tool_call_id.as_deref(), Some(norm_id1.as_str()));
+        assert_eq!(result[2].tool_call_id.as_deref(), Some(norm_id2.as_str()));
     }
 
     // ── Orphaned tool result repair ────────────────────────────────────
@@ -571,10 +566,7 @@ mod tests {
 
     #[test]
     fn tool_result_without_call_id_not_touched() {
-        let messages = vec![
-            msg(Role::User, "something"),
-            msg(Role::Tool, "bare result"),
-        ];
+        let messages = vec![msg(Role::User, "something"), msg(Role::Tool, "bare result")];
         let result = normalize_messages(&messages, ProviderKind::OpenAI);
         assert_eq!(result.len(), 2);
     }
@@ -697,9 +689,7 @@ mod tests {
         // Orphaned tool result repaired (synthetic assistant inserted before it)
         let orphan_idx = result
             .iter()
-            .position(|m| {
-                m.role == Role::Tool && m.tool_call_id.as_deref() == Some("missing_call")
-            })
+            .position(|m| m.role == Role::Tool && m.tool_call_id.as_deref() == Some("missing_call"))
             .unwrap();
         assert_eq!(result[orphan_idx - 1].role, Role::Assistant);
         assert_eq!(result[orphan_idx - 1].tool_calls[0].id, "missing_call");
@@ -751,10 +741,7 @@ mod tests {
 
     #[test]
     fn strip_tag_block_no_match() {
-        assert_eq!(
-            strip_tag_block("no tags here", "x"),
-            "no tags here"
-        );
+        assert_eq!(strip_tag_block("no tags here", "x"), "no tags here");
     }
 
     #[test]

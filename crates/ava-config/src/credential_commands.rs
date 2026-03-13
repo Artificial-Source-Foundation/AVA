@@ -103,7 +103,10 @@ where
                 }
                 Ok(format!("{} credentials removed", provider_name(&provider)))
             } else {
-                Ok(format!("{} credentials were not configured", provider_name(&provider)))
+                Ok(format!(
+                    "{} credentials were not configured",
+                    provider_name(&provider)
+                ))
             }
         }
         CredentialCommand::List => {
@@ -122,11 +125,7 @@ where
                         } else {
                             redact_key(&credential.api_key)
                         };
-                        let mut line = format!(
-                            "{}: {}",
-                            provider_name(provider),
-                            key_display,
-                        );
+                        let mut line = format!("{}: {}", provider_name(provider), key_display,);
                         if let Some(ref base_url) = credential.base_url {
                             line.push_str(&format!(" (base_url: {base_url})"));
                         }

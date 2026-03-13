@@ -300,7 +300,11 @@ mod tests {
     fn auto_approve_blocks_sudo() {
         let inspector = default_inspector();
         let ctx = test_context(true);
-        let result = inspector.inspect("bash", &serde_json::json!({"command": "sudo rm -rf /tmp"}), &ctx);
+        let result = inspector.inspect(
+            "bash",
+            &serde_json::json!({"command": "sudo rm -rf /tmp"}),
+            &ctx,
+        );
         assert_eq!(result.action, Action::Deny);
     }
 
@@ -540,7 +544,11 @@ mod tests {
     fn codebase_search_is_safe() {
         let inspector = default_inspector();
         let ctx = test_context(false);
-        let result = inspector.inspect("codebase_search", &serde_json::json!({"query": "foo"}), &ctx);
+        let result = inspector.inspect(
+            "codebase_search",
+            &serde_json::json!({"query": "foo"}),
+            &ctx,
+        );
         assert_eq!(result.risk_level, RiskLevel::Safe);
         assert_eq!(result.action, Action::Allow);
     }
@@ -551,7 +559,11 @@ mod tests {
         let ctx = test_context(false);
         for tool in &["remember", "recall", "memory_search"] {
             let result = inspector.inspect(tool, &serde_json::json!({}), &ctx);
-            assert_eq!(result.risk_level, RiskLevel::Safe, "expected Safe for {tool}");
+            assert_eq!(
+                result.risk_level,
+                RiskLevel::Safe,
+                "expected Safe for {tool}"
+            );
             assert_eq!(result.action, Action::Allow, "expected Allow for {tool}");
         }
     }
@@ -562,7 +574,11 @@ mod tests {
         let ctx = test_context(false);
         for tool in &["session_search", "session_list", "session_load"] {
             let result = inspector.inspect(tool, &serde_json::json!({}), &ctx);
-            assert_eq!(result.risk_level, RiskLevel::Safe, "expected Safe for {tool}");
+            assert_eq!(
+                result.risk_level,
+                RiskLevel::Safe,
+                "expected Safe for {tool}"
+            );
             assert_eq!(result.action, Action::Allow, "expected Allow for {tool}");
         }
     }

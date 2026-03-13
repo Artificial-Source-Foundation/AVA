@@ -502,7 +502,7 @@ impl App {
             self.state
                 .messages
                 .push(UiMessage::new(MessageKind::User, goal));
-            self.launch_background_agent(bg_goal, app_tx);
+            self.launch_background_agent(bg_goal.goal, app_tx, bg_goal.isolated_branch);
             return;
         }
 

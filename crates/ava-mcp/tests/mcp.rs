@@ -141,10 +141,7 @@ async fn client_protocol_with_mock_transport() {
 
         // initialized notification
         let notif = server_transport.receive().await.unwrap();
-        assert_eq!(
-            notif.method.as_deref(),
-            Some("notifications/initialized")
-        );
+        assert_eq!(notif.method.as_deref(), Some("notifications/initialized"));
 
         // tools/list
         let req = server_transport.receive().await.unwrap();
@@ -188,10 +185,16 @@ async fn client_protocol_with_mock_transport() {
 
     let mut client = MCPClient::new(Box::new(client_transport), "mock");
 
-    let caps = client.initialize().await.expect("initialize should succeed");
+    let caps = client
+        .initialize()
+        .await
+        .expect("initialize should succeed");
     assert!(caps.tools);
 
-    let tools = client.list_tools().await.expect("list_tools should succeed");
+    let tools = client
+        .list_tools()
+        .await
+        .expect("list_tools should succeed");
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0].name, "echo");
 
@@ -202,7 +205,10 @@ async fn client_protocol_with_mock_transport() {
     let text = result["content"][0]["text"].as_str().unwrap();
     assert_eq!(text, "from-client");
 
-    client.disconnect().await.expect("disconnect should succeed");
+    client
+        .disconnect()
+        .await
+        .expect("disconnect should succeed");
     server.await.unwrap();
 }
 
@@ -269,10 +275,16 @@ while True:
 
     let mut client = MCPClient::new(Box::new(transport), "mock");
 
-    let caps = client.initialize().await.expect("initialize should succeed");
+    let caps = client
+        .initialize()
+        .await
+        .expect("initialize should succeed");
     assert!(caps.tools);
 
-    let tools = client.list_tools().await.expect("list_tools should succeed");
+    let tools = client
+        .list_tools()
+        .await
+        .expect("list_tools should succeed");
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0].name, "echo");
 
@@ -283,7 +295,10 @@ while True:
     let text = result["content"][0]["text"].as_str().unwrap();
     assert_eq!(text, "from-client");
 
-    client.disconnect().await.expect("disconnect should succeed");
+    client
+        .disconnect()
+        .await
+        .expect("disconnect should succeed");
 }
 
 #[test]

@@ -3,7 +3,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use ava_platform::Platform;
+use ava_permissions::classifier::classify_bash_command;
+use ava_permissions::tags::RiskLevel;
+use ava_platform::{ExecuteOptions, Platform};
 use ava_types::{AvaError, ToolResult};
 use serde_json::{json, Value};
 
@@ -52,25 +54,29 @@ impl Tool for TestRunnerTool {
             .unwrap_or(DEFAULT_TIMEOUT_MS / 1000);
 
         let base_command = if let Some(cmd) = custom_command {
+            validate_custom_command(cmd)?;
             cmd.to_string()
         } else {
             detect_test_command(&*self.platform).await?
         };
 
         let command = if let Some(f) = filter {
-            format!("{base_command} {f}")
+            format!("{base_command} {}", shell_single_quote(f))
         } else {
             base_command
         };
 
-        let output = tokio::time::timeout(
-            Duration::from_secs(timeout_secs),
-            self.platform.execute(&command),
-        )
-        .await
-        .map_err(|_| {
-            AvaError::TimeoutError(format!("test command timed out after {timeout_secs}s"))
-        })??;
+        let output = self
+            .platform
+            .execute_with_options(
+                &command,
+                ExecuteOptions {
+                    timeout: Some(Duration::from_secs(timeout_secs)),
+                    working_dir: None,
+                    env_vars: Vec::new(),
+                },
+            )
+            .await?;
 
         let mut combined = format!("{}\n{}", output.stdout, output.stderr);
         truncate_split(&mut combined, MAX_OUTPUT_BYTES);
@@ -97,7 +103,9 @@ async fn detect_test_command(platform: &dyn Platform) -> ava_types::Result<Strin
     if platform.exists(Path::new("package.json")).await {
         return Ok("npm test".to_string());
     }
-    if platform.exists(Path::new("pyproject.toml")).await || platform.exists(Path::new("pytest.ini")).await {
+    if platform.exists(Path::new("pyproject.toml")).await
+        || platform.exists(Path::new("pytest.ini")).await
+    {
         return Ok("pytest".to_string());
     }
     if platform.exists(Path::new("go.mod")).await {
@@ -117,13 +125,27 @@ fn truncate_split(content: &mut String, max_bytes: usize) {
     while !content.is_char_boundary(start_end) {
         start_end -= 1;
     }
-    let mut tail_start = content.len() - half;
-    while !content.is_char_boundary(tail_start) {
+    let mut tail_start = content.len().saturating_sub(half);
+    while tail_start < content.len() && !content.is_char_boundary(tail_start) {
         tail_start += 1;
     }
     let head = content[..start_end].to_string();
     let tail = content[tail_start..].to_string();
     *content = format!("{head}\n[...truncated...]\n{tail}");
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn validate_custom_command(command: &str) -> ava_types::Result<()> {
+    let classification = classify_bash_command(command);
+    if classification.blocked || classification.risk_level > RiskLevel::Low {
+        return Err(AvaError::PermissionDenied(
+            "custom test command must be safe or low-risk".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -143,5 +165,23 @@ mod tests {
         truncate_split(&mut s, 100);
         assert!(s.contains("[...truncated...]"));
         assert!(s.len() < 200);
+    }
+
+    #[test]
+    fn truncate_split_handles_multibyte_content() {
+        let mut s = "\u{1F600}".repeat(200);
+        truncate_split(&mut s, 100);
+        assert!(s.contains("[...truncated...]"));
+    }
+
+    #[test]
+    fn shell_quote_escapes_single_quotes() {
+        assert_eq!(shell_single_quote("test name"), "'test name'");
+        assert_eq!(shell_single_quote("a'b"), "'a'\\''b'");
+    }
+
+    #[test]
+    fn validate_custom_command_rejects_dangerous() {
+        assert!(validate_custom_command("rm -rf /").is_err());
     }
 }

@@ -40,18 +40,16 @@ impl Tool for ApplyPatchTool {
     }
 
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
-        let patch_text = args
-            .get("patch")
-            .and_then(Value::as_str)
-            .ok_or_else(|| AvaError::ValidationError("missing required field: patch".to_string()))?;
-        let strip = args
-            .get("strip")
-            .and_then(Value::as_u64)
-            .unwrap_or(1) as usize;
+        let patch_text = args.get("patch").and_then(Value::as_str).ok_or_else(|| {
+            AvaError::ValidationError("missing required field: patch".to_string())
+        })?;
+        let strip = args.get("strip").and_then(Value::as_u64).unwrap_or(1) as usize;
 
         let file_patches = parse_unified_diff(patch_text, strip)?;
         if file_patches.is_empty() {
-            return Err(AvaError::ToolError("No file patches found in diff".to_string()));
+            return Err(AvaError::ToolError(
+                "No file patches found in diff".to_string(),
+            ));
         }
 
         let mut total_applied = 0usize;

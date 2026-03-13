@@ -11,8 +11,7 @@ pub struct PathRisk {
 }
 
 const SYSTEM_PREFIXES: &[&str] = &[
-    "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64",
-    "/boot", "/sys", "/proc", "/var/run",
+    "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64", "/boot", "/sys", "/proc", "/var/run",
 ];
 
 /// Analyze the risk of accessing a file path relative to the workspace.
@@ -143,9 +142,20 @@ mod tests {
 
     #[test]
     fn system_paths_are_critical() {
-        for path in &["/etc/passwd", "/usr/bin/ls", "/bin/sh", "/boot/vmlinuz", "/proc/cpuinfo", "/sys/class"] {
+        for path in &[
+            "/etc/passwd",
+            "/usr/bin/ls",
+            "/bin/sh",
+            "/boot/vmlinuz",
+            "/proc/cpuinfo",
+            "/sys/class",
+        ] {
             let result = analyze_path(path, &ws());
-            assert_eq!(result.risk_level, RiskLevel::Critical, "Expected Critical for {path}");
+            assert_eq!(
+                result.risk_level,
+                RiskLevel::Critical,
+                "Expected Critical for {path}"
+            );
             assert!(result.system_path, "Expected system_path for {path}");
         }
     }

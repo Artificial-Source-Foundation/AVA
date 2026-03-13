@@ -230,7 +230,10 @@ mod tests {
     async fn unavailable_binary_returns_false() {
         let mut cfg = claude_test_config();
         cfg.binary = "__definitely_missing_binary__".to_string();
-        cfg.version_command = vec!["__definitely_missing_binary__".to_string(), "--version".to_string()];
+        cfg.version_command = vec![
+            "__definitely_missing_binary__".to_string(),
+            "--version".to_string(),
+        ];
 
         let runner = CLIAgentRunner::new(cfg);
         assert!(!runner.is_available().await);

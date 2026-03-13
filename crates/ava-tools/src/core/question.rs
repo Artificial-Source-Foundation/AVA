@@ -114,9 +114,7 @@ impl Tool for QuestionTool {
 
         // Wait for the user's answer
         let answer = reply_rx.await.map_err(|_| {
-            AvaError::ToolError(
-                "Question was not answered — the UI channel was closed".to_string(),
-            )
+            AvaError::ToolError("Question was not answered — the UI channel was closed".to_string())
         })?;
 
         if answer.is_empty() {
@@ -207,10 +205,7 @@ mod tests {
             req.reply.send(String::new()).unwrap();
         });
 
-        let result = tool
-            .execute(json!({"question": "What?"}))
-            .await
-            .unwrap();
+        let result = tool.execute(json!({"question": "What?"})).await.unwrap();
         assert!(!result.is_error);
         assert!(result.content.contains("declined"));
 

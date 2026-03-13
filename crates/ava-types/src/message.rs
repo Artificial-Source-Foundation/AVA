@@ -82,9 +82,7 @@ impl ImageContent {
             .ok_or_else(|| format!("No file extension: {}", path.display()))?;
 
         let media_type = ImageMediaType::from_extension(ext).ok_or_else(|| {
-            format!(
-                "Unsupported image format '.{ext}'. Supported: png, jpg, jpeg, gif, webp"
-            )
+            format!("Unsupported image format '.{ext}'. Supported: png, jpg, jpeg, gif, webp")
         })?;
 
         let bytes = std::fs::read(path)
@@ -200,13 +198,34 @@ mod tests {
 
     #[test]
     fn test_image_media_type_from_extension() {
-        assert_eq!(ImageMediaType::from_extension("png"), Some(ImageMediaType::Png));
-        assert_eq!(ImageMediaType::from_extension("PNG"), Some(ImageMediaType::Png));
-        assert_eq!(ImageMediaType::from_extension("jpg"), Some(ImageMediaType::Jpeg));
-        assert_eq!(ImageMediaType::from_extension("jpeg"), Some(ImageMediaType::Jpeg));
-        assert_eq!(ImageMediaType::from_extension("JPEG"), Some(ImageMediaType::Jpeg));
-        assert_eq!(ImageMediaType::from_extension("gif"), Some(ImageMediaType::Gif));
-        assert_eq!(ImageMediaType::from_extension("webp"), Some(ImageMediaType::WebP));
+        assert_eq!(
+            ImageMediaType::from_extension("png"),
+            Some(ImageMediaType::Png)
+        );
+        assert_eq!(
+            ImageMediaType::from_extension("PNG"),
+            Some(ImageMediaType::Png)
+        );
+        assert_eq!(
+            ImageMediaType::from_extension("jpg"),
+            Some(ImageMediaType::Jpeg)
+        );
+        assert_eq!(
+            ImageMediaType::from_extension("jpeg"),
+            Some(ImageMediaType::Jpeg)
+        );
+        assert_eq!(
+            ImageMediaType::from_extension("JPEG"),
+            Some(ImageMediaType::Jpeg)
+        );
+        assert_eq!(
+            ImageMediaType::from_extension("gif"),
+            Some(ImageMediaType::Gif)
+        );
+        assert_eq!(
+            ImageMediaType::from_extension("webp"),
+            Some(ImageMediaType::WebP)
+        );
         assert_eq!(ImageMediaType::from_extension("bmp"), None);
         assert_eq!(ImageMediaType::from_extension("svg"), None);
         assert_eq!(ImageMediaType::from_extension(""), None);
@@ -257,7 +276,9 @@ mod tests {
         assert_eq!(img.media_type, ImageMediaType::Png);
         // Verify it's valid base64
         use base64::Engine;
-        let decoded = base64::engine::general_purpose::STANDARD.decode(&img.data).unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&img.data)
+            .unwrap();
         assert_eq!(decoded, b"fake png data");
 
         std::fs::remove_file(&path).ok();
@@ -307,11 +328,10 @@ mod tests {
 
     #[test]
     fn test_message_with_images() {
-        let msg = Message::new(Role::User, "describe this image")
-            .with_images(vec![
-                ImageContent::new("img1data", ImageMediaType::Png),
-                ImageContent::new("img2data", ImageMediaType::Jpeg),
-            ]);
+        let msg = Message::new(Role::User, "describe this image").with_images(vec![
+            ImageContent::new("img1data", ImageMediaType::Png),
+            ImageContent::new("img2data", ImageMediaType::Jpeg),
+        ]);
         assert!(msg.has_images());
         assert_eq!(msg.images.len(), 2);
     }

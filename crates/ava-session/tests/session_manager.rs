@@ -91,7 +91,8 @@ fn delete_removes_session() {
 
 #[test]
 fn save_load_roundtrip_preserves_tool_calls() {
-    let manager = SessionManager::new(temp_db_path("roundtrip_tools")).expect("manager should init");
+    let manager =
+        SessionManager::new(temp_db_path("roundtrip_tools")).expect("manager should init");
     let mut session = manager.create().expect("create should work");
 
     let tc = ava_types::ToolCall {
@@ -129,8 +130,7 @@ fn save_load_roundtrip_preserves_tool_calls() {
 
 #[test]
 fn list_recent_with_many_sessions() {
-    let manager =
-        SessionManager::new(temp_db_path("many_sessions")).expect("manager should init");
+    let manager = SessionManager::new(temp_db_path("many_sessions")).expect("manager should init");
 
     for i in 0..100 {
         let mut session = manager.create().expect("create should work");

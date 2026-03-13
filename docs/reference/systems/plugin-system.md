@@ -1,6 +1,6 @@
 # Plugin & Extension System
 
-AVA supports three kinds of extensible tools beyond its 19 built-in ones:
+AVA supports three kinds of extensible tools beyond its 6 built-in default tools and 7 extended opt-in tools:
 custom TOML tools, MCP (Model Context Protocol) server tools, and a native/WASM
 extension system. This document covers how each works and how a developer would
 extend AVA today.

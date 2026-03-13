@@ -169,12 +169,7 @@ impl ToolRegistry {
         }
 
         let tool = self.tools.get(&tool_call.name).ok_or_else(|| {
-            let available = self
-                .tools
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", ");
+            let available = self.tools.keys().cloned().collect::<Vec<_>>().join(", ");
             AvaError::ToolNotFound {
                 tool: tool_call.name.clone(),
                 available,

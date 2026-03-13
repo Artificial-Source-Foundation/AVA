@@ -23,7 +23,10 @@ fn token_count_increases_when_messages_added() {
 fn should_compact_at_eighty_percent_threshold() {
     let mut manager = ContextManager::new(50);
     // Use multi-word content so word-based token estimator counts enough tokens
-    let words = (0..60).map(|i| format!("word{i}")).collect::<Vec<_>>().join(" ");
+    let words = (0..60)
+        .map(|i| format!("word{i}"))
+        .collect::<Vec<_>>()
+        .join(" ");
     manager.add_message(Message::new(Role::User, words));
 
     assert!(manager.should_compact());
@@ -34,7 +37,10 @@ fn compact_reduces_message_set_when_over_limit() {
     let mut manager = ContextManager::new(40);
 
     for i in 0..8 {
-        let words = (0..20).map(|j| format!("w{i}_{j}")).collect::<Vec<_>>().join(" ");
+        let words = (0..20)
+            .map(|j| format!("w{i}_{j}"))
+            .collect::<Vec<_>>()
+            .join(" ");
         manager.add_message(Message::new(Role::User, words));
     }
 
@@ -87,7 +93,10 @@ fn compact_preserves_system_prompt() {
 
     // Fill with enough messages to trigger compaction
     for i in 0..10 {
-        let words = (0..20).map(|j| format!("w{i}_{j}")).collect::<Vec<_>>().join(" ");
+        let words = (0..20)
+            .map(|j| format!("w{i}_{j}"))
+            .collect::<Vec<_>>()
+            .join(" ");
         manager.add_message(Message::new(Role::User, words));
     }
 
@@ -95,7 +104,10 @@ fn compact_preserves_system_prompt() {
     manager.compact().expect("compaction should succeed");
 
     let messages = manager.get_messages();
-    assert!(!messages.is_empty(), "should have messages after compaction");
+    assert!(
+        !messages.is_empty(),
+        "should have messages after compaction"
+    );
     assert_eq!(
         messages[0].role,
         Role::System,

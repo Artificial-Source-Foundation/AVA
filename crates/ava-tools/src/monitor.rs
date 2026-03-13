@@ -71,9 +71,15 @@ impl ToolMonitor {
 
     /// Record a tool execution.
     pub fn record(&mut self, execution: ToolExecution) {
-        *self.tool_counts.entry(execution.tool_name.clone()).or_insert(0) += 1;
+        *self
+            .tool_counts
+            .entry(execution.tool_name.clone())
+            .or_insert(0) += 1;
         if !execution.success {
-            *self.error_counts.entry(execution.tool_name.clone()).or_insert(0) += 1;
+            *self
+                .error_counts
+                .entry(execution.tool_name.clone())
+                .or_insert(0) += 1;
         }
         self.total_duration += execution.duration;
         self.history.push(execution);

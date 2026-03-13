@@ -56,9 +56,12 @@ pub async fn load_mcp_config(path: &Path) -> Result<Vec<MCPServerConfig>> {
         return Ok(Vec::new());
     }
 
-    let contents = tokio::fs::read_to_string(path)
-        .await
-        .map_err(|e| AvaError::IoError(format!("failed to read MCP config at {}: {e}", path.display())))?;
+    let contents = tokio::fs::read_to_string(path).await.map_err(|e| {
+        AvaError::IoError(format!(
+            "failed to read MCP config at {}: {e}",
+            path.display()
+        ))
+    })?;
 
     let config: MCPConfigFile = serde_json::from_str(&contents)
         .map_err(|e| AvaError::SerializationError(format!("invalid MCP config: {e}")))?;
@@ -77,10 +80,8 @@ pub async fn load_merged_mcp_config(global: &Path, project: &Path) -> Result<Vec
     }
 
     // Project overrides global by server name
-    let project_names: std::collections::HashSet<&str> = project_configs
-        .iter()
-        .map(|c| c.name.as_str())
-        .collect();
+    let project_names: std::collections::HashSet<&str> =
+        project_configs.iter().map(|c| c.name.as_str()).collect();
 
     global_configs.retain(|c| !project_names.contains(c.name.as_str()));
     global_configs.extend(project_configs);

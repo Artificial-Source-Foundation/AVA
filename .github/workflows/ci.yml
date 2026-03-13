@@ -113,7 +113,7 @@ jobs:
           components: rustfmt
 
       - name: Check formatting
-        run: cargo fmt --check
+        run: cargo fmt --all --check
 
   rust-clippy:
     name: Rust Clippy
@@ -144,8 +144,11 @@ jobs:
       - name: Cache cargo registry & build
         uses: Swatinem/rust-cache@v2
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo nextest run --workspace --profile ci
 
   security:
     name: Security Audit

@@ -129,8 +129,20 @@ mod tests {
     #[test]
     fn record_and_retrieve() {
         let mut log = AuditLog::new();
-        log.record("bash", "ls -la", RiskLevel::Safe, vec![], AuditDecision::AutoApproved);
-        log.record("write", "file.rs", RiskLevel::Low, vec![SafetyTag::WriteFile], AuditDecision::UserApproved);
+        log.record(
+            "bash",
+            "ls -la",
+            RiskLevel::Safe,
+            vec![],
+            AuditDecision::AutoApproved,
+        );
+        log.record(
+            "write",
+            "file.rs",
+            RiskLevel::Low,
+            vec![SafetyTag::WriteFile],
+            AuditDecision::UserApproved,
+        );
 
         assert_eq!(log.len(), 2);
         let recent = log.recent(10);
@@ -143,7 +155,13 @@ mod tests {
     fn recent_returns_last_n() {
         let mut log = AuditLog::new();
         for i in 0..10 {
-            log.record(format!("tool_{i}"), "", RiskLevel::Safe, vec![], AuditDecision::AutoApproved);
+            log.record(
+                format!("tool_{i}"),
+                "",
+                RiskLevel::Safe,
+                vec![],
+                AuditDecision::AutoApproved,
+            );
         }
 
         let recent = log.recent(3);
@@ -156,7 +174,13 @@ mod tests {
     fn truncates_long_arguments() {
         let mut log = AuditLog::new();
         let long_arg = "a".repeat(300);
-        log.record("bash", long_arg, RiskLevel::Safe, vec![], AuditDecision::AutoApproved);
+        log.record(
+            "bash",
+            long_arg,
+            RiskLevel::Safe,
+            vec![],
+            AuditDecision::AutoApproved,
+        );
 
         assert_eq!(log.recent(1)[0].arguments_summary.len(), 200);
     }
@@ -165,7 +189,13 @@ mod tests {
     fn max_entries_enforced() {
         let mut log = AuditLog::default();
         for i in 0..1005 {
-            log.record(format!("tool_{i}"), "", RiskLevel::Safe, vec![], AuditDecision::AutoApproved);
+            log.record(
+                format!("tool_{i}"),
+                "",
+                RiskLevel::Safe,
+                vec![],
+                AuditDecision::AutoApproved,
+            );
         }
         assert_eq!(log.len(), 1000);
         assert_eq!(log.recent(1)[0].tool_name, "tool_1004");
@@ -174,11 +204,29 @@ mod tests {
     #[test]
     fn summary_counts() {
         let mut log = AuditLog::new();
-        log.record("a", "", RiskLevel::Safe, vec![], AuditDecision::AutoApproved);
-        log.record("b", "", RiskLevel::Safe, vec![], AuditDecision::AutoApproved);
+        log.record(
+            "a",
+            "",
+            RiskLevel::Safe,
+            vec![],
+            AuditDecision::AutoApproved,
+        );
+        log.record(
+            "b",
+            "",
+            RiskLevel::Safe,
+            vec![],
+            AuditDecision::AutoApproved,
+        );
         log.record("c", "", RiskLevel::Low, vec![], AuditDecision::UserApproved);
         log.record("d", "", RiskLevel::High, vec![], AuditDecision::Blocked);
-        log.record("e", "", RiskLevel::Medium, vec![], AuditDecision::UserDenied);
+        log.record(
+            "e",
+            "",
+            RiskLevel::Medium,
+            vec![],
+            AuditDecision::UserDenied,
+        );
 
         let summary = log.summary();
         assert_eq!(summary.total, 5);

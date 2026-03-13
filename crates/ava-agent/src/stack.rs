@@ -13,7 +13,7 @@ use ava_llm::{ModelRouter, RouteDecision, RouteSource};
 use ava_mcp::config::load_merged_mcp_config;
 use ava_mcp::manager::ExtensionManager;
 use ava_memory::MemorySystem;
-use ava_platform::StandardPlatform;
+use ava_platform::{Platform, StandardPlatform};
 use ava_session::SessionManager;
 use ava_tools::core::question::QuestionBridge;
 use ava_tools::core::task::{TaskResult, TaskSpawner};
@@ -77,7 +77,7 @@ pub struct AgentStack {
     pub session_manager: Arc<SessionManager>,
     pub memory: Arc<MemorySystem>,
     pub config: ConfigManager,
-    pub platform: Arc<StandardPlatform>,
+    pub platform: Arc<dyn Platform>,
     pub codebase_index: Arc<RwLock<Option<Arc<CodebaseIndex>>>>,
     provider_override: RwLock<Option<String>>,
     model_override: RwLock<Option<String>>,
@@ -274,7 +274,7 @@ impl AgentStack {
         let config_path = config.data_dir.join("config.yaml");
         let credentials_path = config.data_dir.join("credentials.json");
 
-        let platform = Arc::new(StandardPlatform);
+        let platform: Arc<dyn Platform> = Arc::new(StandardPlatform);
 
         let config_mgr = ConfigManager::load_from_paths(config_path, credentials_path).await?;
         let credentials = config_mgr.credentials().await;
@@ -999,7 +999,7 @@ impl AgentStack {
 
 struct AgentTaskSpawner {
     provider: Arc<dyn LLMProvider>,
-    platform: Arc<StandardPlatform>,
+    platform: Arc<dyn Platform>,
     model_name: String,
     max_turns: usize,
     agents_config: AgentsConfig,
@@ -1032,8 +1032,13 @@ impl TaskSpawner for AgentTaskSpawner {
         registry.unregister("todo_read");
         let context = ContextManager::new(128_000);
 
-        // Use configured max_turns if set, but always cap at parent's max_turns.
-        let sub_max_turns = resolved.max_turns.unwrap_or(10).min(self.max_turns);
+        // Use configured max_turns if set. If parent is unlimited (0), keep sub-agent bounded
+        // by its own configured/default cap. Otherwise, cap at parent's max_turns.
+        let sub_max_turns = if self.max_turns == 0 {
+            resolved.max_turns.unwrap_or(10)
+        } else {
+            resolved.max_turns.unwrap_or(10).min(self.max_turns)
+        };
 
         // Use configured prompt if set, otherwise fall back to default.
         let system_prompt = resolved
@@ -1217,7 +1222,7 @@ fn extract_goal_keywords(goal: &str) -> Vec<String> {
         .collect()
 }
 
-fn build_tool_registry(platform: Arc<StandardPlatform>) -> ToolRegistry {
+fn build_tool_registry(platform: Arc<dyn Platform>) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     register_default_tools(&mut registry, platform.clone());
     register_extended_tools(&mut registry, platform);

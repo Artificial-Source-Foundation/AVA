@@ -25,15 +25,13 @@ impl PermissionMiddleware {
 impl Middleware for PermissionMiddleware {
     async fn before(&self, tool_call: &ToolCall) -> Result<()> {
         let context = self.context.read().await;
-        let result =
-            self.inspector
-                .inspect(&tool_call.name, &tool_call.arguments, &context);
+        let result = self
+            .inspector
+            .inspect(&tool_call.name, &tool_call.arguments, &context);
 
         match result.action {
             ava_permissions::Action::Allow => Ok(()),
-            ava_permissions::Action::Deny => {
-                Err(AvaError::PermissionDenied(result.reason))
-            }
+            ava_permissions::Action::Deny => Err(AvaError::PermissionDenied(result.reason)),
             ava_permissions::Action::Ask => Err(AvaError::PermissionDenied(format!(
                 "Tool '{}' requires approval: {} (risk: {:?})",
                 tool_call.name, result.reason, result.risk_level

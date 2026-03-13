@@ -3,9 +3,9 @@ use std::sync::Arc;
 use ava_config::{CredentialStore, ProviderCredential};
 use ava_llm::pool::ConnectionPool;
 use ava_llm::provider::LLMProvider;
+use ava_llm::providers::create_provider;
 use ava_llm::providers::mock::MockProvider;
 use ava_llm::providers::openai::OpenAIProvider;
-use ava_llm::providers::create_provider;
 use ava_llm::router::ModelRouter;
 use ava_llm::{default_model_for_provider, test_provider_credentials};
 use ava_types::{Message, Role};
@@ -60,7 +60,9 @@ fn openai_bad_response_returns_error() {
     let error = OpenAIProvider::parse_response_payload(&payload)
         .expect_err("bad payload should fail parsing");
 
-    assert!(error.to_string().contains("missing OpenAI completion choices"));
+    assert!(error
+        .to_string()
+        .contains("missing OpenAI completion choices"));
 }
 
 #[test]
@@ -151,8 +153,8 @@ fn create_provider_base_url_override_ollama() {
         },
     );
 
-    let provider =
-        create_provider("ollama", "qwen2.5-coder", &store, pool()).expect("ollama provider should work");
+    let provider = create_provider("ollama", "qwen2.5-coder", &store, pool())
+        .expect("ollama provider should work");
     assert_eq!(provider.model_name(), "qwen2.5-coder");
 }
 

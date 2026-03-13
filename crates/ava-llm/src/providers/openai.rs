@@ -35,7 +35,11 @@ pub struct OpenAIProvider {
 }
 
 impl OpenAIProvider {
-    pub fn new(pool: Arc<ConnectionPool>, api_key: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(
+        pool: Arc<ConnectionPool>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
         Self::with_base_url(pool, api_key, model, "https://api.openai.com")
     }
 
@@ -99,7 +103,11 @@ impl OpenAIProvider {
 
     /// Return the maximum reasoning effort string for this model.
     fn max_reasoning_effort(&self) -> &str {
-        if self.supports_xhigh() { "xhigh" } else { "high" }
+        if self.supports_xhigh() {
+            "xhigh"
+        } else {
+            "high"
+        }
     }
 
     pub fn build_request_body(&self, messages: &[Message], stream: bool) -> Value {

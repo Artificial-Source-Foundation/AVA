@@ -90,8 +90,8 @@ mod tests {
 
     #[test]
     fn exponential_backoff_within_jitter_bounds() {
-        let mut budget = RetryBudget::new(5)
-            .with_delays(Duration::from_secs(1), Duration::from_secs(60));
+        let mut budget =
+            RetryBudget::new(5).with_delays(Duration::from_secs(1), Duration::from_secs(60));
 
         let err = AvaError::TimeoutError("test".to_string());
 
@@ -114,8 +114,8 @@ mod tests {
 
     #[test]
     fn caps_at_max_delay() {
-        let mut budget = RetryBudget::new(10)
-            .with_delays(Duration::from_secs(1), Duration::from_secs(10));
+        let mut budget =
+            RetryBudget::new(10).with_delays(Duration::from_secs(1), Duration::from_secs(10));
 
         let err = AvaError::TimeoutError("test".to_string());
 

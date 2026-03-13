@@ -154,9 +154,7 @@ pub fn messages_to_prompt(messages: &[Message]) -> String {
         match message.role {
             Role::System => {}
             Role::User => transcript.push(format!("User: {}", message.content.trim())),
-            Role::Assistant => {
-                transcript.push(format!("Assistant: {}", message.content.trim()))
-            }
+            Role::Assistant => transcript.push(format!("Assistant: {}", message.content.trim())),
             Role::Tool => transcript.push(format!("Tool: {}", message.content.trim())),
         }
     }
@@ -170,7 +168,12 @@ pub fn messages_to_prompt(messages: &[Message]) -> String {
         .rev()
         .find(|m| m.role == Role::User)
         .map(|m| m.content.trim().to_string())
-        .unwrap_or_else(|| messages.last().map(|m| m.content.clone()).unwrap_or_default());
+        .unwrap_or_else(|| {
+            messages
+                .last()
+                .map(|m| m.content.clone())
+                .unwrap_or_default()
+        });
 
     parts.push(format!("Primary task:\n{primary_prompt}"));
     parts.join("\n\n")

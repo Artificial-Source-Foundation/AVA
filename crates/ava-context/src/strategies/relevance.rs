@@ -81,7 +81,10 @@ impl CondensationStrategy for RelevanceStrategy {
         let tail: Vec<Message> = messages[tail_start..].to_vec();
 
         // Budget remaining after system + tail
-        let system_tokens: usize = system_messages.iter().map(estimate_tokens_for_message).sum();
+        let system_tokens: usize = system_messages
+            .iter()
+            .map(estimate_tokens_for_message)
+            .sum();
         let tail_tokens: usize = tail.iter().map(estimate_tokens_for_message).sum();
         let remaining_budget = max_tokens.saturating_sub(system_tokens + tail_tokens);
 
@@ -141,7 +144,9 @@ mod tests {
         // System prompt always kept
         assert_eq!(result[0].role, Role::System);
         // Last 2 messages always kept
-        assert!(result.iter().any(|m| m.content.contains("src/important.rs")));
+        assert!(result
+            .iter()
+            .any(|m| m.content.contains("src/important.rs")));
         assert!(result.iter().any(|m| m.content.contains("main file")));
     }
 

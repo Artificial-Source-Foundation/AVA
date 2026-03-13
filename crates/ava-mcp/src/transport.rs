@@ -154,8 +154,8 @@ async fn receive_framed<R: AsyncRead + Unpin>(reader: &mut BufReader<R>) -> Resu
         }
     }
 
-    let header_text = String::from_utf8(header_bytes)
-        .map_err(|e| AvaError::SerializationError(e.to_string()))?;
+    let header_text =
+        String::from_utf8(header_bytes).map_err(|e| AvaError::SerializationError(e.to_string()))?;
     let headers = parse_headers(header_text.trim_end_matches("\r\n\r\n"))?;
     let len = headers
         .get("content-length")
@@ -166,8 +166,7 @@ async fn receive_framed<R: AsyncRead + Unpin>(reader: &mut BufReader<R>) -> Resu
     let mut body = vec![0_u8; len];
     reader.read_exact(&mut body).await.map_err(AvaError::from)?;
 
-    let body =
-        String::from_utf8(body).map_err(|e| AvaError::SerializationError(e.to_string()))?;
+    let body = String::from_utf8(body).map_err(|e| AvaError::SerializationError(e.to_string()))?;
     serde_json::from_str(&body).map_err(|e| AvaError::SerializationError(e.to_string()))
 }
 
@@ -206,14 +205,10 @@ impl StdioTransport {
         })?;
 
         let stdin = child.stdin.take().ok_or_else(|| {
-            AvaError::ToolError(
-                "MCP server started but stdin is unavailable".to_string(),
-            )
+            AvaError::ToolError("MCP server started but stdin is unavailable".to_string())
         })?;
         let stdout = child.stdout.take().ok_or_else(|| {
-            AvaError::ToolError(
-                "MCP server started but stdout is unavailable".to_string(),
-            )
+            AvaError::ToolError("MCP server started but stdout is unavailable".to_string())
         })?;
 
         Ok(Self {
@@ -360,8 +355,8 @@ where
     }
 
     pub async fn send(&mut self, value: Value) -> Result<()> {
-        let payload =
-            serde_json::to_string(&value).map_err(|e| AvaError::SerializationError(e.to_string()))?;
+        let payload = serde_json::to_string(&value)
+            .map_err(|e| AvaError::SerializationError(e.to_string()))?;
         let frame = encode_message(&payload);
         self.writer
             .write_all(frame.as_bytes())
@@ -393,9 +388,7 @@ where
         let headers = parse_headers(header_text.trim_end_matches("\r\n\r\n"))?;
         let len = headers
             .get("content-length")
-            .ok_or_else(|| {
-                AvaError::ValidationError("missing content-length header".to_string())
-            })?
+            .ok_or_else(|| AvaError::ValidationError("missing content-length header".to_string()))?
             .parse::<usize>()
             .map_err(|e| {
                 AvaError::ValidationError(format!("invalid content-length header: {e}"))
@@ -407,8 +400,8 @@ where
             .await
             .map_err(AvaError::from)?;
 
-        let body = String::from_utf8(body)
-            .map_err(|e| AvaError::SerializationError(e.to_string()))?;
+        let body =
+            String::from_utf8(body).map_err(|e| AvaError::SerializationError(e.to_string()))?;
         serde_json::from_str(&body).map_err(|e| AvaError::SerializationError(e.to_string()))
     }
 }

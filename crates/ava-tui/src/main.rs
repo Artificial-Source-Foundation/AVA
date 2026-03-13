@@ -97,8 +97,16 @@ async fn main() -> Result<()> {
                 .collect::<Vec<_>>()
         });
 
-        benchmark::run_benchmark(specs, None, cli.max_turns, judge_specs, suite, imported_tasks, language_filter)
-            .await?;
+        benchmark::run_benchmark(
+            specs,
+            None,
+            cli.max_turns,
+            judge_specs,
+            suite,
+            imported_tasks,
+            language_filter,
+        )
+        .await?;
         return Ok(());
     }
 

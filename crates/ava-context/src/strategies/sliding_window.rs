@@ -54,10 +54,9 @@ fn truncate_large_tool_results(messages: &[Message], unit: &MessageUnit) -> Vec<
                     cut -= 1;
                 }
                 truncated.content.truncate(cut);
-                truncated.content.push_str(&format!(
-                    "\n\n[... truncated {} chars]",
-                    original_len - cut
-                ));
+                truncated
+                    .content
+                    .push_str(&format!("\n\n[... truncated {} chars]", original_len - cut));
                 truncated
             } else {
                 msg.clone()
@@ -87,8 +86,11 @@ impl CondensationStrategy for SlidingWindowStrategy {
                 .map(|&idx| estimate_tokens_for_message(&messages[idx]))
                 .sum();
             if sys_tokens <= max_tokens {
-                let sys_messages: Vec<Message> =
-                    units[0].indices.iter().map(|&idx| messages[idx].clone()).collect();
+                let sys_messages: Vec<Message> = units[0]
+                    .indices
+                    .iter()
+                    .map(|&idx| messages[idx].clone())
+                    .collect();
                 used += sys_tokens;
                 selected_units.push(sys_messages);
             }
@@ -111,8 +113,11 @@ impl CondensationStrategy for SlidingWindowStrategy {
 
             if used + unit_tokens <= max_tokens {
                 // Whole unit fits
-                let unit_messages: Vec<Message> =
-                    unit.indices.iter().map(|&idx| messages[idx].clone()).collect();
+                let unit_messages: Vec<Message> = unit
+                    .indices
+                    .iter()
+                    .map(|&idx| messages[idx].clone())
+                    .collect();
                 used += unit_tokens;
                 selected_units.push(unit_messages);
             } else {
@@ -163,10 +168,9 @@ mod tests {
             name: "read".to_string(),
             arguments: json!({"path": "/tmp/file"}),
         };
-        let assistant = Message::new(Role::Assistant, "Reading file")
-            .with_tool_calls(vec![tc]);
-        let tool_result = Message::new(Role::Tool, "file contents here")
-            .with_tool_call_id("call_1");
+        let assistant = Message::new(Role::Assistant, "Reading file").with_tool_calls(vec![tc]);
+        let tool_result =
+            Message::new(Role::Tool, "file contents here").with_tool_call_id("call_1");
         let user = Message::new(Role::User, "thanks");
 
         let messages = vec![assistant.clone(), tool_result.clone(), user.clone()];
@@ -183,7 +187,10 @@ mod tests {
         // Either the unit is included in full or not at all
         let has_assistant = out.iter().any(|m| m.role == Role::Assistant);
         let has_tool = out.iter().any(|m| m.role == Role::Tool);
-        assert_eq!(has_assistant, has_tool, "assistant and tool must come together");
+        assert_eq!(
+            has_assistant, has_tool,
+            "assistant and tool must come together"
+        );
     }
 
     #[test]
@@ -195,12 +202,14 @@ mod tests {
             name: "read".to_string(),
             arguments: json!({"path": "/big"}),
         };
-        let assistant = Message::new(Role::Assistant, "Reading the file now")
-            .with_tool_calls(vec![tc]);
+        let assistant =
+            Message::new(Role::Assistant, "Reading the file now").with_tool_calls(vec![tc]);
         // 20KB tool result with multiple words so token count is realistic
-        let big_content = (0..5000).map(|i| format!("line{i}")).collect::<Vec<_>>().join(" ");
-        let tool_result = Message::new(Role::Tool, big_content)
-            .with_tool_call_id("call_1");
+        let big_content = (0..5000)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let tool_result = Message::new(Role::Tool, big_content).with_tool_call_id("call_1");
 
         let messages = vec![assistant, tool_result];
 
@@ -209,7 +218,10 @@ mod tests {
         // Truncated: ~10KB content ≈ ~2500 words * 4/3 = ~3333 tokens + overhead
         let out = strategy.condense(&messages, 4000).unwrap();
         assert_eq!(out.len(), 2, "both assistant + tool should be kept");
-        assert!(out[1].content.contains("[... truncated"), "tool result should be truncated");
+        assert!(
+            out[1].content.contains("[... truncated"),
+            "tool result should be truncated"
+        );
         assert!(out[1].content.len() < 15_000);
     }
 }

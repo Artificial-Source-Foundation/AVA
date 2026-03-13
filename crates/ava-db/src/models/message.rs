@@ -47,7 +47,10 @@ impl MessageRepository {
         .await
     }
 
-    pub async fn list_by_session(&self, session_id: &str) -> Result<Vec<MessageRecord>, sqlx::Error> {
+    pub async fn list_by_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<MessageRecord>, sqlx::Error> {
         sqlx::query_as::<_, MessageRecord>(
             "SELECT id, session_id, role, content, tool_calls_json, created_at FROM messages WHERE session_id = ?1 ORDER BY created_at ASC",
         )

@@ -267,14 +267,15 @@ mod tests {
         let (_dir, db_path) = make_db_path("special_chars_search");
         let system = MemorySystem::new(&db_path).expect("memory system should initialize");
 
-        remember_values(
-            &system,
-            &[("note", "foo's bar baz implementation")],
-        );
+        remember_values(&system, &[("note", "foo's bar baz implementation")]);
 
         // These contain FTS5 special chars that would crash without sanitization
         let result = system.search("foo's bar & <baz>");
-        assert!(result.is_ok(), "search should not crash: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "search should not crash: {:?}",
+            result.err()
+        );
 
         // Also test unbalanced quotes and FTS5 operators
         let result = system.search("\"unbalanced");

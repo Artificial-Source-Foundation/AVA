@@ -254,7 +254,9 @@ mod tests {
         let credentials = CredentialStore::default();
         let result = create_provider("cli:claude-code", "sonnet", &credentials, default_pool());
         let err = result.err().expect("should fail");
-        assert!(err.to_string().contains("must be registered via ModelRouter"));
+        assert!(err
+            .to_string()
+            .contains("must be registered via ModelRouter"));
     }
 
     #[test]
@@ -399,8 +401,7 @@ mod tests {
     #[test]
     fn alibaba_creates_anthropic_compatible_provider() {
         let creds = mock_creds_for(&["alibaba"]);
-        let provider =
-            create_provider("alibaba", "qwen3.5-plus", &creds, default_pool()).unwrap();
+        let provider = create_provider("alibaba", "qwen3.5-plus", &creds, default_pool()).unwrap();
         assert_eq!(provider.model_name(), "qwen3.5-plus");
         assert!(provider.supports_tools());
     }
@@ -417,8 +418,7 @@ mod tests {
     #[test]
     fn kimi_creates_anthropic_compatible_provider() {
         let creds = mock_creds_for(&["kimi-for-coding"]);
-        let provider =
-            create_provider("kimi-for-coding", "k2p5", &creds, default_pool()).unwrap();
+        let provider = create_provider("kimi-for-coding", "k2p5", &creds, default_pool()).unwrap();
         assert_eq!(provider.model_name(), "k2p5");
         assert!(provider.supports_tools());
     }
@@ -435,8 +435,7 @@ mod tests {
     #[test]
     fn inception_creates_provider_with_correct_model() {
         let creds = mock_creds_for(&["inception"]);
-        let provider =
-            create_provider("inception", "mercury-2", &creds, default_pool()).unwrap();
+        let provider = create_provider("inception", "mercury-2", &creds, default_pool()).unwrap();
         assert_eq!(provider.model_name(), "mercury-2");
         assert!(provider.supports_tools());
         assert!(!provider.supports_thinking());
@@ -453,9 +452,13 @@ mod tests {
     #[test]
     fn minimax_cn_creates_anthropic_compatible_provider() {
         let creds = mock_creds_for(&["minimax-cn-coding-plan"]);
-        let provider =
-            create_provider("minimax-cn-coding-plan", "MiniMax-M2", &creds, default_pool())
-                .unwrap();
+        let provider = create_provider(
+            "minimax-cn-coding-plan",
+            "MiniMax-M2",
+            &creds,
+            default_pool(),
+        )
+        .unwrap();
         assert_eq!(provider.model_name(), "MiniMax-M2");
         assert!(provider.supports_tools());
     }

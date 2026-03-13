@@ -60,9 +60,9 @@ impl ModelRegistry {
     /// Look up by exact ID or alias (case-insensitive).
     pub fn find(&self, query: &str) -> Option<&RegisteredModel> {
         let q = query.to_lowercase();
-        self.models.iter().find(|m| {
-            m.id.to_lowercase() == q || m.aliases.iter().any(|a| a.to_lowercase() == q)
-        })
+        self.models
+            .iter()
+            .find(|m| m.id.to_lowercase() == q || m.aliases.iter().any(|a| a.to_lowercase() == q))
     }
 
     /// Look up for a specific provider.
@@ -70,8 +70,7 @@ impl ModelRegistry {
         let q = model.to_lowercase();
         self.models.iter().find(|m| {
             m.provider == provider
-                && (m.id.to_lowercase() == q
-                    || m.aliases.iter().any(|a| a.to_lowercase() == q))
+                && (m.id.to_lowercase() == q || m.aliases.iter().any(|a| a.to_lowercase() == q))
         })
     }
 
@@ -83,9 +82,7 @@ impl ModelRegistry {
         let matches: Vec<_> = self
             .models
             .iter()
-            .filter(|m| {
-                m.id.to_lowercase() == q || m.aliases.iter().any(|a| a.to_lowercase() == q)
-            })
+            .filter(|m| m.id.to_lowercase() == q || m.aliases.iter().any(|a| a.to_lowercase() == q))
             .collect();
 
         // Prefer non-zero pricing (real provider) over free-tier mirrors
@@ -158,19 +155,13 @@ mod tests {
     #[test]
     fn normalize_aliases() {
         let reg = ModelRegistry::load();
-        assert_eq!(
-            reg.normalize("opus"),
-            Some("claude-opus-4.6".to_string())
-        );
+        assert_eq!(reg.normalize("opus"), Some("claude-opus-4.6".to_string()));
     }
 
     #[test]
     fn normalize_fuzzy() {
         let reg = ModelRegistry::load();
-        assert_eq!(
-            reg.normalize("gpt-4o"),
-            Some("gpt-4o".to_string())
-        );
+        assert_eq!(reg.normalize("gpt-4o"), Some("gpt-4o".to_string()));
         assert_eq!(
             reg.normalize("claude-opus-4-6"),
             Some("claude-opus-4.6".to_string())

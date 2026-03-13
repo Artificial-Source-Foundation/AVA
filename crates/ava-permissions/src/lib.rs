@@ -76,9 +76,7 @@ impl PermissionSystem {
         }
 
         if tool == "bash" {
-            let command = args
-                .first()
-                .ok_or("missing bash command")?;
+            let command = args.first().ok_or("missing bash command")?;
 
             let classification = classify_bash_command(command);
             if classification.blocked {

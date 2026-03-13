@@ -1,13 +1,18 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
-use ava_platform::Platform;
+use ava_permissions::classifier::classify_bash_command;
+use ava_permissions::tags::RiskLevel;
+use ava_platform::{ExecuteOptions, Platform};
 use ava_types::{AvaError, ToolResult};
 use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::registry::Tool;
+
+const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 
 pub struct LintTool {
     platform: Arc<dyn Platform>,
@@ -46,20 +51,31 @@ impl Tool for LintTool {
         let scope_path = args.get("path").and_then(Value::as_str);
 
         let command = if let Some(cmd) = custom_command {
+            validate_custom_command(cmd)?;
             let mut cmd = cmd.to_string();
             if fix && !cmd.contains("--fix") {
                 cmd.push_str(" --fix");
             }
             if let Some(p) = scope_path {
                 cmd.push(' ');
-                cmd.push_str(p);
+                cmd.push_str(&shell_single_quote(p));
             }
             cmd
         } else {
             detect_lint_command(&*self.platform, fix, scope_path).await?
         };
 
-        let output = self.platform.execute(&command).await?;
+        let output = self
+            .platform
+            .execute_with_options(
+                &command,
+                ExecuteOptions {
+                    timeout: Some(Duration::from_millis(DEFAULT_TIMEOUT_MS)),
+                    working_dir: None,
+                    env_vars: Vec::new(),
+                },
+            )
+            .await?;
         let combined = format!("{}\n{}", output.stdout, output.stderr);
 
         let (warnings, errors) = count_diagnostics(&combined);
@@ -84,7 +100,9 @@ async fn detect_lint_command(
     fix: bool,
     scope_path: Option<&str>,
 ) -> ava_types::Result<String> {
-    let path_suffix = scope_path.map(|p| format!(" {p}")).unwrap_or_default();
+    let path_suffix = scope_path
+        .map(|p| format!(" {}", shell_single_quote(p)))
+        .unwrap_or_default();
 
     if platform.exists(Path::new("Cargo.toml")).await {
         return if fix {
@@ -125,8 +143,14 @@ fn count_diagnostics(output: &str) -> (usize, usize) {
     let re_eslint = Regex::new(r"(\d+) problems? \((\d+) errors?, (\d+) warnings?\)").ok();
     if let Some(re) = &re_eslint {
         if let Some(caps) = re.captures(output) {
-            errors = caps.get(2).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
-            warnings = caps.get(3).and_then(|m| m.as_str().parse().ok()).unwrap_or(0);
+            errors = caps
+                .get(2)
+                .and_then(|m| m.as_str().parse().ok())
+                .unwrap_or(0);
+            warnings = caps
+                .get(3)
+                .and_then(|m| m.as_str().parse().ok())
+                .unwrap_or(0);
             return (warnings, errors);
         }
     }
@@ -135,7 +159,10 @@ fn count_diagnostics(output: &str) -> (usize, usize) {
     let re_rust_warn = Regex::new(r"generated (\d+) warnings?").ok();
     if let Some(re) = &re_rust_warn {
         for caps in re.captures_iter(output) {
-            warnings += caps.get(1).and_then(|m| m.as_str().parse::<usize>().ok()).unwrap_or(0);
+            warnings += caps
+                .get(1)
+                .and_then(|m| m.as_str().parse::<usize>().ok())
+                .unwrap_or(0);
         }
     }
 
@@ -148,6 +175,20 @@ fn count_diagnostics(output: &str) -> (usize, usize) {
     }
 
     (warnings, errors)
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn validate_custom_command(command: &str) -> ava_types::Result<()> {
+    let classification = classify_bash_command(command);
+    if classification.blocked || classification.risk_level > RiskLevel::Low {
+        return Err(AvaError::PermissionDenied(
+            "custom lint command must be safe or low-risk".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -164,9 +205,21 @@ mod tests {
 
     #[test]
     fn count_rust_diagnostics() {
-        let output = "warning: unused variable\nerror[E0308]: mismatch\nwarning: ... generated 2 warnings";
+        let output =
+            "warning: unused variable\nerror[E0308]: mismatch\nwarning: ... generated 2 warnings";
         let (w, e) = count_diagnostics(output);
         assert_eq!(w, 2);
         assert_eq!(e, 1);
+    }
+
+    #[test]
+    fn shell_quote_escapes_single_quotes() {
+        assert_eq!(shell_single_quote("src/main.rs"), "'src/main.rs'");
+        assert_eq!(shell_single_quote("foo'bar"), "'foo'\\''bar'");
+    }
+
+    #[test]
+    fn validate_custom_command_rejects_dangerous() {
+        assert!(validate_custom_command("rm -rf /").is_err());
     }
 }

@@ -39,10 +39,24 @@ use ratatui::Terminal;
 use std::collections::HashMap;
 use std::io::stdout;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tracing::debug;
+
+#[derive(Debug, Clone)]
+pub(crate) struct PendingBackgroundGoal {
+    pub goal: String,
+    pub isolated_branch: bool,
+}
+
+#[derive(Debug, Clone)]
+struct BackgroundIsolation {
+    worktree_path: PathBuf,
+    branch_name: String,
+}
 
 pub struct AppState {
     pub theme: Theme,
@@ -183,12 +197,13 @@ pub struct App {
     /// Timestamp of the last Esc press, for double-Esc detection.
     last_esc_time: Option<std::time::Instant>,
     /// Pending background goal from `/bg` command (consumed in submit_goal).
-    pub(crate) pending_bg_goal: Option<String>,
+    pub(crate) pending_bg_goal: Option<PendingBackgroundGoal>,
     /// Images pending attachment to the next user message.
     pub(crate) pending_images: Vec<ava_types::ImageContent>,
     next_run_id: u64,
     foreground_run_id: Option<u64>,
     background_run_routes: HashMap<u64, usize>,
+    data_dir: PathBuf,
 }
 
 struct StatusSummary {
@@ -283,7 +298,7 @@ impl App {
         model_catalog.spawn_background_refresh();
 
         let (agent, question_rx) = AgentState::new(
-            data_dir,
+            data_dir.clone(),
             provider,
             model,
             cli.max_turns,
@@ -351,6 +366,7 @@ impl App {
             next_run_id: 1,
             foreground_run_id: None,
             background_run_routes: HashMap::new(),
+            data_dir,
         };
         app.sync_custom_command_autocomplete();
         Ok(app)
@@ -532,15 +548,20 @@ impl App {
         &mut self,
         goal: String,
         app_tx: mpsc::UnboundedSender<AppEvent>,
+        isolated_branch: bool,
     ) {
-        let stack = match self.state.agent.stack() {
-            Ok(s) => Arc::clone(s),
-            Err(msg) => {
-                self.set_status(
-                    format!("Cannot launch background agent: {msg}"),
-                    StatusLevel::Error,
-                );
-                return;
+        let shared_stack = if isolated_branch {
+            None
+        } else {
+            match self.state.agent.stack() {
+                Ok(s) => Some(Arc::clone(s)),
+                Err(msg) => {
+                    self.set_status(
+                        format!("Cannot launch background agent: {msg}"),
+                        StatusLevel::Error,
+                    );
+                    return;
+                }
             }
         };
 
@@ -550,12 +571,83 @@ impl App {
             bg.add_task(goal.clone())
         };
 
+        let isolation = if isolated_branch {
+            let prep = if tokio::runtime::Handle::try_current().is_ok() {
+                tokio::task::block_in_place(|| Self::prepare_background_worktree_sync(task_id))
+            } else {
+                Self::prepare_background_worktree_sync(task_id)
+            };
+
+            match prep {
+                Ok(info) => {
+                    let mut bg = bg_state.lock().unwrap();
+                    bg.set_isolation(
+                        task_id,
+                        info.worktree_path.to_string_lossy().to_string(),
+                        info.branch_name.clone(),
+                    );
+                    Some(info)
+                }
+                Err(err) => {
+                    self.state
+                        .background
+                        .lock()
+                        .unwrap()
+                        .fail_task(task_id, err.clone());
+                    self.set_status(
+                        format!("Background task #{task_id} setup failed: {err}"),
+                        StatusLevel::Error,
+                    );
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+
         let max_turns = self.state.agent.max_turns;
+        let max_budget_usd = self.state.agent.max_budget_usd;
+        let provider_opt = if self.state.agent.provider_name == "default" {
+            None
+        } else {
+            Some(self.state.agent.provider_name.clone())
+        };
+        let model_opt = if self.state.agent.model_name == "default" {
+            None
+        } else {
+            Some(self.state.agent.model_name.clone())
+        };
+        let data_dir = self.data_dir.clone();
         let run_id = self.allocate_run_id();
         self.background_run_routes.insert(run_id, task_id);
         let app_tx_clone = app_tx;
 
         tokio::spawn(async move {
+            let stack = if let Some(isolation) = isolation {
+                let config = ava_agent::stack::AgentStackConfig {
+                    data_dir,
+                    provider: provider_opt,
+                    model: model_opt,
+                    max_turns,
+                    max_budget_usd,
+                    yolo: false,
+                    injected_provider: None,
+                    working_dir: Some(isolation.worktree_path),
+                };
+                match ava_agent::stack::AgentStack::new(config).await {
+                    Ok((stack, _)) => Arc::new(stack),
+                    Err(err) => {
+                        let _ = app_tx_clone.send(AppEvent::AgentRunDone {
+                            run_id,
+                            result: Err(format!("failed to init isolated background stack: {err}")),
+                        });
+                        return;
+                    }
+                }
+            } else {
+                shared_stack.expect("shared stack exists for non-isolated background runs")
+            };
+
             let (agent_event_tx, mut agent_event_rx) = mpsc::unbounded_channel();
             let cancel = tokio_util::sync::CancellationToken::new();
 
@@ -588,9 +680,67 @@ impl App {
         });
 
         self.set_status(
-            format!("Task #{task_id} launched in background"),
+            if isolated_branch {
+                format!("Task #{task_id} launched in background (isolated branch)")
+            } else {
+                format!("Task #{task_id} launched in background")
+            },
             StatusLevel::Info,
         );
+    }
+
+    fn prepare_background_worktree_sync(
+        task_id: usize,
+    ) -> std::result::Result<BackgroundIsolation, String> {
+        let repo_root = Self::run_git_output_sync(&["rev-parse", "--show-toplevel"])
+            .map_err(|e| format!("not a git repository: {e}"))?;
+        let repo_root = PathBuf::from(repo_root.trim());
+
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let branch_name = format!("ava-bg-task-{task_id}-{stamp}");
+        let worktree_root = repo_root.join(".ava").join("worktrees");
+        std::fs::create_dir_all(&worktree_root)
+            .map_err(|e| format!("failed to create worktree dir: {e}"))?;
+        let worktree_path = worktree_root.join(&branch_name);
+
+        let output = Command::new("git")
+            .args([
+                "worktree",
+                "add",
+                "-b",
+                &branch_name,
+                &worktree_path.to_string_lossy(),
+                "HEAD",
+            ])
+            .output()
+            .map_err(|e| format!("failed to run git worktree add: {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            if stderr.is_empty() {
+                return Err("git worktree add failed".to_string());
+            }
+            return Err(format!("git worktree add failed: {stderr}"));
+        }
+
+        Ok(BackgroundIsolation {
+            worktree_path,
+            branch_name,
+        })
+    }
+
+    fn run_git_output_sync(args: &[&str]) -> std::result::Result<String, String> {
+        let output = Command::new("git")
+            .args(args)
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
     /// Enter the background task view (read-only).
@@ -1016,6 +1166,7 @@ impl App {
         &mut self,
         run_id: u64,
         result: std::result::Result<ava_agent::stack::AgentRunResult, String>,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
     ) {
         if self.foreground_run_id == Some(run_id) {
             self.foreground_run_id = None;
@@ -1037,11 +1188,40 @@ impl App {
             return;
         };
 
+        let (isolation_suffix, isolation_target) = {
+            let bg = self.state.background.lock().unwrap();
+            bg.tasks
+                .iter()
+                .find(|task| task.id == task_id)
+                .and_then(|task| {
+                    task.branch_name
+                        .as_ref()
+                        .zip(task.worktree_path.as_ref())
+                        .map(|(branch, path)| {
+                            (
+                                format!(" [{branch} @ {path}]"),
+                                Some((branch.clone(), path.clone())),
+                            )
+                        })
+                })
+                .unwrap_or_else(|| (String::new(), None))
+        };
+
         match result {
             Ok(_) => {
                 self.state.background.lock().unwrap().complete_task(task_id);
+
+                if let Some((branch_name, worktree_path)) = isolation_target {
+                    Self::spawn_background_worktree_cleanup(
+                        task_id,
+                        branch_name,
+                        worktree_path,
+                        app_tx,
+                    );
+                }
+
                 self.set_status(
-                    format!("Background task #{task_id} completed"),
+                    format!("Background task #{task_id} completed{isolation_suffix}"),
                     StatusLevel::Info,
                 );
             }
@@ -1051,12 +1231,90 @@ impl App {
                     .lock()
                     .unwrap()
                     .fail_task(task_id, err.clone());
+
+                if let Some((branch_name, worktree_path)) = isolation_target {
+                    Self::spawn_background_worktree_cleanup(
+                        task_id,
+                        branch_name,
+                        worktree_path,
+                        app_tx,
+                    );
+                }
+
                 self.set_status(
-                    format!("Background task #{task_id} failed"),
+                    format!("Background task #{task_id} failed{isolation_suffix}"),
                     StatusLevel::Error,
                 );
             }
         }
+    }
+
+    fn cleanup_background_worktree_sync(
+        branch_name: &str,
+        worktree_path: &str,
+    ) -> std::result::Result<(), String> {
+        let mut errors = Vec::new();
+
+        let remove_output = Command::new("git")
+            .args(["worktree", "remove", "--force", worktree_path])
+            .output();
+        match remove_output {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                errors.push(format!(
+                    "worktree remove failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            Err(err) => {
+                errors.push(format!("worktree remove failed: {err}"));
+            }
+        }
+
+        let _ = Command::new("git").args(["worktree", "prune"]).output();
+
+        let delete_branch_output = Command::new("git")
+            .args(["branch", "-D", branch_name])
+            .output();
+        match delete_branch_output {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                errors.push(format!(
+                    "branch delete failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ));
+            }
+            Err(err) => {
+                errors.push(format!("branch delete failed: {err}"));
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("; "))
+        }
+    }
+
+    fn spawn_background_worktree_cleanup(
+        task_id: usize,
+        branch_name: String,
+        worktree_path: String,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
+    ) {
+        tokio::spawn(async move {
+            let join = tokio::task::spawn_blocking(move || {
+                Self::cleanup_background_worktree_sync(&branch_name, &worktree_path)
+            })
+            .await;
+
+            let result = match join {
+                Ok(result) => result,
+                Err(err) => Err(format!("cleanup task failed: {err}")),
+            };
+
+            let _ = app_tx.send(AppEvent::BackgroundCleanupResult { task_id, result });
+        });
     }
 
     fn handle_background_agent_event(&mut self, task_id: usize, event: ava_agent::AgentEvent) {
@@ -1612,7 +1870,15 @@ impl App {
                 self.route_agent_event(run_id, event, app_tx, agent_tx);
             }
             AppEvent::AgentRunDone { run_id, result } => {
-                self.finish_routed_run(run_id, result);
+                self.finish_routed_run(run_id, result, app_tx.clone());
+            }
+            AppEvent::BackgroundCleanupResult { task_id, result } => {
+                if let Err(err) = result {
+                    self.set_status(
+                        format!("Background task #{task_id} cleanup failed: {err}"),
+                        StatusLevel::Error,
+                    );
+                }
             }
             AppEvent::TokenUsage(usage) => {
                 self.state.agent.tokens_used = usage;
@@ -2477,6 +2743,7 @@ impl App {
             next_run_id: 1,
             foreground_run_id: None,
             background_run_routes: HashMap::new(),
+            data_dir: PathBuf::from(".ava-test"),
         }
     }
 
@@ -2598,5 +2865,31 @@ mod tests {
                 .map(|msg| msg.text.as_str()),
             Some("Switched to Claude Sonnet")
         );
+    }
+
+    #[test]
+    fn bg_command_sets_pending_goal() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("data.db");
+        let mut app = App::test_new(&db_path);
+
+        let result = app.test_slash_command("/bg refactor auth module");
+        assert!(result.is_none());
+        let pending = app.pending_bg_goal.expect("pending background goal");
+        assert_eq!(pending.goal, "refactor auth module");
+        assert!(!pending.isolated_branch);
+    }
+
+    #[test]
+    fn bg_branch_command_sets_isolated_goal() {
+        let temp = tempdir().expect("tempdir");
+        let db_path = temp.path().join("data.db");
+        let mut app = App::test_new(&db_path);
+
+        let result = app.test_slash_command("/bg --branch refactor auth module");
+        assert!(result.is_none());
+        let pending = app.pending_bg_goal.expect("pending background goal");
+        assert_eq!(pending.goal, "refactor auth module");
+        assert!(pending.isolated_branch);
     }
 }

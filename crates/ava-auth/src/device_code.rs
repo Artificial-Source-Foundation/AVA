@@ -106,10 +106,7 @@ pub async fn poll_device_code(
             .form(&[
                 ("client_id", config.client_id),
                 ("device_code", device_code),
-                (
-                    "grant_type",
-                    "urn:ietf:params:oauth:grant-type:device_code",
-                ),
+                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
             ])
             .send()
             .await

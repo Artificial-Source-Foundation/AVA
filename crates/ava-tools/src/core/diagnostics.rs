@@ -1,12 +1,15 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
-use ava_platform::Platform;
+use ava_platform::{ExecuteOptions, Platform};
 use ava_types::{AvaError, ToolResult};
 use serde_json::{json, Value};
 
 use crate::registry::Tool;
+
+const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 
 pub struct DiagnosticsTool {
     platform: Arc<dyn Platform>,
@@ -41,7 +44,17 @@ impl Tool for DiagnosticsTool {
         let scope_path = args.get("path").and_then(Value::as_str);
 
         let command = detect_diagnostics_command(&*self.platform, scope_path).await?;
-        let output = self.platform.execute(&command).await?;
+        let output = self
+            .platform
+            .execute_with_options(
+                &command,
+                ExecuteOptions {
+                    timeout: Some(Duration::from_millis(DEFAULT_TIMEOUT_MS)),
+                    working_dir: None,
+                    env_vars: Vec::new(),
+                },
+            )
+            .await?;
         let combined = format!("{}\n{}", output.stdout, output.stderr);
 
         let diagnostics = parse_diagnostics(&combined, &command);
@@ -60,16 +73,25 @@ impl Tool for DiagnosticsTool {
 
 async fn detect_diagnostics_command(
     platform: &dyn Platform,
-    _scope_path: Option<&str>,
+    scope_path: Option<&str>,
 ) -> ava_types::Result<String> {
     if platform.exists(Path::new("Cargo.toml")).await {
         return Ok("cargo check --message-format=json 2>&1".to_string());
     }
     if platform.exists(Path::new("package.json")).await {
-        return Ok("npx tsc --noEmit 2>&1".to_string());
+        let path_suffix = scope_path
+            .map(|p| format!(" {}", shell_single_quote(p)))
+            .unwrap_or_default();
+        return Ok(format!("npx tsc --noEmit{path_suffix} 2>&1"));
     }
     if platform.exists(Path::new("pyproject.toml")).await {
-        return Ok("python -m py_compile 2>&1".to_string());
+        if let Some(p) = scope_path {
+            return Ok(format!(
+                "python -m py_compile {} 2>&1",
+                shell_single_quote(p)
+            ));
+        }
+        return Ok("ruff check . 2>&1".to_string());
     }
     Err(AvaError::ToolError(
         "Could not detect project type for diagnostics".to_string(),
@@ -89,17 +111,17 @@ fn parse_diagnostics(output: &str, command: &str) -> Vec<Value> {
                             .get("level")
                             .and_then(Value::as_str)
                             .unwrap_or("unknown");
-                        let text = message
-                            .get("message")
-                            .and_then(Value::as_str)
-                            .unwrap_or("");
+                        let text = message.get("message").and_then(Value::as_str).unwrap_or("");
 
                         // Extract primary span location
                         let spans = message.get("spans").and_then(Value::as_array);
-                        let primary = spans
-                            .and_then(|s| s.iter().find(|span| {
-                                span.get("is_primary").and_then(Value::as_bool).unwrap_or(false)
-                            }));
+                        let primary = spans.and_then(|s| {
+                            s.iter().find(|span| {
+                                span.get("is_primary")
+                                    .and_then(Value::as_bool)
+                                    .unwrap_or(false)
+                            })
+                        });
 
                         let (file, line_num) = if let Some(span) = primary {
                             (
@@ -137,9 +159,32 @@ fn parse_diagnostics(output: &str, command: &str) -> Vec<Value> {
                 }
             }
         }
+    } else if command.contains("ruff check") {
+        // Parse Ruff output: "path.py:line:col: CODE message"
+        let re = regex::Regex::new(r"^(.+?):(\d+):(\d+):\s+([A-Z]\d+)\s+(.+)$").ok();
+        if let Some(re) = re {
+            for line in output.lines() {
+                if let Some(caps) = re.captures(line) {
+                    diagnostics.push(json!({
+                        "file": caps.get(1).map(|m| m.as_str()).unwrap_or(""),
+                        "line": caps.get(2).and_then(|m| m.as_str().parse::<u64>().ok()).unwrap_or(0),
+                        "severity": "error",
+                        "message": format!(
+                            "{} {}",
+                            caps.get(4).map(|m| m.as_str()).unwrap_or(""),
+                            caps.get(5).map(|m| m.as_str()).unwrap_or("")
+                        ).trim().to_string(),
+                    }));
+                }
+            }
+        }
     }
 
     diagnostics
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 #[cfg(test)]
@@ -163,5 +208,21 @@ mod tests {
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0]["severity"], "error");
         assert_eq!(diagnostics[0]["line"], 5);
+    }
+
+    #[test]
+    fn parse_ruff_diagnostics() {
+        let output = "app/main.py:12:5: F821 undefined name 'x'";
+        let diagnostics = parse_diagnostics(output, "ruff check .");
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0]["severity"], "error");
+        assert_eq!(diagnostics[0]["line"], 12);
+        assert_eq!(diagnostics[0]["file"], "app/main.py");
+    }
+
+    #[test]
+    fn shell_quote_escapes_single_quotes() {
+        assert_eq!(shell_single_quote("src/main.py"), "'src/main.py'");
+        assert_eq!(shell_single_quote("a'b"), "'a'\\''b'");
     }
 }

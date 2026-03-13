@@ -189,6 +189,9 @@ mod tests {
 
     #[test]
     fn default_api_endpoint_value() {
-        assert_eq!(DEFAULT_API_ENDPOINT, "https://api.individual.githubcopilot.com");
+        assert_eq!(
+            DEFAULT_API_ENDPOINT,
+            "https://api.individual.githubcopilot.com"
+        );
     }
 }

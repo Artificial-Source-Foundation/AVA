@@ -1,6 +1,6 @@
 # Sprint 61: Reliable Edit Loop
 
-Status: Implemented on `master`; backend/command-level verified. Full manual TUI verification of `/commit` is still pending.
+Status: Implemented on `master` and archived. Backend/command-level verification completed; any remaining UX polish follows normal backlog flow.
 
 ## Goal
 
@@ -89,7 +89,7 @@ Likely areas:
 - Targeted crate tests for edit matching and snapshot behavior
 - `cargo test -p ava-tools`, `cargo test -p ava-agent`, and targeted `ava-tui` command tests passed during implementation
 - Headless provider-backed smoke test succeeded on `master` in a disposable git repo: file edit completed and a ghost snapshot ref was created
-- Full TUI/manual verification of `/commit` UX is still pending because PTY capture is not reliable for alt-screen validation here
+- Original sprint notes flagged `/commit` TUI UX for additional manual review; this now follows normal backlog/UX polish tracking
 - Workspace checks for affected crates
 
 ## Exit Criteria

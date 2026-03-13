@@ -30,7 +30,10 @@ use crate::registry::{ToolRegistry, ToolTier};
 /// read and edit tools so that hash-anchored edits work across tool calls.
 pub fn register_default_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platform>) {
     let hashline_cache = hashline::new_cache();
-    registry.register(read::ReadTool::new(platform.clone(), hashline_cache.clone()));
+    registry.register(read::ReadTool::new(
+        platform.clone(),
+        hashline_cache.clone(),
+    ));
     registry.register(write::WriteTool::new(platform.clone()));
     registry.register(edit::EditTool::new(platform.clone(), hashline_cache));
     registry.register(bash::BashTool::new(platform.clone()));
@@ -56,10 +59,7 @@ pub fn register_extended_tools(registry: &mut ToolRegistry, platform: Arc<dyn Pl
         test_runner::TestRunnerTool::new(platform.clone()),
         ToolTier::Extended,
     );
-    registry.register_with_tier(
-        lint::LintTool::new(platform.clone()),
-        ToolTier::Extended,
-    );
+    registry.register_with_tier(lint::LintTool::new(platform.clone()), ToolTier::Extended);
     registry.register_with_tier(
         diagnostics::DiagnosticsTool::new(platform.clone()),
         ToolTier::Extended,
@@ -74,10 +74,7 @@ pub fn register_core_tools(registry: &mut ToolRegistry, platform: Arc<dyn Platfo
 }
 
 /// Register the task tool with a spawner that can create sub-agent runs.
-pub fn register_task_tool(
-    registry: &mut ToolRegistry,
-    spawner: Arc<dyn task::TaskSpawner>,
-) {
+pub fn register_task_tool(registry: &mut ToolRegistry, spawner: Arc<dyn task::TaskSpawner>) {
     registry.register(task::TaskTool::new(spawner));
 }
 
@@ -91,10 +88,7 @@ pub fn register_todo_tools(registry: &mut ToolRegistry, state: ava_types::TodoSt
 }
 
 /// Register the question tool with a bridge for agent-to-TUI communication.
-pub fn register_question_tool(
-    registry: &mut ToolRegistry,
-    bridge: question::QuestionBridge,
-) {
+pub fn register_question_tool(registry: &mut ToolRegistry, bridge: question::QuestionBridge) {
     registry.register(question::QuestionTool::new(bridge));
 }
 

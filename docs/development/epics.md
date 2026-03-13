@@ -1,6 +1,6 @@
 # AVA Epics
 
-> Last updated: 2026-03-12
+> Last updated: 2026-03-13
 > Related: `docs/development/roadmap.md`, `docs/development/backlog.md`, `docs/development/v3-plan.md`
 
 ## Completed Epics
@@ -32,20 +32,18 @@
 
 | Sprint | Focus | Status |
 |--------|-------|--------|
-| 61 | `B67`, `B54`, `B37`, `B66` safer edit -> validate -> commit flow | Implemented; manual validation remains |
+| 61 | `B67`, `B54`, `B37`, `B66` safer edit -> validate -> commit flow | Implemented and archived |
 
 ### E5: Cost and Runtime Controls (Sprint 62)
 
 | Sprint | Focus | Status |
 |--------|-------|--------|
-| 62 | `B64`, `B63`, `B47`, `B40` stronger budgeting, credential refresh, routing, and cost visibility | Implemented; manual validation remains |
+| 62 | `B64`, `B63`, `B47`, `B40` stronger budgeting, credential refresh, routing, and cost visibility | Implemented, validated, archived via Sprint 62V |
 
 ## Planned v3 Backend Epics
 
 ### E6: Execution and Ecosystem Foundations (Sprint 63)
 
-| Item | Description |
-|------|-------------|
 | Item | Description |
 |------|-------------|
 | `B65` | Pluggable backend operations |

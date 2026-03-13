@@ -390,7 +390,10 @@ mod tests {
     #[test]
     fn popular_providers_come_first() {
         let providers = all_providers();
-        let first_other = providers.iter().position(|p| p.group == ProviderGroup::Other).unwrap();
+        let first_other = providers
+            .iter()
+            .position(|p| p.group == ProviderGroup::Other)
+            .unwrap();
         for p in &providers[..first_other] {
             assert_eq!(p.group, ProviderGroup::Popular);
         }

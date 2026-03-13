@@ -31,6 +31,8 @@ pub struct BackgroundTask {
     pub cost_usd: f64,
     pub messages: Vec<UiMessage>,
     pub error: Option<String>,
+    pub worktree_path: Option<String>,
+    pub branch_name: Option<String>,
 }
 
 impl BackgroundTask {
@@ -106,8 +108,17 @@ impl BackgroundState {
             cost_usd: 0.0,
             messages: Vec::new(),
             error: None,
+            worktree_path: None,
+            branch_name: None,
         });
         id
+    }
+
+    pub fn set_isolation(&mut self, id: usize, worktree_path: String, branch_name: String) {
+        if let Some(task) = self.tasks.iter_mut().find(|t| t.id == id) {
+            task.worktree_path = Some(worktree_path);
+            task.branch_name = Some(branch_name);
+        }
     }
 
     pub fn complete_task(&mut self, id: usize) {

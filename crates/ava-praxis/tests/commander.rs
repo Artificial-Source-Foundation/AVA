@@ -4,12 +4,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use ava_praxis::{
-    Budget, Director, DirectorConfig, PraxisEvent, Domain, Task, TaskType,
-};
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
 use ava_platform::StandardPlatform;
+use ava_praxis::{Budget, Director, DirectorConfig, Domain, PraxisEvent, Task, TaskType};
 use ava_types::{Message, Result, Role, StreamChunk};
 use futures::Stream;
 use tokio::sync::mpsc;
@@ -51,8 +49,10 @@ fn director_with_platform(provider: Arc<dyn LLMProvider>) -> Director {
 
 #[test]
 fn delegation_routes_to_expected_domain() {
-    let provider = Arc::new(MockProvider::new("default", vec![completion_response("ok")]))
-        as Arc<dyn LLMProvider>;
+    let provider = Arc::new(MockProvider::new(
+        "default",
+        vec![completion_response("ok")],
+    )) as Arc<dyn LLMProvider>;
     let mut director = director_with_default(provider);
 
     let worker = director
@@ -74,15 +74,18 @@ fn delegation_routes_to_expected_domain() {
 
 #[test]
 fn domain_routing_covers_all_task_types() {
-    let provider = Arc::new(MockProvider::new("default", vec![
-        completion_response("1"),
-        completion_response("2"),
-        completion_response("3"),
-        completion_response("4"),
-        completion_response("5"),
-        completion_response("6"),
-        completion_response("7"),
-    ])) as Arc<dyn LLMProvider>;
+    let provider = Arc::new(MockProvider::new(
+        "default",
+        vec![
+            completion_response("1"),
+            completion_response("2"),
+            completion_response("3"),
+            completion_response("4"),
+            completion_response("5"),
+            completion_response("6"),
+            completion_response("7"),
+        ],
+    )) as Arc<dyn LLMProvider>;
     let mut director = director_with_default(provider);
 
     let cases = vec![
@@ -124,8 +127,10 @@ fn domain_routing_covers_all_task_types() {
 
 #[test]
 fn budget_allocation_halves_top_level_budget() {
-    let provider = Arc::new(MockProvider::new("default", vec![completion_response("ok")]))
-        as Arc<dyn LLMProvider>;
+    let provider = Arc::new(MockProvider::new(
+        "default",
+        vec![completion_response("ok")],
+    )) as Arc<dyn LLMProvider>;
     let mut director = director_with_default(provider);
     let worker = director
         .delegate(Task {
@@ -144,10 +149,10 @@ fn budget_allocation_halves_top_level_budget() {
 
 #[test]
 fn worker_spawning_uses_domain_provider_model_name() {
-    let default_provider = Arc::new(MockProvider::new("default-model", vec![]))
-        as Arc<dyn LLMProvider>;
-    let backend_provider = Arc::new(MockProvider::new("backend-model", vec![]))
-        as Arc<dyn LLMProvider>;
+    let default_provider =
+        Arc::new(MockProvider::new("default-model", vec![])) as Arc<dyn LLMProvider>;
+    let backend_provider =
+        Arc::new(MockProvider::new("backend-model", vec![])) as Arc<dyn LLMProvider>;
 
     let mut overrides: HashMap<Domain, Arc<dyn LLMProvider>> = HashMap::new();
     overrides.insert(Domain::Backend, backend_provider);
@@ -205,9 +210,14 @@ async fn single_worker_completes_successfully() {
     assert!(events
         .iter()
         .any(|e| matches!(e, PraxisEvent::WorkerCompleted { success: true, .. })));
-    assert!(events.iter().any(
-        |e| matches!(e, PraxisEvent::AllComplete { total_workers: 1, succeeded: 1, failed: 0 })
-    ));
+    assert!(events.iter().any(|e| matches!(
+        e,
+        PraxisEvent::AllComplete {
+            total_workers: 1,
+            succeeded: 1,
+            failed: 0
+        }
+    )));
 }
 
 // --- Story 1: Multi-worker coordination ---
@@ -250,7 +260,10 @@ async fn coordinate_runs_workers_and_merges_session_messages() {
         .iter()
         .filter(|m| m.role == Role::System && m.content.starts_with("[worker-"))
         .collect();
-    assert!(system_msgs.len() >= 2, "should have worker attribution headers");
+    assert!(
+        system_msgs.len() >= 2,
+        "should have worker attribution headers"
+    );
 
     // Check for summary message
     let summary = session
@@ -301,10 +314,7 @@ async fn cancellation_token_stops_workers() {
         .expect("coordinate returns partial success session");
 
     // Failed workers produce error messages in session
-    let has_error = session
-        .messages
-        .iter()
-        .any(|m| m.content.contains("ERROR"));
+    let has_error = session.messages.iter().any(|m| m.content.contains("ERROR"));
     assert!(has_error || session.messages.is_empty());
 
     let events: Vec<PraxisEvent> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
@@ -421,7 +431,10 @@ async fn event_stream_fires_in_order() {
         .expect("should have Summary");
 
     assert!(started_idx < completed_idx, "Started before Completed");
-    assert!(completed_idx < all_complete_idx, "Completed before AllComplete");
+    assert!(
+        completed_idx < all_complete_idx,
+        "Completed before AllComplete"
+    );
     assert!(all_complete_idx < summary_idx, "AllComplete before Summary");
 }
 
@@ -520,7 +533,9 @@ impl LLMProvider for SlowProvider {
         messages: &[Message],
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
         let out = self.generate(messages).await?;
-        Ok(Box::pin(futures::stream::iter(vec![StreamChunk::text(out)])))
+        Ok(Box::pin(futures::stream::iter(vec![StreamChunk::text(
+            out,
+        )])))
     }
 
     fn estimate_tokens(&self, input: &str) -> usize {

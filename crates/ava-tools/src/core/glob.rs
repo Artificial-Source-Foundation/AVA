@@ -46,18 +46,12 @@ impl Tool for GlobTool {
     }
 
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
-        let pattern = args
-            .get("pattern")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                AvaError::ValidationError("missing required field: pattern".to_string())
-            })?;
+        let pattern = args.get("pattern").and_then(Value::as_str).ok_or_else(|| {
+            AvaError::ValidationError("missing required field: pattern".to_string())
+        })?;
         let base = args.get("path").and_then(Value::as_str).unwrap_or(".");
 
-        let query = Path::new(base)
-            .join(pattern)
-            .to_string_lossy()
-            .to_string();
+        let query = Path::new(base).join(pattern).to_string_lossy().to_string();
 
         let mut matches: Vec<(PathBuf, SystemTime)> = Vec::new();
         for entry in glob::glob(&query).map_err(|e| AvaError::ToolError(e.to_string()))? {

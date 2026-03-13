@@ -24,7 +24,9 @@ impl CLIAgentRunner {
     ) -> Result<CLIAgentResult> {
         let args = self.build_args(&options);
         let mut cmd = Command::new(&self.config.binary);
-        cmd.args(&args).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.args(&args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         if self.config.cwd_flag.is_none() {
             cmd.current_dir(&options.cwd);
         }

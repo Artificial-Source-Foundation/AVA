@@ -37,7 +37,10 @@ pub fn reqwest_error(error: reqwest::Error) -> AvaError {
     }
 }
 
-pub async fn validate_status(response: reqwest::Response, provider: &str) -> Result<reqwest::Response> {
+pub async fn validate_status(
+    response: reqwest::Response,
+    provider: &str,
+) -> Result<reqwest::Response> {
     if response.status().is_success() {
         return Ok(response);
     }
@@ -86,18 +89,18 @@ pub async fn send_with_retry(
 ) -> Result<reqwest::Response> {
     let mut attempts = 0;
     loop {
-        let cloned = request.try_clone().ok_or_else(|| {
-            AvaError::ProviderError {
-                provider: provider.to_string(),
-                message: "request body is not clonable (streaming body?)".to_string(),
-            }
+        let cloned = request.try_clone().ok_or_else(|| AvaError::ProviderError {
+            provider: provider.to_string(),
+            message: "request body is not clonable (streaming body?)".to_string(),
         })?;
 
         match cloned.send().await {
             Ok(resp) if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS => {
                 attempts += 1;
                 if attempts > max_retries {
-                    return validate_status(resp, provider).await.map(|_| unreachable!());
+                    return validate_status(resp, provider)
+                        .await
+                        .map(|_| unreachable!());
                 }
                 let delay = resp
                     .headers()
@@ -110,7 +113,9 @@ pub async fn send_with_retry(
             Ok(resp) if resp.status().is_server_error() => {
                 attempts += 1;
                 if attempts > max_retries {
-                    return validate_status(resp, provider).await.map(|_| unreachable!());
+                    return validate_status(resp, provider)
+                        .await
+                        .map(|_| unreachable!());
                 }
                 let delay = 2u64.saturating_pow(attempts as u32);
                 tokio::time::sleep(Duration::from_secs(delay)).await;
@@ -192,12 +197,12 @@ mod tests {
             parameters: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
         }];
         let body = provider.build_request_body_with_tools(&messages, &tools, false);
-        let tool_array = body.get("tools").and_then(serde_json::Value::as_array).unwrap();
+        let tool_array = body
+            .get("tools")
+            .and_then(serde_json::Value::as_array)
+            .unwrap();
         assert_eq!(tool_array.len(), 1);
-        assert_eq!(
-            tool_array[0]["function"]["name"].as_str().unwrap(),
-            "read"
-        );
+        assert_eq!(tool_array[0]["function"]["name"].as_str().unwrap(), "read");
         assert_eq!(tool_array[0]["type"].as_str().unwrap(), "function");
     }
 
@@ -252,10 +257,8 @@ mod tests {
             name: "read".to_string(),
             arguments: json!({"path": "/tmp/test"}),
         };
-        let assistant_msg = Message::new(Role::Assistant, "")
-            .with_tool_calls(vec![tc]);
-        let tool_msg = Message::new(Role::Tool, "file contents")
-            .with_tool_call_id("call_1");
+        let assistant_msg = Message::new(Role::Assistant, "").with_tool_calls(vec![tc]);
+        let tool_msg = Message::new(Role::Tool, "file contents").with_tool_call_id("call_1");
 
         let mapped = map_messages_openai(&[assistant_msg, tool_msg]);
         assert_eq!(mapped.len(), 2);
@@ -276,10 +279,10 @@ mod tests {
             name: "bash".to_string(),
             arguments: json!({"command": "ls"}),
         };
-        let assistant_msg = Message::new(Role::Assistant, "Let me list files.")
-            .with_tool_calls(vec![tc]);
-        let tool_msg = Message::new(Role::Tool, "file1.txt\nfile2.txt")
-            .with_tool_call_id("toolu_1");
+        let assistant_msg =
+            Message::new(Role::Assistant, "Let me list files.").with_tool_calls(vec![tc]);
+        let tool_msg =
+            Message::new(Role::Tool, "file1.txt\nfile2.txt").with_tool_call_id("toolu_1");
 
         let (_, mapped) = map_messages_anthropic(&[assistant_msg, tool_msg]);
         assert_eq!(mapped.len(), 2);
@@ -368,8 +371,14 @@ mod tests {
         let (opus_in, _) = model_pricing_usd_per_million("claude-opus-4");
         let (sonnet_in, _) = model_pricing_usd_per_million("claude-sonnet-4");
         let (haiku_in, _) = model_pricing_usd_per_million("claude-haiku-3.5");
-        assert!(opus_in > sonnet_in, "opus should be more expensive than sonnet");
-        assert!(sonnet_in > haiku_in, "sonnet should be more expensive than haiku");
+        assert!(
+            opus_in > sonnet_in,
+            "opus should be more expensive than sonnet"
+        );
+        assert!(
+            sonnet_in > haiku_in,
+            "sonnet should be more expensive than haiku"
+        );
     }
 
     #[test]

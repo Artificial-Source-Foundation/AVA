@@ -13,7 +13,10 @@ pub struct SandboxOutput {
     pub exit_code: i32,
 }
 
-pub async fn execute_plan(plan: &SandboxPlan, timeout: Duration) -> Result<SandboxOutput, SandboxError> {
+pub async fn execute_plan(
+    plan: &SandboxPlan,
+    timeout: Duration,
+) -> Result<SandboxOutput, SandboxError> {
     let result = tokio::time::timeout(timeout, async {
         let mut command = Command::new(&plan.program);
         command

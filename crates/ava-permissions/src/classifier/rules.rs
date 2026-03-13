@@ -30,7 +30,10 @@ pub(super) fn check_blocked_patterns(lower: &str, _original: &str) -> Option<Str
 
     // curl/wget piped to shell
     if (lower.contains("curl ") || lower.contains("wget "))
-        && (lower.contains("| sh") || lower.contains("| bash") || lower.contains("|sh") || lower.contains("|bash"))
+        && (lower.contains("| sh")
+            || lower.contains("| bash")
+            || lower.contains("|sh")
+            || lower.contains("|bash"))
     {
         return Some("Piping downloaded content to shell is dangerous".to_string());
     }
@@ -62,21 +65,64 @@ pub(super) fn check_blocked_patterns(lower: &str, _original: &str) -> Option<Str
 pub(super) fn is_safe_command(first_word: &str) -> bool {
     matches!(
         first_word,
-        "ls" | "cat" | "echo" | "grep" | "rg" | "find" | "head" | "tail"
-            | "wc" | "pwd" | "date" | "which" | "whoami" | "env" | "printenv"
-            | "uname" | "id" | "file" | "stat" | "du" | "df" | "tree" | "less"
-            | "more" | "sort" | "uniq" | "diff" | "comm" | "cut" | "tr"
-            | "basename" | "dirname" | "realpath" | "readlink" | "tee"
-            | "true" | "false" | "test" | "[" | "printf"
+        "ls" | "cat"
+            | "echo"
+            | "grep"
+            | "rg"
+            | "find"
+            | "head"
+            | "tail"
+            | "wc"
+            | "pwd"
+            | "date"
+            | "which"
+            | "whoami"
+            | "env"
+            | "printenv"
+            | "uname"
+            | "id"
+            | "file"
+            | "stat"
+            | "du"
+            | "df"
+            | "tree"
+            | "less"
+            | "more"
+            | "sort"
+            | "uniq"
+            | "diff"
+            | "comm"
+            | "cut"
+            | "tr"
+            | "basename"
+            | "dirname"
+            | "realpath"
+            | "readlink"
+            | "tee"
+            | "true"
+            | "false"
+            | "test"
+            | "["
+            | "printf"
     )
 }
 
 /// Check if command matches safe git subcommands.
 pub fn is_safe_git_command(lower: &str) -> bool {
     let safe_git = [
-        "git status", "git log", "git diff", "git branch", "git show",
-        "git tag", "git remote", "git stash list", "git shortlog",
-        "git describe", "git rev-parse", "git ls-files", "git blame",
+        "git status",
+        "git log",
+        "git diff",
+        "git branch",
+        "git show",
+        "git tag",
+        "git remote",
+        "git stash list",
+        "git shortlog",
+        "git describe",
+        "git rev-parse",
+        "git ls-files",
+        "git blame",
     ];
     safe_git.iter().any(|cmd| lower.starts_with(cmd))
 }
@@ -89,14 +135,30 @@ pub(super) fn is_low_risk_command(first_word: &str, lower: &str) -> bool {
     }
 
     // Build/test/dev tools
-    if matches!(first_word, "cargo" | "npm" | "npx" | "yarn" | "pnpm" | "bun"
-        | "python" | "python3" | "node" | "deno" | "go" | "rustc" | "gcc"
-        | "make" | "cmake" | "just" | "nix")
-    {
+    if matches!(
+        first_word,
+        "cargo"
+            | "npm"
+            | "npx"
+            | "yarn"
+            | "pnpm"
+            | "bun"
+            | "python"
+            | "python3"
+            | "node"
+            | "deno"
+            | "go"
+            | "rustc"
+            | "gcc"
+            | "make"
+            | "cmake"
+            | "just"
+            | "nix"
+    ) {
         // Check for specific safe subcommands
         let safe_subs = [
-            "test", "build", "clippy", "check", "run", "install", "fmt",
-            "lint", "format", "bench", "doc", "audit", "outdated",
+            "test", "build", "clippy", "check", "run", "install", "fmt", "lint", "format", "bench",
+            "doc", "audit", "outdated",
         ];
         if safe_subs.iter().any(|sub| lower.contains(sub)) {
             return true;
@@ -104,8 +166,10 @@ pub(super) fn is_low_risk_command(first_word: &str, lower: &str) -> bool {
     }
 
     // Standalone safe dev commands
-    matches!(first_word, "rustfmt" | "prettier" | "eslint" | "biome"
-        | "tsc" | "esbuild" | "vite" | "webpack")
+    matches!(
+        first_word,
+        "rustfmt" | "prettier" | "eslint" | "biome" | "tsc" | "esbuild" | "vite" | "webpack"
+    )
 }
 
 /// Check for high-risk patterns that should warn but not block.
@@ -130,9 +194,7 @@ pub(super) fn check_high_risk_patterns(
     }
 
     // git push --force / -f
-    if lower.starts_with("git push")
-        && (lower.contains("--force") || lower.contains("-f"))
-    {
+    if lower.starts_with("git push") && (lower.contains("--force") || lower.contains("-f")) {
         warnings.push("Force push can overwrite remote history".to_string());
         tags = vec![SafetyTag::Destructive, SafetyTag::NetworkAccess];
         return Some(CommandClassification {
@@ -261,7 +323,9 @@ pub(super) fn check_medium_risk_patterns(
 
 /// Check for network access commands.
 pub(super) fn is_network_command(first_word: &str, lower: &str) -> bool {
-    matches!(first_word, "curl" | "wget" | "nc" | "ncat" | "ssh" | "scp" | "rsync" | "ftp" | "sftp")
-        || lower.contains("http://")
+    matches!(
+        first_word,
+        "curl" | "wget" | "nc" | "ncat" | "ssh" | "scp" | "rsync" | "ftp" | "sftp"
+    ) || lower.contains("http://")
         || lower.contains("https://")
 }

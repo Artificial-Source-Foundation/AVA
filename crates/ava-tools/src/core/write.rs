@@ -50,9 +50,7 @@ impl Tool for WriteTool {
 
         let file_path = Path::new(path);
         if let Some(parent) = file_path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| AvaError::IoError(e.to_string()))?;
+            self.platform.create_dir_all(parent).await?;
         }
 
         // B66 currently snapshots edit-heavy replacement flows (`edit`/`multiedit`).

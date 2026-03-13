@@ -5,7 +5,7 @@ use ava_types::Message;
 use crate::error::{ContextError, Result};
 use crate::strategies::{
     AsyncCondensationStrategy, CondensationStrategy, RelevanceStrategy, SlidingWindowStrategy,
-    Summarizer, SummarizationStrategy, ToolTruncationStrategy,
+    SummarizationStrategy, Summarizer, ToolTruncationStrategy,
 };
 use crate::token_tracker::TokenTracker;
 use crate::types::{CondensationResult, CondenserConfig};
@@ -119,7 +119,9 @@ impl HybridCondenser {
 
         // Stage 2: async strategies (e.g. LLM summarization)
         for strategy in &self.async_strategies {
-            current = strategy.condense(&current, self.config.target_tokens).await?;
+            current = strategy
+                .condense(&current, self.config.target_tokens)
+                .await?;
             self.tracker.reset();
             self.tracker.add_messages(&current);
 
@@ -211,7 +213,12 @@ pub fn create_hybrid_condenser_with_relevance(
     let fallback_strategies: Vec<Box<dyn CondensationStrategy>> =
         vec![Box::new(SlidingWindowStrategy)];
 
-    HybridCondenser::new(config, sync_strategies, async_strategies, fallback_strategies)
+    HybridCondenser::new(
+        config,
+        sync_strategies,
+        async_strategies,
+        fallback_strategies,
+    )
 }
 
 #[cfg(test)]
@@ -233,8 +240,14 @@ mod tests {
     fn applies_strategies_when_over_limit() {
         let mut condenser = create_condenser(20);
         // Use multi-word content so word-based token estimator counts enough tokens
-        let words = (0..100).map(|i| format!("word{i}")).collect::<Vec<_>>().join(" ");
-        let tool_words = (0..200).map(|i| format!("val{i}")).collect::<Vec<_>>().join(" ");
+        let words = (0..100)
+            .map(|i| format!("word{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let tool_words = (0..200)
+            .map(|i| format!("val{i}"))
+            .collect::<Vec<_>>()
+            .join(" ");
         let mut messages = vec![Message::new(Role::User, words)];
         messages[0].tool_results.push(ToolResult {
             call_id: "1".to_string(),
@@ -276,7 +289,10 @@ mod tests {
         let mut messages = Vec::new();
         messages.push(Message::new(Role::System, "system prompt"));
         for i in 0..8 {
-            messages.push(Message::new(Role::User, format!("message {i} with some content")));
+            messages.push(Message::new(
+                Role::User,
+                format!("message {i} with some content"),
+            ));
         }
 
         let result = condenser.condense(&messages).await.unwrap();

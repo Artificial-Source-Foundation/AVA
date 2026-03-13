@@ -149,9 +149,7 @@ impl Tool for CustomTool {
 
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(timeout),
-            tokio::process::Command::new(&cmd)
-                .args(&cmd_args)
-                .output(),
+            tokio::process::Command::new(&cmd).args(&cmd_args).output(),
         )
         .await
         .map_err(|_| {
@@ -240,8 +238,9 @@ pub fn create_tool_templates(dir: &Path) -> Result<Vec<PathBuf>> {
     for (filename, content) in &templates {
         let path = dir.join(filename);
         if !path.exists() {
-            std::fs::write(&path, content)
-                .map_err(|e| AvaError::IoError(format!("failed to write {}: {e}", path.display())))?;
+            std::fs::write(&path, content).map_err(|e| {
+                AvaError::IoError(format!("failed to write {}: {e}", path.display()))
+            })?;
             created.push(path);
         }
     }
@@ -314,7 +313,10 @@ timeout_secs = 5
         assert_eq!(def.params.len(), 1);
         assert!(def.params[0].required);
         match &def.execution {
-            ExecutionDef::Shell { command, timeout_secs } => {
+            ExecutionDef::Shell {
+                command,
+                timeout_secs,
+            } => {
                 assert_eq!(command, "echo {{input}}");
                 assert_eq!(*timeout_secs, Some(5));
             }
@@ -335,7 +337,11 @@ script = "print('hello')"
 "#;
         let def: CustomToolDef = toml::from_str(toml_str).unwrap();
         match &def.execution {
-            ExecutionDef::Script { interpreter, script, timeout_secs } => {
+            ExecutionDef::Script {
+                interpreter,
+                script,
+                timeout_secs,
+            } => {
                 assert_eq!(interpreter, "python3");
                 assert_eq!(script, "print('hello')");
                 assert!(timeout_secs.is_none());
@@ -400,7 +406,10 @@ type = "string"
 required = true
 "#;
         let result = toml::from_str::<CustomToolDef>(toml_str);
-        assert!(result.is_err(), "TOML without [execution] should fail to parse");
+        assert!(
+            result.is_err(),
+            "TOML without [execution] should fail to parse"
+        );
     }
 
     #[test]

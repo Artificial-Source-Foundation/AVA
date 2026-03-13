@@ -185,9 +185,7 @@ impl Shell for LocalShell {
                 }
                 Err(e) => {
                     let _ = completion_tx.and_then(|tx_done| tx_done.send(()).ok());
-                    let _ = tx.send(Err(AvaError::PlatformError(format!(
-                        "Process error: {e}"
-                    ))));
+                    let _ = tx.send(Err(AvaError::PlatformError(format!("Process error: {e}"))));
                 }
             }
         });

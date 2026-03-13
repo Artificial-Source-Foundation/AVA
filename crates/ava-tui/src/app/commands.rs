@@ -657,7 +657,7 @@ Available commands:
   /commands [list|reload|init] — manage custom slash commands
   /hooks [list|reload|init|dry-run <event>] — manage lifecycle hooks
   /btw <question>          — ask a side question without interrupting the agent
-  /bg <goal>               — launch a goal as a background agent
+  /bg [--branch] <goal>    — launch a goal as a background agent
   /tasks                   — show background task list
   /clear                   — clear chat
   /compact [focus]          — compact conversation to save context window
@@ -695,20 +695,30 @@ Keyboard shortcuts:
             }
             "/bg" => {
                 if let Some(goal) = arg {
-                    if goal.is_empty() {
+                    let trimmed = goal.trim_start();
+                    let (isolated_branch, goal_text) = if let Some(rest) = trimmed.strip_prefix("--branch") {
+                        (true, rest.trim_start())
+                    } else {
+                        (false, trimmed)
+                    };
+                    if goal_text.is_empty() {
                         Some((
                             MessageKind::Error,
-                            "Usage: /bg <goal> (e.g., /bg refactor the auth module)".to_string(),
+                            "Usage: /bg [--branch] <goal> (e.g., /bg --branch refactor auth module)".to_string(),
                         ))
                     } else {
                         // Store the goal and return None — submit_goal will check pending_bg_goal
-                        self.pending_bg_goal = Some(goal.to_string());
+                        self.pending_bg_goal = Some(super::PendingBackgroundGoal {
+                            goal: goal_text.to_string(),
+                            isolated_branch,
+                        });
                         None
                     }
                 } else {
                     Some((
                         MessageKind::Error,
-                        "Usage: /bg <goal> (e.g., /bg refactor the auth module)".to_string(),
+                        "Usage: /bg [--branch] <goal> (e.g., /bg --branch refactor auth module)"
+                            .to_string(),
                     ))
                 }
             }

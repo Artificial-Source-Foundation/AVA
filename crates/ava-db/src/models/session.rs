@@ -148,10 +148,7 @@ mod tests {
             .expect("session should be inserted");
         }
 
-        let sessions = repo
-            .list_recent(3)
-            .await
-            .expect("list should succeed");
+        let sessions = repo.list_recent(3).await.expect("list should succeed");
         assert_eq!(sessions.len(), 3);
         assert_eq!(sessions[0].id, "session-4");
     }

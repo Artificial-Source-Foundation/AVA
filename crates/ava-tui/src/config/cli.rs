@@ -47,6 +47,14 @@ pub struct CliArgs {
     #[arg(long)]
     pub json: bool,
 
+    /// Watch files and trigger on `ava:` comment directives
+    #[arg(long)]
+    pub watch: bool,
+
+    /// Additional paths to watch (repeatable, defaults to current directory)
+    #[arg(long = "watch-path")]
+    pub watch_path: Vec<String>,
+
     /// Use multi-agent Director mode (Praxis) instead of single AgentStack
     #[arg(long, alias = "praxis")]
     pub multi_agent: bool,

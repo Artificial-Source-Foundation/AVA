@@ -38,10 +38,7 @@ impl ConnectionPool {
         }
     }
 
-    pub fn with_timeouts(
-        connect_timeout: Duration,
-        request_timeout: Duration,
-    ) -> Self {
+    pub fn with_timeouts(connect_timeout: Duration, request_timeout: Duration) -> Self {
         Self {
             connect_timeout,
             request_timeout,
@@ -126,15 +123,14 @@ mod tests {
 
         let stats = pool.stats().await;
         assert_eq!(stats.active_clients, 2);
-        assert!(stats.base_urls.contains(&"https://api.openai.com".to_string()));
+        assert!(stats
+            .base_urls
+            .contains(&"https://api.openai.com".to_string()));
     }
 
     #[tokio::test]
     async fn custom_timeouts() {
-        let pool = ConnectionPool::with_timeouts(
-            Duration::from_secs(5),
-            Duration::from_secs(60),
-        );
+        let pool = ConnectionPool::with_timeouts(Duration::from_secs(5), Duration::from_secs(60));
 
         let client = pool.get_client("https://example.com").await.unwrap();
         assert!(Arc::strong_count(&client) >= 2); // pool + local

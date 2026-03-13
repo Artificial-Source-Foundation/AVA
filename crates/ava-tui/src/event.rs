@@ -81,6 +81,10 @@ pub enum AppEvent {
         run_id: u64,
         result: Result<ava_agent::stack::AgentRunResult, String>,
     },
+    BackgroundCleanupResult {
+        task_id: usize,
+        result: Result<(), String>,
+    },
     TokenUsage(TokenUsage),
     ModelSelectorLoaded(Result<ModelSelectorState, String>),
     ModelSwitchFinished(ModelSwitchResult),
@@ -137,6 +141,11 @@ impl std::fmt::Debug for AppEvent {
             Self::AgentRunDone { run_id, result } => f
                 .debug_struct("AgentRunDone")
                 .field("run_id", run_id)
+                .field("result", result)
+                .finish(),
+            Self::BackgroundCleanupResult { task_id, result } => f
+                .debug_struct("BackgroundCleanupResult")
+                .field("task_id", task_id)
                 .field("result", result)
                 .finish(),
             Self::TokenUsage(u) => f.debug_tuple("TokenUsage").field(u).finish(),

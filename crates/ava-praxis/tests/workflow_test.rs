@@ -1,11 +1,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use ava_praxis::workflow::{Workflow, WorkflowExecutor};
-use ava_praxis::{Budget, PraxisEvent};
 use ava_llm::provider::LLMProvider;
 use ava_llm::providers::mock::MockProvider;
 use ava_platform::StandardPlatform;
+use ava_praxis::workflow::{Workflow, WorkflowExecutor};
+use ava_praxis::{Budget, PraxisEvent};
 use ava_types::Role;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -125,8 +125,14 @@ async fn events_fire_in_correct_order() {
         .position(|e| matches!(e, PraxisEvent::WorkflowComplete { .. }))
         .expect("should have WorkflowComplete");
 
-    assert!(iter_idx < first_phase_idx, "IterationStarted before PhaseStarted");
-    assert!(first_phase_idx < wf_complete_idx, "PhaseStarted before WorkflowComplete");
+    assert!(
+        iter_idx < first_phase_idx,
+        "IterationStarted before PhaseStarted"
+    );
+    assert!(
+        first_phase_idx < wf_complete_idx,
+        "PhaseStarted before WorkflowComplete"
+    );
 }
 
 #[tokio::test]
@@ -173,7 +179,11 @@ async fn feedback_loop_triggers_on_revision_request() {
         .iter()
         .filter(|e| matches!(e, PraxisEvent::PhaseStarted { .. }))
         .collect();
-    assert_eq!(phases.len(), 6, "should have 6 phase starts (3 x 2 iterations)");
+    assert_eq!(
+        phases.len(),
+        6,
+        "should have 6 phase starts (3 x 2 iterations)"
+    );
 
     // WorkflowComplete should show 2 iterations
     if let Some(PraxisEvent::WorkflowComplete { iterations, .. }) = events
@@ -242,10 +252,7 @@ async fn cancellation_stops_mid_workflow() {
 async fn combined_session_contains_phase_markers() {
     let provider = Arc::new(MockProvider::new(
         "mock",
-        vec![
-            completion_response("planned"),
-            completion_response("coded"),
-        ],
+        vec![completion_response("planned"), completion_response("coded")],
     )) as Arc<dyn LLMProvider>;
 
     let workflow = Workflow::plan_code();

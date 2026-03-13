@@ -1,6 +1,6 @@
 # AVA Sprint Roadmap
 
-> Last updated: 2026-03-12 (Sprints 60-62 implemented; Sprint 63-66 remain planning lanes on master; reference corpus refreshed; v3 planning lanes defined)
+> Last updated: 2026-03-13 (Sprint 62V closeout complete; Sprints 60-62 archived; Sprint 63-66 remain active planning lanes on master)
 
 ## Completed (Sprints 11–59)
 
@@ -58,13 +58,14 @@
 | 58 | Modal system revamp — shared SelectList widget, scroll fix, visual redesign |
 | 59 | Provider mega — Copilot provider, provider verification, retry jitter ±20%, circuit breaker wiring, compiled-in model registry, rich StreamChunk, Alibaba Coding Plan fixes, context window display, error text wrapping, dedup guard fix |
 
-## Recently Completed (Sprints 60-62)
+## Recently Completed (Sprints 60-62 + 62V)
 
 | Sprint | Focus | Status |
 |--------|-------|--------|
-| 60 | Streaming tool calls + session/context UX + project instructions + TUI workflow polish | Implemented in code; manual validation ongoing |
-| 61 | Reliable edit loop (`B67`, `B54`, `B37`, `B66`) | Implemented in code; backend/command-level tested; full manual TUI validation still pending |
-| 62 | Cost + runtime foundations (`B64`, `B63`, `B47`, `B40`) | Implemented in code; workspace-tested; manual TUI/provider validation still pending |
+| 60 | Streaming tool calls + session/context UX + project instructions + TUI workflow polish | Implemented and archived |
+| 61 | Reliable edit loop (`B67`, `B54`, `B37`, `B66`) | Implemented and archived |
+| 62 | Cost + runtime foundations (`B64`, `B63`, `B47`, `B40`) | Implemented, validated, and archived via Sprint 62V |
+| 62V | Validation + archive closeout for Sprint 62 | Complete |
 
 ### Sprint 60 Completed Items
 
@@ -78,7 +79,7 @@
 
 v3 is the point where the current active backlog is intentionally burned down, validated, and reorganized into a cleaner release story.
 
-Sprint 62 is now implemented on `master`. Sprint 63-66 remain planning docs and active delivery lanes.
+Sprints 60-62 are now archived as completed delivery history. Sprint 63-66 remain planning docs and active delivery lanes.
 
 ### Backend Lane (Rust-first)
 
@@ -103,12 +104,11 @@ Sprint 62 is now implemented on `master`. Sprint 63-66 remain planning docs and 
 ### Ordering Notes
 
 - `B26` remains the highest-priority open UI-facing item and should land before or together with Sprint 65's coordination work.
-- Sprints 60 and 61 are now treated as done-for-planning and live in the sprint archive while their manual validation notes remain tracked in the backlog.
+- Sprints 60, 61, and 62 are treated as done-for-planning and live in the sprint archive.
 - The backend lane stays Rust-first; the frontend lane is limited to TUI and desktop surfaces for already-approved backend capabilities.
 
 Detailed sprint planning docs live in:
 
-- `docs/development/sprints/sprint-62/overview.md`
 - `docs/development/sprints/sprint-63/overview.md`
 - `docs/development/sprints/sprint-64/overview.md`
 - `docs/development/sprints/sprint-65/overview.md`
@@ -118,21 +118,24 @@ Archived implemented sprint docs live in:
 
 - `docs/development/sprints/archive/sprint-60/overview.md`
 - `docs/development/sprints/archive/sprint-61/overview.md`
+- `docs/development/sprints/archive/sprint-62/overview.md`
+- `docs/development/sprints/archive/sprint-62v/overview.md`
 
 ## Status: v2.1 Released + Active Development
 
-v2.1.0 released on 2026-03-08. Sprints 51-62 materially improved model intelligence, provider coverage, runtime reliability, streaming UX, workflow safety, and cost visibility. Current follow-through is manual TUI/provider validation for recently landed work, backlog cleanup, paired backend/frontend planning toward v3, and using the refreshed reference corpus to keep AVA competitive with OpenCode, Codex CLI, Goose, Gemini CLI, Cline, OpenHands, Continue, Zed, and others. Sprint 63-66 remain roadmap targets rather than completed implementation on `master`.
+v2.1.0 released on 2026-03-08. Sprints 51-62 materially improved model intelligence, provider coverage, runtime reliability, streaming UX, workflow safety, and cost visibility. Sprint 62V closed remaining Sprint 62 validation/archival work. Current focus is backlog cleanup plus paired backend/frontend planning toward v3 while Sprint 63-66 remain roadmap targets rather than completed implementation on `master`.
 
 ## Codebase Stats (lightweight repo snapshot)
 
 | Metric | Value |
 |--------|-------|
 | Rust crates | 20 |
-| Rust source files | 266 |
-| Lines of Rust | ~70,000 |
+| Rust source files | 268 |
+| Lines of Rust | ~77,000 |
 | Tracked test files | 338 |
 | Clippy | Clean |
-| Core built-in tools | 13 (6 default + 7 extended) |
+| Built-in tools | 6 |
+| Extended tools | 7 |
 
 ## Parallelism Guide (Historical)
 

@@ -130,9 +130,7 @@ fn parse_response(stdout: &str) -> Result<ClaudeCodeResponse, AvaError> {
             .ok_or_else(|| AvaError::ToolError("Claude Code returned empty output".into()))
             .and_then(|line| {
                 serde_json::from_str::<ClaudeCodeResponse>(line).map_err(|e| {
-                    AvaError::ToolError(format!(
-                        "Failed to parse Claude Code response: {e}"
-                    ))
+                    AvaError::ToolError(format!("Failed to parse Claude Code response: {e}"))
                 })
             })
     })
@@ -401,7 +399,10 @@ mod tests {
         }"#;
 
         let response = parse_response(json_str).unwrap();
-        assert_eq!(response.result.as_deref(), Some("Found 3 security issues in auth.rs"));
+        assert_eq!(
+            response.result.as_deref(),
+            Some("Found 3 security issues in auth.rs")
+        );
         assert_eq!(response.cost_usd, Some(0.035));
         assert_eq!(response.turns, Some(4));
         assert_eq!(response.duration_ms, Some(8500));
@@ -419,7 +420,10 @@ mod tests {
 
         let response = parse_response(json_str).unwrap();
         assert!(response.result.is_none());
-        assert_eq!(response.error.as_deref(), Some("Rate limited, please try again"));
+        assert_eq!(
+            response.error.as_deref(),
+            Some("Rate limited, please try again")
+        );
     }
 
     #[test]
@@ -614,7 +618,10 @@ mod tests {
             "default_allowed_tools": ["Read", "Edit"]
         }"#;
         let config: ClaudeCodeConfig = serde_json::from_str(json_str).unwrap();
-        assert_eq!(config.binary_path, Some(PathBuf::from("/usr/local/bin/claude")));
+        assert_eq!(
+            config.binary_path,
+            Some(PathBuf::from("/usr/local/bin/claude"))
+        );
         assert!(config.session_persistence);
         assert_eq!(config.default_max_turns, 20);
         assert!((config.default_max_budget_usd - 2.0).abs() < f64::EPSILON);

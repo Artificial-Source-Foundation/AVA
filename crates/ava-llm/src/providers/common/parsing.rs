@@ -108,7 +108,12 @@ pub fn parse_gemini_usage(payload: &Value) -> Option<ava_types::TokenUsage> {
     })
 }
 
-pub fn estimate_cost_usd(input_tokens: usize, output_tokens: usize, in_rate: f64, out_rate: f64) -> f64 {
+pub fn estimate_cost_usd(
+    input_tokens: usize,
+    output_tokens: usize,
+    in_rate: f64,
+    out_rate: f64,
+) -> f64 {
     input_tokens as f64 / 1_000_000.0 * in_rate + output_tokens as f64 / 1_000_000.0 * out_rate
 }
 
@@ -116,7 +121,11 @@ pub fn estimate_cost_usd(input_tokens: usize, output_tokens: usize, in_rate: f64
 /// - Cache read tokens cost 10% of normal input rate.
 /// - Cache creation tokens cost 125% of normal input rate.
 /// - Non-cached input tokens are charged at the normal input rate.
-pub fn estimate_cost_with_cache_usd(usage: &ava_types::TokenUsage, in_rate: f64, out_rate: f64) -> f64 {
+pub fn estimate_cost_with_cache_usd(
+    usage: &ava_types::TokenUsage,
+    in_rate: f64,
+    out_rate: f64,
+) -> f64 {
     let m = 1_000_000.0;
     let non_cached_input = usage.input_tokens.saturating_sub(usage.cache_read_tokens);
     non_cached_input as f64 / m * in_rate
@@ -146,7 +155,9 @@ pub fn parse_openai_completion_payload(payload: &Value) -> Result<String> {
         .get("choices")
         .and_then(Value::as_array)
         .and_then(|choices| choices.first())
-        .ok_or_else(|| AvaError::SerializationError("missing OpenAI completion choices".to_string()))?;
+        .ok_or_else(|| {
+            AvaError::SerializationError("missing OpenAI completion choices".to_string())
+        })?;
 
     // Content may be null when finish_reason is "stop" with no further text
     let content = choice
@@ -174,14 +185,16 @@ pub fn parse_anthropic_completion_payload(payload: &Value) -> Result<String> {
         .get("content")
         .and_then(Value::as_array)
         .and_then(|content| {
-            content.iter().find(|block| {
-                block.get("type").and_then(Value::as_str) == Some("text")
-            })
+            content
+                .iter()
+                .find(|block| block.get("type").and_then(Value::as_str) == Some("text"))
         })
         .and_then(|part| part.get("text"))
         .and_then(Value::as_str)
         .map(ToString::to_string)
-        .ok_or_else(|| AvaError::SerializationError("missing Anthropic completion content".to_string()))
+        .ok_or_else(|| {
+            AvaError::SerializationError("missing Anthropic completion content".to_string())
+        })
 }
 
 pub fn parse_anthropic_delta_payload(payload: &Value) -> Option<String> {
@@ -236,8 +249,14 @@ pub fn parse_anthropic_stream_chunk(payload: &Value) -> Option<StreamChunk> {
             let block_type = content_block.get("type").and_then(Value::as_str)?;
             if block_type == "tool_use" {
                 let index = payload.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
-                let id = content_block.get("id").and_then(Value::as_str).map(String::from);
-                let name = content_block.get("name").and_then(Value::as_str).map(String::from);
+                let id = content_block
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(String::from);
+                let name = content_block
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(String::from);
                 Some(StreamChunk {
                     tool_call: Some(StreamToolCall {
                         index,
@@ -276,8 +295,14 @@ pub fn parse_anthropic_stream_chunk(payload: &Value) -> Option<StreamChunk> {
                 .and_then(|m| m.get("usage"))
                 .map(|u| {
                     let input = u.get("input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
-                    let cache_read = u.get("cache_read_input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
-                    let cache_creation = u.get("cache_creation_input_tokens").and_then(Value::as_u64).unwrap_or(0) as usize;
+                    let cache_read = u
+                        .get("cache_read_input_tokens")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as usize;
+                    let cache_creation = u
+                        .get("cache_creation_input_tokens")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0) as usize;
                     ava_types::TokenUsage {
                         input_tokens: input,
                         output_tokens: 0,
@@ -388,7 +413,11 @@ pub fn parse_openai_stream_chunk(payload: &Value) -> Option<StreamChunk> {
         }
     }
 
-    if has_data { Some(chunk) } else { None }
+    if has_data {
+        Some(chunk)
+    } else {
+        None
+    }
 }
 
 pub fn parse_ollama_completion_payload(payload: &Value) -> Result<String> {
@@ -397,15 +426,23 @@ pub fn parse_ollama_completion_payload(payload: &Value) -> Result<String> {
         .and_then(|message| message.get("content"))
         .and_then(Value::as_str)
         .map(ToString::to_string)
-        .ok_or_else(|| AvaError::SerializationError("missing Ollama completion content".to_string()))
+        .ok_or_else(|| {
+            AvaError::SerializationError("missing Ollama completion content".to_string())
+        })
 }
 
 /// Parse token usage from an Ollama API response payload.
 /// Ollama uses `prompt_eval_count` (input) and `eval_count` (output) at the top level.
 /// These appear in non-streaming responses and in the final streaming chunk (`done: true`).
 pub fn parse_ollama_usage(payload: &Value) -> Option<ava_types::TokenUsage> {
-    let input = payload.get("prompt_eval_count").and_then(Value::as_u64).unwrap_or(0) as usize;
-    let output = payload.get("eval_count").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let input = payload
+        .get("prompt_eval_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let output = payload
+        .get("eval_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
     if input == 0 && output == 0 {
         return None;
     }
@@ -429,7 +466,9 @@ pub fn parse_gemini_completion_payload(payload: &Value) -> Result<String> {
         .and_then(|part| part.get("text"))
         .and_then(Value::as_str)
         .map(ToString::to_string)
-        .ok_or_else(|| AvaError::SerializationError("missing Gemini completion content".to_string()))
+        .ok_or_else(|| {
+            AvaError::SerializationError("missing Gemini completion content".to_string())
+        })
 }
 
 /// Convert AVA tool definitions to the OpenAI function calling format.
@@ -484,7 +523,11 @@ pub fn parse_openai_tool_calls(payload: &Value) -> Vec<ToolCall> {
     tool_calls
         .iter()
         .filter_map(|tc| {
-            let id = tc.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+            let id = tc
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             let function = tc.get("function")?;
             let name = function.get("name").and_then(Value::as_str)?.to_string();
             let arguments_str = function
@@ -592,7 +635,14 @@ mod tests {
 
     #[test]
     fn pricing_free_tier_models() {
-        for model in &["glm-4", "minimax-01", "k2p5-test", "kimi-k2-base", "qwen-max", "qvq-72b"] {
+        for model in &[
+            "glm-4",
+            "minimax-01",
+            "k2p5-test",
+            "kimi-k2-base",
+            "qwen-max",
+            "qvq-72b",
+        ] {
             let (i, o) = model_pricing_usd_per_million(model);
             assert_eq!((i, o), (0.0, 0.0), "expected free for {model}");
         }
@@ -801,7 +851,10 @@ mod tests {
         let payload = json!({
             "content": [{"type": "text", "text": "Hi there"}]
         });
-        assert_eq!(parse_anthropic_completion_payload(&payload).unwrap(), "Hi there");
+        assert_eq!(
+            parse_anthropic_completion_payload(&payload).unwrap(),
+            "Hi there"
+        );
     }
 
     #[test]
@@ -831,7 +884,10 @@ mod tests {
                 {"type": "text", "text": "SMOKE_OK"}
             ]
         });
-        assert_eq!(parse_anthropic_completion_payload(&payload).unwrap(), "SMOKE_OK");
+        assert_eq!(
+            parse_anthropic_completion_payload(&payload).unwrap(),
+            "SMOKE_OK"
+        );
     }
 
     #[test]
@@ -873,7 +929,10 @@ mod tests {
     #[test]
     fn parse_ollama_completion_valid() {
         let payload = json!({"message": {"content": "Ollama says hi"}});
-        assert_eq!(parse_ollama_completion_payload(&payload).unwrap(), "Ollama says hi");
+        assert_eq!(
+            parse_ollama_completion_payload(&payload).unwrap(),
+            "Ollama says hi"
+        );
     }
 
     #[test]
@@ -933,7 +992,10 @@ mod tests {
                 }
             }]
         });
-        assert_eq!(parse_gemini_completion_payload(&payload).unwrap(), "Gemini response");
+        assert_eq!(
+            parse_gemini_completion_payload(&payload).unwrap(),
+            "Gemini response"
+        );
     }
 
     #[test]
@@ -976,8 +1038,16 @@ mod tests {
     #[test]
     fn tools_to_openai_multiple() {
         let tools = vec![
-            Tool { name: "a".into(), description: "d1".into(), parameters: json!({}) },
-            Tool { name: "b".into(), description: "d2".into(), parameters: json!({}) },
+            Tool {
+                name: "a".into(),
+                description: "d1".into(),
+                parameters: json!({}),
+            },
+            Tool {
+                name: "b".into(),
+                description: "d2".into(),
+                parameters: json!({}),
+            },
         ];
         let formatted = tools_to_openai_format(&tools);
         assert_eq!(formatted.len(), 2);

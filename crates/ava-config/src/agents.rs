@@ -400,19 +400,13 @@ max_turns = 10
         assert!(task.enabled);
         assert_eq!(task.max_turns, Some(10));
         // Model inherited from defaults
-        assert_eq!(
-            task.model.as_deref(),
-            Some("anthropic/claude-haiku-4.5")
-        );
+        assert_eq!(task.model.as_deref(), Some("anthropic/claude-haiku-4.5"));
         assert!(task.prompt.is_none());
 
         // Unknown agent inherits defaults
         let unknown = config.get_agent("unknown");
         assert!(unknown.enabled);
-        assert_eq!(
-            unknown.model.as_deref(),
-            Some("anthropic/claude-haiku-4.5")
-        );
+        assert_eq!(unknown.model.as_deref(), Some("anthropic/claude-haiku-4.5"));
         assert_eq!(unknown.max_turns, Some(10));
         assert!(unknown.prompt.is_none());
     }

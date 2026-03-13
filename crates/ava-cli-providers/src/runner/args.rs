@@ -44,7 +44,8 @@ impl CLIAgentRunner {
             }
         }
 
-        if let (Some(tools), Some(flag)) = (&options.allowed_tools, &self.config.allowed_tools_flag) {
+        if let (Some(tools), Some(flag)) = (&options.allowed_tools, &self.config.allowed_tools_flag)
+        {
             args.push(flag.clone());
             args.push(tools.join(","));
         }

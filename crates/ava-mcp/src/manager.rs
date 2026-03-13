@@ -297,7 +297,9 @@ mod tests {
         client.initialize().await.unwrap();
         let mcp_tools = client.list_tools().await.unwrap();
         for tool in &mcp_tools {
-            manager.tools.push(("mock-server".to_string(), tool.clone()));
+            manager
+                .tools
+                .push(("mock-server".to_string(), tool.clone()));
         }
         manager
             .clients

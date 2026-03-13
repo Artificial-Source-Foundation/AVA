@@ -25,7 +25,11 @@ pub struct OpenRouterProvider {
 }
 
 impl OpenRouterProvider {
-    pub fn new(pool: Arc<ConnectionPool>, api_key: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(
+        pool: Arc<ConnectionPool>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
         Self::with_base_url(pool, api_key, model, "https://openrouter.ai/api")
     }
 

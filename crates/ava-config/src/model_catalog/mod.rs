@@ -222,14 +222,26 @@ mod tests {
         };
         assert_eq!(model.api_model_id("anthropic"), "claude-sonnet-4-6");
 
-        let opus = CatalogModel { id: "claude-opus-4.6".to_string(), ..model.clone() };
+        let opus = CatalogModel {
+            id: "claude-opus-4.6".to_string(),
+            ..model.clone()
+        };
         assert_eq!(opus.api_model_id("anthropic"), "claude-opus-4-6");
 
-        let haiku = CatalogModel { id: "claude-haiku-4.5".to_string(), ..model.clone() };
+        let haiku = CatalogModel {
+            id: "claude-haiku-4.5".to_string(),
+            ..model.clone()
+        };
         assert_eq!(haiku.api_model_id("anthropic"), "claude-haiku-4-5-20251001");
 
-        let sonnet45 = CatalogModel { id: "claude-sonnet-4.5".to_string(), ..model.clone() };
-        assert_eq!(sonnet45.api_model_id("anthropic"), "claude-sonnet-4-20250514");
+        let sonnet45 = CatalogModel {
+            id: "claude-sonnet-4.5".to_string(),
+            ..model.clone()
+        };
+        assert_eq!(
+            sonnet45.api_model_id("anthropic"),
+            "claude-sonnet-4-20250514"
+        );
     }
 
     #[test]
@@ -244,7 +256,10 @@ mod tests {
             context_window: None,
             max_output: None,
         };
-        assert_eq!(model.api_model_id("openrouter"), "anthropic/claude-sonnet-4.6");
+        assert_eq!(
+            model.api_model_id("openrouter"),
+            "anthropic/claude-sonnet-4.6"
+        );
     }
 
     #[test]

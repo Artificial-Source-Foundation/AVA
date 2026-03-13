@@ -51,9 +51,9 @@ pub(crate) fn build_tier_prompt(task: &str, role: AgentRole, files: Option<&[Str
             "Review these changes for correctness, style, and potential bugs. \
              Run lint and tests to verify.{files_ctx}\n\nTask context: {task}"
         ),
-        AgentRole::Subagent => format!(
-            "Research the following and report your findings:\n\n{task}{files_ctx}"
-        ),
+        AgentRole::Subagent => {
+            format!("Research the following and report your findings:\n\n{task}{files_ctx}")
+        }
     }
 }
 

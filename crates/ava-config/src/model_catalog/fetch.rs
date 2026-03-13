@@ -120,10 +120,10 @@ impl ModelCatalog {
                 let cost_output = cost.and_then(|c| c.get("output")).and_then(|v| v.as_f64());
 
                 let limit = model_data.get("limit");
-                let context_window =
-                    limit.and_then(|l| l.get("context")).and_then(|v| v.as_u64());
-                let max_output =
-                    limit.and_then(|l| l.get("output")).and_then(|v| v.as_u64());
+                let context_window = limit
+                    .and_then(|l| l.get("context"))
+                    .and_then(|v| v.as_u64());
+                let max_output = limit.and_then(|l| l.get("output")).and_then(|v| v.as_u64());
 
                 providers
                     .entry(model_provider.to_string())
@@ -145,7 +145,10 @@ impl ModelCatalog {
         for (provider_id, models) in &mut providers {
             if let Some(whitelist) = whitelist_map.get(provider_id.as_str()) {
                 models.sort_by_key(|m| {
-                    whitelist.iter().position(|&w| w == m.id).unwrap_or(usize::MAX)
+                    whitelist
+                        .iter()
+                        .position(|&w| w == m.id)
+                        .unwrap_or(usize::MAX)
                 });
             }
         }

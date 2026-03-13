@@ -475,8 +475,7 @@ mod tests {
 
     #[test]
     fn parse_multiple_mentions() {
-        let (attachments, cleaned) =
-            parse_mentions("compare @file:a.rs and @file:b.rs");
+        let (attachments, cleaned) = parse_mentions("compare @file:a.rs and @file:b.rs");
         assert_eq!(attachments.len(), 2);
         assert_eq!(
             attachments[0],

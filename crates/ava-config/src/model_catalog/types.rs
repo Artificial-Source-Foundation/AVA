@@ -36,7 +36,9 @@ impl CatalogModel {
     pub fn cost_display(&self) -> String {
         match (self.cost_input, self.cost_output) {
             (Some(input), Some(output)) if input == 0.0 && output == 0.0 => "free".to_string(),
-            (Some(input), Some(output)) => format!("${}/${}", format_cost(input), format_cost(output)),
+            (Some(input), Some(output)) => {
+                format!("${}/${}", format_cost(input), format_cost(output))
+            }
             _ => String::new(),
         }
     }
@@ -170,8 +172,8 @@ impl ModelCatalog {
 
     /// Default cache path: ~/.ava/cache/models.json
     pub fn default_cache_path() -> Result<PathBuf, String> {
-        let home = dirs::home_dir()
-            .ok_or_else(|| "Could not resolve home directory".to_string())?;
+        let home =
+            dirs::home_dir().ok_or_else(|| "Could not resolve home directory".to_string())?;
         Ok(home.join(".ava").join("cache").join("models.json"))
     }
 }

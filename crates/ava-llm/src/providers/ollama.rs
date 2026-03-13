@@ -20,7 +20,11 @@ pub struct OllamaProvider {
 }
 
 impl OllamaProvider {
-    pub fn new(pool: Arc<ConnectionPool>, base_url: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(
+        pool: Arc<ConnectionPool>,
+        base_url: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
         Self {
             pool,
             model: model.into(),
@@ -80,7 +84,10 @@ impl LLMProvider for OllamaProvider {
                     text.lines()
                         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
                         .filter_map(|payload| {
-                            let done = payload.get("done").and_then(Value::as_bool).unwrap_or(false);
+                            let done = payload
+                                .get("done")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false);
                             let content = payload
                                 .get("message")
                                 .and_then(|message| message.get("content"))

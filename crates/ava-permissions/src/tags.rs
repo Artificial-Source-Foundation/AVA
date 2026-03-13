@@ -200,11 +200,24 @@ mod tests {
         let profiles = core_tool_profiles();
         assert_eq!(profiles.len(), 18);
         let expected = [
-            "read", "glob", "grep", "write", "edit", "bash",
-            "multiedit", "apply_patch", "test_runner", "lint",
-            "diagnostics", "codebase_search",
-            "remember", "recall", "memory_search",
-            "session_search", "session_list", "session_load",
+            "read",
+            "glob",
+            "grep",
+            "write",
+            "edit",
+            "bash",
+            "multiedit",
+            "apply_patch",
+            "test_runner",
+            "lint",
+            "diagnostics",
+            "codebase_search",
+            "remember",
+            "recall",
+            "memory_search",
+            "session_search",
+            "session_list",
+            "session_load",
         ];
         for name in &expected {
             assert!(profiles.contains_key(*name), "missing profile for {name}");

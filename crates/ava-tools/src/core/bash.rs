@@ -2,10 +2,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use ava_platform::Platform;
+use ava_platform::{ExecuteOptions, Platform};
 use ava_sandbox::{execute_plan, select_backend, SandboxPolicy, SandboxRequest};
 use ava_types::{AvaError, ToolResult};
+use futures::StreamExt;
 use serde_json::{json, Value};
+use std::path::PathBuf;
 
 use crate::registry::{Tool, ToolOutput};
 
@@ -54,7 +56,10 @@ impl Tool for BashTool {
             })?
             .to_string();
 
-        if DANGEROUS_PATTERNS.iter().any(|pattern| command.contains(pattern)) {
+        if DANGEROUS_PATTERNS
+            .iter()
+            .any(|pattern| command.contains(pattern))
+        {
             return Err(AvaError::PermissionDenied(
                 "Refusing to run dangerous command".to_string(),
             ));
@@ -65,13 +70,9 @@ impl Tool for BashTool {
             .and_then(Value::as_u64)
             .unwrap_or(DEFAULT_TIMEOUT_MS);
 
-        let final_command = if let Some(cwd) = args.get("cwd").and_then(Value::as_str) {
-            format!("cd {} && {command}", shell_single_quote(cwd))
-        } else {
-            command
-        };
+        let working_dir = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
 
-        if is_install_class(&final_command) {
+        if is_install_class(&command) {
             let cwd = args
                 .get("cwd")
                 .and_then(Value::as_str)
@@ -86,7 +87,7 @@ impl Tool for BashTool {
             };
             let request = SandboxRequest {
                 command: "sh".to_string(),
-                args: vec!["-c".to_string(), final_command],
+                args: vec!["-c".to_string(), command.clone()],
                 working_dir: Some(cwd),
                 env: filtered_env(),
             };
@@ -111,12 +112,17 @@ impl Tool for BashTool {
             });
         }
 
-        let output = tokio::time::timeout(
-            Duration::from_millis(timeout_ms),
-            self.platform.execute(&final_command),
-        )
-        .await
-        .map_err(|_| AvaError::TimeoutError("bash command timed out".to_string()))??;
+        let output = self
+            .platform
+            .execute_with_options(
+                &command,
+                ExecuteOptions {
+                    timeout: Some(Duration::from_millis(timeout_ms)),
+                    working_dir,
+                    env_vars: Vec::new(),
+                },
+            )
+            .await?;
 
         let mut rendered = format!(
             "stdout:\n{}\n\nstderr:\n{}\n\nexit_code: {}",
@@ -151,33 +157,30 @@ impl Tool for BashTool {
             return self.execute(args).await.map(ToolOutput::Complete);
         }
 
-        let final_command = if let Some(cwd) = args.get("cwd").and_then(Value::as_str) {
-            format!("cd {} && {command}", shell_single_quote(cwd))
-        } else {
-            command
-        };
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_TIMEOUT_MS);
+        let working_dir = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
 
-        let mut child = tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(&final_command)
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()
-            .map_err(|e| AvaError::PlatformError(e.to_string()))?;
+        let stream = self
+            .platform
+            .execute_streaming_with_options(
+                &command,
+                ExecuteOptions {
+                    timeout: Some(Duration::from_millis(timeout_ms)),
+                    working_dir,
+                    env_vars: Vec::new(),
+                },
+            )
+            .await?;
 
-        let stdout = child.stdout.take();
-        let stream = async_stream::stream! {
-            if let Some(stdout) = stdout {
-                use tokio::io::{AsyncBufReadExt, BufReader};
-                let reader = BufReader::new(stdout);
-                let mut lines = reader.lines();
-                while let Ok(Some(line)) = lines.next_line().await {
-                    yield line;
-                }
-            }
-        };
-
-        Ok(ToolOutput::Streaming(Box::pin(stream)))
+        Ok(ToolOutput::Streaming(Box::pin(stream.map(
+            |item| match item {
+                Ok(line) => line,
+                Err(err) => format!("[error] {err}"),
+            },
+        ))))
     }
 }
 
@@ -212,13 +215,7 @@ fn is_install_class(command: &str) -> bool {
 
     normalized == "npm i"
         || normalized.contains("npm i ")
-        || patterns
-            .iter()
-            .any(|pattern| normalized.contains(pattern))
-}
-
-fn shell_single_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
+        || patterns.iter().any(|pattern| normalized.contains(pattern))
 }
 
 fn filtered_env() -> Vec<(String, String)> {

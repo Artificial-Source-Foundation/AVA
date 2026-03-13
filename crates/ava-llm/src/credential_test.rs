@@ -47,8 +47,6 @@ pub async fn test_provider_credentials(
             start.elapsed().as_secs_f64()
         ),
         Ok(Err(error)) => format!("{provider}: FAIL ({error})"),
-        Err(_) => format!(
-            "{provider}: FAIL (request timed out after {DEFAULT_TIMEOUT_SECS}s)"
-        ),
+        Err(_) => format!("{provider}: FAIL (request timed out after {DEFAULT_TIMEOUT_SECS}s)"),
     }
 }

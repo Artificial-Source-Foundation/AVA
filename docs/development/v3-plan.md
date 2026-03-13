@@ -1,6 +1,6 @@
 # AVA v3 Plan
 
-> Last updated: 2026-03-12 after refreshing `docs/reference-code/` and re-auditing the active backlog.
+> Last updated: 2026-03-13 after Sprint 62V validation closeout and sprint archive normalization.
 > Related: `docs/development/roadmap.md`, `docs/development/backlog.md`, `docs/development/epics.md`
 
 ## Goal
@@ -10,9 +10,9 @@ v3 is the milestone where the current active backlog is intentionally burned dow
 ## Current State
 
 - v2.1.0 is released.
-- Sprint 60 is implemented and awaiting manual validation follow-through.
-- Sprint 61 is implemented, merged, and backend-tested.
-- Sprint 62 is implemented on `master` and backend/workspace-tested.
+- Sprint 60 is implemented and archived.
+- Sprint 61 is implemented and archived.
+- Sprint 62 is implemented, validated in Sprint 62V, and archived.
 - Sprint 63-66 currently remain planning docs only on `master`.
 - The active backlog is now mostly backend/platform work plus one major UI-facing gap: `B26` Praxis in chat composer.
 - The local reference corpus under `docs/reference-code/` has been refreshed and now reflects newer upstream states across OpenCode, Codex CLI, Goose, Gemini CLI, Cline, OpenHands, Continue, Zed, and others.
@@ -132,7 +132,7 @@ The fresh reference pass reinforced these gaps as the most valuable:
 Call the work "v3 ready" only when all of these are true:
 
 - The active backlog has no unclear owner or stale status.
-- Sprints 60-61 are archived with validation notes preserved.
+- Sprints 60-62 are archived with validation notes preserved.
 - Every planned backend sprint has a matching user-visible UX surface where needed.
 - CLI/headless verification exists for each completed sprint.
 - Remaining desktop-only work is clearly separated from Rust-first CLI/agent work.

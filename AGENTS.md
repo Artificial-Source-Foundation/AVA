@@ -160,8 +160,12 @@ AVA auto-discovers instruction files at startup and injects them into the agent'
 **Discovery order:**
 
 1. `~/.ava/AGENTS.md` — global user-level instructions (all projects)
-2. Project root: `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`
-3. `.ava/rules/*.md` — modular rule files, sorted alphabetically
+2. Ancestor walk (monorepo support): `AGENTS.md` and `CLAUDE.md` from outermost ancestor down to the repo boundary (`.git`), then stop
+3. Project root: `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`
+4. Project-local `.ava/AGENTS.md`
+5. `.ava/rules/*.md` — modular rule files, sorted alphabetically
+6. Config extras from `config.yaml` `instructions:` (supports explicit paths and glob patterns)
+7. Skill files from `.claude/skills/`, `.agents/skills/`, `.ava/skills/` in both global (`~/`) and project scopes (global first)
 
 Files are plain markdown (no special syntax). Each is prefixed with `# From: <filepath>` in the prompt. Duplicate paths are deduplicated. Both the main agent and sub-agents receive these instructions.
 

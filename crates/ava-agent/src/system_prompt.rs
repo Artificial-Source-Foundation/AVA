@@ -141,6 +141,10 @@ mod tests {
         let tools = mock_tools();
         let prompt = build_system_prompt(&tools, false);
         // Should be well under 2000 tokens (~8000 chars) for 2 tools
-        assert!(prompt.len() < 4000, "prompt too long: {} chars", prompt.len());
+        assert!(
+            prompt.len() < 4000,
+            "prompt too long: {} chars",
+            prompt.len()
+        );
     }
 }

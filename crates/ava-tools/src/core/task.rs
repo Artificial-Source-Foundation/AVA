@@ -73,12 +73,9 @@ impl Tool for TaskTool {
     }
 
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
-        let prompt = args
-            .get("prompt")
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                AvaError::ValidationError("missing required field: prompt".to_string())
-            })?;
+        let prompt = args.get("prompt").and_then(Value::as_str).ok_or_else(|| {
+            AvaError::ValidationError("missing required field: prompt".to_string())
+        })?;
 
         if prompt.trim().is_empty() {
             return Err(AvaError::ValidationError(

@@ -59,8 +59,9 @@ fn write_routing_config(dir: &tempfile::TempDir) {
 #[tokio::test]
 async fn agent_stack_new_initializes_components() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
+        yolo: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })
@@ -87,7 +88,7 @@ async fn agent_stack_run_with_mock_provider_completes() {
         "test-model",
         vec![completion_response("done")],
     ));
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         injected_provider: Some(provider),
         ..Default::default()
@@ -119,7 +120,7 @@ async fn agent_stack_run_honors_cancellation() {
         model: "slow-model".to_string(),
         delay: Duration::from_millis(250),
     });
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         injected_provider: Some(provider),
         ..Default::default()
@@ -156,8 +157,9 @@ prompt = "Custom task prompt."
 "#;
     std::fs::write(dir.path().join("agents.toml"), agents_toml).unwrap();
 
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
+        yolo: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })
@@ -175,8 +177,9 @@ async fn test_agents_config_defaults_without_file() {
     let dir = tempfile::tempdir().expect("tempdir");
 
     // No agents.toml file — should use defaults
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
+        yolo: true,
         injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
         ..Default::default()
     })
@@ -193,7 +196,7 @@ async fn agent_stack_resolve_model_route_prefers_cheap_model_when_enabled() {
     write_routing_config(&dir);
     write_credentials(&dir, &["anthropic", "openai"]).await;
 
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         ..Default::default()
     })
@@ -216,7 +219,7 @@ async fn agent_stack_resolve_model_route_respects_manual_override_lock() {
     write_routing_config(&dir);
     write_credentials(&dir, &["anthropic", "openai"]).await;
 
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         provider: Some("openai".to_string()),
         model: Some("gpt-5.3-codex".to_string()),
@@ -248,7 +251,7 @@ async fn streaming_run_emits_budget_warning_and_persists_cost_summary() {
             cache_creation_tokens: 0,
         },
     ));
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         injected_provider: Some(provider),
         max_budget_usd: 0.01,
@@ -317,7 +320,7 @@ async fn follow_up_budget_uses_cumulative_spend() {
             cache_creation_tokens: 0,
         },
     ));
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         injected_provider: Some(provider),
         max_budget_usd: 0.02,
@@ -547,7 +550,7 @@ instructions: []
         "gemini-2.5-pro",
         recorded.clone(),
     ));
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         injected_provider: Some(provider),
         ..Default::default()

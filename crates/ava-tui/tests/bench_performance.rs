@@ -53,7 +53,7 @@ async fn bench_agent_stack_startup() {
     let mock = Arc::new(MockProvider::new("bench-model", vec![]));
 
     let start = Instant::now();
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         injected_provider: Some(mock),
         ..Default::default()
@@ -144,7 +144,7 @@ async fn bench_memory_baseline() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mock = Arc::new(MockProvider::new("bench-model", vec![]));
 
-    let (_stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (_stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir: dir.path().to_path_buf(),
         injected_provider: Some(mock),
         ..Default::default()

@@ -1,168 +1,8 @@
+use crate::state::file_scanner::MentionFileCache;
+use crate::state::message_queue::MessageQueueDisplay;
 use crate::widgets::autocomplete::{AutocompleteItem, AutocompleteState, AutocompleteTrigger};
-use ava_types::{ContextAttachment, MessageTier};
+use ava_types::ContextAttachment;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-
-/// Directories to skip when scanning project files.
-const SKIP_DIRS: &[&str] = &[
-    ".git",
-    "node_modules",
-    "target",
-    ".next",
-    "dist",
-    "build",
-    "__pycache__",
-    ".cache",
-    ".venv",
-    "venv",
-];
-
-/// Maximum depth for recursive file scanning.
-const MAX_SCAN_DEPTH: usize = 4;
-/// Maximum number of results to return.
-const MAX_SCAN_RESULTS: usize = 50;
-
-/// Scan project files from the current directory, returning autocomplete items.
-/// If `folders_only` is true, only directories are returned.
-fn scan_project_files(query: &str, folders_only: bool) -> Vec<AutocompleteItem> {
-    let cwd = match std::env::current_dir() {
-        Ok(p) => p,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut results = Vec::new();
-    scan_dir_recursive(&cwd, &cwd, query, folders_only, 0, &mut results);
-    results.truncate(MAX_SCAN_RESULTS);
-    results
-}
-
-fn scan_dir_recursive(
-    base: &Path,
-    dir: &Path,
-    _query: &str,
-    folders_only: bool,
-    depth: usize,
-    results: &mut Vec<AutocompleteItem>,
-) {
-    if depth > MAX_SCAN_DEPTH || results.len() >= MAX_SCAN_RESULTS {
-        return;
-    }
-
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
-    entries.sort_by_key(|e| e.file_name());
-
-    for entry in entries {
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-
-        // Skip hidden dirs and known large dirs
-        if name_str.starts_with('.') && name_str != ".ava" {
-            continue;
-        }
-        if SKIP_DIRS.contains(&name_str.as_ref()) {
-            continue;
-        }
-
-        let path = entry.path();
-        let rel = path
-            .strip_prefix(base)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .to_string();
-
-        let is_dir = path.is_dir();
-
-        if is_dir {
-            let display = format!("{rel}/");
-            let detail = "folder".to_string();
-            results.push(AutocompleteItem::new(display, detail));
-            scan_dir_recursive(base, &path, _query, folders_only, depth + 1, results);
-        } else if !folders_only {
-            let detail = "file".to_string();
-            results.push(AutocompleteItem::new(rel, detail));
-        }
-    }
-}
-
-/// Cached results from a project file scan, keyed by (cwd, folders_only).
-/// Avoids re-scanning the filesystem on every keystroke within an `@`-mention session.
-#[derive(Debug, Default)]
-struct MentionFileCache {
-    /// The working directory at the time of the scan.
-    cwd: Option<PathBuf>,
-    /// Whether the scan was folders-only.
-    folders_only: bool,
-    /// The full (unfiltered) scan results.
-    items: Vec<AutocompleteItem>,
-}
-
-impl MentionFileCache {
-    /// Return cached items if the cache key matches, otherwise re-scan and update.
-    fn get_or_scan(&mut self, folders_only: bool) -> &[AutocompleteItem] {
-        let current_cwd = std::env::current_dir().ok();
-
-        let hit =
-            self.cwd.is_some() && self.cwd == current_cwd && self.folders_only == folders_only;
-
-        if !hit {
-            // Cache miss: perform the filesystem scan once.
-            // Pass empty query — we collect everything and filter later.
-            self.items = scan_project_files("", folders_only);
-            self.cwd = current_cwd;
-            self.folders_only = folders_only;
-        }
-
-        &self.items
-    }
-
-    /// Discard cached data so the next access triggers a fresh scan.
-    fn invalidate(&mut self) {
-        self.cwd = None;
-        self.items.clear();
-    }
-}
-
-/// A pending queued message shown in the composer queue display.
-#[derive(Debug, Clone)]
-pub struct QueuedDisplayItem {
-    pub text: String,
-    pub tier: MessageTier,
-}
-
-/// UI-side queue display state for mid-stream messages.
-#[derive(Debug, Default, Clone)]
-pub struct MessageQueueDisplay {
-    pub items: Vec<QueuedDisplayItem>,
-}
-
-impl MessageQueueDisplay {
-    pub fn push(&mut self, text: String, tier: MessageTier) {
-        self.items.push(QueuedDisplayItem { text, tier });
-    }
-
-    pub fn clear(&mut self) {
-        self.items.clear();
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
-    }
-
-    pub fn total_count(&self) -> usize {
-        self.items.len()
-    }
-
-    /// Remove steering items (cleared on delivery or hard abort).
-    pub fn clear_steering(&mut self) {
-        self.items
-            .retain(|i| !matches!(i.tier, MessageTier::Steering));
-    }
-}
 
 /// Threshold for collapsing pasted text into a placeholder.
 const PASTE_LINE_THRESHOLD: usize = 5;
@@ -507,11 +347,10 @@ impl InputState {
         }
     }
 
-    /// Dismiss the autocomplete menu and clear the input buffer.
+    /// Dismiss the autocomplete menu while preserving the current draft.
     pub fn dismiss_autocomplete(&mut self) {
         self.autocomplete = None;
         self.mention_cache.invalidate();
-        self.clear();
     }
 
     /// Move selection to the next autocomplete item.
@@ -1040,6 +879,21 @@ mod tests {
             input.mention_cache.cwd.is_none(),
             "cache should be invalidated on dismiss_autocomplete"
         );
+    }
+
+    #[test]
+    fn dismiss_autocomplete_preserves_input_buffer() {
+        let mut input = InputState::default();
+        for ch in "/hel".chars() {
+            input.insert_char(ch);
+        }
+        assert!(input.has_slash_autocomplete());
+
+        input.dismiss_autocomplete();
+
+        assert_eq!(input.buffer, "/hel");
+        assert_eq!(input.cursor, 4);
+        assert!(input.autocomplete.is_none());
     }
 
     #[test]

@@ -1,14 +1,8 @@
 use ava_permissions::tags::{RiskLevel, SafetyTag};
+pub use ava_tools::permission_middleware::ToolApproval;
 use ava_types::ToolCall;
 use std::collections::{HashSet, VecDeque};
 use tokio::sync::oneshot;
-
-#[derive(Debug, Clone)]
-pub enum ToolApproval {
-    Allowed,
-    AllowedForSession,
-    Rejected(Option<String>),
-}
 
 /// Optional inspection result attached to approval requests for UI display.
 #[derive(Debug, Clone)]
@@ -65,6 +59,8 @@ impl PermissionLevel {
 pub struct PermissionState {
     pub queue: VecDeque<ApprovalRequest>,
     pub current_stage: ApprovalStage,
+    /// UI-only mirror for the current session's approvals.
+    /// The authoritative set used by permission checks lives in `InspectionContext`.
     pub session_approved: HashSet<String>,
     pub permission_level: PermissionLevel,
     pub rejection_input: String,

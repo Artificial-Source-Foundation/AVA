@@ -168,6 +168,7 @@ impl AgentState {
     ) -> Result<(
         Self,
         tokio::sync::mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>,
+        tokio::sync::mpsc::UnboundedReceiver<ava_tools::permission_middleware::ApprovalRequest>,
     )> {
         let provider_name = provider.clone().unwrap_or_else(|| "default".to_string());
         let model_name = model.clone().unwrap_or_else(|| "default".to_string());
@@ -181,7 +182,7 @@ impl AgentState {
             yolo,
             ..AgentStackConfig::default()
         };
-        let (agent_stack, question_rx) = AgentStack::new(config).await?;
+        let (agent_stack, question_rx, approval_rx) = AgentStack::new(config).await?;
         let stack = Arc::new(agent_stack);
 
         let mcp_server_count = stack.mcp_server_count().await;
@@ -216,6 +217,7 @@ impl AgentState {
                 message_tx: None,
             },
             question_rx,
+            approval_rx,
         ))
     }
 

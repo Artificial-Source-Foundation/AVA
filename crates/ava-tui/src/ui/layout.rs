@@ -1,5 +1,7 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
+use crate::text_utils::display_width;
+
 pub struct MainLayout {
     pub top_bar: Rect,
     /// Messages area inset by content_margin on both sides.
@@ -27,7 +29,7 @@ pub fn composer_height(buffer: &str, available_width: u16, terminal_height: u16)
         buffer
             .split('\n')
             .map(|line| {
-                let len = line.len();
+                let len = display_width(line);
                 if len == 0 {
                     1usize
                 } else {

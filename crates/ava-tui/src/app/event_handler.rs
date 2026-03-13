@@ -186,19 +186,6 @@ impl App {
                     });
                     self.state.messages.push(msg);
                 } else {
-                    // Check if we need approval
-                    if !self.state.permission.permission_level.is_auto_approve()
-                        && !self.state.permission.session_approved.contains(&call.name)
-                    {
-                        let (tx, _rx) = tokio::sync::oneshot::channel();
-                        let request = crate::state::permission::ApprovalRequest {
-                            call: call.clone(),
-                            approve_tx: tx,
-                            inspection: None,
-                        };
-                        self.state.permission.enqueue(request);
-                        self.state.active_modal = Some(ModalType::ToolApproval);
-                    }
                     // Snapshot files before write/edit/apply_patch for rewind
                     if matches!(
                         call.name.as_str(),

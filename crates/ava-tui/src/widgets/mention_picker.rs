@@ -1,4 +1,5 @@
 use crate::state::theme::Theme;
+use crate::text_utils::display_width;
 use crate::widgets::autocomplete::AutocompleteState;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -90,12 +91,12 @@ pub fn render_mention_picker(
             Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
         ));
 
-        // Right-align the detail
-        // +2 for icon chars (unicode might be wider but we approximate)
-        let left_len = 2 + item.value.len();
+        // Right-align the detail using display width.
+        let left_len = display_width(icon) + display_width(&item.value);
         let detail = &item.detail;
-        if !detail.is_empty() && inner_width > left_len + detail.len() + 2 {
-            let padding = inner_width - left_len - detail.len();
+        let detail_len = display_width(detail);
+        if !detail.is_empty() && inner_width > left_len + detail_len + 2 {
+            let padding = inner_width - left_len - detail_len;
             spans.push(Span::styled(" ".repeat(padding), Style::default().bg(bg)));
             spans.push(Span::styled(
                 detail.clone(),

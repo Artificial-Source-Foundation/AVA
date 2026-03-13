@@ -19,6 +19,20 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, instrument};
 
+pub(crate) fn spawn_auto_approve_requests(
+    mut approval_rx: tokio::sync::mpsc::UnboundedReceiver<
+        ava_tools::permission_middleware::ApprovalRequest,
+    >,
+) {
+    tokio::spawn(async move {
+        while let Some(req) = approval_rx.recv().await {
+            let _ = req
+                .reply
+                .send(ava_tools::permission_middleware::ToolApproval::Allowed);
+        }
+    });
+}
+
 #[instrument(skip(cli))]
 pub async fn run_headless(cli: CliArgs) -> Result<()> {
     if cli.watch {
@@ -256,7 +270,7 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         return Err(eyre!(crate::config::cli::NO_PROVIDER_ERROR));
     }
 
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir,
         provider,
         model,
@@ -266,6 +280,7 @@ async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         ..Default::default()
     })
     .await?;
+    spawn_auto_approve_requests(approval_rx);
 
     // Create message queue for mid-stream messaging
     let (message_queue, message_tx) = MessageQueue::new();
@@ -433,7 +448,7 @@ async fn run_workflow(cli: CliArgs, goal: &str, workflow_name: &str) -> Result<(
         return Err(eyre!(crate::config::cli::NO_PROVIDER_ERROR));
     }
 
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir,
         provider,
         model,
@@ -443,6 +458,7 @@ async fn run_workflow(cli: CliArgs, goal: &str, workflow_name: &str) -> Result<(
         ..Default::default()
     })
     .await?;
+    spawn_auto_approve_requests(approval_rx);
 
     let provider = resolve_provider(&stack).await?;
     let platform = Arc::new(StandardPlatform);
@@ -567,7 +583,7 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
     }
 
     // Build an AgentStack to get a resolved provider
-    let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+    let (stack, _question_rx, approval_rx) = AgentStack::new(AgentStackConfig {
         data_dir,
         provider,
         model,
@@ -577,6 +593,7 @@ async fn run_multi_agent(cli: CliArgs, goal: &str) -> Result<()> {
         ..Default::default()
     })
     .await?;
+    spawn_auto_approve_requests(approval_rx);
 
     let provider = resolve_provider(&stack).await?;
 
@@ -975,7 +992,7 @@ async fn run_voice_loop(cli: CliArgs) -> Result<()> {
         eprintln!("[voice] Goal: {text}");
 
         // Run agent
-        let (stack, _question_rx) = AgentStack::new(AgentStackConfig {
+        let (stack, _question_rx, approval_rx) = AgentStack::new(AgentStackConfig {
             data_dir: data_dir.clone(),
             provider: provider.clone(),
             model: model.clone(),
@@ -985,6 +1002,7 @@ async fn run_voice_loop(cli: CliArgs) -> Result<()> {
             ..Default::default()
         })
         .await?;
+        spawn_auto_approve_requests(approval_rx);
 
         let (tx, mut rx) = mpsc::unbounded_channel();
         let agent_cancel = CancellationToken::new();

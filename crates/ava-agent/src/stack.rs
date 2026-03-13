@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ava_codebase::indexer::index_project;
+use ava_codebase::indexer::{index_project, index_workspace};
 use ava_codebase::CodebaseIndex;
 use ava_config::{AgentsConfig, ConfigManager};
 use ava_context::{
@@ -13,6 +13,10 @@ use ava_llm::{ModelRouter, RouteDecision, RouteSource};
 use ava_mcp::config::load_merged_mcp_config;
 use ava_mcp::manager::ExtensionManager;
 use ava_memory::MemorySystem;
+use ava_permissions::inspector::{DefaultInspector, InspectionContext, PermissionInspector};
+use ava_permissions::policy::PermissionPolicy;
+use ava_permissions::tags::core_tool_profiles;
+use ava_permissions::PermissionSystem;
 use ava_platform::{Platform, StandardPlatform};
 use ava_session::SessionManager;
 use ava_tools::core::question::QuestionBridge;
@@ -22,6 +26,7 @@ use ava_tools::core::{
     register_question_tool, register_task_tool, register_todo_tools,
 };
 use ava_tools::mcp_bridge::{MCPBridgeTool, MCPToolCaller};
+use ava_tools::permission_middleware::{ApprovalBridge, PermissionMiddleware};
 use ava_tools::registry::{ToolRegistry, ToolSource};
 use ava_types::{
     AvaError, QueuedMessage, Result, Role, Session, ThinkingLevel, TodoState, ToolResult,
@@ -98,6 +103,10 @@ pub struct AgentStack {
     pub todo_state: TodoState,
     /// Bridge for the question tool to communicate with the TUI.
     question_bridge: QuestionBridge,
+    /// Bridge for permission requests that require interactive approval.
+    approval_bridge: ApprovalBridge,
+    permission_context: Arc<RwLock<InspectionContext>>,
+    permission_inspector: Arc<dyn PermissionInspector>,
     /// Sub-agent configuration loaded from agents.toml files.
     agents_config: AgentsConfig,
     /// Parent session ID for linking sub-agent sessions back to their parent.
@@ -265,6 +274,7 @@ impl AgentStack {
     ) -> Result<(
         Self,
         mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>,
+        mpsc::UnboundedReceiver<ava_tools::permission_middleware::ApprovalRequest>,
     )> {
         tokio::fs::create_dir_all(&config.data_dir)
             .await
@@ -277,6 +287,7 @@ impl AgentStack {
         let platform: Arc<dyn Platform> = Arc::new(StandardPlatform);
 
         let config_mgr = ConfigManager::load_from_paths(config_path, credentials_path).await?;
+        let cfg = config_mgr.get().await;
         let credentials = config_mgr.credentials().await;
         let router = ModelRouter::new(credentials);
 
@@ -290,11 +301,20 @@ impl AgentStack {
             .clone()
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
+        let workspace_roots = resolve_workspace_roots(&effective_cwd, &cfg.workspace_roots);
+
         let codebase_index: Arc<RwLock<Option<Arc<CodebaseIndex>>>> = Arc::new(RwLock::new(None));
         let index_clone = codebase_index.clone();
         let project_root = effective_cwd.clone();
+        let workspace_roots_for_task = workspace_roots.clone();
         tokio::spawn(async move {
-            match index_project(&project_root).await {
+            let index_result = if workspace_roots_for_task.len() > 1 {
+                index_workspace(&workspace_roots_for_task).await
+            } else {
+                index_project(&project_root).await
+            };
+
+            match index_result {
                 Ok(idx) => {
                     *index_clone.write().await = Some(Arc::new(idx));
                     info!("Codebase indexing complete");
@@ -302,8 +322,6 @@ impl AgentStack {
                 Err(e) => warn!("Codebase indexing failed: {e}"),
             }
         });
-
-        let cfg = config_mgr.get().await;
         let routing_locked = config
             .provider
             .as_deref()
@@ -334,8 +352,28 @@ impl AgentStack {
 
         let todo_state = TodoState::new();
         let (question_bridge, question_rx) = QuestionBridge::new();
+        let (approval_bridge, approval_rx) = ApprovalBridge::new();
+        let permission_context = Arc::new(RwLock::new(InspectionContext {
+            workspace_root: effective_cwd.clone(),
+            auto_approve: config.yolo,
+            session_approved: std::collections::HashSet::new(),
+            safety_profiles: core_tool_profiles(),
+        }));
+        let permission_inspector: Arc<dyn PermissionInspector> = Arc::new(DefaultInspector::new(
+            PermissionSystem::load(effective_cwd.clone(), vec![]),
+            if config.yolo {
+                PermissionPolicy::permissive()
+            } else {
+                PermissionPolicy::standard()
+            },
+        ));
 
-        let mut registry = build_tool_registry(platform.clone());
+        let mut registry = build_tool_registry(
+            platform.clone(),
+            Arc::clone(&permission_inspector),
+            Arc::clone(&permission_context),
+            approval_bridge.clone(),
+        );
         register_todo_tools(&mut registry, todo_state.clone());
         register_question_tool(&mut registry, question_bridge.clone());
         register_custom_tools(&mut registry, &custom_tool_dirs);
@@ -368,10 +406,14 @@ impl AgentStack {
                 plan_mode: RwLock::new(false),
                 todo_state,
                 question_bridge,
+                approval_bridge,
+                permission_context,
+                permission_inspector,
                 agents_config,
                 parent_session_id: RwLock::new(None),
             },
             question_rx,
+            approval_rx,
         ))
     }
 
@@ -428,7 +470,12 @@ impl AgentStack {
     }
 
     pub async fn reload_tools(&self) -> Result<usize> {
-        let mut registry = build_tool_registry(self.platform.clone());
+        let mut registry = build_tool_registry(
+            self.platform.clone(),
+            Arc::clone(&self.permission_inspector),
+            Arc::clone(&self.permission_context),
+            self.approval_bridge.clone(),
+        );
         register_todo_tools(&mut registry, self.todo_state.clone());
         register_question_tool(&mut registry, self.question_bridge.clone());
         register_custom_tools(&mut registry, &self.custom_tool_dirs);
@@ -579,21 +626,58 @@ impl AgentStack {
             Ok(m) => m,
             Err(_) => return goal.to_string(),
         };
-        if memories.is_empty() {
-            return goal.to_string();
-        }
         let entries: Vec<String> = memories
             .into_iter()
             .take(5)
             .map(|m| format!("- [{}]: {}", m.key, m.value))
             .collect();
-        let memory_block = entries.join("\n");
+
+        let learned = self
+            .memory
+            .search_confirmed_learned(&query, 5)
+            .unwrap_or_default();
+        let learned_entries: Vec<String> = learned
+            .into_iter()
+            .map(|m| format!("- [{}]: {}", m.key, m.value))
+            .collect();
+
+        if entries.is_empty() && learned_entries.is_empty() {
+            return goal.to_string();
+        }
+
+        let mut blocks = Vec::new();
+        if !entries.is_empty() {
+            blocks.push(format!("Relevant memories:\n{}", entries.join("\n")));
+        }
+        if !learned_entries.is_empty() {
+            blocks.push(format!(
+                "Confirmed learned project memories:\n{}",
+                learned_entries.join("\n")
+            ));
+        }
+
+        let memory_block = blocks.join("\n\n");
         let memory_block = if memory_block.len() > 2000 {
-            format!("{}...", &memory_block[..2000])
+            let truncated: String = memory_block.chars().take(2000).collect();
+            format!("{truncated}...")
         } else {
             memory_block
         };
-        format!("{goal}\n\nRelevant memories:\n{memory_block}")
+        format!("{goal}\n\n{memory_block}")
+    }
+
+    fn learn_project_patterns_from_goal(&self, goal: &str) {
+        let observations = extract_project_pattern_observations(goal);
+        for observation in observations {
+            if let Err(err) = self.memory.observe_learned_pattern(
+                &observation.key,
+                &observation.value,
+                &observation.source_excerpt,
+                observation.confidence,
+            ) {
+                warn!(error = %err, "failed to persist learned project memory");
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -611,6 +695,7 @@ impl AgentStack {
         message_queue: Option<crate::message_queue::MessageQueue>,
         images: Vec<ava_types::ImageContent>,
     ) -> Result<AgentRunResult> {
+        let raw_goal = goal.to_string();
         let cfg = self.config.get().await;
         let mut resolved_provider_name = self.current_model().await.0;
         let route_decision = if self.injected_provider.is_none() {
@@ -733,7 +818,12 @@ impl AgentStack {
         );
         let context = ContextManager::new_with_condenser(condenser_config, condenser);
 
-        let mut registry = build_tool_registry(self.platform.clone());
+        let mut registry = build_tool_registry(
+            self.platform.clone(),
+            Arc::clone(&self.permission_inspector),
+            Arc::clone(&self.permission_context),
+            self.approval_bridge.clone(),
+        );
         register_todo_tools(&mut registry, self.todo_state.clone());
         register_question_tool(&mut registry, self.question_bridge.clone());
         register_custom_tools(&mut registry, &self.custom_tool_dirs);
@@ -972,6 +1062,7 @@ impl AgentStack {
             if let Some(decision) = applied_route_decision.as_ref() {
                 Self::attach_route_metadata(&mut session, decision);
             }
+            self.learn_project_patterns_from_goal(&raw_goal);
             return Ok(AgentRunResult {
                 success: true,
                 turns: session.messages.len(),
@@ -988,6 +1079,7 @@ impl AgentStack {
         if let Some(decision) = applied_route_decision.as_ref() {
             Self::attach_route_metadata(&mut session, decision);
         }
+        self.learn_project_patterns_from_goal(&raw_goal);
 
         Ok(AgentRunResult {
             success: true,
@@ -1222,10 +1314,94 @@ fn extract_goal_keywords(goal: &str) -> Vec<String> {
         .collect()
 }
 
-fn build_tool_registry(platform: Arc<dyn Platform>) -> ToolRegistry {
+#[derive(Debug, Clone)]
+struct LearnedPatternObservation {
+    key: String,
+    value: String,
+    source_excerpt: String,
+    confidence: f64,
+}
+
+fn extract_project_pattern_observations(goal: &str) -> Vec<LearnedPatternObservation> {
+    let mut out = Vec::new();
+
+    for sentence in split_into_sentences(goal) {
+        let lower = sentence.to_lowercase();
+        let (key, confidence) = if lower.starts_with("always use ") {
+            ("preference.implementation", 0.85)
+        } else if lower.starts_with("prefer ") {
+            ("preference.general", 0.8)
+        } else if lower.contains(" by default") && lower.starts_with("use ") {
+            ("preference.default", 0.85)
+        } else if lower.starts_with("we use ") {
+            ("preference.team", 0.7)
+        } else {
+            continue;
+        };
+
+        if sentence.len() < 12 || sentence.len() > 180 {
+            continue;
+        }
+
+        out.push(LearnedPatternObservation {
+            key: key.to_string(),
+            value: normalize_whitespace(&sentence),
+            source_excerpt: normalize_whitespace(&sentence),
+            confidence,
+        });
+    }
+
+    out
+}
+
+fn split_into_sentences(text: &str) -> Vec<String> {
+    text.split(['\n', '.', '!', '?'])
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect()
+}
+
+fn normalize_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn resolve_workspace_roots(
+    cwd: &std::path::Path,
+    configured: &[String],
+) -> Vec<std::path::PathBuf> {
+    let mut roots = vec![cwd.to_path_buf()];
+    for raw in configured {
+        if raw.trim().is_empty() {
+            continue;
+        }
+        let candidate = std::path::PathBuf::from(raw);
+        let resolved = if candidate.is_absolute() {
+            candidate
+        } else {
+            cwd.join(candidate)
+        };
+        if resolved.is_dir() && !roots.iter().any(|existing| existing == &resolved) {
+            roots.push(resolved);
+        }
+    }
+    roots
+}
+
+fn build_tool_registry(
+    platform: Arc<dyn Platform>,
+    permission_inspector: Arc<dyn PermissionInspector>,
+    permission_context: Arc<RwLock<InspectionContext>>,
+    approval_bridge: ApprovalBridge,
+) -> ToolRegistry {
     let mut registry = ToolRegistry::new();
     register_default_tools(&mut registry, platform.clone());
     register_extended_tools(&mut registry, platform);
+    registry.add_middleware(PermissionMiddleware::new(
+        permission_inspector,
+        permission_context,
+        Some(approval_bridge),
+    ));
     registry
 }
 
@@ -1235,3 +1411,50 @@ const _: () = {
         _assert_send::<AgentStack>();
     }
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pattern_detector_extracts_conservative_preferences() {
+        let goal =
+            "Prefer integration tests for boundaries.\nAlways use cargo clippy before commit.";
+        let patterns = extract_project_pattern_observations(goal);
+        assert_eq!(patterns.len(), 2);
+        assert_eq!(patterns[0].key, "preference.general");
+        assert_eq!(patterns[1].key, "preference.implementation");
+    }
+
+    #[test]
+    fn pattern_detector_ignores_non_preference_sentences() {
+        let goal = "Fix the bug in parser. Add docs.";
+        let patterns = extract_project_pattern_observations(goal);
+        assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn memory_pattern_detector_finds_default_preferences() {
+        let goal = "Use ripgrep by default for search.";
+        let patterns = extract_project_pattern_observations(goal);
+        assert_eq!(patterns.len(), 1);
+        assert_eq!(patterns[0].key, "preference.default");
+    }
+
+    #[test]
+    fn workspace_root_resolution_keeps_cwd_and_valid_roots() {
+        let cwd = std::env::current_dir().expect("cwd");
+        let temp = tempfile::tempdir().expect("temp");
+        let missing = temp.path().join("missing");
+
+        let configured = vec![
+            temp.path().to_string_lossy().to_string(),
+            missing.to_string_lossy().to_string(),
+        ];
+        let roots = resolve_workspace_roots(&cwd, &configured);
+
+        assert!(roots.contains(&cwd));
+        assert!(roots.contains(&temp.path().to_path_buf()));
+        assert!(!roots.contains(&missing));
+    }
+}

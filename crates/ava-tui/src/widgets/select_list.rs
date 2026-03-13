@@ -8,6 +8,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 use crate::state::theme::Theme;
+use crate::text_utils::display_width;
 
 /// Status indicator for a select list item.
 #[derive(Debug, Clone)]
@@ -553,9 +554,9 @@ pub fn render_select_list<T: Clone>(
 
         if !right_text.is_empty() {
             let prefix_len = 3; // status prefix
-            let title_len = item.title.len();
+            let title_len = display_width(&item.title);
             let left_len = prefix_len + title_len;
-            let right_len = right_text.len() + 1; // +1 for trailing space
+            let right_len = display_width(&right_text) + 1; // +1 for trailing space
             let padding = if inner_width > left_len + right_len + 1 {
                 inner_width - left_len - right_len
             } else {

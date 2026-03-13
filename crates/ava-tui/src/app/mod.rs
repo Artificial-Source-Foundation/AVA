@@ -194,6 +194,10 @@ pub struct App {
     /// Receiver for question requests from the agent's question tool.
     question_rx:
         Option<tokio::sync::mpsc::UnboundedReceiver<ava_tools::core::question::QuestionRequest>>,
+    /// Receiver for interactive tool approval requests.
+    approval_rx: Option<
+        tokio::sync::mpsc::UnboundedReceiver<ava_tools::permission_middleware::ApprovalRequest>,
+    >,
     /// Timestamp of the last Esc press, for double-Esc detection.
     last_esc_time: Option<std::time::Instant>,
     /// Pending background goal from `/bg` command (consumed in submit_goal).
@@ -297,7 +301,7 @@ impl App {
         // Start background refresh every 60 min
         model_catalog.spawn_background_refresh();
 
-        let (agent, question_rx) = AgentState::new(
+        let (agent, question_rx, approval_rx) = AgentState::new(
             data_dir.clone(),
             provider,
             model,
@@ -360,6 +364,7 @@ impl App {
             #[cfg(feature = "voice")]
             voice_config: ava_config::VoiceConfig::default(),
             question_rx: Some(question_rx),
+            approval_rx: Some(approval_rx),
             last_esc_time: None,
             pending_bg_goal: None,
             pending_images: Vec::new(),
@@ -440,6 +445,7 @@ impl App {
 
         // Take the question receiver so we can poll it in the event loop
         let mut question_rx = self.question_rx.take();
+        let mut approval_rx = self.approval_rx.take();
 
         if let Some(goal) = self.pending_goal.take() {
             self.submit_goal(goal, app_tx.clone(), agent_tx.clone());
@@ -467,6 +473,9 @@ impl App {
                 Some(event) = app_rx.recv() => self.handle_event(event, app_tx.clone(), agent_tx.clone()),
                 Some(req) = async { match question_rx.as_mut() { Some(rx) => rx.recv().await, None => None } } => {
                     self.handle_event(AppEvent::Question(req), app_tx.clone(), agent_tx.clone());
+                },
+                Some(req) = async { match approval_rx.as_mut() { Some(rx) => rx.recv().await, None => None } } => {
+                    self.handle_event(AppEvent::ToolApproval(req), app_tx.clone(), agent_tx.clone());
                 },
                 else => break,
             }
@@ -635,7 +644,7 @@ impl App {
                     working_dir: Some(isolation.worktree_path),
                 };
                 match ava_agent::stack::AgentStack::new(config).await {
-                    Ok((stack, _)) => Arc::new(stack),
+                    Ok((stack, _, _)) => Arc::new(stack),
                     Err(err) => {
                         let _ = app_tx_clone.send(AppEvent::AgentRunDone {
                             run_id,
@@ -2180,6 +2189,21 @@ impl App {
                 });
                 self.state.active_modal = Some(ModalType::Question);
             }
+            AppEvent::ToolApproval(req) => {
+                let inspection = Some(crate::state::permission::InspectionInfo {
+                    risk_level: req.inspection.risk_level,
+                    tags: req.inspection.tags,
+                    warnings: req.inspection.warnings,
+                });
+                self.state
+                    .permission
+                    .enqueue(crate::state::permission::ApprovalRequest {
+                        call: req.call,
+                        approve_tx: req.reply,
+                        inspection,
+                    });
+                self.state.active_modal = Some(ModalType::ToolApproval);
+            }
             AppEvent::HookResult {
                 event,
                 result,
@@ -2737,6 +2761,7 @@ impl App {
             #[cfg(feature = "voice")]
             voice_config: ava_config::VoiceConfig::default(),
             question_rx: None,
+            approval_rx: None,
             last_esc_time: None,
             pending_bg_goal: None,
             pending_images: Vec::new(),

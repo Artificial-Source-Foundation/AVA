@@ -1,4 +1,5 @@
 use crate::state::theme::Theme;
+use crate::text_utils::display_width;
 use crate::widgets::autocomplete::AutocompleteState;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -94,9 +95,10 @@ pub fn render_slash_menu(
         ));
 
         // Right-align the description
-        let left_len = prefix.len();
-        if !detail.is_empty() && inner_width > left_len + detail.len() + 2 {
-            let padding = inner_width - left_len - detail.len();
+        let left_len = display_width(&prefix);
+        let detail_len = display_width(detail);
+        if !detail.is_empty() && inner_width > left_len + detail_len + 2 {
+            let padding = inner_width - left_len - detail_len;
             spans.push(Span::styled(" ".repeat(padding), Style::default().bg(bg)));
             spans.push(Span::styled(
                 detail.clone(),
@@ -104,7 +106,7 @@ pub fn render_slash_menu(
             ));
         } else {
             // Fill remaining space with background
-            let current_len: usize = prefix.len();
+            let current_len = left_len;
             if inner_width > current_len {
                 spans.push(Span::styled(
                     " ".repeat(inner_width - current_len),

@@ -21,6 +21,7 @@ ava-context = { path = "../ava-context" }
 ava-config = { path = "../ava-config" }
 ava-llm = { path = "../ava-llm" }
 ava-memory = { path = "../ava-memory" }
+ava-permissions = { path = "../ava-permissions" }
 ava-platform = { path = "../ava-platform" }
 ava-session = { path = "../ava-session" }
 ava-mcp = { path = "../ava-mcp" }

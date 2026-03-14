@@ -1,6 +1,6 @@
 # AVA v3 Plan
 
-> Last updated: 2026-03-13 after Sprint 62V validation closeout and sprint archive normalization.
+> Last updated: 2026-03-13 after Sprint 63-66 backend implementation and smoke validation.
 > Related: `docs/development/roadmap.md`, `docs/development/backlog.md`, `docs/development/epics.md`
 
 ## Goal
@@ -13,7 +13,7 @@ v3 is the milestone where the current active backlog is intentionally burned dow
 - Sprint 60 is implemented and archived.
 - Sprint 61 is implemented and archived.
 - Sprint 62 is implemented, validated in Sprint 62V, and archived.
-- Sprint 63-66 currently remain planning docs only on `master`.
+- Sprint 63-66 backend scope is implemented on `master`; roadmap/backlog archive normalization remains.
 - The active backlog is now mostly backend/platform work plus one major UI-facing gap: `B26` Praxis in chat composer.
 - The local reference corpus under `docs/reference-code/` has been refreshed and now reflects newer upstream states across OpenCode, Codex CLI, Goose, Gemini CLI, Cline, OpenHands, Continue, Zed, and others.
 
@@ -44,7 +44,7 @@ Why now: refreshed competitors consistently expose stronger cost visibility, sma
 - `B71` Skill discovery
 - `B45` File watcher mode
 
-Why now: this is the substrate needed for safer automation, remote execution later, and a cleaner extension story.
+Status: implemented on `master`.
 
 ### Sprint 64 - Knowledge and Context Intelligence
 
@@ -53,7 +53,7 @@ Why now: this is the substrate needed for safer automation, remote execution lat
 - `B58` Semantic codebase indexing
 - `B48` Change impact analysis
 
-Why now: AVA already has strong lexical/codebase primitives; this sprint turns them into a clearer competitive advantage.
+Status: implemented on `master`.
 
 ### Sprint 65 - Agent Coordination Backend
 
@@ -62,7 +62,7 @@ Why now: AVA already has strong lexical/codebase primitives; this sprint turns t
 - `B50` Agent team peer communication
 - `B76` Agent Client Protocol (ACP)
 
-Why now: this finishes the coordination layer after execution and knowledge foundations are in place.
+Status: implemented on `master`.
 
 ### Sprint 66 - Optional Capability Backends
 
@@ -71,7 +71,7 @@ Why now: this finishes the coordination layer after execution and knowledge foun
 - `B53` Full LSP exposure
 - `B69` Code search tool
 
-Why now: these are valuable but should stay Extended/plugin-first so they do not bloat the default tool surface.
+Status: implemented on `master` (Extended/plugin-first).
 
 ## Frontend and UX Lane
 
@@ -82,11 +82,15 @@ Why now: these are valuable but should stay Extended/plugin-first so they do not
 - Per-turn duration and cost visibility
 - Budget and quota surfacing
 
+Status: largely delivered in the TUI; remaining work is polish and desktop follow-through.
+
 ### FE-B - Conversation Clarity (pair with Sprint 62)
 
 - Tool-call grouping for read/search noise
 - Inline diff presentation after edits
 - Streaming render polish for calmer chat output
+
+Status: partially delivered. Tool-activity grouping exists; remaining work is better inspectability, calmer streaming, and diff/result polish.
 
 ### FE-C - Session and History UX (pair with Sprint 63)
 
@@ -101,7 +105,9 @@ Why now: these are valuable but should stay Extended/plugin-first so they do not
 - Task status and merge-back visibility
 - Agent-switching/task-inspection affordances
 
-This is the highest-priority open UX track because `B26` is the only open `P1` item.
+Status: first slice delivered. `/praxis <goal>` now launches a Praxis task from the TUI, opens a Praxis task view, streams worker output, supports cancellation, and posts a grouped completion summary back into the main chat. Remaining work is deeper worker/task inspection, richer merge-back/session persistence, and fuller orchestration UX.
+
+This remains the highest-priority open UX track because `B26` is still the only open `P1` item, and backend coordination primitives from Sprint 65 are now available.
 
 ### FE-E - Input and Discoverability (pair with Sprint 64)
 
@@ -131,7 +137,7 @@ The fresh reference pass reinforced these gaps as the most valuable:
 
 Call the work "v3 ready" only when all of these are true:
 
-- The active backlog has no unclear owner or stale status.
+- The active backlog has no stale status text from already-delivered Sprint 63-66 work.
 - Sprints 60-62 are archived with validation notes preserved.
 - Every planned backend sprint has a matching user-visible UX surface where needed.
 - CLI/headless verification exists for each completed sprint.

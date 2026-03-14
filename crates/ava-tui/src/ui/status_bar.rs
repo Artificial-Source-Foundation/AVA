@@ -313,7 +313,7 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         ));
     } else if matches!(
         state.view_mode,
-        ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. }
+        ViewMode::SubAgent { .. } | ViewMode::BackgroundTask { .. } | ViewMode::PraxisTask { .. }
     ) {
         // Sub-agent or background task view hints
         let hints: &[(&str, &str)] = &[("Esc", "back to main"), ("PgUp/PgDn", "scroll")];
@@ -322,6 +322,7 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         // Idle hints
         let hints: &[(&str, &str)] = &[
             ("/", "commands"),
+            ("Ctrl+E", "tools"),
             ("Ctrl+M", "model"),
             ("Ctrl+K", "palette"),
         ];

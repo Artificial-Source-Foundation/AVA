@@ -646,6 +646,7 @@ pub struct MessageState {
     pub scroll_offset: u16,
     pub auto_scroll: bool,
     pub unseen_count: usize,
+    pub show_tools_expanded: bool,
     /// Set by the renderer each frame.
     pub total_lines: u16,
     /// Set by the renderer each frame (content area height minus borders).
@@ -661,6 +662,7 @@ impl Default for MessageState {
             scroll_offset: 0,
             auto_scroll: true,
             unseen_count: 0,
+            show_tools_expanded: false,
             total_lines: 0,
             visible_height: 0,
             spinner_tick: 0,

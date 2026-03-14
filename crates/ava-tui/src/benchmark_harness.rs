@@ -556,11 +556,7 @@ async fn run_harness_task(
     let effective_turns = if task.needs_tools { max_turns } else { 5 };
 
     let mut director = Director::new(DirectorConfig {
-        budget: Budget {
-            max_tokens: 128_000,
-            max_turns: effective_turns,
-            max_cost_usd: 5.0,
-        },
+        budget: Budget::new(128_000, effective_turns, 5.0),
         default_provider: Arc::new(SharedProvider::new(director_arc.clone()))
             as Arc<dyn LLMProvider>,
         domain_providers,

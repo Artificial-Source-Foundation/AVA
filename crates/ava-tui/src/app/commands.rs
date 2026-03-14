@@ -657,6 +657,7 @@ Available commands:
   /hooks [list|reload|init|dry-run <event>] — manage lifecycle hooks
   /btw <question>          — ask a side question without interrupting the agent
   /bg [--branch] <goal>    — launch a goal as a background agent
+  /praxis <goal>           — launch a Praxis multi-agent task
   /tasks                   — show background task list
   /clear                   — clear chat
   /compact [focus]          — compact conversation to save context window
@@ -717,6 +718,29 @@ Keyboard shortcuts:
                     Some((
                         MessageKind::Error,
                         "Usage: /bg [--branch] <goal> (e.g., /bg --branch refactor auth module)"
+                            .to_string(),
+                    ))
+                }
+            }
+            "/praxis" => {
+                if let Some(goal) = arg {
+                    let trimmed = goal.trim();
+                    if trimmed.is_empty() {
+                        Some((
+                            MessageKind::Error,
+                            "Usage: /praxis <goal> (e.g., /praxis parallelize this refactor)"
+                                .to_string(),
+                        ))
+                    } else {
+                        self.pending_praxis_goal = Some(super::PendingPraxisGoal {
+                            goal: trimmed.to_string(),
+                        });
+                        None
+                    }
+                } else {
+                    Some((
+                        MessageKind::Error,
+                        "Usage: /praxis <goal> (e.g., /praxis parallelize this refactor)"
                             .to_string(),
                     ))
                 }

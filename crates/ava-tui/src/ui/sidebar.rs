@@ -161,6 +161,33 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         }
     }
 
+    if !state.praxis.tasks.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled("Praxis", label_style)));
+
+        for task in state.praxis.tasks.iter().rev().take(3) {
+            let goal = truncate_display(&task.goal, area.width.saturating_sub(10) as usize);
+            lines.push(Line::from(vec![
+                Span::styled(format!("  #{} ", task.id), dim_style),
+                Span::styled(goal, value_style),
+            ]));
+            lines.push(Line::from(Span::styled(
+                format!("    {} · {} workers", task.status, task.workers.len()),
+                dim_style,
+            )));
+            for worker in task.workers.iter().take(2) {
+                let worker_desc = truncate_display(
+                    &format!("{} {}/{}", worker.lead, worker.turn, worker.max_turns),
+                    area.width.saturating_sub(8) as usize,
+                );
+                lines.push(Line::from(Span::styled(
+                    format!("      {worker_desc}"),
+                    dim_style,
+                )));
+            }
+        }
+    }
+
     // Todo section — only show when there are incomplete items
     if todo_list::has_incomplete(&state.todo_items) {
         lines.push(Line::from(""));
@@ -212,6 +239,7 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     lines.push(Line::from(Span::styled("Keys", label_style)));
     lines.push(Line::from(Span::styled("  Ctrl+K  palette", dim_style)));
     lines.push(Line::from(Span::styled("  Ctrl+M  model", dim_style)));
+    lines.push(Line::from(Span::styled("  Ctrl+E  tools", dim_style)));
     lines.push(Line::from(Span::styled("  Ctrl+N  new session", dim_style)));
     lines.push(Line::from(Span::styled("  Ctrl+L  sessions", dim_style)));
     lines.push(Line::from(Span::styled("  Ctrl+S  sidebar", dim_style)));
@@ -219,6 +247,11 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     if matches!(state.view_mode, ViewMode::SubAgent { .. }) {
         lines.push(Line::from(Span::styled(
             "  Esc     back (sub-agent)",
+            dim_style,
+        )));
+    } else if matches!(state.view_mode, ViewMode::PraxisTask { .. }) {
+        lines.push(Line::from(Span::styled(
+            "  Esc     back (praxis)",
             dim_style,
         )));
     }

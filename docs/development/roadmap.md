@@ -1,6 +1,6 @@
 # AVA Sprint Roadmap
 
-> Last updated: 2026-03-13 (Sprint 62V closeout complete; Sprints 60-62 archived; Sprint 63-66 remain active planning lanes on master)
+> Last updated: 2026-03-13 (Sprint 63-66 backend delivery implemented on master; archival/status normalization pending)
 
 ## Completed (Sprints 11–59)
 
@@ -58,7 +58,7 @@
 | 58 | Modal system revamp — shared SelectList widget, scroll fix, visual redesign |
 | 59 | Provider mega — Copilot provider, provider verification, retry jitter ±20%, circuit breaker wiring, compiled-in model registry, rich StreamChunk, Alibaba Coding Plan fixes, context window display, error text wrapping, dedup guard fix |
 
-## Recently Completed (Sprints 60-62 + 62V)
+## Recently Completed (Sprints 60-66)
 
 | Sprint | Focus | Status |
 |--------|-------|--------|
@@ -66,6 +66,10 @@
 | 61 | Reliable edit loop (`B67`, `B54`, `B37`, `B66`) | Implemented and archived |
 | 62 | Cost + runtime foundations (`B64`, `B63`, `B47`, `B40`) | Implemented, validated, and archived via Sprint 62V |
 | 62V | Validation + archive closeout for Sprint 62 | Complete |
+| 63 | Execution + ecosystem foundations (`B65`, `B39`, `B61`, `B71`, `B45`) | Implemented on master |
+| 64 | Knowledge + context foundations (`B38`, `B57`, `B58`, `B48`) | Implemented on master |
+| 65 | Agent coordination backend (`B49`, `B59`, `B50`, `B76`) | Implemented on master |
+| 66 | Optional capability backends (`B44`, `B52`, `B53`, `B69`) | Implemented on master (Extended/plugin-first) |
 
 ### Sprint 60 Completed Items
 
@@ -79,32 +83,34 @@
 
 v3 is the point where the current active backlog is intentionally burned down, validated, and reorganized into a cleaner release story.
 
-Sprints 60-62 are now archived as completed delivery history. Sprint 63-66 remain planning docs and active delivery lanes.
+Sprints 60-62 are archived. Sprint 63-66 backend work is now implemented on `master`; sprint docs/backlog status text still needs archival normalization.
 
 ### Backend Lane (Rust-first)
 
 | Sprint | Focus | Status |
 |--------|-------|--------|
-| 63 | Execution + ecosystem foundations (`B65`, `B39`, `B61`, `B71`, `B45`) | Planned |
-| 64 | Knowledge + context foundations (`B38`, `B57`, `B58`, `B48`) | Planned |
-| 65 | Agent coordination backend (`B50`, `B59`, `B49`, `B76`) | Planned |
-| 66 | Optional capability backends (`B44`, `B52`, `B53`, `B69`) | Planned (Extended/plugin-first) |
+| 63 | Execution + ecosystem foundations (`B65`, `B39`, `B61`, `B71`, `B45`) | Implemented on master |
+| 64 | Knowledge + context foundations (`B38`, `B57`, `B58`, `B48`) | Implemented on master |
+| 65 | Agent coordination backend (`B50`, `B59`, `B49`, `B76`) | Implemented on master |
+| 66 | Optional capability backends (`B44`, `B52`, `B53`, `B69`) | Implemented on master (Extended/plugin-first) |
 
 ### Frontend / UX Lane (paired with the backend lane)
 
 | Track | Focus | Paired Backend Sprint |
 |-------|-------|-----------------------|
-| FE-A | Ambient awareness (`context %`, modular footer, duration/cost visibility) | 62 |
-| FE-B | Conversation clarity (tool grouping, inline diffs, quieter streaming) | 62 |
-| FE-C | Session and history UX (session search, rewind preview, session stats) | 63 |
 | FE-D | Praxis chat UX (`B26` composer entry, worker visibility, task status) | 65 |
+| FE-A | Ambient awareness (`context %`, modular footer, duration/cost visibility) — largely delivered | 62 |
+| FE-B | Conversation clarity (tool grouping, inline diffs, quieter streaming) — partially delivered, polish remains | 62 |
+| FE-C | Session and history UX (session search, rewind preview, session stats) | 63 |
 | FE-E | Input + discoverability (shortcut help, richer command discovery, long-input polish) | 64 |
 | FE-F | Desktop parity follow-through for proven TUI patterns | 66 |
 
 ### Ordering Notes
 
 - `B26` remains the highest-priority open UI-facing item and should land before or together with Sprint 65's coordination work.
+- Recent TUI modularization removed the main frontend delivery blocker; the next frontend pass should focus on Praxis composer/sidebar UX and merge-back affordances.
 - Sprints 60, 61, and 62 are treated as done-for-planning and live in the sprint archive.
+- Sprint 63-66 backend scope is implemented; remaining closeout is documentation/archive normalization and paired UX follow-through (`B26`).
 - The backend lane stays Rust-first; the frontend lane is limited to TUI and desktop surfaces for already-approved backend capabilities.
 
 Detailed sprint planning docs live in:
@@ -135,7 +141,7 @@ v2.1.0 released on 2026-03-08. Sprints 51-62 materially improved model intellige
 | Tracked test files | 338 |
 | Clippy | Clean |
 | Built-in tools | 6 |
-| Extended tools | 7 |
+| Extended tools | 11 |
 
 ## Parallelism Guide (Historical)
 

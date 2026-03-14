@@ -8,6 +8,7 @@ pub mod keybinds;
 pub mod message_queue;
 pub mod messages;
 pub mod permission;
+pub mod praxis;
 pub mod rewind;
 pub mod session;
 pub mod theme;

@@ -128,6 +128,28 @@ pub struct Budget {
     pub max_cost_usd: f64,
 }
 
+impl Budget {
+    pub fn new(max_tokens: usize, max_turns: usize, max_cost_usd: f64) -> Self {
+        Self {
+            max_tokens,
+            max_turns,
+            max_cost_usd,
+        }
+    }
+
+    pub fn interactive(max_turns: usize, max_budget_usd: f64) -> Self {
+        Self::new(
+            128_000,
+            if max_turns == 0 { 200 } else { max_turns },
+            if max_budget_usd > 0.0 {
+                max_budget_usd
+            } else {
+                10.0
+            },
+        )
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub description: String,

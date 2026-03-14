@@ -128,3 +128,15 @@ fn bg_branch_command_sets_isolated_goal() {
     assert_eq!(pending.goal, "refactor auth module");
     assert!(pending.isolated_branch);
 }
+
+#[test]
+fn praxis_command_sets_pending_goal() {
+    let temp = tempdir().expect("tempdir");
+    let db_path = temp.path().join("data.db");
+    let mut app = App::test_new(&db_path);
+
+    let result = app.test_slash_command("/praxis parallelize this refactor");
+    assert!(result.is_none());
+    let pending = app.pending_praxis_goal.expect("pending praxis goal");
+    assert_eq!(pending.goal, "parallelize this refactor");
+}

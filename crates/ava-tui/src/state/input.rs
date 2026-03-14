@@ -413,6 +413,7 @@ impl InputState {
                     AutocompleteItem::new("mcp", "List MCP servers"),
                     AutocompleteItem::new("mcp reload", "Reload MCP config"),
                     AutocompleteItem::new("bg", "Launch a goal as a background task"),
+                    AutocompleteItem::new("praxis", "Launch a Praxis multi-agent task"),
                     AutocompleteItem::new("tasks", "Show background task list"),
                     AutocompleteItem::new("agents", "Show sub-agent configuration"),
                     AutocompleteItem::new("plan", "Switch to Plan mode"),

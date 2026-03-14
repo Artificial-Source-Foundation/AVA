@@ -1,6 +1,6 @@
 # AVA Backlog
 
-> Last updated: 2026-03-13 (after Sprint 62V validation closeout and sprint archival updates)
+> Last updated: 2026-03-13 (after Sprint 63-66 backend implementation and smoke validation)
 > Related: `docs/development/roadmap.md`, `docs/development/epics.md`, `docs/development/v3-plan.md`
 
 > Items waiting for sprint assignment. Completed items moved to bottom.
@@ -18,99 +18,81 @@ v3 planning now runs in two lanes:
 
 ### Next
 
-1. `B26` Praxis in chat composer — only open `P1`, and the clearest missing bridge between AVA's backend multi-agent work and the TUI.
-2. `B65` Pluggable backend operations — foundational abstraction for future remote execution, isolated workers, and safer Praxis expansion.
-3. `B39` Background agents on branches — safer background execution through git worktree isolation.
-4. `B61` Dev tooling setup — accelerates future work and improves day-to-day development quality.
-5. `B71` Skill discovery — strong ecosystem leverage without expanding the default tool surface.
+1. `B26` Praxis in chat composer — only open `P1`, and the clearest bridge from delivered backend coordination to user-visible UX.
+2. `B73` Network proxy with SSRF protection — highest-leverage remaining backend hardening item.
+3. `B46` Plugin/skill marketplace — distribution/install layer for optional capabilities.
+4. `B79` Evaluation harness enhancement — formal quality regression/perf signal for future work.
+5. `B80` Trajectory recording — debugging and behavior analytics substrate.
 
 ### Soon
 
-6. `B45` File watcher mode — high workflow value, but needs careful UX design to avoid noise.
-7. `B38` Auto-learned project memories — strong long-session productivity upside once reliability work settles.
-8. `B57` Multi-repo context — valuable after the single-repo knowledge lane is better defined.
-9. `B48` Change impact analysis — best timed after the knowledge/indexing work is clearer.
+6. `B41` Session templates
+7. `B42` Custom agent modes/personas
+8. `B74` Custom keybindings
+9. `B6` Desktop gap: session CRUD commands
 
 ### Later
 
-14. `B46` Plugin/skill marketplace
-15. `B73` Network proxy with SSRF protection
-16. `B6` Desktop gap: session CRUD commands
-17. `B42` Custom agent modes/personas
-18. `B41` Session templates
-19. `B49` Spec-driven development
-20. `B50` Agent team peer communication
-21. `B74` Custom keybindings
-22. `B58` Semantic codebase indexing
-23. `B59` Agent artifacts system
-24. `B76` Agent Client Protocol (ACP)
-25. `B79` Evaluation harness enhancement
-26. `B80` Trajectory recording
-27. `B78` Auto-formatting detection
+14. `B78` Auto-formatting detection
 
 ### De-prioritized Mainly Because They Add Tool Surface
 
-- `B44` Web search capability — valuable, but should remain Extended rather than compete with core workflow work.
-- `B52` AST-aware operations — powerful Extended tool, but a larger dependency/surface expansion than current workflow priorities.
-- `B53` Full LSP exposure to agent — useful, but high surface area and higher implementation cost than current edit-loop work.
+- `B44` Web search capability — delivered as Extended in Sprint 66.
+- `B52` AST-aware operations — delivered as Extended in Sprint 66.
+- `B53` Full LSP exposure to agent — delivered as Extended first slice in Sprint 66.
 - `B68` Batch tool — optimization more than capability; should stay Extended.
 - `B75` Directory listing tool — convenience feature, not a core capability gap.
-- `B55`, `B56`, `B69`, `B72`, `B77` — plugin/MCP-first capabilities that should not displace core workflow and architecture work.
+- `B55`, `B56`, `B72`, `B77` — plugin/MCP-first capabilities that should not displace core workflow and architecture work.
+
+## Delivered in Sprints 63-66 (Pending Archive Normalization)
+
+- `B65`, `B39`, `B61`, `B71`, `B45`
+- `B38`, `B57`, `B58`, `B48`
+- `B49`, `B59`, `B50`, `B76`
+- `B44`, `B52`, `B53`, `B69`
 
 ## P2/P3 Missing or Under-Specified Areas
 
-These items are worth keeping, but likely need tighter scoping before implementation.
+These items are still open and likely need tighter scoping before implementation.
 
-- `B38` Auto-learned project memories — needs a clear trust/review model, storage format, and strategy for avoiding noisy or incorrect learned memories.
 - `B41` Session templates — should specify relationship to `/init`, project instructions, and whether templates are per-user, per-project, or shareable.
 - `B46` Plugin/skill marketplace — needs packaging, trust/signing, versioning, install UX, and update/removal rules.
-- `B48` Change impact analysis — depends on defining how much can be delivered from today's codebase index versus future LSP/semantic work.
-- `B49` Spec-driven development — should define how it differs from existing Plan mode and whether specs are advisory or enforced as workflow gates.
-- `B50` Agent team peer communication — depends on B26 landing first and needs mailbox/conflict-resolution semantics.
-- `B57` Multi-repo context — should define repo discovery, permissions, ranking across repos, and how indexing cost is controlled.
-- `B58` Semantic codebase indexing — needs an explicit storage/runtime strategy (local embeddings, provider embeddings, refresh cadence, disk budget).
-- `B59` Agent artifacts system — should define artifact types, review UX, comment model, and whether this is TUI-only or shared with desktop.
-- `B65` Pluggable backend operations — needs a first-class backend boundary document so bash/read/write/edit refactors do not sprawl.
-- `B71` Skill discovery — should define precedence/conflict rules between discovered skills and existing instruction loading.
-- `B76` ACP — major architecture shift that needs a separate design doc before implementation.
+- `B73` Network proxy with SSRF protection — needs a concrete architecture split between proxy, policy, and sandbox integration.
+- `B79` Evaluation harness enhancement — needs dataset strategy, scoring protocol, and CI/runtime budget limits.
+- `B80` Trajectory recording — needs retention policy, privacy/redaction approach, and replay tooling boundaries.
 
-## Recommended Next 3 Backend Sprints
+## Recommended Next 3 Backend Sprints (Post-66)
 
-### Sprint 63 — Execution + Ecosystem Foundations
+### Sprint 67 — Runtime Hardening + Observability
 
-- `B65` Pluggable backend operations
-- `B39` Background agents on branches
-- `B61` Dev tooling setup
-- `B71` Skill discovery
-- `B45` File watcher mode
+- `B73` Network proxy with SSRF protection
+- `B79` Evaluation harness enhancement
+- `B80` Trajectory recording
 
-Goal: strengthen the execution substrate, improve development velocity, and expand interoperability without bloating the default tool surface.
+Goal: improve safety boundaries and measurable quality before expanding user-facing power.
 
-### Sprint 64 — Knowledge + Context Foundations
+### Sprint 68 — UX Bridge for Delivered Backend Capability
 
-- `B38` Auto-learned project memories
-- `B57` Multi-repo context
-- `B58` Semantic codebase indexing
-- `B48` Change impact analysis
+- `B26` Praxis in chat composer
+- Session/task visibility polish tied to delivered Sprint 65 primitives
 
-Goal: turn AVA's existing codebase/context primitives into a clearer competitive advantage for long sessions and larger workspaces.
+Goal: expose backend coordination work in core chat UX.
 
-### Sprint 65 — Agent Coordination Backend
+### Sprint 69 — Extensibility and Optional Capability Distribution
 
-- `B49` Spec-driven development
-- `B59` Agent artifacts system
-- `B50` Agent team peer communication
-- `B76` Agent Client Protocol (ACP)
+- `B46` Plugin/skill marketplace
+- `B41` Session templates
+- `B42` Custom agent modes/personas
 
-Goal: finish the coordination substrate after execution and knowledge foundations settle.
+Goal: make optional capabilities easier to package, share, and adopt without expanding core defaults.
 
 ## Open
 
 | ID | Priority | Title | Notes |
 |----|----------|-------|-------|
 | B6 | P2 | Desktop gap: session CRUD commands | Missing from Tauri backend (desktop-only, not CLI) |
-| B26 | P1 | Praxis in chat composer | Expose Praxis multi-agent orchestration from chat — `/praxis` or `/team` command spawns Director → Leads → Workers pipeline from the composer without `--praxis` CLI flag. Workers visible in sidebar, results merged into main session. Two tiers: Full (Director → Leads → Workers for complex refactors) and Lite (Director → Workers for quick parallel tasks). Builds on ava-praxis crate. Current status: underlying `ava-praxis` backend, `PraxisEvent` stream, and headless `--multi-agent`/`--praxis` path exist; missing interactive TUI composer wiring, live sidebar worker updates, and merge-back into the active session. |
-| B38 | P2 | Auto-learned project memories | Beyond manual AGENTS.md — system auto-detects patterns (preferred frameworks, coding style, common imports, test patterns) and stores them. Windsurf's praised "Memories" feature. `ava-memory` currently only has manual `remember/recall`. Add: pattern detector that observes tool results + user corrections, builds project profile over time. |
+| B26 | P1 | Praxis in chat composer | Expose Praxis multi-agent orchestration from chat — `/praxis` or `/team` command spawns Director → Leads → Workers pipeline from the composer without `--praxis` CLI flag. Workers visible in sidebar, results merged into main session. Two tiers: Full (Director → Leads → Workers for complex refactors) and Lite (Director → Workers for quick parallel tasks). Builds on ava-praxis crate. Current status: the first TUI slice is now shipped — `/praxis <goal>` launches a Praxis task, opens a dedicated task view, shows worker state in the sidebar, supports cancellation, and posts a grouped completion summary back into the main chat. Remaining work is richer worker decomposition, better merge-back/session persistence, and fuller task inspection UX. |
+| B38 | P2 | Auto-learned project memories | Beyond manual AGENTS.md — system auto-detects patterns (preferred frameworks, coding style, common imports, test patterns) and stores them. Windsurf's praised "Memories" feature. `ava-memory` now has learned-memory persistence and review primitives; remaining work is detection, approval UX, and safe recall policy. |
 | B39 | P2 | Background agents on branches | Background agents (`/bg`) should optionally work on isolated git branches. `git worktree add` for isolation, merge back on completion. Currently background agents share the working tree. |
 | B41 | P3 | Session templates | Save conversation patterns as reusable templates — system prompt + tool set + follow-up pipeline. `/template save security-review`, `/template load security-review`. Store in `.ava/templates/`. |
 | B42 | P3 | Custom agent modes/personas | Beyond Code/Plan — let users define custom modes in config with specific system prompts, tool permissions, and model overrides. `/mode create reviewer` with TOML config. agents.toml already has `prompt` field per agent but TUI only exposes Code/Plan. |

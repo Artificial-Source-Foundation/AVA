@@ -38,19 +38,7 @@ pub(super) async fn run_workflow(cli: CliArgs, goal: &str, workflow_name: &str) 
     let provider = resolve_provider(&stack).await?;
     let platform = Arc::new(StandardPlatform);
 
-    let budget = Budget {
-        max_tokens: 128_000,
-        max_turns: if cli.max_turns == 0 {
-            200
-        } else {
-            cli.max_turns
-        },
-        max_cost_usd: if cli.max_budget_usd > 0.0 {
-            cli.max_budget_usd
-        } else {
-            10.0
-        },
-    };
+    let budget = Budget::interactive(cli.max_turns, cli.max_budget_usd);
 
     let executor = WorkflowExecutor::new(workflow, budget, provider, platform);
 

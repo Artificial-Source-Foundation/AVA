@@ -85,9 +85,9 @@ These run as a paired lane against the backend epics so new backend power ships 
 
 | Epic | Focus | Paired Sprint |
 |------|-------|---------------|
-| FE-A | Ambient awareness (`context %`, modular footer, duration/cost visibility) | 62 |
-| FE-B | Conversation clarity (tool grouping, inline diffs, quieter streaming) | 62 |
-| FE-C | Session and history UX (search, rewind preview, stats) | 63 |
 | FE-D | Praxis chat UX and worker visibility, including `B26` | 65 |
+| FE-A | Ambient awareness (`context %`, modular footer, duration/cost visibility) — largely delivered, follow-through only | 62 |
+| FE-B | Conversation clarity (tool grouping, inline diffs, quieter streaming) — partially delivered, polish remains | 62 |
+| FE-C | Session and history UX (search, rewind preview, stats) | 63 |
 | FE-E | Input and discoverability (shortcuts, richer command discovery, long-input polish) | 64 |
 | FE-F | Desktop parity follow-through for proven TUI patterns | 66 |

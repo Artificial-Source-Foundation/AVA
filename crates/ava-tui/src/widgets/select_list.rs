@@ -53,6 +53,10 @@ pub struct SelectListState<T: Clone> {
     line_map: Vec<usize>,
     /// Cached filtered indices into `items`.
     filtered_cache: Vec<usize>,
+    /// Index of the item currently hovered by the mouse (if any).
+    pub hovered: Option<usize>,
+    /// Cached content area from last render (for mouse hit testing).
+    pub content_area: Option<Rect>,
 }
 
 impl<T: Clone> SelectListState<T> {
@@ -64,6 +68,8 @@ impl<T: Clone> SelectListState<T> {
             scroll_offset: 0,
             line_map: Vec::new(),
             filtered_cache: Vec::new(),
+            hovered: None,
+            content_area: None,
         };
         state.rebuild_cache();
         state
@@ -340,6 +346,75 @@ pub fn handle_select_list_key<T: Clone>(
     }
 }
 
+/// Result of handling a mouse event in the select list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectListMouseAction {
+    /// Hover changed (visual update needed).
+    Hovered,
+    /// An item was clicked — caller should execute like Enter.
+    Clicked,
+    /// Scroll wheel moved selection.
+    Scrolled,
+    /// Mouse event was not handled.
+    Ignored,
+}
+
+/// Handle mouse events for a select list: hover highlight, click to select, scroll wheel.
+pub fn handle_select_list_mouse<T: Clone>(
+    state: &mut SelectListState<T>,
+    event: crossterm::event::MouseEvent,
+    viewport_height: usize,
+) -> SelectListMouseAction {
+    use crossterm::event::MouseEventKind;
+
+    let Some(area) = state.content_area else {
+        return SelectListMouseAction::Ignored;
+    };
+
+    match event.kind {
+        MouseEventKind::Moved | MouseEventKind::Drag(_) => {
+            if event.column >= area.x
+                && event.column < area.right()
+                && event.row >= area.y
+                && event.row < area.bottom()
+            {
+                let rendered_line = (event.row - area.y) as usize + state.scroll_offset;
+                // Find which item index corresponds to this rendered line
+                if let Some(idx) = state.line_map.iter().position(|&l| l == rendered_line) {
+                    if state.hovered != Some(idx) {
+                        state.hovered = Some(idx);
+                        return SelectListMouseAction::Hovered;
+                    }
+                    return SelectListMouseAction::Ignored;
+                }
+            }
+            if state.hovered.is_some() {
+                state.hovered = None;
+                return SelectListMouseAction::Hovered;
+            }
+            SelectListMouseAction::Ignored
+        }
+        MouseEventKind::Down(_) => {
+            if let Some(hovered) = state.hovered {
+                state.selected = hovered;
+                return SelectListMouseAction::Clicked;
+            }
+            SelectListMouseAction::Ignored
+        }
+        MouseEventKind::ScrollUp => {
+            state.move_up(3);
+            state.ensure_visible(viewport_height);
+            SelectListMouseAction::Scrolled
+        }
+        MouseEventKind::ScrollDown => {
+            state.move_down(3);
+            state.ensure_visible(viewport_height);
+            SelectListMouseAction::Scrolled
+        }
+        _ => SelectListMouseAction::Ignored,
+    }
+}
+
 /// A keybind hint displayed at the bottom of the modal.
 pub struct KeybindHint {
     pub key: String,
@@ -357,7 +432,7 @@ pub struct SelectListConfig {
 pub fn render_select_list<T: Clone>(
     frame: &mut Frame<'_>,
     area: Rect,
-    state: &SelectListState<T>,
+    state: &mut SelectListState<T>,
     config: &SelectListConfig,
     theme: &Theme,
 ) {
@@ -380,6 +455,9 @@ pub fn render_select_list<T: Clone>(
     let search_area = chunks[1];
     let content_area = chunks[2];
     let footer_area = chunks[3];
+
+    // Cache content area for mouse hit testing
+    state.content_area = Some(content_area);
 
     let inner_width = content_area.width as usize;
     let filtered = state.filtered();
@@ -498,10 +576,13 @@ pub fn render_select_list<T: Clone>(
         }
 
         let is_selected = idx == state.selected;
+        let is_hovered = state.hovered == Some(idx) && !is_selected;
 
-        // Selected: accent-primary bg with dark text; unselected: transparent
+        // Selected: accent-primary bg with dark text; hovered: subtle surface bg; unselected: transparent
         let bg = if is_selected {
             theme.primary
+        } else if is_hovered {
+            theme.bg_surface
         } else {
             theme.bg_elevated
         };
@@ -595,8 +676,8 @@ pub fn render_select_list<T: Clone>(
             spans.push(Span::styled(" ", Style::default().bg(bg)));
         }
 
-        // Apply full-width background highlight
-        if is_selected {
+        // Apply full-width background highlight for selected or hovered items
+        if is_selected || is_hovered {
             let current_len: usize = spans.iter().map(|s| s.content.len()).sum();
             if inner_width > current_len {
                 spans.push(Span::styled(

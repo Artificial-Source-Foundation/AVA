@@ -25,7 +25,9 @@ impl App {
             AppEvent::Resize(_, _) => {}
             AppEvent::Mouse(mouse) => {
                 use crossterm::event::MouseEventKind;
-                if self.state.active_modal.is_none() {
+                if let Some(modal) = self.state.active_modal {
+                    self.handle_modal_mouse(modal, mouse, app_tx.clone());
+                } else {
                     match mouse.kind {
                         MouseEventKind::ScrollUp => self.state.messages.scroll_up(1),
                         MouseEventKind::ScrollDown => self.state.messages.scroll_down(1),

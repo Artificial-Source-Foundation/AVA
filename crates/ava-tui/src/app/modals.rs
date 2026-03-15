@@ -1,7 +1,10 @@
 use super::*;
 use crate::widgets::command_palette::CommandExec;
 use crate::widgets::provider_connect::{ConnectField, ConnectScreen};
-use crate::widgets::select_list::{handle_select_list_key, list_viewport_height, SelectListAction};
+use crate::widgets::select_list::{
+    handle_select_list_key, handle_select_list_mouse, list_viewport_height, SelectListAction,
+    SelectListMouseAction,
+};
 use ava_auth::config::AuthFlow;
 use std::time::Instant;
 
@@ -96,6 +99,93 @@ impl App {
             ModalType::Rewind => self.handle_rewind_key(key),
             ModalType::TaskList => self.handle_task_list_key(key),
             ModalType::DiffPreview => self.handle_diff_preview_key(key),
+        }
+    }
+
+    /// Route mouse events to the active modal's SelectListState for hover/click/scroll.
+    pub(crate) fn handle_modal_mouse(
+        &mut self,
+        modal: ModalType,
+        mouse: crossterm::event::MouseEvent,
+        app_tx: mpsc::UnboundedSender<AppEvent>,
+    ) {
+        let vh = list_viewport_height(modal_viewport_height());
+
+        match modal {
+            ModalType::CommandPalette => {
+                let action =
+                    handle_select_list_mouse(&mut self.state.command_palette.list, mouse, vh);
+                if action == SelectListMouseAction::Clicked {
+                    // Simulate Enter — execute the selected command
+                    let enter = crossterm::event::KeyEvent::from(KeyCode::Enter);
+                    self.handle_command_palette_key(enter, app_tx);
+                }
+            }
+            ModalType::SessionList => {
+                let action = handle_select_list_mouse(&mut self.state.session_list.list, mouse, vh);
+                if action == SelectListMouseAction::Clicked {
+                    let enter = crossterm::event::KeyEvent::from(KeyCode::Enter);
+                    self.handle_session_list_key(enter, app_tx);
+                }
+            }
+            ModalType::ModelSelector => {
+                if let Some(ref mut selector) = self.state.model_selector {
+                    let action = handle_select_list_mouse(&mut selector.list, mouse, vh);
+                    if action == SelectListMouseAction::Clicked {
+                        let enter = crossterm::event::KeyEvent::from(KeyCode::Enter);
+                        self.handle_model_selector_key(enter, app_tx);
+                    }
+                }
+            }
+            ModalType::ThemeSelector => {
+                if let Some(ref mut selector) = self.state.theme_selector {
+                    let action = handle_select_list_mouse(selector, mouse, vh);
+                    if action == SelectListMouseAction::Clicked {
+                        let enter = crossterm::event::KeyEvent::from(KeyCode::Enter);
+                        self.handle_theme_selector_key(enter);
+                    } else if action == SelectListMouseAction::Scrolled {
+                        // Live preview on scroll (same as Moved in key handler)
+                        if let Some(name) = self
+                            .state
+                            .theme_selector
+                            .as_ref()
+                            .and_then(|s| s.selected_value().cloned())
+                        {
+                            self.state.theme = Theme::from_name(&name);
+                        }
+                    }
+                }
+            }
+            ModalType::ToolList => {
+                handle_select_list_mouse(&mut self.state.tool_list.list, mouse, vh);
+            }
+            ModalType::ProviderConnect => {
+                if let Some(ref mut pc) = self.state.provider_connect {
+                    if matches!(pc.screen, ConnectScreen::List) {
+                        let action = handle_select_list_mouse(&mut pc.list, mouse, vh);
+                        if action == SelectListMouseAction::Clicked {
+                            let enter = crossterm::event::KeyEvent::from(KeyCode::Enter);
+                            self.handle_provider_connect_key(enter, app_tx);
+                        }
+                    }
+                }
+            }
+            ModalType::AgentList => {
+                if let Some(ref mut selector) = self.state.agent_list {
+                    let action = handle_select_list_mouse(selector, mouse, vh);
+                    if action == SelectListMouseAction::Clicked {
+                        let enter = crossterm::event::KeyEvent::from(KeyCode::Enter);
+                        self.handle_agent_list_key(enter);
+                    }
+                }
+            }
+            // Non-SelectList modals — no mouse handling
+            ModalType::ToolApproval
+            | ModalType::Question
+            | ModalType::CopyPicker
+            | ModalType::Rewind
+            | ModalType::TaskList
+            | ModalType::DiffPreview => {}
         }
     }
 

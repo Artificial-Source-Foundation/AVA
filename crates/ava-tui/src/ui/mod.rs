@@ -114,7 +114,7 @@ fn render_toasts(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
     }
 }
 
-fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
+fn render_modal(frame: &mut Frame<'_>, state: &mut AppState, modal: ModalType) {
     let area = frame.area();
     // Use a smaller popup for the copy picker, larger for diff preview
     let popup_area = if matches!(modal, ModalType::DiffPreview) {
@@ -159,7 +159,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
             render_select_list(
                 frame,
                 inner,
-                &state.command_palette.list,
+                &mut state.command_palette.list,
                 &config,
                 &state.theme,
             );
@@ -182,7 +182,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
             render_select_list(
                 frame,
                 inner,
-                &state.session_list.list,
+                &mut state.session_list.list,
                 &config,
                 &state.theme,
             );
@@ -191,7 +191,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
             // Handled inline as a bottom dock bar — should not reach here.
         }
         ModalType::ModelSelector => {
-            if let Some(ref selector) = state.model_selector {
+            if let Some(ref mut selector) = state.model_selector {
                 let config = SelectListConfig {
                     title: "Switch Model".to_string(),
                     search_placeholder: "Search models...".to_string(),
@@ -210,7 +210,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
                         },
                     ],
                 };
-                render_select_list(frame, inner, &selector.list, &config, &state.theme);
+                render_select_list(frame, inner, &mut selector.list, &config, &state.theme);
             }
         }
         ModalType::ToolList => {
@@ -222,13 +222,19 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
                     label: "close".to_string(),
                 }],
             };
-            render_select_list(frame, inner, &state.tool_list.list, &config, &state.theme);
+            render_select_list(
+                frame,
+                inner,
+                &mut state.tool_list.list,
+                &config,
+                &state.theme,
+            );
         }
         ModalType::ProviderConnect => {
             crate::widgets::provider_connect::render_provider_connect(frame, inner, state);
         }
         ModalType::AgentList => {
-            if let Some(ref selector) = state.agent_list {
+            if let Some(ref mut selector) = state.agent_list {
                 let config = SelectListConfig {
                     title: "Sub-Agents".to_string(),
                     search_placeholder: "Search agents...".to_string(),
@@ -243,11 +249,11 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
                         },
                     ],
                 };
-                render_select_list(frame, inner, selector, &config, &state.theme);
+                render_select_list(frame, inner, &mut *selector, &config, &state.theme);
             }
         }
         ModalType::ThemeSelector => {
-            if let Some(ref selector) = state.theme_selector {
+            if let Some(ref mut selector) = state.theme_selector {
                 let config = SelectListConfig {
                     title: "Switch Theme".to_string(),
                     search_placeholder: "Search themes...".to_string(),
@@ -266,7 +272,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
                         },
                     ],
                 };
-                render_select_list(frame, inner, selector, &config, &state.theme);
+                render_select_list(frame, inner, &mut *selector, &config, &state.theme);
             }
         }
         ModalType::Question => {

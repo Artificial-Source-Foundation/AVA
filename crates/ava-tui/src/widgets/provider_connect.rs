@@ -152,9 +152,9 @@ fn build_select_items(providers: &[ProviderStatus]) -> Vec<SelectItem<String>> {
 }
 
 /// Render the provider connect modal.
-pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
     let pc = match state.provider_connect {
-        Some(ref s) => s,
+        Some(ref mut s) => s,
         None => return,
     };
 
@@ -178,7 +178,7 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &AppSta
                     },
                 ],
             };
-            render_select_list(frame, area, &pc.list, &config, &state.theme);
+            render_select_list(frame, area, &mut pc.list, &config, &state.theme);
         }
         ConnectScreen::AuthMethodChoice {
             provider_id,

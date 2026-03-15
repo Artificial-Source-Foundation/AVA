@@ -30,8 +30,6 @@ impl App {
 
     pub(crate) fn show_shortcuts_overlay(&mut self) {
         let shortcuts = "\
-Keyboard Shortcuts                                          [Esc to dismiss]
-
 Navigation
   Tab / Shift+Tab          Cycle mode (Code/Plan/Praxis)
   Ctrl+K / Ctrl+/          Command palette
@@ -71,9 +69,12 @@ Commands
   /export                  Export conversation
   /later                   Queue post-complete message
   /queue                   View queued messages";
-        self.state
-            .messages
-            .push(UiMessage::transient(MessageKind::System, shortcuts));
+        self.state.info_panel = Some(super::InfoPanelState {
+            title: "Keyboard Shortcuts".to_string(),
+            content: shortcuts.to_string(),
+            scroll: 0,
+        });
+        self.state.active_modal = Some(super::ModalType::InfoPanel);
     }
 
     /// Try to paste an image from the system clipboard. If image data is found,

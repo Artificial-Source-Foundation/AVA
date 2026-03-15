@@ -267,11 +267,12 @@ impl UiMessage {
     }
 
     /// Find the byte offset to break `text` at, targeting `max_cols` display
-    /// columns. Prefers breaking at the last space; falls back to exact column
-    /// boundary.
+    /// columns. Prefers breaking at the last space or hyphen within the limit;
+    /// falls back to exact column boundary only when no word boundary exists
+    /// (e.g. long URLs or file paths without spaces).
     fn find_break_point(text: &str, max_cols: usize) -> usize {
         let mut col = 0usize;
-        let mut last_space_byte = None;
+        let mut last_break_byte = None;
         let mut byte_at_max = 0usize;
 
         for (i, ch) in text.char_indices() {
@@ -281,9 +282,12 @@ impl UiMessage {
                 break;
             }
             if ch == ' ' {
-                last_space_byte = Some(i + 1); // break after the space
+                // Break AT the space — space becomes the last char on this line,
+                // and wrap_line_spans will skip the leading space on the next line.
+                last_break_byte = Some(i);
             } else if ch == '-' {
-                last_space_byte = Some(i + ch.len_utf8()); // break after the hyphen
+                // Break AFTER the hyphen so it stays on the current line.
+                last_break_byte = Some(i + ch.len_utf8());
             }
             col += w;
             byte_at_max = i + ch.len_utf8();
@@ -294,12 +298,13 @@ impl UiMessage {
             return byte_at_max;
         }
 
-        // Prefer word boundary.
-        if let Some(sp) = last_space_byte {
-            if sp > 0 {
-                return sp;
+        // Prefer word boundary (space or hyphen).
+        if let Some(bp) = last_break_byte {
+            if bp > 0 {
+                return bp;
             }
         }
+        // No word boundary found — character-break as fallback (long URLs, paths).
         byte_at_max
     }
 

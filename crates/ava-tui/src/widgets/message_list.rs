@@ -272,8 +272,8 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     }
 
     let blocks = derive_blocks(messages_source);
-    // Reserve 1 column for the scrollbar so text doesn't overlap it.
-    let content_width = area.width.saturating_sub(1);
+    // Reserve 1 column for the scrollbar + 2 columns of right padding.
+    let content_width = area.width.saturating_sub(3);
     let show_thinking = state.agent.show_thinking;
 
     // Track per-source-message line ranges for mouse click hit-testing.

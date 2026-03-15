@@ -285,7 +285,7 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         let frame_char = spinner_frame(spinner_tick);
         left_spans.push(Span::styled(
             format!("{frame_char} "),
-            Style::default().fg(state.theme.warning),
+            Style::default().fg(state.theme.text_muted),
         ));
         let activity_style = match state.agent.activity {
             AgentActivity::ExecutingTool(_) => style,

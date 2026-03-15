@@ -63,33 +63,17 @@ pub struct UiMessage {
     pub thinking_expanded: bool,
 }
 
-/// Calm single-dot braille spinner — one dot orbiting (much calmer than full braille set).
-pub const SPINNER_FRAMES: &[&str] = &[
-    "\u{2801}", "\u{2802}", "\u{2804}", "\u{2840}", "\u{2820}", "\u{2810}", "\u{2808}", "\u{2880}",
-];
+/// Gentle dot-pulse spinner — dots grow and shrink like a calm breathing wave.
+pub const SPINNER_FRAMES: &[&str] = &["·  ", "·· ", "···", " ··", "  ·", "   "];
 
-/// Divisor to slow spinner animation. At 16ms ticks (streaming), each frame
-/// lasts ~128ms giving a calm ~1s full rotation. At 250ms ticks (idle), each
-/// frame lasts ~2s — gentle pulse.
-const SPINNER_FRAME_DIVISOR: usize = 8;
+/// Divisor to slow spinner animation. At 16ms ticks, each frame lasts ~192ms
+/// giving a calm ~1.2s full cycle — a gentle breathing rhythm.
+const SPINNER_FRAME_DIVISOR: usize = 12;
 
 /// Returns the current spinner frame based on a tick counter.
 /// The tick is divided down so the animation feels calm rather than frantic.
 pub fn spinner_frame(tick: usize) -> &'static str {
     SPINNER_FRAMES[(tick / SPINNER_FRAME_DIVISOR) % SPINNER_FRAMES.len()]
-}
-
-/// Ellipsis animation frames for "thinking" / activity text.
-/// Cycles: "thinking", "thinking.", "thinking..", "thinking..."
-const ELLIPSIS_PHASES: usize = 4;
-
-/// Divisor for ellipsis animation — slower than spinner for a breathing feel.
-/// At 16ms ticks: ~160ms per phase, ~640ms full cycle. Calm and deliberate.
-const ELLIPSIS_FRAME_DIVISOR: usize = 10;
-
-/// Returns the number of dots (0-3) for an animated ellipsis based on tick.
-pub fn ellipsis_dots(tick: usize) -> usize {
-    (tick / ELLIPSIS_FRAME_DIVISOR) % ELLIPSIS_PHASES
 }
 
 /// Left-border character — full block for visual weight (design: 3px bar).

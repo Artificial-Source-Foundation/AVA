@@ -265,12 +265,17 @@ impl App {
                 if let Some((level, text)) = result.status {
                     self.set_status(text, level);
                 }
-                let msg = if result.transient {
-                    UiMessage::transient(result.kind, result.content)
+                if result.transient && !result.content.contains('\n') {
+                    // Short single-line transient messages go to toast overlay
+                    self.state.toast.push(result.content);
                 } else {
-                    UiMessage::new(result.kind, result.content)
-                };
-                self.state.messages.push(msg);
+                    let msg = if result.transient {
+                        UiMessage::transient(result.kind, result.content)
+                    } else {
+                        UiMessage::new(result.kind, result.content)
+                    };
+                    self.state.messages.push(msg);
+                }
             }
             AppEvent::SessionListLoaded(result) => match result {
                 Ok(sessions) => {

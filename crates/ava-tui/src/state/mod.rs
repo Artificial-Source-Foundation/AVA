@@ -12,4 +12,5 @@ pub mod praxis;
 pub mod rewind;
 pub mod session;
 pub mod theme;
+pub mod toast;
 pub mod voice;

@@ -392,7 +392,7 @@ impl InputState {
                     AutocompleteItem::new("connect", "Add provider credentials"),
                     AutocompleteItem::new("clear", "Clear chat"),
                     AutocompleteItem::new("compact", "Compact conversation to save context window"),
-                    AutocompleteItem::new("think", "Set thinking level"),
+                    AutocompleteItem::new("think", "Toggle thinking visibility"),
                     AutocompleteItem::new("theme", "Switch theme"),
                     AutocompleteItem::new("new", "Start a new session"),
                     AutocompleteItem::new("models", "Switch model (alias)"),

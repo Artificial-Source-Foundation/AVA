@@ -27,6 +27,7 @@ use crate::state::praxis::PraxisState;
 use crate::state::rewind::RewindState;
 use crate::state::session::SessionState;
 use crate::state::theme::Theme;
+use crate::state::toast::ToastState;
 use crate::state::voice::{VoicePhase, VoiceState};
 use crate::ui;
 use crate::ui::status_bar::{StatusLevel, StatusMessage};
@@ -119,6 +120,8 @@ pub struct AppState {
     pub praxis: PraxisState,
     /// Registry of user-defined lifecycle hooks.
     pub hooks: HookRegistry,
+    /// Toast notification state (top-right overlay, auto-dismiss).
+    pub toast: ToastState,
 }
 
 /// A fenced code block extracted from markdown content.
@@ -318,6 +321,7 @@ impl App {
             background: new_shared(),
             praxis: PraxisState::default(),
             hooks: HookRegistry::load(),
+            toast: ToastState::default(),
         };
 
         let mut app = Self {
@@ -798,6 +802,7 @@ impl App {
             background: new_shared(),
             praxis: PraxisState::default(),
             hooks: HookRegistry::load(),
+            toast: ToastState::default(),
         };
 
         Self {

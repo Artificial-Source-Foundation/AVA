@@ -8,7 +8,8 @@ use crate::widgets::select_list::{render_select_list, KeybindHint, SelectListCon
 use crate::widgets::slash_menu::render_slash_menu;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
-use ratatui::widgets::{Block, Borders, Clear};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 pub mod layout;
@@ -79,6 +80,37 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         if modal != ModalType::ToolApproval {
             render_modal(frame, state, modal);
         }
+    }
+
+    // Render toast notifications (top-right overlay, above everything)
+    render_toasts(frame, area, state);
+}
+
+fn render_toasts(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
+    state.toast.cleanup();
+    if state.toast.is_empty() {
+        return;
+    }
+    let theme = &state.theme;
+    for (i, toast) in state.toast.toasts.iter().rev().enumerate() {
+        let text_width = toast.message.len() as u16 + 2; // 1 padding each side
+        let width = text_width.clamp(10, 40);
+        let y = 1 + (i as u16 * 2);
+        if y >= area.height {
+            break;
+        }
+        let x = area.width.saturating_sub(width + 1);
+        let rect = Rect::new(x, y, width, 1);
+        let block = Block::default()
+            .borders(Borders::NONE)
+            .style(Style::default().bg(theme.bg_elevated));
+        let text = Paragraph::new(Line::from(Span::styled(
+            format!(" {} ", toast.message),
+            Style::default().fg(theme.text_muted).bg(theme.bg_elevated),
+        )))
+        .block(block);
+        frame.render_widget(Clear, rect);
+        frame.render_widget(text, rect);
     }
 }
 

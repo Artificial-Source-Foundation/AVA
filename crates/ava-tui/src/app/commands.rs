@@ -218,18 +218,12 @@ impl App {
             "/think" => match arg {
                 Some("show") | Some("on") => {
                     self.state.agent.show_thinking = true;
-                    self.state.messages.push(UiMessage::transient(
-                        MessageKind::System,
-                        "Thinking blocks visible".to_string(),
-                    ));
+                    self.state.toast.push("Thinking blocks visible");
                     None
                 }
                 Some("hide") | Some("off") => {
                     self.state.agent.show_thinking = false;
-                    self.state.messages.push(UiMessage::transient(
-                        MessageKind::System,
-                        "Thinking blocks hidden".to_string(),
-                    ));
+                    self.state.toast.push("Thinking blocks hidden");
                     None
                 }
                 Some(_) => Some((
@@ -243,10 +237,7 @@ impl App {
                     } else {
                         "hidden"
                     };
-                    self.state.messages.push(UiMessage::transient(
-                        MessageKind::System,
-                        format!("Thinking blocks {label}"),
-                    ));
+                    self.state.toast.push(format!("Thinking blocks {label}"));
                     None
                 }
             },

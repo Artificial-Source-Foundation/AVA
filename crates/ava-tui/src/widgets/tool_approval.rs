@@ -1,11 +1,14 @@
 use crate::state::permission::{ApprovalRequest, ApprovalStage, PermissionState};
 use crate::state::theme::Theme;
 use ava_permissions::tags::RiskLevel;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
+
+/// Fixed height for the approval dock panel (replaces composer when active).
+pub const APPROVAL_DOCK_HEIGHT: u16 = 5;
 
 fn risk_color(level: RiskLevel, theme: &Theme) -> ratatui::style::Color {
     match level {
@@ -27,18 +30,54 @@ fn risk_label(level: RiskLevel) -> &'static str {
     }
 }
 
-/// Render the tool approval modal matching the Pencil design.
+/// Extract a one-line command summary from the JSON arguments.
 ///
-/// Design spec:
-///   Modal: 800x400, bg=$bg-elevated, stroke=$border-subtle 1px, clip
-///   Header: h=48, bg=$bg-surface, padding=[0,24], justify=space_between
-///     Left: ⚠ (warning) + "Tool Approval Required" (bold, 14px)
-///     Right: [Esc] (muted)
-///   Body: padding=24, gap=20, vertical layout
-///     Tool section: "TOOL" label (10px, letterspacing, muted) + tool name (16px, bold, warning)
-///     Command section: "COMMAND" label + code box (bg=$bg-deep, stroke=$border-subtle)
-///     Risk section: "RISK" label + badge + description
-///     Button row: right-aligned — Reject (red outline), Allow session (muted outline), Approve (filled blue)
+/// For bash tools: returns the `command` field.
+/// For edit/write tools: returns the `file_path` field.
+/// For other tools: returns a truncated JSON representation.
+fn command_summary(call: &ava_types::ToolCall, max_width: usize) -> String {
+    let args = &call.arguments;
+
+    // Try common field names in priority order
+    let raw = if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
+        cmd.to_string()
+    } else if let Some(path) = args.get("file_path").and_then(|v| v.as_str()) {
+        if let Some(old) = args.get("old_string").and_then(|v| v.as_str()) {
+            format!("{path} (edit: {old})")
+        } else {
+            path.to_string()
+        }
+    } else if let Some(pattern) = args.get("pattern").and_then(|v| v.as_str()) {
+        if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
+            format!("{pattern} in {path}")
+        } else {
+            pattern.to_string()
+        }
+    } else {
+        let s = args.to_string();
+        if s == "{}" {
+            String::new()
+        } else {
+            s
+        }
+    };
+
+    // Collapse to single line and truncate
+    let single_line: String = raw
+        .chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect();
+
+    crate::text_utils::truncate_display(&single_line, max_width)
+}
+
+/// Render the tool approval as a bottom dock bar (OpenCode-style).
+///
+/// Layout (4-5 rows inside a bordered block):
+///   Line 1: △ Permission required                    [MEDIUM]
+///   Line 2:   {tool_name}: {command_summary}
+///   Line 3: [a] Approve  [s] Allow session  [r] Reject  [Esc]
+///     — or stage-specific content (rejection reason input, etc.)
 pub fn render_tool_approval(
     frame: &mut Frame<'_>,
     area: Rect,
@@ -46,443 +85,168 @@ pub fn render_tool_approval(
     permission: &PermissionState,
     theme: &Theme,
 ) {
-    // Fill modal bg
-    let bg = Block::default()
+    // Bordered block with elevated background
+    let block = Block::default()
         .style(Style::default().bg(theme.bg_elevated))
-        .borders(ratatui::widgets::Borders::ALL)
+        .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.border));
-    frame.render_widget(bg, area);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
 
-    // Split: header (3 rows) + body (rest)
-    let header_h = 3u16;
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(header_h), Constraint::Min(0)])
-        .split(Rect {
-            x: area.x + 1,
-            y: area.y + 1,
-            width: area.width.saturating_sub(2),
-            height: area.height.saturating_sub(2),
-        });
+    if inner.height == 0 || inner.width < 10 {
+        return;
+    }
 
-    let header_area = chunks[0];
-    let body_area = chunks[1];
+    let w = inner.width as usize;
+    let pad = 1u16; // horizontal padding inside the border
+    let content_x = inner.x + pad;
+    let content_w = inner.width.saturating_sub(pad * 2);
 
-    // --- Header ---
-    render_header(frame, header_area, theme);
-
-    // --- Body ---
-    render_body(frame, body_area, request, permission, theme);
-}
-
-fn render_header(frame: &mut Frame<'_>, area: Rect, theme: &Theme) {
-    let bg = Block::default().style(Style::default().bg(theme.bg_surface));
-    frame.render_widget(bg, area);
-
-    let pad = 2u16;
-    let inner = Rect {
-        x: area.x + pad,
-        y: area.y,
-        width: area.width.saturating_sub(pad * 2),
-        height: area.height,
-    };
-
-    // Left: ⚠ Tool Approval Required
-    let left = Line::from(vec![
-        Span::styled("\u{26A0} ", Style::default().fg(theme.warning)),
+    // --- Line 1: header with risk badge ---
+    let mut header_spans: Vec<Span<'_>> = vec![
         Span::styled(
-            "Tool Approval Required",
-            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-        ),
-    ]);
-
-    // Right: [Esc]
-    let right_text = "[Esc]";
-    let right_width = right_text.len() as u16;
-
-    // Render left text centered vertically
-    let text_y = inner.y + (inner.height.saturating_sub(1)) / 2;
-    let left_area = Rect {
-        x: inner.x,
-        y: text_y,
-        width: inner.width.saturating_sub(right_width + 1),
-        height: 1,
-    };
-    frame.render_widget(Paragraph::new(left), left_area);
-
-    // Render right text
-    let right_area = Rect {
-        x: inner.x + inner.width.saturating_sub(right_width),
-        y: text_y,
-        width: right_width,
-        height: 1,
-    };
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            right_text,
-            Style::default().fg(theme.text_muted),
-        ))),
-        right_area,
-    );
-}
-
-fn render_body(
-    frame: &mut Frame<'_>,
-    area: Rect,
-    request: &ApprovalRequest,
-    permission: &PermissionState,
-    theme: &Theme,
-) {
-    let bg = Block::default().style(Style::default().bg(theme.bg_elevated));
-    frame.render_widget(bg, area);
-
-    let pad = 2u16;
-    let inner = Rect {
-        x: area.x + pad,
-        y: area.y + 1,
-        width: area.width.saturating_sub(pad * 2),
-        height: area.height.saturating_sub(2),
-    };
-
-    let mut y = inner.y;
-    let w = inner.width;
-
-    // --- TOOL section ---
-    // Label
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            "TOOL",
-            Style::default()
-                .fg(theme.text_muted)
-                .add_modifier(Modifier::BOLD),
-        ))),
-        Rect {
-            x: inner.x,
-            y,
-            width: w,
-            height: 1,
-        },
-    );
-    y += 1;
-
-    // Tool name (large, bold, warning color)
-    frame.render_widget(
-        Paragraph::new(Line::from(Span::styled(
-            request.call.name.clone(),
+            "\u{25B3} ",
             Style::default()
                 .fg(theme.warning)
                 .add_modifier(Modifier::BOLD),
-        ))),
+        ),
+        Span::styled(
+            "Permission required",
+            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+        ),
+    ];
+
+    // Right-aligned risk badge
+    if let Some(info) = &request.inspection {
+        let label = risk_label(info.risk_level);
+        let badge = format!("[{label}]");
+        let left_len = 2 + 19; // "△ " + "Permission required"
+        let gap = w.saturating_sub(left_len + badge.len() + (pad as usize) * 2);
+        let spaces = " ".repeat(gap);
+        header_spans.push(Span::raw(spaces));
+        let color = risk_color(info.risk_level, theme);
+        header_spans.push(Span::styled(
+            badge,
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    let header_line = Line::from(header_spans);
+    frame.render_widget(
+        Paragraph::new(header_line),
         Rect {
-            x: inner.x,
-            y,
-            width: w,
+            x: content_x,
+            y: inner.y,
+            width: content_w,
             height: 1,
         },
     );
-    y += 2; // gap
 
-    // --- COMMAND section ---
-    let args_str = request.call.arguments.to_string();
-    if !args_str.is_empty() && args_str != "{}" {
-        // Label
+    // --- Line 2: tool name + command summary ---
+    let summary = command_summary(&request.call, w.saturating_sub(request.call.name.len() + 6));
+    let detail_text = if summary.is_empty() {
+        format!("  {}", request.call.name)
+    } else {
+        format!("  {}: {}", request.call.name, summary)
+    };
+    let detail_display = crate::text_utils::truncate_display(&detail_text, content_w as usize);
+
+    let detail_line = Line::from(Span::styled(
+        detail_display,
+        Style::default().fg(theme.accent),
+    ));
+    if inner.height > 1 {
         frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "COMMAND",
-                Style::default()
-                    .fg(theme.text_muted)
-                    .add_modifier(Modifier::BOLD),
-            ))),
+            Paragraph::new(detail_line),
             Rect {
-                x: inner.x,
-                y,
-                width: w,
+                x: content_x,
+                y: inner.y + 1,
+                width: content_w,
                 height: 1,
             },
         );
-        y += 1;
+    }
 
-        // Code box: bg_deep with border, green text
-        let cmd_display = crate::text_utils::truncate_display(&args_str, 200);
-        let cmd_lines = textwrap_simple(&cmd_display, w.saturating_sub(4) as usize);
-        let cmd_height = (cmd_lines.len() as u16).clamp(1, 6) + 2; // +2 for padding
-        let cmd_area = Rect {
-            x: inner.x,
-            y,
-            width: w,
-            height: cmd_height,
+    // --- Line 3: action hints (stage-dependent) ---
+    if inner.height > 2 {
+        let action_y = inner.y + 2;
+        let action_area = Rect {
+            x: content_x,
+            y: action_y,
+            width: content_w,
+            height: 1,
         };
 
-        let cmd_bg = Block::default()
-            .style(Style::default().bg(theme.bg_deep))
-            .borders(ratatui::widgets::Borders::ALL)
-            .border_style(Style::default().fg(theme.border));
-        frame.render_widget(cmd_bg, cmd_area);
-
-        let cmd_inner = Rect {
-            x: cmd_area.x + 1,
-            y: cmd_area.y + 1,
-            width: cmd_area.width.saturating_sub(2),
-            height: cmd_area.height.saturating_sub(2),
-        };
-        let cmd_paragraph: Vec<Line<'_>> = cmd_lines
-            .into_iter()
-            .map(|l| Line::from(Span::styled(l, Style::default().fg(theme.success))))
-            .collect();
-        frame.render_widget(
-            Paragraph::new(cmd_paragraph).style(Style::default().bg(theme.bg_deep)),
-            cmd_inner,
-        );
-        y += cmd_height + 1; // gap
-    }
-
-    // --- RISK section ---
-    if let Some(info) = &request.inspection {
-        let color = risk_color(info.risk_level, theme);
-
-        // Label
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "RISK",
-                Style::default()
-                    .fg(theme.text_muted)
-                    .add_modifier(Modifier::BOLD),
-            ))),
-            Rect {
-                x: inner.x,
-                y,
-                width: w,
-                height: 1,
-            },
-        );
-        y += 1;
-
-        // Risk badge + description on same line
-        let label = risk_label(info.risk_level);
-        let mut risk_spans: Vec<Span<'static>> = vec![Span::styled(
-            format!(" {label} "),
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        )];
-
-        // Add first warning as description
-        if let Some(warning) = info.warnings.first() {
-            risk_spans.push(Span::styled(
-                format!("  {warning}"),
-                Style::default().fg(theme.text_dimmed),
-            ));
-        }
-        frame.render_widget(
-            Paragraph::new(Line::from(risk_spans)),
-            Rect {
-                x: inner.x,
-                y,
-                width: w,
-                height: 1,
-            },
-        );
-        y += 1;
-
-        // Additional warnings
-        for warning in info.warnings.iter().skip(1) {
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
-                    format!("  {warning}"),
-                    Style::default().fg(theme.warning),
-                ))),
-                Rect {
-                    x: inner.x,
-                    y,
-                    width: w,
-                    height: 1,
-                },
-            );
-            y += 1;
-        }
-        y += 1; // gap
-    }
-
-    // --- Button row (bottom of body) ---
-    let btn_y = (inner.y + inner.height).saturating_sub(2);
-    if btn_y > y {
-        render_buttons(
-            frame,
-            Rect {
-                x: inner.x,
-                y: btn_y,
-                width: w,
-                height: 1,
-            },
-            permission,
-            theme,
-        );
-    }
-
-    // --- Footer hint line ---
-    let footer_y = (inner.y + inner.height).saturating_sub(1);
-    if footer_y > btn_y {
-        let footer = Line::from(vec![
-            Span::styled(
-                "[a]",
-                Style::default()
-                    .fg(theme.text_muted)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" Approve  ", Style::default().fg(theme.text_dimmed)),
-            Span::styled(
-                "[s]",
-                Style::default()
-                    .fg(theme.text_muted)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" Allow session  ", Style::default().fg(theme.text_dimmed)),
-            Span::styled(
-                "[r]",
-                Style::default()
-                    .fg(theme.text_muted)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" Reject  ", Style::default().fg(theme.text_dimmed)),
-            Span::styled(
-                "[y]",
-                Style::default()
-                    .fg(theme.text_muted)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" Auto-approve  ", Style::default().fg(theme.text_dimmed)),
-            Span::styled(
-                "[Esc]",
-                Style::default()
-                    .fg(theme.text_muted)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" Cancel", Style::default().fg(theme.text_dimmed)),
-        ]);
-        frame.render_widget(
-            Paragraph::new(footer),
-            Rect {
-                x: inner.x,
-                y: footer_y,
-                width: w,
-                height: 1,
-            },
-        );
-    }
-}
-
-fn render_buttons(frame: &mut Frame<'_>, area: Rect, permission: &PermissionState, theme: &Theme) {
-    match permission.current_stage {
-        ApprovalStage::Preview => {
-            frame.render_widget(
-                Paragraph::new(Line::from(Span::styled(
+        match permission.current_stage {
+            ApprovalStage::Preview => {
+                let line = Line::from(Span::styled(
                     "Press any key to continue...",
                     Style::default().fg(theme.text_muted),
-                ))),
-                area,
-            );
-        }
-        ApprovalStage::ActionSelect => {
-            // Right-aligned button hints
-            let buttons = Line::from(vec![
-                Span::styled(
-                    "r",
-                    Style::default()
-                        .fg(theme.error)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" Reject", Style::default().fg(theme.error)),
-                Span::raw("  "),
-                Span::styled(
-                    "s",
-                    Style::default()
-                        .fg(theme.text_dimmed)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" Allow session", Style::default().fg(theme.text_dimmed)),
-                Span::raw("  "),
-                Span::styled(
-                    "a",
-                    Style::default()
-                        .fg(theme.primary)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    " Approve",
-                    Style::default()
-                        .fg(theme.primary)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]);
-            // Right-align by calculating display width
-            let btn_width: usize = buttons
-                .spans
-                .iter()
-                .map(|s| crate::text_utils::span_display_width(s))
-                .sum();
-            let offset = (area.width as usize).saturating_sub(btn_width);
-            let btn_area = Rect {
-                x: area.x + offset as u16,
-                y: area.y,
-                width: btn_width as u16,
-                height: 1,
-            };
-            frame.render_widget(Paragraph::new(buttons), btn_area);
-        }
-        ApprovalStage::RejectionReason => {
-            let line = Line::from(vec![
-                Span::styled("Reason: ", Style::default().fg(theme.text_muted)),
-                Span::styled(
-                    permission.rejection_input.clone(),
-                    Style::default().fg(theme.text),
-                ),
-                Span::styled("\u{2588}", Style::default().fg(theme.primary)),
-                Span::raw("  "),
-                Span::styled(
-                    "Enter",
-                    Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" confirm  ", Style::default().fg(theme.text_muted)),
-                Span::styled(
-                    "Esc",
-                    Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(" cancel", Style::default().fg(theme.text_muted)),
-            ]);
-            frame.render_widget(Paragraph::new(line), area);
-        }
-    }
-}
-
-/// Simple text wrapping by display width (terminal columns).
-fn textwrap_simple(text: &str, width: usize) -> Vec<String> {
-    use unicode_width::UnicodeWidthChar;
-
-    if width == 0 {
-        return vec![text.to_string()];
-    }
-    let mut lines = Vec::new();
-    for line in text.lines() {
-        if crate::text_utils::display_width(line) <= width {
-            lines.push(line.to_string());
-        } else {
-            let mut current = String::new();
-            let mut current_width = 0;
-            for ch in line.chars() {
-                let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
-                if current_width + cw > width && !current.is_empty() {
-                    lines.push(current);
-                    current = String::new();
-                    current_width = 0;
-                }
-                current.push(ch);
-                current_width += cw;
+                ));
+                frame.render_widget(Paragraph::new(line), action_area);
             }
-            if !current.is_empty() {
-                lines.push(current);
+            ApprovalStage::ActionSelect => {
+                let line = Line::from(vec![
+                    Span::styled(
+                        "[a]",
+                        Style::default()
+                            .fg(theme.primary)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" Approve  ", Style::default().fg(theme.text_dimmed)),
+                    Span::styled(
+                        "[s]",
+                        Style::default()
+                            .fg(theme.text_muted)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" Allow session  ", Style::default().fg(theme.text_dimmed)),
+                    Span::styled(
+                        "[r]",
+                        Style::default()
+                            .fg(theme.error)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" Reject  ", Style::default().fg(theme.text_dimmed)),
+                    Span::styled(
+                        "[y]",
+                        Style::default()
+                            .fg(theme.text_muted)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" Auto-approve  ", Style::default().fg(theme.text_dimmed)),
+                    Span::styled(
+                        "[Esc]",
+                        Style::default()
+                            .fg(theme.text_muted)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" Cancel", Style::default().fg(theme.text_dimmed)),
+                ]);
+                frame.render_widget(Paragraph::new(line), action_area);
+            }
+            ApprovalStage::RejectionReason => {
+                let line = Line::from(vec![
+                    Span::styled("Reason: ", Style::default().fg(theme.text_muted)),
+                    Span::styled(
+                        permission.rejection_input.clone(),
+                        Style::default().fg(theme.text),
+                    ),
+                    Span::styled("\u{2588}", Style::default().fg(theme.primary)),
+                    Span::raw("  "),
+                    Span::styled(
+                        "Enter",
+                        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" confirm  ", Style::default().fg(theme.text_muted)),
+                    Span::styled(
+                        "Esc",
+                        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(" cancel", Style::default().fg(theme.text_muted)),
+                ]);
+                frame.render_widget(Paragraph::new(line), action_area);
             }
         }
     }
-    if lines.is_empty() {
-        lines.push(String::new());
-    }
-    lines
 }

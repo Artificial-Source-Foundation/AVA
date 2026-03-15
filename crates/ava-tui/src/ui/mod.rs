@@ -24,18 +24,41 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     frame.render_widget(bg_block, frame.area());
 
     let area = frame.area();
-    let composer_h = layout::composer_height(&state.input.buffer, area.width, area.height);
+
+    // When tool approval is pending, replace the composer with the approval dock
+    let approval_active = matches!(state.active_modal, Some(ModalType::ToolApproval));
+    let composer_h = if approval_active {
+        crate::widgets::tool_approval::APPROVAL_DOCK_HEIGHT
+    } else {
+        layout::composer_height(&state.input.buffer, area.width, area.height)
+    };
     let split = build_layout(area, state.show_sidebar, composer_h);
 
     status_bar::render_top(frame, split.top_bar, state);
     render_message_list(frame, split.messages, state);
 
-    // Composer bg drawn AFTER the message list so it acts as a curtain
-    // covering any streaming text that overflows into the composer area.
-    let composer_bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
-    frame.render_widget(composer_bg, split.composer);
+    if approval_active {
+        // Render the approval dock in place of the composer
+        if let Some(request) = state.permission.queue.front() {
+            let dock_bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
+            frame.render_widget(dock_bg, split.composer);
 
-    render_composer(frame, split.composer, state);
+            crate::widgets::tool_approval::render_tool_approval(
+                frame,
+                split.composer,
+                request,
+                &state.permission,
+                &state.theme,
+            );
+        }
+    } else {
+        // Composer bg drawn AFTER the message list so it acts as a curtain
+        // covering any streaming text that overflows into the composer area.
+        let composer_bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
+        frame.render_widget(composer_bg, split.composer);
+
+        render_composer(frame, split.composer, state);
+    }
     status_bar::render_context_bar(frame, split.context_bar, state);
 
     if let Some(sidebar_area) = split.sidebar {
@@ -51,9 +74,11 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
         }
     }
 
-    // Render modals on top
+    // Render modals on top (ToolApproval is rendered inline as a dock, not as a modal overlay)
     if let Some(modal) = state.active_modal {
-        render_modal(frame, state, modal);
+        if modal != ModalType::ToolApproval {
+            render_modal(frame, state, modal);
+        }
     }
 }
 
@@ -131,15 +156,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &AppState, modal: ModalType) {
             );
         }
         ModalType::ToolApproval => {
-            if let Some(request) = state.permission.queue.front() {
-                crate::widgets::tool_approval::render_tool_approval(
-                    frame,
-                    popup_area,
-                    request,
-                    &state.permission,
-                    &state.theme,
-                );
-            }
+            // Handled inline as a bottom dock bar — should not reach here.
         }
         ModalType::ModelSelector => {
             if let Some(ref selector) = state.model_selector {

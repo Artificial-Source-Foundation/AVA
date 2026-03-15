@@ -364,6 +364,7 @@ impl AgentStack {
             auto_approve: config.yolo,
             session_approved: std::collections::HashSet::new(),
             safety_profiles: core_tool_profiles(),
+            persistent_rules: ava_permissions::persistent::PersistentRules::load(&effective_cwd),
         }));
         let permission_inspector: Arc<dyn PermissionInspector> = Arc::new(DefaultInspector::new(
             PermissionSystem::load(effective_cwd.clone(), vec![]),
@@ -882,12 +883,26 @@ impl AgentStack {
         // Build system prompt suffix: mode instructions + project instructions
         let project_instructions =
             crate::instructions::load_project_instructions_with_config(&cfg.instructions);
-        if let Some(ref pi) = project_instructions {
+
+        // Trim instructions to fit the model's context window (max 33% for instructions)
+        let project_instructions = project_instructions.map(|pi| {
+            let registry = ava_config::model_catalog::registry::ModelRegistry::load();
+            let model_name = provider.model_name();
+            let context_window = registry
+                .find(model_name)
+                .map(|m| m.limits.context_window)
+                .unwrap_or(200_000); // default to 200K if unknown
+            let instruction_budget = context_window / 3;
             info!(
                 bytes = pi.len(),
+                estimated_tokens = pi.len() / 4,
+                context_window,
+                instruction_budget,
                 "Loaded project instructions into system prompt"
             );
-        }
+            crate::instructions::trim_instructions_to_budget(&pi, instruction_budget)
+        });
+
         let system_prompt_suffix = match (mode_suffix, project_instructions) {
             (Some(mode), Some(proj)) => Some(format!("{mode}\n\n{proj}")),
             (Some(mode), None) => Some(mode),
@@ -1261,7 +1276,15 @@ impl TaskSpawner for AgentTaskSpawner {
             custom_system_prompt: Some(system_prompt),
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
-            system_prompt_suffix: crate::instructions::load_project_instructions(),
+            system_prompt_suffix: crate::instructions::load_project_instructions().map(|pi| {
+                let registry = ava_config::model_catalog::registry::ModelRegistry::load();
+                let context_window = registry
+                    .find(&self.model_name)
+                    .map(|m| m.limits.context_window)
+                    .unwrap_or(200_000);
+                let instruction_budget = context_window / 3;
+                crate::instructions::trim_instructions_to_budget(&pi, instruction_budget)
+            }),
             extended_tools: true, // sub-agents get full tool access
             plan_mode: false,
             post_edit_validation: None,

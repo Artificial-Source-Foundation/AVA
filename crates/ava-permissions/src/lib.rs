@@ -12,6 +12,7 @@ pub mod audit;
 pub mod classifier;
 pub mod inspector;
 pub mod path_safety;
+pub mod persistent;
 pub mod policy;
 pub mod tags;
 

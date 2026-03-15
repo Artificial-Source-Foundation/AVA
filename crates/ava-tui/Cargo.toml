@@ -21,7 +21,7 @@ ratatui = "0.29"
 crossterm = { version = "0.28", features = ["event-stream"] }
 tokio = { version = "1", features = ["full"] }
 tokio-stream = "0.1"
-tokio-util = "0.7"
+tokio-util.workspace = true
 futures = "0.3"
 pulldown-cmark = "0.12"
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
@@ -47,8 +47,8 @@ cpal = { version = "0.15", optional = true }
 hound = { version = "3.5", optional = true }
 whisper-rs = { version = "0.12", optional = true }
 async-trait = { version = "0.1", optional = true }
-reqwest = { version = "0.12", features = ["json", "multipart"] }
-regex = "1"
+reqwest.workspace = true
+regex.workspace = true
 clap = { version = "4", features = ["derive"] }
 toml.workspace = true
 serde_yaml.workspace = true

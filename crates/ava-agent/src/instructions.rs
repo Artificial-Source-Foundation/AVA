@@ -19,6 +19,51 @@ const PROJECT_ROOT_FILES: &[&str] = &[
 /// Order defines precedence within each scope (global/project).
 const SKILL_DIRS: &[&str] = &[".claude/skills", ".agents/skills", ".ava/skills"];
 
+/// Estimate token count (rough: ~4 chars per token).
+fn estimate_tokens(text: &str) -> usize {
+    text.len() / 4
+}
+
+/// Trim instructions to fit within a token budget.
+///
+/// When the model's context window is small (e.g. 128K), the raw project
+/// instructions (CLAUDE.md + AGENTS.md + rules) can consume most of the
+/// available context. This function truncates at a section boundary so the
+/// agent still has room for conversation and tool output.
+pub fn trim_instructions_to_budget(instructions: &str, max_tokens: usize) -> String {
+    let estimated = estimate_tokens(instructions);
+    if estimated <= max_tokens {
+        return instructions.to_string();
+    }
+
+    let original_k = estimated / 1000;
+    let budget_k = max_tokens / 1000;
+
+    // Truncate to fit the character budget
+    let max_chars = max_tokens * 4;
+    let trimmed = &instructions[..max_chars.min(instructions.len())];
+
+    // Find the last complete section (## heading) boundary to avoid mid-sentence cuts
+    let result = if let Some(last_heading) = trimmed.rfind("\n## ") {
+        format!(
+            "{}\n\n[... instructions trimmed to fit context window ...]",
+            &trimmed[..last_heading]
+        )
+    } else {
+        format!("{}\n\n[... instructions trimmed ...]", trimmed)
+    };
+
+    tracing::warn!(
+        original_tokens_k = original_k,
+        budget_tokens_k = budget_k,
+        "Instructions trimmed from ~{}K to ~{}K tokens to fit context window",
+        original_k,
+        budget_k
+    );
+
+    result
+}
+
 /// Load project instructions from the current working directory and global config.
 /// Returns `None` if no instruction files are found.
 /// Each file's content is prefixed with `# From: <filepath>` header.
@@ -409,6 +454,43 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_trim_instructions_no_trimming_needed() {
+        let instructions = "## Section 1\nSome content.\n\n## Section 2\nMore content.";
+        // Budget is larger than the content
+        let result = trim_instructions_to_budget(instructions, 100_000);
+        assert_eq!(result, instructions);
+    }
+
+    #[test]
+    fn test_trim_instructions_cuts_at_section_boundary() {
+        let section1 = "## Section 1\n".to_string() + &"a".repeat(400);
+        let section2 = "\n\n## Section 2\n".to_string() + &"b".repeat(400);
+        let instructions = format!("{}{}", section1, section2);
+        // Budget allows ~120 tokens = ~480 chars. Section 1 is ~413 chars.
+        // After trimming to 480 chars we should find the last ## heading boundary.
+        let result = trim_instructions_to_budget(&instructions, 120);
+        assert!(result.contains("Section 1"));
+        assert!(result.contains("[... instructions trimmed to fit context window ...]"));
+        assert!(!result.contains("Section 2"));
+    }
+
+    #[test]
+    fn test_trim_instructions_no_heading_boundary() {
+        let instructions = "a".repeat(2000);
+        let result = trim_instructions_to_budget(&instructions, 100);
+        // 100 tokens * 4 = 400 chars
+        assert!(result.len() < 500);
+        assert!(result.contains("[... instructions trimmed ...]"));
+    }
+
+    #[test]
+    fn test_estimate_tokens() {
+        assert_eq!(estimate_tokens("abcd"), 1);
+        assert_eq!(estimate_tokens("abcdefgh"), 2);
+        assert_eq!(estimate_tokens(""), 0);
+    }
 
     #[test]
     fn test_no_instructions_returns_none() {

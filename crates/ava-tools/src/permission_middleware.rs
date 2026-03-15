@@ -11,6 +11,8 @@ use crate::registry::Middleware;
 pub enum ToolApproval {
     Allowed,
     AllowedForSession,
+    /// Persist the approval to `.ava/permissions.toml` so it survives across sessions.
+    AllowAlways,
     Rejected(Option<String>),
 }
 
@@ -112,6 +114,17 @@ impl Middleware for PermissionMiddleware {
                             .insert(tool_call.name.clone());
                         Ok(())
                     }
+                    ToolApproval::AllowAlways => {
+                        let mut ctx = self.context.write().await;
+                        // Add to session approved for immediate effect
+                        ctx.session_approved.insert(tool_call.name.clone());
+                        // Persist to .ava/permissions.toml
+                        ctx.persistent_rules.allow_tool(&tool_call.name);
+                        if let Err(e) = ctx.persistent_rules.save(&ctx.workspace_root) {
+                            tracing::warn!("Failed to save persistent permission rules: {e}");
+                        }
+                        Ok(())
+                    }
                     ToolApproval::Rejected(reason) => {
                         Err(AvaError::PermissionDenied(reason.unwrap_or_else(|| {
                             format!("Tool '{}' was rejected by the user", tool_call.name)
@@ -176,6 +189,7 @@ mod tests {
             workspace_root: "/workspace".into(),
             auto_approve: false,
             session_approved: std::collections::HashSet::new(),
+            persistent_rules: ava_permissions::persistent::PersistentRules::default(),
             safety_profiles: std::collections::HashMap::new(),
         }))
     }

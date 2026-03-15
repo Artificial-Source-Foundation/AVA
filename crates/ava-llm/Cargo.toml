@@ -14,7 +14,7 @@ ava-auth = { path = "../ava-auth" }
 ava-config = { path = "../ava-config" }
 ava-types = { path = "../ava-types" }
 futures.workspace = true
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

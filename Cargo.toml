@@ -47,6 +47,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 dirs = "5.0"
 futures = "0.3"
 tokio-stream = "0.1"
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate", "chrono", "uuid"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros", "chrono", "uuid"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "multipart", "rustls-tls"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+regex = "1"
 tempfile = "3.0"
 toml = "0.8"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

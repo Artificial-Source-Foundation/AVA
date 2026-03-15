@@ -5,6 +5,7 @@ use serde_json::Value;
 
 use crate::classifier::classify_bash_command;
 use crate::path_safety::analyze_path;
+use crate::persistent::PersistentRules;
 use crate::policy::PermissionPolicy;
 use crate::tags::{RiskLevel, SafetyTag, ToolSafetyProfile};
 use crate::Action;
@@ -20,11 +21,12 @@ pub struct InspectionResult {
     pub warnings: Vec<String>,
 }
 
-/// Runtime context for permission inspection — workspace root, auto-approve flag, session approvals, and safety profiles.
+/// Runtime context for permission inspection — workspace root, auto-approve flag, session approvals, persistent rules, and safety profiles.
 pub struct InspectionContext {
     pub workspace_root: PathBuf,
     pub auto_approve: bool,
     pub session_approved: HashSet<String>,
+    pub persistent_rules: PersistentRules,
     pub safety_profiles: HashMap<String, ToolSafetyProfile>,
 }
 
@@ -225,6 +227,32 @@ impl PermissionInspector for DefaultInspector {
             };
         }
 
+        // 4b. Persistently allowed tools (from .ava/permissions.toml)
+        if context.persistent_rules.is_tool_allowed(tool_name) {
+            return InspectionResult {
+                action: Action::Allow,
+                reason: format!("tool '{tool_name}' is persistently allowed"),
+                risk_level,
+                tags,
+                warnings,
+            };
+        }
+
+        // 4c. Persistently allowed bash commands (prefix match)
+        if tool_name == "bash" {
+            if let Some(command) = arguments.get("command").and_then(|v| v.as_str()) {
+                if context.persistent_rules.is_command_allowed(command) {
+                    return InspectionResult {
+                        action: Action::Allow,
+                        reason: "command is persistently allowed".to_string(),
+                        risk_level,
+                        tags,
+                        warnings,
+                    };
+                }
+            }
+        }
+
         // 5. Check policy blocked tools
         if self.policy.blocked_tools.contains(&tool_name.to_string()) {
             return InspectionResult {
@@ -345,6 +373,7 @@ mod tests {
             workspace_root: PathBuf::from("/workspace"),
             auto_approve,
             session_approved: HashSet::new(),
+            persistent_rules: PersistentRules::default(),
             safety_profiles: core_tool_profiles(),
         }
     }
@@ -742,5 +771,50 @@ mod tests {
         );
         assert_eq!(result.risk_level, RiskLevel::Critical);
         assert_eq!(result.action, Action::Deny);
+    }
+
+    // === Persistent rules ===
+
+    #[test]
+    fn persistent_tool_allowed() {
+        let inspector = default_inspector();
+        let mut ctx = test_context(false);
+        ctx.persistent_rules.allow_tool("bash");
+        let result = inspector.inspect(
+            "bash",
+            &serde_json::json!({"command": "curl https://example.com"}),
+            &ctx,
+        );
+        assert_eq!(result.action, Action::Allow);
+        assert!(result.reason.contains("persistently allowed"));
+    }
+
+    #[test]
+    fn persistent_command_allowed() {
+        let inspector = default_inspector();
+        let mut ctx = test_context(false);
+        ctx.persistent_rules.allow_command("cargo test");
+        let result = inspector.inspect(
+            "bash",
+            &serde_json::json!({"command": "cargo test --workspace"}),
+            &ctx,
+        );
+        assert_eq!(result.action, Action::Allow);
+        assert!(result.reason.contains("persistently allowed"));
+    }
+
+    #[test]
+    fn persistent_rules_do_not_bypass_critical_block() {
+        let inspector = default_inspector();
+        let mut ctx = test_context(false);
+        // Even if bash is persistently allowed, critical commands are still blocked
+        ctx.persistent_rules.allow_tool("bash");
+        let result = inspector.inspect(
+            "bash",
+            &serde_json::json!({"command": "sudo rm -rf /"}),
+            &ctx,
+        );
+        assert_eq!(result.action, Action::Deny);
+        assert_eq!(result.risk_level, RiskLevel::Critical);
     }
 }

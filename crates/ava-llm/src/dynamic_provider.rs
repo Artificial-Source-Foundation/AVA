@@ -8,7 +8,7 @@ use ava_config::{CredentialStore, ProviderCredentialState};
 use ava_types::{AvaError, Message, Result, StreamChunk, ThinkingLevel, Tool};
 use futures::Stream;
 use tokio::sync::{Mutex, RwLock};
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::pool::ConnectionPool;
 use crate::provider::{LLMProvider, LLMResponse};
@@ -78,6 +78,48 @@ impl DynamicCredentialProvider {
                 common::estimate_cost_usd(input_tokens, output_tokens, in_rate, out_rate)
             }
         }
+    }
+
+    /// Whether this provider uses OAuth credentials that can be refreshed.
+    fn is_oauth_provider(&self) -> bool {
+        ava_auth::config::oauth_config(&self.provider_name).is_some()
+    }
+
+    /// Force-refresh OAuth credentials by expiring the cached token, then
+    /// resolve fresh credentials and build a new provider.
+    async fn provider_after_forced_refresh(&self) -> Result<Box<dyn LLMProvider>> {
+        // Mark the current token as expired so resolve_credentials_snapshot
+        // will trigger a refresh.
+        {
+            let mut store = self.credentials.write().await;
+            if let Some(cred) = store.providers.get_mut(&self.provider_name) {
+                if cred.is_oauth_configured() {
+                    // Set expiry to 0 (epoch) so is_oauth_expired() returns true
+                    cred.oauth_expires_at = Some(0);
+                }
+            }
+        }
+
+        let snapshot = resolve_credentials_snapshot(
+            &self.credentials,
+            &self.provider_name,
+            self.credentials_path.as_deref(),
+            &self.refresh_locks,
+        )
+        .await?;
+
+        create_provider(
+            &self.provider_name,
+            &self.model,
+            &snapshot,
+            self.pool.clone(),
+        )
+    }
+
+    /// Check whether an error is an auth failure (401) that could be resolved
+    /// by refreshing OAuth credentials.
+    fn is_refreshable_auth_error(err: &AvaError) -> bool {
+        matches!(err, AvaError::MissingApiKey { .. })
     }
 }
 
@@ -163,17 +205,36 @@ async fn refresh_lock(
 #[async_trait]
 impl LLMProvider for DynamicCredentialProvider {
     async fn generate(&self, messages: &[Message]) -> Result<String> {
-        self.provider_for_request().await?.generate(messages).await
+        let result = self.provider_for_request().await?.generate(messages).await;
+        if self.is_oauth_provider() && result.as_ref().is_err_and(Self::is_refreshable_auth_error) {
+            info!(provider = %self.provider_name, "401 received; forcing OAuth token refresh and retrying");
+            return self
+                .provider_after_forced_refresh()
+                .await?
+                .generate(messages)
+                .await;
+        }
+        result
     }
 
     async fn generate_stream(
         &self,
         messages: &[Message],
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
-        self.provider_for_request()
+        let result = self
+            .provider_for_request()
             .await?
             .generate_stream(messages)
-            .await
+            .await;
+        if self.is_oauth_provider() && result.as_ref().is_err_and(Self::is_refreshable_auth_error) {
+            info!(provider = %self.provider_name, "401 received; forcing OAuth token refresh and retrying");
+            return self
+                .provider_after_forced_refresh()
+                .await?
+                .generate_stream(messages)
+                .await;
+        }
+        result
     }
 
     fn estimate_tokens(&self, input: &str) -> usize {
@@ -197,10 +258,20 @@ impl LLMProvider for DynamicCredentialProvider {
         messages: &[Message],
         tools: &[Tool],
     ) -> Result<LLMResponse> {
-        self.provider_for_request()
+        let result = self
+            .provider_for_request()
             .await?
             .generate_with_tools(messages, tools)
-            .await
+            .await;
+        if self.is_oauth_provider() && result.as_ref().is_err_and(Self::is_refreshable_auth_error) {
+            info!(provider = %self.provider_name, "401 received; forcing OAuth token refresh and retrying");
+            return self
+                .provider_after_forced_refresh()
+                .await?
+                .generate_with_tools(messages, tools)
+                .await;
+        }
+        result
     }
 
     fn supports_thinking(&self) -> bool {
@@ -217,10 +288,20 @@ impl LLMProvider for DynamicCredentialProvider {
         tools: &[Tool],
         thinking: ThinkingLevel,
     ) -> Result<LLMResponse> {
-        self.provider_for_request()
+        let result = self
+            .provider_for_request()
             .await?
             .generate_with_thinking(messages, tools, thinking)
-            .await
+            .await;
+        if self.is_oauth_provider() && result.as_ref().is_err_and(Self::is_refreshable_auth_error) {
+            info!(provider = %self.provider_name, "401 received; forcing OAuth token refresh and retrying");
+            return self
+                .provider_after_forced_refresh()
+                .await?
+                .generate_with_thinking(messages, tools, thinking)
+                .await;
+        }
+        result
     }
 
     async fn generate_stream_with_tools(
@@ -228,10 +309,20 @@ impl LLMProvider for DynamicCredentialProvider {
         messages: &[Message],
         tools: &[Tool],
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
-        self.provider_for_request()
+        let result = self
+            .provider_for_request()
             .await?
             .generate_stream_with_tools(messages, tools)
-            .await
+            .await;
+        if self.is_oauth_provider() && result.as_ref().is_err_and(Self::is_refreshable_auth_error) {
+            info!(provider = %self.provider_name, "401 received; forcing OAuth token refresh and retrying");
+            return self
+                .provider_after_forced_refresh()
+                .await?
+                .generate_stream_with_tools(messages, tools)
+                .await;
+        }
+        result
     }
 
     async fn generate_stream_with_thinking(
@@ -240,10 +331,20 @@ impl LLMProvider for DynamicCredentialProvider {
         tools: &[Tool],
         thinking: ThinkingLevel,
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
-        self.provider_for_request()
+        let result = self
+            .provider_for_request()
             .await?
             .generate_stream_with_thinking(messages, tools, thinking)
-            .await
+            .await;
+        if self.is_oauth_provider() && result.as_ref().is_err_and(Self::is_refreshable_auth_error) {
+            info!(provider = %self.provider_name, "401 received; forcing OAuth token refresh and retrying");
+            return self
+                .provider_after_forced_refresh()
+                .await?
+                .generate_stream_with_thinking(messages, tools, thinking)
+                .await;
+        }
+        result
     }
 
     async fn generate_with_thinking_config(
@@ -252,10 +353,20 @@ impl LLMProvider for DynamicCredentialProvider {
         tools: &[Tool],
         config: ThinkingConfig,
     ) -> Result<LLMResponse> {
-        self.provider_for_request()
+        let result = self
+            .provider_for_request()
             .await?
             .generate_with_thinking_config(messages, tools, config)
-            .await
+            .await;
+        if self.is_oauth_provider() && result.as_ref().is_err_and(Self::is_refreshable_auth_error) {
+            info!(provider = %self.provider_name, "401 received; forcing OAuth token refresh and retrying");
+            return self
+                .provider_after_forced_refresh()
+                .await?
+                .generate_with_thinking_config(messages, tools, config)
+                .await;
+        }
+        result
     }
 
     async fn generate_stream_with_thinking_config(
@@ -264,9 +375,19 @@ impl LLMProvider for DynamicCredentialProvider {
         tools: &[Tool],
         config: ThinkingConfig,
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
-        self.provider_for_request()
+        let result = self
+            .provider_for_request()
             .await?
             .generate_stream_with_thinking_config(messages, tools, config)
-            .await
+            .await;
+        if self.is_oauth_provider() && result.as_ref().is_err_and(Self::is_refreshable_auth_error) {
+            info!(provider = %self.provider_name, "401 received; forcing OAuth token refresh and retrying");
+            return self
+                .provider_after_forced_refresh()
+                .await?
+                .generate_stream_with_thinking_config(messages, tools, config)
+                .await;
+        }
+        result
     }
 }

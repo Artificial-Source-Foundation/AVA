@@ -15,7 +15,9 @@ pub mod stack;
 pub mod stuck;
 pub mod system_prompt;
 
-pub use instructions::{contextual_instructions_for_file, load_project_instructions};
+pub use instructions::{
+    contextual_instructions_for_file, load_project_instructions, trim_instructions_to_budget,
+};
 /// Reflection loop primitives for error analysis and auto-fix retries.
 pub use reflection::{ErrorKind, ReflectionAgent, ReflectionLoop, ToolExecutor, ToolResult};
 pub use {

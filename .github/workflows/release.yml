@@ -45,7 +45,7 @@ jobs:
 
       - name: Install cross
         if: matrix.cross
-        run: cargo install cross --locked
+        uses: taiki-e/install-action@cross
 
       - name: Install Linux dependencies
         if: matrix.os == 'ubuntu-22.04' && !matrix.cross

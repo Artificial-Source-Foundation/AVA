@@ -414,6 +414,7 @@ impl InputState {
                     AutocompleteItem::new("hooks dry-run", "Simulate hook execution"),
                     AutocompleteItem::new("later", "Queue a post-complete message (Tier 3)"),
                     AutocompleteItem::new("queue", "Show queued messages"),
+                    AutocompleteItem::new("shortcuts", "Show keyboard shortcuts (Ctrl+?)"),
                 ];
                 // Append custom command items
                 items.extend(self.custom_slash_items.clone());

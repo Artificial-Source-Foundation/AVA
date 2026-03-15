@@ -151,6 +151,9 @@ impl App {
                 Action::ExpandThinking => {
                     self.state.messages.toggle_all_thinking();
                 }
+                Action::ShowShortcuts => {
+                    self.show_shortcuts_overlay();
+                }
                 Action::PasteImage => {
                     self.paste_image_from_clipboard();
                 }

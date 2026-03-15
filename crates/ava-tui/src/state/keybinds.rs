@@ -33,6 +33,8 @@ pub enum Action {
     SubmitPostComplete,
     /// Expand/collapse all thinking blocks in the message list.
     ExpandThinking,
+    /// Show keyboard shortcuts overlay.
+    ShowShortcuts,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,5 +146,12 @@ pub fn default_keybinds() -> HashMap<Action, Vec<KeyBinding>> {
             }],
         ),
         (Action::ExpandThinking, vec![ctrl('e')]),
+        (
+            Action::ShowShortcuts,
+            vec![KeyBinding {
+                code: KeyCode::Char('?'),
+                modifiers: KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
+            }],
+        ),
     ])
 }

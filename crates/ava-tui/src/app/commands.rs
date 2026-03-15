@@ -399,6 +399,10 @@ impl App {
                 self.copy_last_response_with_mode(force_all);
                 None
             }
+            "/shortcuts" | "/keys" | "/keybinds" => {
+                self.show_shortcuts_overlay();
+                None
+            }
             "/help" => {
                 let help = "\
 Available commands:
@@ -425,24 +429,10 @@ Available commands:
   /tasks                   — show background task list
   /later <message>         — queue a post-complete message
   /queue                   — show queued messages
+  /shortcuts               — show keyboard shortcuts (Ctrl+?)
   /clear                   — clear chat
   /compact [focus]          — compact conversation to save context window
-  /help                    — show this help
-
-Keyboard shortcuts:
-  Tab / Shift+Tab          — cycle agent mode (Code/Plan/Praxis)
-  Ctrl+K / Ctrl+/          — command palette
-  Ctrl+M                   — model selector
-  Ctrl+B                   — move running agent to background
-  Ctrl+T                   — cycle thinking level
-  Ctrl+V                   — paste image from clipboard
-  Ctrl+Y                   — copy last response to clipboard
-  Ctrl+N                   — new session
-  Ctrl+L                   — session picker
-  Ctrl+S                   — toggle sidebar
-  Ctrl+R                   — voice input (requires --features voice)
-  Ctrl+Z                   — end /btw branch (restore conversation)
-  Ctrl+C                   — cancel / clear input / quit";
+  /help                    — show this help";
                 self.state
                     .messages
                     .push(UiMessage::transient(MessageKind::System, help));

@@ -23,11 +23,11 @@ impl PermissionPolicy {
         }
     }
 
-    /// Allow Safe+Low automatically, ask for Medium+, deny Critical.
+    /// Allow Safe+Low+Medium automatically, ask for High+, deny Critical.
     pub fn standard() -> Self {
         Self {
             name: "standard".to_string(),
-            max_risk_level: RiskLevel::Low,
+            max_risk_level: RiskLevel::Medium,
             blocked_tags: vec![SafetyTag::Destructive],
             allowed_tools: vec![],
             blocked_tools: vec![],
@@ -58,9 +58,9 @@ mod tests {
     }
 
     #[test]
-    fn standard_allows_up_to_low() {
+    fn standard_allows_up_to_medium() {
         let policy = PermissionPolicy::standard();
-        assert_eq!(policy.max_risk_level, RiskLevel::Low);
+        assert_eq!(policy.max_risk_level, RiskLevel::Medium);
         assert!(policy.blocked_tags.contains(&SafetyTag::Destructive));
     }
 
@@ -78,6 +78,6 @@ mod tests {
         let json = serde_json::to_string(&policy).unwrap();
         let deserialized: PermissionPolicy = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.name, "standard");
-        assert_eq!(deserialized.max_risk_level, RiskLevel::Low);
+        assert_eq!(deserialized.max_risk_level, RiskLevel::Medium);
     }
 }

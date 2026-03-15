@@ -394,6 +394,18 @@ mod tests {
     }
 
     #[test]
+    fn safe_cd() {
+        let result = classify_bash_command("cd /tmp/project");
+        assert_eq!(result.risk_level, RiskLevel::Safe);
+    }
+
+    #[test]
+    fn safe_cd_chain_cargo_test() {
+        let result = classify_bash_command("cd /workspace && cargo test");
+        assert_eq!(result.risk_level, RiskLevel::Low); // max of Safe (cd) and Low (cargo test)
+    }
+
+    #[test]
     fn safe_git_status() {
         let result = classify_bash_command("git status");
         assert_eq!(result.risk_level, RiskLevel::Low); // git is low, git status is safe-ish

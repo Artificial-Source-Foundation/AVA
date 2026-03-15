@@ -61,7 +61,7 @@ pub(super) fn check_blocked_patterns(lower: &str, _original: &str) -> Option<Str
     None
 }
 
-/// Check if command is safe (read-only, no side effects).
+/// Check if command is safe (read-only or harmless shell builtins).
 pub(super) fn is_safe_command(first_word: &str) -> bool {
     matches!(
         first_word,
@@ -104,6 +104,18 @@ pub(super) fn is_safe_command(first_word: &str) -> bool {
             | "test"
             | "["
             | "printf"
+            | "cd"
+            | "pushd"
+            | "popd"
+            | "dirs"
+            | "type"
+            | "command"
+            | "hash"
+            | "alias"
+            | "history"
+            | "help"
+            | "man"
+            | "info"
     )
 }
 

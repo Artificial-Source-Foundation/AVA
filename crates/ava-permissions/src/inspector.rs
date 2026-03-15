@@ -447,8 +447,63 @@ mod tests {
         let inspector = default_inspector();
         let ctx = test_context(false);
         let result = inspector.inspect("bash", &serde_json::json!({"command": "ls -la"}), &ctx);
-        // Classifier downgrades to Safe, which is within standard policy threshold (Low)
+        // Classifier downgrades to Safe, which is within standard policy threshold (Medium)
         assert_eq!(result.risk_level, RiskLevel::Safe);
+        assert_eq!(result.action, Action::Allow);
+    }
+
+    #[test]
+    fn low_risk_bash_auto_approved_by_standard_policy() {
+        let inspector = default_inspector();
+        let ctx = test_context(false);
+
+        // cargo test should be Low risk and auto-approved by standard policy (threshold=Medium)
+        let result = inspector.inspect(
+            "bash",
+            &serde_json::json!({"command": "cargo test --workspace"}),
+            &ctx,
+        );
+        assert_eq!(result.risk_level, RiskLevel::Low);
+        assert_eq!(result.action, Action::Allow);
+
+        // npm run build should also be Low risk and auto-approved
+        let result = inspector.inspect(
+            "bash",
+            &serde_json::json!({"command": "npm run build"}),
+            &ctx,
+        );
+        assert_eq!(result.risk_level, RiskLevel::Low);
+        assert_eq!(result.action, Action::Allow);
+
+        // git status should be Low risk and auto-approved
+        let result = inspector.inspect("bash", &serde_json::json!({"command": "git status"}), &ctx);
+        assert_eq!(result.risk_level, RiskLevel::Low);
+        assert_eq!(result.action, Action::Allow);
+
+        // cargo clippy should be Low risk and auto-approved
+        let result = inspector.inspect(
+            "bash",
+            &serde_json::json!({"command": "cargo clippy --workspace"}),
+            &ctx,
+        );
+        assert_eq!(result.risk_level, RiskLevel::Low);
+        assert_eq!(result.action, Action::Allow);
+
+        // cd && cargo test chains should auto-approve (cd is Safe, cargo test is Low)
+        let result = inspector.inspect(
+            "bash",
+            &serde_json::json!({"command": "cd /workspace/project && cargo test"}),
+            &ctx,
+        );
+        assert_eq!(result.action, Action::Allow);
+
+        // git commit should be Medium risk and auto-approved by standard policy
+        let result = inspector.inspect(
+            "bash",
+            &serde_json::json!({"command": "git commit -m 'fix bug'"}),
+            &ctx,
+        );
+        assert_eq!(result.risk_level, RiskLevel::Medium);
         assert_eq!(result.action, Action::Allow);
     }
 

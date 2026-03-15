@@ -276,25 +276,49 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     let content_width = area.width.saturating_sub(1);
     let show_thinking = state.agent.show_thinking;
 
+    // Track per-source-message line ranges for mouse click hit-testing.
+    let mut line_ranges: Vec<(u16, u16)> = Vec::with_capacity(messages_source.len());
+    // Index into messages_source — advances as we iterate render blocks.
+    let mut src_idx = 0usize;
+
     for (i, block) in blocks.iter().enumerate() {
         if i > 0 {
             lines.push(Line::raw(""));
         }
+        let start = lines.len() as u16;
         match block {
-            RenderBlock::Message(message) => lines.extend(render_message_with_options(
-                message,
-                &state.theme,
-                spinner_tick,
-                content_width,
-                show_thinking,
-            )),
-            RenderBlock::ActionGroup { messages, active } => lines.extend(render_action_group(
-                messages,
-                &state.theme,
-                spinner_tick,
-                content_width,
-                *active || state.messages.show_tools_expanded,
-            )),
+            RenderBlock::Message(message) => {
+                lines.extend(render_message_with_options(
+                    message,
+                    &state.theme,
+                    spinner_tick,
+                    content_width,
+                    show_thinking,
+                ));
+                let end = lines.len() as u16;
+                // Record range for this source message.
+                if src_idx < messages_source.len() {
+                    line_ranges.push((start, end));
+                    src_idx += 1;
+                }
+            }
+            RenderBlock::ActionGroup { messages, active } => {
+                lines.extend(render_action_group(
+                    messages,
+                    &state.theme,
+                    spinner_tick,
+                    content_width,
+                    *active || state.messages.show_tools_expanded,
+                ));
+                let end = lines.len() as u16;
+                // Each message in the group gets the same range (the whole group).
+                for _ in 0..messages.len() {
+                    if src_idx < messages_source.len() {
+                        line_ranges.push((start, end));
+                        src_idx += 1;
+                    }
+                }
+            }
         }
     }
 
@@ -305,6 +329,8 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     let total = lines.len() as u16;
     let visible_height = area.height;
 
+    state.messages.messages_area = area;
+    state.messages.message_line_ranges = line_ranges;
     state.messages.total_lines = total;
     state.messages.visible_height = visible_height;
 

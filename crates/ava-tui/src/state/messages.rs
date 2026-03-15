@@ -547,7 +547,7 @@ impl UiMessage {
                         }
                         let click_hint = if total > max_visible {
                             format!(
-                                "\u{25b6} ... ({} more lines \u{2014} Ctrl+E to expand)",
+                                "\u{25b6} ... ({} more lines \u{2014} click or Ctrl+E to expand)",
                                 total - max_visible
                             )
                         } else {
@@ -869,6 +869,13 @@ pub struct MessageState {
     pub visible_height: u16,
     /// Tick counter for spinner animation.
     pub spinner_tick: usize,
+    /// Set by the renderer each frame — the area where messages are drawn.
+    /// Used for mouse click hit-testing.
+    pub messages_area: ratatui::layout::Rect,
+    /// Set by the renderer each frame — maps each source message index to
+    /// its `(start_line, end_line)` in the total line buffer (exclusive end).
+    /// Used for mapping click positions to message indices.
+    pub message_line_ranges: Vec<(u16, u16)>,
 }
 
 impl Default for MessageState {
@@ -882,6 +889,8 @@ impl Default for MessageState {
             total_lines: 0,
             visible_height: 0,
             spinner_tick: 0,
+            messages_area: ratatui::layout::Rect::default(),
+            message_line_ranges: Vec::new(),
         }
     }
 }
@@ -951,6 +960,24 @@ impl MessageState {
                 msg.thinking_expanded = new_state;
             }
         }
+    }
+
+    /// Given an absolute screen row, return the source message index if it
+    /// falls inside the messages area. Uses `messages_area`, `scroll_offset`,
+    /// and `message_line_ranges` (all set by the renderer each frame).
+    pub fn message_index_at_row(&self, row: u16) -> Option<usize> {
+        let area = self.messages_area;
+        if row < area.y || row >= area.y + area.height {
+            return None;
+        }
+        let visual_row = row - area.y;
+        let absolute_line = visual_row + self.scroll_offset;
+        for (i, &(start, end)) in self.message_line_ranges.iter().enumerate() {
+            if absolute_line >= start && absolute_line < end {
+                return Some(i);
+            }
+        }
+        None
     }
 
     /// Returns the content of the last assistant message, if any.

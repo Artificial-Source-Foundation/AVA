@@ -31,6 +31,19 @@ impl App {
                     match mouse.kind {
                         MouseEventKind::ScrollUp => self.state.messages.scroll_up(1),
                         MouseEventKind::ScrollDown => self.state.messages.scroll_down(1),
+                        MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+                            // Check if click landed on a thinking block — toggle expand/collapse.
+                            if let Some(idx) = self.state.messages.message_index_at_row(mouse.row) {
+                                if let Some(msg) = self.state.messages.messages.get(idx) {
+                                    if matches!(
+                                        msg.kind,
+                                        crate::state::messages::MessageKind::Thinking
+                                    ) {
+                                        self.state.messages.toggle_thinking_at(idx);
+                                    }
+                                }
+                            }
+                        }
                         _ => {}
                     }
                 }

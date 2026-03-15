@@ -148,6 +148,9 @@ impl App {
                 Action::ToggleThinking => {
                     self.state.agent.cycle_thinking();
                 }
+                Action::ExpandThinking => {
+                    self.state.messages.toggle_all_thinking();
+                }
                 Action::VoiceToggle => {
                     #[cfg(feature = "voice")]
                     self.toggle_voice(app_tx);

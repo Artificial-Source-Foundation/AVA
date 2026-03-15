@@ -58,6 +58,9 @@ pub struct UiMessage {
     /// Used for system info commands (/help, /queue, etc.) that should not
     /// pollute the chat history.
     pub transient: bool,
+    /// Whether thinking content is expanded (show all lines) or collapsed (first 5 lines).
+    /// Only meaningful for `MessageKind::Thinking` messages. Default: `false` (collapsed).
+    pub thinking_expanded: bool,
 }
 
 /// Braille spinner frames for streaming/working animation.
@@ -100,6 +103,7 @@ impl UiMessage {
             agent_mode: None,
             started_at: None,
             transient: false,
+            thinking_expanded: false,
         }
     }
 
@@ -510,22 +514,46 @@ impl UiMessage {
                     let content_lines: Vec<&str> = self.content.lines().collect();
                     let total = content_lines.len();
                     let max_visible = 5;
+                    let is_collapsible = total > max_visible;
 
-                    // Header line
-                    let mut result = vec![Line::from(vec![dot, Span::styled("Thinking", style)])];
+                    // Header line with expand/collapse indicator
+                    let header_label = if is_collapsible {
+                        if self.thinking_expanded {
+                            "Thinking \u{25bc}" // ▼ = expanded
+                        } else {
+                            "Thinking \u{25b6}" // ▶ = collapsed
+                        }
+                    } else {
+                        "Thinking"
+                    };
+                    let mut result = vec![Line::from(vec![
+                        dot,
+                        Span::styled(header_label.to_owned(), style),
+                    ])];
 
-                    // Show up to max_visible lines of content
-                    let show = total.min(max_visible);
-                    for text_line in &content_lines[..show] {
-                        result.push(Line::from(vec![Span::styled(text_line.to_string(), style)]));
-                    }
-
-                    // Collapse indicator for remaining lines
-                    if total > max_visible {
-                        result.push(Line::from(vec![Span::styled(
-                            format!("\u{25b6} ... ({} more lines)", total - max_visible),
-                            style,
-                        )]));
+                    if self.thinking_expanded || !is_collapsible {
+                        // Show ALL lines when expanded (or when content is short enough)
+                        for text_line in &content_lines {
+                            result
+                                .push(Line::from(vec![Span::styled(text_line.to_string(), style)]));
+                        }
+                    } else {
+                        // Collapsed: show first max_visible lines + indicator
+                        for text_line in &content_lines[..max_visible] {
+                            result
+                                .push(Line::from(vec![Span::styled(text_line.to_string(), style)]));
+                        }
+                        let click_hint = if total > max_visible {
+                            format!(
+                                "\u{25b6} ... ({} more lines \u{2014} Ctrl+E to expand)",
+                                total - max_visible
+                            )
+                        } else {
+                            String::new()
+                        };
+                        if !click_hint.is_empty() {
+                            result.push(Line::from(vec![Span::styled(click_hint, style)]));
+                        }
                     }
 
                     Self::prepend_bars(&mut result, bar_color, width);
@@ -856,6 +884,30 @@ impl MessageState {
         self.auto_scroll = true;
         self.scroll_offset = self.total_lines.saturating_sub(self.visible_height);
         self.unseen_count = 0;
+    }
+
+    /// Toggle the expanded/collapsed state of a specific thinking message.
+    pub fn toggle_thinking_at(&mut self, message_index: usize) {
+        if let Some(msg) = self.messages.get_mut(message_index) {
+            if matches!(msg.kind, MessageKind::Thinking) {
+                msg.thinking_expanded = !msg.thinking_expanded;
+            }
+        }
+    }
+
+    /// Toggle all thinking blocks between expanded and collapsed.
+    /// If any are collapsed, expand all; otherwise collapse all.
+    pub fn toggle_all_thinking(&mut self) {
+        let any_collapsed = self
+            .messages
+            .iter()
+            .any(|m| matches!(m.kind, MessageKind::Thinking) && !m.thinking_expanded);
+        let new_state = any_collapsed; // expand all if any collapsed, else collapse all
+        for msg in &mut self.messages {
+            if matches!(msg.kind, MessageKind::Thinking) {
+                msg.thinking_expanded = new_state;
+            }
+        }
     }
 
     /// Returns the content of the last assistant message, if any.

@@ -29,6 +29,8 @@ pub enum Action {
     SubmitFollowUp,
     /// Submit a post-complete message (Tier 3) while the agent is running.
     SubmitPostComplete,
+    /// Expand/collapse all thinking blocks in the message list.
+    ExpandThinking,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,5 +140,6 @@ pub fn default_keybinds() -> HashMap<Action, Vec<KeyBinding>> {
                 modifiers: KeyModifiers::ALT.union(KeyModifiers::CONTROL),
             }],
         ),
+        (Action::ExpandThinking, vec![ctrl('e')]),
     ])
 }

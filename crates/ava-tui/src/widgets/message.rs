@@ -12,6 +12,16 @@ pub fn render_message(
     message.to_lines(theme, spinner_tick, width)
 }
 
+pub fn render_message_with_options(
+    message: &UiMessage,
+    theme: &Theme,
+    spinner_tick: usize,
+    width: u16,
+    show_thinking: bool,
+) -> Vec<Line<'static>> {
+    message.to_lines_with_options(theme, spinner_tick, width, show_thinking)
+}
+
 pub fn render_action_group(
     messages: &[&UiMessage],
     theme: &Theme,

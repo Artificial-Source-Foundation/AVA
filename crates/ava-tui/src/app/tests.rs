@@ -111,14 +111,4 @@ fn model_switch_result_updates_state_and_closes_modal() {
 
 // /bg command removed — tests removed
 
-#[test]
-fn praxis_command_sets_pending_goal() {
-    let temp = tempdir().expect("tempdir");
-    let db_path = temp.path().join("data.db");
-    let mut app = App::test_new(&db_path);
-
-    let result = app.test_slash_command("/praxis parallelize this refactor");
-    assert!(result.is_none());
-    let pending = app.pending_praxis_goal.expect("pending praxis goal");
-    assert_eq!(pending.goal, "parallelize this refactor");
-}
+// /praxis command removed — Praxis accessible only via Tab cycling

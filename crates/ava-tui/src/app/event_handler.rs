@@ -75,7 +75,7 @@ impl App {
                 }
             }
             ava_agent::AgentEvent::Token(chunk) => {
-                self.state.agent.activity = AgentActivity::Thinking;
+                self.state.agent.activity = AgentActivity::Streaming;
                 // Mark any preceding thinking message as done streaming
                 if let Some(last) = self.state.messages.messages.last_mut() {
                     if matches!(last.kind, MessageKind::Thinking) {
@@ -321,8 +321,16 @@ impl App {
                 // Mark last assistant message as done streaming and attach model info
                 if let Some(last) = self.state.messages.messages.last_mut() {
                     last.is_streaming = false;
-                    if matches!(last.kind, MessageKind::Assistant) && last.model_name.is_none() {
-                        last.model_name = Some(self.state.agent.model_name.clone());
+                    if matches!(last.kind, MessageKind::Assistant) {
+                        if last.model_name.is_none() {
+                            last.model_name = Some(self.state.agent.model_name.clone());
+                        }
+                        // Finalize response time from started_at
+                        if last.response_time.is_none() {
+                            if let Some(started) = last.started_at {
+                                last.response_time = Some(started.elapsed().as_secs_f64());
+                            }
+                        }
                     }
                 }
                 self.is_streaming.store(false, Ordering::Relaxed);
@@ -412,8 +420,15 @@ impl App {
                 // Mark last assistant message as done streaming and attach model info
                 if let Some(last) = self.state.messages.messages.last_mut() {
                     last.is_streaming = false;
-                    if matches!(last.kind, MessageKind::Assistant) && last.model_name.is_none() {
-                        last.model_name = Some(self.state.agent.model_name.clone());
+                    if matches!(last.kind, MessageKind::Assistant) {
+                        if last.model_name.is_none() {
+                            last.model_name = Some(self.state.agent.model_name.clone());
+                        }
+                        if last.response_time.is_none() {
+                            if let Some(started) = last.started_at {
+                                last.response_time = Some(started.elapsed().as_secs_f64());
+                            }
+                        }
                     }
                 }
                 self.state.agent.activity = AgentActivity::Idle;

@@ -7,14 +7,15 @@ impl App {
         app_tx: mpsc::UnboundedSender<AppEvent>,
         agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
     ) -> bool {
-        // Ctrl+Z ends btw branch
+        // Ctrl+Z ends btw branch (no-op when btw is not active)
         if key
             .modifiers
             .contains(crossterm::event::KeyModifiers::CONTROL)
             && key.code == KeyCode::Char('z')
-            && self.state.btw.active
         {
-            self.end_btw_branch();
+            if self.state.btw.active {
+                self.end_btw_branch();
+            }
             return false;
         }
 

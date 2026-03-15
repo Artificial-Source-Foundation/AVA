@@ -25,7 +25,10 @@ impl App {
                         let model = model.to_string();
                         if let Some(tx) = app_tx.clone() {
                             let display = format!("{provider}/{model}");
-                            self.set_status(format!("Switching to {display}..."), StatusLevel::Info);
+                            self.set_status(
+                                format!("Switching to {display}..."),
+                                StatusLevel::Info,
+                            );
                             self.spawn_model_switch(
                                 provider,
                                 model,
@@ -36,18 +39,23 @@ impl App {
                             None
                         } else {
                             let result = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current().block_on(
-                                    self.state.agent.switch_model(&provider, &model)
-                                )
+                                tokio::runtime::Handle::current()
+                                    .block_on(self.state.agent.switch_model(&provider, &model))
                             });
                             match result {
                                 Ok(desc) => {
-                                    self.set_status(format!("Switched to {desc}"), StatusLevel::Info);
+                                    self.set_status(
+                                        format!("Switched to {desc}"),
+                                        StatusLevel::Info,
+                                    );
                                     Some((MessageKind::System, format!("Switched to {desc}")))
                                 }
                                 Err(err) => {
                                     self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                                    Some((MessageKind::Error, format!("Failed to switch model: {err}")))
+                                    Some((
+                                        MessageKind::Error,
+                                        format!("Failed to switch model: {err}"),
+                                    ))
                                 }
                             }
                         }
@@ -62,32 +70,18 @@ impl App {
                     None
                 }
             }
-            "/tools" => {
-                match arg {
-                    Some("reload") => {
-                        if let Some(tx) = app_tx.clone() {
-                            self.set_status("Reloading tools...", StatusLevel::Info);
-                            self.spawn_tools_reload(tx);
-                            None
-                        } else {
-                            let result = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current()
-                                    .block_on(self.state.agent.reload_tools())
-                            });
-                            match result {
-                                Ok(msg) => {
-                                    self.set_status(&msg, StatusLevel::Info);
-                                    Some((MessageKind::System, msg))
-                                }
-                                Err(err) => {
-                                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                                    Some((MessageKind::Error, err))
-                                }
-                            }
-                        }
-                    }
-                    Some("init") => {
-                        match self.state.agent.create_tool_templates() {
+            "/mcp" => match arg {
+                Some("reload") => {
+                    if let Some(tx) = app_tx.clone() {
+                        self.set_status("Reloading MCP...", StatusLevel::Info);
+                        self.spawn_mcp_reload(tx);
+                        None
+                    } else {
+                        let result = tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current()
+                                .block_on(self.state.agent.reload_mcp())
+                        });
+                        match result {
                             Ok(msg) => {
                                 self.set_status(&msg, StatusLevel::Info);
                                 Some((MessageKind::System, msg))
@@ -98,93 +92,38 @@ impl App {
                             }
                         }
                     }
-                    _ => {
-                        // Show tool list modal
-                        self.state.active_modal = Some(ModalType::ToolList);
-                        if let Some(tx) = app_tx.clone() {
-                            self.state.tool_list = ToolListState::default();
-                            self.set_status("Loading tools...", StatusLevel::Info);
-                            self.spawn_tool_list_load(tx);
+                }
+                Some("list") | None => {
+                    if let Some(tx) = app_tx.clone() {
+                        self.set_status("Loading MCP servers...", StatusLevel::Info);
+                        self.spawn_mcp_server_list(tx);
+                        None
+                    } else {
+                        let servers = tokio::task::block_in_place(|| {
+                            tokio::runtime::Handle::current()
+                                .block_on(self.state.agent.mcp_server_info())
+                        })
+                        .unwrap_or_default();
+                        let text = if servers.is_empty() {
+                            "No MCP servers connected".to_string()
                         } else {
-                            let tools = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current()
-                                    .block_on(self.state.agent.list_tools_with_source())
-                            })
-                            .unwrap_or_default();
-                            let tool_items: Vec<crate::widgets::tool_list::ToolListItem> = tools
-                                .into_iter()
-                                .map(|(def, src)| {
-                                    crate::widgets::tool_list::ToolListItem {
-                                        name: def.name,
-                                        description: def.description,
-                                        source: src,
-                                    }
-                                })
+                            let lines: Vec<String> = servers
+                                .iter()
+                                .map(|s| format!("  {} ({} tools)", s.name, s.tool_count))
                                 .collect();
-                            self.state.tool_list = ToolListState::from_items(tool_items);
-                        }
+                            format!("MCP servers ({}):\n{}", servers.len(), lines.join("\n"))
+                        };
+                        self.state
+                            .messages
+                            .push(UiMessage::transient(MessageKind::System, text));
                         None
                     }
                 }
-            }
-            "/mcp" => {
-                match arg {
-                    Some("reload") => {
-                        if let Some(tx) = app_tx.clone() {
-                            self.set_status("Reloading MCP...", StatusLevel::Info);
-                            self.spawn_mcp_reload(tx);
-                            None
-                        } else {
-                            let result = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current()
-                                    .block_on(self.state.agent.reload_mcp())
-                            });
-                            match result {
-                                Ok(msg) => {
-                                    self.set_status(&msg, StatusLevel::Info);
-                                    Some((MessageKind::System, msg))
-                                }
-                                Err(err) => {
-                                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                                    Some((MessageKind::Error, err))
-                                }
-                            }
-                        }
-                    }
-                    Some("list") | None => {
-                        if let Some(tx) = app_tx.clone() {
-                            self.set_status("Loading MCP servers...", StatusLevel::Info);
-                            self.spawn_mcp_server_list(tx);
-                            None
-                        } else {
-                            let servers = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current()
-                                    .block_on(self.state.agent.mcp_server_info())
-                            })
-                            .unwrap_or_default();
-                            let text = if servers.is_empty() {
-                                "No MCP servers connected".to_string()
-                            } else {
-                                let lines: Vec<String> = servers
-                                    .iter()
-                                    .map(|s| format!("  {} ({} tools)", s.name, s.tool_count))
-                                    .collect();
-                                format!(
-                                    "MCP servers ({}):\n{}",
-                                    servers.len(),
-                                    lines.join("\n")
-                                )
-                            };
-                            self.state.messages.push(UiMessage::transient(MessageKind::System, text));
-                            None
-                        }
-                    }
-                    Some(sub) => Some((
-                        MessageKind::Error,
-                        format!("Unknown /mcp subcommand: {sub}. Use: list, reload"),
-                    )),
-                }
-            }
+                Some(sub) => Some((
+                    MessageKind::Error,
+                    format!("Unknown /mcp subcommand: {sub}. Use: list, reload"),
+                )),
+            },
             "/connect" | "/providers" => {
                 if let Some(tx) = app_tx.clone() {
                     self.state.provider_connect = Some(ProviderConnectState::from_credentials(
@@ -256,139 +195,6 @@ impl App {
                     ))
                 }
             }
-            "/credentials" => {
-                match arg {
-                    Some("list") | None => {
-                        if let Some(tx) = app_tx.clone() {
-                            self.set_status("Loading credentials...", StatusLevel::Info);
-                            self.spawn_credential_command(
-                                ava_config::CredentialCommand::List,
-                                Self::format_credentials_list_result,
-                                tx,
-                            );
-                            None
-                        } else {
-                            let result = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current().block_on(async {
-                                    let store = ava_config::CredentialStore::load_default()
-                                        .await
-                                        .unwrap_or_default();
-                                    ava_config::execute_credential_command(
-                                        ava_config::CredentialCommand::List,
-                                        &mut store.clone(),
-                                    )
-                                    .await
-                                })
-                            });
-                            match result {
-                                Ok(msg) => {
-                                    let masked = super::command_support::mask_credentials_output(&msg);
-                                    self.state.messages.push(UiMessage::transient(MessageKind::System, format!("Credentials:\n{masked}")));
-                                    None
-                                }
-                                Err(err) => Some((MessageKind::Error, format!("Failed: {err}"))),
-                            }
-                        }
-                    }
-                    Some(sub) if sub.starts_with("add ") || sub.starts_with("set ") => {
-                        let rest = sub.split_once(' ').map(|x| x.1).unwrap_or("");
-                        let parts: Vec<&str> = rest.splitn(2, ' ').collect();
-                        if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
-                            let provider = parts[0].to_lowercase();
-                            let api_key = parts[1].to_string();
-                            if let Some(tx) = app_tx.clone() {
-                                self.set_status(format!("Saving credentials for {provider}..."), StatusLevel::Info);
-                                self.spawn_credential_command(
-                                    ava_config::CredentialCommand::Set {
-                                        provider,
-                                        api_key,
-                                        base_url: None,
-                                    },
-                                    Self::format_standard_credential_result,
-                                    tx,
-                                );
-                                None
-                            } else {
-                                let result = tokio::task::block_in_place(|| {
-                                    tokio::runtime::Handle::current().block_on(async {
-                                        let mut store = ava_config::CredentialStore::load_default()
-                                            .await
-                                            .unwrap_or_default();
-                                        ava_config::execute_credential_command(
-                                            ava_config::CredentialCommand::Set {
-                                                provider,
-                                                api_key,
-                                                base_url: None,
-                                            },
-                                            &mut store,
-                                        )
-                                        .await
-                                    })
-                                });
-                                match result {
-                                    Ok(msg) => {
-                                        self.set_status(&msg, StatusLevel::Info);
-                                        Some((MessageKind::System, msg))
-                                    }
-                                    Err(err) => {
-                                        self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                                        Some((MessageKind::Error, format!("Failed: {err}")))
-                                    }
-                                }
-                            }
-                        } else {
-                            Some((
-                                MessageKind::Error,
-                                "Usage: /credentials add <provider> <api_key>".to_string(),
-                            ))
-                        }
-                    }
-                    Some(sub) if sub.starts_with("remove ") || sub.starts_with("rm ") => {
-                        let provider = sub.split_once(' ').map(|x| x.1).unwrap_or("").trim().to_lowercase();
-                        if provider.is_empty() {
-                            Some((
-                                MessageKind::Error,
-                                "Usage: /credentials remove <provider>".to_string(),
-                            ))
-                        } else if let Some(tx) = app_tx.clone() {
-                            self.set_status(format!("Removing credentials for {provider}..."), StatusLevel::Info);
-                            self.spawn_credential_command(
-                                ava_config::CredentialCommand::Remove { provider },
-                                Self::format_standard_credential_result,
-                                tx,
-                            );
-                            None
-                        } else {
-                            let result = tokio::task::block_in_place(|| {
-                                tokio::runtime::Handle::current().block_on(async {
-                                    let mut store = ava_config::CredentialStore::load_default()
-                                        .await
-                                        .unwrap_or_default();
-                                    ava_config::execute_credential_command(
-                                        ava_config::CredentialCommand::Remove { provider },
-                                        &mut store,
-                                    )
-                                    .await
-                                })
-                            });
-                            match result {
-                                Ok(msg) => {
-                                    self.set_status(&msg, StatusLevel::Info);
-                                    Some((MessageKind::System, msg))
-                                }
-                                Err(err) => {
-                                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                                    Some((MessageKind::Error, format!("Failed: {err}")))
-                                }
-                            }
-                        }
-                    }
-                    Some(sub) => Some((
-                        MessageKind::Error,
-                        format!("Unknown /credentials subcommand: {sub}. Use: list, add <provider> <key>, remove <provider>"),
-                    )),
-                }
-            }
             "/new" => {
                 self.state.messages.messages.clear();
                 self.state.messages.reset_scroll();
@@ -408,38 +214,49 @@ impl App {
                 self.set_status("Chat cleared", StatusLevel::Info);
                 None
             }
-            "/compact" => {
-                self.run_compact(arg)
-            }
-            "/think" => {
-                match arg {
-                    Some(level_str) => {
-                        if let Some(level) = ava_types::ThinkingLevel::from_str_loose(level_str) {
-                            self.state.agent.set_thinking_level(level);
-                            let label = level.label();
-                            Some((MessageKind::System, format!("Thinking level set to {label}")))
-                        } else {
-                            Some((MessageKind::Error,
-                                "Invalid level. Use: /think off|low|med|high|max".to_string()
-                            ))
-                        }
-                    }
-                    None => {
-                        let label = self.state.agent.cycle_thinking();
-                        Some((MessageKind::System, format!("Thinking level: {label}")))
-                    }
+            "/compact" => self.run_compact(arg),
+            "/think" => match arg {
+                Some("show") | Some("on") => {
+                    self.state.agent.show_thinking = true;
+                    self.state.messages.push(UiMessage::transient(
+                        MessageKind::System,
+                        "Thinking blocks visible".to_string(),
+                    ));
+                    None
                 }
-            }
-            "/agents" => {
-                self.open_agent_list();
-                None
-            }
+                Some("hide") | Some("off") => {
+                    self.state.agent.show_thinking = false;
+                    self.state.messages.push(UiMessage::transient(
+                        MessageKind::System,
+                        "Thinking blocks hidden".to_string(),
+                    ));
+                    None
+                }
+                Some(_) => Some((
+                    MessageKind::Error,
+                    "Usage: /think [show|on|hide|off] — toggle thinking visibility".to_string(),
+                )),
+                None => {
+                    self.state.agent.show_thinking = !self.state.agent.show_thinking;
+                    let label = if self.state.agent.show_thinking {
+                        "visible"
+                    } else {
+                        "hidden"
+                    };
+                    self.state.messages.push(UiMessage::transient(
+                        MessageKind::System,
+                        format!("Thinking blocks {label}"),
+                    ));
+                    None
+                }
+            },
             "/sessions" => {
                 self.execute_command_action(Action::SessionList, app_tx.clone());
                 None
             }
             "/permissions" => {
-                self.state.permission.permission_level = self.state.permission.permission_level.toggle();
+                self.state.permission.permission_level =
+                    self.state.permission.permission_level.toggle();
                 let label = self.state.permission.permission_level.label();
                 self.set_status(format!("Permissions: {label}"), StatusLevel::Info);
                 None
@@ -450,10 +267,7 @@ impl App {
                         let names = Theme::all_names();
                         if names.iter().any(|n| n == name) {
                             self.state.theme = Theme::from_name(name);
-                            self.set_status(
-                                format!("Theme: {name}"),
-                                StatusLevel::Info,
-                            );
+                            self.set_status(format!("Theme: {name}"), StatusLevel::Info);
                             Some((MessageKind::System, format!("Switched to theme: {name}")))
                         } else {
                             let available = names.join(", ");
@@ -480,8 +294,10 @@ impl App {
                     Ok(handle) => {
                         let result = tokio::task::block_in_place(|| {
                             handle.block_on(async {
-                                tokio::task::spawn_blocking(super::git_commit::handle_commit_command)
-                                    .await
+                                tokio::task::spawn_blocking(
+                                    super::git_commit::handle_commit_command,
+                                )
+                                .await
                             })
                         });
 
@@ -496,139 +312,42 @@ impl App {
                     Err(_) => Some(super::git_commit::handle_commit_command()),
                 }
             }
-            "/export" => {
-                self.export_conversation(arg)
-            }
+            "/export" => self.export_conversation(arg),
             "/copy" => {
                 let force_all = arg.map(|a| a.eq_ignore_ascii_case("all")).unwrap_or(false);
                 self.copy_last_response_with_mode(force_all);
                 None
             }
-            "/image" => {
-                if let Some(path_str) = arg {
-                    let path = std::path::Path::new(path_str);
-                    match ava_types::ImageContent::from_file(path) {
-                        Ok(img) => {
-                            self.pending_images.push(img);
-                            let count = self.pending_images.len();
-                            self.set_status(
-                                format!("Image attached ({count} pending). Type your prompt and press Enter."),
-                                StatusLevel::Info,
-                            );
-                            Some((MessageKind::System, format!(
-                                "Attached image: {} ({}). {count} image(s) pending — send a message to include them.",
-                                path.display(), path.extension().and_then(|e| e.to_str()).unwrap_or("unknown")
-                            )))
-                        }
-                        Err(e) => {
-                            Some((MessageKind::Error, e))
-                        }
-                    }
-                } else {
-                    Some((MessageKind::Error,
-                        "Usage: /image <path>\nSupported formats: png, jpg, jpeg, gif, webp\nExample: /image screenshot.png".to_string()
-                    ))
-                }
-            }
-            "/plan" => {
-                if matches!(self.state.agent_mode, AgentMode::Plan) {
-                    Some((MessageKind::System, "Already in Plan mode.".to_string()))
-                } else {
-                    self.state.agent_mode = AgentMode::Plan;
-                    self.state.agent.set_mode(self.state.agent_mode);
-                    self.set_status("Mode: Plan", StatusLevel::Info);
-                    Some((MessageKind::System, "Switched to Plan mode \u{2014} will write plans to .ava/plans/".to_string()))
-                }
-            }
-            "/code" => {
-                if matches!(self.state.agent_mode, AgentMode::Code) {
-                    Some((MessageKind::System, "Already in Code mode.".to_string()))
-                } else {
-                    self.state.agent_mode = AgentMode::Code;
-                    self.state.agent.set_mode(self.state.agent_mode);
-                    self.set_status("Mode: Code", StatusLevel::Info);
-                    Some((MessageKind::System, "Switched to Code mode \u{2014} plan files at .ava/plans/".to_string()))
-                }
-            }
-            "/plans" => {
-                let plans_dir = std::env::current_dir()
-                    .unwrap_or_default()
-                    .join(".ava")
-                    .join("plans");
-                if !plans_dir.exists() {
-                    self.state.messages.push(UiMessage::transient(MessageKind::System, "No plans found. Switch to Plan mode and ask the agent to create a plan."));
-                    None
-                } else {
-                    match std::fs::read_dir(&plans_dir) {
-                        Ok(entries) => {
-                            let mut files: Vec<String> = entries
-                                .filter_map(|e| e.ok())
-                                .filter(|e| {
-                                    e.path().extension().and_then(|ext| ext.to_str()) == Some("md")
-                                })
-                                .map(|e| {
-                                    let name = e.file_name().to_string_lossy().to_string();
-                                    let size = e.metadata().map(|m| m.len()).unwrap_or(0);
-                                    format!("  {name} ({size} bytes)")
-                                })
-                                .collect();
-                            files.sort();
-                            if files.is_empty() {
-                                self.state.messages.push(UiMessage::transient(MessageKind::System, "No plan files in .ava/plans/. Switch to Plan mode to create one."));
-                            } else {
-                                self.state.messages.push(UiMessage::transient(MessageKind::System, format!(
-                                    "Plans ({} files):\n{}",
-                                    files.len(),
-                                    files.join("\n")
-                                )));
-                            }
-                            None
-                        }
-                        Err(err) => {
-                            Some((MessageKind::Error, format!("Failed to read .ava/plans/: {err}")))
-                        }
-                    }
-                }
-            }
             "/help" => {
                 let help = "\
 Available commands:
   /model [provider/model]  — show or switch model (alias: /models)
-  /think [level]           — set thinking level (off/low/med/high/max)
+  /think [show|hide]       — toggle thinking block visibility
   /theme [name]            — cycle or switch theme (default/dracula/nord)
   /permissions             — toggle permission level
   /connect [provider]      — add provider credentials
   /providers               — show provider status
   /disconnect <provider>   — remove provider credentials
-  /credentials [list|add|remove] — manage provider API keys (masked)
-  /tools                   — list all tools
-  /tools reload            — reload tools from disk
-  /tools init              — create tool templates
   /mcp [list]              — show MCP servers
   /mcp reload              — reload MCP config
-  /agents                  — show sub-agent configuration
   /new [title]             — start a new session (optional title)
   /sessions                — session picker
   /init                    — initialize project (tool, hook, and command templates)
   /commit                  — inspect commit readiness and suggest a message
   /export [filename]       — export conversation to file (.md or .json)
   /copy [all]              — copy last response (picks code block if multiple)
-  /image <path>            — attach image to next message (png/jpg/gif/webp)
-  /plan                    — switch to Plan mode
-  /code                    — switch to Code mode
-  /plans                   — list plan files in .ava/plans/
-  /commands [list|reload|init] — manage custom slash commands
-  /hooks [list|reload|init|dry-run <event>] — manage lifecycle hooks
+  /hooks [list|reload|dry-run <event>] — manage lifecycle hooks
   /btw [question]          — start a side conversation branch
   /btw end                 — restore original conversation
-  /praxis <goal>           — launch a Praxis multi-agent task
   /tasks                   — show background task list
+  /later <message>         — queue a post-complete message
+  /queue                   — show queued messages
   /clear                   — clear chat
   /compact [focus]          — compact conversation to save context window
   /help                    — show this help
 
 Keyboard shortcuts:
-  Tab / Shift+Tab          — cycle agent mode (Code/Plan)
+  Tab / Shift+Tab          — cycle agent mode (Code/Plan/Praxis)
   Ctrl+K / Ctrl+/          — command palette
   Ctrl+M                   — model selector
   Ctrl+B                   — move running agent to background
@@ -639,7 +358,9 @@ Keyboard shortcuts:
   Ctrl+S                   — toggle sidebar
   Ctrl+Z                   — end /btw branch (restore conversation)
   Ctrl+C                   — cancel / clear input / quit";
-                self.state.messages.push(UiMessage::transient(MessageKind::System, help));
+                self.state
+                    .messages
+                    .push(UiMessage::transient(MessageKind::System, help));
                 None
             }
             "/btw" => {
@@ -661,35 +382,7 @@ Keyboard shortcuts:
                     None
                 }
             }
-            "/commands" => {
-                self.handle_commands_command(arg)
-            }
-            "/hooks" => {
-                self.handle_hooks_command(arg)
-            }
-            "/praxis" => {
-                if let Some(goal) = arg {
-                    let trimmed = goal.trim();
-                    if trimmed.is_empty() {
-                        Some((
-                            MessageKind::Error,
-                            "Usage: /praxis <goal> (e.g., /praxis parallelize this refactor)"
-                                .to_string(),
-                        ))
-                    } else {
-                        self.pending_praxis_goal = Some(super::PendingPraxisGoal {
-                            goal: trimmed.to_string(),
-                        });
-                        None
-                    }
-                } else {
-                    Some((
-                        MessageKind::Error,
-                        "Usage: /praxis <goal> (e.g., /praxis parallelize this refactor)"
-                            .to_string(),
-                    ))
-                }
-            }
+            "/hooks" => self.handle_hooks_command(arg),
             "/tasks" => {
                 self.state.active_modal = Some(super::ModalType::TaskList);
                 None
@@ -697,25 +390,41 @@ Keyboard shortcuts:
             "/later" => {
                 if let Some(text) = arg {
                     if text.is_empty() {
-                        Some((MessageKind::Error, "Usage: /later <message> — queue a post-complete message".to_string()))
+                        Some((
+                            MessageKind::Error,
+                            "Usage: /later <message> — queue a post-complete message".to_string(),
+                        ))
                     } else {
                         // Parse optional group: /later 2 message
-                        let (group, message) = if let Some(rest) = text.strip_prefix(|c: char| c.is_ascii_digit()) {
-                            let num_str = format!("{}{}", &text[..1], rest.chars().take_while(|c| c.is_ascii_digit()).collect::<String>());
-                            let after = text[num_str.len()..].trim();
-                            if after.is_empty() {
-                                (1, text.to_string()) // Just a number, treat as message
+                        let (group, message) =
+                            if let Some(rest) = text.strip_prefix(|c: char| c.is_ascii_digit()) {
+                                let num_str = format!(
+                                    "{}{}",
+                                    &text[..1],
+                                    rest.chars()
+                                        .take_while(|c| c.is_ascii_digit())
+                                        .collect::<String>()
+                                );
+                                let after = text[num_str.len()..].trim();
+                                if after.is_empty() {
+                                    (1, text.to_string()) // Just a number, treat as message
+                                } else {
+                                    (num_str.parse().unwrap_or(1), after.to_string())
+                                }
                             } else {
-                                (num_str.parse().unwrap_or(1), after.to_string())
-                            }
-                        } else {
-                            (1, text.to_string())
-                        };
-                        self.send_queued_message(message, ava_types::MessageTier::PostComplete { group });
+                                (1, text.to_string())
+                            };
+                        self.send_queued_message(
+                            message,
+                            ava_types::MessageTier::PostComplete { group },
+                        );
                         None // send_queued_message already displays the message
                     }
                 } else {
-                    Some((MessageKind::Error, "Usage: /later <message> — queue a post-complete message".to_string()))
+                    Some((
+                        MessageKind::Error,
+                        "Usage: /later <message> — queue a post-complete message".to_string(),
+                    ))
                 }
             }
             "/queue" => {
@@ -734,7 +443,9 @@ Keyboard shortcuts:
                     }
                     format!("Queued messages:\n{}", lines.join("\n"))
                 };
-                self.state.messages.push(UiMessage::transient(MessageKind::System, text));
+                self.state
+                    .messages
+                    .push(UiMessage::transient(MessageKind::System, text));
                 None
             }
             _ => {
@@ -745,7 +456,10 @@ Keyboard shortcuts:
                     // The caller (submit_goal) will call try_resolve_custom_command().
                     None
                 } else {
-                    Some((MessageKind::Error, format!("Unknown command: {cmd}. Type /help for available commands.")))
+                    Some((
+                        MessageKind::Error,
+                        format!("Unknown command: {cmd}. Type /help for available commands."),
+                    ))
                 }
             }
         }
@@ -754,7 +468,7 @@ Keyboard shortcuts:
 
 #[cfg(test)]
 mod tests {
-    use crate::app::{App, ModalType};
+    use crate::app::App;
     use crate::event::{AppEvent, ModelSwitchContext};
     use tempfile::tempdir;
     use tokio::sync::mpsc;
@@ -775,25 +489,6 @@ mod tests {
                 assert_eq!(result.model, "test-model");
                 assert!(matches!(result.context, ModelSwitchContext::SlashCommand));
                 assert!(result.result.is_err());
-            }
-            other => panic!("unexpected event: {other:?}"),
-        }
-    }
-
-    #[tokio::test]
-    async fn slash_tools_opens_modal_and_loads_async() {
-        let temp = tempdir().expect("tempdir");
-        let db_path = temp.path().join("data.db");
-        let mut app = App::test_new(&db_path);
-        let (tx, mut rx) = mpsc::unbounded_channel();
-
-        let result = app.handle_slash_command("/tools", Some(tx));
-
-        assert!(result.is_none());
-        assert!(matches!(app.state.active_modal, Some(ModalType::ToolList)));
-        match rx.recv().await {
-            Some(AppEvent::ToolListLoaded(Err(err))) => {
-                assert!(err.contains("AgentStack not initialised"));
             }
             other => panic!("unexpected event: {other:?}"),
         }

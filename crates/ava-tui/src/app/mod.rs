@@ -601,67 +601,6 @@ impl App {
         }
     }
 
-    /// Open the agent list modal showing sub-agent configuration from agents.toml.
-    pub(crate) fn open_agent_list(&mut self) {
-        let home = dirs::home_dir().unwrap_or_default();
-        let global_path = home.join(".ava").join("agents.toml");
-        let project_path = std::env::current_dir()
-            .unwrap_or_default()
-            .join(".ava")
-            .join("agents.toml");
-
-        let config = ava_config::AgentsConfig::load(&global_path, &project_path);
-
-        // Collect known agent types: always show "task", plus any explicitly configured
-        let mut agent_names: Vec<String> = vec!["task".to_string()];
-        for name in config.agents.keys() {
-            if !agent_names.contains(name) {
-                agent_names.push(name.clone());
-            }
-        }
-        agent_names.sort();
-
-        let items: Vec<SelectItem<String>> = agent_names
-            .iter()
-            .map(|name| {
-                let resolved = config.get_agent(name);
-                let status_text = if resolved.enabled {
-                    "enabled"
-                } else {
-                    "disabled"
-                };
-                let mut detail_parts: Vec<String> = vec![status_text.to_string()];
-                if let Some(ref model) = resolved.model {
-                    detail_parts.push(format!("model={model}"));
-                }
-                if let Some(turns) = resolved.max_turns {
-                    detail_parts.push(format!("max_turns={turns}"));
-                }
-                let detail = detail_parts.join("  ");
-                let status = if resolved.enabled {
-                    Some(crate::widgets::select_list::ItemStatus::Connected(
-                        "enabled".to_string(),
-                    ))
-                } else {
-                    Some(crate::widgets::select_list::ItemStatus::Info(
-                        "disabled".to_string(),
-                    ))
-                };
-                SelectItem {
-                    title: name.clone(),
-                    detail,
-                    section: Some("Sub-Agents".to_string()),
-                    status,
-                    value: name.clone(),
-                    enabled: true,
-                }
-            })
-            .collect();
-
-        self.state.agent_list = Some(SelectListState::new(items));
-        self.state.active_modal = Some(ModalType::AgentList);
-    }
-
     /// Open the theme selector modal with live preview.
     pub(crate) fn open_theme_selector(&mut self) {
         let current = &self.state.theme.name;
@@ -722,11 +661,15 @@ impl App {
             } else {
                 let mut msg = UiMessage::new(MessageKind::Assistant, content);
                 msg.is_streaming = true;
+                msg.started_at = Some(std::time::Instant::now());
+                msg.agent_mode = Some(self.state.agent_mode.label().to_string());
                 self.state.messages.push(msg);
             }
         } else {
             let mut msg = UiMessage::new(MessageKind::Assistant, content);
             msg.is_streaming = true;
+            msg.started_at = Some(std::time::Instant::now());
+            msg.agent_mode = Some(self.state.agent_mode.label().to_string());
             self.state.messages.push(msg);
         }
         if self.state.messages.auto_scroll {
@@ -744,6 +687,12 @@ impl App {
                 last.is_streaming = false;
                 if last.model_name.is_none() {
                     last.model_name = Some(self.state.agent.model_name.clone());
+                }
+                // Finalize response time from started_at
+                if last.response_time.is_none() {
+                    if let Some(started) = last.started_at {
+                        last.response_time = Some(started.elapsed().as_secs_f64());
+                    }
                 }
             }
         }

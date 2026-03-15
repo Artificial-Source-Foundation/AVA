@@ -17,77 +17,11 @@ impl App {
         Some(CustomCommandRegistry::resolve_prompt(custom_cmd, args))
     }
 
-    pub(super) fn handle_commands_command(
-        &mut self,
-        arg: Option<&str>,
-    ) -> Option<(MessageKind, String)> {
-        use crate::state::custom_commands::CustomCommandRegistry;
-
-        match arg {
-            Some("reload") => {
-                self.state.custom_commands.reload();
-                self.sync_custom_command_autocomplete();
-                let count = self.state.custom_commands.commands.len();
-                self.set_status(
-                    format!("Reloaded {count} custom commands"),
-                    StatusLevel::Info,
-                );
-                Some((
-                    MessageKind::System,
-                    format!("Reloaded {count} custom commands"),
-                ))
-            }
-            Some("init") => match CustomCommandRegistry::create_templates() {
-                Ok(msg) => {
-                    self.state.custom_commands.reload();
-                    self.sync_custom_command_autocomplete();
-                    self.set_status(&msg, StatusLevel::Info);
-                    Some((MessageKind::System, msg))
-                }
-                Err(err) => {
-                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                    Some((MessageKind::Error, err))
-                }
-            },
-            Some("list") | None => {
-                let commands = &self.state.custom_commands.commands;
-                if commands.is_empty() {
-                    Some((
-                        MessageKind::System,
-                        "No custom commands found.\nAdd .toml files to .ava/commands/ or ~/.ava/commands/.\nRun /commands init to create an example.".to_string(),
-                    ))
-                } else {
-                    let mut lines = Vec::new();
-                    lines.push(format!("Custom commands ({}):", commands.len()));
-                    for cmd in commands {
-                        let source = cmd.source.label();
-                        let params = if cmd.params.is_empty() {
-                            String::new()
-                        } else {
-                            let param_names: Vec<&str> =
-                                cmd.params.iter().map(|p| p.name.as_str()).collect();
-                            format!(" [{}]", param_names.join(", "))
-                        };
-                        lines.push(format!(
-                            "  /{}{} -- {} ({})",
-                            cmd.name, params, cmd.description, source
-                        ));
-                    }
-                    Some((MessageKind::System, lines.join("\n")))
-                }
-            }
-            Some(sub) => Some((
-                MessageKind::Error,
-                format!("Unknown /commands subcommand: {sub}. Use: list, reload, init"),
-            )),
-        }
-    }
-
     pub(super) fn handle_hooks_command(
         &mut self,
         arg: Option<&str>,
     ) -> Option<(MessageKind, String)> {
-        use crate::hooks::{HookContext, HookEvent, HookRegistry, HookRunner};
+        use crate::hooks::{HookContext, HookEvent, HookRunner};
 
         match arg {
             Some("reload") => {
@@ -96,17 +30,6 @@ impl App {
                 self.set_status(format!("Reloaded {count} hooks"), StatusLevel::Info);
                 Some((MessageKind::System, format!("Reloaded {count} hooks")))
             }
-            Some("init") => match HookRegistry::create_templates() {
-                Ok(msg) => {
-                    self.state.hooks.reload();
-                    self.set_status(&msg, StatusLevel::Info);
-                    Some((MessageKind::System, msg))
-                }
-                Err(err) => {
-                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                    Some((MessageKind::Error, err))
-                }
-            },
             Some(sub) if sub.starts_with("dry-run") => {
                 let rest = sub.strip_prefix("dry-run").unwrap_or("").trim();
                 let parts: Vec<&str> = rest.splitn(2, ' ').collect();
@@ -156,7 +79,7 @@ impl App {
                 if self.state.hooks.is_empty() {
                     Some((
                         MessageKind::System,
-                        "No hooks loaded.\nAdd .toml files to .ava/hooks/ or ~/.ava/hooks/.\nRun /hooks init to create example templates.".to_string(),
+                        "No hooks loaded.\nAdd .toml files to .ava/hooks/ or ~/.ava/hooks/.\nRun /init to create example templates.".to_string(),
                     ))
                 } else {
                     let mut lines = Vec::new();
@@ -183,9 +106,7 @@ impl App {
             }
             Some(sub) => Some((
                 MessageKind::Error,
-                format!(
-                    "Unknown /hooks subcommand: {sub}. Use: list, reload, init, dry-run <event>"
-                ),
+                format!("Unknown /hooks subcommand: {sub}. Use: list, reload, dry-run <event>"),
             )),
         }
     }
@@ -339,57 +260,4 @@ impl App {
             },
         }
     }
-
-    pub(super) fn format_credentials_list_result(
-        result: Result<String, String>,
-    ) -> crate::event::CommandMessageResult {
-        match result {
-            Ok(msg) => {
-                let masked = mask_credentials_output(&msg);
-                crate::event::CommandMessageResult {
-                    kind: MessageKind::System,
-                    content: format!("Credentials:\n{masked}"),
-                    status: Some((StatusLevel::Info, "Credentials loaded".to_string())),
-                    transient: true,
-                }
-            }
-            Err(err) => crate::event::CommandMessageResult {
-                kind: MessageKind::Error,
-                content: format!("Failed: {err}"),
-                status: Some((StatusLevel::Error, format!("Failed: {err}"))),
-                transient: false,
-            },
-        }
-    }
-}
-
-fn mask_key(key: &str) -> String {
-    if key.len() <= 4 {
-        "****".to_string()
-    } else {
-        format!("****{}", &key[key.len() - 4..])
-    }
-}
-
-/// Mask API keys in credentials list output. Looks for lines containing
-/// key-like strings (long alphanumeric sequences) and masks them.
-pub(super) fn mask_credentials_output(output: &str) -> String {
-    output
-        .lines()
-        .map(|line| {
-            // Look for API key patterns: long alphanumeric strings, typically after ": " or "= "
-            if let Some(idx) = line.find(": ") {
-                let (prefix, rest) = line.split_at(idx + 2);
-                let trimmed = rest.trim();
-                if trimmed.len() > 8 {
-                    format!("{}{}", prefix, mask_key(trimmed))
-                } else {
-                    line.to_string()
-                }
-            } else {
-                line.to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }

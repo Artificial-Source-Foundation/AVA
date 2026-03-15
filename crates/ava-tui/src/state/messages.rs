@@ -76,6 +76,17 @@ const LEFT_BAR: &str = "\u{258E}";
 /// Padding after the left bar (design: content padding 16px ≈ 2 chars).
 const BAR_PAD: &str = "  ";
 
+/// Format a duration in seconds for display: `3.2s`, `1m 24s`, `2m 0s`.
+fn format_duration_secs(secs: f64) -> String {
+    if secs < 60.0 {
+        format!("{secs:.1}s")
+    } else {
+        let mins = secs as u64 / 60;
+        let rem = secs as u64 % 60;
+        format!("{mins}m {rem}s")
+    }
+}
+
 impl UiMessage {
     pub fn new(kind: MessageKind, content: impl Into<String>) -> Self {
         Self {
@@ -265,6 +276,8 @@ impl UiMessage {
             }
             if ch == ' ' {
                 last_space_byte = Some(i + 1); // break after the space
+            } else if ch == '-' {
+                last_space_byte = Some(i + ch.len_utf8()); // break after the hyphen
             }
             col += w;
             byte_at_max = i + ch.len_utf8();
@@ -285,6 +298,16 @@ impl UiMessage {
     }
 
     pub fn to_lines(&self, theme: &Theme, spinner_tick: usize, width: u16) -> Vec<Line<'static>> {
+        self.to_lines_with_options(theme, spinner_tick, width, true)
+    }
+
+    pub fn to_lines_with_options(
+        &self,
+        theme: &Theme,
+        spinner_tick: usize,
+        width: u16,
+        show_thinking: bool,
+    ) -> Vec<Line<'static>> {
         let bar_color = self.bar_color(theme);
 
         let mut lines = match self.kind {
@@ -292,36 +315,22 @@ impl UiMessage {
                 let mut content_lines = markdown_to_lines(&self.content, theme);
                 Self::prepend_bars(&mut content_lines, bar_color, width);
 
-                // Add metadata line (model name, response time)
-                if let Some(ref model) = self.model_name {
-                    let mut meta_spans = vec![
-                        Span::styled(LEFT_BAR, Style::default().fg(bar_color)),
-                        Span::raw(BAR_PAD),
-                    ];
-                    let meta_text = if let Some(secs) = self.response_time {
-                        format!("{model} \u{00b7} {secs:.1}s")
-                    } else {
-                        model.clone()
-                    };
-                    meta_spans.push(Span::styled(
-                        meta_text,
-                        Style::default().fg(theme.text_dimmed),
-                    ));
-                    content_lines.push(Line::from(meta_spans));
-                }
-
-                // Per-message footer: mode + model + duration (only after streaming completes)
+                // Per-message footer: ■ mode · model · duration (only after streaming completes)
                 if !self.is_streaming {
-                    if let Some(ref started) = self.started_at {
-                        let duration = started.elapsed();
+                    if let Some(ref model) = self.model_name {
                         let mode_label = self.agent_mode.as_deref().unwrap_or("Code");
-                        let model_label = self.model_name.as_deref().unwrap_or("unknown");
-                        let footer_text = format!(
-                            "\u{25a0} {} \u{00b7} {} \u{00b7} {:.1}s",
-                            mode_label,
-                            model_label,
-                            duration.as_secs_f64()
-                        );
+                        let duration_part = if let Some(secs) = self.response_time {
+                            format!(" \u{00b7} {}", format_duration_secs(secs))
+                        } else if let Some(ref started) = self.started_at {
+                            format!(
+                                " \u{00b7} {}",
+                                format_duration_secs(started.elapsed().as_secs_f64())
+                            )
+                        } else {
+                            String::new()
+                        };
+                        let footer_text =
+                            format!("\u{25a0} {mode_label} \u{00b7} {model}{duration_part}");
                         let mut footer_spans = vec![
                             Span::styled(LEFT_BAR, Style::default().fg(bar_color)),
                             Span::raw(BAR_PAD),
@@ -476,7 +485,23 @@ impl UiMessage {
                     .add_modifier(Modifier::ITALIC);
                 let dot = Span::styled("\u{25cf} ", Style::default().fg(theme.primary));
 
-                if self.content.is_empty() {
+                if !show_thinking {
+                    // Collapsed single-line placeholder when thinking visibility is off
+                    let dim_style = Style::default()
+                        .fg(theme.text_dimmed)
+                        .add_modifier(Modifier::DIM | Modifier::ITALIC);
+                    let mut result = vec![Line::from(vec![
+                        Span::styled(
+                            "\u{25cf} ",
+                            Style::default()
+                                .fg(theme.text_dimmed)
+                                .add_modifier(Modifier::DIM),
+                        ),
+                        Span::styled("Thinking (hidden)", dim_style),
+                    ])];
+                    Self::prepend_bars(&mut result, bar_color, width);
+                    result
+                } else if self.content.is_empty() {
                     let mut result =
                         vec![Line::from(vec![dot, Span::styled("Thinking...", style)])];
                     Self::prepend_bars(&mut result, bar_color, width);
@@ -484,25 +509,27 @@ impl UiMessage {
                 } else {
                     let content_lines: Vec<&str> = self.content.lines().collect();
                     let total = content_lines.len();
-                    if total > 3 {
-                        // Collapsed thinking: show summary
-                        let mut result = vec![Line::from(vec![
-                            dot,
-                            Span::styled(format!("\u{25b6} Thinking ({total} lines)..."), style),
-                        ])];
-                        Self::prepend_bars(&mut result, bar_color, width);
-                        result
-                    } else {
-                        // Header line
-                        let mut result =
-                            vec![Line::from(vec![dot, Span::styled("Thinking", style)])];
-                        for text_line in &content_lines {
-                            result
-                                .push(Line::from(vec![Span::styled(text_line.to_string(), style)]));
-                        }
-                        Self::prepend_bars(&mut result, bar_color, width);
-                        result
+                    let max_visible = 5;
+
+                    // Header line
+                    let mut result = vec![Line::from(vec![dot, Span::styled("Thinking", style)])];
+
+                    // Show up to max_visible lines of content
+                    let show = total.min(max_visible);
+                    for text_line in &content_lines[..show] {
+                        result.push(Line::from(vec![Span::styled(text_line.to_string(), style)]));
                     }
+
+                    // Collapse indicator for remaining lines
+                    if total > max_visible {
+                        result.push(Line::from(vec![Span::styled(
+                            format!("\u{25b6} ... ({} more lines)", total - max_visible),
+                            style,
+                        )]));
+                    }
+
+                    Self::prepend_bars(&mut result, bar_color, width);
+                    result
                 }
             }
             MessageKind::Error => {
@@ -519,14 +546,18 @@ impl UiMessage {
                 result
             }
             MessageKind::System => {
-                // System messages: no left bar, italic, dimmed, centered
-                vec![Line::from(Span::styled(
-                    self.content.clone(),
-                    Style::default()
-                        .fg(theme.text_dimmed)
-                        .add_modifier(Modifier::ITALIC),
-                ))
-                .alignment(Alignment::Center)]
+                // System messages: no left bar, italic, dimmed, centered.
+                // Wrap to available width so long system messages don't overflow.
+                let style = Style::default()
+                    .fg(theme.text_dimmed)
+                    .add_modifier(Modifier::ITALIC);
+                let content_width = width as usize;
+                let spans = vec![Span::styled(self.content.clone(), style)];
+                let wrapped = Self::wrap_line_spans(spans, content_width);
+                wrapped
+                    .into_iter()
+                    .map(|row| Line::from(row).alignment(Alignment::Center))
+                    .collect()
             }
             MessageKind::SubAgent => {
                 let data = self.sub_agent.as_ref();

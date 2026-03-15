@@ -275,7 +275,7 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             } else {
                 Style::default().fg(state.theme.accent)
             };
-            (format!("{name}{elapsed_str}"), s)
+            (format!("running {name}...{elapsed_str}"), s)
         } else {
             (
                 state.agent.activity.to_string(),

@@ -42,7 +42,6 @@ fn help_returns_system_message() {
     assert!(msg.contains("/new"), "help should mention /new");
     assert!(msg.contains("/init"), "help should mention /init");
     assert!(msg.contains("/commit"), "help should mention /commit");
-    assert!(msg.contains("/tools"), "help should mention /tools");
     assert!(msg.contains("/mcp"), "help should mention /mcp");
     assert!(msg.contains("/connect"), "help should mention /connect");
     assert!(
@@ -206,65 +205,48 @@ fn theme_with_invalid_name_returns_error() {
 // ── /think ───────────────────────────────────────────────────────────────
 
 #[test]
-fn think_no_args_cycles_level() {
+fn think_no_args_toggles_visibility() {
     let (mut app, _tmp) = make_app();
-    // Default test model uses binary thinking (Off -> High)
+    // Default: show_thinking = true, toggling hides it
+    assert!(app.state.agent.show_thinking);
     let result = app.test_slash_command("/think");
-    assert!(result.is_some());
-    let (kind, msg) = result.unwrap();
-    assert_eq!(kind, MessageKind::System);
-    assert!(msg.contains("Thinking level:"), "should show current level");
-    assert!(
-        msg.contains("high"),
-        "binary cycling from Off should land on high"
-    );
+    // /think now pushes transient and returns None
+    assert!(result.is_none());
+    assert!(!app.state.agent.show_thinking);
+    // Toggle again to show
+    let result = app.test_slash_command("/think");
+    assert!(result.is_none());
+    assert!(app.state.agent.show_thinking);
 }
 
 #[test]
-fn think_cycles_through_levels() {
+fn think_show_hide_subcommands() {
     let (mut app, _tmp) = make_app();
-    // Default test model uses binary thinking: Off -> High -> Off -> High
-    let expected = ["high", "off", "high", "off"];
-    for level_name in &expected {
-        let result = app.test_slash_command("/think");
-        let (_, msg) = result.unwrap();
-        assert!(
-            msg.contains(level_name),
-            "expected {level_name} but got: {msg}"
-        );
-    }
+    // /think hide
+    let result = app.test_slash_command("/think hide");
+    assert!(result.is_none());
+    assert!(!app.state.agent.show_thinking);
+    // /think show
+    let result = app.test_slash_command("/think show");
+    assert!(result.is_none());
+    assert!(app.state.agent.show_thinking);
+    // /think off
+    let result = app.test_slash_command("/think off");
+    assert!(result.is_none());
+    assert!(!app.state.agent.show_thinking);
+    // /think on
+    let result = app.test_slash_command("/think on");
+    assert!(result.is_none());
+    assert!(app.state.agent.show_thinking);
 }
 
 #[test]
-fn think_with_valid_levels() {
-    for (input, expected) in [
-        ("off", "off"),
-        ("low", "low"),
-        ("med", "med"),
-        ("high", "high"),
-        ("max", "max"),
-    ] {
-        let (mut app, _tmp) = make_app();
-        let result = app.test_slash_command(&format!("/think {input}"));
-        assert!(result.is_some(), "/think {input} should return Some");
-        let (kind, msg) = result.unwrap();
-        assert_eq!(kind, MessageKind::System);
-        assert!(
-            msg.contains(expected),
-            "for /think {input}: expected '{expected}' in '{msg}'"
-        );
-    }
-}
-
-#[test]
-fn think_with_invalid_level_returns_error() {
+fn think_with_invalid_arg_returns_error() {
     let (mut app, _tmp) = make_app();
     let result = app.test_slash_command("/think banana");
     assert!(result.is_some());
-    let (kind, msg) = result.unwrap();
+    let (kind, _msg) = result.unwrap();
     assert_eq!(kind, MessageKind::Error);
-    assert!(msg.contains("Invalid level"), "should say invalid level");
-    assert!(msg.contains("/think"), "should show usage");
 }
 
 // ── /permissions ─────────────────────────────────────────────────────────
@@ -425,21 +407,6 @@ async fn providers_alias_opens_modal() {
     let result = app.test_slash_command("/providers");
     assert!(result.is_none());
     assert_eq!(app.state.active_modal, Some(ModalType::ProviderConnect));
-}
-
-// ── /tools ───────────────────────────────────────────────────────────────
-// /tools (no args) uses tokio::task::block_in_place for tool listing.
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tools_no_args_opens_tool_list_modal() {
-    let (mut app, _tmp) = make_app();
-    let result = app.test_slash_command("/tools");
-    assert!(result.is_none(), "/tools should return None (opens modal)");
-    assert_eq!(
-        app.state.active_modal,
-        Some(ModalType::ToolList),
-        "should open tool list modal"
-    );
 }
 
 // ── unknown command ──────────────────────────────────────────────────────

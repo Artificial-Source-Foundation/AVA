@@ -132,6 +132,56 @@ impl PermissionInspector for DefaultInspector {
             }
         }
 
+        // 2b. Auto-approve file/search tools targeting paths inside the project root
+        let project_safe_tools = ["read", "write", "edit", "glob", "grep"];
+        if project_safe_tools.contains(&tool_name) {
+            let paths = extract_paths(tool_name, arguments);
+            let workspace = &context.workspace_root;
+            let all_inside = !paths.is_empty()
+                && paths.iter().all(|p| {
+                    let pb = std::path::Path::new(p);
+                    // Check if the path is inside workspace or .ava/ directory
+                    pb.starts_with(workspace)
+                });
+            if all_inside {
+                // Writes to .ava/ are always safe (AVA's own config/plans directory)
+                let all_ava_dir = paths.iter().all(|p| {
+                    let pb = std::path::Path::new(p);
+                    pb.starts_with(workspace.join(".ava"))
+                });
+                if all_ava_dir {
+                    return InspectionResult {
+                        action: Action::Allow,
+                        reason: "path inside .ava/ directory (AVA config)".to_string(),
+                        risk_level: RiskLevel::Safe,
+                        tags,
+                        warnings,
+                    };
+                }
+                risk_level = RiskLevel::Safe;
+            }
+        }
+
+        // 2c. Auto-approve writes to .ava/ directory regardless of tool
+        {
+            let paths = extract_paths(tool_name, arguments);
+            let workspace = &context.workspace_root;
+            let all_ava = !paths.is_empty()
+                && paths.iter().all(|p| {
+                    let pb = std::path::Path::new(p);
+                    pb.starts_with(workspace.join(".ava"))
+                });
+            if all_ava {
+                return InspectionResult {
+                    action: Action::Allow,
+                    reason: "path inside .ava/ directory (AVA config)".to_string(),
+                    risk_level: RiskLevel::Safe,
+                    tags,
+                    warnings,
+                };
+            }
+        }
+
         // 3. Auto-approve mode: allow everything EXCEPT what was already blocked above
         if context.auto_approve {
             return InspectionResult {

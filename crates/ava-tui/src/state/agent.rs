@@ -44,7 +44,8 @@ pub struct SubAgentInfo {
 pub enum AgentMode {
     #[default]
     Code, // Full tool access, standard execution
-    Plan, // Read-only tools only, analysis/planning
+    Plan,   // Read-only tools only, analysis/planning
+    Praxis, // Multi-agent orchestration via Praxis
 }
 
 impl AgentMode {
@@ -52,24 +53,38 @@ impl AgentMode {
         match self {
             Self::Code => "Code",
             Self::Plan => "Plan",
+            Self::Praxis => "Praxis",
         }
     }
 
     pub fn cycle_next(&self) -> Self {
         match self {
             Self::Code => Self::Plan,
-            Self::Plan => Self::Code,
+            Self::Plan => Self::Praxis,
+            Self::Praxis => Self::Code,
         }
     }
 
     pub fn cycle_prev(&self) -> Self {
-        self.cycle_next()
+        match self {
+            Self::Code => Self::Praxis,
+            Self::Plan => Self::Code,
+            Self::Praxis => Self::Plan,
+        }
     }
 
     /// Returns mode-specific system prompt suffix, or None for Code mode.
     pub fn prompt_suffix(&self) -> Option<&'static str> {
         match self {
             Self::Code => None,
+            Self::Praxis => Some(
+                "You are in Praxis mode — multi-agent orchestration. Use the task tool to decompose \
+                 complex goals into sub-tasks and delegate them to sub-agents. Each sub-agent runs \
+                 independently with its own context and tool access. Coordinate results across \
+                 sub-agents and synthesize their outputs into a coherent solution.\n\n\
+                 Prefer decomposition: break large goals into 2-5 focused sub-tasks rather than \
+                 attempting everything in a single pass."
+            ),
             Self::Plan => Some(
                 "You are in Plan mode. You can analyze code, create plans, and write plan documents \
                  to .ava/plans/*.md. You cannot modify source code files or run destructive commands. \
@@ -92,6 +107,7 @@ pub enum AgentActivity {
     #[default]
     Idle,
     Thinking,
+    Streaming,
     ExecutingTool(String),
 }
 
@@ -99,8 +115,9 @@ impl std::fmt::Display for AgentActivity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Idle => write!(f, "idle"),
-            Self::Thinking => write!(f, "thinking"),
-            Self::ExecutingTool(name) => write!(f, "running {name}"),
+            Self::Thinking => write!(f, "thinking..."),
+            Self::Streaming => write!(f, "streaming..."),
+            Self::ExecutingTool(name) => write!(f, "running {name}..."),
         }
     }
 }
@@ -130,6 +147,8 @@ pub struct AgentState {
     pub recent_models: Vec<String>,
     /// Current thinking/reasoning level.
     pub thinking_level: ThinkingLevel,
+    /// Whether thinking blocks are shown in the UI (toggled via `/think`).
+    pub show_thinking: bool,
     /// Sub-agents spawned by the task tool.
     pub sub_agents: Vec<SubAgentInfo>,
     cancel: Option<CancellationToken>,
@@ -218,6 +237,7 @@ impl AgentState {
                 workflow_iteration: None,
                 recent_models,
                 thinking_level: ThinkingLevel::Off,
+                show_thinking: true,
                 sub_agents: Vec::new(),
                 cancel: None,
                 task: None,
@@ -561,6 +581,7 @@ impl AgentState {
             workflow_iteration: None,
             recent_models: Vec::new(),
             thinking_level: ThinkingLevel::Off,
+            show_thinking: true,
             sub_agents: Vec::new(),
             cancel: None,
             task: None,
@@ -571,7 +592,7 @@ impl AgentState {
     /// Sync the agent mode prompt suffix and plan_mode flag to the stack.
     pub fn set_mode(&self, mode: super::agent::AgentMode) {
         let suffix = mode.prompt_suffix().map(|s| s.to_string());
-        let is_plan = matches!(mode, super::agent::AgentMode::Plan);
+        let is_plan = matches!(mode, AgentMode::Plan);
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
             tokio::spawn(async move {

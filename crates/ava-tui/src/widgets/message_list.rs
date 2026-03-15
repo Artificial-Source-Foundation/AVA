@@ -1,11 +1,11 @@
 use crate::app::{AppState, ViewMode};
 use crate::state::messages::{MessageKind, UiMessage};
-use crate::widgets::message::{render_action_group, render_message};
+use crate::widgets::message::{render_action_group, render_message_with_options};
 use crate::widgets::welcome::render_welcome;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
+use ratatui::widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 
 enum RenderBlock<'a> {
@@ -132,6 +132,10 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
 
     // Empty state: show the welcome screen across the full area (main view only).
     if messages_source.is_empty() {
+        // Clear the area first to prevent ghost characters from prior renders.
+        let bg_fill = Block::default().style(Style::default().bg(state.theme.bg_deep));
+        frame.render_widget(bg_fill, area);
+
         if matches!(state.view_mode, ViewMode::Main) {
             render_welcome(frame, area, state);
         } else {
@@ -270,17 +274,19 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     let blocks = derive_blocks(messages_source);
     // Reserve 1 column for the scrollbar so text doesn't overlap it.
     let content_width = area.width.saturating_sub(1);
+    let show_thinking = state.agent.show_thinking;
 
     for (i, block) in blocks.iter().enumerate() {
         if i > 0 {
             lines.push(Line::raw(""));
         }
         match block {
-            RenderBlock::Message(message) => lines.extend(render_message(
+            RenderBlock::Message(message) => lines.extend(render_message_with_options(
                 message,
                 &state.theme,
                 spinner_tick,
                 content_width,
+                show_thinking,
             )),
             RenderBlock::ActionGroup { messages, active } => lines.extend(render_action_group(
                 messages,
@@ -313,16 +319,29 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         state.messages.scroll_offset = max_offset;
     }
 
+    // Clear the entire message area with a background fill so no ghost characters
+    // from previous frames or overlapping widgets persist between renders.
+    let bg_fill = Block::default().style(Style::default().bg(state.theme.bg_deep));
+    frame.render_widget(bg_fill, area);
+
+    // Render the paragraph in a narrower area so text doesn't overlap the scrollbar column.
+    let content_area = Rect {
+        width: area.width.saturating_sub(1),
+        ..area
+    };
     let widget = Paragraph::new(lines).scroll((state.messages.scroll_offset, 0));
-    frame.render_widget(widget, area);
+    frame.render_widget(widget, content_area);
 
     // Render scroll indicator when not at bottom (content overflows).
+    // Use the full `area` so the scrollbar sits flush at the rightmost column.
     if total > visible_height && !state.messages.auto_scroll {
         let mut scrollbar_state = ScrollbarState::new(max_offset as usize)
             .position(state.messages.scroll_offset as usize);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_symbol("\u{2593}")
             .track_symbol(Some("\u{2591}"))
+            .begin_symbol(None)
+            .end_symbol(None)
             .style(Style::default().fg(state.theme.text_dimmed));
         frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
     }

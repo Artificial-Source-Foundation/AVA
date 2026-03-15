@@ -384,7 +384,7 @@ impl InputState {
                 let mut items = vec![
                     AutocompleteItem::new(
                         "btw",
-                        "Ask a side question without interrupting the agent",
+                        "Start a side conversation branch (like git stash for chat)",
                     ),
                     AutocompleteItem::new("help", "Show available commands"),
                     AutocompleteItem::new("model", "Switch model"),
@@ -395,9 +395,9 @@ impl InputState {
                     AutocompleteItem::new("compact", "Compact conversation to save context window"),
                     AutocompleteItem::new("think", "Set thinking level"),
                     AutocompleteItem::new("theme", "Switch theme"),
-                    AutocompleteItem::new("status", "Show session info"),
+                    AutocompleteItem::new("new", "Start a new session"),
+                    AutocompleteItem::new("models", "Switch model (alias)"),
                     AutocompleteItem::new("init", "Initialize AVA for this project"),
-                    AutocompleteItem::new("diff", "Show git changes"),
                     AutocompleteItem::new(
                         "commit",
                         "Inspect commit readiness and suggest a message",
@@ -412,7 +412,6 @@ impl InputState {
                     AutocompleteItem::new("tools init", "Create tool templates"),
                     AutocompleteItem::new("mcp", "List MCP servers"),
                     AutocompleteItem::new("mcp reload", "Reload MCP config"),
-                    AutocompleteItem::new("bg", "Launch a goal as a background task"),
                     AutocompleteItem::new("praxis", "Launch a Praxis multi-agent task"),
                     AutocompleteItem::new("tasks", "Show background task list"),
                     AutocompleteItem::new("agents", "Show sub-agent configuration"),

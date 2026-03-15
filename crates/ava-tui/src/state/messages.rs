@@ -48,6 +48,16 @@ pub struct UiMessage {
     pub response_time: Option<f64>,
     /// Sub-agent metadata (only set for `MessageKind::SubAgent`).
     pub sub_agent: Option<SubAgentData>,
+    /// Tool name (for ToolCall/ToolResult messages).
+    pub tool_name: Option<String>,
+    /// Agent mode when this message was created.
+    pub agent_mode: Option<String>,
+    /// When the message started (for computing duration in footer).
+    pub started_at: Option<std::time::Instant>,
+    /// Transient messages are removed when the user sends a new message.
+    /// Used for system info commands (/help, /queue, etc.) that should not
+    /// pollute the chat history.
+    pub transient: bool,
 }
 
 /// Braille spinner frames for streaming/working animation.
@@ -75,7 +85,19 @@ impl UiMessage {
             model_name: None,
             response_time: None,
             sub_agent: None,
+            tool_name: None,
+            agent_mode: None,
+            started_at: None,
+            transient: false,
         }
+    }
+
+    /// Create a transient message that will be removed when the user sends
+    /// their next message. Ideal for info-only output (/help, /queue, etc.).
+    pub fn transient(kind: MessageKind, content: impl Into<String>) -> Self {
+        let mut msg = Self::new(kind, content);
+        msg.transient = true;
+        msg
     }
 
     /// Returns the left-bar color for this message kind.
@@ -288,6 +310,32 @@ impl UiMessage {
                     content_lines.push(Line::from(meta_spans));
                 }
 
+                // Per-message footer: mode + model + duration (only after streaming completes)
+                if !self.is_streaming {
+                    if let Some(ref started) = self.started_at {
+                        let duration = started.elapsed();
+                        let mode_label = self.agent_mode.as_deref().unwrap_or("Code");
+                        let model_label = self.model_name.as_deref().unwrap_or("unknown");
+                        let footer_text = format!(
+                            "\u{25a0} {} \u{00b7} {} \u{00b7} {:.1}s",
+                            mode_label,
+                            model_label,
+                            duration.as_secs_f64()
+                        );
+                        let mut footer_spans = vec![
+                            Span::styled(LEFT_BAR, Style::default().fg(bar_color)),
+                            Span::raw(BAR_PAD),
+                        ];
+                        footer_spans.push(Span::styled(
+                            footer_text,
+                            Style::default()
+                                .fg(theme.text_dimmed)
+                                .add_modifier(Modifier::DIM),
+                        ));
+                        content_lines.push(Line::from(footer_spans));
+                    }
+                }
+
                 content_lines
             }
             MessageKind::User => {
@@ -338,33 +386,86 @@ impl UiMessage {
                 result
             }
             MessageKind::ToolResult => {
-                // Truncate to max 5 lines, dimmed
+                let dim_style = Style::default()
+                    .fg(theme.text_dimmed)
+                    .add_modifier(Modifier::DIM);
+                let tool = self.tool_name.as_deref().unwrap_or("");
                 let content_lines: Vec<&str> = self.content.lines().collect();
-                let truncated = content_lines.len() > 5;
                 let total = content_lines.len();
-                let display_lines = if truncated {
-                    &content_lines[..5]
-                } else {
-                    &content_lines[..]
-                };
 
                 let mut result = Vec::new();
-                for (i, line) in display_lines.iter().enumerate() {
-                    let prefix = if i == 0 { "\u{25be} " } else { "  " };
-                    result.push(Line::from(Span::styled(
-                        format!("{prefix}{line}"),
-                        Style::default()
-                            .fg(theme.text_dimmed)
-                            .add_modifier(Modifier::DIM),
-                    )));
-                }
-                if truncated {
-                    result.push(Line::from(Span::styled(
-                        format!("  ... ({} more lines)", total - 5),
-                        Style::default()
-                            .fg(theme.text_dimmed)
-                            .add_modifier(Modifier::DIM),
-                    )));
+
+                match tool {
+                    // Show full output for edit/write tools
+                    "edit" | "write" | "multiedit" | "apply_patch" => {
+                        for (i, line) in content_lines.iter().enumerate() {
+                            let prefix = if i == 0 { "\u{25be} " } else { "  " };
+                            result.push(Line::from(Span::styled(
+                                format!("{prefix}{line}"),
+                                dim_style,
+                            )));
+                        }
+                    }
+                    // Read: show summary
+                    "read" => {
+                        let filename = content_lines
+                            .first()
+                            .and_then(|l| l.split_whitespace().last())
+                            .unwrap_or("file");
+                        result.push(Line::from(Span::styled(
+                            format!("\u{25be} \u{1f4c4} Read {filename} ({total} lines)"),
+                            dim_style,
+                        )));
+                    }
+                    // Bash: show command + max 5 lines
+                    "bash" => {
+                        let cmd_line = content_lines.first().copied().unwrap_or("");
+                        result.push(Line::from(Span::styled(
+                            format!("\u{25be} $ {cmd_line}"),
+                            dim_style,
+                        )));
+                        let output_lines = if total > 1 { &content_lines[1..] } else { &[] };
+                        let max_lines = 5;
+                        let show = output_lines.len().min(max_lines);
+                        for line in &output_lines[..show] {
+                            result.push(Line::from(Span::styled(format!("  {line}"), dim_style)));
+                        }
+                        if output_lines.len() > max_lines {
+                            result.push(Line::from(Span::styled(
+                                format!("  ... ({} more lines)", output_lines.len() - max_lines),
+                                dim_style,
+                            )));
+                        }
+                    }
+                    // Glob/grep: show match count summary
+                    "glob" | "grep" => {
+                        result.push(Line::from(Span::styled(
+                            format!("\u{25be} {total} matches"),
+                            dim_style,
+                        )));
+                    }
+                    // Default: max 5 lines
+                    _ => {
+                        let truncated = total > 5;
+                        let display_lines = if truncated {
+                            &content_lines[..5]
+                        } else {
+                            &content_lines[..]
+                        };
+                        for (i, line) in display_lines.iter().enumerate() {
+                            let prefix = if i == 0 { "\u{25be} " } else { "  " };
+                            result.push(Line::from(Span::styled(
+                                format!("{prefix}{line}"),
+                                dim_style,
+                            )));
+                        }
+                        if truncated {
+                            result.push(Line::from(Span::styled(
+                                format!("  ... ({} more lines)", total - 5),
+                                dim_style,
+                            )));
+                        }
+                    }
                 }
                 Self::prepend_bars(&mut result, bar_color, width);
                 result
@@ -381,14 +482,27 @@ impl UiMessage {
                     Self::prepend_bars(&mut result, bar_color, width);
                     result
                 } else {
-                    // Header line
-                    let mut result = vec![Line::from(vec![dot, Span::styled("Thinking", style)])];
-                    // Full thinking content, split by newlines
-                    for text_line in self.content.lines() {
-                        result.push(Line::from(vec![Span::styled(text_line.to_string(), style)]));
+                    let content_lines: Vec<&str> = self.content.lines().collect();
+                    let total = content_lines.len();
+                    if total > 3 {
+                        // Collapsed thinking: show summary
+                        let mut result = vec![Line::from(vec![
+                            dot,
+                            Span::styled(format!("\u{25b6} Thinking ({total} lines)..."), style),
+                        ])];
+                        Self::prepend_bars(&mut result, bar_color, width);
+                        result
+                    } else {
+                        // Header line
+                        let mut result =
+                            vec![Line::from(vec![dot, Span::styled("Thinking", style)])];
+                        for text_line in &content_lines {
+                            result
+                                .push(Line::from(vec![Span::styled(text_line.to_string(), style)]));
+                        }
+                        Self::prepend_bars(&mut result, bar_color, width);
+                        result
                     }
-                    Self::prepend_bars(&mut result, bar_color, width);
-                    result
                 }
             }
             MessageKind::Error => {
@@ -672,6 +786,10 @@ impl Default for MessageState {
 
 impl MessageState {
     pub fn push(&mut self, message: UiMessage) {
+        // Remove transient messages when the user sends a new message.
+        if matches!(message.kind, MessageKind::User) {
+            self.messages.retain(|m| !m.transient);
+        }
         self.messages.push(message);
         if !self.auto_scroll {
             self.unseen_count += 1;

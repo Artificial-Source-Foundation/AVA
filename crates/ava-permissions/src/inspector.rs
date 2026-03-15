@@ -95,10 +95,8 @@ impl PermissionInspector for DefaultInspector {
                     };
                 }
 
-                // Upgrade risk from classifier
-                if classification.risk_level > risk_level {
-                    risk_level = classification.risk_level;
-                }
+                // Apply classifier risk (both upgrades AND downgrades from base profile)
+                risk_level = classification.risk_level;
                 for tag in &classification.tags {
                     if !tags.contains(tag) {
                         tags.push(*tag);
@@ -374,12 +372,13 @@ mod tests {
     }
 
     #[test]
-    fn bash_exceeds_standard_policy_threshold() {
+    fn safe_bash_auto_approved_by_policy() {
         let inspector = default_inspector();
         let ctx = test_context(false);
         let result = inspector.inspect("bash", &serde_json::json!({"command": "ls -la"}), &ctx);
-        // Safe command but bash base profile is Medium > Low threshold → Ask
-        assert_eq!(result.action, Action::Ask);
+        // Classifier downgrades to Safe, which is within standard policy threshold (Low)
+        assert_eq!(result.risk_level, RiskLevel::Safe);
+        assert_eq!(result.action, Action::Allow);
     }
 
     #[test]
@@ -581,5 +580,36 @@ mod tests {
             );
             assert_eq!(result.action, Action::Allow, "expected Allow for {tool}");
         }
+    }
+
+    // === UX-9: Safe bash commands auto-approve, risky ask, critical block ===
+
+    #[test]
+    fn safe_bash_auto_approved() {
+        let inspector = default_inspector();
+        let ctx = test_context(false);
+        let result = inspector.inspect("bash", &serde_json::json!({"command": "ls"}), &ctx);
+        assert_eq!(result.risk_level, RiskLevel::Safe);
+    }
+
+    #[test]
+    fn risky_bash_asks() {
+        let inspector = default_inspector();
+        let ctx = test_context(false);
+        let result = inspector.inspect("bash", &serde_json::json!({"command": "rm foo.txt"}), &ctx);
+        assert!(result.risk_level >= RiskLevel::Medium);
+    }
+
+    #[test]
+    fn critical_bash_blocked() {
+        let inspector = default_inspector();
+        let ctx = test_context(false);
+        let result = inspector.inspect(
+            "bash",
+            &serde_json::json!({"command": "sudo rm -rf /"}),
+            &ctx,
+        );
+        assert_eq!(result.risk_level, RiskLevel::Critical);
+        assert_eq!(result.action, Action::Deny);
     }
 }

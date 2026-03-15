@@ -231,60 +231,7 @@ pub struct App {
     data_dir: PathBuf,
 }
 
-struct StatusSummary {
-    model: String,
-    tokens_in: usize,
-    tokens_out: usize,
-    cost: f64,
-    max_budget_usd: f64,
-    latest_budget_alert: Option<u8>,
-    session_id: String,
-    turn: usize,
-    tool_count: usize,
-    mcp_count: usize,
-    cwd: String,
-    route_summary: Option<String>,
-}
-
-impl StatusSummary {
-    fn render(&self) -> String {
-        let spend = if self.max_budget_usd > 0.0 {
-            let percent = (self.cost / self.max_budget_usd * 100.0).round() as u64;
-            format!(
-                "${:.2} / ${:.2} ({percent}%)",
-                self.cost, self.max_budget_usd
-            )
-        } else {
-            format!("${:.2}", self.cost)
-        };
-        let budget_alert = self
-            .latest_budget_alert
-            .map(|threshold| format!("\nBudget alert: crossed {threshold}% threshold"))
-            .unwrap_or_default();
-        let route = self
-            .route_summary
-            .as_ref()
-            .map(|summary| format!("\nRouting: {summary}"))
-            .unwrap_or_default();
-
-        format!(
-            "Model: {}\n\
-             Tokens: {} in / {} out\n\
-             Spend: {spend}{budget_alert}{route}\n\
-             Session: {} ({} turns)\n\
-             Tools: {} total ({} MCP)\n\
-             Working directory: {}",
-            self.model,
-            self.tokens_in,
-            self.tokens_out,
-            self.session_id,
-            self.turn,
-            self.tool_count,
-            self.mcp_count,
-            self.cwd,
-        )
-    }
-}
+// StatusSummary removed — /status command was removed
 
 impl App {
     pub async fn new(cli: CliArgs) -> Result<Self> {

@@ -161,7 +161,7 @@ mod tests {
     #[test]
     fn normalize_fuzzy() {
         let reg = ModelRegistry::load();
-        assert_eq!(reg.normalize("gpt-4o"), Some("gpt-4o".to_string()));
+        assert_eq!(reg.normalize("gpt-5-mini"), Some("gpt-5-mini".to_string()));
         assert_eq!(
             reg.normalize("claude-opus-4-6"),
             Some("claude-opus-4.6".to_string())
@@ -178,8 +178,8 @@ mod tests {
     fn pricing_returns_correct_values() {
         let reg = ModelRegistry::load();
         let (inp, out) = reg.pricing("claude-opus-4.6").unwrap();
-        assert_eq!(inp, 15.0);
-        assert_eq!(out, 75.0);
+        assert_eq!(inp, 5.0);
+        assert_eq!(out, 25.0);
     }
 
     #[test]

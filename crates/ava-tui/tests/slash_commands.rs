@@ -18,9 +18,17 @@ fn make_app() -> (App, tempfile::TempDir) {
 fn help_returns_system_message() {
     let (mut app, _tmp) = make_app();
     let result = app.test_slash_command("/help");
-    assert!(result.is_some(), "/help should return Some");
-    let (kind, msg) = result.unwrap();
-    assert_eq!(kind, MessageKind::System);
+    // /help now pushes a transient message directly and returns None
+    assert!(
+        result.is_none(),
+        "/help should return None (transient message pushed directly)"
+    );
+    let messages = &app.state.messages.messages;
+    assert!(!messages.is_empty(), "help should push a transient message");
+    let last = messages.last().unwrap();
+    assert_eq!(last.kind, MessageKind::System);
+    assert!(last.transient, "help message should be transient");
+    let msg = &last.content;
     assert!(
         msg.contains("Available commands:"),
         "help text should list commands"
@@ -31,8 +39,8 @@ fn help_returns_system_message() {
     assert!(msg.contains("/theme"), "help should mention /theme");
     assert!(msg.contains("/compact"), "help should mention /compact");
     assert!(msg.contains("/sessions"), "help should mention /sessions");
-    assert!(msg.contains("/status"), "help should mention /status");
-    assert!(msg.contains("/diff"), "help should mention /diff");
+    assert!(msg.contains("/new"), "help should mention /new");
+    assert!(msg.contains("/init"), "help should mention /init");
     assert!(msg.contains("/commit"), "help should mention /commit");
     assert!(msg.contains("/tools"), "help should mention /tools");
     assert!(msg.contains("/mcp"), "help should mention /mcp");
@@ -200,20 +208,23 @@ fn theme_with_invalid_name_returns_error() {
 #[test]
 fn think_no_args_cycles_level() {
     let (mut app, _tmp) = make_app();
-    // Default thinking level is Off, cycling should go to Low
+    // Default test model uses binary thinking (Off -> High)
     let result = app.test_slash_command("/think");
     assert!(result.is_some());
     let (kind, msg) = result.unwrap();
     assert_eq!(kind, MessageKind::System);
     assert!(msg.contains("Thinking level:"), "should show current level");
-    assert!(msg.contains("low"), "cycling from Off should land on low");
+    assert!(
+        msg.contains("high"),
+        "binary cycling from Off should land on high"
+    );
 }
 
 #[test]
 fn think_cycles_through_levels() {
     let (mut app, _tmp) = make_app();
-    // Off -> Low -> Medium -> High -> Max -> Off
-    let expected = ["low", "med", "high", "max", "off"];
+    // Default test model uses binary thinking: Off -> High -> Off -> High
+    let expected = ["high", "off", "high", "off"];
     for level_name in &expected {
         let result = app.test_slash_command("/think");
         let (_, msg) = result.unwrap();
@@ -317,26 +328,7 @@ fn disconnect_no_args_returns_error() {
     assert!(msg.contains("/disconnect"), "should echo the command");
 }
 
-// ── /status ──────────────────────────────────────────────────────────────
-// /status uses tokio::task::block_in_place, needs a multi-threaded runtime.
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn status_returns_system_info() {
-    let (mut app, _tmp) = make_app();
-    let result = app.test_slash_command("/status");
-    assert!(result.is_some());
-    let (kind, msg) = result.unwrap();
-    assert_eq!(kind, MessageKind::System);
-    assert!(msg.contains("Model:"), "should show model");
-    assert!(
-        msg.contains("test-provider/test-model"),
-        "should show test provider/model"
-    );
-    assert!(msg.contains("Tokens:"), "should show tokens");
-    assert!(msg.contains("Session:"), "should show session");
-    assert!(msg.contains("Tools:"), "should show tools");
-    assert!(msg.contains("Working directory:"), "should show cwd");
-}
+// /status command removed — test removed
 
 // ── /diff ────────────────────────────────────────────────────────────────
 
@@ -504,13 +496,16 @@ fn non_slash_input_returns_none() {
 fn leading_whitespace_is_trimmed() {
     let (mut app, _tmp) = make_app();
     // Input with leading spaces: after trim, starts with /
+    // /help now pushes a transient message directly and returns None
     let result = app.test_slash_command("  /help  ");
     assert!(
-        result.is_some(),
-        "trimmed input starting with / should be handled"
+        result.is_none(),
+        "trimmed /help should return None (transient message pushed directly)"
     );
-    let (kind, _) = result.unwrap();
-    assert_eq!(kind, MessageKind::System);
+    let messages = &app.state.messages.messages;
+    assert!(!messages.is_empty(), "help should push a transient message");
+    let last = messages.last().unwrap();
+    assert_eq!(last.kind, MessageKind::System);
 }
 
 #[test]

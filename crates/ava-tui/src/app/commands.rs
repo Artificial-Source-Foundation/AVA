@@ -17,7 +17,7 @@ impl App {
         let arg = parts.get(1).map(|s| s.trim());
 
         match cmd {
-            "/model" => {
+            "/model" | "/models" => {
                 if let Some(model_str) = arg {
                     // Parse "provider/model" format — split on first '/' only
                     if let Some((provider, model)) = model_str.split_once('/') {
@@ -162,22 +162,21 @@ impl App {
                                     .block_on(self.state.agent.mcp_server_info())
                             })
                             .unwrap_or_default();
-                            if servers.is_empty() {
-                                Some((MessageKind::System, "No MCP servers connected".to_string()))
+                            let text = if servers.is_empty() {
+                                "No MCP servers connected".to_string()
                             } else {
                                 let lines: Vec<String> = servers
                                     .iter()
                                     .map(|s| format!("  {} ({} tools)", s.name, s.tool_count))
                                     .collect();
-                                Some((
-                                    MessageKind::System,
-                                    format!(
-                                        "MCP servers ({}):\n{}",
-                                        servers.len(),
-                                        lines.join("\n")
-                                    ),
-                                ))
-                            }
+                                format!(
+                                    "MCP servers ({}):\n{}",
+                                    servers.len(),
+                                    lines.join("\n")
+                                )
+                            };
+                            self.state.messages.push(UiMessage::transient(MessageKind::System, text));
+                            None
                         }
                     }
                     Some(sub) => Some((
@@ -282,7 +281,11 @@ impl App {
                                 })
                             });
                             match result {
-                                Ok(msg) => Some((MessageKind::System, format!("Credentials:\n{msg}"))),
+                                Ok(msg) => {
+                                    let masked = super::command_support::mask_credentials_output(&msg);
+                                    self.state.messages.push(UiMessage::transient(MessageKind::System, format!("Credentials:\n{masked}")));
+                                    None
+                                }
                                 Err(err) => Some((MessageKind::Error, format!("Failed: {err}"))),
                             }
                         }
@@ -386,59 +389,18 @@ impl App {
                     )),
                 }
             }
-            "/status" => {
-                if let Some(app_tx) = app_tx {
-                    self.spawn_status_message(app_tx);
-                    return None;
-                }
-
-                let tool_count = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current()
-                        .block_on(self.state.agent.list_tools_with_source())
-                })
-                .unwrap_or_default()
-                .len();
-                let status = self.build_status_summary(tool_count).render();
-                Some((MessageKind::System, status))
-            }
-            "/diff" => {
-                let diff_stat = std::process::Command::new("git")
-                    .args(["diff", "--stat"])
-                    .output();
-
-                let status_short = std::process::Command::new("git")
-                    .args(["status", "--short"])
-                    .output();
-
-                let mut output = String::new();
-
-                match diff_stat {
-                    Ok(ref result) if !result.stdout.is_empty() => {
-                        output.push_str(&String::from_utf8_lossy(&result.stdout));
-                    }
-                    Ok(_) => {
-                        output.push_str("No staged/unstaged changes.\n");
-                    }
-                    Err(err) => {
-                        return Some((
-                            MessageKind::Error,
-                            format!("Failed to run git diff: {err}"),
-                        ));
+            "/new" => {
+                self.state.messages.messages.clear();
+                self.state.messages.reset_scroll();
+                self.state.agent.clear_session_metrics();
+                if let Some(title) = arg {
+                    if let Some(ref session) = self.state.session.current_session {
+                        let mut meta = session.metadata.clone();
+                        meta["title"] = serde_json::json!(title);
                     }
                 }
-
-                if let Ok(ref result) = status_short {
-                    let status_text = String::from_utf8_lossy(&result.stdout);
-                    let untracked_count = status_text
-                        .lines()
-                        .filter(|l| l.starts_with("??"))
-                        .count();
-                    if untracked_count > 0 {
-                        output.push_str(&format!("{untracked_count} untracked files\n"));
-                    }
-                }
-
-                Some((MessageKind::System, output.trim_end().to_string()))
+                self.set_status("New session started", StatusLevel::Info);
+                Some((MessageKind::System, "Started new session".to_string()))
             }
             "/clear" => {
                 self.state.messages.messages.clear();
@@ -594,7 +556,8 @@ impl App {
                     .join(".ava")
                     .join("plans");
                 if !plans_dir.exists() {
-                    Some((MessageKind::System, "No plans found. Switch to Plan mode and ask the agent to create a plan.".to_string()))
+                    self.state.messages.push(UiMessage::transient(MessageKind::System, "No plans found. Switch to Plan mode and ask the agent to create a plan."));
+                    None
                 } else {
                     match std::fs::read_dir(&plans_dir) {
                         Ok(entries) => {
@@ -611,14 +574,15 @@ impl App {
                                 .collect();
                             files.sort();
                             if files.is_empty() {
-                                Some((MessageKind::System, "No plan files in .ava/plans/. Switch to Plan mode to create one.".to_string()))
+                                self.state.messages.push(UiMessage::transient(MessageKind::System, "No plan files in .ava/plans/. Switch to Plan mode to create one."));
                             } else {
-                                Some((MessageKind::System, format!(
+                                self.state.messages.push(UiMessage::transient(MessageKind::System, format!(
                                     "Plans ({} files):\n{}",
                                     files.len(),
                                     files.join("\n")
-                                )))
+                                )));
                             }
+                            None
                         }
                         Err(err) => {
                             Some((MessageKind::Error, format!("Failed to read .ava/plans/: {err}")))
@@ -629,23 +593,23 @@ impl App {
             "/help" => {
                 let help = "\
 Available commands:
-  /model [provider/model]  — show or switch model
+  /model [provider/model]  — show or switch model (alias: /models)
   /think [level]           — set thinking level (off/low/med/high/max)
   /theme [name]            — cycle or switch theme (default/dracula/nord)
   /permissions             — toggle permission level
   /connect [provider]      — add provider credentials
   /providers               — show provider status
   /disconnect <provider>   — remove provider credentials
-  /credentials [list|add|remove] — manage provider API keys (redacted)
+  /credentials [list|add|remove] — manage provider API keys (masked)
   /tools                   — list all tools
   /tools reload            — reload tools from disk
   /tools init              — create tool templates
   /mcp [list]              — show MCP servers
   /mcp reload              — reload MCP config
   /agents                  — show sub-agent configuration
+  /new [title]             — start a new session (optional title)
   /sessions                — session picker
-  /status                  — show session info
-  /diff                    — show git changes
+  /init                    — initialize project (tool, hook, and command templates)
   /commit                  — inspect commit readiness and suggest a message
   /export [filename]       — export conversation to file (.md or .json)
   /copy [all]              — copy last response (picks code block if multiple)
@@ -655,8 +619,8 @@ Available commands:
   /plans                   — list plan files in .ava/plans/
   /commands [list|reload|init] — manage custom slash commands
   /hooks [list|reload|init|dry-run <event>] — manage lifecycle hooks
-  /btw <question>          — ask a side question without interrupting the agent
-  /bg [--branch] <goal>    — launch a goal as a background agent
+  /btw [question]          — start a side conversation branch
+  /btw end                 — restore original conversation
   /praxis <goal>           — launch a Praxis multi-agent task
   /tasks                   — show background task list
   /clear                   — clear chat
@@ -673,18 +637,28 @@ Keyboard shortcuts:
   Ctrl+N                   — new session
   Ctrl+L                   — session picker
   Ctrl+S                   — toggle sidebar
+  Ctrl+Z                   — end /btw branch (restore conversation)
   Ctrl+C                   — cancel / clear input / quit";
-                Some((MessageKind::System, help.to_string()))
+                self.state.messages.push(UiMessage::transient(MessageKind::System, help));
+                None
             }
             "/btw" => {
-                if let Some(question) = arg {
-                    self.handle_btw_query(question.to_string());
-                    None
+                if self.state.btw.active {
+                    match arg {
+                        Some("end") | Some("done") | Some("pop") => {
+                            self.end_btw_branch();
+                            None
+                        }
+                        _ => {
+                            Some((
+                                MessageKind::System,
+                                "Already in a /btw branch. Use /btw end (or Ctrl+Z) to restore the original conversation.".to_string(),
+                            ))
+                        }
+                    }
                 } else {
-                    Some((
-                        MessageKind::Error,
-                        "Usage: /btw <question> (e.g., /btw what does the retry logic do?)".to_string(),
-                    ))
+                    self.start_btw_branch(arg.map(|s| s.to_string()));
+                    None
                 }
             }
             "/commands" => {
@@ -692,35 +666,6 @@ Keyboard shortcuts:
             }
             "/hooks" => {
                 self.handle_hooks_command(arg)
-            }
-            "/bg" => {
-                if let Some(goal) = arg {
-                    let trimmed = goal.trim_start();
-                    let (isolated_branch, goal_text) = if let Some(rest) = trimmed.strip_prefix("--branch") {
-                        (true, rest.trim_start())
-                    } else {
-                        (false, trimmed)
-                    };
-                    if goal_text.is_empty() {
-                        Some((
-                            MessageKind::Error,
-                            "Usage: /bg [--branch] <goal> (e.g., /bg --branch refactor auth module)".to_string(),
-                        ))
-                    } else {
-                        // Store the goal and return None — submit_goal will check pending_bg_goal
-                        self.pending_bg_goal = Some(super::PendingBackgroundGoal {
-                            goal: goal_text.to_string(),
-                            isolated_branch,
-                        });
-                        None
-                    }
-                } else {
-                    Some((
-                        MessageKind::Error,
-                        "Usage: /bg [--branch] <goal> (e.g., /bg --branch refactor auth module)"
-                            .to_string(),
-                    ))
-                }
             }
             "/praxis" => {
                 if let Some(goal) = arg {
@@ -774,8 +719,8 @@ Keyboard shortcuts:
                 }
             }
             "/queue" => {
-                if self.state.input.queue_display.is_empty() {
-                    Some((MessageKind::System, "No messages queued.".to_string()))
+                let text = if self.state.input.queue_display.is_empty() {
+                    "No messages queued.".to_string()
                 } else {
                     let mut lines = Vec::new();
                     for item in &self.state.input.queue_display.items {
@@ -787,8 +732,10 @@ Keyboard shortcuts:
                         let truncated = crate::text_utils::truncate_display(&item.text, 60);
                         lines.push(format!("{badge} {truncated}"));
                     }
-                    Some((MessageKind::System, format!("Queued messages:\n{}", lines.join("\n"))))
-                }
+                    format!("Queued messages:\n{}", lines.join("\n"))
+                };
+                self.state.messages.push(UiMessage::transient(MessageKind::System, text));
+                None
             }
             _ => {
                 // Check custom commands before reporting unknown

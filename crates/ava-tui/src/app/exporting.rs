@@ -1,6 +1,19 @@
 use super::*;
 use chrono::Local;
 
+/// Format a number with comma separators (e.g. 128000 -> "128,000").
+fn format_with_commas(n: usize) -> String {
+    let s = n.to_string();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            result.push(',');
+        }
+        result.push(ch);
+    }
+    result
+}
+
 impl App {
     pub(super) fn export_conversation(
         &self,
@@ -91,7 +104,7 @@ impl App {
         out.push_str(&format!("Messages: {msg_count}\n"));
         out.push_str("\n---\n\n");
 
-        for msg in messages {
+        for msg in messages.iter().filter(|m| !m.transient) {
             match msg.kind {
                 MessageKind::User => {
                     out.push_str("## User\n");
@@ -158,6 +171,7 @@ impl App {
 
         let json_messages: Vec<serde_json::Value> = messages
             .iter()
+            .filter(|m| !m.transient)
             .map(|msg| {
                 let role = match msg.kind {
                     MessageKind::User => "user",
@@ -246,8 +260,9 @@ impl App {
             return Some((
                 MessageKind::System,
                 format!(
-                    "Context usage is low ({:.0}%), no compaction needed.\n{before_tokens} tokens across {before_count} messages.",
+                    "Context usage is low ({:.0}%), no compaction needed. \n{} tokens across {before_count} messages.",
                     usage_pct,
+                    format_with_commas(before_tokens),
                 ),
             ));
         }
@@ -319,18 +334,25 @@ impl App {
             return Some((
                 MessageKind::System,
                 format!(
-                    "Conversation is already compact.\n{before_tokens} tokens across {before_count} messages.",
+                    "Conversation is already compact.\n{} tokens across {before_count} messages.",
+                    format_with_commas(before_tokens),
                 ),
             ));
         }
 
         let summary = if let Some(focus_text) = focus {
             format!(
-                "Compacted conversation (focus: \"{focus_text}\"). Saved ~{saved_tokens} tokens (was {before_tokens}, now {after_tokens}). Dropped {dropped_count} messages, kept {after_count}."
+                "Compacted conversation (focus: \"{focus_text}\"). Saved ~{} tokens (was {}, now {}). Dropped {dropped_count} messages, kept {after_count}.",
+                    format_with_commas(saved_tokens),
+                    format_with_commas(before_tokens),
+                    format_with_commas(after_tokens)
             )
         } else {
             format!(
-                "Compacted conversation. Saved ~{saved_tokens} tokens (was {before_tokens}, now {after_tokens}). Dropped {dropped_count} messages, kept {after_count}."
+                "Compacted conversation. Saved ~{} tokens (was {}, now {}). Dropped {dropped_count} messages, kept {after_count}.",
+                    format_with_commas(saved_tokens),
+                    format_with_commas(before_tokens),
+                    format_with_commas(after_tokens)
             )
         };
 

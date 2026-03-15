@@ -586,9 +586,9 @@ mod tests {
 
     #[test]
     fn pricing_claude_opus() {
-        let (i, o) = model_pricing_usd_per_million("claude-opus-4");
-        assert_eq!(i, 15.00);
-        assert_eq!(o, 75.00);
+        let (i, o) = model_pricing_usd_per_million("claude-opus-4-6");
+        assert_eq!(i, 5.00);
+        assert_eq!(o, 25.00);
     }
 
     #[test]
@@ -664,9 +664,9 @@ mod tests {
 
     #[test]
     fn pricing_case_insensitive() {
-        let (i, o) = model_pricing_usd_per_million("CLAUDE-OPUS-4");
-        assert_eq!(i, 15.00);
-        assert_eq!(o, 75.00);
+        let (i, o) = model_pricing_usd_per_million("CLAUDE-OPUS-4-6");
+        assert_eq!(i, 5.00);
+        assert_eq!(o, 25.00);
     }
 
     // ── parse_usage ──

@@ -24,7 +24,6 @@ pub enum Action {
     Audit,
     VoiceToggle,
     CopyLastResponse,
-    ToggleToolDetails,
     BackgroundAgent,
     /// Submit a follow-up message (Tier 2) while the agent is running.
     SubmitFollowUp,
@@ -124,7 +123,6 @@ pub fn default_keybinds() -> HashMap<Action, Vec<KeyBinding>> {
         (Action::SessionList, vec![ctrl('l')]),
         (Action::VoiceToggle, vec![ctrl('v')]),
         (Action::CopyLastResponse, vec![ctrl('y')]),
-        (Action::ToggleToolDetails, vec![ctrl('e')]),
         (Action::BackgroundAgent, vec![ctrl('b')]),
         (
             Action::SubmitFollowUp,

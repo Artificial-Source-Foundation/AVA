@@ -1,23 +1,17 @@
-use std::sync::{Arc, Mutex};
+use crate::state::messages::UiMessage;
 
-/// State for the `/btw` side-conversation overlay.
+/// State for the `/btw` conversation branch.
 ///
-/// This is an ephemeral Q&A that runs while the agent is working.
-/// The question and answer never enter message history.
+/// Works like `git stash` for chat: saves a checkpoint of the current
+/// conversation, lets the user ask questions in the normal chat flow
+/// (with full tool use), then restores the checkpoint on `/btw end`
+/// or Ctrl+Z — discarding all btw messages.
 #[derive(Default)]
 pub struct BtwState {
-    /// True while the LLM call is in flight.
-    pub pending: bool,
-    /// The completed response to display in the overlay.
-    pub response: Option<BtwResponse>,
-    /// Shared slot for the background task to deposit its result.
-    /// Polled on each tick by the event loop.
-    pub pending_result: Option<Arc<Mutex<Option<BtwResponse>>>>,
-}
-
-/// A completed `/btw` side question and its answer.
-#[derive(Debug, Clone)]
-pub struct BtwResponse {
-    pub question: String,
-    pub answer: String,
+    /// True while in a btw branch.
+    pub active: bool,
+    /// Saved messages from before the branch started.
+    pub checkpoint_messages: Vec<UiMessage>,
+    /// Saved scroll offset from before the branch started.
+    pub checkpoint_scroll: u16,
 }

@@ -27,12 +27,14 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     let composer_h = layout::composer_height(&state.input.buffer, area.width, area.height);
     let split = build_layout(area, state.show_sidebar, composer_h);
 
-    // Composer bg (bars handle their own bg internally)
+    status_bar::render_top(frame, split.top_bar, state);
+    render_message_list(frame, split.messages, state);
+
+    // Composer bg drawn AFTER the message list so it acts as a curtain
+    // covering any streaming text that overflows into the composer area.
     let composer_bg = Block::default().style(Style::default().bg(state.theme.bg_elevated));
     frame.render_widget(composer_bg, split.composer);
 
-    status_bar::render_top(frame, split.top_bar, state);
-    render_message_list(frame, split.messages, state);
     render_composer(frame, split.composer, state);
     status_bar::render_context_bar(frame, split.context_bar, state);
 
@@ -52,11 +54,6 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     // Render modals on top
     if let Some(modal) = state.active_modal {
         render_modal(frame, state, modal);
-    }
-
-    // Render /btw overlay on top of everything (including modals)
-    if state.btw.pending || state.btw.response.is_some() {
-        crate::widgets::btw_overlay::render_btw_overlay(frame, &state.btw, &state.theme);
     }
 }
 

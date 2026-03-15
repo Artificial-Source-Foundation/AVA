@@ -245,6 +245,14 @@ impl ThinkingLevel {
         }
     }
 
+    /// Binary toggle: Off ↔ High (for models that don't support granular levels).
+    pub fn cycle_binary(self) -> Self {
+        match self {
+            Self::Off => Self::High,
+            _ => Self::Off,
+        }
+    }
+
     /// Display label for status bar
     pub fn label(self) -> &'static str {
         match self {

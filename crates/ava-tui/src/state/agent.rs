@@ -190,6 +190,13 @@ impl AgentState {
 
         let context_window = lookup_context_window(&provider_name, &model_name);
 
+        // Load recent models from per-project state
+        let recent_models = {
+            let project_root = std::env::current_dir().unwrap_or_default();
+            let ps = ava_config::ProjectState::load(&project_root);
+            ps.recent_models
+        };
+
         Ok((
             Self {
                 stack: Some(stack),
@@ -209,7 +216,7 @@ impl AgentState {
                 tool_start: None,
                 workflow_phase: None,
                 workflow_iteration: None,
-                recent_models: Vec::new(),
+                recent_models,
                 thinking_level: ThinkingLevel::Off,
                 sub_agents: Vec::new(),
                 cancel: None,
@@ -402,8 +409,11 @@ impl AgentState {
         // Track in recent models (most recent first, max 5)
         let key = format!("{provider}/{model}");
         self.recent_models.retain(|m| m != &key);
-        self.recent_models.insert(0, key);
+        self.recent_models.insert(0, key.clone());
         self.recent_models.truncate(5);
+
+        // Persist to project state
+        self.persist_recent_models(&key);
 
         Ok(format!("{provider}/{model}"))
     }
@@ -415,10 +425,21 @@ impl AgentState {
 
         let key = format!("{provider}/{model}");
         self.recent_models.retain(|m| m != &key);
-        self.recent_models.insert(0, key);
+        self.recent_models.insert(0, key.clone());
         self.recent_models.truncate(5);
 
+        // Persist to project state
+        self.persist_recent_models(&key);
+
         format!("{provider}/{model}")
+    }
+
+    /// Persist recent models list to per-project `.ava/state.json`.
+    fn persist_recent_models(&self, key: &str) {
+        let project_root = std::env::current_dir().unwrap_or_default();
+        let mut ps = ava_config::ProjectState::load(&project_root);
+        ps.push_recent_model(key.to_string());
+        let _ = ps.save(&project_root);
     }
 
     /// Get current provider/model description.
@@ -473,8 +494,14 @@ impl AgentState {
     }
 
     /// Cycle thinking level and sync to agent stack. Returns the new level's label.
+    /// Uses binary cycling (Off↔High) for models that don't support granular levels
+    /// (e.g. Kimi, DeepSeek, Alibaba), and full cycling for Claude/GPT/Gemini.
     pub fn cycle_thinking(&mut self) -> &'static str {
-        self.thinking_level = self.thinking_level.cycle();
+        self.thinking_level = if self.model_supports_thinking_levels() {
+            self.thinking_level.cycle()
+        } else {
+            self.thinking_level.cycle_binary()
+        };
         if let Some(stack) = &self.stack {
             let stack = stack.clone();
             let level = self.thinking_level;

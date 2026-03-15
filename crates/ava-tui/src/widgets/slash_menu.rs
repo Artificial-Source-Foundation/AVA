@@ -118,6 +118,6 @@ pub fn render_slash_menu(
         lines.push(Line::from(spans));
     }
 
-    let widget = Paragraph::new(lines);
+    let widget = Paragraph::new(lines).style(Style::default().bg(theme.bg_elevated));
     frame.render_widget(widget, inner);
 }

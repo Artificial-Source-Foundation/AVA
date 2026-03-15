@@ -38,9 +38,10 @@ impl App {
 
         self.state.agent.detach_run();
         self.is_streaming.store(false, Ordering::Relaxed);
-        self.state.messages.messages.clear();
-        self.state.messages.reset_scroll();
-        self.state.agent.clear_session_metrics();
+        self.state.messages.push(UiMessage::new(
+            MessageKind::System,
+            "Agent moved to background",
+        ));
         self.set_status(
             format!("Task #{task_id} moved to background"),
             StatusLevel::Info,

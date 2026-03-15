@@ -302,7 +302,7 @@ fn render_body(
     }
 
     // --- Button row (bottom of body) ---
-    let btn_y = (inner.y + inner.height).saturating_sub(1);
+    let btn_y = (inner.y + inner.height).saturating_sub(2);
     if btn_y > y {
         render_buttons(
             frame,
@@ -314,6 +314,57 @@ fn render_body(
             },
             permission,
             theme,
+        );
+    }
+
+    // --- Footer hint line ---
+    let footer_y = (inner.y + inner.height).saturating_sub(1);
+    if footer_y > btn_y {
+        let footer = Line::from(vec![
+            Span::styled(
+                "[a]",
+                Style::default()
+                    .fg(theme.text_muted)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" Approve  ", Style::default().fg(theme.text_dimmed)),
+            Span::styled(
+                "[s]",
+                Style::default()
+                    .fg(theme.text_muted)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" Allow session  ", Style::default().fg(theme.text_dimmed)),
+            Span::styled(
+                "[r]",
+                Style::default()
+                    .fg(theme.text_muted)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" Reject  ", Style::default().fg(theme.text_dimmed)),
+            Span::styled(
+                "[y]",
+                Style::default()
+                    .fg(theme.text_muted)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" Auto-approve  ", Style::default().fg(theme.text_dimmed)),
+            Span::styled(
+                "[Esc]",
+                Style::default()
+                    .fg(theme.text_muted)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" Cancel", Style::default().fg(theme.text_dimmed)),
+        ]);
+        frame.render_widget(
+            Paragraph::new(footer),
+            Rect {
+                x: inner.x,
+                y: footer_y,
+                width: w,
+                height: 1,
+            },
         );
     }
 }

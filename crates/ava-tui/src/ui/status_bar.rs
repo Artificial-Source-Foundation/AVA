@@ -153,6 +153,16 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         left_spans.push(Span::styled(&msg.text, Style::default().fg(color)));
     }
 
+    // BTW branch indicator
+    if state.btw.active {
+        left_spans.push(Span::styled(
+            " [btw]",
+            Style::default()
+                .fg(state.theme.accent)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
     // Background task indicator
     {
         let bg = state.background.lock().unwrap();
@@ -276,9 +286,13 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         let frame_char = spinner_frame(spinner_tick);
         left_spans.push(Span::styled(
             format!("{frame_char} "),
-            Style::default().fg(state.theme.accent),
+            Style::default().fg(state.theme.warning),
         ));
-        left_spans.push(Span::styled(activity, style));
+        let activity_style = match state.agent.activity {
+            AgentActivity::ExecutingTool(_) => style,
+            _ => Style::default().fg(state.theme.text_dimmed),
+        };
+        left_spans.push(Span::styled(activity, activity_style));
 
         // Workflow phase
         if let Some((idx, count, name)) = &state.agent.workflow_phase {
@@ -322,7 +336,6 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         // Idle hints
         let hints: &[(&str, &str)] = &[
             ("/", "commands"),
-            ("Ctrl+E", "tools"),
             ("Ctrl+M", "model"),
             ("Ctrl+K", "palette"),
         ];

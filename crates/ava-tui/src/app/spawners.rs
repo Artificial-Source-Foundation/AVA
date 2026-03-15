@@ -116,6 +116,7 @@ impl App {
                         StatusLevel::Error,
                         "Failed: AgentStack not initialised".to_string(),
                     )),
+                    transient: false,
                 },
             ));
             return;
@@ -143,6 +144,7 @@ impl App {
                     kind,
                     content,
                     status,
+                    transient: false,
                 },
             ));
         });
@@ -172,6 +174,7 @@ impl App {
                         StatusLevel::Error,
                         "Failed: AgentStack not initialised".to_string(),
                     )),
+                    transient: false,
                 },
             ));
             return;
@@ -199,6 +202,7 @@ impl App {
                     kind,
                     content,
                     status,
+                    transient: false,
                 },
             ));
         });
@@ -221,76 +225,7 @@ impl App {
         });
     }
 
-    pub(crate) fn spawn_status_message(&self, app_tx: mpsc::UnboundedSender<AppEvent>) {
-        let Some(stack) = self.state.agent.stack_handle() else {
-            let _ = app_tx.send(AppEvent::CommandMessage(
-                crate::event::CommandMessageResult {
-                    kind: MessageKind::Error,
-                    content: "Failed to inspect status: AgentStack not initialised".to_string(),
-                    status: Some((
-                        StatusLevel::Error,
-                        "Failed: AgentStack not initialised".to_string(),
-                    )),
-                },
-            ));
-            return;
-        };
-
-        let base_summary = self.build_status_summary(0);
-
-        tokio::spawn(async move {
-            let tool_count = stack.tools.read().await.list_tools_with_source().len();
-            let status = StatusSummary {
-                tool_count,
-                ..base_summary
-            }
-            .render();
-            let _ = app_tx.send(AppEvent::CommandMessage(
-                crate::event::CommandMessageResult {
-                    kind: MessageKind::System,
-                    content: status,
-                    status: None,
-                },
-            ));
-        });
-    }
-
-    pub(super) fn current_route_summary(&self) -> Option<String> {
-        self.state
-            .session
-            .current_session
-            .as_ref()
-            .and_then(crate::session_summary::route_summary)
-    }
-
-    pub(super) fn build_status_summary(&self, tool_count: usize) -> StatusSummary {
-        StatusSummary {
-            model: self.state.agent.current_model_display(),
-            tokens_in: self.state.agent.tokens_used.input,
-            tokens_out: self.state.agent.tokens_used.output,
-            cost: self.state.agent.cost,
-            max_budget_usd: self.state.agent.max_budget_usd,
-            latest_budget_alert: self
-                .state
-                .agent
-                .latest_budget_alert
-                .map(|alert| alert.threshold_percent),
-            session_id: self
-                .state
-                .session
-                .current_session
-                .as_ref()
-                .map(|session| session.id.to_string())
-                .unwrap_or_else(|| "none".to_string()),
-            turn: self.state.agent.current_turn,
-            tool_count,
-            mcp_count: self.state.agent.mcp_tool_count,
-            cwd: std::env::current_dir()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|_| "unknown".to_string()),
-            route_summary: self.current_route_summary(),
-        }
-    }
+    // spawn_status_message, current_route_summary, build_status_summary removed — /status command was removed
 
     pub(crate) fn spawn_commit_prep(&self, app_tx: mpsc::UnboundedSender<AppEvent>) {
         tokio::spawn(async move {
@@ -307,6 +242,7 @@ impl App {
                     kind: result.0,
                     content: result.1,
                     status: None,
+                    transient: false,
                 },
             ));
         });

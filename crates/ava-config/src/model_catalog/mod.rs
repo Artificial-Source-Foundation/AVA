@@ -113,9 +113,9 @@ mod tests {
                 "id": "fastrouter",
                 "name": "FastRouter",
                 "models": {
-                    "gpt-4.1": {
-                        "id": "openai/gpt-4.1",
-                        "name": "GPT-4.1",
+                    "gpt-5.1": {
+                        "id": "openai/gpt-5.1",
+                        "name": "GPT-5.1",
                         "tool_call": true,
                         "cost": { "input": 2.0, "output": 8.0 },
                         "limit": { "context": 1000000, "output": 32768 }
@@ -129,7 +129,7 @@ mod tests {
 
         let models = catalog.models_for("openai");
         assert_eq!(models.len(), 1);
-        assert_eq!(models[0].id, "gpt-4.1"); // Prefix stripped
+        assert_eq!(models[0].id, "gpt-5.1"); // Prefix stripped
     }
 
     #[test]
@@ -139,9 +139,9 @@ mod tests {
                 "id": "zenmux",
                 "name": "ZenMux",
                 "models": {
-                    "gpt-4.1": {
-                        "id": "openai/gpt-4.1",
-                        "name": "GPT-4.1",
+                    "gpt-5": {
+                        "id": "openai/gpt-5",
+                        "name": "GPT-5",
                         "tool_call": true,
                         "limit": { "context": 1000000, "output": 32768 }
                     },
@@ -159,7 +159,7 @@ mod tests {
         let raw: HashMap<String, serde_json::Value> = serde_json::from_str(raw_json).unwrap();
         let catalog = ModelCatalog::from_raw(raw, 1000);
         assert_eq!(catalog.models_for("openai").len(), 1);
-        assert_eq!(catalog.models_for("openai")[0].name, "GPT-4.1");
+        assert_eq!(catalog.models_for("openai")[0].name, "GPT-5");
     }
 
     #[test]

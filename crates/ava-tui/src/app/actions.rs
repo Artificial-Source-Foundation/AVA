@@ -52,92 +52,48 @@ impl App {
         }
     }
 
-    pub(crate) fn handle_btw_query(&mut self, question: String) {
-        let history: Vec<ava_types::Message> = self
-            .state
-            .messages
-            .messages
-            .iter()
-            .filter_map(|ui_msg| {
-                let role = match ui_msg.kind {
-                    MessageKind::User => ava_types::Role::User,
-                    MessageKind::Assistant => ava_types::Role::Assistant,
-                    _ => return None,
-                };
-                Some(ava_types::Message::new(role, ui_msg.content.clone()))
-            })
-            .collect();
+    /// Start a `/btw` conversation branch. Saves current messages + scroll
+    /// as a checkpoint, clears chat for the side conversation, and optionally
+    /// seeds the composer with a question.
+    pub(crate) fn start_btw_branch(&mut self, question: Option<String>) {
+        // Save checkpoint
+        self.state.btw.checkpoint_messages = self.state.messages.messages.clone();
+        self.state.btw.checkpoint_scroll = self.state.messages.scroll_offset;
+        self.state.btw.active = true;
 
-        let stack = match self.state.agent.stack() {
-            Ok(s) => Arc::clone(s),
-            Err(msg) => {
-                self.set_status(format!("Cannot run /btw: {msg}"), StatusLevel::Error);
-                return;
-            }
-        };
+        // Clear the chat for the branch conversation
+        self.state.messages.messages.clear();
+        self.state.messages.reset_scroll();
 
-        let provider_name = self.state.agent.provider_name.clone();
-        let model_name = self.state.agent.model_name.clone();
+        self.set_status(
+            "Entered /btw branch \u{2014} use /btw end or Ctrl+Z to restore",
+            StatusLevel::Info,
+        );
+        self.state.messages.push(UiMessage::new(
+            MessageKind::System,
+            "Entered a /btw conversation branch. Your main conversation is saved. Use /btw end or Ctrl+Z to restore it.",
+        ));
 
-        self.state.btw.pending = true;
-        self.state.btw.response = None;
-        self.set_status("Thinking about your side question...", StatusLevel::Info);
+        // If a question was provided, seed it into the composer
+        if let Some(q) = question {
+            self.state.input.buffer = q;
+            self.state.input.cursor = self.state.input.buffer.len();
+        }
+    }
 
-        let question_clone = question.clone();
-        let btw_result: Arc<std::sync::Mutex<Option<crate::state::btw::BtwResponse>>> =
-            Arc::new(std::sync::Mutex::new(None));
-        let btw_result_clone = Arc::clone(&btw_result);
-        self.state.btw.pending_result = Some(btw_result);
+    /// End the current `/btw` branch: restore the checkpoint messages and scroll,
+    /// discarding everything from the branch.
+    pub(crate) fn end_btw_branch(&mut self) {
+        if !self.state.btw.active {
+            return;
+        }
 
-        tokio::spawn(async move {
-            let mut messages = Vec::with_capacity(history.len() + 2);
-            messages.push(ava_types::Message::new(
-                ava_types::Role::System,
-                "Answer this side question briefly and directly. You have access to the conversation context but no tools. Keep your answer concise."
-                    .to_string(),
-            ));
-            messages.extend(history);
-            messages.push(ava_types::Message::new(
-                ava_types::Role::User,
-                question_clone.clone(),
-            ));
+        // Restore checkpoint
+        self.state.messages.messages = std::mem::take(&mut self.state.btw.checkpoint_messages);
+        self.state.messages.scroll_offset = self.state.btw.checkpoint_scroll;
+        self.state.btw.active = false;
 
-            let result = stack
-                .router
-                .route_required(&provider_name, &model_name)
-                .await;
-            match result {
-                Ok(provider) => match provider.generate(&messages).await {
-                    Ok(answer) => {
-                        let response = crate::state::btw::BtwResponse {
-                            question: question_clone,
-                            answer,
-                        };
-                        if let Ok(mut slot) = btw_result_clone.lock() {
-                            *slot = Some(response);
-                        }
-                    }
-                    Err(e) => {
-                        let response = crate::state::btw::BtwResponse {
-                            question: question_clone,
-                            answer: format!("Error: {e}"),
-                        };
-                        if let Ok(mut slot) = btw_result_clone.lock() {
-                            *slot = Some(response);
-                        }
-                    }
-                },
-                Err(e) => {
-                    let response = crate::state::btw::BtwResponse {
-                        question: question_clone,
-                        answer: format!("Provider error: {e}"),
-                    };
-                    if let Ok(mut slot) = btw_result_clone.lock() {
-                        *slot = Some(response);
-                    }
-                }
-            }
-        });
+        self.set_status("Restored main conversation", StatusLevel::Info);
     }
 
     pub(crate) fn open_rewind_modal(&mut self) {

@@ -569,6 +569,7 @@ impl App {
             .messages
             .messages
             .iter()
+            .filter(|ui_msg| !ui_msg.transient)
             .filter_map(|ui_msg| {
                 let role = match ui_msg.kind {
                     MessageKind::User => ava_types::Role::User,

@@ -4,19 +4,16 @@ pub mod bash;
 pub mod claude_code;
 pub mod code_search;
 pub mod custom_tool;
-pub mod diagnostics;
 pub mod edit;
 pub mod git_read;
 pub mod glob;
 pub mod grep;
 pub mod hashline;
-pub mod lint;
 pub mod lsp_ops;
 pub mod multiedit;
 pub mod question;
 pub mod read;
 pub mod task;
-pub mod test_runner;
 pub mod todo;
 pub mod web_fetch;
 pub mod web_search;
@@ -58,15 +55,6 @@ pub fn register_extended_tools(registry: &mut ToolRegistry, platform: Arc<dyn Pl
     registry.register_with_tier(web_search::WebSearchTool::new(), ToolTier::Extended);
     registry.register_with_tier(
         multiedit::MultiEditTool::new(platform.clone()),
-        ToolTier::Extended,
-    );
-    registry.register_with_tier(
-        test_runner::TestRunnerTool::new(platform.clone()),
-        ToolTier::Extended,
-    );
-    registry.register_with_tier(lint::LintTool::new(platform.clone()), ToolTier::Extended);
-    registry.register_with_tier(
-        diagnostics::DiagnosticsTool::new(platform.clone()),
         ToolTier::Extended,
     );
     registry.register_with_tier(

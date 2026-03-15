@@ -277,6 +277,9 @@ pub struct ProjectState {
     /// Last used model in this project.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_model: Option<String>,
+    /// Recently used models (most recent first, max 5). Stored as "provider/model" keys.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recent_models: Vec<String>,
 }
 
 impl ProjectState {
@@ -287,6 +290,13 @@ impl ProjectState {
             .ok()
             .and_then(|content| serde_json::from_str(&content).ok())
             .unwrap_or_default()
+    }
+
+    /// Add a model key to the front of recent_models, dedup, cap at 5.
+    pub fn push_recent_model(&mut self, key: String) {
+        self.recent_models.retain(|m| m != &key);
+        self.recent_models.insert(0, key);
+        self.recent_models.truncate(5);
     }
 
     /// Save project state to `.ava/state.json` relative to the given project root.

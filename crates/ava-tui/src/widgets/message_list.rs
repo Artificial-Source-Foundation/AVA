@@ -268,6 +268,8 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     }
 
     let blocks = derive_blocks(messages_source);
+    // Reserve 1 column for the scrollbar so text doesn't overlap it.
+    let content_width = area.width.saturating_sub(1);
 
     for (i, block) in blocks.iter().enumerate() {
         if i > 0 {
@@ -278,13 +280,13 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
                 message,
                 &state.theme,
                 spinner_tick,
-                area.width,
+                content_width,
             )),
             RenderBlock::ActionGroup { messages, active } => lines.extend(render_action_group(
                 messages,
                 &state.theme,
                 spinner_tick,
-                area.width,
+                content_width,
                 *active || state.messages.show_tools_expanded,
             )),
         }

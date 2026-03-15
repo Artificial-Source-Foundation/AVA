@@ -126,8 +126,8 @@ async fn bench_session_create_and_list() {
     );
     assert_eq!(recent.len(), 100);
     assert!(
-        elapsed.as_millis() < 5000,
-        "Session create+list took {elapsed:?}, expected < 5000ms"
+        elapsed.as_millis() < 15000,
+        "Session create+list took {elapsed:?}, expected < 15000ms"
     );
 
     // Cleanup

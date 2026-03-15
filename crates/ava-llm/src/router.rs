@@ -584,7 +584,7 @@ mod tests {
 
         assert_eq!(decision.source, RouteSource::PolicyAuto);
         assert_eq!(decision.provider, "openai");
-        assert_eq!(decision.display_model, "gpt-4o-mini");
+        assert_eq!(decision.display_model, "gpt-5-mini");
     }
 
     #[tokio::test]

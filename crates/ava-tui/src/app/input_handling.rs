@@ -7,14 +7,15 @@ impl App {
         app_tx: mpsc::UnboundedSender<AppEvent>,
         agent_tx: mpsc::UnboundedSender<ava_agent::AgentEvent>,
     ) -> bool {
-        if self.state.btw.response.is_some() {
-            match key.code {
-                KeyCode::Char(' ') | KeyCode::Enter | KeyCode::Esc => {
-                    self.state.btw.response = None;
-                    return false;
-                }
-                _ => {}
-            }
+        // Ctrl+Z ends btw branch
+        if key
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::CONTROL)
+            && key.code == KeyCode::Char('z')
+            && self.state.btw.active
+        {
+            self.end_btw_branch();
+            return false;
         }
 
         if let Some(modal) = self.state.active_modal {
@@ -152,18 +153,6 @@ impl App {
                 }
                 Action::CopyLastResponse => {
                     self.copy_last_response();
-                }
-                Action::ToggleToolDetails => {
-                    self.state.messages.show_tools_expanded =
-                        !self.state.messages.show_tools_expanded;
-                    self.set_status(
-                        if self.state.messages.show_tools_expanded {
-                            "Expanded past tool activity"
-                        } else {
-                            "Collapsed past tool activity"
-                        },
-                        StatusLevel::Info,
-                    );
                 }
                 Action::BackgroundAgent => {
                     if self.state.agent.is_running {

@@ -329,11 +329,13 @@ impl App {
                 kind: MessageKind::System,
                 content: msg.clone(),
                 status: Some((StatusLevel::Info, msg)),
+                transient: false,
             },
             Err(err) => crate::event::CommandMessageResult {
                 kind: MessageKind::Error,
                 content: format!("Failed: {err}"),
                 status: Some((StatusLevel::Error, format!("Failed: {err}"))),
+                transient: false,
             },
         }
     }
@@ -342,16 +344,52 @@ impl App {
         result: Result<String, String>,
     ) -> crate::event::CommandMessageResult {
         match result {
-            Ok(msg) => crate::event::CommandMessageResult {
-                kind: MessageKind::System,
-                content: format!("Credentials:\n{msg}"),
-                status: Some((StatusLevel::Info, "Credentials loaded".to_string())),
-            },
+            Ok(msg) => {
+                let masked = mask_credentials_output(&msg);
+                crate::event::CommandMessageResult {
+                    kind: MessageKind::System,
+                    content: format!("Credentials:\n{masked}"),
+                    status: Some((StatusLevel::Info, "Credentials loaded".to_string())),
+                    transient: true,
+                }
+            }
             Err(err) => crate::event::CommandMessageResult {
                 kind: MessageKind::Error,
                 content: format!("Failed: {err}"),
                 status: Some((StatusLevel::Error, format!("Failed: {err}"))),
+                transient: false,
             },
         }
     }
+}
+
+fn mask_key(key: &str) -> String {
+    if key.len() <= 4 {
+        "****".to_string()
+    } else {
+        format!("****{}", &key[key.len() - 4..])
+    }
+}
+
+/// Mask API keys in credentials list output. Looks for lines containing
+/// key-like strings (long alphanumeric sequences) and masks them.
+pub(super) fn mask_credentials_output(output: &str) -> String {
+    output
+        .lines()
+        .map(|line| {
+            // Look for API key patterns: long alphanumeric strings, typically after ": " or "= "
+            if let Some(idx) = line.find(": ") {
+                let (prefix, rest) = line.split_at(idx + 2);
+                let trimmed = rest.trim();
+                if trimmed.len() > 8 {
+                    format!("{}{}", prefix, mask_key(trimmed))
+                } else {
+                    line.to_string()
+                }
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }

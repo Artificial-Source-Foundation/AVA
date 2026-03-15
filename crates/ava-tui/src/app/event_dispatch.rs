@@ -66,17 +66,6 @@ impl App {
                         }
                     }
                 }
-                let btw_ready = self
-                    .state
-                    .btw
-                    .pending_result
-                    .as_ref()
-                    .and_then(|slot| slot.try_lock().ok().and_then(|mut guard| guard.take()));
-                if let Some(response) = btw_ready {
-                    self.state.btw.pending = false;
-                    self.state.btw.response = Some(response);
-                    self.state.btw.pending_result = None;
-                }
             }
             AppEvent::AgentRunEvent { run_id, event } => {
                 self.route_agent_event(run_id, event, app_tx, agent_tx);
@@ -265,7 +254,7 @@ impl App {
                     self.set_status(format!("Loaded {count} MCP servers"), StatusLevel::Info);
                     self.state
                         .messages
-                        .push(UiMessage::new(MessageKind::System, content));
+                        .push(UiMessage::transient(MessageKind::System, content));
                 }
                 Err(err) => self.set_status(
                     format!("Failed to load MCP servers: {err}"),
@@ -276,9 +265,12 @@ impl App {
                 if let Some((level, text)) = result.status {
                     self.set_status(text, level);
                 }
-                self.state
-                    .messages
-                    .push(UiMessage::new(result.kind, result.content));
+                let msg = if result.transient {
+                    UiMessage::transient(result.kind, result.content)
+                } else {
+                    UiMessage::new(result.kind, result.content)
+                };
+                self.state.messages.push(msg);
             }
             AppEvent::SessionListLoaded(result) => match result {
                 Ok(sessions) => {

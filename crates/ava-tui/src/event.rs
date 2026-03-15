@@ -42,6 +42,8 @@ pub struct CommandMessageResult {
     pub kind: MessageKind,
     pub content: String,
     pub status: Option<(StatusLevel, String)>,
+    /// When true, the message will be removed when the user sends their next message.
+    pub transient: bool,
 }
 
 #[derive(Debug)]

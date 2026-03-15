@@ -115,6 +115,6 @@ pub fn render_mention_picker(
         lines.push(Line::from(spans));
     }
 
-    let widget = Paragraph::new(lines);
+    let widget = Paragraph::new(lines).style(Style::default().bg(theme.bg_elevated));
     frame.render_widget(widget, inner);
 }

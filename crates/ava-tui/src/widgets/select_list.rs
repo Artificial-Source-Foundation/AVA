@@ -227,8 +227,15 @@ impl<T: Clone> SelectListState<T> {
             .iter()
             .enumerate()
             .filter_map(|(idx, item)| {
+                // Build search haystack from section + title + detail
+                let search_str = format!(
+                    "{} {} {}",
+                    item.section.as_deref().unwrap_or(""),
+                    item.title,
+                    item.detail
+                );
                 let mut buf = Vec::new();
-                let haystack = nucleo::Utf32Str::new(&item.title, &mut buf);
+                let haystack = nucleo::Utf32Str::new(&search_str, &mut buf);
                 needle
                     .score(haystack, &mut matcher)
                     .map(|score| (score, idx))

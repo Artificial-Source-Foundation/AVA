@@ -6,12 +6,12 @@
       "name": "Claude Opus 4.6",
       "aliases": ["opus", "opus-4.6", "claude-opus-4-6", "claude-opus-4"],
       "capabilities": { "tool_call": true, "vision": true, "reasoning": true, "streaming": true },
-      "limits": { "context_window": 200000, "max_output": 32000 },
+      "limits": { "context_window": 1048576, "max_output": 32000 },
       "cost": {
-        "input_per_million": 15.0,
-        "output_per_million": 75.0,
-        "cache_read_per_million": 1.5,
-        "cache_write_per_million": 18.75
+        "input_per_million": 5.0,
+        "output_per_million": 25.0,
+        "cache_read_per_million": 0.5,
+        "cache_write_per_million": 6.25
       }
     },
     {
@@ -20,7 +20,7 @@
       "name": "Claude Sonnet 4.6",
       "aliases": ["sonnet", "sonnet-4.6", "claude-sonnet-4-6", "claude-sonnet-4"],
       "capabilities": { "tool_call": true, "vision": true, "reasoning": true, "streaming": true },
-      "limits": { "context_window": 200000, "max_output": 64000 },
+      "limits": { "context_window": 1048576, "max_output": 64000 },
       "cost": {
         "input_per_million": 3.0,
         "output_per_million": 15.0,
@@ -151,31 +151,22 @@
       "cost": { "input_per_million": 2.5, "output_per_million": 10.0 }
     },
     {
-      "id": "gpt-4.1",
+      "id": "gpt-5.4",
       "provider": "openai",
-      "name": "GPT-4.1",
+      "name": "GPT-5.4",
       "aliases": [],
-      "capabilities": { "tool_call": true, "vision": true, "streaming": true },
-      "limits": { "context_window": 1000000, "max_output": 32768 },
-      "cost": { "input_per_million": 2.0, "output_per_million": 8.0 }
+      "capabilities": { "tool_call": true, "reasoning": true, "streaming": true },
+      "limits": { "context_window": 1048576, "max_output": 100000 },
+      "cost": { "input_per_million": 2.5, "output_per_million": 15.0 }
     },
     {
-      "id": "gpt-4o",
+      "id": "gpt-5-mini",
       "provider": "openai",
-      "name": "GPT-4o",
-      "aliases": ["4o"],
-      "capabilities": { "tool_call": true, "vision": true, "streaming": true },
-      "limits": { "context_window": 128000, "max_output": 16384 },
-      "cost": { "input_per_million": 2.5, "output_per_million": 10.0 }
-    },
-    {
-      "id": "gpt-4o-mini",
-      "provider": "openai",
-      "name": "GPT-4o Mini",
-      "aliases": ["4o-mini"],
-      "capabilities": { "tool_call": true, "vision": true, "streaming": true },
-      "limits": { "context_window": 128000, "max_output": 16384 },
-      "cost": { "input_per_million": 0.15, "output_per_million": 0.6 }
+      "name": "GPT-5 Mini",
+      "aliases": [],
+      "capabilities": { "tool_call": true, "reasoning": true, "streaming": true },
+      "limits": { "context_window": 131072, "max_output": 100000 },
+      "cost": { "input_per_million": 0.5, "output_per_million": 2.0 }
     },
     {
       "id": "codex-mini-latest",
@@ -190,15 +181,6 @@
       "id": "o3-mini",
       "provider": "openai",
       "name": "o3-mini",
-      "aliases": [],
-      "capabilities": { "tool_call": true, "reasoning": true, "streaming": true },
-      "limits": { "context_window": 200000, "max_output": 100000 },
-      "cost": { "input_per_million": 1.1, "output_per_million": 4.4 }
-    },
-    {
-      "id": "o4-mini",
-      "provider": "openai",
-      "name": "o4-mini",
       "aliases": [],
       "capabilities": { "tool_call": true, "reasoning": true, "streaming": true },
       "limits": { "context_window": 200000, "max_output": 100000 },
@@ -241,13 +223,22 @@
       "cost": { "input_per_million": 0.2, "output_per_million": 0.8 }
     },
     {
-      "id": "claude-sonnet-4",
-      "provider": "copilot",
-      "name": "Claude Sonnet 4",
+      "id": "gemini-3.1-pro",
+      "provider": "google",
+      "name": "Gemini 3.1 Pro",
       "aliases": [],
-      "capabilities": { "tool_call": true, "streaming": true },
-      "limits": { "context_window": 200000, "max_output": 16000 },
-      "cost": { "input_per_million": 0.0, "output_per_million": 0.0 }
+      "capabilities": { "tool_call": true, "vision": true, "reasoning": true, "streaming": true },
+      "limits": { "context_window": 2097152, "max_output": 65536 },
+      "cost": { "input_per_million": 1.25, "output_per_million": 10.0 }
+    },
+    {
+      "id": "gemini-3-flash",
+      "provider": "google",
+      "name": "Gemini 3 Flash",
+      "aliases": [],
+      "capabilities": { "tool_call": true, "vision": true, "reasoning": true, "streaming": true },
+      "limits": { "context_window": 1048576, "max_output": 65536 },
+      "cost": { "input_per_million": 0.3, "output_per_million": 2.5 }
     },
     {
       "id": "claude-sonnet-4.5",
@@ -292,24 +283,6 @@
       "aliases": [],
       "capabilities": { "tool_call": true, "streaming": true },
       "limits": { "context_window": 200000, "max_output": 8192 },
-      "cost": { "input_per_million": 0.0, "output_per_million": 0.0 }
-    },
-    {
-      "id": "gpt-4.1",
-      "provider": "copilot",
-      "name": "GPT-4.1",
-      "aliases": [],
-      "capabilities": { "tool_call": true, "streaming": true },
-      "limits": { "context_window": 1000000, "max_output": 32768 },
-      "cost": { "input_per_million": 0.0, "output_per_million": 0.0 }
-    },
-    {
-      "id": "gpt-4o",
-      "provider": "copilot",
-      "name": "GPT-4o",
-      "aliases": [],
-      "capabilities": { "tool_call": true, "streaming": true },
-      "limits": { "context_window": 128000, "max_output": 16384 },
       "cost": { "input_per_million": 0.0, "output_per_million": 0.0 }
     },
     {

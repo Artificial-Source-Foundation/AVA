@@ -23,7 +23,12 @@ const INDEX_USERNAME: &str = "__ava_provider_index";
 const ENCRYPTED_FILE: &str = "credentials.enc";
 
 /// PBKDF2 iteration count for key derivation.
+#[cfg(not(test))]
 const PBKDF2_ITERATIONS: u32 = 600_000;
+
+/// Reduced iteration count for tests (~600x faster).
+#[cfg(test)]
+const PBKDF2_ITERATIONS: u32 = 1_000;
 
 /// AES-256-GCM nonce size in bytes.
 const NONCE_SIZE: usize = 12;

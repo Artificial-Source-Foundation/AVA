@@ -17,7 +17,8 @@ fn backgrounded_run_events_stay_out_of_foreground() {
 
     app.background_current_agent(app_tx.clone());
 
-    assert!(app.state.messages.messages.is_empty());
+    // Messages preserved after backgrounding (user msg + system notification)
+    assert!(app.state.messages.messages.len() >= 1);
     assert_eq!(app.foreground_run_id, None);
     assert_eq!(app.background_run_routes.get(&42), Some(&1));
 
@@ -38,7 +39,12 @@ fn backgrounded_run_events_stay_out_of_foreground() {
         agent_tx.clone(),
     );
 
-    assert!(app.state.messages.messages.is_empty());
+    // Foreground messages preserved (user msg + system notification) — background events don't leak in
+    let fg_count = app.state.messages.messages.len();
+    assert!(
+        fg_count >= 1 && fg_count <= 2,
+        "foreground should have original messages only, got {fg_count}"
+    );
     let bg = app.state.background.lock().unwrap();
     let task = bg.tasks.iter().find(|task| task.id == 1).expect("task");
     assert_eq!(task.messages.len(), 3);
@@ -103,31 +109,7 @@ fn model_switch_result_updates_state_and_closes_modal() {
     );
 }
 
-#[test]
-fn bg_command_sets_pending_goal() {
-    let temp = tempdir().expect("tempdir");
-    let db_path = temp.path().join("data.db");
-    let mut app = App::test_new(&db_path);
-
-    let result = app.test_slash_command("/bg refactor auth module");
-    assert!(result.is_none());
-    let pending = app.pending_bg_goal.expect("pending background goal");
-    assert_eq!(pending.goal, "refactor auth module");
-    assert!(!pending.isolated_branch);
-}
-
-#[test]
-fn bg_branch_command_sets_isolated_goal() {
-    let temp = tempdir().expect("tempdir");
-    let db_path = temp.path().join("data.db");
-    let mut app = App::test_new(&db_path);
-
-    let result = app.test_slash_command("/bg --branch refactor auth module");
-    assert!(result.is_none());
-    let pending = app.pending_bg_goal.expect("pending background goal");
-    assert_eq!(pending.goal, "refactor auth module");
-    assert!(pending.isolated_branch);
-}
+// /bg command removed — tests removed
 
 #[test]
 fn praxis_command_sets_pending_goal() {

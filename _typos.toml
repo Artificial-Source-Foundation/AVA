@@ -1,0 +1,13 @@
+[default.extend-words]
+ava = "ava"
+mcp = "mcp"
+
+[files]
+extend-exclude = [
+    "*.lock",
+    "target/",
+    "node_modules/",
+    "dist/",
+    "docs/reference-code/",
+    "docs/research/",
+]

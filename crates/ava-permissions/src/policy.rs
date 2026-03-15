@@ -24,11 +24,13 @@ impl PermissionPolicy {
     }
 
     /// Allow Safe+Low+Medium automatically, ask for High+, deny Critical.
+    /// With blocklist classifier, most commands are Low (auto-approve).
+    /// Only flagged dangerous commands reach High (ask) or Critical (deny).
     pub fn standard() -> Self {
         Self {
             name: "standard".to_string(),
             max_risk_level: RiskLevel::Medium,
-            blocked_tags: vec![SafetyTag::Destructive],
+            blocked_tags: vec![],
             allowed_tools: vec![],
             blocked_tools: vec![],
         }
@@ -61,7 +63,8 @@ mod tests {
     fn standard_allows_up_to_medium() {
         let policy = PermissionPolicy::standard();
         assert_eq!(policy.max_risk_level, RiskLevel::Medium);
-        assert!(policy.blocked_tags.contains(&SafetyTag::Destructive));
+        // Blocklist approach: no blocked tags — High risk commands get Ask, Critical gets Deny
+        assert!(policy.blocked_tags.is_empty());
     }
 
     #[test]

@@ -447,8 +447,8 @@ mod tests {
         let inspector = default_inspector();
         let ctx = test_context(false);
         let result = inspector.inspect("bash", &serde_json::json!({"command": "ls -la"}), &ctx);
-        // Classifier downgrades to Safe, which is within standard policy threshold (Medium)
-        assert_eq!(result.risk_level, RiskLevel::Safe);
+        // Blocklist classifier: ls is Low (default), within standard policy threshold (Medium)
+        assert_eq!(result.risk_level, RiskLevel::Low);
         assert_eq!(result.action, Action::Allow);
     }
 
@@ -497,13 +497,13 @@ mod tests {
         );
         assert_eq!(result.action, Action::Allow);
 
-        // git commit should be Medium risk and auto-approved by standard policy
+        // git commit is Low risk (blocklist default) and auto-approved
         let result = inspector.inspect(
             "bash",
             &serde_json::json!({"command": "git commit -m 'fix bug'"}),
             &ctx,
         );
-        assert_eq!(result.risk_level, RiskLevel::Medium);
+        assert_eq!(result.risk_level, RiskLevel::Low);
         assert_eq!(result.action, Action::Allow);
     }
 
@@ -715,15 +715,20 @@ mod tests {
         let inspector = default_inspector();
         let ctx = test_context(false);
         let result = inspector.inspect("bash", &serde_json::json!({"command": "ls"}), &ctx);
-        assert_eq!(result.risk_level, RiskLevel::Safe);
+        assert_eq!(result.risk_level, RiskLevel::Low);
     }
 
     #[test]
     fn risky_bash_asks() {
         let inspector = default_inspector();
         let ctx = test_context(false);
-        let result = inspector.inspect("bash", &serde_json::json!({"command": "rm foo.txt"}), &ctx);
-        assert!(result.risk_level >= RiskLevel::Medium);
+        // rm -rf is High risk — requires user confirmation
+        let result = inspector.inspect(
+            "bash",
+            &serde_json::json!({"command": "rm -rf /tmp/test"}),
+            &ctx,
+        );
+        assert!(result.risk_level >= RiskLevel::High);
     }
 
     #[test]

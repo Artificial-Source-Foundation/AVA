@@ -3,6 +3,7 @@ use crate::tags::{RiskLevel, SafetyTag};
 use super::CommandClassification;
 
 /// Check for patterns that should be BLOCKED (Critical risk).
+/// These are ALWAYS denied, even in auto-approve mode.
 pub(super) fn check_blocked_patterns(lower: &str, _original: &str) -> Option<String> {
     // rm -rf / or rm -rf ~ or rm -rf /*
     if (lower.contains("rm ") || lower.starts_with("rm "))
@@ -58,68 +59,19 @@ pub(super) fn check_blocked_patterns(lower: &str, _original: &str) -> Option<Str
         return Some("Fork bomb detected".to_string());
     }
 
+    // chmod 777 / or chown root /
+    if lower.contains("chmod") && lower.contains("777") && lower.contains(" /") {
+        let after_777 = lower.split("777").nth(1).unwrap_or("").trim();
+        if after_777 == "/" || after_777.starts_with("/ ") {
+            return Some("chmod 777 on root filesystem".to_string());
+        }
+    }
+
     None
 }
 
-/// Check if command is safe (read-only or harmless shell builtins).
-pub(super) fn is_safe_command(first_word: &str) -> bool {
-    matches!(
-        first_word,
-        "ls" | "cat"
-            | "echo"
-            | "grep"
-            | "rg"
-            | "find"
-            | "head"
-            | "tail"
-            | "wc"
-            | "pwd"
-            | "date"
-            | "which"
-            | "whoami"
-            | "env"
-            | "printenv"
-            | "uname"
-            | "id"
-            | "file"
-            | "stat"
-            | "du"
-            | "df"
-            | "tree"
-            | "less"
-            | "more"
-            | "sort"
-            | "uniq"
-            | "diff"
-            | "comm"
-            | "cut"
-            | "tr"
-            | "basename"
-            | "dirname"
-            | "realpath"
-            | "readlink"
-            | "tee"
-            | "true"
-            | "false"
-            | "test"
-            | "["
-            | "printf"
-            | "cd"
-            | "pushd"
-            | "popd"
-            | "dirs"
-            | "type"
-            | "command"
-            | "hash"
-            | "alias"
-            | "history"
-            | "help"
-            | "man"
-            | "info"
-    )
-}
-
-/// Check if command matches safe git subcommands.
+/// Check if command matches safe git subcommands (read-only git operations).
+/// Exposed publicly for use by the git_read tool.
 pub fn is_safe_git_command(lower: &str) -> bool {
     let safe_git = [
         "git status",
@@ -139,52 +91,8 @@ pub fn is_safe_git_command(lower: &str) -> bool {
     safe_git.iter().any(|cmd| lower.starts_with(cmd))
 }
 
-/// Check if command is low risk (build/test tools).
-pub(super) fn is_low_risk_command(first_word: &str, lower: &str) -> bool {
-    // Safe git subcommands
-    if first_word == "git" && is_safe_git_command(lower) {
-        return true;
-    }
-
-    // Build/test/dev tools
-    if matches!(
-        first_word,
-        "cargo"
-            | "npm"
-            | "npx"
-            | "yarn"
-            | "pnpm"
-            | "bun"
-            | "python"
-            | "python3"
-            | "node"
-            | "deno"
-            | "go"
-            | "rustc"
-            | "gcc"
-            | "make"
-            | "cmake"
-            | "just"
-            | "nix"
-    ) {
-        // Check for specific safe subcommands
-        let safe_subs = [
-            "test", "build", "clippy", "check", "run", "install", "fmt", "lint", "format", "bench",
-            "doc", "audit", "outdated",
-        ];
-        if safe_subs.iter().any(|sub| lower.contains(sub)) {
-            return true;
-        }
-    }
-
-    // Standalone safe dev commands
-    matches!(
-        first_word,
-        "rustfmt" | "prettier" | "eslint" | "biome" | "tsc" | "esbuild" | "vite" | "webpack"
-    )
-}
-
 /// Check for high-risk patterns that should warn but not block.
+/// These require user confirmation in standard policy.
 pub(super) fn check_high_risk_patterns(
     first_word: &str,
     lower: &str,
@@ -193,7 +101,7 @@ pub(super) fn check_high_risk_patterns(
     let mut warnings = Vec::new();
     let mut tags = vec![SafetyTag::Destructive];
 
-    // rm -rf (non-root paths — root is already blocked)
+    // rm -rf (non-root paths -- root is already blocked)
     if first_word == "rm" && (lower.contains("-rf") || lower.contains("-fr")) {
         warnings.push("rm -rf can recursively delete files".to_string());
         return Some(CommandClassification {
@@ -230,9 +138,83 @@ pub(super) fn check_high_risk_patterns(
         });
     }
 
-    // chmod 777
+    // chmod 777 (non-root -- root is blocked above)
     if lower.contains("chmod") && lower.contains("777") {
         warnings.push("chmod 777 makes files world-writable".to_string());
+        tags = vec![SafetyTag::SystemModification];
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags,
+            warnings,
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // kill -9
+    if first_word == "kill" && lower.contains("-9") {
+        warnings.push("kill -9 forcefully terminates a process".to_string());
+        tags = vec![SafetyTag::SystemModification];
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags,
+            warnings,
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // pkill / killall
+    if matches!(first_word, "pkill" | "killall") {
+        warnings.push(format!("{first_word} can terminate multiple processes"));
+        tags = vec![SafetyTag::SystemModification];
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags,
+            warnings,
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // npm publish / cargo publish
+    if (lower.starts_with("npm ") && lower.contains("publish"))
+        || (lower.starts_with("cargo ") && lower.contains("publish"))
+    {
+        warnings.push("Publishing packages is irreversible".to_string());
+        tags = vec![SafetyTag::NetworkAccess];
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags,
+            warnings,
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // docker rm / docker rmi
+    if lower.starts_with("docker ") && (lower.contains(" rm") || lower.contains(" rmi")) {
+        warnings.push("Removing Docker containers/images".to_string());
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags,
+            warnings,
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    // Redirect to system paths (> /etc/*, > /usr/*, etc.)
+    if lower.contains("> /etc/")
+        || lower.contains(">/etc/")
+        || lower.contains("> /usr/")
+        || lower.contains(">/usr/")
+        || lower.contains("> /var/")
+        || lower.contains(">/var/")
+        || lower.contains("> /sys/")
+        || lower.contains(">/sys/")
+    {
+        warnings.push("Redirecting output to system path".to_string());
         tags = vec![SafetyTag::SystemModification];
         return Some(CommandClassification {
             risk_level: RiskLevel::High,
@@ -277,67 +259,21 @@ pub(super) fn check_high_risk_patterns(
         });
     }
 
-    None
-}
-
-/// Check for medium-risk patterns.
-pub(super) fn check_medium_risk_patterns(
-    first_word: &str,
-    lower: &str,
-    _words: &[String],
-) -> Option<CommandClassification> {
-    // rm (single file, no -rf)
-    if first_word == "rm" && !lower.contains("-rf") && !lower.contains("-fr") {
-        return Some(CommandClassification {
-            risk_level: RiskLevel::Medium,
-            tags: vec![SafetyTag::DeleteFile],
-            warnings: vec!["rm will delete files".to_string()],
-            blocked: false,
-            reason: None,
-        });
-    }
-
-    // kill -9
-    if first_word == "kill" && lower.contains("-9") {
-        return Some(CommandClassification {
-            risk_level: RiskLevel::Medium,
-            tags: vec![SafetyTag::SystemModification],
-            warnings: vec!["kill -9 forcefully terminates a process".to_string()],
-            blocked: false,
-            reason: None,
-        });
-    }
-
-    // pkill / killall
-    if matches!(first_word, "pkill" | "killall") {
-        return Some(CommandClassification {
-            risk_level: RiskLevel::Medium,
-            tags: vec![SafetyTag::SystemModification],
-            warnings: vec![format!("{first_word} can terminate multiple processes")],
-            blocked: false,
-            reason: None,
-        });
-    }
-
-    // git operations that aren't safe or high risk
-    if first_word == "git" && !is_safe_git_command(lower) {
-        return Some(CommandClassification {
-            risk_level: RiskLevel::Medium,
-            tags: vec![SafetyTag::ExecuteCommand],
-            warnings: vec![],
-            blocked: false,
-            reason: None,
-        });
-    }
-
-    None
-}
-
-/// Check for network access commands.
-pub(super) fn is_network_command(first_word: &str, lower: &str) -> bool {
-    matches!(
+    // Plain network commands (curl, wget without pipe to shell)
+    if matches!(
         first_word,
         "curl" | "wget" | "nc" | "ncat" | "ssh" | "scp" | "rsync" | "ftp" | "sftp"
-    ) || lower.contains("http://")
-        || lower.contains("https://")
+    ) {
+        warnings.push("Command performs network access".to_string());
+        tags = vec![SafetyTag::NetworkAccess];
+        return Some(CommandClassification {
+            risk_level: RiskLevel::High,
+            tags,
+            warnings,
+            blocked: false,
+            reason: None,
+        });
+    }
+
+    None
 }

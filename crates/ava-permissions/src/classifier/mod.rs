@@ -4,10 +4,7 @@ mod rules;
 pub use rules::is_safe_git_command;
 
 use parser::{extract_words_heuristic, extract_words_treesitter};
-use rules::{
-    check_blocked_patterns, check_high_risk_patterns, check_medium_risk_patterns,
-    is_low_risk_command, is_network_command, is_safe_command,
-};
+use rules::{check_blocked_patterns, check_high_risk_patterns};
 
 use crate::tags::{RiskLevel, SafetyTag};
 
@@ -22,10 +19,10 @@ pub struct CommandClassification {
 }
 
 impl CommandClassification {
-    fn safe() -> Self {
+    fn low() -> Self {
         Self {
-            risk_level: RiskLevel::Safe,
-            tags: vec![],
+            risk_level: RiskLevel::Low,
+            tags: vec![SafetyTag::ExecuteCommand],
             warnings: vec![],
             blocked: false,
             reason: None,
@@ -62,6 +59,9 @@ impl CommandClassification {
 
 /// Classify a bash command string, returning structured risk information.
 ///
+/// Uses a BLOCKLIST approach: all commands default to Low risk (auto-approve),
+/// and only specific dangerous patterns are flagged as High or Critical.
+///
 /// Parses pipes (`|`), chains (`&&`, `||`, `;`), and returns the HIGHEST risk
 /// from all parts. Uses tree-sitter for word extraction, falls back to heuristic.
 pub fn classify_bash_command(command: &str) -> CommandClassification {
@@ -74,10 +74,10 @@ pub fn classify_bash_command(command: &str) -> CommandClassification {
 
     let parts = split_command_parts(command);
     if parts.is_empty() {
-        return CommandClassification::safe();
+        return CommandClassification::low();
     }
 
-    let mut result = CommandClassification::safe();
+    let mut result = CommandClassification::low();
     for part in &parts {
         let part_result = classify_single_command(part.trim());
         result.merge_highest(&part_result);
@@ -141,10 +141,16 @@ fn split_command_parts(command: &str) -> Vec<String> {
     parts
 }
 
+/// Classify a single command (no pipes/chains).
+///
+/// Blocklist approach:
+/// 1. Critical patterns → blocked (always denied)
+/// 2. High-risk patterns → warn (ask user)
+/// 3. Everything else → Low (auto-approve)
 fn classify_single_command(command: &str) -> CommandClassification {
     let lower = command.to_ascii_lowercase();
 
-    // Check blocked patterns first (Critical)
+    // 1. Check blocked patterns (Critical)
     if let Some(reason) = check_blocked_patterns(&lower, command) {
         return CommandClassification::blocked(reason);
     }
@@ -155,57 +161,13 @@ fn classify_single_command(command: &str) -> CommandClassification {
 
     let first_word = words.first().map(|s| s.as_str()).unwrap_or("");
 
-    // Check safe patterns
-    if is_safe_command(first_word) {
-        return CommandClassification {
-            risk_level: RiskLevel::Safe,
-            tags: vec![SafetyTag::ReadOnly],
-            warnings: vec![],
-            blocked: false,
-            reason: None,
-        };
-    }
-
-    // Check low-risk (allowed) patterns
-    if is_low_risk_command(first_word, &lower) {
-        return CommandClassification {
-            risk_level: RiskLevel::Low,
-            tags: vec![SafetyTag::ExecuteCommand],
-            warnings: vec![],
-            blocked: false,
-            reason: None,
-        };
-    }
-
-    // Check high-risk (warn) patterns
+    // 2. Check high-risk patterns (warn/ask)
     if let Some(result) = check_high_risk_patterns(first_word, &lower, &words) {
         return result;
     }
 
-    // Check medium-risk patterns
-    if let Some(result) = check_medium_risk_patterns(first_word, &lower, &words) {
-        return result;
-    }
-
-    // Check network access
-    if is_network_command(first_word, &lower) {
-        return CommandClassification {
-            risk_level: RiskLevel::High,
-            tags: vec![SafetyTag::NetworkAccess],
-            warnings: vec!["Command performs network access".to_string()],
-            blocked: false,
-            reason: None,
-        };
-    }
-
-    // Default: medium risk for unrecognized commands
-    CommandClassification {
-        risk_level: RiskLevel::Medium,
-        tags: vec![SafetyTag::ExecuteCommand],
-        warnings: vec![],
-        blocked: false,
-        reason: None,
-    }
+    // 3. Everything else: Low risk (auto-approve)
+    CommandClassification::low()
 }
 
 #[cfg(test)]
@@ -332,28 +294,74 @@ mod tests {
         assert_eq!(result.risk_level, RiskLevel::High);
     }
 
-    // === MEDIUM risk ===
-
     #[test]
-    fn medium_risk_rm_single_file() {
-        let result = classify_bash_command("rm foo.txt");
-        assert_eq!(result.risk_level, RiskLevel::Medium);
-        assert!(result.tags.contains(&SafetyTag::DeleteFile));
-    }
-
-    #[test]
-    fn medium_risk_kill_9() {
+    fn high_risk_kill_9() {
         let result = classify_bash_command("kill -9 1234");
-        assert_eq!(result.risk_level, RiskLevel::Medium);
+        assert_eq!(result.risk_level, RiskLevel::High);
     }
 
     #[test]
-    fn medium_risk_pkill() {
+    fn high_risk_pkill() {
         let result = classify_bash_command("pkill -f node");
-        assert_eq!(result.risk_level, RiskLevel::Medium);
+        assert_eq!(result.risk_level, RiskLevel::High);
     }
 
-    // === LOW risk ===
+    #[test]
+    fn high_risk_npm_publish() {
+        let result = classify_bash_command("npm publish");
+        assert_eq!(result.risk_level, RiskLevel::High);
+    }
+
+    #[test]
+    fn high_risk_cargo_publish() {
+        let result = classify_bash_command("cargo publish");
+        assert_eq!(result.risk_level, RiskLevel::High);
+    }
+
+    #[test]
+    fn high_risk_docker_rm() {
+        let result = classify_bash_command("docker rm container_id");
+        assert_eq!(result.risk_level, RiskLevel::High);
+    }
+
+    #[test]
+    fn high_risk_network_curl() {
+        let result = classify_bash_command("curl https://example.com");
+        assert_eq!(result.risk_level, RiskLevel::High);
+        assert!(result.tags.contains(&SafetyTag::NetworkAccess));
+    }
+
+    #[test]
+    fn high_risk_network_wget() {
+        let result = classify_bash_command("wget https://example.com/file.tar.gz");
+        assert_eq!(result.risk_level, RiskLevel::High);
+    }
+
+    // === LOW risk (default — everything else auto-approves) ===
+
+    #[test]
+    fn low_risk_ls() {
+        let result = classify_bash_command("ls -la");
+        assert_eq!(result.risk_level, RiskLevel::Low);
+    }
+
+    #[test]
+    fn low_risk_cat() {
+        let result = classify_bash_command("cat README.md");
+        assert_eq!(result.risk_level, RiskLevel::Low);
+    }
+
+    #[test]
+    fn low_risk_echo() {
+        let result = classify_bash_command("echo hello world");
+        assert_eq!(result.risk_level, RiskLevel::Low);
+    }
+
+    #[test]
+    fn low_risk_cd() {
+        let result = classify_bash_command("cd /tmp/project");
+        assert_eq!(result.risk_level, RiskLevel::Low);
+    }
 
     #[test]
     fn low_risk_cargo_test() {
@@ -373,53 +381,63 @@ mod tests {
         assert_eq!(result.risk_level, RiskLevel::Low);
     }
 
-    // === SAFE ===
-
     #[test]
-    fn safe_ls() {
-        let result = classify_bash_command("ls -la");
-        assert_eq!(result.risk_level, RiskLevel::Safe);
-    }
-
-    #[test]
-    fn safe_cat() {
-        let result = classify_bash_command("cat README.md");
-        assert_eq!(result.risk_level, RiskLevel::Safe);
-    }
-
-    #[test]
-    fn safe_echo() {
-        let result = classify_bash_command("echo hello world");
-        assert_eq!(result.risk_level, RiskLevel::Safe);
-    }
-
-    #[test]
-    fn safe_cd() {
-        let result = classify_bash_command("cd /tmp/project");
-        assert_eq!(result.risk_level, RiskLevel::Safe);
-    }
-
-    #[test]
-    fn safe_cd_chain_cargo_test() {
-        let result = classify_bash_command("cd /workspace && cargo test");
-        assert_eq!(result.risk_level, RiskLevel::Low); // max of Safe (cd) and Low (cargo test)
-    }
-
-    #[test]
-    fn safe_git_status() {
+    fn low_risk_git_status() {
         let result = classify_bash_command("git status");
-        assert_eq!(result.risk_level, RiskLevel::Low); // git is low, git status is safe-ish
+        assert_eq!(result.risk_level, RiskLevel::Low);
     }
 
     #[test]
-    fn safe_git_log() {
+    fn low_risk_git_log() {
         let result = classify_bash_command("git log --oneline -10");
         assert_eq!(result.risk_level, RiskLevel::Low);
     }
 
     #[test]
-    fn safe_git_diff() {
+    fn low_risk_git_diff() {
         let result = classify_bash_command("git diff HEAD");
+        assert_eq!(result.risk_level, RiskLevel::Low);
+    }
+
+    #[test]
+    fn low_risk_git_commit() {
+        let result = classify_bash_command("git commit -m 'fix bug'");
+        assert_eq!(result.risk_level, RiskLevel::Low);
+    }
+
+    #[test]
+    fn low_risk_python() {
+        let result = classify_bash_command("python script.py");
+        assert_eq!(result.risk_level, RiskLevel::Low);
+    }
+
+    #[test]
+    fn low_risk_node() {
+        let result = classify_bash_command("node app.js");
+        assert_eq!(result.risk_level, RiskLevel::Low);
+    }
+
+    #[test]
+    fn low_risk_go_build() {
+        let result = classify_bash_command("go build ./...");
+        assert_eq!(result.risk_level, RiskLevel::Low);
+    }
+
+    #[test]
+    fn low_risk_rm_single_file() {
+        let result = classify_bash_command("rm foo.txt");
+        assert_eq!(result.risk_level, RiskLevel::Low);
+    }
+
+    #[test]
+    fn low_risk_make() {
+        let result = classify_bash_command("make all");
+        assert_eq!(result.risk_level, RiskLevel::Low);
+    }
+
+    #[test]
+    fn low_risk_unknown_command() {
+        let result = classify_bash_command("my-custom-tool --flag");
         assert_eq!(result.risk_level, RiskLevel::Low);
     }
 
@@ -427,7 +445,7 @@ mod tests {
 
     #[test]
     fn chain_returns_highest_risk() {
-        // ls is Safe but rm -rf is High → overall High
+        // ls is Low but rm -rf is High → overall High
         let result = classify_bash_command("ls && rm -rf /tmp/test");
         assert_eq!(result.risk_level, RiskLevel::High);
     }
@@ -435,7 +453,7 @@ mod tests {
     #[test]
     fn pipe_returns_highest_risk() {
         let result = classify_bash_command("cat file.txt | grep pattern");
-        assert_eq!(result.risk_level, RiskLevel::Safe);
+        assert_eq!(result.risk_level, RiskLevel::Low);
     }
 
     #[test]
@@ -451,18 +469,9 @@ mod tests {
         assert_eq!(result.risk_level, RiskLevel::Critical);
     }
 
-    // === Network ===
-
     #[test]
-    fn network_curl() {
-        let result = classify_bash_command("curl https://example.com");
-        assert_eq!(result.risk_level, RiskLevel::High);
-        assert!(result.tags.contains(&SafetyTag::NetworkAccess));
-    }
-
-    #[test]
-    fn network_wget() {
-        let result = classify_bash_command("wget https://example.com/file.tar.gz");
-        assert_eq!(result.risk_level, RiskLevel::High);
+    fn cd_chain_cargo_test() {
+        let result = classify_bash_command("cd /workspace && cargo test");
+        assert_eq!(result.risk_level, RiskLevel::Low);
     }
 }

@@ -456,10 +456,17 @@ Keyboard shortcuts:
                     // The caller (submit_goal) will call try_resolve_custom_command().
                     None
                 } else {
-                    Some((
-                        MessageKind::Error,
-                        format!("Unknown command: {cmd}. Type /help for available commands."),
-                    ))
+                    // Fuzzy match: treat typos near "/model" as the model command
+                    let cmd_lower = cmd.to_ascii_lowercase();
+                    if cmd_lower.starts_with("/mod") || cmd_lower.starts_with("/mode") {
+                        self.execute_command_action(Action::ModelSwitch, app_tx.clone());
+                        None
+                    } else {
+                        Some((
+                            MessageKind::Error,
+                            format!("Unknown command: {cmd}. Type /help for available commands."),
+                        ))
+                    }
                 }
             }
         }

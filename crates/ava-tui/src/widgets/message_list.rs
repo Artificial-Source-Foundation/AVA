@@ -324,12 +324,20 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     let bg_fill = Block::default().style(Style::default().bg(state.theme.bg_deep));
     frame.render_widget(bg_fill, area);
 
+    // CRITICAL: Manually slice lines to exactly the visible window instead of
+    // relying on Paragraph::scroll(). This guarantees that the Paragraph widget
+    // receives only as many lines as fit in the area, preventing any possibility
+    // of text bleeding past area.bottom().
+    let start = (state.messages.scroll_offset as usize).min(lines.len());
+    let end = (start + visible_height as usize).min(lines.len());
+    let visible_lines: Vec<Line<'static>> = lines.drain(start..end).collect();
+
     // Render the paragraph in a narrower area so text doesn't overlap the scrollbar column.
     let content_area = Rect {
         width: area.width.saturating_sub(1),
         ..area
     };
-    let widget = Paragraph::new(lines).scroll((state.messages.scroll_offset, 0));
+    let widget = Paragraph::new(visible_lines);
     frame.render_widget(widget, content_area);
 
     // Render scroll indicator when not at bottom (content overflows).

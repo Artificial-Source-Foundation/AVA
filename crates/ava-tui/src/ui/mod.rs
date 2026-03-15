@@ -123,6 +123,8 @@ fn render_modal(frame: &mut Frame<'_>, state: &mut AppState, modal: ModalType) {
         centered_rect(50, 40, area)
     } else if matches!(modal, ModalType::Rewind) {
         centered_rect(60, 60, area)
+    } else if matches!(modal, ModalType::InfoPanel) {
+        centered_rect(70, 80, area)
     } else {
         centered_rect(60, 70, area)
     };
@@ -309,7 +311,106 @@ fn render_modal(frame: &mut Frame<'_>, state: &mut AppState, modal: ModalType) {
                 );
             }
         }
+        ModalType::InfoPanel => {
+            render_info_panel(frame, inner, state);
+        }
     }
+}
+
+fn render_info_panel(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+    use ratatui::style::Modifier;
+    use ratatui::widgets::Wrap;
+
+    let Some(ref panel) = state.info_panel else {
+        return;
+    };
+
+    // Title line
+    let title_line = Line::from(Span::styled(
+        &panel.title,
+        Style::default()
+            .fg(state.theme.text)
+            .add_modifier(Modifier::BOLD),
+    ));
+
+    // Build content lines, highlighting command names (lines starting with /)
+    let content_lines: Vec<Line<'_>> = panel
+        .content
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if let Some(rest) = trimmed.strip_prefix('/') {
+                // Split at first whitespace after the command name
+                let cmd_end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
+                let cmd = &trimmed[..cmd_end + 1]; // includes the leading /
+                let desc = &trimmed[cmd_end + 1..];
+                Line::from(vec![
+                    Span::styled(
+                        cmd.to_string(),
+                        Style::default()
+                            .fg(state.theme.accent)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        desc.to_string(),
+                        Style::default().fg(state.theme.text_muted),
+                    ),
+                ])
+            } else {
+                Line::from(Span::styled(
+                    line.to_string(),
+                    Style::default().fg(state.theme.text),
+                ))
+            }
+        })
+        .collect();
+
+    let total_lines = content_lines.len() as u16;
+
+    // Layout: title (1 line) + separator (1 line) + content (dynamic) + footer (1 line)
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // title
+            Constraint::Length(1), // separator
+            Constraint::Min(1),    // content
+            Constraint::Length(1), // footer
+        ])
+        .split(area);
+
+    // Render title
+    frame.render_widget(Paragraph::new(title_line), chunks[0]);
+
+    // Render separator
+    let sep = Line::from(Span::styled(
+        "\u{2500}".repeat(chunks[1].width as usize),
+        Style::default().fg(state.theme.border),
+    ));
+    frame.render_widget(Paragraph::new(sep), chunks[1]);
+
+    // Render scrollable content
+    let content_height = chunks[2].height;
+    let content_paragraph = Paragraph::new(content_lines)
+        .wrap(Wrap { trim: false })
+        .scroll((panel.scroll, 0));
+    frame.render_widget(content_paragraph, chunks[2]);
+
+    // Footer with scroll indicator
+    let can_scroll = total_lines > content_height;
+    let footer_text = if can_scroll {
+        format!(
+            " Esc close | \u{2191}/\u{2193} scroll | {}/{}",
+            panel.scroll + 1,
+            total_lines.saturating_sub(content_height) + 1
+        )
+    } else {
+        " Esc close".to_string()
+    };
+    let footer = Line::from(Span::styled(
+        footer_text,
+        Style::default().fg(state.theme.text_muted),
+    ));
+    frame.render_widget(Paragraph::new(footer), chunks[3]);
 }
 
 fn render_question_modal(frame: &mut Frame<'_>, area: Rect, state: &AppState) {

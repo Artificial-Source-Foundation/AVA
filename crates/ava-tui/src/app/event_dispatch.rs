@@ -244,9 +244,12 @@ impl App {
                     let count = servers.len();
                     let content = super::commands::format_mcp_server_list(&servers);
                     self.set_status(format!("Loaded {count} MCP servers"), StatusLevel::Info);
-                    self.state
-                        .messages
-                        .push(UiMessage::transient(MessageKind::System, content));
+                    self.state.info_panel = Some(super::InfoPanelState {
+                        title: "MCP Servers".to_string(),
+                        content,
+                        scroll: 0,
+                    });
+                    self.state.active_modal = Some(super::ModalType::InfoPanel);
                 }
                 Err(err) => self.set_status(
                     format!("Failed to load MCP servers: {err}"),

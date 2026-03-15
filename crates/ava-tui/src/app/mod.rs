@@ -112,6 +112,8 @@ pub struct AppState {
     pub custom_commands: CustomCommandRegistry,
     /// State for the diff preview modal (per-hunk accept/reject).
     pub diff_preview: Option<DiffPreviewState>,
+    /// State for the generic info panel modal (/help, /mcp list, etc.).
+    pub info_panel: Option<InfoPanelState>,
     /// State for the rewind system (checkpoints + modal).
     pub rewind: RewindState,
     /// Shared background task state.
@@ -201,6 +203,18 @@ pub enum ModalType {
     Rewind,
     TaskList,
     DiffPreview,
+    InfoPanel,
+}
+
+/// State for a generic scrollable info panel modal (used by /help, /mcp list, etc.).
+#[derive(Debug, Clone)]
+pub struct InfoPanelState {
+    /// Title shown at the top of the modal.
+    pub title: String,
+    /// Pre-formatted text content.
+    pub content: String,
+    /// Current scroll offset (in lines).
+    pub scroll: u16,
 }
 
 pub struct App {
@@ -319,6 +333,7 @@ impl App {
             btw: BtwState::default(),
             custom_commands: CustomCommandRegistry::load(),
             diff_preview: None,
+            info_panel: None,
             rewind: RewindState::default(),
             background: new_shared(),
             praxis: PraxisState::default(),
@@ -735,8 +750,8 @@ impl App {
                     "totalUsd": self.state.agent.cost,
                     "budgetUsd": (self.state.agent.max_budget_usd > 0.0)
                         .then_some(self.state.agent.max_budget_usd),
-                    "inputTokens": self.state.agent.tokens_used.input,
-                    "outputTokens": self.state.agent.tokens_used.output,
+                    "inputTokens": self.state.agent.tokens_used.cumulative_input,
+                    "outputTokens": self.state.agent.tokens_used.cumulative_output,
                     "lastAlertThresholdPercent": self
                         .state
                         .agent
@@ -801,6 +816,7 @@ impl App {
             btw: BtwState::default(),
             custom_commands: CustomCommandRegistry::default(),
             diff_preview: None,
+            info_panel: None,
             rewind: RewindState::default(),
             background: new_shared(),
             praxis: PraxisState::default(),

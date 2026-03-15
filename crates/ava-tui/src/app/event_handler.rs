@@ -44,8 +44,10 @@ impl App {
             .current_session
             .as_ref()
             .map(|s| s.id.to_string());
-        ctx.tokens_used =
-            Some(self.state.agent.tokens_used.input + self.state.agent.tokens_used.output);
+        ctx.tokens_used = Some(
+            self.state.agent.tokens_used.cumulative_input
+                + self.state.agent.tokens_used.cumulative_output,
+        );
         ctx.cost_usd = Some(self.state.agent.cost);
         ctx
     }
@@ -95,8 +97,14 @@ impl App {
                 output_tokens,
                 cost_usd,
             } => {
-                self.state.agent.tokens_used.input += input_tokens;
-                self.state.agent.tokens_used.output += output_tokens;
+                // Replace (not accumulate) for context display — each turn's
+                // input_tokens already includes the full conversation history,
+                // so the latest value represents current context window usage.
+                self.state.agent.tokens_used.input = input_tokens;
+                self.state.agent.tokens_used.output = output_tokens;
+                // Accumulate for session-level reporting
+                self.state.agent.tokens_used.cumulative_input += input_tokens;
+                self.state.agent.tokens_used.cumulative_output += output_tokens;
                 self.state.agent.cost += cost_usd;
             }
             ava_agent::AgentEvent::BudgetWarning {
@@ -369,9 +377,10 @@ impl App {
                     self.fire_hooks_async(HookEvent::SubagentStop, ctx, app_tx.clone());
                 }
 
-                // Accumulate sub-agent token usage into the parent's totals
-                self.state.agent.tokens_used.input += input_tokens;
-                self.state.agent.tokens_used.output += output_tokens;
+                // Accumulate sub-agent token usage into cumulative totals only —
+                // don't overwrite the parent's latest-turn context display values.
+                self.state.agent.tokens_used.cumulative_input += input_tokens;
+                self.state.agent.tokens_used.cumulative_output += output_tokens;
                 self.state.agent.cost += cost_usd;
 
                 // Convert agent messages to UI messages for storage

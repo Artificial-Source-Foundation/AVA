@@ -23,8 +23,8 @@ impl App {
             let id = bg.add_task(goal.clone());
             bg.add_tokens(
                 id,
-                self.state.agent.tokens_used.input,
-                self.state.agent.tokens_used.output,
+                self.state.agent.tokens_used.cumulative_input,
+                self.state.agent.tokens_used.cumulative_output,
                 self.state.agent.cost,
             );
             for msg in &self.state.messages.messages {

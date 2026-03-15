@@ -68,7 +68,7 @@ impl App {
                     }
                 }
             }
-            Some(ModalType::Rewind) | Some(ModalType::DiffPreview) => {
+            Some(ModalType::Rewind) | Some(ModalType::DiffPreview) | Some(ModalType::InfoPanel) => {
                 // These modals have no text input — ignore paste
             }
             _ => {}
@@ -99,6 +99,7 @@ impl App {
             ModalType::Rewind => self.handle_rewind_key(key),
             ModalType::TaskList => self.handle_task_list_key(key),
             ModalType::DiffPreview => self.handle_diff_preview_key(key),
+            ModalType::InfoPanel => self.handle_info_panel_key(key),
         }
     }
 
@@ -176,6 +177,21 @@ impl App {
                     if action == SelectListMouseAction::Clicked {
                         let enter = crossterm::event::KeyEvent::from(KeyCode::Enter);
                         self.handle_agent_list_key(enter);
+                    }
+                }
+            }
+            ModalType::InfoPanel => {
+                // Handle mouse scroll for the info panel
+                if let crossterm::event::MouseEventKind::ScrollDown = mouse.kind {
+                    if let Some(ref mut panel) = self.state.info_panel {
+                        let content_lines = panel.content.lines().count() as u16;
+                        let vh = modal_viewport_height() as u16;
+                        let max_scroll = content_lines.saturating_sub(vh.saturating_sub(2));
+                        panel.scroll = (panel.scroll + 3).min(max_scroll);
+                    }
+                } else if let crossterm::event::MouseEventKind::ScrollUp = mouse.kind {
+                    if let Some(ref mut panel) = self.state.info_panel {
+                        panel.scroll = panel.scroll.saturating_sub(3);
                     }
                 }
             }
@@ -937,6 +953,45 @@ impl App {
                 self.state.diff_preview = None;
                 self.state.active_modal = None;
                 self.set_status("Diff preview cancelled", StatusLevel::Info);
+            }
+            _ => {}
+        }
+        false
+    }
+
+    fn handle_info_panel_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        let Some(ref mut panel) = self.state.info_panel else {
+            self.state.active_modal = None;
+            return false;
+        };
+
+        let content_lines = panel.content.lines().count() as u16;
+        let vh = modal_viewport_height() as u16;
+        // Reserve 2 lines for title + footer
+        let max_scroll = content_lines.saturating_sub(vh.saturating_sub(2));
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.state.info_panel = None;
+                self.state.active_modal = None;
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                panel.scroll = (panel.scroll + 1).min(max_scroll);
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                panel.scroll = panel.scroll.saturating_sub(1);
+            }
+            KeyCode::PageDown => {
+                panel.scroll = (panel.scroll + vh.saturating_sub(4)).min(max_scroll);
+            }
+            KeyCode::PageUp => {
+                panel.scroll = panel.scroll.saturating_sub(vh.saturating_sub(4));
+            }
+            KeyCode::Home | KeyCode::Char('g') => {
+                panel.scroll = 0;
+            }
+            KeyCode::End | KeyCode::Char('G') => {
+                panel.scroll = max_scroll;
             }
             _ => {}
         }

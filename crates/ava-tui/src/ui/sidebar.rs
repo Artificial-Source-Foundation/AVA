@@ -37,13 +37,22 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             value_style,
         )),
         Line::from(""),
-        Line::from(Span::styled("Tokens", label_style)),
+        Line::from(Span::styled("Context (latest turn)", label_style)),
         Line::from(Span::styled(
             format!("  in:  {}", state.agent.tokens_used.input),
             value_style,
         )),
         Line::from(Span::styled(
             format!("  out: {}", state.agent.tokens_used.output),
+            value_style,
+        )),
+        Line::from(Span::styled("Session Total", label_style)),
+        Line::from(Span::styled(
+            format!("  in:  {}", state.agent.tokens_used.cumulative_input),
+            value_style,
+        )),
+        Line::from(Span::styled(
+            format!("  out: {}", state.agent.tokens_used.cumulative_output),
             value_style,
         )),
         Line::from(""),

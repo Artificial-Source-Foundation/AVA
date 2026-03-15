@@ -15,42 +15,53 @@ fn make_app() -> (App, tempfile::TempDir) {
 // ── /help ────────────────────────────────────────────────────────────────
 
 #[test]
-fn help_returns_system_message() {
+fn help_opens_info_panel_modal() {
     let (mut app, _tmp) = make_app();
     let result = app.test_slash_command("/help");
-    // /help now pushes a transient message directly and returns None
+    // /help now opens an InfoPanel modal instead of pushing a transient message
     assert!(
         result.is_none(),
-        "/help should return None (transient message pushed directly)"
+        "/help should return None (modal opened directly)"
     );
-    let messages = &app.state.messages.messages;
-    assert!(!messages.is_empty(), "help should push a transient message");
-    let last = messages.last().unwrap();
-    assert_eq!(last.kind, MessageKind::System);
-    assert!(last.transient, "help message should be transient");
-    let msg = &last.content;
-    assert!(
-        msg.contains("Available commands:"),
-        "help text should list commands"
+    assert_eq!(
+        app.state.active_modal,
+        Some(ModalType::InfoPanel),
+        "should open InfoPanel modal"
     );
-    assert!(msg.contains("/model"), "help should mention /model");
-    assert!(msg.contains("/clear"), "help should mention /clear");
-    assert!(msg.contains("/help"), "help should mention /help");
-    assert!(msg.contains("/theme"), "help should mention /theme");
-    assert!(msg.contains("/compact"), "help should mention /compact");
-    assert!(msg.contains("/sessions"), "help should mention /sessions");
-    assert!(msg.contains("/new"), "help should mention /new");
-    assert!(msg.contains("/init"), "help should mention /init");
-    assert!(msg.contains("/commit"), "help should mention /commit");
-    assert!(msg.contains("/mcp"), "help should mention /mcp");
-    assert!(msg.contains("/connect"), "help should mention /connect");
+    let panel = app
+        .state
+        .info_panel
+        .as_ref()
+        .expect("info_panel should be set");
     assert!(
-        msg.contains("/disconnect"),
+        panel.title.contains("Help"),
+        "panel title should contain Help"
+    );
+    let content = &panel.content;
+    assert!(content.contains("/model"), "help should mention /model");
+    assert!(content.contains("/clear"), "help should mention /clear");
+    assert!(content.contains("/help"), "help should mention /help");
+    assert!(content.contains("/theme"), "help should mention /theme");
+    assert!(content.contains("/compact"), "help should mention /compact");
+    assert!(
+        content.contains("/sessions"),
+        "help should mention /sessions"
+    );
+    assert!(content.contains("/new"), "help should mention /new");
+    assert!(content.contains("/init"), "help should mention /init");
+    assert!(content.contains("/commit"), "help should mention /commit");
+    assert!(content.contains("/mcp"), "help should mention /mcp");
+    assert!(content.contains("/connect"), "help should mention /connect");
+    assert!(
+        content.contains("/disconnect"),
         "help should mention /disconnect"
     );
-    assert!(msg.contains("/copy"), "help should mention /copy");
-    assert!(msg.contains("/think"), "help should mention /think");
-    assert!(msg.contains("/shortcuts"), "help should mention /shortcuts");
+    assert!(content.contains("/copy"), "help should mention /copy");
+    assert!(content.contains("/think"), "help should mention /think");
+    assert!(
+        content.contains("/shortcuts"),
+        "help should mention /shortcuts"
+    );
 }
 
 // ── /clear ───────────────────────────────────────────────────────────────
@@ -460,16 +471,21 @@ fn non_slash_input_returns_none() {
 fn leading_whitespace_is_trimmed() {
     let (mut app, _tmp) = make_app();
     // Input with leading spaces: after trim, starts with /
-    // /help now pushes a transient message directly and returns None
+    // /help now opens an InfoPanel modal instead of pushing a transient message
     let result = app.test_slash_command("  /help  ");
     assert!(
         result.is_none(),
-        "trimmed /help should return None (transient message pushed directly)"
+        "trimmed /help should return None (modal opened directly)"
     );
-    let messages = &app.state.messages.messages;
-    assert!(!messages.is_empty(), "help should push a transient message");
-    let last = messages.last().unwrap();
-    assert_eq!(last.kind, MessageKind::System);
+    assert_eq!(
+        app.state.active_modal,
+        Some(ModalType::InfoPanel),
+        "trimmed /help should open InfoPanel modal"
+    );
+    assert!(
+        app.state.info_panel.is_some(),
+        "info_panel should be set after trimmed /help"
+    );
 }
 
 #[test]

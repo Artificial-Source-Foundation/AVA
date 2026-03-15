@@ -134,9 +134,12 @@ impl App {
                             })
                             .unwrap_or_default();
                             let text = format_mcp_server_list(&servers);
-                            self.state
-                                .messages
-                                .push(UiMessage::transient(MessageKind::System, text));
+                            self.state.info_panel = Some(super::InfoPanelState {
+                                title: "MCP Servers".to_string(),
+                                content: text,
+                                scroll: 0,
+                            });
+                            self.state.active_modal = Some(super::ModalType::InfoPanel);
                             None
                         }
                     }
@@ -405,37 +408,39 @@ impl App {
             }
             "/help" => {
                 let help = "\
-Available commands:
-  /model [provider/model]  — show or switch model (alias: /models)
-  /think [show|hide]       — toggle thinking block visibility
-  /theme [name]            — cycle or switch theme (default/dracula/nord)
-  /permissions             — toggle permission level
-  /connect [provider]      — add provider credentials
-  /providers               — show provider status
-  /disconnect <provider>   — remove provider credentials
-  /mcp [list]              — show MCP servers (scope + status)
-  /mcp reload              — reload MCP config
-  /mcp enable <name>       — enable a disabled MCP server
-  /mcp disable <name>      — disable an MCP server (session-scoped)
-  /new [title]             — start a new session (optional title)
-  /sessions                — session picker
-  /init                    — initialize project (tool, hook, and command templates)
-  /commit                  — inspect commit readiness and suggest a message
-  /export [filename]       — export conversation to file (.md or .json)
-  /copy [all]              — copy last response (picks code block if multiple)
-  /hooks [list|reload|dry-run <event>] — manage lifecycle hooks
-  /btw [question]          — start a side conversation branch
-  /btw end                 — restore original conversation
-  /tasks                   — show background task list
-  /later <message>         — queue a post-complete message
-  /queue                   — show queued messages
-  /shortcuts               — show keyboard shortcuts (Ctrl+?)
-  /clear                   — clear chat
-  /compact [focus]          — compact conversation to save context window
-  /help                    — show this help";
-                self.state
-                    .messages
-                    .push(UiMessage::transient(MessageKind::System, help));
+/model [provider/model]  — show or switch model (alias: /models)
+/think [show|hide]       — toggle thinking block visibility
+/theme [name]            — cycle or switch theme (default/dracula/nord)
+/permissions             — toggle permission level
+/connect [provider]      — add provider credentials
+/providers               — show provider status
+/disconnect <provider>   — remove provider credentials
+/mcp [list]              — show MCP servers (scope + status)
+/mcp reload              — reload MCP config
+/mcp enable <name>       — enable a disabled MCP server
+/mcp disable <name>      — disable an MCP server (session-scoped)
+/new [title]             — start a new session (optional title)
+/sessions                — session picker
+/init                    — initialize project (tool, hook, and command templates)
+/commit                  — inspect commit readiness and suggest a message
+/export [filename]       — export conversation to file (.md or .json)
+/copy [all]              — copy last response (picks code block if multiple)
+/hooks [list|reload|dry-run <event>] — manage lifecycle hooks
+/btw [question]          — start a side conversation branch
+/btw end                 — restore original conversation
+/tasks                   — show background task list
+/later <message>         — queue a post-complete message
+/queue                   — show queued messages
+/shortcuts               — show keyboard shortcuts (Ctrl+?)
+/clear                   — clear chat
+/compact [focus]         — compact conversation to save context window
+/help                    — show this help";
+                self.state.info_panel = Some(super::InfoPanelState {
+                    title: "Help — Available Commands".to_string(),
+                    content: help.to_string(),
+                    scroll: 0,
+                });
+                self.state.active_modal = Some(super::ModalType::InfoPanel);
                 None
             }
             "/btw" => {

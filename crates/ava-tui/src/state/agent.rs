@@ -10,8 +10,14 @@ use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Default, Clone)]
 pub struct TokenUsage {
+    /// Latest turn's input tokens — represents current context window consumption.
     pub input: usize,
+    /// Latest turn's output tokens.
     pub output: usize,
+    /// Cumulative input tokens across all turns in this session (for reporting).
+    pub cumulative_input: usize,
+    /// Cumulative output tokens across all turns in this session (for reporting).
+    pub cumulative_output: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -361,17 +367,21 @@ impl AgentState {
     pub fn apply_session_summary(&mut self, session: &Session) {
         let summary = crate::session_summary::cost_summary(session);
 
+        let inp = if session.token_usage.input_tokens > 0 {
+            session.token_usage.input_tokens
+        } else {
+            summary.map(|value| value.input_tokens).unwrap_or_default()
+        };
+        let out = if session.token_usage.output_tokens > 0 {
+            session.token_usage.output_tokens
+        } else {
+            summary.map(|value| value.output_tokens).unwrap_or_default()
+        };
         self.tokens_used = TokenUsage {
-            input: if session.token_usage.input_tokens > 0 {
-                session.token_usage.input_tokens
-            } else {
-                summary.map(|value| value.input_tokens).unwrap_or_default()
-            },
-            output: if session.token_usage.output_tokens > 0 {
-                session.token_usage.output_tokens
-            } else {
-                summary.map(|value| value.output_tokens).unwrap_or_default()
-            },
+            input: inp,
+            output: out,
+            cumulative_input: inp,
+            cumulative_output: out,
         };
 
         self.cost = summary.map(|value| value.total_usd).unwrap_or(0.0);
@@ -699,6 +709,8 @@ mod tests {
         state.tokens_used = TokenUsage {
             input: 10,
             output: 5,
+            cumulative_input: 10,
+            cumulative_output: 5,
         };
         state.cost = 0.25;
         state.latest_budget_alert = Some(BudgetAlertState {

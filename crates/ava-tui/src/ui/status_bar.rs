@@ -244,6 +244,7 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 ("r", "reject"),
                 ("Esc", "cancel"),
             ],
+            ModalType::InfoPanel => vec![("\u{2191}/\u{2193}", "scroll"), ("Esc", "close")],
             _ => vec![
                 ("\u{2191}/\u{2193}", "nav"),
                 ("Enter", "select"),

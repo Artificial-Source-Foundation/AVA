@@ -115,7 +115,7 @@ pub(super) fn is_trigger_event_kind(kind: &notify::EventKind) -> bool {
     matches!(
         kind,
         EventKind::Modify(ModifyKind::Any | ModifyKind::Data(_) | ModifyKind::Name(_))
-| EventKind::Create(CreateKind::File)
+            | EventKind::Create(CreateKind::File)
     )
 }
 

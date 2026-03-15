@@ -11,10 +11,10 @@ pub(super) fn handle_commit_command() -> (MessageKind, String) {
 
     let branch = git_stdout(["branch", "--show-current"]).unwrap_or_else(|| "unknown".to_string());
     let Some(status_text) = git_stdout(["status", "--short"]) else {
-            return (
-                MessageKind::Error,
-                "Failed to run `git status --short`.".to_string(),
-            );
+        return (
+            MessageKind::Error,
+            "Failed to run `git status --short`.".to_string(),
+        );
     };
 
     let status = CommitPrepStatus::from_porcelain(&status_text);

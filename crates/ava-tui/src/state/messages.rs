@@ -515,7 +515,7 @@ impl UiMessage {
                 } else {
                     let content_lines: Vec<&str> = self.content.lines().collect();
                     let total = content_lines.len();
-                    let max_visible = 5;
+                    let max_visible = 2;
                     let is_collapsible = total > max_visible;
 
                     // Header line with expand/collapse indicator

@@ -621,6 +621,7 @@ impl App {
             parent_session_id,
             std::mem::take(&mut self.pending_images),
         );
+        self.state.pending_image_count = 0;
     }
 
     /// Send a mid-stream message to the running agent via the message queue.

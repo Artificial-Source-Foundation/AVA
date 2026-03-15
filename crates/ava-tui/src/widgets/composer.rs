@@ -259,6 +259,30 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         }
     }
 
+    // Show pending image attachments as badges
+    if state.pending_image_count > 0 {
+        let bar_i = Span::styled("\u{258E}", Style::default().fg(state.theme.accent));
+        let label = if state.pending_image_count == 1 {
+            "1 image attached".to_string()
+        } else {
+            format!("{} images attached", state.pending_image_count)
+        };
+        all_lines.push(Line::from(vec![
+            bar_i,
+            Span::raw(pad),
+            Span::styled(
+                "[@image]",
+                Style::default()
+                    .fg(state.theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" {label}"),
+                Style::default().fg(state.theme.text_muted),
+            ),
+        ]));
+    }
+
     // Show pending queued messages between input and model info
     if !state.input.queue_display.is_empty() {
         let bar_q = Span::styled("\u{258E}", Style::default().fg(state.theme.text_dimmed));

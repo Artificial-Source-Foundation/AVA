@@ -122,6 +122,8 @@ pub struct AppState {
     pub hooks: HookRegistry,
     /// Toast notification state (top-right overlay, auto-dismiss).
     pub toast: ToastState,
+    /// Number of images pending attachment to the next user message.
+    pub pending_image_count: usize,
 }
 
 /// A fenced code block extracted from markdown content.
@@ -322,6 +324,7 @@ impl App {
             praxis: PraxisState::default(),
             hooks: HookRegistry::load(),
             toast: ToastState::default(),
+            pending_image_count: 0,
         };
 
         let mut app = Self {
@@ -803,6 +806,7 @@ impl App {
             praxis: PraxisState::default(),
             hooks: HookRegistry::load(),
             toast: ToastState::default(),
+            pending_image_count: 0,
         };
 
         Self {

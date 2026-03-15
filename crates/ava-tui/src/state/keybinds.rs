@@ -23,6 +23,8 @@ pub enum Action {
     ForceCompact,
     Audit,
     VoiceToggle,
+    /// Paste image from clipboard (Ctrl+V).
+    PasteImage,
     CopyLastResponse,
     BackgroundAgent,
     /// Submit a follow-up message (Tier 2) while the agent is running.
@@ -123,7 +125,8 @@ pub fn default_keybinds() -> HashMap<Action, Vec<KeyBinding>> {
         (Action::ToggleThinking, vec![ctrl('t')]),
         (Action::Cancel, vec![ctrl('c')]),
         (Action::SessionList, vec![ctrl('l')]),
-        (Action::VoiceToggle, vec![ctrl('v')]),
+        (Action::PasteImage, vec![ctrl('v')]),
+        (Action::VoiceToggle, vec![ctrl('r')]),
         (Action::CopyLastResponse, vec![ctrl('y')]),
         (Action::BackgroundAgent, vec![ctrl('b')]),
         (

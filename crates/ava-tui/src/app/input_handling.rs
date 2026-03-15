@@ -151,6 +151,9 @@ impl App {
                 Action::ExpandThinking => {
                     self.state.messages.toggle_all_thinking();
                 }
+                Action::PasteImage => {
+                    self.paste_image_from_clipboard();
+                }
                 Action::VoiceToggle => {
                     #[cfg(feature = "voice")]
                     self.toggle_voice(app_tx);

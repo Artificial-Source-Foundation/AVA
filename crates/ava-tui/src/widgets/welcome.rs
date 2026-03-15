@@ -116,7 +116,7 @@ pub fn render_welcome(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
         let grid: &[(&str, &str, &str, &str)] = &[
             ("Ctrl+K", "Command palette", "Ctrl+M", "Switch model"),
-            ("Ctrl+S", "Switch session", "Ctrl+V", "Voice input"),
+            ("Ctrl+S", "Switch session", "Ctrl+V", "Paste image"),
         ];
 
         // All grid rows must have the same total width for center alignment.

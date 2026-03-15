@@ -435,10 +435,12 @@ Keyboard shortcuts:
   Ctrl+M                   — model selector
   Ctrl+B                   — move running agent to background
   Ctrl+T                   — cycle thinking level
+  Ctrl+V                   — paste image from clipboard
   Ctrl+Y                   — copy last response to clipboard
   Ctrl+N                   — new session
   Ctrl+L                   — session picker
   Ctrl+S                   — toggle sidebar
+  Ctrl+R                   — voice input (requires --features voice)
   Ctrl+Z                   — end /btw branch (restore conversation)
   Ctrl+C                   — cancel / clear input / quit";
                 self.state

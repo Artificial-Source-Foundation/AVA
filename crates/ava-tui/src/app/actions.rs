@@ -28,6 +28,105 @@ impl App {
         self.copy_last_response_with_mode(false);
     }
 
+    /// Try to paste an image from the system clipboard. If image data is found,
+    /// encode it as PNG, create an `ImageContent`, and push it to `pending_images`.
+    /// Falls back to pasting text if the clipboard contains a file path to an image.
+    pub(crate) fn paste_image_from_clipboard(&mut self) {
+        let mut clipboard = match arboard::Clipboard::new() {
+            Ok(cb) => cb,
+            Err(e) => {
+                self.set_status(format!("Clipboard unavailable: {e}"), StatusLevel::Error);
+                return;
+            }
+        };
+
+        // Try to get image data directly from clipboard
+        if let Ok(img) = clipboard.get_image() {
+            match Self::encode_rgba_to_png(img.width, img.height, &img.bytes) {
+                Ok(png_bytes) => {
+                    use base64::Engine;
+                    let data = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                    let image = ava_types::ImageContent::new(data, ava_types::ImageMediaType::Png);
+                    self.pending_images.push(image);
+                    let count = self.pending_images.len();
+                    self.state.pending_image_count = count;
+                    self.set_status(
+                        format!(
+                            "Image pasted from clipboard ({count} image{} attached)",
+                            if count == 1 { "" } else { "s" }
+                        ),
+                        StatusLevel::Info,
+                    );
+                    return;
+                }
+                Err(e) => {
+                    self.set_status(
+                        format!("Failed to encode clipboard image: {e}"),
+                        StatusLevel::Error,
+                    );
+                    return;
+                }
+            }
+        }
+
+        // Fall back: check if clipboard text is a path to an image file
+        if let Ok(text) = clipboard.get_text() {
+            let trimmed = text.trim();
+            let path = std::path::Path::new(trimmed);
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    if ava_types::ImageMediaType::is_supported_extension(ext) {
+                        match ava_types::ImageContent::from_file(path) {
+                            Ok(image) => {
+                                self.pending_images.push(image);
+                                let count = self.pending_images.len();
+                                self.state.pending_image_count = count;
+                                self.set_status(
+                                    format!(
+                                        "Image attached from path ({count} image{} attached)",
+                                        if count == 1 { "" } else { "s" }
+                                    ),
+                                    StatusLevel::Info,
+                                );
+                                return;
+                            }
+                            Err(e) => {
+                                self.set_status(
+                                    format!("Failed to read image: {e}"),
+                                    StatusLevel::Error,
+                                );
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        self.set_status(
+            "No image in clipboard (use Ctrl+V to paste images, bracketed paste for text)",
+            StatusLevel::Warn,
+        );
+    }
+
+    /// Encode raw RGBA pixel data to PNG bytes.
+    fn encode_rgba_to_png(width: usize, height: usize, rgba: &[u8]) -> Result<Vec<u8>, String> {
+        let mut buf = Vec::new();
+        {
+            let mut encoder =
+                png::Encoder::new(std::io::Cursor::new(&mut buf), width as u32, height as u32);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder
+                .write_header()
+                .map_err(|e| format!("PNG header error: {e}"))?;
+            writer
+                .write_image_data(rgba)
+                .map_err(|e| format!("PNG write error: {e}"))?;
+        }
+        Ok(buf)
+    }
+
     pub(crate) fn copy_to_clipboard(&mut self, text: &str, label: Option<String>) {
         match arboard::Clipboard::new() {
             Ok(mut clipboard) => match clipboard.set_text(text) {

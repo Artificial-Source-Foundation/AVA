@@ -43,14 +43,11 @@ impl App {
                     ));
                 }
 
-                let event = match HookEvent::from_str_loose(event_str) {
-                    Some(e) => e,
-                    None => {
+                let Some(event) = HookEvent::from_str_loose(event_str) else {
                         return Some((
                             MessageKind::Error,
                             format!("Unknown event: {event_str}. Use /hooks dry-run for list."),
                         ));
-                    }
                 };
 
                 let mut ctx = HookContext::for_event(&event);

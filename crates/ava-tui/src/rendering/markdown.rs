@@ -188,9 +188,7 @@ pub fn markdown_to_lines(md: &str, theme: &Theme) -> Vec<Line<'static>> {
                     styles.pop();
                 }
             }
-            Event::End(TagEnd::Strong)
-            | Event::End(TagEnd::Emphasis)
-            | Event::End(TagEnd::Strikethrough) => {
+            Event::End(TagEnd::Strong | TagEnd::Emphasis | TagEnd::Strikethrough) => {
                 if styles.len() > 1 {
                     styles.pop();
                 }

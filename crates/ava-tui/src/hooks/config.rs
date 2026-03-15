@@ -134,9 +134,8 @@ impl HookRegistry {
     }
 
     fn load_from_dir(dir: &Path, source: HookSource, hooks: &mut Vec<HookConfig>) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(_) => return, // Directory doesn't exist — that's fine
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return; // Directory doesn't exist — that's fine
         };
 
         for entry in entries.flatten() {
@@ -205,9 +204,8 @@ impl HookRegistry {
     pub fn matches(hook: &HookConfig, context: &super::events::HookContext) -> bool {
         // Check tool name matcher
         if let Some(ref matcher) = hook.matcher {
-            let tool_name = match context.tool_name.as_deref() {
-                Some(name) => name,
-                None => return false, // matcher set but no tool name — skip
+            let Some(tool_name) = context.tool_name.as_deref() else {
+                return false; // matcher set but no tool name — skip
             };
             let patterns: Vec<&str> = matcher.split('|').collect();
             if !patterns.iter().any(|p| {
@@ -225,9 +223,8 @@ impl HookRegistry {
 
         // Check file path pattern
         if let Some(ref pattern) = hook.path_pattern {
-            let file_path = match context.file_path.as_deref() {
-                Some(path) => path,
-                None => return false, // path_pattern set but no file_path — skip
+            let Some(file_path) = context.file_path.as_deref() else {
+                return false; // path_pattern set but no file_path — skip
             };
             if !glob_match(pattern, file_path) {
                 return false;

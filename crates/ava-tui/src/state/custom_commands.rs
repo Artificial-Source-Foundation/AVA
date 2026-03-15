@@ -78,9 +78,8 @@ impl CustomCommandRegistry {
     }
 
     fn load_from_dir(dir: &Path, source: CommandSource, commands: &mut Vec<CustomCommand>) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(entries) => entries,
-            Err(_) => return, // Directory doesn't exist — that's fine
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return; // Directory doesn't exist — that's fine
         };
 
         for entry in entries.flatten() {

@@ -255,9 +255,8 @@ Commands
     pub(crate) fn execute_rewind(&mut self, option: crate::state::rewind::RewindOption) {
         use crate::state::rewind::RewindOption;
 
-        let checkpoint_idx = match self.state.rewind.checkpoints.len().checked_sub(1) {
-            Some(idx) => idx,
-            None => return,
+        let Some(checkpoint_idx) = self.state.rewind.checkpoints.len().checked_sub(1) else {
+            return;
         };
 
         let checkpoint = &self.state.rewind.checkpoints[checkpoint_idx];

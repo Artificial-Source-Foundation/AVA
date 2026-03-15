@@ -266,9 +266,8 @@ fn parse_issues(text: &str) -> Vec<ReviewIssue> {
     let issue_re = Regex::new(r"###\s+\[(\w+)\]\s+([^:\s]+)?:?(\d+)?\s*-?\s*(.+)").unwrap();
     let mut issues = Vec::new();
 
-    let issues_section = match extract_section(text, "Issues") {
-        Some(s) => s,
-        None => return issues,
+    let Some(issues_section) = extract_section(text, "Issues") else {
+        return issues;
     };
 
     if issues_section.to_ascii_lowercase().contains("no issues") {
@@ -295,9 +294,8 @@ fn parse_issues(text: &str) -> Vec<ReviewIssue> {
 }
 
 fn extract_list_section(text: &str, heading: &str) -> Vec<String> {
-    let section = match extract_section(text, heading) {
-        Some(s) => s,
-        None => return Vec::new(),
+    let Some(section) = extract_section(text, heading) else {
+        return Vec::new();
     };
 
     section

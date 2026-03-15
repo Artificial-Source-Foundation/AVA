@@ -309,12 +309,12 @@ impl App {
             }
             "/compact" => self.run_compact(arg),
             "/think" => match arg {
-                Some("show") | Some("on") => {
+                Some("show" | "on") => {
                     self.state.agent.show_thinking = true;
                     self.state.toast.push("Thinking blocks visible");
                     None
                 }
-                Some("hide") | Some("off") => {
+                Some("hide" | "off") => {
                     self.state.agent.show_thinking = false;
                     self.state.toast.push("Thinking blocks hidden");
                     None
@@ -446,7 +446,7 @@ impl App {
             "/btw" => {
                 if self.state.btw.active {
                     match arg {
-                        Some("end") | Some("done") | Some("pop") => {
+                        Some("end" | "done" | "pop") => {
                             self.end_btw_branch();
                             None
                         }

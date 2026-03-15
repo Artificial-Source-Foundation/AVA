@@ -181,9 +181,8 @@ impl Tool for CustomTool {
 /// Load custom tool definitions from a directory of `.toml` files.
 pub fn load_custom_tools(dir: &Path) -> Vec<(CustomToolDef, String)> {
     let mut tools = Vec::new();
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return tools,
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return tools;
     };
 
     for entry in entries.flatten() {

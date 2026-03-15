@@ -239,9 +239,8 @@ fn collect_skill_files(skill_dir: &Path, sections: &mut Vec<String>, seen: &mut 
 /// Try to load a skill file and append it as a section.
 /// Deduplicates by canonical path and strips optional YAML frontmatter.
 fn try_load_skill_file(path: &Path, seen: &mut HashSet<PathBuf>, sections: &mut Vec<String>) {
-    let canonical = match fs::canonicalize(path) {
-        Ok(c) => c,
-        Err(_) => return,
+    let Ok(canonical) = fs::canonicalize(path) else {
+        return;
     };
 
     if !seen.insert(canonical) {
@@ -249,9 +248,8 @@ fn try_load_skill_file(path: &Path, seen: &mut HashSet<PathBuf>, sections: &mut 
         return;
     }
 
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return,
+    let Ok(content) = fs::read_to_string(path) else {
+        return;
     };
 
     let trimmed = content.trim();
@@ -283,9 +281,8 @@ fn parse_frontmatter(content: &str) -> (Option<Vec<String>>, &str) {
 
     // Find closing ---
     let after_opening = &content[4..]; // skip "---\n"
-    let closing = match after_opening.find("\n---\n") {
-        Some(pos) => pos,
-        None => return (None, content), // no closing delimiter
+    let Some(closing) = after_opening.find("\n---\n") else {
+        return (None, content); // no closing delimiter
     };
 
     let frontmatter = &after_opening[..closing];
@@ -343,9 +340,8 @@ fn try_load_rule_file(
     seen: &mut HashSet<PathBuf>,
     sections: &mut Vec<String>,
 ) {
-    let canonical = match fs::canonicalize(path) {
-        Ok(c) => c,
-        Err(_) => return,
+    let Ok(canonical) = fs::canonicalize(path) else {
+        return;
     };
 
     if !seen.insert(canonical) {
@@ -353,9 +349,8 @@ fn try_load_rule_file(
         return;
     }
 
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return,
+    let Ok(content) = fs::read_to_string(path) else {
+        return;
     };
 
     let trimmed = content.trim();
@@ -424,9 +419,8 @@ pub fn contextual_instructions_for_file(file_path: &Path, project_root: &Path) -
 /// Deduplicates by canonical path and skips empty content.
 fn try_load_file(path: &Path, seen: &mut HashSet<PathBuf>, sections: &mut Vec<String>) {
     // Resolve canonical path for deduplication
-    let canonical = match fs::canonicalize(path) {
-        Ok(c) => c,
-        Err(_) => return, // file doesn't exist or is inaccessible
+    let Ok(canonical) = fs::canonicalize(path) else {
+        return; // file doesn't exist or is inaccessible
     };
 
     if !seen.insert(canonical) {
@@ -434,9 +428,8 @@ fn try_load_file(path: &Path, seen: &mut HashSet<PathBuf>, sections: &mut Vec<St
         return;
     }
 
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
-        Err(_) => return,
+    let Ok(content) = fs::read_to_string(path) else {
+        return;
     };
 
     let trimmed = content.trim();

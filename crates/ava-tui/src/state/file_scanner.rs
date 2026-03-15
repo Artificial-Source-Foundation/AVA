@@ -23,9 +23,8 @@ const MAX_SCAN_RESULTS: usize = 50;
 /// Scan project files from the current directory, returning autocomplete items.
 /// If `folders_only` is true, only directories are returned.
 pub(crate) fn scan_project_files(query: &str, folders_only: bool) -> Vec<AutocompleteItem> {
-    let cwd = match std::env::current_dir() {
-        Ok(p) => p,
-        Err(_) => return Vec::new(),
+    let Ok(cwd) = std::env::current_dir() else {
+        return Vec::new();
     };
 
     let mut results = Vec::new();
@@ -46,9 +45,8 @@ fn scan_dir_recursive(
         return;
     }
 
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
     };
 
     let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();

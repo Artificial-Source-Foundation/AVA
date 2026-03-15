@@ -114,10 +114,8 @@ pub(super) fn is_trigger_event_kind(kind: &notify::EventKind) -> bool {
 
     matches!(
         kind,
-        EventKind::Modify(ModifyKind::Any)
-            | EventKind::Modify(ModifyKind::Data(_))
-            | EventKind::Modify(ModifyKind::Name(_))
-            | EventKind::Create(CreateKind::File)
+        EventKind::Modify(ModifyKind::Any | ModifyKind::Data(_) | ModifyKind::Name(_))
+| EventKind::Create(CreateKind::File)
     )
 }
 
@@ -130,9 +128,8 @@ pub(super) fn should_ignore_watch_path(path: &Path) -> bool {
 }
 
 fn extract_comment_directives_from_path(path: &Path) -> Vec<String> {
-    let content = match std::fs::read_to_string(path) {
-        Ok(content) => content,
-        Err(_) => return Vec::new(),
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Vec::new();
     };
     extract_comment_directives(&content)
 }

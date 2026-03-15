@@ -20,10 +20,14 @@ pub unsafe fn load_native_extension(path: &Path) -> Result<Box<dyn Extension>, E
         return Err(ExtensionError::FileNotFound(path.to_path_buf()));
     }
 
+    // SAFETY: `path` has been verified to exist; `Library::new` loads the shared
+    // object and resolves its symbols.  Caller guarantees ABI compatibility.
     let library = unsafe { Library::new(path) }
         .map_err(|error| ExtensionError::LoadFailure(error.to_string()))?;
 
     let constructor = load_constructor(&library)?;
+    // SAFETY: `constructor` was resolved from a valid library symbol; caller
+    // guarantees the factory returns a valid, heap-allocated `dyn Extension`.
     let raw_extension = unsafe { constructor() };
     if raw_extension.is_null() {
         return Err(ExtensionError::LoadFailure(
@@ -31,6 +35,8 @@ pub unsafe fn load_native_extension(path: &Path) -> Result<Box<dyn Extension>, E
         ));
     }
 
+    // SAFETY: `raw_extension` is non-null (checked above) and was allocated by
+    // the extension factory with the global allocator.
     let extension = unsafe { Box::from_raw(raw_extension) };
 
     // Keep the library loaded so the extension vtable remains valid.
@@ -42,6 +48,8 @@ pub unsafe fn load_native_extension(path: &Path) -> Result<Box<dyn Extension>, E
 fn load_constructor<'lib>(
     library: &'lib Library,
 ) -> Result<libloading::Symbol<'lib, ExtensionFactory>, ExtensionError> {
+    // SAFETY: `library` is a valid loaded shared object; we look up a known
+    // symbol name that must conform to the `ExtensionFactory` signature.
     unsafe { library.get::<ExtensionFactory>(b"ava_extension_create\0") }
         .map_err(|_| ExtensionError::MissingSymbol("ava_extension_create".to_string()))
 }

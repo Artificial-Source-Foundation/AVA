@@ -76,9 +76,8 @@ pub(super) fn finalize_tool_calls(accumulators: Vec<ToolCallAccumulator>) -> Vec
 }
 
 pub(super) fn parse_tool_calls(content: &str) -> Result<Vec<ToolCall>> {
-    let value = match serde_json::from_str::<Value>(content) {
-        Ok(value) => value,
-        Err(_) => return Ok(Vec::new()),
+    let Ok(value) = serde_json::from_str::<Value>(content) else {
+        return Ok(Vec::new());
     };
 
     let calls = if let Some(raw_calls) = value.get("tool_calls") {

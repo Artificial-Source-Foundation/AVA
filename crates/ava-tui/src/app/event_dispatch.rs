@@ -191,7 +191,7 @@ impl App {
                     self.state.model_selector = Some(selector);
                 }
                 Err(err) => {
-                    self.set_status(format!("Failed to load models: {err}"), StatusLevel::Error)
+                    self.set_status(format!("Failed to load models: {err}"), StatusLevel::Error);
                 }
             },
             AppEvent::ModelSwitchFinished(result) => match result.result {
@@ -249,7 +249,7 @@ impl App {
                     self.set_status(format!("Loaded {count} tools"), StatusLevel::Info);
                 }
                 Err(err) => {
-                    self.set_status(format!("Failed to load tools: {err}"), StatusLevel::Error)
+                    self.set_status(format!("Failed to load tools: {err}"), StatusLevel::Error);
                 }
             },
             AppEvent::McpServersLoaded(result) => match result {
@@ -324,7 +324,7 @@ impl App {
                     }
                 }
                 Err(err) => {
-                    self.set_status(format!("Failed to load session: {err}"), StatusLevel::Error)
+                    self.set_status(format!("Failed to load session: {err}"), StatusLevel::Error);
                 }
             },
             AppEvent::ProviderConnectLoaded(result) => match result {

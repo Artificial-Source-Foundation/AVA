@@ -55,9 +55,8 @@ impl PermissionSystem {
     }
 
     pub fn evaluate(&self, tool: &str, args: &[&str]) -> Action {
-        let static_action = match self.static_action(tool, args) {
-            Ok(action) => action,
-            Err(_) => return Action::Deny,
+        let Ok(static_action) = self.static_action(tool, args) else {
+            return Action::Deny;
         };
 
         match self.dynamic_check(tool, args) {

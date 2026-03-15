@@ -58,3 +58,21 @@ toml = "0.8"
 lto = "thin"
 codegen-units = 1
 strip = true
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+rust_2018_idioms = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+undocumented_unsafe_blocks = "deny"
+todo = "warn"
+cloned_instead_of_copied = "warn"
+flat_map_option = "warn"
+manual_let_else = "warn"
+redundant_else = "warn"
+semicolon_if_nothing_returned = "warn"
+unnested_or_patterns = "warn"
+vec_init_then_push = "warn"
+rest_pat_in_fully_bound_structs = "warn"
+unnecessary_self_imports = "warn"

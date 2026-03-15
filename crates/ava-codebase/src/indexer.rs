@@ -99,9 +99,8 @@ async fn index_single_root(
 ) {
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let mut entries = match fs::read_dir(&dir).await {
-            Ok(entries) => entries,
-            Err(_) => continue,
+        let Ok(mut entries) = fs::read_dir(&dir).await else {
+            continue;
         };
 
         while let Ok(Some(entry)) = entries.next_entry().await {
@@ -124,9 +123,8 @@ async fn index_single_root(
                 continue;
             }
 
-            let content = match fs::read_to_string(&path).await {
-                Ok(c) => c,
-                Err(_) => continue,
+            let Ok(content) = fs::read_to_string(&path).await else {
+                continue;
             };
 
             let relative = path

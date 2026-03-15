@@ -1,3 +1,4 @@
+#![allow(unsafe_code)]
 //! AVA Extensions — hook primitives and extension lifecycle management.
 //!
 //! This crate provides:

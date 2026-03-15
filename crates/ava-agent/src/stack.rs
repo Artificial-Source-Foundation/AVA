@@ -435,12 +435,9 @@ impl AgentStack {
 
     pub async fn mcp_server_info(&self) -> Vec<MCPServerInfo> {
         let guard = self.mcp.read().await;
-        let runtime = match guard.as_ref() {
-            Some(r) => r,
-            None => {
-                // Even with no runtime, report servers from config so disabled ones show up.
-                return self.mcp_server_info_from_config().await;
-            }
+        let Some(runtime) = guard.as_ref() else {
+            // Even with no runtime, report servers from config so disabled ones show up.
+            return self.mcp_server_info_from_config().await;
         };
         let disabled = self.disabled_mcp_servers.read().await;
         let mut servers: std::collections::HashMap<String, usize> =
@@ -734,9 +731,8 @@ impl AgentStack {
             return goal.to_string();
         }
         let query = keywords.join(" ");
-        let memories = match self.memory.search(&query) {
-            Ok(m) => m,
-            Err(_) => return goal.to_string(),
+        let Ok(memories) = self.memory.search(&query) else {
+            return goal.to_string();
         };
         let entries: Vec<String> = memories
             .into_iter()

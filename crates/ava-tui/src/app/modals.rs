@@ -68,7 +68,7 @@ impl App {
                     }
                 }
             }
-            Some(ModalType::Rewind) | Some(ModalType::DiffPreview) | Some(ModalType::InfoPanel) => {
+            Some(ModalType::Rewind | ModalType::DiffPreview | ModalType::InfoPanel) => {
                 // These modals have no text input — ignore paste
             }
             _ => {}
@@ -352,12 +352,9 @@ impl App {
         key: crossterm::event::KeyEvent,
         app_tx: mpsc::UnboundedSender<AppEvent>,
     ) -> bool {
-        let selector = match self.state.model_selector {
-            Some(ref mut s) => s,
-            None => {
-                self.state.active_modal = None;
-                return false;
-            }
+        let Some(ref mut selector) = self.state.model_selector else {
+            self.state.active_modal = None;
+            return false;
         };
 
         let vh = list_viewport_height(modal_viewport_height());
@@ -403,12 +400,9 @@ impl App {
         key: crossterm::event::KeyEvent,
         app_tx: mpsc::UnboundedSender<AppEvent>,
     ) -> bool {
-        let state = match self.state.provider_connect {
-            Some(ref mut s) => s,
-            None => {
-                self.state.active_modal = None;
-                return false;
-            }
+        let Some(ref mut state) = self.state.provider_connect else {
+            self.state.active_modal = None;
+            return false;
         };
 
         match &state.screen.clone() {
@@ -654,12 +648,9 @@ impl App {
     }
 
     fn handle_agent_list_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
-        let selector = match self.state.agent_list {
-            Some(ref mut s) => s,
-            None => {
-                self.state.active_modal = None;
-                return false;
-            }
+        let Some(ref mut selector) = self.state.agent_list else {
+            self.state.active_modal = None;
+            return false;
         };
 
         let vh = list_viewport_height(modal_viewport_height());
@@ -739,12 +730,9 @@ impl App {
     }
 
     fn handle_copy_picker_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
-        let picker = match self.state.copy_picker.take() {
-            Some(p) => p,
-            None => {
-                self.state.active_modal = None;
-                return false;
-            }
+        let Some(picker) = self.state.copy_picker.take() else {
+            self.state.active_modal = None;
+            return false;
         };
 
         match key.code {
@@ -818,12 +806,9 @@ impl App {
     }
 
     fn handle_theme_selector_key(&mut self, key: crossterm::event::KeyEvent) -> bool {
-        let selector = match self.state.theme_selector {
-            Some(ref mut s) => s,
-            None => {
-                self.state.active_modal = None;
-                return false;
-            }
+        let Some(ref mut selector) = self.state.theme_selector else {
+            self.state.active_modal = None;
+            return false;
         };
 
         let vh = list_viewport_height(modal_viewport_height());

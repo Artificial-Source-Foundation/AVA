@@ -353,7 +353,7 @@ impl App {
             KeyCode::Char(ch)
                 if key.modifiers == KeyModifiers::NONE || key.modifiers == KeyModifiers::SHIFT =>
             {
-                self.state.input.insert_char(ch)
+                self.state.input.insert_char(ch);
             }
             KeyCode::Backspace => self.state.input.delete_backward_with_paste(),
             KeyCode::Delete => self.state.input.delete_forward(),

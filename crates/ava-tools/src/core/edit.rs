@@ -152,9 +152,8 @@ impl EditTool {
             .map_err(|e| AvaError::ToolError(format!("hashline cache lock poisoned: {e}")))?;
 
         let path_buf = PathBuf::from(path);
-        let entries = match cache.get(&path_buf) {
-            Some(entries) => entries,
-            None => return Ok(None), // No cache for this file — skip hashline resolution
+        let Some(entries) = cache.get(&path_buf) else {
+            return Ok(None); // No cache for this file — skip hashline resolution
         };
 
         match hashline::resolve_anchors(old_text, entries) {

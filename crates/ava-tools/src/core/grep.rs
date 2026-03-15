@@ -72,9 +72,8 @@ impl Tool for GrepTool {
             .build();
 
         for dent in walker {
-            let dent = match dent {
-                Ok(d) => d,
-                Err(_) => continue,
+            let Ok(dent) = dent else {
+                continue;
             };
             if !dent.file_type().map(|kind| kind.is_file()).unwrap_or(false) {
                 continue;

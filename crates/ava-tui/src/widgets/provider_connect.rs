@@ -153,9 +153,8 @@ fn build_select_items(providers: &[ProviderStatus]) -> Vec<SelectItem<String>> {
 
 /// Render the provider connect modal.
 pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
-    let pc = match state.provider_connect {
-        Some(ref mut s) => s,
-        None => return,
+    let Some(ref mut pc) = state.provider_connect else {
+        return;
     };
 
     match &pc.screen {

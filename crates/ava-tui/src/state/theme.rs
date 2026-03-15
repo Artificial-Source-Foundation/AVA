@@ -1375,9 +1375,8 @@ impl Theme {
         }
 
         let mut themes = Vec::new();
-        let entries = match std::fs::read_dir(&themes_dir) {
-            Ok(entries) => entries,
-            Err(_) => return Vec::new(),
+        let Ok(entries) = std::fs::read_dir(&themes_dir) else {
+            return Vec::new();
         };
 
         for entry in entries.flatten() {

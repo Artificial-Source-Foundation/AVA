@@ -561,15 +561,56 @@ impl UiMessage {
                 }
             }
             MessageKind::Error => {
+                let error_style = Style::default().fg(theme.error);
+                let bold_error = Style::default()
+                    .fg(theme.error)
+                    .add_modifier(Modifier::BOLD);
+                let hint_style = Style::default()
+                    .fg(theme.warning)
+                    .add_modifier(Modifier::ITALIC);
+
+                // Header line: ✗ Error
                 let mut result = vec![Line::from(vec![
-                    Span::styled(
-                        "\u{2717} ",
-                        Style::default()
-                            .fg(theme.error)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(self.content.clone(), Style::default().fg(theme.error)),
+                    Span::styled("\u{2717} ", bold_error),
+                    Span::styled("Error", bold_error),
                 ])];
+
+                // Error body — each line gets its own Line entry for proper wrapping
+                for text_line in self.content.lines() {
+                    result.push(Line::from(vec![Span::styled(
+                        text_line.to_owned(),
+                        error_style,
+                    )]));
+                }
+
+                // Contextual hints based on error content
+                let lower = self.content.to_lowercase();
+                let hint = if lower.contains("rate limit") || lower.contains("429") {
+                    Some("Rate limited \u{2014} try again in a moment or switch to a different model")
+                } else if lower.contains("timeout") || lower.contains("timed out") {
+                    Some("Request timed out \u{2014} the model may be overloaded")
+                } else if lower.contains("authentication")
+                    || lower.contains("401")
+                    || lower.contains("403")
+                {
+                    Some("Authentication failed \u{2014} check your credentials with /connect")
+                } else if (lower.contains("context") || lower.contains("token"))
+                    && lower.contains("exceed")
+                {
+                    Some("Context window exceeded \u{2014} try /compact to reduce context")
+                } else {
+                    None
+                };
+
+                if let Some(hint_text) = hint {
+                    // Blank separator line
+                    result.push(Line::from(Span::raw(String::new())));
+                    result.push(Line::from(vec![Span::styled(
+                        hint_text.to_owned(),
+                        hint_style,
+                    )]));
+                }
+
                 Self::prepend_bars(&mut result, bar_color, width);
                 result
             }

@@ -359,19 +359,25 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     // Right side: tokens, cost, model badge
     let mut right_spans: Vec<Span<'static>> = Vec::new();
 
-    // Tokens
+    // Context window usage: used/max
+    let used_tokens = state.agent.tokens_used.input + state.agent.tokens_used.output;
     let token_text = {
-        let input = format_tokens(state.agent.tokens_used.input);
+        let used = format_tokens(used_tokens);
         if let Some(ctx) = state.agent.context_window {
-            format!("{input}/{}", format_tokens(ctx))
+            let pct = if ctx > 0 {
+                (used_tokens as f64 / ctx as f64 * 100.0).round() as usize
+            } else {
+                0
+            };
+            format!("{used}/{} ({pct}%)", format_tokens(ctx))
         } else {
-            input
+            used
         }
     };
-    if state.agent.tokens_used.input > 0 {
+    if used_tokens > 0 {
         right_spans.push(Span::styled(
             token_text,
-            Style::default().fg(state.theme.text_muted),
+            Style::default().fg(state.theme.text_dimmed),
         ));
     }
 

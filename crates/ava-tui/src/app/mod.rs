@@ -354,11 +354,16 @@ impl App {
             EnterAlternateScreen,
             crossterm::event::EnableBracketedPaste,
             crossterm::event::EnableMouseCapture,
-            crossterm::event::PushKeyboardEnhancementFlags(
-                crossterm::event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                    | crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-            )
         )?;
+        if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
+            execute!(
+                stdout(),
+                crossterm::event::PushKeyboardEnhancementFlags(
+                    crossterm::event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                        | crossterm::event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                )
+            )?;
+        }
 
         // Install panic hook that restores the terminal before printing the panic.
         // Without this, a panic leaves the terminal in raw/alternate-screen mode,
@@ -371,9 +376,14 @@ impl App {
                 LeaveAlternateScreen,
                 crossterm::event::DisableBracketedPaste,
                 crossterm::event::DisableMouseCapture,
-                crossterm::event::PopKeyboardEnhancementFlags,
                 crossterm::cursor::Show
             );
+            if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
+                let _ = execute!(
+                    std::io::stdout(),
+                    crossterm::event::PopKeyboardEnhancementFlags
+                );
+            }
             original_hook(info);
         }));
 
@@ -461,8 +471,13 @@ impl App {
             LeaveAlternateScreen,
             crossterm::event::DisableBracketedPaste,
             crossterm::event::DisableMouseCapture,
-            crossterm::event::PopKeyboardEnhancementFlags
         )?;
+        if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
+            execute!(
+                terminal.backend_mut(),
+                crossterm::event::PopKeyboardEnhancementFlags
+            )?;
+        }
         terminal.show_cursor()?;
 
         Ok(())

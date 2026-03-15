@@ -1,4 +1,29 @@
+use ava_agent::stack::MCPServerInfo;
+
 use super::*;
+
+/// Format MCP server list for display.
+pub(crate) fn format_mcp_server_list(servers: &[MCPServerInfo]) -> String {
+    if servers.is_empty() {
+        return "No MCP servers configured".to_string();
+    }
+    let lines: Vec<String> = servers
+        .iter()
+        .map(|s| {
+            let icon = if s.enabled { "\u{2713}" } else { "\u{2717}" };
+            let scope = s.scope.to_string();
+            if s.enabled {
+                format!(
+                    "  {icon} {} ({scope}) \u{2014} {} tools",
+                    s.name, s.tool_count
+                )
+            } else {
+                format!("  {icon} {} ({scope}) \u{2014} disabled", s.name)
+            }
+        })
+        .collect();
+    format!("MCP Servers:\n{}", lines.join("\n"))
+}
 
 impl App {
     /// Handle slash commands. Returns Some((kind, message)) if handled, None if not a slash command.
@@ -70,60 +95,125 @@ impl App {
                     None
                 }
             }
-            "/mcp" => match arg {
-                Some("reload") => {
-                    if let Some(tx) = app_tx.clone() {
-                        self.set_status("Reloading MCP...", StatusLevel::Info);
-                        self.spawn_mcp_reload(tx);
-                        None
-                    } else {
-                        let result = tokio::task::block_in_place(|| {
-                            tokio::runtime::Handle::current()
-                                .block_on(self.state.agent.reload_mcp())
-                        });
-                        match result {
-                            Ok(msg) => {
-                                self.set_status(&msg, StatusLevel::Info);
-                                Some((MessageKind::System, msg))
-                            }
-                            Err(err) => {
-                                self.set_status(format!("Failed: {err}"), StatusLevel::Error);
-                                Some((MessageKind::Error, err))
+            "/mcp" => {
+                let mcp_parts: Vec<&str> = arg.unwrap_or("list").splitn(2, ' ').collect();
+                let mcp_sub = mcp_parts[0];
+                let mcp_arg = mcp_parts.get(1).map(|s| s.trim());
+                match mcp_sub {
+                    "reload" => {
+                        if let Some(tx) = app_tx.clone() {
+                            self.set_status("Reloading MCP...", StatusLevel::Info);
+                            self.spawn_mcp_reload(tx);
+                            None
+                        } else {
+                            let result = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current()
+                                    .block_on(self.state.agent.reload_mcp())
+                            });
+                            match result {
+                                Ok(msg) => {
+                                    self.set_status(&msg, StatusLevel::Info);
+                                    Some((MessageKind::System, msg))
+                                }
+                                Err(err) => {
+                                    self.set_status(format!("Failed: {err}"), StatusLevel::Error);
+                                    Some((MessageKind::Error, err))
+                                }
                             }
                         }
                     }
-                }
-                Some("list") | None => {
-                    if let Some(tx) = app_tx.clone() {
-                        self.set_status("Loading MCP servers...", StatusLevel::Info);
-                        self.spawn_mcp_server_list(tx);
-                        None
-                    } else {
-                        let servers = tokio::task::block_in_place(|| {
-                            tokio::runtime::Handle::current()
-                                .block_on(self.state.agent.mcp_server_info())
-                        })
-                        .unwrap_or_default();
-                        let text = if servers.is_empty() {
-                            "No MCP servers connected".to_string()
+                    "list" => {
+                        if let Some(tx) = app_tx.clone() {
+                            self.set_status("Loading MCP servers...", StatusLevel::Info);
+                            self.spawn_mcp_server_list(tx);
+                            None
                         } else {
-                            let lines: Vec<String> = servers
-                                .iter()
-                                .map(|s| format!("  {} ({} tools)", s.name, s.tool_count))
-                                .collect();
-                            format!("MCP servers ({}):\n{}", servers.len(), lines.join("\n"))
-                        };
-                        self.state
-                            .messages
-                            .push(UiMessage::transient(MessageKind::System, text));
-                        None
+                            let servers = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current()
+                                    .block_on(self.state.agent.mcp_server_info())
+                            })
+                            .unwrap_or_default();
+                            let text = format_mcp_server_list(&servers);
+                            self.state
+                                .messages
+                                .push(UiMessage::transient(MessageKind::System, text));
+                            None
+                        }
                     }
+                    "enable" => {
+                        if let Some(name) = mcp_arg {
+                            let result = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current()
+                                    .block_on(self.state.agent.mcp_enable_server(name))
+                            });
+                            match result {
+                                Ok(true) => {
+                                    self.set_status(
+                                        format!("Enabled MCP server: {name}"),
+                                        StatusLevel::Info,
+                                    );
+                                    Some((
+                                        MessageKind::System,
+                                        format!("Enabled MCP server: {name} (tools reloaded)"),
+                                    ))
+                                }
+                                Ok(false) => Some((
+                                    MessageKind::Error,
+                                    format!("MCP server '{name}' is not disabled"),
+                                )),
+                                Err(err) => Some((
+                                    MessageKind::Error,
+                                    format!("Failed to enable '{name}': {err}"),
+                                )),
+                            }
+                        } else {
+                            Some((
+                                MessageKind::Error,
+                                "Usage: /mcp enable <name>".to_string(),
+                            ))
+                        }
+                    }
+                    "disable" => {
+                        if let Some(name) = mcp_arg {
+                            let result = tokio::task::block_in_place(|| {
+                                tokio::runtime::Handle::current()
+                                    .block_on(self.state.agent.mcp_disable_server(name))
+                            });
+                            match result {
+                                Ok(true) => {
+                                    self.set_status(
+                                        format!("Disabled MCP server: {name}"),
+                                        StatusLevel::Info,
+                                    );
+                                    Some((
+                                        MessageKind::System,
+                                        format!("Disabled MCP server: {name} (tools removed)"),
+                                    ))
+                                }
+                                Ok(false) => Some((
+                                    MessageKind::Error,
+                                    format!("MCP server '{name}' not found"),
+                                )),
+                                Err(err) => Some((
+                                    MessageKind::Error,
+                                    format!("Failed to disable '{name}': {err}"),
+                                )),
+                            }
+                        } else {
+                            Some((
+                                MessageKind::Error,
+                                "Usage: /mcp disable <name>".to_string(),
+                            ))
+                        }
+                    }
+                    sub => Some((
+                        MessageKind::Error,
+                        format!(
+                            "Unknown /mcp subcommand: {sub}. Use: list, reload, enable <name>, disable <name>"
+                        ),
+                    )),
                 }
-                Some(sub) => Some((
-                    MessageKind::Error,
-                    format!("Unknown /mcp subcommand: {sub}. Use: list, reload"),
-                )),
-            },
+            }
             "/connect" | "/providers" => {
                 if let Some(tx) = app_tx.clone() {
                     self.state.provider_connect = Some(ProviderConnectState::from_credentials(
@@ -319,8 +409,10 @@ Available commands:
   /connect [provider]      — add provider credentials
   /providers               — show provider status
   /disconnect <provider>   — remove provider credentials
-  /mcp [list]              — show MCP servers
+  /mcp [list]              — show MCP servers (scope + status)
   /mcp reload              — reload MCP config
+  /mcp enable <name>       — enable a disabled MCP server
+  /mcp disable <name>      — disable an MCP server (session-scoped)
   /new [title]             — start a new session (optional title)
   /sessions                — session picker
   /init                    — initialize project (tool, hook, and command templates)

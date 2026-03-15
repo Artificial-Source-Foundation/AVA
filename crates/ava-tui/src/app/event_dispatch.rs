@@ -242,17 +242,7 @@ impl App {
             AppEvent::McpServersLoaded(result) => match result {
                 Ok(servers) => {
                     let count = servers.len();
-                    let content = if servers.is_empty() {
-                        "No MCP servers connected".to_string()
-                    } else {
-                        let lines: Vec<String> = servers
-                            .iter()
-                            .map(|server| {
-                                format!("  {} ({} tools)", server.name, server.tool_count)
-                            })
-                            .collect();
-                        format!("MCP servers ({}):\n{}", servers.len(), lines.join("\n"))
-                    };
+                    let content = super::commands::format_mcp_server_list(&servers);
                     self.set_status(format!("Loaded {count} MCP servers"), StatusLevel::Info);
                     self.state
                         .messages

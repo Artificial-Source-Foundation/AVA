@@ -8,6 +8,23 @@ use serde::{Deserialize, Serialize};
 // MCP server configuration
 // ---------------------------------------------------------------------------
 
+/// Whether a server was loaded from the global (`~/.ava/mcp.json`) or local
+/// (`.ava/mcp.json`) config file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum McpServerScope {
+    Global,
+    Local,
+}
+
+impl std::fmt::Display for McpServerScope {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Global => write!(f, "global"),
+            Self::Local => write!(f, "local"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MCPServerConfig {
     pub name: String,
@@ -86,6 +103,33 @@ pub async fn load_merged_mcp_config(global: &Path, project: &Path) -> Result<Vec
     global_configs.retain(|c| !project_names.contains(c.name.as_str()));
     global_configs.extend(project_configs);
     Ok(global_configs)
+}
+
+/// Load and merge MCP configs, tagging each server with its scope (global vs local).
+/// Project configs override global configs by server name.
+pub async fn load_merged_mcp_config_with_scope(
+    global: &Path,
+    project: &Path,
+) -> Result<Vec<(MCPServerConfig, McpServerScope)>> {
+    let global_configs = load_mcp_config(global).await?;
+    let project_configs = load_mcp_config(project).await?;
+
+    let project_names: std::collections::HashSet<&str> =
+        project_configs.iter().map(|c| c.name.as_str()).collect();
+
+    let mut result: Vec<(MCPServerConfig, McpServerScope)> = global_configs
+        .into_iter()
+        .filter(|c| !project_names.contains(c.name.as_str()))
+        .map(|c| (c, McpServerScope::Global))
+        .collect();
+
+    result.extend(
+        project_configs
+            .into_iter()
+            .map(|c| (c, McpServerScope::Local)),
+    );
+
+    Ok(result)
 }
 
 /// Load MCP server configurations from a JSON string (useful for testing).

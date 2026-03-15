@@ -10,7 +10,7 @@ use ava_context::{
 };
 use ava_llm::provider::{LLMProvider, SharedProvider};
 use ava_llm::{ModelRouter, RouteDecision, RouteSource};
-use ava_mcp::config::load_merged_mcp_config;
+use ava_mcp::config::{load_merged_mcp_config_with_scope, McpServerScope};
 use ava_mcp::manager::ExtensionManager;
 use ava_memory::MemorySystem;
 use ava_permissions::inspector::{DefaultInspector, InspectionContext, PermissionInspector};
@@ -68,12 +68,16 @@ struct MCPRuntime {
     server_count: usize,
     tool_count: usize,
     tools_with_source: Vec<(String, ava_types::Tool)>,
+    /// Scope (global vs local) for each server name.
+    server_scopes: std::collections::HashMap<String, McpServerScope>,
 }
 
 #[derive(Debug, Clone)]
 pub struct MCPServerInfo {
     pub name: String,
     pub tool_count: usize,
+    pub scope: McpServerScope,
+    pub enabled: bool,
 }
 
 pub struct AgentStack {
@@ -93,6 +97,8 @@ pub struct AgentStack {
     yolo: bool,
     injected_provider: Option<Arc<dyn LLMProvider>>,
     mcp: Arc<RwLock<Option<MCPRuntime>>>,
+    /// Session-scoped set of disabled MCP server names.
+    disabled_mcp_servers: RwLock<std::collections::HashSet<String>>,
     custom_tool_dirs: Vec<PathBuf>,
     mcp_global_config: PathBuf,
     mcp_project_config: PathBuf,
@@ -398,6 +404,7 @@ impl AgentStack {
                 yolo: config.yolo,
                 injected_provider: config.injected_provider,
                 mcp: Arc::new(RwLock::new(mcp_runtime)),
+                disabled_mcp_servers: RwLock::new(std::collections::HashSet::new()),
                 custom_tool_dirs,
                 mcp_global_config,
                 mcp_project_config,
@@ -429,26 +436,128 @@ impl AgentStack {
         let guard = self.mcp.read().await;
         let runtime = match guard.as_ref() {
             Some(r) => r,
-            None => return Vec::new(),
+            None => {
+                // Even with no runtime, report servers from config so disabled ones show up.
+                return self.mcp_server_info_from_config().await;
+            }
         };
+        let disabled = self.disabled_mcp_servers.read().await;
         let mut servers: std::collections::HashMap<String, usize> =
             std::collections::HashMap::new();
         for (server_name, _) in &runtime.tools_with_source {
             *servers.entry(server_name.clone()).or_insert(0) += 1;
         }
-        servers
+        let mut result: Vec<MCPServerInfo> = servers
             .into_iter()
-            .map(|(name, tool_count)| MCPServerInfo { name, tool_count })
+            .map(|(name, tool_count)| {
+                let scope = runtime
+                    .server_scopes
+                    .get(&name)
+                    .copied()
+                    .unwrap_or(McpServerScope::Global);
+                let enabled = !disabled.contains(&name);
+                MCPServerInfo {
+                    name,
+                    tool_count,
+                    scope,
+                    enabled,
+                }
+            })
+            .collect();
+        // Also include disabled servers that aren't in the active runtime
+        for name in disabled.iter() {
+            if !result.iter().any(|s| s.name == *name) {
+                let scope = runtime
+                    .server_scopes
+                    .get(name)
+                    .copied()
+                    .unwrap_or(McpServerScope::Global);
+                result.push(MCPServerInfo {
+                    name: name.clone(),
+                    tool_count: 0,
+                    scope,
+                    enabled: false,
+                });
+            }
+        }
+        result.sort_by(|a, b| a.name.cmp(&b.name));
+        result
+    }
+
+    /// Fallback: build server info from config files when no MCP runtime is active.
+    async fn mcp_server_info_from_config(&self) -> Vec<MCPServerInfo> {
+        let configs =
+            load_merged_mcp_config_with_scope(&self.mcp_global_config, &self.mcp_project_config)
+                .await
+                .unwrap_or_default();
+        let disabled = self.disabled_mcp_servers.read().await;
+        configs
+            .into_iter()
+            .map(|(cfg, scope)| MCPServerInfo {
+                enabled: cfg.enabled && !disabled.contains(&cfg.name),
+                name: cfg.name,
+                tool_count: 0,
+                scope,
+            })
             .collect()
     }
 
+    /// Disable an MCP server by name (session-scoped). Returns true if the server exists.
+    pub async fn mcp_disable_server(&self, name: &str) -> bool {
+        // Check that the server name is known
+        let known = self.mcp_server_exists(name).await;
+        if known {
+            self.disabled_mcp_servers
+                .write()
+                .await
+                .insert(name.to_string());
+            // Remove tools from this server in the registry
+            let mut registry = self.tools.write().await;
+            registry.remove_by_source(
+                |src| matches!(src, ToolSource::MCP { server } if server == name),
+            );
+        }
+        known
+    }
+
+    /// Enable a previously disabled MCP server. Returns true if it was disabled.
+    /// Triggers a selective reload to re-register tools from this server.
+    pub async fn mcp_enable_server(&self, name: &str) -> bool {
+        let was_disabled = self.disabled_mcp_servers.write().await.remove(name);
+        if was_disabled {
+            // Re-register tools from this server by reloading MCP
+            let _ = self.reload_mcp().await;
+        }
+        was_disabled
+    }
+
+    /// Check if a server name exists in config or runtime.
+    async fn mcp_server_exists(&self, name: &str) -> bool {
+        // Check runtime first
+        let guard = self.mcp.read().await;
+        if let Some(runtime) = guard.as_ref() {
+            if runtime.server_scopes.contains_key(name) {
+                return true;
+            }
+        }
+        drop(guard);
+        // Check config files
+        let configs =
+            load_merged_mcp_config_with_scope(&self.mcp_global_config, &self.mcp_project_config)
+                .await
+                .unwrap_or_default();
+        configs.iter().any(|(cfg, _)| cfg.name == name)
+    }
+
     pub async fn reload_mcp(&self) -> Result<(usize, usize)> {
+        let disabled = self.disabled_mcp_servers.read().await.clone();
         let mut registry = self.tools.write().await;
         registry.remove_by_source(|src| matches!(src, ToolSource::MCP { .. }));
-        let runtime = init_mcp(
+        let runtime = init_mcp_with_disabled(
             &self.mcp_global_config,
             &self.mcp_project_config,
             &mut registry,
+            &disabled,
         )
         .await;
         let counts = runtime
@@ -479,10 +588,12 @@ impl AgentStack {
         register_todo_tools(&mut registry, self.todo_state.clone());
         register_question_tool(&mut registry, self.question_bridge.clone());
         register_custom_tools(&mut registry, &self.custom_tool_dirs);
-        let runtime = init_mcp(
+        let disabled = self.disabled_mcp_servers.read().await.clone();
+        let runtime = init_mcp_with_disabled(
             &self.mcp_global_config,
             &self.mcp_project_config,
             &mut registry,
+            &disabled,
         )
         .await;
         let count = registry.tool_count();
@@ -1250,8 +1361,50 @@ async fn init_mcp(
     project_config: &std::path::Path,
     registry: &mut ToolRegistry,
 ) -> Option<MCPRuntime> {
-    match load_merged_mcp_config(global_config, project_config).await {
-        Ok(configs) if !configs.is_empty() => {
+    init_mcp_with_disabled(
+        global_config,
+        project_config,
+        registry,
+        &std::collections::HashSet::new(),
+    )
+    .await
+}
+
+async fn init_mcp_with_disabled(
+    global_config: &std::path::Path,
+    project_config: &std::path::Path,
+    registry: &mut ToolRegistry,
+    disabled: &std::collections::HashSet<String>,
+) -> Option<MCPRuntime> {
+    match load_merged_mcp_config_with_scope(global_config, project_config).await {
+        Ok(configs_with_scope) if !configs_with_scope.is_empty() => {
+            // Build scope map from all configs (before filtering)
+            let server_scopes: std::collections::HashMap<String, McpServerScope> =
+                configs_with_scope
+                    .iter()
+                    .map(|(cfg, scope)| (cfg.name.clone(), *scope))
+                    .collect();
+
+            // Filter out disabled servers
+            let configs: Vec<_> = configs_with_scope
+                .into_iter()
+                .filter(|(cfg, _)| !disabled.contains(&cfg.name))
+                .map(|(cfg, _)| cfg)
+                .collect();
+
+            if configs.is_empty() {
+                // All servers disabled — return runtime with scope info but no tools
+                return Some(MCPRuntime {
+                    caller: Arc::new(ExtensionManagerCaller {
+                        manager: ExtensionManager::new(),
+                    }),
+                    server_count: 0,
+                    tool_count: 0,
+                    tools_with_source: Vec::new(),
+                    server_scopes,
+                });
+            }
+
             let mut manager = ExtensionManager::new();
             if let Err(e) = manager.initialize(configs).await {
                 warn!(error = %e, "Failed to initialize MCP servers");
@@ -1288,6 +1441,7 @@ async fn init_mcp(
                 server_count,
                 tool_count,
                 tools_with_source,
+                server_scopes,
             })
         }
         Ok(_) => None,

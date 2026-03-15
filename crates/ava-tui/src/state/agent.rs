@@ -474,6 +474,21 @@ impl AgentState {
         Ok(self.stack()?.mcp_server_info().await)
     }
 
+    /// Disable an MCP server by name (session-scoped).
+    pub async fn mcp_disable_server(&self, name: &str) -> std::result::Result<bool, String> {
+        Ok(self.stack()?.mcp_disable_server(name).await)
+    }
+
+    /// Enable a previously disabled MCP server.
+    pub async fn mcp_enable_server(&mut self, name: &str) -> std::result::Result<bool, String> {
+        let stack = self.stack()?.clone();
+        let result = stack.mcp_enable_server(name).await;
+        // Update cached counts after re-enabling
+        self.mcp_server_count = stack.mcp_server_count().await;
+        self.mcp_tool_count = stack.mcp_tool_count().await;
+        Ok(result)
+    }
+
     /// Reload MCP servers from config. Updates cached counts.
     pub async fn reload_mcp(&mut self) -> std::result::Result<String, String> {
         let (servers, tools) = self

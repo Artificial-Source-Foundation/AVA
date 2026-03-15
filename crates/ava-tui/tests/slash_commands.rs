@@ -50,10 +50,7 @@ fn help_returns_system_message() {
     );
     assert!(msg.contains("/copy"), "help should mention /copy");
     assert!(msg.contains("/think"), "help should mention /think");
-    assert!(
-        msg.contains("Keyboard shortcuts:"),
-        "help should include keyboard shortcuts"
-    );
+    assert!(msg.contains("/shortcuts"), "help should mention /shortcuts");
 }
 
 // ── /clear ───────────────────────────────────────────────────────────────

@@ -66,6 +66,27 @@ impl PermissionInspector for DefaultInspector {
         arguments: &Value,
         context: &InspectionContext,
     ) -> InspectionResult {
+        // 0. Internal AVA tools are always safe — zero external risk
+        const INTERNAL_TOOLS: &[&str] = &[
+            "todo_read",
+            "todo_write",
+            "task",
+            "question",
+            "codebase_search",
+        ];
+        if INTERNAL_TOOLS.contains(&tool_name)
+            || tool_name.starts_with("memory_")
+            || tool_name.starts_with("session_")
+        {
+            return InspectionResult {
+                action: Action::Allow,
+                reason: format!("internal AVA tool '{tool_name}' is always safe"),
+                risk_level: RiskLevel::Safe,
+                tags: vec![],
+                warnings: vec![],
+            };
+        }
+
         // 1. For bash: run classifier FIRST, before auto-approve check
         //    Critical/blocked commands must be denied regardless of auto-approve
         let mut risk_level;

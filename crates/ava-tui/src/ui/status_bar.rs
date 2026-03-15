@@ -197,31 +197,15 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         ));
     }
 
-    // Right side: auto-approve warning (if active)
-    let perm_text = if state.permission.permission_level.is_auto_approve() {
-        "auto-approve"
-    } else {
-        ""
-    };
-
-    // Calculate widths and fill gap
+    // Calculate widths and fill remaining space
     let left_width: usize = left_spans
         .iter()
         .map(|s| crate::text_utils::span_display_width(s))
         .sum();
-    let right_width = crate::text_utils::display_width(perm_text) + H_PAD.len();
-    let gap = (area.width as usize).saturating_sub(left_width + right_width);
+    let gap = (area.width as usize).saturating_sub(left_width + H_PAD.len());
 
     if gap > 0 {
         left_spans.push(Span::raw(" ".repeat(gap)));
-    }
-    if !perm_text.is_empty() {
-        left_spans.push(Span::styled(
-            perm_text.to_string(),
-            Style::default()
-                .fg(state.theme.warning)
-                .add_modifier(Modifier::BOLD),
-        ));
     }
     left_spans.push(Span::raw(H_PAD));
 

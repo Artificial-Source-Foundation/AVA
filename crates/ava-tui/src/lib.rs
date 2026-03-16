@@ -9,9 +9,15 @@ pub mod app;
 #[cfg(feature = "voice")]
 pub mod audio;
 pub mod auth;
+#[cfg(feature = "benchmark")]
 pub mod benchmark;
+#[cfg(feature = "benchmark")]
 pub mod benchmark_harness;
+#[cfg(feature = "benchmark")]
 pub mod benchmark_import;
+#[cfg(feature = "benchmark")]
+pub mod benchmark_reporting;
+#[cfg(feature = "benchmark")]
 pub mod benchmark_tasks;
 pub mod config;
 pub mod event;

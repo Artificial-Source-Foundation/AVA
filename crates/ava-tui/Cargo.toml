@@ -72,6 +72,7 @@ notify = "6"
 
 [features]
 default = []
+benchmark = []
 voice = ["dep:cpal", "dep:hound", "dep:async-trait"]
 local-whisper = ["voice", "dep:whisper-rs"]
 

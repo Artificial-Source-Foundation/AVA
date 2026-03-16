@@ -478,6 +478,27 @@ impl App {
         let mut question_rx = self.question_rx.take();
         let mut approval_rx = self.approval_rx.take();
 
+        // First-time onboarding: if no provider has credentials, show welcome
+        // message and auto-open the provider connect modal.
+        if self.pending_goal.is_none() {
+            let credentials = ava_config::CredentialStore::load_default()
+                .await
+                .unwrap_or_default();
+            if credentials.configured_providers().is_empty() {
+                self.state.messages.push(UiMessage::new(
+                    MessageKind::System,
+                    "Welcome to AVA! No provider is configured yet. \
+                     Set up a provider below to get started, or press Esc and use \
+                     --provider/--model flags."
+                        .to_string(),
+                ));
+                self.state.provider_connect =
+                    Some(ProviderConnectState::from_credentials(&credentials));
+                self.spawn_provider_connect_load(None, app_tx.clone());
+                self.state.active_modal = Some(ModalType::ProviderConnect);
+            }
+        }
+
         if let Some(goal) = self.pending_goal.take() {
             self.submit_goal(goal, app_tx.clone(), agent_tx.clone());
         }

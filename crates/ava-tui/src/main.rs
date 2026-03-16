@@ -1,5 +1,6 @@
 use ava_tui::app::App;
 use ava_tui::auth::run_auth;
+#[cfg(feature = "benchmark")]
 use ava_tui::benchmark;
 use ava_tui::config::cli::{CliArgs, Command};
 use ava_tui::headless::run_headless;
@@ -17,11 +18,11 @@ async fn main() -> Result<()> {
 
     let cli = CliArgs::parse();
 
+    let is_benchmark = cfg!(feature = "benchmark") && (cli.benchmark || cli.harness);
     let is_tui = cli.command.is_none()
         && !cli.headless
         && !cli.json
-        && !cli.benchmark
-        && !cli.harness
+        && !is_benchmark
         && std::io::stdout().is_terminal();
 
     // _log_guard MUST be held for the lifetime of main — dropping it loses buffered logs.
@@ -34,81 +35,90 @@ async fn main() -> Result<()> {
         None => {}
     }
 
-    // Harnessed-pair benchmark mode
-    if cli.harness {
-        let director_str = cli.director.as_deref().ok_or_else(|| {
-            color_eyre::eyre::eyre!(
-                "Missing --director flag. Usage: ava --harness --director \"openrouter:anthropic/claude-opus-4.6\" --worker \"inception:mercury-2\""
+    // Benchmark modes (only available with --features benchmark)
+    #[cfg(feature = "benchmark")]
+    {
+        // Harnessed-pair benchmark mode
+        if cli.harness {
+            let director_str = cli.director.as_deref().ok_or_else(|| {
+                color_eyre::eyre::eyre!(
+                    "Missing --director flag. Usage: ava --harness --director \"openrouter:anthropic/claude-opus-4.6\" --worker \"inception:mercury-2\""
+                )
+            })?;
+            let worker_str = cli.worker.as_deref().ok_or_else(|| {
+                color_eyre::eyre::eyre!(
+                    "Missing --worker flag. Usage: ava --harness --director \"openrouter:anthropic/claude-opus-4.6\" --worker \"inception:mercury-2\""
+                )
+            })?;
+            let director_spec = ava_tui::benchmark_harness::parse_single_model_spec(director_str)?;
+            let worker_spec = ava_tui::benchmark_harness::parse_single_model_spec(worker_str)?;
+            let suite = ava_tui::benchmark_tasks::BenchmarkSuite::parse_str(&cli.suite)
+                .unwrap_or_else(|| {
+                    eprintln!(
+                        "Warning: unknown suite '{}', defaulting to 'all'",
+                        cli.suite
+                    );
+                    ava_tui::benchmark_tasks::BenchmarkSuite::All
+                });
+            ava_tui::benchmark_harness::run_harness(
+                director_spec,
+                worker_spec,
+                cli.max_turns,
+                suite,
             )
-        })?;
-        let worker_str = cli.worker.as_deref().ok_or_else(|| {
-            color_eyre::eyre::eyre!(
-                "Missing --worker flag. Usage: ava --harness --director \"openrouter:anthropic/claude-opus-4.6\" --worker \"inception:mercury-2\""
-            )
-        })?;
-        let director_spec = ava_tui::benchmark_harness::parse_single_model_spec(director_str)?;
-        let worker_spec = ava_tui::benchmark_harness::parse_single_model_spec(worker_str)?;
-        let suite =
-            ava_tui::benchmark_tasks::BenchmarkSuite::parse_str(&cli.suite).unwrap_or_else(|| {
-                eprintln!(
-                    "Warning: unknown suite '{}', defaulting to 'all'",
-                    cli.suite
-                );
-                ava_tui::benchmark_tasks::BenchmarkSuite::All
-            });
-        ava_tui::benchmark_harness::run_harness(director_spec, worker_spec, cli.max_turns, suite)
             .await?;
-        return Ok(());
-    }
+            return Ok(());
+        }
 
-    // Benchmark mode
-    if cli.benchmark {
-        let specs = benchmark::parse_model_specs(
-            cli.provider.as_deref(),
-            cli.model.as_deref(),
-            cli.models.as_deref(),
-        )?;
-        let judge_specs = benchmark::parse_judge_specs(cli.judges.as_deref())?;
-        let suite =
-            ava_tui::benchmark_tasks::BenchmarkSuite::parse_str(&cli.suite).unwrap_or_else(|| {
-                eprintln!(
-                    "Warning: unknown suite '{}', defaulting to 'all'",
-                    cli.suite
-                );
-                ava_tui::benchmark_tasks::BenchmarkSuite::All
+        // Benchmark mode
+        if cli.benchmark {
+            let specs = benchmark::parse_model_specs(
+                cli.provider.as_deref(),
+                cli.model.as_deref(),
+                cli.models.as_deref(),
+            )?;
+            let judge_specs = benchmark::parse_judge_specs(cli.judges.as_deref())?;
+            let suite = ava_tui::benchmark_tasks::BenchmarkSuite::parse_str(&cli.suite)
+                .unwrap_or_else(|| {
+                    eprintln!(
+                        "Warning: unknown suite '{}', defaulting to 'all'",
+                        cli.suite
+                    );
+                    ava_tui::benchmark_tasks::BenchmarkSuite::All
+                });
+
+            // Import external benchmark tasks if requested
+            let imported_tasks = if let Some(ref polyglot_path) = cli.import_polyglot {
+                ava_tui::benchmark_import::import_polyglot(std::path::Path::new(polyglot_path))?
+            } else {
+                Vec::new()
+            };
+
+            let language_filter = cli.language.as_deref().map(|lang_str| {
+                lang_str
+                    .split(',')
+                    .filter_map(|s| {
+                        let s = s.trim();
+                        ava_tui::benchmark_tasks::Language::parse_str(s).or_else(|| {
+                            eprintln!("Warning: unknown language '{}', skipping", s);
+                            None
+                        })
+                    })
+                    .collect::<Vec<_>>()
             });
 
-        // Import external benchmark tasks if requested
-        let imported_tasks = if let Some(ref polyglot_path) = cli.import_polyglot {
-            ava_tui::benchmark_import::import_polyglot(std::path::Path::new(polyglot_path))?
-        } else {
-            Vec::new()
-        };
-
-        let language_filter = cli.language.as_deref().map(|lang_str| {
-            lang_str
-                .split(',')
-                .filter_map(|s| {
-                    let s = s.trim();
-                    ava_tui::benchmark_tasks::Language::parse_str(s).or_else(|| {
-                        eprintln!("Warning: unknown language '{}', skipping", s);
-                        None
-                    })
-                })
-                .collect::<Vec<_>>()
-        });
-
-        benchmark::run_benchmark(
-            specs,
-            None,
-            cli.max_turns,
-            judge_specs,
-            suite,
-            imported_tasks,
-            language_filter,
-        )
-        .await?;
-        return Ok(());
+            benchmark::run_benchmark(
+                specs,
+                None,
+                cli.max_turns,
+                judge_specs,
+                suite,
+                imported_tasks,
+                language_filter,
+            )
+            .await?;
+            return Ok(());
+        }
     }
 
     if !is_tui {

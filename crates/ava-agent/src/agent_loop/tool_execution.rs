@@ -7,7 +7,6 @@ use serde_json::{json, Value};
 
 use super::AgentLoop;
 use crate::instructions::contextual_instructions_for_file;
-use crate::stuck::StuckDetector;
 
 const MAX_TOOL_RESULT_BYTES: usize = 50_000;
 const POST_EDIT_VALIDATION_TOOLS: &[&str] = &["edit", "multiedit", "write", "apply_patch"];
@@ -41,58 +40,6 @@ pub(super) fn truncate_tool_result(result: &mut ToolResult) {
 }
 
 impl AgentLoop {
-    /// Execute tool calls, record in detector's monitor, and collect results.
-    /// Read-only tools are executed concurrently; write tools sequentially.
-    pub(super) async fn execute_tool_calls_tracked(
-        &self,
-        tool_calls: &[ToolCall],
-        detector: &mut StuckDetector,
-    ) -> Vec<ToolResult> {
-        // Separate indices into read-only and write groups
-        let mut read_indices = Vec::new();
-        let mut write_indices = Vec::new();
-        for (i, tc) in tool_calls.iter().enumerate() {
-            if tc.name == "attempt_completion" {
-                continue;
-            }
-            if READ_ONLY_TOOLS.contains(&tc.name.as_str()) {
-                read_indices.push(i);
-            } else {
-                write_indices.push(i);
-            }
-        }
-
-        let mut all_results: Vec<Option<(ToolResult, ToolExecution)>> =
-            vec![None; tool_calls.len()];
-
-        // Execute read-only tools concurrently
-        if !read_indices.is_empty() {
-            let futs: Vec<_> = read_indices
-                .iter()
-                .map(|&i| self.execute_tool_call_timed(&tool_calls[i]))
-                .collect();
-            let read_results = futures::future::join_all(futs).await;
-            for (idx_pos, &i) in read_indices.iter().enumerate() {
-                all_results[i] = Some(read_results[idx_pos].clone());
-            }
-        }
-
-        // Execute write tools sequentially
-        for &i in &write_indices {
-            let result = self.execute_tool_call_timed(&tool_calls[i]).await;
-            all_results[i] = Some(result);
-        }
-
-        // Collect in original order, recording executions
-        let mut results = Vec::new();
-        for slot in all_results.into_iter().flatten() {
-            let (result, execution) = slot;
-            detector.tool_monitor_mut().record(execution);
-            results.push(result);
-        }
-        results
-    }
-
     /// Execute a tool call and return both the result and a timed execution record.
     /// In plan mode, write/edit tools are restricted to `.ava/plans/*.md` paths.
     pub(super) async fn execute_tool_call_timed(

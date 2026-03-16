@@ -15,6 +15,7 @@ use ava_types::{
 };
 use futures::{Stream, StreamExt};
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 use tracing::{debug, info, instrument, trace, warn};
 
 use crate::llm_trait::LLMProvider;
@@ -33,7 +34,7 @@ fn usage_cost_usd(model: &str, usage: &TokenUsage) -> f64 {
 
 /// Core agent execution loop that orchestrates LLM calls, tool execution, and stuck detection.
 ///
-/// Supports both synchronous (`run`) and streaming (`run_streaming`) execution modes.
+/// Uses a single unified engine (`run_unified`) for both headless and streaming modes.
 /// Read-only tools are executed concurrently; write tools run sequentially.
 pub struct AgentLoop {
     pub llm: Box<dyn LLMProvider>,
@@ -215,28 +216,14 @@ impl AgentLoop {
         }
     }
 
-    /// Inject a summary prompt and do one final LLM call so the agent can wrap up.
-    async fn force_summary(
-        &mut self,
-        session: &mut Session,
-        prompt: &str,
-        total_usage: &mut TokenUsage,
-    ) {
-        let summary_msg = Message::new(Role::User, prompt.to_string());
-        self.context.add_message(summary_msg.clone());
-        session.add_message(summary_msg);
-        if let Ok((text, _, usage)) = self.generate_response_with_thinking().await {
-            Self::merge_usage(total_usage, &usage);
-            if !text.trim().is_empty() {
-                let msg = Message::new(Role::Assistant, text);
-                self.context.add_message(msg.clone());
-                session.add_message(msg);
-            }
+    /// Send an event to the optional event channel. No-op when headless.
+    fn emit(event_tx: &Option<mpsc::UnboundedSender<AgentEvent>>, event: AgentEvent) {
+        if let Some(tx) = event_tx {
+            let _ = tx.send(event);
         }
     }
 
     /// Inject the system prompt into the context before the first turn.
-    /// Inject the system prompt if one hasn't been added yet.
     /// Idempotent: calling this multiple times (e.g., follow-up runs) is safe.
     fn inject_system_prompt(&mut self) {
         // Skip if system prompt already present (follow-up / post-complete reuse the context)
@@ -262,13 +249,342 @@ impl AgentLoop {
         self.context.add_message(Message::new(Role::System, system));
     }
 
-    #[instrument(skip(self), fields(model = %self.config.model))]
-    pub async fn run(&mut self, goal: &str) -> ava_types::Result<Session> {
+    /// Inject a summary prompt and do one final LLM call so the agent can wrap up.
+    async fn force_summary(
+        &mut self,
+        session: &mut Session,
+        prompt: &str,
+        total_usage: &mut TokenUsage,
+        event_tx: &Option<mpsc::UnboundedSender<AgentEvent>>,
+    ) {
+        let summary_msg = Message::new(Role::User, prompt.to_string());
+        self.context.add_message(summary_msg.clone());
+        session.add_message(summary_msg);
+        Self::emit(
+            event_tx,
+            AgentEvent::Progress(if prompt.contains("budget") {
+                "budget limit reached — requesting summary".to_string()
+            } else {
+                "turn limit reached — requesting summary".to_string()
+            }),
+        );
+        if let Ok((text, _, usage)) = self.generate_response_with_thinking().await {
+            Self::merge_usage(total_usage, &usage);
+            if !text.trim().is_empty() {
+                Self::emit(event_tx, AgentEvent::Token(text.clone()));
+                let msg = Message::new(Role::Assistant, text);
+                self.context.add_message(msg.clone());
+                session.add_message(msg);
+            }
+        }
+    }
+
+    /// Generate LLM response — streaming when `event_tx` is present, non-streaming otherwise.
+    ///
+    /// Returns (response_text, tool_calls, usage). When streaming, tokens and thinking
+    /// events are emitted to `event_tx` as they arrive.
+    async fn generate_turn_response(
+        &mut self,
+        event_tx: &Option<mpsc::UnboundedSender<AgentEvent>>,
+    ) -> ava_types::Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
+        let native_tools = self.llm.supports_tools();
+
+        // Dedup guard — hash last message content + message count so context growth
+        // (new tool results) breaks the dedup even if the last message content is
+        // identical (e.g. same compile error).
+        let dedup_hash = {
+            let msgs = self.context.get_messages();
+            let mut hasher = DefaultHasher::new();
+            msgs.len().hash(&mut hasher);
+            if let Some(last) = msgs.last() {
+                last.content.hash(&mut hasher);
+            }
+            hasher.finish()
+        };
+        if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time)
+        {
+            if dedup_hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
+                warn!("Skipping duplicate request (same content within 2s)");
+                return Ok((String::new(), vec![], None));
+            }
+        }
+
+        let streaming = event_tx.is_some();
+
+        let result = if streaming {
+            self.generate_turn_streaming(native_tools, event_tx).await
+        } else {
+            self.generate_turn_non_streaming().await
+        };
+
+        // Set dedup hash on success with non-empty response
+        match &result {
+            Ok((text, calls, _)) => {
+                if !text.trim().is_empty() || !calls.is_empty() {
+                    self.last_request_hash = Some(dedup_hash);
+                    self.last_request_time = Some(Instant::now());
+                }
+            }
+            Err(_) => {
+                self.last_request_hash = Some(dedup_hash);
+                self.last_request_time = Some(Instant::now());
+            }
+        }
+
+        result
+    }
+
+    /// Streaming LLM call: emits Token, Thinking, and TokenUsage events.
+    async fn generate_turn_streaming(
+        &mut self,
+        native_tools: bool,
+        event_tx: &Option<mpsc::UnboundedSender<AgentEvent>>,
+    ) -> ava_types::Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
+        info!(
+            model = %self.config.model,
+            native_tools,
+            thinking = %self.config.thinking_level,
+            messages = self.context.get_messages().len(),
+            "starting LLM stream request"
+        );
+
+        let stream_result = if native_tools {
+            let tool_defs = self.active_tool_defs();
+            if self.config.thinking_level != ThinkingLevel::Off {
+                let thinking = ThinkingConfig::new(
+                    self.config.thinking_level,
+                    self.config.thinking_budget_tokens,
+                );
+                let resolved = self.llm.resolve_thinking_config(thinking);
+                if let Some(fallback) = resolved.fallback {
+                    warn!(
+                        requested_budget = thinking.budget_tokens,
+                        applied_budget = resolved.applied.budget_tokens,
+                        ?fallback,
+                        model = %self.config.model,
+                        "provider could not fully honor requested thinking budget"
+                    );
+                }
+                self.llm
+                    .generate_stream_with_thinking_config(
+                        self.context.get_messages(),
+                        &tool_defs,
+                        thinking,
+                    )
+                    .await
+            } else {
+                self.llm
+                    .generate_stream_with_tools(self.context.get_messages(), &tool_defs)
+                    .await
+            }
+        } else {
+            self.llm.generate_stream(self.context.get_messages()).await
+        };
+
+        let mut stream = stream_result?;
+        let mut full_text = String::new();
+        let mut accumulated_tool_calls: Vec<response::ToolCallAccumulator> = Vec::new();
+        let mut last_usage: Option<TokenUsage> = None;
+        let mut chunk_count: usize = 0;
+
+        while let Some(chunk) = stream.next().await {
+            chunk_count += 1;
+            trace!(
+                chunk_count,
+                has_content = chunk.content.is_some(),
+                has_thinking = chunk.thinking.is_some(),
+                has_tool_call = chunk.tool_call.is_some(),
+                has_usage = chunk.usage.is_some(),
+                done = chunk.done,
+                "stream chunk received"
+            );
+            // Emit text tokens as they arrive
+            if let Some(text) = chunk.text_content() {
+                full_text.push_str(text);
+                Self::emit(event_tx, AgentEvent::Token(text.to_string()));
+            }
+            // Emit thinking
+            if let Some(ref thinking) = chunk.thinking {
+                if !thinking.is_empty() {
+                    Self::emit(event_tx, AgentEvent::Thinking(thinking.clone()));
+                }
+            }
+            // Accumulate tool call fragments
+            if let Some(ref tc) = chunk.tool_call {
+                response::accumulate_tool_call(&mut accumulated_tool_calls, tc);
+            }
+            // Capture usage (may arrive in message_start and message_delta)
+            if let Some(ref usage) = chunk.usage {
+                if let Some(ref mut existing) = last_usage {
+                    // Merge: Anthropic sends input in message_start, output in message_delta
+                    if usage.input_tokens > 0 {
+                        existing.input_tokens = usage.input_tokens;
+                    }
+                    if usage.output_tokens > 0 {
+                        existing.output_tokens = usage.output_tokens;
+                    }
+                    if usage.cache_read_tokens > 0 {
+                        existing.cache_read_tokens = usage.cache_read_tokens;
+                    }
+                    if usage.cache_creation_tokens > 0 {
+                        existing.cache_creation_tokens = usage.cache_creation_tokens;
+                    }
+                } else {
+                    last_usage = Some(usage.clone());
+                }
+            }
+        }
+
+        info!(
+            chunk_count,
+            text_len = full_text.len(),
+            tool_calls = accumulated_tool_calls.len(),
+            has_usage = last_usage.is_some(),
+            "stream completed"
+        );
+
+        // Convert accumulated tool calls or parse from text
+        let tool_calls = if native_tools && !accumulated_tool_calls.is_empty() {
+            response::finalize_tool_calls(accumulated_tool_calls)
+        } else if !native_tools {
+            parse_tool_calls(&full_text).unwrap_or_default()
+        } else {
+            vec![]
+        };
+
+        Ok((full_text, tool_calls, last_usage))
+    }
+
+    /// Non-streaming LLM call (used by headless mode).
+    async fn generate_turn_non_streaming(
+        &mut self,
+    ) -> ava_types::Result<(String, Vec<ToolCall>, Option<TokenUsage>)> {
+        self.generate_response_with_thinking().await
+    }
+
+    /// Execute tool calls with steering support and event emission.
+    ///
+    /// Returns (tool_results, steering_triggered).
+    async fn execute_tools_unified(
+        &mut self,
+        tool_calls: &[ToolCall],
+        detector: &mut StuckDetector,
+        event_tx: &Option<mpsc::UnboundedSender<AgentEvent>>,
+    ) -> (Vec<ToolResult>, bool) {
+        let mut steering_triggered = false;
+
+        // Separate into read-only and write groups
+        let mut read_calls: Vec<(usize, &ToolCall)> = Vec::new();
+        let mut write_calls: Vec<(usize, &ToolCall)> = Vec::new();
+        for (i, tc) in tool_calls.iter().enumerate() {
+            if tc.name == "attempt_completion" {
+                continue;
+            }
+            if tool_execution::READ_ONLY_TOOLS.contains(&tc.name.as_str()) {
+                read_calls.push((i, tc));
+            } else {
+                write_calls.push((i, tc));
+            }
+        }
+
+        // Emit all ToolCall events first (streaming mode)
+        for tc in tool_calls {
+            if tc.name == "attempt_completion" {
+                continue;
+            }
+            Self::emit(event_tx, AgentEvent::ToolCall(tc.clone()));
+        }
+
+        let mut indexed_results: Vec<(usize, ToolResult, ToolExecution)> = Vec::new();
+
+        // Read-only tools concurrently
+        if !read_calls.is_empty() {
+            let futs: Vec<_> = read_calls
+                .iter()
+                .map(|(_, tc)| self.execute_tool_call_timed(tc))
+                .collect();
+            let results = futures::future::join_all(futs).await;
+            for (pos, (i, _)) in read_calls.iter().enumerate() {
+                let (result, execution) = results[pos].clone();
+                indexed_results.push((*i, result, execution));
+            }
+        }
+
+        // Poll for steering after read-only batch
+        if let Some(ref mut queue) = self.message_queue {
+            queue.poll();
+            if queue.has_steering() {
+                steering_triggered = true;
+            }
+        }
+
+        // Write tools sequentially — check steering between each
+        if !steering_triggered {
+            for (i, tc) in &write_calls {
+                let (result, execution) = self.execute_tool_call_timed(tc).await;
+                indexed_results.push((*i, result, execution));
+
+                // Poll for steering after each write tool
+                if let Some(ref mut queue) = self.message_queue {
+                    queue.poll();
+                    if queue.has_steering() {
+                        steering_triggered = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // If steering was triggered, add skip results for remaining write tools
+        if steering_triggered {
+            let executed_indices: std::collections::HashSet<usize> =
+                indexed_results.iter().map(|(i, _, _)| *i).collect();
+            for (i, tc) in &write_calls {
+                if !executed_indices.contains(i) {
+                    let skip_result = ToolResult {
+                        call_id: tc.id.clone(),
+                        content: "Skipped due to steering message.".to_string(),
+                        is_error: true,
+                    };
+                    let execution = ToolExecution {
+                        tool_name: tc.name.clone(),
+                        arguments_hash: ava_tools::monitor::hash_arguments(&tc.arguments),
+                        success: false,
+                        duration: std::time::Duration::ZERO,
+                        timestamp: Instant::now(),
+                    };
+                    indexed_results.push((*i, skip_result, execution));
+                }
+            }
+        }
+
+        // Sort by original index and collect results
+        indexed_results.sort_by_key(|(i, _, _)| *i);
+        let mut tool_results = Vec::new();
+        for (_, result, execution) in indexed_results {
+            detector.tool_monitor_mut().record(execution);
+            tool_results.push(result.clone());
+            Self::emit(event_tx, AgentEvent::ToolResult(result));
+        }
+
+        (tool_results, steering_triggered)
+    }
+
+    /// Unified agent execution engine. Both `run()` (headless) and `run_streaming()`
+    /// delegate to this method. When `event_tx` is `Some`, streaming events (Token,
+    /// Thinking, ToolCall, ToolResult, Progress, Complete, etc.) are emitted. When
+    /// `None`, execution is silent.
+    async fn run_unified(
+        &mut self,
+        goal: &str,
+        event_tx: Option<mpsc::UnboundedSender<AgentEvent>>,
+    ) -> ava_types::Result<Session> {
         let mut session = Session::new();
         let mut detector = StuckDetector::new();
         let mut total_usage = TokenUsage::default();
         let mut total_cost_usd = 0.0;
 
+        // --- Setup ---
         self.inject_system_prompt();
 
         // Inject conversation history from previous turns
@@ -292,42 +608,78 @@ impl AgentLoop {
         } else {
             self.config.max_turns
         };
+        let max_budget = self.config.max_budget_usd;
         let mut turn: usize = 0;
 
+        // --- Main loop ---
         loop {
-            // --- Check turn limit ---
+            // Check turn limit
             if self.config.max_turns > 0 && turn >= effective_max {
-                self.force_summary(&mut session, &format!(
-                    "You have reached the maximum number of turns ({}). Please summarize what you've accomplished and list any remaining work.",
-                    self.config.max_turns,
-                ), &mut total_usage).await;
+                self.force_summary(
+                    &mut session,
+                    &format!(
+                        "You have reached the maximum number of turns ({}). Please summarize what you've accomplished and list any remaining work.",
+                        self.config.max_turns,
+                    ),
+                    &mut total_usage,
+                    &event_tx,
+                ).await;
                 break;
             }
 
-            // --- Check budget limit ---
-            if self.config.max_budget_usd > 0.0 && total_cost_usd >= self.config.max_budget_usd {
-                self.force_summary(&mut session, &format!(
-                    "You have reached the budget limit (${:.2}). Please summarize what you've accomplished and list any remaining work.",
-                    self.config.max_budget_usd,
-                ), &mut total_usage).await;
+            // Check budget limit
+            if max_budget > 0.0 && total_cost_usd >= max_budget {
+                self.force_summary(
+                    &mut session,
+                    &format!(
+                        "You have reached the budget limit (${:.2}). Please summarize what you've accomplished and list any remaining work.",
+                        max_budget,
+                    ),
+                    &mut total_usage,
+                    &event_tx,
+                ).await;
                 break;
             }
 
             turn += 1;
+            Self::emit(&event_tx, AgentEvent::Progress(format!("turn {turn}")));
 
-            let (response_text, tool_calls, usage) = self.generate_response_with_thinking().await?;
+            // --- Generate LLM response ---
+            let (response_text, tool_calls, usage) =
+                match self.generate_turn_response(&event_tx).await {
+                    Ok(result) => result,
+                    Err(error) => {
+                        Self::emit(&event_tx, AgentEvent::Error(error.to_string()));
+                        return Err(error);
+                    }
+                };
+
             Self::merge_usage(&mut total_usage, &usage);
             if let Some(ref usage) = usage {
-                total_cost_usd += usage_cost_usd(&self.config.model, usage);
+                let cost = usage_cost_usd(&self.config.model, usage);
+                total_cost_usd += cost;
+                Self::emit(
+                    &event_tx,
+                    AgentEvent::TokenUsage {
+                        input_tokens: usage.input_tokens,
+                        output_tokens: usage.output_tokens,
+                        cost_usd: cost,
+                    },
+                );
             }
 
-            let assistant_message = Message::new(Role::Assistant, response_text.clone())
-                .with_tool_calls(tool_calls.clone());
-
-            let tool_results = self
-                .execute_tool_calls_tracked(&tool_calls, &mut detector)
+            // --- Execute tools ---
+            let (tool_results, steering_triggered) = self
+                .execute_tools_unified(&tool_calls, &mut detector, &event_tx)
                 .await;
 
+            // --- Stuck detection ---
+            debug!(
+                text_len = response_text.len(),
+                tool_calls = tool_calls.len(),
+                tool_results = tool_results.len(),
+                "running stuck detection"
+            );
             match detector.check(
                 &response_text,
                 &tool_calls,
@@ -338,31 +690,55 @@ impl AgentLoop {
             ) {
                 StuckAction::Continue => {}
                 StuckAction::InjectMessage(msg) => {
+                    let assistant_message = Message::new(Role::Assistant, response_text.clone())
+                        .with_tool_calls(tool_calls.clone());
                     self.context.add_message(assistant_message.clone());
                     session.add_message(assistant_message);
                     self.add_tool_results(&tool_calls, &tool_results, &mut session);
+                    Self::emit(&event_tx, AgentEvent::Progress(msg.clone()));
                     let nudge = Message::new(Role::User, msg);
                     self.context.add_message(nudge.clone());
                     session.add_message(nudge);
                     continue;
                 }
                 StuckAction::Stop(reason) => {
+                    Self::emit(&event_tx, AgentEvent::Progress(reason.clone()));
                     session.add_message(Message::new(Role::System, reason));
                     break;
                 }
             }
 
-            // Skip adding empty responses to context
+            // --- Empty response handling ---
             if response_text.trim().is_empty() && tool_calls.is_empty() {
-                continue;
+                let msg = format!(
+                    "Provider returned empty response (model: {}, turn {}). \
+                     Possible API format mismatch. Run with RUST_LOG=debug for details.",
+                    self.config.model, turn
+                );
+                warn!("{msg}");
+                Self::emit(&event_tx, AgentEvent::Error(msg));
+                self.last_request_hash = None;
+                self.last_request_time = None;
+                break;
             }
 
+            let assistant_message = Message::new(Role::Assistant, response_text.clone())
+                .with_tool_calls(tool_calls.clone());
             self.context.add_message(assistant_message.clone());
             session.add_message(assistant_message);
 
             // Natural completion: non-empty text with no tool calls = final answer
             if tool_calls.is_empty() {
+                info!(
+                    text_len = response_text.len(),
+                    "natural completion — no tool calls"
+                );
                 session.token_usage = total_usage;
+                Self::emit(
+                    &event_tx,
+                    AgentEvent::ToolStats(detector.tool_monitor().stats()),
+                );
+                Self::emit(&event_tx, AgentEvent::Complete(session.clone()));
                 return Ok(session);
             }
 
@@ -370,502 +746,129 @@ impl AgentLoop {
                 .iter()
                 .any(|call| call.name == "attempt_completion");
 
+            // Add tool results to context
             self.add_tool_results(&tool_calls, &tool_results, &mut session);
 
-            // Inject a self-correction hint for the first error (avoids flooding)
-            if let Some(err_result) = tool_results
-                .iter()
-                .find(|result| result.is_error || has_validation_failure(result))
-            {
-                let (prefix, first_line) = correction_hint_parts(err_result);
-                let hint = format!(
-                    "{prefix}: {first_line}. Try a different approach — don't repeat the same call."
-                );
-                let hint_msg = Message::new(Role::User, hint);
-                self.context.add_message(hint_msg.clone());
-                session.add_message(hint_msg);
+            // Inject a self-correction hint for the first error (skip if steering overrides)
+            if !steering_triggered {
+                if let Some(err_result) = tool_results
+                    .iter()
+                    .find(|result| result.is_error || has_validation_failure(result))
+                {
+                    let (prefix, first_line) = correction_hint_parts(err_result);
+                    let hint = format!(
+                        "{prefix}: {first_line}. Try a different approach — don't repeat the same call."
+                    );
+                    let hint_msg = Message::new(Role::User, hint);
+                    self.context.add_message(hint_msg.clone());
+                    session.add_message(hint_msg);
+                }
+            }
+
+            // Steering injection: if steering was triggered, inject all steering
+            // messages as user turns and skip to the next LLM call.
+            if steering_triggered {
+                if let Some(ref mut queue) = self.message_queue {
+                    let steering_msgs = queue.drain_steering();
+                    for text in steering_msgs {
+                        let prefixed = format!("[User steering] {text}");
+                        Self::emit(&event_tx, AgentEvent::Progress(format!("steering: {text}")));
+                        let msg = Message::new(Role::User, prefixed);
+                        self.context.add_message(msg.clone());
+                        session.add_message(msg);
+                    }
+                }
+                // Continue to next turn — the LLM will see the steering message
+                continue;
             }
 
             if self.context.should_compact() {
-                self.context.compact_async().await?;
+                if let Err(error) = self.context.compact_async().await {
+                    Self::emit(&event_tx, AgentEvent::Error(error.to_string()));
+                    return Err(error.into());
+                }
+                Self::emit(
+                    &event_tx,
+                    AgentEvent::Progress("context compacted".to_string()),
+                );
             }
 
             if completion_requested {
                 session.token_usage = total_usage;
+                Self::emit(
+                    &event_tx,
+                    AgentEvent::ToolStats(detector.tool_monitor().stats()),
+                );
+                Self::emit(&event_tx, AgentEvent::Complete(session.clone()));
                 return Ok(session);
             }
         }
 
+        // --- Cleanup ---
+        info!("agent loop ended");
         session.token_usage = total_usage;
+        Self::emit(
+            &event_tx,
+            AgentEvent::ToolStats(detector.tool_monitor().stats()),
+        );
+        Self::emit(&event_tx, AgentEvent::Complete(session.clone()));
         Ok(session)
     }
 
+    /// Headless (non-streaming) execution. Delegates to the unified engine with no event sink.
+    #[instrument(skip(self), fields(model = %self.config.model))]
+    pub async fn run(&mut self, goal: &str) -> ava_types::Result<Session> {
+        self.run_unified(goal, None).await
+    }
+
+    /// Streaming execution. Delegates to the unified engine with an event channel,
+    /// returning the receiver wrapped as a stream for backward compatibility.
     #[instrument(skip(self), fields(model = %self.config.model))]
     pub async fn run_streaming(
         &mut self,
         goal: &str,
     ) -> Pin<Box<dyn Stream<Item = AgentEvent> + Send + '_>> {
+        let (tx, rx) = mpsc::unbounded_channel();
         let goal = goal.to_string();
+
+        // Run the unified engine inline (not spawned) so we can borrow `self`.
+        // We use async_stream to drive the unified engine and yield events from
+        // the receiver in lock-step.
         Box::pin(async_stream::stream! {
-            let mut session = Session::new();
-            let mut detector = StuckDetector::new();
-            let mut total_cost_usd = 0.0;
-
-            self.inject_system_prompt();
-
-            // Inject conversation history from previous turns
-            for msg in std::mem::take(&mut self.history) {
-                self.context.add_message(msg.clone());
-                session.add_message(msg);
-            }
-
-            let goal_images = std::mem::take(&mut self.images);
-            let goal_message = if goal_images.is_empty() {
-                Message::new(Role::User, goal.clone())
-            } else {
-                Message::new(Role::User, goal.clone()).with_images(goal_images)
-            };
-            self.context.add_message(goal_message.clone());
-            session.add_message(goal_message);
-
-            // max_turns == 0 means unlimited
-            let effective_max: usize = if self.config.max_turns == 0 { usize::MAX } else { self.config.max_turns };
-            let max_budget = self.config.max_budget_usd;
-            let mut turn: usize = 0;
+            // Start the unified engine — it will send events to `tx`.
+            // We run it as a future and poll the receiver for events.
+            let mut engine_fut = std::pin::pin!(self.run_unified(&goal, Some(tx)));
+            let mut rx = rx;
+            let mut engine_done = false;
 
             loop {
-                // --- Check turn limit ---
-                if self.config.max_turns > 0 && turn >= effective_max {
-                    let summary_prompt = format!(
-                        "You have reached the maximum number of turns ({}). Please summarize what you've accomplished and list any remaining work.",
-                        self.config.max_turns,
-                    );
-                    let summary_msg = Message::new(Role::User, summary_prompt);
-                    self.context.add_message(summary_msg.clone());
-                    session.add_message(summary_msg);
-                    yield AgentEvent::Progress("turn limit reached — requesting summary".to_string());
-                    if let Ok((text, _, _)) = self.generate_response_with_thinking().await {
-                        if !text.trim().is_empty() {
-                            yield AgentEvent::Token(text.clone());
-                            let msg = Message::new(Role::Assistant, text);
-                            self.context.add_message(msg.clone());
-                            session.add_message(msg);
-                        }
+                if engine_done {
+                    // Drain remaining events from the channel after engine completes
+                    while let Ok(event) = rx.try_recv() {
+                        yield event;
                     }
                     break;
                 }
 
-                // --- Check budget limit ---
-                if max_budget > 0.0 && total_cost_usd >= max_budget {
-                    let summary_prompt = format!(
-                        "You have reached the budget limit (${:.2}). Please summarize what you've accomplished and list any remaining work.",
-                        max_budget,
-                    );
-                    let summary_msg = Message::new(Role::User, summary_prompt);
-                    self.context.add_message(summary_msg.clone());
-                    session.add_message(summary_msg);
-                    yield AgentEvent::Progress("budget limit reached — requesting summary".to_string());
-                    if let Ok((text, _, _)) = self.generate_response_with_thinking().await {
-                        if !text.trim().is_empty() {
-                            yield AgentEvent::Token(text.clone());
-                            let msg = Message::new(Role::Assistant, text);
-                            self.context.add_message(msg.clone());
-                            session.add_message(msg);
+                tokio::select! {
+                    biased;
+                    // Prefer draining events before polling the engine again
+                    event = rx.recv() => {
+                        match event {
+                            Some(event) => yield event,
+                            None => break, // channel closed
                         }
                     }
-                    break;
-                }
-
-                turn += 1;
-                yield AgentEvent::Progress(format!("turn {}", turn));
-
-                let native_tools = self.llm.supports_tools();
-
-                // Dedup guard — hash last message content + message count so
-                // context growth (new tool results) breaks the dedup even if
-                // the last message content is identical (e.g. same compile error).
-                let dedup_hash = {
-                    let msgs = self.context.get_messages();
-                    let mut hasher = DefaultHasher::new();
-                    msgs.len().hash(&mut hasher);
-                    if let Some(last) = msgs.last() {
-                        last.content.hash(&mut hasher);
-                    }
-                    hasher.finish()
-                };
-                if let (Some(prev_hash), Some(prev_time)) = (self.last_request_hash, self.last_request_time) {
-                    if dedup_hash == prev_hash && prev_time.elapsed().as_secs() < 2 {
-                        warn!(turn = turn + 1, "Skipping duplicate request (same content within 2s)");
-                        continue;
-                    }
-                }
-
-                let (response_text, tool_calls, usage) = {
-                    info!(
-                        model = %self.config.model,
-                        turn = turn + 1,
-                        native_tools,
-                        thinking = %self.config.thinking_level,
-                        messages = self.context.get_messages().len(),
-                        "starting LLM stream request"
-                    );
-                    let stream_result = if native_tools {
-                        let tool_defs = self.active_tool_defs();
-                        if self.config.thinking_level != ThinkingLevel::Off {
-                            let thinking = ThinkingConfig::new(
-                                self.config.thinking_level,
-                                self.config.thinking_budget_tokens,
-                            );
-                            let resolved = self.llm.resolve_thinking_config(thinking);
-                            if let Some(fallback) = resolved.fallback {
-                                warn!(
-                                    requested_budget = thinking.budget_tokens,
-                                    applied_budget = resolved.applied.budget_tokens,
-                                    ?fallback,
-                                    model = %self.config.model,
-                                    "provider could not fully honor requested thinking budget"
-                                );
-                            }
-                            self.llm
-                                .generate_stream_with_thinking_config(
-                                    self.context.get_messages(),
-                                    &tool_defs,
-                                    thinking,
-                                )
-                                .await
-                        } else {
-                            self.llm.generate_stream_with_tools(
-                                self.context.get_messages(), &tool_defs,
-                            ).await
-                        }
-                    } else {
-                        self.llm.generate_stream(self.context.get_messages()).await
-                    };
-
-                    match stream_result {
-                        Ok(mut stream) => {
-                            let mut full_text = String::new();
-                            let mut accumulated_tool_calls: Vec<response::ToolCallAccumulator> = Vec::new();
-                            let mut last_usage: Option<ava_types::TokenUsage> = None;
-                            let mut chunk_count: usize = 0;
-
-                            while let Some(chunk) = stream.next().await {
-                                chunk_count += 1;
-                                trace!(
-                                    chunk_count,
-                                    has_content = chunk.content.is_some(),
-                                    has_thinking = chunk.thinking.is_some(),
-                                    has_tool_call = chunk.tool_call.is_some(),
-                                    has_usage = chunk.usage.is_some(),
-                                    done = chunk.done,
-                                    "stream chunk received"
-                                );
-                                // Emit text tokens as they arrive
-                                if let Some(text) = chunk.text_content() {
-                                    full_text.push_str(text);
-                                    yield AgentEvent::Token(text.to_string());
-                                }
-                                // Emit thinking
-                                if let Some(ref thinking) = chunk.thinking {
-                                    if !thinking.is_empty() {
-                                        yield AgentEvent::Thinking(thinking.clone());
-                                    }
-                                }
-                                // Accumulate tool call fragments
-                                if let Some(ref tc) = chunk.tool_call {
-                                    response::accumulate_tool_call(&mut accumulated_tool_calls, tc);
-                                }
-                                // Capture usage (may arrive in message_start and message_delta)
-                                if let Some(ref usage) = chunk.usage {
-                                    if let Some(ref mut existing) = last_usage {
-                                        // Merge: Anthropic sends input in message_start, output in message_delta
-                                        if usage.input_tokens > 0 {
-                                            existing.input_tokens = usage.input_tokens;
-                                        }
-                                        if usage.output_tokens > 0 {
-                                            existing.output_tokens = usage.output_tokens;
-                                        }
-                                        if usage.cache_read_tokens > 0 {
-                                            existing.cache_read_tokens = usage.cache_read_tokens;
-                                        }
-                                        if usage.cache_creation_tokens > 0 {
-                                            existing.cache_creation_tokens = usage.cache_creation_tokens;
-                                        }
-                                    } else {
-                                        last_usage = Some(usage.clone());
-                                    }
-                                }
-                            }
-
-                            info!(
-                                chunk_count,
-                                text_len = full_text.len(),
-                                tool_calls = accumulated_tool_calls.len(),
-                                has_usage = last_usage.is_some(),
-                                "stream completed"
-                            );
-
-                            // Emit token usage
-                            if let Some(usage) = last_usage.clone() {
-                                let cost = usage_cost_usd(&self.config.model, &usage);
-                                total_cost_usd += cost;
-                                yield AgentEvent::TokenUsage {
-                                    input_tokens: usage.input_tokens,
-                                    output_tokens: usage.output_tokens,
-                                    cost_usd: cost,
-                                };
-                            }
-
-                            // Convert accumulated tool calls or parse from text
-                            let tool_calls = if native_tools && !accumulated_tool_calls.is_empty() {
-                                response::finalize_tool_calls(accumulated_tool_calls)
-                            } else if !native_tools {
-                                parse_tool_calls(&full_text).unwrap_or_default()
-                            } else {
-                                vec![]
-                            };
-
-                            (full_text, tool_calls, last_usage)
-                        }
-                        Err(error) => {
+                    result = &mut engine_fut => {
+                        engine_done = true;
+                        // If engine errored and didn't emit Error event, emit one now
+                        if let Err(error) = result {
                             yield AgentEvent::Error(error.to_string());
-                            return;
                         }
+                        // Continue to drain remaining events
                     }
-                };
-
-                self.last_request_hash = Some(dedup_hash);
-                self.last_request_time = Some(Instant::now());
-
-                // Execute tools: read-only in parallel, write sequentially.
-                // Between tool executions, poll the message queue for steering messages.
-                // If steering is detected, skip remaining tools.
-                let mut tool_results_collected = Vec::new();
-                let mut steering_triggered = false;
-                {
-                    let mut read_calls: Vec<(usize, &ToolCall)> = Vec::new();
-                    let mut write_calls: Vec<(usize, &ToolCall)> = Vec::new();
-                    for (i, tc) in tool_calls.iter().enumerate() {
-                        if tc.name == "attempt_completion" { continue; }
-                        if tool_execution::READ_ONLY_TOOLS.contains(&tc.name.as_str()) {
-                            read_calls.push((i, tc));
-                        } else {
-                            write_calls.push((i, tc));
-                        }
-                    }
-
-                    // Emit all ToolCall events first
-                    for tc in &tool_calls {
-                        if tc.name == "attempt_completion" { continue; }
-                        yield AgentEvent::ToolCall(tc.clone());
-                    }
-
-                    let mut indexed_results: Vec<(usize, ToolResult, ToolExecution)> = Vec::new();
-
-                    // Read-only tools concurrently
-                    if !read_calls.is_empty() {
-                        let futs: Vec<_> = read_calls.iter().map(|(_, tc)| self.execute_tool_call_timed(tc)).collect();
-                        let results = futures::future::join_all(futs).await;
-                        for (pos, (i, _)) in read_calls.iter().enumerate() {
-                            let (result, execution) = results[pos].clone();
-                            indexed_results.push((*i, result, execution));
-                        }
-                    }
-
-                    // Poll for steering after read-only batch
-                    if let Some(ref mut queue) = self.message_queue {
-                        queue.poll();
-                        if queue.has_steering() {
-                            steering_triggered = true;
-                        }
-                    }
-
-                    // Write tools sequentially — check steering between each
-                    if !steering_triggered {
-                        for (i, tc) in &write_calls {
-                            let (result, execution) = self.execute_tool_call_timed(tc).await;
-                            indexed_results.push((*i, result, execution));
-
-                            // Poll for steering after each write tool
-                            if let Some(ref mut queue) = self.message_queue {
-                                queue.poll();
-                                if queue.has_steering() {
-                                    steering_triggered = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    // If steering was triggered, add skip results for remaining write tools
-                    if steering_triggered {
-                        let executed_indices: std::collections::HashSet<usize> =
-                            indexed_results.iter().map(|(i, _, _)| *i).collect();
-                        for (i, tc) in &write_calls {
-                            if !executed_indices.contains(i) {
-                                let skip_result = ToolResult {
-                                    call_id: tc.id.clone(),
-                                    content: "Skipped due to steering message.".to_string(),
-                                    is_error: true,
-                                };
-                                let execution = ToolExecution {
-                                    tool_name: tc.name.clone(),
-                                    arguments_hash: ava_tools::monitor::hash_arguments(&tc.arguments),
-                                    success: false,
-                                    duration: std::time::Duration::ZERO,
-                                    timestamp: Instant::now(),
-                                };
-                                indexed_results.push((*i, skip_result, execution));
-                            }
-                        }
-                    }
-
-                    // Sort by original index and emit results
-                    indexed_results.sort_by_key(|(i, _, _)| *i);
-                    for (_, result, execution) in indexed_results {
-                        detector.tool_monitor_mut().record(execution);
-                        tool_results_collected.push(result.clone());
-                        yield AgentEvent::ToolResult(result);
-                    }
-                }
-
-                // Stuck detection
-                debug!(
-                    text_len = response_text.len(),
-                    tool_calls = tool_calls.len(),
-                    tool_results = tool_results_collected.len(),
-                    "running stuck detection"
-                );
-                match detector.check(
-                    &response_text,
-                    &tool_calls,
-                    &tool_results_collected,
-                    usage.as_ref(),
-                    &self.config,
-                    self.llm.as_ref(),
-                ) {
-                    StuckAction::Continue => {}
-                    StuckAction::InjectMessage(msg) => {
-                        let assistant_message = Message::new(Role::Assistant, response_text.clone())
-                            .with_tool_calls(tool_calls.clone());
-                        self.context.add_message(assistant_message.clone());
-                        session.add_message(assistant_message);
-                        for (i, tool_call) in tool_calls.iter().enumerate() {
-                            if tool_call.name == "attempt_completion" { continue; }
-                            if let Some(result) = tool_results_collected.get(i) {
-                                let tool_message = Message::new(Role::Tool, result.content.clone())
-                                    .with_tool_call_id(&tool_call.id)
-                                    .with_tool_results(vec![result.clone()]);
-                                self.context.add_message(tool_message.clone());
-                                session.add_message(tool_message);
-                            }
-                        }
-                        yield AgentEvent::Progress(msg.clone());
-                        let nudge = Message::new(Role::User, msg);
-                        self.context.add_message(nudge.clone());
-                        session.add_message(nudge);
-                        continue;
-                    }
-                    StuckAction::Stop(reason) => {
-                        yield AgentEvent::Progress(reason);
-                        break;
-                    }
-                }
-
-                // Skip adding empty responses to context — but don't set dedup
-                // hash so the next turn will still make a real API call instead
-                // of silently burning turns via the dedup guard.
-                if response_text.trim().is_empty() && tool_calls.is_empty() {
-                    let msg = format!(
-                        "Provider returned empty response (model: {}, turn {}). \
-                         Possible API format mismatch. Run with RUST_LOG=debug for details.",
-                        self.config.model, turn + 1
-                    );
-                    warn!("{msg}");
-                    yield AgentEvent::Error(msg);
-                    self.last_request_hash = None;
-                    self.last_request_time = None;
-                    break;
-                }
-
-                let assistant_message = Message::new(Role::Assistant, response_text.clone())
-                    .with_tool_calls(tool_calls.clone());
-                self.context.add_message(assistant_message.clone());
-                session.add_message(assistant_message);
-
-                // Natural completion: non-empty text with no tool calls = final answer
-                if tool_calls.is_empty() {
-                    info!(text_len = response_text.len(), "natural completion — no tool calls, emitting Complete");
-                    yield AgentEvent::ToolStats(detector.tool_monitor().stats());
-                    yield AgentEvent::Complete(session.clone());
-                    return;
-                }
-
-                let completion_requested = tool_calls.iter().any(|call| call.name == "attempt_completion");
-
-                // Add tool results to context
-                for (i, tool_call) in tool_calls.iter().enumerate() {
-                    if tool_call.name == "attempt_completion" { continue; }
-                    if let Some(result) = tool_results_collected.get(i) {
-                        let tool_message = Message::new(Role::Tool, result.content.clone())
-                            .with_tool_call_id(&tool_call.id)
-                            .with_tool_results(vec![result.clone()]);
-                        self.context.add_message(tool_message.clone());
-                        session.add_message(tool_message);
-                    }
-                }
-
-                // Inject a self-correction hint for the first error (skip if steering overrides)
-                if !steering_triggered {
-                    if let Some(err_result) = tool_results_collected
-                        .iter()
-                        .find(|result| result.is_error || has_validation_failure(result))
-                    {
-                        let (prefix, first_line) = correction_hint_parts(err_result);
-                        let hint = format!(
-                            "{prefix}: {first_line}. Try a different approach — don't repeat the same call."
-                        );
-                        let hint_msg = Message::new(Role::User, hint);
-                        self.context.add_message(hint_msg.clone());
-                        session.add_message(hint_msg);
-                    }
-                }
-
-                // Steering injection: if steering was triggered, inject all steering
-                // messages as user turns and skip to the next LLM call.
-                if steering_triggered {
-                    if let Some(ref mut queue) = self.message_queue {
-                        let steering_msgs = queue.drain_steering();
-                        for text in steering_msgs {
-                            let prefixed = format!("[User steering] {text}");
-                            yield AgentEvent::Progress(format!("steering: {text}"));
-                            let msg = Message::new(Role::User, prefixed);
-                            self.context.add_message(msg.clone());
-                            session.add_message(msg);
-                        }
-                    }
-                    // Continue to next turn — the LLM will see the steering message
-                    continue;
-                }
-
-                if self.context.should_compact() {
-                    if let Err(error) = self.context.compact_async().await {
-                        yield AgentEvent::Error(error.to_string());
-                        return;
-                    }
-                    yield AgentEvent::Progress("context compacted".to_string());
-                }
-
-                if completion_requested {
-                    yield AgentEvent::ToolStats(detector.tool_monitor().stats());
-                    yield AgentEvent::Complete(session.clone());
-                    return;
                 }
             }
-
-            info!("agent loop ended");
-            yield AgentEvent::ToolStats(detector.tool_monitor().stats());
-            yield AgentEvent::Complete(session);
         })
     }
 }

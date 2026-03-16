@@ -10,7 +10,7 @@ use tracing::instrument;
 
 use crate::circuit_breaker::CircuitBreaker;
 use crate::pool::ConnectionPool;
-use crate::provider::LLMProvider;
+use crate::provider::{LLMProvider, ProviderCapabilities};
 use crate::providers::common;
 use crate::thinking::{ResolvedThinkingConfig, ThinkingBudgetFallback, ThinkingConfig};
 
@@ -225,6 +225,18 @@ impl LLMProvider for GeminiProvider {
 
     fn model_name(&self) -> &str {
         &self.model
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            supports_streaming: true,
+            supports_tool_use: false,
+            supports_thinking: self.supports_thinking_mode(),
+            supports_thinking_levels: self.supports_thinking_mode(),
+            supports_images: true,
+            max_context_window: 1_000_000,
+            supports_prompt_caching: false,
+        }
     }
 
     fn provider_kind(&self) -> crate::message_transform::ProviderKind {

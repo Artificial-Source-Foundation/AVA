@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use tracing::instrument;
 
 use crate::pool::ConnectionPool;
-use crate::provider::{LLMProvider, LLMResponse};
+use crate::provider::{LLMProvider, LLMResponse, ProviderCapabilities};
 use crate::providers::common;
 
 #[derive(Clone)]
@@ -158,6 +158,18 @@ impl LLMProvider for OllamaProvider {
 
     fn model_name(&self) -> &str {
         &self.model
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            supports_streaming: true,
+            supports_tool_use: false,
+            supports_thinking: false,
+            supports_thinking_levels: false,
+            supports_images: false,
+            max_context_window: 0, // model-dependent
+            supports_prompt_caching: false,
+        }
     }
 
     fn provider_kind(&self) -> crate::message_transform::ProviderKind {

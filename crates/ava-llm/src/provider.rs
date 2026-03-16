@@ -3,12 +3,120 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use ava_types::{
-    Message, Result, StreamChunk, StreamToolCall, ThinkingLevel, TokenUsage, Tool, ToolCall,
+    AvaError, Message, Result, StreamChunk, StreamToolCall, ThinkingLevel, TokenUsage, Tool,
+    ToolCall,
 };
 use futures::Stream;
 
 use crate::message_transform::{normalize_messages, ProviderKind};
 use crate::thinking::{ResolvedThinkingConfig, ThinkingBudgetFallback, ThinkingConfig};
+
+/// Declarative capability surface for an LLM provider.
+///
+/// Instead of querying individual `supports_*` methods, callers can inspect
+/// a single struct to understand what a provider can do. This separates
+/// capability declaration from transport behavior.
+#[derive(Debug, Clone)]
+pub struct ProviderCapabilities {
+    /// Whether the provider supports streaming responses.
+    pub supports_streaming: bool,
+    /// Whether the provider supports native tool/function calling.
+    pub supports_tool_use: bool,
+    /// Whether the provider supports thinking/reasoning modes.
+    pub supports_thinking: bool,
+    /// Whether the provider supports granular thinking levels (Low/Medium/High/Max).
+    pub supports_thinking_levels: bool,
+    /// Whether the provider supports image inputs.
+    pub supports_images: bool,
+    /// Maximum context window size in tokens (0 = unknown).
+    pub max_context_window: usize,
+    /// Whether the provider supports prompt caching.
+    pub supports_prompt_caching: bool,
+}
+
+impl Default for ProviderCapabilities {
+    fn default() -> Self {
+        Self {
+            supports_streaming: true,
+            supports_tool_use: false,
+            supports_thinking: false,
+            supports_thinking_levels: false,
+            supports_images: false,
+            max_context_window: 0,
+            supports_prompt_caching: false,
+        }
+    }
+}
+
+/// Structured classification of provider errors.
+///
+/// Enables callers (retry logic, circuit breaker, fallback routing) to make
+/// decisions based on error semantics rather than parsing error strings.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProviderErrorKind {
+    /// Rate limit hit; retry after the given duration if available.
+    RateLimit { retry_after_secs: Option<u64> },
+    /// Authentication or authorization failure (401/403).
+    AuthFailure,
+    /// Input exceeded the model's context window.
+    ContextWindowExceeded,
+    /// The requested model was not found or is unavailable.
+    ModelNotFound,
+    /// Network-level error (DNS, connection refused, etc.).
+    NetworkError,
+    /// Request timed out.
+    Timeout,
+    /// Server-side error (5xx).
+    ServerError { status: u16 },
+    /// Unclassified error.
+    Unknown,
+}
+
+impl ProviderErrorKind {
+    /// Classify an `AvaError` into a structured error kind by inspecting
+    /// the error message. This is a heuristic — providers that return
+    /// structured error responses should override with more precise logic.
+    pub fn classify(error: &AvaError) -> Self {
+        let msg = error.to_string().to_lowercase();
+        if msg.contains("rate limit") || msg.contains("429") || msg.contains("too many requests") {
+            Self::RateLimit {
+                retry_after_secs: None,
+            }
+        } else if msg.contains("401")
+            || msg.contains("403")
+            || msg.contains("auth")
+            || msg.contains("unauthorized")
+            || msg.contains("forbidden")
+        {
+            Self::AuthFailure
+        } else if msg.contains("context") && (msg.contains("exceed") || msg.contains("too long")) {
+            Self::ContextWindowExceeded
+        } else if msg.contains("model") && msg.contains("not found") {
+            Self::ModelNotFound
+        } else if msg.contains("timeout") || msg.contains("timed out") {
+            Self::Timeout
+        } else if msg.contains("connection") || msg.contains("dns") || msg.contains("network") {
+            Self::NetworkError
+        } else if msg.contains("500")
+            || msg.contains("502")
+            || msg.contains("503")
+            || msg.contains("504")
+            || msg.contains("server error")
+        {
+            Self::ServerError { status: 500 }
+        } else {
+            Self::Unknown
+        }
+    }
+
+    /// Whether this error kind is retryable.
+    pub fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::RateLimit { .. } | Self::Timeout | Self::NetworkError | Self::ServerError { .. }
+        )
+    }
+}
 
 /// Response from an LLM that may include both text content and native tool calls.
 #[derive(Debug, Clone, Default)]
@@ -41,6 +149,22 @@ pub trait LLMProvider: Send + Sync {
     fn estimate_cost(&self, input_tokens: usize, output_tokens: usize) -> f64;
     /// The model identifier string (e.g., "claude-sonnet-4-6").
     fn model_name(&self) -> &str;
+
+    /// Declarative capability surface for this provider/model combination.
+    ///
+    /// Returns a `ProviderCapabilities` struct describing what this provider
+    /// supports. The default implementation derives values from the existing
+    /// `supports_tools()`, `supports_thinking()`, and `thinking_levels()` methods
+    /// for backward compatibility.
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            supports_streaming: true,
+            supports_tool_use: self.supports_tools(),
+            supports_thinking: self.supports_thinking(),
+            supports_thinking_levels: !self.thinking_levels().is_empty(),
+            ..Default::default()
+        }
+    }
 
     /// The provider family for cross-provider message normalization.
     /// Override this in provider implementations; defaults to `OpenAI` (most common).
@@ -227,6 +351,10 @@ impl LLMProvider for NormalizingProvider {
         self.inner.model_name()
     }
 
+    fn capabilities(&self) -> ProviderCapabilities {
+        self.inner.capabilities()
+    }
+
     fn provider_kind(&self) -> ProviderKind {
         self.inner.provider_kind()
     }
@@ -351,6 +479,10 @@ impl LLMProvider for SharedProvider {
 
     fn model_name(&self) -> &str {
         self.inner.model_name()
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        self.inner.capabilities()
     }
 
     fn provider_kind(&self) -> ProviderKind {

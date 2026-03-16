@@ -8,7 +8,7 @@ use futures::Stream;
 use tracing::instrument;
 
 use crate::pool::ConnectionPool;
-use crate::provider::{LLMProvider, LLMResponse};
+use crate::provider::{LLMProvider, LLMResponse, ProviderCapabilities};
 use crate::providers::openai::OpenAIProvider;
 
 /// Inception Labs provider for Mercury diffusion models.
@@ -83,6 +83,18 @@ impl LLMProvider for InceptionProvider {
 
     fn model_name(&self) -> &str {
         self.inner.model_name()
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            supports_streaming: true,
+            supports_tool_use: true,
+            supports_thinking: false,
+            supports_thinking_levels: false,
+            supports_images: false,
+            max_context_window: 32_000,
+            supports_prompt_caching: false,
+        }
     }
 
     fn provider_kind(&self) -> crate::message_transform::ProviderKind {

@@ -10,7 +10,7 @@ use tracing::instrument;
 
 use crate::circuit_breaker::CircuitBreaker;
 use crate::pool::ConnectionPool;
-use crate::provider::{LLMProvider, LLMResponse};
+use crate::provider::{LLMProvider, LLMResponse, ProviderCapabilities};
 use crate::providers::common;
 
 /// Thinking/reasoning format variants for OpenAI-compatible providers.
@@ -273,6 +273,18 @@ impl LLMProvider for OpenAIProvider {
 
     fn model_name(&self) -> &str {
         &self.model
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            supports_streaming: true,
+            supports_tool_use: true,
+            supports_thinking: self.supports_reasoning(),
+            supports_thinking_levels: self.supports_reasoning(),
+            supports_images: true,
+            max_context_window: 128_000,
+            supports_prompt_caching: false,
+        }
     }
 
     fn provider_kind(&self) -> crate::message_transform::ProviderKind {

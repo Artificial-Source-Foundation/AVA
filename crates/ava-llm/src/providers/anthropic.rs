@@ -10,7 +10,7 @@ use tracing::{debug, instrument, trace, warn};
 
 use crate::circuit_breaker::CircuitBreaker;
 use crate::pool::ConnectionPool;
-use crate::provider::{LLMProvider, LLMResponse};
+use crate::provider::{LLMProvider, LLMResponse, ProviderCapabilities};
 use crate::providers::common;
 use crate::thinking::{ResolvedThinkingConfig, ThinkingBudgetFallback, ThinkingConfig};
 
@@ -290,6 +290,18 @@ impl LLMProvider for AnthropicProvider {
 
     fn model_name(&self) -> &str {
         &self.model
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            supports_streaming: true,
+            supports_tool_use: true,
+            supports_thinking: self.supports_adaptive_thinking() || self.is_kimi_thinking_model(),
+            supports_thinking_levels: self.supports_adaptive_thinking(),
+            supports_images: true,
+            max_context_window: 200_000,
+            supports_prompt_caching: !self.third_party,
+        }
     }
 
     fn provider_kind(&self) -> crate::message_transform::ProviderKind {

@@ -75,15 +75,39 @@ struct BackgroundIsolation {
 }
 
 pub struct AppState {
+    // ── Theme & Layout ──────────────────────────────────────────────────
     pub theme: Theme,
+    pub show_sidebar: bool,
+    pub view_mode: ViewMode,
+
+    // ── Chat ────────────────────────────────────────────────────────────
     pub messages: MessageState,
     pub input: InputState,
-    pub session: SessionState,
-    pub permission: PermissionState,
-    pub keybinds: KeybindState,
+    /// State for the /btw side-conversation overlay.
+    pub btw: BtwState,
+
+    // ── Agent ───────────────────────────────────────────────────────────
     pub agent: AgentState,
     pub agent_mode: AgentMode,
-    pub show_sidebar: bool,
+    /// Message index where the current agent turn started (BUG-41).
+    /// Used to scope `mark_interrupted_messages` to only the current turn.
+    pub turn_start_index: usize,
+
+    // ── Session & Persistence ───────────────────────────────────────────
+    pub session: SessionState,
+    /// State for the rewind system (checkpoints + modal).
+    pub rewind: RewindState,
+
+    // ── Permissions & Keybindings ───────────────────────────────────────
+    pub permission: PermissionState,
+    pub keybinds: KeybindState,
+
+    // ── Model & Provider ────────────────────────────────────────────────
+    pub model_catalog: ava_config::CatalogState,
+    pub voice: VoiceState,
+
+    // ── Modals ──────────────────────────────────────────────────────────
+    pub active_modal: Option<ModalType>,
     pub command_palette: CommandPaletteState,
     pub session_list: SessionListState,
     pub model_selector: Option<ModelSelectorState>,
@@ -93,42 +117,41 @@ pub struct AppState {
     pub agent_list: Option<SelectListState<String>>,
     /// Saved theme before opening theme selector (for live preview revert on Esc).
     pub theme_before_preview: Option<Theme>,
-    pub active_modal: Option<ModalType>,
-    pub view_mode: ViewMode,
-    pub status_message: Option<StatusMessage>,
-    pub voice: VoiceState,
-    pub model_catalog: ava_config::CatalogState,
-    /// Cached snapshot of the agent's todo list for sidebar rendering.
-    pub todo_items: Vec<ava_types::TodoItem>,
-    /// Shared todo state handle (for async refresh).
-    pub todo_state: Option<ava_types::TodoState>,
     /// Active question from the agent (question tool).
     pub question: Option<QuestionState>,
     /// Active copy picker state (shown when multiple code blocks in last response).
     pub copy_picker: Option<CopyPickerState>,
-    /// State for the /btw side-conversation overlay.
-    pub btw: BtwState,
-    /// Registry of user-defined slash commands from TOML files.
-    pub custom_commands: CustomCommandRegistry,
     /// State for the diff preview modal (per-hunk accept/reject).
     pub diff_preview: Option<DiffPreviewState>,
     /// State for the generic info panel modal (/help, /mcp list, etc.).
     pub info_panel: Option<InfoPanelState>,
-    /// State for the rewind system (checkpoints + modal).
-    pub rewind: RewindState,
+
+    // ── Notifications ───────────────────────────────────────────────────
+    /// Toast notification state (top-right overlay, auto-dismiss).
+    pub toast: ToastState,
+    pub status_message: Option<StatusMessage>,
+
+    // ── Background & Multi-Agent ────────────────────────────────────────
     /// Shared background task state.
     pub background: SharedBackgroundState,
     /// Praxis multi-agent task state.
     pub praxis: PraxisState,
+
+    // ── Sidebar & Todo ──────────────────────────────────────────────────
+    /// Cached snapshot of the agent's todo list for sidebar rendering.
+    pub todo_items: Vec<ava_types::TodoItem>,
+    /// Shared todo state handle (for async refresh).
+    pub todo_state: Option<ava_types::TodoState>,
+
+    // ── Extensions & Hooks ──────────────────────────────────────────────
+    /// Registry of user-defined slash commands from TOML files.
+    pub custom_commands: CustomCommandRegistry,
     /// Registry of user-defined lifecycle hooks.
     pub hooks: HookRegistry,
-    /// Toast notification state (top-right overlay, auto-dismiss).
-    pub toast: ToastState,
+
+    // ── Misc ────────────────────────────────────────────────────────────
     /// Number of images pending attachment to the next user message.
     pub pending_image_count: usize,
-    /// Message index where the current agent turn started (BUG-41).
-    /// Used to scope `mark_interrupted_messages` to only the current turn.
-    pub turn_start_index: usize,
 }
 
 /// A fenced code block extracted from markdown content.
@@ -305,15 +328,33 @@ impl App {
         let todo_state = agent.todo_state();
 
         let state = AppState {
+            // Theme & Layout
             theme: Theme::from_name(&cli.theme),
+            show_sidebar: false,
+            view_mode: ViewMode::default(),
+            // Chat
             messages: MessageState::default(),
             input: InputState::default(),
-            session,
-            permission,
-            keybinds,
+            btw: BtwState::default(),
+            // Agent
             agent,
             agent_mode: AgentMode::default(),
-            show_sidebar: false,
+            turn_start_index: 0,
+            // Session & Persistence
+            session,
+            rewind: RewindState::default(),
+            // Permissions & Keybindings
+            permission,
+            keybinds,
+            // Model & Provider
+            model_catalog,
+            voice: VoiceState {
+                auto_submit: cli.voice,
+                continuous: cli.voice,
+                ..VoiceState::default()
+            },
+            // Modals
+            active_modal: None,
             command_palette: CommandPaletteState::with_defaults(),
             session_list: SessionListState::default(),
             model_selector: None,
@@ -322,30 +363,24 @@ impl App {
             theme_selector: None,
             agent_list: None,
             theme_before_preview: None,
-            active_modal: None,
-            view_mode: ViewMode::default(),
-            status_message: None,
-            voice: VoiceState {
-                auto_submit: cli.voice,
-                continuous: cli.voice,
-                ..VoiceState::default()
-            },
-            model_catalog,
-            todo_items: Vec::new(),
-            todo_state,
             question: None,
             copy_picker: None,
-            btw: BtwState::default(),
-            custom_commands: CustomCommandRegistry::load(),
             diff_preview: None,
             info_panel: None,
-            rewind: RewindState::default(),
+            // Notifications
+            toast: ToastState::default(),
+            status_message: None,
+            // Background & Multi-Agent
             background: new_shared(),
             praxis: PraxisState::default(),
+            // Sidebar & Todo
+            todo_items: Vec::new(),
+            todo_state,
+            // Extensions & Hooks
+            custom_commands: CustomCommandRegistry::load(),
             hooks: HookRegistry::load(),
-            toast: ToastState::default(),
+            // Misc
             pending_image_count: 0,
-            turn_start_index: 0,
         };
 
         let mut app = Self {
@@ -848,15 +883,29 @@ impl App {
         let session = SessionState::new(db_path).expect("SessionState");
 
         let state = AppState {
+            // Theme & Layout
             theme: Theme::default_theme(),
+            show_sidebar: false,
+            view_mode: ViewMode::default(),
+            // Chat
             messages: MessageState::default(),
             input: InputState::default(),
-            session,
-            permission: PermissionState::default(),
-            keybinds: KeybindState::default(),
+            btw: BtwState::default(),
+            // Agent
             agent: AgentState::test_new("test-provider", "test-model"),
             agent_mode: AgentMode::default(),
-            show_sidebar: false,
+            turn_start_index: 0,
+            // Session & Persistence
+            session,
+            rewind: RewindState::default(),
+            // Permissions & Keybindings
+            permission: PermissionState::default(),
+            keybinds: KeybindState::default(),
+            // Model & Provider
+            model_catalog: ava_config::CatalogState::default(),
+            voice: VoiceState::default(),
+            // Modals
+            active_modal: None,
             command_palette: CommandPaletteState::with_defaults(),
             session_list: SessionListState::default(),
             model_selector: None,
@@ -865,26 +914,24 @@ impl App {
             theme_selector: None,
             agent_list: None,
             theme_before_preview: None,
-            active_modal: None,
-            view_mode: ViewMode::default(),
-            status_message: None,
-            voice: VoiceState::default(),
-            model_catalog: ava_config::CatalogState::default(),
-            todo_items: Vec::new(),
-            todo_state: None,
             question: None,
             copy_picker: None,
-            btw: BtwState::default(),
-            custom_commands: CustomCommandRegistry::default(),
             diff_preview: None,
             info_panel: None,
-            rewind: RewindState::default(),
+            // Notifications
+            toast: ToastState::default(),
+            status_message: None,
+            // Background & Multi-Agent
             background: new_shared(),
             praxis: PraxisState::default(),
+            // Sidebar & Todo
+            todo_items: Vec::new(),
+            todo_state: None,
+            // Extensions & Hooks
+            custom_commands: CustomCommandRegistry::default(),
             hooks: HookRegistry::load(),
-            toast: ToastState::default(),
+            // Misc
             pending_image_count: 0,
-            turn_start_index: 0,
         };
 
         Self {

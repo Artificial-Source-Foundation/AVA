@@ -618,6 +618,10 @@ impl App {
         let msg_index = self.state.messages.messages.len();
         self.state.rewind.create_checkpoint(msg_index, &goal);
 
+        // BUG-41: Track where this turn's messages start so that
+        // mark_interrupted_messages only affects the current turn.
+        self.state.turn_start_index = self.state.messages.messages.len();
+
         self.state
             .messages
             .push(UiMessage::new(MessageKind::User, goal.clone()));
@@ -695,11 +699,12 @@ impl App {
         // Force flush any remaining buffered tokens so the last assistant message is complete
         self.force_flush_token_buffer();
 
-        // Walk messages from the end to find in-progress tool calls and streaming messages.
-        // A ToolCall is "in-progress" if there is no matching ToolResult after it.
+        // BUG-41: Only walk messages from the CURRENT turn (turn_start_index) to avoid
+        // marking tool groups from previous turns as interrupted.
+        let start = self.state.turn_start_index;
         let msgs = &mut self.state.messages.messages;
         let mut seen_result = false;
-        for msg in msgs.iter_mut().rev() {
+        for msg in msgs[start..].iter_mut().rev() {
             match msg.kind {
                 MessageKind::ToolResult => {
                     seen_result = true;

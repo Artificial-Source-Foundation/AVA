@@ -126,6 +126,9 @@ pub struct AppState {
     pub toast: ToastState,
     /// Number of images pending attachment to the next user message.
     pub pending_image_count: usize,
+    /// Message index where the current agent turn started (BUG-41).
+    /// Used to scope `mark_interrupted_messages` to only the current turn.
+    pub turn_start_index: usize,
 }
 
 /// A fenced code block extracted from markdown content.
@@ -342,6 +345,7 @@ impl App {
             hooks: HookRegistry::load(),
             toast: ToastState::default(),
             pending_image_count: 0,
+            turn_start_index: 0,
         };
 
         let mut app = Self {
@@ -829,6 +833,7 @@ impl App {
             hooks: HookRegistry::load(),
             toast: ToastState::default(),
             pending_image_count: 0,
+            turn_start_index: 0,
         };
 
         Self {

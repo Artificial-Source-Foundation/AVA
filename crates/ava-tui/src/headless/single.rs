@@ -184,42 +184,76 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         println!(
             "{}",
             serde_json::json!({
-                "type": "summary",
+                "type": "complete",
                 "success": result.success,
                 "turns": result.turns,
-                "costSummary": cost_summary.map(|summary| serde_json::json!({
-                    "totalUsd": summary.total_usd,
-                    "budgetUsd": summary.budget_usd,
-                    "inputTokens": summary.input_tokens,
-                    "outputTokens": summary.output_tokens,
-                })),
+                "cost": cost_summary.as_ref().map(|s| s.total_usd),
+                "input_tokens": cost_summary.as_ref().map(|s| s.input_tokens),
+                "output_tokens": cost_summary.as_ref().map(|s| s.output_tokens),
                 "routing": route_summary,
             })
         );
     } else {
+        // Print routing info at the start of the summary
+        if let Some(ref route) = route_summary {
+            eprintln!("[routing: {route}]");
+        }
         let spend = cost_summary.map(|summary| match summary.budget_usd {
             Some(budget) if budget > 0.0 => {
                 format!(
-                    " cost=${:.2}/${budget:.2} tokens={} in/{} out",
+                    " cost=${:.2}/${budget:.2} tokens={}/{} in/out",
                     summary.total_usd, summary.input_tokens, summary.output_tokens
                 )
             }
             _ => format!(
-                " cost=${:.2} tokens={} in/{} out",
+                " cost=${:.2} tokens={}/{} in/out",
                 summary.total_usd, summary.input_tokens, summary.output_tokens
             ),
         });
-        let route = route_summary.map(|summary| format!(" route={summary}"));
         eprintln!(
-            "[Done] success={}, turns={}{}{}",
+            "[Done] success={}, turns={}{}",
             result.success,
             result.turns,
             spend.unwrap_or_default(),
-            route.unwrap_or_default(),
         );
     }
 
     std::process::exit(if result.success { 0 } else { 1 });
+}
+
+/// Produce a compact one-line summary of tool arguments for headless text output.
+/// Extracts the most meaningful field (e.g., path for read/write, command for bash).
+fn summarize_tool_args(tool_name: &str, args: &serde_json::Value) -> String {
+    let obj = match args.as_object() {
+        Some(o) => o,
+        None => return args.to_string(),
+    };
+    // Pick the most informative field based on tool name
+    let key = match tool_name {
+        "read" | "write" | "edit" | "glob" => "file_path",
+        "bash" => "command",
+        "grep" => "pattern",
+        _ => {
+            // Fall back to first string field
+            if let Some((k, v)) = obj.iter().find(|(_, v)| v.is_string()) {
+                return format!("{}={}", k, truncate_str(v.as_str().unwrap_or(""), 80));
+            }
+            return String::new();
+        }
+    };
+    match obj.get(key).and_then(|v| v.as_str()) {
+        Some(val) => truncate_str(val, 120),
+        None => String::new(),
+    }
+}
+
+/// Truncate a string to `max_len` chars, appending "..." if truncated.
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len])
+    }
 }
 
 pub(super) fn load_cli_images(paths: &[String]) -> Vec<ImageContent> {

@@ -318,6 +318,18 @@ impl App {
         // Start background refresh every 60 min
         model_catalog.spawn_background_refresh();
 
+        // Load configured providers for welcome screen display
+        let configured_providers = ava_config::CredentialStore::load_default()
+            .await
+            .map(|creds| {
+                creds
+                    .configured_providers()
+                    .into_iter()
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let (agent, question_rx, approval_rx) = AgentState::new(
             data_dir.clone(),
             provider,
@@ -383,6 +395,7 @@ impl App {
             hooks: HookRegistry::load(),
             // Misc
             pending_image_count: 0,
+            configured_providers,
         };
 
         let mut app = Self {
@@ -958,6 +971,7 @@ impl App {
             hooks: HookRegistry::load(),
             // Misc
             pending_image_count: 0,
+            configured_providers: Vec::new(),
         };
 
         Self {

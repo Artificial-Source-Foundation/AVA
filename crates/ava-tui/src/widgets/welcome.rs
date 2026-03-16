@@ -14,6 +14,9 @@ const ASCII_ART: &[&str] = &[
     "/_/ \\_\\ \\_/ /_/ \\_\\",
 ];
 
+/// Version from workspace Cargo.toml.
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub fn render_welcome(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let theme = &state.theme;
     let cwd = std::env::current_dir()
@@ -26,7 +29,8 @@ pub fn render_welcome(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let model_display = truncate_str(&raw_model, max_val);
     let cwd = truncate_str(&cwd, max_val);
     let show_art = area.height >= 14 && area.width >= 30;
-    let show_shortcuts = area.height >= 18 && area.width >= 50;
+    let show_shortcuts = area.height >= 20 && area.width >= 50;
+    let show_providers = area.height >= 16 && !state.configured_providers.is_empty();
 
     let mut lines: Vec<Line<'static>> = Vec::new();
 
@@ -49,22 +53,21 @@ pub fn render_welcome(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         )));
     }
 
-    // Design gap: 24px → 1 blank line
-    lines.push(Line::from(""));
-
-    // 2. Subtitle
+    // Tagline + version
     lines.push(Line::from(Span::styled(
-        "AI Coding Agent",
+        "Multi-agent AI Coding Assistant",
         Style::default().fg(theme.text_muted),
     )));
+    lines.push(Line::from(Span::styled(
+        format!("v{VERSION}"),
+        Style::default().fg(theme.text_dimmed),
+    )));
 
-    // Design gap: 24px → 1 blank line
+    // Design gap
     lines.push(Line::from(""));
 
-    // 3. Info block (design gap: 8px → adjacent, no blank line)
-    // Right-justify labels: "Model" and "cwd" both get 6-char label columns.
-    // Pad the shorter line so both have equal total width for correct center alignment.
-    let label_width = 6; // "Model " and "  cwd " are both 6 chars
+    // 2. Info block
+    let label_width = 6;
     let model_line_content = format!(
         "{:>width$} {}",
         "Model",
@@ -101,9 +104,30 @@ pub fn render_welcome(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         ),
     ]));
 
+    // 3. Configured providers
+    if show_providers {
+        lines.push(Line::from(""));
+
+        let mut provider_spans: Vec<Span<'static>> = Vec::new();
+        provider_spans.push(Span::styled(
+            "Providers  ",
+            Style::default().fg(theme.text_dimmed),
+        ));
+        for (i, name) in state.configured_providers.iter().enumerate() {
+            if i > 0 {
+                provider_spans.push(Span::styled("  ", Style::default().fg(theme.text_dimmed)));
+            }
+            provider_spans.push(Span::styled(name.clone(), Style::default().fg(theme.text)));
+            provider_spans.push(Span::styled(
+                " \u{2713}",
+                Style::default().fg(theme.success),
+            ));
+        }
+        lines.push(Line::from(provider_spans));
+    }
+
     // 4. Shortcuts section
     if show_shortcuts {
-        // Design gap: 24px → 1 blank line
         lines.push(Line::from(""));
 
         lines.push(Line::from(Span::styled(
@@ -113,38 +137,33 @@ pub fn render_welcome(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 .add_modifier(Modifier::BOLD),
         )));
 
-        // Design gap: 12px → 1 blank line
         lines.push(Line::from(""));
 
         let key_style = Style::default().fg(theme.text).add_modifier(Modifier::BOLD);
         let desc_style = Style::default().fg(theme.text_muted);
 
+        // Two-column aligned grid
+        let col1_key = 10; // key column width
+        let col1_desc = 20; // description column width
+        let col2_key = 10;
+
         let grid: &[(&str, &str, &str, &str)] = &[
             ("Ctrl+K", "Command palette", "Ctrl+M", "Switch model"),
-            ("Ctrl+S", "Switch session", "Ctrl+V", "Paste image"),
+            ("Ctrl+S", "Switch session", "Ctrl+N", "New session"),
+            ("Ctrl+V", "Paste image", "", ""),
         ];
 
-        // All grid rows must have the same total width for center alignment.
-        // Full row: key1(8) + desc1(20) + key2(8) + desc2(max_d2)
-        let max_d2_len = grid.iter().map(|(_, _, _, d2)| d2.len()).max().unwrap_or(0);
-        let grid_row_width = 8 + 20 + 8 + max_d2_len;
-
         for (k1, d1, k2, d2) in grid {
-            lines.push(Line::from(vec![
-                Span::styled(format!("{k1:<8}"), key_style),
-                Span::styled(format!("{d1:<20}"), desc_style),
-                Span::styled(format!("{k2:<8}"), key_style),
-                Span::styled(format!("{d2:<width$}", width = max_d2_len), desc_style),
-            ]));
+            let mut spans = vec![
+                Span::styled(format!("{k1:<col1_key$}"), key_style),
+                Span::styled(format!("{d1:<col1_desc$}"), desc_style),
+            ];
+            if !k2.is_empty() {
+                spans.push(Span::styled(format!("{k2:<col2_key$}"), key_style));
+                spans.push(Span::styled((*d2).to_string(), desc_style));
+            }
+            lines.push(Line::from(spans));
         }
-        // Pad the half-width row to match full grid row width
-        lines.push(Line::from(vec![
-            Span::styled(format!("{:<8}", "Ctrl+N"), key_style),
-            Span::styled(
-                format!("{:<width$}", "New session", width = grid_row_width - 8),
-                desc_style,
-            ),
-        ]));
     }
 
     // Vertical centering with upward bias (40% top / 60% bottom)

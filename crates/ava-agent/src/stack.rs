@@ -26,7 +26,9 @@ use ava_tools::core::{
     register_question_tool, register_task_tool, register_todo_tools,
 };
 use ava_tools::mcp_bridge::{MCPBridgeTool, MCPToolCaller};
-use ava_tools::permission_middleware::{ApprovalBridge, PermissionMiddleware};
+use ava_tools::permission_middleware::{
+    convert_tool_source, ApprovalBridge, PermissionMiddleware, SharedToolSources,
+};
 use ava_tools::registry::{ToolRegistry, ToolSource};
 use ava_types::{
     AvaError, QueuedMessage, Result, Role, Session, ThinkingLevel, TodoState, ToolResult,
@@ -114,6 +116,10 @@ pub struct AgentStack {
     approval_bridge: ApprovalBridge,
     permission_context: Arc<RwLock<InspectionContext>>,
     permission_inspector: Arc<dyn PermissionInspector>,
+    /// Shared tool-source map used by the permission middleware.
+    /// Updated whenever tools are registered (init, MCP reconnect, custom reload).
+    #[allow(dead_code)] // Stored for future dynamic-registration updates
+    shared_tool_sources: SharedToolSources,
     /// Sub-agent configuration loaded from agents.toml files.
     agents_config: AgentsConfig,
     /// Parent session ID for linking sub-agent sessions back to their parent.
@@ -308,7 +314,7 @@ impl AgentStack {
             },
         ));
 
-        let mut registry = build_tool_registry(
+        let (mut registry, shared_tool_sources) = build_tool_registry(
             platform.clone(),
             Arc::clone(&permission_inspector),
             Arc::clone(&permission_context),
@@ -319,6 +325,18 @@ impl AgentStack {
         register_custom_tools(&mut registry, &custom_tool_dirs);
 
         let mcp_runtime = init_mcp(&mcp_global_config, &mcp_project_config, &mut registry).await;
+
+        // Populate the permission middleware's source map from the fully-built registry
+        // so that inspect() receives the correct ToolSource for every tool.
+        {
+            let mut sources = shared_tool_sources
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            for (def, src) in registry.list_tools_with_source() {
+                sources.insert(def.name, convert_tool_source(&src));
+            }
+        }
+
         let tools = Arc::new(RwLock::new(registry));
 
         Ok((
@@ -350,6 +368,7 @@ impl AgentStack {
                 approval_bridge,
                 permission_context,
                 permission_inspector,
+                shared_tool_sources,
                 agents_config,
                 parent_session_id: RwLock::new(None),
             },
@@ -510,7 +529,7 @@ impl AgentStack {
     }
 
     pub async fn reload_tools(&self) -> Result<usize> {
-        let mut registry = build_tool_registry(
+        let (mut registry, reload_sources) = build_tool_registry(
             self.platform.clone(),
             Arc::clone(&self.permission_inspector),
             Arc::clone(&self.permission_context),
@@ -527,6 +546,13 @@ impl AgentStack {
             &disabled,
         )
         .await;
+        // Populate tool sources for the permission middleware.
+        {
+            let mut sources = reload_sources.write().unwrap_or_else(|e| e.into_inner());
+            for (def, src) in registry.list_tools_with_source() {
+                sources.insert(def.name, convert_tool_source(&src));
+            }
+        }
         let count = registry.tool_count();
         *self.tools.write().await = registry;
         *self.mcp.write().await = runtime;
@@ -795,7 +821,7 @@ impl AgentStack {
         );
         let context = ContextManager::new_with_condenser(condenser_config, condenser);
 
-        let mut registry = build_tool_registry(
+        let (mut registry, run_tool_sources) = build_tool_registry(
             self.platform.clone(),
             Arc::clone(&self.permission_inspector),
             Arc::clone(&self.permission_context),
@@ -833,6 +859,14 @@ impl AgentStack {
                         source,
                     );
                 }
+            }
+        }
+
+        // Populate tool sources for the permission middleware (run-scoped registry).
+        {
+            let mut sources = run_tool_sources.write().unwrap_or_else(|e| e.into_inner());
+            for (def, src) in registry.list_tools_with_source() {
+                sources.insert(def.name, convert_tool_source(&src));
             }
         }
 
@@ -1360,16 +1394,18 @@ fn build_tool_registry(
     permission_inspector: Arc<dyn PermissionInspector>,
     permission_context: Arc<RwLock<InspectionContext>>,
     approval_bridge: ApprovalBridge,
-) -> ToolRegistry {
+) -> (ToolRegistry, SharedToolSources) {
     let mut registry = ToolRegistry::new();
     register_default_tools(&mut registry, platform.clone());
     register_extended_tools(&mut registry, platform);
-    registry.add_middleware(PermissionMiddleware::new(
+    let middleware = PermissionMiddleware::new(
         permission_inspector,
         permission_context,
         Some(approval_bridge),
-    ));
-    registry
+    );
+    let shared_sources = middleware.tool_sources();
+    registry.add_middleware(middleware);
+    (registry, shared_sources)
 }
 
 const _: () = {

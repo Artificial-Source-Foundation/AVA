@@ -199,6 +199,7 @@ fn parse_probe_args(command: &str) -> ava_types::Result<(String, Vec<String>)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn lsp_ops_default_probe_command_maps_languages() {

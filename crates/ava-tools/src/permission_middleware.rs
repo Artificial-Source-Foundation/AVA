@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -61,10 +62,36 @@ impl ApprovalBridge {
     }
 }
 
+/// Shared map of tool name → permission-level [`ava_permissions::inspector::ToolSource`].
+///
+/// Populated by the stack after tool registration; the middleware reads it per-call
+/// to set `InspectionContext.tool_source` before the inspector runs.
+pub type SharedToolSources =
+    Arc<std::sync::RwLock<HashMap<String, ava_permissions::inspector::ToolSource>>>;
+
+/// Convert a registry-level [`crate::registry::ToolSource`] into the
+/// permission-level [`ava_permissions::inspector::ToolSource`].
+pub fn convert_tool_source(
+    src: &crate::registry::ToolSource,
+) -> ava_permissions::inspector::ToolSource {
+    match src {
+        crate::registry::ToolSource::BuiltIn => ava_permissions::inspector::ToolSource::BuiltIn,
+        crate::registry::ToolSource::MCP { server } => {
+            ava_permissions::inspector::ToolSource::MCP {
+                server: server.clone(),
+            }
+        }
+        crate::registry::ToolSource::Custom { path } => {
+            ava_permissions::inspector::ToolSource::Custom { path: path.clone() }
+        }
+    }
+}
+
 pub struct PermissionMiddleware {
     inspector: Arc<dyn PermissionInspector>,
     context: Arc<RwLock<InspectionContext>>,
     approval_bridge: Option<ApprovalBridge>,
+    tool_sources: SharedToolSources,
 }
 
 impl PermissionMiddleware {
@@ -77,13 +104,35 @@ impl PermissionMiddleware {
             inspector,
             context,
             approval_bridge,
+            tool_sources: Arc::new(std::sync::RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Return a shared handle to the tool-source map.
+    ///
+    /// The caller (typically `build_tool_registry` in `ava-agent`) populates this
+    /// map after registering tools so the middleware can look up each tool's
+    /// provenance at call time.
+    pub fn tool_sources(&self) -> SharedToolSources {
+        Arc::clone(&self.tool_sources)
     }
 }
 
 #[async_trait]
 impl Middleware for PermissionMiddleware {
     async fn before(&self, tool_call: &ToolCall) -> Result<()> {
+        // Set the tool source on the context so the inspector can make
+        // source-aware decisions (e.g. only auto-approve truly built-in tools).
+        {
+            let source = self
+                .tool_sources
+                .read()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&tool_call.name)
+                .cloned();
+            self.context.write().await.tool_source = source;
+        }
+
         let context = self.context.read().await;
         let result = self
             .inspector

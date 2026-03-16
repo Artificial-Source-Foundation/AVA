@@ -148,12 +148,12 @@ fn load_from_root_with_extras(
         // 2. Project root files
         for name in PROJECT_ROOT_FILES {
             let path = root.join(name);
-            try_load_file(&path, &mut seen, &mut sections);
+            try_load_file_bounded(&path, root, &mut seen, &mut sections);
         }
 
         // 2b. Project-level .ava/AGENTS.md (inside .ava dir)
         let project_ava_agents = root.join(".ava").join("AGENTS.md");
-        try_load_file(&project_ava_agents, &mut seen, &mut sections);
+        try_load_file_bounded(&project_ava_agents, root, &mut seen, &mut sections);
 
         // 3. .ava/rules/*.md — sorted alphabetically
         let rules_dir = root.join(".ava").join("rules");
@@ -184,12 +184,12 @@ fn load_from_root_with_extras(
                     let mut matched: Vec<PathBuf> = paths.filter_map(|p| p.ok()).collect();
                     matched.sort();
                     for path in matched {
-                        try_load_file(&path, &mut seen, &mut sections);
+                        try_load_file_bounded(&path, root, &mut seen, &mut sections);
                     }
                 }
             } else {
                 let path = root.join(extra);
-                try_load_file(&path, &mut seen, &mut sections);
+                try_load_file_bounded(&path, root, &mut seen, &mut sections);
             }
         }
     } // end project_trusted
@@ -221,14 +221,14 @@ fn load_skill_sections(
     // Global skills always load
     if let Some(home) = home {
         for skill_dir in SKILL_DIRS {
-            collect_skill_files(&home.join(skill_dir), sections, seen);
+            collect_skill_files(&home.join(skill_dir), None, sections, seen);
         }
     }
 
     // Project-local skills require trust
     if project_trusted {
         for skill_dir in SKILL_DIRS {
-            collect_skill_files(&root.join(skill_dir), sections, seen);
+            collect_skill_files(&root.join(skill_dir), Some(root), sections, seen);
         }
     }
 }
@@ -237,13 +237,21 @@ fn load_skill_sections(
 /// Supported layout:
 /// - <dir>/SKILL.md
 /// - <dir>/<skill-name>/SKILL.md
-fn collect_skill_files(skill_dir: &Path, sections: &mut Vec<String>, seen: &mut HashSet<PathBuf>) {
+///
+/// If `boundary` is `Some`, each file's canonical path must stay within that root
+/// (symlink escape prevention for project-local skills).
+fn collect_skill_files(
+    skill_dir: &Path,
+    boundary: Option<&Path>,
+    sections: &mut Vec<String>,
+    seen: &mut HashSet<PathBuf>,
+) {
     if !skill_dir.is_dir() {
         return;
     }
 
     let direct_skill = skill_dir.join("SKILL.md");
-    try_load_skill_file(&direct_skill, seen, sections);
+    try_load_skill_file(&direct_skill, boundary, seen, sections);
 
     if let Ok(entries) = fs::read_dir(skill_dir) {
         let mut nested_skill_files: Vec<PathBuf> = entries
@@ -256,17 +264,35 @@ fn collect_skill_files(skill_dir: &Path, sections: &mut Vec<String>, seen: &mut 
         nested_skill_files.sort();
 
         for skill_file in nested_skill_files {
-            try_load_skill_file(&skill_file, seen, sections);
+            try_load_skill_file(&skill_file, boundary, seen, sections);
         }
     }
 }
 
 /// Try to load a skill file and append it as a section.
 /// Deduplicates by canonical path and strips optional YAML frontmatter.
-fn try_load_skill_file(path: &Path, seen: &mut HashSet<PathBuf>, sections: &mut Vec<String>) {
+/// If `boundary` is `Some`, the canonical path must stay within that root.
+fn try_load_skill_file(
+    path: &Path,
+    boundary: Option<&Path>,
+    seen: &mut HashSet<PathBuf>,
+    sections: &mut Vec<String>,
+) {
     let Ok(canonical) = fs::canonicalize(path) else {
         return;
     };
+
+    // Verify the canonical path stays within the boundary (symlink escape prevention).
+    if let Some(root) = boundary {
+        let project_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        if !canonical.starts_with(&project_root) {
+            tracing::warn!(
+                "Skill file {} resolves outside project root — skipping",
+                path.display()
+            );
+            return;
+        }
+    }
 
     if !seen.insert(canonical) {
         tracing::debug!("skipping duplicate instruction file: {}", path.display());
@@ -369,6 +395,16 @@ fn try_load_rule_file(
         return;
     };
 
+    // Verify the canonical path stays within the project root (symlink escape prevention).
+    let project_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    if !canonical.starts_with(&project_root) {
+        tracing::warn!(
+            "Instruction file {} resolves outside project root — skipping",
+            path.display()
+        );
+        return;
+    }
+
     if !seen.insert(canonical) {
         tracing::debug!("skipping duplicate instruction file: {}", path.display());
         return;
@@ -443,10 +479,43 @@ pub fn contextual_instructions_for_file(file_path: &Path, project_root: &Path) -
 /// Try to read a single file and append it as a section.
 /// Deduplicates by canonical path and skips empty content.
 fn try_load_file(path: &Path, seen: &mut HashSet<PathBuf>, sections: &mut Vec<String>) {
+    try_load_file_inner(path, None, seen, sections);
+}
+
+/// Try to read a project-local file, verifying the canonical path stays within `root`.
+/// This prevents symlink escape attacks where a symlinked instruction file resolves
+/// outside the project boundary.
+fn try_load_file_bounded(
+    path: &Path,
+    root: &Path,
+    seen: &mut HashSet<PathBuf>,
+    sections: &mut Vec<String>,
+) {
+    try_load_file_inner(path, Some(root), seen, sections);
+}
+
+fn try_load_file_inner(
+    path: &Path,
+    boundary: Option<&Path>,
+    seen: &mut HashSet<PathBuf>,
+    sections: &mut Vec<String>,
+) {
     // Resolve canonical path for deduplication
     let Ok(canonical) = fs::canonicalize(path) else {
         return; // file doesn't exist or is inaccessible
     };
+
+    // If a boundary is specified, verify the canonical path stays within it.
+    if let Some(root) = boundary {
+        let project_root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        if !canonical.starts_with(&project_root) {
+            tracing::warn!(
+                "Instruction file {} resolves outside project root — skipping",
+                path.display()
+            );
+            return;
+        }
+    }
 
     if !seen.insert(canonical) {
         tracing::debug!("skipping duplicate instruction file: {}", path.display());

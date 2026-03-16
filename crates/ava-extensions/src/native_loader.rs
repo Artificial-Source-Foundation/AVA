@@ -70,6 +70,8 @@ mod tests {
 
     #[test]
     fn test_missing_file_error() {
+        // SAFETY: the path does not exist, so `Library::new` will fail with an IO error
+        // before any foreign code is loaded. No actual shared library is opened.
         let result =
             unsafe { load_native_extension(Path::new("/path/that/does/not/exist/libmissing.so")) };
         assert!(matches!(result, Err(ExtensionError::FileNotFound(_))));

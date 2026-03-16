@@ -135,8 +135,10 @@ impl PermissionInspector for DefaultInspector {
             "question",
             "codebase_search",
         ];
-        let is_builtin = context.tool_source.as_ref() == Some(&ToolSource::BuiltIn)
-            || context.tool_source.is_none(); // backwards compat: treat unknown as built-in
+        // Fail-closed: only treat a tool as built-in if the source is EXPLICITLY BuiltIn.
+        // Unknown source (None) is NOT treated as built-in — an MCP tool named "todo_read"
+        // would otherwise bypass inspection.
+        let is_builtin = context.tool_source.as_ref() == Some(&ToolSource::BuiltIn);
         let has_internal_name = INTERNAL_TOOLS.contains(&tool_name)
             || tool_name.starts_with("memory_")
             || tool_name.starts_with("session_");
@@ -169,6 +171,16 @@ impl PermissionInspector for DefaultInspector {
         tags = profile
             .map(|p| p.tags.iter().copied().collect())
             .unwrap_or_default();
+
+        // Custom and MCP tools get elevated to at least High risk — they run
+        // untrusted code and must not be auto-approved at Medium by standard policy.
+        if matches!(
+            context.tool_source,
+            Some(ToolSource::Custom { .. }) | Some(ToolSource::MCP { .. })
+        ) && risk_level < RiskLevel::High
+        {
+            risk_level = RiskLevel::High;
+        }
 
         if tool_name == "bash" {
             if let Some(command) = arguments.get("command").and_then(|v| v.as_str()) {

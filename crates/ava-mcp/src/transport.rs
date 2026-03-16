@@ -188,10 +188,12 @@ const SENSITIVE_ENV_VARS: &[&str] = &[
     "GH_TOKEN",
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
+    "OPENROUTER_API_KEY",
     "GOOGLE_API_KEY",
     "AZURE_OPENAI_API_KEY",
     "HF_TOKEN",
     "HUGGING_FACE_HUB_TOKEN",
+    "AVA_MASTER_PASSWORD",
 ];
 
 impl StdioTransport {

@@ -106,7 +106,7 @@ pub fn render_tool_approval(
     // --- Line 1: header with risk badge ---
     let mut header_spans: Vec<Span<'_>> = vec![
         Span::styled(
-            "! ",
+            "\u{25B3} ",
             Style::default()
                 .fg(theme.warning)
                 .add_modifier(Modifier::BOLD),
@@ -259,7 +259,7 @@ pub fn render_tool_approval(
                             permission.rejection_input.clone(),
                             Style::default().fg(theme.text),
                         ),
-                        Span::styled("|".to_string(), Style::default().fg(theme.primary)),
+                        Span::styled("\u{2588}".to_string(), Style::default().fg(theme.primary)),
                         Span::raw("  ".to_string()),
                         Span::styled(
                             "Enter".to_string(),

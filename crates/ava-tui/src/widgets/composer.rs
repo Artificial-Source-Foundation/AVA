@@ -86,7 +86,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     };
 
     // Design: 3px bar → 1 char full-block
-    let bar = Span::styled("|", Style::default().fg(bar_color));
+    let bar = Span::styled("\u{258E}", Style::default().fg(bar_color));
     // Design: content padding 16px → 2 chars after bar
     let pad = "  ";
 
@@ -97,7 +97,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             vec![Line::from(vec![
                 bar.clone(),
                 Span::raw(pad),
-                Span::styled("> ", Style::default().fg(state.theme.accent)),
+                Span::styled("\u{276f} ", Style::default().fg(state.theme.accent)),
                 Span::styled(
                     format!("Listening... ({elapsed:.1}s)"),
                     Style::default()
@@ -109,7 +109,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         VoicePhase::Transcribing => vec![Line::from(vec![
             bar.clone(),
             Span::raw(pad),
-            Span::styled("> ", Style::default().fg(state.theme.accent)),
+            Span::styled("\u{276f} ", Style::default().fg(state.theme.accent)),
             Span::styled(
                 "Transcribing...",
                 Style::default()
@@ -123,7 +123,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                     bar.clone(),
                     Span::raw(pad),
                     Span::styled(
-                        "> ",
+                        "\u{276f} ",
                         Style::default()
                             .fg(state.theme.primary)
                             .add_modifier(Modifier::BOLD),
@@ -139,7 +139,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 let mut lines = Vec::with_capacity(input_lines.len());
 
                 for (i, line_text) in input_lines.iter().enumerate() {
-                    let prompt_char = if i == 0 { "> " } else { "  " };
+                    let prompt_char = if i == 0 { "\u{276f} " } else { "  " };
                     let is_cursor_line = i == cursor_line;
 
                     let mut spans = vec![
@@ -165,7 +165,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                         // Block cursor character
                         if after.is_empty() {
                             spans.push(Span::styled(
-                                "|",
+                                "\u{2588}",
                                 Style::default().fg(state.theme.text_muted),
                             ));
                         } else {
@@ -242,7 +242,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     // Show context attachments as badges
     if !state.input.attachments.is_empty() {
-        let bar_a = Span::styled("|", Style::default().fg(state.theme.accent));
+        let bar_a = Span::styled("\u{258E}", Style::default().fg(state.theme.accent));
         for attachment in &state.input.attachments {
             let badge = match attachment {
                 ava_types::ContextAttachment::File { .. } => "[@file]",
@@ -270,7 +270,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     // Show pending image attachments as individual badges
     if state.pending_image_count > 0 {
-        let bar_i = Span::styled("|", Style::default().fg(state.theme.accent));
+        let bar_i = Span::styled("\u{258E}", Style::default().fg(state.theme.accent));
         for i in 1..=state.pending_image_count {
             all_lines.push(Line::from(vec![
                 bar_i.clone(),
@@ -287,7 +287,7 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     // Show pending queued messages between input and model info
     if !state.input.queue_display.is_empty() {
-        let bar_q = Span::styled("|", Style::default().fg(state.theme.text_dimmed));
+        let bar_q = Span::styled("\u{258E}", Style::default().fg(state.theme.text_dimmed));
         for item in &state.input.queue_display.items {
             let (badge, badge_color) = match &item.tier {
                 ava_types::MessageTier::Steering => ("[S]", state.theme.warning),

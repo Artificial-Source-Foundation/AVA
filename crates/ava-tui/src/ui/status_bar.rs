@@ -92,7 +92,7 @@ const ITEM_GAP: &str = "  ";
 pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     // Defensive: ensure every cell in this area is explicitly painted.
     frame.render_widget(ratatui::widgets::Clear, area);
-    let sep = Span::styled(" | ", Style::default().fg(state.theme.text_dimmed));
+    let sep = Span::styled(" \u{2502} ", Style::default().fg(state.theme.text_dimmed));
 
     let mut left_spans = vec![
         Span::raw(H_PAD),
@@ -129,7 +129,7 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 Style::default().fg(state.theme.error),
             ));
             let bars = (state.voice.amplitude * 25.0).min(5.0) as usize;
-            let bar_str: String = "#".repeat(bars) + &".".repeat(5 - bars);
+            let bar_str: String = "\u{2588}".repeat(bars) + &"\u{2591}".repeat(5 - bars);
             left_spans.push(Span::styled(
                 format!(" {bar_str}"),
                 Style::default().fg(state.theme.accent),
@@ -238,8 +238,12 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 ("r", "reject"),
                 ("Esc", "cancel"),
             ],
-            ModalType::InfoPanel => vec![("up/down", "scroll"), ("Esc", "close")],
-            _ => vec![("up/down", "nav"), ("Enter", "select"), ("Esc", "close")],
+            ModalType::InfoPanel => vec![("\u{2191}/\u{2193}", "scroll"), ("Esc", "close")],
+            _ => vec![
+                ("\u{2191}/\u{2193}", "nav"),
+                ("Enter", "select"),
+                ("Esc", "close"),
+            ],
         };
         render_hints(&mut left_spans, &hints, state);
     } else if state.agent.is_running {

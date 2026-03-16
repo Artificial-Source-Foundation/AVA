@@ -484,7 +484,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, th
     );
 
     // Separator line
-    let sep = "-".repeat(area.width.saturating_sub(2) as usize);
+    let sep = "\u{2500}".repeat(area.width.saturating_sub(2) as usize);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             sep,
@@ -521,7 +521,7 @@ fn render_hunks(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, the
             lines.push(clamp_line(
                 Line::from(vec![
                     Span::styled(
-                        format!("-- {file_display} "),
+                        format!("\u{2500}\u{2500} {file_display} "),
                         Style::default()
                             .fg(theme.diff_hunk_header)
                             .add_modifier(Modifier::BOLD),
@@ -538,18 +538,18 @@ fn render_hunks(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, the
         // Hunk header with stats and status
         let status_marker = match hunk.accepted {
             Some(true) => Span::styled(
-                " + ",
+                " \u{2713} ",
                 Style::default()
                     .fg(theme.diff_added)
                     .add_modifier(Modifier::BOLD),
             ),
             Some(false) => Span::styled(
-                " x ",
+                " \u{2717} ",
                 Style::default()
                     .fg(theme.diff_removed)
                     .add_modifier(Modifier::BOLD),
             ),
-            None => Span::styled(" o ", Style::default().fg(theme.text_muted)),
+            None => Span::styled(" \u{25CB} ", Style::default().fg(theme.text_muted)),
         };
 
         let hunk_header_style = if is_selected {
@@ -560,7 +560,7 @@ fn render_hunks(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, the
             Style::default().fg(theme.diff_hunk_header)
         };
 
-        let selection_indicator = if is_selected { "> " } else { "  " };
+        let selection_indicator = if is_selected { "\u{25B6} " } else { "  " };
 
         lines.push(clamp_line(
             Line::from(vec![
@@ -662,7 +662,7 @@ fn render_hunks(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, the
 fn render_footer(frame: &mut Frame<'_>, area: Rect, _state: &DiffPreviewState, theme: &Theme) {
     let footer_w = area.width.saturating_sub(2) as usize;
     // Separator
-    let sep = "-".repeat(area.width.saturating_sub(2) as usize);
+    let sep = "\u{2500}".repeat(area.width.saturating_sub(2) as usize);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
             sep,

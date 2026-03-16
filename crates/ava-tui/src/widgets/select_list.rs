@@ -528,11 +528,15 @@ pub fn render_select_list<T: Clone>(
         } else {
             theme.text
         };
-        let cursor = if state.query.is_empty() { "" } else { "|" };
+        let cursor = if state.query.is_empty() {
+            ""
+        } else {
+            "\u{2588}"
+        };
 
         let search_line = Line::from(vec![
             Span::styled(
-                " / ",
+                " \u{1F50D} ",
                 Style::default().fg(theme.text_dimmed).bg(theme.bg_deep),
             ),
             Span::styled(
@@ -604,7 +608,7 @@ pub fn render_select_list<T: Clone>(
         match &item.status {
             Some(ItemStatus::Active) => {
                 spans.push(Span::styled(
-                    " * ",
+                    " \u{25CF} ",
                     Style::default()
                         .fg(if is_selected { fg } else { theme.accent })
                         .bg(bg),
@@ -612,7 +616,7 @@ pub fn render_select_list<T: Clone>(
             }
             Some(ItemStatus::Connected(_)) => {
                 spans.push(Span::styled(
-                    " + ",
+                    " \u{2713} ",
                     Style::default()
                         .fg(if is_selected { fg } else { theme.success })
                         .bg(bg),

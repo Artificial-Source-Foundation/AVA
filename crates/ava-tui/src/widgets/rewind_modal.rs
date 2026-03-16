@@ -140,7 +140,7 @@ pub fn render_rewind_modal(frame: &mut Frame<'_>, area: Rect, rewind: &RewindSta
     // Keybind hints
     lines.push(Line::from(Span::styled(
         truncate_str(
-            "[1-5] select  [up/down] navigate  [Enter] confirm  [Esc] cancel",
+            "[1-5] select  [\u{2191}\u{2193}] navigate  [Enter] confirm  [Esc] cancel",
             inner_w,
         ),
         Style::default().fg(theme.text_muted),

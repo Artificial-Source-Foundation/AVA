@@ -129,8 +129,8 @@ fn render_toasts(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
     let theme = &state.theme;
     for (i, toast) in state.toast.toasts.iter().rev().enumerate() {
         let icon = match toast.kind {
-            ToastKind::Success => "+ ",
-            ToastKind::Info => "i ",
+            ToastKind::Success => "\u{2713} ",
+            ToastKind::Info => "\u{2139} ",
         };
         // Width: border(1) + pad(1) + icon + message + pad(1) + border(1)
         let inner_width = display_width(icon) as u16 + display_width(&toast.message) as u16;
@@ -246,7 +246,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &mut AppState, modal: ModalType) {
                     search_placeholder: "Search models...".to_string(),
                     keybinds: vec![
                         KeybindHint {
-                            key: "up/down".to_string(),
+                            key: "\u{2191}\u{2193}".to_string(),
                             label: "navigate".to_string(),
                         },
                         KeybindHint {
@@ -308,7 +308,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &mut AppState, modal: ModalType) {
                     search_placeholder: "Search themes...".to_string(),
                     keybinds: vec![
                         KeybindHint {
-                            key: "up/down".to_string(),
+                            key: "\u{2191}\u{2193}".to_string(),
                             label: "navigate".to_string(),
                         },
                         KeybindHint {
@@ -430,7 +430,7 @@ fn render_info_panel(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     // Render separator
     let sep = Line::from(Span::styled(
-        "-".repeat(chunks[1].width as usize),
+        "\u{2500}".repeat(chunks[1].width as usize),
         Style::default().fg(state.theme.border),
     ));
     frame.render_widget(Paragraph::new(sep), chunks[1]);
@@ -455,7 +455,7 @@ fn render_info_panel(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let can_scroll = total_lines > content_height;
     let footer_text = if can_scroll {
         format!(
-            " Esc close | up/down scroll | {}/{}",
+            " Esc close | \u{2191}/\u{2193} scroll | {}/{}",
             panel.scroll + 1,
             total_lines.saturating_sub(content_height) + 1
         )
@@ -533,7 +533,7 @@ fn render_question_modal(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let hint_text = if q.options.is_empty() {
         "[Enter] submit  [Esc] decline"
     } else {
-        "[up/down] navigate  [Enter] select  [Esc] decline"
+        "[\u{2191}\u{2193}] navigate  [Enter] select  [Esc] decline"
     };
     lines.push(Line::from(Span::styled(
         truncate_str(hint_text, inner_w),

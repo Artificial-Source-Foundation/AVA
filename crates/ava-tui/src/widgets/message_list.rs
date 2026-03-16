@@ -241,7 +241,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         drop(bg);
         lines.push(Line::from(vec![
             Span::styled(
-                "< ",
+                "\u{2190} ",
                 Style::default()
                     .fg(state.theme.accent)
                     .add_modifier(Modifier::BOLD),
@@ -262,7 +262,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             Span::styled(status_str, Style::default().fg(state.theme.text_muted)),
         ]));
         lines.push(Line::from(Span::styled(
-            "-".repeat(content_width as usize),
+            "\u{2500}".repeat(content_width as usize),
             Style::default().fg(state.theme.border),
         )));
         lines.push(Line::raw(""));
@@ -277,7 +277,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             .unwrap_or_default();
         lines.push(Line::from(vec![
             Span::styled(
-                "< ",
+                "\u{2190} ",
                 Style::default()
                     .fg(state.theme.accent)
                     .add_modifier(Modifier::BOLD),
@@ -298,7 +298,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             Span::styled(status_str, Style::default().fg(state.theme.text_muted)),
         ]));
         lines.push(Line::from(Span::styled(
-            "-".repeat(content_width as usize),
+            "\u{2500}".repeat(content_width as usize),
             Style::default().fg(state.theme.border),
         )));
         lines.push(Line::raw(""));
@@ -308,7 +308,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         let truncated_desc = crate::text_utils::truncate_display(description, 60);
         lines.push(Line::from(vec![
             Span::styled(
-                "< ",
+                "\u{2190} ",
                 Style::default()
                     .fg(state.theme.accent)
                     .add_modifier(Modifier::BOLD),
@@ -328,7 +328,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             ),
         ]));
         lines.push(Line::from(Span::styled(
-            "-".repeat(content_width as usize),
+            "\u{2500}".repeat(content_width as usize),
             Style::default().fg(state.theme.border),
         )));
         lines.push(Line::raw(""));
@@ -422,7 +422,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Min(0),    // content
-            Constraint::Length(1), // right margin (was 2)
+            Constraint::Length(2), // right margin — absorbs Unicode bleed
             Constraint::Length(1), // scrollbar
         ])
         .split(area);
@@ -474,8 +474,8 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         let mut scrollbar_state = ScrollbarState::new(max_offset as usize)
             .position(state.messages.scroll_offset as usize);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .thumb_symbol("#")
-            .track_symbol(Some("."))
+            .thumb_symbol("\u{2593}")
+            .track_symbol(Some("\u{2591}"))
             .begin_symbol(None)
             .end_symbol(None)
             .style(Style::default().fg(state.theme.text_dimmed));

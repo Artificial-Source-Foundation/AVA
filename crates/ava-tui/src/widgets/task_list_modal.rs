@@ -41,13 +41,13 @@ pub fn render_task_list(
                     (frame_char.to_string(), Style::default().fg(theme.accent))
                 }
                 TaskStatus::Completed => (
-                    "+".to_string(),
+                    "\u{2713}".to_string(),
                     Style::default()
                         .fg(theme.success)
                         .add_modifier(Modifier::BOLD),
                 ),
                 TaskStatus::Failed => (
-                    "x".to_string(),
+                    "\u{2717}".to_string(),
                     Style::default()
                         .fg(theme.error)
                         .add_modifier(Modifier::BOLD),

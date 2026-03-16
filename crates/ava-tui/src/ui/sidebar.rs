@@ -143,7 +143,7 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 };
                 let dim_modifier = Modifier::DIM;
                 let mut spans = vec![Span::styled(
-                    "  + ",
+                    "  \u{2713} ",
                     Style::default().fg(Color::Green).add_modifier(dim_modifier),
                 )];
                 if sa.provider.as_deref() == Some("claude-code") {
@@ -177,10 +177,10 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
         for task in state.praxis.tasks.iter().rev().take(3) {
             let task_icon = match task.status {
-                PraxisTaskStatus::Running => "~",
-                PraxisTaskStatus::Completed => "+",
-                PraxisTaskStatus::Failed => "x",
-                PraxisTaskStatus::Pending => ".",
+                PraxisTaskStatus::Running => "\u{27F3}",   // ⟳
+                PraxisTaskStatus::Completed => "\u{2713}", // ✓
+                PraxisTaskStatus::Failed => "\u{2717}",    // ✗
+                PraxisTaskStatus::Pending => "\u{00B7}",   // ·
             };
             let task_color = match task.status {
                 PraxisTaskStatus::Running => Color::Yellow,
@@ -195,15 +195,19 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
                 Span::styled(goal, value_style),
             ]));
             lines.push(Line::from(Span::styled(
-                format!("    {} - {} workers", task.status, task.workers.len()),
+                format!(
+                    "    {} \u{00B7} {} workers",
+                    task.status,
+                    task.workers.len()
+                ),
                 dim_style,
             )));
             for worker in task.workers.iter().take(4) {
                 let worker_icon = match worker.status {
-                    PraxisTaskStatus::Running => "~",
-                    PraxisTaskStatus::Completed => "+",
-                    PraxisTaskStatus::Failed => "x",
-                    PraxisTaskStatus::Pending => ".",
+                    PraxisTaskStatus::Running => "\u{27F3}",
+                    PraxisTaskStatus::Completed => "\u{2713}",
+                    PraxisTaskStatus::Failed => "\u{2717}",
+                    PraxisTaskStatus::Pending => "\u{00B7}",
                 };
                 let worker_color = match worker.status {
                     PraxisTaskStatus::Running => Color::Yellow,
@@ -242,15 +246,15 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         for item in &state.todo_items {
             let (icon, style) = match item.status {
                 TodoStatus::Completed => (
-                    "+",
+                    "\u{2713}",
                     Style::default()
                         .fg(Color::Green)
                         .add_modifier(Modifier::DIM),
                 ),
-                TodoStatus::InProgress => ("*", Style::default().fg(Color::Yellow)),
-                TodoStatus::Pending => ("o", Style::default().fg(state.theme.text)),
+                TodoStatus::InProgress => ("\u{25CF}", Style::default().fg(Color::Yellow)),
+                TodoStatus::Pending => ("\u{25CB}", Style::default().fg(state.theme.text)),
                 TodoStatus::Cancelled => (
-                    "x",
+                    "\u{2717}",
                     Style::default()
                         .fg(state.theme.text_dimmed)
                         .add_modifier(Modifier::DIM),

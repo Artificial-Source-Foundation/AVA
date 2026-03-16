@@ -10,12 +10,15 @@ pub(crate) fn format_mcp_server_list(servers: &[MCPServerInfo]) -> String {
     let lines: Vec<String> = servers
         .iter()
         .map(|s| {
-            let icon = if s.enabled { "+" } else { "x" };
+            let icon = if s.enabled { "\u{2713}" } else { "\u{2717}" };
             let scope = s.scope.to_string();
             if s.enabled {
-                format!("  {icon} {} ({scope}) - {} tools", s.name, s.tool_count)
+                format!(
+                    "  {icon} {} ({scope}) \u{2014} {} tools",
+                    s.name, s.tool_count
+                )
             } else {
-                format!("  {icon} {} ({scope}) - disabled", s.name)
+                format!("  {icon} {} ({scope}) \u{2014} disabled", s.name)
             }
         })
         .collect();
@@ -323,7 +326,8 @@ impl App {
                 }
                 Some(_) => Some((
                     MessageKind::Error,
-                    "Usage: /think [show|on|hide|off] - toggle thinking visibility".to_string(),
+                    "Usage: /think [show|on|hide|off] \u{2014} toggle thinking visibility"
+                        .to_string(),
                 )),
                 None => {
                     self.state.agent.show_thinking = !self.state.agent.show_thinking;
@@ -410,35 +414,35 @@ impl App {
             }
             "/help" => {
                 let help = "\
-/model [provider/model]  - show or switch model (alias: /models)
-/think [show|hide]       - toggle thinking block visibility
-/theme [name]            - cycle or switch theme (default/dracula/nord)
-/permissions             - toggle permission level
-/connect [provider]      - add provider credentials
-/providers               - show provider status
-/disconnect <provider>   - remove provider credentials
-/mcp [list]              - show MCP servers (scope + status)
-/mcp reload              - reload MCP config
-/mcp enable <name>       - enable a disabled MCP server
-/mcp disable <name>      - disable an MCP server (session-scoped)
-/new [title]             - start a new session (optional title)
-/sessions                - session picker
-/commit                  - inspect commit readiness and suggest a message
-/export [filename]       - export conversation to file (.md or .json)
-/copy [all]              - copy last response (picks code block if multiple)
-/hooks [list|reload|dry-run <event>] - manage lifecycle hooks
-/init                    - create example project templates
-/btw [question]          - start a side conversation branch
-/btw end                 - restore original conversation
-/tasks                   - show background task list
-/later <message>         - queue a post-complete message
-/queue                   - show queued messages
-/shortcuts               - show keyboard shortcuts (Ctrl+?)
-/clear                   - clear chat
-/compact [focus]         - compact conversation to save context window
-/help                    - show this help";
+/model [provider/model]  \u{2014} show or switch model (alias: /models)
+/think [show|hide]       \u{2014} toggle thinking block visibility
+/theme [name]            \u{2014} cycle or switch theme (default/dracula/nord)
+/permissions             \u{2014} toggle permission level
+/connect [provider]      \u{2014} add provider credentials
+/providers               \u{2014} show provider status
+/disconnect <provider>   \u{2014} remove provider credentials
+/mcp [list]              \u{2014} show MCP servers (scope + status)
+/mcp reload              \u{2014} reload MCP config
+/mcp enable <name>       \u{2014} enable a disabled MCP server
+/mcp disable <name>      \u{2014} disable an MCP server (session-scoped)
+/new [title]             \u{2014} start a new session (optional title)
+/sessions                \u{2014} session picker
+/commit                  \u{2014} inspect commit readiness and suggest a message
+/export [filename]       \u{2014} export conversation to file (.md or .json)
+/copy [all]              \u{2014} copy last response (picks code block if multiple)
+/hooks [list|reload|dry-run <event>] \u{2014} manage lifecycle hooks
+/init                    \u{2014} create example project templates
+/btw [question]          \u{2014} start a side conversation branch
+/btw end                 \u{2014} restore original conversation
+/tasks                   \u{2014} show background task list
+/later <message>         \u{2014} queue a post-complete message
+/queue                   \u{2014} show queued messages
+/shortcuts               \u{2014} show keyboard shortcuts (Ctrl+?)
+/clear                   \u{2014} clear chat
+/compact [focus]         \u{2014} compact conversation to save context window
+/help                    \u{2014} show this help";
                 self.state.info_panel = Some(super::InfoPanelState {
-                    title: "Help - Available Commands".to_string(),
+                    title: "Help \u{2014} Available Commands".to_string(),
                     content: help.to_string(),
                     scroll: 0,
                 });
@@ -474,7 +478,8 @@ impl App {
                     if text.is_empty() {
                         Some((
                             MessageKind::Error,
-                            "Usage: /later <message> - queue a post-complete message".to_string(),
+                            "Usage: /later <message> \u{2014} queue a post-complete message"
+                                .to_string(),
                         ))
                     } else {
                         // Parse optional group: /later 2 message
@@ -505,7 +510,8 @@ impl App {
                 } else {
                     Some((
                         MessageKind::Error,
-                        "Usage: /later <message> - queue a post-complete message".to_string(),
+                        "Usage: /later <message> \u{2014} queue a post-complete message"
+                            .to_string(),
                     ))
                 }
             }

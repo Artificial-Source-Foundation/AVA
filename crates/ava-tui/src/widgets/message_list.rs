@@ -2,7 +2,7 @@ use crate::app::{AppState, ViewMode};
 use crate::state::messages::{MessageKind, UiMessage};
 use crate::widgets::message::{render_action_group, render_message_with_options};
 use crate::widgets::welcome::render_welcome;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
@@ -406,15 +406,31 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     let bg_fill = Block::default().style(Style::default().bg(state.theme.bg_deep));
     frame.render_widget(bg_fill, area);
 
-    // STEP 2: Create a clipped content area that is 3 columns narrower than the
-    // full area (2 right margin + 1 scrollbar). ALL text rendering goes here,
-    // guaranteeing that no characters can bleed past this boundary.
-    let content_area = Rect {
-        x: area.x,
-        y: area.y,
-        width: content_width,
-        height: area.height,
-    };
+    // STEP 2: Split the area into content + margin + scrollbar using Layout.
+    // This guarantees pixel-perfect tiling with NO gaps between regions.
+    // Previous manual Rect arithmetic left a 2-column gap that was never
+    // explicitly rendered into, causing ghost character bleed.
+    let horizontal = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Min(0),    // content
+            Constraint::Length(2), // right margin
+            Constraint::Length(1), // scrollbar
+        ])
+        .split(area);
+    let content_area = horizontal[0];
+    let margin_area = horizontal[1];
+    let scrollbar_area_layout = horizontal[2];
+
+    // Explicitly fill the margin gap so no stale characters survive.
+    frame.render_widget(Clear, margin_area);
+    let margin_bg = Block::default().style(Style::default().bg(state.theme.bg_deep));
+    frame.render_widget(margin_bg, margin_area);
+
+    // Also explicitly clear the scrollbar column.
+    frame.render_widget(Clear, scrollbar_area_layout);
+    let scrollbar_bg = Block::default().style(Style::default().bg(state.theme.bg_deep));
+    frame.render_widget(scrollbar_bg, scrollbar_area_layout);
 
     // STEP 3: Manually slice lines to exactly the visible window instead of
     // relying on Paragraph::scroll(). This guarantees that the Paragraph widget
@@ -438,14 +454,10 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     let widget = Paragraph::new(clamped_lines);
     frame.render_widget(widget, content_area);
 
-    // STEP 6: Render scrollbar into a dedicated 1-column area at the far right.
+    // STEP 6: Render scrollbar into the layout-derived scrollbar column.
+    // Using the layout-split area (scrollbar_area_layout) guarantees the
+    // scrollbar is exactly 1 column wide with no gap between it and the margin.
     if total > visible_height && !state.messages.auto_scroll {
-        let scrollbar_area = Rect {
-            x: area.right().saturating_sub(1),
-            y: area.y,
-            width: 1,
-            height: area.height,
-        };
         let mut scrollbar_state = ScrollbarState::new(max_offset as usize)
             .position(state.messages.scroll_offset as usize);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
@@ -454,6 +466,6 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             .begin_symbol(None)
             .end_symbol(None)
             .style(Style::default().fg(state.theme.text_dimmed));
-        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
+        frame.render_stateful_widget(scrollbar, scrollbar_area_layout, &mut scrollbar_state);
     }
 }

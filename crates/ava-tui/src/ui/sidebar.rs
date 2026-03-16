@@ -1,4 +1,5 @@
 use crate::app::{AppState, ViewMode};
+use crate::state::praxis::PraxisTaskStatus;
 use crate::text_utils::truncate_display;
 use crate::widgets::safe_render::clamp_line;
 use crate::widgets::todo_list;
@@ -176,7 +177,7 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
         for task in state.praxis.tasks.iter().rev().take(3) {
             let task_icon = match task.status {
-                PraxisTaskStatus::Running => "\u{27F3}",  // ⟳
+                PraxisTaskStatus::Running => "\u{27F3}",   // ⟳
                 PraxisTaskStatus::Completed => "\u{2713}", // ✓
                 PraxisTaskStatus::Failed => "\u{2717}",    // ✗
                 PraxisTaskStatus::Pending => "\u{00B7}",   // ·
@@ -189,15 +190,16 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             };
             let goal = truncate_display(&task.goal, area.width.saturating_sub(10) as usize);
             lines.push(Line::from(vec![
-                Span::styled(
-                    format!("  {task_icon} "),
-                    Style::default().fg(task_color),
-                ),
+                Span::styled(format!("  {task_icon} "), Style::default().fg(task_color)),
                 Span::styled(format!("#{} ", task.id), dim_style),
                 Span::styled(goal, value_style),
             ]));
             lines.push(Line::from(Span::styled(
-                format!("    {} \u{00B7} {} workers", task.status, task.workers.len()),
+                format!(
+                    "    {} \u{00B7} {} workers",
+                    task.status,
+                    task.workers.len()
+                ),
                 dim_style,
             )));
             for worker in task.workers.iter().take(4) {

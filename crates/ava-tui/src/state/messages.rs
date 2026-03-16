@@ -66,6 +66,11 @@ pub struct UiMessage {
     /// Whether this message was cancelled by the user pressing Esc.
     /// Cancelled tool calls render dimmed with `[interrupted]` suffix.
     pub cancelled: bool,
+    /// Whether the action group containing this tool message is expanded.
+    /// Only meaningful for `MessageKind::ToolCall` / `MessageKind::ToolResult`.
+    /// When toggled on any message in a group, the renderer checks all group
+    /// members and uses this flag for per-group expand/collapse.
+    pub tool_group_expanded: bool,
 }
 
 /// Minimal dot-pulse spinner — calmer than braille, safe single-width chars.
@@ -112,6 +117,7 @@ impl UiMessage {
             transient: false,
             thinking_expanded: false,
             cancelled: false,
+            tool_group_expanded: false,
         }
     }
 
@@ -1019,6 +1025,52 @@ impl MessageState {
             if matches!(msg.kind, MessageKind::Thinking) {
                 msg.thinking_expanded = !msg.thinking_expanded;
             }
+        }
+    }
+
+    /// Toggle the expanded/collapsed state of a tool action group.
+    /// Finds the consecutive group of ToolCall/ToolResult messages surrounding
+    /// the given index and flips `tool_group_expanded` on all of them.
+    pub fn toggle_tool_group_at(&mut self, message_index: usize) {
+        if let Some(msg) = self.messages.get(message_index) {
+            if !matches!(msg.kind, MessageKind::ToolCall | MessageKind::ToolResult) {
+                return;
+            }
+        } else {
+            return;
+        }
+
+        // Walk backwards to find group start.
+        let mut start = message_index;
+        while start > 0 {
+            if matches!(
+                self.messages[start - 1].kind,
+                MessageKind::ToolCall | MessageKind::ToolResult
+            ) {
+                start -= 1;
+            } else {
+                break;
+            }
+        }
+        // Walk forwards to find group end (exclusive).
+        let mut end = message_index + 1;
+        while end < self.messages.len() {
+            if matches!(
+                self.messages[end].kind,
+                MessageKind::ToolCall | MessageKind::ToolResult
+            ) {
+                end += 1;
+            } else {
+                break;
+            }
+        }
+
+        // Determine new state: if any in the group is collapsed, expand all.
+        let any_collapsed = self.messages[start..end]
+            .iter()
+            .any(|m| !m.tool_group_expanded);
+        for msg in &mut self.messages[start..end] {
+            msg.tool_group_expanded = any_collapsed;
         }
     }
 

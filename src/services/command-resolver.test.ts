@@ -1,18 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { parseSlashCommand } from './command-resolver'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  getAvailableCommands,
+  parseSlashCommand,
+  registerCommand,
+  resolveCommand,
+} from './command-resolver'
 
-// Mock getCommands from core-v2
-const mockCommands = new Map<
-  string,
-  { name: string; description: string; execute: ReturnType<typeof vi.fn> }
->()
-
-vi.mock('@ava/core-v2/extensions', () => ({
-  getCommands: () => mockCommands,
-}))
-
-// Import after mock setup
-const { resolveCommand, getAvailableCommands } = await import('./command-resolver')
 
 describe('parseSlashCommand', () => {
   it('parses /help', () => {
@@ -42,12 +35,6 @@ describe('parseSlashCommand', () => {
   })
 
   it('returns null for file paths like /home/user/file', () => {
-    // /home starts with a letter, but /home/user contains a slash after
-    // Actually this WILL parse as name=home, args=user/file
-    // The regex requires ^\/([a-zA-Z][\w-]*)(?:\s+(.*))?$
-    // /home/user/file — the second / is not whitespace, so the \w- group stops at /
-    // Actually: [a-zA-Z][\w-]* matches "home" then we need whitespace or end
-    // /home/user/file — after "home" we have "/" which is neither \s nor end → no match
     expect(parseSlashCommand('/home/user/file')).toBeNull()
   })
 
@@ -72,16 +59,8 @@ describe('parseSlashCommand', () => {
 })
 
 describe('resolveCommand', () => {
-  beforeEach(() => {
-    mockCommands.clear()
-  })
-
   it('resolves a registered command', () => {
-    mockCommands.set('help', {
-      name: 'help',
-      description: 'Show help',
-      execute: vi.fn(),
-    })
+    registerCommand('help', { description: 'Show help', execute: vi.fn() })
 
     const result = resolveCommand({ name: 'help', args: '' })
     expect(result).not.toBeNull()
@@ -95,11 +74,7 @@ describe('resolveCommand', () => {
   })
 
   it('marks custom commands as not built-in', () => {
-    mockCommands.set('deploy', {
-      name: 'deploy',
-      description: 'Deploy the app',
-      execute: vi.fn(),
-    })
+    registerCommand('deploy', { description: 'Deploy the app', execute: vi.fn() })
 
     const result = resolveCommand({ name: 'deploy', args: 'staging' })
     expect(result).not.toBeNull()
@@ -109,29 +84,21 @@ describe('resolveCommand', () => {
 })
 
 describe('getAvailableCommands', () => {
-  beforeEach(() => {
-    mockCommands.clear()
-  })
-
-  it('returns empty array when no commands registered', () => {
-    expect(getAvailableCommands()).toEqual([])
-  })
-
   it('returns sorted command list', () => {
-    mockCommands.set('zzz', { name: 'zzz', description: 'Last', execute: vi.fn() })
-    mockCommands.set('aaa', { name: 'aaa', description: 'First', execute: vi.fn() })
-    mockCommands.set('mmm', { name: 'mmm', description: 'Middle', execute: vi.fn() })
+    registerCommand('zzz', { description: 'Last', execute: vi.fn() })
+    registerCommand('aaa', { description: 'First', execute: vi.fn() })
+    registerCommand('mmm', { description: 'Middle', execute: vi.fn() })
 
     const cmds = getAvailableCommands()
-    expect(cmds).toHaveLength(3)
-    expect(cmds[0]!.name).toBe('aaa')
-    expect(cmds[1]!.name).toBe('mmm')
-    expect(cmds[2]!.name).toBe('zzz')
+    // At minimum, aaa should come before mmm, and mmm before zzz
+    const names = cmds.map((c) => c.name)
+    expect(names.indexOf('aaa')).toBeLessThan(names.indexOf('mmm'))
+    expect(names.indexOf('mmm')).toBeLessThan(names.indexOf('zzz'))
   })
 
   it('includes name, description, and isBuiltIn', () => {
-    mockCommands.set('help', { name: 'help', description: 'Show help info', execute: vi.fn() })
-    mockCommands.set('deploy', { name: 'deploy', description: 'Deploy app', execute: vi.fn() })
+    registerCommand('help', { description: 'Show help info', execute: vi.fn() })
+    registerCommand('deploy', { description: 'Deploy app', execute: vi.fn() })
 
     const cmds = getAvailableCommands()
     const help = cmds.find((c) => c.name === 'help')!

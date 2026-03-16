@@ -1,22 +1,32 @@
-<!-- Last verified: 2026-03-12. Run 'npm run test:run && cargo test --workspace' to revalidate. -->
+<!-- Last verified: 2026-03-16. Run 'just check && npm run tauri build' to revalidate. -->
 
-# AVA Architecture & Conventions (v2.1)
+# AVA Architecture & Conventions (v3)
 
 ## Quick Commands
 
 ```bash
-# Rust CLI/agent (primary)
+# Rust CLI/agent (primary) — via just (see Justfile)
+just check                      # fmt + clippy + nextest (all-in-one)
+just test                       # cargo nextest run --workspace
+just lint                       # cargo clippy --workspace
+just fmt                        # cargo fmt --all
+just run                        # interactive TUI
+just headless "goal"            # headless mode
+just build-release              # optimized binary
+just doc                        # check doc builds
+just cov                        # coverage report (requires cargo-llvm-cov)
+
+# Or raw cargo
 cargo test --workspace
 cargo clippy --workspace
 cargo run --bin ava             # interactive TUI
 cargo run --bin ava -- --help   # see all flags
 
-# Desktop app (TypeScript + Tauri)
+# Desktop app (SolidJS + Tauri)
 npm run tauri dev
 npm run lint
 npm run format:check
 npx tsc --noEmit
-npm run test:run
 ```
 
 If `npm run tauri dev` fails with `ENOSPC` watcher errors on Linux, see `docs/troubleshooting/`.
@@ -24,22 +34,20 @@ If `npm run tauri dev` fails with `ENOSPC` watcher errors on Linux, see `docs/tr
 Release verification:
 
 ```bash
-cargo test --workspace
-cargo clippy --workspace
+just check
 npm run tauri build
 ```
 
 ## Architecture
 
-AVA uses a **Rust-first architecture**. All new CLI/agent code MUST be Rust.
+AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust.
 
 - **CLI/TUI**: Pure Rust binary (`crates/ava-tui/`) — Ratatui + Crossterm + Tokio
 - **Agent runtime**: Rust (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-praxis/`)
-- **Desktop frontend**: SolidJS + TypeScript (stays — Tauri requires web frontend)
-- **Desktop backend**: Rust via Tauri commands (`src-tauri/`)
-- **Legacy TS packages**: `packages/core-v2/` and `packages/extensions/` are desktop-only; do NOT add new features here
+- **Desktop frontend**: SolidJS + TypeScript (`src/`) — calls Rust directly via Tauri IPC
+- **Desktop backend**: Rust via Tauri commands (`src-tauri/src/commands/`)
 
-The TypeScript layer (`packages/`) is retained only for the Tauri desktop webview. The CLI is 100% Rust — no Node.js dependency.
+The desktop app follows the same backend path as the CLI: SolidJS frontend invokes Tauri IPC commands, which call into the shared Rust crates directly. There is no TypeScript orchestration layer — `packages/` has been deleted.
 
 ### Mid-Stream Messaging
 
@@ -62,7 +70,7 @@ AVA/
 │   ├── ava-agent/            # Agent execution loop + reflection
 │   ├── ava-llm/              # LLM providers (Anthropic, OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception)
 │   ├── ava-tools/            # Tool trait + registry + core tools (read/write/edit/bash/glob/grep)
-│   ├── ava-praxis/        # Multi-agent orchestration (Praxis)
+│   ├── ava-praxis/           # Multi-agent orchestration (Praxis)
 │   ├── ava-session/          # Session persistence (SQLite + FTS5)
 │   ├── ava-memory/           # Persistent memory/recall
 │   ├── ava-auth/             # Credential and auth flows
@@ -78,15 +86,8 @@ AVA/
 │   ├── ava-mcp/              # MCP (Model Context Protocol) support
 │   ├── ava-extensions/       # Extension system
 │   └── ava-cli-providers/    # CLI provider resolution
-├── packages/                 # TypeScript — DESKTOP ONLY (do not use for CLI)
-│   ├── core-v2/              # desktop orchestration kernel
-│   ├── extensions/           # desktop extension modules
-│   ├── core/                 # compatibility shim
-│   ├── platform-node/
-│   └── platform-tauri/
-├── src/                      # desktop frontend (SolidJS)
-├── src-tauri/                # desktop native host + Tauri commands
-├── cli/                      # legacy TS CLI (being replaced by crates/ava-tui)
+├── src/                      # Desktop frontend (SolidJS → Tauri IPC → Rust)
+├── src-tauri/                # Tauri host + Rust IPC commands
 └── tests/
 ```
 
@@ -133,57 +134,16 @@ AVA requires explicit trust before loading project-local config from untrusted r
 Trust a project: run `ava --trust` to approve.
 Global config (`~/.ava/`) always loads.
 
-## Extensions Map (Desktop Only)
-
-The following 20 extensions are part of the **TypeScript desktop layer** (`packages/extensions/`). They do NOT apply to the Rust CLI.
-
-<details>
-<summary>Desktop extensions list</summary>
-
-1. `agent-modes`
-2. `commander`
-3. `context`
-4. `diff`
-5. `git`
-6. `hooks`
-7. `instructions`
-8. `lsp`
-9. `mcp`
-10. `memory`
-11. `models`
-12. `permissions`
-13. `plugins`
-14. `prompts`
-15. `providers`
-16. `recall`
-17. `server`
-18. `slash-commands`
-19. `tools-extended`
-20. `validator`
-
-</details>
-
 ## Rust-First Rule
 
-**All new agent/CLI features MUST be implemented in Rust.** Do not add new features to `packages/` (TypeScript).
+**All code is Rust.** The TypeScript orchestration layer (`packages/`) has been deleted. The desktop frontend (`src/`) calls Rust crates directly via Tauri IPC commands.
 
 - New tools → `crates/ava-tools/src/core/` (implement `Tool` trait)
 - New providers → `crates/ava-llm/src/providers/`
 - New agent features → `crates/ava-agent/` or `crates/ava-praxis/`
 - TUI features → `crates/ava-tui/`
+- Desktop commands → `src-tauri/src/commands/`
 - Configuration → `crates/ava-config/`
-
-The `dispatchCompute` pattern is **deprecated for new work**. It remains in `packages/` for the desktop app only. The CLI calls Rust crates directly — no IPC, no bridge.
-
-### Legacy dispatchCompute (desktop only)
-
-Still used in `packages/extensions/` for Tauri desktop features:
-
-```typescript
-dispatchCompute<T>(rustCommand, rustArgs, tsFallback)
-```
-
-Do NOT use this pattern for new CLI/agent features. Write Rust directly.
 
 ## Middleware Priority
 
@@ -196,16 +156,15 @@ Middleware runs in priority order (lower number = earlier execution):
 | error-recovery | 15 | Checkpoint recovery before destructive actions |
 | lsp-diagnostics | 20 | LSP-based diagnostics validation |
 
-Register middleware via `ToolRegistry::add_middleware()` (Rust) or `api.addToolMiddleware({ priority, before, after })` (desktop TS).
+Register middleware via `ToolRegistry::add_middleware()`.
 
 ## Code Style
 
-### TypeScript / SolidJS
+### TypeScript / SolidJS (desktop frontend only)
 
 - strict mode, no `any`
 - explicit exported return types
 - SolidJS only in `src/` (no React patterns)
-- use `.js` import suffix where package config requires it
 - Biome for formatting, ESLint + oxlint for linting
 
 ### Rust
@@ -241,11 +200,11 @@ Register middleware via `ToolRegistry::add_middleware()` (Rust) or `api.addToolM
 3. Register via `ToolRegistry::add_middleware()`
 4. Add ordering/behavior tests
 
-### Add Desktop Feature (TypeScript — desktop only)
+### Add Desktop Feature
 
-1. Implement in `packages/extensions/`
-2. Register on activation
-3. Optionally add Rust hotpath via `src-tauri/src/commands/` + `dispatchCompute`
+1. Add Rust command in `src-tauri/src/commands/{feature}.rs`
+2. Register in `src-tauri/src/commands/mod.rs` and `src-tauri/src/lib.rs`
+3. Invoke from SolidJS frontend via `@tauri-apps/api` (`invoke` / `listen`)
 
 ## CLI Testing
 
@@ -272,14 +231,42 @@ cargo run --bin ava -- "goal" --headless --later "review" --later-group 2 "commi
 
 **Default test model**: `anthropic/claude-haiku-4.5` ($1/$5 per M tokens — cheapest Western SOTA with full tool use support).
 
+## Slash Commands
+
+Verified handlers in `crates/ava-tui/src/app/commands.rs`:
+
+| Command | Description |
+|---------|-------------|
+| `/model [provider/model]` | Show or switch model (alias: `/models`) |
+| `/think [show\|hide]` | Toggle thinking block visibility |
+| `/theme [name]` | Cycle or switch theme |
+| `/permissions` | Toggle permission level |
+| `/connect [provider]` | Add provider credentials (alias: `/providers`) |
+| `/disconnect <provider>` | Remove provider credentials |
+| `/mcp [list\|reload\|enable\|disable]` | Manage MCP servers |
+| `/new [title]` | Start a new session |
+| `/sessions` | Session picker (Ctrl+L) |
+| `/commit` | Inspect commit readiness |
+| `/export [filename]` | Export conversation (.md or .json) |
+| `/copy [all]` | Copy last response to clipboard (Ctrl+Y) |
+| `/btw [question]` | Side conversation branch (`/btw end` to restore) |
+| `/hooks [list\|reload\|dry-run]` | Manage lifecycle hooks |
+| `/tasks` | Show background task list |
+| `/later <message>` | Queue a post-complete message |
+| `/queue` | Show queued messages |
+| `/shortcuts` | Show keyboard shortcuts (Ctrl+?, alias: `/keys`, `/keybinds`) |
+| `/compact [focus]` | Compact conversation to save context window |
+| `/clear` | Clear chat |
+| `/help` | Show help |
+
 ## Documentation Priority
 
 1. `CLAUDE.md` (this file) — architecture, conventions, commands
 2. `AGENTS.md` — AI agent instructions
-3. `docs/development/roadmap.md` — sprint roadmap (11-66+) and active delivery lanes
+3. `docs/development/roadmap.md` — sprint roadmap and delivery status
 4. `docs/development/backlog.md` — active backlog and validation status
 5. `docs/development/epics.md` — completed and planned epics
-6. `docs/development/v3-plan.md` — paired backend/frontend plan toward v3
+6. `docs/development/v3-plan.md` — v3 plan (complete)
 7. `docs/development/test-matrix.md` — E2E test verification
 8. `docs/development/sprints/` — sprint prompts
 9. `docs/development/research/` — competitor analysis

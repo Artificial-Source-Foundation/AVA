@@ -188,13 +188,13 @@ These are concrete gaps with specific competitor implementations to reference:
 
 **Impact**: Intelligent context selection based on code graph structure.
 
-**Effort**: Medium (Rust implementation via `dispatchCompute`)
+**Effort**: Medium (Rust implementation in `crates/ava-codebase/`)
 
 #### 3.1.4 3-Layer Loop Detection — Gemini CLI
 
 **Gap**: AVA has basic doom loop; Gemini has sophisticated 3-layer.
 
-**Reference Implementation**: `packages/core/src/services/loopDetectionService.ts`
+**Reference Implementation**: Gemini CLI `packages/core/src/services/loopDetectionService.ts` (external competitor path — not an AVA path; AVA's `packages/` has been deleted)
 
 **What it does**:
 - **Layer 1**: Tool hash matching (5 identical consecutive calls)
@@ -283,7 +283,7 @@ These are concrete gaps with specific competitor implementations to reference:
 
 **Gap**: AVA has static policies; Gemini has dynamic LLM-generated.
 
-**Reference Implementation**: `packages/core/src/safety/conseca/`
+**Reference Implementation**: Gemini CLI `packages/core/src/safety/conseca/` (external competitor path)
 
 **What it does**:
 - Phase 1: LLM generates least-privilege policies from prompt
@@ -327,7 +327,7 @@ Expose AVA's tools to other MCP clients.
 
 #### 3.3.3 A2A Protocol — Gemini CLI
 
-**Reference**: `packages/a2a-server/src/`
+**Reference**: Gemini CLI `packages/a2a-server/src/` (external competitor path)
 
 Agent-to-agent interoperability protocol.
 
@@ -339,7 +339,7 @@ Inline edit suggestions (requires editor integration).
 
 #### 3.3.5 Cross-Provider Normalization — Pi Mono
 
-**Reference**: `packages/ai/src/providers/transform-messages.ts`
+**Reference**: Pi Mono `packages/ai/src/providers/transform-messages.ts` (external competitor path; AVA's cross-provider normalization is now in `crates/ava-agent/` via `NormalizingProvider`)
 
 Handle thinking blocks, tool ID normalization, orphaned tool repair.
 

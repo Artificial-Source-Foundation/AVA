@@ -2,6 +2,15 @@
 
 All notable changes to AVA are documented in this file.
 
+## [Unreleased]
+
+### Removed
+- **Deleted `packages/` directory entirely.** The TypeScript desktop layer (`packages/core-v2/`, `packages/extensions/`, `packages/core/`, `packages/platform-node/`, `packages/platform-tauri/`) has been removed. The desktop app now calls Rust crates directly via Tauri IPC commands (`src-tauri/src/commands/`), eliminating the `dispatchCompute` bridge pattern and all Node.js runtime dependencies from the desktop path.
+
+### Changed
+- Desktop frontend (SolidJS) retained in `src/` but all backend logic is now pure Rust via `src-tauri/`.
+- The `dispatchCompute` pattern is no longer present anywhere in the codebase (previously deprecated for new work, now fully removed).
+
 ## [2.1.0] - 2026-03-08
 
 Release polish, documentation, and E2E test matrix.

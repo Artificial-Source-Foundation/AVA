@@ -1,5 +1,5 @@
-<!-- Last verified: 2026-03-12 -->
-# AI Coding Agent Instructions (v2.1)
+<!-- Last verified: 2026-03-16 -->
+# AI Coding Agent Instructions (v3)
 
 > Universal instructions for AI assistants working on AVA
 
@@ -8,11 +8,16 @@
 ## Quick Start
 
 ```bash
-# Rust (primary)
+# Rust (primary) — via just (see Justfile)
+just check                      # fmt + clippy + nextest (all-in-one)
+just test                       # cargo nextest run --workspace
+just lint                       # cargo clippy --workspace
+
+# Or raw cargo
 cargo test --workspace
 cargo clippy --workspace
 
-# Desktop (TypeScript + Tauri)
+# Desktop (SolidJS + Tauri)
 npm run tauri dev
 npm run lint
 npm run format:check
@@ -30,10 +35,9 @@ AVA is a multi-agent AI coding assistant with desktop app and CLI.
 
 - **CLI/TUI**: Pure Rust binary (`crates/ava-tui/`) — Ratatui + Crossterm + Tokio
 - **Agent runtime**: Rust crates (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-praxis/`)
-- **Desktop**: Tauri 2 (Rust backend + SolidJS frontend)
-- **Desktop orchestration**: `packages/core-v2/` + `packages/extensions/` (TypeScript, desktop only)
+- **Desktop**: Tauri 2 — SolidJS frontend → Tauri IPC → Rust crates
 
-**IMPORTANT: All new CLI/agent features MUST be Rust. Do not add new features to `packages/` (TypeScript). The TypeScript layer is retained only for the Tauri desktop webview.**
+**IMPORTANT: All new features MUST be Rust. The desktop app calls Rust crates directly via Tauri IPC commands (`src-tauri/src/commands/`).**
 
 ---
 
@@ -43,36 +47,33 @@ AVA is a multi-agent AI coding assistant with desktop app and CLI.
 
 ```text
 AVA/
-├── crates/              # Rust crates — PRIMARY codebase for CLI/agent
+├── crates/              # Rust crates — ALL backend logic (CLI + agent + desktop)
 │   ├── ava-tui/         # CLI/TUI binary (Ratatui)
 │   ├── ava-agent/       # Agent loop + reflection
 │   ├── ava-llm/         # LLM providers (Anthropic, OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception)
 │   ├── ava-tools/       # Tool trait + registry + core tools
-│   ├── ava-praxis/   # Multi-agent orchestration
+│   ├── ava-praxis/      # Multi-agent orchestration
 │   ├── ava-session/     # Session persistence
 │   ├── ava-memory/      # Persistent memory/recall
 │   └── ...              # 13 more crates
-├── packages/            # TypeScript — DESKTOP ONLY
-│   ├── core-v2/         # desktop orchestration kernel
-│   ├── extensions/      # desktop extension modules (20)
-│   └── ...
-├── src/                 # desktop frontend (SolidJS)
-├── src-tauri/           # desktop Tauri host
-└── cli/                 # legacy TS CLI (being replaced by crates/ava-tui)
+├── src/                 # Desktop frontend (SolidJS → Tauri IPC → Rust)
+└── src-tauri/           # Tauri host + IPC commands (calls into crates/)
 ```
 
-### Rust-First Rule
+### Rust Backend
 
-**All new CLI/agent features MUST be Rust.** The `dispatchCompute` pattern is deprecated for new work.
+**All features are Rust.** Both the CLI and the desktop app use the same Rust crates.
 
 - New tools → `crates/ava-tools/src/core/` (implement `Tool` trait)
 - New providers → `crates/ava-llm/src/providers/`
 - New agent features → `crates/ava-agent/` or `crates/ava-praxis/`
 - TUI features → `crates/ava-tui/`
+- Desktop commands → `src-tauri/src/commands/` (Tauri IPC into crates)
 
 ### Important Counts
 
-- Rust crates: ~20
+- Rust crates: 20
+- LLM providers: 7 (Anthropic, OpenAI, Gemini, Ollama, OpenRouter, Copilot, Inception)
 - Built-in tools by default: 6 (`read`, `write`, `edit`, `bash`, `glob`, `grep`)
 - Extended opt-in tools: 8 (`apply_patch`, `web_fetch`, `web_search`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `git_read`)
 - Dynamic tools: MCP servers + TOML custom tools
@@ -145,11 +146,12 @@ Middleware priorities are contract-sensitive. Lower numeric priority runs earlie
 2. Implement `LLMProvider` trait (generate, generate_stream, estimate_tokens, estimate_cost, model_name)
 3. Add tests, run `cargo test -p ava-llm`
 
-### Add Desktop Feature (TypeScript — desktop only)
+### Add Desktop Feature
 
-1. Implement in `packages/extensions/`
-2. Register on activation
-3. Optionally add Rust hotpath via `src-tauri/src/commands/`
+1. Implement logic in the appropriate Rust crate under `crates/`
+2. Expose via Tauri command in `src-tauri/src/commands/`
+3. Register command in `src-tauri/src/commands/mod.rs` and `src-tauri/src/lib.rs`
+4. Call from SolidJS frontend via `invoke()`
 
 ---
 
@@ -177,8 +179,7 @@ Implementation: `crates/ava-agent/src/instructions.rs`
 
 ## Before Committing
 
-- `cargo test --workspace`
-- `cargo clippy --workspace`
+- `just check` (or `cargo fmt --all --check && cargo clippy --workspace && cargo nextest run --workspace`)
 - `npm run lint`
 - `npm run format:check`
 - `npx tsc --noEmit`
@@ -193,12 +194,7 @@ An OpenRouter API key is configured at `~/.ava/credentials.json` for testing.
 ### Running CLI tests
 
 ```bash
-# Rust CLI (current)
 cargo run --bin ava -- "your goal here" --headless --provider openrouter --model <model>
-
-# Legacy Node CLI (legacy — being replaced by Rust CLI: cargo run --bin ava)
-cd cli && npm run build && cd ..
-node cli/dist/index.js run "your goal here" --provider openrouter --model <model> --max-turns 5
 ```
 
 ### Recommended models (via OpenRouter)
@@ -223,7 +219,7 @@ For budget/bulk work, use `moonshotai/kimi-k2.5` or `z-ai/glm-5`.
 
 - Commit secrets or credentials
 - Add parent-directory imports
-- Rely on migration-era `packages/core/src/*` paths for new work
+- Add TypeScript backend logic — all backend code is Rust
 - Use React patterns in `src/`
 
 ---

@@ -1,58 +1,12 @@
-<!-- Last verified: 2026-03-07. Run 'cargo test --workspace' to revalidate. -->
+<!-- Last verified: 2026-03-16. Run 'cargo test --workspace' to revalidate. -->
 
 # Backend Modules
 
-> **Hybrid Architecture**: Rust crates (`crates/`) for CLI + TypeScript (`packages/core-v2/` + `packages/extensions/`) for desktop
->
-> `packages/core/` is now a compatibility re-export shim.
->
-> **Rule**: All new CLI/agent features MUST be Rust (crates/).
+> **Pure Rust backend**: All backend logic lives in `crates/`. The SolidJS frontend (`src/`) communicates with Rust via Tauri IPC commands (`src-tauri/`).
 
-## Module Organization
+## Rust Crates (`crates/`)
 
-### Core Runtime (`packages/core-v2/`)
-
-The execution kernel contains:
-
-| Module | Purpose |
-|--------|---------|
-| `agent/` | Agent loop, turn execution, tool dispatch, event handling |
-| `tools/` | Core tool registry and built-in tool definitions |
-| `llm/` | LLM client factory and message handling |
-| `session/` | Session CRUD, persistence, forking |
-| `context/` | Token tracking and context window management |
-| `extensions/` | Extension loading, lifecycle, manifest parsing |
-| `permissions/` | Permission checks and security pipeline |
-| `bus/` | Pub/sub message bus |
-
-### Extensions (`packages/extensions/`)
-
-20 built-in extension modules:
-
-1. **agent-modes** — Agent mode management (plan mode, etc.)
-2. **commander** — Worker delegation and batch execution
-3. **context** — Context strategies and compaction
-4. **diff** — Diff tracking and patch application
-5. **git** — Git operations and auto-commit
-6. **hooks** — Lifecycle hook system
-7. **instructions** — Project instruction loading
-8. **lsp** — Language Server Protocol client
-9. **mcp** — Model Context Protocol support
-10. **memory** — Persistent memory and recall
-11. **models** — Model registry and availability
-12. **permissions** — Runtime permission system
-13. **plugins** — Plugin management UI
-14. **prompts** — Prompt building and variants
-15. **providers** — LLM provider implementations (16 sub-providers)
-16. **recall** — Memory recall integration
-17. **server** — Local server for external integrations
-18. **slash-commands** — User-defined slash commands
-19. **tools-extended** — Extended tool surface (~15 tools)
-20. **validator** — QA validation pipeline
-
-### Rust Crates (`crates/`) — CLI/Agent Stack
-
-20 Rust crates currently make up the CLI and agent runtime:
+~22 Rust crates make up the CLI, agent runtime, and desktop backend:
 
 1. `ava-agent` — Agent execution loop + reflection
 2. `ava-auth` — OAuth and credential flows
@@ -75,14 +29,15 @@ The execution kernel contains:
 19. `ava-types` — Shared types
 20. `ava-validator` — Validation pipeline
 
-**Tool surface**: 6 built-in tools by default, 7 extended tools when enabled, plus separately-registered task/todo/question helpers and dynamic MCP/custom tools.
+**Tool surface**: 6 built-in tools by default, 8 extended tools when enabled, plus separately-registered task/todo/question helpers and dynamic MCP/custom tools.
 
-## Migration Notes
+## Desktop Frontend (`src/`)
 
-The previous `packages/core/` monolith has been restructured:
-- Business logic moved to `packages/core-v2/`
-- Features modularized into `packages/extensions/`
-- `packages/core/` now re-exports from core-v2 for compatibility
+SolidJS application served by Tauri. Communicates with the Rust backend exclusively through Tauri IPC commands defined in `src-tauri/src/commands/`.
+
+## Tauri Commands (`src-tauri/`)
+
+Rust command modules that bridge the SolidJS frontend to the Rust crate ecosystem. Each command is registered in `src-tauri/src/commands/mod.rs` and `src-tauri/src/lib.rs`.
 
 ---
 

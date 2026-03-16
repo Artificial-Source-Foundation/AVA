@@ -4,9 +4,9 @@ Top-level files and directories should stay intentional and stable.
 
 ## Root zones
 
-- `crates/` — Rust-first CLI, agent, tooling, and shared runtime crates.
-- `src/` and `src-tauri/` — desktop frontend and native host.
-- `packages/` and `cli/` — legacy or desktop-only TypeScript code.
+- `crates/` — Rust CLI, agent, tooling, and shared runtime crates (all backend logic).
+- `src/` — desktop frontend (SolidJS).
+- `src-tauri/` — desktop native host (Tauri IPC commands bridging frontend to Rust crates).
 - `docs/` — product, architecture, sprint, and reference docs.
 - `scripts/` — repository automation, validation, migration, and benchmark helpers.
 - hidden directories such as `.ava/`, `.github/`, `.config/`, and `.tmp/` — local config, automation, or scratch state.
@@ -16,7 +16,7 @@ Top-level files and directories should stay intentional and stable.
 - Keep the root limited to entrypoint docs, workspace manifests, shared config, and a small number of operational scripts.
 - Do not leave one-off benchmark outputs, compiled binaries, or language exercise files in the root.
 - Put disposable local artifacts in `.tmp/` so cleanup stays obvious and `git status` stays readable.
-- When adding a new top-level directory, document why it cannot live under `crates/`, `docs/`, `scripts/`, `src/`, or `packages/`.
+- When adding a new top-level directory, document why it cannot live under `crates/`, `docs/`, `scripts/`, or `src/`.
 
 ## Root file categories
 

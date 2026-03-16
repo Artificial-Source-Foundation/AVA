@@ -1,26 +1,11 @@
 import { createRoot } from 'solid-js'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { useModelStatus } from './useModelStatus'
 
-// Mock onEvent
-const handlers = new Map<string, Set<(data: unknown) => void>>()
-
-vi.mock('@ava/core-v2/extensions', () => ({
-  onEvent: (event: string, handler: (data: unknown) => void) => {
-    if (!handlers.has(event)) handlers.set(event, new Set())
-    handlers.get(event)!.add(handler)
-    return { dispose: () => handlers.get(event)?.delete(handler) }
-  },
-}))
-
+/** Dispatch a DOM CustomEvent matching the ava: prefix convention */
 function emit(event: string, data: unknown): void {
-  const set = handlers.get(event)
-  if (set) for (const h of set) h(data)
+  window.dispatchEvent(new CustomEvent(`ava:${event}`, { detail: data }))
 }
-
-afterEach(() => {
-  handlers.clear()
-})
 
 describe('useModelStatus', () => {
   it('starts with zero count', () => {
@@ -62,13 +47,17 @@ describe('useModelStatus', () => {
   })
 
   it('cleans up subscriptions', () => {
+    // After dispose, events should no longer update the signals
+    let modelCountAccessor: (() => number) | undefined
     createRoot((dispose) => {
-      useModelStatus()
-      expect(handlers.get('models:updated')?.size).toBe(1)
-      expect(handlers.get('models:ready')?.size).toBe(1)
+      const { modelCount } = useModelStatus()
+      modelCountAccessor = modelCount
+      emit('models:updated', { count: 5 })
+      expect(modelCount()).toBe(5)
       dispose()
-      expect(handlers.get('models:updated')?.size ?? 0).toBe(0)
-      expect(handlers.get('models:ready')?.size ?? 0).toBe(0)
     })
+    // After dispose, value is stale (no new updates)
+    emit('models:updated', { count: 99 })
+    expect(modelCountAccessor!()).toBe(5)
   })
 })

@@ -1,5 +1,7 @@
 # AVA 3.0: The Rust-Native Architecture
 
+> **Status (2026-03-16): This vision has been realized.** The `packages/` TypeScript layer has been deleted. The desktop app now calls Rust crates directly via Tauri IPC. All agent, tool, and backend logic is pure Rust. The migration strategy outlined below (Phases 1-4) is complete. This document is retained as historical research.
+
 > If AI eliminates the complexity barrier, what would the "perfect" AI coding agent look like?
 
 ## The Ideal Architecture (No Compromises)

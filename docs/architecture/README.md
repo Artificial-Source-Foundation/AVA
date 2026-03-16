@@ -8,32 +8,32 @@
 
 ## Overview
 
-AVA uses a **Rust-first architecture** with a hybrid backend:
+AVA uses a **pure Rust backend** for both CLI and desktop:
 
 ```
 AVA/
-├── crates/                   # Rust crates — PRIMARY for CLI/agent (20 crates)
+├── crates/                   # Rust crates — ALL backend logic (~22 crates)
 │   ├── ava-tui/              # CLI/TUI binary (Ratatui + Crossterm)
 │   ├── ava-agent/            # Agent execution loop
 │   ├── ava-llm/              # LLM providers (7 built-in + mock)
-│   ├── ava-tools/            # Tool trait + registry (6 built-in + 7 extended tools)
-│   ├── ava-praxis/        # Multi-agent orchestration (Praxis)
-│   └── ...                   # 16 more crates (session, memory, config, etc.)
-├── packages/                 # TypeScript — DESKTOP ONLY
-│   ├── core-v2/              # Desktop orchestration kernel
-│   ├── extensions/           # Desktop extension modules (20)
-│   └── platform-*/           # Platform implementations
+│   ├── ava-tools/            # Tool trait + registry (6 built-in + 8 extended tools)
+│   ├── ava-praxis/           # Multi-agent orchestration (Praxis)
+│   └── ...                   # 17 more crates (session, memory, config, etc.)
 ├── src/                      # Desktop frontend (SolidJS)
-├── src-tauri/                # Desktop native host (Tauri 2.0)
+├── src-tauri/                # Desktop native host (Tauri 2.0) — IPC to Rust crates
 └── docs/
     ├── architecture/         # System design docs (this directory)
     ├── development/          # Roadmap, sprints, epics
     └── research/             # Competitive analysis
 ```
 
-### Architecture Rule
+### Data Flow
 
-**All new CLI/agent features MUST be Rust.** The TypeScript layer (`packages/`) is retained only for the Tauri desktop webview.
+```
+SolidJS (src/) → Tauri IPC → Rust commands (src-tauri/) → Rust crates (crates/)
+```
+
+The CLI (`crates/ava-tui/`) calls Rust crates directly with no IPC layer.
 
 ---
 
@@ -43,9 +43,9 @@ AVA/
 
 | Document | Description |
 |----------|-------------|
-| [architecture-guide.md](./architecture-guide.md) | Desktop backend: system boundaries, execution flow, middleware |
-| [backend.md](./backend.md) | Backend overview: Rust crates + TypeScript extensions |
-| [modules.md](./modules.md) | Module organization (core-v2, extensions, crates) |
+| [architecture-guide.md](./architecture-guide.md) | Backend architecture: system boundaries, execution flow, middleware |
+| [backend.md](./backend.md) | Backend overview: Rust crates |
+| [modules.md](./modules.md) | Module organization: Rust crates + SolidJS frontend |
 | [data-flow.md](./data-flow.md) | Desktop data flow (turn lifecycle, hooks) |
 | [praxis.md](./praxis.md) | Desktop agent hierarchy (Director → Leads → Workers) |
 | [database-schema.md](./database-schema.md) | SQLite schema for session storage |
@@ -86,7 +86,7 @@ Director (AgentExecutor)
 Director aggregates results and presents to user
 ```
 
-**Desktop only** — the Rust CLI uses Director with workflow pipelines instead.
+The Rust CLI uses Director with workflow pipelines for multi-agent orchestration.
 
 ---
 

@@ -1,23 +1,22 @@
 # AVA v3 Plan
 
-> Last updated: 2026-03-13 after Sprint 63-66 backend implementation and smoke validation.
+> Last updated: 2026-03-16. v3 is COMPLETE.
 > Related: `docs/development/roadmap.md`, `docs/development/backlog.md`, `docs/development/epics.md`
 
 ## Goal
 
-v3 is the milestone where the current active backlog is intentionally burned down, validated in the CLI/TUI, and reorganized into a clean backend-plus-UX release story.
+v3 is the milestone where the active backlog was burned down, validated in the CLI/TUI, and reorganized into a clean backend-plus-UX release.
 
-## Current State
+## Status: COMPLETE
 
-- v2.1.0 is released.
-- Sprint 60 is implemented and archived.
-- Sprint 61 is implemented and archived.
-- Sprint 62 is implemented, validated in Sprint 62V, and archived.
-- Sprint 63-66 backend scope is implemented on `master`; roadmap/backlog archive normalization remains.
-- The active backlog is now mostly backend/platform work plus one major UI-facing gap: `B26` Praxis in chat composer.
-- The local reference corpus under `docs/reference-code/` has been refreshed and now reflects newer upstream states across OpenCode, Codex CLI, Goose, Gemini CLI, Cline, OpenHands, Continue, Zed, and others.
+- v2.1.0 released on 2026-03-08.
+- Sprints 60-62 implemented, validated, and archived.
+- Sprints 63-66 backend scope implemented and complete on `master`.
+- The `packages/` TypeScript orchestration layer has been deleted. Desktop calls Rust directly via Tauri IPC.
+- All ARCH, SEC, and UX release criteria met.
+- Remaining open work is post-v3 backlog items tracked in `docs/development/backlog.md`.
 
-## Planning Principles
+## Planning Principles (retained for future work)
 
 1. Keep new core capability work Rust-first.
 2. Pair backend wins with visible TUI/Desktop UX so features do not stay hidden.
@@ -25,18 +24,16 @@ v3 is the milestone where the current active backlog is intentionally burned dow
 4. Prefer lean-core delivery: default tools stay capped at 6, with Extended/plugin/MCP for optional capability expansion.
 5. Validate CLI/headless paths during implementation and keep manual TUI validation as an explicit closeout step.
 
-## Backend Lane
+## Backend Lane (Complete)
 
-### Sprint 62 - Cost and Runtime Controls
+### Sprint 62 - Cost and Runtime Controls -- COMPLETE
 
 - `B64` Thinking budget configuration
 - `B63` Dynamic API key resolution
 - `B47` Cost-aware model routing
 - `B40` Budget alerts and cost dashboard
 
-Why now: refreshed competitors consistently expose stronger cost visibility, smarter routing, and better long-session reliability.
-
-### Sprint 63 - Execution and Ecosystem Foundations
+### Sprint 63 - Execution and Ecosystem Foundations -- COMPLETE
 
 - `B65` Pluggable backend operations
 - `B39` Background agents on branches
@@ -44,101 +41,57 @@ Why now: refreshed competitors consistently expose stronger cost visibility, sma
 - `B71` Skill discovery
 - `B45` File watcher mode
 
-Status: implemented on `master`.
-
-### Sprint 64 - Knowledge and Context Intelligence
+### Sprint 64 - Knowledge and Context Intelligence -- COMPLETE
 
 - `B38` Auto-learned project memories
 - `B57` Multi-repo context
 - `B58` Semantic codebase indexing
 - `B48` Change impact analysis
 
-Status: implemented on `master`.
-
-### Sprint 65 - Agent Coordination Backend
+### Sprint 65 - Agent Coordination Backend -- COMPLETE
 
 - `B49` Spec-driven development
 - `B59` Agent artifacts system
 - `B50` Agent team peer communication
 - `B76` Agent Client Protocol (ACP)
 
-Status: implemented on `master`.
+### Sprint 66 - Optional Capability Backends -- COMPLETE
 
-### Sprint 66 - Optional Capability Backends
+- `B44` Web search capability (Extended)
+- `B52` AST-aware operations (Extended)
+- `B53` Full LSP exposure (Extended)
+- `B69` Code search tool (Extended)
 
-- `B44` Web search capability
-- `B52` AST-aware operations
-- `B53` Full LSP exposure
-- `B69` Code search tool
+## Frontend and UX Lane (Complete)
 
-Status: implemented on `master` (Extended/plugin-first).
+### FE-A - Ambient Awareness -- COMPLETE
 
-## Frontend and UX Lane
+Context window usage indicator, modular footer/status bar, per-turn duration and cost visibility, budget and quota surfacing.
 
-### FE-A - Ambient Awareness (pair with Sprint 62)
+### FE-B - Conversation Clarity -- COMPLETE
 
-- Context window usage indicator
-- Modular footer/status bar
-- Per-turn duration and cost visibility
-- Budget and quota surfacing
+Tool-call grouping, inline diff presentation, streaming render polish.
 
-Status: largely delivered in the TUI; remaining work is polish and desktop follow-through.
+### FE-C - Session and History UX -- COMPLETE
 
-### FE-B - Conversation Clarity (pair with Sprint 62)
+Session browser search and sort, rewind preview, session stats.
 
-- Tool-call grouping for read/search noise
-- Inline diff presentation after edits
-- Streaming render polish for calmer chat output
+### FE-D - Praxis Chat UX -- FIRST SLICE DELIVERED
 
-Status: partially delivered. Tool-activity grouping exists; remaining work is better inspectability, calmer streaming, and diff/result polish.
+Praxis accessible via Tab cycling in TUI. Worker visibility in sidebar, task status, cancellation, grouped completion summary. `B26` remains open for deeper worker/task inspection and richer merge-back UX.
 
-### FE-C - Session and History UX (pair with Sprint 63)
+### FE-E - Input and Discoverability -- COMPLETE
 
-- Session browser search and sort
-- Rewind preview and safer session forking
-- Session stats summary
+Shortcut/help overlay (`/shortcuts`, Ctrl+?), command discovery, long-input polish.
 
-### FE-D - Praxis Chat UX (pair with Sprint 65)
+### FE-F - Desktop Parity -- COMPLETE
 
-- `B26` Praxis in chat composer
-- Worker visibility in the sidebar
-- Task status and merge-back visibility
-- Agent-switching/task-inspection affordances
+Desktop calls Rust crates directly via Tauri IPC (`src-tauri/src/commands/`). The `packages/` TypeScript layer has been deleted. All backend logic is shared Rust.
 
-Status: first slice delivered. `/praxis <goal>` now launches a Praxis task from the TUI, opens a Praxis task view, streams worker output, supports cancellation, and posts a grouped completion summary back into the main chat. Remaining work is deeper worker/task inspection, richer merge-back/session persistence, and fuller orchestration UX.
+## Release Criteria for v3 -- ALL MET
 
-This remains the highest-priority open UX track because `B26` is still the only open `P1` item, and backend coordination primitives from Sprint 65 are now available.
-
-### FE-E - Input and Discoverability (pair with Sprint 64)
-
-- Shortcut/help overlay
-- Better command discovery
-- Long-input polish and editor-friendly flows
-
-### FE-F - Desktop Parity Follow-Through (pair with Sprint 66)
-
-- Port proven TUI improvements into the desktop shell where they make sense
-- Keep desktop work scoped to surfacing approved backend capabilities, not creating a second product roadmap
-
-## Competitive Priorities from the Refreshed Reference Corpus
-
-The fresh reference pass reinforced these gaps as the most valuable:
-
-1. Context condensation and long-session control
-2. Loop/stuck detection and recovery UX
-3. Parallel read-only tool execution
-4. Safer rollback/checkpoint workflows
-5. Better edit reliability fallbacks
-6. Stronger cost visibility and routing
-7. Better conversation readability (tool grouping, inline diffs)
-8. Better multi-agent visibility once Praxis is exposed in-chat
-
-## Release Rule for v3
-
-Call the work "v3 ready" only when all of these are true:
-
-- The active backlog has no stale status text from already-delivered Sprint 63-66 work.
+- The active backlog has no stale status text from Sprint 63-66 work.
 - Sprints 60-62 are archived with validation notes preserved.
-- Every planned backend sprint has a matching user-visible UX surface where needed.
+- Every planned backend sprint has a matching user-visible UX surface.
 - CLI/headless verification exists for each completed sprint.
-- Remaining desktop-only work is clearly separated from Rust-first CLI/agent work.
+- Desktop backend is fully Rust via Tauri IPC (the `packages/` TypeScript layer has been deleted).

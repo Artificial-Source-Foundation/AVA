@@ -1,61 +1,26 @@
-<!-- Last verified: 2026-03-07. Run 'cargo test --workspace' to revalidate. -->
+<!-- Last verified: 2026-03-16. Run 'cargo test --workspace' to revalidate. -->
 
 # Backend Overview
 
-> **Note**: AVA is now Rust-first for CLI and agent development. This document describes the current hybrid repository where the desktop layer still retains TypeScript orchestration modules.
->
-> - **New CLI/agent features**: Write in `crates/` (Rust)
-> - **Desktop extensions**: Still in `packages/core-v2/` + `packages/extensions/` (TypeScript)
+> AVA uses a pure Rust backend for both CLI and desktop. The SolidJS frontend communicates with Rust via Tauri IPC commands.
 >
 > See `CLAUDE.md` for current architecture guidance.
 
 ## Runtime Model
 
-AVA runs a hybrid backend:
+```
+SolidJS (src/) → Tauri IPC → Rust commands (src-tauri/) → Rust crates (crates/)
+CLI (ava-tui)  → direct calls → Rust crates (crates/)
+```
 
-- `packages/core-v2/`: minimal execution kernel (agent loop, tools, extension API)
-- `packages/extensions/`: feature modules layered onto core-v2
-- Rust/Tauri commands (`src-tauri/src/commands/`) for compute and safety hotpaths
-
-`packages/core/` remains as a compatibility re-export shim.
+All backend logic lives in Rust crates. Tauri commands in `src-tauri/src/commands/` bridge the desktop frontend to the crate ecosystem.
 
 ## Current Shape
 
-- Built-in extensions: ~20 desktop extension modules
-- Rust crates: 20 under `crates/`
-- Built-in tools by default: 6, with 7 additional extended tools available when enabled, plus task/todo/question helpers and dynamic MCP/custom tools
+- Rust crates: ~22 under `crates/`
+- Built-in tools by default: 6, with 8 additional extended tools available when enabled, plus task/todo/question helpers and dynamic MCP/custom tools
 
-### Runtime Extension Count
-
-Typical runtime extension activation count is ~31:
-- 20 feature extensions (always enabled)
-- ~16 provider extensions (varies by configuration)
-- Minus 4 commonly disabled: `lsp`, `mcp`, `server`, `litellm`
-
-### Extension Module Index (~20)
-
-- agent-modes
-- commander
-- context
-- diff
-- git
-- hooks
-- instructions
-- lsp
-- mcp
-- memory
-- models
-- permissions
-- plugins
-- prompts
-- providers
-- recall
-- server
-- slash-commands
-- tools-extended
-- validator
-
-### Rust Crate Index (20)
+### Rust Crate Index (~22)
 
 1. `ava-agent` — Agent execution loop
 2. `ava-auth` — OAuth, Copilot token exchange, PKCE
@@ -80,26 +45,6 @@ Typical runtime extension activation count is ~31:
 
 See `crates/` directory for source. Run `cargo test --workspace` for test status.
 
-## Rust Hotpath Pattern
-
-> **Note:** `dispatchCompute` is still used in the desktop Tauri app. It is **deprecated for new CLI/agent features** — write Rust directly in `crates/`.
-
-Use `dispatchCompute<T>(rustCommand, rustArgs, tsFallback)` for performance-sensitive logic in the desktop app only.
-
-- Tauri desktop runtime: execute Rust command
-- Node/CLI runtime: use TypeScript fallback
-
-Examples include edit/grep compute paths, permission evaluation, and validation checks.
-
-## Extension Responsibilities
-
-Common extension responsibilities include:
-
-- middleware (`before` / `after`) with explicit priority
-- tool registration
-- settings registration and settings sync
-- event subscriptions through the bus
-
 ## Safety and Reliability Layers
 
 - sandbox routing for install-class shell commands
@@ -107,19 +52,19 @@ Common extension responsibilities include:
 - checkpoint refs for recovery before destructive actions
 - agent reliability middleware for stuck-loop and recovery handling
 
-### Rust CLI Permission Model
+### Permission Model
 
-The Rust CLI uses a two-level permission system:
+The permission system uses two levels:
 
 - **PermissionLevel** (`ava-tui/src/state/permission.rs`): `Standard` (default) or `AutoApprove` (replaces old `--yolo` flag, CLI flag `--auto-approve` with `--yolo` alias). Toggle at runtime via `/permissions` command.
 - **DefaultInspector** (`ava-permissions/src/inspector.rs`): 9-step evaluation — command classification, path safety, auto-approve check, session approvals, policy blocked/allowed tools, tag checks, risk threshold, static/dynamic rules. Critical commands (rm -rf /, sudo, fork bombs) are always blocked regardless of permission level.
 
 ### Agent Modes
 
-Agent execution modes (`ava-tui/src/state/agent.rs`): `Code` (default, full tool access), `Plan` (read-only tools, analysis/planning), `Architect` (plan-first, then implement on approval). Mode-specific prompt suffix injected via `AgentStack.mode_prompt_suffix` into `AgentConfig.system_prompt_suffix`. Tab/Shift+Tab cycles modes in the TUI composer.
+Agent execution modes (`ava-tui/src/state/agent.rs`): `Code` (default, full tool access), `Plan` (read-only tools, analysis/planning). Mode-specific prompt suffix injected via `AgentStack.mode_prompt_suffix` into `AgentConfig.system_prompt_suffix`. Tab/Shift+Tab cycles modes in the TUI composer.
 
 ## Where To Read Next
 
-- `docs/backend/architecture-guide.md`
-- `docs/troubleshooting.md`
+- `docs/architecture/architecture-guide.md`
+- `docs/troubleshooting/`
 - `CLAUDE.md`

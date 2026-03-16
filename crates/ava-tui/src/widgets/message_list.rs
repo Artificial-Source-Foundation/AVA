@@ -217,9 +217,10 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     let spinner_tick = state.messages.spinner_tick;
     let mut lines: Vec<Line<'static>> = Vec::new();
 
-    // Reserve 1 column for the scrollbar + 1 column of right margin.
+    // Reserve 1 column for the scrollbar + 1 column of right margin +
+    // 1 column safety margin against ambiguous-width Unicode characters.
     // ALL text rendering must use content_width to prevent bleed.
-    let content_width = area.width.saturating_sub(2);
+    let content_width = area.width.saturating_sub(3);
 
     // Top padding: 1 blank line between status bar and first message.
     lines.push(Line::raw(""));
@@ -447,14 +448,22 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     // This is the final safety net — even if wrapping or markdown rendering
     // produced a line wider than expected, we truncate it here so the
     // Paragraph widget can never emit characters beyond the area boundary.
-    let clamped_width = content_area.width as usize;
+    //
+    // Safety: subtract 1 column as a guard against characters with ambiguous
+    // East-Asian width (e.g. ■ U+25A0, · U+00B7).  unicode-width reports
+    // them as 1 column, but some terminals render them as 2.  The 1-column
+    // margin prevents any such character from bleeding into the scrollbar /
+    // margin columns on the right.
+    let clamped_width = content_area.width.saturating_sub(1) as usize;
     let clamped_lines: Vec<Line<'static>> = visible_lines
         .into_iter()
         .map(|line| clamp_line_width(line, clamped_width))
         .collect();
 
     // STEP 5: Render the paragraph into the clipped content_area.
-    let widget = Paragraph::new(clamped_lines);
+    // Explicit bg ensures every cell the Paragraph touches carries the
+    // correct background, even for spans that omit a bg color.
+    let widget = Paragraph::new(clamped_lines).style(Style::default().bg(state.theme.bg_deep));
     frame.render_widget(widget, content_area);
 
     // STEP 6: Render scrollbar into the layout-derived scrollbar column.

@@ -111,7 +111,7 @@ impl ProviderConnectState {
         if self.key_input.is_empty() {
             String::new()
         } else {
-            "\u{25CF}".repeat(self.key_input.len())
+            "*".repeat(self.key_input.len())
         }
     }
 
@@ -127,8 +127,8 @@ fn build_select_items(providers: &[ProviderStatus]) -> Vec<SelectItem<String>> {
         .iter()
         .map(|p| {
             let section = match p.group {
-                ProviderGroup::Popular => "\u{2605} Popular",
-                ProviderGroup::Other => "\u{2022} Other",
+                ProviderGroup::Popular => "* Popular",
+                ProviderGroup::Other => "- Other",
             };
             let status = if p.configured {
                 let text = if let Some(ref key) = p.redacted_key {
@@ -286,7 +286,7 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
 
             // API key field
             let key_active = pc.active_field == ConnectField::ApiKey;
-            let key_indicator = if key_active { "\u{25B8} " } else { "  " };
+            let key_indicator = if key_active { "> " } else { "  " };
             let key_label_style = if key_active {
                 Style::default()
                     .fg(state.theme.primary)
@@ -295,7 +295,7 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
                 Style::default().fg(state.theme.text_muted)
             };
             let masked = pc.masked_key();
-            let cursor = if key_active { "\u{2588}" } else { "" };
+            let cursor = if key_active { "|" } else { "" };
 
             lines.push(Line::from(Span::styled(
                 truncate_str(&format!("{key_indicator}API Key"), aw),
@@ -328,7 +328,7 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
 
             // Base URL field
             let url_active = pc.active_field == ConnectField::BaseUrl;
-            let url_indicator = if url_active { "\u{25B8} " } else { "  " };
+            let url_indicator = if url_active { "> " } else { "  " };
             let url_label_style = if url_active {
                 Style::default()
                     .fg(state.theme.primary)
@@ -336,7 +336,7 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
             } else {
                 Style::default().fg(state.theme.text_muted)
             };
-            let url_cursor = if url_active { "\u{2588}" } else { "" };
+            let url_cursor = if url_active { "|" } else { "" };
 
             lines.push(Line::from(Span::styled(
                 truncate_str(&format!("{url_indicator}Base URL (optional)"), aw),
@@ -577,9 +577,7 @@ fn build_provider_list(credentials: &CredentialStore) -> Vec<ProviderStatus> {
 }
 
 fn spinner_char(elapsed: u64) -> char {
-    const CHARS: &[char] = &[
-        '\u{280B}', '\u{2819}', '\u{2838}', '\u{2834}', '\u{2826}', '\u{2807}',
-    ];
+    const CHARS: &[char] = &['|', '/', '-', '\\'];
     CHARS[(elapsed as usize) % CHARS.len()]
 }
 

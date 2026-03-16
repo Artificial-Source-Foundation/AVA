@@ -158,13 +158,8 @@ fn short_path(path: &str) -> String {
 
 /// Truncate a string inline (for commands/patterns), adding "..." if too long.
 fn truncate_inline(s: &str, max: usize) -> String {
-    // Take only the first line
     let first_line = s.lines().next().unwrap_or(s);
-    if first_line.len() <= max {
-        first_line.to_string()
-    } else {
-        format!("{}...", &first_line[..max.saturating_sub(3)])
-    }
+    crate::text_utils::truncate_display(first_line, max)
 }
 
 /// Generate a summary of completed tool activity for the action group header.
@@ -275,11 +270,11 @@ pub fn render_action_group(
     if has_cancelled {
         // Interrupted: show dimmed summary — truncate to width so it cannot bleed
         let summary = tool_activity_summary(&tool_calls);
-        let max_summary = width.saturating_sub(2 + 14) as usize; // 2 = "● ", 14 = " [interrupted]"
+        let max_summary = width.saturating_sub(2 + 14) as usize; // 2 = "* ", 14 = " [interrupted]"
         let summary = crate::text_utils::truncate_display(&summary, max_summary);
         let interrupted_line = clamp_line(
             Line::from(vec![
-                Span::styled("● ".to_string(), dim),
+                Span::styled("* ".to_string(), dim),
                 Span::styled(summary, dim),
                 Span::styled(" [interrupted]".to_string(), dim),
             ]),
@@ -316,7 +311,7 @@ pub fn render_action_group(
             if let Some(hint) = detail {
                 lines.push(Line::from(vec![
                     Span::raw("  "),
-                    Span::styled("\u{2514} ", Style::default().fg(theme.text_dimmed)),
+                    Span::styled("- ", Style::default().fg(theme.text_dimmed)),
                     Span::styled(
                         hint,
                         Style::default()
@@ -338,28 +333,28 @@ pub fn render_action_group(
 
     if expanded {
         // Expanded header with ▼ indicator
-        let prefix = "● ▼ ";
+        let prefix = "* v ";
         let summary = crate::text_utils::truncate_display(
             &summary,
-            width.saturating_sub(prefix.len() as u16) as usize,
+            width.saturating_sub(crate::text_utils::display_width(prefix) as u16) as usize,
         );
         let mut lines = vec![Line::from(vec![
-            Span::styled("● ", dim),
-            Span::styled("\u{25bc} ", dim), // ▼
+            Span::styled("* ", dim),
+            Span::styled("v ", dim),
             Span::styled(summary, dim),
         ])];
         render_expanded_details(&tool_calls, &tool_results, theme, width, &mut lines);
         lines
     } else {
         // Collapsed header with ▶ indicator
-        let prefix = "● ▶ ";
+        let prefix = "* > ";
         let summary = crate::text_utils::truncate_display(
             &summary,
-            width.saturating_sub(prefix.len() as u16) as usize,
+            width.saturating_sub(crate::text_utils::display_width(prefix) as u16) as usize,
         );
         vec![Line::from(vec![
-            Span::styled("● ", dim),
-            Span::styled("\u{25b6} ", dim), // ▶
+            Span::styled("* ", dim),
+            Span::styled("> ", dim),
             Span::styled(summary, dim),
         ])]
     }
@@ -383,7 +378,7 @@ fn render_expanded_details(
             crate::text_utils::truncate_display(&detail, width.saturating_sub(6) as usize);
         lines.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled("\u{2514} ", dim),
+            Span::styled("- ", dim),
             Span::styled(preview, dim),
         ]));
     }
@@ -404,7 +399,7 @@ fn render_expanded_details(
         );
         lines.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled("\u{21b3} ", Style::default().fg(theme.primary)),
+            Span::styled("-> ", Style::default().fg(theme.primary)),
             Span::styled(preview, Style::default().fg(theme.text_muted)),
         ]));
     }
@@ -412,13 +407,13 @@ fn render_expanded_details(
 
 /// Extract a detail hint to show below the activity line (e.g., file path, command).
 /// The returned string is truncated to fit within the available width (accounting
-/// for the `"  └ "` prefix that the caller prepends — 4 display columns).
+/// for the `"  - "` prefix that the caller prepends - 4 display columns).
 fn tool_detail_hint(content: &str, width: u16) -> Option<String> {
     let tool_name = content.split_whitespace().next().unwrap_or("tool");
     let args_str = content[tool_name.len()..].trim_start();
     let args: Option<serde_json::Value> = serde_json::from_str(args_str).ok();
 
-    // Budget for the hint text itself: total width minus the 4-column prefix "  └ ".
+    // Budget for the hint text itself: total width minus the 4-column prefix "  - ".
     let max_hint = width.saturating_sub(4) as usize;
 
     let hint = match tool_name {

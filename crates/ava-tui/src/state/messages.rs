@@ -1,10 +1,10 @@
 use crate::rendering::markdown::markdown_to_lines;
 use crate::state::theme::Theme;
+use crate::text_utils::{display_width, safe_char_width};
 use ratatui::layout::Alignment;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use std::time::Duration;
-use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessageKind {
@@ -74,7 +74,7 @@ pub struct UiMessage {
 }
 
 /// Minimal dot-pulse spinner — calmer than braille, safe single-width chars.
-pub const SPINNER_FRAMES: &[&str] = &["·", ":", "·", " "];
+pub const SPINNER_FRAMES: &[&str] = &[".", ":", ".", " "];
 
 /// Divisor to slow spinner animation. At 16ms ticks, each frame lasts ~150ms
 /// giving a smooth ~1.2s full cycle — a calm breathing pulse.
@@ -87,7 +87,7 @@ pub fn spinner_frame(tick: usize) -> &'static str {
 }
 
 /// Left-border character — full block for visual weight (design: 3px bar).
-const LEFT_BAR: &str = "\u{258E}";
+const LEFT_BAR: &str = "|";
 /// Padding after the left bar (design: content padding 16px ≈ 2 chars).
 const BAR_PAD: &str = "  ";
 
@@ -155,7 +155,7 @@ impl UiMessage {
     }
 
     /// Width of the bar prefix (LEFT_BAR + BAR_PAD) in columns.
-    const BAR_PREFIX_WIDTH: u16 = 3; // "▎" (1) + "  " (2)
+    const BAR_PREFIX_WIDTH: u16 = 3; // "|" (1) + "  " (2)
 
     /// Prepend a colored left bar + padding to each line, then manually
     /// wrap so that every visual row carries its own bar prefix.
@@ -209,7 +209,7 @@ impl UiMessage {
             .collect();
 
         // Check total width — fast path if no wrapping needed.
-        let total_width: usize = segments.iter().map(|s| s.text.width()).sum();
+        let total_width: usize = segments.iter().map(|s| display_width(&s.text)).sum();
         if total_width <= max_width {
             return vec![segments
                 .into_iter()
@@ -240,7 +240,7 @@ impl UiMessage {
                     continue;
                 }
 
-                let rem_width = remaining.width();
+                let rem_width = display_width(remaining);
                 if rem_width <= avail {
                     current_row.push(Span::styled(remaining.to_owned(), style));
                     current_width += rem_width;
@@ -302,7 +302,7 @@ impl UiMessage {
         let mut byte_at_max = 0usize;
 
         for (i, ch) in text.char_indices() {
-            let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+            let w = safe_char_width(ch);
             if col + w > max_cols {
                 byte_at_max = i;
                 break;
@@ -357,7 +357,7 @@ impl UiMessage {
                 // Append blinking cursor to last line while streaming
                 if self.is_streaming {
                     let cursor_char = if (spinner_tick / 8) % 2 == 0 {
-                        "\u{258c}" // ▌
+                        "|"
                     } else {
                         " "
                     };
@@ -371,17 +371,16 @@ impl UiMessage {
 
                 Self::prepend_bars(&mut content_lines, bar_color, width);
 
-                // Per-message footer: ■ mode · model · duration (only after streaming completes)
+                // Per-message footer: # mode . model . duration (only after streaming completes)
                 if !self.is_streaming {
                     if let Some(ref model) = self.model_name {
                         let mode_label = self.agent_mode.as_deref().unwrap_or("Code");
                         let duration_part = if let Some(secs) = self.response_time {
-                            format!(" \u{00b7} {}", format_duration_secs(secs))
+                            format!(" . {}", format_duration_secs(secs))
                         } else {
                             String::new()
                         };
-                        let footer_raw =
-                            format!("\u{25a0} {mode_label} \u{00b7} {model}{duration_part}");
+                        let footer_raw = format!("# {mode_label} . {model}{duration_part}");
                         // Truncate footer to fit within content area (width minus bar prefix)
                         let footer_budget = (width.saturating_sub(Self::BAR_PREFIX_WIDTH)) as usize;
                         let footer_text =
@@ -432,7 +431,7 @@ impl UiMessage {
                         .fg(theme.text_dimmed)
                         .add_modifier(Modifier::DIM);
                     let mut result = vec![Line::from(vec![
-                        Span::styled("● ", dim),
+                        Span::styled("* ", dim),
                         Span::styled(activity, dim),
                         Span::styled(" [interrupted]", dim),
                     ])];
@@ -441,7 +440,7 @@ impl UiMessage {
                 } else {
                     let mut result = vec![Line::from(vec![
                         Span::styled(
-                            "● ",
+                            "* ",
                             Style::default()
                                 .fg(theme.text_dimmed)
                                 .add_modifier(Modifier::DIM),
@@ -471,7 +470,7 @@ impl UiMessage {
                     // Show full output for edit/write tools
                     "edit" | "write" | "multiedit" | "apply_patch" => {
                         for (i, line) in content_lines.iter().enumerate() {
-                            let prefix = if i == 0 { "\u{25be} " } else { "  " };
+                            let prefix = if i == 0 { "v " } else { "  " };
                             result.push(Line::from(Span::styled(
                                 format!("{prefix}{line}"),
                                 dim_style,
@@ -485,7 +484,7 @@ impl UiMessage {
                             .and_then(|l| l.split_whitespace().last())
                             .unwrap_or("file");
                         result.push(Line::from(Span::styled(
-                            format!("\u{25be} \u{1f4c4} Read {filename} ({total} lines)"),
+                            format!("v [F] Read {filename} ({total} lines)"),
                             dim_style,
                         )));
                     }
@@ -493,7 +492,7 @@ impl UiMessage {
                     "bash" => {
                         let cmd_line = content_lines.first().copied().unwrap_or("");
                         result.push(Line::from(Span::styled(
-                            format!("\u{25be} $ {cmd_line}"),
+                            format!("v $ {cmd_line}"),
                             dim_style,
                         )));
                         let output_lines = if total > 1 { &content_lines[1..] } else { &[] };
@@ -512,7 +511,7 @@ impl UiMessage {
                     // Glob/grep: show match count summary
                     "glob" | "grep" => {
                         result.push(Line::from(Span::styled(
-                            format!("\u{25be} {total} matches"),
+                            format!("v {total} matches"),
                             dim_style,
                         )));
                     }
@@ -525,7 +524,7 @@ impl UiMessage {
                             &content_lines[..]
                         };
                         for (i, line) in display_lines.iter().enumerate() {
-                            let prefix = if i == 0 { "\u{25be} " } else { "  " };
+                            let prefix = if i == 0 { "v " } else { "  " };
                             result.push(Line::from(Span::styled(
                                 format!("{prefix}{line}"),
                                 dim_style,
@@ -546,7 +545,7 @@ impl UiMessage {
                 let style = Style::default()
                     .fg(theme.text_dimmed)
                     .add_modifier(Modifier::ITALIC);
-                let dot = Span::styled("\u{25cf} ", Style::default().fg(theme.primary));
+                let dot = Span::styled("* ", Style::default().fg(theme.primary));
 
                 if !show_thinking {
                     // Minimal single-line hint when thinking visibility is off
@@ -554,7 +553,7 @@ impl UiMessage {
                         .fg(theme.text_dimmed)
                         .add_modifier(Modifier::DIM | Modifier::ITALIC);
                     let mut result = vec![Line::from(vec![
-                        Span::styled("\u{00b7} ", dim_style), // · (middle dot)
+                        Span::styled(". ", dim_style),
                         Span::styled("thinking...", dim_style),
                     ])];
                     Self::prepend_bars(&mut result, bar_color, width);
@@ -573,9 +572,9 @@ impl UiMessage {
                     // Header line with expand/collapse indicator
                     let header_label = if is_collapsible {
                         if self.thinking_expanded {
-                            "Thinking \u{25bc}" // ▼ = expanded
+                            "Thinking v"
                         } else {
-                            "Thinking \u{25b6}" // ▶ = collapsed
+                            "Thinking >"
                         }
                     } else {
                         "Thinking"
@@ -599,7 +598,7 @@ impl UiMessage {
                         }
                         let click_hint = if total > max_visible {
                             format!(
-                                "\u{25b6} ... ({} more lines \u{2014} click or Ctrl+E to expand)",
+                                "> ... ({} more lines - click or Ctrl+E to expand)",
                                 total - max_visible
                             )
                         } else {
@@ -623,9 +622,9 @@ impl UiMessage {
                     .fg(theme.warning)
                     .add_modifier(Modifier::ITALIC);
 
-                // Header line: ✗ Error
+                // Header line: x Error
                 let mut result = vec![Line::from(vec![
-                    Span::styled("\u{2717} ", bold_error),
+                    Span::styled("x ", bold_error),
                     Span::styled("Error", bold_error),
                 ])];
 
@@ -640,18 +639,18 @@ impl UiMessage {
                 // Contextual hints based on error content
                 let lower = self.content.to_lowercase();
                 let hint = if lower.contains("rate limit") || lower.contains("429") {
-                    Some("Rate limited \u{2014} try again in a moment or switch to a different model")
+                    Some("Rate limited - try again in a moment or switch to a different model")
                 } else if lower.contains("timeout") || lower.contains("timed out") {
-                    Some("Request timed out \u{2014} the model may be overloaded")
+                    Some("Request timed out - the model may be overloaded")
                 } else if lower.contains("authentication")
                     || lower.contains("401")
                     || lower.contains("403")
                 {
-                    Some("Authentication failed \u{2014} check your credentials with /connect")
+                    Some("Authentication failed - check your credentials with /connect")
                 } else if (lower.contains("context") || lower.contains("token"))
                     && lower.contains("exceed")
                 {
-                    Some("Context window exceeded \u{2014} try /compact to reduce context")
+                    Some("Context window exceeded - try /compact to reduce context")
                 } else {
                     None
                 };
@@ -690,16 +689,15 @@ impl UiMessage {
                 let is_running = data.map(|d| d.is_running).unwrap_or(false);
                 let is_failed = data.map(|d| d.failed).unwrap_or(false);
 
-                // Box drawing characters
-                let top_left = "\u{256d}"; // ╭
-                let top_right = "\u{256e}"; // ╮
-                let bot_left = "\u{2570}"; // ╰
-                let bot_right = "\u{256f}"; // ╯
-                let horiz = "\u{2500}"; // ─
-                let vert = "\u{2502}"; // │
+                let top_left = "+";
+                let top_right = "+";
+                let bot_left = "+";
+                let bot_right = "+";
+                let horiz = "-";
+                let vert = "|";
 
                 // Calculate inner width: total width minus bar prefix (3) minus box border+padding on each side (2+1 left, 1+2 right = 6)
-                // Box: "│ " (2) content "│" (1) = 3 chars for box borders
+                // Box: "| " (2) content "|" (1) = 3 chars for box borders
                 // But we also have the left bar prefix (3 chars) prepended later.
                 // Available width inside the box for content:
                 let box_outer_width = if width > Self::BAR_PREFIX_WIDTH + 4 {
@@ -707,7 +705,7 @@ impl UiMessage {
                 } else {
                     40 // fallback minimum
                 };
-                // Inner content width: box_outer_width minus "│ " (2) and " │" (2)
+                // Inner content width: box_outer_width minus "| " (2) and " |" (2)
                 let inner_width = box_outer_width.saturating_sub(4);
 
                 // Style varies by state: running=normal, failed=red, completed=dimmed
@@ -749,21 +747,21 @@ impl UiMessage {
 
                 let mut result = Vec::new();
 
-                // ── Top border ──
                 let fill_len = box_outer_width.saturating_sub(2); // minus corners
                 let top_border = format!("{top_left}{}{top_right}", horiz.repeat(fill_len));
                 result.push(Line::from(Span::styled(top_border, border_style)));
 
                 if is_running {
-                    // ── Header: spinner + "Sub-agent: description" ──
                     let frame = spinner_frame(spinner_tick);
                     let header_content_spans = vec![
                         Span::styled(format!("{frame} "), Style::default().fg(theme.accent)),
                         Span::styled("Sub-agent: ", label_style),
                         Span::styled(desc_display.clone(), desc_style),
                     ];
-                    let header_text_width: usize =
-                        header_content_spans.iter().map(|s| s.content.width()).sum();
+                    let header_text_width: usize = header_content_spans
+                        .iter()
+                        .map(|s| display_width(s.content.as_ref()))
+                        .sum();
                     let header_pad = inner_width.saturating_sub(header_text_width);
                     let mut header_line_spans =
                         vec![Span::styled(format!("{vert} "), border_style)];
@@ -774,7 +772,6 @@ impl UiMessage {
                     ));
                     result.push(Line::from(header_line_spans));
                 } else {
-                    // ── Header: ✓ (success) or ✗ (failed) + "Sub-agent: description" ──
                     let tool_count = data.map(|d| d.tool_count).unwrap_or(0);
                     let duration_str = data
                         .and_then(|d| d.duration)
@@ -783,14 +780,14 @@ impl UiMessage {
 
                     let (icon, icon_style) = if is_failed {
                         (
-                            "\u{2717} ",
+                            "x ",
                             Style::default()
                                 .fg(theme.error)
                                 .add_modifier(Modifier::BOLD),
                         )
                     } else {
                         (
-                            "\u{2713} ",
+                            "+ ",
                             Style::default()
                                 .fg(theme.success)
                                 .add_modifier(Modifier::DIM),
@@ -802,8 +799,10 @@ impl UiMessage {
                         Span::styled("Sub-agent: ", label_style),
                         Span::styled(desc_display.clone(), desc_style),
                     ];
-                    let header_text_width: usize =
-                        header_content_spans.iter().map(|s| s.content.width()).sum();
+                    let header_text_width: usize = header_content_spans
+                        .iter()
+                        .map(|s| display_width(s.content.as_ref()))
+                        .sum();
                     let header_pad = inner_width.saturating_sub(header_text_width);
                     let mut header_line_spans =
                         vec![Span::styled(format!("{vert} "), border_style)];
@@ -814,7 +813,6 @@ impl UiMessage {
                     ));
                     result.push(Line::from(header_line_spans));
 
-                    // ── Stats line: "N tools, Xs" ──
                     let stats = if !duration_str.is_empty() {
                         format!("{tool_count} tools, {duration_str}")
                     } else if tool_count > 0 {
@@ -823,7 +821,7 @@ impl UiMessage {
                         String::new()
                     };
                     if !stats.is_empty() {
-                        let stats_width = stats.width();
+                        let stats_width = display_width(&stats);
                         let stats_pad = inner_width.saturating_sub(stats_width);
                         result.push(Line::from(vec![
                             Span::styled(format!("{vert} "), border_style),
@@ -832,11 +830,9 @@ impl UiMessage {
                         ]));
                     }
 
-                    // ── Result preview: first 3 lines ──
                     if !self.content.is_empty() {
-                        // Inner separator: ├───┤
                         let sep_fill = box_outer_width.saturating_sub(2);
-                        let sep = format!("\u{251c}{}\u{2524}", horiz.repeat(sep_fill));
+                        let sep = format!("+{}+", horiz.repeat(sep_fill));
                         result.push(Line::from(Span::styled(sep, border_style)));
 
                         let content_lines: Vec<&str> = self.content.lines().collect();
@@ -857,18 +853,9 @@ impl UiMessage {
                         };
 
                         for line in display {
-                            // Truncate line to fit inner width
-                            let display_line = if line.width() > inner_width {
-                                let mut end = inner_width.saturating_sub(3);
-                                // Find a valid char boundary
-                                while end > 0 && !line.is_char_boundary(end) {
-                                    end -= 1;
-                                }
-                                format!("{}...", &line[..end])
-                            } else {
-                                line.to_string()
-                            };
-                            let line_width = display_line.width();
+                            let display_line =
+                                crate::text_utils::truncate_display(line, inner_width);
+                            let line_width = display_width(&display_line);
                             let line_pad = inner_width.saturating_sub(line_width);
                             result.push(Line::from(vec![
                                 Span::styled(format!("{vert} "), border_style),
@@ -882,7 +869,7 @@ impl UiMessage {
                         if truncated {
                             let more_text =
                                 format!("[+{} more lines]", content_lines.len() - show_lines);
-                            let more_width = more_text.width();
+                            let more_width = display_width(&more_text);
                             let more_pad = inner_width.saturating_sub(more_width);
                             result.push(Line::from(vec![
                                 Span::styled(format!("{vert} "), border_style),
@@ -895,14 +882,13 @@ impl UiMessage {
                         }
                     }
 
-                    // ── Hint line: only when sub-agent has viewable messages ──
                     let has_conversation = data
                         .map(|d| !d.session_messages.is_empty())
                         .unwrap_or(false);
                     if has_conversation {
                         let msg_count = data.map(|d| d.session_messages.len()).unwrap_or(0);
-                        let hint = format!("[{msg_count} messages \u{2014} Enter to view]");
-                        let hint_width = hint.width();
+                        let hint = format!("[{msg_count} messages - Enter to view]");
+                        let hint_width = display_width(&hint);
                         let hint_pad = inner_width.saturating_sub(hint_width);
                         let hint_style = if is_failed {
                             Style::default()
@@ -921,7 +907,6 @@ impl UiMessage {
                     }
                 }
 
-                // ── Bottom border ──
                 let bot_border = format!(
                     "{bot_left}{}{bot_right}",
                     horiz.repeat(box_outer_width.saturating_sub(2))

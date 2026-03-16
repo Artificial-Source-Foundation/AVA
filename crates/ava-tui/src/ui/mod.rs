@@ -129,8 +129,8 @@ fn render_toasts(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
     let theme = &state.theme;
     for (i, toast) in state.toast.toasts.iter().rev().enumerate() {
         let icon = match toast.kind {
-            ToastKind::Success => "\u{2713} ",
-            ToastKind::Info => "\u{2139} ",
+            ToastKind::Success => "+ ",
+            ToastKind::Info => "i ",
         };
         // Width: border(1) + pad(1) + icon + message + pad(1) + border(1)
         let inner_width = display_width(icon) as u16 + display_width(&toast.message) as u16;
@@ -246,7 +246,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &mut AppState, modal: ModalType) {
                     search_placeholder: "Search models...".to_string(),
                     keybinds: vec![
                         KeybindHint {
-                            key: "\u{2191}\u{2193}".to_string(),
+                            key: "up/down".to_string(),
                             label: "navigate".to_string(),
                         },
                         KeybindHint {
@@ -308,7 +308,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &mut AppState, modal: ModalType) {
                     search_placeholder: "Search themes...".to_string(),
                     keybinds: vec![
                         KeybindHint {
-                            key: "\u{2191}\u{2193}".to_string(),
+                            key: "up/down".to_string(),
                             label: "navigate".to_string(),
                         },
                         KeybindHint {
@@ -367,7 +367,6 @@ fn render_modal(frame: &mut Frame<'_>, state: &mut AppState, modal: ModalType) {
 fn render_info_panel(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     use crate::widgets::safe_render::truncate_str;
     use ratatui::style::Modifier;
-    use ratatui::widgets::Wrap;
 
     let Some(ref panel) = state.info_panel else {
         return;
@@ -384,7 +383,7 @@ fn render_info_panel(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     ));
 
     // Build content lines, highlighting command names (lines starting with /)
-    let content_lines: Vec<Line<'_>> = panel
+    let content_lines: Vec<Line<'static>> = panel
         .content
         .lines()
         .map(|line| {
@@ -415,8 +414,6 @@ fn render_info_panel(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         })
         .collect();
 
-    let total_lines = content_lines.len() as u16;
-
     // Layout: title (1 line) + separator (1 line) + content (dynamic) + footer (1 line)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -433,23 +430,32 @@ fn render_info_panel(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     // Render separator
     let sep = Line::from(Span::styled(
-        "\u{2500}".repeat(chunks[1].width as usize),
+        "-".repeat(chunks[1].width as usize),
         Style::default().fg(state.theme.border),
     ));
     frame.render_widget(Paragraph::new(sep), chunks[1]);
 
-    // Render scrollable content
+    // Render scrollable content with explicit clamping and manual slicing.
     let content_height = chunks[2].height;
-    let content_paragraph = Paragraph::new(content_lines)
-        .wrap(Wrap { trim: false })
-        .scroll((panel.scroll, 0));
-    frame.render_widget(content_paragraph, chunks[2]);
+    let clamped_lines: Vec<Line<'static>> = content_lines
+        .into_iter()
+        .map(|line| clamp_line(line, chunks[2].width as usize))
+        .collect();
+    let total_lines = clamped_lines.len() as u16;
+    let start = (panel.scroll as usize).min(clamped_lines.len());
+    let end = (start + content_height as usize).min(clamped_lines.len());
+    let visible_lines: Vec<Line<'static>> = clamped_lines
+        .into_iter()
+        .skip(start)
+        .take(end - start)
+        .collect();
+    frame.render_widget(Paragraph::new(visible_lines), chunks[2]);
 
     // Footer with scroll indicator — clamped to area width
     let can_scroll = total_lines > content_height;
     let footer_text = if can_scroll {
         format!(
-            " Esc close | \u{2191}/\u{2193} scroll | {}/{}",
+            " Esc close | up/down scroll | {}/{}",
             panel.scroll + 1,
             total_lines.saturating_sub(content_height) + 1
         )
@@ -527,7 +533,7 @@ fn render_question_modal(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let hint_text = if q.options.is_empty() {
         "[Enter] submit  [Esc] decline"
     } else {
-        "[↑↓] navigate  [Enter] select  [Esc] decline"
+        "[up/down] navigate  [Enter] select  [Esc] decline"
     };
     lines.push(Line::from(Span::styled(
         truncate_str(hint_text, inner_w),

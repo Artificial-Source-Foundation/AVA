@@ -4,12 +4,12 @@
 //! before the final `Paragraph::new()`.  Popup widgets should use
 //! [`anchored_popup`] to guarantee viewport containment.
 
+use crate::text_utils::{display_width, safe_char_width};
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
 use ratatui::Frame;
-use unicode_width::UnicodeWidthStr;
 
 /// Convert a `Line` with borrowed content into a `Line<'static>` by cloning
 /// all span content.
@@ -30,7 +30,7 @@ pub fn clamp_line(line: Line<'static>, max_width: usize) -> Line<'static> {
     let total: usize = line
         .spans
         .iter()
-        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+        .map(|s| display_width(s.content.as_ref()))
         .sum();
     if total <= max_width {
         return line;
@@ -41,7 +41,7 @@ pub fn clamp_line(line: Line<'static>, max_width: usize) -> Line<'static> {
     let budget = max_width.saturating_sub(3); // reserve room for "..."
 
     for span in line.spans {
-        let w = UnicodeWidthStr::width(span.content.as_ref());
+        let w = display_width(span.content.as_ref());
         if used + w <= budget {
             clamped.push(span);
             used += w;
@@ -65,7 +65,7 @@ pub fn truncate_str(s: &str, max_width: usize) -> String {
     let mut result = String::new();
     let mut width = 0;
     for ch in s.chars() {
-        let w = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        let w = safe_char_width(ch);
         if width + w > max_width {
             break;
         }
@@ -104,10 +104,10 @@ pub fn fit_key_value(
     left_style: Style,
     right_style: Style,
 ) -> Line<'static> {
-    let left_w = UnicodeWidthStr::width(left);
+    let left_w = display_width(left);
     let gap = 2; // "  " between key and value
     let available_right = width.saturating_sub(left_w + gap);
-    let right_truncated = if UnicodeWidthStr::width(right) > available_right {
+    let right_truncated = if display_width(right) > available_right {
         format!(
             "{}...",
             &truncate_str(right, available_right.saturating_sub(3))
@@ -115,7 +115,7 @@ pub fn fit_key_value(
     } else {
         right.to_string()
     };
-    let padding = width.saturating_sub(left_w + UnicodeWidthStr::width(right_truncated.as_str()));
+    let padding = width.saturating_sub(left_w + display_width(right_truncated.as_str()));
 
     Line::from(vec![
         Span::styled(left.to_string(), left_style),
@@ -168,7 +168,7 @@ mod tests {
         let total: usize = result
             .spans
             .iter()
-            .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+            .map(|s| display_width(s.content.as_ref()))
             .sum();
         assert!(total <= 10);
     }
@@ -184,7 +184,7 @@ mod tests {
         let total: usize = result
             .spans
             .iter()
-            .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+            .map(|s| display_width(s.content.as_ref()))
             .sum();
         assert!(total <= 12);
     }
@@ -197,7 +197,7 @@ mod tests {
         let total: usize = result
             .spans
             .iter()
-            .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+            .map(|s| display_width(s.content.as_ref()))
             .sum();
         assert!(total <= 8);
     }
@@ -247,7 +247,7 @@ mod tests {
         let total: usize = line
             .spans
             .iter()
-            .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+            .map(|s| display_width(s.content.as_ref()))
             .sum();
         assert_eq!(total, 20); // padded to fill width
     }
@@ -264,8 +264,20 @@ mod tests {
         let total: usize = line
             .spans
             .iter()
-            .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+            .map(|s| display_width(s.content.as_ref()))
             .sum();
         assert!(total <= 15);
+    }
+
+    #[test]
+    fn clamp_line_ambiguous_chars() {
+        let line = Line::from(vec![Span::raw("✓✓✓")]);
+        let result = clamp_line(line, 4);
+        let total: usize = result
+            .spans
+            .iter()
+            .map(|s| display_width(s.content.as_ref()))
+            .sum();
+        assert!(total <= 4);
     }
 }

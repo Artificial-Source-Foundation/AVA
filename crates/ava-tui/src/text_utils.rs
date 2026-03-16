@@ -4,7 +4,27 @@
 //! rather than byte length, so multi-byte and wide characters are handled
 //! correctly without risking panics from slicing inside a code-point.
 
-use unicode_width::UnicodeWidthStr;
+use unicode_width::UnicodeWidthChar;
+
+/// Return a conservative terminal width for a single character.
+///
+/// ASCII keeps the width reported by `unicode-width` so control characters
+/// stay zero-width. Any non-ASCII character is treated as at least 2 columns.
+#[inline]
+pub fn safe_char_width(ch: char) -> usize {
+    let width = UnicodeWidthChar::width(ch).unwrap_or(0);
+    if ch.is_ascii() {
+        width
+    } else {
+        width.max(2)
+    }
+}
+
+/// Return a conservative terminal width for a string.
+#[inline]
+pub fn safe_display_width(s: &str) -> usize {
+    s.chars().map(safe_char_width).sum()
+}
 
 /// Truncate `s` to fit within `max_display_cols` terminal columns.
 ///
@@ -16,7 +36,7 @@ use unicode_width::UnicodeWidthStr;
 /// the raw string is returned as-is — it is the caller's responsibility to
 /// ensure the budget is large enough.
 pub fn truncate_display(s: &str, max_display_cols: usize) -> String {
-    let width = s.width();
+    let width = safe_display_width(s);
     if width <= max_display_cols {
         return s.to_string();
     }
@@ -28,7 +48,7 @@ pub fn truncate_display(s: &str, max_display_cols: usize) -> String {
     let mut col = 0;
     let mut end = 0;
     for ch in s.chars() {
-        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        let cw = safe_char_width(ch);
         if col + cw > budget {
             break;
         }
@@ -43,7 +63,7 @@ pub fn truncate_display(s: &str, max_display_cols: usize) -> String {
 ///
 /// Useful for file-path labels where the end is more informative.
 pub fn truncate_display_start(s: &str, max_display_cols: usize) -> String {
-    let width = s.width();
+    let width = safe_display_width(s);
     if width <= max_display_cols {
         return s.to_string();
     }
@@ -56,7 +76,7 @@ pub fn truncate_display_start(s: &str, max_display_cols: usize) -> String {
     let mut col = 0;
     let mut start = s.len();
     for ch in s.chars().rev() {
-        let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+        let cw = safe_char_width(ch);
         if col + cw > budget {
             break;
         }
@@ -68,11 +88,11 @@ pub fn truncate_display_start(s: &str, max_display_cols: usize) -> String {
 
 /// Compute the display width (terminal columns) of a string.
 ///
-/// This is a thin wrapper around `UnicodeWidthStr::width` exported for
-/// convenience so callers don't need to import `unicode_width` themselves.
+/// This is a conservative wrapper around `unicode-width` that treats every
+/// non-ASCII character as at least 2 columns.
 #[inline]
 pub fn display_width(s: &str) -> usize {
-    s.width()
+    safe_display_width(s)
 }
 
 /// Compute the display width of a `Span`'s content.
@@ -80,7 +100,7 @@ pub fn display_width(s: &str) -> usize {
 /// Identical to `display_width` but accepts the `Cow<str>` inside a Span.
 #[inline]
 pub fn span_display_width(span: &ratatui::text::Span<'_>) -> usize {
-    span.content.width()
+    safe_display_width(span.content.as_ref())
 }
 
 /// Truncate a string at a character boundary (byte-oriented limit).
@@ -134,16 +154,21 @@ mod tests {
 
     #[test]
     fn multibyte_exact_budget() {
-        assert_eq!(truncate_display("café", 4), "café");
+        assert_eq!(truncate_display("café", 5), "café");
     }
 
     #[test]
     fn multibyte_truncated() {
-        // "café latte" = 10 display cols, budget = 7 → 7 - 3 = 4 cols for text
-        // "café" is 4 display cols, fits exactly → "café..."
+        // Conservative width treats 'é' as 2 columns.
         let result = truncate_display("café latte", 7);
-        assert_eq!(result, "café...");
+        assert_eq!(result, "caf...");
         assert!(display_width(&result) <= 7);
+    }
+
+    #[test]
+    fn ambiguous_width_chars_are_overestimated() {
+        assert_eq!(display_width("·"), 2);
+        assert_eq!(display_width("✓"), 2);
     }
 
     #[test]
@@ -230,8 +255,7 @@ mod tests {
 
     #[test]
     fn width_multibyte() {
-        // 'é' is 1 column despite being 2 bytes in UTF-8
-        assert_eq!(display_width("café"), 4);
+        assert_eq!(display_width("café"), 5);
     }
 
     #[test]

@@ -165,10 +165,7 @@ pub fn markdown_to_lines(md: &str, theme: &Theme) -> Vec<Line<'static>> {
                 if !current.is_empty() {
                     lines.push(finalize_line(&mut current, blockquote_depth, theme));
                 }
-                current.push(Span::styled(
-                    "  \u{2022} ",
-                    Style::default().fg(theme.text_muted),
-                ));
+                current.push(Span::styled("  - ", Style::default().fg(theme.text_muted)));
             }
             Event::Start(Tag::Paragraph) => {
                 if !current.is_empty() {
@@ -223,7 +220,7 @@ fn finalize_line(
     let spans = std::mem::take(current);
     if blockquote_depth > 0 {
         let mut prefixed = Vec::with_capacity(spans.len() + 1);
-        let prefix = "\u{2502} ".repeat(blockquote_depth as usize);
+        let prefix = "| ".repeat(blockquote_depth as usize);
         prefixed.push(Span::styled(prefix, Style::default().fg(theme.success)));
         prefixed.extend(spans);
         Line::from(prefixed)

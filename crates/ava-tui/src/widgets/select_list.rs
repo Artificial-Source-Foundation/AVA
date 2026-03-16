@@ -528,15 +528,11 @@ pub fn render_select_list<T: Clone>(
         } else {
             theme.text
         };
-        let cursor = if state.query.is_empty() {
-            ""
-        } else {
-            "\u{2588}"
-        };
+        let cursor = if state.query.is_empty() { "" } else { "|" };
 
         let search_line = Line::from(vec![
             Span::styled(
-                " \u{1F50D} ",
+                " / ",
                 Style::default().fg(theme.text_dimmed).bg(theme.bg_deep),
             ),
             Span::styled(
@@ -608,7 +604,7 @@ pub fn render_select_list<T: Clone>(
         match &item.status {
             Some(ItemStatus::Active) => {
                 spans.push(Span::styled(
-                    " \u{25CF} ",
+                    " * ",
                     Style::default()
                         .fg(if is_selected { fg } else { theme.accent })
                         .bg(bg),
@@ -616,7 +612,7 @@ pub fn render_select_list<T: Clone>(
             }
             Some(ItemStatus::Connected(_)) => {
                 spans.push(Span::styled(
-                    " \u{2713} ",
+                    " + ",
                     Style::default()
                         .fg(if is_selected { fg } else { theme.success })
                         .bg(bg),
@@ -694,11 +690,12 @@ pub fn render_select_list<T: Clone>(
         lines.push(clamp_line(Line::from(spans), inner_width));
     }
 
-    // Render scrollable content
-    let scroll = state.scroll_offset as u16;
-    let widget = Paragraph::new(lines)
-        .scroll((scroll, 0))
-        .style(Style::default().bg(theme.bg_elevated));
+    // Render scrollable content with manual slicing so the paragraph only ever
+    // receives lines that fit inside the viewport.
+    let start = state.scroll_offset.min(lines.len());
+    let end = (start + content_area.height as usize).min(lines.len());
+    let visible_lines: Vec<Line<'_>> = lines.into_iter().skip(start).take(end - start).collect();
+    let widget = Paragraph::new(visible_lines).style(Style::default().bg(theme.bg_elevated));
     frame.render_widget(widget, content_area);
 
     // --- Sticky footer: bg_surface background, keybind hints ---

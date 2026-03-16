@@ -202,7 +202,7 @@ Commands
         self.state.messages.reset_scroll();
 
         self.set_status(
-            "Entered /btw branch \u{2014} use /btw end or Ctrl+Z to restore",
+            "Entered /btw branch - use /btw end or Ctrl+Z to restore",
             StatusLevel::Info,
         );
         self.state.messages.push(UiMessage::new(

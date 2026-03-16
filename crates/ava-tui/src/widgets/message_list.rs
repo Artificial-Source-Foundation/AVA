@@ -1,5 +1,6 @@
 use crate::app::{AppState, ViewMode};
 use crate::state::messages::{MessageKind, UiMessage};
+use crate::text_utils::{display_width, safe_char_width};
 use crate::widgets::message::{render_action_group, render_message_with_options};
 use crate::widgets::welcome::render_welcome;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -7,7 +8,6 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
-use unicode_width::UnicodeWidthStr;
 
 /// Hard-clamp a Line to at most `max_width` display columns.
 ///
@@ -17,7 +17,11 @@ use unicode_width::UnicodeWidthStr;
 /// spans are truncated (and trailing spans dropped) until the total width fits.
 fn clamp_line_width(line: Line<'static>, max_width: usize) -> Line<'static> {
     // Fast path: measure total width and bail early if it fits.
-    let total: usize = line.spans.iter().map(|s| s.content.width()).sum();
+    let total: usize = line
+        .spans
+        .iter()
+        .map(|s| display_width(s.content.as_ref()))
+        .sum();
     if total <= max_width {
         return line;
     }
@@ -30,7 +34,7 @@ fn clamp_line_width(line: Line<'static>, max_width: usize) -> Line<'static> {
         if remaining == 0 {
             break;
         }
-        let span_w = span.content.width();
+        let span_w = display_width(span.content.as_ref());
         if span_w <= remaining {
             remaining -= span_w;
             clamped_spans.push(span);
@@ -39,7 +43,7 @@ fn clamp_line_width(line: Line<'static>, max_width: usize) -> Line<'static> {
             let mut col = 0usize;
             let mut byte_end = 0usize;
             for ch in span.content.chars() {
-                let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                let cw = safe_char_width(ch);
                 if col + cw > remaining {
                     break;
                 }
@@ -237,7 +241,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         drop(bg);
         lines.push(Line::from(vec![
             Span::styled(
-                "\u{2190} ",
+                "< ",
                 Style::default()
                     .fg(state.theme.accent)
                     .add_modifier(Modifier::BOLD),
@@ -258,7 +262,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             Span::styled(status_str, Style::default().fg(state.theme.text_muted)),
         ]));
         lines.push(Line::from(Span::styled(
-            "\u{2500}".repeat(content_width as usize),
+            "-".repeat(content_width as usize),
             Style::default().fg(state.theme.border),
         )));
         lines.push(Line::raw(""));
@@ -273,7 +277,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             .unwrap_or_default();
         lines.push(Line::from(vec![
             Span::styled(
-                "← ",
+                "< ",
                 Style::default()
                     .fg(state.theme.accent)
                     .add_modifier(Modifier::BOLD),
@@ -294,7 +298,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             Span::styled(status_str, Style::default().fg(state.theme.text_muted)),
         ]));
         lines.push(Line::from(Span::styled(
-            "─".repeat(content_width as usize),
+            "-".repeat(content_width as usize),
             Style::default().fg(state.theme.border),
         )));
         lines.push(Line::raw(""));
@@ -304,7 +308,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         let truncated_desc = crate::text_utils::truncate_display(description, 60);
         lines.push(Line::from(vec![
             Span::styled(
-                "\u{2190} ",
+                "< ",
                 Style::default()
                     .fg(state.theme.accent)
                     .add_modifier(Modifier::BOLD),
@@ -324,7 +328,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             ),
         ]));
         lines.push(Line::from(Span::styled(
-            "\u{2500}".repeat(content_width as usize),
+            "-".repeat(content_width as usize),
             Style::default().fg(state.theme.border),
         )));
         lines.push(Line::raw(""));
@@ -449,12 +453,9 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     // produced a line wider than expected, we truncate it here so the
     // Paragraph widget can never emit characters beyond the area boundary.
     //
-    // Safety: subtract 1 column as a guard against characters with ambiguous
-    // East-Asian width (e.g. ■ U+25A0, · U+00B7).  unicode-width reports
-    // them as 1 column, but some terminals render them as 2.  The 1-column
-    // margin prevents any such character from bleeding into the scrollbar /
-    // margin columns on the right.
-    let clamped_width = content_area.width.saturating_sub(1) as usize;
+    // Conservative width measurement now treats non-ASCII as at least 2 columns,
+    // so clamping to the full content width is safe.
+    let clamped_width = content_area.width as usize;
     let clamped_lines: Vec<Line<'static>> = visible_lines
         .into_iter()
         .map(|line| clamp_line_width(line, clamped_width))
@@ -473,8 +474,8 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         let mut scrollbar_state = ScrollbarState::new(max_offset as usize)
             .position(state.messages.scroll_offset as usize);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
-            .thumb_symbol("\u{2593}")
-            .track_symbol(Some("\u{2591}"))
+            .thumb_symbol("#")
+            .track_symbol(Some("."))
             .begin_symbol(None)
             .end_symbol(None)
             .style(Style::default().fg(state.theme.text_dimmed));

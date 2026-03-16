@@ -8,27 +8,14 @@
  *   pushes settings to core via pushSettingsToCore().
  */
 
-import { getCoreSettings } from './core-bridge'
-
-/** Stub type replacing @ava/core-v2/config import */
-interface SettingsEvent {
-  type: string
-  category: string
-}
-
 // ─── Loop Prevention ────────────────────────────────────────────────────────
-
-let _pushing = false
 
 /**
  * Call before pushSettingsToCore() to suppress the echo event.
- * The flag auto-resets on the next microtask.
+ * Retained as a no-op stub for call-site compatibility.
  */
 export function markPushing(): void {
-  _pushing = true
-  queueMicrotask(() => {
-    _pushing = false
-  })
+  // No-op — core-v2 SettingsManager has been removed
 }
 
 // ─── Sync Lifecycle ─────────────────────────────────────────────────────────
@@ -36,24 +23,10 @@ export function markPushing(): void {
 /**
  * Start listening for SettingsManager events and forward them to the window.
  * Returns a cleanup function.
+ *
+ * Note: With core-v2 removed, getCoreSettings() always returns null.
+ * This is now a no-op stub retained for call-site compatibility.
  */
 export function startSettingsSync(): () => void {
-  const sm = getCoreSettings()
-  if (!sm) return () => {}
-
-  const handler = (event: SettingsEvent) => {
-    if (_pushing) return
-
-    if (event.type === 'category_changed' || event.type === 'category_registered') {
-      const value = event.type === 'category_changed' ? sm.get(event.category) : undefined
-      window.dispatchEvent(
-        new CustomEvent('ava:core-settings-changed', {
-          detail: { type: event.type, category: event.category, value },
-        })
-      )
-    }
-  }
-
-  const unsub = sm.on(handler)
-  return unsub
+  return () => {}
 }

@@ -1,9 +1,0 @@
-{
-  "name": "ava-provider-azure",
-  "version": "0.1.0",
-  "description": "Azure OpenAI provider for AVA",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": true,
-  "priority": 50
-}

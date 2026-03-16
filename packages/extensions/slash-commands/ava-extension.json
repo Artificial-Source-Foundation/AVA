@@ -1,9 +1,0 @@
-{
-  "name": "ava-slash-commands",
-  "version": "1.0.0",
-  "description": "Built-in /commands",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": true,
-  "priority": 10
-}

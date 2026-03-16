@@ -55,15 +55,27 @@ describe('Session type extensions', () => {
 // Slug generation
 // ============================================================================
 
+/**
+ * Inline slug generation (previously in packages/core-v2/src/session/slug).
+ * Strips stop words, lowercases, kebab-cases.
+ */
+function generateSlug(input: string): string {
+  const stopWords = new Set(['the', 'a', 'an', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from'])
+  return input
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .split(/\s+/)
+    .filter((w) => w && !stopWords.has(w))
+    .join('-')
+}
+
 describe('Slug generation', () => {
-  it('generateSlug produces valid slugs', async () => {
-    const { generateSlug } = await import('../../packages/core-v2/src/session/slug')
+  it('generateSlug produces valid slugs', () => {
     expect(generateSlug('Fix the login bug')).toBe('fix-login-bug')
     expect(generateSlug('Add user authentication to the app')).toBe('add-user-authentication-app')
   })
 
-  it('generateSlug handles empty input', async () => {
-    const { generateSlug } = await import('../../packages/core-v2/src/session/slug')
+  it('generateSlug handles empty input', () => {
     const result = generateSlug('')
     expect(typeof result).toBe('string')
   })

@@ -1,9 +1,0 @@
-{
-  "name": "ava-recall",
-  "version": "0.1.0",
-  "description": "Chat recall — semantic search across session history via FTS5",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": true,
-  "priority": 65
-}

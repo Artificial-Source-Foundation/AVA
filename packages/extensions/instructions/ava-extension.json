@@ -1,9 +1,0 @@
-{
-  "name": "ava-instructions",
-  "version": "1.0.0",
-  "description": "Project and directory instruction loading",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": true,
-  "priority": 5
-}

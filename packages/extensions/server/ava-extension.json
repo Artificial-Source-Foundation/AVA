@@ -1,9 +1,0 @@
-{
-  "name": "ava-server",
-  "version": "0.1.0",
-  "description": "HTTP server for remote agent control (ACP)",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": false,
-  "priority": 90
-}

@@ -46,7 +46,7 @@ export async function runAppInit(
   setSplashStatus: (status: string) => void,
   setProjectHubVisible: (visible: boolean) => void
 ): Promise<AppInitResult> {
-  const { settings, isToolAutoApproved } = useSettings()
+  const { settings } = useSettings()
   const { initializeProjects, currentProject } = useProject()
   const { loadSessionsForCurrentProject, restoreForCurrentProject } = useSession()
   const { loadWorkflows, getScheduledWorkflows, markWorkflowRun, workflows } = useWorkflows()
@@ -116,7 +116,6 @@ export async function runAppInit(
     setSplashStatus('Initializing core engine...')
     const cleanupCore = await initCoreBridge({
       contextLimit: 200_000,
-      autoApprovalChecker: isToolAutoApproved,
     })
     onCleanup(cleanupCore)
     pushSettingsToCore()
@@ -129,19 +128,8 @@ export async function runAppInit(
     await initializeProjects()
 
     setSplashStatus('Loading plugins...')
-    try {
-      const { loadInstalledPlugins } = await import('../services/extension-loader')
-      const { createExtensionAPI } = await import('../../packages/core-v2/src/extensions/api.js')
-      const { getMessageBus } = await import('../../packages/core-v2/src/bus/index.js')
-      const { getCoreSessionManager } = await import('../services/core-bridge')
-      const sessionMgr = getCoreSessionManager()!
-      const pluginResult = await loadInstalledPlugins((name) =>
-        createExtensionAPI(name, getMessageBus(), sessionMgr)
-      )
-      onCleanup(pluginResult.cleanup)
-    } catch (err) {
-      console.warn('[App] Plugin loading skipped:', err)
-    }
+    // Plugin loading is now handled by the Rust backend.
+    // The packages/core-v2 layer has been removed.
 
     const deepLinkHandle = initDeepLinks()
     onCleanup(() => deepLinkHandle.dispose())

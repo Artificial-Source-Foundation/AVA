@@ -6,14 +6,10 @@
 
 import { invoke } from '@tauri-apps/api/core'
 
-/** Local LLMProvider type (replaces @ava/core-v2/llm import) */
-type LLMProvider = string
 import { STORAGE_KEYS } from '../../config/constants'
 import type { LLMProviderConfig } from '../../config/defaults/provider-defaults'
-import { getCoreSettings } from '../../services/core-bridge'
 import { logDebug, logInfo, logWarn } from '../../services/logger'
 import { writeSettingsToFS } from '../../services/settings-fs'
-import { markPushing } from '../../services/settings-sync'
 import { setPermissionMode } from '../../services/tool-approval-bridge'
 import { DEFAULT_SETTINGS } from './settings-defaults'
 import { mergeWithDefaults } from './settings-hydration'
@@ -107,75 +103,17 @@ export function syncAllApiKeys(current: AppSettings): void {
 // Core Settings Sync — pushes frontend AppSettings → core SettingsManager
 // ============================================================================
 
-/** Push current frontend settings to the core SettingsManager */
+/**
+ * Push current frontend settings to the core SettingsManager.
+ *
+ * Note: With core-v2 removed, getCoreSettings() always returns null.
+ * This function now only syncs the permission mode to the desktop
+ * approval middleware. The rest is a no-op stub.
+ */
 export function pushSettingsToCore(s: AppSettings): void {
-  const sm = getCoreSettings()
-  if (!sm) return
-
-  markPushing() // prevents feedback loop with settings-sync
-
-  // Ensure categories exist (core-v2 only ships 'provider' and 'agent' by default;
-  // extensions may register more, but on first save they might not be loaded yet)
-  const registered = sm.getRegisteredCategories()
-  if (!registered.includes('permissions')) {
-    sm.registerCategory('permissions', { allowBashExecution: false, autoApprovePatterns: [] })
-  }
-  if (!registered.includes('context')) {
-    sm.registerCategory('context', { maxTokens: 4096, compactionThreshold: 80 })
-  }
-  if (!registered.includes('git')) {
-    sm.registerCategory('git', {
-      enabled: true,
-      autoCommit: false,
-      branchPrefix: 'ava/',
-      messagePrefix: '[ava]',
-    })
-  }
-
-  const activeProvider = s.providers.find(
-    (p) => p.enabled && (p.apiKey || p.status === 'connected')
-  )
-  const providerUpdate: Record<string, unknown> = {
-    defaultProvider: (activeProvider?.id ?? 'openai') as LLMProvider,
-    defaultModel: activeProvider?.defaultModel ?? 'gpt-5.2',
-  }
-  if (s.generation.weakModel) {
-    providerUpdate.weakModel = s.generation.weakModel
-  }
-  if (s.generation.editorModel) {
-    providerUpdate.editorModel = s.generation.editorModel
-  }
-  sm.set('provider', providerUpdate)
-  logDebug('settings', 'Provider settings synced', {
-    defaultProvider: providerUpdate.defaultProvider,
-    defaultModel: providerUpdate.defaultModel,
-  })
-
   // Sync permission mode to the desktop approval middleware
   setPermissionMode(s.permissionMode)
-
-  sm.set('permissions', {
-    permissionMode: s.permissionMode,
-    allowBashExecution: s.permissionMode !== 'ask',
-    autoApprovePatterns: s.autoApprovedTools,
-    toolRules: s.toolRules,
-    autoApproveReads: true,
-    autoApproveWrites: s.permissionMode === 'auto-approve' || s.permissionMode === 'bypass',
-    autoApproveCommands: s.permissionMode === 'bypass',
-    smartApprove: s.permissionMode === 'auto-approve',
-  })
-
-  sm.set('context', {
-    maxTokens: s.generation.maxTokens,
-    compactionThreshold: s.generation.compactionThreshold,
-  })
-  sm.set('git', {
-    enabled: s.git.enabled,
-    autoCommit: s.git.autoCommit,
-    branchPrefix: 'ava/',
-    messagePrefix: s.git.commitPrefix,
-  })
-  logDebug('settings', 'Core settings synced')
+  logDebug('settings', 'Core settings sync skipped (core-v2 removed)')
 }
 
 // ============================================================================

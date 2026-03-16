@@ -12,7 +12,21 @@ interface Disposable {
   dispose(): void
 }
 
-type ExtensionAPI = Record<string, unknown>
+/** Minimal ExtensionAPI interface matching plugin-loader.ts */
+interface ExtensionAPI {
+  registerTool(tool: { definition?: { name?: string }; [key: string]: unknown }): Disposable
+  registerCommand: (...args: unknown[]) => Disposable
+  registerAgentMode: (...args: unknown[]) => Disposable
+  registerValidator: (...args: unknown[]) => Disposable
+  registerContextStrategy: (...args: unknown[]) => Disposable
+  registerProvider: (...args: unknown[]) => Disposable
+  addToolMiddleware: (...args: unknown[]) => Disposable
+  on: (...args: unknown[]) => Disposable
+  emit: (...args: unknown[]) => void
+  getSettings: (...args: unknown[]) => unknown
+  onSettingsChanged: (...args: unknown[]) => Disposable
+  getSessionManager: (...args: unknown[]) => unknown
+}
 
 let loadInstalledPlugins: (
   createApi: (name: string) => ExtensionAPI

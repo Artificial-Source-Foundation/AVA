@@ -309,16 +309,19 @@ pub fn render_action_group(
         if let Some(call) = current_call {
             let detail = tool_detail_hint(&call.content, width);
             if let Some(hint) = detail {
-                lines.push(Line::from(vec![
-                    Span::raw("  "),
-                    Span::styled("\u{2514} ", Style::default().fg(theme.text_dimmed)),
-                    Span::styled(
-                        hint,
-                        Style::default()
-                            .fg(theme.text_dimmed)
-                            .add_modifier(Modifier::DIM),
-                    ),
-                ]));
+                lines.push(clamp_line(
+                    Line::from(vec![
+                        Span::raw("  "),
+                        Span::styled("\u{2514} ", Style::default().fg(theme.text_dimmed)),
+                        Span::styled(
+                            hint,
+                            Style::default()
+                                .fg(theme.text_dimmed)
+                                .add_modifier(Modifier::DIM),
+                        ),
+                    ]),
+                    width as usize,
+                ));
             }
         }
 
@@ -376,11 +379,14 @@ fn render_expanded_details(
         let detail = tool_activity_line(&call.content, false);
         let preview =
             crate::text_utils::truncate_display(&detail, width.saturating_sub(6) as usize);
-        lines.push(Line::from(vec![
-            Span::raw("  "),
-            Span::styled("\u{2514} ", dim),
-            Span::styled(preview, dim),
-        ]));
+        lines.push(clamp_line(
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled("\u{2514} ", dim),
+                Span::styled(preview, dim),
+            ]),
+            width as usize,
+        ));
     }
     if tool_calls.len() > 5 {
         lines.push(clamp_line(
@@ -393,15 +399,25 @@ fn render_expanded_details(
     }
 
     if let Some(last_result) = tool_results.last() {
-        let preview = crate::text_utils::truncate_display(
-            &last_result.content.replace('\n', " "),
-            width.saturating_sub(6) as usize,
-        );
-        lines.push(Line::from(vec![
-            Span::raw("  "),
-            Span::styled("\u{21b3} ", Style::default().fg(theme.primary)),
-            Span::styled(preview, Style::default().fg(theme.text_muted)),
-        ]));
+        // Take only the first non-empty line to prevent vertical overflow,
+        // and replace tabs/control chars that break terminal width calculation.
+        let first_line = last_result
+            .content
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("")
+            .replace('\t', " ");
+        // Prefix is "  ↳ " = 4 display columns; add 2 extra safety margin.
+        let preview =
+            crate::text_utils::truncate_display(&first_line, width.saturating_sub(6) as usize);
+        lines.push(clamp_line(
+            Line::from(vec![
+                Span::raw("  "),
+                Span::styled("\u{21b3} ", Style::default().fg(theme.primary)),
+                Span::styled(preview, Style::default().fg(theme.text_muted)),
+            ]),
+            width as usize,
+        ));
     }
 }
 

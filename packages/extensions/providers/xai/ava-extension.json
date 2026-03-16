@@ -1,9 +1,0 @@
-{
-  "name": "ava-provider-xai",
-  "version": "1.0.0",
-  "description": "xAI LLM provider",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": true,
-  "priority": 0
-}

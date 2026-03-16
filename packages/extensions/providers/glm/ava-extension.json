@@ -1,9 +1,0 @@
-{
-  "name": "ava-provider-glm",
-  "version": "1.0.0",
-  "description": "GLM (Zhipu AI) LLM provider",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": true,
-  "priority": 0
-}

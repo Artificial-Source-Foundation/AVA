@@ -1,9 +1,0 @@
-{
-  "name": "ava-provider-litellm",
-  "version": "1.0.0",
-  "description": "LiteLLM proxy LLM provider",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": false,
-  "priority": 0
-}

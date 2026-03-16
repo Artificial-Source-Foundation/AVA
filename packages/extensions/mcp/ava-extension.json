@@ -1,9 +1,0 @@
-{
-  "name": "ava-mcp",
-  "version": "1.0.0",
-  "description": "MCP (Model Context Protocol) client",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": false,
-  "priority": 20
-}

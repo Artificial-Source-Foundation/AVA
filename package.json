@@ -16,10 +16,8 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "typecheck": "tsc --noEmit",
-    "typecheck:all": "pnpm -r typecheck",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:cli": "vitest run cli/src/",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
@@ -29,8 +27,7 @@
     "knip:fix": "knip --fix",
     "analyze": "ANALYZE=true vite build",
     "prepare": "lefthook install",
-    "cli": "node cli/dist/index.js",
-    "cli:acp": "node cli/dist/index.js --acp"
+    "cli": "cargo run --bin ava"
   },
   "license": "MIT",
   "dependencies": {

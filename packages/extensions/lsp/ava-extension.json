@@ -1,9 +1,0 @@
-{
-  "name": "ava-lsp",
-  "version": "1.0.0",
-  "description": "Language Server Protocol integration",
-  "main": "src/index.ts",
-  "builtIn": true,
-  "enabledByDefault": false,
-  "priority": 20
-}

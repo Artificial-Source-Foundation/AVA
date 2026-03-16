@@ -8,7 +8,7 @@ const analyze = process.env.ANALYZE === 'true'
 
 const STUB_PATH = fileURLToPath(new URL('./src/stubs/node-stub.ts', import.meta.url))
 
-// Node.js built-in modules that @ava/core imports but only uses in CLI context.
+// Node.js built-in modules that some transitive dependencies may import.
 // In the browser (Tauri webview), these get replaced with no-op stubs.
 const NODE_BUILTINS = new Set([
   'node:child_process',
@@ -47,7 +47,7 @@ const NODE_BUILTINS = new Set([
 /**
  * Plugin that redirects all Node.js built-in imports to a stub module.
  * Uses `resolveId` hook which fires before `vite:import-analysis`,
- * ensuring workspace-linked packages (like @ava/core) are handled.
+ * ensuring any Node.js built-in imports are handled.
  */
 function stubNodeBuiltins(): Plugin {
   return {
@@ -125,7 +125,7 @@ export default defineConfig(async () => ({
 
   // Exclude reference code, Node.js-only modules, and other non-source directories from optimization
   optimizeDeps: {
-    exclude: ['docs', 'cli', 'packages', 'puppeteer', 'puppeteer-core'],
+    exclude: ['docs', 'cli', 'puppeteer', 'puppeteer-core'],
     include: ['@codemirror/state', '@codemirror/view'],
     entries: ['src/**/*.{ts,tsx}'],
   },

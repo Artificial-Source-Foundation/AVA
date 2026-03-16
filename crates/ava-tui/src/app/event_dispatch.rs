@@ -22,7 +22,10 @@ impl App {
                     self.state.input.handle_paste(value);
                 }
             }
-            AppEvent::Resize(_, _) => {}
+            AppEvent::Resize(_, _) => {
+                // Terminal resized — flag for full clear before next draw
+                self.needs_clear = true;
+            }
             AppEvent::Mouse(mouse) => {
                 use crossterm::event::MouseEventKind;
                 if let Some(modal) = self.state.active_modal {

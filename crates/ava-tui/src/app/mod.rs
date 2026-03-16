@@ -248,6 +248,8 @@ pub struct App {
     foreground_run_id: Option<u64>,
     background_run_routes: HashMap<u64, usize>,
     data_dir: PathBuf,
+    /// Set on terminal resize to force a full clear before next draw.
+    needs_clear: bool,
 }
 
 // StatusSummary removed — /status command was removed
@@ -364,6 +366,7 @@ impl App {
             foreground_run_id: None,
             background_run_routes: HashMap::new(),
             data_dir,
+            needs_clear: false,
         };
         app.sync_custom_command_autocomplete();
         Ok(app)
@@ -454,6 +457,12 @@ impl App {
         }
 
         loop {
+            // On resize, clear the entire terminal buffer to prevent stale artifacts
+            if self.needs_clear {
+                terminal.clear()?;
+                self.needs_clear = false;
+            }
+
             let draw_start = std::time::Instant::now();
             terminal.draw(|frame| ui::render(frame, &mut self.state))?;
             let draw_elapsed = draw_start.elapsed();
@@ -844,6 +853,7 @@ impl App {
             foreground_run_id: None,
             background_run_routes: HashMap::new(),
             data_dir: PathBuf::from(".ava-test"),
+            needs_clear: false,
         }
     }
 

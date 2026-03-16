@@ -20,9 +20,13 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     // Advance spinner animation each frame
     state.messages.advance_spinner();
 
-    // Fill background with deepest bg color — sections layer on top
+    // Nuclear clear: reset every cell in the terminal buffer, then fill with
+    // the deepest background color.  This prevents stale character artifacts
+    // (e.g. `ke ..`, `ac`, `n.`) that survive tab-switching or resize.
+    let full_area = frame.area();
+    frame.render_widget(Clear, full_area);
     let bg_block = Block::default().style(Style::default().bg(state.theme.bg_deep));
-    frame.render_widget(bg_block, frame.area());
+    frame.render_widget(bg_block, full_area);
 
     let area = frame.area();
 

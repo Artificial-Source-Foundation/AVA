@@ -162,6 +162,10 @@ pub struct AgentState {
     /// Sender for mid-stream user messages (steering, follow-up, post-complete).
     /// Set when the agent is started; cleared when it finishes.
     pub message_tx: Option<mpsc::UnboundedSender<QueuedMessage>>,
+    /// Timestamp when the user submitted their goal (for total loop timing).
+    /// Set in `submit_goal`, used in `Complete`/`finish_run` to show total elapsed time
+    /// on the LAST assistant message only.
+    pub loop_started_at: Option<Instant>,
 }
 
 /// Look up context window for a model from the compiled-in registry.
@@ -248,6 +252,7 @@ impl AgentState {
                 cancel: None,
                 task: None,
                 message_tx: None,
+                loop_started_at: None,
             },
             question_rx,
             approval_rx,
@@ -611,6 +616,7 @@ impl AgentState {
             cancel: None,
             task: None,
             message_tx: None,
+            loop_started_at: None,
         }
     }
 

@@ -698,14 +698,12 @@ impl App {
             } else {
                 let mut msg = UiMessage::new(MessageKind::Assistant, content);
                 msg.is_streaming = true;
-                msg.started_at = Some(std::time::Instant::now());
                 msg.agent_mode = Some(self.state.agent_mode.label().to_string());
                 self.state.messages.push(msg);
             }
         } else {
             let mut msg = UiMessage::new(MessageKind::Assistant, content);
             msg.is_streaming = true;
-            msg.started_at = Some(std::time::Instant::now());
             msg.agent_mode = Some(self.state.agent_mode.label().to_string());
             self.state.messages.push(msg);
         }
@@ -725,14 +723,13 @@ impl App {
                 if last.model_name.is_none() {
                     last.model_name = Some(self.state.agent.model_name.clone());
                 }
-                // Finalize response time from started_at
-                if last.response_time.is_none() {
-                    if let Some(started) = last.started_at {
-                        last.response_time = Some(started.elapsed().as_secs_f64());
-                    }
+                // Set total loop duration from loop_started_at
+                if let Some(started) = self.state.agent.loop_started_at {
+                    last.response_time = Some(started.elapsed().as_secs_f64());
                 }
             }
         }
+        self.state.agent.loop_started_at = None;
 
         // Store model info and generate title in session metadata before saving
         if let Some(meta) = result.session.metadata.as_object_mut() {

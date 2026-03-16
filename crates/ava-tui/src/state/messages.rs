@@ -332,11 +332,6 @@ impl UiMessage {
                         let mode_label = self.agent_mode.as_deref().unwrap_or("Code");
                         let duration_part = if let Some(secs) = self.response_time {
                             format!(" \u{00b7} {}", format_duration_secs(secs))
-                        } else if let Some(ref started) = self.started_at {
-                            format!(
-                                " \u{00b7} {}",
-                                format_duration_secs(started.elapsed().as_secs_f64())
-                            )
                         } else {
                             String::new()
                         };

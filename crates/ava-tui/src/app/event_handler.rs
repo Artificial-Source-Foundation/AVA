@@ -140,13 +140,20 @@ impl App {
 
                 // Force flush any buffered tokens before tool call
                 self.force_flush_token_buffer();
-                // Mark last assistant/thinking message as done streaming
+                // Mark last assistant/thinking message as done streaming.
+                // Clear response_time on intermediate assistant messages — only the
+                // LAST assistant message will get the total loop time on Complete.
                 if let Some(last) = self.state.messages.messages.last_mut() {
                     if matches!(last.kind, MessageKind::Assistant | MessageKind::Thinking) {
                         last.is_streaming = false;
-                        if matches!(last.kind, MessageKind::Assistant) && last.model_name.is_none()
-                        {
-                            last.model_name = Some(self.state.agent.model_name.clone());
+                        if matches!(last.kind, MessageKind::Assistant) {
+                            if last.model_name.is_none() {
+                                last.model_name = Some(self.state.agent.model_name.clone());
+                            }
+                            // This is an intermediate message (more tool calls coming),
+                            // so suppress its footer by clearing timing data.
+                            last.response_time = None;
+                            last.started_at = None;
                         }
                     }
                 }
@@ -326,21 +333,21 @@ impl App {
 
                 // Force flush any remaining buffered tokens
                 self.force_flush_token_buffer();
-                // Mark last assistant message as done streaming and attach model info
+                // Mark last assistant message as done streaming and attach model info.
+                // Use loop_started_at for the TOTAL elapsed time on the final message.
                 if let Some(last) = self.state.messages.messages.last_mut() {
                     last.is_streaming = false;
                     if matches!(last.kind, MessageKind::Assistant) {
                         if last.model_name.is_none() {
                             last.model_name = Some(self.state.agent.model_name.clone());
                         }
-                        // Finalize response time from started_at
-                        if last.response_time.is_none() {
-                            if let Some(started) = last.started_at {
-                                last.response_time = Some(started.elapsed().as_secs_f64());
-                            }
+                        // Set total loop duration from loop_started_at
+                        if let Some(started) = self.state.agent.loop_started_at {
+                            last.response_time = Some(started.elapsed().as_secs_f64());
                         }
                     }
                 }
+                self.state.agent.loop_started_at = None;
                 self.is_streaming.store(false, Ordering::Relaxed);
                 self.state.agent.is_running = false;
                 self.state.agent.activity = AgentActivity::Idle;
@@ -433,13 +440,13 @@ impl App {
                         if last.model_name.is_none() {
                             last.model_name = Some(self.state.agent.model_name.clone());
                         }
-                        if last.response_time.is_none() {
-                            if let Some(started) = last.started_at {
-                                last.response_time = Some(started.elapsed().as_secs_f64());
-                            }
+                        // Set total loop duration from loop_started_at
+                        if let Some(started) = self.state.agent.loop_started_at {
+                            last.response_time = Some(started.elapsed().as_secs_f64());
                         }
                     }
                 }
+                self.state.agent.loop_started_at = None;
                 self.state.agent.activity = AgentActivity::Idle;
                 self.state
                     .messages
@@ -613,6 +620,7 @@ impl App {
             .push(UiMessage::new(MessageKind::User, goal.clone()));
         self.is_streaming.store(true, Ordering::Relaxed);
         self.state.agent.activity = AgentActivity::Thinking;
+        self.state.agent.loop_started_at = Some(std::time::Instant::now());
         let parent_session_id = self
             .state
             .session

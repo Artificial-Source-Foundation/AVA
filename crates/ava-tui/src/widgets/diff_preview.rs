@@ -1,4 +1,5 @@
 use crate::state::theme::Theme;
+use crate::widgets::safe_render::clamp_line;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -449,17 +450,18 @@ pub fn render_diff_preview(
 fn render_header(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, theme: &Theme) {
     let (total, accepted, rejected, undecided) = state.total_stats();
     let file_count = state.file_count();
+    let header_w = area.width.saturating_sub(2) as usize;
 
     let title_spans = vec![
         Span::styled(
-            "Diff Preview",
+            "Diff Preview".to_string(),
             Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
         ),
         Span::styled(
             format!("  {file_count} file(s), {total} hunk(s)"),
             Style::default().fg(theme.text_muted),
         ),
-        Span::raw("  "),
+        Span::raw("  ".to_string()),
         Span::styled(format!("{accepted}"), Style::default().fg(theme.diff_added)),
         Span::styled(
             format!("/{rejected}"),
@@ -472,7 +474,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, th
     ];
 
     frame.render_widget(
-        Paragraph::new(Line::from(title_spans)),
+        Paragraph::new(clamp_line(Line::from(title_spans), header_w)),
         Rect {
             x: area.x + 1,
             y: area.y,
@@ -500,6 +502,7 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, th
 fn render_hunks(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, theme: &Theme) {
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut current_file: Option<&PathBuf> = None;
+    let line_w = area.width as usize;
 
     for (idx, hunk) in state.hunks.iter().enumerate() {
         let is_selected = idx == state.selected_hunk;
@@ -515,18 +518,21 @@ fn render_hunks(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, the
                 .file_name()
                 .map(|f| f.to_string_lossy().to_string())
                 .unwrap_or_else(|| hunk.file.display().to_string());
-            lines.push(Line::from(vec![
-                Span::styled(
-                    format!("\u{2500}\u{2500} {file_display} "),
-                    Style::default()
-                        .fg(theme.diff_hunk_header)
-                        .add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(
-                    hunk.file.display().to_string(),
-                    Style::default().fg(theme.text_dimmed),
-                ),
-            ]));
+            lines.push(clamp_line(
+                Line::from(vec![
+                    Span::styled(
+                        format!("\u{2500}\u{2500} {file_display} "),
+                        Style::default()
+                            .fg(theme.diff_hunk_header)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        hunk.file.display().to_string(),
+                        Style::default().fg(theme.text_dimmed),
+                    ),
+                ]),
+                line_w,
+            ));
         }
 
         // Hunk header with stats and status
@@ -556,31 +562,37 @@ fn render_hunks(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, the
 
         let selection_indicator = if is_selected { "\u{25B6} " } else { "  " };
 
-        lines.push(Line::from(vec![
-            Span::styled(selection_indicator.to_string(), hunk_header_style),
-            status_marker,
-            Span::styled(
-                format!(
-                    "@@ -{},{} +{},{} @@",
-                    hunk.old_start + 1,
-                    hunk.old_lines.len(),
-                    hunk.old_start + 1,
-                    hunk.new_lines.len()
+        lines.push(clamp_line(
+            Line::from(vec![
+                Span::styled(selection_indicator.to_string(), hunk_header_style),
+                status_marker,
+                Span::styled(
+                    format!(
+                        "@@ -{},{} +{},{} @@",
+                        hunk.old_start + 1,
+                        hunk.old_lines.len(),
+                        hunk.old_start + 1,
+                        hunk.new_lines.len()
+                    ),
+                    hunk_header_style,
                 ),
-                hunk_header_style,
-            ),
-            Span::styled(
-                format!("  +{} -{} ", hunk.additions(), hunk.deletions()),
-                Style::default().fg(theme.text_muted),
-            ),
-        ]));
+                Span::styled(
+                    format!("  +{} -{} ", hunk.additions(), hunk.deletions()),
+                    Style::default().fg(theme.text_muted),
+                ),
+            ]),
+            line_w,
+        ));
 
         // Context before
         for line in &hunk.context_before {
-            lines.push(Line::from(Span::styled(
-                format!("   {line}"),
-                Style::default().fg(theme.diff_context),
-            )));
+            lines.push(clamp_line(
+                Line::from(Span::styled(
+                    format!("   {line}"),
+                    Style::default().fg(theme.diff_context),
+                )),
+                line_w,
+            ));
         }
 
         // Deleted lines
@@ -594,7 +606,10 @@ fn render_hunks(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, the
                     .fg(theme.diff_removed)
                     .bg(theme.diff_removed_bg)
             };
-            lines.push(Line::from(Span::styled(format!("  -{line}"), style)));
+            lines.push(clamp_line(
+                Line::from(Span::styled(format!("  -{line}"), style)),
+                line_w,
+            ));
         }
 
         // Added lines
@@ -608,15 +623,21 @@ fn render_hunks(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, the
                     .fg(theme.diff_added)
                     .bg(theme.diff_added_bg)
             };
-            lines.push(Line::from(Span::styled(format!("  +{line}"), style)));
+            lines.push(clamp_line(
+                Line::from(Span::styled(format!("  +{line}"), style)),
+                line_w,
+            ));
         }
 
         // Context after
         for line in &hunk.context_after {
-            lines.push(Line::from(Span::styled(
-                format!("   {line}"),
-                Style::default().fg(theme.diff_context),
-            )));
+            lines.push(clamp_line(
+                Line::from(Span::styled(
+                    format!("   {line}"),
+                    Style::default().fg(theme.diff_context),
+                )),
+                line_w,
+            ));
         }
     }
 
@@ -639,6 +660,7 @@ fn render_hunks(frame: &mut Frame<'_>, area: Rect, state: &DiffPreviewState, the
 }
 
 fn render_footer(frame: &mut Frame<'_>, area: Rect, _state: &DiffPreviewState, theme: &Theme) {
+    let footer_w = area.width.saturating_sub(2) as usize;
     // Separator
     let sep = "\u{2500}".repeat(area.width.saturating_sub(2) as usize);
     frame.render_widget(
@@ -711,7 +733,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, _state: &DiffPreviewState, t
     ];
 
     frame.render_widget(
-        Paragraph::new(Line::from(hints)),
+        Paragraph::new(clamp_line(Line::from(hints), footer_w)),
         Rect {
             x: area.x + 1,
             y: area.y + 1,

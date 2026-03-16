@@ -3,6 +3,7 @@
 
 use crate::state::rewind::{RewindOption, RewindState};
 use crate::state::theme::Theme;
+use crate::widgets::safe_render::truncate_str;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -10,6 +11,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui::Frame;
 
 pub fn render_rewind_modal(frame: &mut Frame<'_>, area: Rect, rewind: &RewindState, theme: &Theme) {
+    let inner_w = area.width.saturating_sub(2) as usize; // account for block borders
     let mut lines: Vec<Line<'_>> = Vec::new();
 
     // Title
@@ -29,11 +31,14 @@ pub fn render_rewind_modal(frame: &mut Frame<'_>, area: Rect, rewind: &RewindSta
         )));
         lines.push(Line::from(""));
 
-        // Truncate preview to first 50 display columns
-        let truncated = crate::text_utils::truncate_display(&checkpoint.message_preview, 50);
+        // Truncate preview to fit dynamic width (minus quote + indent)
+        let truncated = crate::text_utils::truncate_display(
+            &checkpoint.message_preview,
+            inner_w.saturating_sub(4),
+        );
         let preview = format!("\"{truncated}\"");
         lines.push(Line::from(Span::styled(
-            format!("  {preview}"),
+            truncate_str(&format!("  {preview}"), inner_w),
             Style::default()
                 .fg(theme.text)
                 .add_modifier(Modifier::ITALIC),
@@ -44,7 +49,10 @@ pub fn render_rewind_modal(frame: &mut Frame<'_>, area: Rect, rewind: &RewindSta
         let file_count = rewind.file_change_count_after(rewind.checkpoints.len().saturating_sub(1));
         if file_count > 0 {
             lines.push(Line::from(Span::styled(
-                format!("  {file_count} file(s) changed in this turn"),
+                truncate_str(
+                    &format!("  {file_count} file(s) changed in this turn"),
+                    inner_w,
+                ),
                 Style::default().fg(theme.text_dimmed),
             )));
 
@@ -63,12 +71,12 @@ pub fn render_rewind_modal(frame: &mut Frame<'_>, area: Rect, rewind: &RewindSta
                     .and_then(|f| f.to_str())
                     .unwrap_or(&change.path);
                 lines.push(Line::from(Span::styled(
-                    format!("    {symbol} {filename}"),
+                    truncate_str(&format!("    {symbol} {filename}"), inner_w),
                     Style::default().fg(theme.text_dimmed),
                 )));
                 if i == 4 && changes.len() > 5 {
                     lines.push(Line::from(Span::styled(
-                        format!("    ... and {} more", changes.len() - 5),
+                        truncate_str(&format!("    ... and {} more", changes.len() - 5), inner_w),
                         Style::default().fg(theme.text_dimmed),
                     )));
                 }
@@ -106,7 +114,7 @@ pub fn render_rewind_modal(frame: &mut Frame<'_>, area: Rect, rewind: &RewindSta
         // Show description for the selected option
         if is_selected {
             lines.push(Line::from(Span::styled(
-                format!("     {}", option.description()),
+                truncate_str(&format!("     {}", option.description()), inner_w),
                 Style::default()
                     .fg(theme.text_dimmed)
                     .add_modifier(Modifier::ITALIC),
@@ -118,7 +126,10 @@ pub fn render_rewind_modal(frame: &mut Frame<'_>, area: Rect, rewind: &RewindSta
 
     // Warning
     lines.push(Line::from(Span::styled(
-        "Note: Rewinding does not affect files edited manually or via bash.",
+        truncate_str(
+            "Note: Rewinding does not affect files edited manually or via bash.",
+            inner_w,
+        ),
         Style::default()
             .fg(theme.warning)
             .add_modifier(Modifier::ITALIC),
@@ -128,7 +139,10 @@ pub fn render_rewind_modal(frame: &mut Frame<'_>, area: Rect, rewind: &RewindSta
 
     // Keybind hints
     lines.push(Line::from(Span::styled(
-        "[1-5] select  [\u{2191}\u{2193}] navigate  [Enter] confirm  [Esc] cancel",
+        truncate_str(
+            "[1-5] select  [\u{2191}\u{2193}] navigate  [Enter] confirm  [Esc] cancel",
+            inner_w,
+        ),
         Style::default().fg(theme.text_muted),
     )));
 

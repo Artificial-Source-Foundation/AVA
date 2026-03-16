@@ -260,20 +260,27 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
             frame.render_widget(Paragraph::new(lines), area);
         }
         ConnectScreen::Configure(provider_id) => {
+            let aw = area.width as usize;
             let display = provider_name(provider_id);
             let env_hint = standard_env_var(provider_id);
 
             let mut lines = vec![
-                Line::from(vec![
-                    Span::styled(
-                        format!("Configure {display}"),
-                        Style::default()
-                            .fg(state.theme.primary)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("  "),
-                    Span::styled("esc", Style::default().fg(state.theme.text_dimmed)),
-                ]),
+                clamp_line(
+                    Line::from(vec![
+                        Span::styled(
+                            format!("Configure {display}"),
+                            Style::default()
+                                .fg(state.theme.primary)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw("  ".to_string()),
+                        Span::styled(
+                            "esc".to_string(),
+                            Style::default().fg(state.theme.text_dimmed),
+                        ),
+                    ]),
+                    aw,
+                ),
                 Line::from(""),
             ];
 
@@ -291,25 +298,28 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
             let cursor = if key_active { "\u{2588}" } else { "" };
 
             lines.push(Line::from(Span::styled(
-                format!("{key_indicator}API Key"),
+                truncate_str(&format!("{key_indicator}API Key"), aw),
                 key_label_style,
             )));
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(
-                    if masked.is_empty() && key_active {
-                        cursor.to_string()
-                    } else {
-                        format!("{masked}{cursor}")
-                    },
-                    Style::default().fg(state.theme.text),
-                ),
-            ]));
+            lines.push(clamp_line(
+                Line::from(vec![
+                    Span::raw("  ".to_string()),
+                    Span::styled(
+                        if masked.is_empty() && key_active {
+                            cursor.to_string()
+                        } else {
+                            format!("{masked}{cursor}")
+                        },
+                        Style::default().fg(state.theme.text),
+                    ),
+                ]),
+                aw,
+            ));
 
             // Env var hint
             if let Some(env_var) = env_hint {
                 lines.push(Line::from(Span::styled(
-                    format!("  or set {env_var}"),
+                    truncate_str(&format!("  or set {env_var}"), aw),
                     Style::default().fg(state.theme.text_dimmed),
                 )));
             }
@@ -329,39 +339,63 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
             let url_cursor = if url_active { "\u{2588}" } else { "" };
 
             lines.push(Line::from(Span::styled(
-                format!("{url_indicator}Base URL (optional)"),
+                truncate_str(&format!("{url_indicator}Base URL (optional)"), aw),
                 url_label_style,
             )));
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled(
-                    if pc.base_url_input.is_empty() && url_active {
-                        url_cursor.to_string()
-                    } else {
-                        format!("{}{url_cursor}", pc.base_url_input)
-                    },
-                    Style::default().fg(state.theme.text),
-                ),
-            ]));
+            lines.push(clamp_line(
+                Line::from(vec![
+                    Span::raw("  ".to_string()),
+                    Span::styled(
+                        if pc.base_url_input.is_empty() && url_active {
+                            url_cursor.to_string()
+                        } else {
+                            format!("{}{url_cursor}", pc.base_url_input)
+                        },
+                        Style::default().fg(state.theme.text),
+                    ),
+                ]),
+                aw,
+            ));
 
             // Error message
             if let Some(ref msg) = pc.message {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
-                    msg.as_str(),
+                    truncate_str(msg.as_str(), aw),
                     Style::default().fg(state.theme.error),
                 )));
             }
 
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("enter ", Style::default().fg(state.theme.text_muted)),
-                Span::styled("save  ", Style::default().fg(state.theme.text_dimmed)),
-                Span::styled("tab ", Style::default().fg(state.theme.text_muted)),
-                Span::styled("next field  ", Style::default().fg(state.theme.text_dimmed)),
-                Span::styled("esc ", Style::default().fg(state.theme.text_muted)),
-                Span::styled("back", Style::default().fg(state.theme.text_dimmed)),
-            ]));
+            lines.push(clamp_line(
+                Line::from(vec![
+                    Span::styled(
+                        "enter ".to_string(),
+                        Style::default().fg(state.theme.text_muted),
+                    ),
+                    Span::styled(
+                        "save  ".to_string(),
+                        Style::default().fg(state.theme.text_dimmed),
+                    ),
+                    Span::styled(
+                        "tab ".to_string(),
+                        Style::default().fg(state.theme.text_muted),
+                    ),
+                    Span::styled(
+                        "next field  ".to_string(),
+                        Style::default().fg(state.theme.text_dimmed),
+                    ),
+                    Span::styled(
+                        "esc ".to_string(),
+                        Style::default().fg(state.theme.text_muted),
+                    ),
+                    Span::styled(
+                        "back".to_string(),
+                        Style::default().fg(state.theme.text_dimmed),
+                    ),
+                ]),
+                aw,
+            ));
 
             frame.render_widget(Paragraph::new(lines), area);
         }
@@ -370,41 +404,54 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
             auth_url,
             started,
         } => {
+            let aw = area.width as usize;
             let display = provider_name(provider_id);
             let elapsed_secs = started.elapsed().as_secs();
             let spinner = spinner_char(elapsed_secs);
 
             let lines = vec![
                 Line::from(Span::styled(
-                    format!("Sign in to {display}"),
+                    truncate_str(&format!("Sign in to {display}"), aw),
                     Style::default()
                         .fg(state.theme.primary)
                         .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "Opening browser for authentication...",
+                    truncate_str("Opening browser for authentication...", aw),
                     Style::default().fg(state.theme.text),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "If the browser didn't open, visit:",
+                    truncate_str("If the browser didn't open, visit:", aw),
                     Style::default().fg(state.theme.text_muted),
                 )),
                 Line::from(Span::styled(
-                    truncate_url(auth_url, area.width as usize - 4),
+                    truncate_url(auth_url, aw.saturating_sub(4)),
                     Style::default().fg(state.theme.accent),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    format!("{spinner} Waiting for authorization... {elapsed_secs}s"),
+                    truncate_str(
+                        &format!("{spinner} Waiting for authorization... {elapsed_secs}s"),
+                        aw,
+                    ),
                     Style::default().fg(state.theme.text_muted),
                 )),
                 Line::from(""),
-                Line::from(vec![
-                    Span::styled("[Esc] ", Style::default().fg(state.theme.text_muted)),
-                    Span::styled("Cancel", Style::default().fg(state.theme.text_dimmed)),
-                ]),
+                clamp_line(
+                    Line::from(vec![
+                        Span::styled(
+                            "[Esc] ".to_string(),
+                            Style::default().fg(state.theme.text_muted),
+                        ),
+                        Span::styled(
+                            "Cancel".to_string(),
+                            Style::default().fg(state.theme.text_dimmed),
+                        ),
+                    ]),
+                    aw,
+                ),
             ];
 
             frame.render_widget(Paragraph::new(lines), area);
@@ -415,52 +462,74 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
             verification_uri,
             started,
         } => {
+            let aw = area.width as usize;
             let display = provider_name(provider_id);
             let elapsed_secs = started.elapsed().as_secs();
             let spinner = spinner_char(elapsed_secs);
 
             let lines = vec![
                 Line::from(Span::styled(
-                    format!("Sign in to {display}"),
+                    truncate_str(&format!("Sign in to {display}"), aw),
                     Style::default()
                         .fg(state.theme.primary)
                         .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    "Enter this code:",
+                    truncate_str("Enter this code:", aw),
                     Style::default().fg(state.theme.text),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
-                    format!("    {user_code}"),
+                    truncate_str(&format!("    {user_code}"), aw),
                     Style::default()
                         .fg(state.theme.accent)
                         .add_modifier(Modifier::BOLD),
                 )),
                 Line::from(""),
-                Line::from(vec![
-                    Span::styled("Visit: ", Style::default().fg(state.theme.text_muted)),
-                    Span::styled(
-                        verification_uri.as_str(),
-                        Style::default().fg(state.theme.accent),
-                    ),
-                ]),
+                clamp_line(
+                    Line::from(vec![
+                        Span::styled(
+                            "Visit: ".to_string(),
+                            Style::default().fg(state.theme.text_muted),
+                        ),
+                        Span::styled(
+                            truncate_str(verification_uri.as_str(), aw.saturating_sub(7)),
+                            Style::default().fg(state.theme.accent),
+                        ),
+                    ]),
+                    aw,
+                ),
                 Line::from(""),
                 Line::from(Span::styled(
-                    format!("{spinner} Waiting for authorization... {elapsed_secs}s"),
+                    truncate_str(
+                        &format!("{spinner} Waiting for authorization... {elapsed_secs}s"),
+                        aw,
+                    ),
                     Style::default().fg(state.theme.text_muted),
                 )),
                 Line::from(""),
-                Line::from(vec![
-                    Span::styled("[Enter] ", Style::default().fg(state.theme.text_muted)),
-                    Span::styled(
-                        "Open browser  ",
-                        Style::default().fg(state.theme.text_dimmed),
-                    ),
-                    Span::styled("[Esc] ", Style::default().fg(state.theme.text_muted)),
-                    Span::styled("Cancel", Style::default().fg(state.theme.text_dimmed)),
-                ]),
+                clamp_line(
+                    Line::from(vec![
+                        Span::styled(
+                            "[Enter] ".to_string(),
+                            Style::default().fg(state.theme.text_muted),
+                        ),
+                        Span::styled(
+                            "Open browser  ".to_string(),
+                            Style::default().fg(state.theme.text_dimmed),
+                        ),
+                        Span::styled(
+                            "[Esc] ".to_string(),
+                            Style::default().fg(state.theme.text_muted),
+                        ),
+                        Span::styled(
+                            "Cancel".to_string(),
+                            Style::default().fg(state.theme.text_dimmed),
+                        ),
+                    ]),
+                    aw,
+                ),
             ];
 
             frame.render_widget(Paragraph::new(lines), area);

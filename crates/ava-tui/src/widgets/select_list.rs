@@ -9,7 +9,7 @@ use ratatui::Frame;
 
 use crate::state::theme::Theme;
 use crate::text_utils::display_width;
-use crate::widgets::safe_render::{clamp_line, truncate_str};
+use crate::widgets::safe_render::clamp_line;
 
 /// Status indicator for a select list item.
 #[derive(Debug, Clone)]

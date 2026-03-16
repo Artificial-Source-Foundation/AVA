@@ -1,6 +1,7 @@
 use crate::state::background::{BackgroundState, TaskStatus};
 use crate::state::messages::spinner_frame;
 use crate::state::theme::Theme;
+use crate::widgets::safe_render::{clamp_line, truncate_str};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -15,11 +16,12 @@ pub fn render_task_list(
     theme: &Theme,
     spinner_tick: usize,
 ) {
+    let w = area.width as usize;
     let mut lines: Vec<Line<'_>> = Vec::new();
 
     // Title
     lines.push(Line::from(Span::styled(
-        "Background Tasks",
+        truncate_str("Background Tasks", w),
         Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
     )));
     lines.push(Line::from(""));
@@ -73,8 +75,9 @@ pub fn render_task_list(
                 Style::default().fg(theme.text_dimmed)
             };
 
-            // Truncate goal to fit
-            let goal = task.goal_display(40);
+            // Truncate goal to fit — derive budget from area width
+            let goal_budget = w.saturating_sub(22); // prefix(2) + id(4) + icon(2) + status(8) + quotes(2) + elapsed(~4)
+            let goal = task.goal_display(goal_budget);
             let elapsed = task.elapsed_display();
 
             let goal_style = if is_selected {
@@ -83,20 +86,23 @@ pub fn render_task_list(
                 Style::default().fg(theme.text_muted)
             };
 
-            lines.push(Line::from(vec![
-                Span::styled(prefix.to_string(), prefix_style),
-                Span::styled(
-                    format!("#{:<3}", task.id),
-                    Style::default().fg(theme.text_dimmed),
-                ),
-                Span::styled(format!("{icon} "), icon_style),
-                Span::styled(status_str.to_string(), status_style),
-                Span::styled(format!("\"{goal}\""), goal_style),
-                Span::styled(
-                    format!("  {elapsed}"),
-                    Style::default().fg(theme.text_dimmed),
-                ),
-            ]));
+            lines.push(clamp_line(
+                Line::from(vec![
+                    Span::styled(prefix.to_string(), prefix_style),
+                    Span::styled(
+                        format!("#{:<3}", task.id),
+                        Style::default().fg(theme.text_dimmed),
+                    ),
+                    Span::styled(format!("{icon} "), icon_style),
+                    Span::styled(status_str.to_string(), status_style),
+                    Span::styled(format!("\"{goal}\""), goal_style),
+                    Span::styled(
+                        format!("  {elapsed}"),
+                        Style::default().fg(theme.text_dimmed),
+                    ),
+                ]),
+                w,
+            ));
         }
     }
 
@@ -135,7 +141,7 @@ pub fn render_task_list(
         format!("Failed: {failed}"),
         Style::default().fg(theme.error),
     ));
-    lines.push(Line::from(summary_spans));
+    lines.push(clamp_line(Line::from(summary_spans), w));
 
     if total_tokens > 0 || total_cost > 0.0 {
         let tokens_str = if total_tokens >= 1_000_000 {
@@ -145,34 +151,46 @@ pub fn render_task_list(
         } else {
             total_tokens.to_string()
         };
-        lines.push(Line::from(vec![
-            Span::styled("  ", Style::default()),
-            Span::styled(
-                format!("Total tokens: {tokens_str}  Cost: ${total_cost:.2}"),
-                Style::default().fg(theme.text_muted),
-            ),
-        ]));
+        lines.push(clamp_line(
+            Line::from(vec![
+                Span::styled("  ".to_string(), Style::default()),
+                Span::styled(
+                    format!("Total tokens: {tokens_str}  Cost: ${total_cost:.2}"),
+                    Style::default().fg(theme.text_muted),
+                ),
+            ]),
+            w,
+        ));
     }
 
     // Keybind hints
     lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled("  ", Style::default()),
-        Span::styled(
-            "Enter",
-            Style::default()
-                .fg(theme.text_muted)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(": view task  ", Style::default().fg(theme.text_dimmed)),
-        Span::styled(
-            "Esc",
-            Style::default()
-                .fg(theme.text_muted)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(": close", Style::default().fg(theme.text_dimmed)),
-    ]));
+    lines.push(clamp_line(
+        Line::from(vec![
+            Span::styled("  ".to_string(), Style::default()),
+            Span::styled(
+                "Enter".to_string(),
+                Style::default()
+                    .fg(theme.text_muted)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                ": view task  ".to_string(),
+                Style::default().fg(theme.text_dimmed),
+            ),
+            Span::styled(
+                "Esc".to_string(),
+                Style::default()
+                    .fg(theme.text_muted)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                ": close".to_string(),
+                Style::default().fg(theme.text_dimmed),
+            ),
+        ]),
+        w,
+    ));
 
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, area);

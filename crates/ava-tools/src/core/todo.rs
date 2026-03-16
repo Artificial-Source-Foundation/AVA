@@ -66,6 +66,8 @@ impl Tool for TodoWriteTool {
     }
 
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
+        tracing::debug!(tool = "todo_write", "executing todo_write tool");
+
         let todos_val = args.get("todos").ok_or_else(|| {
             ava_types::AvaError::ValidationError("missing required field: todos".into())
         })?;
@@ -184,6 +186,8 @@ impl Tool for TodoReadTool {
     }
 
     async fn execute(&self, _args: Value) -> ava_types::Result<ToolResult> {
+        tracing::debug!(tool = "todo_read", "executing todo_read tool");
+
         let items = self.state.get();
 
         if items.is_empty() {

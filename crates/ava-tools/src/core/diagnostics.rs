@@ -43,6 +43,8 @@ impl Tool for DiagnosticsTool {
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
         let scope_path = args.get("path").and_then(Value::as_str);
 
+        tracing::debug!(tool = "diagnostics", path = ?scope_path, "executing diagnostics tool");
+
         let command = detect_diagnostics_command(&*self.platform, scope_path).await?;
         let output = self
             .platform

@@ -63,7 +63,11 @@ impl Tool for MultiEditTool {
             AvaError::ValidationError("missing required field: edits".to_string())
         })?;
 
-        tracing::debug!(tool = "multiedit", edit_count = edits.len(), "executing multiedit tool");
+        tracing::debug!(
+            tool = "multiedit",
+            edit_count = edits.len(),
+            "executing multiedit tool"
+        );
 
         if edits.is_empty() {
             return Err(AvaError::ValidationError(

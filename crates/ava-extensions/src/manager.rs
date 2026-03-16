@@ -121,6 +121,11 @@ impl ExtensionManager {
     pub fn register_native<E: Extension>(&mut self, extension: E) -> Result<(), ExtensionError> {
         let descriptor = extension.descriptor();
         validate_descriptor(&descriptor.name, &descriptor.version, &descriptor.path)?;
+        tracing::info!(
+            "Extension registered: {} v{}",
+            descriptor.name,
+            descriptor.version
+        );
 
         self.hooks
             .replace_extension(&descriptor.name, &descriptor.hooks);

@@ -70,6 +70,7 @@ impl LocalFileSystem {
 #[async_trait]
 impl FileSystem for LocalFileSystem {
     async fn read_file(&self, path: &Path) -> Result<String> {
+        tracing::debug!("File read: {}", path.display());
         Ok(tokio::fs::read_to_string(path).await?)
     }
 

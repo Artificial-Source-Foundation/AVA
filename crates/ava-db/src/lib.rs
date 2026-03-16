@@ -33,6 +33,7 @@ impl Database {
     /// Create a new database at the given path
     pub async fn create_at(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
+        tracing::debug!("DB initialized at {}", path.display());
 
         // Ensure parent directory exists
         if let Some(parent) = path.parent() {
@@ -50,7 +51,10 @@ impl Database {
         sqlx::migrate!("./src/migrations")
             .run(&self.pool)
             .await
-            .map_err(|e| ava_types::AvaError::DatabaseError(e.to_string()))?;
+            .map_err(|e| {
+                tracing::error!("DB migration failed: {e}");
+                ava_types::AvaError::DatabaseError(e.to_string())
+            })?;
         Ok(())
     }
 

@@ -68,6 +68,8 @@ impl PermissionInspector for DefaultInspector {
         arguments: &Value,
         context: &InspectionContext,
     ) -> InspectionResult {
+        tracing::debug!("Permission check: tool={tool_name}");
+
         // 0. Internal AVA tools are always safe — zero external risk
         const INTERNAL_TOOLS: &[&str] = &[
             "todo_read",
@@ -107,6 +109,7 @@ impl PermissionInspector for DefaultInspector {
 
                 // Blocked commands are ALWAYS denied, even in auto-approve mode
                 if classification.blocked {
+                    tracing::warn!("Command blocked: {command}");
                     return InspectionResult {
                         action: Action::Deny,
                         reason: classification
@@ -136,6 +139,7 @@ impl PermissionInspector for DefaultInspector {
             for path in &paths {
                 let path_risk = analyze_path(path, &context.workspace_root);
                 if path_risk.system_path && path_risk.risk_level == RiskLevel::Critical {
+                    tracing::warn!("System path access denied: {path}");
                     return InspectionResult {
                         action: Action::Deny,
                         reason: path_risk

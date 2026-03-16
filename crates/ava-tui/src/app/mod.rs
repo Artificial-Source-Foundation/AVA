@@ -413,6 +413,28 @@ impl App {
                     crossterm::event::PopKeyboardEnhancementFlags
                 );
             }
+
+            // Write crash log with full backtrace to ~/.ava/logs/crash-<timestamp>.log
+            if let Some(home) = dirs::home_dir() {
+                let crash_dir = home.join(".ava").join("logs");
+                let _ = std::fs::create_dir_all(&crash_dir);
+                let now = chrono::Utc::now();
+                let timestamp = now.format("%Y-%m-%dT%H-%M-%S");
+                let crash_path = crash_dir.join(format!("crash-{timestamp}.log"));
+                if let Ok(mut f) = std::fs::File::create(&crash_path) {
+                    use std::io::Write;
+                    let _ = writeln!(f, "AVA Crash Report");
+                    let _ = writeln!(f, "Time: {now}");
+                    let _ = writeln!(f, "Panic: {info}");
+                    let _ = writeln!(
+                        f,
+                        "\nBacktrace:\n{}",
+                        std::backtrace::Backtrace::force_capture()
+                    );
+                    eprintln!("Crash log written to: {}", crash_path.display());
+                }
+            }
+
             original_hook(info);
         }));
 

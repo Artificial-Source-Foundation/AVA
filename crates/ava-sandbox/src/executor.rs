@@ -17,6 +17,7 @@ pub async fn execute_plan(
     plan: &SandboxPlan,
     timeout: Duration,
 ) -> Result<SandboxOutput, SandboxError> {
+    tracing::debug!("Sandbox executing: {} {:?}", plan.program, plan.args);
     let result = tokio::time::timeout(timeout, async {
         let mut command = Command::new(&plan.program);
         command

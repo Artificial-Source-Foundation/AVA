@@ -301,6 +301,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "urlencoding",
 ]
 
@@ -317,6 +318,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]
@@ -329,6 +331,7 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -366,6 +369,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -379,6 +383,7 @@ dependencies = [
  "sqlx",
  "tempfile",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -387,6 +392,7 @@ name = "ava-extensions"
 version = "2.0.0"
 dependencies = [
  "libloading",
+ "tracing",
 ]
 
 [[package]]
@@ -427,6 +433,7 @@ version = "2.0.0"
 dependencies = [
  "rusqlite",
  "tempfile",
+ "tracing",
 ]
 
 [[package]]
@@ -438,6 +445,7 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+ "tracing",
  "tree-sitter",
  "tree-sitter-bash",
 ]
@@ -453,6 +461,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tracing",
 ]
 
 [[package]]
@@ -484,6 +493,7 @@ dependencies = [
  "serde",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -496,6 +506,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tracing",
  "uuid",
 ]
 
@@ -573,6 +584,7 @@ dependencies = [
  "similar",
  "syntect",
  "tempfile",
+ "time",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -595,6 +607,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -603,6 +616,7 @@ name = "ava-validator"
 version = "2.0.0"
 dependencies = [
  "criterion",
+ "tracing",
 ]
 
 [[package]]
@@ -4952,6 +4966,7 @@ dependencies = [
  "sharded-slab",
  "smallvec",
  "thread_local",
+ "time",
  "tracing",
  "tracing-core",
  "tracing-log",

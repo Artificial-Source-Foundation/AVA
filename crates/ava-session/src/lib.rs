@@ -77,7 +77,9 @@ impl SessionManager {
     }
 
     pub fn create(&self) -> Result<Session> {
-        Ok(Session::new())
+        let session = Session::new();
+        tracing::info!("Session created: {}", session.id);
+        Ok(session)
     }
 
     pub fn db_path(&self) -> &Path {
@@ -85,6 +87,11 @@ impl SessionManager {
     }
 
     pub fn save(&self, session: &Session) -> Result<()> {
+        tracing::debug!(
+            "Session saved: {}, {} messages",
+            session.id,
+            session.messages.len()
+        );
         let mut conn = self.open_conn()?;
         let tx = conn.transaction().map_err(db_error)?;
 
@@ -135,6 +142,7 @@ impl SessionManager {
     }
 
     pub fn get(&self, id: Uuid) -> Result<Option<Session>> {
+        tracing::debug!("Session loading: {id}");
         let conn = self.open_conn()?;
         self.get_with_conn(&conn, id)
     }

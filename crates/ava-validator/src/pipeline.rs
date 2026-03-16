@@ -43,6 +43,7 @@ impl ValidationPipeline {
         for validator in &self.validators {
             let result = validator.validate(content);
             if !result.valid {
+                tracing::debug!("Validation failed: validator '{}'", validator.name());
                 return result.prepend_detail(format!("validator '{}' failed", validator.name()));
             }
         }

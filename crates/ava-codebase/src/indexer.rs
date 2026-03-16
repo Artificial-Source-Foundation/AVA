@@ -79,6 +79,7 @@ async fn index_roots(roots: &[PathBuf], qualify_repo_paths: bool) -> Result<Code
 
     search.commit()?;
     let pagerank = calculate_pagerank(&graph, 0.85, 20);
+    tracing::info!("Codebase indexed: {} files", graph.node_count());
 
     Ok(CodebaseIndex {
         search,

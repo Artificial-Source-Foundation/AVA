@@ -28,6 +28,7 @@ impl Condenser {
     pub fn condense(&mut self, messages: &[Message]) -> Result<CondensationResult> {
         self.tracker.reset();
         self.tracker.add_messages(messages);
+        let before_tokens = self.tracker.current_tokens;
 
         if !self.tracker.is_over_limit() {
             return Ok(CondensationResult {
@@ -45,6 +46,12 @@ impl Condenser {
             self.tracker.add_messages(&current);
 
             if !self.tracker.is_over_limit() {
+                tracing::info!(
+                    "Context condensed: {} -> {} tokens (strategy: {})",
+                    before_tokens,
+                    self.tracker.current_tokens,
+                    strategy.name()
+                );
                 return Ok(CondensationResult {
                     messages: current,
                     estimated_tokens: self.tracker.current_tokens,
@@ -91,6 +98,7 @@ impl HybridCondenser {
     pub async fn condense(&mut self, messages: &[Message]) -> Result<CondensationResult> {
         self.tracker.reset();
         self.tracker.add_messages(messages);
+        let before_tokens = self.tracker.current_tokens;
 
         if !self.tracker.is_over_limit() {
             return Ok(CondensationResult {
@@ -141,6 +149,12 @@ impl HybridCondenser {
             self.tracker.add_messages(&current);
 
             if !self.tracker.is_over_limit() {
+                tracing::info!(
+                    "Context condensed: {} -> {} tokens (strategy: {})",
+                    before_tokens,
+                    self.tracker.current_tokens,
+                    strategy.name()
+                );
                 return Ok(CondensationResult {
                     messages: current,
                     estimated_tokens: self.tracker.current_tokens,

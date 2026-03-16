@@ -3,6 +3,7 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, error, info};
 
 use crate::config::OAuthConfig;
 use crate::pkce::PkceParams;
@@ -55,6 +56,7 @@ pub async fn exchange_code_for_tokens(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
+        error!("Token exchange failed: {status}");
         return Err(AuthError::TokenExchange(format!(
             "Token endpoint returned {status}: {}",
             &body[..body.len().min(500)]
@@ -71,6 +73,7 @@ pub async fn exchange_code_for_tokens(
         .unwrap_or_default()
         .as_secs();
 
+    info!("OAuth token exchange succeeded");
     Ok(OAuthTokens {
         access_token: raw.access_token,
         refresh_token: raw.refresh_token,
@@ -84,6 +87,7 @@ pub async fn refresh_token(
     config: &OAuthConfig,
     refresh_tok: &str,
 ) -> Result<OAuthTokens, AuthError> {
+    debug!("Refreshing OAuth token");
     let client = reqwest::Client::new();
     let response = client
         .post(config.token_url)
@@ -100,6 +104,7 @@ pub async fn refresh_token(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
+        error!("OAuth token refresh failed: {status}");
         return Err(AuthError::RefreshFailed(format!(
             "Token endpoint returned {status}: {}",
             &body[..body.len().min(500)]
@@ -116,6 +121,7 @@ pub async fn refresh_token(
         .unwrap_or_default()
         .as_secs();
 
+    info!("OAuth token refreshed successfully");
     Ok(OAuthTokens {
         access_token: raw.access_token,
         refresh_token: raw.refresh_token,

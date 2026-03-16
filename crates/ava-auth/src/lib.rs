@@ -312,8 +312,11 @@ pub fn provider_info(id: &str) -> Option<&'static ProviderInfo> {
 
 /// Start the appropriate auth flow for a provider.
 pub async fn authenticate(provider_id: &str) -> Result<AuthResult, AuthError> {
-    let info = provider_info(provider_id)
-        .ok_or_else(|| AuthError::UnknownProvider(provider_id.to_string()))?;
+    tracing::info!("Starting auth flow for provider: {provider_id}");
+    let info = provider_info(provider_id).ok_or_else(|| {
+        tracing::error!("Auth failed: unknown provider '{provider_id}'");
+        AuthError::UnknownProvider(provider_id.to_string())
+    })?;
 
     match info.primary_flow() {
         AuthFlow::Pkce => {

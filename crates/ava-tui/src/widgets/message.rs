@@ -393,10 +393,15 @@ fn render_expanded_details(
 }
 
 /// Extract a detail hint to show below the activity line (e.g., file path, command).
+/// The returned string is truncated to fit within the available width (accounting
+/// for the `"  └ "` prefix that the caller prepends — 4 display columns).
 fn tool_detail_hint(content: &str, width: u16) -> Option<String> {
     let tool_name = content.split_whitespace().next().unwrap_or("tool");
     let args_str = content[tool_name.len()..].trim_start();
     let args: Option<serde_json::Value> = serde_json::from_str(args_str).ok();
+
+    // Budget for the hint text itself: total width minus the 4-column prefix "  └ ".
+    let max_hint = width.saturating_sub(4) as usize;
 
     let hint = match tool_name {
         "read" | "write" | "edit" | "multiedit" => {
@@ -404,7 +409,10 @@ fn tool_detail_hint(content: &str, width: u16) -> Option<String> {
                 .as_ref()
                 .and_then(|v| v.get("file_path").or(v.get("path")))
                 .and_then(|v| v.as_str())?;
-            Some(short_path(path))
+            Some(crate::text_utils::truncate_display(
+                &short_path(path),
+                max_hint,
+            ))
         }
         "bash" => {
             let cmd = args
@@ -412,24 +420,22 @@ fn tool_detail_hint(content: &str, width: u16) -> Option<String> {
                 .and_then(|v| v.get("command").or(v.get("cmd")))
                 .and_then(|v| v.as_str())?;
             let first_line = cmd.lines().next().unwrap_or(cmd);
-            Some(truncate_inline(
-                first_line,
-                width.saturating_sub(8) as usize,
-            ))
+            Some(crate::text_utils::truncate_display(first_line, max_hint))
         }
         "glob" => {
             let pattern = args
                 .as_ref()
                 .and_then(|v| v.get("pattern"))
                 .and_then(|v| v.as_str())?;
-            Some(pattern.to_string())
+            Some(crate::text_utils::truncate_display(pattern, max_hint))
         }
         "grep" => {
             let pattern = args
                 .as_ref()
                 .and_then(|v| v.get("pattern"))
                 .and_then(|v| v.as_str())?;
-            Some(format!("'{pattern}'"))
+            let formatted = format!("'{pattern}'");
+            Some(crate::text_utils::truncate_display(&formatted, max_hint))
         }
         _ => None,
     };

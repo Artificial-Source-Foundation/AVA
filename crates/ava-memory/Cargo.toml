@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 rusqlite = { version = "0.31", features = ["bundled"] }
+tracing.workspace = true
 
 [dev-dependencies]
 tempfile = "3.0"

@@ -17,6 +17,7 @@ pub struct DiscoveredAgent {
 
 /// Discover which CLI agents are installed on this system.
 pub async fn discover_agents() -> Vec<DiscoveredAgent> {
+    tracing::debug!("Discovering CLI agents");
     discover_agents_from_configs(builtin_configs()).await
 }
 
@@ -50,6 +51,7 @@ pub(crate) async fn discover_agents_from_configs(
     }
 
     discovered.sort_by(|a, b| a.name.cmp(&b.name));
+    tracing::info!("Discovered {} CLI agents", discovered.len());
     discovered
 }
 

@@ -24,7 +24,8 @@ async fn main() -> Result<()> {
         && !cli.harness
         && std::io::stdout().is_terminal();
 
-    init_logging(is_tui);
+    // _log_guard MUST be held for the lifetime of main — dropping it loses buffered logs.
+    let _log_guard = init_logging(is_tui);
 
     // Subcommand routing
     match cli.command.clone() {
@@ -119,26 +120,42 @@ async fn main() -> Result<()> {
 }
 
 /// Initialize logging:
-/// - **File**: Always writes debug+ logs to `~/.ava/logs/ava.log` (daily rotation)
+/// - **File**: Always writes to `~/.ava/logs/ava-YYYY-MM-DD.log` (daily rotation, non-blocking)
 /// - **Stderr**: Only in headless/CLI mode, controlled by `RUST_LOG` (default: warn).
 ///   NEVER enabled in TUI mode — stderr output corrupts the alternate screen.
-fn init_logging(is_tui: bool) {
+/// - **Crash logs**: Written to `~/.ava/logs/crash-YYYY-MM-DDTHH-MM-SS.log` on panic.
+///
+/// Returns a guard that MUST be held for the lifetime of `main()`.
+/// Dropping it flushes and closes the non-blocking file writer.
+fn init_logging(is_tui: bool) -> tracing_appender::non_blocking::WorkerGuard {
     let log_dir = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join(".ava")
         .join("logs");
+    std::fs::create_dir_all(&log_dir).ok();
 
-    // File layer: AVA crates at debug, third-party at warn
+    // Non-blocking file writer with daily rotation.
+    // Prefix "ava" produces files like `ava.2026-03-15.log`.
     let file_appender = tracing_appender::rolling::daily(&log_dir, "ava.log");
-    let file_filter = tracing_subscriber::EnvFilter::new(
-        "warn,ava_agent=debug,ava_llm=debug,ava_tui=debug,ava_tools=debug,\
-         ava_praxis=debug,ava_config=debug,ava_session=debug,ava_context=debug,\
-         ava_permissions=info,ava_mcp=info,ava_auth=info,ava_platform=info",
-    );
+    let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
+
+    // File filter: RUST_LOG if set, otherwise AVA crates at debug + third-party at warn
+    let file_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        tracing_subscriber::EnvFilter::new(
+            "info,ava_agent=debug,ava_llm=debug,ava_tui=debug,ava_tools=debug,\
+             ava_praxis=debug,ava_config=debug,ava_session=debug,ava_context=debug,\
+             ava_permissions=info,ava_mcp=info,ava_auth=info,ava_platform=info",
+        )
+    });
+
+    // Format: [2026-03-15T18:30:00Z] [INFO] [crate::module] message
     let file_layer = tracing_subscriber::fmt::layer()
-        .with_writer(file_appender)
+        .with_writer(file_writer)
         .with_target(true)
+        .with_file(true)
+        .with_line_number(true)
         .with_ansi(false)
+        .with_timer(tracing_subscriber::fmt::time::UtcTime::rfc_3339())
         .with_filter(file_filter);
 
     if is_tui {
@@ -147,6 +164,7 @@ fn init_logging(is_tui: bool) {
     } else {
         // Headless/CLI mode: file + stderr
         let stderr_layer = tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
             .with_target(false)
             .compact()
             .with_filter(
@@ -164,4 +182,6 @@ fn init_logging(is_tui: bool) {
         "AVA logging initialized — tui={is_tui}, log dir: {}",
         log_dir.display()
     );
+
+    guard
 }

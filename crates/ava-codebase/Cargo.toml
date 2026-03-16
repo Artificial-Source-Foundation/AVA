@@ -17,6 +17,7 @@ tantivy = "0.22"
 petgraph = "0.6"
 tokio = { workspace = true, features = ["fs", "rt"] }
 regex = "1"
+tracing.workspace = true
 
 [features]
 default = []

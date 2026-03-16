@@ -18,6 +18,7 @@ futures.workspace = true
 tokio-stream.workspace = true
 chrono.workspace = true
 ava-types = { path = "../ava-types" }
+tracing.workspace = true
 
 [dev-dependencies]
 tempfile = "3.0"

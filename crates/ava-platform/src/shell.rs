@@ -63,6 +63,7 @@ impl LocalShell {
 #[async_trait]
 impl Shell for LocalShell {
     async fn execute(&self, command: &str, options: ExecuteOptions) -> Result<CommandOutput> {
+        tracing::debug!("Shell command: {command}");
         let start = tokio::time::Instant::now();
 
         let mut cmd = Command::new("sh");

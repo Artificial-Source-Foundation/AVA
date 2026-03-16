@@ -39,6 +39,7 @@ impl MemorySystem {
     }
 
     pub fn remember(&self, key: &str, value: &str) -> Result<Memory> {
+        tracing::debug!("Memory stored: {key}");
         let conn = self.conn()?;
         conn.execute(
             "INSERT INTO memories (key, value) VALUES (?1, ?2)",
@@ -54,6 +55,7 @@ impl MemorySystem {
     }
 
     pub fn recall(&self, key: &str) -> Result<Option<Memory>> {
+        tracing::debug!("Memory recalled: {key}");
         let conn = self.conn()?;
         conn.query_row(
             "SELECT id, key, value, created_at FROM memories

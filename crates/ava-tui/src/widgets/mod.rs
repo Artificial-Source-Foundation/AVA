@@ -10,6 +10,7 @@ pub mod message_list;
 pub mod model_selector;
 pub mod provider_connect;
 pub mod rewind_modal;
+pub mod safe_render;
 pub mod select_list;
 pub mod session_list;
 pub mod slash_menu;

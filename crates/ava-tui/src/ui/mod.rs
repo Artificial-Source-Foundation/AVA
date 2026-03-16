@@ -4,6 +4,7 @@ use crate::widgets::autocomplete::AutocompleteTrigger;
 use crate::widgets::composer::render_composer;
 use crate::widgets::mention_picker::render_mention_picker;
 use crate::widgets::message_list::render_message_list;
+use crate::widgets::safe_render::clamp_line;
 use crate::widgets::select_list::{render_select_list, KeybindHint, SelectListConfig};
 use crate::widgets::slash_menu::render_slash_menu;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -145,11 +146,16 @@ fn render_toasts(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.border))
             .style(Style::default().bg(theme.bg_surface));
-        let text = Paragraph::new(Line::from(Span::styled(
-            format!("{icon}{}", toast.message),
-            Style::default().fg(theme.text_muted).bg(theme.bg_surface),
-        )))
-        .block(block);
+        // Clamp toast content to the inner width (width minus 2 for borders)
+        let inner_w = rect.width.saturating_sub(2) as usize;
+        let toast_line = clamp_line(
+            Line::from(Span::styled(
+                format!("{icon}{}", toast.message),
+                Style::default().fg(theme.text_muted).bg(theme.bg_surface),
+            )),
+            inner_w,
+        );
+        let text = Paragraph::new(toast_line).block(block);
         frame.render_widget(Clear, rect);
         frame.render_widget(text, rect);
     }

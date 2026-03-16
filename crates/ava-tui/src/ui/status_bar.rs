@@ -2,6 +2,7 @@ use crate::app::{AppState, ModalType, ViewMode};
 use crate::state::agent::AgentActivity;
 use crate::state::messages::spinner_frame;
 use crate::state::voice::VoicePhase;
+use crate::widgets::safe_render::{clamp_line, to_static_line};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -197,8 +198,8 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     }
     left_spans.push(Span::raw(H_PAD));
 
-    // Ensure total span width does not exceed the area
-    truncate_spans_to_fit(&mut left_spans, area.width as usize);
+    // Clamp the final line to the area width
+    let final_line = clamp_line(to_static_line(Line::from(left_spans)), area.width as usize);
 
     // Fill bg first, then render text centered vertically
     let bg = ratatui::widgets::Block::default().style(Style::default().bg(state.theme.bg_surface));
@@ -212,7 +213,7 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         width: area.width,
         height: 1,
     };
-    let widget = Paragraph::new(Line::from(left_spans));
+    let widget = Paragraph::new(final_line);
     frame.render_widget(widget, text_area);
 }
 
@@ -413,8 +414,8 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     all_spans.extend(right_spans);
     all_spans.push(Span::raw(H_PAD));
 
-    // Ensure total span width does not exceed the area
-    truncate_spans_to_fit(&mut all_spans, area.width as usize);
+    // Clamp the final line to the area width
+    let final_line = clamp_line(Line::from(all_spans), area.width as usize);
 
     // Fill bg first, then render text centered vertically
     let bg = Block::default().style(Style::default().bg(state.theme.bg_surface));
@@ -428,22 +429,8 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         width: area.width,
         height: 1,
     };
-    let widget = Paragraph::new(Line::from(all_spans));
+    let widget = Paragraph::new(final_line);
     frame.render_widget(widget, text_area);
-}
-
-/// Truncate a list of spans so their total display width fits within `max_width`.
-///
-/// Removes spans from the end until the total width is within budget.
-fn truncate_spans_to_fit(spans: &mut Vec<Span<'_>>, max_width: usize) {
-    let mut total: usize = spans
-        .iter()
-        .map(|s| crate::text_utils::span_display_width(s))
-        .sum();
-    while total > max_width && !spans.is_empty() {
-        let last = spans.pop().unwrap();
-        total -= crate::text_utils::span_display_width(&last);
-    }
 }
 
 /// Render a list of (key, description) hint pairs with consistent styling.

@@ -1,5 +1,6 @@
 use crate::app::{AppState, ViewMode};
 use crate::text_utils::truncate_display;
+use crate::widgets::safe_render::clamp_line;
 use crate::widgets::todo_list;
 use ava_types::TodoStatus;
 use ratatui::layout::Rect;
@@ -264,7 +265,20 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         )));
     }
 
-    let widget = Paragraph::new(lines).block(
+    // Clamp every line to the inner width (area minus 1 for the left border)
+    let clamp_width = area.width.saturating_sub(1) as usize;
+    let clamped_lines: Vec<Line<'static>> = lines
+        .into_iter()
+        .map(|line| {
+            let static_spans: Vec<Span<'static>> = line
+                .spans
+                .into_iter()
+                .map(|s| Span::styled(s.content.to_string(), s.style))
+                .collect();
+            clamp_line(Line::from(static_spans), clamp_width)
+        })
+        .collect();
+    let widget = Paragraph::new(clamped_lines).block(
         Block::default()
             .borders(Borders::LEFT)
             .border_style(Style::default().fg(state.theme.border)),

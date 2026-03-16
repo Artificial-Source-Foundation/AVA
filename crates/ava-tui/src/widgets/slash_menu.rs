@@ -1,6 +1,7 @@
 use crate::state::theme::Theme;
 use crate::text_utils::display_width;
 use crate::widgets::autocomplete::AutocompleteState;
+use crate::widgets::safe_render::{anchored_popup, clamp_line};
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -28,12 +29,17 @@ pub fn render_slash_menu(
     let visible_count = item_count.min(MAX_VISIBLE);
     // Each item is 1 row, plus 2 for border (top + bottom)
     let menu_height = (visible_count as u16) + 2;
-
-    // Position the menu above the composer
-    let menu_y = composer_rect.y.saturating_sub(menu_height);
     let menu_width = composer_rect.width.saturating_sub(1).min(60);
 
-    let menu_rect = Rect::new(composer_rect.x, menu_y, menu_width, menu_height);
+    // Use anchored_popup to guarantee the menu stays within the viewport
+    let viewport = frame.area();
+    let menu_rect = anchored_popup(
+        viewport,
+        composer_rect.x,
+        composer_rect.y,
+        menu_width,
+        menu_height,
+    );
 
     // Clear the area behind the menu
     frame.render_widget(Clear, menu_rect);
@@ -53,7 +59,8 @@ pub fn render_slash_menu(
         0
     };
 
-    let mut lines: Vec<Line<'_>> = Vec::with_capacity(visible_count);
+    let inner_width = inner.width as usize;
+    let mut lines: Vec<Line<'static>> = Vec::with_capacity(visible_count);
 
     for (idx, item) in state
         .items
@@ -76,11 +83,10 @@ pub fn render_slash_menu(
             theme.text_muted
         };
 
-        let inner_width = inner.width as usize;
         let prefix = format!("/{}", item.value);
         let detail = &item.detail;
 
-        let mut spans: Vec<Span<'_>> = Vec::new();
+        let mut spans: Vec<Span<'static>> = Vec::new();
 
         // Slash prefix styled
         spans.push(Span::styled(
@@ -115,7 +121,7 @@ pub fn render_slash_menu(
             }
         }
 
-        lines.push(Line::from(spans));
+        lines.push(clamp_line(Line::from(spans), inner_width));
     }
 
     let widget = Paragraph::new(lines).style(Style::default().bg(theme.bg_elevated));

@@ -3,6 +3,7 @@ use crate::state::input::InputState;
 use crate::state::theme::Theme;
 use crate::state::voice::VoicePhase;
 use crate::text_utils::truncate_display;
+use crate::widgets::safe_render::clamp_line;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -332,6 +333,20 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         ])
         .split(area)[1];
 
-    let paragraph = Paragraph::new(all_lines).style(Style::default().bg(state.theme.bg_elevated));
+    let max_width = inner.width as usize;
+    let clamped_lines: Vec<Line<'static>> = all_lines
+        .into_iter()
+        .map(|line| {
+            // Convert from Line<'_> to Line<'static> by cloning span content
+            let static_spans: Vec<Span<'static>> = line
+                .spans
+                .into_iter()
+                .map(|s| Span::styled(s.content.to_string(), s.style))
+                .collect();
+            clamp_line(Line::from(static_spans), max_width)
+        })
+        .collect();
+    let paragraph =
+        Paragraph::new(clamped_lines).style(Style::default().bg(state.theme.bg_elevated));
     frame.render_widget(paragraph, inner);
 }

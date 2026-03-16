@@ -308,6 +308,9 @@ impl UiMessage {
             } else if ch == '-' {
                 // Break AFTER the hyphen so it stays on the current line.
                 last_break_byte = Some(i + ch.len_utf8());
+            } else if ch == ',' {
+                // Break AFTER comma so comma stays on current line.
+                last_break_byte = Some(i + ch.len_utf8());
             }
             col += w;
             byte_at_max = i + ch.len_utf8();

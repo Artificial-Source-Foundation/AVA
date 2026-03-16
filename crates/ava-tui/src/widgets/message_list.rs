@@ -217,9 +217,9 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     let spinner_tick = state.messages.spinner_tick;
     let mut lines: Vec<Line<'static>> = Vec::new();
 
-    // Reserve 1 column for the scrollbar + 2 columns of right padding.
+    // Reserve 1 column for the scrollbar + 1 column of right margin.
     // ALL text rendering must use content_width to prevent bleed.
-    let content_width = area.width.saturating_sub(3);
+    let content_width = area.width.saturating_sub(2);
 
     // Top padding: 1 blank line between status bar and first message.
     lines.push(Line::raw(""));
@@ -414,7 +414,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Min(0),    // content
-            Constraint::Length(2), // right margin
+            Constraint::Length(1), // right margin (was 2)
             Constraint::Length(1), // scrollbar
         ])
         .split(area);

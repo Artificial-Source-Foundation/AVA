@@ -1,10 +1,13 @@
 mod app_state;
+mod bridge;
 mod commands;
 mod events;
 mod pty;
 
 use app_state::AppState;
+use bridge::DesktopBridge;
 use commands::{
+    // Existing commands
     agent_run, agent_stream, allow_project_path, append_log, cleanup_old_logs,
     compute_fuzzy_replace, compute_grep, compute_repo_map, evaluate_permission, execute_browser_tool,
     execute_git_tool, execute_tool, extensions_register_native, extensions_register_wasm,
@@ -13,6 +16,14 @@ use commands::{
     oauth_copilot_device_start, oauth_listen, pty_kill, pty_resize, pty_spawn, pty_write,
     read_latest_logs, reflection_reflect_and_fix, sandbox_apply_landlock, set_plugin_enabled,
     set_plugins_state, uninstall_plugin, validation_validate_edit, validation_validate_with_retry,
+    // New bridge commands
+    submit_goal, cancel_agent, get_agent_status,
+    list_sessions, load_session, create_session, delete_session,
+    list_models, get_current_model, switch_model,
+    list_providers,
+    get_config,
+    list_agent_tools,
+    list_mcp_servers, reload_mcp_servers,
 };
 use pty::PtyManager;
 use tauri::Manager;
@@ -35,13 +46,20 @@ pub fn run() {
                 .app_data_dir()
                 .map_err(|error| format!("failed to resolve app data directory: {error}"))?;
 
-            let state = tauri::async_runtime::block_on(AppState::new(app_data_dir))
+            // Legacy AppState (used by existing commands)
+            let state = tauri::async_runtime::block_on(AppState::new(app_data_dir.clone()))
                 .map_err(|error| format!("failed to initialize app state: {error}"))?;
-
             app.manage(state);
+
+            // New DesktopBridge — wraps the real AgentStack
+            let bridge = tauri::async_runtime::block_on(DesktopBridge::init(app_data_dir))
+                .map_err(|error| format!("failed to initialize desktop bridge: {error}"))?;
+            app.manage(bridge);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // --- Existing commands (unchanged) ---
             greet,
             oauth_listen,
             oauth_copilot_device_start,
@@ -80,7 +98,23 @@ pub fn run() {
             extensions_register_wasm,
             validation_validate_edit,
             validation_validate_with_retry,
-            reflection_reflect_and_fix
+            reflection_reflect_and_fix,
+            // --- New: real backend bridge ---
+            submit_goal,
+            cancel_agent,
+            get_agent_status,
+            list_sessions,
+            load_session,
+            create_session,
+            delete_session,
+            list_models,
+            get_current_model,
+            switch_model,
+            list_providers,
+            get_config,
+            list_agent_tools,
+            list_mcp_servers,
+            reload_mcp_servers,
         ])
         .run(context)
         .expect("error while running tauri application");

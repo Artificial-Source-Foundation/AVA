@@ -12,7 +12,8 @@ fn syntect_to_ratatui(color: SynColor) -> Color {
     Color::Rgb(color.r, color.g, color.b)
 }
 
-pub fn highlight_code(code: &str, language: &str) -> Vec<Line<'static>> {
+/// Highlight code with syntax coloring. If `bg` is `Some`, every span gets that background.
+pub fn highlight_code(code: &str, language: &str, bg: Option<Color>) -> Vec<Line<'static>> {
     let syntax = SYNTAX_SET
         .find_syntax_by_token(language)
         .unwrap_or_else(|| SYNTAX_SET.find_syntax_plain_text());
@@ -37,10 +38,11 @@ pub fn highlight_code(code: &str, language: &str) -> Vec<Line<'static>> {
             let spans = ranges
                 .into_iter()
                 .map(|(style, text)| {
-                    Span::styled(
-                        text.to_string(),
-                        Style::default().fg(syntect_to_ratatui(style.foreground)),
-                    )
+                    let mut s = Style::default().fg(syntect_to_ratatui(style.foreground));
+                    if let Some(bg_color) = bg {
+                        s = s.bg(bg_color);
+                    }
+                    Span::styled(text.to_string(), s)
                 })
                 .collect::<Vec<_>>();
             Line::from(spans)

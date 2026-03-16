@@ -468,13 +468,22 @@ impl UiMessage {
                 let mut result = Vec::new();
 
                 match tool {
-                    // Show full output for edit/write tools
+                    // Show full output for edit/write tools with diff coloring
                     "edit" | "write" | "multiedit" | "apply_patch" => {
                         for (i, line) in content_lines.iter().enumerate() {
                             let prefix = if i == 0 { "\u{25be} " } else { "  " };
+                            let line_style = if line.starts_with('+') {
+                                Style::default().fg(ratatui::style::Color::Green)
+                            } else if line.starts_with('-') {
+                                Style::default().fg(ratatui::style::Color::Red)
+                            } else if line.starts_with('@') {
+                                Style::default().fg(ratatui::style::Color::Cyan)
+                            } else {
+                                dim_style
+                            };
                             result.push(Line::from(Span::styled(
                                 format!("{prefix}{line}"),
-                                dim_style,
+                                line_style,
                             )));
                         }
                     }

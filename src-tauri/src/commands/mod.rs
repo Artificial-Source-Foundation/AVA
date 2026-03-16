@@ -18,6 +18,15 @@ pub mod pty;
 mod tool_browser;
 mod tool_git;
 
+// --- New: real backend bridge commands ---
+pub mod agent_commands;
+pub mod session_commands;
+pub mod model_commands;
+pub mod provider_commands;
+pub mod config_commands;
+pub mod tool_commands;
+pub mod mcp_commands;
+
 pub use agent_integration::{
     agent_run, agent_stream, execute_tool, list_tools, ToolInfo,
 };
@@ -41,3 +50,12 @@ pub use pty::{pty_kill, pty_resize, pty_spawn, pty_write};
 pub use tool_browser::execute_browser_tool;
 pub use tool_git::execute_git_tool;
 pub use validation::{validation_validate_edit, validation_validate_with_retry};
+
+// --- New: re-exports for bridge commands ---
+pub use agent_commands::{submit_goal, cancel_agent, get_agent_status};
+pub use session_commands::{list_sessions, load_session, create_session, delete_session};
+pub use model_commands::{list_models, get_current_model, switch_model};
+pub use provider_commands::list_providers;
+pub use config_commands::get_config;
+pub use tool_commands::list_agent_tools;
+pub use mcp_commands::{list_mcp_servers, reload_mcp_servers};

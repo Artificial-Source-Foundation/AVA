@@ -50,6 +50,10 @@ ava-mcp = { path = "../crates/ava-mcp" }
 ava-session = { path = "../crates/ava-session" }
 ava-codebase = { path = "../crates/ava-codebase" }
 ava-auth = { path = "../crates/ava-auth" }
+ava-config = { path = "../crates/ava-config" }
+ava-types = { path = "../crates/ava-types" }
+ava-platform = { path = "../crates/ava-platform" }
+tokio-util = "0.7"
 
 [profile.release]
 lto = true

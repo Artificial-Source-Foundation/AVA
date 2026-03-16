@@ -7,6 +7,8 @@ use tauri::{Emitter, Window};
 pub enum AgentEvent {
     #[serde(rename = "token")]
     Token { content: String },
+    #[serde(rename = "thinking")]
+    Thinking { content: String },
     #[serde(rename = "tool_call")]
     ToolCall { name: String, args: Value },
     #[serde(rename = "tool_result")]
@@ -17,6 +19,18 @@ pub enum AgentEvent {
     Complete { session: Value },
     #[serde(rename = "error")]
     Error { message: String },
+    #[serde(rename = "token_usage")]
+    TokenUsage {
+        input_tokens: usize,
+        output_tokens: usize,
+        cost_usd: f64,
+    },
+    #[serde(rename = "budget_warning")]
+    BudgetWarning {
+        threshold_percent: u8,
+        current_cost_usd: f64,
+        max_budget_usd: f64,
+    },
 }
 
 pub struct EventEmitter {
@@ -89,6 +103,73 @@ impl EventEmitter {
                 },
             )
             .map_err(|e| e.to_string())
+    }
+}
+
+/// Convert an `ava_agent::AgentEvent` to a Tauri `AgentEvent` payload.
+/// Returns `None` for events that have no direct desktop representation
+/// (e.g. `ToolStats`, `SubAgentComplete`).
+pub fn from_backend_event(
+    event: &ava_agent::agent_loop::AgentEvent,
+) -> Option<AgentEvent> {
+    use ava_agent::agent_loop::AgentEvent as BE;
+    match event {
+        BE::Token(content) => Some(AgentEvent::Token {
+            content: content.clone(),
+        }),
+        BE::Thinking(content) => Some(AgentEvent::Thinking {
+            content: content.clone(),
+        }),
+        BE::ToolCall(tc) => Some(AgentEvent::ToolCall {
+            name: tc.name.clone(),
+            args: tc.arguments.clone(),
+        }),
+        BE::ToolResult(tr) => Some(AgentEvent::ToolResult {
+            content: tr.content.clone(),
+            is_error: tr.is_error,
+        }),
+        BE::Progress(msg) => Some(AgentEvent::Progress {
+            message: msg.clone(),
+        }),
+        BE::Complete(session) => {
+            let session_json = serde_json::to_value(session).unwrap_or_default();
+            Some(AgentEvent::Complete {
+                session: session_json,
+            })
+        }
+        BE::Error(msg) => Some(AgentEvent::Error {
+            message: msg.clone(),
+        }),
+        BE::TokenUsage {
+            input_tokens,
+            output_tokens,
+            cost_usd,
+        } => Some(AgentEvent::TokenUsage {
+            input_tokens: *input_tokens,
+            output_tokens: *output_tokens,
+            cost_usd: *cost_usd,
+        }),
+        BE::BudgetWarning {
+            threshold_percent,
+            current_cost_usd,
+            max_budget_usd,
+        } => Some(AgentEvent::BudgetWarning {
+            threshold_percent: *threshold_percent,
+            current_cost_usd: *current_cost_usd,
+            max_budget_usd: *max_budget_usd,
+        }),
+        // ToolStats and SubAgentComplete don't have a direct frontend representation yet.
+        _ => None,
+    }
+}
+
+/// Emit a backend `AgentEvent` to all Tauri windows via the app handle.
+pub fn emit_backend_event<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    event: &ava_agent::agent_loop::AgentEvent,
+) {
+    if let Some(payload) = from_backend_event(event) {
+        let _ = handle.emit("agent-event", payload);
     }
 }
 

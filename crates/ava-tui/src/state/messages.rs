@@ -393,48 +393,36 @@ impl UiMessage {
                 result
             }
             MessageKind::ToolCall => {
-                // Compact OpenCode-style: "▸ tool_name · args"
-                let tool_name = self.content.split_whitespace().next().unwrap_or("");
-                let rest = self.content[tool_name.len()..].trim_start();
+                // Human-readable activity line (Claude Code style)
+                let activity =
+                    crate::widgets::message::tool_activity_line(&self.content, self.is_streaming);
 
                 if self.cancelled {
-                    // Cancelled tool calls render fully dimmed with [interrupted] suffix
                     let dim = Style::default()
                         .fg(theme.text_dimmed)
                         .add_modifier(Modifier::DIM);
-                    let mut spans = vec![
-                        Span::styled("\u{25b8} ", dim),
-                        Span::styled(format!("{tool_name} "), dim),
-                    ];
-                    if !rest.is_empty() {
-                        spans.push(Span::styled(rest.to_owned(), dim));
-                        spans.push(Span::styled(" ", dim));
-                    }
-                    spans.push(Span::styled("[interrupted]", dim));
-                    let mut result = vec![Line::from(spans)];
+                    let mut result = vec![Line::from(vec![
+                        Span::styled("● ", dim),
+                        Span::styled(activity, dim),
+                        Span::styled(" [interrupted]", dim),
+                    ])];
                     Self::prepend_bars(&mut result, bar_color, width);
                     result
                 } else {
-                    let icon_color = match tool_name {
-                        "edit" | "write" | "apply_patch" | "bash" => theme.warning,
-                        _ => theme.success,
-                    };
-                    let mut spans = vec![
-                        Span::styled("\u{25b8} ", Style::default().fg(icon_color)),
+                    let mut result = vec![Line::from(vec![
                         Span::styled(
-                            format!("{tool_name} "),
+                            "● ",
                             Style::default()
-                                .fg(theme.text_muted)
-                                .add_modifier(Modifier::BOLD),
+                                .fg(theme.text_dimmed)
+                                .add_modifier(Modifier::DIM),
                         ),
-                    ];
-                    if !rest.is_empty() {
-                        spans.push(Span::styled(
-                            rest.to_owned(),
-                            Style::default().fg(theme.text_dimmed),
-                        ));
-                    }
-                    let mut result = vec![Line::from(spans)];
+                        Span::styled(
+                            activity,
+                            Style::default()
+                                .fg(theme.text_dimmed)
+                                .add_modifier(Modifier::DIM),
+                        ),
+                    ])];
                     Self::prepend_bars(&mut result, bar_color, width);
                     result
                 }

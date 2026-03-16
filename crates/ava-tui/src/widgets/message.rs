@@ -22,6 +22,227 @@ pub fn render_message_with_options(
     message.to_lines_with_options(theme, spinner_tick, width, show_thinking)
 }
 
+/// Generate a human-readable activity description for a single tool call.
+/// `active` = true means the tool is currently running.
+pub(crate) fn tool_activity_line(content: &str, active: bool) -> String {
+    let tool_name = content.split_whitespace().next().unwrap_or("tool");
+    let args_str = content[tool_name.len()..].trim_start();
+
+    // Try to extract useful fields from JSON args
+    let args: Option<serde_json::Value> = serde_json::from_str(args_str).ok();
+
+    match tool_name {
+        "read" => {
+            let path = args
+                .as_ref()
+                .and_then(|v| v.get("file_path").or(v.get("path")))
+                .and_then(|v| v.as_str())
+                .unwrap_or("file");
+            let short = short_path(path);
+            if active {
+                format!("Reading {short}...")
+            } else {
+                format!("Read {short}")
+            }
+        }
+        "write" => {
+            let path = args
+                .as_ref()
+                .and_then(|v| v.get("file_path").or(v.get("path")))
+                .and_then(|v| v.as_str())
+                .unwrap_or("file");
+            let short = short_path(path);
+            if active {
+                format!("Writing {short}...")
+            } else {
+                format!("Wrote {short}")
+            }
+        }
+        "edit" | "multiedit" => {
+            let path = args
+                .as_ref()
+                .and_then(|v| v.get("file_path").or(v.get("path")))
+                .and_then(|v| v.as_str())
+                .unwrap_or("file");
+            let short = short_path(path);
+            if active {
+                format!("Editing {short}...")
+            } else {
+                format!("Edited {short}")
+            }
+        }
+        "bash" => {
+            let cmd = args
+                .as_ref()
+                .and_then(|v| v.get("command").or(v.get("cmd")))
+                .and_then(|v| v.as_str())
+                .unwrap_or("command");
+            let short_cmd = truncate_inline(cmd, 60);
+            if active {
+                format!("Running: {short_cmd}")
+            } else {
+                format!("Ran: {short_cmd}")
+            }
+        }
+        "glob" => {
+            let pattern = args
+                .as_ref()
+                .and_then(|v| v.get("pattern"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("*");
+            if active {
+                format!("Searching for {pattern}...")
+            } else {
+                format!("Searched for {pattern}")
+            }
+        }
+        "grep" => {
+            let pattern = args
+                .as_ref()
+                .and_then(|v| v.get("pattern"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("pattern");
+            let short_pat = truncate_inline(pattern, 40);
+            if active {
+                format!("Searching for '{short_pat}'...")
+            } else {
+                format!("Searched for '{short_pat}'")
+            }
+        }
+        "apply_patch" => {
+            if active {
+                "Applying patch...".to_string()
+            } else {
+                "Applied patch".to_string()
+            }
+        }
+        "task" => {
+            if active {
+                "Spawning sub-agent...".to_string()
+            } else {
+                "Sub-agent completed".to_string()
+            }
+        }
+        "codebase_search" => {
+            let query = args
+                .as_ref()
+                .and_then(|v| v.get("query"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("query");
+            let short_q = truncate_inline(query, 40);
+            if active {
+                format!("Searching codebase for '{short_q}'...")
+            } else {
+                format!("Searched codebase for '{short_q}'")
+            }
+        }
+        _ => {
+            if active {
+                format!("Running {tool_name}...")
+            } else {
+                format!("{tool_name} completed")
+            }
+        }
+    }
+}
+
+/// Shorten a file path to just the last 2-3 components for display.
+fn short_path(path: &str) -> String {
+    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    if parts.len() <= 3 {
+        return path.to_string();
+    }
+    format!(".../{}", parts[parts.len() - 3..].join("/"))
+}
+
+/// Truncate a string inline (for commands/patterns), adding "..." if too long.
+fn truncate_inline(s: &str, max: usize) -> String {
+    // Take only the first line
+    let first_line = s.lines().next().unwrap_or(s);
+    if first_line.len() <= max {
+        first_line.to_string()
+    } else {
+        format!("{}...", &first_line[..max.saturating_sub(3)])
+    }
+}
+
+/// Generate a summary of completed tool activity for the action group header.
+fn tool_activity_summary(tool_calls: &[&UiMessage]) -> String {
+    let mut reads = 0usize;
+    let mut writes = 0usize;
+    let mut edits = 0usize;
+    let mut bashes = 0usize;
+    let mut searches = 0usize;
+    let mut others = Vec::new();
+
+    for call in tool_calls {
+        let tool_name = call.content.split_whitespace().next().unwrap_or("tool");
+        match tool_name {
+            "read" => reads += 1,
+            "write" => writes += 1,
+            "edit" | "multiedit" | "apply_patch" => edits += 1,
+            "bash" => bashes += 1,
+            "glob" | "grep" | "codebase_search" => searches += 1,
+            other => {
+                if !others.contains(&other.to_string()) {
+                    others.push(other.to_string());
+                }
+            }
+        }
+    }
+
+    let mut parts = Vec::new();
+    if reads > 0 {
+        parts.push(format!(
+            "read {} file{}",
+            reads,
+            if reads > 1 { "s" } else { "" }
+        ));
+    }
+    if edits > 0 {
+        parts.push(format!(
+            "edited {} file{}",
+            edits,
+            if edits > 1 { "s" } else { "" }
+        ));
+    }
+    if writes > 0 {
+        parts.push(format!(
+            "wrote {} file{}",
+            writes,
+            if writes > 1 { "s" } else { "" }
+        ));
+    }
+    if bashes > 0 {
+        parts.push(format!(
+            "ran {} command{}",
+            bashes,
+            if bashes > 1 { "s" } else { "" }
+        ));
+    }
+    if searches > 0 {
+        parts.push(format!(
+            "searched {} pattern{}",
+            searches,
+            if searches > 1 { "s" } else { "" }
+        ));
+    }
+    for other in &others {
+        parts.push(format!("ran {other}"));
+    }
+
+    if parts.is_empty() {
+        "completed".to_string()
+    } else {
+        // Capitalize first letter
+        let mut summary = parts.join(", ");
+        if let Some(first) = summary.get_mut(..1) {
+            first.make_ascii_uppercase();
+        }
+        summary
+    }
+}
+
 pub fn render_action_group(
     messages: &[&UiMessage],
     theme: &Theme,
@@ -43,117 +264,169 @@ pub fn render_action_group(
         .last()
         .is_some_and(|msg| matches!(msg.kind, MessageKind::ToolCall));
 
-    let tool_names: Vec<String> = tool_calls
-        .iter()
-        .map(|msg| {
-            msg.content
-                .split_whitespace()
-                .next()
-                .unwrap_or("tool")
-                .to_string()
-        })
-        .collect();
-
-    let mut unique_names = Vec::new();
-    for name in tool_names {
-        if !unique_names.contains(&name) {
-            unique_names.push(name);
-        }
-    }
-
-    let title = if unique_names.is_empty() {
-        format!("{} tool activity", tool_results.len().max(1))
-    } else {
-        crate::text_utils::truncate_display(
-            &unique_names.join(", "),
-            width.saturating_sub(12) as usize,
-        )
-    };
-
     // Check if any tool call in this group was cancelled
     let has_cancelled = messages.iter().any(|msg| msg.cancelled);
-
-    let icon = if has_cancelled {
-        "▸ ".to_string()
-    } else if active {
-        format!("{} ", spinner_frame(spinner_tick))
-    } else {
-        "▸ ".to_string()
-    };
 
     let dim = Style::default()
         .fg(theme.text_dimmed)
         .add_modifier(Modifier::DIM);
 
-    let header_spans = if has_cancelled {
-        vec![
-            Span::styled(icon, dim),
-            Span::styled(
-                format!(
-                    "{} tools · {} result{}",
-                    tool_calls.len().max(1),
-                    tool_results.len(),
-                    if tool_results.len() == 1 { "" } else { "s" }
-                ),
-                dim,
-            ),
-            Span::styled(" · ", dim),
-            Span::styled(title, dim),
+    if has_cancelled {
+        // Interrupted: show dimmed summary
+        let summary = tool_activity_summary(&tool_calls);
+        let mut lines = vec![Line::from(vec![
+            Span::styled("● ", dim),
+            Span::styled(summary, dim),
             Span::styled(" [interrupted]", dim),
-        ]
-    } else {
-        vec![
+        ])];
+
+        if expanded {
+            render_expanded_details(&tool_calls, &tool_results, theme, width, &mut lines);
+        }
+
+        return lines;
+    }
+
+    if active {
+        // Currently running: show the current tool activity with spinner
+        let current_call = tool_calls.last();
+        let activity = current_call
+            .map(|c| tool_activity_line(&c.content, true))
+            .unwrap_or_else(|| "Running...".to_string());
+
+        let icon = format!("{} ", spinner_frame(spinner_tick));
+        let mut lines = vec![Line::from(vec![
             Span::styled(icon, Style::default().fg(theme.accent)),
-            Span::styled(
-                format!(
-                    "{} tools · {} result{}",
-                    tool_calls.len().max(1),
-                    tool_results.len(),
-                    if tool_results.len() == 1 { "" } else { "s" }
-                ),
-                Style::default()
-                    .fg(theme.text_muted)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(" · ", Style::default().fg(theme.text_dimmed)),
-            Span::styled(title, Style::default().fg(theme.text_dimmed)),
-        ]
-    };
-    let mut lines = vec![Line::from(header_spans)];
+            Span::styled(activity, Style::default().fg(theme.text_muted)),
+        ])];
+
+        // Show file/detail hint for the current tool below the activity line
+        if let Some(call) = current_call {
+            let detail = tool_detail_hint(&call.content, width);
+            if let Some(hint) = detail {
+                lines.push(Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled("\u{2514} ", Style::default().fg(theme.text_dimmed)),
+                    Span::styled(
+                        hint,
+                        Style::default()
+                            .fg(theme.text_dimmed)
+                            .add_modifier(Modifier::DIM),
+                    ),
+                ]));
+            }
+        }
+
+        return lines;
+    }
+
+    // Completed: show summary line
+    let summary = tool_activity_summary(&tool_calls);
+    let mut lines = vec![Line::from(vec![
+        Span::styled(
+            "● ",
+            Style::default()
+                .fg(theme.text_dimmed)
+                .add_modifier(Modifier::DIM),
+        ),
+        Span::styled(
+            summary,
+            Style::default()
+                .fg(theme.text_dimmed)
+                .add_modifier(Modifier::DIM),
+        ),
+    ])];
 
     if expanded {
-        for call in tool_calls.iter().take(3) {
-            let preview = crate::text_utils::truncate_display(
-                &call.content,
-                width.saturating_sub(6) as usize,
-            );
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled("• ", Style::default().fg(theme.success)),
-                Span::styled(preview, Style::default().fg(theme.text_dimmed)),
-            ]));
-        }
-        if tool_calls.len() > 3 {
-            lines.push(Line::from(Span::styled(
-                format!("  … {} more tool calls", tool_calls.len() - 3),
-                Style::default()
-                    .fg(theme.text_dimmed)
-                    .add_modifier(Modifier::DIM),
-            )));
-        }
-
-        if let Some(last_result) = tool_results.last() {
-            let preview = crate::text_utils::truncate_display(
-                &last_result.content.replace('\n', " "),
-                width.saturating_sub(6) as usize,
-            );
-            lines.push(Line::from(vec![
-                Span::raw("  "),
-                Span::styled("↳ ", Style::default().fg(theme.primary)),
-                Span::styled(preview, Style::default().fg(theme.text_muted)),
-            ]));
-        }
+        render_expanded_details(&tool_calls, &tool_results, theme, width, &mut lines);
     }
 
     lines
+}
+
+/// Render expanded details for an action group (tool calls + last result).
+fn render_expanded_details(
+    tool_calls: &[&UiMessage],
+    tool_results: &[&UiMessage],
+    theme: &Theme,
+    width: u16,
+    lines: &mut Vec<Line<'static>>,
+) {
+    let dim = Style::default()
+        .fg(theme.text_dimmed)
+        .add_modifier(Modifier::DIM);
+
+    for call in tool_calls.iter().take(5) {
+        let detail = tool_activity_line(&call.content, false);
+        let preview =
+            crate::text_utils::truncate_display(&detail, width.saturating_sub(6) as usize);
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("\u{2514} ", dim),
+            Span::styled(preview, dim),
+        ]));
+    }
+    if tool_calls.len() > 5 {
+        lines.push(Line::from(Span::styled(
+            format!("  ... {} more", tool_calls.len() - 5),
+            dim,
+        )));
+    }
+
+    if let Some(last_result) = tool_results.last() {
+        let preview = crate::text_utils::truncate_display(
+            &last_result.content.replace('\n', " "),
+            width.saturating_sub(6) as usize,
+        );
+        lines.push(Line::from(vec![
+            Span::raw("  "),
+            Span::styled("\u{21b3} ", Style::default().fg(theme.primary)),
+            Span::styled(preview, Style::default().fg(theme.text_muted)),
+        ]));
+    }
+}
+
+/// Extract a detail hint to show below the activity line (e.g., file path, command).
+fn tool_detail_hint(content: &str, width: u16) -> Option<String> {
+    let tool_name = content.split_whitespace().next().unwrap_or("tool");
+    let args_str = content[tool_name.len()..].trim_start();
+    let args: Option<serde_json::Value> = serde_json::from_str(args_str).ok();
+
+    let hint = match tool_name {
+        "read" | "write" | "edit" | "multiedit" => {
+            let path = args
+                .as_ref()
+                .and_then(|v| v.get("file_path").or(v.get("path")))
+                .and_then(|v| v.as_str())?;
+            Some(short_path(path))
+        }
+        "bash" => {
+            let cmd = args
+                .as_ref()
+                .and_then(|v| v.get("command").or(v.get("cmd")))
+                .and_then(|v| v.as_str())?;
+            let first_line = cmd.lines().next().unwrap_or(cmd);
+            Some(truncate_inline(
+                first_line,
+                width.saturating_sub(8) as usize,
+            ))
+        }
+        "glob" => {
+            let pattern = args
+                .as_ref()
+                .and_then(|v| v.get("pattern"))
+                .and_then(|v| v.as_str())?;
+            Some(pattern.to_string())
+        }
+        "grep" => {
+            let pattern = args
+                .as_ref()
+                .and_then(|v| v.get("pattern"))
+                .and_then(|v| v.as_str())?;
+            Some(format!("'{pattern}'"))
+        }
+        _ => None,
+    };
+
+    hint
 }

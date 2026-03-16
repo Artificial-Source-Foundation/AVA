@@ -31,6 +31,7 @@ pub fn base_url_for_provider(provider_name: &str) -> Option<&'static str> {
     match provider_name {
         "anthropic" => Some("https://api.anthropic.com"),
         "openai" => Some("https://api.openai.com"),
+        "chatgpt" => Some("https://chatgpt.com/backend-api/codex"),
         "openrouter" => Some("https://openrouter.ai/api"),
         "gemini" => Some("https://generativelanguage.googleapis.com"),
         "copilot" => Some("https://api.individual.githubcopilot.com"),
@@ -84,26 +85,46 @@ pub fn create_provider(
                 .ok_or_else(|| AvaError::MissingApiKey {
                     provider: "openai".to_string(),
                 })?;
-            let api_key = entry
-                .effective_api_key()
-                .ok_or_else(|| AvaError::MissingApiKey {
-                    provider: "openai".to_string(),
-                })?
-                .to_string();
-            // Determine the base URL:
-            // 1. Explicit base_url override takes priority
-            // 2. Default: api.openai.com
-            // NOTE: ChatGPT OAuth tokens need the Responses API at
-            // chatgpt.com/backend-api/codex/responses — this requires a
-            // separate provider implementation (different API format).
-            // For now, OAuth tokens should use Copilot provider instead.
-            let base_url = entry
-                .base_url
-                .clone()
-                .unwrap_or_else(|| "https://api.openai.com".to_string());
-            Ok(Box::new(OpenAIProvider::with_base_url(
-                pool, api_key, model, base_url,
-            )))
+
+            // Detect OAuth-only credentials (ChatGPT Plus/Pro subscriptions):
+            // When the user has an OAuth token but NO API key, route to the
+            // ChatGPT Responses API at chatgpt.com/backend-api/codex.
+            let has_api_key = !entry.api_key.trim().is_empty();
+            let has_oauth = entry.is_oauth_configured() && !entry.is_oauth_expired();
+
+            if !has_api_key && has_oauth {
+                // ChatGPT OAuth — use the Responses API
+                let oauth_token = entry
+                    .oauth_token
+                    .as_deref()
+                    .ok_or_else(|| AvaError::MissingApiKey {
+                        provider: "openai (OAuth token missing)".to_string(),
+                    })?
+                    .to_string();
+                let base_url = entry
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| "https://chatgpt.com/backend-api/codex".to_string());
+                Ok(Box::new(
+                    OpenAIProvider::with_base_url(pool, oauth_token, model, base_url)
+                        .with_responses_api(true),
+                ))
+            } else {
+                // Standard API key — use Chat Completions API
+                let api_key = entry
+                    .effective_api_key()
+                    .ok_or_else(|| AvaError::MissingApiKey {
+                        provider: "openai".to_string(),
+                    })?
+                    .to_string();
+                let base_url = entry
+                    .base_url
+                    .clone()
+                    .unwrap_or_else(|| "https://api.openai.com".to_string());
+                Ok(Box::new(OpenAIProvider::with_base_url(
+                    pool, api_key, model, base_url,
+                )))
+            }
         }
         "openrouter" => {
             let entry = credential
@@ -178,6 +199,34 @@ pub fn create_provider(
                 .unwrap_or_else(|| "http://localhost:11434".to_string());
             Ok(Box::new(OllamaProvider::new(pool, base_url, model)))
         }
+        // ChatGPT — explicit provider alias for the Responses API.
+        // Users can also configure OAuth under the "openai" provider name
+        // (auto-detected from OAuth-only credentials).
+        "chatgpt" => {
+            let entry = credential
+                .ok_or_else(|| AvaError::MissingApiKey {
+                    provider: "chatgpt".to_string(),
+                })?;
+            let oauth_token = entry
+                .oauth_token
+                .as_deref()
+                .or_else(|| {
+                    let key = entry.api_key.trim();
+                    if key.is_empty() { None } else { Some(key) }
+                })
+                .ok_or_else(|| AvaError::MissingApiKey {
+                    provider: "chatgpt (not connected — configure OAuth or set token)".to_string(),
+                })?
+                .to_string();
+            let base_url = entry
+                .base_url
+                .clone()
+                .unwrap_or_else(|| "https://chatgpt.com/backend-api/codex".to_string());
+            Ok(Box::new(
+                OpenAIProvider::with_base_url(pool, oauth_token, model, base_url)
+                    .with_responses_api(true),
+            ))
+        }
         // OpenAI-compatible coding plan providers
         "zai-coding-plan" | "zhipuai-coding-plan" => {
             let entry = credential.ok_or_else(|| AvaError::MissingApiKey {
@@ -232,7 +281,7 @@ pub fn create_provider(
         }
         _ => Err(AvaError::ProviderError {
             provider: provider_name.to_string(),
-            message: "unknown provider. Available: anthropic, openai, openrouter, inception, copilot, gemini, ollama, \
+            message: "unknown provider. Available: anthropic, openai, chatgpt, openrouter, inception, copilot, gemini, ollama, \
                       alibaba, alibaba-cn, zai-coding-plan, zhipuai-coding-plan, kimi-for-coding, \
                       minimax-coding-plan, minimax-cn-coding-plan"
                 .to_string(),

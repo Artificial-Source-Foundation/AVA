@@ -593,6 +593,286 @@ pub fn parse_openai_tool_calls(payload: &Value) -> Vec<ToolCall> {
 }
 
 /// Parse tool use blocks from an Anthropic completion response payload.
+/// Convert AVA tool definitions to the OpenAI Responses API format.
+///
+/// The Responses API uses a flat tool schema:
+/// `{ "type": "function", "name": "...", "description": "...", "parameters": {...} }`
+/// instead of the Chat Completions nested `{ "type": "function", "function": {...} }` format.
+pub fn tools_to_responses_api_format(tools: &[Tool]) -> Vec<Value> {
+    tools
+        .iter()
+        .map(|tool| {
+            json!({
+                "type": "function",
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+                "strict": true,
+            })
+        })
+        .collect()
+}
+
+/// Parse a Responses API SSE streaming event into a `StreamChunk`.
+///
+/// The Responses API uses event types like `response.output_text.delta`,
+/// `response.function_call_arguments.delta`, `response.completed`, etc.
+/// instead of the Chat Completions `choices[].delta` format.
+pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> {
+    let event_type = payload.get("type").and_then(Value::as_str)?;
+
+    match event_type {
+        // Text content deltas
+        "response.text.delta" | "response.output_text.delta" => {
+            let delta = payload.get("delta").and_then(Value::as_str)?;
+            if delta.is_empty() {
+                return None;
+            }
+            Some(StreamChunk::text(delta))
+        }
+
+        // Reasoning/thinking deltas
+        "response.reasoning.delta"
+        | "response.reasoning_text.delta"
+        | "response.reasoning_summary.delta"
+        | "response.reasoning_summary_text.delta" => {
+            let delta = payload.get("delta").and_then(Value::as_str)?;
+            if delta.is_empty() {
+                return None;
+            }
+            Some(StreamChunk {
+                thinking: Some(delta.to_string()),
+                ..Default::default()
+            })
+        }
+
+        // Tool call argument deltas (streamed incrementally)
+        "response.tool_call_arguments.delta" | "response.function_call_arguments.delta" => {
+            let call_id = payload
+                .get("call_id")
+                .or_else(|| payload.get("tool_call_id"))
+                .or_else(|| payload.get("id"))
+                .and_then(Value::as_str)
+                .map(String::from);
+            let name = payload
+                .get("name")
+                .or_else(|| payload.get("function_name"))
+                .and_then(Value::as_str)
+                .map(String::from);
+            let arguments_delta = payload
+                .get("delta")
+                .or_else(|| payload.get("arguments"))
+                .and_then(Value::as_str)
+                .map(String::from);
+
+            Some(StreamChunk {
+                tool_call: Some(StreamToolCall {
+                    index: payload.get("index").and_then(Value::as_u64).unwrap_or(0) as usize,
+                    id: call_id,
+                    name,
+                    arguments_delta,
+                }),
+                ..Default::default()
+            })
+        }
+
+        // Output item events — capture tool call identity and completed calls
+        "response.output_item.added" | "response.output_item.done" => {
+            let item = payload.get("item")?;
+            let item_type = item.get("type").and_then(Value::as_str)?;
+
+            match item_type {
+                "text" | "output_text" => {
+                    let text = item.get("text").and_then(Value::as_str)?;
+                    if text.is_empty() {
+                        return None;
+                    }
+                    Some(StreamChunk::text(text))
+                }
+                "reasoning" => {
+                    let text = item.get("text").and_then(Value::as_str)?;
+                    if text.is_empty() {
+                        return None;
+                    }
+                    Some(StreamChunk {
+                        thinking: Some(text.to_string()),
+                        ..Default::default()
+                    })
+                }
+                "function_call" | "tool_call" if event_type == "response.output_item.done" => {
+                    let call_id = item
+                        .get("call_id")
+                        .or_else(|| item.get("tool_call_id"))
+                        .or_else(|| item.get("id"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let name = item
+                        .get("name")
+                        .or_else(|| item.get("function").and_then(|f| f.get("name")))
+                        .and_then(Value::as_str)?
+                        .to_string();
+                    let arguments = item
+                        .get("arguments")
+                        .or_else(|| item.get("function").and_then(|f| f.get("arguments")))
+                        .and_then(Value::as_str)
+                        .unwrap_or("{}");
+
+                    Some(StreamChunk {
+                        tool_call: Some(StreamToolCall {
+                            index: item.get("index").and_then(Value::as_u64).unwrap_or(0) as usize,
+                            id: Some(if call_id.is_empty() {
+                                Uuid::new_v4().to_string()
+                            } else {
+                                call_id
+                            }),
+                            name: Some(name),
+                            arguments_delta: Some(arguments.to_string()),
+                        }),
+                        ..Default::default()
+                    })
+                }
+                "message" => {
+                    // Extract text from message content blocks
+                    let content = item.get("content").and_then(Value::as_array)?;
+                    let text: String = content
+                        .iter()
+                        .filter(|c| {
+                            let t = c.get("type").and_then(Value::as_str).unwrap_or("");
+                            t == "text" || t == "output_text"
+                        })
+                        .filter_map(|c| c.get("text").and_then(Value::as_str))
+                        .collect::<Vec<_>>()
+                        .join("");
+                    if text.is_empty() {
+                        return None;
+                    }
+                    Some(StreamChunk::text(&text))
+                }
+                _ => None,
+            }
+        }
+
+        // Completion events — extract usage
+        "response.done" | "response.completed" => {
+            let usage = payload
+                .get("response")
+                .and_then(|r| r.get("usage"))
+                .or_else(|| payload.get("usage"));
+            if let Some(usage) = usage {
+                let input = usage
+                    .get("input_tokens")
+                    .or_else(|| usage.get("prompt_tokens"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+                let output = usage
+                    .get("output_tokens")
+                    .or_else(|| usage.get("completion_tokens"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+                let cached = usage
+                    .get("input_tokens_details")
+                    .or_else(|| usage.get("prompt_tokens_details"))
+                    .and_then(|d| d.get("cached_tokens"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0) as usize;
+                if input > 0 || output > 0 {
+                    return Some(StreamChunk {
+                        usage: Some(ava_types::TokenUsage {
+                            input_tokens: input,
+                            output_tokens: output,
+                            cache_read_tokens: cached,
+                            cache_creation_tokens: 0,
+                        }),
+                        done: true,
+                        ..Default::default()
+                    });
+                }
+            }
+            Some(StreamChunk::finished())
+        }
+
+        // Refusal
+        "response.refusal.delta" => {
+            let delta = payload.get("delta").and_then(Value::as_str)?;
+            Some(StreamChunk::text(format!("[Refusal] {delta}")))
+        }
+
+        _ => None,
+    }
+}
+
+/// Parse a non-streaming Responses API response into content + tool calls + usage.
+pub fn parse_responses_api_payload(
+    payload: &Value,
+) -> (String, Vec<ToolCall>, Option<ava_types::TokenUsage>) {
+    let mut content = String::new();
+    let mut tool_calls = Vec::new();
+
+    // Output is an array of items
+    if let Some(output) = payload.get("output").and_then(Value::as_array) {
+        for item in output {
+            let item_type = item.get("type").and_then(Value::as_str).unwrap_or("");
+            match item_type {
+                "message" => {
+                    if let Some(msg_content) = item.get("content").and_then(Value::as_array) {
+                        for block in msg_content {
+                            let block_type =
+                                block.get("type").and_then(Value::as_str).unwrap_or("");
+                            if block_type == "text" || block_type == "output_text" {
+                                if let Some(text) = block.get("text").and_then(Value::as_str) {
+                                    content.push_str(text);
+                                }
+                            }
+                        }
+                    }
+                }
+                "text" | "output_text" => {
+                    if let Some(text) = item.get("text").and_then(Value::as_str) {
+                        content.push_str(text);
+                    }
+                }
+                "function_call" | "tool_call" => {
+                    let call_id = item
+                        .get("call_id")
+                        .or_else(|| item.get("id"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let name = item
+                        .get("name")
+                        .or_else(|| item.get("function").and_then(|f| f.get("name")))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let args_str = item
+                        .get("arguments")
+                        .or_else(|| item.get("function").and_then(|f| f.get("arguments")))
+                        .and_then(Value::as_str)
+                        .unwrap_or("{}");
+                    let arguments = serde_json::from_str(args_str).unwrap_or(json!({}));
+                    if !name.is_empty() {
+                        tool_calls.push(ToolCall {
+                            id: if call_id.is_empty() {
+                                Uuid::new_v4().to_string()
+                            } else {
+                                call_id
+                            },
+                            name,
+                            arguments,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let usage = parse_usage(payload);
+
+    (content, tool_calls, usage)
+}
+
 pub fn parse_anthropic_tool_calls(payload: &Value) -> Vec<ToolCall> {
     let Some(content) = payload.get("content").and_then(Value::as_array) else {
         return vec![];

@@ -32,6 +32,10 @@ pub struct OpenAIProvider {
     base_url: String,
     thinking_format: ThinkingFormat,
     circuit_breaker: Option<Arc<CircuitBreaker>>,
+    /// When true, use the OpenAI Responses API format (`/responses` endpoint)
+    /// instead of the Chat Completions API (`/v1/chat/completions`).
+    /// Required for ChatGPT OAuth tokens at `chatgpt.com/backend-api/codex`.
+    use_responses_api: bool,
 }
 
 impl OpenAIProvider {
@@ -56,12 +60,22 @@ impl OpenAIProvider {
             base_url: base_url.into(),
             thinking_format: ThinkingFormat::OpenAI,
             circuit_breaker: Some(Arc::new(CircuitBreaker::default_provider())),
+            use_responses_api: false,
         }
     }
 
     /// Set the thinking format for this provider (DashScope, Zhipu, etc.).
     pub fn with_thinking_format(mut self, format: ThinkingFormat) -> Self {
         self.thinking_format = format;
+        self
+    }
+
+    /// Enable the Responses API mode for ChatGPT OAuth tokens.
+    ///
+    /// When enabled, requests use the Responses API format (`/responses` endpoint)
+    /// instead of the Chat Completions API (`/v1/chat/completions`).
+    pub fn with_responses_api(mut self, enabled: bool) -> Self {
+        self.use_responses_api = enabled;
         self
     }
 
@@ -108,6 +122,143 @@ impl OpenAIProvider {
         } else {
             "high"
         }
+    }
+
+    /// The completions endpoint URL, respecting the Responses API mode.
+    fn completions_url(&self) -> String {
+        if self.use_responses_api {
+            format!("{}/responses", self.base_url)
+        } else {
+            format!("{}/v1/chat/completions", self.base_url)
+        }
+    }
+
+    /// Build a Responses API request body.
+    ///
+    /// The Responses API uses `instructions` (system prompt) + `input` (messages)
+    /// instead of a flat `messages` array.
+    fn build_responses_request_body(
+        &self,
+        messages: &[Message],
+        tools: &[ava_types::Tool],
+        stream: bool,
+    ) -> Value {
+        // Extract system message as "instructions"
+        let instructions: String = messages
+            .iter()
+            .filter(|m| m.role == ava_types::Role::System)
+            .map(|m| m.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Convert non-system messages to "input" format
+        let input: Vec<Value> = messages
+            .iter()
+            .filter(|m| m.role != ava_types::Role::System)
+            .map(|m| {
+                let role = match m.role {
+                    ava_types::Role::User => "user",
+                    ava_types::Role::Assistant => "assistant",
+                    ava_types::Role::Tool => "tool",
+                    ava_types::Role::System => unreachable!(),
+                };
+
+                // Handle tool result messages
+                if m.role == ava_types::Role::Tool {
+                    if let Some(ref tool_call_id) = m.tool_call_id {
+                        return json!({
+                            "type": "function_call_output",
+                            "call_id": tool_call_id,
+                            "output": m.content,
+                        });
+                    }
+                }
+
+                // Handle assistant messages with tool calls
+                if m.role == ava_types::Role::Assistant && !m.tool_calls.is_empty() {
+                    let mut items = Vec::new();
+                    // Add text content if present
+                    if !m.content.is_empty() {
+                        items.push(json!({
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": m.content}],
+                        }));
+                    }
+                    // Add function calls
+                    for tc in &m.tool_calls {
+                        items.push(json!({
+                            "type": "function_call",
+                            "call_id": tc.id,
+                            "name": tc.name,
+                            "arguments": tc.arguments.to_string(),
+                        }));
+                    }
+                    // For a single function call with no text, return it directly
+                    if items.len() == 1 {
+                        return items.into_iter().next().unwrap();
+                    }
+                    // Multiple items: return as array (the API accepts mixed arrays)
+                    return Value::Array(items);
+                }
+
+                json!({
+                    "role": role,
+                    "content": m.content,
+                })
+            })
+            .flat_map(|v| {
+                // Flatten arrays from multi-item assistant messages
+                if let Value::Array(items) = v {
+                    items
+                } else {
+                    vec![v]
+                }
+            })
+            .collect();
+
+        let mut body = json!({
+            "model": self.model,
+            "instructions": instructions,
+            "input": input,
+            "stream": stream,
+            "store": false,
+        });
+
+        // Add tools in Responses API format
+        if !tools.is_empty() {
+            body["tools"] = json!(common::tools_to_responses_api_format(tools));
+        }
+
+        body
+    }
+
+    /// Build a Responses API request body with reasoning support.
+    fn build_responses_request_body_with_thinking(
+        &self,
+        messages: &[Message],
+        tools: &[ava_types::Tool],
+        stream: bool,
+        thinking: ThinkingLevel,
+    ) -> Value {
+        let mut body = self.build_responses_request_body(messages, tools, stream);
+
+        if thinking != ThinkingLevel::Off && self.supports_reasoning() {
+            let effort = match thinking {
+                ThinkingLevel::Off => unreachable!(),
+                ThinkingLevel::Low => "low",
+                ThinkingLevel::Medium => "medium",
+                ThinkingLevel::High => "high",
+                ThinkingLevel::Max => self.max_reasoning_effort(),
+            };
+            body["reasoning"] = json!({
+                "effort": effort,
+                "summary": "auto",
+            });
+            body["include"] = json!(["reasoning.encrypted_content"]);
+        }
+
+        body
     }
 
     pub fn build_request_body(&self, messages: &[Message], stream: bool) -> Value {
@@ -199,6 +350,15 @@ impl OpenAIProvider {
         common::parse_openai_completion_payload(payload)
     }
 
+    /// Label used in error messages — distinguishes ChatGPT Responses API from standard OpenAI.
+    fn provider_label(&self) -> String {
+        if self.use_responses_api {
+            "ChatGPT".to_string()
+        } else {
+            "OpenAI".to_string()
+        }
+    }
+
     async fn client(&self) -> Result<Arc<reqwest::Client>> {
         self.pool.get_client(&self.base_url).await
     }
@@ -212,20 +372,38 @@ impl OpenAIProvider {
 impl LLMProvider for OpenAIProvider {
     #[instrument(skip(self, messages), fields(model = %self.model))]
     async fn generate(&self, messages: &[Message]) -> Result<String> {
+        let provider_label = self.provider_label();
         let client = self.client().await?;
+        let body = if self.use_responses_api {
+            self.build_responses_request_body(messages, &[], false)
+        } else {
+            self.build_request_body(messages, false)
+        };
         let request = client
-            .post(format!("{}/v1/chat/completions", self.base_url))
+            .post(self.completions_url())
             .bearer_auth(&self.api_key)
-            .json(&self.build_request_body(messages, false));
+            .json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "OpenAI").await?;
+        let response = common::validate_status(response, &provider_label).await?;
         let payload: Value = response
             .json()
             .await
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
-        Self::parse_response_payload(&payload)
+        if self.use_responses_api {
+            let (content, _, _) = common::parse_responses_api_payload(&payload);
+            if content.is_empty() {
+                Err(AvaError::ProviderError {
+                    provider: provider_label,
+                    message: "empty response from Responses API".to_string(),
+                })
+            } else {
+                Ok(content)
+            }
+        } else {
+            Self::parse_response_payload(&payload)
+        }
     }
 
     #[instrument(skip(self, messages), fields(model = %self.model))]
@@ -233,14 +411,21 @@ impl LLMProvider for OpenAIProvider {
         &self,
         messages: &[Message],
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
+        let provider_label = self.provider_label();
         let client = self.client().await?;
+        let body = if self.use_responses_api {
+            self.build_responses_request_body(messages, &[], true)
+        } else {
+            self.build_request_body(messages, true)
+        };
         let request = client
-            .post(format!("{}/v1/chat/completions", self.base_url))
+            .post(self.completions_url())
             .bearer_auth(&self.api_key)
-            .json(&self.build_request_body(messages, true));
+            .json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "OpenAI").await?;
+        let response = common::validate_status(response, &provider_label).await?;
+        let use_responses = self.use_responses_api;
         let mut sse_parser = common::SseParser::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
             let chunks = chunk
@@ -251,7 +436,13 @@ impl LLMProvider for OpenAIProvider {
                         .feed(&text)
                         .into_iter()
                         .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
-                        .filter_map(|payload| common::parse_openai_stream_chunk(&payload))
+                        .filter_map(|payload| {
+                            if use_responses {
+                                common::parse_responses_api_stream_chunk(&payload)
+                            } else {
+                                common::parse_openai_stream_chunk(&payload)
+                            }
+                        })
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
@@ -301,35 +492,51 @@ impl LLMProvider for OpenAIProvider {
         messages: &[Message],
         tools: &[ava_types::Tool],
     ) -> Result<LLMResponse> {
-        let body = self.build_request_body_with_tools(messages, tools, false);
+        let provider_label = self.provider_label();
+        let body = if self.use_responses_api {
+            self.build_responses_request_body(messages, tools, false)
+        } else {
+            self.build_request_body_with_tools(messages, tools, false)
+        };
         tracing::debug!(
             message_count = messages.len(),
             tool_count = tools.len(),
+            responses_api = self.use_responses_api,
             "Sending generate_with_tools request"
         );
         let client = self.client().await?;
         let request = client
-            .post(format!("{}/v1/chat/completions", self.base_url))
+            .post(self.completions_url())
             .bearer_auth(&self.api_key)
             .json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "OpenAI").await?;
+        let response = common::validate_status(response, &provider_label).await?;
         let payload: Value = response
             .json()
             .await
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
-        let content = Self::parse_response_payload(&payload).unwrap_or_default();
-        let tool_calls = common::parse_openai_tool_calls(&payload);
-        let usage = common::parse_usage(&payload);
+        if self.use_responses_api {
+            let (content, tool_calls, usage) = common::parse_responses_api_payload(&payload);
+            Ok(LLMResponse {
+                content,
+                tool_calls,
+                usage,
+                thinking: None,
+            })
+        } else {
+            let content = Self::parse_response_payload(&payload).unwrap_or_default();
+            let tool_calls = common::parse_openai_tool_calls(&payload);
+            let usage = common::parse_usage(&payload);
 
-        Ok(LLMResponse {
-            content,
-            tool_calls,
-            usage,
-            thinking: None,
-        })
+            Ok(LLMResponse {
+                content,
+                tool_calls,
+                usage,
+                thinking: None,
+            })
+        }
     }
 
     #[instrument(skip(self, messages, tools), fields(model = %self.model))]
@@ -338,17 +545,25 @@ impl LLMProvider for OpenAIProvider {
         messages: &[Message],
         tools: &[ava_types::Tool],
     ) -> Result<Pin<Box<dyn Stream<Item = StreamChunk> + Send>>> {
-        let mut body = self.build_request_body_with_tools(messages, tools, true);
-        // Request usage in the final streaming chunk
-        body["stream_options"] = json!({"include_usage": true});
+        let provider_label = self.provider_label();
+        let mut body = if self.use_responses_api {
+            self.build_responses_request_body(messages, tools, true)
+        } else {
+            self.build_request_body_with_tools(messages, tools, true)
+        };
+        if !self.use_responses_api {
+            // Request usage in the final streaming chunk (Chat Completions only)
+            body["stream_options"] = json!({"include_usage": true});
+        }
         let client = self.client().await?;
         let request = client
-            .post(format!("{}/v1/chat/completions", self.base_url))
+            .post(self.completions_url())
             .bearer_auth(&self.api_key)
             .json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "OpenAI").await?;
+        let response = common::validate_status(response, &provider_label).await?;
+        let use_responses = self.use_responses_api;
         let mut sse_parser = common::SseParser::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
             let chunks = chunk
@@ -359,7 +574,13 @@ impl LLMProvider for OpenAIProvider {
                         .feed(&text)
                         .into_iter()
                         .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
-                        .filter_map(|payload| common::parse_openai_stream_chunk(&payload))
+                        .filter_map(|payload| {
+                            if use_responses {
+                                common::parse_responses_api_stream_chunk(&payload)
+                            } else {
+                                common::parse_openai_stream_chunk(&payload)
+                            }
+                        })
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
@@ -381,16 +602,24 @@ impl LLMProvider for OpenAIProvider {
             return self.generate_stream_with_tools(messages, tools).await;
         }
 
-        let mut body = self.build_request_body_with_thinking(messages, tools, true, thinking);
-        body["stream_options"] = json!({"include_usage": true});
+        let provider_label = self.provider_label();
+        let mut body = if self.use_responses_api {
+            self.build_responses_request_body_with_thinking(messages, tools, true, thinking)
+        } else {
+            self.build_request_body_with_thinking(messages, tools, true, thinking)
+        };
+        if !self.use_responses_api {
+            body["stream_options"] = json!({"include_usage": true});
+        }
         let client = self.client().await?;
         let request = client
-            .post(format!("{}/v1/chat/completions", self.base_url))
+            .post(self.completions_url())
             .bearer_auth(&self.api_key)
             .json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "OpenAI").await?;
+        let response = common::validate_status(response, &provider_label).await?;
+        let use_responses = self.use_responses_api;
         let mut sse_parser = common::SseParser::new();
         let stream = response.bytes_stream().flat_map(move |chunk| {
             let chunks = chunk
@@ -401,7 +630,13 @@ impl LLMProvider for OpenAIProvider {
                         .feed(&text)
                         .into_iter()
                         .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
-                        .filter_map(|payload| common::parse_openai_stream_chunk(&payload))
+                        .filter_map(|payload| {
+                            if use_responses {
+                                common::parse_responses_api_stream_chunk(&payload)
+                            } else {
+                                common::parse_openai_stream_chunk(&payload)
+                            }
+                        })
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
@@ -448,30 +683,45 @@ impl LLMProvider for OpenAIProvider {
             return self.generate_with_tools(messages, tools).await;
         }
 
-        let body = self.build_request_body_with_thinking(messages, tools, false, thinking);
+        let provider_label = self.provider_label();
+        let body = if self.use_responses_api {
+            self.build_responses_request_body_with_thinking(messages, tools, false, thinking)
+        } else {
+            self.build_request_body_with_thinking(messages, tools, false, thinking)
+        };
         let client = self.client().await?;
         let request = client
-            .post(format!("{}/v1/chat/completions", self.base_url))
+            .post(self.completions_url())
             .bearer_auth(&self.api_key)
             .json(&body);
 
         let response = self.send_request(request).await?;
-        let response = common::validate_status(response, "OpenAI").await?;
+        let response = common::validate_status(response, &provider_label).await?;
         let payload: Value = response
             .json()
             .await
             .map_err(|error| AvaError::SerializationError(error.to_string()))?;
 
-        let content = Self::parse_response_payload(&payload).unwrap_or_default();
-        let tool_calls = common::parse_openai_tool_calls(&payload);
-        let usage = common::parse_usage(&payload);
-        let thinking_content = self.parse_reasoning(&payload);
+        if self.use_responses_api {
+            let (content, tool_calls, usage) = common::parse_responses_api_payload(&payload);
+            Ok(LLMResponse {
+                content,
+                tool_calls,
+                usage,
+                thinking: None, // Responses API returns thinking in stream only
+            })
+        } else {
+            let content = Self::parse_response_payload(&payload).unwrap_or_default();
+            let tool_calls = common::parse_openai_tool_calls(&payload);
+            let usage = common::parse_usage(&payload);
+            let thinking_content = self.parse_reasoning(&payload);
 
-        Ok(LLMResponse {
-            content,
-            tool_calls,
-            usage,
-            thinking: thinking_content,
-        })
+            Ok(LLMResponse {
+                content,
+                tool_calls,
+                usage,
+                thinking: thinking_content,
+            })
+        }
     }
 }

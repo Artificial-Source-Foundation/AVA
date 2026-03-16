@@ -57,9 +57,9 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.cross }}" = "true" ]; then
-            cross build --release --bin ava --target ${{ matrix.target }}
+            cross build --release --locked --bin ava --target ${{ matrix.target }}
           else
-            cargo build --release --bin ava --target ${{ matrix.target }}
+            cargo build --release --locked --bin ava --target ${{ matrix.target }}
           fi
 
       - name: Package tarball (unix)

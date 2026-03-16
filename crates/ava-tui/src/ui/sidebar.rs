@@ -172,25 +172,62 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     if !state.praxis.tasks.is_empty() {
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("Praxis", label_style)));
+        lines.push(Line::from(Span::styled("Praxis Workers", label_style)));
 
         for task in state.praxis.tasks.iter().rev().take(3) {
+            let task_icon = match task.status {
+                PraxisTaskStatus::Running => "\u{27F3}",  // ⟳
+                PraxisTaskStatus::Completed => "\u{2713}", // ✓
+                PraxisTaskStatus::Failed => "\u{2717}",    // ✗
+                PraxisTaskStatus::Pending => "\u{00B7}",   // ·
+            };
+            let task_color = match task.status {
+                PraxisTaskStatus::Running => Color::Yellow,
+                PraxisTaskStatus::Completed => Color::Green,
+                PraxisTaskStatus::Failed => state.theme.error,
+                PraxisTaskStatus::Pending => state.theme.text_dimmed,
+            };
             let goal = truncate_display(&task.goal, area.width.saturating_sub(10) as usize);
             lines.push(Line::from(vec![
-                Span::styled(format!("  #{} ", task.id), dim_style),
+                Span::styled(
+                    format!("  {task_icon} "),
+                    Style::default().fg(task_color),
+                ),
+                Span::styled(format!("#{} ", task.id), dim_style),
                 Span::styled(goal, value_style),
             ]));
             lines.push(Line::from(Span::styled(
-                format!("    {} · {} workers", task.status, task.workers.len()),
+                format!("    {} \u{00B7} {} workers", task.status, task.workers.len()),
                 dim_style,
             )));
-            for worker in task.workers.iter().take(2) {
+            for worker in task.workers.iter().take(4) {
+                let worker_icon = match worker.status {
+                    PraxisTaskStatus::Running => "\u{27F3}",
+                    PraxisTaskStatus::Completed => "\u{2713}",
+                    PraxisTaskStatus::Failed => "\u{2717}",
+                    PraxisTaskStatus::Pending => "\u{00B7}",
+                };
+                let worker_color = match worker.status {
+                    PraxisTaskStatus::Running => Color::Yellow,
+                    PraxisTaskStatus::Completed => Color::Green,
+                    PraxisTaskStatus::Failed => state.theme.error,
+                    PraxisTaskStatus::Pending => state.theme.text_dimmed,
+                };
                 let worker_desc = truncate_display(
                     &format!("{} {}/{}", worker.lead, worker.turn, worker.max_turns),
-                    area.width.saturating_sub(8) as usize,
+                    area.width.saturating_sub(10) as usize,
                 );
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("      {worker_icon} "),
+                        Style::default().fg(worker_color),
+                    ),
+                    Span::styled(worker_desc, dim_style),
+                ]));
+            }
+            if task.workers.len() > 4 {
                 lines.push(Line::from(Span::styled(
-                    format!("      {worker_desc}"),
+                    format!("      +{} more", task.workers.len() - 4),
                     dim_style,
                 )));
             }

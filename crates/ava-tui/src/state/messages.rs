@@ -68,9 +68,8 @@ pub struct UiMessage {
     pub cancelled: bool,
 }
 
-/// Smooth block-pulse spinner — a single character breathes from dim to bright
-/// and back, using Unicode block elements for a futuristic feel.
-pub const SPINNER_FRAMES: &[&str] = &["░", "▒", "▓", "█", "▓", "▒", "░", " "];
+/// Minimal dot-pulse spinner — calmer than braille, safe single-width chars.
+pub const SPINNER_FRAMES: &[&str] = &["·", ":", "·", " "];
 
 /// Divisor to slow spinner animation. At 16ms ticks, each frame lasts ~150ms
 /// giving a smooth ~1.2s full cycle — a calm breathing pulse.

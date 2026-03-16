@@ -36,6 +36,23 @@ impl App {
             return false;
         }
 
+        if key.code == KeyCode::Esc && self.state.agent.is_running {
+            // Esc while agent is running: cancel (same as Ctrl+C)
+            self.mark_interrupted_messages();
+            self.state
+                .messages
+                .push(crate::state::messages::UiMessage::new(
+                    MessageKind::System,
+                    "Session interrupted",
+                ));
+            self.state.agent.abort();
+            self.state.input.queue_display.clear_steering();
+            self.cancel_all_agents();
+            self.is_streaming
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            return false;
+        }
+
         if key.code == KeyCode::Esc && !self.state.agent.is_running {
             if let Some(last) = self.last_esc_time {
                 if last.elapsed() < std::time::Duration::from_millis(500) {

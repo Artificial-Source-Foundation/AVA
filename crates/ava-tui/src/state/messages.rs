@@ -73,17 +73,24 @@ pub struct UiMessage {
     pub tool_group_expanded: bool,
 }
 
-/// Minimal dot-pulse spinner — calmer than braille, safe single-width chars.
-pub const SPINNER_FRAMES: &[&str] = &["\u{00b7}", ":", "\u{00b7}", " "];
+/// Fixed-width spinner character — always exactly 1 column, no jitter.
+/// Brightness is varied via color cycling rather than character changes.
+pub const SPINNER_CHAR: &str = "●";
 
-/// Divisor to slow spinner animation. At 16ms ticks, each frame lasts ~150ms
-/// giving a smooth ~1.2s full cycle — a calm breathing pulse.
-const SPINNER_FRAME_DIVISOR: usize = 9;
+/// Divisor to slow spinner animation. At 16ms ticks, each frame lasts ~160ms
+/// giving a smooth ~640ms full cycle — a calm breathing pulse.
+const SPINNER_FRAME_DIVISOR: usize = 10;
 
-/// Returns the current spinner frame based on a tick counter.
+/// Returns the spinner phase index (0..3) for color cycling.
 /// The tick is divided down so the animation feels calm rather than frantic.
-pub fn spinner_frame(tick: usize) -> &'static str {
-    SPINNER_FRAMES[(tick / SPINNER_FRAME_DIVISOR) % SPINNER_FRAMES.len()]
+pub fn spinner_phase(tick: usize) -> usize {
+    (tick / SPINNER_FRAME_DIVISOR) % 4
+}
+
+/// Returns the current spinner frame character (always fixed-width).
+/// Kept for backward compatibility — prefer `spinner_phase` + color cycling.
+pub fn spinner_frame(_tick: usize) -> &'static str {
+    SPINNER_CHAR
 }
 
 /// Left-border character — full block for visual weight (design: 3px bar).

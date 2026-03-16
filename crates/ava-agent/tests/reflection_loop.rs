@@ -1,3 +1,5 @@
+#![allow(unsafe_code)] // CountingAllocator benchmark needs unsafe GlobalAlloc
+
 use std::cell::{Cell, RefCell};
 
 use ava_agent::{ErrorKind, ReflectionAgent, ReflectionLoop, ToolExecutor, ToolResult};

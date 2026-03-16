@@ -998,6 +998,99 @@ mod tests {
         );
     }
 
+    // --- trust gate tests ---
+
+    #[test]
+    fn test_untrusted_project_skips_local_instructions() {
+        let tmp = TempDir::new().unwrap();
+        let fake_home = TempDir::new().unwrap();
+        let ava_dir = fake_home.path().join(".ava");
+        fs::create_dir_all(&ava_dir).unwrap();
+
+        // Global instructions (should always load)
+        fs::write(ava_dir.join("AGENTS.md"), "Global rules.").unwrap();
+
+        // Project-local files (should be skipped when untrusted)
+        fs::write(tmp.path().join("AGENTS.md"), "Project AGENTS.").unwrap();
+        fs::write(tmp.path().join("CLAUDE.md"), "Project CLAUDE.").unwrap();
+        let rules = tmp.path().join(".ava").join("rules");
+        fs::create_dir_all(&rules).unwrap();
+        fs::write(rules.join("style.md"), "Style rule.").unwrap();
+
+        // Project-local skills (should be skipped)
+        let skill_dir = tmp.path().join(".ava").join("skills").join("rust");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(skill_dir.join("SKILL.md"), "Rust skill.").unwrap();
+
+        // Load with project_trusted = false
+        let result = load_from_root_with_extras(tmp.path(), Some(fake_home.path()), &[], false);
+        assert!(result.is_some(), "Global instructions should still load");
+        let text = result.unwrap();
+
+        assert!(
+            text.contains("Global rules."),
+            "Global instructions should load even when untrusted"
+        );
+        assert!(
+            !text.contains("Project AGENTS."),
+            "Project AGENTS.md should be skipped when untrusted"
+        );
+        assert!(
+            !text.contains("Project CLAUDE."),
+            "Project CLAUDE.md should be skipped when untrusted"
+        );
+        assert!(
+            !text.contains("Style rule."),
+            ".ava/rules/ should be skipped when untrusted"
+        );
+        assert!(
+            !text.contains("Rust skill."),
+            "Project skills should be skipped when untrusted"
+        );
+    }
+
+    #[test]
+    fn test_untrusted_project_no_global_returns_none() {
+        let tmp = TempDir::new().unwrap();
+        // Project-local only, no global
+        fs::write(tmp.path().join("AGENTS.md"), "Project rules.").unwrap();
+
+        let result = load_from_root_with_extras(tmp.path(), None, &[], false);
+        assert!(
+            result.is_none(),
+            "Untrusted project with no global instructions should return None"
+        );
+    }
+
+    #[test]
+    fn test_untrusted_project_global_skills_still_load() {
+        let tmp = TempDir::new().unwrap();
+        let fake_home = TempDir::new().unwrap();
+
+        // Global skill
+        let global_skill = fake_home.path().join(".ava").join("skills").join("global");
+        fs::create_dir_all(&global_skill).unwrap();
+        fs::write(global_skill.join("SKILL.md"), "Global skill guidance.").unwrap();
+
+        // Project skill (should be skipped)
+        let project_skill = tmp.path().join(".ava").join("skills").join("local");
+        fs::create_dir_all(&project_skill).unwrap();
+        fs::write(project_skill.join("SKILL.md"), "Local skill guidance.").unwrap();
+
+        let result = load_from_root_with_extras(tmp.path(), Some(fake_home.path()), &[], false);
+        assert!(result.is_some());
+        let text = result.unwrap();
+
+        assert!(
+            text.contains("Global skill guidance."),
+            "Global skills should load even when untrusted"
+        );
+        assert!(
+            !text.contains("Local skill guidance."),
+            "Project-local skills should be skipped when untrusted"
+        );
+    }
+
     #[test]
     fn test_contextual_instructions_empty_file_skipped() {
         let tmp = TempDir::new().unwrap();

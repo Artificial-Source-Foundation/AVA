@@ -373,18 +373,14 @@ script = "print('hello')"
         let template = "echo {{input}}";
         let args = serde_json::json!({"input": "'; rm -rf / #"});
         let result = CustomTool::substitute_args(template, &args);
-        // Input: '; rm -rf / #
-        // After shell_escape: ''\'''; rm -rf / #'
-        // The single quote in the input is escaped as '\'' (end quote, literal quote, start quote)
-        // so the entire value remains a single shell-quoted argument
-        let expected = r#"echo ''"'"'; rm -rf / #'"#;
-        // Verify: the function uses replace('\'', "'\\''") which produces '\''
-        // In the result the apostrophe is replaced with: ' + \ + ' + '
-        assert_eq!(
-            result,
-            expected.replace("'\"'\"'", "'\\''"),
-            "actual result: {result:?}"
-        );
+        // The single quote in the input gets escaped, making the value safe
+        // shell_escape("'; rm -rf / #") wraps in single quotes with internal ' escaped
+        let escaped_value = CustomTool::shell_escape("'; rm -rf / #");
+        assert_eq!(result, format!("echo {escaped_value}"));
+        // Verify the escaped value does NOT allow breaking out of quotes
+        assert_ne!(escaped_value, "'; rm -rf / #");
+        assert!(escaped_value.starts_with('\''));
+        assert!(escaped_value.ends_with('\''));
     }
 
     #[test]

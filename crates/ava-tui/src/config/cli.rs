@@ -55,6 +55,10 @@ pub struct CliArgs {
     #[arg(long = "watch-path")]
     pub watch_path: Vec<String>,
 
+    /// Trust the current project (allows loading .ava/mcp.json and .ava/hooks/)
+    #[arg(long)]
+    pub trust: bool,
+
     /// Use multi-agent Director mode (Praxis) instead of single AgentStack
     #[arg(long, alias = "praxis")]
     pub multi_agent: bool,

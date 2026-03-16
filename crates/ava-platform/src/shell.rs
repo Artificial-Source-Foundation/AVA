@@ -4,10 +4,11 @@ use async_trait::async_trait;
 use ava_types::{AvaError, Result};
 use futures::stream::{BoxStream, StreamExt};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex};
 
 /// Command execution output
 #[derive(Debug, Clone)]
@@ -79,14 +80,32 @@ impl Shell for LocalShell {
         }
 
         // Spawn the child so we retain a handle for killing on timeout
-        let mut child = cmd.spawn().map_err(|e| AvaError::IoError(e.to_string()))?;
+        let child = cmd.spawn().map_err(|e| AvaError::IoError(e.to_string()))?;
 
         if let Some(timeout) = options.timeout {
-            match tokio::time::timeout(timeout, child.wait_with_output()).await {
-                Ok(Ok(output)) => Ok(CommandOutput {
-                    stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-                    exit_code: output.status.code().unwrap_or(-1),
+            // Pin the future so we can cancel it and still kill the child on timeout.
+            let mut child = child;
+            let stdout = child.stdout.take();
+            let stderr = child.stderr.take();
+
+            let wait_fut = async {
+                let status = child.wait().await?;
+                let mut stdout_buf = Vec::new();
+                let mut stderr_buf = Vec::new();
+                if let Some(mut r) = stdout {
+                    tokio::io::AsyncReadExt::read_to_end(&mut r, &mut stdout_buf).await?;
+                }
+                if let Some(mut r) = stderr {
+                    tokio::io::AsyncReadExt::read_to_end(&mut r, &mut stderr_buf).await?;
+                }
+                Ok::<_, std::io::Error>((status, stdout_buf, stderr_buf))
+            };
+
+            match tokio::time::timeout(timeout, wait_fut).await {
+                Ok(Ok((status, stdout_buf, stderr_buf))) => Ok(CommandOutput {
+                    stdout: String::from_utf8_lossy(&stdout_buf).to_string(),
+                    stderr: String::from_utf8_lossy(&stderr_buf).to_string(),
+                    exit_code: status.code().unwrap_or(-1),
                     duration: start.elapsed(),
                 }),
                 Ok(Err(e)) => Err(AvaError::IoError(e.to_string())),
@@ -142,6 +161,9 @@ impl Shell for LocalShell {
             AvaError::PlatformError(format!("Failed to capture stderr for command: {command}"))
         })?;
 
+        // Wrap child in Arc<Mutex> so both timeout and wait tasks can access it
+        let child = Arc::new(Mutex::new(Some(child)));
+
         let stdout_reader = BufReader::new(stdout);
         let stderr_reader = BufReader::new(stderr);
 
@@ -171,10 +193,16 @@ impl Shell for LocalShell {
             let tx_timeout = tx.clone();
             let (done_tx, done_rx) = oneshot::channel::<()>();
             completion_tx = Some(done_tx);
+            let child_timeout = Arc::clone(&child);
 
             tokio::spawn(async move {
                 tokio::select! {
                     _ = tokio::time::sleep(timeout) => {
+                        // Kill the child process to avoid orphans
+                        if let Some(mut ch) = child_timeout.lock().await.take() {
+                            ch.kill().await.ok();
+                            ch.wait().await.ok(); // Reap to avoid zombies
+                        }
                         let _ = tx_timeout.send(Err(AvaError::TimeoutError(format!(
                             "Command timed out after {timeout:?}"
                         ))));
@@ -186,7 +214,11 @@ impl Shell for LocalShell {
 
         // Spawn task to wait for process and report exit code
         tokio::spawn(async move {
-            match child.wait().await {
+            // Take the child out of the shared slot (may be None if timeout killed it)
+            let Some(mut ch) = child.lock().await.take() else {
+                return;
+            };
+            match ch.wait().await {
                 Ok(status) => {
                     let _ = completion_tx.and_then(|tx_done| tx_done.send(()).ok());
                     let _ = tx.send(Ok(format!("[exit] {}", status.code().unwrap_or(-1))));

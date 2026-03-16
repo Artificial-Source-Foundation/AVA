@@ -17,6 +17,7 @@ pub mod keychain;
 pub mod model_catalog;
 pub mod routing;
 pub mod thinking;
+pub mod trust;
 
 pub use agents::AgentsConfig;
 pub use ava_auth;
@@ -71,6 +72,7 @@ pub use keychain::{redact_key_for_log, KeychainManager, MigrationResult};
 pub use model_catalog::{fallback_catalog, CatalogModel, CatalogState, ModelCatalog};
 pub use routing::{RoutingConfig, RoutingMode, RoutingProfile, RoutingTarget, RoutingTargets};
 pub use thinking::{ProviderThinkingBudgetConfig, ThinkingBudgetConfig};
+pub use trust::{is_project_trusted, trust_project};
 
 /// LLM provider configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

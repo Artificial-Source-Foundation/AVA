@@ -150,6 +150,50 @@ pub fn parse_sse_lines(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Buffered SSE parser that handles partial network chunks correctly.
+///
+/// Network chunks can split mid-event (e.g., a JSON payload split across two
+/// TCP frames). This parser accumulates data until complete SSE events
+/// (delimited by double newlines) are available, then extracts `data:` lines.
+#[derive(Debug, Default)]
+pub struct SseParser {
+    buffer: String,
+}
+
+impl SseParser {
+    pub fn new() -> Self {
+        Self {
+            buffer: String::new(),
+        }
+    }
+
+    /// Feed a network chunk into the parser and return any complete SSE data payloads.
+    pub fn feed(&mut self, chunk: &str) -> Vec<String> {
+        self.buffer.push_str(chunk);
+        let mut events = Vec::new();
+
+        // SSE events are separated by double newlines (\n\n)
+        while let Some(pos) = self.buffer.find("\n\n") {
+            let event_text = self.buffer[..pos].to_string();
+            self.buffer = self.buffer[pos + 2..].to_string();
+
+            // Extract data lines from the complete event
+            for line in event_text.lines() {
+                let payload = line
+                    .strip_prefix("data: ")
+                    .or_else(|| line.strip_prefix("data:"));
+                if let Some(payload) = payload {
+                    if payload != "[DONE]" {
+                        events.push(payload.to_string());
+                    }
+                }
+            }
+        }
+
+        events
+    }
+}
+
 pub fn parse_openai_completion_payload(payload: &Value) -> Result<String> {
     let choice = payload
         .get("choices")

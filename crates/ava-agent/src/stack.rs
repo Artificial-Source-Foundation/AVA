@@ -345,7 +345,20 @@ impl AgentStack {
         }
 
         let mcp_global_config = config.data_dir.join("mcp.json");
-        let mcp_project_config = effective_cwd.join(".ava").join("mcp.json");
+        let project_trusted = ava_config::is_project_trusted(&effective_cwd);
+        let mcp_project_config = if project_trusted {
+            effective_cwd.join(".ava").join("mcp.json")
+        } else {
+            let candidate = effective_cwd.join(".ava").join("mcp.json");
+            if candidate.exists() {
+                tracing::warn!(
+                    "Skipping project-local MCP servers — project not trusted. \
+                     Run with --trust or approve via /trust in TUI."
+                );
+            }
+            // Use a non-existent path so the loader finds nothing
+            config.data_dir.join(".mcp-project-skipped.json")
+        };
         let custom_tool_dirs = vec![
             config.data_dir.join("tools"),
             effective_cwd.join(".ava").join("tools"),
@@ -364,7 +377,9 @@ impl AgentStack {
             auto_approve: config.yolo,
             session_approved: std::collections::HashSet::new(),
             safety_profiles: core_tool_profiles(),
-            persistent_rules: ava_permissions::persistent::PersistentRules::load_project(&effective_cwd),
+            persistent_rules: ava_permissions::persistent::PersistentRules::load_project(
+                &effective_cwd,
+            ),
         }));
         let permission_inspector: Arc<dyn PermissionInspector> = Arc::new(DefaultInspector::new(
             PermissionSystem::load(effective_cwd.clone(), vec![]),

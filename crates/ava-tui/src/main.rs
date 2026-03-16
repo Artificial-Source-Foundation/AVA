@@ -28,6 +28,16 @@ async fn main() -> Result<()> {
     // _log_guard MUST be held for the lifetime of main — dropping it loses buffered logs.
     let _log_guard = init_logging(is_tui);
 
+    // --trust: mark the current project as trusted before loading MCP/hooks
+    if cli.trust {
+        let cwd = std::env::current_dir().unwrap_or_default();
+        if let Err(e) = ava_config::trust_project(&cwd) {
+            eprintln!("Failed to trust project: {e}");
+        } else {
+            eprintln!("Trusted project: {}", cwd.display());
+        }
+    }
+
     // Subcommand routing
     match cli.command.clone() {
         Some(Command::Review(args)) => return run_review(args).await,

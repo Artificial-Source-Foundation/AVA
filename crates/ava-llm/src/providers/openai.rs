@@ -241,12 +241,14 @@ impl LLMProvider for OpenAIProvider {
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, "OpenAI").await?;
-        let stream = response.bytes_stream().flat_map(|chunk| {
+        let mut sse_parser = common::SseParser::new();
+        let stream = response.bytes_stream().flat_map(move |chunk| {
             let chunks = chunk
                 .ok()
                 .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
                 .map(|text| {
-                    common::parse_sse_lines(&text)
+                    sse_parser
+                        .feed(&text)
                         .into_iter()
                         .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
                         .filter_map(|payload| common::parse_openai_stream_chunk(&payload))
@@ -335,12 +337,14 @@ impl LLMProvider for OpenAIProvider {
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, "OpenAI").await?;
-        let stream = response.bytes_stream().flat_map(|chunk| {
+        let mut sse_parser = common::SseParser::new();
+        let stream = response.bytes_stream().flat_map(move |chunk| {
             let chunks = chunk
                 .ok()
                 .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
                 .map(|text| {
-                    common::parse_sse_lines(&text)
+                    sse_parser
+                        .feed(&text)
                         .into_iter()
                         .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
                         .filter_map(|payload| common::parse_openai_stream_chunk(&payload))
@@ -375,12 +379,14 @@ impl LLMProvider for OpenAIProvider {
 
         let response = self.send_request(request).await?;
         let response = common::validate_status(response, "OpenAI").await?;
-        let stream = response.bytes_stream().flat_map(|chunk| {
+        let mut sse_parser = common::SseParser::new();
+        let stream = response.bytes_stream().flat_map(move |chunk| {
             let chunks = chunk
                 .ok()
                 .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
                 .map(|text| {
-                    common::parse_sse_lines(&text)
+                    sse_parser
+                        .feed(&text)
                         .into_iter()
                         .filter_map(|line| serde_json::from_str::<Value>(&line).ok())
                         .filter_map(|payload| common::parse_openai_stream_chunk(&payload))

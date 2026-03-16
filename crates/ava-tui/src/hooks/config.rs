@@ -125,9 +125,14 @@ impl HookRegistry {
             Self::load_from_dir(&global_dir, HookSource::Global, &mut hooks);
         }
 
-        // Load project hooks (can shadow globals with same filename)
+        // Load project hooks only from trusted projects
         let project_dir = PathBuf::from(".ava").join("hooks");
-        Self::load_from_dir(&project_dir, HookSource::Project, &mut hooks);
+        let cwd = std::env::current_dir().unwrap_or_default();
+        if ava_config::is_project_trusted(&cwd) {
+            Self::load_from_dir(&project_dir, HookSource::Project, &mut hooks);
+        } else if project_dir.exists() {
+            debug!("Skipping project-local hooks — project not trusted. Run with --trust or approve via /trust in TUI.");
+        }
 
         debug!(count = hooks.len(), "loaded hooks");
         Self { hooks }

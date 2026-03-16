@@ -306,6 +306,7 @@ impl App {
             "/clear" => {
                 self.state.messages.messages.clear();
                 self.state.messages.reset_scroll();
+                self.state.agent.clear_session_metrics();
                 self.pending_images.clear();
                 self.state.pending_image_count = 0;
                 self.set_status("Chat cleared", StatusLevel::Info);

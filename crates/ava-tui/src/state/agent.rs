@@ -357,6 +357,7 @@ impl AgentState {
         self.tokens_used = TokenUsage::default();
         self.cost = 0.0;
         self.latest_budget_alert = None;
+        self.loop_started_at = None;
         self.sub_agents.clear();
     }
 
@@ -719,6 +720,8 @@ mod tests {
             cumulative_output: 5,
         };
         state.cost = 0.25;
+        state.current_turn = 3;
+        state.loop_started_at = Some(Instant::now());
         state.latest_budget_alert = Some(BudgetAlertState {
             threshold_percent: 50,
             spent_usd: 0.25,
@@ -740,7 +743,11 @@ mod tests {
 
         assert_eq!(state.tokens_used.input, 0);
         assert_eq!(state.tokens_used.output, 0);
+        assert_eq!(state.tokens_used.cumulative_input, 0);
+        assert_eq!(state.tokens_used.cumulative_output, 0);
+        assert_eq!(state.current_turn, 0);
         assert_eq!(state.cost, 0.0);
+        assert!(state.loop_started_at.is_none());
         assert!(state.latest_budget_alert.is_none());
         assert!(state.sub_agents.is_empty());
     }

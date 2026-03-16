@@ -355,7 +355,16 @@ impl SessionManager {
 
     fn init_schema(&self) -> Result<()> {
         let conn = self.open_conn()?;
-        conn.execute_batch(SCHEMA_SQL).map_err(db_error)?;
+
+        let version: i32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .map_err(db_error)?;
+
+        if version < 1 {
+            conn.execute_batch(SCHEMA_SQL).map_err(db_error)?;
+            conn.execute_batch("PRAGMA user_version = 1;")
+                .map_err(db_error)?;
+        }
 
         // Run migrations for existing databases (idempotent — ignores "duplicate column" errors)
         for sql in MIGRATION_SQL {

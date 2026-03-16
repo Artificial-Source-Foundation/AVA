@@ -243,6 +243,7 @@ impl Tool for ClaudeCodeTool {
         cmd.args(&cmd_args)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
             // Clear CLAUDECODE env var to allow nested invocation.
             // CC blocks nested sessions by checking this var, but AVA spawns
             // CC as an independent subprocess, not a nested session.

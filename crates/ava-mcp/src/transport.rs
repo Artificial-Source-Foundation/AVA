@@ -180,6 +180,20 @@ pub struct StdioTransport {
     stdout: BufReader<tokio::process::ChildStdout>,
 }
 
+/// Environment variable names that should never be forwarded to MCP server processes.
+const SENSITIVE_ENV_VARS: &[&str] = &[
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_TOKEN",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+    "HF_TOKEN",
+    "HUGGING_FACE_HUB_TOKEN",
+];
+
 impl StdioTransport {
     pub async fn spawn(
         command: &str,
@@ -190,8 +204,15 @@ impl StdioTransport {
         cmd.args(args)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
 
+        // Remove sensitive environment variables from the inherited environment
+        for var in SENSITIVE_ENV_VARS {
+            cmd.env_remove(var);
+        }
+
+        // Apply user-configured env vars (these are explicitly allowed by the user)
         for (key, value) in env {
             cmd.env(key, value);
         }

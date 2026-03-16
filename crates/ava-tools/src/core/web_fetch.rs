@@ -76,6 +76,11 @@ fn is_blocked_url(url: &str) -> Result<(), AvaError> {
     Ok(())
 }
 
+/// Returns `true` if the URL targets a blocked address (for use in redirect policy).
+fn is_blocked_url_bool(url: &str) -> bool {
+    is_blocked_url(url).is_err()
+}
+
 /// Strip HTML tags and extract text content.
 fn strip_html(html: &str) -> String {
     // Remove script and style blocks entirely
@@ -146,11 +151,22 @@ impl Tool for WebFetchTool {
         // SSRF prevention
         is_blocked_url(url)?;
 
-        // Build client with timeout and redirect policy
+        // Build client with timeout and redirect policy that validates each hop
         let client = reqwest::Client::builder()
             .user_agent("ava/2.1")
             .timeout(std::time::Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::limited(5))
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 5 {
+                    attempt.error(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "too many redirects",
+                    ))
+                } else if is_blocked_url_bool(attempt.url().as_str()) {
+                    attempt.stop()
+                } else {
+                    attempt.follow()
+                }
+            }))
             .build()
             .map_err(|e| AvaError::ToolError(format!("Failed to create HTTP client: {e}")))?;
 

@@ -90,17 +90,25 @@ impl CustomTool {
         Value::Object(schema)
     }
 
+    /// Shell-escape a value by single-quoting it, escaping any internal single quotes.
+    fn shell_escape(s: &str) -> String {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+
     /// Substitute `{{param_name}}` placeholders in a command string with argument values.
+    ///
+    /// All substituted values are shell-escaped to prevent command injection.
     fn substitute_args(template: &str, args: &Value) -> String {
         let mut result = template.to_string();
         if let Some(obj) = args.as_object() {
             for (key, value) in obj {
                 let placeholder = format!("{{{{{key}}}}}");
-                let replacement = match value {
+                let raw = match value {
                     Value::String(s) => s.clone(),
                     other => other.to_string(),
                 };
-                result = result.replace(&placeholder, &replacement);
+                let escaped = Self::shell_escape(&raw);
+                result = result.replace(&placeholder, &escaped);
             }
         }
         result
@@ -149,7 +157,10 @@ impl Tool for CustomTool {
 
         let output = tokio::time::timeout(
             std::time::Duration::from_secs(timeout),
-            tokio::process::Command::new(&cmd).args(&cmd_args).output(),
+            tokio::process::Command::new(&cmd)
+                .args(&cmd_args)
+                .kill_on_drop(true)
+                .output(),
         )
         .await
         .map_err(|_| {
@@ -354,7 +365,33 @@ script = "print('hello')"
         let template = "echo {{name}} is {{age}} years old";
         let args = serde_json::json!({"name": "Alice", "age": 30});
         let result = CustomTool::substitute_args(template, &args);
-        assert_eq!(result, "echo Alice is 30 years old");
+        assert_eq!(result, "echo 'Alice' is '30' years old");
+    }
+
+    #[test]
+    fn substitute_args_escapes_injection() {
+        let template = "echo {{input}}";
+        let args = serde_json::json!({"input": "'; rm -rf / #"});
+        let result = CustomTool::substitute_args(template, &args);
+        // Input: '; rm -rf / #
+        // After shell_escape: ''\'''; rm -rf / #'
+        // The single quote in the input is escaped as '\'' (end quote, literal quote, start quote)
+        // so the entire value remains a single shell-quoted argument
+        let expected = r#"echo ''"'"'; rm -rf / #'"#;
+        // Verify: the function uses replace('\'', "'\\''") which produces '\''
+        // In the result the apostrophe is replaced with: ' + \ + ' + '
+        assert_eq!(
+            result,
+            expected.replace("'\"'\"'", "'\\''"),
+            "actual result: {result:?}"
+        );
+    }
+
+    #[test]
+    fn shell_escape_handles_single_quotes() {
+        assert_eq!(CustomTool::shell_escape("hello"), "'hello'");
+        assert_eq!(CustomTool::shell_escape("it's"), "'it'\\''s'");
+        assert_eq!(CustomTool::shell_escape(""), "''");
     }
 
     #[tokio::test]
@@ -378,6 +415,7 @@ script = "print('hello')"
             .execute(serde_json::json!({"msg": "hello"}))
             .await
             .unwrap();
+        // Shell-escaped param is passed through sh -c, which strips the quotes
         assert_eq!(result.content.trim(), "hello");
         assert!(!result.is_error);
     }

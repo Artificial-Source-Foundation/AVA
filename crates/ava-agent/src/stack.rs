@@ -248,15 +248,43 @@ impl AgentStack {
             // Use a non-existent path so the loader finds nothing
             config.data_dir.join(".mcp-project-skipped.json")
         };
-        let custom_tool_dirs = vec![
-            config.data_dir.join("tools"),
-            effective_cwd.join(".ava").join("tools"),
-        ];
+        let custom_tool_dirs = if project_trusted {
+            vec![
+                config.data_dir.join("tools"),
+                effective_cwd.join(".ava").join("tools"),
+            ]
+        } else {
+            let candidate = effective_cwd.join(".ava").join("tools");
+            if candidate.is_dir() {
+                tracing::warn!(
+                    "Skipping project-local custom tools — project not trusted. \
+                     Run with --trust or approve via /trust in TUI."
+                );
+            }
+            // Only load global custom tools
+            vec![config.data_dir.join("tools")]
+        };
 
-        let agents_config = AgentsConfig::load(
-            &config.data_dir.join("agents.toml"),
-            &effective_cwd.join(".ava").join("agents.toml"),
-        );
+        let agents_config = if project_trusted {
+            AgentsConfig::load(
+                &config.data_dir.join("agents.toml"),
+                &effective_cwd.join(".ava").join("agents.toml"),
+            )
+        } else {
+            let candidate = effective_cwd.join(".ava").join("agents.toml");
+            if candidate.exists() {
+                tracing::warn!(
+                    "Skipping project-local agents.toml — project not trusted. \
+                     Run with --trust or approve via /trust in TUI."
+                );
+            }
+            // Only load global agents config
+            AgentsConfig::load(
+                &config.data_dir.join("agents.toml"),
+                // Use a non-existent path so load_file returns None for the project config
+                &config.data_dir.join(".agents-project-skipped.toml"),
+            )
+        };
 
         let todo_state = TodoState::new();
         let (question_bridge, question_rx) = QuestionBridge::new();

@@ -75,108 +75,128 @@ pub fn load_project_instructions() -> Option<String> {
 ///
 /// `extra_paths` are file paths or glob patterns relative to the project root.
 /// They are loaded after the standard instruction files.
+///
+/// Project-local instruction files (AGENTS.md, CLAUDE.md, .cursorrules,
+/// .github/copilot-instructions.md, .ava/rules/*.md, .ava/skills/) are only
+/// loaded when the project is trusted. Global instructions (~/.ava/AGENTS.md)
+/// always load regardless of trust.
 pub fn load_project_instructions_with_config(extra_paths: &[String]) -> Option<String> {
     let cwd = std::env::current_dir().ok()?;
     let home = dirs::home_dir();
-    load_from_root_with_extras(&cwd, home.as_deref(), extra_paths)
+    let project_trusted = ava_config::is_project_trusted(&cwd);
+    if !project_trusted {
+        tracing::warn!(
+            "Skipping project-local instructions — project not trusted. \
+             Run with --trust or approve via /trust in TUI."
+        );
+    }
+    load_from_root_with_extras(&cwd, home.as_deref(), extra_paths, project_trusted)
 }
 
 /// Internal implementation that accepts explicit root and home paths for testability.
+/// Defaults to `project_trusted = true` for backward-compatible tests.
 #[cfg(test)]
 fn load_from_root(root: &Path, home: Option<&Path>) -> Option<String> {
-    load_from_root_with_extras(root, home, &[])
+    load_from_root_with_extras(root, home, &[], true)
 }
 
-/// Internal implementation that accepts explicit root, home, and extra instruction paths.
+/// Internal implementation that accepts explicit root, home, extra instruction paths,
+/// and a trust flag. When `project_trusted` is `false`, only global instructions
+/// (~/.ava/AGENTS.md and global skills) are loaded; all project-local files are skipped.
 fn load_from_root_with_extras(
     root: &Path,
     home: Option<&Path>,
     extra_paths: &[String],
+    project_trusted: bool,
 ) -> Option<String> {
     let mut seen = HashSet::new();
     let mut sections = Vec::new();
 
-    // 1. Global user-level instructions: ~/.ava/AGENTS.md
+    // 1. Global user-level instructions: ~/.ava/AGENTS.md (always loaded)
     if let Some(home) = home {
         let global = home.join(".ava").join("AGENTS.md");
         try_load_file(&global, &mut seen, &mut sections);
     }
 
-    // 1b. Walk parent directories for AGENTS.md (monorepo support)
-    // Stop at filesystem root or directory containing .git
-    {
-        let mut ancestors = Vec::new();
-        let mut dir = root.parent();
-        while let Some(d) = dir {
-            if d.join(".git").exists() {
-                // This directory is a repo boundary — include it but don't go higher
+    // --- Everything below is project-local and requires trust ---
+
+    if project_trusted {
+        // 1b. Walk parent directories for AGENTS.md (monorepo support)
+        // Stop at filesystem root or directory containing .git
+        {
+            let mut ancestors = Vec::new();
+            let mut dir = root.parent();
+            while let Some(d) = dir {
+                if d.join(".git").exists() {
+                    // This directory is a repo boundary — include it but don't go higher
+                    ancestors.push(d.to_path_buf());
+                    break;
+                }
                 ancestors.push(d.to_path_buf());
-                break;
+                dir = d.parent();
             }
-            ancestors.push(d.to_path_buf());
-            dir = d.parent();
-        }
-        // Load in top-down order (outermost first) so more-specific rules take priority
-        ancestors.reverse();
-        for ancestor in &ancestors {
-            for name in &["AGENTS.md", "CLAUDE.md"] {
-                let path = ancestor.join(name);
-                try_load_file(&path, &mut seen, &mut sections);
-            }
-        }
-    }
-
-    // 2. Project root files
-    for name in PROJECT_ROOT_FILES {
-        let path = root.join(name);
-        try_load_file(&path, &mut seen, &mut sections);
-    }
-
-    // 2b. Project-level .ava/AGENTS.md (inside .ava dir)
-    let project_ava_agents = root.join(".ava").join("AGENTS.md");
-    try_load_file(&project_ava_agents, &mut seen, &mut sections);
-
-    // 3. .ava/rules/*.md — sorted alphabetically
-    let rules_dir = root.join(".ava").join("rules");
-    if rules_dir.is_dir() {
-        if let Ok(entries) = fs::read_dir(&rules_dir) {
-            let mut rule_files: Vec<PathBuf> = entries
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| {
-                    p.extension()
-                        .map(|ext| ext.eq_ignore_ascii_case("md"))
-                        .unwrap_or(false)
-                })
-                .collect();
-            rule_files.sort();
-            for path in rule_files {
-                try_load_rule_file(&path, root, &mut seen, &mut sections);
-            }
-        }
-    }
-
-    // 4. User-configured extra instruction paths (from config.yaml `instructions:`)
-    for extra in extra_paths {
-        if extra.contains('*') {
-            // Treat as glob pattern relative to root
-            let full_pattern = root.join(extra);
-            if let Ok(paths) = glob::glob(&full_pattern.to_string_lossy()) {
-                let mut matched: Vec<PathBuf> = paths.filter_map(|p| p.ok()).collect();
-                matched.sort();
-                for path in matched {
+            // Load in top-down order (outermost first) so more-specific rules take priority
+            ancestors.reverse();
+            for ancestor in &ancestors {
+                for name in &["AGENTS.md", "CLAUDE.md"] {
+                    let path = ancestor.join(name);
                     try_load_file(&path, &mut seen, &mut sections);
                 }
             }
-        } else {
-            let path = root.join(extra);
+        }
+
+        // 2. Project root files
+        for name in PROJECT_ROOT_FILES {
+            let path = root.join(name);
             try_load_file(&path, &mut seen, &mut sections);
         }
-    }
 
-    // 5. Skill discovery (global first, then project).
+        // 2b. Project-level .ava/AGENTS.md (inside .ava dir)
+        let project_ava_agents = root.join(".ava").join("AGENTS.md");
+        try_load_file(&project_ava_agents, &mut seen, &mut sections);
+
+        // 3. .ava/rules/*.md — sorted alphabetically
+        let rules_dir = root.join(".ava").join("rules");
+        if rules_dir.is_dir() {
+            if let Ok(entries) = fs::read_dir(&rules_dir) {
+                let mut rule_files: Vec<PathBuf> = entries
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .filter(|p| {
+                        p.extension()
+                            .map(|ext| ext.eq_ignore_ascii_case("md"))
+                            .unwrap_or(false)
+                    })
+                    .collect();
+                rule_files.sort();
+                for path in rule_files {
+                    try_load_rule_file(&path, root, &mut seen, &mut sections);
+                }
+            }
+        }
+
+        // 4. User-configured extra instruction paths (from config.yaml `instructions:`)
+        for extra in extra_paths {
+            if extra.contains('*') {
+                // Treat as glob pattern relative to root
+                let full_pattern = root.join(extra);
+                if let Ok(paths) = glob::glob(&full_pattern.to_string_lossy()) {
+                    let mut matched: Vec<PathBuf> = paths.filter_map(|p| p.ok()).collect();
+                    matched.sort();
+                    for path in matched {
+                        try_load_file(&path, &mut seen, &mut sections);
+                    }
+                }
+            } else {
+                let path = root.join(extra);
+                try_load_file(&path, &mut seen, &mut sections);
+            }
+        }
+    } // end project_trusted
+
+    // 5. Skill discovery (global first, then project — project gated on trust).
     // Supported roots: .claude/skills, .agents/skills, .ava/skills
-    load_skill_sections(root, home, &mut seen, &mut sections);
+    load_skill_sections(root, home, project_trusted, &mut seen, &mut sections);
 
     if sections.is_empty() {
         return None;
@@ -190,21 +210,26 @@ fn load_from_root_with_extras(
 }
 
 /// Load discovered skill files as additional instruction sections.
-/// Skill files are discovered from both global and project scopes.
+/// Global skills always load; project-local skills require trust.
 fn load_skill_sections(
     root: &Path,
     home: Option<&Path>,
+    project_trusted: bool,
     seen: &mut HashSet<PathBuf>,
     sections: &mut Vec<String>,
 ) {
+    // Global skills always load
     if let Some(home) = home {
         for skill_dir in SKILL_DIRS {
             collect_skill_files(&home.join(skill_dir), sections, seen);
         }
     }
 
-    for skill_dir in SKILL_DIRS {
-        collect_skill_files(&root.join(skill_dir), sections, seen);
+    // Project-local skills require trust
+    if project_trusted {
+        for skill_dir in SKILL_DIRS {
+            collect_skill_files(&root.join(skill_dir), sections, seen);
+        }
     }
 }
 
@@ -730,7 +755,7 @@ mod tests {
         .unwrap();
 
         let extras = vec!["team/conventions.md".to_string()];
-        let result = load_from_root_with_extras(tmp.path(), None, &extras);
+        let result = load_from_root_with_extras(tmp.path(), None, &extras, true);
         assert!(result.is_some());
         let text = result.unwrap();
         assert!(
@@ -753,7 +778,7 @@ mod tests {
         fs::write(docs_dir.join("notes.txt"), "Not a markdown file.").unwrap();
 
         let extras = vec!["docs/*.md".to_string()];
-        let result = load_from_root_with_extras(tmp.path(), None, &extras);
+        let result = load_from_root_with_extras(tmp.path(), None, &extras, true);
         assert!(result.is_some());
         let text = result.unwrap();
         assert!(
@@ -775,7 +800,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         // No files created — the extra path points to a nonexistent file
         let extras = vec!["nonexistent/file.md".to_string()];
-        let result = load_from_root_with_extras(tmp.path(), None, &extras);
+        let result = load_from_root_with_extras(tmp.path(), None, &extras, true);
         assert!(
             result.is_none(),
             "Missing extra files should be silently skipped"
@@ -789,7 +814,7 @@ mod tests {
         fs::write(tmp.path().join("AGENTS.md"), "Standard rules.").unwrap();
 
         let extras = vec!["AGENTS.md".to_string()];
-        let result = load_from_root_with_extras(tmp.path(), None, &extras);
+        let result = load_from_root_with_extras(tmp.path(), None, &extras, true);
         assert!(result.is_some());
         let text = result.unwrap();
         let count = text.matches("Standard rules.").count();

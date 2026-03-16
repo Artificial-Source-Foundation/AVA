@@ -35,7 +35,13 @@ impl MemorySystem {
     }
 
     fn conn(&self) -> Result<Connection> {
-        Connection::open(&self.db_path)
+        let conn = Connection::open(&self.db_path)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA foreign_keys = ON;
+             PRAGMA busy_timeout = 5000;",
+        )?;
+        Ok(conn)
     }
 
     pub fn remember(&self, key: &str, value: &str) -> Result<Memory> {
@@ -139,54 +145,63 @@ impl MemorySystem {
 
     fn init_schema(&self) -> Result<()> {
         let conn = self.conn()?;
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS memories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                key TEXT NOT NULL,
-                value TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-            );
 
-            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
-                value,
-                content='memories',
-                content_rowid='id'
-            );
+        let version: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
 
-            CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-                INSERT INTO memories_fts(rowid, value) VALUES (new.id, new.value);
-            END;
+        if version < 1 {
+            conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS memories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                );
 
-            CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
-                INSERT INTO memories_fts(memories_fts, rowid, value)
-                VALUES ('delete', old.id, old.value);
-            END;
+                CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+                    value,
+                    content='memories',
+                    content_rowid='id'
+                );
 
-            CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
-                INSERT INTO memories_fts(memories_fts, rowid, value)
-                VALUES ('delete', old.id, old.value);
-                INSERT INTO memories_fts(rowid, value) VALUES (new.id, new.value);
-            END;
+                CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+                    INSERT INTO memories_fts(rowid, value) VALUES (new.id, new.value);
+                END;
 
-            CREATE TABLE IF NOT EXISTS learned_memories (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                key TEXT NOT NULL,
-                value TEXT NOT NULL,
-                source_excerpt TEXT NOT NULL,
-                observed_count INTEGER NOT NULL DEFAULT 1,
-                confidence REAL NOT NULL DEFAULT 0.0,
-                status TEXT NOT NULL DEFAULT 'pending',
-                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-                UNIQUE(key, value)
-            );
+                CREATE TRIGGER IF NOT EXISTS memories_ad AFTER DELETE ON memories BEGIN
+                    INSERT INTO memories_fts(memories_fts, rowid, value)
+                    VALUES ('delete', old.id, old.value);
+                END;
 
-            CREATE INDEX IF NOT EXISTS idx_learned_memories_status
-              ON learned_memories(status);
+                CREATE TRIGGER IF NOT EXISTS memories_au AFTER UPDATE ON memories BEGIN
+                    INSERT INTO memories_fts(memories_fts, rowid, value)
+                    VALUES ('delete', old.id, old.value);
+                    INSERT INTO memories_fts(rowid, value) VALUES (new.id, new.value);
+                END;
 
-            CREATE INDEX IF NOT EXISTS idx_learned_memories_updated_at
-              ON learned_memories(updated_at);",
-        )
+                CREATE TABLE IF NOT EXISTS learned_memories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    key TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    source_excerpt TEXT NOT NULL,
+                    observed_count INTEGER NOT NULL DEFAULT 1,
+                    confidence REAL NOT NULL DEFAULT 0.0,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                    UNIQUE(key, value)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_learned_memories_status
+                  ON learned_memories(status);
+
+                CREATE INDEX IF NOT EXISTS idx_learned_memories_updated_at
+                  ON learned_memories(updated_at);
+
+                PRAGMA user_version = 1;",
+            )?;
+        }
+
+        Ok(())
     }
 }
 

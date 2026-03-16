@@ -17,6 +17,7 @@ pub mod routing;
 pub mod stack;
 pub mod stuck;
 pub mod system_prompt;
+pub mod trace;
 
 pub use instructions::{
     contextual_instructions_for_file, load_project_instructions, trim_instructions_to_budget,

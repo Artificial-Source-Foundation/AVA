@@ -273,6 +273,7 @@ dependencies = [
  "ava-session",
  "ava-tools",
  "ava-types",
+ "chrono",
  "criterion",
  "dirs",
  "futures",

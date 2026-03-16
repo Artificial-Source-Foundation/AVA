@@ -30,6 +30,7 @@ ava-session = { path = "../ava-session" }
 ava-mcp = { path = "../ava-mcp" }
 ava-tools = { path = "../ava-tools" }
 ava-types = { path = "../ava-types" }
+chrono.workspace = true
 dirs.workspace = true
 glob = "0.3"
 which = "7"

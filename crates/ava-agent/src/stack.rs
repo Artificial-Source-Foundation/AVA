@@ -143,118 +143,6 @@ pub struct AgentRunResult {
     pub session: Session,
 }
 
-#[derive(Debug, Default)]
-struct BudgetTelemetry {
-    input_tokens: usize,
-    output_tokens: usize,
-    total_cost_usd: f64,
-    max_budget_usd: f64,
-    last_alert_threshold_percent: Option<u8>,
-    emitted_thresholds: Vec<u8>,
-    skipped_follow_up_messages: usize,
-    skipped_post_complete_groups: usize,
-    skipped_post_complete_messages: usize,
-}
-
-impl BudgetTelemetry {
-    const ALERT_THRESHOLDS: [u8; 3] = [50, 75, 90];
-
-    fn new(max_budget_usd: f64) -> Self {
-        Self {
-            max_budget_usd,
-            ..Self::default()
-        }
-    }
-
-    fn observe(&mut self, event: &AgentEvent) -> Vec<AgentEvent> {
-        match event {
-            AgentEvent::TokenUsage {
-                input_tokens,
-                output_tokens,
-                cost_usd,
-            } => {
-                self.input_tokens += input_tokens;
-                self.output_tokens += output_tokens;
-                self.total_cost_usd += cost_usd;
-            }
-            AgentEvent::SubAgentComplete {
-                input_tokens,
-                output_tokens,
-                cost_usd,
-                ..
-            } => {
-                self.input_tokens += input_tokens;
-                self.output_tokens += output_tokens;
-                self.total_cost_usd += cost_usd;
-            }
-            _ => return Vec::new(),
-        }
-
-        if self.max_budget_usd <= 0.0 {
-            return Vec::new();
-        }
-
-        let percent_used = self.total_cost_usd / self.max_budget_usd * 100.0;
-        let mut warnings = Vec::new();
-        for threshold in Self::ALERT_THRESHOLDS {
-            if percent_used >= f64::from(threshold) && !self.emitted_thresholds.contains(&threshold)
-            {
-                self.emitted_thresholds.push(threshold);
-                self.last_alert_threshold_percent = Some(threshold);
-                warnings.push(AgentEvent::BudgetWarning {
-                    threshold_percent: threshold,
-                    current_cost_usd: self.total_cost_usd,
-                    max_budget_usd: self.max_budget_usd,
-                });
-            }
-        }
-        warnings
-    }
-
-    fn attach_to_session(&self, session: &mut Session) {
-        session.metadata["costSummary"] = serde_json::json!({
-            "totalUsd": self.total_cost_usd,
-            "budgetUsd": (self.max_budget_usd > 0.0).then_some(self.max_budget_usd),
-            "inputTokens": self.input_tokens,
-            "outputTokens": self.output_tokens,
-            "lastAlertThresholdPercent": self.last_alert_threshold_percent,
-            "skippedQueuedFollowUps": self.skipped_follow_up_messages,
-            "skippedQueuedPostCompleteGroups": self.skipped_post_complete_groups,
-            "skippedQueuedPostCompleteMessages": self.skipped_post_complete_messages,
-        });
-    }
-
-    fn remaining_budget_usd(&self) -> Option<f64> {
-        if self.max_budget_usd <= 0.0 {
-            None
-        } else {
-            Some((self.max_budget_usd - self.total_cost_usd).max(0.0))
-        }
-    }
-
-    fn budget_exhausted(&self) -> bool {
-        self.remaining_budget_usd()
-            .is_some_and(|remaining| remaining <= 0.0)
-    }
-
-    fn budget_status_label(&self) -> String {
-        if self.max_budget_usd > 0.0 {
-            format!("${:.2}/${:.2}", self.total_cost_usd, self.max_budget_usd)
-        } else {
-            format!("${:.2}", self.total_cost_usd)
-        }
-    }
-
-    fn record_skipped_follow_up_messages(&mut self, count: usize) {
-        self.skipped_follow_up_messages += count;
-    }
-
-    fn record_skipped_post_complete_group(&mut self, message_count: usize) {
-        self.skipped_post_complete_groups += 1;
-        self.skipped_post_complete_messages += message_count;
-    }
-}
-
 impl Default for AgentStackConfig {
     fn default() -> Self {
         Self {
@@ -742,66 +630,11 @@ impl AgentStack {
     }
 
     async fn enrich_goal_with_memories(&self, goal: &str) -> String {
-        let keywords = extract_goal_keywords(goal);
-        if keywords.is_empty() {
-            return goal.to_string();
-        }
-        let query = keywords.join(" ");
-        let Ok(memories) = self.memory.search(&query) else {
-            return goal.to_string();
-        };
-        let entries: Vec<String> = memories
-            .into_iter()
-            .take(5)
-            .map(|m| format!("- [{}]: {}", m.key, m.value))
-            .collect();
-
-        let learned = self
-            .memory
-            .search_confirmed_learned(&query, 5)
-            .unwrap_or_default();
-        let learned_entries: Vec<String> = learned
-            .into_iter()
-            .map(|m| format!("- [{}]: {}", m.key, m.value))
-            .collect();
-
-        if entries.is_empty() && learned_entries.is_empty() {
-            return goal.to_string();
-        }
-
-        let mut blocks = Vec::new();
-        if !entries.is_empty() {
-            blocks.push(format!("Relevant memories:\n{}", entries.join("\n")));
-        }
-        if !learned_entries.is_empty() {
-            blocks.push(format!(
-                "Confirmed learned project memories:\n{}",
-                learned_entries.join("\n")
-            ));
-        }
-
-        let memory_block = blocks.join("\n\n");
-        let memory_block = if memory_block.len() > 2000 {
-            let truncated: String = memory_block.chars().take(2000).collect();
-            format!("{truncated}...")
-        } else {
-            memory_block
-        };
-        format!("{goal}\n\n{memory_block}")
+        crate::memory_enrichment::enrich_goal_with_memories(&self.memory, goal).await
     }
 
     fn learn_project_patterns_from_goal(&self, goal: &str) {
-        let observations = extract_project_pattern_observations(goal);
-        for observation in observations {
-            if let Err(err) = self.memory.observe_learned_pattern(
-                &observation.key,
-                &observation.value,
-                &observation.source_excerpt,
-                observation.confidence,
-            ) {
-                warn!(error = %err, "failed to persist learned project memory");
-            }
-        }
+        crate::memory_enrichment::learn_project_patterns_from_goal(&self.memory, goal);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -893,34 +726,11 @@ impl AgentStack {
         let mode_suffix = self.mode_prompt_suffix.read().await.clone();
 
         // Build system prompt suffix: mode instructions + project instructions
-        let project_instructions =
-            crate::instructions::load_project_instructions_with_config(&cfg.instructions);
-
-        // Trim instructions to fit the model's context window (max 33% for instructions)
-        let project_instructions = project_instructions.map(|pi| {
-            let registry = ava_config::model_catalog::registry::ModelRegistry::load();
-            let model_name = provider.model_name();
-            let context_window = registry
-                .find(model_name)
-                .map(|m| m.limits.context_window)
-                .unwrap_or(200_000); // default to 200K if unknown
-            let instruction_budget = context_window / 3;
-            info!(
-                bytes = pi.len(),
-                estimated_tokens = pi.len() / 4,
-                context_window,
-                instruction_budget,
-                "Loaded project instructions into system prompt"
-            );
-            crate::instructions::trim_instructions_to_budget(&pi, instruction_budget)
-        });
-
-        let system_prompt_suffix = match (mode_suffix, project_instructions) {
-            (Some(mode), Some(proj)) => Some(format!("{mode}\n\n{proj}")),
-            (Some(mode), None) => Some(mode),
-            (None, Some(proj)) => Some(proj),
-            (None, None) => None,
-        };
+        let system_prompt_suffix = crate::instruction_resolver::build_system_prompt_suffix(
+            mode_suffix,
+            provider.model_name(),
+            &cfg.instructions,
+        );
 
         let config = AgentConfig {
             max_turns: turns_limit,
@@ -1288,15 +1098,9 @@ impl TaskSpawner for AgentTaskSpawner {
             custom_system_prompt: Some(system_prompt),
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
-            system_prompt_suffix: crate::instructions::load_project_instructions().map(|pi| {
-                let registry = ava_config::model_catalog::registry::ModelRegistry::load();
-                let context_window = registry
-                    .find(&self.model_name)
-                    .map(|m| m.limits.context_window)
-                    .unwrap_or(200_000);
-                let instruction_budget = context_window / 3;
-                crate::instructions::trim_instructions_to_budget(&pi, instruction_budget)
-            }),
+            system_prompt_suffix: crate::instruction_resolver::build_sub_agent_instructions(
+                &self.model_name,
+            ),
             extended_tools: true, // sub-agents get full tool access
             plan_mode: false,
             post_edit_validation: None,
@@ -1487,74 +1291,6 @@ async fn init_mcp_with_disabled(
     }
 }
 
-const STOPWORDS: &[&str] = &[
-    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had",
-    "do", "does", "did", "will", "would", "could", "should", "may", "might", "can", "shall", "to",
-    "of", "in", "for", "on", "with", "at", "by", "from", "as", "into", "about", "it", "its",
-    "this", "that", "and", "or", "but", "not", "no", "so", "if", "then", "than", "too", "very",
-    "just", "how", "what", "which", "who", "when", "where", "why", "all", "each", "me", "my", "i",
-    "you", "your", "we", "our", "he", "she", "they", "them",
-];
-
-fn extract_goal_keywords(goal: &str) -> Vec<String> {
-    goal.split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
-        .map(|s| s.trim().to_lowercase())
-        .filter(|s| s.len() > 2 && !STOPWORDS.contains(&s.as_str()))
-        .collect()
-}
-
-#[derive(Debug, Clone)]
-struct LearnedPatternObservation {
-    key: String,
-    value: String,
-    source_excerpt: String,
-    confidence: f64,
-}
-
-fn extract_project_pattern_observations(goal: &str) -> Vec<LearnedPatternObservation> {
-    let mut out = Vec::new();
-
-    for sentence in split_into_sentences(goal) {
-        let lower = sentence.to_lowercase();
-        let (key, confidence) = if lower.starts_with("always use ") {
-            ("preference.implementation", 0.85)
-        } else if lower.starts_with("prefer ") {
-            ("preference.general", 0.8)
-        } else if lower.contains(" by default") && lower.starts_with("use ") {
-            ("preference.default", 0.85)
-        } else if lower.starts_with("we use ") {
-            ("preference.team", 0.7)
-        } else {
-            continue;
-        };
-
-        if sentence.len() < 12 || sentence.len() > 180 {
-            continue;
-        }
-
-        out.push(LearnedPatternObservation {
-            key: key.to_string(),
-            value: normalize_whitespace(&sentence),
-            source_excerpt: normalize_whitespace(&sentence),
-            confidence,
-        });
-    }
-
-    out
-}
-
-fn split_into_sentences(text: &str) -> Vec<String> {
-    text.split(['\n', '.', '!', '?'])
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect()
-}
-
-fn normalize_whitespace(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
 fn resolve_workspace_roots(
     cwd: &std::path::Path,
     configured: &[String],
@@ -1604,31 +1340,6 @@ const _: () = {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn pattern_detector_extracts_conservative_preferences() {
-        let goal =
-            "Prefer integration tests for boundaries.\nAlways use cargo clippy before commit.";
-        let patterns = extract_project_pattern_observations(goal);
-        assert_eq!(patterns.len(), 2);
-        assert_eq!(patterns[0].key, "preference.general");
-        assert_eq!(patterns[1].key, "preference.implementation");
-    }
-
-    #[test]
-    fn pattern_detector_ignores_non_preference_sentences() {
-        let goal = "Fix the bug in parser. Add docs.";
-        let patterns = extract_project_pattern_observations(goal);
-        assert!(patterns.is_empty());
-    }
-
-    #[test]
-    fn memory_pattern_detector_finds_default_preferences() {
-        let goal = "Use ripgrep by default for search.";
-        let patterns = extract_project_pattern_observations(goal);
-        assert_eq!(patterns.len(), 1);
-        assert_eq!(patterns[0].key, "preference.default");
-    }
 
     #[test]
     fn workspace_root_resolution_keeps_cwd_and_valid_roots() {

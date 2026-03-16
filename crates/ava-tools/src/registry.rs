@@ -7,6 +7,17 @@ use futures::Stream;
 use serde_json::Value;
 use tracing::instrument;
 
+/// Record of a single tool invocation, capturing timing and outcome.
+#[derive(Debug, Clone)]
+pub struct ToolInvocationRecord {
+    pub tool_name: String,
+    pub tool_source: ToolSource,
+    pub start_time: std::time::Instant,
+    pub duration_ms: u64,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
 /// Output from a tool execution — either complete or streaming.
 pub enum ToolOutput {
     Complete(ToolResult),
@@ -262,5 +273,42 @@ impl ToolRegistry {
 
     pub fn tool_count(&self) -> usize {
         self.tools.len()
+    }
+
+    /// Look up the source of a registered tool.
+    pub fn tool_source(&self, name: &str) -> Option<ToolSource> {
+        self.sources.get(name).cloned()
+    }
+
+    /// Execute a tool call and return both the result and an invocation record
+    /// capturing timing and success/failure metadata.
+    #[instrument(skip(self), fields(tool = %tool_call.name))]
+    pub async fn execute_tracked(
+        &self,
+        tool_call: ToolCall,
+    ) -> (Result<ToolResult>, ToolInvocationRecord) {
+        let start = std::time::Instant::now();
+        let tool_name = tool_call.name.clone();
+        let source = self.tool_source(&tool_name).unwrap_or(ToolSource::BuiltIn);
+
+        let result = self.execute(tool_call).await;
+
+        let record = ToolInvocationRecord {
+            tool_name,
+            tool_source: source,
+            start_time: start,
+            duration_ms: start.elapsed().as_millis() as u64,
+            success: match &result {
+                Ok(r) => !r.is_error,
+                Err(_) => false,
+            },
+            error: match &result {
+                Err(e) => Some(e.to_string()),
+                Ok(r) if r.is_error => Some(r.content.clone()),
+                _ => None,
+            },
+        };
+
+        (result, record)
     }
 }

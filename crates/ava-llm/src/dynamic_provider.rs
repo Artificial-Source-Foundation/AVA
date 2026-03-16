@@ -11,7 +11,7 @@ use tokio::sync::{Mutex, RwLock};
 use tracing::{info, warn};
 
 use crate::pool::ConnectionPool;
-use crate::provider::{LLMProvider, LLMResponse};
+use crate::provider::{LLMProvider, LLMResponse, ProviderCapabilities};
 use crate::providers::{common, create_provider};
 use crate::thinking::ThinkingConfig;
 
@@ -28,6 +28,7 @@ pub(crate) struct DynamicCredentialProvider {
     metadata_supports_tools: bool,
     metadata_supports_thinking: bool,
     metadata_thinking_levels: Vec<ThinkingLevel>,
+    metadata_capabilities: ProviderCapabilities,
 }
 
 impl DynamicCredentialProvider {
@@ -50,6 +51,7 @@ impl DynamicCredentialProvider {
             metadata_supports_tools: metadata_provider.supports_tools(),
             metadata_supports_thinking: metadata_provider.supports_thinking(),
             metadata_thinking_levels: metadata_provider.thinking_levels().to_vec(),
+            metadata_capabilities: metadata_provider.capabilities(),
         }
     }
 
@@ -247,6 +249,10 @@ impl LLMProvider for DynamicCredentialProvider {
 
     fn model_name(&self) -> &str {
         &self.model
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        self.metadata_capabilities.clone()
     }
 
     fn supports_tools(&self) -> bool {

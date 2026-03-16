@@ -148,6 +148,8 @@ impl Tool for WebFetchTool {
             .and_then(Value::as_u64)
             .unwrap_or(50_000) as usize;
 
+        tracing::debug!(tool = "web_fetch", %url, "executing web_fetch tool");
+
         // SSRF prevention
         is_blocked_url(url)?;
 

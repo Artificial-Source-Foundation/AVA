@@ -48,6 +48,8 @@ impl Tool for WriteTool {
             AvaError::ValidationError("missing required field: content".to_string())
         })?;
 
+        tracing::debug!(tool = "write", %path, bytes = content.len(), "executing write tool");
+
         let file_path = Path::new(path);
         if let Some(parent) = file_path.parent() {
             self.platform.create_dir_all(parent).await?;

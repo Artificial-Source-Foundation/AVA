@@ -65,6 +65,8 @@ impl Tool for ReadTool {
             .and_then(Value::as_bool)
             .unwrap_or(false);
 
+        tracing::debug!(tool = "read", %path, "executing read tool");
+
         let content = self
             .platform
             .read_file(Path::new(path))

@@ -50,6 +50,8 @@ impl Tool for GitReadTool {
             AvaError::ValidationError("missing required field: command".to_string())
         })?;
 
+        tracing::debug!(tool = "git", %subcommand, "executing git tool");
+
         let full_command = format!("git {subcommand}");
         let lower = full_command.to_ascii_lowercase();
 

@@ -203,7 +203,7 @@ impl HookContext {
         match level {
             HookPayloadLevel::Full => { /* pass everything */ }
             HookPayloadLevel::Standard => {
-                self.tool_input = self.tool_input.take().map(|v| truncate_json_value(v));
+                self.tool_input = self.tool_input.take().map(truncate_json_value);
                 self.tool_output = self.tool_output.take().map(|s| truncate_string(&s));
                 self.prompt = self.prompt.take().map(|s| truncate_string(&s));
             }

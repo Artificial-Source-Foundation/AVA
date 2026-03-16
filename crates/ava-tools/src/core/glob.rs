@@ -51,6 +51,8 @@ impl Tool for GlobTool {
         })?;
         let base = args.get("path").and_then(Value::as_str).unwrap_or(".");
 
+        tracing::debug!(tool = "glob", %pattern, base = %base, "executing glob tool");
+
         // Workspace boundary enforcement: prevent glob from searching outside the working directory.
         // Uses AVA_WORKSPACE env var if set, otherwise falls back to current directory.
         if let Ok(base_canonical) = std::fs::canonicalize(base) {

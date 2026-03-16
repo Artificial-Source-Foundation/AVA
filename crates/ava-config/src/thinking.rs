@@ -2,6 +2,15 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Maximum thinking budget: 100K tokens. Prevents runaway token usage from
+/// misconfigured budgets.
+const MAX_THINKING_BUDGET: u32 = 100_000;
+
+/// Clamp a thinking budget to the allowed maximum.
+pub fn validate_budget(budget: u32) -> u32 {
+    budget.min(MAX_THINKING_BUDGET)
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ThinkingBudgetConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -34,6 +43,7 @@ impl ThinkingBudgetConfig {
             })
             .or(self.default)
             .filter(|budget| *budget > 0)
+            .map(validate_budget)
     }
 
     pub fn normalize_keys(&mut self) {
@@ -109,5 +119,17 @@ mod tests {
         config.normalize_keys();
 
         assert_eq!(config.resolve("GEMINI", "GEMINI-2.5-PRO"), Some(8192));
+    }
+
+    #[test]
+    fn resolve_clamps_excessive_budget() {
+        let mut config = ThinkingBudgetConfig {
+            default: Some(500_000),
+            providers: HashMap::new(),
+        };
+        config.normalize_keys();
+
+        // Should be clamped to MAX_THINKING_BUDGET (100_000)
+        assert_eq!(config.resolve("any", "any"), Some(100_000));
     }
 }

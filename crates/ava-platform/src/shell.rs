@@ -25,6 +25,11 @@ pub struct ExecuteOptions {
     pub timeout: Option<Duration>,
     pub working_dir: Option<std::path::PathBuf>,
     pub env_vars: Vec<(String, String)>,
+    /// When true, clear the inherited environment before applying `env_vars`.
+    /// A safe default PATH is always injected when scrubbing.
+    /// Use this for sandboxed command execution to prevent leaking credentials
+    /// or other sensitive host environment variables.
+    pub scrub_env: bool,
 }
 
 impl Default for ExecuteOptions {
@@ -33,6 +38,7 @@ impl Default for ExecuteOptions {
             timeout: Some(Duration::from_secs(300)),
             working_dir: None,
             env_vars: Vec::new(),
+            scrub_env: false,
         }
     }
 }
@@ -73,6 +79,11 @@ impl Shell for LocalShell {
 
         if let Some(dir) = options.working_dir {
             cmd.current_dir(dir);
+        }
+
+        if options.scrub_env {
+            cmd.env_clear();
+            cmd.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
         }
 
         for (key, value) in options.env_vars {
@@ -143,6 +154,11 @@ impl Shell for LocalShell {
 
         if let Some(dir) = options.working_dir {
             cmd.current_dir(dir);
+        }
+
+        if options.scrub_env {
+            cmd.env_clear();
+            cmd.env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin");
         }
 
         for (key, value) in options.env_vars {

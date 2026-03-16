@@ -97,6 +97,8 @@ impl Tool for QuestionTool {
             })
             .unwrap_or_default();
 
+        tracing::debug!(tool = "question", %question, options_count = options.len(), "executing question tool");
+
         let (reply_tx, reply_rx) = oneshot::channel();
 
         self.bridge

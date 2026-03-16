@@ -168,6 +168,8 @@ pub(crate) fn list(
     }
 }
 
+// TODO: Add FTS5 index for learned memories if this query path becomes hot.
+// Current LIKE scan is adequate for small memory stores.
 pub(crate) fn search_confirmed(
     conn: &Connection,
     query: &str,

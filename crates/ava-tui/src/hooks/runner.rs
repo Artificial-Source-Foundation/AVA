@@ -57,6 +57,11 @@ impl HookRunner {
             return (HookResult::Allow, executions);
         }
 
+        // Apply default payload level to reduce exfiltration surface.
+        // Hook contexts passed to external commands/HTTP are truncated.
+        let mut context = context;
+        context.apply_payload_level(super::events::HookPayloadLevel::default());
+
         let context_json = serde_json::to_string(&context).unwrap_or_default();
 
         for hook in hooks {

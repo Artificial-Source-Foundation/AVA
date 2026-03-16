@@ -87,6 +87,8 @@ impl Tool for CodeSearchTool {
             .and_then(Value::as_str)
             .unwrap_or("lexical");
 
+        tracing::debug!(tool = "code_search", %query, %mode, "executing code_search tool");
+
         // TODO: Reuse shared CodebaseIndex instead of rebuilding per invocation.
         // This is a performance issue, not a security issue.
         let index = index_project(&root)

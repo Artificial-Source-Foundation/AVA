@@ -53,6 +53,8 @@ impl Tool for TestRunnerTool {
             .and_then(Value::as_u64)
             .unwrap_or(DEFAULT_TIMEOUT_MS / 1000);
 
+        // TODO: Execute test frameworks via direct argv builders instead of sh -c
+        // This prevents shell injection from test/lint command composition.
         let base_command = if let Some(cmd) = custom_command {
             validate_custom_command(cmd)?;
             cmd.to_string()
@@ -65,6 +67,8 @@ impl Tool for TestRunnerTool {
         } else {
             base_command
         };
+
+        tracing::debug!(tool = "test_runner", %command, "executing test runner tool");
 
         let output = self
             .platform
@@ -96,6 +100,7 @@ impl Tool for TestRunnerTool {
     }
 }
 
+// TODO: Factor out shared project-tooling detector (DRY with lint.rs)
 async fn detect_test_command(platform: &dyn Platform) -> ava_types::Result<String> {
     if platform.exists(Path::new("Cargo.toml")).await {
         return Ok("cargo test".to_string());

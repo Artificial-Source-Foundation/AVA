@@ -57,6 +57,8 @@ impl Tool for AstOpsTool {
     }
 
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
+        tracing::debug!(tool = "ast_ops", "executing ast_ops tool");
+
         ensure_ast_grep_available(self).await?;
 
         let operation = args
@@ -192,6 +194,7 @@ fn quote(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     #[test]
     fn ast_ops_metadata_is_valid() {

@@ -10,11 +10,24 @@ pub fn build_bwrap_plan(request: &SandboxRequest, policy: &SandboxPolicy) -> Res
         "--unshare-user".to_string(),
         "--unshare-pid".to_string(),
         "--die-with-parent".to_string(),
+        // Minimal /dev and /proc for sandboxed processes
+        "--dev".to_string(),
+        "/dev".to_string(),
+        "--proc".to_string(),
+        "/proc".to_string(),
     ];
 
     if !policy.allow_network {
         args.push("--unshare-net".to_string());
     }
+
+    // Note: bwrap does not support restricting process spawning (fork/exec) at the
+    // namespace level. The allow_process_spawn policy field is enforced on macOS via
+    // sandbox-exec profiles but has no bwrap equivalent. Seccomp filters would be
+    // needed for this on Linux, which is out of scope for the bwrap wrapper.
+
+    // Scrub host environment — only pass through explicitly requested env vars.
+    args.push("--clearenv".to_string());
 
     for ro in &policy.read_only_paths {
         args.push("--ro-bind".to_string());
@@ -32,6 +45,11 @@ pub fn build_bwrap_plan(request: &SandboxRequest, policy: &SandboxPolicy) -> Res
         args.push("--chdir".to_string());
         args.push(cwd.clone());
     }
+
+    // Set a safe default PATH so commands can still resolve
+    args.push("--setenv".to_string());
+    args.push("PATH".to_string());
+    args.push("/usr/bin:/bin:/usr/sbin:/sbin".to_string());
 
     for (key, value) in &request.env {
         args.push("--setenv".to_string());

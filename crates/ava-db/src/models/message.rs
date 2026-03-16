@@ -53,6 +53,8 @@ impl MessageRepository {
         .await
     }
 
+    // TODO: Add per-session sequence column for stable ordering.
+    // Currently orders by created_at which can have ties.
     pub async fn list_by_session(
         &self,
         session_id: &str,

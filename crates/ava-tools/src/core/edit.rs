@@ -74,6 +74,8 @@ impl Tool for EditTool {
             .and_then(Value::as_bool)
             .unwrap_or(false);
 
+        tracing::debug!(tool = "edit", %path, %replace_all, "executing edit tool");
+
         let file_path = Path::new(path);
         let original = self.platform.read_file(file_path).await?;
 

@@ -52,6 +52,31 @@ impl Tool for ApplyPatchTool {
             ));
         }
 
+        tracing::debug!(
+            tool = "apply_patch",
+            file_count = file_patches.len(),
+            "executing apply_patch tool"
+        );
+
+        // Workspace boundary enforcement: prevent patches from writing outside the workspace.
+        let workspace = std::env::current_dir()
+            .map_err(|e| AvaError::IoError(format!("failed to determine workspace: {e}")))?;
+        for file_patch in &file_patches {
+            let file_path = Path::new(&file_patch.path);
+            let canonical = if self.platform.exists(file_path).await {
+                std::fs::canonicalize(file_path).unwrap_or_else(|_| file_path.to_path_buf())
+            } else {
+                // For new files, resolve against workspace
+                workspace.join(file_path)
+            };
+            if !canonical.starts_with(&workspace) {
+                return Err(AvaError::PermissionDenied(format!(
+                    "Patch targets file outside workspace: {}",
+                    file_patch.path
+                )));
+            }
+        }
+
         // Save original file contents for rollback on failure
         let mut backups: Vec<(std::path::PathBuf, Option<String>)> = Vec::new();
         for file_patch in &file_patches {

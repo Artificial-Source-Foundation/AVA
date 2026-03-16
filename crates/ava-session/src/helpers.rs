@@ -51,6 +51,10 @@ pub const MIGRATION_SQL: &[&str] = &[
     "ALTER TABLE messages ADD COLUMN tool_call_id TEXT",
     "ALTER TABLE messages ADD COLUMN images TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE sessions ADD COLUMN token_usage TEXT NOT NULL DEFAULT '{}'",
+    // Clean up any orphaned messages (shouldn't exist but defensive).
+    // FK enforcement was added after initial schema, so existing databases
+    // may have orphaned rows from before PRAGMA foreign_keys = ON was set.
+    "DELETE FROM messages WHERE session_id NOT IN (SELECT id FROM sessions)",
 ];
 
 pub fn role_to_str(role: &Role) -> &'static str {

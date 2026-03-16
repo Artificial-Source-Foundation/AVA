@@ -77,6 +77,8 @@ impl Tool for TaskTool {
             AvaError::ValidationError("missing required field: prompt".to_string())
         })?;
 
+        tracing::debug!(tool = "task", "executing task tool");
+
         if prompt.trim().is_empty() {
             return Err(AvaError::ValidationError(
                 "prompt cannot be empty".to_string(),

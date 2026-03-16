@@ -55,6 +55,8 @@ impl Tool for GrepTool {
         let path = args.get("path").and_then(Value::as_str).unwrap_or(".");
         let include = args.get("include").and_then(Value::as_str);
 
+        tracing::debug!(tool = "grep", %pattern, %path, "executing grep tool");
+
         // Workspace boundary enforcement: prevent grep from searching outside the working directory.
         // Uses AVA_WORKSPACE env var if set, otherwise falls back to current directory.
         if let Ok(path_canonical) = std::fs::canonicalize(path) {

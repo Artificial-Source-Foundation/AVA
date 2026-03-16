@@ -224,6 +224,8 @@ impl Tool for ClaudeCodeTool {
     }
 
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
+        tracing::debug!(tool = "claude_code", "executing claude_code tool");
+
         // Resolve binary path
         let binary = find_claude_binary(self.config.binary_path.as_deref())
             .await

@@ -83,6 +83,8 @@ impl Tool for WebSearchTool {
             .unwrap_or(5)
             .clamp(1, 20) as usize;
 
+        tracing::debug!(tool = "web_search", %query, %provider, "executing web_search tool");
+
         let search_url = build_duckduckgo_url(query);
         is_blocked_url(&search_url)?;
 
@@ -115,6 +117,10 @@ impl Tool for WebSearchTool {
             });
         }
 
+        // NOTE: Search results are returned as tool_result content in the "tool" role.
+        // The LLM treats tool-role content as data, not instructions, so HTML/prompt
+        // injection in search results does not require additional sanitization here.
+        // HTML tags are already stripped by parse_duckduckgo_results via TAG_RE.
         let parsed = parse_duckduckgo_results(&body, max_results);
         if parsed.is_empty() {
             return Ok(ToolResult {

@@ -272,6 +272,10 @@ impl MCPTransport for StdioTransport {
 // HttpTransport — connects to an HTTP MCP server
 // ---------------------------------------------------------------------------
 
+// WARNING: HTTP transport is intentionally incomplete and should not be used
+// in production. Only stdio transport is supported. This module exists as a
+// placeholder for future SSE-based MCP transport support.
+
 pub struct HttpTransport {
     #[allow(dead_code)]
     base_url: String,

@@ -9,12 +9,14 @@ pub fn build_sandbox_exec_plan(
     validate_policy(policy)?;
     validate_request(request)?;
 
-    let mut profile_parts = vec![
-        "(version 1)".to_string(),
-        "(deny default)".to_string(),
-        "(allow process-exec)".to_string(),
-        "(allow process-fork)".to_string(),
-    ];
+    let mut profile_parts = vec!["(version 1)".to_string(), "(deny default)".to_string()];
+
+    if policy.allow_process_spawn {
+        profile_parts.push("(allow process-exec)".to_string());
+        profile_parts.push("(allow process-fork)".to_string());
+    }
+    // When allow_process_spawn is false, process-exec and process-fork remain
+    // denied by the "(deny default)" rule above.
 
     for path in policy
         .read_only_paths

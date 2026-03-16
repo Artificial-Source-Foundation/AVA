@@ -50,6 +50,8 @@ impl Tool for LintTool {
         let fix = args.get("fix").and_then(Value::as_bool).unwrap_or(false);
         let scope_path = args.get("path").and_then(Value::as_str);
 
+        // TODO: Execute test frameworks via direct argv builders instead of sh -c
+        // This prevents shell injection from test/lint command composition.
         let command = if let Some(cmd) = custom_command {
             validate_custom_command(cmd)?;
             let mut cmd = cmd.to_string();
@@ -64,6 +66,8 @@ impl Tool for LintTool {
         } else {
             detect_lint_command(&*self.platform, fix, scope_path).await?
         };
+
+        tracing::debug!(tool = "lint", %command, "executing lint tool");
 
         let output = self
             .platform
@@ -95,6 +99,7 @@ impl Tool for LintTool {
     }
 }
 
+// TODO: Factor out shared project-tooling detector (DRY with test_runner.rs)
 async fn detect_lint_command(
     platform: &dyn Platform,
     fix: bool,

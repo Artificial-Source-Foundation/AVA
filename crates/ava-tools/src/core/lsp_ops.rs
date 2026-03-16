@@ -52,6 +52,8 @@ impl Tool for LspOpsTool {
             .and_then(Value::as_str)
             .ok_or_else(|| AvaError::ValidationError("missing required field: operation".into()))?;
 
+        tracing::debug!(tool = "lsp_ops", %operation, "executing lsp_ops tool");
+
         match operation {
             "list_supported" => Ok(ToolResult {
                 call_id: String::new(),

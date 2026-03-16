@@ -134,6 +134,10 @@ pub async fn refresh_token(
 ///
 /// Safe for extracting claims from id_tokens that were already validated
 /// by the authorization server during the token exchange.
+///
+/// NOTE: JWT is decoded WITHOUT signature verification.
+/// Used only for non-security metadata extraction (expiry time, account id).
+/// Never use decoded claims for authorization decisions.
 pub fn decode_jwt_payload(jwt: &str) -> Result<serde_json::Value, AuthError> {
     let parts: Vec<&str> = jwt.split('.').collect();
     if parts.len() != 3 {

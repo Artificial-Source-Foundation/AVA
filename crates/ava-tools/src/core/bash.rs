@@ -62,6 +62,8 @@ impl Tool for BashTool {
 
         let working_dir = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
 
+        tracing::debug!(tool = "bash", %command, "executing bash tool");
+
         // TODO: Invert sandbox model — sandbox ALL commands by default,
         // with narrowly approved exceptions for safe development commands.
         // Currently only install-class commands are sandboxed.
@@ -113,6 +115,7 @@ impl Tool for BashTool {
                     timeout: Some(Duration::from_millis(timeout_ms)),
                     working_dir,
                     env_vars: Vec::new(),
+                    scrub_env: false,
                 },
             )
             .await?;
@@ -158,6 +161,7 @@ impl Tool for BashTool {
                     timeout: Some(Duration::from_millis(timeout_ms)),
                     working_dir,
                     env_vars: Vec::new(),
+                    scrub_env: false,
                 },
             )
             .await?;

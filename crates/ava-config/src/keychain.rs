@@ -289,16 +289,26 @@ impl KeychainManager {
         let content = serde_json::to_string_pretty(&envelope)
             .map_err(|e| AvaError::SerializationError(e.to_string()))?;
 
-        std::fs::write(&self.encrypted_path, &content)
-            .map_err(|e| AvaError::IoError(e.to_string()))?;
+        // Atomic write: write to temp file first, then rename to avoid partial writes
+        let tmp_path = format!("{}.tmp", self.encrypted_path.display());
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o600);
-            std::fs::set_permissions(&self.encrypted_path, perms)
+            // Create empty file, restrict permissions, then write content
+            std::fs::write(&tmp_path, "").map_err(|e| AvaError::IoError(e.to_string()))?;
+            std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))
                 .map_err(|e| AvaError::IoError(e.to_string()))?;
+            std::fs::write(&tmp_path, &content).map_err(|e| AvaError::IoError(e.to_string()))?;
         }
+
+        #[cfg(not(unix))]
+        {
+            std::fs::write(&tmp_path, &content).map_err(|e| AvaError::IoError(e.to_string()))?;
+        }
+
+        std::fs::rename(&tmp_path, &self.encrypted_path)
+            .map_err(|e| AvaError::IoError(e.to_string()))?;
 
         Ok(())
     }

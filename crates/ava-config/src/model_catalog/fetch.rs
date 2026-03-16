@@ -10,6 +10,8 @@ use super::types::{CatalogModel, ModelCatalog};
 
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
+/// Maximum allowed catalog response size (5 MB) to prevent resource exhaustion.
+const MAX_CATALOG_SIZE: usize = 5 * 1024 * 1024;
 
 impl ModelCatalog {
     /// Fetch catalog from models.dev API.
@@ -30,9 +32,28 @@ impl ModelCatalog {
             return Err(format!("models.dev returned {}", response.status()));
         }
 
-        let raw: HashMap<String, Value> = response
-            .json()
+        // Validate response size before parsing to prevent resource exhaustion
+        if let Some(content_length) = response.content_length() {
+            if content_length as usize > MAX_CATALOG_SIZE {
+                return Err(format!(
+                    "Catalog response too large ({content_length} bytes, max {MAX_CATALOG_SIZE})"
+                ));
+            }
+        }
+
+        let body = response
+            .bytes()
             .await
+            .map_err(|e| format!("Failed to read models.dev response: {e}"))?;
+
+        if body.len() > MAX_CATALOG_SIZE {
+            return Err(format!(
+                "Catalog response too large ({} bytes, max {MAX_CATALOG_SIZE})",
+                body.len()
+            ));
+        }
+
+        let raw: HashMap<String, Value> = serde_json::from_slice(&body)
             .map_err(|e| format!("Failed to parse models.dev JSON: {e}"))?;
 
         let now = SystemTime::now()

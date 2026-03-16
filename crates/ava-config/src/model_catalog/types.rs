@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -182,12 +183,15 @@ impl ModelCatalog {
 #[derive(Debug, Clone)]
 pub struct CatalogState {
     inner: Arc<RwLock<ModelCatalog>>,
+    /// Shutdown flag for the background refresh task.
+    shutdown: Arc<AtomicBool>,
 }
 
 impl Default for CatalogState {
     fn default() -> Self {
         Self {
             inner: Arc::new(RwLock::new(ModelCatalog::default())),
+            shutdown: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -239,11 +243,19 @@ impl CatalogState {
     }
 
     /// Refresh in the background (non-blocking).
+    ///
+    /// The spawned task checks `shutdown` before each refresh cycle and exits
+    /// when `stop_background_refresh()` is called.
     pub fn spawn_background_refresh(&self) {
         let state = self.clone();
+        let shutdown = Arc::clone(&self.shutdown);
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(REFRESH_INTERVAL).await;
+                if shutdown.load(Ordering::Relaxed) {
+                    tracing::debug!("Background model catalog refresh shutting down");
+                    break;
+                }
                 tracing::debug!("Refreshing model catalog...");
                 match ModelCatalog::fetch().await {
                     Ok(catalog) => {
@@ -259,5 +271,10 @@ impl CatalogState {
                 }
             }
         });
+    }
+
+    /// Signal the background refresh task to stop.
+    pub fn stop_background_refresh(&self) {
+        self.shutdown.store(true, Ordering::Relaxed);
     }
 }

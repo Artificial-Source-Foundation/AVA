@@ -41,16 +41,26 @@ pub(crate) async fn write_file_atomic(path: &Path, content: &str) -> Result<()> 
         Uuid::new_v4()
     ));
 
-    fs::write(&temp_path, content)
-        .await
-        .map_err(|e| AvaError::IoError(e.to_string()))?;
-
+    // Create temp file with restrictive permissions before writing content
+    // to avoid a window where sensitive data is world-readable.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        // Create empty file first, then restrict permissions, then write content
+        fs::write(&temp_path, "")
+            .await
+            .map_err(|e| AvaError::IoError(e.to_string()))?;
+        std::fs::set_permissions(&temp_path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| AvaError::IoError(e.to_string()))?;
+        fs::write(&temp_path, content)
+            .await
+            .map_err(|e| AvaError::IoError(e.to_string()))?;
+    }
 
-        let perms = std::fs::Permissions::from_mode(0o600);
-        std::fs::set_permissions(&temp_path, perms)
+    #[cfg(not(unix))]
+    {
+        fs::write(&temp_path, content)
+            .await
             .map_err(|e| AvaError::IoError(e.to_string()))?;
     }
 

@@ -51,6 +51,22 @@ impl Tool for GlobTool {
         })?;
         let base = args.get("path").and_then(Value::as_str).unwrap_or(".");
 
+        // Workspace boundary enforcement: prevent glob from searching outside the working directory.
+        // Uses AVA_WORKSPACE env var if set, otherwise falls back to current directory.
+        if let Ok(base_canonical) = std::fs::canonicalize(base) {
+            let workspace = std::env::var("AVA_WORKSPACE")
+                .ok()
+                .and_then(|w| std::fs::canonicalize(w).ok())
+                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+            if !base_canonical.starts_with(&workspace) {
+                return Err(AvaError::PermissionDenied(format!(
+                    "glob base path {} is outside workspace {}",
+                    base_canonical.display(),
+                    workspace.display()
+                )));
+            }
+        }
+
         let query = Path::new(base).join(pattern).to_string_lossy().to_string();
 
         let mut matches: Vec<(PathBuf, SystemTime)> = Vec::new();

@@ -11,6 +11,15 @@ pub mod device_code;
 pub mod pkce;
 pub mod tokens;
 
+/// Build a reqwest client with explicit timeouts for auth requests.
+fn http_client() -> Result<reqwest::Client, AuthError> {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| AuthError::Network(format!("Failed to build HTTP client: {e}")))
+}
+
 use config::{oauth_config, AuthFlow};
 use device_code::DeviceCodeResponse;
 use tokens::OAuthTokens;

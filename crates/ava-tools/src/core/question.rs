@@ -112,10 +112,17 @@ impl Tool for QuestionTool {
                 )
             })?;
 
-        // Wait for the user's answer
-        let answer = reply_rx.await.map_err(|_| {
-            AvaError::ToolError("Question was not answered — the UI channel was closed".to_string())
-        })?;
+        // Wait for the user's answer with a 5-minute timeout
+        let answer = tokio::time::timeout(std::time::Duration::from_secs(300), reply_rx)
+            .await
+            .map_err(|_| {
+                AvaError::TimeoutError("User did not respond within 5 minutes".to_string())
+            })?
+            .map_err(|_| {
+                AvaError::ToolError(
+                    "Question was not answered — the UI channel was closed".to_string(),
+                )
+            })?;
 
         if answer.is_empty() {
             Ok(ToolResult {

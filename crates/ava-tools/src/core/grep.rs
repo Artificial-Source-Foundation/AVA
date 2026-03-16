@@ -55,6 +55,24 @@ impl Tool for GrepTool {
         let path = args.get("path").and_then(Value::as_str).unwrap_or(".");
         let include = args.get("include").and_then(Value::as_str);
 
+        // Workspace boundary enforcement: prevent grep from searching outside the working directory.
+        // Uses AVA_WORKSPACE env var if set, otherwise falls back to current directory.
+        if let Ok(path_canonical) = std::fs::canonicalize(path) {
+            let workspace = std::env::var("AVA_WORKSPACE")
+                .ok()
+                .and_then(|w| std::fs::canonicalize(w).ok())
+                .unwrap_or_else(|| {
+                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+                });
+            if !path_canonical.starts_with(&workspace) {
+                return Err(AvaError::PermissionDenied(format!(
+                    "grep search path {} is outside workspace {}",
+                    path_canonical.display(),
+                    workspace.display()
+                )));
+            }
+        }
+
         let matcher = RegexMatcher::new(pattern).map_err(|e| AvaError::ToolError(e.to_string()))?;
         let include_glob = include
             .map(Pattern::new)

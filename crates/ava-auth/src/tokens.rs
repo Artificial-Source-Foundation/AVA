@@ -7,7 +7,7 @@ use tracing::{debug, error, info};
 
 use crate::config::OAuthConfig;
 use crate::pkce::PkceParams;
-use crate::AuthError;
+use crate::{http_client, AuthError};
 
 /// OAuth tokens returned from authorization.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -38,7 +38,7 @@ pub async fn exchange_code_for_tokens(
         config.redirect_port, config.redirect_path
     );
 
-    let client = reqwest::Client::new();
+    let client = http_client()?;
     let response = client
         .post(config.token_url)
         .header("Content-Type", "application/x-www-form-urlencoded")
@@ -88,7 +88,7 @@ pub async fn refresh_token(
     refresh_tok: &str,
 ) -> Result<OAuthTokens, AuthError> {
     debug!("Refreshing OAuth token");
-    let client = reqwest::Client::new();
+    let client = http_client()?;
     let response = client
         .post(config.token_url)
         .header("Content-Type", "application/x-www-form-urlencoded")

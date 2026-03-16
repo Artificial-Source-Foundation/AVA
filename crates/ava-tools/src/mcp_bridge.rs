@@ -16,21 +16,40 @@ pub trait MCPToolCaller: Send + Sync {
 /// A bridge tool that wraps an MCP server tool and implements the ava-tools `Tool` trait.
 /// This allows MCP tools to be registered in the `ToolRegistry` and called like any
 /// other built-in tool.
+///
+/// Tools are namespaced as `mcp.{server_name}.{tool_name}` to prevent collisions
+/// between different MCP servers. The original tool name is preserved for dispatch
+/// to the MCP server.
 pub struct MCPBridgeTool {
+    /// Namespaced name: `mcp.{server}.{tool}`
+    namespaced_name: String,
+    /// Original tool name as known by the MCP server (used for dispatch).
+    original_name: String,
     definition: ToolDefinition,
     caller: Arc<dyn MCPToolCaller>,
 }
 
 impl MCPBridgeTool {
-    pub fn new(definition: ToolDefinition, caller: Arc<dyn MCPToolCaller>) -> Self {
-        Self { definition, caller }
+    pub fn new(
+        definition: ToolDefinition,
+        caller: Arc<dyn MCPToolCaller>,
+        server_name: &str,
+    ) -> Self {
+        let namespaced_name = format!("mcp.{}.{}", server_name, definition.name);
+        let original_name = definition.name.clone();
+        Self {
+            namespaced_name,
+            original_name,
+            definition,
+            caller,
+        }
     }
 }
 
 #[async_trait]
 impl Tool for MCPBridgeTool {
     fn name(&self) -> &str {
-        &self.definition.name
+        &self.namespaced_name
     }
 
     fn description(&self) -> &str {
@@ -42,7 +61,8 @@ impl Tool for MCPBridgeTool {
     }
 
     async fn execute(&self, args: Value) -> Result<ToolResult> {
-        self.caller.call_tool(self.name(), args).await
+        // Dispatch using the original (non-namespaced) name that the MCP server knows.
+        self.caller.call_tool(&self.original_name, args).await
     }
 }
 
@@ -74,11 +94,14 @@ mod tests {
                 parameters: json!({"type": "object"}),
             },
             caller,
+            "my_server",
         );
 
-        assert_eq!(tool.name(), "test_tool");
+        // Name should be namespaced
+        assert_eq!(tool.name(), "mcp.my_server.test_tool");
         assert_eq!(tool.description(), "A test MCP tool");
 
+        // Execute should dispatch using the original name
         let result = tool.execute(json!({})).await.unwrap();
         assert_eq!(result.content, "result from test_tool");
         assert!(!result.is_error);
@@ -93,25 +116,26 @@ mod tests {
 
         registry.register(MCPBridgeTool::new(
             ToolDefinition {
-                name: "mcp_weather".to_string(),
+                name: "weather".to_string(),
                 description: "Get weather".to_string(),
                 parameters: json!({"type": "object", "properties": {"city": {"type": "string"}}}),
             },
             caller,
+            "acme",
         ));
 
         let tools = registry.list_tools();
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0].name, "mcp_weather");
+        assert_eq!(tools[0].name, "mcp.acme.weather");
 
         let result = registry
             .execute(ava_types::ToolCall {
                 id: "call-1".to_string(),
-                name: "mcp_weather".to_string(),
+                name: "mcp.acme.weather".to_string(),
                 arguments: json!({"city": "London"}),
             })
             .await
             .unwrap();
-        assert_eq!(result.content, "result from mcp_weather");
+        assert_eq!(result.content, "result from weather");
     }
 }

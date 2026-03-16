@@ -76,6 +76,7 @@ impl MCPClient {
 
         self.transport.send(&request).await?;
         let response = self.transport.receive().await?;
+        Self::verify_response_id(id, &response)?;
 
         if let Some(err) = &response.error {
             return Err(AvaError::ToolError(format!(
@@ -129,6 +130,7 @@ impl MCPClient {
         let request = JsonRpcMessage::request(id, "tools/list", json!({}));
         self.transport.send(&request).await?;
         let response = self.transport.receive().await?;
+        Self::verify_response_id(id, &response)?;
 
         if let Some(err) = &response.error {
             return Err(AvaError::ToolError(format!(
@@ -163,6 +165,7 @@ impl MCPClient {
 
         self.transport.send(&request).await?;
         let response = self.transport.receive().await?;
+        Self::verify_response_id(id, &response)?;
 
         if let Some(err) = &response.error {
             return Err(AvaError::ToolError(format!(
@@ -191,6 +194,21 @@ impl MCPClient {
     /// The server capabilities, if initialize has been called.
     pub fn capabilities(&self) -> Option<&ServerCapabilities> {
         self.server_capabilities.as_ref()
+    }
+
+    /// Verify that the response ID matches the request ID we sent.
+    /// This prevents accepting stale or misrouted responses.
+    fn verify_response_id(expected: u64, response: &JsonRpcMessage) -> Result<()> {
+        let expected_value = Value::Number(expected.into());
+        match &response.id {
+            Some(id) if *id == expected_value => Ok(()),
+            Some(id) => Err(AvaError::ToolError(format!(
+                "MCP response ID mismatch: expected {expected}, got {id}"
+            ))),
+            None => Err(AvaError::ToolError(format!(
+                "MCP response missing ID, expected {expected}"
+            ))),
+        }
     }
 
     fn next_id(&self) -> u64 {

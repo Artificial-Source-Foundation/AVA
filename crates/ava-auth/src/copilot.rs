@@ -4,8 +4,9 @@
 //!     → { token, expires_at, endpoints: { api: "https://api.individual.githubcopilot.com" } }
 
 use serde::Deserialize;
+use url::Url;
 
-use crate::AuthError;
+use crate::{http_client, AuthError};
 
 /// Default Copilot API endpoint (individual plan).
 const DEFAULT_API_ENDPOINT: &str = "https://api.individual.githubcopilot.com";
@@ -70,9 +71,33 @@ fn extract_endpoint_from_token(token: &str) -> Option<String> {
     Some(format!("https://{api_host}"))
 }
 
+/// Allowed Copilot API host suffixes for endpoint validation.
+const ALLOWED_COPILOT_HOSTS: &[&str] = &[
+    "api.github.com",
+    "githubcopilot.com",
+    "githubusercontent.com",
+];
+
+/// Validate that a Copilot API endpoint points to a trusted host.
+fn validate_copilot_endpoint(endpoint: &str) -> Result<(), AuthError> {
+    let url = Url::parse(endpoint)
+        .map_err(|e| AuthError::Other(format!("Invalid Copilot endpoint URL '{endpoint}': {e}")))?;
+    if let Some(host) = url.host_str() {
+        if !ALLOWED_COPILOT_HOSTS
+            .iter()
+            .any(|allowed| host == *allowed || host.ends_with(&format!(".{allowed}")))
+        {
+            return Err(AuthError::Other(format!("Untrusted Copilot host: {host}")));
+        }
+    } else {
+        return Err(AuthError::Other("Copilot endpoint has no host".to_string()));
+    }
+    Ok(())
+}
+
 /// Exchange a GitHub OAuth access token for a Copilot API token.
 pub async fn exchange_copilot_token(github_token: &str) -> Result<CopilotToken, AuthError> {
-    let client = reqwest::Client::new();
+    let client = http_client()?;
     let response = client
         .get(TOKEN_EXCHANGE_URL)
         .header("Authorization", format!("token {github_token}"))
@@ -105,6 +130,9 @@ pub async fn exchange_copilot_token(github_token: &str) -> Result<CopilotToken, 
         .and_then(|ep| ep.api)
         .or_else(|| extract_endpoint_from_token(&raw.token))
         .unwrap_or_else(|| DEFAULT_API_ENDPOINT.to_string());
+
+    // Validate the resolved endpoint against known Copilot hosts
+    validate_copilot_endpoint(&api_endpoint)?;
 
     Ok(CopilotToken {
         token: raw.token,
@@ -193,5 +221,24 @@ mod tests {
             DEFAULT_API_ENDPOINT,
             "https://api.individual.githubcopilot.com"
         );
+    }
+
+    #[test]
+    fn validate_copilot_endpoint_allows_known_hosts() {
+        assert!(validate_copilot_endpoint("https://api.github.com/v1").is_ok());
+        assert!(validate_copilot_endpoint("https://api.individual.githubcopilot.com").is_ok());
+        assert!(validate_copilot_endpoint("https://copilot-proxy.githubusercontent.com").is_ok());
+    }
+
+    #[test]
+    fn validate_copilot_endpoint_rejects_unknown_hosts() {
+        assert!(validate_copilot_endpoint("https://evil.example.com").is_err());
+        assert!(validate_copilot_endpoint("https://not-github.com").is_err());
+        assert!(validate_copilot_endpoint("https://api.github.com.evil.com").is_err());
+    }
+
+    #[test]
+    fn validate_copilot_endpoint_rejects_invalid_urls() {
+        assert!(validate_copilot_endpoint("not-a-url").is_err());
     }
 }

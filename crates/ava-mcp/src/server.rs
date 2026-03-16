@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use ava_tools::registry::ToolRegistry;
+use ava_tools::registry::{ToolRegistry, ToolSource};
 use ava_types::Result;
 use serde_json::{json, Value};
 
@@ -60,16 +60,41 @@ impl AVAMCPServer {
                     "server": "ava-mcp"
                 }
             })),
-            "tools/list" => Ok(json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": {
-                    "tools": self.tool_registry.list_tools()
-                }
-            })),
+            "tools/list" => {
+                // Only export built-in tools via MCP — do not re-export MCP or custom tools
+                // to prevent tool leakage across trust boundaries.
+                let exportable: Vec<_> = self
+                    .tool_registry
+                    .list_tools_with_source()
+                    .into_iter()
+                    .filter(|(_, source)| *source == ToolSource::BuiltIn)
+                    .map(|(def, _)| def)
+                    .collect();
+                Ok(json!({
+                    "jsonrpc": "2.0",
+                    "id": id,
+                    "result": {
+                        "tools": exportable
+                    }
+                }))
+            }
             "tools/call" => {
                 let call_id = format!("mcp-call-{id}");
                 let tool_call = tool_call_from_request(&call_id, &params)?;
+
+                // Only allow execution of built-in tools via MCP
+                let source = self.tool_registry.tool_source(&tool_call.name);
+                if source.as_ref() != Some(&ToolSource::BuiltIn) {
+                    return Ok(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": {
+                            "code": -32601,
+                            "message": format!("tool '{}' is not exportable via MCP", tool_call.name)
+                        }
+                    }));
+                }
+
                 let result = self.tool_registry.execute(tool_call).await?;
 
                 Ok(json!({

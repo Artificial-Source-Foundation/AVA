@@ -83,6 +83,12 @@ impl ToolMonitor {
         }
         self.total_duration += execution.duration;
         self.history.push(execution);
+
+        // Cap history to prevent unbounded growth
+        const MAX_HISTORY: usize = 1000;
+        if self.history.len() > MAX_HISTORY {
+            self.history.drain(..self.history.len() - MAX_HISTORY);
+        }
     }
 
     /// Detect repetition patterns in recent tool history.

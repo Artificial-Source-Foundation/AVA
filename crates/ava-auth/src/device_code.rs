@@ -8,7 +8,7 @@ use tokio::time::{sleep, Duration, Instant};
 
 use crate::config::OAuthConfig;
 use crate::tokens::OAuthTokens;
-use crate::AuthError;
+use crate::{http_client, AuthError};
 
 /// Response from requesting a device code.
 #[derive(Debug, Clone)]
@@ -44,7 +44,7 @@ struct RawPollResponse {
 
 /// Request a device code from the provider.
 pub async fn request_device_code(config: &OAuthConfig) -> Result<DeviceCodeResponse, AuthError> {
-    let client = reqwest::Client::new();
+    let client = http_client()?;
     let scope = config.scopes.join(" ");
 
     let response = client
@@ -78,17 +78,37 @@ pub async fn request_device_code(config: &OAuthConfig) -> Result<DeviceCodeRespo
     })
 }
 
+/// Maximum time to wait for device code authorization (5 minutes).
+const DEVICE_CODE_POLL_TIMEOUT_SECS: u64 = 300;
+
 /// Poll for authorization after the user enters the device code.
 ///
 /// Returns `Ok(Some(tokens))` on success, `Ok(None)` if the code expired,
-/// or `Err` on unrecoverable errors.
+/// or `Err` on unrecoverable errors. Enforces a 5-minute overall timeout
+/// independent of the server-reported expiry.
 pub async fn poll_device_code(
     config: &OAuthConfig,
     device_code: &str,
     interval: u64,
     expires_in: u64,
 ) -> Result<Option<OAuthTokens>, AuthError> {
-    let client = reqwest::Client::new();
+    let timeout_secs = expires_in.min(DEVICE_CODE_POLL_TIMEOUT_SECS);
+    tokio::time::timeout(
+        Duration::from_secs(timeout_secs),
+        poll_device_code_inner(config, device_code, interval, expires_in),
+    )
+    .await
+    .unwrap_or(Ok(None))
+}
+
+/// Inner polling loop for device code authorization.
+async fn poll_device_code_inner(
+    config: &OAuthConfig,
+    device_code: &str,
+    interval: u64,
+    expires_in: u64,
+) -> Result<Option<OAuthTokens>, AuthError> {
+    let client = http_client()?;
     let start = Instant::now();
     let max_wait = Duration::from_secs(expires_in);
     let mut current_interval = interval;

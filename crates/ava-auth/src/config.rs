@@ -66,6 +66,8 @@ pub fn oauth_config(provider: &str) -> Option<&'static OAuthConfig> {
 }
 
 /// Build the full authorization URL for a PKCE flow.
+///
+/// Uses `url::Url` for safe URL construction instead of string concatenation.
 pub fn build_auth_url(config: &OAuthConfig, pkce: &PkceParams) -> String {
     let redirect_uri = format!(
         "http://localhost:{}{}",
@@ -73,27 +75,25 @@ pub fn build_auth_url(config: &OAuthConfig, pkce: &PkceParams) -> String {
     );
     let scope = config.scopes.join(" ");
 
-    let mut params = vec![
-        ("response_type", "code".to_string()),
-        ("client_id", config.client_id.to_string()),
-        ("redirect_uri", redirect_uri),
-        ("scope", scope),
-        ("state", pkce.state.clone()),
-        ("code_challenge", pkce.challenge.clone()),
-        ("code_challenge_method", "S256".to_string()),
-    ];
+    let mut url = url::Url::parse(config.authorization_url)
+        .expect("Static authorization_url must be a valid URL");
 
-    for &(key, value) in config.extra_params {
-        params.push((key, value.to_string()));
+    {
+        let mut query = url.query_pairs_mut();
+        query.append_pair("response_type", "code");
+        query.append_pair("client_id", config.client_id);
+        query.append_pair("redirect_uri", &redirect_uri);
+        query.append_pair("scope", &scope);
+        query.append_pair("state", &pkce.state);
+        query.append_pair("code_challenge", &pkce.challenge);
+        query.append_pair("code_challenge_method", "S256");
+
+        for &(key, value) in config.extra_params {
+            query.append_pair(key, value);
+        }
     }
 
-    let query = params
-        .iter()
-        .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
-        .collect::<Vec<_>>()
-        .join("&");
-
-    format!("{}?{}", config.authorization_url, query)
+    url.to_string()
 }
 
 #[cfg(test)]

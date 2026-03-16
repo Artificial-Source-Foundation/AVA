@@ -52,62 +52,98 @@ impl Tool for ApplyPatchTool {
             ));
         }
 
+        // Save original file contents for rollback on failure
+        let mut backups: Vec<(std::path::PathBuf, Option<String>)> = Vec::new();
+        for file_patch in &file_patches {
+            let file_path = Path::new(&file_patch.path);
+            if self.platform.exists(file_path).await {
+                let original = self.platform.read_file(file_path).await?;
+                backups.push((file_path.to_path_buf(), Some(original)));
+            } else {
+                backups.push((file_path.to_path_buf(), None));
+            }
+        }
+
         let mut total_applied = 0usize;
         let mut total_rejected = 0usize;
         let mut rejected_details: Vec<String> = Vec::new();
         let mut files_modified = 0usize;
+        let mut files_written: Vec<std::path::PathBuf> = Vec::new();
 
-        for file_patch in &file_patches {
-            let file_path = Path::new(&file_patch.path);
-            let content = if self.platform.exists(file_path).await {
-                self.platform.read_file(file_path).await?
-            } else {
-                String::new()
-            };
+        let apply_result: ava_types::Result<()> = async {
+            for file_patch in &file_patches {
+                let file_path = Path::new(&file_patch.path);
+                let content = if self.platform.exists(file_path).await {
+                    self.platform.read_file(file_path).await?
+                } else {
+                    String::new()
+                };
 
-            let lines: Vec<String> = content.lines().map(String::from).collect();
-            let mut result_lines = lines.clone();
-            let mut offset: isize = 0;
-            let mut file_applied = 0usize;
+                let lines: Vec<String> = content.lines().map(String::from).collect();
+                let mut result_lines = lines.clone();
+                let mut offset: isize = 0;
+                let mut file_applied = 0usize;
 
-            for hunk in &file_patch.hunks {
-                match apply_hunk(&result_lines, hunk, offset) {
-                    Some((new_lines, new_offset)) => {
-                        result_lines = new_lines;
-                        offset = new_offset;
-                        file_applied += 1;
+                for hunk in &file_patch.hunks {
+                    match apply_hunk(&result_lines, hunk, offset) {
+                        Some((new_lines, new_offset)) => {
+                            result_lines = new_lines;
+                            offset = new_offset;
+                            file_applied += 1;
+                        }
+                        None => {
+                            total_rejected += 1;
+                            rejected_details.push(format!(
+                                "{}:{} - hunk @@ -{},{} +{},{} @@",
+                                file_patch.path,
+                                hunk.old_start,
+                                hunk.old_start,
+                                hunk.old_count,
+                                hunk.new_start,
+                                hunk.new_count
+                            ));
+                        }
                     }
-                    None => {
-                        total_rejected += 1;
-                        rejected_details.push(format!(
-                            "{}:{} - hunk @@ -{},{} +{},{} @@",
-                            file_patch.path,
-                            hunk.old_start,
-                            hunk.old_start,
-                            hunk.old_count,
-                            hunk.new_start,
-                            hunk.new_count
-                        ));
+                }
+
+                if file_applied > 0 {
+                    let mut output = result_lines.join("\n");
+                    // Preserve trailing newline if original had one
+                    if content.ends_with('\n') || !content.is_empty() {
+                        output.push('\n');
+                    }
+                    // Create parent dirs if needed for new files
+                    if let Some(parent) = file_path.parent() {
+                        if !parent.as_os_str().is_empty() && !self.platform.exists(parent).await {
+                            // Use platform to create the file which handles parent dirs
+                        }
+                    }
+                    self.platform.write_file(file_path, &output).await?;
+                    files_written.push(file_path.to_path_buf());
+                    total_applied += file_applied;
+                    files_modified += 1;
+                }
+            }
+            Ok(())
+        }
+        .await;
+
+        // On failure, restore all modified files from backups
+        if let Err(e) = apply_result {
+            for (path, original) in &backups {
+                if files_written.contains(path) {
+                    match original {
+                        Some(content) => {
+                            let _ = self.platform.write_file(path, content).await;
+                        }
+                        None => {
+                            // File was newly created; best-effort removal via platform
+                            let _ = self.platform.write_file(path, "").await;
+                        }
                     }
                 }
             }
-
-            if file_applied > 0 {
-                let mut output = result_lines.join("\n");
-                // Preserve trailing newline if original had one
-                if content.ends_with('\n') || !content.is_empty() {
-                    output.push('\n');
-                }
-                // Create parent dirs if needed for new files
-                if let Some(parent) = file_path.parent() {
-                    if !parent.as_os_str().is_empty() && !self.platform.exists(parent).await {
-                        // Use platform to create the file which handles parent dirs
-                    }
-                }
-                self.platform.write_file(file_path, &output).await?;
-                total_applied += file_applied;
-                files_modified += 1;
-            }
+            return Err(e);
         }
 
         let mut msg = format!("Applied {total_applied} hunks to {files_modified} files.");

@@ -827,7 +827,7 @@ impl AgentStack {
                         server: server_name.clone(),
                     };
                     registry.register_with_source(
-                        MCPBridgeTool::new(tool_def.clone(), runtime.caller.clone()),
+                        MCPBridgeTool::new(tool_def.clone(), runtime.caller.clone(), server_name),
                         source,
                     );
                 }
@@ -1294,7 +1294,7 @@ async fn init_mcp_with_disabled(
                     server: server_name.clone(),
                 };
                 registry.register_with_source(
-                    MCPBridgeTool::new(tool_def.clone(), caller.clone()),
+                    MCPBridgeTool::new(tool_def.clone(), caller.clone(), server_name),
                     source,
                 );
             }

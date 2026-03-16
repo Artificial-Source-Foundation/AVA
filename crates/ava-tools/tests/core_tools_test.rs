@@ -9,7 +9,7 @@ use ava_tools::core::{
 };
 use ava_tools::registry::Tool;
 use serde_json::json;
-use tempfile::tempdir;
+use tempfile::{tempdir, tempdir_in};
 
 #[tokio::test]
 async fn read_tool_reads_file_with_line_numbers() {
@@ -252,7 +252,8 @@ async fn bash_tool_rejects_dangerous_commands() {
 
 #[tokio::test]
 async fn glob_tool_matches_patterns_and_respects_path() {
-    let dir = tempdir().expect("tempdir");
+    // Use tempdir_in(".") so the temp dir is inside the workspace boundary
+    let dir = tempdir_in(".").expect("tempdir");
     let src = dir.path().join("src");
     tokio::fs::create_dir_all(&src).await.expect("mkdir");
     tokio::fs::write(src.join("a.rs"), "a")
@@ -277,7 +278,7 @@ async fn glob_tool_matches_patterns_and_respects_path() {
 
 #[tokio::test]
 async fn glob_tool_returns_empty_result() {
-    let dir = tempdir().expect("tempdir");
+    let dir = tempdir_in(".").expect("tempdir");
     let tool = GlobTool::new();
     let result = tool
         .execute(json!({
@@ -292,7 +293,7 @@ async fn glob_tool_returns_empty_result() {
 
 #[tokio::test]
 async fn grep_tool_matches_regex_and_include_filter() {
-    let dir = tempdir().expect("tempdir");
+    let dir = tempdir_in(".").expect("tempdir");
     tokio::fs::write(dir.path().join("main.rs"), "let status = \"ok\";\n")
         .await
         .expect("write");
@@ -316,7 +317,7 @@ async fn grep_tool_matches_regex_and_include_filter() {
 
 #[tokio::test]
 async fn grep_tool_returns_empty_result() {
-    let dir = tempdir().expect("tempdir");
+    let dir = tempdir_in(".").expect("tempdir");
     tokio::fs::write(dir.path().join("main.rs"), "fn main() {}\n")
         .await
         .expect("write");

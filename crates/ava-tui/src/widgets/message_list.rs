@@ -5,7 +5,7 @@ use crate::widgets::welcome::render_welcome;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
+use ratatui::widgets::{Block, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
 
 enum RenderBlock<'a> {
@@ -133,6 +133,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     // Empty state: show the welcome screen across the full area (main view only).
     if messages_source.is_empty() {
         // Clear the area first to prevent ghost characters from prior renders.
+        frame.render_widget(Clear, area);
         let bg_fill = Block::default().style(Style::default().bg(state.theme.bg_deep));
         frame.render_widget(bg_fill, area);
 
@@ -162,6 +163,10 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     // Build all visual lines, inserting 1 blank line between every message.
     let spinner_tick = state.messages.spinner_tick;
     let mut lines: Vec<Line<'static>> = Vec::new();
+
+    // Reserve 1 column for the scrollbar + 2 columns of right padding.
+    // ALL text rendering must use content_width to prevent bleed.
+    let content_width = area.width.saturating_sub(3);
 
     // Top padding: 1 blank line between status bar and first message.
     lines.push(Line::raw(""));
@@ -199,7 +204,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             Span::styled(status_str, Style::default().fg(state.theme.text_muted)),
         ]));
         lines.push(Line::from(Span::styled(
-            "\u{2500}".repeat(area.width as usize),
+            "\u{2500}".repeat(content_width as usize),
             Style::default().fg(state.theme.border),
         )));
         lines.push(Line::raw(""));
@@ -235,7 +240,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             Span::styled(status_str, Style::default().fg(state.theme.text_muted)),
         ]));
         lines.push(Line::from(Span::styled(
-            "─".repeat(area.width as usize),
+            "─".repeat(content_width as usize),
             Style::default().fg(state.theme.border),
         )));
         lines.push(Line::raw(""));
@@ -265,15 +270,13 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             ),
         ]));
         lines.push(Line::from(Span::styled(
-            "\u{2500}".repeat(area.width as usize),
+            "\u{2500}".repeat(content_width as usize),
             Style::default().fg(state.theme.border),
         )));
         lines.push(Line::raw(""));
     }
 
     let blocks = derive_blocks(messages_source);
-    // Reserve 1 column for the scrollbar + 2 columns of right padding.
-    let content_width = area.width.saturating_sub(3);
     let show_thinking = state.agent.show_thinking;
 
     // Track per-source-message line ranges for mouse click hit-testing.
@@ -345,12 +348,22 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
         state.messages.scroll_offset = max_offset;
     }
 
-    // Clear the entire message area with a background fill so no ghost characters
-    // from previous frames or overlapping widgets persist between renders.
+    // STEP 1: Clear the ENTIRE area to prevent ghost characters from prior renders.
+    frame.render_widget(Clear, area);
     let bg_fill = Block::default().style(Style::default().bg(state.theme.bg_deep));
     frame.render_widget(bg_fill, area);
 
-    // CRITICAL: Manually slice lines to exactly the visible window instead of
+    // STEP 2: Create a clipped content area that is 3 columns narrower than the
+    // full area (2 right margin + 1 scrollbar). ALL text rendering goes here,
+    // guaranteeing that no characters can bleed past this boundary.
+    let content_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: content_width,
+        height: area.height,
+    };
+
+    // STEP 3: Manually slice lines to exactly the visible window instead of
     // relying on Paragraph::scroll(). This guarantees that the Paragraph widget
     // receives only as many lines as fit in the area, preventing any possibility
     // of text bleeding past area.bottom().
@@ -358,17 +371,18 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     let end = (start + visible_height as usize).min(lines.len());
     let visible_lines: Vec<Line<'static>> = lines.drain(start..end).collect();
 
-    // Render the paragraph in a narrower area so text doesn't overlap the scrollbar column.
-    let content_area = Rect {
-        width: area.width.saturating_sub(1),
-        ..area
-    };
+    // STEP 4: Render the paragraph into the clipped content_area.
     let widget = Paragraph::new(visible_lines);
     frame.render_widget(widget, content_area);
 
-    // Render scroll indicator when not at bottom (content overflows).
-    // Use the full `area` so the scrollbar sits flush at the rightmost column.
+    // STEP 5: Render scrollbar into a dedicated 1-column area at the far right.
     if total > visible_height && !state.messages.auto_scroll {
+        let scrollbar_area = Rect {
+            x: area.right().saturating_sub(1),
+            y: area.y,
+            width: 1,
+            height: area.height,
+        };
         let mut scrollbar_state = ScrollbarState::new(max_offset as usize)
             .position(state.messages.scroll_offset as usize);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
@@ -377,6 +391,6 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             .begin_symbol(None)
             .end_symbol(None)
             .style(Style::default().fg(state.theme.text_dimmed));
-        frame.render_stateful_widget(scrollbar, area, &mut scrollbar_state);
+        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
     }
 }

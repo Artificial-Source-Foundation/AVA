@@ -605,13 +605,14 @@ fn sse_to_stream(
     response: reqwest::Response,
     third_party: bool,
 ) -> impl Stream<Item = StreamChunk> {
+    let mut sse_parser = common::SseParser::new();
     response.bytes_stream().flat_map(move |chunk| {
         let chunks = chunk
             .ok()
             .and_then(|bytes| String::from_utf8(bytes.to_vec()).ok())
             .map(|text| {
                 trace!(provider = "Anthropic", third_party, "SSE raw: {text}");
-                let sse_lines = common::parse_sse_lines(&text);
+                let sse_lines = sse_parser.feed(&text);
                 trace!(
                     provider = "Anthropic",
                     third_party,

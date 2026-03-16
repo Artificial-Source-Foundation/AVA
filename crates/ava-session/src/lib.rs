@@ -96,19 +96,22 @@ impl SessionManager {
         let tx = conn.transaction().map_err(db_error)?;
 
         tx.execute(
-            "INSERT INTO sessions (id, created_at, updated_at, metadata, parent_id)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO sessions (id, created_at, updated_at, metadata, parent_id, token_usage)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(id) DO UPDATE SET
                updated_at = excluded.updated_at,
                metadata = excluded.metadata,
-               parent_id = excluded.parent_id",
+               parent_id = excluded.parent_id,
+               token_usage = excluded.token_usage",
             params![
                 session.id.to_string(),
                 session.created_at.to_rfc3339(),
                 session.updated_at.to_rfc3339(),
                 serde_json::to_string(&session.metadata)
                     .map_err(|error| AvaError::SerializationError(error.to_string()))?,
-                session.metadata.get("parent_id").and_then(Value::as_str)
+                session.metadata.get("parent_id").and_then(Value::as_str),
+                serde_json::to_string(&session.token_usage)
+                    .map_err(|error| AvaError::SerializationError(error.to_string()))?
             ],
         )
         .map_err(db_error)?;
@@ -121,8 +124,8 @@ impl SessionManager {
 
         for message in &session.messages {
             tx.execute(
-                "INSERT INTO messages (id, session_id, role, content, timestamp, tool_calls, tool_results)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO messages (id, session_id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
                     message.id.to_string(),
                     session.id.to_string(),
@@ -132,6 +135,9 @@ impl SessionManager {
                     serde_json::to_string(&message.tool_calls)
                         .map_err(|error| AvaError::SerializationError(error.to_string()))?,
                     serde_json::to_string(&message.tool_results)
+                        .map_err(|error| AvaError::SerializationError(error.to_string()))?,
+                    message.tool_call_id.as_deref(),
+                    serde_json::to_string(&message.images)
                         .map_err(|error| AvaError::SerializationError(error.to_string()))?
                 ],
             )
@@ -253,7 +259,7 @@ impl SessionManager {
     fn get_with_conn(&self, conn: &Connection, id: Uuid) -> Result<Option<Session>> {
         let row = conn
             .query_row(
-                "SELECT id, created_at, updated_at, metadata FROM sessions WHERE id = ?1",
+                "SELECT id, created_at, updated_at, metadata, token_usage FROM sessions WHERE id = ?1",
                 params![id.to_string()],
                 |row| {
                     Ok((
@@ -261,19 +267,20 @@ impl SessionManager {
                         row.get::<_, String>(1)?,
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, Option<String>>(4)?,
                     ))
                 },
             )
             .optional()
             .map_err(db_error)?;
 
-        let Some((session_id, created_at, updated_at, metadata)) = row else {
+        let Some((session_id, created_at, updated_at, metadata, token_usage_json)) = row else {
             return Ok(None);
         };
 
         let mut messages_stmt = conn
             .prepare(
-                "SELECT id, role, content, timestamp, tool_calls, tool_results
+                "SELECT id, role, content, timestamp, tool_calls, tool_results, tool_call_id, images
                  FROM messages WHERE session_id = ?1 ORDER BY timestamp ASC, id ASC",
             )
             .map_err(db_error)?;
@@ -298,6 +305,18 @@ impl SessionManager {
                             Box::new(error),
                         )
                     })?;
+                let tool_call_id: Option<String> = row.get(6)?;
+                let images_json: String = row
+                    .get::<_, Option<String>>(7)?
+                    .unwrap_or_else(|| "[]".to_string());
+                let images = serde_json::from_str::<Vec<ava_types::ImageContent>>(&images_json)
+                    .map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            7,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?;
 
                 Ok(Message {
                     id: parse_uuid(&row.get::<_, String>(0)?).map_err(to_conversion_error)?,
@@ -307,8 +326,8 @@ impl SessionManager {
                         .map_err(to_conversion_error)?,
                     tool_calls,
                     tool_results,
-                    tool_call_id: None,
-                    images: Vec::new(),
+                    tool_call_id,
+                    images,
                 })
             })
             .map_err(db_error)?

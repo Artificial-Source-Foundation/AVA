@@ -7,7 +7,8 @@ pub const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS sessions (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     metadata TEXT NOT NULL,
-    parent_id TEXT
+    parent_id TEXT,
+    token_usage TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -18,6 +19,8 @@ CREATE TABLE IF NOT EXISTS messages (
     timestamp TEXT NOT NULL,
     tool_calls TEXT NOT NULL,
     tool_results TEXT NOT NULL,
+    tool_call_id TEXT,
+    images TEXT NOT NULL DEFAULT '[]',
     FOREIGN KEY(session_id) REFERENCES sessions(id)
 );
 

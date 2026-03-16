@@ -839,6 +839,70 @@ mod tests {
         assert_eq!(lines, vec!["payload1", "payload2"]);
     }
 
+    // ── SseParser (buffered) ──
+
+    #[test]
+    fn sse_parser_complete_events() {
+        let mut parser = SseParser::new();
+        let events = parser.feed("data: {\"text\":\"hello\"}\n\ndata: {\"text\":\"world\"}\n\n");
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], "{\"text\":\"hello\"}");
+        assert_eq!(events[1], "{\"text\":\"world\"}");
+    }
+
+    #[test]
+    fn sse_parser_partial_chunk() {
+        let mut parser = SseParser::new();
+        // First chunk: incomplete event (no double newline)
+        let events = parser.feed("data: {\"tex");
+        assert!(events.is_empty());
+        // Second chunk: completes the event
+        let events = parser.feed("t\":\"hello\"}\n\n");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], "{\"text\":\"hello\"}");
+    }
+
+    #[test]
+    fn sse_parser_split_across_three_chunks() {
+        let mut parser = SseParser::new();
+        assert!(parser.feed("da").is_empty());
+        assert!(parser.feed("ta: payload").is_empty());
+        let events = parser.feed("1\n\n");
+        assert_eq!(events, vec!["payload1"]);
+    }
+
+    #[test]
+    fn sse_parser_filters_done() {
+        let mut parser = SseParser::new();
+        let events = parser.feed("data: {\"ok\":true}\n\ndata: [DONE]\n\n");
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0], "{\"ok\":true}");
+    }
+
+    #[test]
+    fn sse_parser_ignores_non_data_lines() {
+        let mut parser = SseParser::new();
+        let events = parser.feed("event: message\ndata: payload\n\n");
+        assert_eq!(events, vec!["payload"]);
+    }
+
+    #[test]
+    fn sse_parser_empty_input() {
+        let mut parser = SseParser::new();
+        assert!(parser.feed("").is_empty());
+    }
+
+    #[test]
+    fn sse_parser_buffered_across_multiple_events() {
+        let mut parser = SseParser::new();
+        // Feed two partial events in one chunk
+        let events = parser.feed("data: first\n\ndata: sec");
+        assert_eq!(events, vec!["first"]);
+        // Complete the second event
+        let events = parser.feed("ond\n\n");
+        assert_eq!(events, vec!["second"]);
+    }
+
     // ── parse_openai_completion_payload ──
 
     #[test]

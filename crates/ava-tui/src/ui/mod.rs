@@ -119,6 +119,7 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
 
 fn render_toasts(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
     use crate::state::toast::ToastKind;
+    use crate::text_utils::display_width;
 
     state.toast.cleanup();
     if state.toast.is_empty() {
@@ -131,7 +132,7 @@ fn render_toasts(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
             ToastKind::Info => "\u{2139} ",
         };
         // Width: border(1) + pad(1) + icon + message + pad(1) + border(1)
-        let inner_width = icon.len() as u16 + toast.message.len() as u16;
+        let inner_width = display_width(icon) as u16 + display_width(&toast.message) as u16;
         let width = (inner_width + 4).clamp(14, 44); // +4 for borders + padding
         let height: u16 = 3; // border + content + border
         let y = 1 + (i as u16 * (height + 1));

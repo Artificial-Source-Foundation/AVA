@@ -22,20 +22,22 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     let value_style = Style::default().fg(state.theme.text);
     let dim_style = Style::default().fg(state.theme.text_dimmed);
 
+    // Maximum display width for value text (account for border + indent)
+    let inner_w = area.width.saturating_sub(1) as usize;
+
+    let provider_display = truncate_display(&state.agent.provider_name, inner_w.saturating_sub(2));
+    let model_display = truncate_display(&state.agent.model_name, inner_w.saturating_sub(2));
+    let activity_str = state.agent.activity.to_string();
+    let activity_display = truncate_display(&activity_str, inner_w.saturating_sub(2));
+
     let mut lines = vec![
         Line::from(""),
         Line::from(Span::styled("Session", label_style)),
         Line::from(Span::styled(format!("  {session_label}"), value_style)),
         Line::from(""),
         Line::from(Span::styled("Provider", label_style)),
-        Line::from(Span::styled(
-            format!("  {}", state.agent.provider_name),
-            value_style,
-        )),
-        Line::from(Span::styled(
-            format!("  {}", state.agent.model_name),
-            value_style,
-        )),
+        Line::from(Span::styled(format!("  {provider_display}"), value_style)),
+        Line::from(Span::styled(format!("  {model_display}"), value_style)),
         Line::from(""),
         Line::from(Span::styled("Context (latest turn)", label_style)),
         Line::from(Span::styled(
@@ -68,10 +70,7 @@ pub fn render_sidebar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             },
             value_style,
         )),
-        Line::from(Span::styled(
-            format!("  {}", state.agent.activity),
-            value_style,
-        )),
+        Line::from(Span::styled(format!("  {activity_display}"), value_style)),
     ];
 
     // Sub-agents section — only show when there are any sub-agents

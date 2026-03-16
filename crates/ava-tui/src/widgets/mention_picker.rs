@@ -28,9 +28,9 @@ pub fn render_mention_picker(
     let menu_height = (visible_count as u16) + 2; // +2 for borders
 
     let menu_y = composer_rect.y.saturating_sub(menu_height);
-    let menu_width = composer_rect.width.min(70);
+    let menu_width = composer_rect.width.saturating_sub(1).min(70);
 
-    let menu_rect = Rect::new(composer_rect.x + 1, menu_y, menu_width, menu_height);
+    let menu_rect = Rect::new(composer_rect.x, menu_y, menu_width, menu_height);
 
     frame.render_widget(Clear, menu_rect);
 

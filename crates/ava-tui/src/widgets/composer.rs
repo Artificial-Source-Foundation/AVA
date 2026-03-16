@@ -2,6 +2,7 @@ use crate::app::AppState;
 use crate::state::input::InputState;
 use crate::state::theme::Theme;
 use crate::state::voice::VoicePhase;
+use crate::text_utils::truncate_display;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -203,25 +204,32 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         crate::state::agent::AgentMode::Plan => state.theme.primary,
         crate::state::agent::AgentMode::Praxis => state.theme.warning,
     };
+    // Clamp provider + model names so the line fits the composer width.
+    // bar(1) + pad(2) + mode badge + "  " + provider + "  " + model
+    let inner_w = area.width.saturating_sub(1) as usize; // usable cols
+    let mode_label = format!("[{}]", state.agent_mode.label());
+    let prefix_len = 1 + 2 + mode_label.len() + 2; // bar + pad + badge + gap
+    let remaining = inner_w.saturating_sub(prefix_len);
+    let prov_max = remaining / 2;
+    let model_max = remaining.saturating_sub(prov_max.min(state.agent.provider_name.len()) + 2);
+    let prov_display = truncate_display(&state.agent.provider_name, prov_max);
+    let model_display = truncate_display(&state.agent.model_name, model_max);
     let model_info_line = Line::from(vec![
         bar,
         Span::raw(pad),
         Span::styled(
-            format!("[{}]", state.agent_mode.label()),
+            mode_label,
             Style::default().fg(mode_color).add_modifier(Modifier::BOLD),
         ),
         Span::styled("  ", Style::default()),
         Span::styled(
-            &state.agent.provider_name,
+            prov_display,
             Style::default()
                 .fg(state.theme.primary)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("  ", Style::default()),
-        Span::styled(
-            &state.agent.model_name,
-            Style::default().fg(state.theme.text_muted),
-        ),
+        Span::styled(model_display, Style::default().fg(state.theme.text_muted)),
     ]);
 
     // Fill entire composer area with bg_elevated first

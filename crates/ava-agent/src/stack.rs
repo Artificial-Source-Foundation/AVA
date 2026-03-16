@@ -39,6 +39,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
 
 use crate::agent_loop::{AgentConfig, AgentEvent, AgentLoop};
+use crate::budget::BudgetTelemetry;
 use crate::routing::analyze_task;
 
 struct LlmSummarizer(Arc<dyn LLMProvider>);

@@ -6,8 +6,11 @@
 //! - Detects stuck states and terminates gracefully
 
 pub mod agent_loop;
+pub(crate) mod budget;
+pub mod instruction_resolver;
 pub mod instructions;
 pub mod llm_trait;
+pub(crate) mod memory_enrichment;
 pub mod message_queue;
 pub mod reflection;
 pub mod routing;

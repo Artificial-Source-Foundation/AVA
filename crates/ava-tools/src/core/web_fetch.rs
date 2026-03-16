@@ -31,7 +31,7 @@ impl WebFetchTool {
 }
 
 /// Check if a URL targets a local/private address (SSRF prevention).
-fn is_blocked_url(url: &str) -> Result<(), AvaError> {
+pub(crate) fn is_blocked_url(url: &str) -> Result<(), AvaError> {
     let lower = url.to_lowercase();
 
     // Only allow http and https schemes

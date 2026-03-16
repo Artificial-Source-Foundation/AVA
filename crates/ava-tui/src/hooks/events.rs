@@ -163,6 +163,25 @@ pub struct HookContext {
     pub cwd: Option<String>,
 }
 
+/// Controls how much data is included in hook context payloads.
+///
+/// Hook contexts are passed to external commands and HTTP endpoints, which
+/// makes them a potential exfiltration surface. The payload level limits
+/// how much content is exposed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HookPayloadLevel {
+    /// Only event type, tool name, cwd.
+    #[default]
+    Minimal,
+    /// Minimal + truncated content (first 500 chars).
+    Standard,
+    /// Everything — opt-in only.
+    Full,
+}
+
+/// Maximum number of characters for truncated fields at Standard level.
+const TRUNCATE_LIMIT: usize = 500;
+
 impl HookContext {
     /// Create a minimal context for the given event.
     pub fn for_event(event: &HookEvent) -> Self {
@@ -173,6 +192,49 @@ impl HookContext {
                 .map(|p| p.display().to_string()),
             ..Default::default()
         }
+    }
+
+    /// Truncate large fields in the context to reduce exfiltration surface.
+    ///
+    /// By default, hook contexts use `HookPayloadLevel::Minimal`, which strips
+    /// tool input/output, prompt text, and session metadata. `Standard` keeps
+    /// them but truncates to 500 characters. `Full` passes everything as-is.
+    pub fn apply_payload_level(&mut self, level: HookPayloadLevel) {
+        match level {
+            HookPayloadLevel::Full => { /* pass everything */ }
+            HookPayloadLevel::Standard => {
+                self.tool_input = self.tool_input.take().map(|v| truncate_json_value(v));
+                self.tool_output = self.tool_output.take().map(|s| truncate_string(&s));
+                self.prompt = self.prompt.take().map(|s| truncate_string(&s));
+            }
+            HookPayloadLevel::Minimal => {
+                // Strip all content fields — keep only event, tool_name, cwd
+                self.tool_input = None;
+                self.tool_output = None;
+                self.prompt = None;
+                self.session_id = None;
+                self.cost_usd = None;
+                self.tokens_used = None;
+                self.subagent_description = None;
+            }
+        }
+    }
+}
+
+fn truncate_string(s: &str) -> String {
+    if s.len() > TRUNCATE_LIMIT {
+        format!("{}...[truncated]", &s[..TRUNCATE_LIMIT])
+    } else {
+        s.to_string()
+    }
+}
+
+fn truncate_json_value(v: serde_json::Value) -> serde_json::Value {
+    let s = v.to_string();
+    if s.len() > TRUNCATE_LIMIT {
+        serde_json::Value::String(format!("{}...[truncated]", &s[..TRUNCATE_LIMIT]))
+    } else {
+        v
     }
 }
 

@@ -36,6 +36,7 @@ ava-codebase = { path = "../ava-codebase" }
 reqwest.workspace = true
 url = "2"
 toml.workspace = true
+shell-words = "1"
 
 [dev-dependencies]
 tempfile.workspace = true

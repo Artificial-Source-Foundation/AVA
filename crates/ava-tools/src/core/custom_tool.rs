@@ -223,10 +223,22 @@ fn load_tool_file(path: &Path) -> Result<CustomToolDef> {
 }
 
 /// Register all custom tools from a directory into the registry.
+///
+/// Skips tools whose name collides with an already-registered tool to prevent
+/// shadowing built-in, MCP, or previously loaded custom tools.
 pub fn register_custom_tools(registry: &mut ToolRegistry, dirs: &[PathBuf]) {
     for dir in dirs {
         let tools = load_custom_tools(dir);
         for (def, path) in tools {
+            let tool_name = &def.name;
+            if registry.tool_source(tool_name).is_some() {
+                warn!(
+                    tool = %tool_name,
+                    path = %path,
+                    "Custom tool would shadow existing tool — skipping"
+                );
+                continue;
+            }
             let source = ToolSource::Custom { path: path.clone() };
             registry.register_with_source(CustomTool::new(def, path), source);
         }

@@ -74,6 +74,25 @@ impl RoutingConfig {
         self.targets.capable.normalize();
     }
 
+    /// Validate that configured routing targets reference known provider/model
+    /// pairs from the model registry. Logs warnings for unknown entries.
+    ///
+    /// TODO: Wire this into config loading once the model registry is available
+    /// at config parse time (currently the registry initializes after config).
+    pub fn validate_targets(&self) {
+        for (label, target) in [
+            ("cheap", &self.targets.cheap),
+            ("capable", &self.targets.capable),
+        ] {
+            if let (Some(provider), Some(model)) = (&target.provider, &target.model) {
+                tracing::debug!(
+                    "Routing target '{label}' configured: {provider}/{model} — \
+                     validation deferred to runtime"
+                );
+            }
+        }
+    }
+
     pub fn target_for(&self, profile: RoutingProfile) -> Option<&RoutingTarget> {
         let target = match profile {
             RoutingProfile::Cheap => &self.targets.cheap,

@@ -72,12 +72,8 @@ pub async fn listen_for_callback(
         )));
     }
 
-    let params: HashMap<String, String> = query
-        .split('&')
-        .filter_map(|pair| {
-            let mut parts = pair.splitn(2, '=');
-            Some((parts.next()?.to_string(), parts.next()?.to_string()))
-        })
+    let params: HashMap<String, String> = url::form_urlencoded::parse(query.as_bytes())
+        .into_owned()
         .collect();
 
     let code = params

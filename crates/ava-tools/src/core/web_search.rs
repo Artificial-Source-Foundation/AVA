@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use std::sync::LazyLock;
 use url::form_urlencoded;
 
+use crate::core::web_fetch::is_blocked_url;
 use crate::registry::Tool;
 
 pub struct WebSearchTool;
@@ -83,6 +84,8 @@ impl Tool for WebSearchTool {
             .clamp(1, 20) as usize;
 
         let search_url = build_duckduckgo_url(query);
+        is_blocked_url(&search_url)?;
+
         let client = reqwest::Client::builder()
             .user_agent("ava-web-search/2.1")
             .timeout(std::time::Duration::from_secs(20))

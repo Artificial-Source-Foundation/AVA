@@ -87,6 +87,8 @@ impl Tool for CodeSearchTool {
             .and_then(Value::as_str)
             .unwrap_or("lexical");
 
+        // TODO: Reuse shared CodebaseIndex instead of rebuilding per invocation.
+        // This is a performance issue, not a security issue.
         let index = index_project(&root)
             .await
             .map_err(|e| AvaError::ToolError(format!("failed to index project: {e}")))?;

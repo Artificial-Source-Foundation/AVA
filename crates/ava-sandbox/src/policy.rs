@@ -1,12 +1,8 @@
 use crate::error::{Result, SandboxError};
 use crate::types::{SandboxPolicy, SandboxRequest};
 
-pub fn validate_policy(policy: &SandboxPolicy) -> Result<()> {
-    if policy.writable_paths.is_empty() {
-        return Err(SandboxError::InvalidPolicy(
-            "at least one writable path is required".to_string(),
-        ));
-    }
+pub fn validate_policy(_policy: &SandboxPolicy) -> Result<()> {
+    // Read-only sandboxes (no writable paths) are valid — do not require writable_paths.
     Ok(())
 }
 

@@ -1,22 +1,16 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use ava_permissions::classifier::classify_bash_command;
-use ava_permissions::tags::RiskLevel;
-use ava_platform::{ExecuteOptions, Platform};
 use ava_types::{AvaError, ToolResult};
 use serde_json::{json, Value};
 
 use crate::registry::Tool;
 
-pub struct LspOpsTool {
-    platform: Arc<dyn Platform>,
-}
+pub struct LspOpsTool;
 
 impl LspOpsTool {
-    pub fn new(platform: Arc<dyn Platform>) -> Self {
-        Self { platform }
+    pub fn new(_platform: std::sync::Arc<dyn ava_platform::Platform>) -> Self {
+        Self
     }
 }
 
@@ -90,34 +84,41 @@ impl Tool for LspOpsTool {
                     .transpose()?
                     .unwrap_or_else(|| default_probe_command(language));
 
-                validate_probe_command(&probe_cmd)?;
+                let (binary, args) = parse_probe_args(&probe_cmd)?;
 
-                let result = self
-                    .platform
-                    .execute_with_options(
-                        &probe_cmd,
-                        ExecuteOptions {
-                            timeout: Some(Duration::from_secs(5)),
-                            working_dir: None,
-                            env_vars: Vec::new(),
-                        },
-                    )
-                    .await;
+                let result = tokio::time::timeout(
+                    Duration::from_secs(5),
+                    tokio::process::Command::new(&binary)
+                        .args(&args)
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .output(),
+                )
+                .await;
 
                 let payload = match result {
-                    Ok(output) => json!({
-                        "language": language,
-                        "probe_command": probe_cmd,
-                        "available": output.exit_code == 0,
-                        "exit_code": output.exit_code,
-                        "stdout": output.stdout,
-                        "stderr": output.stderr,
-                    }),
-                    Err(err) => json!({
+                    Ok(Ok(output)) => {
+                        let exit_code = output.status.code().unwrap_or(-1);
+                        json!({
+                            "language": language,
+                            "probe_command": probe_cmd,
+                            "available": exit_code == 0,
+                            "exit_code": exit_code,
+                            "stdout": String::from_utf8_lossy(&output.stdout),
+                            "stderr": String::from_utf8_lossy(&output.stderr),
+                        })
+                    }
+                    Ok(Err(err)) => json!({
                         "language": language,
                         "probe_command": probe_cmd,
                         "available": false,
                         "error": err.to_string(),
+                    }),
+                    Err(_) => json!({
+                        "language": language,
+                        "probe_command": probe_cmd,
+                        "available": false,
+                        "error": "probe timed out after 5s",
                     }),
                 };
 
@@ -174,14 +175,23 @@ fn is_allowed_lsp_binary(binary: &str) -> bool {
     )
 }
 
-fn validate_probe_command(command: &str) -> ava_types::Result<()> {
-    let classification = classify_bash_command(command);
-    if classification.blocked || classification.risk_level > RiskLevel::Low {
-        return Err(AvaError::PermissionDenied(
-            "lsp_ops probe command must be safe or low-risk".to_string(),
+/// Parse a probe command string into (binary, args) for direct execution.
+/// Only allowed LSP binaries can be probed.
+fn parse_probe_args(command: &str) -> ava_types::Result<(String, Vec<String>)> {
+    let parts: Vec<&str> = command.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err(AvaError::ValidationError(
+            "probe command cannot be empty".to_string(),
         ));
     }
-    Ok(())
+    let binary = parts[0].to_string();
+    if !is_allowed_lsp_binary(&binary) {
+        return Err(AvaError::PermissionDenied(format!(
+            "lsp_ops only allows known LSP binaries, got: {binary}"
+        )));
+    }
+    let args = parts[1..].iter().map(|s| s.to_string()).collect();
+    Ok((binary, args))
 }
 
 #[cfg(test)]
@@ -202,7 +212,8 @@ mod tests {
 
     #[test]
     fn lsp_ops_rejects_unsafe_probe_command() {
-        assert!(validate_probe_command("rm -rf /").is_err());
+        assert!(parse_probe_args("rm -rf /").is_err());
+        assert!(parse_probe_args("rust-analyzer --version").is_ok());
     }
 
     #[tokio::test]

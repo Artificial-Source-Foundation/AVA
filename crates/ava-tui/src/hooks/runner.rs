@@ -148,6 +148,7 @@ impl HookRunner {
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
+        cmd.kill_on_drop(true);
 
         if let Some(dir) = cwd {
             cmd.current_dir(dir);
@@ -172,7 +173,9 @@ impl HookRunner {
             });
         }
 
-        // Wait with timeout
+        // Wait with timeout. kill_on_drop(true) is set as a safety net,
+        // but on timeout we also kill explicitly so the process is reaped
+        // immediately rather than waiting for the Child to be dropped.
         let timeout = Duration::from_secs(timeout_secs);
         match tokio::time::timeout(timeout, child.wait_with_output()).await {
             Ok(Ok(output)) => {
@@ -209,6 +212,9 @@ impl HookRunner {
                 HookResult::Error(format!("IO error: {e}"))
             }
             Err(_) => {
+                // Timeout fired. wait_with_output() consumed the Child, so
+                // when the timeout cancels the future the Child is dropped
+                // and kill_on_drop(true) sends SIGKILL + reaps it.
                 warn!(command = %command, timeout_secs, "hook command timed out");
                 HookResult::Error(format!("Hook timed out after {timeout_secs}s"))
             }

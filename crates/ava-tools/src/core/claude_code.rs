@@ -90,7 +90,7 @@ impl ClaudeCodeTool {
 ///
 /// Resolution order:
 /// 1. Config override (`binary_path`)
-/// 2. PATH lookup via `which claude`
+/// 2. Direct PATH search (no shell invocation)
 async fn find_claude_binary(config_path: Option<&Path>) -> Option<PathBuf> {
     // 1. Check config override
     if let Some(p) = config_path {
@@ -99,20 +99,20 @@ async fn find_claude_binary(config_path: Option<&Path>) -> Option<PathBuf> {
         }
     }
 
-    // 2. Check PATH via `which claude`
-    let output = tokio::process::Command::new("which")
-        .arg("claude")
-        .output()
-        .await
-        .ok()?;
+    // 2. Search PATH directories directly (avoids shelling out to `which`)
+    find_in_path("claude")
+}
 
-    if output.status.success() {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return Some(PathBuf::from(path));
+/// Search PATH environment variable for a binary by name.
+fn find_in_path(binary: &str) -> Option<PathBuf> {
+    let path_var = std::env::var("PATH").ok()?;
+    let separator = if cfg!(windows) { ';' } else { ':' };
+    for dir in path_var.split(separator) {
+        let candidate = Path::new(dir).join(binary);
+        if candidate.is_file() {
+            return Some(candidate);
         }
     }
-
     None
 }
 

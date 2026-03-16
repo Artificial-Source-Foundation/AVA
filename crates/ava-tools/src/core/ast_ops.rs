@@ -1,9 +1,6 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use ava_permissions::classifier::classify_bash_command;
-use ava_platform::{ExecuteOptions, Platform};
 use ava_types::{AvaError, ToolResult};
 use serde_json::{json, Value};
 
@@ -11,13 +8,11 @@ use crate::registry::Tool;
 
 const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 
-pub struct AstOpsTool {
-    platform: Arc<dyn Platform>,
-}
+pub struct AstOpsTool;
 
 impl AstOpsTool {
-    pub fn new(platform: Arc<dyn Platform>) -> Self {
-        Self { platform }
+    pub fn new(_platform: std::sync::Arc<dyn ava_platform::Platform>) -> Self {
+        Self
     }
 }
 
@@ -62,7 +57,7 @@ impl Tool for AstOpsTool {
     }
 
     async fn execute(&self, args: Value) -> ava_types::Result<ToolResult> {
-        ensure_ast_grep_available(&*self.platform).await?;
+        ensure_ast_grep_available(self).await?;
 
         let operation = args
             .get("operation")
@@ -96,52 +91,70 @@ impl Tool for AstOpsTool {
             }
         };
 
-        validate_command(&command)?;
-        let output = self
-            .platform
-            .execute_with_options(
-                &command,
-                ExecuteOptions {
-                    timeout: Some(Duration::from_millis(DEFAULT_TIMEOUT_MS)),
-                    working_dir: None,
-                    env_vars: Vec::new(),
-                },
-            )
-            .await?;
+        let args = parse_sg_args(&command)?;
+        let output = tokio::time::timeout(
+            Duration::from_millis(DEFAULT_TIMEOUT_MS),
+            tokio::process::Command::new("sg")
+                .args(&args)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .output(),
+        )
+        .await
+        .map_err(|_| AvaError::ToolError("ast-grep timed out".to_string()))?
+        .map_err(|e| AvaError::ToolError(format!("Failed to execute sg: {e}")))?;
 
-        let combined = format!("{}{}", output.stdout, output.stderr);
+        let exit_code = output.status.code().unwrap_or(-1);
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
         Ok(ToolResult {
             call_id: String::new(),
             content: json!({
                 "operation": operation,
                 "command": command,
-                "exit_code": output.exit_code,
+                "exit_code": exit_code,
                 "output": combined,
             })
             .to_string(),
-            is_error: output.exit_code != 0,
+            is_error: exit_code != 0,
         })
     }
 }
 
-async fn ensure_ast_grep_available(platform: &dyn Platform) -> ava_types::Result<()> {
-    let output = platform
-        .execute_with_options(
-            "sg --version",
-            ExecuteOptions {
-                timeout: Some(Duration::from_secs(5)),
-                working_dir: None,
-                env_vars: Vec::new(),
-            },
-        )
+async fn ensure_ast_grep_available(_platform: &AstOpsTool) -> ava_types::Result<()> {
+    let output = tokio::process::Command::new("sg")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
         .await;
 
     match output {
-        Ok(result) if result.exit_code == 0 => Ok(()),
+        Ok(status) if status.success() => Ok(()),
         _ => Err(AvaError::ToolError(
             "ast-grep binary (sg) is required for ast_ops but was not found in PATH".to_string(),
         )),
     }
+}
+
+/// Parse the generated shell command string into arguments for direct execution.
+/// The command is always of the form: `sg scan --json --pattern '...' [--rewrite '...'] --lang '...' '...'`
+fn parse_sg_args(command: &str) -> ava_types::Result<Vec<String>> {
+    if !command.starts_with("sg scan ") {
+        return Err(AvaError::PermissionDenied(
+            "ast_ops only allows generated sg scan commands".to_string(),
+        ));
+    }
+
+    // Use shell_words to parse the shell-quoted command
+    let all_args = shell_words::split(command)
+        .map_err(|e| AvaError::ValidationError(format!("Failed to parse sg command: {e}")))?;
+
+    // Skip the leading "sg" — we invoke sg directly
+    Ok(all_args.into_iter().skip(1).collect())
 }
 
 fn build_search_command(pattern: &str, language: &str, path: &str) -> String {
@@ -166,22 +179,6 @@ fn build_replace_preview_command(
         quote(language),
         quote(path)
     )
-}
-
-fn validate_command(command: &str) -> ava_types::Result<()> {
-    if !command.starts_with("sg scan ") {
-        return Err(AvaError::PermissionDenied(
-            "ast_ops only allows generated sg scan commands".to_string(),
-        ));
-    }
-
-    let classification = classify_bash_command(command);
-    if classification.blocked {
-        return Err(AvaError::PermissionDenied(
-            "ast_ops generated command failed safety validation".to_string(),
-        ));
-    }
-    Ok(())
 }
 
 fn quote(value: &str) -> String {
@@ -210,10 +207,8 @@ mod tests {
     }
 
     #[test]
-    fn ast_ops_requires_low_risk_commands() {
-        assert!(validate_command("rm -rf /").is_err());
-        assert!(
-            validate_command("sg scan --json --pattern 'fn main()' --lang 'rust' 'src'").is_ok()
-        );
+    fn ast_ops_rejects_non_sg_commands() {
+        assert!(parse_sg_args("rm -rf /").is_err());
+        assert!(parse_sg_args("sg scan --json --pattern 'fn main()' --lang 'rust' 'src'").is_ok());
     }
 }

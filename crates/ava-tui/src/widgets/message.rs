@@ -332,27 +332,37 @@ pub fn render_action_group(
 
     // Completed: show summary line — truncate to width so it cannot bleed
     let summary = tool_activity_summary(&tool_calls);
-    let summary = crate::text_utils::truncate_display(&summary, width.saturating_sub(2) as usize); // 2 = "● "
-    let mut lines = vec![Line::from(vec![
-        Span::styled(
-            "● ",
-            Style::default()
-                .fg(theme.text_dimmed)
-                .add_modifier(Modifier::DIM),
-        ),
-        Span::styled(
-            summary,
-            Style::default()
-                .fg(theme.text_dimmed)
-                .add_modifier(Modifier::DIM),
-        ),
-    ])];
+    let dim = Style::default()
+        .fg(theme.text_dimmed)
+        .add_modifier(Modifier::DIM);
 
     if expanded {
+        // Expanded header with ▼ indicator
+        let prefix = "● ▼ ";
+        let summary = crate::text_utils::truncate_display(
+            &summary,
+            width.saturating_sub(prefix.len() as u16) as usize,
+        );
+        let mut lines = vec![Line::from(vec![
+            Span::styled("● ", dim),
+            Span::styled("\u{25bc} ", dim), // ▼
+            Span::styled(summary, dim),
+        ])];
         render_expanded_details(&tool_calls, &tool_results, theme, width, &mut lines);
+        lines
+    } else {
+        // Collapsed header with ▶ indicator
+        let prefix = "● ▶ ";
+        let summary = crate::text_utils::truncate_display(
+            &summary,
+            width.saturating_sub(prefix.len() as u16) as usize,
+        );
+        vec![Line::from(vec![
+            Span::styled("● ", dim),
+            Span::styled("\u{25b6} ", dim), // ▶
+            Span::styled(summary, dim),
+        ])]
     }
-
-    lines
 }
 
 /// Render expanded details for an action group (tool calls + last result).

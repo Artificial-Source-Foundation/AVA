@@ -353,6 +353,22 @@ impl UiMessage {
         let mut lines = match self.kind {
             MessageKind::Assistant => {
                 let mut content_lines = markdown_to_lines(&self.content, theme);
+
+                // Append blinking cursor to last line while streaming
+                if self.is_streaming {
+                    let cursor_char = if (spinner_tick / 8) % 2 == 0 {
+                        "\u{258c}" // ▌
+                    } else {
+                        " "
+                    };
+                    if let Some(last_line) = content_lines.last_mut() {
+                        last_line.spans.push(Span::styled(
+                            cursor_char.to_string(),
+                            Style::default().fg(theme.primary),
+                        ));
+                    }
+                }
+
                 Self::prepend_bars(&mut content_lines, bar_color, width);
 
                 // Per-message footer: ■ mode · model · duration (only after streaming completes)
@@ -533,18 +549,13 @@ impl UiMessage {
                 let dot = Span::styled("\u{25cf} ", Style::default().fg(theme.primary));
 
                 if !show_thinking {
-                    // Collapsed single-line placeholder when thinking visibility is off
+                    // Minimal single-line hint when thinking visibility is off
                     let dim_style = Style::default()
                         .fg(theme.text_dimmed)
                         .add_modifier(Modifier::DIM | Modifier::ITALIC);
                     let mut result = vec![Line::from(vec![
-                        Span::styled(
-                            "\u{25cf} ",
-                            Style::default()
-                                .fg(theme.text_dimmed)
-                                .add_modifier(Modifier::DIM),
-                        ),
-                        Span::styled("Thinking (hidden)", dim_style),
+                        Span::styled("\u{00b7} ", dim_style), // · (middle dot)
+                        Span::styled("thinking...", dim_style),
                     ])];
                     Self::prepend_bars(&mut result, bar_color, width);
                     result

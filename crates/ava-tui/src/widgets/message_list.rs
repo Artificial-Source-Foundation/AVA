@@ -361,9 +361,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             RenderBlock::ActionGroup { messages, active } => {
                 // Per-group expanded state: check if any message in the group
                 // has tool_group_expanded set by user click.
-                let group_expanded = messages
-                    .iter()
-                    .any(|m| m.tool_group_expanded);
+                let group_expanded = messages.iter().any(|m| m.tool_group_expanded);
                 lines.extend(render_action_group(
                     messages,
                     &state.theme,

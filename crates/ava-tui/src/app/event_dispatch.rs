@@ -62,7 +62,11 @@ impl App {
                     self.state.todo_items = todo_state.get();
                 }
                 {
-                    let mut bg = self.state.background.lock().unwrap();
+                    let mut bg = self
+                        .state
+                        .background
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     bg.expire_notification();
                     if let Some((ref text, _)) = bg.notification {
                         let should_set = self

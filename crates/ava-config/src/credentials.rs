@@ -9,7 +9,7 @@ use tokio::fs;
 use tracing::warn;
 
 /// Per-provider credential entry.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ProviderCredential {
     /// API key or token.
     pub api_key: String,
@@ -31,6 +31,45 @@ pub struct ProviderCredential {
     /// OAuth account identifier (e.g., ChatGPT account ID).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oauth_account_id: Option<String>,
+}
+
+impl std::fmt::Debug for ProviderCredential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProviderCredential")
+            .field(
+                "api_key",
+                &if self.api_key.is_empty() {
+                    "<empty>"
+                } else {
+                    "<redacted>"
+                },
+            )
+            .field("base_url", &self.base_url)
+            .field("org_id", &self.org_id)
+            .field(
+                "oauth_token",
+                &self.oauth_token.as_ref().map(|t| {
+                    if t.is_empty() {
+                        "<empty>"
+                    } else {
+                        "<redacted>"
+                    }
+                }),
+            )
+            .field(
+                "oauth_refresh_token",
+                &self.oauth_refresh_token.as_ref().map(|t| {
+                    if t.is_empty() {
+                        "<empty>"
+                    } else {
+                        "<redacted>"
+                    }
+                }),
+            )
+            .field("oauth_expires_at", &self.oauth_expires_at)
+            .field("oauth_account_id", &self.oauth_account_id)
+            .finish()
+    }
 }
 
 impl ProviderCredential {

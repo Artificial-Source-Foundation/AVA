@@ -20,9 +20,10 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     // Advance spinner animation each frame
     state.messages.advance_spinner();
 
-    // Nuclear clear: reset every cell in the terminal buffer, then fill with
-    // the deepest background color.  This prevents stale character artifacts
-    // (e.g. `ke ..`, `ac`, `n.`) that survive tab-switching or resize.
+    // ── LAYER 0: Nuclear clear ──────────────────────────────────────
+    // Reset every cell in the terminal buffer, then fill with the
+    // deepest background color.  This is the first line of defense
+    // against stale character artifacts.
     let full_area = frame.area();
     frame.render_widget(Clear, full_area);
     let bg_block = Block::default().style(Style::default().bg(state.theme.bg_deep));
@@ -39,9 +40,27 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
     };
     let split = build_layout(area, state.show_sidebar, composer_h);
 
+    // ── LAYER 1: Section-level Clear + bg fill ──────────────────────
+    // Each section gets its own Clear before rendering.  This is the
+    // second line of defense — even if the nuclear clear somehow
+    // missed a cell, the section clear will catch it.
+
+    // Top bar
+    frame.render_widget(Clear, split.top_bar);
     status_bar::render_top(frame, split.top_bar, state);
+
+    // Messages — clear the FULL-WIDTH area (including margins) first,
+    // then render into the inset area.  This guarantees margin columns
+    // are explicitly painted rather than relying on the nuclear clear.
+    frame.render_widget(Clear, split.messages_full);
+    frame.render_widget(
+        Block::default().style(Style::default().bg(state.theme.bg_deep)),
+        split.messages_full,
+    );
     render_message_list(frame, split.messages, state);
 
+    // Composer
+    frame.render_widget(Clear, split.composer);
     if approval_active {
         // Render the approval dock in place of the composer
         if let Some(request) = state.permission.queue.front() {
@@ -64,9 +83,17 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
 
         render_composer(frame, split.composer, state);
     }
+
+    // Context bar
+    frame.render_widget(Clear, split.context_bar);
     status_bar::render_context_bar(frame, split.context_bar, state);
 
     if let Some(sidebar_area) = split.sidebar {
+        frame.render_widget(Clear, sidebar_area);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(state.theme.bg_deep)),
+            sidebar_area,
+        );
         sidebar::render_sidebar(frame, sidebar_area, state);
     }
 
@@ -305,7 +332,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &mut AppState, modal: ModalType) {
             );
         }
         ModalType::TaskList => {
-            let bg = state.background.lock().unwrap();
+            let bg = state.background.lock().unwrap_or_else(|e| e.into_inner());
             crate::widgets::task_list_modal::render_task_list(
                 frame,
                 inner,

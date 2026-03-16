@@ -70,7 +70,10 @@ pub fn parse_mentions(text: &str) -> (Vec<ContextAttachment>, String) {
     let words: Vec<(usize, &str)> = text
         .split_whitespace()
         .map(|word| {
-            let start = text[last_end..].find(word).unwrap() + last_end;
+            let start = text[last_end..]
+                .find(word)
+                .expect("word from split_whitespace must exist in source")
+                + last_end;
             last_end = start + word.len();
             (start, word)
         })

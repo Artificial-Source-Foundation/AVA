@@ -7,6 +7,59 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
+
+/// Hard-clamp a Line to at most `max_width` display columns.
+///
+/// This is the **final safety net** against text bleed.  Every line that enters
+/// the message-list Paragraph passes through this function.  If a line is
+/// already within budget it is returned unchanged (zero allocation).  Otherwise
+/// spans are truncated (and trailing spans dropped) until the total width fits.
+fn clamp_line_width(line: Line<'static>, max_width: usize) -> Line<'static> {
+    // Fast path: measure total width and bail early if it fits.
+    let total: usize = line.spans.iter().map(|s| s.content.width()).sum();
+    if total <= max_width {
+        return line;
+    }
+
+    let alignment = line.alignment;
+    let mut remaining = max_width;
+    let mut clamped_spans: Vec<Span<'static>> = Vec::with_capacity(line.spans.len());
+
+    for span in line.spans {
+        if remaining == 0 {
+            break;
+        }
+        let span_w = span.content.width();
+        if span_w <= remaining {
+            remaining -= span_w;
+            clamped_spans.push(span);
+        } else {
+            // Truncate this span at `remaining` display columns.
+            let mut col = 0usize;
+            let mut byte_end = 0usize;
+            for ch in span.content.chars() {
+                let cw = unicode_width::UnicodeWidthChar::width(ch).unwrap_or(0);
+                if col + cw > remaining {
+                    break;
+                }
+                col += cw;
+                byte_end += ch.len_utf8();
+            }
+            if byte_end > 0 {
+                clamped_spans.push(Span::styled(
+                    span.content[..byte_end].to_owned(),
+                    span.style,
+                ));
+            }
+            break;
+        }
+    }
+
+    let mut result = Line::from(clamped_spans);
+    result.alignment = alignment;
+    result
+}
 
 enum RenderBlock<'a> {
     Message(&'a UiMessage),
@@ -110,7 +163,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
             }
         }
         ViewMode::BackgroundTask { task_id, .. } => {
-            let bg = state.background.lock().unwrap();
+            let bg = state.background.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(task) = bg.tasks.iter().find(|t| t.id == *task_id) {
                 bg_messages_owned = task.messages.clone();
                 drop(bg);
@@ -174,7 +227,7 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     // Add breadcrumb header when viewing a background task or sub-agent conversation.
     if let ViewMode::BackgroundTask { task_id, goal } = &state.view_mode {
         let truncated_goal = crate::text_utils::truncate_display(goal, 55);
-        let bg = state.background.lock().unwrap();
+        let bg = state.background.lock().unwrap_or_else(|e| e.into_inner());
         let status_str = if let Some(task) = bg.tasks.iter().find(|t| t.id == *task_id) {
             format!(" ({})", task.status)
         } else {
@@ -371,11 +424,21 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     let end = (start + visible_height as usize).min(lines.len());
     let visible_lines: Vec<Line<'static>> = lines.drain(start..end).collect();
 
-    // STEP 4: Render the paragraph into the clipped content_area.
-    let widget = Paragraph::new(visible_lines);
+    // STEP 4: Hard-clamp every line to content_area.width.
+    // This is the final safety net — even if wrapping or markdown rendering
+    // produced a line wider than expected, we truncate it here so the
+    // Paragraph widget can never emit characters beyond the area boundary.
+    let clamped_width = content_area.width as usize;
+    let clamped_lines: Vec<Line<'static>> = visible_lines
+        .into_iter()
+        .map(|line| clamp_line_width(line, clamped_width))
+        .collect();
+
+    // STEP 5: Render the paragraph into the clipped content_area.
+    let widget = Paragraph::new(clamped_lines);
     frame.render_widget(widget, content_area);
 
-    // STEP 5: Render scrollbar into a dedicated 1-column area at the far right.
+    // STEP 6: Render scrollbar into a dedicated 1-column area at the far right.
     if total > visible_height && !state.messages.auto_scroll {
         let scrollbar_area = Rect {
             x: area.right().saturating_sub(1),

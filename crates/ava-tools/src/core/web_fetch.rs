@@ -1,9 +1,20 @@
+use std::sync::LazyLock;
+
 use async_trait::async_trait;
 use ava_types::{AvaError, ToolResult};
 use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::registry::Tool;
+
+static RE_SCRIPT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<script[^>]*>.*?</script>").unwrap());
+static RE_STYLE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<style[^>]*>.*?</style>").unwrap());
+static RE_BLOCK: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)<(?:br|/p|/div|/li|/tr|/h[1-6])[^>]*>").unwrap());
+static RE_TAGS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]+>").unwrap());
+static RE_BLANK_LINES: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\n{3,}").unwrap());
 
 pub struct WebFetchTool;
 
@@ -68,18 +79,14 @@ fn is_blocked_url(url: &str) -> Result<(), AvaError> {
 /// Strip HTML tags and extract text content.
 fn strip_html(html: &str) -> String {
     // Remove script and style blocks entirely
-    let re_script = Regex::new(r"(?is)<script[^>]*>.*?</script>").unwrap();
-    let text = re_script.replace_all(html, "");
-    let re_style = Regex::new(r"(?is)<style[^>]*>.*?</style>").unwrap();
-    let text = re_style.replace_all(&text, "");
+    let text = RE_SCRIPT.replace_all(html, "");
+    let text = RE_STYLE.replace_all(&text, "");
 
     // Replace <br>, <p>, <div>, <li>, <tr> with newlines for readability
-    let re_block = Regex::new(r"(?i)<(?:br|/p|/div|/li|/tr|/h[1-6])[^>]*>").unwrap();
-    let text = re_block.replace_all(&text, "\n");
+    let text = RE_BLOCK.replace_all(&text, "\n");
 
     // Strip remaining tags
-    let re_tags = Regex::new(r"<[^>]+>").unwrap();
-    let text = re_tags.replace_all(&text, "");
+    let text = RE_TAGS.replace_all(&text, "");
 
     // Decode common HTML entities
     let text = text
@@ -92,8 +99,7 @@ fn strip_html(html: &str) -> String {
         .replace("&nbsp;", " ");
 
     // Collapse multiple blank lines
-    let re_blank = Regex::new(r"\n{3,}").unwrap();
-    let text = re_blank.replace_all(&text, "\n\n");
+    let text = RE_BLANK_LINES.replace_all(&text, "\n\n");
 
     text.trim().to_string()
 }

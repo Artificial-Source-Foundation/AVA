@@ -105,7 +105,7 @@ impl Tool for EditTool {
             let result = self
                 .engine
                 .apply(&request)
-                .map_err(|_| AvaError::ToolError("No matching edit strategy found".to_string()))?;
+                .map_err(|e| AvaError::ToolError(format!("edit matching failed: {e}")))?;
             let strategy = if resolved_old.is_some() {
                 format!("hashline+{}", result.strategy)
             } else {

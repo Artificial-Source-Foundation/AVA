@@ -248,9 +248,11 @@ impl UiMessage {
                     if !current_row.is_empty() {
                         rows.push(std::mem::take(&mut current_row));
                         current_width = 0;
+                    } else if remaining.is_empty() {
+                        break;
                     } else {
                         // Force at least one char to avoid infinite loop.
-                        let ch = remaining.chars().next().unwrap();
+                        let ch = remaining.chars().next().expect("remaining is non-empty");
                         let clen = ch.len_utf8();
                         current_row.push(Span::styled(remaining[..clen].to_owned(), style));
                         remaining = &remaining[clen..];

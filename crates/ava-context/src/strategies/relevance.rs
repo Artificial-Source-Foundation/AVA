@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use ava_types::{Message, Role};
 use regex::Regex;
@@ -6,6 +7,8 @@ use regex::Regex;
 use crate::error::Result;
 use crate::strategies::CondensationStrategy;
 use crate::token_tracker::estimate_tokens_for_message;
+
+static RE_FILE_PATH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[\w./\-]+\.\w{1,6}").unwrap());
 
 /// Relevance-aware condensation strategy that scores messages by:
 /// 1. PageRank score of files mentioned in the message
@@ -26,8 +29,8 @@ impl RelevanceStrategy {
     }
 
     fn extract_paths(content: &str) -> Vec<String> {
-        let re = Regex::new(r"[\w./\-]+\.\w{1,6}").unwrap();
-        re.find_iter(content)
+        RE_FILE_PATH
+            .find_iter(content)
             .filter(|m| m.as_str().contains('/') || m.as_str().contains('.'))
             .map(|m| m.as_str().to_string())
             .collect()

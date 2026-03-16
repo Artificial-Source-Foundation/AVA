@@ -119,6 +119,40 @@ pub fn build_layout(area: Rect, show_sidebar: bool, composer_h: u16) -> MainLayo
         height: messages_full.height,
     };
 
+    // Safety invariant: sections must tile vertically with no gaps or overlaps.
+    // top_bar.bottom() == messages_full.y
+    // messages_full.bottom() == composer.y
+    // composer.bottom() == context_bar.y
+    // context_bar.bottom() == main.y + main.height
+    debug_assert_eq!(
+        top_bar.y + top_bar.height,
+        messages_full.y,
+        "gap/overlap between top_bar and messages: top_bar.bottom()={} messages.y={}",
+        top_bar.y + top_bar.height,
+        messages_full.y,
+    );
+    debug_assert_eq!(
+        messages_full.y + messages_full.height,
+        composer.y,
+        "gap/overlap between messages and composer: messages.bottom()={} composer.y={}",
+        messages_full.y + messages_full.height,
+        composer.y,
+    );
+    debug_assert_eq!(
+        composer.y + composer.height,
+        context_bar.y,
+        "gap/overlap between composer and context_bar: composer.bottom()={} context_bar.y={}",
+        composer.y + composer.height,
+        context_bar.y,
+    );
+    debug_assert_eq!(
+        context_bar.y + context_bar.height,
+        main.y + main.height,
+        "gap/overlap between context_bar and bottom: context_bar.bottom()={} main.bottom()={}",
+        context_bar.y + context_bar.height,
+        main.y + main.height,
+    );
+
     MainLayout {
         top_bar,
         messages,

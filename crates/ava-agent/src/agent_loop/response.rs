@@ -43,7 +43,7 @@ pub(super) fn accumulate_tool_call(
             name: String::new(),
             arguments_json: String::new(),
         });
-        accumulators.last_mut().unwrap()
+        accumulators.last_mut().expect("accumulator just pushed")
     };
     if let Some(ref id) = tc.id {
         acc.id.clone_from(id);

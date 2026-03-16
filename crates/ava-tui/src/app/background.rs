@@ -19,7 +19,11 @@ impl App {
             .unwrap_or_else(|| "background task".to_string());
 
         let task_id = {
-            let mut bg = self.state.background.lock().unwrap();
+            let mut bg = self
+                .state
+                .background
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             let id = bg.add_task(goal.clone());
             bg.add_tokens(
                 id,
@@ -71,7 +75,7 @@ impl App {
 
         let bg_state = Arc::clone(&self.state.background);
         let task_id = {
-            let mut bg = bg_state.lock().unwrap();
+            let mut bg = bg_state.lock().unwrap_or_else(|e| e.into_inner());
             bg.add_task(goal.clone())
         };
 
@@ -84,7 +88,7 @@ impl App {
 
             match prep {
                 Ok(info) => {
-                    let mut bg = bg_state.lock().unwrap();
+                    let mut bg = bg_state.lock().unwrap_or_else(|e| e.into_inner());
                     bg.set_isolation(
                         task_id,
                         info.worktree_path.to_string_lossy().to_string(),
@@ -129,7 +133,7 @@ impl App {
         // Create cancel token before spawning so it can be stored for external cancellation
         let cancel = tokio_util::sync::CancellationToken::new();
         {
-            let mut bg = bg_state.lock().unwrap();
+            let mut bg = bg_state.lock().unwrap_or_else(|e| e.into_inner());
             bg.set_cancel_token(task_id, cancel.clone());
         }
 
@@ -253,7 +257,11 @@ impl App {
     }
 
     pub(crate) fn enter_background_task_view(&mut self, task_id: usize) -> bool {
-        let bg = self.state.background.lock().unwrap();
+        let bg = self
+            .state
+            .background
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(task) = bg.tasks.iter().find(|t| t.id == task_id) {
             let goal = task.goal_display(50);
             drop(bg);
@@ -338,7 +346,11 @@ impl App {
         task_id: usize,
         event: ava_agent::AgentEvent,
     ) {
-        let mut bg = self.state.background.lock().unwrap();
+        let mut bg = self
+            .state
+            .background
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         match event {
             ava_agent::AgentEvent::Token(chunk) => {
                 if let Some(task) = bg.tasks.iter_mut().find(|t| t.id == task_id) {

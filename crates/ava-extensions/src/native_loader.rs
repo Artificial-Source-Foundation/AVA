@@ -39,7 +39,17 @@ pub unsafe fn load_native_extension(path: &Path) -> Result<Box<dyn Extension>, E
     // the extension factory with the global allocator.
     let extension = unsafe { Box::from_raw(raw_extension) };
 
-    // Keep the library loaded so the extension vtable remains valid.
+    // WHY: The library must stay loaded so the extension vtable (trait object
+    // function pointers) remains valid for the lifetime of the `Box<dyn Extension>`.
+    // Dropping `Library` would unload the shared object, leaving dangling vtable
+    // pointers and causing UB on any subsequent method call.
+    //
+    // LIMITATION: Extensions loaded this way cannot be unloaded at runtime.
+    // Once loaded, the shared library remains resident until process exit.
+    //
+    // FUTURE: Store an `Arc<Library>` alongside the extension (e.g. in a wrapper
+    // struct) so the library's lifetime is tied to the extension object. This
+    // would enable proper lifecycle management and eventual hot-reload support.
     std::mem::forget(library);
 
     Ok(extension)

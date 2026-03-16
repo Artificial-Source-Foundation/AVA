@@ -742,7 +742,11 @@ impl App {
     pub(crate) fn cancel_all_agents(&mut self) {
         // Cancel background tasks
         let bg_cancelled = {
-            let mut bg = self.state.background.lock().unwrap();
+            let mut bg = self
+                .state
+                .background
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             bg.cancel_all_running()
         };
         if bg_cancelled > 0 {

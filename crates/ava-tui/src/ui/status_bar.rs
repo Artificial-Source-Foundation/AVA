@@ -89,6 +89,8 @@ const ITEM_GAP: &str = "  ";
 // Right: permission mode badge
 
 pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+    // Defensive: ensure every cell in this area is explicitly painted.
+    frame.render_widget(ratatui::widgets::Clear, area);
     let sep = Span::styled(" \u{2502} ", Style::default().fg(state.theme.text_dimmed));
 
     let mut left_spans = vec![
@@ -165,7 +167,7 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     // Background task indicator
     {
-        let bg = state.background.lock().unwrap();
+        let bg = state.background.lock().unwrap_or_else(|e| e.into_inner());
         let running = bg.running_count();
         if running > 0 {
             left_spans.push(Span::styled(
@@ -217,6 +219,8 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 // Right: tokens + cost + model badge (gap=16)
 
 pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+    // Defensive: ensure every cell in this area is explicitly painted.
+    frame.render_widget(ratatui::widgets::Clear, area);
     let spinner_tick = state.messages.spinner_tick;
 
     let mut left_spans: Vec<Span<'static>> = vec![Span::raw(H_PAD)];

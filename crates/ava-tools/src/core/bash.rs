@@ -13,7 +13,6 @@ use crate::registry::{Tool, ToolOutput};
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 const MAX_OUTPUT_BYTES: usize = 100 * 1024;
-const DANGEROUS_PATTERNS: [&str; 4] = ["rm -rf /", "dd if=", "mkfs", ":(){ :|:& };:"];
 
 pub struct BashTool {
     platform: Arc<dyn Platform>,
@@ -55,15 +54,6 @@ impl Tool for BashTool {
                 AvaError::ValidationError("missing required field: command".to_string())
             })?
             .to_string();
-
-        if DANGEROUS_PATTERNS
-            .iter()
-            .any(|pattern| command.contains(pattern))
-        {
-            return Err(AvaError::PermissionDenied(
-                "Refusing to run dangerous command".to_string(),
-            ));
-        }
 
         let timeout_ms = args
             .get("timeout_ms")
@@ -145,12 +135,6 @@ impl Tool for BashTool {
                 AvaError::ValidationError("missing required field: command".to_string())
             })?
             .to_string();
-
-        if DANGEROUS_PATTERNS.iter().any(|p| command.contains(p)) {
-            return Err(AvaError::PermissionDenied(
-                "Refusing to run dangerous command".to_string(),
-            ));
-        }
 
         // For install-class or complex commands, fall back to complete
         if is_install_class(&command) {

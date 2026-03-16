@@ -312,7 +312,7 @@ impl MCPTransport for InMemoryTransport {
     async fn send(&mut self, message: &JsonRpcMessage) -> Result<()> {
         self.outgoing
             .send(message.clone())
-            .map_err(|_| AvaError::ToolError("transport channel closed".to_string()))
+            .map_err(|e| AvaError::ToolError(format!("transport channel closed: {e}")))
     }
 
     async fn receive(&mut self) -> Result<JsonRpcMessage> {

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use ava_agent::{AgentConfig, AgentEvent, AgentLoop};
 use ava_context::ContextManager;
@@ -10,6 +10,11 @@ use futures::StreamExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
+
+static RE_DIFF_STAT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*(.+?)\s+\|\s+(\d+)\s*(\+*)(-*)").unwrap());
+static RE_ISSUE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"###\s+\[(\w+)\]\s+([^:\s]+)?:?(\d+)?\s*-?\s*(.+)").unwrap());
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -150,11 +155,10 @@ pub async fn collect_diff(mode: &DiffMode) -> Result<ReviewContext, String> {
 }
 
 fn parse_diff_stats(stat_output: &str) -> Vec<DiffStats> {
-    let re = Regex::new(r"^\s*(.+?)\s+\|\s+(\d+)\s*(\+*)(-*)").unwrap();
     stat_output
         .lines()
         .filter_map(|line| {
-            let caps = re.captures(line)?;
+            let caps = RE_DIFF_STAT.captures(line)?;
             let file = caps.get(1)?.as_str().trim().to_string();
             let insertions = caps.get(3).map_or(0, |m| m.as_str().len());
             let deletions = caps.get(4).map_or(0, |m| m.as_str().len());
@@ -263,7 +267,6 @@ fn extract_section(text: &str, heading: &str) -> Option<String> {
 }
 
 fn parse_issues(text: &str) -> Vec<ReviewIssue> {
-    let issue_re = Regex::new(r"###\s+\[(\w+)\]\s+([^:\s]+)?:?(\d+)?\s*-?\s*(.+)").unwrap();
     let mut issues = Vec::new();
 
     let Some(issues_section) = extract_section(text, "Issues") else {
@@ -274,7 +277,7 @@ fn parse_issues(text: &str) -> Vec<ReviewIssue> {
         return issues;
     }
 
-    for caps in issue_re.captures_iter(&issues_section) {
+    for caps in RE_ISSUE.captures_iter(&issues_section) {
         let severity = Severity::from_str_loose(caps.get(1).map_or("", |m| m.as_str()));
         let file = caps.get(2).map(|m| m.as_str().to_string());
         let line = caps.get(3).and_then(|m| m.as_str().parse().ok());

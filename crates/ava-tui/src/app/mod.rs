@@ -572,7 +572,11 @@ impl App {
         };
 
         let (isolation_suffix, isolation_target) = {
-            let bg = self.state.background.lock().unwrap();
+            let bg = self
+                .state
+                .background
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             bg.tasks
                 .iter()
                 .find(|task| task.id == task_id)
@@ -592,7 +596,11 @@ impl App {
 
         match result {
             Ok(_) => {
-                self.state.background.lock().unwrap().complete_task(task_id);
+                self.state
+                    .background
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .complete_task(task_id);
 
                 if let Some((branch_name, worktree_path)) = isolation_target {
                     Self::spawn_background_worktree_cleanup(

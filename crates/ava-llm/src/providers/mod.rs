@@ -92,16 +92,15 @@ pub fn create_provider(
                 .to_string();
             // Determine the base URL:
             // 1. Explicit base_url override takes priority
-            // 2. OAuth tokens (ChatGPT Plus/Pro) use the ChatGPT backend API
-            // 3. Standard API keys use api.openai.com
-            let base_url = if let Some(ref base_url) = entry.base_url {
-                base_url.clone()
-            } else if entry.is_oauth_configured() && !entry.is_oauth_expired() && entry.api_key.trim().is_empty() {
-                // Pure OAuth credential (no API key fallback) — use ChatGPT backend
-                "https://chatgpt.com/backend-api/codex".to_string()
-            } else {
-                "https://api.openai.com".to_string()
-            };
+            // 2. Default: api.openai.com
+            // NOTE: ChatGPT OAuth tokens need the Responses API at
+            // chatgpt.com/backend-api/codex/responses — this requires a
+            // separate provider implementation (different API format).
+            // For now, OAuth tokens should use Copilot provider instead.
+            let base_url = entry
+                .base_url
+                .clone()
+                .unwrap_or_else(|| "https://api.openai.com".to_string());
             Ok(Box::new(OpenAIProvider::with_base_url(
                 pool, api_key, model, base_url,
             )))

@@ -161,12 +161,19 @@ impl App {
                 handle_select_list_mouse(&mut self.state.tool_list.list, mouse, vh);
             }
             ModalType::ProviderConnect => {
+                // Provider list is short — disable scroll, keep click/hover
                 if let Some(ref mut pc) = self.state.provider_connect {
                     if matches!(pc.screen, ConnectScreen::List) {
-                        let action = handle_select_list_mouse(&mut pc.list, mouse, vh);
-                        if action == SelectListMouseAction::Clicked {
-                            let enter = crossterm::event::KeyEvent::from(KeyCode::Enter);
-                            self.handle_provider_connect_key(enter, app_tx);
+                        if !matches!(
+                            mouse.kind,
+                            crossterm::event::MouseEventKind::ScrollUp
+                                | crossterm::event::MouseEventKind::ScrollDown
+                        ) {
+                            let action = handle_select_list_mouse(&mut pc.list, mouse, vh);
+                            if action == SelectListMouseAction::Clicked {
+                                let enter = crossterm::event::KeyEvent::from(KeyCode::Enter);
+                                self.handle_provider_connect_key(enter, app_tx);
+                            }
                         }
                     }
                 }

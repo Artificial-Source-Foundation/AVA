@@ -255,23 +255,22 @@ impl<T: Clone> SelectListState<T> {
     /// Rebuild line_map from current filtered items + sections.
     /// Precomputes the actual rendered line for each item,
     /// accounting for section headers and blank separator lines.
+    /// Section headers are always shown (even during search) so the user
+    /// knows which provider/category each filtered item belongs to.
     fn rebuild_line_map(&mut self) {
-        let show_sections = self.query.is_empty();
         let mut line = 0usize;
         let mut last_section: Option<&str> = None;
         let mut map = Vec::with_capacity(self.filtered_cache.len());
 
         for &idx in &self.filtered_cache {
             let item = &self.items[idx];
-            if show_sections {
-                if let Some(ref section) = item.section {
-                    if last_section != Some(section.as_str()) {
-                        if last_section.is_some() {
-                            line += 1; // Blank line between sections
-                        }
-                        line += 1; // Section header line
-                        last_section = Some(section);
+            if let Some(ref section) = item.section {
+                if last_section != Some(section.as_str()) {
+                    if last_section.is_some() {
+                        line += 1; // Blank line between sections
                     }
+                    line += 1; // Section header line
+                    last_section = Some(section);
                 }
             }
             map.push(line);
@@ -462,7 +461,6 @@ pub fn render_select_list<T: Clone>(
 
     let inner_width = content_area.width as usize;
     let filtered = state.filtered();
-    let show_sections = state.query.is_empty();
 
     // --- Header bar: bg_surface background, title left, [Esc] right ---
     {
@@ -556,26 +554,25 @@ pub fn render_select_list<T: Clone>(
     let mut last_section: Option<&str> = None;
 
     for (idx, item) in filtered.iter().enumerate() {
-        // Section header
-        if show_sections {
-            if let Some(ref section) = item.section {
-                if last_section != Some(section.as_str()) {
-                    if last_section.is_some() {
-                        lines.push(Line::from(""));
-                    }
-                    // Section header: uppercase, bold, text_dimmed (#505A6B)
-                    let section_upper = section.to_uppercase();
-                    lines.push(clamp_line(
-                        Line::from(vec![Span::styled(
-                            format!("  {section_upper}"),
-                            Style::default()
-                                .fg(theme.text_dimmed)
-                                .add_modifier(Modifier::BOLD),
-                        )]),
-                        inner_width,
-                    ));
-                    last_section = Some(section);
+        // Section header — always shown (even during search) so the user
+        // knows which provider/category each item belongs to.
+        if let Some(ref section) = item.section {
+            if last_section != Some(section.as_str()) {
+                if last_section.is_some() {
+                    lines.push(Line::from(""));
                 }
+                // Section header: uppercase, bold, text_dimmed (#505A6B)
+                let section_upper = section.to_uppercase();
+                lines.push(clamp_line(
+                    Line::from(vec![Span::styled(
+                        format!("  {section_upper}"),
+                        Style::default()
+                            .fg(theme.text_dimmed)
+                            .add_modifier(Modifier::BOLD),
+                    )]),
+                    inner_width,
+                ));
+                last_section = Some(section);
             }
         }
 
@@ -938,18 +935,29 @@ mod tests {
     }
 
     #[test]
-    fn line_map_no_sections_when_searching() {
+    fn line_map_preserves_sections_when_searching() {
         let mut state = SelectListState::new(make_items(&[
             ("Fruit", &["apple", "banana"]),
-            ("Veggie", &["carrot"]),
+            ("Veggie", &["avocado"]),
         ]));
 
-        // When searching, sections are hidden
-        state.type_char('a'); // matches "apple" (and possibly others)
-                              // Line map should have no section header offsets
-        for (i, &line) in state.line_map.iter().enumerate() {
-            assert_eq!(line, i, "Without sections, line should equal index");
-        }
+        // When searching, sections are still shown so the user knows
+        // which provider/category each filtered item belongs to.
+        state.type_char('a'); // matches "apple" and "avocado" (fuzzy)
+        let filtered = state.filtered();
+        assert!(filtered.len() >= 2, "should match at least 2 items");
+
+        // line_map should account for section headers
+        // If items span multiple sections, the line positions should
+        // not be contiguous (section header lines in between).
+        let has_section_gaps = state.line_map.windows(2).any(|pair| pair[1] - pair[0] > 1);
+        // If all results are in one section, there's a header at line 0
+        // so first item is at line 1 (not 0).
+        let first_item_offset = state.line_map.first().copied().unwrap_or(0);
+        assert!(
+            has_section_gaps || first_item_offset > 0,
+            "Section headers should still be present during search"
+        );
     }
 
     #[test]

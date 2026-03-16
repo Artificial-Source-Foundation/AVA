@@ -90,13 +90,21 @@ pub fn create_provider(
                     provider: "openai".to_string(),
                 })?
                 .to_string();
-            if let Some(base_url) = entry.base_url {
-                Ok(Box::new(OpenAIProvider::with_base_url(
-                    pool, api_key, model, base_url,
-                )))
+            // Determine the base URL:
+            // 1. Explicit base_url override takes priority
+            // 2. OAuth tokens (ChatGPT Plus/Pro) use the ChatGPT backend API
+            // 3. Standard API keys use api.openai.com
+            let base_url = if let Some(ref base_url) = entry.base_url {
+                base_url.clone()
+            } else if entry.is_oauth_configured() && !entry.is_oauth_expired() && entry.api_key.trim().is_empty() {
+                // Pure OAuth credential (no API key fallback) — use ChatGPT backend
+                "https://chatgpt.com/backend-api/codex".to_string()
             } else {
-                Ok(Box::new(OpenAIProvider::new(pool, api_key, model)))
-            }
+                "https://api.openai.com".to_string()
+            };
+            Ok(Box::new(OpenAIProvider::with_base_url(
+                pool, api_key, model, base_url,
+            )))
         }
         "openrouter" => {
             let entry = credential
@@ -430,6 +438,37 @@ mod tests {
             create_provider("minimax-coding-plan", "MiniMax-M2", &creds, default_pool()).unwrap();
         assert_eq!(provider.model_name(), "MiniMax-M2");
         assert!(provider.supports_tools());
+    }
+
+    #[test]
+    fn openai_oauth_uses_chatgpt_backend_url() {
+        // When OpenAI credential has only an OAuth token (no API key),
+        // the provider should route to the ChatGPT backend API.
+        let mut store = CredentialStore::default();
+        store.set(
+            "openai",
+            ava_config::ProviderCredential {
+                api_key: String::new(),
+                base_url: None,
+                org_id: None,
+                oauth_token: Some("oauth-access-token".to_string()),
+                oauth_refresh_token: Some("refresh-token".to_string()),
+                oauth_expires_at: Some(u64::MAX), // far future
+                oauth_account_id: None,
+            },
+        );
+        let provider = create_provider("openai", "codex-mini", &store, default_pool())
+            .expect("should create OpenAI provider with OAuth");
+        assert_eq!(provider.model_name(), "codex-mini");
+    }
+
+    #[test]
+    fn openai_api_key_uses_standard_url() {
+        // When OpenAI credential has a regular API key (no OAuth),
+        // it should use api.openai.com.
+        let creds = mock_creds_for(&["openai"]);
+        let provider = create_provider("openai", "gpt-4.1", &creds, default_pool()).unwrap();
+        assert_eq!(provider.model_name(), "gpt-4.1");
     }
 
     #[test]

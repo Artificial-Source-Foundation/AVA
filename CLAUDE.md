@@ -100,7 +100,7 @@ Tool philosophy: keep the default surface as lean as possible. AVA's out-of-the-
 | Tier | Count | Tools |
 |---|---:|---|
 | Default | 6 | read, write, edit, bash, glob, grep |
-| Extended | 8 | apply_patch, web_fetch, web_search, multiedit, ast_ops, lsp_ops, code_search, git_read |
+### Extended | 8 | apply_patch, web_fetch, web_search, multiedit, ast_ops, lsp_ops, code_search, git_read |
 
 Plugin-tier capabilities should normally ship via MCP servers or TOML custom tools, not by expanding the compiled default tool surface.
 
@@ -241,7 +241,8 @@ Verified handlers in `crates/ava-tui/src/app/commands.rs`:
 | `/think [show\|hide]` | Toggle thinking block visibility |
 | `/theme [name]` | Cycle or switch theme |
 | `/permissions` | Toggle permission level |
-| `/connect [provider]` | Add provider credentials (alias: `/providers`) |
+| `/connect [provider]` | Add provider credentials |
+| `/providers` | Show provider status (alias for `/connect`) |
 | `/disconnect <provider>` | Remove provider credentials |
 | `/mcp [list\|reload\|enable\|disable]` | Manage MCP servers |
 | `/new [title]` | Start a new session |
@@ -255,9 +256,44 @@ Verified handlers in `crates/ava-tui/src/app/commands.rs`:
 | `/later <message>` | Queue a post-complete message |
 | `/queue` | Show queued messages |
 | `/shortcuts` | Show keyboard shortcuts (Ctrl+?, alias: `/keys`, `/keybinds`) |
+| `/keys` | Alias for `/shortcuts` |
+| `/keybinds` | Alias for `/shortcuts` |
 | `/compact [focus]` | Compact conversation to save context window |
 | `/clear` | Clear chat |
 | `/help` | Show help |
+| `/init` | Create example project templates (`.ava/`, hooks, rules) |
+| `/rewind` | Show conversation checkpoint history and restore points |
+
+## Keyboard Shortcuts
+
+Verified in `crates/ava-tui/src/state/keybinds.rs`:
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+/` or `Ctrl+K` | Command palette |
+| `Ctrl+N` | New session |
+| `Ctrl+L` | Session list |
+| `Ctrl+M` | Model switcher |
+| `Ctrl+S` | Toggle sidebar |
+| `Ctrl+T` | Toggle thinking visibility |
+| `Ctrl+C` | Cancel current operation |
+| `Ctrl+V` | Paste image from clipboard |
+| `Ctrl+Y` | Copy last response |
+| `Ctrl+B` | Background agent |
+| `Ctrl+R` | Voice toggle |
+| `Ctrl+E` | Expand/collapse all thinking blocks |
+| `Ctrl+Shift+?` | Show keyboard shortcuts |
+| `PageUp` | Scroll up |
+| `PageDown` | Scroll down |
+| `Home` | Scroll to top |
+| `End` | Scroll to bottom |
+| `Alt+Enter` | Submit follow-up (Tier 2) |
+| `Ctrl+Alt+Enter` | Submit post-complete (Tier 3) |
+
+Mid-stream messaging:
+- **Steering** (Enter): Inject message after current tool, skip remaining tools
+- **Follow-up** (Alt+Enter): Queue message after agent completes current task
+- **Post-complete** (Ctrl+Alt+Enter): Queue message for after agent stops (grouped G1, G2, G3...)
 
 ## Documentation Priority
 

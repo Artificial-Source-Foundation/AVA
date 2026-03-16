@@ -90,7 +90,7 @@ AVA/
 └── tests/
 ```
 
-## Tool Surface (6 built-in + 7 extended)
+## Tool Surface (6 built-in + 8 extended)
 
 Tools are organized into tiers. Only **Default** tools are sent to the LLM by default; Extended tools are registered and executable but not included in the system prompt unless `extended_tools` is enabled.
 
@@ -99,13 +99,13 @@ Tool philosophy: keep the default surface as lean as possible. AVA's out-of-the-
 | Tier | Count | Tools |
 |---|---:|---|
 | Default | 6 | read, write, edit, bash, glob, grep |
-| Extended | 7 | apply_patch, web_fetch, multiedit, test_runner, lint, diagnostics, git |
+| Extended | 8 | apply_patch, web_fetch, web_search, multiedit, ast_ops, lsp_ops, code_search, git_read |
 
 Plugin-tier capabilities should normally ship via MCP servers or TOML custom tools, not by expanding the compiled default tool surface.
 
 Additional tools are registered separately (todo_read/write, question, task, codebase_search, memory tools, session tools) and always available when their dependencies are initialized.
 
-Total: 6 built-in tools by default, 7 extended opt-in tools, plus always-available tasking/session helpers + dynamic MCP tools + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
+Total: 6 built-in tools by default, 8 extended opt-in tools, plus always-available tasking/session helpers + dynamic MCP tools + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
 
 ## Project Instructions
 
@@ -118,6 +118,20 @@ AVA auto-discovers instruction files and injects them into the agent's system pr
 Also reads: `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md` for cross-tool compatibility.
 
 Format: plain markdown. No special syntax needed. Each file is prefixed with `# From: <filepath>` in the prompt. Paths are deduplicated by canonical path. Both main agent and sub-agents receive the instructions.
+
+## Workspace Trust
+
+AVA requires explicit trust before loading project-local config from untrusted repos:
+- `.ava/mcp.json` — MCP servers
+- `.ava/hooks/*.toml` — Lifecycle hooks
+- `.ava/tools/*.toml` — Custom tools
+- `.ava/commands/` — Custom slash commands
+- `AGENTS.md`, `.ava/rules/*.md` — Project instructions
+- `.ava/agents.toml` — Agent configuration
+- `.ava/skills/` — Skill files
+
+Trust a project: `ava --trust` or approve in TUI on first launch.
+Global config (`~/.ava/`) always loads.
 
 ## Extensions Map (Desktop Only)
 

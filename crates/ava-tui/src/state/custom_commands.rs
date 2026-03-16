@@ -1,3 +1,4 @@
+use ava_config::is_project_trusted;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -70,8 +71,14 @@ impl CustomCommandRegistry {
         }
 
         // Load from .ava/commands/*.toml (project — overrides global)
-        let project_dir = PathBuf::from(".ava").join("commands");
-        Self::load_from_dir(&project_dir, CommandSource::Project, &mut commands);
+        // Only load project commands if the project is trusted.
+        let cwd = std::env::current_dir().unwrap_or_default();
+        if is_project_trusted(&cwd) {
+            let project_dir = PathBuf::from(".ava").join("commands");
+            Self::load_from_dir(&project_dir, CommandSource::Project, &mut commands);
+        } else {
+            debug!("skipping project custom commands — project not trusted");
+        }
 
         debug!(count = commands.len(), "loaded custom commands");
         Self { commands }

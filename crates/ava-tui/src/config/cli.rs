@@ -55,7 +55,7 @@ pub struct CliArgs {
     #[arg(long = "watch-path")]
     pub watch_path: Vec<String>,
 
-    /// Trust the current project (allows loading .ava/mcp.json and .ava/hooks/)
+    /// Trust the current project (allows loading all project-local config: .ava/mcp.json, .ava/hooks/, .ava/tools/, .ava/commands/, .ava/agents.toml, .ava/skills/, AGENTS.md, .ava/rules/)
     #[arg(long)]
     pub trust: bool,
 

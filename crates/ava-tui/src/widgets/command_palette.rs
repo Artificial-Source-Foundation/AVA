@@ -6,7 +6,7 @@ use crate::widgets::select_list::{SelectItem, SelectListState};
 pub enum CommandExec {
     /// Dispatch an Action variant (modals, toggles, etc.).
     Action(Action),
-    /// Execute a slash command string (e.g. "/status").
+    /// Execute a slash command string (e.g. "/help").
     Slash(String),
 }
 
@@ -80,19 +80,6 @@ impl CommandPaletteState {
                 "Provider",
                 CommandExec::Slash("/providers".to_string()),
             ),
-            // Tools
-            make_item(
-                "List Tools",
-                "",
-                "Tools",
-                CommandExec::Slash("/tools".to_string()),
-            ),
-            make_item(
-                "Reload Tools",
-                "",
-                "Tools",
-                CommandExec::Slash("/tools reload".to_string()),
-            ),
             // MCP
             make_item(
                 "List MCP Servers",
@@ -107,26 +94,7 @@ impl CommandPaletteState {
                 CommandExec::Slash("/mcp reload".to_string()),
             ),
             // Info
-            make_item(
-                "Status",
-                "",
-                "Info",
-                CommandExec::Slash("/status".to_string()),
-            ),
-            make_item(
-                "Git Diff",
-                "",
-                "Info",
-                CommandExec::Slash("/diff".to_string()),
-            ),
             make_item("Help", "", "Info", CommandExec::Slash("/help".to_string())),
-            // Security
-            make_item(
-                "Audit Log",
-                "",
-                "Security",
-                CommandExec::Action(Action::Audit),
-            ),
             // UI
             make_item(
                 "Toggle Sidebar",

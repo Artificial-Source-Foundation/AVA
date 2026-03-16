@@ -52,6 +52,23 @@ const SAFE_AVA_PATHS: &[&str] = &[
     "themes",
 ];
 
+/// Canonicalize a path safely, resolving symlinks.
+/// For non-existent files, canonicalize the parent directory instead
+/// and append the file name — this prevents symlink escape attacks where
+/// a symlinked workspace directory makes a non-existent target appear
+/// to be inside the workspace when it's actually outside.
+fn safe_canonicalize(path: &std::path::Path) -> std::path::PathBuf {
+    if path.exists() {
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    } else {
+        // For new files, canonicalize the parent directory
+        path.parent()
+            .and_then(|p| std::fs::canonicalize(p).ok())
+            .map(|p| p.join(path.file_name().unwrap_or_default()))
+            .unwrap_or_else(|| path.to_path_buf())
+    }
+}
+
 /// Check if a path under .ava/ is in a safe (non-trust-surface) location.
 fn is_safe_ava_path(path: &std::path::Path, ava_dir: &std::path::Path) -> bool {
     if !path.starts_with(ava_dir) {
@@ -219,8 +236,7 @@ impl PermissionInspector for DefaultInspector {
             let all_inside = !paths.is_empty()
                 && paths.iter().all(|p| {
                     let pb = std::path::Path::new(p);
-                    let canonical_path =
-                        std::fs::canonicalize(pb).unwrap_or_else(|_| pb.to_path_buf());
+                    let canonical_path = safe_canonicalize(pb);
                     canonical_path.starts_with(&canonical_workspace)
                 });
             if all_inside {
@@ -228,16 +244,14 @@ impl PermissionInspector for DefaultInspector {
                 let ava_dir = canonical_workspace.join(".ava");
                 let all_ava_dir = paths.iter().all(|p| {
                     let pb = std::path::Path::new(p);
-                    let canonical_path =
-                        std::fs::canonicalize(pb).unwrap_or_else(|_| pb.to_path_buf());
+                    let canonical_path = safe_canonicalize(pb);
                     canonical_path.starts_with(&ava_dir)
                 });
                 if all_ava_dir {
                     // Only auto-approve if ALL paths target safe .ava/ subdirectories
                     let all_safe = paths.iter().all(|p| {
                         let pb = std::path::Path::new(p);
-                        let canonical_path =
-                            std::fs::canonicalize(pb).unwrap_or_else(|_| pb.to_path_buf());
+                        let canonical_path = safe_canonicalize(pb);
                         is_safe_ava_path(&canonical_path, &ava_dir)
                     });
                     if all_safe {
@@ -272,15 +286,13 @@ impl PermissionInspector for DefaultInspector {
             let all_ava = !paths.is_empty()
                 && paths.iter().all(|p| {
                     let pb = std::path::Path::new(p);
-                    let canonical_path =
-                        std::fs::canonicalize(pb).unwrap_or_else(|_| pb.to_path_buf());
+                    let canonical_path = safe_canonicalize(pb);
                     canonical_path.starts_with(&ava_dir)
                 });
             if all_ava {
                 let all_safe = paths.iter().all(|p| {
                     let pb = std::path::Path::new(p);
-                    let canonical_path =
-                        std::fs::canonicalize(pb).unwrap_or_else(|_| pb.to_path_buf());
+                    let canonical_path = safe_canonicalize(pb);
                     is_safe_ava_path(&canonical_path, &ava_dir)
                 });
                 if all_safe {

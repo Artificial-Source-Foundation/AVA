@@ -46,6 +46,11 @@ pub fn get_cwd() -> Result<String, String> {
 }
 
 /// Append text to a log file, creating parent directories if needed.
+///
+/// TODO(security): This command accepts caller-supplied paths with no
+/// confinement. It should validate that the resolved path falls within the
+/// Tauri `app_data_dir()/logs` directory to prevent arbitrary file writes.
+/// Requires an `AppHandle` parameter to call `app_handle.path().app_data_dir()`.
 #[tauri::command]
 pub fn append_log(path: String, content: String) -> Result<(), String> {
     let p = Path::new(&path);
@@ -64,6 +69,8 @@ pub fn append_log(path: String, content: String) -> Result<(), String> {
 }
 
 /// Read the latest N lines from a log file.
+///
+/// TODO(security): Same as `append_log` — confine `path` to app log directory.
 #[tauri::command]
 pub fn read_latest_logs(path: String, lines: usize) -> Result<String, String> {
     let p = Path::new(&path);
@@ -91,6 +98,8 @@ pub fn read_latest_logs(path: String, lines: usize) -> Result<String, String> {
 }
 
 /// Delete log files older than `max_age_days` in the given directory.
+///
+/// TODO(security): Same as `append_log` — confine `dir` to app log directory.
 #[tauri::command]
 pub fn cleanup_old_logs(dir: String, max_age_days: u64) -> Result<u32, String> {
     let dir_path = Path::new(&dir);

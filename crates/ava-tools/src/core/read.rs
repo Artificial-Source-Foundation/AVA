@@ -12,6 +12,10 @@ use crate::registry::Tool;
 /// Default maximum lines returned when no explicit `limit` is provided.
 const MAX_LINES_DEFAULT: usize = 2000;
 
+/// Maximum file size we will read (10 MB). Larger files should be inspected
+/// via `bash` (e.g. `head`, `tail`, `less`).
+const MAX_READ_SIZE: u64 = 10 * 1024 * 1024;
+
 pub struct ReadTool {
     platform: Arc<dyn Platform>,
     hashline_cache: HashlineCache,
@@ -67,9 +71,25 @@ impl Tool for ReadTool {
 
         tracing::debug!(tool = "read", %path, "executing read tool");
 
+        // Guard against OOM: reject files larger than MAX_READ_SIZE before
+        // loading them into memory.
+        let file_path = Path::new(path);
+        match tokio::fs::metadata(file_path).await {
+            Ok(meta) if meta.len() > MAX_READ_SIZE => {
+                return Err(AvaError::ToolError(format!(
+                    "File too large ({:.1}MB). Max: 10MB. Use bash to read portions.",
+                    meta.len() as f64 / 1_048_576.0
+                )));
+            }
+            Ok(_) => {}
+            // Let the platform read_file handle missing-file / permission errors
+            // with its own error mapping below.
+            Err(_) => {}
+        }
+
         let content = self
             .platform
-            .read_file(Path::new(path))
+            .read_file(file_path)
             .await
             .map_err(|err| match err {
                 AvaError::IoError(message) if message.contains("No such file") => {

@@ -7,7 +7,6 @@
  * Stop button to abort a running agent.
  */
 
-import { abortExecutor } from '@ava/core-v2/agent'
 import {
   CheckCircle,
   ChevronRight,
@@ -17,6 +16,12 @@ import {
   Users,
   XCircle,
 } from 'lucide-solid'
+
+/** Stub for abortExecutor (replaces @ava/core-v2/agent import) */
+function abortExecutor(_id: string): boolean {
+  // Agent abort is now handled by the Rust backend
+  return false
+}
 import { type Component, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { useTeam } from '../../stores/team'
 import type { ToolCall } from '../../types'

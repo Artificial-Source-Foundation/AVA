@@ -6,8 +6,14 @@
  * Latest operation per file wins (deduplication).
  */
 
-import { emitEvent } from '@ava/core-v2/extensions'
 import { ChevronsDownUp, ChevronsUpDown, FileEdit, Minus, Plus } from 'lucide-solid'
+
+/** Emit event via DOM CustomEvent (replaces @ava/core-v2/extensions emitEvent) */
+function emitEvent(eventName: string, data: unknown): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(`ava:${eventName}`, { detail: data }))
+  }
+}
 import { type Component, createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import { useExtensionEvent } from '../../hooks/useExtensionEvents'
 import { type EditorInfo, getAvailableEditors } from '../../services/ide-integration'

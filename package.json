@@ -8,9 +8,7 @@
     "start": "vite",
     "dev": "vite",
     "build": "vite build",
-    "build:packages": "pnpm -r --filter './packages/*' build",
-    "build:cli": "pnpm --filter @ava/cli build",
-    "build:all": "pnpm build:packages && pnpm build:cli",
+    "build:cli": "echo 'CLI is now a Rust binary — use cargo build'",
     "serve": "vite preview",
     "tauri": "tauri",
     "lint": "oxlint && eslint src/",
@@ -36,7 +34,6 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@ava/platform-tauri": "workspace:*",
     "@codemirror/lang-javascript": "^6.2.4",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/state": "^6.5.4",

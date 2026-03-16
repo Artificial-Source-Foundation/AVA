@@ -8,20 +8,35 @@
  * instructions are included in the system prompt.
  */
 
-import { onEvent } from '@ava/core-v2/extensions'
-import {
-  addPromptSection,
-  buildSystemPrompt,
-} from '../../../packages/extensions/prompts/src/builder.js'
 import { logInfo } from '../../services/logger'
 
 // Track whether instructions have been loaded for the current session.
 // Once loaded, skip the wait on subsequent messages (avoids 1.5s delay).
 let instructionsLoaded = false
-// Module-level listener — kept alive for app lifetime (no dispose needed)
-void onEvent('instructions:loaded', () => {
-  instructionsLoaded = true
-})
+
+/** Stub event listener (replaces @ava/core-v2/extensions onEvent) */
+function _onInstructionsLoaded(): void {
+  // Listen for DOM custom event instead of core-v2 event bus
+  if (typeof window !== 'undefined') {
+    window.addEventListener('ava:instructions-loaded', () => {
+      instructionsLoaded = true
+    })
+  }
+}
+_onInstructionsLoaded()
+
+/** Local prompt sections registry (replaces packages/extensions/prompts) */
+const _promptSections = new Map<string, { name: string; priority: number; content: string }>()
+
+function addPromptSection(section: { name: string; priority: number; content: string }): () => void {
+  _promptSections.set(section.name, section)
+  return () => { _promptSections.delete(section.name) }
+}
+
+function buildSystemPrompt(_model?: string): string {
+  const sorted = [..._promptSections.values()].sort((a, b) => a.priority - b.priority)
+  return sorted.map((s) => s.content).join('\n\n')
+}
 
 /** Reset when session changes (called from session store or core-bridge). */
 export function resetInstructionsLoaded(): void {
@@ -106,7 +121,6 @@ export async function buildSystemPromptAfterInstructions(
  */
 function waitForInstructions(timeoutMs: number): Promise<void> {
   return new Promise<void>((resolve) => {
-    // If already loaded (race: event fired before this wait), resolve quickly
     if (instructionsLoaded) {
       resolve()
       return
@@ -117,14 +131,16 @@ function waitForInstructions(timeoutMs: number): Promise<void> {
       resolve()
     }, timeoutMs)
 
-    const sub = onEvent('instructions:loaded', () => {
-      clearTimeout(timeout)
-      instructionsLoaded = true
-      // Small delay to let the core-bridge handler add the prompt section
-      setTimeout(() => {
-        sub.dispose()
-        resolve()
-      }, 50)
-    })
+    if (typeof window !== 'undefined') {
+      const handler = () => {
+        clearTimeout(timeout)
+        instructionsLoaded = true
+        window.removeEventListener('ava:instructions-loaded', handler)
+        setTimeout(resolve, 50)
+      }
+      window.addEventListener('ava:instructions-loaded', handler)
+    } else {
+      // No window — just wait for timeout
+    }
   })
 }

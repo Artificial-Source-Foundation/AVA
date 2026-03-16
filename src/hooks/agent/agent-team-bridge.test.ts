@@ -1,5 +1,5 @@
-import type { AgentEvent } from '@ava/core-v2/agent'
 import { describe, expect, it, vi } from 'vitest'
+import type { AgentEvent } from './agent-events'
 import { createTeamBridge } from './agent-team-bridge'
 
 vi.mock('../../services/logger', () => ({

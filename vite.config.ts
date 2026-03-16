@@ -114,44 +114,7 @@ export default defineConfig(async () => ({
       }),
   ].filter(Boolean),
 
-  // Resolve workspace packages directly from source (bypasses pnpm junction
-  // issues on Windows where Vite's commonjs-resolver fails to follow junctions)
-  resolve: {
-    alias: {
-      // core-v2 subpath aliases (longer paths first so they match before the base)
-      '@ava/core-v2/agent': fileURLToPath(
-        new URL('./packages/core-v2/src/agent/index.ts', import.meta.url)
-      ),
-      '@ava/core-v2/bus': fileURLToPath(
-        new URL('./packages/core-v2/src/bus/index.ts', import.meta.url)
-      ),
-      '@ava/core-v2/config': fileURLToPath(
-        new URL('./packages/core-v2/src/config/index.ts', import.meta.url)
-      ),
-      '@ava/core-v2/extensions': fileURLToPath(
-        new URL('./packages/core-v2/src/extensions/index.ts', import.meta.url)
-      ),
-      '@ava/core-v2/llm': fileURLToPath(
-        new URL('./packages/core-v2/src/llm/index.ts', import.meta.url)
-      ),
-      '@ava/core-v2/logger': fileURLToPath(
-        new URL('./packages/core-v2/src/logger/index.ts', import.meta.url)
-      ),
-      '@ava/core-v2/platform': fileURLToPath(
-        new URL('./packages/core-v2/src/platform.ts', import.meta.url)
-      ),
-      '@ava/core-v2/session': fileURLToPath(
-        new URL('./packages/core-v2/src/session/index.ts', import.meta.url)
-      ),
-      '@ava/core-v2/tools': fileURLToPath(
-        new URL('./packages/core-v2/src/tools/index.ts', import.meta.url)
-      ),
-      '@ava/core-v2': fileURLToPath(new URL('./packages/core-v2/src/index.ts', import.meta.url)),
-      '@ava/platform-tauri': fileURLToPath(
-        new URL('./packages/platform-tauri/src/index.ts', import.meta.url)
-      ),
-    },
-  },
+  resolve: {},
 
   // Define globals for browser compatibility (Node.js polyfills)
   define: {

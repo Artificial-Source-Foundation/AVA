@@ -2,6 +2,10 @@
  * Plugin Templates — data + code generation helpers
  *
  * Template definitions and scaffold code generators for the PluginWizard.
+ *
+ * NOTE: The @ava/core-v2/extensions imports below appear inside template string
+ * literals (generated code for plugin authors). They reference the extension API
+ * that plugins use, NOT runtime imports in this module.
  */
 
 import { Code2, type Puzzle, Terminal, Wand2, Zap } from 'lucide-solid'

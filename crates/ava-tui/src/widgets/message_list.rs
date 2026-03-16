@@ -446,7 +446,10 @@ pub fn render_message_list(frame: &mut Frame<'_>, area: Rect, state: &mut AppSta
     // of text bleeding past area.bottom().
     let start = (state.messages.scroll_offset as usize).min(lines.len());
     let end = (start + visible_height as usize).min(lines.len());
-    let visible_lines: Vec<Line<'static>> = lines.drain(start..end).collect();
+    // Hard-cap to content_area.height — the Paragraph must NEVER receive more
+    // lines than the area can display, otherwise text bleeds into the composer.
+    let max_visible = content_area.height as usize;
+    let visible_lines: Vec<Line<'static>> = lines.drain(start..end).take(max_visible).collect();
 
     // STEP 4: Hard-clamp every line to content_area.width.
     // This is the final safety net — even if wrapping or markdown rendering

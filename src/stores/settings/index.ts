@@ -104,13 +104,12 @@ export function syncAllApiKeys(): void {
  * Bulk-sync all localStorage credentials to ~/.ava/credentials.json.
  * Call after platform is initialized to share credentials with the CLI.
  */
+/**
+ * Bulk-sync all localStorage credentials to ~/.ava/credentials.json.
+ * Now handled by the Rust backend — this is a no-op stub.
+ */
 export function syncCredentialsToDisk(): void {
-  import('@ava/platform-tauri')
-    .then(({ TauriCredentialStore }) => {
-      const store = new TauriCredentialStore()
-      store.syncAllToDisk().catch(() => {})
-    })
-    .catch(() => {})
+  // No-op — credential sync is now handled by the Rust backend
 }
 
 // Signal to track env key detection results for the toast notification

@@ -9,7 +9,30 @@
  *   API key:      ava:{provider}:api_key
  */
 
-import { getPlatform } from '@ava/core-v2/platform'
+import { invoke } from '@tauri-apps/api/core'
+
+/** Minimal credential store interface (replaces @ava/core-v2/platform import) */
+const credentials = {
+  async set(key: string, value: string): Promise<void> {
+    try {
+      await invoke('set_credential', { key, value })
+    } catch {
+      // Fallback to localStorage
+      localStorage.setItem(`ava_cred_${key}`, value)
+    }
+  },
+  async delete(key: string): Promise<void> {
+    try {
+      await invoke('delete_credential', { key })
+    } catch {
+      localStorage.removeItem(`ava_cred_${key}`)
+    }
+  },
+}
+
+function getPlatform() {
+  return { credentials }
+}
 
 export interface StoredAuth {
   type: 'oauth' | 'api-key'

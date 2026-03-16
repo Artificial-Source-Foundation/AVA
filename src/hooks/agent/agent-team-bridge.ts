@@ -4,10 +4,10 @@
  * Also handles team:stop and team:message events from the UI.
  */
 
-import type { AgentEvent } from '@ava/core-v2/agent'
-import { abortExecutor } from '@ava/core-v2/agent'
+import { invoke } from '@tauri-apps/api/core'
 import { logDebug, logInfo } from '../../services/logger'
 import type { useTeam } from '../../stores/team'
+import type { AgentEvent } from './agent-events'
 
 type TeamStore = ReturnType<typeof useTeam>
 
@@ -86,52 +86,44 @@ export function createTeamBridge(
       }
 
       case 'delegation:start': {
-        const e = event as {
-          agentId: string
-          childAgentId: string
-          workerName: string
-          task: string
-          tier?: string
-        }
         logInfo(
           TAG,
-          `delegation:start parent=${e.agentId} child=${e.childAgentId} worker=${e.workerName} task=${e.task.slice(0, 80)}`
+          `delegation:start parent=${event.agentId} child=${event.childAgentId} worker=${event.workerName} task=${event.task.slice(0, 80)}`
         )
 
-        const domain = teamStore.inferDomain(e.task)
-        const workerLabel = e.workerName.charAt(0).toUpperCase() + e.workerName.slice(1)
+        const domain = teamStore.inferDomain(event.task)
+        const workerLabel = event.workerName.charAt(0).toUpperCase() + event.workerName.slice(1)
 
         // Map Praxis tier to team role
         const role =
-          e.tier === 'lead' ? 'senior-lead' : e.tier === 'worker' ? 'junior-dev' : 'senior-lead'
+          event.tier === 'lead' ? 'senior-lead' : event.tier === 'worker' ? 'junior-dev' : 'senior-lead'
 
         teamStore.addMember({
-          id: e.childAgentId,
+          id: event.childAgentId,
           name: workerLabel,
           role,
           status: 'working',
-          parentId: e.agentId,
+          parentId: event.agentId,
           domain,
           model: 'unknown',
-          task: e.task,
+          task: event.task,
           toolCalls: [],
           messages: [],
           createdAt: Date.now(),
           delegatedAt: Date.now(),
-          delegationContext: lastThought[e.agentId],
+          delegationContext: lastThought[event.agentId],
         })
         break
       }
 
       case 'delegation:complete': {
-        const e = event as { childAgentId: string; success: boolean; output: string }
         logInfo(
           TAG,
-          `delegation:complete child=${e.childAgentId} success=${e.success} output=${e.output?.slice(0, 100)}`
+          `delegation:complete child=${event.childAgentId} success=${event.success} output=${event.output?.slice(0, 100)}`
         )
-        teamStore.updateMemberStatus(e.childAgentId, e.success ? 'done' : 'error')
-        teamStore.updateMember(e.childAgentId, {
-          result: e.output,
+        teamStore.updateMemberStatus(event.childAgentId, event.success ? 'done' : 'error')
+        teamStore.updateMember(event.childAgentId, {
+          result: event.output,
           completedAt: Date.now(),
         })
         break
@@ -191,10 +183,7 @@ export function createTeamBridge(
         const ts = Date.now()
         const toolId = `${event.toolName}-${ts}`
         runningTools[`${event.agentId}:${event.toolName}`] = toolId
-        const eventArgs = (event as Record<string, unknown>).args as
-          | Record<string, unknown>
-          | undefined
-        logDebug(TAG, `tool:start ${event.agentId} ${event.toolName}`, eventArgs)
+        logDebug(TAG, `tool:start ${event.agentId} ${event.toolName}`, event.args)
 
         // Reset thought accumulation — new thinking block starts after tool calls
         delete currentThoughtId[event.agentId]
@@ -204,7 +193,7 @@ export function createTeamBridge(
           id: toolId,
           name: event.toolName,
           status: 'running',
-          args: eventArgs,
+          args: event.args,
           startedAt: ts,
         })
         break
@@ -214,9 +203,8 @@ export function createTeamBridge(
         const key = `${event.agentId}:${event.toolName}`
         const toolId = runningTools[key]
         if (toolId) {
-          const eventData = event as Record<string, unknown>
-          const output = eventData.output as string | undefined
-          const error = event.success ? undefined : String(eventData.error ?? '')
+          const output = event.output
+          const error = event.success ? undefined : String(output ?? '')
           logDebug(
             TAG,
             `tool:finish ${event.agentId} ${event.toolName} success=${event.success} ${event.durationMs}ms`,
@@ -236,15 +224,17 @@ export function createTeamBridge(
     }
   }
 
-  /** Stop a running agent by its member ID. */
+  /** Stop a running agent by its member ID via Rust backend. */
   function stopAgent(memberId: string): boolean {
     logInfo(TAG, `stopAgent ${memberId}`)
-    const aborted = abortExecutor(memberId)
-    if (aborted) {
+    try {
+      void invoke('cancel_agent')
       teamStore.updateMemberStatus(memberId, 'error')
       teamStore.updateMember(memberId, { error: 'Stopped by user' })
+      return true
+    } catch {
+      return false
     }
-    return aborted
   }
 
   /** Send a follow-up message to a running agent (stored in team messages). */

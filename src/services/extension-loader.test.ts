@@ -5,8 +5,14 @@
  * and watch debouncing.
  */
 
-import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+/** Minimal types (replaces @ava/core-v2/extensions import) */
+interface Disposable {
+  dispose(): void
+}
+
+type ExtensionAPI = Record<string, unknown>
 
 let loadInstalledPlugins: (
   createApi: (name: string) => ExtensionAPI

@@ -1,15 +1,12 @@
 /**
- * Tool Execution — Diff Capture Middleware
+ * Tool Execution — Constants and Helpers
  *
- * Captures file diffs for tool calls that modify files.
- * Registers a temporary ToolMiddleware that snapshots file content
- * before and after file-modifying tools execute.
+ * File path extraction and tool classification constants.
+ * The diff capture middleware is no longer used — diffs are captured
+ * in the Rust backend. This module is retained for constants and
+ * the getModifiedFilePath helper.
  */
 
-import type { ToolMiddleware, ToolMiddlewareContext } from '@ava/core-v2/extensions'
-import { readFileContent } from '../../services/file-browser'
-import { recordFileChange } from '../../services/file-versions'
-import type { FileOperationType } from '../../types'
 import type { SessionBridge } from './types'
 
 // ============================================================================
@@ -62,91 +59,33 @@ export const SOLO_EXCLUDED = new Set([
 ])
 
 // ============================================================================
-// Diff Capture Middleware
+// Diff Capture Middleware — DEPRECATED
 // ============================================================================
 
+/** Tool middleware type for backward compat */
+export interface ToolMiddleware {
+  name: string
+  priority: number
+  before?: (ctx: { toolName: string; args: Record<string, unknown> }) => Promise<unknown>
+  after?: (ctx: { toolName: string; args: Record<string, unknown> }, result: unknown) => Promise<unknown>
+}
+
 /**
- * Create a ToolMiddleware that captures before/after file content for
- * file-modifying tool calls. Captured diffs are stored as FileOperations.
+ * @deprecated Diff capture now happens in the Rust backend.
+ * Returns a no-op middleware for backward compatibility.
  */
 export function createDiffCaptureMiddleware(
-  sessionId: string,
-  sessionBridge: SessionBridge
+  _sessionId: string,
+  _sessionBridge: SessionBridge
 ): ToolMiddleware {
-  const originalContents = new Map<string, string | null>()
-
   return {
     name: 'chat-diff-capture',
     priority: 25,
-
-    async before(ctx: ToolMiddlewareContext) {
-      const filePath = getModifiedFilePath(ctx.toolName, ctx.args)
-      if (filePath && DIFF_TOOLS.has(ctx.toolName)) {
-        try {
-          const content = await readFileContent(filePath)
-          originalContents.set(filePath, content && content.length <= MAX_CAPTURE ? content : null)
-        } catch {
-          originalContents.set(filePath, null)
-        }
-      }
-      return undefined
-    },
-
-    async after(ctx: ToolMiddlewareContext, result) {
-      if (!result) return undefined
-
-      const filePath = getModifiedFilePath(ctx.toolName, ctx.args)
-      if (!filePath || !result.success || !DIFF_TOOLS.has(ctx.toolName)) return undefined
-
-      const originalContent = originalContents.get(filePath) ?? null
-      originalContents.delete(filePath)
-
-      let newContent: string | null = null
-      if (ctx.toolName === 'delete_file' || ctx.toolName === 'delete') {
-        newContent = null
-      } else {
-        try {
-          const content = await readFileContent(filePath)
-          newContent = content && content.length <= MAX_CAPTURE ? content : null
-        } catch {
-          /* file may not exist after failure */
-        }
-      }
-
-      const opType: FileOperationType =
-        ctx.toolName === 'edit' || ctx.toolName === 'apply_patch' || ctx.toolName === 'multiedit'
-          ? 'edit'
-          : ctx.toolName === 'create_file'
-            ? 'write'
-            : ctx.toolName === 'delete_file' || ctx.toolName === 'delete'
-              ? 'delete'
-              : 'write'
-
-      const oldLines = originalContent?.split('\n').length ?? 0
-      const newLines = newContent?.split('\n').length ?? 0
-
-      const fileOp = {
-        id: `${sessionId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        sessionId,
-        type: opType,
-        filePath,
-        timestamp: Date.now(),
-        originalContent: originalContent ?? undefined,
-        newContent: newContent ?? undefined,
-        linesAdded: newLines > oldLines ? newLines - oldLines : 0,
-        linesRemoved: oldLines > newLines ? oldLines - newLines : 0,
-        isNew: originalContent === null && opType === 'write',
-      }
-      sessionBridge.addFileOperation(fileOp)
-      recordFileChange(sessionId, fileOp)
-
-      return undefined
-    },
   }
 }
 
 // ============================================================================
-// File Path Extraction (re-exported from chat/tool-execution)
+// File Path Extraction
 // ============================================================================
 
 /** Extract the file path from a file-modifying tool's input */

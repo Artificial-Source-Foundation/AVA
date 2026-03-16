@@ -3,7 +3,27 @@
  * Lint checking and file-path extraction for tool calls.
  */
 
-import { executeTool, type ToolContext } from '@ava/core-v2/tools'
+/** Local types (replaces @ava/core-v2/tools import) */
+interface ToolContext {
+  sessionId?: string
+  workingDirectory?: string
+  [key: string]: unknown
+}
+
+interface ToolResult {
+  success: boolean
+  output: string
+  error?: string
+}
+
+/** Stub executeTool — tool execution now happens in Rust backend */
+async function executeTool(
+  _toolName: string,
+  _args: Record<string, unknown>,
+  _ctx: ToolContext
+): Promise<ToolResult> {
+  return { success: false, output: '', error: 'Tool execution is now handled by the Rust backend' }
+}
 
 // ============================================================================
 // File Path Extraction

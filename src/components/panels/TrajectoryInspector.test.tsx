@@ -1,5 +1,10 @@
-import type { AgentEvent } from '@ava/core-v2/agent'
 import { render } from 'solid-js/web'
+
+/** Local AgentEvent type (replaces @ava/core-v2/agent import) */
+interface AgentEvent {
+  type: string
+  [key: string]: unknown
+}
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TrajectoryInspector } from './TrajectoryInspector'
 

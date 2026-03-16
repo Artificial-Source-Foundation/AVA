@@ -3,8 +3,8 @@
  * Manages tool activity lifecycle for the agent hook
  */
 
-import type { ToolCallInfo } from '@ava/core-v2/agent'
 import type { Setter } from 'solid-js'
+import type { ToolCallInfo } from './agent-events'
 import type { ToolActivity } from './agent-types'
 
 /** Add a new tool activity entry */

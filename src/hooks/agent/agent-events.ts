@@ -1,14 +1,48 @@
 /**
  * Agent Events
- * Processes AgentEvent stream and updates reactive signals
+ * Processes agent event stream and updates reactive signals.
+ *
+ * The AgentEvent type is now defined locally — the Rust backend
+ * emits events via Tauri IPC, not the TypeScript core-v2 agent.
  */
 
-import type { AgentEvent } from '@ava/core-v2/agent'
 import type { Setter } from 'solid-js'
 import { batch } from 'solid-js'
 import { logError, logWarn } from '../../services/logger'
 import { addToolActivity, updateToolActivity, updateToolActivityBatch } from './agent-tool-activity'
 import type { ToolActivity } from './agent-types'
+
+// ============================================================================
+// Local AgentEvent type (replaces @ava/core-v2/agent import)
+// ============================================================================
+
+/** Agent event — union of all event types emitted during agent execution */
+export type AgentEvent =
+  | { type: 'agent:start'; agentId: string; goal?: string }
+  | { type: 'agent:finish'; agentId: string; result: { success: boolean; error?: string; output?: string; turns: number; tokensUsed: { input: number; output: number }; terminateMode?: string } }
+  | { type: 'turn:start'; agentId: string; turn: number }
+  | { type: 'turn:end'; agentId: string; turn: number; toolCalls?: ToolCallInfo[] }
+  | { type: 'thought'; agentId: string; content: string }
+  | { type: 'thinking'; agentId: string; content: string }
+  | { type: 'tool:start'; agentId: string; toolName: string; args?: Record<string, unknown> }
+  | { type: 'tool:finish'; agentId: string; toolName: string; success: boolean; output?: string; durationMs?: number }
+  | { type: 'tool:progress'; agentId: string; toolName: string; chunk: string }
+  | { type: 'context:compacting'; agentId: string; estimatedTokens: number; contextLimit: number; messagesBefore: number; messagesAfter: number }
+  | { type: 'delegation:start'; agentId: string; childAgentId: string; workerName: string; task: string; tier?: string }
+  | { type: 'delegation:complete'; agentId: string; childAgentId: string; workerName: string; success: boolean; output: string; durationMs?: number }
+  | { type: 'error'; agentId: string; error: string }
+
+/** Tool call info from turn:end events */
+export interface ToolCallInfo {
+  name: string
+  success: boolean
+  result?: string
+  durationMs?: number
+}
+
+// ============================================================================
+// Event Handler
+// ============================================================================
 
 /** Signal setters needed by the event handler */
 export interface AgentEventSignals {
@@ -89,11 +123,10 @@ export function createAgentEventHandler(
         break
 
       case 'delegation:start': {
-        const e = event as AgentEvent & { workerName: string; childAgentId: string; task: string }
         addToolActivity(signals.setToolActivity, {
-          id: `delegate_${e.workerName}-${e.childAgentId}`,
-          name: `delegate_${e.workerName}`,
-          args: { task: e.task, worker: e.workerName },
+          id: `delegate_${event.workerName}-${event.childAgentId}`,
+          name: `delegate_${event.workerName}`,
+          args: { task: event.task, worker: event.workerName },
           status: 'running',
           startedAt: Date.now(),
         })
@@ -101,15 +134,10 @@ export function createAgentEventHandler(
       }
 
       case 'delegation:complete': {
-        const e = event as AgentEvent & {
-          workerName: string
-          success: boolean
-          durationMs?: number
-        }
-        updateToolActivity(signals.setToolActivity, `delegate_${e.workerName}`, {
-          status: e.success ? 'success' : 'error',
+        updateToolActivity(signals.setToolActivity, `delegate_${event.workerName}`, {
+          status: event.success ? 'success' : 'error',
           completedAt: Date.now(),
-          durationMs: e.durationMs,
+          durationMs: event.durationMs,
         })
         break
       }

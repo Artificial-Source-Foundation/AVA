@@ -3,8 +3,24 @@
  * Reactive hook that tracks model availability from the models extension.
  */
 
-import { onEvent } from '@ava/core-v2/extensions'
 import { type Accessor, createSignal, onCleanup } from 'solid-js'
+
+/** Minimal event subscription via DOM CustomEvents (replaces @ava/core-v2/extensions onEvent) */
+function onEvent(eventName: string, handler: (data: unknown) => void): { dispose: () => void } {
+  const listener = (e: Event) => {
+    handler((e as CustomEvent).detail)
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener(`ava:${eventName}`, listener)
+  }
+  return {
+    dispose() {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener(`ava:${eventName}`, listener)
+      }
+    },
+  }
+}
 
 export interface ModelStatusInfo {
   modelCount: Accessor<number>

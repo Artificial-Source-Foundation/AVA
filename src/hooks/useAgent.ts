@@ -13,7 +13,6 @@ import {
   resolveApproval as resolveApprovalBridge,
 } from '../services/tool-approval-bridge'
 import { useSettings } from '../stores/settings'
-import type { ToolCall } from '../types'
 import type { StreamError } from '../types/llm'
 import type { AgentState, ApprovalRequest, ToolActivity } from './agent'
 import type { QueuedMessage } from './chat/types'
@@ -52,13 +51,13 @@ function createAgentStore() {
 
   // ── Frontend-only signals ───────────────────────────────────────────
   const [isPlanMode, setIsPlanMode] = createSignal(false)
-  const [currentTurn, setCurrentTurn] = createSignal(0)
-  const [tokensUsed, setTokensUsed] = createSignal(0)
+  const [currentTurn, _setCurrentTurn] = createSignal(0)
+  const [tokensUsed, _setTokensUsed] = createSignal(0)
   const [currentThought, setCurrentThought] = createSignal('')
   const [toolActivity, setToolActivity] = createSignal<ToolActivity[]>([])
   const [pendingApproval, setPendingApproval] = createSignal<ApprovalRequest | null>(null)
   const [doomLoopDetected, setDoomLoopDetected] = createSignal(false)
-  const [currentAgentId, setCurrentAgentId] = createSignal<string | null>(null)
+  const [currentAgentId, _setCurrentAgentId] = createSignal<string | null>(null)
   const [streamingTokenEstimate, setStreamingTokenEstimate] = createSignal(0)
   const [streamingStartedAt, setStreamingStartedAt] = createSignal<number | null>(null)
   const [messageQueue, setMessageQueue] = createSignal<QueuedMessage[]>([])
@@ -73,7 +72,7 @@ function createAgentStore() {
   // Actions
   // ====================================================================
 
-  async function run(goal: string): Promise<unknown> {
+  async function run(goal: string, config?: { model?: string }): Promise<unknown> {
     if (rustAgent.isRunning()) {
       setMessageQueue((prev) => [...prev, { content: goal }])
       return null
@@ -88,7 +87,7 @@ function createAgentStore() {
     })
 
     try {
-      const result = await rustAgent.run(goal)
+      const result = await rustAgent.run(goal, { model: config?.model })
       return result
     } finally {
       batch(() => {

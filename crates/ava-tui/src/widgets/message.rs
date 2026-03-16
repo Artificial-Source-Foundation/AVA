@@ -1,4 +1,4 @@
-use crate::state::messages::{spinner_frame, MessageKind, UiMessage};
+use crate::state::messages::{inline_spinner_frame, MessageKind, UiMessage};
 use crate::state::theme::Theme;
 use crate::widgets::safe_render::clamp_line;
 use ratatui::style::{Modifier, Style};
@@ -299,7 +299,7 @@ pub fn render_action_group(
         let activity =
             crate::text_utils::truncate_display(&activity, width.saturating_sub(2) as usize);
 
-        let icon = format!("{} ", spinner_frame(spinner_tick));
+        let icon = format!("{} ", inline_spinner_frame(spinner_tick));
         let mut lines = vec![Line::from(vec![
             Span::styled(icon, Style::default().fg(theme.accent)),
             Span::styled(activity, Style::default().fg(theme.text_muted)),

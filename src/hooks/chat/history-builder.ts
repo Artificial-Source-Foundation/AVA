@@ -8,8 +8,25 @@
  * with no results and loses conversation context.
  */
 
-import type { ChatMessage, ContentBlock } from '@ava/core-v2/llm'
 import type { Message } from '../../types'
+
+/** Local types (replaces @ava/core-v2/llm import) */
+interface ContentBlock {
+  type: string
+  text?: string
+  id?: string
+  name?: string
+  input?: unknown
+  tool_use_id?: string
+  content?: string
+  is_error?: boolean
+  [key: string]: unknown
+}
+
+interface ChatMessage {
+  role: 'user' | 'assistant' | 'system'
+  content: ContentBlock[] | string
+}
 
 /**
  * Build structured conversation history from session messages.

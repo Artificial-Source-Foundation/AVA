@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 use async_trait::async_trait;
@@ -53,23 +53,9 @@ impl Tool for GlobTool {
 
         tracing::debug!(tool = "glob", %pattern, base = %base, "executing glob tool");
 
-        // Workspace boundary enforcement: prevent glob from searching outside the working directory.
-        // Uses AVA_WORKSPACE env var if set, otherwise falls back to current directory.
-        if let Ok(base_canonical) = std::fs::canonicalize(base) {
-            let workspace = std::env::var("AVA_WORKSPACE")
-                .ok()
-                .and_then(|w| std::fs::canonicalize(w).ok())
-                .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-            if !base_canonical.starts_with(&workspace) {
-                return Err(AvaError::PermissionDenied(format!(
-                    "glob base path {} is outside workspace {}",
-                    base_canonical.display(),
-                    workspace.display()
-                )));
-            }
-        }
+        let base_path = crate::core::path_guard::enforce_workspace_path(base, "glob")?;
 
-        let query = Path::new(base).join(pattern).to_string_lossy().to_string();
+        let query = base_path.join(pattern).to_string_lossy().to_string();
 
         let mut matches: Vec<(PathBuf, SystemTime)> = Vec::new();
         for entry in glob::glob(&query).map_err(|e| AvaError::ToolError(e.to_string()))? {

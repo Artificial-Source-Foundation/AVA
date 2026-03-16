@@ -396,7 +396,6 @@ impl InputState {
                     AutocompleteItem::new("theme", "Switch theme"),
                     AutocompleteItem::new("new", "Start a new session"),
                     AutocompleteItem::new("models", "Switch model (alias)"),
-                    AutocompleteItem::new("init", "Initialize AVA for this project"),
                     AutocompleteItem::new(
                         "commit",
                         "Inspect commit readiness and suggest a message",
@@ -407,7 +406,7 @@ impl InputState {
                     AutocompleteItem::new("mcp reload", "Reload MCP config"),
                     AutocompleteItem::new("tasks", "Show background task list"),
                     AutocompleteItem::new("permissions", "Toggle permission level"),
-                    AutocompleteItem::new("undo", "Rewind conversation/code to a previous point"),
+                    AutocompleteItem::new("copy", "Copy last response to clipboard"),
                     AutocompleteItem::new("export", "Export conversation to file"),
                     AutocompleteItem::new("hooks", "List/manage lifecycle hooks"),
                     AutocompleteItem::new("hooks reload", "Reload hooks from disk"),

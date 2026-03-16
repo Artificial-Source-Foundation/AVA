@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -76,8 +76,8 @@ impl Tool for EditTool {
 
         tracing::debug!(tool = "edit", %path, %replace_all, "executing edit tool");
 
-        let file_path = Path::new(path);
-        let original = self.platform.read_file(file_path).await?;
+        let file_path = crate::core::path_guard::enforce_workspace_path(path, "edit")?;
+        let original = self.platform.read_file(&file_path).await?;
 
         // Strategy 0: Try hash-anchored resolution before the fuzzy cascade.
         // Strip hash anchors from new_text as well (LLM may copy them).
@@ -118,7 +118,7 @@ impl Tool for EditTool {
 
         let snapshot_note = match self
             .snapshotter
-            .snapshot_file_before_write(file_path, &original)
+            .snapshot_file_before_write(&file_path, &original)
             .await
         {
             Ok(Some(snapshot)) => format!("; ghost snapshot {}", snapshot.ref_name),
@@ -126,7 +126,7 @@ impl Tool for EditTool {
             Err(err) => format!("; ghost snapshot unavailable ({err})"),
         };
 
-        self.platform.write_file(file_path, &updated).await?;
+        self.platform.write_file(&file_path, &updated).await?;
 
         let change_lines = line_diff_count(&original, &updated);
         Ok(ToolResult {

@@ -10,7 +10,12 @@ const TRUSTED_FILE: &str = "trusted_projects.json";
 
 /// Check whether `project_root` has been explicitly trusted by the user.
 pub fn is_project_trusted(project_root: &Path) -> bool {
-    let Some(trust_path) = dirs::home_dir().map(|h| h.join(".ava").join(TRUSTED_FILE)) else {
+    let Some(trust_path) = dirs::home_dir().map(|h| {
+        h.canonicalize()
+            .unwrap_or(h)
+            .join(".ava")
+            .join(TRUSTED_FILE)
+    }) else {
         return false;
     };
 
@@ -41,6 +46,8 @@ pub fn is_project_trusted(project_root: &Path) -> bool {
 pub fn trust_project(project_root: &Path) -> std::io::Result<()> {
     let trust_path = dirs::home_dir()
         .unwrap_or_default()
+        .canonicalize()
+        .unwrap_or_else(|_| dirs::home_dir().unwrap_or_default())
         .join(".ava")
         .join(TRUSTED_FILE);
 

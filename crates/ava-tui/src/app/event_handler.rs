@@ -975,6 +975,27 @@ fn resolve_attachments(attachments: &[ava_types::ContextAttachment]) -> String {
                 } else {
                     cwd.join(path)
                 };
+                // Validate the resolved path is within the workspace to prevent
+                // listing arbitrary directories outside the project via @folder mentions.
+                match std::fs::canonicalize(&full_path) {
+                    Ok(canonical) => {
+                        if !canonical.starts_with(&cwd) {
+                            tracing::warn!(
+                                "Folder attachment outside workspace: {}",
+                                path.display()
+                            );
+                            blocks.push(format!(
+                                "<context source=\"{}/\" error=\"path is outside the workspace boundary\" />",
+                                path.display()
+                            ));
+                            continue;
+                        }
+                    }
+                    Err(_) => {
+                        // If we can't canonicalize (e.g. folder doesn't exist), fall through
+                        // to the read_dir which will produce a proper error.
+                    }
+                }
                 match std::fs::read_dir(&full_path) {
                     Ok(entries) => {
                         let mut listing = Vec::new();

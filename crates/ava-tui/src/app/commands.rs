@@ -426,7 +426,6 @@ impl App {
 /mcp disable <name>      — disable an MCP server (session-scoped)
 /new [title]             — start a new session (optional title)
 /sessions                — session picker
-/init                    — initialize project (tool, hook, and command templates)
 /commit                  — inspect commit readiness and suggest a message
 /export [filename]       — export conversation to file (.md or .json)
 /copy [all]              — copy last response (picks code block if multiple)

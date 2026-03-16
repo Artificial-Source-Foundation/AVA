@@ -1,4 +1,5 @@
 #![allow(unsafe_code)] // CountingAllocator benchmark needs unsafe GlobalAlloc
+#![allow(clippy::undocumented_unsafe_blocks)]
 
 use std::cell::{Cell, RefCell};
 

@@ -131,7 +131,9 @@ impl HookRegistry {
         if ava_config::is_project_trusted(&cwd) {
             Self::load_from_dir(&project_dir, HookSource::Project, &mut hooks);
         } else if project_dir.exists() {
-            debug!("Skipping project-local hooks — project not trusted. Run with --trust or approve via /trust in TUI.");
+            debug!(
+                "Skipping project-local hooks — project not trusted. Run with --trust to approve."
+            );
         }
 
         debug!(count = hooks.len(), "loaded hooks");

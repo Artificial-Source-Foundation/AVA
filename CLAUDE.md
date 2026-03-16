@@ -130,7 +130,7 @@ AVA requires explicit trust before loading project-local config from untrusted r
 - `.ava/agents.toml` — Agent configuration
 - `.ava/skills/` — Skill files
 
-Trust a project: `ava --trust` or approve in TUI on first launch.
+Trust a project: run `ava --trust` to approve.
 Global config (`~/.ava/`) always loads.
 
 ## Extensions Map (Desktop Only)

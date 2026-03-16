@@ -248,7 +248,7 @@ impl AgentStack {
             if candidate.exists() {
                 tracing::warn!(
                     "Skipping project-local MCP servers — project not trusted. \
-                     Run with --trust or approve via /trust in TUI."
+                     Run with --trust to approve."
                 );
             }
             // Use a non-existent path so the loader finds nothing
@@ -264,7 +264,7 @@ impl AgentStack {
             if candidate.is_dir() {
                 tracing::warn!(
                     "Skipping project-local custom tools — project not trusted. \
-                     Run with --trust or approve via /trust in TUI."
+                     Run with --trust to approve."
                 );
             }
             // Only load global custom tools
@@ -281,7 +281,7 @@ impl AgentStack {
             if candidate.exists() {
                 tracing::warn!(
                     "Skipping project-local agents.toml — project not trusted. \
-                     Run with --trust or approve via /trust in TUI."
+                     Run with --trust to approve."
                 );
             }
             // Only load global agents config
@@ -514,6 +514,22 @@ impl AgentStack {
             .as_ref()
             .map_or((0, 0), |r| (r.server_count, r.tool_count));
         *self.mcp.write().await = runtime;
+        // Refresh shared_tool_sources so the permission middleware sees new MCP tools.
+        {
+            let mut sources = self
+                .shared_tool_sources
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            // Remove stale MCP entries, then re-insert from the updated registry.
+            sources.retain(|_, src| {
+                !matches!(src, ava_permissions::inspector::ToolSource::MCP { .. })
+            });
+            for (def, src) in registry.list_tools_with_source() {
+                if matches!(src, ToolSource::MCP { .. }) {
+                    sources.insert(def.name, convert_tool_source(&src));
+                }
+            }
+        }
         Ok(counts)
     }
 

@@ -87,7 +87,7 @@ pub fn load_project_instructions_with_config(extra_paths: &[String]) -> Option<S
     if !project_trusted {
         tracing::warn!(
             "Skipping project-local instructions — project not trusted. \
-             Run with --trust or approve via /trust in TUI."
+             Run with --trust to approve."
         );
     }
     load_from_root_with_extras(&cwd, home.as_deref(), extra_paths, project_trusted)

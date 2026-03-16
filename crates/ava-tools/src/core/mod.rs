@@ -11,6 +11,7 @@ pub mod grep;
 pub mod hashline;
 pub mod lsp_ops;
 pub mod multiedit;
+pub mod path_guard;
 pub mod question;
 pub mod read;
 pub mod task;

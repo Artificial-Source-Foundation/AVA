@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -50,7 +49,8 @@ impl Tool for WriteTool {
 
         tracing::debug!(tool = "write", %path, bytes = content.len(), "executing write tool");
 
-        let file_path = Path::new(path);
+        let file_path = crate::core::path_guard::enforce_workspace_path(path, "write")?;
+
         if let Some(parent) = file_path.parent() {
             self.platform.create_dir_all(parent).await?;
         }
@@ -58,7 +58,7 @@ impl Tool for WriteTool {
         // B66 currently snapshots edit-heavy replacement flows (`edit`/`multiedit`).
         // Plain `write` stays unsnapshotted in this conservative slice until we
         // settle broader snapshot coverage and cleanup behavior.
-        self.platform.write_file(file_path, content).await?;
+        self.platform.write_file(&file_path, content).await?;
 
         Ok(ToolResult {
             call_id: String::new(),

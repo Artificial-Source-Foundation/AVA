@@ -1,4 +1,3 @@
-use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -58,35 +57,25 @@ impl Tool for ApplyPatchTool {
             "executing apply_patch tool"
         );
 
-        // Workspace boundary enforcement: prevent patches from writing outside the workspace.
-        let workspace = std::env::current_dir()
-            .map_err(|e| AvaError::IoError(format!("failed to determine workspace: {e}")))?;
+        let mut safe_paths: Vec<std::path::PathBuf> = Vec::with_capacity(file_patches.len());
         for file_patch in &file_patches {
-            let file_path = Path::new(&file_patch.path);
-            let canonical = if self.platform.exists(file_path).await {
-                std::fs::canonicalize(file_path).unwrap_or_else(|_| file_path.to_path_buf())
-            } else {
-                // For new files, resolve against workspace
-                workspace.join(file_path)
-            };
-            if !canonical.starts_with(&workspace) {
-                return Err(AvaError::PermissionDenied(format!(
-                    "Patch targets file outside workspace: {}",
-                    file_patch.path
-                )));
-            }
+            safe_paths.push(crate::core::path_guard::enforce_workspace_path(
+                &file_patch.path,
+                "apply_patch",
+            )?);
         }
 
         // Save original file contents for rollback on failure
         let mut backups: Vec<(std::path::PathBuf, Option<String>)> = Vec::new();
-        for file_patch in &file_patches {
-            let file_path = Path::new(&file_patch.path);
+        for (file_patch, file_path) in file_patches.iter().zip(safe_paths.iter()) {
             if self.platform.exists(file_path).await {
                 let original = self.platform.read_file(file_path).await?;
                 backups.push((file_path.to_path_buf(), Some(original)));
             } else {
                 backups.push((file_path.to_path_buf(), None));
             }
+
+            tracing::trace!(tool = "apply_patch", path = %file_patch.path, resolved_path = %file_path.display(), "path validated");
         }
 
         let mut total_applied = 0usize;
@@ -96,8 +85,7 @@ impl Tool for ApplyPatchTool {
         let mut files_written: Vec<std::path::PathBuf> = Vec::new();
 
         let apply_result: ava_types::Result<()> = async {
-            for file_patch in &file_patches {
-                let file_path = Path::new(&file_patch.path);
+            for (file_patch, file_path) in file_patches.iter().zip(safe_paths.iter()) {
                 let content = if self.platform.exists(file_path).await {
                     self.platform.read_file(file_path).await?
                 } else {

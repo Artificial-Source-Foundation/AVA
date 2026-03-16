@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -76,7 +76,7 @@ impl Tool for MultiEditTool {
         }
 
         // Parse all edits
-        let mut parsed: Vec<(&str, &str, &str)> = Vec::with_capacity(edits.len());
+        let mut parsed: Vec<(PathBuf, &str, &str)> = Vec::with_capacity(edits.len());
         for edit in edits {
             let path = edit
                 .get("path")
@@ -94,25 +94,25 @@ impl Tool for MultiEditTool {
                 .ok_or_else(|| {
                     AvaError::ValidationError("edit missing field: new_text".to_string())
                 })?;
-            parsed.push((path, old_text, new_text));
+            let safe_path = crate::core::path_guard::enforce_workspace_path(path, "multiedit")?;
+            parsed.push((safe_path, old_text, new_text));
         }
 
         // Group edits by file path, preserving order
-        let mut by_file: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
-        for (path, old_text, new_text) in &parsed {
+        let mut by_file: BTreeMap<PathBuf, Vec<(&str, &str)>> = BTreeMap::new();
+        for (path, old_text, new_text) in parsed {
             by_file.entry(path).or_default().push((old_text, new_text));
         }
 
         // Validation pass: read all files and check all edits can be applied
-        let mut file_contents: BTreeMap<&str, String> = BTreeMap::new();
+        let mut file_contents: BTreeMap<PathBuf, String> = BTreeMap::new();
         let mut failures: Vec<String> = Vec::new();
 
         for (path, edits_for_file) in &by_file {
-            let file_path = Path::new(path);
-            let content = match self.platform.read_file(file_path).await {
+            let content = match self.platform.read_file(path.as_path()).await {
                 Ok(c) => c,
                 Err(e) => {
-                    failures.push(format!("{path}: cannot read file: {e}"));
+                    failures.push(format!("{}: cannot read file: {e}", path.display()));
                     continue;
                 }
             };
@@ -130,12 +130,12 @@ impl Tool for MultiEditTool {
                         } else {
                             old_text.to_string()
                         };
-                        failures.push(format!("{path}: no match for \"{snippet}\""));
+                        failures.push(format!("{}: no match for \"{snippet}\"", path.display()));
                     }
                 }
             }
 
-            file_contents.insert(path, content);
+            file_contents.insert(path.clone(), content);
         }
 
         if !failures.is_empty() {
@@ -154,29 +154,32 @@ impl Tool for MultiEditTool {
 
         for (path, edits_for_file) in &by_file {
             let original = file_contents.remove(path).ok_or_else(|| {
-                AvaError::ToolError(format!("{path}: file content missing after validation"))
+                AvaError::ToolError(format!(
+                    "{}: file content missing after validation",
+                    path.display()
+                ))
             })?;
             let mut working = original.clone();
             for (old_text, new_text) in edits_for_file {
                 let request = EditRequest::new(working, old_text.to_string(), new_text.to_string());
                 let result = self.engine.apply(&request).map_err(|e| {
-                    AvaError::ToolError(format!("{path}: validated edit failed: {e}"))
+                    AvaError::ToolError(format!("{}: validated edit failed: {e}", path.display()))
                 })?;
                 working = result.content;
                 total_edits += 1;
             }
             match self
                 .snapshotter
-                .snapshot_file_before_write(Path::new(path), &original)
+                .snapshot_file_before_write(path.as_path(), &original)
                 .await
             {
                 Ok(Some(_)) => snapshot_count += 1,
                 Ok(None) => {}
                 Err(err) => {
-                    snapshot_warnings.push(format!("{path}: {err}"));
+                    snapshot_warnings.push(format!("{}: {err}", path.display()));
                 }
             }
-            self.platform.write_file(Path::new(path), &working).await?;
+            self.platform.write_file(path.as_path(), &working).await?;
         }
 
         let snapshot_note = if snapshot_warnings.is_empty() {

@@ -57,23 +57,7 @@ impl Tool for GrepTool {
 
         tracing::debug!(tool = "grep", %pattern, %path, "executing grep tool");
 
-        // Workspace boundary enforcement: prevent grep from searching outside the working directory.
-        // Uses AVA_WORKSPACE env var if set, otherwise falls back to current directory.
-        if let Ok(path_canonical) = std::fs::canonicalize(path) {
-            let workspace = std::env::var("AVA_WORKSPACE")
-                .ok()
-                .and_then(|w| std::fs::canonicalize(w).ok())
-                .unwrap_or_else(|| {
-                    std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-                });
-            if !path_canonical.starts_with(&workspace) {
-                return Err(AvaError::PermissionDenied(format!(
-                    "grep search path {} is outside workspace {}",
-                    path_canonical.display(),
-                    workspace.display()
-                )));
-            }
-        }
+        let path = crate::core::path_guard::enforce_workspace_path(path, "grep")?;
 
         let matcher = RegexMatcher::new(pattern).map_err(|e| AvaError::ToolError(e.to_string()))?;
         let include_glob = include
@@ -84,7 +68,7 @@ impl Tool for GrepTool {
         let mut searcher: Searcher = SearcherBuilder::new().line_number(true).build();
 
         let mut matches = Vec::new();
-        let walker = WalkBuilder::new(path)
+        let walker = WalkBuilder::new(path.as_path())
             .hidden(false)
             .git_ignore(true)
             .git_global(true)

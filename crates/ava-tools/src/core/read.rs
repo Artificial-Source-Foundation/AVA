@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -71,10 +71,12 @@ impl Tool for ReadTool {
 
         tracing::debug!(tool = "read", %path, "executing read tool");
 
+        // Enforce workspace boundaries before reading file contents.
+        let file_path = crate::core::path_guard::enforce_workspace_path(path, "read")?;
+
         // Guard against OOM: reject files larger than MAX_READ_SIZE before
         // loading them into memory.
-        let file_path = Path::new(path);
-        match tokio::fs::metadata(file_path).await {
+        match tokio::fs::metadata(&file_path).await {
             Ok(meta) if meta.len() > MAX_READ_SIZE => {
                 return Err(AvaError::ToolError(format!(
                     "File too large ({:.1}MB). Max: 10MB. Use bash to read portions.",
@@ -89,7 +91,7 @@ impl Tool for ReadTool {
 
         let content = self
             .platform
-            .read_file(file_path)
+            .read_file(&file_path)
             .await
             .map_err(|err| match err {
                 AvaError::IoError(message) if message.contains("No such file") => {

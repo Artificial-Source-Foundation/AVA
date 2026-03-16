@@ -611,6 +611,16 @@ impl AgentStack {
         *self.thinking_level.read().await
     }
 
+    /// Returns `true` if the agent is in auto-approve (yolo) mode.
+    pub async fn is_auto_approve(&self) -> bool {
+        self.permission_context.read().await.auto_approve
+    }
+
+    /// Set the auto-approve flag on the live permission context.
+    pub async fn set_auto_approve(&self, auto_approve: bool) {
+        self.permission_context.write().await.auto_approve = auto_approve;
+    }
+
     /// Create a message queue for mid-stream messaging.
     /// Returns the queue (to pass into `run()`) and the sender (for the TUI to send messages).
     pub fn create_message_queue(

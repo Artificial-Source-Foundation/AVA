@@ -13,6 +13,8 @@ import type {
   JsonValue,
   McpReloadResult,
   McpServerInfo,
+  PermissionLevelInfo,
+  PermissionLevelValue,
   ModelInfo,
   NativeExtensionRegistration,
   OAuthCallback,
@@ -246,4 +248,11 @@ export const rustBackend = {
     invokeCommand('list_mcp_servers'),
   reloadMcpServers: (): Promise<McpReloadResult> =>
     invokeCommand('reload_mcp_servers'),
+
+  getPermissionLevel: (): Promise<PermissionLevelInfo> =>
+    invokeCommand('get_permission_level'),
+  setPermissionLevel: (level: PermissionLevelValue): Promise<PermissionLevelInfo> =>
+    invokeCommand('set_permission_level', { level }),
+  togglePermissionLevel: (): Promise<PermissionLevelInfo> =>
+    invokeCommand('toggle_permission_level'),
 }

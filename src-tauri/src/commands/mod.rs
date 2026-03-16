@@ -26,6 +26,7 @@ pub mod provider_commands;
 pub mod config_commands;
 pub mod tool_commands;
 pub mod mcp_commands;
+pub mod permission_commands;
 
 pub use agent_integration::{
     agent_run, agent_stream, execute_tool, list_tools, ToolInfo,
@@ -52,10 +53,11 @@ pub use tool_git::execute_git_tool;
 pub use validation::{validation_validate_edit, validation_validate_with_retry};
 
 // --- New: re-exports for bridge commands ---
-pub use agent_commands::{submit_goal, cancel_agent, get_agent_status};
+pub use agent_commands::{submit_goal, cancel_agent, get_agent_status, resolve_approval, resolve_question};
 pub use session_commands::{list_sessions, load_session, create_session, delete_session};
 pub use model_commands::{list_models, get_current_model, switch_model};
 pub use provider_commands::list_providers;
 pub use config_commands::get_config;
 pub use tool_commands::list_agent_tools;
 pub use mcp_commands::{list_mcp_servers, reload_mcp_servers};
+pub use permission_commands::{get_permission_level, set_permission_level, toggle_permission_level};

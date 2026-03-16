@@ -31,6 +31,21 @@ pub enum AgentEvent {
         current_cost_usd: f64,
         max_budget_usd: f64,
     },
+    #[serde(rename = "approval_request")]
+    ApprovalRequest {
+        id: String,
+        tool_name: String,
+        args: Value,
+        risk_level: String,
+        reason: String,
+        warnings: Vec<String>,
+    },
+    #[serde(rename = "question_request")]
+    QuestionRequest {
+        id: String,
+        question: String,
+        options: Vec<String>,
+    },
 }
 
 pub struct EventEmitter {
@@ -196,5 +211,33 @@ mod tests {
 
         assert_eq!(complete_json["type"], "complete");
         assert_eq!(complete_json["session"]["id"], "mock-session");
+    }
+
+    #[test]
+    fn serializes_approval_request_event() {
+        let event = AgentEvent::ApprovalRequest {
+            id: "req-1".to_string(),
+            tool_name: "bash".to_string(),
+            args: json!({"command": "rm -rf /tmp/test"}),
+            risk_level: "high".to_string(),
+            reason: "destructive command".to_string(),
+            warnings: vec!["uses rm -rf".to_string()],
+        };
+        let as_json = serde_json::to_value(event).expect("event to serialize");
+        assert_eq!(as_json["type"], "approval_request");
+        assert_eq!(as_json["tool_name"], "bash");
+        assert_eq!(as_json["risk_level"], "high");
+    }
+
+    #[test]
+    fn serializes_question_request_event() {
+        let event = AgentEvent::QuestionRequest {
+            id: "q-1".to_string(),
+            question: "Which framework?".to_string(),
+            options: vec!["React".to_string(), "SolidJS".to_string()],
+        };
+        let as_json = serde_json::to_value(event).expect("event to serialize");
+        assert_eq!(as_json["type"], "question_request");
+        assert_eq!(as_json["question"], "Which framework?");
     }
 }

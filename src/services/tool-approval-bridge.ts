@@ -57,9 +57,18 @@ export function resolveApproval(approved: boolean): void {
 
 let _permissionMode: 'ask' | 'auto-approve' | 'bypass' = 'ask'
 
-/** Set the current permission mode (called from settings sync) */
+/** Set the current permission mode (called from settings sync).
+ *  Also syncs to the Rust backend's permission context. */
 export function setPermissionMode(mode: 'ask' | 'auto-approve' | 'bypass'): void {
   _permissionMode = mode
+
+  // Sync to Rust backend — map desktop modes to backend levels
+  const backendLevel = mode === 'ask' ? 'standard' : 'autoApprove'
+  import('../services/rust-bridge').then(({ rustBackend }) => {
+    rustBackend.setPermissionLevel(backendLevel).catch(() => {
+      // Silently ignore — bridge may not be ready yet during startup
+    })
+  })
 }
 
 // ─── Auto-Approval Check ────────────────────────────────────────────────────

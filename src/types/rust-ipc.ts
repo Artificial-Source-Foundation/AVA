@@ -293,3 +293,9 @@ export interface McpReloadResult {
   serverCount: number
   toolCount: number
 }
+
+export type PermissionLevelValue = 'standard' | 'autoApprove'
+
+export interface PermissionLevelInfo {
+  level: PermissionLevelValue
+}

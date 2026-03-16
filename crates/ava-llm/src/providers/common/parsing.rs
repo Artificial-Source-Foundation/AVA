@@ -602,11 +602,18 @@ pub fn tools_to_responses_api_format(tools: &[Tool]) -> Vec<Value> {
     tools
         .iter()
         .map(|tool| {
+            // The Responses API with strict:true requires additionalProperties:false
+            // in the parameters schema. Inject it if missing.
+            let mut params = tool.parameters.clone();
+            if let Some(obj) = params.as_object_mut() {
+                obj.entry("additionalProperties")
+                    .or_insert(Value::Bool(false));
+            }
             json!({
                 "type": "function",
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": tool.parameters,
+                "parameters": params,
                 "strict": true,
             })
         })

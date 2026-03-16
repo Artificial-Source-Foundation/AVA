@@ -17,13 +17,14 @@ use commands::{
     read_latest_logs, reflection_reflect_and_fix, sandbox_apply_landlock, set_plugin_enabled,
     set_plugins_state, uninstall_plugin, validation_validate_edit, validation_validate_with_retry,
     // New bridge commands
-    submit_goal, cancel_agent, get_agent_status,
+    submit_goal, cancel_agent, get_agent_status, resolve_approval, resolve_question,
     list_sessions, load_session, create_session, delete_session,
     list_models, get_current_model, switch_model,
     list_providers,
     get_config,
     list_agent_tools,
     list_mcp_servers, reload_mcp_servers,
+    get_permission_level, set_permission_level, toggle_permission_level,
 };
 use pty::PtyManager;
 use tauri::Manager;
@@ -103,6 +104,8 @@ pub fn run() {
             submit_goal,
             cancel_agent,
             get_agent_status,
+            resolve_approval,
+            resolve_question,
             list_sessions,
             load_session,
             create_session,
@@ -115,6 +118,9 @@ pub fn run() {
             list_agent_tools,
             list_mcp_servers,
             reload_mcp_servers,
+            get_permission_level,
+            set_permission_level,
+            toggle_permission_level,
         ])
         .run(context)
         .expect("error while running tauri application");

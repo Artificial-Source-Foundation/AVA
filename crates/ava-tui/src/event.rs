@@ -234,12 +234,17 @@ pub fn spawn_event_reader(tx: mpsc::UnboundedSender<AppEvent>) {
                     let _ = tx.send(AppEvent::Resize(w, h));
                 }
                 Ok(CEvent::Mouse(mouse)) => {
-                    // Only forward scroll events (not movement, clicks, etc.)
-                    if matches!(
-                        mouse.kind,
-                        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-                    ) {
-                        let _ = tx.send(AppEvent::Mouse(mouse));
+                    // Forward scroll, click, and movement events for modal
+                    // hover/click support and message area interactions.
+                    match mouse.kind {
+                        MouseEventKind::ScrollUp
+                        | MouseEventKind::ScrollDown
+                        | MouseEventKind::Down(_)
+                        | MouseEventKind::Moved
+                        | MouseEventKind::Drag(_) => {
+                            let _ = tx.send(AppEvent::Mouse(mouse));
+                        }
+                        _ => {}
                     }
                 }
                 Ok(_) => {}

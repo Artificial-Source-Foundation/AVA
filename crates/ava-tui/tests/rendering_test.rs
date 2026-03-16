@@ -12,7 +12,7 @@ fn markdown_renders_lines() {
 
 #[test]
 fn syntax_highlighting_produces_lines() {
-    let lines = highlight_code("fn main() {}", "rust");
+    let lines = highlight_code("fn main() {}", "rust", None);
     assert!(!lines.is_empty());
 }
 

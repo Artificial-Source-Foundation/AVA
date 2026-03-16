@@ -22,22 +22,25 @@ pub fn markdown_to_lines(md: &str, theme: &Theme) -> Vec<Line<'static>> {
     // Link state
     let mut link_url = String::new();
 
+    // List nesting: each entry is Some(counter) for ordered, None for unordered
+    let mut list_stack: Vec<Option<u64>> = Vec::new();
+
     for event in parser {
         if in_code_block {
             match event {
                 Event::Text(text) => code_buf.push_str(&text),
                 Event::End(TagEnd::CodeBlock) => {
-                    // Render code block with syntax highlighting
+                    // Fence markers with bg_elevated background
+                    let fence_style = Style::default().fg(theme.text_dimmed).bg(theme.bg_elevated);
                     lines.push(Line::from(Span::styled(
                         format!("```{code_lang}"),
-                        Style::default().fg(theme.text_dimmed),
+                        fence_style,
                     )));
-                    let highlighted = highlight_code(code_buf.trim_end(), &code_lang);
+                    // Syntax-highlighted code lines with bg_elevated background
+                    let highlighted =
+                        highlight_code(code_buf.trim_end(), &code_lang, Some(theme.bg_elevated));
                     lines.extend(highlighted);
-                    lines.push(Line::from(Span::styled(
-                        "```",
-                        Style::default().fg(theme.text_dimmed),
-                    )));
+                    lines.push(Line::from(Span::styled("```", fence_style)));
                     in_code_block = false;
                     code_lang.clear();
                     code_buf.clear();
@@ -63,9 +66,10 @@ pub fn markdown_to_lines(md: &str, theme: &Theme) -> Vec<Line<'static>> {
                 current.push(Span::styled(text.to_string(), style));
             }
             Event::Code(code) => {
+                // Inline code: accent foreground + elevated background
                 current.push(Span::styled(
                     format!("`{code}`"),
-                    Style::default().fg(theme.accent),
+                    Style::default().fg(theme.accent).bg(theme.bg_elevated),
                 ));
             }
             Event::Start(Tag::Strong) => {
@@ -104,14 +108,14 @@ pub fn markdown_to_lines(md: &str, theme: &Theme) -> Vec<Line<'static>> {
                         .fg(theme.primary)
                         .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
                     HeadingLevel::H2 => Style::default()
-                        .fg(theme.primary)
+                        .fg(theme.accent)
                         .add_modifier(Modifier::BOLD),
                     HeadingLevel::H3 => Style::default()
                         .fg(theme.primary)
-                        .add_modifier(Modifier::BOLD | Modifier::ITALIC),
+                        .add_modifier(Modifier::BOLD),
                     _ => Style::default()
-                        .fg(theme.primary)
-                        .add_modifier(Modifier::ITALIC),
+                        .fg(theme.text_muted)
+                        .add_modifier(Modifier::BOLD),
                 };
                 styles.push(heading_style);
             }
@@ -143,9 +147,10 @@ pub fn markdown_to_lines(md: &str, theme: &Theme) -> Vec<Line<'static>> {
                 if !matches!(link_type, LinkType::Autolink) {
                     link_url = dest_url.to_string();
                 }
+                // Links: accent color + underline
                 styles.push(
                     Style::default()
-                        .fg(theme.primary)
+                        .fg(theme.accent)
                         .add_modifier(Modifier::UNDERLINED),
                 );
             }
@@ -161,14 +166,32 @@ pub fn markdown_to_lines(md: &str, theme: &Theme) -> Vec<Line<'static>> {
                     styles.pop();
                 }
             }
+            Event::Start(Tag::List(first_number)) => {
+                list_stack.push(first_number);
+            }
+            Event::End(TagEnd::List(_)) => {
+                list_stack.pop();
+            }
             Event::Start(Tag::Item) => {
                 if !current.is_empty() {
                     lines.push(finalize_line(&mut current, blockquote_depth, theme));
                 }
-                current.push(Span::styled(
-                    "  \u{2022} ",
-                    Style::default().fg(theme.text_muted),
-                ));
+                // Indentation based on nesting depth (2 spaces per level)
+                let depth = list_stack.len().saturating_sub(1);
+                let indent = "  ".repeat(depth);
+                let bullet_style = Style::default().fg(theme.text_muted);
+
+                if let Some(Some(counter)) = list_stack.last_mut() {
+                    // Ordered list: show number with right-aligned padding
+                    current.push(Span::styled(
+                        format!("{indent}{counter:>2}. "),
+                        bullet_style,
+                    ));
+                    *counter += 1;
+                } else {
+                    // Unordered list: bullet
+                    current.push(Span::styled(format!("{indent}  \u{2022} "), bullet_style));
+                }
             }
             Event::Start(Tag::Paragraph) => {
                 if !current.is_empty() {

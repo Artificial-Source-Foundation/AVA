@@ -648,22 +648,39 @@ impl UiMessage {
 
                 // Contextual hints based on error content
                 let lower = self.content.to_lowercase();
-                let hint = if lower.contains("rate limit") || lower.contains("429") {
-                    Some("Rate limited \u{2014} try again in a moment or switch to a different model")
+                let (hint, action) = if lower.contains("rate limit") || lower.contains("429") {
+                    (
+                        Some("Rate limited \u{2014} try again in a moment or switch to a different model"),
+                        Some("  \u{2192} Press Enter to retry, or Ctrl+M to switch model"),
+                    )
                 } else if lower.contains("timeout") || lower.contains("timed out") {
-                    Some("Request timed out \u{2014} the model may be overloaded")
+                    (
+                        Some("Request timed out \u{2014} the model may be overloaded"),
+                        Some("  \u{2192} Press Enter to retry, or try a faster model"),
+                    )
                 } else if lower.contains("authentication")
+                    || lower.contains("auth")
                     || lower.contains("401")
                     || lower.contains("403")
                 {
-                    Some("Authentication failed \u{2014} check your credentials with /connect")
+                    (
+                        Some("Authentication failed \u{2014} check your credentials with /connect"),
+                        Some("  \u{2192} Use /connect to reconfigure credentials"),
+                    )
                 } else if (lower.contains("context") || lower.contains("token"))
                     && lower.contains("exceed")
                 {
-                    Some("Context window exceeded \u{2014} try /compact to reduce context")
+                    (
+                        Some("Context window exceeded \u{2014} try /compact to reduce context"),
+                        Some("  \u{2192} Use /compact to reduce context, or switch to a larger model"),
+                    )
                 } else {
-                    None
+                    (None, None)
                 };
+
+                let action_style = Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD);
 
                 if let Some(hint_text) = hint {
                     // Blank separator line
@@ -671,6 +688,12 @@ impl UiMessage {
                     result.push(Line::from(vec![Span::styled(
                         hint_text.to_owned(),
                         hint_style,
+                    )]));
+                }
+                if let Some(action_text) = action {
+                    result.push(Line::from(vec![Span::styled(
+                        action_text.to_owned(),
+                        action_style,
                     )]));
                 }
 

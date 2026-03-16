@@ -152,6 +152,8 @@ pub struct AppState {
     // ── Misc ────────────────────────────────────────────────────────────
     /// Number of images pending attachment to the next user message.
     pub pending_image_count: usize,
+    /// Configured provider names for the welcome screen display.
+    pub configured_providers: Vec<String>,
 }
 
 /// A fenced code block extracted from markdown content.
@@ -489,13 +491,37 @@ impl App {
             for msg in &session.messages {
                 let kind = match msg.role {
                     ava_types::Role::User => MessageKind::User,
-                    ava_types::Role::Assistant => MessageKind::Assistant,
-                    ava_types::Role::Tool => MessageKind::ToolResult,
+                    ava_types::Role::Assistant => {
+                        // Assistant messages with non-empty tool_calls are tool invocations,
+                        // but we display them as Assistant (the tool call details are in
+                        // separate ToolCall UI messages created during the live run).
+                        MessageKind::Assistant
+                    }
+                    ava_types::Role::Tool => {
+                        // Distinguish tool calls from tool results using stored metadata.
+                        // Messages with a tool_call_id are results returned by a tool.
+                        // Messages with non-empty tool_calls are the call itself.
+                        if msg.tool_call_id.is_some() || !msg.tool_results.is_empty() {
+                            MessageKind::ToolResult
+                        } else if !msg.tool_calls.is_empty() {
+                            MessageKind::ToolCall
+                        } else {
+                            // Fallback heuristic: if content looks like a tool result
+                            // (typically shorter, no JSON tool structure), treat as ToolResult.
+                            MessageKind::ToolResult
+                        }
+                    }
                     ava_types::Role::System => MessageKind::System,
                 };
-                self.state
-                    .messages
-                    .push(UiMessage::new(kind, msg.content.clone()));
+                let mut ui_msg = UiMessage::new(kind.clone(), msg.content.clone());
+                // Populate tool name for ToolCall/ToolResult messages so they render
+                // with the correct tool badge in the message list.
+                if matches!(kind, MessageKind::ToolCall | MessageKind::ToolResult) {
+                    if let Some(tc) = msg.tool_calls.first() {
+                        ui_msg.tool_name = Some(tc.name.clone());
+                    }
+                }
+                self.state.messages.push(ui_msg);
             }
             // Restore model from session metadata
             if let Some(meta) = session.metadata.as_object() {

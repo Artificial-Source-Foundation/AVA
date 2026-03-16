@@ -68,19 +68,23 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
     if json_mode {
         while let Some(event) = rx.recv().await {
             let json = match &event {
-                AgentEvent::Token(t) => serde_json::json!({"type": "token", "content": t}),
+                AgentEvent::Token(t) => serde_json::json!({"type": "text", "content": t}),
                 AgentEvent::Thinking(t) => {
                     serde_json::json!({"type": "thinking", "content": t})
                 }
                 AgentEvent::ToolCall(tc) => {
-                    serde_json::json!({"type": "tool_call", "tool": tc.name, "arguments": tc.arguments})
+                    serde_json::json!({"type": "tool_call", "tool": tc.name, "args": tc.arguments})
                 }
                 AgentEvent::ToolResult(tr) => {
-                    serde_json::json!({"type": "tool_result", "content": tr.content})
+                    serde_json::json!({"type": "tool_result", "tool": tr.call_id, "content": tr.content, "is_error": tr.is_error})
                 }
                 AgentEvent::Progress(p) => serde_json::json!({"type": "progress", "message": p}),
                 AgentEvent::Complete(_) => serde_json::json!({"type": "complete"}),
-                AgentEvent::Error(e) => serde_json::json!({"type": "error", "message": e}),
+                AgentEvent::Error(e) => {
+                    // Errors go to stderr in JSON mode too
+                    eprintln!("{}", serde_json::json!({"type": "error", "message": e}));
+                    continue;
+                }
                 AgentEvent::ToolStats(s) => serde_json::json!({"type": "tool_stats", "stats": s}),
                 AgentEvent::TokenUsage {
                     input_tokens,
@@ -108,14 +112,45 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
             println!("{json}");
         }
     } else {
+        let mut turn: u32 = 0;
+        let mut in_text = false;
         while let Some(event) = rx.recv().await {
             match &event {
-                AgentEvent::Token(t) => print!("{t}"),
-                AgentEvent::ToolCall(tc) => eprintln!("[tool: {}({})]", tc.name, tc.arguments),
-                AgentEvent::ToolResult(tr) => eprintln!("[result: {}]", tr.content),
-                AgentEvent::Progress(p) => eprintln!("[{p}]"),
+                AgentEvent::Token(t) => {
+                    if !in_text {
+                        in_text = true;
+                    }
+                    print!("{t}");
+                }
+                AgentEvent::ToolCall(tc) => {
+                    if in_text {
+                        println!();
+                        in_text = false;
+                    }
+                    // Compact summary: tool name + first meaningful arg
+                    let summary = summarize_tool_args(&tc.name, &tc.arguments);
+                    eprintln!("[tool: {}] {}", tc.name, summary);
+                }
+                AgentEvent::ToolResult(_) => {
+                    // Tool results are internal — omit from text output for cleaner scripting
+                }
+                AgentEvent::Progress(p) => {
+                    if in_text {
+                        println!();
+                        in_text = false;
+                    }
+                    // Progress messages include turn transitions
+                    if p.starts_with("Turn ") || p.starts_with("turn ") {
+                        turn += 1;
+                        eprintln!("[turn {turn}]");
+                    } else {
+                        eprintln!("[{p}]");
+                    }
+                }
                 AgentEvent::Complete(_) => break,
-                AgentEvent::Thinking(t) => eprintln!("[thinking: {t}]"),
+                AgentEvent::Thinking(_) => {
+                    // Thinking content is internal — omit from text output
+                }
                 AgentEvent::BudgetWarning {
                     threshold_percent,
                     current_cost_usd,
@@ -127,12 +162,18 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 | AgentEvent::TokenUsage { .. }
                 | AgentEvent::SubAgentComplete { .. } => {}
                 AgentEvent::Error(e) => {
+                    if in_text {
+                        println!();
+                        in_text = false;
+                    }
                     eprintln!("[error: {e}]");
                     break;
                 }
             }
         }
-        println!();
+        if in_text {
+            println!();
+        }
     }
 
     let result = handle.await??;

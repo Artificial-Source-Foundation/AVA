@@ -21,6 +21,15 @@ pub struct InspectionResult {
     pub warnings: Vec<String>,
 }
 
+/// Where a tool came from — used for source-aware permission checks.
+/// Mirrors `ava_tools::registry::ToolSource` without creating a dependency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToolSource {
+    BuiltIn,
+    MCP { server: String },
+    Custom { path: String },
+}
+
 /// Runtime context for permission inspection — workspace root, auto-approve flag, session approvals, persistent rules, and safety profiles.
 pub struct InspectionContext {
     pub workspace_root: PathBuf,
@@ -28,6 +37,36 @@ pub struct InspectionContext {
     pub session_approved: HashSet<String>,
     pub persistent_rules: PersistentRules,
     pub safety_profiles: HashMap<String, ToolSafetyProfile>,
+    /// Source of the tool being inspected (None if unknown).
+    pub tool_source: Option<ToolSource>,
+}
+
+/// Safe .ava/ subdirectories that can be auto-approved for writes.
+/// Trust-surface files like mcp.json, hooks/, tools/, permissions.toml are NOT safe.
+const SAFE_AVA_PATHS: &[&str] = &[
+    "plans",
+    "state.json",
+    "logs",
+    "traces",
+    "sessions",
+    "themes",
+];
+
+/// Check if a path under .ava/ is in a safe (non-trust-surface) location.
+fn is_safe_ava_path(path: &std::path::Path, ava_dir: &std::path::Path) -> bool {
+    if !path.starts_with(ava_dir) {
+        return false;
+    }
+    let relative = match path.strip_prefix(ava_dir) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    // Get the first component of the relative path
+    let first = match relative.components().next() {
+        Some(std::path::Component::Normal(name)) => name.to_string_lossy(),
+        _ => return false,
+    };
+    SAFE_AVA_PATHS.iter().any(|safe| *safe == first.as_ref())
 }
 
 /// Evaluates whether a tool call should be allowed, denied, or require user approval.
@@ -70,7 +109,8 @@ impl PermissionInspector for DefaultInspector {
     ) -> InspectionResult {
         tracing::debug!("Permission check: tool={tool_name}");
 
-        // 0. Internal AVA tools are always safe — zero external risk
+        // 0. Internal AVA tools are always safe — but ONLY if they are built-in.
+        //    An MCP tool named "todo_read" must NOT get auto-approved.
         const INTERNAL_TOOLS: &[&str] = &[
             "todo_read",
             "todo_write",
@@ -78,10 +118,12 @@ impl PermissionInspector for DefaultInspector {
             "question",
             "codebase_search",
         ];
-        if INTERNAL_TOOLS.contains(&tool_name)
+        let is_builtin = context.tool_source.as_ref() == Some(&ToolSource::BuiltIn)
+            || context.tool_source.is_none(); // backwards compat: treat unknown as built-in
+        let has_internal_name = INTERNAL_TOOLS.contains(&tool_name)
             || tool_name.starts_with("memory_")
-            || tool_name.starts_with("session_")
-        {
+            || tool_name.starts_with("session_");
+        if has_internal_name && is_builtin {
             return InspectionResult {
                 action: Action::Allow,
                 reason: format!("internal AVA tool '{tool_name}' is always safe"),
@@ -89,6 +131,14 @@ impl PermissionInspector for DefaultInspector {
                 tags: vec![],
                 warnings: vec![],
             };
+        }
+        // If the tool has an internal name but is NOT built-in, log a warning and continue
+        // to normal inspection (it will go through risk checks like any other tool).
+        if has_internal_name && !is_builtin {
+            tracing::warn!(
+                "Tool '{tool_name}' has an internal tool name but source is {:?} — not auto-approving",
+                context.tool_source
+            );
         }
 
         // 1. For bash: run classifier FIRST, before auto-approve check
@@ -164,23 +214,46 @@ impl PermissionInspector for DefaultInspector {
         if project_safe_tools.contains(&tool_name) {
             let paths = extract_paths(tool_name, arguments);
             let workspace = &context.workspace_root;
+            let canonical_workspace =
+                std::fs::canonicalize(workspace).unwrap_or_else(|_| workspace.clone());
             let all_inside = !paths.is_empty()
                 && paths.iter().all(|p| {
                     let pb = std::path::Path::new(p);
-                    // Check if the path is inside workspace or .ava/ directory
-                    pb.starts_with(workspace)
+                    let canonical_path =
+                        std::fs::canonicalize(pb).unwrap_or_else(|_| pb.to_path_buf());
+                    canonical_path.starts_with(&canonical_workspace)
                 });
             if all_inside {
-                // Writes to .ava/ are always safe (AVA's own config/plans directory)
+                // Writes to safe .ava/ subdirectories are auto-approved
+                let ava_dir = canonical_workspace.join(".ava");
                 let all_ava_dir = paths.iter().all(|p| {
                     let pb = std::path::Path::new(p);
-                    pb.starts_with(workspace.join(".ava"))
+                    let canonical_path =
+                        std::fs::canonicalize(pb).unwrap_or_else(|_| pb.to_path_buf());
+                    canonical_path.starts_with(&ava_dir)
                 });
                 if all_ava_dir {
+                    // Only auto-approve if ALL paths target safe .ava/ subdirectories
+                    let all_safe = paths.iter().all(|p| {
+                        let pb = std::path::Path::new(p);
+                        let canonical_path =
+                            std::fs::canonicalize(pb).unwrap_or_else(|_| pb.to_path_buf());
+                        is_safe_ava_path(&canonical_path, &ava_dir)
+                    });
+                    if all_safe {
+                        return InspectionResult {
+                            action: Action::Allow,
+                            reason: "path inside safe .ava/ subdirectory".to_string(),
+                            risk_level: RiskLevel::Safe,
+                            tags,
+                            warnings,
+                        };
+                    }
+                    // Trust-surface .ava/ files require approval
                     return InspectionResult {
-                        action: Action::Allow,
-                        reason: "path inside .ava/ directory (AVA config)".to_string(),
-                        risk_level: RiskLevel::Safe,
+                        action: Action::Ask,
+                        reason: "path targets trust-surface file in .ava/ directory".to_string(),
+                        risk_level: RiskLevel::Medium,
                         tags,
                         warnings,
                     };
@@ -189,20 +262,40 @@ impl PermissionInspector for DefaultInspector {
             }
         }
 
-        // 2c. Auto-approve writes to .ava/ directory regardless of tool
+        // 2c. Auto-approve writes to safe .ava/ subdirectories regardless of tool
         {
             let paths = extract_paths(tool_name, arguments);
             let workspace = &context.workspace_root;
+            let canonical_workspace =
+                std::fs::canonicalize(workspace).unwrap_or_else(|_| workspace.clone());
+            let ava_dir = canonical_workspace.join(".ava");
             let all_ava = !paths.is_empty()
                 && paths.iter().all(|p| {
                     let pb = std::path::Path::new(p);
-                    pb.starts_with(workspace.join(".ava"))
+                    let canonical_path =
+                        std::fs::canonicalize(pb).unwrap_or_else(|_| pb.to_path_buf());
+                    canonical_path.starts_with(&ava_dir)
                 });
             if all_ava {
+                let all_safe = paths.iter().all(|p| {
+                    let pb = std::path::Path::new(p);
+                    let canonical_path =
+                        std::fs::canonicalize(pb).unwrap_or_else(|_| pb.to_path_buf());
+                    is_safe_ava_path(&canonical_path, &ava_dir)
+                });
+                if all_safe {
+                    return InspectionResult {
+                        action: Action::Allow,
+                        reason: "path inside safe .ava/ subdirectory".to_string(),
+                        risk_level: RiskLevel::Safe,
+                        tags,
+                        warnings,
+                    };
+                }
                 return InspectionResult {
-                    action: Action::Allow,
-                    reason: "path inside .ava/ directory (AVA config)".to_string(),
-                    risk_level: RiskLevel::Safe,
+                    action: Action::Ask,
+                    reason: "path targets trust-surface file in .ava/ directory".to_string(),
+                    risk_level: RiskLevel::Medium,
                     tags,
                     warnings,
                 };
@@ -379,6 +472,7 @@ mod tests {
             session_approved: HashSet::new(),
             persistent_rules: PersistentRules::default(),
             safety_profiles: core_tool_profiles(),
+            tool_source: Some(ToolSource::BuiltIn),
         }
     }
 

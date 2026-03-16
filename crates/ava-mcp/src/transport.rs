@@ -163,6 +163,16 @@ async fn receive_framed<R: AsyncRead + Unpin>(reader: &mut BufReader<R>) -> Resu
         .parse::<usize>()
         .map_err(|e| AvaError::ValidationError(format!("invalid content-length header: {e}")))?;
 
+    /// Maximum MCP message size: 10 MB. Prevents a malicious or buggy MCP server
+    /// from exhausting memory with an oversized response.
+    const MAX_MCP_MESSAGE_SIZE: usize = 10 * 1024 * 1024;
+
+    if len > MAX_MCP_MESSAGE_SIZE {
+        return Err(AvaError::ToolError(format!(
+            "MCP response too large: {len} bytes exceeds {MAX_MCP_MESSAGE_SIZE} byte limit"
+        )));
+    }
+
     let mut body = vec![0_u8; len];
     reader.read_exact(&mut body).await.map_err(AvaError::from)?;
 

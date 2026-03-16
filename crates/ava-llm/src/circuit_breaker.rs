@@ -41,9 +41,15 @@ impl CircuitBreaker {
                 if let Some(last_time) = *last {
                     if last_time.elapsed() >= self.cooldown {
                         drop(last);
-                        // Transition to half-open
-                        self.state.store(STATE_HALF_OPEN, Ordering::Release);
-                        true
+                        // CAS: only one thread transitions Open → HalfOpen
+                        self.state
+                            .compare_exchange(
+                                STATE_OPEN,
+                                STATE_HALF_OPEN,
+                                Ordering::AcqRel,
+                                Ordering::Acquire,
+                            )
+                            .is_ok()
                     } else {
                         false
                     }
@@ -53,8 +59,9 @@ impl CircuitBreaker {
                 }
             }
             STATE_HALF_OPEN => {
-                // Allow exactly one probe request (already transitioned)
-                true
+                // Already transitioning — only the thread that won the CAS above
+                // should be probing. Block additional concurrent probes.
+                false
             }
             _ => true,
         }
@@ -175,5 +182,24 @@ mod tests {
         cb.record_failure();
         assert_eq!(cb.state_name(), "open");
         assert!(!cb.allow_request());
+    }
+
+    #[test]
+    fn half_open_allows_only_one_probe() {
+        let cb = CircuitBreaker::new(2, Duration::from_millis(10));
+
+        cb.record_failure();
+        cb.record_failure();
+        std::thread::sleep(Duration::from_millis(15));
+
+        // First call wins the CAS and gets the probe slot
+        assert!(cb.allow_request());
+        assert_eq!(cb.state_name(), "half-open");
+
+        // Second call while still half-open is blocked
+        assert!(
+            !cb.allow_request(),
+            "only one probe should be allowed in half-open"
+        );
     }
 }

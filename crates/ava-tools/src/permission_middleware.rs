@@ -191,6 +191,7 @@ mod tests {
             session_approved: std::collections::HashSet::new(),
             persistent_rules: ava_permissions::persistent::PersistentRules::default(),
             safety_profiles: std::collections::HashMap::new(),
+            tool_source: None,
         }))
     }
 

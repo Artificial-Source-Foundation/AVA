@@ -32,6 +32,9 @@ fn usage_cost_usd(model: &str, usage: &TokenUsage) -> f64 {
     ava_llm::providers::common::estimate_cost_with_cache_usd(usage, in_rate, out_rate)
 }
 
+/// Hard cap on total tool calls per agent turn to prevent runaway tool invocations.
+const MAX_TOOLS_PER_TURN: usize = 50;
+
 /// Core agent execution loop that orchestrates LLM calls, tool execution, and stuck detection.
 ///
 /// Uses a single unified engine (`run_unified`) for both headless and streaming modes.
@@ -473,10 +476,20 @@ impl AgentLoop {
     ) -> (Vec<ToolResult>, bool) {
         let mut steering_triggered = false;
 
+        // Guard against runaway tool invocations from a single LLM response
+        if tool_calls.len() > MAX_TOOLS_PER_TURN {
+            warn!(
+                requested = tool_calls.len(),
+                limit = MAX_TOOLS_PER_TURN,
+                "Tool call limit reached, truncating to {MAX_TOOLS_PER_TURN}"
+            );
+        }
+        let capped_calls = &tool_calls[..tool_calls.len().min(MAX_TOOLS_PER_TURN)];
+
         // Separate into read-only and write groups
         let mut read_calls: Vec<(usize, &ToolCall)> = Vec::new();
         let mut write_calls: Vec<(usize, &ToolCall)> = Vec::new();
-        for (i, tc) in tool_calls.iter().enumerate() {
+        for (i, tc) in capped_calls.iter().enumerate() {
             if tc.name == "attempt_completion" {
                 continue;
             }
@@ -488,7 +501,7 @@ impl AgentLoop {
         }
 
         // Emit all ToolCall events first (streaming mode)
-        for tc in tool_calls {
+        for tc in capped_calls {
             if tc.name == "attempt_completion" {
                 continue;
             }

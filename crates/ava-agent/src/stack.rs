@@ -297,6 +297,7 @@ impl AgentStack {
             persistent_rules: ava_permissions::persistent::PersistentRules::load_project(
                 &effective_cwd,
             ),
+            tool_source: None, // Set per-tool-call by middleware
         }));
         let permission_inspector: Arc<dyn PermissionInspector> = Arc::new(DefaultInspector::new(
             PermissionSystem::load(effective_cwd.clone(), vec![]),
@@ -816,6 +817,7 @@ impl AgentStack {
                 let guard = self.parent_session_id.read().await;
                 guard.clone()
             },
+            depth: 0,
         });
         register_task_tool(&mut registry, spawner);
 
@@ -1065,6 +1067,10 @@ impl AgentStack {
     }
 }
 
+/// Maximum nesting depth for sub-agent spawning. Prevents unbounded recursion
+/// even if future refactors accidentally expose the task tool to sub-agents.
+const MAX_AGENT_DEPTH: u32 = 3;
+
 struct AgentTaskSpawner {
     provider: Arc<dyn LLMProvider>,
     platform: Arc<dyn Platform>,
@@ -1077,11 +1083,19 @@ struct AgentTaskSpawner {
     session_manager: Option<Arc<SessionManager>>,
     /// Parent session ID for linking sub-agent sessions.
     parent_session_id: Option<String>,
+    /// Current nesting depth (0 = top-level agent).
+    depth: u32,
 }
 
 #[async_trait]
 impl TaskSpawner for AgentTaskSpawner {
     async fn spawn(&self, prompt: &str) -> Result<TaskResult> {
+        if self.depth >= MAX_AGENT_DEPTH {
+            return Err(AvaError::ToolError(format!(
+                "Maximum sub-agent depth reached ({MAX_AGENT_DEPTH}). Cannot spawn deeper."
+            )));
+        }
+
         let resolved = self.agents_config.get_agent("task");
 
         if !resolved.enabled {

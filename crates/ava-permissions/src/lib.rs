@@ -87,7 +87,7 @@ impl PermissionSystem {
             }
         }
 
-        if ["webfetch", "websearch", "curl", "wget"].contains(&tool) {
+        if ["web_fetch", "web_search", "curl", "wget"].contains(&tool) {
             return Ok(Some(Action::Ask));
         }
 

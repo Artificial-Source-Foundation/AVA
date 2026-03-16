@@ -5,7 +5,7 @@ use crate::state::voice::VoicePhase;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph, Wrap};
+use ratatui::widgets::{Block, Paragraph};
 use ratatui::Frame;
 
 /// Split a line of text into spans, styling paste placeholders with accent color.
@@ -324,8 +324,6 @@ pub fn render_composer(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         ])
         .split(area)[1];
 
-    let paragraph = Paragraph::new(all_lines)
-        .style(Style::default().bg(state.theme.bg_elevated))
-        .wrap(Wrap { trim: false });
+    let paragraph = Paragraph::new(all_lines).style(Style::default().bg(state.theme.bg_elevated));
     frame.render_widget(paragraph, inner);
 }

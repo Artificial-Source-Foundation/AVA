@@ -1,24 +1,24 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use ava_permissions::classifier::is_safe_git_command;
-use ava_platform::{ExecuteOptions, Platform};
 use ava_types::{AvaError, ToolResult};
 use serde_json::{json, Value};
+use tokio::process::Command;
 
 use crate::registry::Tool;
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 
 /// Restricted git tool that only allows safe, read-only git commands.
-pub struct GitReadTool {
-    platform: Arc<dyn Platform>,
-}
+///
+/// SEC: Uses direct process execution (`Command::new("git")`) rather than
+/// shell invocation (`sh -c "git ..."`) to prevent shell injection.
+pub struct GitReadTool;
 
 impl GitReadTool {
-    pub fn new(platform: Arc<dyn Platform>) -> Self {
-        Self { platform }
+    pub fn new() -> Self {
+        Self
     }
 }
 
@@ -71,27 +71,28 @@ impl Tool for GitReadTool {
             )));
         }
 
-        let output = self
-            .platform
-            .execute_with_options(
-                &full_command,
-                ExecuteOptions {
-                    timeout: Some(Duration::from_millis(DEFAULT_TIMEOUT_MS)),
-                    working_dir: None,
-                    env_vars: Vec::new(),
-                },
-            )
-            .await?;
+        // SEC: Use direct process execution to avoid shell injection.
+        // The subcommand is split on whitespace and passed as args to `git` directly,
+        // rather than going through `sh -c "git ..."`.
+        let args: Vec<&str> = subcommand.split_whitespace().collect();
+        let output = tokio::time::timeout(
+            Duration::from_millis(DEFAULT_TIMEOUT_MS),
+            Command::new("git").args(&args).output(),
+        )
+        .await
+        .map_err(|_| AvaError::PlatformError("git command timed out".to_string()))?
+        .map_err(|e| AvaError::PlatformError(format!("failed to execute git: {e}")))?;
 
-        let rendered = format!(
-            "stdout:\n{}\n\nstderr:\n{}\n\nexit_code: {}",
-            output.stdout, output.stderr, output.exit_code
-        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let exit_code = output.status.code().unwrap_or(-1);
+
+        let rendered = format!("stdout:\n{stdout}\n\nstderr:\n{stderr}\n\nexit_code: {exit_code}");
 
         Ok(ToolResult {
             call_id: String::new(),
             content: rendered,
-            is_error: output.exit_code != 0,
+            is_error: exit_code != 0,
         })
     }
 }

@@ -443,6 +443,7 @@ name = "ava-permissions"
 version = "2.0.0"
 dependencies = [
  "chrono",
+ "dirs",
  "regex",
  "serde",
  "serde_json",

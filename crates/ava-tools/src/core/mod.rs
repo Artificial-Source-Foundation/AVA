@@ -66,7 +66,7 @@ pub fn register_extended_tools(registry: &mut ToolRegistry, platform: Arc<dyn Pl
         ToolTier::Extended,
     );
     registry.register_with_tier(code_search::CodeSearchTool::new(), ToolTier::Extended);
-    registry.register_with_tier(git_read::GitReadTool::new(platform), ToolTier::Extended);
+    registry.register_with_tier(git_read::GitReadTool::new(), ToolTier::Extended);
 }
 
 /// Register all core tools (default + extended). Backwards-compatible alias.

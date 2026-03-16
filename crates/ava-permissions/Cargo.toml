@@ -19,4 +19,5 @@ tree-sitter = "0.22"
 tree-sitter-bash = "0.21"
 chrono = { version = "0.4", features = ["serde"] }
 toml = "0.8"
+dirs.workspace = true
 tracing.workspace = true

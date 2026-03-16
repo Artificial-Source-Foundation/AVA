@@ -62,6 +62,9 @@ impl Tool for BashTool {
 
         let working_dir = args.get("cwd").and_then(Value::as_str).map(PathBuf::from);
 
+        // TODO: Invert sandbox model — sandbox ALL commands by default,
+        // with narrowly approved exceptions for safe development commands.
+        // Currently only install-class commands are sandboxed.
         if is_install_class(&command) {
             let cwd = args
                 .get("cwd")

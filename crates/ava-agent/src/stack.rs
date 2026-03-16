@@ -294,7 +294,7 @@ impl AgentStack {
             auto_approve: config.yolo,
             session_approved: std::collections::HashSet::new(),
             safety_profiles: core_tool_profiles(),
-            persistent_rules: ava_permissions::persistent::PersistentRules::load_project(
+            persistent_rules: ava_permissions::persistent::PersistentRules::load_merged(
                 &effective_cwd,
             ),
             tool_source: None, // Set per-tool-call by middleware

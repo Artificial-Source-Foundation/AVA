@@ -1,10 +1,15 @@
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-/// Persistent permission rules saved to `.ava/permissions.toml`.
+/// Persistent permission rules saved to `~/.ava/permissions.toml` (user-global).
 ///
 /// These survive across sessions — when a user selects "Allow always" in the
 /// approval dock, the rule is written here and auto-loaded on next startup.
+///
+/// SEC: Allowlists are stored in the user-global path (`~/.ava/permissions.toml`)
+/// to prevent malicious repositories from pre-populating allowlists via a
+/// repo-local `.ava/permissions.toml`. Project-local rules (via `load_project`)
+/// can only *restrict* (add blocked tools/commands), never expand permissions.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct PersistentRules {
     /// Tools that are always allowed (e.g., "bash", "task").
@@ -22,38 +27,76 @@ pub struct PersistentRules {
 }
 
 impl PersistentRules {
-    /// Load persistent rules from `.ava/permissions.toml` under the given workspace root.
+    /// Return the user-global permissions path: `~/.ava/permissions.toml`.
+    fn global_path() -> PathBuf {
+        dirs::home_dir()
+            .unwrap_or_default()
+            .join(".ava/permissions.toml")
+    }
+
+    /// Load persistent rules from `~/.ava/permissions.toml` (user-global).
     /// Returns default (empty) rules if the file doesn't exist or can't be parsed.
-    pub fn load(workspace_root: &Path) -> Self {
-        let path = workspace_root.join(".ava/permissions.toml");
-        std::fs::read_to_string(&path)
+    ///
+    /// SEC: This reads from the user's home directory, NOT from the repository,
+    /// so a malicious repo cannot pre-populate allowlists.
+    pub fn load() -> Self {
+        Self::load_from(&Self::global_path())
+    }
+
+    /// Load rules from an arbitrary path (used internally and for testing).
+    fn load_from(path: &Path) -> Self {
+        std::fs::read_to_string(path)
             .ok()
             .and_then(|s| toml::from_str(&s).ok())
             .unwrap_or_default()
     }
 
-    /// Load project-local rules from `.ava/permissions.toml`.
+    /// Load project-local rules from `.ava/permissions.toml` under the workspace root.
     ///
     /// SEC-4: Project-local rules can only *restrict* (add blocked tools/commands),
     /// never *expand* permissions (allow tools/commands). This prevents a malicious
     /// repository from shipping a `.ava/permissions.toml` that auto-approves
     /// dangerous tools.
     pub fn load_project(workspace_root: &Path) -> Self {
-        let mut rules = Self::load(workspace_root);
+        let path = workspace_root.join(".ava/permissions.toml");
+        let mut rules = Self::load_from(&path);
         // Project-local rules can only restrict, never expand permissions
         rules.allowed_tools.clear();
         rules.allowed_commands.clear();
         rules
     }
 
-    /// Save persistent rules to `.ava/permissions.toml` under the given workspace root.
-    pub fn save(&self, workspace_root: &Path) -> std::io::Result<()> {
-        let path = workspace_root.join(".ava/permissions.toml");
+    /// Merge project-local restrictions into the user-global rules.
+    /// This loads user-global allowlists and then overlays project-local blocklists.
+    pub fn load_merged(workspace_root: &Path) -> Self {
+        let mut global = Self::load();
+        let project = Self::load_project(workspace_root);
+        // Overlay project-local blocklists onto global rules
+        global.blocked_tools.extend(project.blocked_tools);
+        global.blocked_commands.extend(project.blocked_commands);
+        global
+    }
+
+    /// Save persistent rules to `~/.ava/permissions.toml` (user-global).
+    ///
+    /// SEC: Always writes to the user's home directory, never to the repository.
+    pub fn save(&self) -> std::io::Result<()> {
+        let path = Self::global_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let content = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
         std::fs::write(&path, content)
+    }
+
+    /// Save persistent rules to a specific path (for testing).
+    #[cfg(test)]
+    pub fn save_to(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let content = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
+        std::fs::write(path, content)
     }
 
     /// Mark a tool as always allowed.
@@ -98,11 +141,11 @@ impl PersistentRules {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn load_missing_file_returns_default() {
-        let rules = PersistentRules::load(&PathBuf::from("/nonexistent/path"));
+        let rules =
+            PersistentRules::load_from(&PathBuf::from("/nonexistent/path/permissions.toml"));
         assert!(rules.allowed_tools.is_empty());
         assert!(rules.allowed_commands.is_empty());
     }
@@ -153,7 +196,10 @@ mod tests {
         rules.allow_command("rm -rf /");
         rules.blocked_tools.insert("write".to_string());
         rules.blocked_commands.insert("sudo".to_string());
-        rules.save(&dir).expect("save should succeed");
+
+        // Write to the project-local path
+        let project_path = dir.join(".ava/permissions.toml");
+        rules.save_to(&project_path).expect("save should succeed");
 
         let loaded = PersistentRules::load_project(&dir);
         // Allowlists cleared for project-local rules
@@ -170,20 +216,41 @@ mod tests {
     fn roundtrip_save_load() {
         let dir = std::env::temp_dir().join("ava_persistent_rules_test");
         let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("permissions.toml");
 
         let mut rules = PersistentRules::default();
         rules.allow_tool("bash");
         rules.allow_tool("task");
         rules.allow_command("cargo test");
         rules.allow_command("npm run");
-        rules.save(&dir).expect("save should succeed");
+        rules.save_to(&path).expect("save should succeed");
 
-        let loaded = PersistentRules::load(&dir);
+        let loaded = PersistentRules::load_from(&path);
         assert!(loaded.is_tool_allowed("bash"));
         assert!(loaded.is_tool_allowed("task"));
         assert!(loaded.is_command_allowed("cargo test --workspace"));
         assert!(loaded.is_command_allowed("npm run build"));
         assert!(!loaded.is_tool_allowed("write"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn merged_rules_combine_global_allows_and_project_blocks() {
+        let dir = std::env::temp_dir().join("ava_persistent_merged_test");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // Write project-local blocklist
+        let mut project_rules = PersistentRules::default();
+        project_rules.blocked_tools.insert("bash".to_string());
+        let project_path = dir.join(".ava/permissions.toml");
+        project_rules
+            .save_to(&project_path)
+            .expect("save should succeed");
+
+        // load_merged reads global + project blocks
+        let merged = PersistentRules::load_merged(&dir);
+        assert!(merged.is_tool_blocked("bash"));
 
         let _ = std::fs::remove_dir_all(&dir);
     }

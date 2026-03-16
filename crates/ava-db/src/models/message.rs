@@ -1,4 +1,10 @@
 //! Message model and repository operations.
+//!
+//! **Legacy**: This module is retained for schema compatibility but is NOT used
+//! for active message storage. The primary message persistence layer is
+//! `ava-session` (SQLite + FTS5), which stores full roundtrip-fidelity messages
+//! including tool results, images, token usage, and tool call IDs.
+//! Do not add new message features here — use `ava-session` instead.
 
 use sqlx::{FromRow, SqlitePool};
 

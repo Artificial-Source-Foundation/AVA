@@ -195,6 +195,7 @@ impl App {
                         tool_count: 0,
                         duration: None,
                         is_running: true,
+                        failed: false,
                         call_id: call.id.clone(),
                         session_id: None,
                         session_messages: Vec::new(),
@@ -280,6 +281,7 @@ impl App {
                     };
 
                     // Update the SubAgent UI message with result content and stats
+                    let sa_failed = result.is_error;
                     if let Some(msg) = self.state.messages.messages.iter_mut().rev().find(|m| {
                         matches!(m.kind, MessageKind::SubAgent)
                             && m.sub_agent
@@ -290,6 +292,7 @@ impl App {
                         msg.is_streaming = false;
                         if let Some(data) = msg.sub_agent.as_mut() {
                             data.is_running = false;
+                            data.failed = sa_failed;
                             data.tool_count = sa_tool_count.0;
                             data.duration = sa_tool_count.1;
                         }

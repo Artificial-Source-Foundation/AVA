@@ -29,6 +29,8 @@ pub struct SubAgentData {
     pub duration: Option<Duration>,
     /// Whether the sub-agent is still executing.
     pub is_running: bool,
+    /// Whether the sub-agent failed (set on completion from `ToolResult.is_error`).
+    pub failed: bool,
     /// The tool call ID, used to match the ToolResult back.
     pub call_id: String,
     /// The sub-agent's session ID (set on completion via `SubAgentComplete` event).
@@ -126,7 +128,19 @@ impl UiMessage {
             MessageKind::Thinking => theme.primary,
             MessageKind::Error => theme.error,
             MessageKind::System => theme.text_dimmed,
-            MessageKind::SubAgent => theme.accent,
+            MessageKind::SubAgent => {
+                if let Some(data) = &self.sub_agent {
+                    if data.failed {
+                        theme.error
+                    } else if !data.is_running {
+                        theme.text_dimmed
+                    } else {
+                        theme.accent
+                    }
+                } else {
+                    theme.accent
+                }
+            }
         }
     }
 
@@ -636,6 +650,7 @@ impl UiMessage {
                     .map(|d| d.description.as_str())
                     .unwrap_or(&self.content);
                 let is_running = data.map(|d| d.is_running).unwrap_or(false);
+                let is_failed = data.map(|d| d.failed).unwrap_or(false);
 
                 // Box drawing characters
                 let top_left = "\u{256d}"; // ╭
@@ -657,10 +672,36 @@ impl UiMessage {
                 // Inner content width: box_outer_width minus "│ " (2) and " │" (2)
                 let inner_width = box_outer_width.saturating_sub(4);
 
-                let border_style = Style::default().fg(theme.border);
-                let accent_style = Style::default()
-                    .fg(theme.accent)
-                    .add_modifier(Modifier::BOLD);
+                // Style varies by state: running=normal, failed=red, completed=dimmed
+                let border_style = if is_failed {
+                    Style::default().fg(theme.error).add_modifier(Modifier::DIM)
+                } else if !is_running {
+                    Style::default()
+                        .fg(theme.text_dimmed)
+                        .add_modifier(Modifier::DIM)
+                } else {
+                    Style::default().fg(theme.border)
+                };
+                let label_style = if is_failed {
+                    Style::default()
+                        .fg(theme.error)
+                        .add_modifier(Modifier::BOLD)
+                } else if !is_running {
+                    Style::default()
+                        .fg(theme.text_dimmed)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD)
+                };
+                let desc_style = if is_failed {
+                    Style::default().fg(theme.error).add_modifier(Modifier::DIM)
+                } else if !is_running {
+                    Style::default().fg(theme.text_dimmed)
+                } else {
+                    Style::default().fg(theme.text_muted)
+                };
                 let dimmed_style = Style::default().fg(theme.text_dimmed);
 
                 // Truncate description to fit inner width (minus icon + "Sub-agent: " prefix)
@@ -680,8 +721,8 @@ impl UiMessage {
                     let frame = spinner_frame(spinner_tick);
                     let header_content_spans = vec![
                         Span::styled(format!("{frame} "), Style::default().fg(theme.accent)),
-                        Span::styled("Sub-agent: ", accent_style),
-                        Span::styled(desc_display.clone(), Style::default().fg(theme.text_muted)),
+                        Span::styled("Sub-agent: ", label_style),
+                        Span::styled(desc_display.clone(), desc_style),
                     ];
                     let header_text_width: usize =
                         header_content_spans.iter().map(|s| s.content.width()).sum();
@@ -695,22 +736,33 @@ impl UiMessage {
                     ));
                     result.push(Line::from(header_line_spans));
                 } else {
-                    // ── Header: checkmark + "Sub-agent: description" ──
+                    // ── Header: ✓ (success) or ✗ (failed) + "Sub-agent: description" ──
                     let tool_count = data.map(|d| d.tool_count).unwrap_or(0);
                     let duration_str = data
                         .and_then(|d| d.duration)
                         .map(|d| format!("{:.1}s", d.as_secs_f64()))
                         .unwrap_or_default();
 
-                    let header_content_spans = vec![
-                        Span::styled(
+                    let (icon, icon_style) = if is_failed {
+                        (
+                            "\u{2717} ",
+                            Style::default()
+                                .fg(theme.error)
+                                .add_modifier(Modifier::BOLD),
+                        )
+                    } else {
+                        (
                             "\u{2713} ",
                             Style::default()
                                 .fg(theme.success)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled("Sub-agent: ", accent_style),
-                        Span::styled(desc_display.clone(), Style::default().fg(theme.text_muted)),
+                                .add_modifier(Modifier::DIM),
+                        )
+                    };
+
+                    let header_content_spans = vec![
+                        Span::styled(icon, icon_style),
+                        Span::styled("Sub-agent: ", label_style),
+                        Span::styled(desc_display.clone(), desc_style),
                     ];
                     let header_text_width: usize =
                         header_content_spans.iter().map(|s| s.content.width()).sum();
@@ -758,6 +810,14 @@ impl UiMessage {
                             &content_lines[..]
                         };
 
+                        let content_style = if is_failed {
+                            Style::default().fg(theme.error).add_modifier(Modifier::DIM)
+                        } else {
+                            Style::default()
+                                .fg(theme.text_dimmed)
+                                .add_modifier(Modifier::DIM)
+                        };
+
                         for line in display {
                             // Truncate line to fit inner width
                             let display_line = if line.width() > inner_width {
@@ -774,12 +834,7 @@ impl UiMessage {
                             let line_pad = inner_width.saturating_sub(line_width);
                             result.push(Line::from(vec![
                                 Span::styled(format!("{vert} "), border_style),
-                                Span::styled(
-                                    display_line,
-                                    Style::default()
-                                        .fg(theme.text_dimmed)
-                                        .add_modifier(Modifier::DIM),
-                                ),
+                                Span::styled(display_line, content_style),
                                 Span::styled(
                                     format!("{}{vert}", " ".repeat(line_pad)),
                                     border_style,
@@ -793,12 +848,7 @@ impl UiMessage {
                             let more_pad = inner_width.saturating_sub(more_width);
                             result.push(Line::from(vec![
                                 Span::styled(format!("{vert} "), border_style),
-                                Span::styled(
-                                    more_text,
-                                    Style::default()
-                                        .fg(theme.text_dimmed)
-                                        .add_modifier(Modifier::DIM),
-                                ),
+                                Span::styled(more_text, content_style),
                                 Span::styled(
                                     format!("{}{vert}", " ".repeat(more_pad)),
                                     border_style,
@@ -816,14 +866,18 @@ impl UiMessage {
                         let hint = format!("[{msg_count} messages \u{2014} Enter to view]");
                         let hint_width = hint.width();
                         let hint_pad = inner_width.saturating_sub(hint_width);
+                        let hint_style = if is_failed {
+                            Style::default()
+                                .fg(theme.error)
+                                .add_modifier(Modifier::DIM | Modifier::ITALIC)
+                        } else {
+                            Style::default()
+                                .fg(theme.text_dimmed)
+                                .add_modifier(Modifier::DIM | Modifier::ITALIC)
+                        };
                         result.push(Line::from(vec![
                             Span::styled(format!("{vert} "), border_style),
-                            Span::styled(
-                                hint,
-                                Style::default()
-                                    .fg(theme.accent)
-                                    .add_modifier(Modifier::DIM | Modifier::ITALIC),
-                            ),
+                            Span::styled(hint, hint_style),
                             Span::styled(format!("{}{vert}", " ".repeat(hint_pad)), border_style),
                         ]));
                     }

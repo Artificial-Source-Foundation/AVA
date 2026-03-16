@@ -354,8 +354,12 @@ impl UiMessage {
                         } else {
                             String::new()
                         };
-                        let footer_text =
+                        let footer_raw =
                             format!("\u{25a0} {mode_label} \u{00b7} {model}{duration_part}");
+                        // Truncate footer to fit within content area (width minus bar prefix)
+                        let footer_budget = (width.saturating_sub(Self::BAR_PREFIX_WIDTH)) as usize;
+                        let footer_text =
+                            crate::text_utils::truncate_display(&footer_raw, footer_budget);
                         let mut footer_spans = vec![
                             Span::styled(LEFT_BAR, Style::default().fg(bar_color)),
                             Span::raw(BAR_PAD),

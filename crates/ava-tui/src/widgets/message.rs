@@ -272,8 +272,10 @@ pub fn render_action_group(
         .add_modifier(Modifier::DIM);
 
     if has_cancelled {
-        // Interrupted: show dimmed summary
+        // Interrupted: show dimmed summary — truncate to width so it cannot bleed
         let summary = tool_activity_summary(&tool_calls);
+        let max_summary = width.saturating_sub(2 + 14) as usize; // 2 = "● ", 14 = " [interrupted]"
+        let summary = crate::text_utils::truncate_display(&summary, max_summary);
         let mut lines = vec![Line::from(vec![
             Span::styled("● ", dim),
             Span::styled(summary, dim),
@@ -293,6 +295,9 @@ pub fn render_action_group(
         let activity = current_call
             .map(|c| tool_activity_line(&c.content, true))
             .unwrap_or_else(|| "Running...".to_string());
+        // Truncate activity text to fit within width (icon is 2 cols)
+        let activity =
+            crate::text_utils::truncate_display(&activity, width.saturating_sub(2) as usize);
 
         let icon = format!("{} ", spinner_frame(spinner_tick));
         let mut lines = vec![Line::from(vec![
@@ -320,8 +325,9 @@ pub fn render_action_group(
         return lines;
     }
 
-    // Completed: show summary line
+    // Completed: show summary line — truncate to width so it cannot bleed
     let summary = tool_activity_summary(&tool_calls);
+    let summary = crate::text_utils::truncate_display(&summary, width.saturating_sub(2) as usize); // 2 = "● "
     let mut lines = vec![Line::from(vec![
         Span::styled(
             "● ",

@@ -183,20 +183,6 @@ pub fn render_top(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         }
     }
 
-    // Pending image attachments indicator
-    if state.pending_image_count > 0 {
-        let count = state.pending_image_count;
-        left_spans.push(Span::styled(
-            format!(
-                " [{count} image{} attached]",
-                if count == 1 { "" } else { "s" }
-            ),
-            Style::default()
-                .fg(state.theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
-
     // Calculate widths and fill remaining space
     let left_width: usize = left_spans
         .iter()

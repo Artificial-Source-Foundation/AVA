@@ -99,13 +99,7 @@ Commands
                     self.pending_images.push(image);
                     let count = self.pending_images.len();
                     self.state.pending_image_count = count;
-                    self.set_status(
-                        format!(
-                            "Image pasted from clipboard ({count} image{} attached)",
-                            if count == 1 { "" } else { "s" }
-                        ),
-                        StatusLevel::Info,
-                    );
+                    self.set_status("Image attached", StatusLevel::Info);
                     return;
                 }
                 Err(e) => {
@@ -130,13 +124,7 @@ Commands
                                 self.pending_images.push(image);
                                 let count = self.pending_images.len();
                                 self.state.pending_image_count = count;
-                                self.set_status(
-                                    format!(
-                                        "Image attached from path ({count} image{} attached)",
-                                        if count == 1 { "" } else { "s" }
-                                    ),
-                                    StatusLevel::Info,
-                                );
+                                self.set_status("Image attached", StatusLevel::Info);
                                 return;
                             }
                             Err(e) => {

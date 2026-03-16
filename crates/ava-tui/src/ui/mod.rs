@@ -91,26 +91,35 @@ pub fn render(frame: &mut Frame<'_>, state: &mut AppState) {
 }
 
 fn render_toasts(frame: &mut Frame<'_>, area: Rect, state: &mut AppState) {
+    use crate::state::toast::ToastKind;
+
     state.toast.cleanup();
     if state.toast.is_empty() {
         return;
     }
     let theme = &state.theme;
     for (i, toast) in state.toast.toasts.iter().rev().enumerate() {
-        let text_width = toast.message.len() as u16 + 2; // 1 padding each side
-        let width = text_width.clamp(10, 40);
-        let y = 1 + (i as u16 * 2);
-        if y >= area.height {
+        let icon = match toast.kind {
+            ToastKind::Success => "\u{2713} ",
+            ToastKind::Info => "\u{2139} ",
+        };
+        // Width: border(1) + pad(1) + icon + message + pad(1) + border(1)
+        let inner_width = icon.len() as u16 + toast.message.len() as u16;
+        let width = (inner_width + 4).clamp(14, 44); // +4 for borders + padding
+        let height: u16 = 3; // border + content + border
+        let y = 1 + (i as u16 * (height + 1));
+        if y + height > area.height {
             break;
         }
         let x = area.width.saturating_sub(width + 1);
-        let rect = Rect::new(x, y, width, 1);
+        let rect = Rect::new(x, y, width, height);
         let block = Block::default()
-            .borders(Borders::NONE)
-            .style(Style::default().bg(theme.bg_elevated));
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.border))
+            .style(Style::default().bg(theme.bg_surface));
         let text = Paragraph::new(Line::from(Span::styled(
-            format!(" {} ", toast.message),
-            Style::default().fg(theme.text_muted).bg(theme.bg_elevated),
+            format!("{icon}{}", toast.message),
+            Style::default().fg(theme.text_muted).bg(theme.bg_surface),
         )))
         .block(block);
         frame.render_widget(Clear, rect);

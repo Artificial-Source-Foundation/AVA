@@ -68,12 +68,13 @@ pub struct UiMessage {
     pub cancelled: bool,
 }
 
-/// Gentle dot-pulse spinner — dots grow and shrink like a calm breathing wave.
-pub const SPINNER_FRAMES: &[&str] = &["·  ", "·· ", "···", " ··", "  ·", "   "];
+/// Smooth block-pulse spinner — a single character breathes from dim to bright
+/// and back, using Unicode block elements for a futuristic feel.
+pub const SPINNER_FRAMES: &[&str] = &["░", "▒", "▓", "█", "▓", "▒", "░", " "];
 
-/// Divisor to slow spinner animation. At 16ms ticks, each frame lasts ~192ms
-/// giving a calm ~1.2s full cycle — a gentle breathing rhythm.
-const SPINNER_FRAME_DIVISOR: usize = 12;
+/// Divisor to slow spinner animation. At 16ms ticks, each frame lasts ~150ms
+/// giving a smooth ~1.2s full cycle — a calm breathing pulse.
+const SPINNER_FRAME_DIVISOR: usize = 9;
 
 /// Returns the current spinner frame based on a tick counter.
 /// The tick is divided down so the animation feels calm rather than frantic.

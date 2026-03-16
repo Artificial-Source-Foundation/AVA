@@ -3,9 +3,16 @@ use std::time::{Duration, Instant};
 const TOAST_DURATION: Duration = Duration::from_secs(3);
 const MAX_TOASTS: usize = 3;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToastKind {
+    Success,
+    Info,
+}
+
 #[derive(Debug, Clone)]
 pub struct Toast {
     pub message: String,
+    pub kind: ToastKind,
     pub created_at: Instant,
 }
 
@@ -16,8 +23,17 @@ pub struct ToastState {
 
 impl ToastState {
     pub fn push(&mut self, message: impl Into<String>) {
+        self.push_kind(message, ToastKind::Info);
+    }
+
+    pub fn push_success(&mut self, message: impl Into<String>) {
+        self.push_kind(message, ToastKind::Success);
+    }
+
+    fn push_kind(&mut self, message: impl Into<String>, kind: ToastKind) {
         self.toasts.push(Toast {
             message: message.into(),
+            kind,
             created_at: Instant::now(),
         });
         if self.toasts.len() > MAX_TOASTS {

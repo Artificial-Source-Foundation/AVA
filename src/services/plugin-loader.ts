@@ -6,8 +6,28 @@
  * and individual plugin reload.
  */
 
-import type { Disposable, ExtensionAPI } from '@ava/core-v2/extensions'
 import type { PluginManifest, PluginPermission } from '../types/plugin'
+
+/** Minimal Disposable interface (replaces @ava/core-v2/extensions import) */
+interface Disposable {
+  dispose(): void
+}
+
+/** Minimal ExtensionAPI interface for plugin sandboxing */
+interface ExtensionAPI {
+  registerTool(tool: { definition?: { name?: string }; [key: string]: unknown }): Disposable
+  registerCommand: (...args: unknown[]) => Disposable
+  registerAgentMode: (...args: unknown[]) => Disposable
+  registerValidator: (...args: unknown[]) => Disposable
+  registerContextStrategy: (...args: unknown[]) => Disposable
+  registerProvider: (...args: unknown[]) => Disposable
+  addToolMiddleware: (...args: unknown[]) => Disposable
+  on: (...args: unknown[]) => Disposable
+  emit: (...args: unknown[]) => void
+  getSettings: (...args: unknown[]) => unknown
+  onSettingsChanged: (...args: unknown[]) => Disposable
+  getSessionManager: (...args: unknown[]) => unknown
+}
 
 // ─── Plugin Sandboxing ──────────────────────────────────────────────────────
 

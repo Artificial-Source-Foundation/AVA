@@ -1,103 +1,141 @@
+import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { createSignal, onCleanup } from 'solid-js'
-import { rustAgent } from '../services/rust-bridge'
-import type { AgentEvent, RustSession } from '../types/rust-ipc'
+import { batch, createSignal, onCleanup } from 'solid-js'
+import type { AgentEvent, SubmitGoalResult } from '../types/rust-ipc'
+import type { ToolCall } from '../types'
 
 export function useRustAgent() {
   const [isRunning, setIsRunning] = createSignal(false)
-  const [events, setEvents] = createSignal<AgentEvent[]>([])
-  const [currentTokens, setCurrentTokens] = createSignal('')
+  const [streamingContent, setStreamingContent] = createSignal('')
+  const [thinkingContent, setThinkingContent] = createSignal('')
+  const [activeToolCalls, setActiveToolCalls] = createSignal<ToolCall[]>([])
   const [error, setError] = createSignal<string | null>(null)
-  const [session, setSession] = createSignal<RustSession | null>(null)
+  const [lastResult, setLastResult] = createSignal<SubmitGoalResult | null>(null)
+  const [tokenUsage, setTokenUsage] = createSignal({ input: 0, output: 0, cost: 0 })
+  const [events, setEvents] = createSignal<AgentEvent[]>([])
 
-  let activeRunId = 0
   let unlisten: UnlistenFn | null = null
 
-  const appendEvent = (event: AgentEvent): void => {
-    setEvents((prev) => [...prev, event])
-    if (event.type === 'token') setCurrentTokens((prev) => prev + event.content)
-    if (event.type === 'complete') {
-      setSession(event.session)
-      setIsRunning(false)
-    }
-    if (event.type === 'error') {
-      setError(event.message)
-      setIsRunning(false)
-    }
-  }
-
-  const attachListener = async (runId: number): Promise<void> => {
+  const attachListener = async (): Promise<void> => {
     detachListener()
     unlisten = await listen<AgentEvent>('agent-event', (evt) => {
-      if (runId !== activeRunId) return
-      appendEvent(evt.payload)
+      const event = evt.payload
+      setEvents((prev) => [...prev, event])
+
+      switch (event.type) {
+        case 'token':
+          setStreamingContent((prev) => prev + event.content)
+          break
+        case 'thinking':
+          setThinkingContent((prev) => prev + event.content)
+          break
+        case 'tool_call':
+          setActiveToolCalls((prev) => [...prev, {
+            id: `${event.name}-${Date.now()}`,
+            name: event.name,
+            args: event.args,
+            status: 'running' as const,
+            startedAt: Date.now(),
+          }])
+          break
+        case 'tool_result': {
+          setActiveToolCalls((prev) => {
+            const updated = [...prev]
+            const lastIdx = updated.map((tc) => tc.status).lastIndexOf('running')
+            const last = lastIdx >= 0 ? updated[lastIdx] : undefined
+            if (last) {
+              last.status = event.is_error ? 'error' : 'success'
+              last.output = event.content
+              last.completedAt = Date.now()
+            }
+            return updated
+          })
+          break
+        }
+        case 'token_usage':
+          setTokenUsage({
+            input: event.inputTokens,
+            output: event.outputTokens,
+            cost: event.costUsd,
+          })
+          break
+        case 'complete':
+          batch(() => {
+            setIsRunning(false)
+          })
+          break
+        case 'error':
+          batch(() => {
+            setError(event.message)
+            setIsRunning(false)
+          })
+          break
+      }
     })
   }
 
   const detachListener = (): void => {
-    if (!unlisten) return
-    unlisten()
-    unlisten = null
+    if (unlisten) { unlisten(); unlisten = null }
   }
 
   const resetState = (): void => {
-    setEvents([])
-    setCurrentTokens('')
-    setError(null)
-    setSession(null)
+    batch(() => {
+      setEvents([])
+      setStreamingContent('')
+      setThinkingContent('')
+      setActiveToolCalls([])
+      setError(null)
+      setLastResult(null)
+      setTokenUsage({ input: 0, output: 0, cost: 0 })
+    })
   }
 
-  const run = async (goal: string): Promise<RustSession> => {
-    const runId = activeRunId + 1
-    activeRunId = runId
+  const run = async (goal: string, opts?: { provider?: string; model?: string; maxTurns?: number }): Promise<SubmitGoalResult | null> => {
     resetState()
     setIsRunning(true)
     try {
-      const result = await rustAgent.run(goal)
-      if (runId !== activeRunId) throw new Error('Run cancelled')
-      setSession(result)
+      await attachListener()
+      const result = await invoke<SubmitGoalResult>('submit_goal', {
+        args: {
+          goal,
+          maxTurns: opts?.maxTurns ?? 0,
+          provider: opts?.provider ?? null,
+          model: opts?.model ?? null,
+        },
+      })
+      setLastResult(result)
       setIsRunning(false)
       return result
-    } catch (error_) {
-      const message = error_ instanceof Error ? error_.message : String(error_)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
       setError(message)
       setIsRunning(false)
-      throw new Error(message)
-    }
-  }
-
-  const stream = async (goal: string): Promise<void> => {
-    const runId = activeRunId + 1
-    activeRunId = runId
-    resetState()
-    setIsRunning(true)
-    try {
-      await attachListener(runId)
-      await rustAgent.stream(goal)
-      if (runId === activeRunId) setIsRunning(false)
-    } catch (error_) {
-      const message = error_ instanceof Error ? error_.message : String(error_)
-      setError(message)
-      setIsRunning(false)
-      throw new Error(message)
+      return null
     } finally {
       detachListener()
     }
   }
 
-  const stop = (): void => {
-    activeRunId += 1
+  const cancel = async (): Promise<void> => {
+    try {
+      await invoke('cancel_agent')
+    } catch { /* ignore */ }
     setIsRunning(false)
     detachListener()
   }
 
-  const clearError = (): void => {
-    setError(null)
+  const clearError = (): void => { setError(null) }
+
+  onCleanup(() => { detachListener() })
+
+  return {
+    isRunning, streamingContent, thinkingContent, activeToolCalls,
+    error, lastResult, tokenUsage, events,
+    run, cancel, clearError,
+    // Aliases for compatibility
+    stop: cancel,
+    isStreaming: isRunning,
+    currentTokens: streamingContent,
+    session: lastResult,
   }
-
-  onCleanup(() => {
-    stop()
-  })
-
-  return { isRunning, events, currentTokens, error, session, run, stream, stop, clearError }
 }

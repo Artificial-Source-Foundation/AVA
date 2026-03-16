@@ -8,8 +8,13 @@
  *   pushes settings to core via pushSettingsToCore().
  */
 
-import type { SettingsEvent } from '@ava/core-v2/config'
 import { getCoreSettings } from './core-bridge'
+
+/** Stub type replacing @ava/core-v2/config import */
+interface SettingsEvent {
+  type: string
+  category: string
+}
 
 // ─── Loop Prevention ────────────────────────────────────────────────────────
 

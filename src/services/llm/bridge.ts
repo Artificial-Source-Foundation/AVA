@@ -3,12 +3,13 @@
  * Bridges local model resolution with @ava/core-v2 LLM client
  */
 
-import { createClient as coreCreateClient, type LLMClient } from '@ava/core-v2/llm'
-
-// Re-export LLMClient type for consumers
-export type { LLMClient }
-
 import type { LLMProvider } from '../../types/llm'
+
+/** Minimal LLMClient type (replaces @ava/core-v2/llm import) */
+export interface LLMClient {
+  chat(messages: unknown[], options?: unknown): Promise<unknown>
+  [key: string]: unknown
+}
 
 // ============================================================================
 // Model to Provider Resolution
@@ -72,12 +73,16 @@ export function resolveProvider(model: string): LLMProvider {
 // ============================================================================
 
 /**
- * Create LLM client for a model
- * Uses @ava/core client with Tauri platform
+ * Create LLM client for a model.
+ * LLM client creation now happens in Rust via Tauri IPC.
+ * This stub returns a placeholder — callers should use invoke() instead.
  */
-export function createClient(model: string): LLMClient {
-  const provider = resolveProvider(model)
-  return coreCreateClient(provider)
+export function createClient(_model: string): LLMClient {
+  return {
+    async chat() {
+      throw new Error('LLM client creation is now handled by the Rust backend. Use Tauri invoke() instead.')
+    },
+  }
 }
 
 /**

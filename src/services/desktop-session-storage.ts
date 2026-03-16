@@ -6,9 +6,51 @@
  * ensuring both systems share the same persistence layer.
  */
 
-import type { ContentBlock, TextBlock, ToolUseBlock } from '@ava/core-v2/llm'
-import type { SessionState, SessionStorage } from '@ava/core-v2/session'
 import type { Message } from '../types'
+
+/** Local content block types (replaces @ava/core-v2/llm import) */
+interface TextBlock {
+  type: 'text'
+  text: string
+}
+
+interface ToolUseBlock {
+  type: 'tool_use'
+  id: string
+  name: string
+  input: unknown
+}
+
+type ContentBlock = TextBlock | ToolUseBlock | { type: string; [key: string]: unknown }
+
+/** Local session types (replaces @ava/core-v2/session import) */
+interface SessionState {
+  id: string
+  name?: string
+  slug?: string
+  messages: Array<{ role: 'user' | 'assistant'; content: ContentBlock[] | string }>
+  workingDirectory: string
+  toolCallCount: number
+  tokenStats: {
+    inputTokens: number
+    outputTokens: number
+    messages: Map<string, unknown>
+  }
+  openFiles: Map<string, unknown>
+  env: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+  status: string
+  parentSessionId?: string
+}
+
+interface SessionStorage {
+  save(session: SessionState): Promise<void>
+  load(id: string): Promise<SessionState | null>
+  delete(id: string): Promise<boolean>
+  list(): Promise<Array<{ id: string; name?: string; updatedAt: number }>>
+  loadAll(): Promise<SessionState[]>
+}
 import {
   createSession,
   deleteSession,

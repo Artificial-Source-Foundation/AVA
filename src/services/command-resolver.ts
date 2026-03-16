@@ -6,7 +6,24 @@
  * and provides a sorted list for autocomplete.
  */
 
-import { getCommands, type SlashCommand } from '@ava/core-v2/extensions'
+/** Minimal SlashCommand type (replaces @ava/core-v2/extensions import) */
+export interface SlashCommand {
+  description: string
+  execute?: (...args: unknown[]) => unknown
+  [key: string]: unknown
+}
+
+/** Local command registry — populated by frontend code instead of core-v2 */
+const _commands = new Map<string, SlashCommand>()
+
+function getCommands(): Map<string, SlashCommand> {
+  return _commands
+}
+
+/** Register a command in the local registry */
+export function registerCommand(name: string, command: SlashCommand): void {
+  _commands.set(name, command)
+}
 
 // Commands that execute locally in the UI (no agent turn needed)
 const BUILT_IN_NAMES = new Set([

@@ -83,10 +83,9 @@ export interface AgentSignals {
 // Refs
 // ============================================================================
 
-import type { AgentExecutor } from '@ava/core-v2/agent'
-
 /** Mutable refs for abort controller and executor instance */
 export interface AgentRefs {
   abortRef: { current: AbortController | null }
-  executorRef: { current: AgentExecutor | null }
+  /** @deprecated Executor is now in the Rust backend */
+  executorRef: { current: unknown | null }
 }

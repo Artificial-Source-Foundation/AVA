@@ -1,6 +1,6 @@
 use crate::app::{AppState, ModalType, ViewMode};
 use crate::state::agent::{AgentActivity, AgentMode};
-use crate::state::messages::{spinner_phase, SPINNER_CHAR};
+use crate::state::messages::spinner_frame;
 use crate::state::voice::VoicePhase;
 use crate::widgets::safe_render::{clamp_line, to_static_line};
 use ratatui::layout::Rect;
@@ -276,17 +276,11 @@ pub fn render_context_bar(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             )
         };
 
-        // Fixed-width breathing dot: same char, cycling brightness
-        let spinner_colors = [
-            state.theme.text_dimmed,
-            state.theme.text_muted,
-            state.theme.accent,
-            state.theme.text_muted,
-        ];
-        let spinner_color = spinner_colors[spinner_phase(spinner_tick)];
+        // Equalizer bars: 3 chars wide + 1 space = 4 chars total, fixed width
+        let frame = spinner_frame(spinner_tick);
         left_spans.push(Span::styled(
-            format!("{SPINNER_CHAR}  "),
-            Style::default().fg(spinner_color),
+            format!("{frame} "),
+            Style::default().fg(state.theme.accent),
         ));
         let activity_style = match state.agent.activity {
             AgentActivity::ExecutingTool(_) => style,

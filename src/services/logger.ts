@@ -6,13 +6,26 @@
  * Daily files: ava-YYYY-MM-DD.log with 7-day retention.
  */
 
-import {
-  type LogEntry as CoreLogEntry,
-  type LogLevel as CoreLogLevel,
-  configureLogger,
-  formatLogEntry as formatCoreLogEntry,
-} from '@ava/core-v2/logger'
 import { invoke } from '@tauri-apps/api/core'
+
+/** Stub types replacing @ava/core-v2/logger */
+type CoreLogLevel = 'debug' | 'info' | 'warn' | 'error'
+interface CoreLogEntry {
+  level: CoreLogLevel
+  source: string
+  message: string
+  timestamp?: string
+  fields?: Record<string, unknown>
+}
+
+/** No-op logger configuration (core-v2 logger no longer used) */
+function configureLogger(_opts: { level?: CoreLogLevel; callback?: (entry: CoreLogEntry) => void }): void {
+  // No-op — logging is handled locally
+}
+
+function formatCoreLogEntry(entry: CoreLogEntry): string {
+  return `[${entry.level}] [${entry.source}] ${entry.message}`
+}
 import { appDataDir } from '@tauri-apps/api/path'
 import {
   formatLogEntry,

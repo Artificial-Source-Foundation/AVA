@@ -4,8 +4,8 @@
  * Replaces ContextTracker + Compactor from @ava/core.
  */
 
-import { getContextStrategies } from '@ava/core-v2/extensions'
-import type { MessageContent } from '@ava/core-v2/llm'
+/** Local MessageContent type (replaces @ava/core-v2/llm import) */
+type MessageContent = string | Array<{ type: string; text?: string; [key: string]: unknown }>
 
 /** Extract plain text from MessageContent. */
 function textOf(content: MessageContent): string {
@@ -14,6 +14,11 @@ function textOf(content: MessageContent): string {
     .filter((b) => b.type === 'text')
     .map((b) => (b as { text: string }).text)
     .join('\n')
+}
+
+/** Stub for getContextStrategies (replaces @ava/core-v2/extensions import) */
+function getContextStrategies(): Map<string, { compact: (messages: Array<{ role: string; content: string }>, target: number) => Array<{ role: string; content: MessageContent }> }> {
+  return new Map()
 }
 
 export interface ContextStats {

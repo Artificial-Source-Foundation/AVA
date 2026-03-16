@@ -2,32 +2,22 @@
  * useAgent Hook — Unified Agent + Chat (Orchestrator)
  *
  * Single hook that drives ALL agent interactions in the desktop app.
- * Delegates to extracted modules:
- *   - tool-execution.ts: diff capture middleware, file path helpers, constants
- *   - streaming.ts: AgentExecutor creation, event routing, flush timers
- *   - turn-manager.ts: run/cancel/steer/retry/edit/regenerate/undo lifecycle
- *
- * Replaces the old split between useAgent (agent mode) and useChat (chat mode).
- * useChat.ts is now a thin backward-compat wrapper over this hook.
+ * Delegates to the Rust backend via useRustAgent() for all execution.
+ * The TypeScript layer only manages UI state (approval bridge, plan mode, queuing).
  */
 
-import type { AgentEvent, AgentExecutor } from '@ava/core-v2/agent'
 import { batch, createSignal } from 'solid-js'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
 import {
   pendingApproval as pendingApprovalSignal,
   resolveApproval as resolveApprovalBridge,
 } from '../services/tool-approval-bridge'
-import { useProject } from '../stores/project'
-import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
-import { useTeam } from '../stores/team'
 import type { ToolCall } from '../types'
 import type { StreamError } from '../types/llm'
 import type { AgentState, ApprovalRequest, ToolActivity } from './agent'
-import { createAgentEventHandler, createTeamBridge } from './agent'
-import { createTurnManager } from './agent/turn-manager'
 import type { QueuedMessage } from './chat/types'
+import { useRustAgent } from './use-rust-agent'
 
 // Re-export types so existing consumers continue working
 export type { AgentState, ApprovalRequest, ToolActivity }
@@ -57,8 +47,10 @@ export function _resetAgentSingleton(): void {
 // ============================================================================
 
 function createAgentStore() {
-  // ── Agent signals ─────────────────────────────────────────────────────
-  const [isRunning, setIsRunning] = createSignal(false)
+  const rustAgent = useRustAgent()
+  const settingsRef = useSettings()
+
+  // ── Frontend-only signals ───────────────────────────────────────────
   const [isPlanMode, setIsPlanMode] = createSignal(false)
   const [currentTurn, setCurrentTurn] = createSignal(0)
   const [tokensUsed, setTokensUsed] = createSignal(0)
@@ -66,120 +58,67 @@ function createAgentStore() {
   const [toolActivity, setToolActivity] = createSignal<ToolActivity[]>([])
   const [pendingApproval, setPendingApproval] = createSignal<ApprovalRequest | null>(null)
   const [doomLoopDetected, setDoomLoopDetected] = createSignal(false)
-  const [lastError, setLastError] = createSignal<string | null>(null)
   const [currentAgentId, setCurrentAgentId] = createSignal<string | null>(null)
-  const [eventTimeline, setEventTimeline] = createSignal<AgentEvent[]>([])
-
-  // ── Chat signals (absorbed from useChat) ──────────────────────────────
-  const [activeToolCalls, setActiveToolCalls] = createSignal<ToolCall[]>([])
   const [streamingTokenEstimate, setStreamingTokenEstimate] = createSignal(0)
   const [streamingStartedAt, setStreamingStartedAt] = createSignal<number | null>(null)
-  const [error, setError] = createSignal<StreamError | null>(null)
   const [messageQueue, setMessageQueue] = createSignal<QueuedMessage[]>([])
-  // Live streaming content — updated on every token WITHOUT touching the session store.
-  const [streamingContent, setStreamingContent] = createSignal('')
 
-  // ── External stores / refs ────────────────────────────────────────────
-  const abortRef = { current: null as AbortController | null }
-  const executorRef = { current: null as AgentExecutor | null }
-  const sessionStore = useSession()
-  const settingsRef = useSettings()
-  const teamStore = useTeam()
-  const { currentProject } = useProject()
-
-  // ── Team bridge + event handler ───────────────────────────────────────
-  const isTeamMode = () => {
-    const gen = settingsRef.settings().generation
-    return gen.delegationEnabled === true
+  // Map Rust agent error signal to StreamError shape
+  const error = (): StreamError | null => {
+    const msg = rustAgent.error()
+    return msg ? { type: 'unknown', message: msg } : null
   }
-  const {
-    bridgeToTeam,
-    stopAgent,
-    sendMessage: sendTeamMessage,
-  } = createTeamBridge(teamStore, isTeamMode)
-  const baseAgentEventHandler = createAgentEventHandler(
-    {
-      setCurrentAgentId,
-      setCurrentTurn,
-      setTokensUsed,
-      setToolActivity,
-      setDoomLoopDetected,
-      setLastError,
-      setIsRunning,
-      setCurrentThought,
-    },
-    bridgeToTeam
-  )
 
-  const handleAgentEvent = (event: AgentEvent): void => {
-    if (event.type === 'agent:start') {
-      setEventTimeline([event])
-    } else {
-      setEventTimeline((prev) => {
-        const next = [...prev, event]
-        return next.length > 2000 ? next.slice(-2000) : next
-      })
+  // ====================================================================
+  // Actions
+  // ====================================================================
+
+  async function run(goal: string): Promise<unknown> {
+    if (rustAgent.isRunning()) {
+      setMessageQueue((prev) => [...prev, { content: goal }])
+      return null
     }
-    baseAgentEventHandler(event)
+
+    batch(() => {
+      setCurrentThought('')
+      setDoomLoopDetected(false)
+      setToolActivity([])
+      setStreamingTokenEstimate(0)
+      setStreamingStartedAt(Date.now())
+    })
+
+    try {
+      const result = await rustAgent.run(goal)
+      return result
+    } finally {
+      batch(() => {
+        setStreamingStartedAt(null)
+      })
+      // Process queue
+      const queue = messageQueue()
+      if (queue.length > 0) {
+        const next = queue[0]!
+        setMessageQueue((prev) => prev.slice(1))
+        void run(next.content)
+      }
+    }
   }
 
-  // ── Assemble signals, refs, and bridges for extracted modules ─────────
-  const signals = {
-    isRunning,
-    setIsRunning,
-    isPlanMode,
-    setIsPlanMode,
-    currentTurn,
-    setCurrentTurn,
-    tokensUsed,
-    setTokensUsed,
-    currentThought,
-    setCurrentThought,
-    toolActivity,
-    setToolActivity,
-    pendingApproval,
-    setPendingApproval,
-    doomLoopDetected,
-    setDoomLoopDetected,
-    lastError,
-    setLastError,
-    currentAgentId,
-    eventTimeline,
-    setCurrentAgentId,
-    activeToolCalls,
-    setActiveToolCalls,
-    streamingContent,
-    setStreamingContent,
-    streamingTokenEstimate,
-    setStreamingTokenEstimate,
-    streamingStartedAt,
-    setStreamingStartedAt,
-    error,
-    setError,
-    messageQueue,
-    setMessageQueue,
+  function cancel(): void {
+    void rustAgent.cancel()
+    batch(() => {
+      setMessageQueue([])
+      setStreamingStartedAt(null)
+    })
   }
 
-  const refs = { abortRef, executorRef }
-
-  const configDeps = {
-    currentProjectDir: () => currentProject()?.directory,
-    settingsRef,
+  function steer(content: string): void {
+    // In Rust backend mode, steer by cancelling and re-running with new content
+    void rustAgent.cancel()
+    batch(() => {
+      setMessageQueue([{ content }])
+    })
   }
-
-  // ── Turn manager (run, cancel, steer, retry, etc.) ────────────────────
-  const turnManager = createTurnManager({
-    signals,
-    refs,
-    session: sessionStore,
-    handleAgentEvent,
-    configDeps,
-    teamStore,
-  })
-
-  // ====================================================================
-  // Local Helpers (approval, plan mode, error, state)
-  // ====================================================================
 
   function togglePlanMode(): void {
     setIsPlanMode((prev) => !prev)
@@ -203,14 +142,13 @@ function createAgentStore() {
 
   function clearError(): void {
     batch(() => {
-      setLastError(null)
-      setError(null)
+      rustAgent.clearError()
     })
   }
 
   function getState(): AgentState {
     return {
-      isRunning: isRunning(),
+      isRunning: rustAgent.isRunning(),
       isPlanMode: isPlanMode(),
       currentTurn: currentTurn(),
       tokensUsed: tokensUsed(),
@@ -218,8 +156,31 @@ function createAgentStore() {
       toolActivity: toolActivity(),
       pendingApproval: pendingApprovalSignal() as ApprovalRequest | null,
       doomLoopDetected: doomLoopDetected(),
-      lastError: lastError(),
+      lastError: rustAgent.error(),
     }
+  }
+
+  function removeFromQueue(index: number): void {
+    setMessageQueue((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  function clearQueue(): void {
+    setMessageQueue([])
+  }
+
+  // Stub for message actions — these now require Rust backend support
+  async function retryMessage(_assistantMessageId: string): Promise<void> {
+    // TODO: implement via Rust IPC
+  }
+  async function editAndResend(_messageId: string, _newContent: string): Promise<void> {
+    // TODO: implement via Rust IPC
+  }
+  async function regenerateResponse(_assistantMessageId: string): Promise<void> {
+    // TODO: implement via Rust IPC
+  }
+  async function undoLastEdit(): Promise<{ success: boolean; message: string }> {
+    // TODO: implement via Rust IPC
+    return { success: false, message: 'Not yet implemented via Rust backend' }
   }
 
   // ====================================================================
@@ -227,8 +188,8 @@ function createAgentStore() {
   // ====================================================================
 
   return {
-    // ── Agent signals ─────────────────────────────────────────────────
-    isRunning,
+    // ── Agent signals (mapped from Rust agent) ───────────────────────
+    isRunning: rustAgent.isRunning,
     isPlanMode,
     currentTurn,
     tokensUsed,
@@ -236,40 +197,40 @@ function createAgentStore() {
     toolActivity,
     pendingApproval: pendingApprovalSignal as () => ApprovalRequest | null,
     doomLoopDetected,
-    lastError,
+    lastError: rustAgent.error,
     currentAgentId,
-    eventTimeline,
+    eventTimeline: rustAgent.events,
 
-    // ── Chat signals (from absorbed useChat) ──────────────────────────
-    isStreaming: isRunning, // alias for backward compat
-    activeToolCalls,
-    streamingContent,
+    // ── Chat signals (mapped from Rust agent) ────────────────────────
+    isStreaming: rustAgent.isRunning, // alias for backward compat
+    activeToolCalls: rustAgent.activeToolCalls,
+    streamingContent: rustAgent.streamingContent,
     streamingTokenEstimate,
     streamingStartedAt,
     error,
     messageQueue,
     queuedCount: () => messageQueue().length,
 
-    // ── Actions (delegated to turn manager) ──────────────────────────
-    run: turnManager.run,
-    cancel: turnManager.cancel,
-    steer: turnManager.steer,
-    retryMessage: turnManager.retryMessage,
-    editAndResend: turnManager.editAndResend,
-    regenerateResponse: turnManager.regenerateResponse,
-    undoLastEdit: turnManager.undoLastEdit,
+    // ── Actions ──────────────────────────────────────────────────────
+    run,
+    cancel,
+    steer,
+    retryMessage,
+    editAndResend,
+    regenerateResponse,
+    undoLastEdit,
 
-    // ── Queue (delegated to turn manager) ─────────────────────────────
-    removeFromQueue: turnManager.removeFromQueue,
-    clearQueue: turnManager.clearQueue,
+    // ── Queue ────────────────────────────────────────────────────────
+    removeFromQueue,
+    clearQueue,
 
-    // ── Agent-specific ────────────────────────────────────────────────
+    // ── Agent-specific ──────────────────────────────────────────────
     togglePlanMode,
     checkAutoApproval,
     resolveApproval,
     clearError,
     getState,
-    stopAgent,
-    sendTeamMessage,
+    stopAgent: (_memberId: string) => false,
+    sendTeamMessage: (_memberId: string, _message: string) => {},
   }
 }

@@ -73,24 +73,17 @@ pub struct UiMessage {
     pub tool_group_expanded: bool,
 }
 
-/// Fixed-width spinner character — always exactly 1 column, no jitter.
-/// Brightness is varied via color cycling rather than character changes.
-pub const SPINNER_CHAR: &str = "●";
+/// Equalizer-bar spinner frames — three bars that rise and fall like an audio
+/// visualizer.  Each frame is exactly 3 characters wide (no jitter).
+pub const SPINNER_FRAMES: &[&str] = &["▁▃▇", "▃▇▅", "▇▅▂", "▅▂▃", "▂▃▇", "▃▇▃", "▇▃▁", "▃▁▃"];
 
-/// Divisor to slow spinner animation. At 16ms ticks, each frame lasts ~160ms
-/// giving a smooth ~640ms full cycle — a calm breathing pulse.
-const SPINNER_FRAME_DIVISOR: usize = 10;
+/// Divisor to slow spinner animation. At 16ms ticks, each frame lasts ~128ms
+/// giving a smooth ~1s full cycle.
+const SPINNER_FRAME_DIVISOR: usize = 8;
 
-/// Returns the spinner phase index (0..3) for color cycling.
-/// The tick is divided down so the animation feels calm rather than frantic.
-pub fn spinner_phase(tick: usize) -> usize {
-    (tick / SPINNER_FRAME_DIVISOR) % 4
-}
-
-/// Returns the current spinner frame character (always fixed-width).
-/// Kept for backward compatibility — prefer `spinner_phase` + color cycling.
-pub fn spinner_frame(_tick: usize) -> &'static str {
-    SPINNER_CHAR
+/// Returns the current spinner frame string (always exactly 3 columns wide).
+pub fn spinner_frame(tick: usize) -> &'static str {
+    SPINNER_FRAMES[(tick / SPINNER_FRAME_DIVISOR) % SPINNER_FRAMES.len()]
 }
 
 /// Left-border character — full block for visual weight (design: 3px bar).

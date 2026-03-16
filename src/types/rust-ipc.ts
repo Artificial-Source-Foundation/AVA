@@ -95,6 +95,25 @@ export interface ErrorEvent {
   message: string
 }
 
+export interface ThinkingEvent {
+  type: 'thinking'
+  content: string
+}
+
+export interface TokenUsageEvent {
+  type: 'token_usage'
+  inputTokens: number
+  outputTokens: number
+  costUsd: number
+}
+
+export interface BudgetWarningEvent {
+  type: 'budget_warning'
+  thresholdPercent: number
+  currentCostUsd: number
+  maxBudgetUsd: number
+}
+
 export type AgentEvent =
   | TokenEvent
   | ToolCallEvent
@@ -102,6 +121,9 @@ export type AgentEvent =
   | ProgressEvent
   | CompleteEvent
   | ErrorEvent
+  | ThinkingEvent
+  | TokenUsageEvent
+  | BudgetWarningEvent
 
 export interface ComputeGrepMatch {
   file: string
@@ -204,3 +226,70 @@ export interface WasmExtensionRegistration {
 export type ExtensionRegistrationResult =
   | ({ kind: 'native' } & NativeExtensionRegistration)
   | ({ kind: 'wasm' } & WasmExtensionRegistration)
+
+// New types for the Rust backend bridge
+
+export interface SubmitGoalArgs {
+  goal: string
+  maxTurns?: number
+  provider?: string
+  model?: string
+}
+
+export interface SubmitGoalResult {
+  success: boolean
+  turns: number
+  sessionId: string
+}
+
+export interface AgentStatus {
+  running: boolean
+  provider: string
+  model: string
+}
+
+export interface SessionSummary {
+  id: string
+  title: string
+  messageCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ModelInfo {
+  id: string
+  provider: string
+  name: string
+  toolCall: boolean
+  vision: boolean
+  contextWindow: number
+  costInput: number
+  costOutput: number
+}
+
+export interface CurrentModel {
+  provider: string
+  model: string
+}
+
+export interface ProviderInfo {
+  name: string
+}
+
+export interface AgentToolInfo {
+  name: string
+  description: string
+  source: string
+}
+
+export interface McpServerInfo {
+  name: string
+  toolCount: number
+  scope: string
+  enabled: boolean
+}
+
+export interface McpReloadResult {
+  serverCount: number
+  toolCount: number
+}

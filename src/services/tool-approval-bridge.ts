@@ -6,12 +6,25 @@
  * approves or denies the call via a SolidJS signal.
  */
 
-import type {
-  ToolMiddleware,
-  ToolMiddlewareContext,
-  ToolMiddlewareResult,
-} from '@ava/core-v2/extensions'
 import { createSignal } from 'solid-js'
+
+/** Minimal middleware types (replaces @ava/core-v2/extensions import) */
+interface ToolMiddlewareContext {
+  toolName: string
+  args: Record<string, unknown>
+}
+
+interface ToolMiddlewareResult {
+  blocked?: boolean
+  reason?: string
+  result?: { success: boolean; output: string; error?: string }
+}
+
+interface ToolMiddleware {
+  name: string
+  priority: number
+  before(ctx: ToolMiddlewareContext): Promise<ToolMiddlewareResult | undefined>
+}
 import { checkAutoApproval } from '../lib/tool-approval'
 
 // ─── Types ──────────────────────────────────────────────────────────────────

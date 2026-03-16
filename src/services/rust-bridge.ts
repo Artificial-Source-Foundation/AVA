@@ -1,19 +1,26 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
+  AgentStatus,
+  AgentToolInfo,
   BrowserToolResult,
   ComputeGrepResult,
   CopilotDeviceCodeResponse,
   CopilotDevicePollResponse,
+  CurrentModel,
   ExtensionRegistrationResult,
   FuzzyReplaceResult,
   GitToolResult,
   JsonValue,
+  McpReloadResult,
+  McpServerInfo,
+  ModelInfo,
   NativeExtensionRegistration,
   OAuthCallback,
   PermissionResult,
   PermissionRule,
   PluginStateEntry,
   PluginStateMap,
+  ProviderInfo,
   PtySpawnOptions,
   ReflectResult,
   ReflectToolResult,
@@ -24,6 +31,9 @@ import type {
   RustSession,
   RustToolInfo,
   RustValidationResult,
+  SessionSummary,
+  SubmitGoalArgs,
+  SubmitGoalResult,
   ToolResult,
   WasmExtensionRegistration,
 } from '../types/rust-ipc'
@@ -96,8 +106,14 @@ export const rustTools = {
 }
 
 export const rustAgent = {
-  run: (goal: string): Promise<RustSession> => invokeCommand('agent_run', { goal }),
-  stream: (goal: string): Promise<void> => invokeCommand('agent_stream', { goal }),
+  run: (goal: string): Promise<SubmitGoalResult> =>
+    invokeCommand('submit_goal', { args: { goal } }),
+  stream: (goal: string): Promise<SubmitGoalResult> =>
+    invokeCommand('submit_goal', { args: { goal } }),
+  cancel: (): Promise<void> =>
+    invokeCommand('cancel_agent'),
+  status: (): Promise<AgentStatus> =>
+    invokeCommand('get_agent_status'),
 }
 
 export const rustCompute = {
@@ -191,4 +207,43 @@ export const rustExtensions = {
     invokeCommand('extensions_register_native', { ...input }),
   registerWasm: (input: WasmExtensionRegistration): Promise<ExtensionRegistrationResult> =>
     invokeCommand('extensions_register_wasm', { ...input }),
+}
+
+export const rustBackend = {
+  submitGoal: (args: SubmitGoalArgs): Promise<SubmitGoalResult> =>
+    invokeCommand('submit_goal', { args }),
+  cancelAgent: (): Promise<void> =>
+    invokeCommand('cancel_agent'),
+  getAgentStatus: (): Promise<AgentStatus> =>
+    invokeCommand('get_agent_status'),
+
+  listSessions: (limit?: number): Promise<SessionSummary[]> =>
+    invokeCommand('list_sessions', { limit }),
+  loadSession: (id: string): Promise<JsonValue> =>
+    invokeCommand('load_session', { id }),
+  createSession: (): Promise<SessionSummary> =>
+    invokeCommand('create_session'),
+  deleteSession: (id: string): Promise<void> =>
+    invokeCommand('delete_session', { id }),
+
+  listModels: (): Promise<ModelInfo[]> =>
+    invokeCommand('list_models'),
+  getCurrentModel: (): Promise<CurrentModel> =>
+    invokeCommand('get_current_model'),
+  switchModel: (provider: string, model: string): Promise<void> =>
+    invokeCommand('switch_model', { provider, model }),
+
+  listProviders: (): Promise<ProviderInfo[]> =>
+    invokeCommand('list_providers'),
+
+  getConfig: (): Promise<JsonValue> =>
+    invokeCommand('get_config'),
+
+  listAgentTools: (): Promise<AgentToolInfo[]> =>
+    invokeCommand('list_agent_tools'),
+
+  listMcpServers: (): Promise<McpServerInfo[]> =>
+    invokeCommand('list_mcp_servers'),
+  reloadMcpServers: (): Promise<McpReloadResult> =>
+    invokeCommand('reload_mcp_servers'),
 }

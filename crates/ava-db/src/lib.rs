@@ -3,8 +3,9 @@
 //! Provides SQLite database operations for sessions, messages, and other persistent data.
 
 use ava_types::Result;
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions};
 use std::path::Path;
+use std::str::FromStr;
 
 pub mod models;
 
@@ -21,9 +22,15 @@ pub struct Database {
 impl Database {
     /// Create a new database connection pool
     pub async fn new(database_url: &str) -> Result<Self> {
+        let options = SqliteConnectOptions::from_str(database_url)
+            .map_err(|e| ava_types::AvaError::DatabaseError(e.to_string()))?
+            .journal_mode(SqliteJournalMode::Wal)
+            .foreign_keys(true)
+            .busy_timeout(std::time::Duration::from_millis(5000));
+
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(database_url)
+            .connect_with(options)
             .await
             .map_err(|e| ava_types::AvaError::DatabaseError(e.to_string()))?;
 

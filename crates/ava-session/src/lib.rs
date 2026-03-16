@@ -15,7 +15,8 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::helpers::{
-    db_error, parse_datetime, parse_uuid, role_to_str, str_to_role, to_conversion_error, SCHEMA_SQL,
+    db_error, parse_datetime, parse_uuid, role_to_str, str_to_role, to_conversion_error,
+    MIGRATION_SQL, SCHEMA_SQL,
 };
 
 pub struct SessionManager {
@@ -235,14 +236,16 @@ impl SessionManager {
     }
 
     pub fn delete(&self, id: Uuid) -> Result<()> {
-        let conn = self.open_conn()?;
-        conn.execute(
+        let mut conn = self.open_conn()?;
+        let tx = conn.transaction().map_err(db_error)?;
+
+        tx.execute(
             "DELETE FROM messages WHERE session_id = ?1",
             params![id.to_string()],
         )
         .map_err(db_error)?;
 
-        let deleted = conn
+        let deleted = tx
             .execute(
                 "DELETE FROM sessions WHERE id = ?1",
                 params![id.to_string()],
@@ -253,7 +256,7 @@ impl SessionManager {
             return Err(AvaError::NotFound(format!("session {id} not found")));
         }
 
-        Ok(())
+        tx.commit().map_err(db_error)
     }
 
     fn get_with_conn(&self, conn: &Connection, id: Uuid) -> Result<Option<Session>> {
@@ -334,6 +337,11 @@ impl SessionManager {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(db_error)?;
 
+        let token_usage = token_usage_json
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<ava_types::TokenUsage>(json).ok())
+            .unwrap_or_default();
+
         Ok(Some(Session {
             id: parse_uuid(&session_id)?,
             created_at: parse_datetime(&created_at)?,
@@ -341,17 +349,31 @@ impl SessionManager {
             messages,
             metadata: serde_json::from_str(&metadata)
                 .map_err(|error| AvaError::SerializationError(error.to_string()))?,
-            token_usage: ava_types::TokenUsage::default(),
+            token_usage,
         }))
     }
 
     fn init_schema(&self) -> Result<()> {
         let conn = self.open_conn()?;
-        conn.execute_batch(SCHEMA_SQL).map_err(db_error)
+        conn.execute_batch(SCHEMA_SQL).map_err(db_error)?;
+
+        // Run migrations for existing databases (idempotent — ignores "duplicate column" errors)
+        for sql in MIGRATION_SQL {
+            let _ = conn.execute_batch(sql);
+        }
+
+        Ok(())
     }
 
     fn open_conn(&self) -> Result<Connection> {
-        Connection::open(&self.db_path).map_err(db_error)
+        let conn = Connection::open(&self.db_path).map_err(db_error)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             PRAGMA foreign_keys = ON;
+             PRAGMA busy_timeout = 5000;",
+        )
+        .map_err(db_error)?;
+        Ok(conn)
     }
 }
 

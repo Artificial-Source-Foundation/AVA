@@ -45,6 +45,14 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
     INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
 END;";
 
+/// Migration SQL for adding new columns to existing databases.
+/// Each statement is idempotent — ALTER TABLE will fail silently if the column already exists.
+pub const MIGRATION_SQL: &[&str] = &[
+    "ALTER TABLE messages ADD COLUMN tool_call_id TEXT",
+    "ALTER TABLE messages ADD COLUMN images TEXT NOT NULL DEFAULT '[]'",
+    "ALTER TABLE sessions ADD COLUMN token_usage TEXT NOT NULL DEFAULT '{}'",
+];
+
 pub fn role_to_str(role: &Role) -> &'static str {
     match role {
         Role::System => "system",

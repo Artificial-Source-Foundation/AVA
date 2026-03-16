@@ -13,6 +13,12 @@ pub struct PersistentRules {
     /// Specific bash commands that are always allowed (e.g., "cargo test").
     #[serde(default)]
     pub allowed_commands: HashSet<String>,
+    /// Tools that are always blocked.
+    #[serde(default)]
+    pub blocked_tools: HashSet<String>,
+    /// Specific bash commands that are always blocked.
+    #[serde(default)]
+    pub blocked_commands: HashSet<String>,
 }
 
 impl PersistentRules {
@@ -24,6 +30,20 @@ impl PersistentRules {
             .ok()
             .and_then(|s| toml::from_str(&s).ok())
             .unwrap_or_default()
+    }
+
+    /// Load project-local rules from `.ava/permissions.toml`.
+    ///
+    /// SEC-4: Project-local rules can only *restrict* (add blocked tools/commands),
+    /// never *expand* permissions (allow tools/commands). This prevents a malicious
+    /// repository from shipping a `.ava/permissions.toml` that auto-approves
+    /// dangerous tools.
+    pub fn load_project(workspace_root: &Path) -> Self {
+        let mut rules = Self::load(workspace_root);
+        // Project-local rules can only restrict, never expand permissions
+        rules.allowed_tools.clear();
+        rules.allowed_commands.clear();
+        rules
     }
 
     /// Save persistent rules to `.ava/permissions.toml` under the given workspace root.
@@ -46,14 +66,30 @@ impl PersistentRules {
         self.allowed_commands.insert(command.to_string());
     }
 
-    /// Check whether a tool is persistently allowed.
+    /// Check whether a tool is persistently allowed (and not blocked).
     pub fn is_tool_allowed(&self, tool: &str) -> bool {
-        self.allowed_tools.contains(tool)
+        !self.blocked_tools.contains(tool) && self.allowed_tools.contains(tool)
     }
 
-    /// Check whether a bash command matches any persistently allowed command prefix.
+    /// Check whether a tool is persistently blocked.
+    pub fn is_tool_blocked(&self, tool: &str) -> bool {
+        self.blocked_tools.contains(tool)
+    }
+
+    /// Check whether a bash command matches any persistently allowed command prefix
+    /// (and is not blocked).
     pub fn is_command_allowed(&self, command: &str) -> bool {
+        if self.is_command_blocked(command) {
+            return false;
+        }
         self.allowed_commands
+            .iter()
+            .any(|c| command.starts_with(c.as_str()))
+    }
+
+    /// Check whether a bash command matches any persistently blocked command prefix.
+    pub fn is_command_blocked(&self, command: &str) -> bool {
+        self.blocked_commands
             .iter()
             .any(|c| command.starts_with(c.as_str()))
     }
@@ -86,6 +122,48 @@ mod tests {
         assert!(rules.is_command_allowed("cargo test --workspace"));
         assert!(rules.is_command_allowed("cargo test"));
         assert!(!rules.is_command_allowed("cargo build"));
+    }
+
+    #[test]
+    fn blocked_tool_overrides_allowed() {
+        let mut rules = PersistentRules::default();
+        rules.allow_tool("bash");
+        rules.blocked_tools.insert("bash".to_string());
+        // Blocked takes precedence over allowed
+        assert!(!rules.is_tool_allowed("bash"));
+        assert!(rules.is_tool_blocked("bash"));
+    }
+
+    #[test]
+    fn blocked_command_overrides_allowed() {
+        let mut rules = PersistentRules::default();
+        rules.allow_command("rm");
+        rules.blocked_commands.insert("rm".to_string());
+        assert!(!rules.is_command_allowed("rm -rf /"));
+        assert!(rules.is_command_blocked("rm -rf /"));
+    }
+
+    #[test]
+    fn load_project_clears_allowlists() {
+        let dir = std::env::temp_dir().join("ava_persistent_project_test");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let mut rules = PersistentRules::default();
+        rules.allow_tool("bash");
+        rules.allow_command("rm -rf /");
+        rules.blocked_tools.insert("write".to_string());
+        rules.blocked_commands.insert("sudo".to_string());
+        rules.save(&dir).expect("save should succeed");
+
+        let loaded = PersistentRules::load_project(&dir);
+        // Allowlists cleared for project-local rules
+        assert!(loaded.allowed_tools.is_empty());
+        assert!(loaded.allowed_commands.is_empty());
+        // Blocklists preserved
+        assert!(loaded.is_tool_blocked("write"));
+        assert!(loaded.is_command_blocked("sudo rm"));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -122,6 +122,17 @@ impl ToolRegistry {
         T: Tool + 'static,
     {
         let name = tool.name().to_string();
+
+        // SEC-3: Prevent external tools from shadowing built-in tools
+        if let Some(existing_source) = self.sources.get(&name) {
+            if *existing_source == ToolSource::BuiltIn && source != ToolSource::BuiltIn {
+                tracing::warn!(
+                    "Rejecting tool '{name}' from {source} — would shadow built-in tool"
+                );
+                return;
+            }
+        }
+
         let tier = match &source {
             ToolSource::BuiltIn => ToolTier::Default,
             ToolSource::MCP { .. } | ToolSource::Custom { .. } => ToolTier::Plugin,

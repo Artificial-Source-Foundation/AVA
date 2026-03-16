@@ -78,9 +78,11 @@ impl Shell for LocalShell {
             cmd.env(key, value);
         }
 
-        // Apply timeout if specified
+        // Spawn the child so we retain a handle for killing on timeout
+        let mut child = cmd.spawn().map_err(|e| AvaError::IoError(e.to_string()))?;
+
         if let Some(timeout) = options.timeout {
-            match tokio::time::timeout(timeout, cmd.output()).await {
+            match tokio::time::timeout(timeout, child.wait_with_output()).await {
                 Ok(Ok(output)) => Ok(CommandOutput {
                     stdout: String::from_utf8_lossy(&output.stdout).to_string(),
                     stderr: String::from_utf8_lossy(&output.stderr).to_string(),
@@ -88,13 +90,18 @@ impl Shell for LocalShell {
                     duration: start.elapsed(),
                 }),
                 Ok(Err(e)) => Err(AvaError::IoError(e.to_string())),
-                Err(_) => Err(AvaError::TimeoutError(format!(
-                    "Command timed out after {timeout:?}"
-                ))),
+                Err(_) => {
+                    // Kill the child process to avoid orphans
+                    child.kill().await.ok();
+                    child.wait().await.ok(); // Reap to avoid zombies
+                    Err(AvaError::TimeoutError(format!(
+                        "Command timed out after {timeout:?}"
+                    )))
+                }
             }
         } else {
-            let output = cmd
-                .output()
+            let output = child
+                .wait_with_output()
                 .await
                 .map_err(|e| AvaError::IoError(e.to_string()))?;
             Ok(CommandOutput {

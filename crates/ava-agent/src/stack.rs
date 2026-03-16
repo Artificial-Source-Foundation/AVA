@@ -364,7 +364,7 @@ impl AgentStack {
             auto_approve: config.yolo,
             session_approved: std::collections::HashSet::new(),
             safety_profiles: core_tool_profiles(),
-            persistent_rules: ava_permissions::persistent::PersistentRules::load(&effective_cwd),
+            persistent_rules: ava_permissions::persistent::PersistentRules::load_project(&effective_cwd),
         }));
         let permission_inspector: Arc<dyn PermissionInspector> = Arc::new(DefaultInspector::new(
             PermissionSystem::load(effective_cwd.clone(), vec![]),

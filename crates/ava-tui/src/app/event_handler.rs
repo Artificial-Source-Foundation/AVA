@@ -922,6 +922,24 @@ fn resolve_attachments(attachments: &[ava_types::ContextAttachment]) -> String {
                 } else {
                     cwd.join(path)
                 };
+                // Validate the resolved path is within the workspace to prevent
+                // reading arbitrary files outside the project via @file mentions.
+                match std::fs::canonicalize(&full_path) {
+                    Ok(canonical) => {
+                        if !canonical.starts_with(&cwd) {
+                            tracing::warn!("Attachment path outside workspace: {}", path.display());
+                            blocks.push(format!(
+                                "<context source=\"{}\" error=\"path is outside the workspace boundary\" />",
+                                path.display()
+                            ));
+                            continue;
+                        }
+                    }
+                    Err(_) => {
+                        // If we can't canonicalize (e.g. file doesn't exist), fall through
+                        // to the read_to_string which will produce a proper error.
+                    }
+                }
                 match std::fs::read_to_string(&full_path) {
                     Ok(content) => {
                         // Truncate very large files

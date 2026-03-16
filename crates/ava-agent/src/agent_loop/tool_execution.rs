@@ -87,16 +87,20 @@ impl AgentLoop {
         };
         truncate_tool_result(&mut result);
 
-        // Append contextual AGENTS.md instructions for read tool results
+        // Append contextual AGENTS.md instructions for read tool results.
+        // Only inject if the project is trusted — untrusted projects must not
+        // have their AGENTS.md injected as contextual instructions.
         if tool_call.name == "read" && !result.is_error {
             if let Some(path_str) = tool_call.arguments.get("path").and_then(|v| v.as_str()) {
                 let file_path = PathBuf::from(path_str);
                 let project_root = std::env::current_dir().unwrap_or_default();
-                if let Some(instructions) =
-                    contextual_instructions_for_file(&file_path, &project_root)
-                {
-                    result.content.push_str("\n\n---\n");
-                    result.content.push_str(&instructions);
+                if ava_config::is_project_trusted(&project_root) {
+                    if let Some(instructions) =
+                        contextual_instructions_for_file(&file_path, &project_root)
+                    {
+                        result.content.push_str("\n\n---\n");
+                        result.content.push_str(&instructions);
+                    }
                 }
             }
         }

@@ -6,6 +6,7 @@ use ratatui::widgets::Paragraph;
 use std::time::Instant;
 
 use crate::app::AppState;
+use crate::widgets::safe_render::{clamp_line, truncate_str};
 use crate::widgets::select_list::{
     render_select_list, ItemStatus, KeybindHint, SelectItem, SelectListConfig, SelectListState,
 };
@@ -183,6 +184,7 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
             provider_id,
             selected,
         } => {
+            let aw = area.width as usize;
             let info = ava_auth::provider_info(provider_id);
             let display = info
                 .map(|i| i.name.to_string())
@@ -192,21 +194,30 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
                 .unwrap_or_else(|| vec![AuthFlow::ApiKey]);
 
             let mut lines = vec![
-                Line::from(vec![
-                    Span::styled(
-                        format!("Connect {display}"),
-                        Style::default()
-                            .fg(state.theme.primary)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("  "),
-                    Span::styled("esc", Style::default().fg(state.theme.text_dimmed)),
-                ]),
+                clamp_line(
+                    Line::from(vec![
+                        Span::styled(
+                            format!("Connect {display}"),
+                            Style::default()
+                                .fg(state.theme.primary)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw("  ".to_string()),
+                        Span::styled(
+                            "esc".to_string(),
+                            Style::default().fg(state.theme.text_dimmed),
+                        ),
+                    ]),
+                    aw,
+                ),
                 Line::from(""),
-                Line::from(Span::styled(
-                    "How do you want to connect?",
-                    Style::default().fg(state.theme.text),
-                )),
+                clamp_line(
+                    Line::from(Span::styled(
+                        "How do you want to connect?".to_string(),
+                        Style::default().fg(state.theme.text),
+                    )),
+                    aw,
+                ),
                 Line::from(""),
             ];
 
@@ -226,17 +237,24 @@ pub fn render_provider_connect(frame: &mut Frame<'_>, area: Rect, state: &mut Ap
                     Style::default().fg(state.theme.text)
                 };
 
-                lines.push(Line::from(vec![
-                    Span::styled(
-                        if is_sel { "> " } else { "  " },
-                        Style::default().fg(state.theme.primary),
-                    ),
-                    Span::styled(label, name_style),
-                    Span::styled(
-                        format!("  {hint}"),
-                        Style::default().fg(state.theme.text_dimmed),
-                    ),
-                ]));
+                lines.push(clamp_line(
+                    Line::from(vec![
+                        Span::styled(
+                            if is_sel {
+                                "> ".to_string()
+                            } else {
+                                "  ".to_string()
+                            },
+                            Style::default().fg(state.theme.primary),
+                        ),
+                        Span::styled(label.to_string(), name_style),
+                        Span::styled(
+                            format!("  {hint}"),
+                            Style::default().fg(state.theme.text_dimmed),
+                        ),
+                    ]),
+                    aw,
+                ));
             }
 
             frame.render_widget(Paragraph::new(lines), area);

@@ -9,6 +9,7 @@ use ratatui::Frame;
 
 use crate::state::theme::Theme;
 use crate::text_utils::display_width;
+use crate::widgets::safe_render::{clamp_line, truncate_str};
 
 /// Status indicator for a select list item.
 #[derive(Debug, Clone)]
@@ -564,12 +565,15 @@ pub fn render_select_list<T: Clone>(
                     }
                     // Section header: uppercase, bold, text_dimmed (#505A6B)
                     let section_upper = section.to_uppercase();
-                    lines.push(Line::from(vec![Span::styled(
-                        format!("  {section_upper}"),
-                        Style::default()
-                            .fg(theme.text_dimmed)
-                            .add_modifier(Modifier::BOLD),
-                    )]));
+                    lines.push(clamp_line(
+                        Line::from(vec![Span::styled(
+                            format!("  {section_upper}"),
+                            Style::default()
+                                .fg(theme.text_dimmed)
+                                .add_modifier(Modifier::BOLD),
+                        )]),
+                        inner_width,
+                    ));
                     last_section = Some(section);
                 }
             }
@@ -678,7 +682,7 @@ pub fn render_select_list<T: Clone>(
 
         // Apply full-width background highlight for selected or hovered items
         if is_selected || is_hovered {
-            let current_len: usize = spans.iter().map(|s| s.content.len()).sum();
+            let current_len: usize = spans.iter().map(|s| display_width(&s.content)).sum();
             if inner_width > current_len {
                 spans.push(Span::styled(
                     " ".repeat(inner_width - current_len),
@@ -687,7 +691,7 @@ pub fn render_select_list<T: Clone>(
             }
         }
 
-        lines.push(Line::from(spans));
+        lines.push(clamp_line(Line::from(spans), inner_width));
     }
 
     // Render scrollable content
@@ -720,8 +724,8 @@ pub fn render_select_list<T: Clone>(
                 Style::default().fg(theme.text_dimmed).bg(theme.bg_surface),
             ));
         }
-        let footer =
-            Paragraph::new(Line::from(footer_spans)).style(Style::default().bg(theme.bg_surface));
+        let footer_line = clamp_line(Line::from(footer_spans), inner_width);
+        let footer = Paragraph::new(footer_line).style(Style::default().bg(theme.bg_surface));
         let footer_text_area = Rect::new(footer_area.x, footer_area.y + 1, footer_area.width, 1);
         frame.render_widget(footer, footer_text_area);
     }

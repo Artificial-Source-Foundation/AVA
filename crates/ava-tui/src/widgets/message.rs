@@ -1,5 +1,6 @@
 use crate::state::messages::{spinner_frame, MessageKind, UiMessage};
 use crate::state::theme::Theme;
+use crate::widgets::safe_render::clamp_line;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
@@ -276,11 +277,15 @@ pub fn render_action_group(
         let summary = tool_activity_summary(&tool_calls);
         let max_summary = width.saturating_sub(2 + 14) as usize; // 2 = "● ", 14 = " [interrupted]"
         let summary = crate::text_utils::truncate_display(&summary, max_summary);
-        let mut lines = vec![Line::from(vec![
-            Span::styled("● ", dim),
-            Span::styled(summary, dim),
-            Span::styled(" [interrupted]", dim),
-        ])];
+        let interrupted_line = clamp_line(
+            Line::from(vec![
+                Span::styled("● ".to_string(), dim),
+                Span::styled(summary, dim),
+                Span::styled(" [interrupted]".to_string(), dim),
+            ]),
+            width as usize,
+        );
+        let mut lines = vec![interrupted_line];
 
         if expanded {
             render_expanded_details(&tool_calls, &tool_results, theme, width, &mut lines);
@@ -373,10 +378,13 @@ fn render_expanded_details(
         ]));
     }
     if tool_calls.len() > 5 {
-        lines.push(Line::from(Span::styled(
-            format!("  ... {} more", tool_calls.len() - 5),
-            dim,
-        )));
+        lines.push(clamp_line(
+            Line::from(Span::styled(
+                format!("  ... {} more", tool_calls.len() - 5),
+                dim,
+            )),
+            width as usize,
+        ));
     }
 
     if let Some(last_result) = tool_results.last() {

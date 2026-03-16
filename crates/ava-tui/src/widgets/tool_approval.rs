@@ -1,5 +1,6 @@
 use crate::state::permission::{ApprovalRequest, ApprovalStage, PermissionState};
 use crate::state::theme::Theme;
+use crate::widgets::safe_render::clamp_line;
 use ava_permissions::tags::RiskLevel;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -131,7 +132,7 @@ pub fn render_tool_approval(
         ));
     }
 
-    let header_line = Line::from(header_spans);
+    let header_line = clamp_line(Line::from(header_spans), content_w as usize);
     frame.render_widget(
         Paragraph::new(header_line),
         Rect {
@@ -177,74 +178,105 @@ pub fn render_tool_approval(
             height: 1,
         };
 
+        let cw = content_w as usize;
         match permission.current_stage {
             ApprovalStage::Preview => {
-                let line = Line::from(Span::styled(
-                    "Press any key to continue...",
-                    Style::default().fg(theme.text_muted),
-                ));
+                let line = clamp_line(
+                    Line::from(Span::styled(
+                        "Press any key to continue...".to_string(),
+                        Style::default().fg(theme.text_muted),
+                    )),
+                    cw,
+                );
                 frame.render_widget(Paragraph::new(line), action_area);
             }
             ApprovalStage::ActionSelect => {
-                let line = Line::from(vec![
-                    Span::styled(
-                        "[a]",
-                        Style::default()
-                            .fg(theme.primary)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" Approve  ", Style::default().fg(theme.text_dimmed)),
-                    Span::styled(
-                        "[s]",
-                        Style::default()
-                            .fg(theme.text_muted)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" Allow session  ", Style::default().fg(theme.text_dimmed)),
-                    Span::styled(
-                        "[r]",
-                        Style::default()
-                            .fg(theme.error)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" Reject  ", Style::default().fg(theme.text_dimmed)),
-                    Span::styled(
-                        "[y]",
-                        Style::default()
-                            .fg(theme.text_muted)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" Auto-approve  ", Style::default().fg(theme.text_dimmed)),
-                    Span::styled(
-                        "[Esc]",
-                        Style::default()
-                            .fg(theme.text_muted)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" Cancel", Style::default().fg(theme.text_dimmed)),
-                ]);
+                let line = clamp_line(
+                    Line::from(vec![
+                        Span::styled(
+                            "[a]".to_string(),
+                            Style::default()
+                                .fg(theme.primary)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            " Approve  ".to_string(),
+                            Style::default().fg(theme.text_dimmed),
+                        ),
+                        Span::styled(
+                            "[s]".to_string(),
+                            Style::default()
+                                .fg(theme.text_muted)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            " Allow session  ".to_string(),
+                            Style::default().fg(theme.text_dimmed),
+                        ),
+                        Span::styled(
+                            "[r]".to_string(),
+                            Style::default()
+                                .fg(theme.error)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            " Reject  ".to_string(),
+                            Style::default().fg(theme.text_dimmed),
+                        ),
+                        Span::styled(
+                            "[y]".to_string(),
+                            Style::default()
+                                .fg(theme.text_muted)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            " Auto-approve  ".to_string(),
+                            Style::default().fg(theme.text_dimmed),
+                        ),
+                        Span::styled(
+                            "[Esc]".to_string(),
+                            Style::default()
+                                .fg(theme.text_muted)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            " Cancel".to_string(),
+                            Style::default().fg(theme.text_dimmed),
+                        ),
+                    ]),
+                    cw,
+                );
                 frame.render_widget(Paragraph::new(line), action_area);
             }
             ApprovalStage::RejectionReason => {
-                let line = Line::from(vec![
-                    Span::styled("Reason: ", Style::default().fg(theme.text_muted)),
-                    Span::styled(
-                        permission.rejection_input.clone(),
-                        Style::default().fg(theme.text),
-                    ),
-                    Span::styled("\u{2588}", Style::default().fg(theme.primary)),
-                    Span::raw("  "),
-                    Span::styled(
-                        "Enter",
-                        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" confirm  ", Style::default().fg(theme.text_muted)),
-                    Span::styled(
-                        "Esc",
-                        Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(" cancel", Style::default().fg(theme.text_muted)),
-                ]);
+                let line = clamp_line(
+                    Line::from(vec![
+                        Span::styled(
+                            "Reason: ".to_string(),
+                            Style::default().fg(theme.text_muted),
+                        ),
+                        Span::styled(
+                            permission.rejection_input.clone(),
+                            Style::default().fg(theme.text),
+                        ),
+                        Span::styled("\u{2588}".to_string(), Style::default().fg(theme.primary)),
+                        Span::raw("  ".to_string()),
+                        Span::styled(
+                            "Enter".to_string(),
+                            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            " confirm  ".to_string(),
+                            Style::default().fg(theme.text_muted),
+                        ),
+                        Span::styled(
+                            "Esc".to_string(),
+                            Style::default().fg(theme.text).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(" cancel".to_string(), Style::default().fg(theme.text_muted)),
+                    ]),
+                    cw,
+                );
                 frame.render_widget(Paragraph::new(line), action_area);
             }
         }

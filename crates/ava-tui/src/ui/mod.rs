@@ -365,6 +365,7 @@ fn render_modal(frame: &mut Frame<'_>, state: &mut AppState, modal: ModalType) {
 }
 
 fn render_info_panel(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+    use crate::widgets::safe_render::truncate_str;
     use ratatui::style::Modifier;
     use ratatui::widgets::Wrap;
 
@@ -372,9 +373,11 @@ fn render_info_panel(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         return;
     };
 
-    // Title line
+    let max_w = area.width as usize;
+
+    // Title line — clamped to area width
     let title_line = Line::from(Span::styled(
-        &panel.title,
+        truncate_str(&panel.title, max_w),
         Style::default()
             .fg(state.theme.text)
             .add_modifier(Modifier::BOLD),
@@ -442,7 +445,7 @@ fn render_info_panel(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         .scroll((panel.scroll, 0));
     frame.render_widget(content_paragraph, chunks[2]);
 
-    // Footer with scroll indicator
+    // Footer with scroll indicator — clamped to area width
     let can_scroll = total_lines > content_height;
     let footer_text = if can_scroll {
         format!(
@@ -453,6 +456,7 @@ fn render_info_panel(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     } else {
         " Esc close".to_string()
     };
+    let footer_text = truncate_str(&footer_text, max_w);
     let footer = Line::from(Span::styled(
         footer_text,
         Style::default().fg(state.theme.text_muted),
@@ -461,17 +465,25 @@ fn render_info_panel(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 }
 
 fn render_question_modal(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+    use crate::widgets::safe_render::truncate_str;
     use ratatui::style::Modifier;
     use ratatui::text::{Line, Span};
     use ratatui::widgets::Paragraph;
 
     let Some(ref q) = state.question else { return };
 
+    let title = "Agent Question";
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(state.theme.accent));
+    let inner_w = area.width.saturating_sub(2) as usize; // borders
+
     let mut lines: Vec<Line<'_>> = Vec::new();
 
-    // Question text
+    // Question text — clamped
     lines.push(Line::from(Span::styled(
-        &q.question,
+        truncate_str(&q.question, inner_w),
         Style::default()
             .fg(state.theme.text)
             .add_modifier(Modifier::BOLD),
@@ -481,14 +493,14 @@ fn render_question_modal(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     if q.options.is_empty() {
         // Free-text input
         lines.push(Line::from(Span::styled(
-            "Type your answer:",
+            truncate_str("Type your answer:", inner_w),
             Style::default().fg(state.theme.text_muted),
         )));
         lines.push(Line::from(""));
 
         let cursor_line = format!("> {}_", q.input);
         lines.push(Line::from(Span::styled(
-            cursor_line,
+            truncate_str(&cursor_line, inner_w),
             Style::default().fg(state.theme.accent),
         )));
     } else {
@@ -504,30 +516,30 @@ fn render_question_modal(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
             } else {
                 ("  ", Style::default().fg(state.theme.text))
             };
-            lines.push(Line::from(Span::styled(format!("{prefix}{opt}"), style)));
+            lines.push(Line::from(Span::styled(
+                truncate_str(&format!("{prefix}{opt}"), inner_w),
+                style,
+            )));
         }
     }
 
     lines.push(Line::from(""));
+    let hint_text = if q.options.is_empty() {
+        "[Enter] submit  [Esc] decline"
+    } else {
+        "[↑↓] navigate  [Enter] select  [Esc] decline"
+    };
     lines.push(Line::from(Span::styled(
-        if q.options.is_empty() {
-            "[Enter] submit  [Esc] decline"
-        } else {
-            "[↑↓] navigate  [Enter] select  [Esc] decline"
-        },
+        truncate_str(hint_text, inner_w),
         Style::default().fg(state.theme.text_muted),
     )));
 
-    let title = "Agent Question";
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(state.theme.accent));
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);
 }
 
 fn render_copy_picker(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
+    use crate::widgets::safe_render::truncate_str;
     use ratatui::style::Modifier;
     use ratatui::text::{Line, Span};
     use ratatui::widgets::Paragraph;
@@ -536,11 +548,17 @@ fn render_copy_picker(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         return;
     };
 
+    let block = Block::default()
+        .title(" Copy Code Block ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(state.theme.border));
+    let inner_w = area.width.saturating_sub(2) as usize;
+
     let mut lines: Vec<Line<'_>> = Vec::new();
 
     // Title
     lines.push(Line::from(Span::styled(
-        "Copy Code Block",
+        truncate_str("Copy Code Block", inner_w),
         Style::default()
             .fg(state.theme.text)
             .add_modifier(Modifier::BOLD),
@@ -548,23 +566,23 @@ fn render_copy_picker(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
     lines.push(Line::from(""));
 
     // List code blocks (up to 9)
-    for (i, block) in picker.blocks.iter().enumerate().take(9) {
-        let lang = if block.language.is_empty() {
+    for (i, blk) in picker.blocks.iter().enumerate().take(9) {
+        let lang = if blk.language.is_empty() {
             "code".to_string()
         } else {
-            block.language.clone()
+            blk.language.clone()
         };
-        let line_count = block.content.lines().count();
+        let line_count = blk.content.lines().count();
         let label = format!(
             "  {}. {} (lines {}-{}, {} lines)",
             i + 1,
             lang,
-            block.start_line,
-            block.end_line,
+            blk.start_line,
+            blk.end_line,
             line_count,
         );
         lines.push(Line::from(Span::styled(
-            label,
+            truncate_str(&label, inner_w),
             Style::default().fg(state.theme.text),
         )));
     }
@@ -573,7 +591,7 @@ fn render_copy_picker(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     // "Copy entire response" option
     lines.push(Line::from(Span::styled(
-        "  a. Copy entire response",
+        truncate_str("  a. Copy entire response", inner_w),
         Style::default().fg(state.theme.accent),
     )));
 
@@ -581,14 +599,10 @@ fn render_copy_picker(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
 
     // Hint
     lines.push(Line::from(Span::styled(
-        "Press 1-9 to copy, Esc to cancel",
+        truncate_str("Press 1-9 to copy, Esc to cancel", inner_w),
         Style::default().fg(state.theme.text_muted),
     )));
 
-    let block = Block::default()
-        .title(" Copy Code Block ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(state.theme.border));
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(paragraph, area);
 }

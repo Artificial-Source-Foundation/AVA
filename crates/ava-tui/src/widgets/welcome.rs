@@ -1,4 +1,5 @@
 use crate::app::AppState;
+use crate::widgets::safe_render::truncate_str;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -19,7 +20,11 @@ pub fn render_welcome(frame: &mut Frame<'_>, area: Rect, state: &AppState) {
         .map(|p| p.display().to_string())
         .unwrap_or_else(|_| "unknown".to_string());
 
-    let model_display = format!("{}/{}", state.agent.provider_name, state.agent.model_name);
+    let raw_model = format!("{}/{}", state.agent.provider_name, state.agent.model_name);
+    // Truncate model and cwd to fit within area width (leave room for label)
+    let max_val = (area.width as usize).saturating_sub(8); // 6-char label + 2 margin
+    let model_display = truncate_str(&raw_model, max_val);
+    let cwd = truncate_str(&cwd, max_val);
     let show_art = area.height >= 14 && area.width >= 30;
     let show_shortcuts = area.height >= 18 && area.width >= 50;
 

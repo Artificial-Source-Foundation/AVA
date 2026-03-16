@@ -126,6 +126,13 @@ impl App {
         self.background_run_routes.insert(run_id, task_id);
         let app_tx_clone = app_tx;
 
+        // Create cancel token before spawning so it can be stored for external cancellation
+        let cancel = tokio_util::sync::CancellationToken::new();
+        {
+            let mut bg = bg_state.lock().unwrap();
+            bg.set_cancel_token(task_id, cancel.clone());
+        }
+
         tokio::spawn(async move {
             let stack = if let Some(isolation) = isolation {
                 let config = ava_agent::stack::AgentStackConfig {
@@ -153,7 +160,6 @@ impl App {
             };
 
             let (agent_event_tx, mut agent_event_rx) = mpsc::unbounded_channel();
-            let cancel = tokio_util::sync::CancellationToken::new();
 
             let relay_tx = app_tx_clone.clone();
             let collector_handle = tokio::spawn(async move {

@@ -1,6 +1,7 @@
 use crate::state::messages::UiMessage;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskStatus {
@@ -33,6 +34,8 @@ pub struct BackgroundTask {
     pub error: Option<String>,
     pub worktree_path: Option<String>,
     pub branch_name: Option<String>,
+    /// Cancellation token for stopping the background agent.
+    pub cancel: Option<CancellationToken>,
 }
 
 impl BackgroundTask {
@@ -110,8 +113,15 @@ impl BackgroundState {
             error: None,
             worktree_path: None,
             branch_name: None,
+            cancel: None,
         });
         id
+    }
+
+    pub fn set_cancel_token(&mut self, id: usize, token: CancellationToken) {
+        if let Some(task) = self.tasks.iter_mut().find(|t| t.id == id) {
+            task.cancel = Some(token);
+        }
     }
 
     pub fn set_isolation(&mut self, id: usize, worktree_path: String, branch_name: String) {
@@ -138,6 +148,24 @@ impl BackgroundState {
             let elapsed = task.elapsed_display();
             self.notification = Some((format!("Task #{id} failed ({elapsed})"), Instant::now()));
         }
+    }
+
+    /// Cancel all running background tasks by firing their cancellation tokens.
+    /// Returns the number of tasks cancelled.
+    pub fn cancel_all_running(&mut self) -> usize {
+        let mut count = 0;
+        for task in &mut self.tasks {
+            if task.status == TaskStatus::Running {
+                if let Some(cancel) = task.cancel.take() {
+                    cancel.cancel();
+                    count += 1;
+                }
+                task.status = TaskStatus::Failed;
+                task.completed_at = Some(Instant::now());
+                task.error = Some("Interrupted by user".to_string());
+            }
+        }
+        count
     }
 
     pub fn running_count(&self) -> usize {

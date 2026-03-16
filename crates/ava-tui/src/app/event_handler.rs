@@ -688,6 +688,92 @@ impl App {
         }
     }
 
+    /// Mark in-progress messages as cancelled (UX-33).
+    /// Any ToolCall without a subsequent ToolResult, and any streaming assistant/thinking
+    /// message, gets marked as interrupted.
+    pub(crate) fn mark_interrupted_messages(&mut self) {
+        // Force flush any remaining buffered tokens so the last assistant message is complete
+        self.force_flush_token_buffer();
+
+        // Walk messages from the end to find in-progress tool calls and streaming messages.
+        // A ToolCall is "in-progress" if there is no matching ToolResult after it.
+        let msgs = &mut self.state.messages.messages;
+        let mut seen_result = false;
+        for msg in msgs.iter_mut().rev() {
+            match msg.kind {
+                MessageKind::ToolResult => {
+                    seen_result = true;
+                }
+                MessageKind::ToolCall => {
+                    if !seen_result {
+                        msg.cancelled = true;
+                    }
+                    // After encountering a ToolCall, reset: the next ToolCall
+                    // going backwards needs its own ToolResult.
+                    seen_result = false;
+                }
+                MessageKind::SubAgent => {
+                    if let Some(ref mut data) = msg.sub_agent {
+                        if data.is_running {
+                            msg.cancelled = true;
+                            msg.is_streaming = false;
+                            data.is_running = false;
+                            data.failed = true;
+                        }
+                    }
+                }
+                MessageKind::Assistant | MessageKind::Thinking => {
+                    if msg.is_streaming {
+                        msg.is_streaming = false;
+                    }
+                }
+                MessageKind::User => break, // Stop at the last user message
+                _ => {}
+            }
+        }
+    }
+
+    /// Cancel ALL running agents: background tasks, sub-agents, and praxis tasks (UX-34).
+    pub(crate) fn cancel_all_agents(&mut self) {
+        // Cancel background tasks
+        let bg_cancelled = {
+            let mut bg = self.state.background.lock().unwrap();
+            bg.cancel_all_running()
+        };
+        if bg_cancelled > 0 {
+            info!(
+                count = bg_cancelled,
+                "Cancelled background tasks on interrupt"
+            );
+        }
+
+        // Cancel running sub-agents
+        for sa in &mut self.state.agent.sub_agents {
+            if sa.is_running {
+                sa.is_running = false;
+                sa.elapsed = Some(sa.started_at.elapsed());
+                sa.current_tool = None;
+            }
+        }
+
+        // Cancel running praxis tasks
+        for task in &mut self.state.praxis.tasks {
+            if task.status == crate::state::praxis::PraxisTaskStatus::Running
+                || task.status == crate::state::praxis::PraxisTaskStatus::Pending
+            {
+                if let Some(cancel) = task.cancel.take() {
+                    cancel.cancel();
+                }
+                task.status = crate::state::praxis::PraxisTaskStatus::Failed;
+                task.completed_at = Some(std::time::Instant::now());
+                task.messages.push(UiMessage::new(
+                    MessageKind::System,
+                    "Praxis task interrupted by user.",
+                ));
+            }
+        }
+    }
+
     pub(crate) fn toggle_voice(&mut self, app_tx: mpsc::UnboundedSender<AppEvent>) {
         match self.state.voice.phase {
             VoicePhase::Idle => {

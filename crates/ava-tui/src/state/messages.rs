@@ -63,6 +63,9 @@ pub struct UiMessage {
     /// Whether thinking content is expanded (show all lines) or collapsed (first 5 lines).
     /// Only meaningful for `MessageKind::Thinking` messages. Default: `false` (collapsed).
     pub thinking_expanded: bool,
+    /// Whether this message was cancelled by the user pressing Esc.
+    /// Cancelled tool calls render dimmed with `[interrupted]` suffix.
+    pub cancelled: bool,
 }
 
 /// Gentle dot-pulse spinner — dots grow and shrink like a calm breathing wave.
@@ -108,6 +111,7 @@ impl UiMessage {
             started_at: None,
             transient: false,
             thinking_expanded: false,
+            cancelled: false,
         }
     }
 
@@ -390,29 +394,49 @@ impl UiMessage {
             MessageKind::ToolCall => {
                 // Compact OpenCode-style: "▸ tool_name · args"
                 let tool_name = self.content.split_whitespace().next().unwrap_or("");
-                let icon_color = match tool_name {
-                    "edit" | "write" | "apply_patch" | "bash" => theme.warning,
-                    _ => theme.success,
-                };
                 let rest = self.content[tool_name.len()..].trim_start();
-                let mut spans = vec![
-                    Span::styled("\u{25b8} ", Style::default().fg(icon_color)),
-                    Span::styled(
-                        format!("{tool_name} "),
-                        Style::default()
-                            .fg(theme.text_muted)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                ];
-                if !rest.is_empty() {
-                    spans.push(Span::styled(
-                        rest.to_owned(),
-                        Style::default().fg(theme.text_dimmed),
-                    ));
+
+                if self.cancelled {
+                    // Cancelled tool calls render fully dimmed with [interrupted] suffix
+                    let dim = Style::default()
+                        .fg(theme.text_dimmed)
+                        .add_modifier(Modifier::DIM);
+                    let mut spans = vec![
+                        Span::styled("\u{25b8} ", dim),
+                        Span::styled(format!("{tool_name} "), dim),
+                    ];
+                    if !rest.is_empty() {
+                        spans.push(Span::styled(rest.to_owned(), dim));
+                        spans.push(Span::styled(" ", dim));
+                    }
+                    spans.push(Span::styled("[interrupted]", dim));
+                    let mut result = vec![Line::from(spans)];
+                    Self::prepend_bars(&mut result, bar_color, width);
+                    result
+                } else {
+                    let icon_color = match tool_name {
+                        "edit" | "write" | "apply_patch" | "bash" => theme.warning,
+                        _ => theme.success,
+                    };
+                    let mut spans = vec![
+                        Span::styled("\u{25b8} ", Style::default().fg(icon_color)),
+                        Span::styled(
+                            format!("{tool_name} "),
+                            Style::default()
+                                .fg(theme.text_muted)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ];
+                    if !rest.is_empty() {
+                        spans.push(Span::styled(
+                            rest.to_owned(),
+                            Style::default().fg(theme.text_dimmed),
+                        ));
+                    }
+                    let mut result = vec![Line::from(spans)];
+                    Self::prepend_bars(&mut result, bar_color, width);
+                    result
                 }
-                let mut result = vec![Line::from(spans)];
-                Self::prepend_bars(&mut result, bar_color, width);
-                result
             }
             MessageKind::ToolResult => {
                 let dim_style = Style::default()

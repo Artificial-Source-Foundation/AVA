@@ -70,27 +70,56 @@ pub fn render_action_group(
         )
     };
 
-    let icon = if active {
+    // Check if any tool call in this group was cancelled
+    let has_cancelled = messages.iter().any(|msg| msg.cancelled);
+
+    let icon = if has_cancelled {
+        "▸ ".to_string()
+    } else if active {
         format!("{} ", spinner_frame(spinner_tick))
     } else {
         "▸ ".to_string()
     };
-    let mut lines = vec![Line::from(vec![
-        Span::styled(icon, Style::default().fg(theme.accent)),
-        Span::styled(
-            format!(
-                "{} tools · {} result{}",
-                tool_calls.len().max(1),
-                tool_results.len(),
-                if tool_results.len() == 1 { "" } else { "s" }
+
+    let dim = Style::default()
+        .fg(theme.text_dimmed)
+        .add_modifier(Modifier::DIM);
+
+    let header_spans = if has_cancelled {
+        vec![
+            Span::styled(icon, dim),
+            Span::styled(
+                format!(
+                    "{} tools · {} result{}",
+                    tool_calls.len().max(1),
+                    tool_results.len(),
+                    if tool_results.len() == 1 { "" } else { "s" }
+                ),
+                dim,
             ),
-            Style::default()
-                .fg(theme.text_muted)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" · ", Style::default().fg(theme.text_dimmed)),
-        Span::styled(title, Style::default().fg(theme.text_dimmed)),
-    ])];
+            Span::styled(" · ", dim),
+            Span::styled(title, dim),
+            Span::styled(" [interrupted]", dim),
+        ]
+    } else {
+        vec![
+            Span::styled(icon, Style::default().fg(theme.accent)),
+            Span::styled(
+                format!(
+                    "{} tools · {} result{}",
+                    tool_calls.len().max(1),
+                    tool_results.len(),
+                    if tool_results.len() == 1 { "" } else { "s" }
+                ),
+                Style::default()
+                    .fg(theme.text_muted)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" · ", Style::default().fg(theme.text_dimmed)),
+            Span::styled(title, Style::default().fg(theme.text_dimmed)),
+        ]
+    };
+    let mut lines = vec![Line::from(header_spans)];
 
     if expanded {
         for call in tool_calls.iter().take(3) {

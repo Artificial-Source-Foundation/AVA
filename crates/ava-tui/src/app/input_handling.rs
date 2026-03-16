@@ -69,8 +69,24 @@ impl App {
                         }
                     }
                     if self.state.agent.is_running {
+                        // UX-33: Mark in-progress tool calls as cancelled
+                        self.mark_interrupted_messages();
+                        // Push system message
+                        self.state
+                            .messages
+                            .push(crate::state::messages::UiMessage::new(
+                                MessageKind::System,
+                                "Session interrupted",
+                            ));
+
                         self.state.agent.abort();
                         self.state.input.queue_display.clear_steering();
+
+                        // UX-34: Cancel ALL running agents — background + sub-agents + praxis
+                        self.cancel_all_agents();
+
+                        self.is_streaming
+                            .store(false, std::sync::atomic::Ordering::Relaxed);
                     } else if !self.state.input.buffer.is_empty() {
                         self.state.input.clear();
                     } else {

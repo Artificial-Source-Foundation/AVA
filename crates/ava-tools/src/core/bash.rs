@@ -94,11 +94,15 @@ impl Tool for BashTool {
                 .await
                 .map_err(|e| AvaError::PlatformError(e.to_string()))?;
 
-            let mut rendered = format!(
+            let rendered = format!(
                 "stdout:\n{}\n\nstderr:\n{}\n\nexit_code: {}",
                 output.stdout, output.stderr, output.exit_code
             );
-            truncate_with_notice(&mut rendered, MAX_OUTPUT_BYTES);
+            let rendered = super::output_fallback::save_tool_output_fallback(
+                "bash",
+                &rendered,
+                MAX_OUTPUT_BYTES,
+            );
 
             return Ok(ToolResult {
                 call_id: String::new(),
@@ -120,11 +124,12 @@ impl Tool for BashTool {
             )
             .await?;
 
-        let mut rendered = format!(
+        let rendered = format!(
             "stdout:\n{}\n\nstderr:\n{}\n\nexit_code: {}",
             output.stdout, output.stderr, output.exit_code
         );
-        truncate_with_notice(&mut rendered, MAX_OUTPUT_BYTES);
+        let rendered =
+            super::output_fallback::save_tool_output_fallback("bash", &rendered, MAX_OUTPUT_BYTES);
 
         Ok(ToolResult {
             call_id: String::new(),
@@ -173,20 +178,6 @@ impl Tool for BashTool {
             },
         ))))
     }
-}
-
-fn truncate_with_notice(content: &mut String, max_bytes: usize) {
-    if content.len() <= max_bytes {
-        return;
-    }
-
-    let mut idx = max_bytes;
-    while !content.is_char_boundary(idx) {
-        idx -= 1;
-    }
-
-    content.truncate(idx);
-    content.push_str("\n[truncated]");
 }
 
 fn is_install_class(command: &str) -> bool {

@@ -37,6 +37,8 @@ reqwest.workspace = true
 url = "2"
 toml.workspace = true
 shell-words = "1"
+chrono.workspace = true
+dirs.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

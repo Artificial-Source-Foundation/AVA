@@ -6,14 +6,12 @@
  * The TypeScript layer only manages UI state (approval bridge, plan mode, queuing).
  */
 
-import { batch, createSignal } from 'solid-js'
+import { batch, createEffect, createSignal, on } from 'solid-js'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
-import {
-  pendingApproval as pendingApprovalSignal,
-  resolveApproval as resolveApprovalBridge,
-} from '../services/tool-approval-bridge'
+import { rustAgent as rustAgentBridge, rustBackend } from '../services/rust-bridge'
 import { useSettings } from '../stores/settings'
 import type { StreamError } from '../types/llm'
+import type { ApprovalRequestEvent } from '../types/rust-ipc'
 import type { AgentState, ApprovalRequest, ToolActivity } from './agent'
 import type { QueuedMessage } from './chat/types'
 import { useRustAgent } from './use-rust-agent'
@@ -68,6 +66,41 @@ function createAgentStore() {
     return msg ? { type: 'unknown', message: msg } : null
   }
 
+  // ── Watch for approval_request / question_request events from Rust ──
+  let lastProcessedEventIdx = 0
+
+  createEffect(
+    on(rustAgent.events, (allEvents) => {
+      for (let i = lastProcessedEventIdx; i < allEvents.length; i++) {
+        const event = allEvents[i]!
+        if (event.type === 'approval_request') {
+          const approvalEvent = event as ApprovalRequestEvent
+          const riskLevel = (['low', 'medium', 'high', 'critical'].includes(approvalEvent.risk_level)
+            ? approvalEvent.risk_level
+            : 'medium') as 'low' | 'medium' | 'high' | 'critical'
+
+          const toolName = approvalEvent.tool_name
+          const toolType = toolName === 'bash'
+            ? 'command' as const
+            : toolName.startsWith('mcp_')
+              ? 'mcp' as const
+              : 'file' as const
+
+          setPendingApproval({
+            id: approvalEvent.id,
+            type: toolType,
+            toolName,
+            args: approvalEvent.args as Record<string, unknown>,
+            description: approvalEvent.reason,
+            riskLevel,
+            resolve: () => {}, // not used — resolution goes through IPC
+          })
+        }
+      }
+      lastProcessedEventIdx = allEvents.length
+    })
+  )
+
   // ====================================================================
   // Actions
   // ====================================================================
@@ -112,11 +145,17 @@ function createAgentStore() {
   }
 
   function steer(content: string): void {
-    // In Rust backend mode, steer by cancelling and re-running with new content
-    void rustAgent.cancel()
-    batch(() => {
-      setMessageQueue([{ content }])
-    })
+    void rustAgent.steer(content)
+  }
+
+  function followUp(content: string): void {
+    void rustAgent.followUp(content)
+    setMessageQueue((prev) => [...prev, { content }])
+  }
+
+  function postComplete(content: string, group?: number): void {
+    void rustAgent.postComplete(content, group)
+    setMessageQueue((prev) => [...prev, { content }])
   }
 
   function togglePlanMode(): void {
@@ -130,13 +169,11 @@ function createAgentStore() {
     return sharedCheckAutoApproval(toolName, args, settingsRef.isToolAutoApproved)
   }
 
-  function resolveApproval(approved: boolean): void {
-    resolveApprovalBridge(approved)
-    const request = pendingApproval()
-    if (request) {
-      request.resolve(approved)
-      setPendingApproval(null)
-    }
+  function resolveApproval(approved: boolean, alwaysAllow?: boolean): void {
+    setPendingApproval(null)
+    void rustAgentBridge.resolveApproval(approved, alwaysAllow ?? false).catch((err) => {
+      console.error('Failed to resolve approval:', err)
+    })
   }
 
   function clearError(): void {
@@ -153,7 +190,7 @@ function createAgentStore() {
       tokensUsed: tokensUsed(),
       currentThought: currentThought(),
       toolActivity: toolActivity(),
-      pendingApproval: pendingApprovalSignal() as ApprovalRequest | null,
+      pendingApproval: pendingApproval(),
       doomLoopDetected: doomLoopDetected(),
       lastError: rustAgent.error(),
     }
@@ -167,19 +204,58 @@ function createAgentStore() {
     setMessageQueue([])
   }
 
-  // Stub for message actions — these now require Rust backend support
+  // Message actions — wired through Rust IPC
   async function retryMessage(_assistantMessageId: string): Promise<void> {
-    // TODO: implement via Rust IPC
+    if (rustAgent.isRunning()) return
+    batch(() => {
+      setCurrentThought('')
+      setDoomLoopDetected(false)
+      setToolActivity([])
+      setStreamingTokenEstimate(0)
+      setStreamingStartedAt(Date.now())
+    })
+    try {
+      await rustBackend.retryLastMessage()
+    } finally {
+      setStreamingStartedAt(null)
+    }
   }
-  async function editAndResend(_messageId: string, _newContent: string): Promise<void> {
-    // TODO: implement via Rust IPC
+
+  async function editAndResend(messageId: string, newContent: string): Promise<void> {
+    if (rustAgent.isRunning()) return
+    batch(() => {
+      setCurrentThought('')
+      setDoomLoopDetected(false)
+      setToolActivity([])
+      setStreamingTokenEstimate(0)
+      setStreamingStartedAt(Date.now())
+    })
+    try {
+      await rustBackend.editAndResend({ messageId, newContent })
+    } finally {
+      setStreamingStartedAt(null)
+    }
   }
+
   async function regenerateResponse(_assistantMessageId: string): Promise<void> {
-    // TODO: implement via Rust IPC
+    if (rustAgent.isRunning()) return
+    batch(() => {
+      setCurrentThought('')
+      setDoomLoopDetected(false)
+      setToolActivity([])
+      setStreamingTokenEstimate(0)
+      setStreamingStartedAt(Date.now())
+    })
+    try {
+      await rustBackend.regenerateResponse()
+    } finally {
+      setStreamingStartedAt(null)
+    }
   }
+
   async function undoLastEdit(): Promise<{ success: boolean; message: string }> {
-    // TODO: implement via Rust IPC
-    return { success: false, message: 'Not yet implemented via Rust backend' }
+    const result = await rustBackend.undoLastEdit()
+    return { success: result.success, message: result.message }
   }
 
   // ====================================================================
@@ -194,7 +270,7 @@ function createAgentStore() {
     tokensUsed,
     currentThought,
     toolActivity,
-    pendingApproval: pendingApprovalSignal as () => ApprovalRequest | null,
+    pendingApproval,
     doomLoopDetected,
     lastError: rustAgent.error,
     currentAgentId,
@@ -214,6 +290,8 @@ function createAgentStore() {
     run,
     cancel,
     steer,
+    followUp,
+    postComplete,
     retryMessage,
     editAndResend,
     regenerateResponse,

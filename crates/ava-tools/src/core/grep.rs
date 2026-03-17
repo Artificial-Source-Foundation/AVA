@@ -112,9 +112,13 @@ impl Tool for GrepTool {
             }
         }
 
+        let content = matches.join("\n");
+        let content =
+            super::output_fallback::save_tool_output_fallback("grep", &content, 100 * 1024);
+
         Ok(ToolResult {
             call_id: String::new(),
-            content: matches.join("\n"),
+            content,
             is_error: false,
         })
     }

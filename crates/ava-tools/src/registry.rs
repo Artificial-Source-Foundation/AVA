@@ -275,6 +275,16 @@ impl ToolRegistry {
         self.tools.len()
     }
 
+    /// Check whether a tool with the given name is registered.
+    pub fn has_tool(&self, name: &str) -> bool {
+        self.tools.contains_key(name)
+    }
+
+    /// Return the names of all registered tools.
+    pub fn tool_names(&self) -> Vec<String> {
+        self.tools.keys().cloned().collect()
+    }
+
     /// Look up the source of a registered tool.
     pub fn tool_source(&self, name: &str) -> Option<ToolSource> {
         self.sources.get(name).cloned()

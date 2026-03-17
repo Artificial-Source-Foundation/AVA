@@ -5,11 +5,13 @@
 //! - Message history management
 //! - Full-text search over sessions
 
+pub mod diff_tracking;
 mod helpers;
 
 use std::path::{Path, PathBuf};
 
 use ava_types::{AvaError, Message, Result, Session};
+use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
 use uuid::Uuid;
@@ -257,6 +259,41 @@ impl SessionManager {
         }
 
         tx.commit().map_err(db_error)
+    }
+
+    /// Rename a session by updating its metadata title and `updated_at`.
+    pub fn rename(&self, id: Uuid, new_title: &str) -> Result<()> {
+        let conn = self.open_conn()?;
+
+        // Read current metadata
+        let metadata_str: String = conn
+            .query_row(
+                "SELECT metadata FROM sessions WHERE id = ?1",
+                params![id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(db_error)?
+            .ok_or_else(|| AvaError::NotFound(format!("session {id} not found")))?;
+
+        let mut metadata: serde_json::Map<String, Value> = serde_json::from_str(&metadata_str)
+            .map_err(|e| AvaError::SerializationError(e.to_string()))?;
+
+        metadata.insert("title".to_string(), Value::String(new_title.to_string()));
+
+        let updated_at = Utc::now().to_rfc3339();
+        conn.execute(
+            "UPDATE sessions SET metadata = ?1, updated_at = ?2 WHERE id = ?3",
+            params![
+                serde_json::to_string(&metadata)
+                    .map_err(|e| AvaError::SerializationError(e.to_string()))?,
+                updated_at,
+                id.to_string(),
+            ],
+        )
+        .map_err(db_error)?;
+
+        Ok(())
     }
 
     fn get_with_conn(&self, conn: &Connection, id: Uuid) -> Result<Option<Session>> {

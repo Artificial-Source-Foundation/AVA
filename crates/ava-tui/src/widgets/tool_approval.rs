@@ -121,8 +121,12 @@ pub fn render_tool_approval(
     if let Some(info) = &request.inspection {
         let label = risk_label(info.risk_level);
         let badge = format!("[{label}]");
-        let left_len = 2 + 19; // "△ " + "Permission required"
-        let gap = w.saturating_sub(left_len + badge.len() + (pad as usize) * 2);
+        let left_len: usize = header_spans
+            .iter()
+            .map(|s| crate::text_utils::display_width(s.content.as_ref()))
+            .sum();
+        let badge_len = crate::text_utils::display_width(&badge);
+        let gap = w.saturating_sub(left_len + badge_len + (pad as usize) * 2);
         let spaces = " ".repeat(gap);
         header_spans.push(Span::raw(spaces));
         let color = risk_color(info.risk_level, theme);

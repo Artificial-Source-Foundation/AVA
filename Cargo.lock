@@ -525,6 +525,8 @@ dependencies = [
  "ava-platform",
  "ava-sandbox",
  "ava-types",
+ "chrono",
+ "dirs",
  "futures",
  "glob",
  "grep-matcher",

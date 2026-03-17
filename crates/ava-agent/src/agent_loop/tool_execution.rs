@@ -5,6 +5,8 @@ use ava_tools::monitor::{hash_arguments, ToolExecution};
 use ava_types::{Message, Role, Session, ToolCall, ToolResult};
 use serde_json::{json, Value};
 
+use ava_tools::registry::ToolRegistry;
+
 use super::AgentLoop;
 use crate::instructions::contextual_instructions_for_file;
 
@@ -46,6 +48,14 @@ impl AgentLoop {
         &self,
         tool_call: &ToolCall,
     ) -> (ToolResult, ToolExecution) {
+        // Auto-repair misnamed tool calls (e.g. "Read" → "read")
+        let mut tool_call = tool_call.clone();
+        let repaired = repair_tool_name(&tool_call.name, &self.tools);
+        if repaired != tool_call.name {
+            tool_call.name = repaired;
+        }
+        let tool_call = &tool_call;
+
         // Plan mode: block write/edit/bash to non-plan paths
         if self.config.plan_mode {
             if let Some(rejection) = check_plan_mode_tool(tool_call) {
@@ -419,6 +429,28 @@ pub fn check_plan_mode_tool(tool_call: &ToolCall) -> Option<String> {
 
     // Allow attempt_completion and other non-write tools
     None
+}
+
+/// Attempt to repair a misnamed tool call (e.g. "Read" → "read", "Bash" → "bash").
+///
+/// Returns the corrected name if a match is found, or the original name if not.
+pub fn repair_tool_name(name: &str, registry: &ToolRegistry) -> String {
+    // Exact match — no repair needed
+    if registry.has_tool(name) {
+        return name.to_string();
+    }
+
+    // Case-insensitive match against all registered tool names
+    let lower = name.to_lowercase();
+    for tool_name in registry.tool_names() {
+        if tool_name.to_lowercase() == lower {
+            tracing::info!("Repaired tool name '{}' → '{}'", name, tool_name);
+            return tool_name;
+        }
+    }
+
+    // No match — return original (will error in execute)
+    name.to_string()
 }
 
 /// Check if a path is within .ava/plans/ and has a .md extension.

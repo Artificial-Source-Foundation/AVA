@@ -139,6 +139,10 @@ impl Tool for ReadTool {
             ));
         }
 
+        // If even the truncated-by-lines content is large, save to disk
+        let content =
+            super::output_fallback::save_tool_output_fallback("read", &content, 100 * 1024);
+
         Ok(ToolResult {
             call_id: String::new(),
             content,

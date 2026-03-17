@@ -74,6 +74,29 @@ pub async fn validate_status(
     })
 }
 
+/// Parse the `Retry-After` (seconds) or `retry-after-ms` (milliseconds) header
+/// from an HTTP response. Returns the delay as a `Duration`, preferring the
+/// millisecond variant when both are present.
+pub fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    // Prefer retry-after-ms (milliseconds) — used by OpenAI and some providers
+    if let Some(ms) = headers
+        .get("retry-after-ms")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+    {
+        return Some(Duration::from_millis(ms));
+    }
+    // Fall back to standard retry-after (seconds)
+    if let Some(secs) = headers
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+    {
+        return Some(Duration::from_secs(secs));
+    }
+    None
+}
+
 /// Send an HTTP request with retry logic for transient failures.
 ///
 /// Retries on:
@@ -102,13 +125,9 @@ pub async fn send_with_retry(
                         .await
                         .map(|_| unreachable!());
                 }
-                let delay = resp
-                    .headers()
-                    .get("retry-after")
-                    .and_then(|v| v.to_str().ok())
-                    .and_then(|v| v.parse::<u64>().ok())
-                    .unwrap_or_else(|| 2u64.saturating_pow(attempts as u32));
-                tokio::time::sleep(Duration::from_secs(delay)).await;
+                let delay = parse_retry_after(resp.headers())
+                    .unwrap_or_else(|| Duration::from_secs(2u64.saturating_pow(attempts as u32)));
+                tokio::time::sleep(delay).await;
             }
             Ok(resp) if resp.status().is_server_error() => {
                 attempts += 1;

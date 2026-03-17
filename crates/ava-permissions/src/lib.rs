@@ -8,6 +8,7 @@
 use regex::Regex;
 use std::path::{Component, Path, PathBuf};
 
+pub mod arc_monitor;
 pub mod audit;
 pub mod canonicalize;
 pub mod checker_registry;
@@ -15,10 +16,12 @@ pub mod classifier;
 pub mod guardian;
 pub mod injection;
 pub mod inspector;
+pub mod osv_scanner;
 pub mod path_safety;
 pub mod patterns;
 pub mod persistent;
 pub mod policy;
+pub mod readonly_judge;
 pub mod tags;
 
 use classifier::classify_bash_command;

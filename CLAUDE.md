@@ -39,7 +39,7 @@ AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust
 
 ### Codebase Stats
 
-- **21 Rust crates**, 358 source files, ~104K LOC, 1,798 tests
+- **21 Rust crates**, ~40K LOC, 1,502 tests
 - **8 LLM providers**: Anthropic, OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock
 - **6 default tools**: `read`, `write`, `edit`, `bash`, `glob`, `grep`
 - **8 extended tools**: `apply_patch`, `web_fetch`, `web_search`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `git_read`
@@ -71,6 +71,7 @@ AVA/
 |   +-- ava-config/           # Config, credentials, model catalog
 |   +-- ava-context/          # Token tracking + context condensation
 |   +-- ava-mcp/              # Model Context Protocol client/server
+|   +-- ava-plugin/           # Power plugin system (JSON-RPC, subprocess isolation)
 |   +-- ava-session/          # Session persistence (SQLite)
 |   +-- ava-memory/           # Persistent memory (SQLite + FTS5)
 |   +-- ava-codebase/         # Code indexing (BM25 + PageRank)

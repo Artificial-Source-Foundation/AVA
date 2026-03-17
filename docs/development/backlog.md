@@ -1,19 +1,25 @@
 # AVA Backlog
 
-> Last updated: 2026-03-16
+> Last updated: 2026-03-17
 > Related: [roadmap.md](roadmap.md), [epics.md](epics.md)
 
 Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `bash`, `glob`, `grep`). New capabilities go to Extended, MCP, plugin, or custom-tool tier.
+
+## Recently Completed
+
+- **Plugin system Phase 1** — `ava-plugin` crate, AgentStack wiring, TypeScript SDK, 4 examples, CLI commands. Smoke tested e2e.
+- **Dead code cleanup** — 30 unwired modules → `docs/ideas/`, -10.5K LOC
+- **Docs overhaul** — README, crate-map, plugin guide, changelog, CLAUDE.md/AGENTS.md
 
 ## Execution Order
 
 ### Next (High Impact)
 
-1. **B26** Praxis in chat composer -- P1. First TUI slice shipped (Tab cycling, worker sidebar). Needs deeper worker/task inspection, merge-back, session persistence.
-2. **B73** Network proxy with SSRF protection -- P2. Managed proxy for agent outbound requests. Block private IPs, metadata endpoints, configurable deny-lists.
-3. **B46** Plugin/skill marketplace -- P2. `ava plugin install <name>` for community tools, hooks, MCP configs, agent presets. Requires plugin runtime (v3.0 Phase 2).
-4. **B79** Evaluation harness enhancement -- P3. SWE-bench integration, formal quality regression scoring.
-5. **B80** Trajectory recording -- P3. Full agent decision tree as structured JSONL per session. Enables replay, pattern analysis, debugging.
+1. **Plugin Phase 2** — `@ava-ai/plugin` npm publish, Python SDK, auth hook sub-protocol.
+2. **Plugin Phase 3** — OpenCode compatibility bridge, plugin marketplace.
+3. **B26** Praxis in chat composer — deeper worker/task inspection.
+4. **B79** Evaluation harness — SWE-bench integration.
+5. **B80** Trajectory recording — JSONL decision trees.
 
 ### Soon (Medium Impact)
 

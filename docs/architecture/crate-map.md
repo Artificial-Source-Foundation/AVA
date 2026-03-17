@@ -1,21 +1,21 @@
-<!-- Last verified: 2026-03-16. Run 'cargo test --workspace' to revalidate. -->
+<!-- Last verified: 2026-03-17. Run 'cargo test --workspace' to revalidate. -->
 
 # AVA Crate Map
 
-20 Rust crates under `crates/`. Total: 358 source files, ~104K LOC, 1,798 tests.
+21 Rust crates under `crates/`. ~40K LOC, 1,502 tests.
 
 ## Dependency Layers
 
 ```
-Layer 0 (no ava deps):  ava-types, ava-memory, ava-sandbox, ava-extensions, ava-codebase, ava-auth, ava-permissions, ava-validator
+Layer 0 (no ava deps):  ava-types, ava-memory, ava-sandbox, ava-extensions, ava-codebase, ava-auth, ava-permissions, ava-validator, ava-plugin
 Layer 1:                ava-db, ava-platform, ava-context, ava-config, ava-session (depend on ava-types)
 Layer 2:                ava-llm (ava-types, ava-config, ava-auth)
                         ava-tools (ava-types, ava-config, ava-permissions, ava-platform, ava-sandbox, ava-codebase)
                         ava-mcp (ava-types, ava-tools)
 Layer 3:                ava-cli-providers (ava-types, ava-llm)
-                        ava-agent (ava-types, ava-llm, ava-tools, ava-config, ava-context, ava-permissions, ava-platform, ava-session, ava-memory, ava-mcp, ava-codebase, ava-praxis)
+                        ava-agent (ava-types, ava-llm, ava-tools, ava-config, ava-context, ava-permissions, ava-platform, ava-session, ava-memory, ava-mcp, ava-codebase, ava-plugin)
 Layer 4:                ava-praxis (ava-types, ava-agent, ava-llm, ava-tools, ava-context, ava-platform, ava-cli-providers)
-Layer 5 (top):          ava-tui (depends on nearly everything)
+Layer 5 (top):          ava-tui (depends on nearly everything + ava-plugin)
 ```
 
 ## Crate Details
@@ -80,6 +80,12 @@ Layer 5 (top):          ava-tui (depends on nearly everything)
 - **Key types**: `MCPClient`, `MCPTool`, `AVAMCPServer`, `MCPServerConfig`, `TransportType` (Stdio/Http), `MCPTransport` (trait), `StdioTransport`, `HttpTransport`, `InMemoryTransport`, `ExtensionManager`
 - **Depends on**: ava-types, ava-tools
 - **Stats**: 6 files, 1,786 LOC
+
+### ava-plugin
+- **Purpose**: Power plugin system — subprocess-isolated plugins via JSON-RPC over stdio
+- **Key types**: `PluginManager`, `PluginManifest`, `PluginProcess`, `HookEvent` (12 variants), `HookDispatcher`, `HookRequest`, `HookResponse`
+- **Depends on**: ava-types
+- **Stats**: 6 files, ~1,400 LOC, 32 tests
 
 ### ava-session
 - **Purpose**: Session persistence with SQLite, bookmarks, conversation tree, diff tracking

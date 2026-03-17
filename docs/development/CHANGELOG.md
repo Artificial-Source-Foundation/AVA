@@ -8,10 +8,12 @@
   - 12 hook types (auth, tool.before/after, agent.before/after, session, etc.)
   - Plugin wired into AgentStack (hooks fire at all lifecycle points)
   - `@ava-ai/plugin` TypeScript SDK (zero dependencies)
-  - 3 example plugins (hello-plugin, env-guard, request-logger)
-  - CLI: `ava plugin list/add/remove/info`
+  - 4 example plugins (hello-plugin, env-guard, request-logger, tool-timer)
+  - CLI: `ava plugin list/add/remove/info` with npm install for deps
   - TUI: `/plugin` slash command
-- Plugin system design doc with OpenCode flaw analysis
+  - Plugin stderr inherited for dev visibility
+  - Smoke tested end-to-end with gpt-5.3-codex
+- Plugin system design doc with OpenCode 11-flaw analysis
 
 ### Removed
 - 30 unwired modules (~10.5K LOC dead code) moved to `docs/ideas/`

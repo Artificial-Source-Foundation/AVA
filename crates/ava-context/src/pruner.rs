@@ -16,11 +16,8 @@ const MIN_PRUNE_CHARS: usize = 200;
 /// Returns the number of messages pruned.
 ///
 /// This is much cheaper than full LLM compaction — no API call required.
-pub fn prune_old_tool_outputs(messages: &mut Vec<Message>, protected_tokens: usize) -> usize {
-    let total_tokens: usize = messages
-        .iter()
-        .map(|m| estimate_tokens_for_message(m))
-        .sum();
+pub fn prune_old_tool_outputs(messages: &mut [Message], protected_tokens: usize) -> usize {
+    let total_tokens: usize = messages.iter().map(estimate_tokens_for_message).sum();
     if total_tokens <= protected_tokens {
         return 0;
     }

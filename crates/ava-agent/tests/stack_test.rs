@@ -35,6 +35,7 @@ async fn write_credentials(dir: &tempfile::TempDir, providers: &[&str]) {
                 oauth_refresh_token: None,
                 oauth_expires_at: None,
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
     }

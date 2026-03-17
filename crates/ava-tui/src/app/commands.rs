@@ -344,6 +344,7 @@ impl App {
                 self.execute_command_action(Action::SessionList, app_tx.clone());
                 None
             }
+            "/bookmark" | "/bm" => self.handle_bookmark_command(arg),
             "/permissions" => {
                 self.state.permission.permission_level =
                     self.state.permission.permission_level.toggle();
@@ -427,6 +428,7 @@ impl App {
 /mcp disable <name>      \u{2014} disable an MCP server (session-scoped)
 /new [title]             \u{2014} start a new session (optional title)
 /sessions                \u{2014} session picker
+/bookmark [label]        \u{2014} bookmark current point (list/clear/remove)
 /commit                  \u{2014} inspect commit readiness and suggest a message
 /export [filename]       \u{2014} export conversation to file (.md or .json)
 /copy [all]              \u{2014} copy last response (picks code block if multiple)

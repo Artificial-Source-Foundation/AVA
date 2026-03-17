@@ -159,10 +159,7 @@ impl Tool for WebFetchTool {
             .timeout(std::time::Duration::from_secs(30))
             .redirect(reqwest::redirect::Policy::custom(|attempt| {
                 if attempt.previous().len() >= 5 {
-                    attempt.error(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "too many redirects",
-                    ))
+                    attempt.error(std::io::Error::other("too many redirects"))
                 } else if is_blocked_url_bool(attempt.url().as_str()) {
                     attempt.stop()
                 } else {

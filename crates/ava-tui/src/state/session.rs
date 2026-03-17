@@ -1,4 +1,4 @@
-use ava_session::SessionManager;
+use ava_session::{Bookmark, SessionManager};
 use ava_types::Session;
 use color_eyre::eyre::{eyre, Result};
 use std::path::Path;
@@ -61,5 +61,41 @@ impl SessionState {
             tracing::warn!("Failed to save session: {}", e);
         }
         self.current_session = Some(session.clone());
+    }
+
+    // ── Bookmark operations (BG-13) ──────────────────────────────────
+
+    /// Add a bookmark at the given message index.
+    pub fn add_bookmark(&self, label: &str, message_index: usize) -> Result<Bookmark> {
+        let session = self
+            .current_session
+            .as_ref()
+            .ok_or_else(|| eyre!("No active session"))?;
+        Ok(self
+            .manager
+            .add_bookmark(session.id, label, message_index)?)
+    }
+
+    /// List bookmarks for the current session.
+    pub fn list_bookmarks(&self) -> Result<Vec<Bookmark>> {
+        let session = self
+            .current_session
+            .as_ref()
+            .ok_or_else(|| eyre!("No active session"))?;
+        Ok(self.manager.list_bookmarks(session.id)?)
+    }
+
+    /// Remove a bookmark by ID.
+    pub fn remove_bookmark(&self, bookmark_id: Uuid) -> Result<()> {
+        Ok(self.manager.remove_bookmark(bookmark_id)?)
+    }
+
+    /// Clear all bookmarks for the current session.
+    pub fn clear_bookmarks(&self) -> Result<usize> {
+        let session = self
+            .current_session
+            .as_ref()
+            .ok_or_else(|| eyre!("No active session"))?;
+        Ok(self.manager.clear_bookmarks(session.id)?)
     }
 }

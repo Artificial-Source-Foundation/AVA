@@ -55,6 +55,7 @@ async fn auth_login(provider_id: &str) -> Result<()> {
                             oauth_refresh_token: tokens.refresh_token,
                             oauth_expires_at: tokens.expires_at,
                             oauth_account_id: account_id,
+                            litellm_compatible: None,
                         },
                     );
                     store.save_default().await?;
@@ -102,6 +103,7 @@ async fn auth_login(provider_id: &str) -> Result<()> {
                             oauth_refresh_token: tokens.refresh_token,
                             oauth_expires_at: tokens.expires_at,
                             oauth_account_id: None,
+                            litellm_compatible: None,
                         },
                     );
                     store.save_default().await?;

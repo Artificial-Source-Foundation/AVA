@@ -8,7 +8,8 @@ pub const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS sessions (
     updated_at TEXT NOT NULL,
     metadata TEXT NOT NULL,
     parent_id TEXT,
-    token_usage TEXT NOT NULL DEFAULT '{}'
+    token_usage TEXT NOT NULL DEFAULT '{}',
+    branch_head TEXT
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -21,6 +22,7 @@ CREATE TABLE IF NOT EXISTS messages (
     tool_results TEXT NOT NULL,
     tool_call_id TEXT,
     images TEXT NOT NULL DEFAULT '[]',
+    parent_id TEXT,
     FOREIGN KEY(session_id) REFERENCES sessions(id)
 );
 
@@ -43,7 +45,16 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
     INSERT INTO messages_fts(messages_fts, rowid, content)
     VALUES ('delete', old.rowid, old.content);
     INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
-END;";
+END;
+
+CREATE TABLE IF NOT EXISTS bookmarks (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    message_index INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);";
 
 /// Migration SQL for adding new columns to existing databases.
 /// Each statement is idempotent — ALTER TABLE will fail silently if the column already exists.
@@ -51,10 +62,22 @@ pub const MIGRATION_SQL: &[&str] = &[
     "ALTER TABLE messages ADD COLUMN tool_call_id TEXT",
     "ALTER TABLE messages ADD COLUMN images TEXT NOT NULL DEFAULT '[]'",
     "ALTER TABLE sessions ADD COLUMN token_usage TEXT NOT NULL DEFAULT '{}'",
+    // Bookmarks table (BG-13)
+    "CREATE TABLE IF NOT EXISTS bookmarks (
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        message_index INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+    )",
     // Clean up any orphaned messages (shouldn't exist but defensive).
     // FK enforcement was added after initial schema, so existing databases
     // may have orphaned rows from before PRAGMA foreign_keys = ON was set.
     "DELETE FROM messages WHERE session_id NOT IN (SELECT id FROM sessions)",
+    // BG-10: Conversation tree support
+    "ALTER TABLE messages ADD COLUMN parent_id TEXT",
+    "ALTER TABLE sessions ADD COLUMN branch_head TEXT",
 ];
 
 pub fn role_to_str(role: &Role) -> &'static str {

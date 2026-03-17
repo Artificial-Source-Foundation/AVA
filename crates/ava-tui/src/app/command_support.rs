@@ -108,6 +108,122 @@ impl App {
         }
     }
 
+    pub(super) fn handle_bookmark_command(
+        &mut self,
+        arg: Option<&str>,
+    ) -> Option<(MessageKind, String)> {
+        match arg {
+            Some("list") | None => {
+                // List bookmarks for current session
+                match self.state.session.list_bookmarks() {
+                    Ok(bookmarks) if bookmarks.is_empty() => Some((
+                        MessageKind::System,
+                        "No bookmarks in this session.".to_string(),
+                    )),
+                    Ok(bookmarks) => {
+                        let mut lines = vec![format!("Bookmarks ({}):", bookmarks.len())];
+                        for bm in &bookmarks {
+                            let short_id = &bm.id.to_string()[..8];
+                            lines.push(format!(
+                                "  [{}] \"{}\" at message #{}",
+                                short_id, bm.label, bm.message_index
+                            ));
+                        }
+                        Some((MessageKind::System, lines.join("\n")))
+                    }
+                    Err(err) => Some((
+                        MessageKind::Error,
+                        format!("Failed to list bookmarks: {err}"),
+                    )),
+                }
+            }
+            Some("clear") => match self.state.session.clear_bookmarks() {
+                Ok(count) => {
+                    self.set_status(format!("Cleared {count} bookmarks"), StatusLevel::Info);
+                    Some((MessageKind::System, format!("Cleared {count} bookmarks")))
+                }
+                Err(err) => Some((
+                    MessageKind::Error,
+                    format!("Failed to clear bookmarks: {err}"),
+                )),
+            },
+            Some(sub) if sub.starts_with("remove ") => {
+                let id_prefix = sub.strip_prefix("remove ").unwrap().trim();
+                if id_prefix.is_empty() {
+                    return Some((
+                        MessageKind::Error,
+                        "Usage: /bookmark remove <id-prefix>".to_string(),
+                    ));
+                }
+                // Find bookmark by ID prefix
+                match self.state.session.list_bookmarks() {
+                    Ok(bookmarks) => {
+                        let matches: Vec<_> = bookmarks
+                            .iter()
+                            .filter(|bm| bm.id.to_string().starts_with(id_prefix))
+                            .collect();
+                        match matches.len() {
+                            0 => Some((
+                                MessageKind::Error,
+                                format!("No bookmark matching '{id_prefix}'"),
+                            )),
+                            1 => {
+                                let bm = matches[0];
+                                let label = bm.label.clone();
+                                match self.state.session.remove_bookmark(bm.id) {
+                                    Ok(()) => {
+                                        self.set_status(
+                                            format!("Removed bookmark: {label}"),
+                                            StatusLevel::Info,
+                                        );
+                                        Some((
+                                            MessageKind::System,
+                                            format!("Removed bookmark: {label}"),
+                                        ))
+                                    }
+                                    Err(err) => Some((
+                                        MessageKind::Error,
+                                        format!("Failed to remove bookmark: {err}"),
+                                    )),
+                                }
+                            }
+                            n => Some((
+                                MessageKind::Error,
+                                format!(
+                                    "Ambiguous: {n} bookmarks match '{id_prefix}'. Be more specific."
+                                ),
+                            )),
+                        }
+                    }
+                    Err(err) => Some((
+                        MessageKind::Error,
+                        format!("Failed to list bookmarks: {err}"),
+                    )),
+                }
+            }
+            Some(label) => {
+                // Add a bookmark at the current message index
+                let message_index = self.state.messages.messages.len().saturating_sub(1);
+                match self.state.session.add_bookmark(label, message_index) {
+                    Ok(bm) => {
+                        let short_id = &bm.id.to_string()[..8];
+                        self.set_status(format!("Bookmarked: {label}"), StatusLevel::Info);
+                        Some((
+                            MessageKind::System,
+                            format!(
+                                "Bookmark added: \"{}\" at message #{} [{}]",
+                                bm.label, bm.message_index, short_id
+                            ),
+                        ))
+                    }
+                    Err(err) => {
+                        Some((MessageKind::Error, format!("Failed to add bookmark: {err}")))
+                    }
+                }
+            }
+        }
+    }
+
     pub(crate) fn sync_custom_command_autocomplete(&mut self) {
         use crate::widgets::autocomplete::AutocompleteItem;
 

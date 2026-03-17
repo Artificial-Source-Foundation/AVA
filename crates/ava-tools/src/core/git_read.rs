@@ -16,6 +16,12 @@ const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 /// shell invocation (`sh -c "git ..."`) to prevent shell injection.
 pub struct GitReadTool;
 
+impl Default for GitReadTool {
+    fn default() -> Self {
+        Self
+    }
+}
+
 impl GitReadTool {
     pub fn new() -> Self {
         Self

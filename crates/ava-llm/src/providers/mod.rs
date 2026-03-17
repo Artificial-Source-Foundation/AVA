@@ -121,9 +121,13 @@ pub fn create_provider(
                     .base_url
                     .clone()
                     .unwrap_or_else(|| "https://api.openai.com".to_string());
-                Ok(Box::new(OpenAIProvider::with_base_url(
-                    pool, api_key, model, base_url,
-                )))
+                let litellm = entry.litellm_compatible.unwrap_or_else(|| {
+                    openai::looks_like_litellm_proxy(&base_url)
+                });
+                Ok(Box::new(
+                    OpenAIProvider::with_base_url(pool, api_key, model, base_url)
+                        .with_litellm_compatible(litellm),
+                ))
             }
         }
         "openrouter" => {
@@ -350,6 +354,7 @@ mod tests {
                 oauth_refresh_token: None,
                 oauth_expires_at: None,
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
         let result = create_provider("copilot", "gpt-4o", &store, default_pool());
@@ -370,6 +375,7 @@ mod tests {
                 oauth_refresh_token: None,
                 oauth_expires_at: None,
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
         let provider = create_provider("copilot", "gpt-4o", &store, default_pool())
@@ -390,6 +396,7 @@ mod tests {
                     oauth_refresh_token: None,
                     oauth_expires_at: None,
                     oauth_account_id: None,
+                    litellm_compatible: None,
                 },
             );
         }
@@ -503,6 +510,7 @@ mod tests {
                 oauth_refresh_token: Some("refresh-token".to_string()),
                 oauth_expires_at: Some(u64::MAX), // far future
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
         let provider = create_provider("openai", "codex-mini", &store, default_pool())

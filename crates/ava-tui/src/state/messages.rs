@@ -367,7 +367,7 @@ impl UiMessage {
 
                 // Append blinking cursor to last line while streaming
                 if self.is_streaming {
-                    let cursor_char = if (spinner_tick / 8) % 2 == 0 {
+                    let cursor_char = if (spinner_tick / 8).is_multiple_of(2) {
                         "\u{258c}" // ▌
                     } else {
                         " "

@@ -552,6 +552,7 @@ mod tests {
                 oauth_refresh_token: None,
                 oauth_expires_at: None,
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
         credentials.save(&credentials_path).await.unwrap();
@@ -592,6 +593,7 @@ mod tests {
                         oauth_refresh_token: None,
                         oauth_expires_at: None,
                         oauth_account_id: None,
+                        litellm_compatible: None,
                     },
                 );
             })

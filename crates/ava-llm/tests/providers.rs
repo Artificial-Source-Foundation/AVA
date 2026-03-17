@@ -21,6 +21,7 @@ fn credential(api_key: &str) -> ProviderCredential {
         oauth_refresh_token: None,
         oauth_expires_at: None,
         oauth_account_id: None,
+        litellm_compatible: None,
     }
 }
 
@@ -129,6 +130,7 @@ fn create_provider_base_url_override_openrouter() {
             oauth_refresh_token: None,
             oauth_expires_at: None,
             oauth_account_id: None,
+            litellm_compatible: None,
         },
     );
 
@@ -150,6 +152,7 @@ fn create_provider_base_url_override_ollama() {
             oauth_refresh_token: None,
             oauth_expires_at: None,
             oauth_account_id: None,
+            litellm_compatible: None,
         },
     );
 
@@ -203,6 +206,7 @@ async fn router_available_providers_matches_configured_credentials() {
             oauth_refresh_token: None,
             oauth_expires_at: None,
             oauth_account_id: None,
+            litellm_compatible: None,
         },
     );
     let router = ModelRouter::new(store);

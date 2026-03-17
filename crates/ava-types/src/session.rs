@@ -17,6 +17,10 @@ pub struct Session {
     /// Accumulated token usage across all turns in this session.
     #[serde(default)]
     pub token_usage: TokenUsage,
+    /// Active branch head — the leaf message ID of the currently selected branch.
+    /// `None` means linear mode (use all messages in order).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_head: Option<Uuid>,
 }
 
 impl Session {
@@ -29,6 +33,7 @@ impl Session {
             messages: Vec::new(),
             metadata: serde_json::json!({}),
             token_usage: TokenUsage::default(),
+            branch_head: None,
         }
     }
 

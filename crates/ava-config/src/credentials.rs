@@ -31,6 +31,11 @@ pub struct ProviderCredential {
     /// OAuth account identifier (e.g., ChatGPT account ID).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oauth_account_id: Option<String>,
+    /// Enable LiteLLM proxy compatibility mode.
+    /// When true, a dummy tool is injected into requests with empty tool lists
+    /// to prevent LiteLLM routing issues with certain models.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub litellm_compatible: Option<bool>,
 }
 
 impl std::fmt::Debug for ProviderCredential {
@@ -334,6 +339,7 @@ impl CredentialStore {
                     oauth_refresh_token: None,
                     oauth_expires_at: None,
                     oauth_account_id: None,
+                    litellm_compatible: None,
                 });
         cred.oauth_token = Some(access_token.to_string());
         cred.oauth_refresh_token = refresh_token.map(String::from);
@@ -432,6 +438,7 @@ fn empty_credential() -> ProviderCredential {
         oauth_refresh_token: None,
         oauth_expires_at: None,
         oauth_account_id: None,
+        litellm_compatible: None,
     }
 }
 
@@ -513,6 +520,7 @@ mod tests {
             oauth_refresh_token: None,
             oauth_expires_at: None,
             oauth_account_id: None,
+            litellm_compatible: None,
         }
     }
 
@@ -546,6 +554,7 @@ mod tests {
                 oauth_refresh_token: None,
                 oauth_expires_at: None,
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
         store.save(&path).await.unwrap();
@@ -620,6 +629,7 @@ mod tests {
                 oauth_refresh_token: Some("refresh-token".to_string()),
                 oauth_expires_at: Some(1),
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
 
@@ -677,6 +687,7 @@ mod tests {
                 oauth_refresh_token: Some("refresh-token".to_string()),
                 oauth_expires_at: Some(1),
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
 

@@ -230,9 +230,8 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
 /// Produce a compact one-line summary of tool arguments for headless text output.
 /// Extracts the most meaningful field (e.g., path for read/write, command for bash).
 fn summarize_tool_args(tool_name: &str, args: &serde_json::Value) -> String {
-    let obj = match args.as_object() {
-        Some(o) => o,
-        None => return args.to_string(),
+    let Some(obj) = args.as_object() else {
+        return args.to_string();
     };
     // Pick the most informative field based on tool name
     let key = match tool_name {

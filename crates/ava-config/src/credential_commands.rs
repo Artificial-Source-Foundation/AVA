@@ -83,6 +83,7 @@ where
                     oauth_refresh_token: None,
                     oauth_expires_at: None,
                     oauth_account_id: None,
+                    litellm_compatible: None,
                 },
             );
 
@@ -250,6 +251,7 @@ mod tests {
                 oauth_refresh_token: None,
                 oauth_expires_at: None,
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
 
@@ -307,6 +309,7 @@ mod tests {
                 oauth_refresh_token: None,
                 oauth_expires_at: None,
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
 

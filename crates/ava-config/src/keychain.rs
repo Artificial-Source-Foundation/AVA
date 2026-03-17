@@ -640,6 +640,7 @@ mod tests {
                 oauth_refresh_token: None,
                 oauth_expires_at: None,
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
         store.set(
@@ -652,6 +653,7 @@ mod tests {
                 oauth_refresh_token: Some("refresh-xyz".to_string()),
                 oauth_expires_at: Some(1700000000),
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
 
@@ -698,6 +700,7 @@ mod tests {
                 oauth_refresh_token: None,
                 oauth_expires_at: None,
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
 
@@ -731,6 +734,7 @@ mod tests {
             oauth_refresh_token: None,
             oauth_expires_at: None,
             oauth_account_id: None,
+            litellm_compatible: None,
         };
         manager.store("openrouter", &cred).unwrap();
 
@@ -769,6 +773,7 @@ mod tests {
                     oauth_refresh_token: None,
                     oauth_expires_at: None,
                     oauth_account_id: None,
+                    litellm_compatible: None,
                 },
             );
             store.save(&plaintext_path).await.unwrap();
@@ -825,6 +830,7 @@ mod tests {
                 oauth_refresh_token: None,
                 oauth_expires_at: None,
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
         store.set(
@@ -837,6 +843,7 @@ mod tests {
                 oauth_refresh_token: None,
                 oauth_expires_at: None,
                 oauth_account_id: None,
+                litellm_compatible: None,
             },
         );
 

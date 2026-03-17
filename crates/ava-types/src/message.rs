@@ -108,6 +108,10 @@ pub struct Message {
     /// Image attachments for multimodal messages.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<ImageContent>,
+    /// Parent message ID for tree-structured conversations (BG-10).
+    /// When `None`, this is a root message or a legacy linear message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<Uuid>,
 }
 
 impl Message {
@@ -121,6 +125,7 @@ impl Message {
             tool_results: Vec::new(),
             tool_call_id: None,
             images: Vec::new(),
+            parent_id: None,
         }
     }
 
@@ -141,6 +146,11 @@ impl Message {
 
     pub fn with_images(mut self, images: Vec<ImageContent>) -> Self {
         self.images = images;
+        self
+    }
+
+    pub fn with_parent(mut self, parent_id: Uuid) -> Self {
+        self.parent_id = Some(parent_id);
         self
     }
 

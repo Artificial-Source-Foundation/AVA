@@ -72,8 +72,7 @@ pub fn trust_project(project_root: &Path) -> std::io::Result<()> {
     }
     std::fs::write(
         &trust_path,
-        serde_json::to_string_pretty(&data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?,
+        serde_json::to_string_pretty(&data).map_err(std::io::Error::other)?,
     )
 }
 

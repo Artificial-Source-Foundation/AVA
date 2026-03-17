@@ -13,6 +13,38 @@ use crate::pool::ConnectionPool;
 use crate::provider::{LLMProvider, LLMResponse, ProviderCapabilities};
 use crate::providers::common;
 
+/// Heuristic check for whether a base URL likely points to a LiteLLM proxy.
+///
+/// Returns `true` if the URL contains common LiteLLM proxy indicators:
+/// - The hostname contains "litellm"
+/// - The URL path ends with `/v1` (common for self-hosted proxies on non-standard ports)
+///
+/// This is used for auto-detection when `litellm_compatible` is not explicitly set.
+pub fn looks_like_litellm_proxy(base_url: &str) -> bool {
+    let lower = base_url.to_lowercase();
+    lower.contains("litellm")
+}
+
+/// Returns a minimal dummy tool definition for LiteLLM proxy compatibility.
+///
+/// Some LiteLLM proxy configurations fail to route requests correctly when no
+/// tools are present. This injects a harmless no-op tool that the model will
+/// never call, satisfying LiteLLM's routing requirements.
+fn litellm_dummy_tools() -> Vec<Value> {
+    vec![json!({
+        "type": "function",
+        "function": {
+            "name": "litellm_noop",
+            "description": "Reserved no-op tool for LiteLLM proxy compatibility. Do not call this tool.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    })]
+}
+
 /// Thinking/reasoning format variants for OpenAI-compatible providers.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ThinkingFormat {
@@ -36,6 +68,9 @@ pub struct OpenAIProvider {
     /// instead of the Chat Completions API (`/v1/chat/completions`).
     /// Required for ChatGPT OAuth tokens at `chatgpt.com/backend-api/codex`.
     use_responses_api: bool,
+    /// When true, inject a dummy tool into requests with empty tool lists
+    /// to prevent LiteLLM proxy routing issues with certain models.
+    litellm_compatible: bool,
 }
 
 impl OpenAIProvider {
@@ -61,6 +96,7 @@ impl OpenAIProvider {
             thinking_format: ThinkingFormat::OpenAI,
             circuit_breaker: Some(Arc::new(CircuitBreaker::default_provider())),
             use_responses_api: false,
+            litellm_compatible: false,
         }
     }
 
@@ -76,6 +112,15 @@ impl OpenAIProvider {
     /// instead of the Chat Completions API (`/v1/chat/completions`).
     pub fn with_responses_api(mut self, enabled: bool) -> Self {
         self.use_responses_api = enabled;
+        self
+    }
+
+    /// Enable LiteLLM proxy compatibility mode.
+    ///
+    /// When enabled, a minimal dummy tool is injected into requests that have
+    /// no tools, preventing LiteLLM proxy routing issues with certain models.
+    pub fn with_litellm_compatible(mut self, enabled: bool) -> Self {
+        self.litellm_compatible = enabled;
         self
     }
 
@@ -228,6 +273,8 @@ impl OpenAIProvider {
         // Add tools in Responses API format
         if !tools.is_empty() {
             body["tools"] = json!(common::tools_to_responses_api_format(tools));
+        } else if self.litellm_compatible {
+            body["tools"] = json!(litellm_dummy_tools());
         }
 
         body
@@ -278,6 +325,8 @@ impl OpenAIProvider {
         let mut body = self.build_request_body(messages, stream);
         if !tools.is_empty() {
             body["tools"] = json!(common::tools_to_openai_format(tools));
+        } else if self.litellm_compatible {
+            body["tools"] = json!(litellm_dummy_tools());
         }
         body
     }
@@ -294,6 +343,8 @@ impl OpenAIProvider {
 
         if !tools.is_empty() {
             body["tools"] = json!(common::tools_to_openai_format(tools));
+        } else if self.litellm_compatible {
+            body["tools"] = json!(litellm_dummy_tools());
         }
 
         if thinking != ThinkingLevel::Off && self.supports_reasoning() {

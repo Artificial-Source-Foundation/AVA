@@ -74,9 +74,8 @@ fn is_safe_ava_path(path: &std::path::Path, ava_dir: &std::path::Path) -> bool {
     if !path.starts_with(ava_dir) {
         return false;
     }
-    let relative = match path.strip_prefix(ava_dir) {
-        Ok(r) => r,
-        Err(_) => return false,
+    let Ok(relative) = path.strip_prefix(ava_dir) else {
+        return false;
     };
     // Get the first component of the relative path
     let first = match relative.components().next() {
@@ -176,7 +175,7 @@ impl PermissionInspector for DefaultInspector {
         // untrusted code and must not be auto-approved at Medium by standard policy.
         if matches!(
             context.tool_source,
-            Some(ToolSource::Custom { .. }) | Some(ToolSource::MCP { .. })
+            Some(ToolSource::Custom { .. } | ToolSource::MCP { .. })
         ) && risk_level < RiskLevel::High
         {
             risk_level = RiskLevel::High;

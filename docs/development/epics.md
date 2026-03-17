@@ -1,93 +1,80 @@
 # AVA Epics
 
 > Last updated: 2026-03-16
-> Related: `docs/development/roadmap.md`, `docs/development/backlog.md`, `docs/development/v3-plan.md`
+> Related: [roadmap.md](roadmap.md), [backlog.md](backlog.md)
 
-## Completed Epics
+## Planned Epics
 
-### E1: Dynamic Model Intelligence (Sprints 53-55, 59)
+### E10: Plugin System (v3.0)
 
-| Sprint | Focus | Status |
-|--------|-------|--------|
-| 53 | Dynamic model catalog (models.dev fetch, whitelist, cache) | Complete |
-| 54 | Thinking/reasoning mode (per-provider variants, `/think`, `Ctrl+T`) | Complete |
-| 55 | Coding plan providers (Alibaba, ZAI, ZhipuAI, Kimi, MiniMax) | Complete |
-| 59 | Provider mega: Copilot, verification, retry jitter, circuit breaker wiring, compiled-in model registry, rich `StreamChunk`, Alibaba fixes | Complete |
+Target: v3.0 release. AVA's next major milestone.
 
-### E2: Codebase Quality (Sprints 56-58)
+| Phase | Scope | Status |
+|-------|-------|--------|
+| Phase 1 | Plugin runtime (`ava-plugin` crate, trait, isolation, TOML config) | Not started |
+| Phase 2 | Plugin SDK, `ava plugin install`, registry, versioning | Not started |
+| Phase 3 | Marketplace, verified publishers, templates, OpenCode compat bridge | Not started |
 
-| Sprint | Focus | Status |
-|--------|-------|--------|
-| 56 | Quality audit (unwrap, tests, docs, modularity, perf, hygiene) | Complete |
-| 57 | Quality fixes: P0 panics/tests plus P1 docs/modularity | Complete |
-| 58 | Modal system revamp (`SelectList`, scroll fixes, visual polish) | Complete |
+Related backlog: B46 (marketplace), B55/B56/B72/B77 (plugin-first capabilities).
 
-### E3: Streaming and Session UX (Sprint 60)
+## Recently Completed Epics
 
-| Sprint | Focus | Status |
-|--------|-------|--------|
-| 60 | Streaming tool calls, session/context UX, project instructions, workflow polish | Complete |
+### E11: Dead Code Cleanup (v2.1.1) -- COMPLETE
 
-### E4: Reliable Edit Loop (Sprint 61)
+Removed 30 unwired modules (~10.5K lines) and archived design docs to `docs/ideas/`.
 
-| Sprint | Focus | Status |
-|--------|-------|--------|
-| 61 | `B67`, `B54`, `B37`, `B66` safer edit -> validate -> commit flow | Implemented and archived |
+### E12: Documentation Overhaul (v2.1.1) -- COMPLETE
 
-### E5: Cost and Runtime Controls (Sprint 62)
+Refreshed CLAUDE.md, AGENTS.md, README, crate docs. Added plugin design research. Rebuilt `docs/development/` as project management hub.
 
-| Sprint | Focus | Status |
-|--------|-------|--------|
-| 62 | `B64`, `B63`, `B47`, `B40` stronger budgeting, credential refresh, routing, and cost visibility | Implemented, validated, archived via Sprint 62V |
+### E13: Security Hardening (v2.1.1) -- COMPLETE
 
-## Completed v3 Backend Epics
+11 security commits covering: sandbox hardening, permission hardening, config hardening, auth hardening, symlink escape fix, trust gates, MCP env filtering, tool tracing.
+
+### E14: Backend Gaps (v2.1.1) -- COMPLETE
+
+Filled competitive gaps from deep scrape analysis: conversation tree/branching (BG-10), session bookmarks (BG-13), LiteLLM compat (BG-14), named agents (BG-11), tool output disk fallback (BG-3/4), pruning (BG-5), ghost revert (BG-6), compaction improvements (BG-7/8), branch summarization (BG-9), direction-aware truncation (BG-12), secret redaction, repetition inspector, turn diff tracker, focus chain, tool call repair.
+
+## Completed v3 Epics (Sprints 60-66)
+
+### E3: Streaming and Session UX (Sprint 60) -- COMPLETE
+
+Streaming tool calls, session/context UX, project instructions, three-tier mid-stream messaging, workflow polish.
+
+### E4: Reliable Edit Loop (Sprint 61) -- COMPLETE
+
+RelativeIndenter, auto lint+test, smart `/commit`, ghost snapshots.
+
+### E5: Cost and Runtime Controls (Sprint 62) -- COMPLETE
+
+Thinking budgets, dynamic API keys, cost-aware routing, budget alerts. Validated via Sprint 62V.
 
 ### E6: Execution and Ecosystem Foundations (Sprint 63) -- COMPLETE
 
-| Item | Description |
-|------|-------------|
-| `B65` | Pluggable backend operations |
-| `B39` | Background agents on branches |
-| `B61` | Dev tooling setup |
-| `B71` | Skill discovery |
-| `B45` | File watcher mode |
+Pluggable backend ops (B65), background agents on branches (B39), dev tooling (B61), skill discovery (B71), file watcher (B45).
 
 ### E7: Knowledge and Context Intelligence (Sprint 64) -- COMPLETE
 
-| Item | Description |
-|------|-------------|
-| `B38` | Auto-learned project memories |
-| `B57` | Multi-repo context |
-| `B58` | Semantic codebase indexing |
-| `B48` | Change impact analysis |
+Auto-learned memories (B38), multi-repo context (B57), semantic indexing (B58), change impact analysis (B48).
 
 ### E8: Agent Coordination Backend (Sprint 65) -- COMPLETE
 
-| Item | Description |
-|------|-------------|
-| `B49` | Spec-driven development |
-| `B59` | Agent artifacts system |
-| `B50` | Agent team peer communication |
-| `B76` | Agent Client Protocol (ACP) |
+Spec-driven dev (B49), agent artifacts (B59), agent team peer comm (B50), ACP (B76).
 
 ### E9: Optional Capability Backends (Sprint 66) -- COMPLETE
 
-| Item | Description |
-|------|-------------|
-| `B44` | Web search capability (Extended) |
-| `B52` | AST-aware operations (Extended) |
-| `B53` | Full LSP exposure (Extended) |
-| `B69` | Code search tool (plugin/MCP) |
+Web search (B44), AST ops (B52), LSP ops (B53), code search (B69). All Extended tier.
 
-## Completed v3 Frontend and UX Epics
+## Completed Foundation Epics (Sprints 11-59)
 
-All delivered. See `docs/development/v3-plan.md` for details.
+### E1: Dynamic Model Intelligence (Sprints 53-55, 59) -- COMPLETE
 
-| Epic | Focus | Paired Sprint |
-|------|-------|---------------|
-| FE-D | Praxis chat UX and worker visibility, including `B26` | 65 |
-| FE-A | Ambient awareness (`context %`, modular footer, duration/cost visibility) — largely delivered, follow-through only | 62 |
-| FE-B | Conversation clarity (tool grouping, inline diffs, quieter streaming) — partially delivered, polish remains | 62 |
-| FE-C | Session and history UX (search, rewind preview, stats) | 63 |
-| FE-E | Input and discoverability (shortcuts, richer command discovery, long-input polish) | 64 |
-| FE-F | Desktop parity follow-through for proven TUI patterns | 66 |
+Dynamic model catalog, thinking/reasoning modes, 7 coding plan providers, Copilot provider, compiled-in registry, rich StreamChunk.
+
+### E2: Codebase Quality (Sprints 56-58) -- COMPLETE
+
+Quality audit, unwrap/panic fixes, modal system revamp with shared SelectList widget.
+
+### Foundation (Sprints 11-50f) -- COMPLETE
+
+55 sprints covering: Rust agent stack, TUI, credentials, Praxis multi-agent, CLI providers, agent loop intelligence, MCP, TOML plugins, context/memory, performance, safety, code review, voice input, stabilization, and v2.1 release.

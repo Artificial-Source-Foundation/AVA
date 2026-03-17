@@ -1,34 +1,63 @@
-# AVA v2.1 — E2E Test Matrix
+# AVA Test Matrix
 
-> Verified 2026-03-08 on `anthropic/claude-haiku-4.5` via OpenRouter
+> Last updated: 2026-03-16 | All tests passing
 
-## Tool Tests (13 core tools)
+## Per-Crate Test Counts
 
-This matrix tracks the default and extended tools exposed through the main tool registry. Runtime helpers such as `task`, `todo_*`, and `question` are registered separately, and historical references to memory/session/codebase tools reflect earlier architecture snapshots rather than the current default tool inventory.
+Total: **1,466 tests** across 21 crates. All passing, 0 failures, 1 ignored.
 
-| # | Tool | Status | Test Description |
-|---|------|--------|------------------|
-| 1 | read | PASS | Read file, report content |
-| 2 | write | PASS | Create file, verify content |
-| 3 | edit | PASS | Single string replacement |
-| 4 | bash | PASS | Shell command execution |
-| 5 | glob | PASS | File pattern matching |
-| 6 | grep | PASS | Content search with line numbers |
-| 7 | multiedit | PASS | Atomic multi-file edits |
-| 8 | apply_patch | PASS | Unified diff application |
-| 9 | test_runner | PASS | Cargo test execution |
-| 10 | lint | PASS | Clippy lint results |
-| 11 | diagnostics | PASS | Compiler diagnostics |
-| 12 | web_fetch | PASS | Remote fetch with output limits |
-| 13 | git | PASS | Review-only git access (via `ava review`) |
+| Crate | Tests | Focus |
+|-------|------:|-------|
+| ava-llm | 277 | Provider implementations, streaming, model catalog, registry |
+| ava-tui | 217 | TUI rendering, widgets, slash commands, headless mode |
+| ava-tools | 196 | Tool trait, core tools, registry, middleware |
+| ava-agent | 134 | Agent loop, reflection, stack, instructions, E2E |
+| ava-permissions | 115 | Command classification, safety tags, risk levels, inspector |
+| ava-config | 79 | Configuration, credentials, model catalog |
+| ava-smoke | 67 | Smoke tests (mock provider, no network) |
+| ava-context | 60 | Context management, condensation, compaction |
+| ava-types | 58 | Shared types, serialization |
+| ava-praxis | 50 | Multi-agent orchestration, workflows |
+| ava-session | 35 | Session persistence, SQLite, FTS5 |
+| ava-cli-providers | 32 | CLI provider resolution |
+| ava-mcp | 31 | MCP transport, client, config |
+| ava-auth | 31 | OAuth flows, token exchange, PKCE |
+| ava-codebase | 22 | BM25 indexing, PageRank, import graph |
+| ava-platform | 16 | File system, shell abstractions |
+| ava-validator | 13 | Validation pipelines |
+| ava-memory | 11 | Memory persistence, recall |
+| ava-extensions | 9 | Extension management |
+| ava-sandbox | 7 | Command sandboxing |
+| ava-db | 6 | SQLite connection pool |
+| ava-plugin | 0 | Plugin system (new, no tests yet) |
 
-## Mode Tests (5/5)
+## E2E Tool Tests (13 tools)
 
-| Mode | Status | Command |
-|------|--------|---------|
+Verified on `anthropic/claude-haiku-4.5` via OpenRouter.
+
+| # | Tool | Tier | Status |
+|---|------|------|--------|
+| 1 | read | Default | PASS |
+| 2 | write | Default | PASS |
+| 3 | edit | Default | PASS |
+| 4 | bash | Default | PASS |
+| 5 | glob | Default | PASS |
+| 6 | grep | Default | PASS |
+| 7 | multiedit | Extended | PASS |
+| 8 | apply_patch | Extended | PASS |
+| 9 | test_runner | Extended | PASS |
+| 10 | lint | Extended | PASS |
+| 11 | diagnostics | Extended | PASS |
+| 12 | web_fetch | Extended | PASS |
+| 13 | git | Extended | PASS |
+
+## Mode Tests
+
+| Mode | Status | Flag |
+|------|--------|------|
 | Headless | PASS | `--headless` |
 | JSON output | PASS | `--headless --json` |
-| Multi-agent commander | PASS | `--multi-agent` |
+| Multi-agent | PASS | `--multi-agent` |
 | Workflow pipeline | PASS | `--workflow plan-code-review` |
 | Review subcommand | PASS | `ava review --working` |
 
@@ -36,14 +65,22 @@ This matrix tracks the default and extended tools exposed through the main tool 
 
 | Provider | Model | Status |
 |----------|-------|--------|
-| OpenRouter → Anthropic | `anthropic/claude-haiku-4.5` | PASS |
-| OpenRouter → OpenAI | `openai/gpt-5.3-codex` | PASS |
-| OpenRouter → Google | `google/gemini-3-flash-preview` | PASS |
+| OpenRouter -> Anthropic | `anthropic/claude-haiku-4.5` | PASS |
+| OpenRouter -> OpenAI | `openai/gpt-5.3-codex` | PASS |
+| OpenRouter -> Google | `google/gemini-3-flash-preview` | PASS |
 
-## Recommended Test Models
+## Test Commands
 
-| Use Case | Model ID | Cost (input/output per M) |
-|----------|----------|---------------------------|
-| Smoke tests | `anthropic/claude-haiku-4.5` | $1 / $5 |
-| Quality verification | `anthropic/claude-sonnet-4` | $3 / $15 |
-| Budget bulk | `moonshotai/kimi-k2.5` | $0.45 / $0.45 |
+```bash
+# Full workspace
+cargo test --workspace
+
+# Single crate
+cargo test -p ava-tools
+
+# With output
+cargo test --workspace -- --nocapture
+
+# Smoke test (requires OpenRouter key)
+cargo run --bin ava -- "Reply with SMOKE_OK" --headless --provider openrouter --model anthropic/claude-haiku-4.5 --max-turns 3
+```

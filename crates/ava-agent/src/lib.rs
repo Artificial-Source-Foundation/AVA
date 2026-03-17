@@ -6,24 +6,15 @@
 //! - Detects stuck states and terminates gracefully
 
 pub mod agent_loop;
-pub mod architect;
 pub(crate) mod budget;
-pub mod build_race;
-pub mod file_watcher;
-pub mod hooks;
 pub mod instruction_resolver;
 pub mod instructions;
 pub mod llm_trait;
 pub(crate) mod memory_enrichment;
-pub mod mentions;
 pub mod message_queue;
 pub mod reflection;
-pub mod reviewer;
 pub mod routing;
-pub mod scheduler;
-pub mod session_agent;
 pub mod stack;
-pub mod startup_context;
 pub mod stuck;
 pub mod system_prompt;
 pub mod trace;

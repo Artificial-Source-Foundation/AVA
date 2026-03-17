@@ -126,9 +126,9 @@ v2.1.0 released on 2026-03-08. Sprints 63-66 completed the v3 backend and UX lan
 | Metric | Value |
 |--------|-------|
 | Rust crates | 20 |
-| Rust source files | 268 |
-| Lines of Rust | ~77,000 |
-| Tracked test files | 338 |
+| Rust source files | 358 |
+| Lines of Rust | ~104,000 |
+| Tests | 1,798 |
 | Clippy | Clean |
 | Built-in tools | 6 |
 | Extended tools | 8 |

@@ -1,6 +1,6 @@
 # AVA Epics
 
-> Last updated: 2026-03-13
+> Last updated: 2026-03-16
 > Related: `docs/development/roadmap.md`, `docs/development/backlog.md`, `docs/development/v3-plan.md`
 
 ## Completed Epics
@@ -40,9 +40,9 @@
 |--------|-------|--------|
 | 62 | `B64`, `B63`, `B47`, `B40` stronger budgeting, credential refresh, routing, and cost visibility | Implemented, validated, archived via Sprint 62V |
 
-## Planned v3 Backend Epics
+## Completed v3 Backend Epics
 
-### E6: Execution and Ecosystem Foundations (Sprint 63)
+### E6: Execution and Ecosystem Foundations (Sprint 63) -- COMPLETE
 
 | Item | Description |
 |------|-------------|
@@ -52,7 +52,7 @@
 | `B71` | Skill discovery |
 | `B45` | File watcher mode |
 
-### E7: Knowledge and Context Intelligence (Sprint 64)
+### E7: Knowledge and Context Intelligence (Sprint 64) -- COMPLETE
 
 | Item | Description |
 |------|-------------|
@@ -61,7 +61,7 @@
 | `B58` | Semantic codebase indexing |
 | `B48` | Change impact analysis |
 
-### E8: Agent Coordination Backend (Sprint 65)
+### E8: Agent Coordination Backend (Sprint 65) -- COMPLETE
 
 | Item | Description |
 |------|-------------|
@@ -70,7 +70,7 @@
 | `B50` | Agent team peer communication |
 | `B76` | Agent Client Protocol (ACP) |
 
-### E9: Optional Capability Backends (Sprint 66)
+### E9: Optional Capability Backends (Sprint 66) -- COMPLETE
 
 | Item | Description |
 |------|-------------|
@@ -79,9 +79,9 @@
 | `B53` | Full LSP exposure (Extended) |
 | `B69` | Code search tool (plugin/MCP) |
 
-## Planned v3 Frontend and UX Epics
+## Completed v3 Frontend and UX Epics
 
-These run as a paired lane against the backend epics so new backend power ships with visible product value.
+All delivered. See `docs/development/v3-plan.md` for details.
 
 | Epic | Focus | Paired Sprint |
 |------|-------|---------------|

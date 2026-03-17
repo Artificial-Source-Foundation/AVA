@@ -3,33 +3,35 @@
 # Backend Modules
 
 > **Pure Rust backend**: All backend logic lives in `crates/`. The SolidJS frontend (`src/`) communicates with Rust via Tauri IPC commands (`src-tauri/`).
+>
+> For detailed crate descriptions, dependencies, and key types, see [crate-map.md](crate-map.md).
 
 ## Rust Crates (`crates/`)
 
-~22 Rust crates make up the CLI, agent runtime, and desktop backend:
+20 Rust crates (358 files, ~104K LOC, 1,798 tests):
 
-1. `ava-agent` — Agent execution loop + reflection
-2. `ava-auth` — OAuth and credential flows
-3. `ava-cli-providers` — CLI provider management
-4. `ava-codebase` — Code indexing (BM25 + PageRank)
-5. `ava-config` — Configuration management
-6. `ava-context` — Context window management
-7. `ava-db` — SQLite connection pool
-8. `ava-extensions` — Extension system
-9. `ava-llm` — LLM providers (Anthropic, Copilot, Gemini, Inception, Ollama, OpenAI, OpenRouter, mock)
-10. `ava-mcp` — Model Context Protocol
-11. `ava-memory` — Persistent memory/recall
-12. `ava-permissions` — Permission system
-13. `ava-platform` — Platform abstractions (fs, shell)
-14. `ava-praxis` — Multi-agent orchestration (Praxis)
-15. `ava-sandbox` — Command sandboxing (bwrap/sandbox-exec)
-16. `ava-session` — Session persistence (SQLite + FTS5)
-17. `ava-tools` — Tool trait + registry + tiered core tools
-18. `ava-tui` — CLI/TUI binary (Ratatui + Crossterm)
-19. `ava-types` — Shared types
-20. `ava-validator` — Validation pipeline
-
-**Tool surface**: 6 built-in tools by default, 8 extended tools when enabled, plus separately-registered task/todo/question helpers and dynamic MCP/custom tools.
+| Crate | Purpose |
+|-------|---------|
+| `ava-agent` | Agent execution loop, tool calling, stuck detection, mid-stream messaging |
+| `ava-auth` | OAuth (PKCE, device code), Copilot token exchange |
+| `ava-cli-providers` | External CLI agent integration (Claude Code, etc.) |
+| `ava-codebase` | Code indexing (BM25 + PageRank), dependency graph, semantic search |
+| `ava-config` | Config management, credentials, model catalog, agent configs |
+| `ava-context` | Token tracking, context condensation |
+| `ava-db` | SQLite connection pool, data models |
+| `ava-extensions` | Extension system (hooks, native/WASM loaders) |
+| `ava-llm` | LLM providers (8), connection pool, circuit breaker, retry, routing |
+| `ava-mcp` | Model Context Protocol client/server (stdio + HTTP) |
+| `ava-memory` | Persistent key-value memory (SQLite + FTS5) |
+| `ava-permissions` | Permission rules, bash command classifier, risk levels |
+| `ava-platform` | File system and shell abstractions |
+| `ava-praxis` | Multi-agent orchestration (Director pattern), ACP, artifacts |
+| `ava-sandbox` | OS-level sandboxing (bwrap/sandbox-exec) |
+| `ava-session` | Session persistence (SQLite), bookmarks, conversation tree |
+| `ava-tools` | Tool trait, registry, 6 default + 8 extended tools, custom tools |
+| `ava-tui` | CLI/TUI binary (Ratatui + Crossterm) |
+| `ava-types` | Shared types (Message, Session, ToolCall, AvaError) |
+| `ava-validator` | Code validation pipeline with retry |
 
 ## Desktop Frontend (`src/`)
 
@@ -41,4 +43,4 @@ Rust command modules that bridge the SolidJS frontend to the Rust crate ecosyste
 
 ---
 
-*See also: [architecture-guide.md](architecture-guide.md), [CLAUDE.md](../../CLAUDE.md)*
+*See also: [crate-map.md](crate-map.md), [architecture-guide.md](architecture-guide.md), [CLAUDE.md](../../CLAUDE.md)*

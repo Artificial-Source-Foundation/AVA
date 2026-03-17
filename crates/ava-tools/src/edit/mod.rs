@@ -3,7 +3,6 @@ pub mod fuzzy_match;
 pub mod recovery;
 pub mod request;
 pub mod strategies;
-pub mod streaming;
 
 pub use error::EditError;
 pub use fuzzy_match::{FuzzyMatchStrategy, StreamMatch, StreamingMatcher};
@@ -14,7 +13,6 @@ pub use strategies::{
     IndentationAwareStrategy, LineNumberStrategy, MultiOccurrenceStrategy, RegexMatchStrategy,
     RelativeIndentStrategy, TokenBoundaryStrategy,
 };
-pub use streaming::{EditChunk, StreamingEditResult, StreamingEditor};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EditResult {

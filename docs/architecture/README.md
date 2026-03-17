@@ -2,7 +2,7 @@
 
 > AVA system design — Rust-first AI coding assistant with desktop and CLI interfaces
 >
-> **Last verified**: 2026-03-08
+> **Last verified**: 2026-03-16
 
 ---
 
@@ -12,11 +12,11 @@ AVA uses a **pure Rust backend** for both CLI and desktop:
 
 ```
 AVA/
-├── crates/                   # Rust crates — ALL backend logic (~22 crates)
+├── crates/                   # Rust crates — ALL backend logic (20 crates)
 │   ├── ava-tui/              # CLI/TUI binary (Ratatui + Crossterm)
 │   ├── ava-agent/            # Agent execution loop
 │   ├── ava-llm/              # LLM providers (7 built-in + mock)
-│   ├── ava-tools/            # Tool trait + registry (6 built-in + 8 extended tools)
+│   ├── ava-tools/            # Tool trait + registry (6 default + 8 extended tools)
 │   ├── ava-praxis/           # Multi-agent orchestration (Praxis)
 │   └── ...                   # 17 more crates (session, memory, config, etc.)
 ├── src/                      # Desktop frontend (SolidJS)
@@ -45,6 +45,7 @@ The CLI (`crates/ava-tui/`) calls Rust crates directly with no IPC layer.
 |----------|-------------|
 | [architecture-guide.md](./architecture-guide.md) | Backend architecture: system boundaries, execution flow, middleware |
 | [backend.md](./backend.md) | Backend overview: Rust crates |
+| [crate-map.md](./crate-map.md) | Detailed crate map with dependencies and key types |
 | [modules.md](./modules.md) | Module organization: Rust crates + SolidJS frontend |
 | [data-flow.md](./data-flow.md) | Desktop data flow (turn lifecycle, hooks) |
 | [praxis.md](./praxis.md) | Desktop agent hierarchy (Director → Leads → Workers) |
@@ -95,9 +96,9 @@ The Rust CLI uses Director with workflow pipelines for multi-agent orchestration
 | Group | Count | Tools |
 |-------|------:|-------|
 | Built-in | 6 | read, write, edit, bash, glob, grep |
-| Extended | 7 | apply_patch, web_fetch, multiedit, test_runner, lint, diagnostics, git |
+| Extended | 8 | apply_patch, web_fetch, web_search, multiedit, ast_ops, lsp_ops, code_search, git_read |
 
-Additional runtime helpers such as `task`, `question`, and todo tools are registered separately. Dynamic MCP tools and TOML custom tools remain supported.
+Additional runtime helpers (task, question, todo tools) are always available. Dynamic MCP tools and TOML custom tools load at runtime.
 
 ---
 

@@ -3,10 +3,8 @@
 pub mod condenser;
 pub mod error;
 pub mod focus;
-pub mod history_processor;
 pub mod manager;
 pub mod pruner;
-pub mod remote_compaction;
 pub mod strategies;
 pub mod token_tracker;
 pub mod types;

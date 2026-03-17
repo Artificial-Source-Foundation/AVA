@@ -4,7 +4,6 @@ pub mod error;
 pub mod executor;
 pub mod linux;
 pub mod macos;
-pub mod network_policy;
 pub mod policy;
 pub mod types;
 

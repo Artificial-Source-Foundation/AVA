@@ -44,7 +44,7 @@ When adding middleware, document the chosen priority and expected interactions. 
 
 ## 4) Current Topology Summary
 
-- Rust crates: ~22 under `crates/`
+- Rust crates: 20 under `crates/`
 - Built-in tools by default: 6, with 8 additional extended tools available when enabled
 - Dynamic MCP tools and TOML custom tools supported at runtime
 

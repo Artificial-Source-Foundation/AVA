@@ -17,10 +17,10 @@ All backend logic lives in Rust crates. Tauri commands in `src-tauri/src/command
 
 ## Current Shape
 
-- Rust crates: ~22 under `crates/`
+- Rust crates: 20 under `crates/`
 - Built-in tools by default: 6, with 8 additional extended tools available when enabled, plus task/todo/question helpers and dynamic MCP/custom tools
 
-### Rust Crate Index (~22)
+### Rust Crate Index (20)
 
 1. `ava-agent` — Agent execution loop
 2. `ava-auth` — OAuth, Copilot token exchange, PKCE

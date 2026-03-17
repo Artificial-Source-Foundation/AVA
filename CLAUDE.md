@@ -1,20 +1,17 @@
-<!-- Last verified: 2026-03-16. Run 'just check && npm run tauri build' to revalidate. -->
+<!-- Last verified: 2026-03-16. Run 'just check' to revalidate. -->
 
 # AVA Architecture & Conventions (v3)
 
 ## Quick Commands
 
 ```bash
-# Rust CLI/agent (primary) — via just (see Justfile)
+# Rust CLI/agent (primary) -- via just (see Justfile)
 just check                      # fmt + clippy + nextest (all-in-one)
 just test                       # cargo nextest run --workspace
 just lint                       # cargo clippy --workspace
 just fmt                        # cargo fmt --all
 just run                        # interactive TUI
 just headless "goal"            # headless mode
-just build-release              # optimized binary
-just doc                        # check doc builds
-just cov                        # coverage report (requires cargo-llvm-cov)
 
 # Or raw cargo
 cargo test --workspace
@@ -29,25 +26,24 @@ npm run format:check
 npx tsc --noEmit
 ```
 
-If `npm run tauri dev` fails with `ENOSPC` watcher errors on Linux, see `docs/troubleshooting/`.
-
-Release verification:
-
-```bash
-just check
-npm run tauri build
-```
+Release verification: `just check && npm run tauri build`
 
 ## Architecture
 
 AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust.
 
-- **CLI/TUI**: Pure Rust binary (`crates/ava-tui/`) — Ratatui + Crossterm + Tokio
+- **CLI/TUI**: Pure Rust binary (`crates/ava-tui/`) -- Ratatui + Crossterm + Tokio
 - **Agent runtime**: Rust (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-praxis/`)
-- **Desktop frontend**: SolidJS + TypeScript (`src/`) — calls Rust directly via Tauri IPC
+- **Desktop frontend**: SolidJS + TypeScript (`src/`) -- calls Rust directly via Tauri IPC
 - **Desktop backend**: Rust via Tauri commands (`src-tauri/src/commands/`)
 
-The desktop app follows the same backend path as the CLI: SolidJS frontend invokes Tauri IPC commands, which call into the shared Rust crates directly. There is no TypeScript orchestration layer — `packages/` has been deleted.
+### Codebase Stats
+
+- **20 Rust crates**, 358 source files, ~104K LOC, 1,798 tests
+- **8 LLM providers**: Anthropic, OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock
+- **6 default tools**: `read`, `write`, `edit`, `bash`, `glob`, `grep`
+- **8 extended tools**: `apply_patch`, `web_fetch`, `web_search`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `git_read`
+- **Dynamic tools**: MCP servers + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
 
 ### Mid-Stream Messaging
 
@@ -55,99 +51,86 @@ Three-tier message queue for interacting with the agent while it runs:
 
 | Tier | TUI Trigger | Headless Flag | Injection Point |
 |------|-------------|---------------|-----------------|
-| **Steering** | Enter | (stdin) | After current tool — skips remaining tools |
+| **Steering** | Enter | (stdin) | After current tool -- skips remaining tools |
 | **Follow-up** | Alt+Enter | `--follow-up` | After agent completes current task |
-| **Post-complete** | Ctrl+Alt+Enter | `--later` / `--later-group` | After agent stops — grouped pipeline (G1, G2, G3...) |
+| **Post-complete** | Ctrl+Alt+Enter | `--later` / `--later-group` | After agent stops -- grouped pipeline (G1, G2, G3...) |
 
-Commands: `/later` (add post-complete message), `/queue` (view/manage pending messages). Status bar shows `[N queued]`.
+Commands: `/later` (add post-complete message), `/queue` (view/manage pending messages).
 
 ## Project Structure
 
 ```text
 AVA/
-├── crates/                   # ~20 Rust crates (agent stack + TUI + services)
-│   ├── ava-tui/              # CLI/TUI binary (Ratatui) — THE primary interface
-│   ├── ava-agent/            # Agent execution loop + reflection
-│   ├── ava-llm/              # LLM providers (Anthropic, OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception)
-│   ├── ava-tools/            # Tool trait + registry + core tools (read/write/edit/bash/glob/grep)
-│   ├── ava-praxis/           # Multi-agent orchestration (Praxis)
-│   ├── ava-session/          # Session persistence (SQLite + FTS5)
-│   ├── ava-memory/           # Persistent memory/recall
-│   ├── ava-auth/             # Credential and auth flows
-│   ├── ava-config/           # Configuration management
-│   ├── ava-permissions/      # Tool permission checks
-│   ├── ava-sandbox/          # Command sandboxing (bwrap/sandbox-exec)
-│   ├── ava-platform/         # File system + shell abstractions
-│   ├── ava-context/          # Context window management + condensation
-│   ├── ava-codebase/         # Code indexing (BM25 + PageRank)
-│   ├── ava-db/               # SQLite connection pool
-│   ├── ava-types/            # Shared types
-│   ├── ava-validator/        # Validation utilities
-│   ├── ava-mcp/              # MCP (Model Context Protocol) support
-│   ├── ava-extensions/       # Extension system
-│   └── ava-cli-providers/    # CLI provider resolution
-├── src/                      # Desktop frontend (SolidJS → Tauri IPC → Rust)
-├── src-tauri/                # Tauri host + Rust IPC commands
-└── tests/
++-- crates/                   # 20 Rust crates (agent stack + TUI + services)
+|   +-- ava-tui/              # CLI/TUI binary (Ratatui) -- THE primary interface
+|   +-- ava-agent/            # Agent execution loop + reflection
+|   +-- ava-llm/              # LLM providers (8 built-in)
+|   +-- ava-tools/            # Tool trait + registry + 6 default + 8 extended tools
+|   +-- ava-praxis/           # Multi-agent orchestration (Praxis)
+|   +-- ava-permissions/      # Permission rules + bash command classifier
+|   +-- ava-config/           # Config, credentials, model catalog
+|   +-- ava-context/          # Token tracking + context condensation
+|   +-- ava-mcp/              # Model Context Protocol client/server
+|   +-- ava-session/          # Session persistence (SQLite)
+|   +-- ava-memory/           # Persistent memory (SQLite + FTS5)
+|   +-- ava-codebase/         # Code indexing (BM25 + PageRank)
+|   +-- ava-auth/             # OAuth + credential flows
+|   +-- ava-platform/         # File system + shell abstractions
+|   +-- ava-sandbox/          # Command sandboxing (bwrap/sandbox-exec)
+|   +-- ava-cli-providers/    # External CLI agent integration
+|   +-- ava-extensions/       # Extension system (hooks, native/WASM)
+|   +-- ava-db/               # SQLite connection pool
+|   +-- ava-types/            # Shared types
+|   +-- ava-validator/        # Validation pipeline
++-- src/                      # Desktop frontend (SolidJS -> Tauri IPC -> Rust)
++-- src-tauri/                # Tauri host + Rust IPC commands
++-- docs/                     # Documentation (see docs/README.md)
 ```
 
-## Tool Surface (6 built-in + 8 extended)
+## Tool Surface
 
-Tools are organized into tiers. Only **Default** tools are sent to the LLM by default; Extended tools are registered and executable but not included in the system prompt unless `extended_tools` is enabled.
-
-Tool philosophy: keep the default surface as lean as possible. AVA's out-of-the-box default set should stay capped at 6 tools (`read`, `write`, `edit`, `bash`, `glob`, `grep`). New tool capabilities should normally ship as **Extended**, MCP, plugin, or custom tools rather than expanding the default set.
+Keep the default set capped at 6. New capabilities should ship as Extended, MCP, plugin, or custom tools.
 
 | Tier | Count | Tools |
-|---|---:|---|
+|------|------:|-------|
 | Default | 6 | read, write, edit, bash, glob, grep |
-### Extended | 8 | apply_patch, web_fetch, web_search, multiedit, ast_ops, lsp_ops, code_search, git_read |
+| Extended | 8 | apply_patch, web_fetch, web_search, multiedit, ast_ops, lsp_ops, code_search, git_read |
 
-Plugin-tier capabilities should normally ship via MCP servers or TOML custom tools, not by expanding the compiled default tool surface.
-
-Additional tools are registered separately (todo_read/write, question, task, codebase_search, memory tools, session tools) and always available when their dependencies are initialized.
-
-Total: 6 built-in tools by default, 8 extended opt-in tools, plus always-available tasking/session helpers + dynamic MCP tools + TOML custom tools (`~/.ava/tools/`, `.ava/tools/`)
+Additional helpers (todo_read/write, question, task, codebase_search, memory/session tools) are always available when initialized. Dynamic MCP tools and TOML custom tools load at runtime from `~/.ava/tools/`, `.ava/tools/`, `~/.ava/mcp.json`, `.ava/mcp.json`.
 
 ## Project Instructions
 
-AVA auto-discovers instruction files and injects them into the agent's system prompt (`crates/ava-agent/src/instructions.rs`):
+Auto-discovered and injected into the agent's system prompt (`crates/ava-agent/src/instructions.rs`):
 
-1. `~/.ava/AGENTS.md` — global rules (all projects)
-2. `AGENTS.md` — project-level rules (root)
-3. `.ava/rules/*.md` — modular rule files (alphabetical)
-
-Also reads: `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md` for cross-tool compatibility.
-
-Format: plain markdown. No special syntax needed. Each file is prefixed with `# From: <filepath>` in the prompt. Paths are deduplicated by canonical path. Both main agent and sub-agents receive the instructions.
+1. `~/.ava/AGENTS.md` -- global rules
+2. Ancestor walk: `AGENTS.md`/`CLAUDE.md` from outermost ancestor to `.git` boundary
+3. Project root: `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`
+4. `.ava/AGENTS.md`, `.ava/rules/*.md` -- project-local rules (alphabetical)
+5. `config.yaml` `instructions:` paths/globs
+6. Skill files from `.claude/skills/`, `.agents/skills/`, `.ava/skills/`
 
 ## Workspace Trust
 
-AVA requires explicit trust before loading project-local config from untrusted repos:
-- `.ava/mcp.json` — MCP servers
-- `.ava/hooks/*.toml` — Lifecycle hooks
-- `.ava/tools/*.toml` — Custom tools
-- `.ava/commands/` — Custom slash commands
-- `AGENTS.md`, `.ava/rules/*.md` — Project instructions
-- `.ava/agents.toml` — Agent configuration
-- `.ava/skills/` — Skill files
+Project-local config requires explicit trust before loading:
 
-Trust a project: run `ava --trust` to approve.
-Global config (`~/.ava/`) always loads.
+- `.ava/mcp.json`, `.ava/hooks/*.toml`, `.ava/tools/*.toml`, `.ava/commands/`, `AGENTS.md`, `.ava/rules/*.md`, `.ava/agents.toml`, `.ava/skills/`
+
+Trust a project: `ava --trust`. Global config (`~/.ava/`) always loads.
 
 ## Rust-First Rule
 
-**All code is Rust.** The TypeScript orchestration layer (`packages/`) has been deleted. The desktop frontend (`src/`) calls Rust crates directly via Tauri IPC commands.
+**All code is Rust.** The desktop frontend (`src/`) calls Rust crates via Tauri IPC.
 
-- New tools → `crates/ava-tools/src/core/` (implement `Tool` trait)
-- New providers → `crates/ava-llm/src/providers/`
-- New agent features → `crates/ava-agent/` or `crates/ava-praxis/`
-- TUI features → `crates/ava-tui/`
-- Desktop commands → `src-tauri/src/commands/`
-- Configuration → `crates/ava-config/`
+- New tools: `crates/ava-tools/src/core/` (implement `Tool` trait)
+- New providers: `crates/ava-llm/src/providers/`
+- New agent features: `crates/ava-agent/` or `crates/ava-praxis/`
+- TUI features: `crates/ava-tui/`
+- Desktop commands: `src-tauri/src/commands/`
+- Configuration: `crates/ava-config/`
 
 ## Middleware Priority
 
-Middleware runs in priority order (lower number = earlier execution):
+Lower number = earlier execution. Register via `ToolRegistry::add_middleware()`.
 
 | Middleware | Priority | Purpose |
 |------------|----------|---------|
@@ -156,9 +139,13 @@ Middleware runs in priority order (lower number = earlier execution):
 | error-recovery | 15 | Checkpoint recovery before destructive actions |
 | lsp-diagnostics | 20 | LSP-based diagnostics validation |
 
-Register middleware via `ToolRegistry::add_middleware()`.
-
 ## Code Style
+
+### Rust
+
+- keep error strings actionable and deterministic
+- add serde `rename_all = "camelCase"` for Tauri IPC compatibility
+- register new Tauri commands in `src-tauri/src/commands/mod.rs` and `src-tauri/src/lib.rs`
 
 ### TypeScript / SolidJS (desktop frontend only)
 
@@ -167,106 +154,64 @@ Register middleware via `ToolRegistry::add_middleware()`.
 - SolidJS only in `src/` (no React patterns)
 - Biome for formatting, ESLint + oxlint for linting
 
-### Rust
-
-- prefer small command modules in `src-tauri/src/commands/`
-- add serde `rename_all = "camelCase"` for TS IPC compatibility
-- register every new command in `src-tauri/src/commands/mod.rs` and `src-tauri/src/lib.rs`
-- keep error strings actionable and deterministic
-
 ## Common Workflows
 
 ### Add a Tool (Rust)
 
-1. Decide the tier first. New tools should normally be `Extended`; only expand the default 6 with a strong justification.
+1. Decide tier: default to Extended; only expand the default 6 with strong justification
 2. Create `crates/ava-tools/src/core/{tool_name}.rs`
 3. Implement `Tool` trait (`name`, `description`, `parameters`, `execute`)
-4. Register in `crates/ava-tools/src/core/mod.rs` → `register_core_tools()` using the appropriate tiering path
-5. Add tests in `crates/ava-tools/tests/`
-6. `cargo test -p ava-tools`
+4. Register in `register_core_tools()` with appropriate tiering
+5. Add tests, run `cargo test -p ava-tools`
 
 ### Add an LLM Provider (Rust)
 
 1. Create `crates/ava-llm/src/providers/{provider_name}.rs`
-2. Implement `LLMProvider` trait (5 methods: generate, generate_stream, estimate_tokens, estimate_cost, model_name)
-3. Register in provider module
-4. Add tests
-5. `cargo test -p ava-llm`
+2. Implement `LLMProvider` trait (generate, generate_stream, estimate_tokens, estimate_cost, model_name)
+3. Add tests, run `cargo test -p ava-llm`
 
 ### Add Middleware (Rust)
 
 1. Implement `Middleware` trait in `crates/ava-tools/src/`
 2. Set explicit priority
 3. Register via `ToolRegistry::add_middleware()`
-4. Add ordering/behavior tests
 
 ### Add Desktop Feature
 
 1. Add Rust command in `src-tauri/src/commands/{feature}.rs`
 2. Register in `src-tauri/src/commands/mod.rs` and `src-tauri/src/lib.rs`
-3. Invoke from SolidJS frontend via `@tauri-apps/api` (`invoke` / `listen`)
-
-## CLI Testing
-
-Use OpenRouter for smoke tests. Credentials at `~/.ava/credentials.json`.
-
-```bash
-# Smoke test (cheapest Western SOTA)
-cargo run --bin ava -- "Reply with SMOKE_OK" --headless --provider openrouter --model anthropic/claude-haiku-4.5 --max-turns 3
-
-# Quality test
-cargo run --bin ava -- "goal" --headless --provider openrouter --model anthropic/claude-sonnet-4
-
-# Multi-agent / director (Praxis)
-cargo run --bin ava -- "goal" --headless --multi-agent --provider openrouter --model anthropic/claude-haiku-4.5
-
-# Workflow pipeline
-cargo run --bin ava -- "goal" --headless --workflow plan-code-review --provider openrouter --model anthropic/claude-haiku-4.5
-
-# Mid-stream messaging (headless)
-cargo run --bin ava -- "goal" --headless --follow-up "also run tests" --provider openrouter --model anthropic/claude-haiku-4.5
-cargo run --bin ava -- "goal" --headless --later "commit when done" --provider openrouter --model anthropic/claude-haiku-4.5
-cargo run --bin ava -- "goal" --headless --later "review" --later-group 2 "commit" --provider openrouter --model anthropic/claude-haiku-4.5
-```
-
-**Default test model**: `anthropic/claude-haiku-4.5` ($1/$5 per M tokens — cheapest Western SOTA with full tool use support).
+3. Invoke from SolidJS via `invoke()`
 
 ## Slash Commands
 
-Verified handlers in `crates/ava-tui/src/app/commands.rs`:
-
 | Command | Description |
 |---------|-------------|
-| `/model [provider/model]` | Show or switch model (alias: `/models`) |
-| `/think [show\|hide]` | Toggle thinking block visibility |
+| `/model [provider/model]` | Show or switch model |
+| `/think [show\|hide]` | Toggle thinking visibility |
 | `/theme [name]` | Cycle or switch theme |
 | `/permissions` | Toggle permission level |
 | `/connect [provider]` | Add provider credentials |
-| `/providers` | Show provider status (alias for `/connect`) |
+| `/providers` | Show provider status |
 | `/disconnect <provider>` | Remove provider credentials |
 | `/mcp [list\|reload\|enable\|disable]` | Manage MCP servers |
 | `/new [title]` | Start a new session |
 | `/sessions` | Session picker (Ctrl+L) |
 | `/commit` | Inspect commit readiness |
-| `/export [filename]` | Export conversation (.md or .json) |
-| `/copy [all]` | Copy last response to clipboard (Ctrl+Y) |
-| `/btw [question]` | Side conversation branch (`/btw end` to restore) |
+| `/export [filename]` | Export conversation |
+| `/copy [all]` | Copy last response (Ctrl+Y) |
+| `/btw [question]` | Side conversation branch |
 | `/hooks [list\|reload\|dry-run]` | Manage lifecycle hooks |
-| `/tasks` | Show background task list |
-| `/later <message>` | Queue a post-complete message |
+| `/tasks` | Show background tasks |
+| `/later <message>` | Queue post-complete message |
 | `/queue` | Show queued messages |
-| `/shortcuts` | Show keyboard shortcuts (Ctrl+?, alias: `/keys`, `/keybinds`) |
-| `/keys` | Alias for `/shortcuts` |
-| `/keybinds` | Alias for `/shortcuts` |
-| `/compact [focus]` | Compact conversation to save context window |
+| `/shortcuts` | Show keyboard shortcuts (Ctrl+?) |
+| `/compact [focus]` | Compact conversation |
 | `/clear` | Clear chat |
 | `/help` | Show help |
-| `/init` | Create example project templates (`.ava/`, hooks, rules) |
-| `/rewind` | Show conversation checkpoint history and restore points |
+| `/init` | Create project templates |
+| `/rewind` | Conversation checkpoint history |
 
 ## Keyboard Shortcuts
-
-Verified in `crates/ava-tui/src/state/keybinds.rs`:
 
 | Shortcut | Action |
 |----------|--------|
@@ -277,34 +222,34 @@ Verified in `crates/ava-tui/src/state/keybinds.rs`:
 | `Ctrl+S` | Toggle sidebar |
 | `Ctrl+T` | Toggle thinking visibility |
 | `Ctrl+C` | Cancel current operation |
-| `Ctrl+V` | Paste image from clipboard |
+| `Ctrl+V` | Paste image |
 | `Ctrl+Y` | Copy last response |
 | `Ctrl+B` | Background agent |
 | `Ctrl+R` | Voice toggle |
-| `Ctrl+E` | Expand/collapse all thinking blocks |
-| `Ctrl+Shift+?` | Show keyboard shortcuts |
-| `PageUp` | Scroll up |
-| `PageDown` | Scroll down |
-| `Home` | Scroll to top |
-| `End` | Scroll to bottom |
+| `Ctrl+E` | Expand/collapse thinking blocks |
 | `Alt+Enter` | Submit follow-up (Tier 2) |
 | `Ctrl+Alt+Enter` | Submit post-complete (Tier 3) |
 
-Mid-stream messaging:
-- **Steering** (Enter): Inject message after current tool, skip remaining tools
-- **Follow-up** (Alt+Enter): Queue message after agent completes current task
-- **Post-complete** (Ctrl+Alt+Enter): Queue message for after agent stops (grouped G1, G2, G3...)
+## CLI Testing
 
-## Documentation Priority
+```bash
+# Smoke test
+cargo run --bin ava -- "Reply with SMOKE_OK" --headless --provider openrouter --model anthropic/claude-haiku-4.5 --max-turns 3
 
-1. `CLAUDE.md` (this file) — architecture, conventions, commands
-2. `AGENTS.md` — AI agent instructions
-3. `docs/development/roadmap.md` — sprint roadmap and delivery status
-4. `docs/development/backlog.md` — active backlog and validation status
-5. `docs/development/epics.md` — completed and planned epics
-6. `docs/development/v3-plan.md` — v3 plan (complete)
-7. `docs/development/test-matrix.md` — E2E test verification
-8. `docs/development/sprints/` — sprint prompts
-9. `docs/development/research/` — competitor analysis
-10. `docs/architecture/` — system design docs
-11. `docs/reference-code/` — competitor source code notes (12 projects)
+# Multi-agent
+cargo run --bin ava -- "goal" --headless --multi-agent --provider openrouter --model anthropic/claude-haiku-4.5
+
+# Mid-stream messaging
+cargo run --bin ava -- "goal" --headless --follow-up "also run tests" --provider openrouter --model anthropic/claude-haiku-4.5
+cargo run --bin ava -- "goal" --headless --later "commit when done" --provider openrouter --model anthropic/claude-haiku-4.5
+```
+
+## Documentation
+
+1. `CLAUDE.md` (this file) -- architecture, conventions, commands
+2. `AGENTS.md` -- AI agent instructions
+3. `docs/README.md` -- documentation entry point with crate map
+4. `docs/plugins.md` -- TOML custom tools and MCP server guide
+5. `docs/architecture/crate-map.md` -- detailed crate dependency map
+6. `docs/development/roadmap.md` -- sprint history
+7. `docs/development/backlog.md` -- open backlog items

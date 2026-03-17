@@ -15,7 +15,6 @@ pub mod credential_commands;
 pub mod credentials;
 pub mod keychain;
 pub mod model_catalog;
-pub mod recipe;
 pub mod routing;
 pub mod thinking;
 pub mod trust;

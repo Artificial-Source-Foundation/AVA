@@ -19,6 +19,17 @@ pub struct GhostSnapshot {
     pub object_id: String,
 }
 
+/// Metadata for a listed snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapshotInfo {
+    /// The full ref name (e.g. `refs/ava/snapshots/17100...-1-src_lib.rs`).
+    pub ref_name: String,
+    /// The file path component extracted from the ref name.
+    pub file_hint: String,
+    /// The object ID of the stored blob.
+    pub object_id: String,
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GhostSnapshotter;
 

@@ -3,6 +3,7 @@
 pub mod condenser;
 pub mod error;
 pub mod manager;
+pub mod pruner;
 pub mod strategies;
 pub mod token_tracker;
 pub mod types;
@@ -13,6 +14,7 @@ pub use condenser::{
 };
 pub use error::{ContextError, Result};
 pub use manager::ContextManager;
+pub use pruner::prune_old_tool_outputs;
 pub use strategies::{
     AsyncCondensationStrategy, CondensationStrategy, RelevanceStrategy, SlidingWindowStrategy,
     SummarizationStrategy, Summarizer, ToolTruncationStrategy,

@@ -218,18 +218,68 @@ Commands
     }
 
     /// End the current `/btw` branch: restore the checkpoint messages and scroll,
-    /// discarding everything from the branch.
+    /// injecting a brief summary of what was discussed before discarding the branch.
     pub(crate) fn end_btw_branch(&mut self) {
         if !self.state.btw.active {
             return;
         }
+
+        // Summarize the branch before discarding it
+        let summary = Self::summarize_btw_branch(&self.state.messages.messages);
 
         // Restore checkpoint
         self.state.messages.messages = std::mem::take(&mut self.state.btw.checkpoint_messages);
         self.state.messages.scroll_offset = self.state.btw.checkpoint_scroll;
         self.state.btw.active = false;
 
+        // Inject summary so the main conversation retains a trace
+        self.state
+            .messages
+            .push(UiMessage::new(MessageKind::System, &summary));
+
         self.set_status("Restored main conversation", StatusLevel::Info);
+    }
+
+    /// Generate a heuristic summary of a /btw branch conversation.
+    fn summarize_btw_branch(messages: &[UiMessage]) -> String {
+        let user_count = messages
+            .iter()
+            .filter(|m| matches!(m.kind, MessageKind::User))
+            .count();
+        let assistant_count = messages
+            .iter()
+            .filter(|m| matches!(m.kind, MessageKind::Assistant))
+            .count();
+        let tool_count = messages
+            .iter()
+            .filter(|m| matches!(m.kind, MessageKind::ToolCall))
+            .count();
+
+        // Get the first user question
+        let first_question = messages
+            .iter()
+            .find(|m| matches!(m.kind, MessageKind::User))
+            .map(|m| {
+                let q = m.content.trim();
+                if q.len() > 100 {
+                    // Truncate at a char boundary
+                    let mut end = 100;
+                    while end > 0 && !q.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    format!("{}...", &q[..end])
+                } else {
+                    q.to_string()
+                }
+            })
+            .unwrap_or_else(|| "side conversation".to_string());
+
+        format!(
+            "[btw branch: asked about '{}' \u{2014} {} messages, {} tool calls]",
+            first_question,
+            user_count + assistant_count,
+            tool_count
+        )
     }
 
     pub(crate) fn open_rewind_modal(&mut self) {

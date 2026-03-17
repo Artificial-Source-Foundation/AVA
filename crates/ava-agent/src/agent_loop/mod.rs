@@ -796,14 +796,25 @@ impl AgentLoop {
             }
 
             if self.context.should_compact() {
-                if let Err(error) = self.context.compact_async().await {
-                    Self::emit(&event_tx, AgentEvent::Error(error.to_string()));
-                    return Err(error.into());
+                // Try lightweight pruning first — much cheaper than LLM compaction.
+                let pruned = self.context.try_prune();
+                if pruned > 0 {
+                    Self::emit(
+                        &event_tx,
+                        AgentEvent::Progress(format!("pruned {pruned} old tool output(s)")),
+                    );
                 }
-                Self::emit(
-                    &event_tx,
-                    AgentEvent::Progress("context compacted".to_string()),
-                );
+                // If still over threshold after pruning, do full compaction.
+                if self.context.should_compact() {
+                    if let Err(error) = self.context.compact_async().await {
+                        Self::emit(&event_tx, AgentEvent::Error(error.to_string()));
+                        return Err(error.into());
+                    }
+                    Self::emit(
+                        &event_tx,
+                        AgentEvent::Progress("context compacted".to_string()),
+                    );
+                }
             }
 
             if completion_requested {

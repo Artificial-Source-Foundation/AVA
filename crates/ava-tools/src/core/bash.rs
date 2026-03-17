@@ -98,7 +98,7 @@ impl Tool for BashTool {
                 "stdout:\n{}\n\nstderr:\n{}\n\nexit_code: {}",
                 output.stdout, output.stderr, output.exit_code
             );
-            let rendered = super::output_fallback::save_tool_output_fallback(
+            let rendered = super::output_fallback::save_tool_output_fallback_tail(
                 "bash",
                 &rendered,
                 MAX_OUTPUT_BYTES,
@@ -128,8 +128,11 @@ impl Tool for BashTool {
             "stdout:\n{}\n\nstderr:\n{}\n\nexit_code: {}",
             output.stdout, output.stderr, output.exit_code
         );
-        let rendered =
-            super::output_fallback::save_tool_output_fallback("bash", &rendered, MAX_OUTPUT_BYTES);
+        let rendered = super::output_fallback::save_tool_output_fallback_tail(
+            "bash",
+            &rendered,
+            MAX_OUTPUT_BYTES,
+        );
 
         Ok(ToolResult {
             call_id: String::new(),

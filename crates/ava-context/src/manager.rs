@@ -1,6 +1,7 @@
 use ava_types::{Message, Role, ToolResult};
 
 use crate::condenser::{create_condenser, Condenser, HybridCondenser};
+use crate::pruner::prune_old_tool_outputs;
 use crate::token_tracker::TokenTracker;
 use crate::types::CondenserConfig;
 use crate::Result;
@@ -16,6 +17,8 @@ pub struct ContextManager {
     compaction_threshold_pct: f32,
     tracker: TokenTracker,
     condenser: CondenserKind,
+    /// Latest compaction summary for iterative summarization (BG-7).
+    last_summary: Option<String>,
 }
 
 impl ContextManager {
@@ -26,6 +29,7 @@ impl ContextManager {
             compaction_threshold_pct: 0.8,
             tracker: TokenTracker::new(token_limit),
             condenser: CondenserKind::Sync(create_condenser(token_limit)),
+            last_summary: None,
         }
     }
 
@@ -37,6 +41,7 @@ impl ContextManager {
             compaction_threshold_pct: threshold,
             tracker: TokenTracker::new(config.max_tokens),
             condenser: CondenserKind::Hybrid(condenser),
+            last_summary: None,
         }
     }
 
@@ -74,6 +79,22 @@ impl ContextManager {
         self.token_count() > threshold
     }
 
+    /// Lightweight pruning pass: replaces old tool outputs with a short summary.
+    /// Returns the number of messages pruned.
+    ///
+    /// Call this before full compaction — if pruning brings usage below the
+    /// threshold, the expensive LLM compaction can be skipped entirely.
+    pub fn try_prune(&mut self) -> usize {
+        // Protect the most recent 60% of the token limit.
+        let protected = (self.token_limit as f32 * 0.6) as usize;
+        let pruned = prune_old_tool_outputs(&mut self.messages, protected);
+        if pruned > 0 {
+            self.tracker.reset();
+            self.tracker.add_messages(&self.messages);
+        }
+        pruned
+    }
+
     /// Synchronous compaction — only works when using a sync Condenser.
     /// For hybrid condensers, use `compact_async()`.
     pub fn compact(&mut self) -> Result<()> {
@@ -100,7 +121,13 @@ impl ContextManager {
     }
 
     /// Async compaction — uses the hybrid condenser pipeline.
+    /// Stores the compaction summary for iterative use in subsequent compactions.
     pub async fn compact_async(&mut self) -> Result<()> {
+        // Feed previous summary into the hybrid condenser's summarization strategy
+        if let CondenserKind::Hybrid(condenser) = &mut self.condenser {
+            condenser.set_previous_summary(self.last_summary.clone());
+        }
+
         match &mut self.condenser {
             CondenserKind::Sync(condenser) => {
                 let condensed = condenser.condense(&self.messages)?;
@@ -111,9 +138,29 @@ impl ContextManager {
                 self.messages = condensed.messages;
             }
         }
+
+        // Extract the latest summary from system messages (the compaction summary
+        // is inserted as a system message containing "[Summary" or "[Updated summary")
+        self.last_summary = self
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::System)
+            .find(|m| {
+                m.content.starts_with("[Summary of")
+                    || m.content.starts_with("[Updated summary")
+                    || m.content.contains("Files read:")
+                    || m.content.contains("Files modified:")
+            })
+            .map(|m| m.content.clone());
+
         self.tracker.reset();
         self.tracker.add_messages(&self.messages);
         Ok(())
+    }
+
+    /// Get the last compaction summary (for external inspection or persistence).
+    pub fn last_summary(&self) -> Option<&str> {
+        self.last_summary.as_deref()
     }
 
     pub fn get_system_message(&self) -> Option<&Message> {

@@ -36,6 +36,38 @@ pub fn save_tool_output_fallback(tool_name: &str, content: &str, max_inline_size
     truncate_with_path_notice(content, max_inline_size, Some(&path))
 }
 
+/// Like [`save_tool_output_fallback`] but uses tail-truncation: keeps the last
+/// `max_inline_size` bytes of content. This is better for bash output where
+/// errors and exit codes appear at the end.
+pub fn save_tool_output_fallback_tail(
+    tool_name: &str,
+    content: &str,
+    max_inline_size: usize,
+) -> String {
+    if content.len() <= max_inline_size {
+        return content.to_string();
+    }
+
+    let output_dir = match dirs::home_dir() {
+        Some(home) => home.join(".ava/tool-output"),
+        None => return truncate_tail_with_path_notice(content, max_inline_size, None),
+    };
+
+    if std::fs::create_dir_all(&output_dir).is_err() {
+        return truncate_tail_with_path_notice(content, max_inline_size, None);
+    }
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S%.3f");
+    let filename = format!("{tool_name}-{timestamp}.txt");
+    let path = output_dir.join(&filename);
+
+    if std::fs::write(&path, content).is_err() {
+        return truncate_tail_with_path_notice(content, max_inline_size, None);
+    }
+
+    truncate_tail_with_path_notice(content, max_inline_size, Some(&path))
+}
+
 /// Clean up tool output files older than the given number of days.
 pub fn cleanup_old_outputs(max_age_days: u64) {
     let output_dir = match dirs::home_dir() {
@@ -64,6 +96,11 @@ pub fn cleanup_old_outputs(max_age_days: u64) {
 }
 
 fn truncate_with_path_notice(content: &str, max_size: usize, path: Option<&Path>) -> String {
+    truncate_head_with_path_notice(content, max_size, path)
+}
+
+/// Head-truncation: keep the first `max_size` bytes (for file reads, grep, etc.).
+fn truncate_head_with_path_notice(content: &str, max_size: usize, path: Option<&Path>) -> String {
     let mut idx = max_size.min(content.len());
     while idx > 0 && !content.is_char_boundary(idx) {
         idx -= 1;
@@ -78,6 +115,31 @@ fn truncate_with_path_notice(content: &str, max_size: usize, path: Option<&Path>
         ),
         None => format!("{truncated}\n\n... [output truncated]"),
     }
+}
+
+/// Tail-truncation: keep the last `max_size` bytes (for bash output where errors
+/// appear at the end).
+fn truncate_tail_with_path_notice(content: &str, max_size: usize, path: Option<&Path>) -> String {
+    let start = content.len().saturating_sub(max_size);
+    let mut idx = start;
+    while idx < content.len() && !content.is_char_boundary(idx) {
+        idx += 1;
+    }
+    let truncated = &content[idx..];
+    let omitted_lines = content[..idx].lines().count();
+
+    let notice = match path {
+        Some(p) => format!(
+            "[... first {omitted_lines} lines omitted, showing last portion — full output saved to {}]\n\
+             Use the read tool to access the full output if needed.\n\n",
+            p.display()
+        ),
+        None => format!(
+            "[... first {omitted_lines} lines omitted, showing last portion]\n\n"
+        ),
+    };
+
+    format!("{notice}{truncated}")
 }
 
 /// Return the tool-output directory path.
@@ -110,5 +172,24 @@ mod tests {
     #[test]
     fn cleanup_does_not_panic_on_missing_dir() {
         cleanup_old_outputs(7);
+    }
+
+    #[test]
+    fn small_output_tail_returned_unchanged() {
+        let content = "hello world";
+        let result = save_tool_output_fallback_tail("test", content, 1024);
+        assert_eq!(result, content);
+    }
+
+    #[test]
+    fn large_output_tail_truncated_keeps_end() {
+        // Build content with numbered lines so we can verify tail is kept
+        let lines: Vec<String> = (1..=200).map(|i| format!("line {i}")).collect();
+        let content = lines.join("\n");
+        let result = save_tool_output_fallback_tail("test", &content, 200);
+        assert!(result.contains("lines omitted, showing last portion"));
+        assert!(result.contains("line 200"));
+        // Should NOT contain the very first lines
+        assert!(!result.contains("line 1\n"));
     }
 }

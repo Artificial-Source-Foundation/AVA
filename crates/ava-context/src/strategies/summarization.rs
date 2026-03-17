@@ -11,6 +11,8 @@ pub struct SummarizationStrategy {
     summarizer: Option<Arc<dyn Summarizer>>,
     batch_size: usize,
     preserve_recent: usize,
+    /// Previous summary to build upon incrementally.
+    previous_summary: Option<String>,
 }
 
 impl SummarizationStrategy {
@@ -23,15 +25,48 @@ impl SummarizationStrategy {
             summarizer,
             batch_size,
             preserve_recent,
+            previous_summary: None,
         }
     }
 
+    /// Set a previous summary to build upon incrementally.
+    pub fn set_previous_summary(&mut self, summary: Option<String>) {
+        self.previous_summary = summary;
+    }
+
+    /// Get the last summary produced (stored after each condense call).
+    pub fn previous_summary(&self) -> Option<&str> {
+        self.previous_summary.as_deref()
+    }
+
     /// Extract key information from messages without an LLM call.
-    fn heuristic_summary(messages: &[Message]) -> String {
-        let mut file_paths = Vec::new();
+    fn heuristic_summary(messages: &[Message], previous_summary: Option<&str>) -> String {
+        let mut files_read = Vec::new();
+        let mut files_modified = Vec::new();
         let mut tool_names = Vec::new();
         let mut errors = Vec::new();
         let mut decisions = Vec::new();
+
+        // Seed from previous summary's file tracking lines
+        if let Some(prev) = previous_summary {
+            for line in prev.lines() {
+                if let Some(rest) = line.strip_prefix("Files read: ") {
+                    for p in rest.split(", ") {
+                        let p = p.trim().to_string();
+                        if !p.is_empty() && !files_read.contains(&p) {
+                            files_read.push(p);
+                        }
+                    }
+                } else if let Some(rest) = line.strip_prefix("Files modified: ") {
+                    for p in rest.split(", ") {
+                        let p = p.trim().to_string();
+                        if !p.is_empty() && !files_modified.contains(&p) {
+                            files_modified.push(p);
+                        }
+                    }
+                }
+            }
+        }
 
         for msg in messages {
             // Extract file paths (common patterns: /path/to/file, ./relative)
@@ -41,9 +76,39 @@ impl SummarizationStrategy {
                 });
                 if (trimmed.starts_with('/') || trimmed.starts_with("./"))
                     && trimmed.len() > 2
-                    && !file_paths.contains(&trimmed.to_string())
+                    && !files_read.contains(&trimmed.to_string())
+                    && !files_modified.contains(&trimmed.to_string())
                 {
-                    file_paths.push(trimmed.to_string());
+                    files_read.push(trimmed.to_string());
+                }
+            }
+
+            // Classify files as read vs modified based on tool calls
+            for call in &msg.tool_calls {
+                if !tool_names.contains(&call.name) {
+                    tool_names.push(call.name.clone());
+                }
+                // Extract file path from tool arguments if present
+                let path = call
+                    .arguments
+                    .get("file_path")
+                    .or_else(|| call.arguments.get("path"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                if let Some(p) = path {
+                    let is_write = matches!(
+                        call.name.as_str(),
+                        "write" | "edit" | "apply_patch" | "multiedit"
+                    );
+                    if is_write {
+                        if !files_modified.contains(&p) {
+                            files_modified.push(p.clone());
+                        }
+                        // Remove from files_read if it was there
+                        files_read.retain(|f| f != &p);
+                    } else if !files_read.contains(&p) && !files_modified.contains(&p) {
+                        files_read.push(p);
+                    }
                 }
             }
 
@@ -61,13 +126,6 @@ impl SummarizationStrategy {
                 }
             }
 
-            // Extract tool call names
-            for call in &msg.tool_calls {
-                if !tool_names.contains(&call.name) {
-                    tool_names.push(call.name.clone());
-                }
-            }
-
             // Capture short assistant messages as potential decisions
             if msg.role == Role::Assistant
                 && !msg.content.trim().is_empty()
@@ -78,11 +136,23 @@ impl SummarizationStrategy {
         }
 
         let mut lines = Vec::new();
-        lines.push(format!("[Summary of {} previous messages]", messages.len()));
 
-        if !file_paths.is_empty() {
-            let paths: Vec<_> = file_paths.iter().take(20).cloned().collect();
-            lines.push(format!("- Files mentioned: {}", paths.join(", ")));
+        if previous_summary.is_some() {
+            lines.push(format!(
+                "[Updated summary — {} new messages]",
+                messages.len()
+            ));
+        } else {
+            lines.push(format!("[Summary of {} previous messages]", messages.len()));
+        }
+
+        if !files_read.is_empty() {
+            let paths: Vec<_> = files_read.iter().take(20).cloned().collect();
+            lines.push(format!("Files read: {}", paths.join(", ")));
+        }
+        if !files_modified.is_empty() {
+            let paths: Vec<_> = files_modified.iter().take(20).cloned().collect();
+            lines.push(format!("Files modified: {}", paths.join(", ")));
         }
         if !tool_names.is_empty() {
             let names: Vec<_> = tool_names.iter().take(15).cloned().collect();
@@ -124,6 +194,7 @@ impl SummarizationStrategy {
     }
 
     /// Split messages into (system, old_batch, recent) preserving system prompt and recent messages.
+    /// Never splits between a tool call (assistant with tool_calls) and its tool results.
     fn partition_messages(
         messages: &[Message],
         batch_size: usize,
@@ -148,10 +219,55 @@ impl SummarizationStrategy {
             return (system_msgs, Vec::new(), non_system);
         }
 
-        let old_batch = non_system[..batch].to_vec();
-        let recent = non_system[batch..].to_vec();
+        // Find a safe cut point that doesn't split tool call/result pairs
+        let cut = Self::find_safe_cut_point(&non_system, batch);
+
+        if cut == 0 {
+            return (system_msgs, Vec::new(), non_system);
+        }
+
+        let old_batch = non_system[..cut].to_vec();
+        let recent = non_system[cut..].to_vec();
 
         (system_msgs, old_batch, recent)
+    }
+
+    /// Find a safe cut point that never splits between a tool call and its results.
+    /// Starting from `target_index`, adjusts backward or forward to avoid orphaned
+    /// tool calls or tool results.
+    fn find_safe_cut_point(messages: &[Message], target_index: usize) -> usize {
+        let target = target_index.min(messages.len());
+
+        // If cutting right at a tool result, walk back to include the assistant tool call
+        if target < messages.len() && messages[target].role == Role::Tool {
+            let mut idx = target;
+            // Walk back past all consecutive tool results
+            while idx > 0 && messages[idx].role == Role::Tool {
+                idx -= 1;
+            }
+            // If the message before the tool results is an assistant with tool_calls,
+            // we must not cut between it and its results — cut before the assistant
+            if messages[idx].role == Role::Assistant && !messages[idx].tool_calls.is_empty() {
+                return idx;
+            }
+            // Otherwise just use the original target
+        }
+
+        // If the message just before the cut is an assistant with tool_calls,
+        // its tool results would be in the "recent" side — include them in old_batch instead
+        if target > 0
+            && target < messages.len()
+            && messages[target - 1].role == Role::Assistant
+            && !messages[target - 1].tool_calls.is_empty()
+        {
+            let mut end = target;
+            while end < messages.len() && messages[end].role == Role::Tool {
+                end += 1;
+            }
+            return end;
+        }
+
+        target
     }
 }
 
@@ -170,19 +286,42 @@ impl AsyncCondensationStrategy for SummarizationStrategy {
             return Ok(messages.to_vec());
         }
 
+        let prev = self.previous_summary.as_deref();
+
         // Try LLM summarization, fall back to heuristic
         let summary_text = if let Some(summarizer) = &self.summarizer {
             let formatted = Self::format_messages_for_prompt(&old_batch);
-            let prompt = format!(
-                "Summarize the following conversation concisely, preserving key decisions, \
-                 file paths mentioned, and tool outcomes:\n\n{formatted}"
-            );
+            let prompt = if let Some(previous) = prev {
+                format!(
+                    "You are summarizing a conversation. Here is the previous summary:\n\n\
+                     {previous}\n\n\
+                     Here are the new messages since that summary:\n\n\
+                     {formatted}\n\n\
+                     Update the summary to include the new information. Format:\n\
+                     - Goal: what the user is trying to accomplish\n\
+                     - Progress: what has been done so far (files read, changes made, tools used)\n\
+                     - Current state: where things stand now\n\
+                     Files read: <comma-separated list>\n\
+                     Files modified: <comma-separated list>"
+                )
+            } else {
+                format!(
+                    "Summarize the following conversation concisely, preserving key decisions, \
+                     file paths mentioned, and tool outcomes. Format:\n\
+                     - Goal: what the user is trying to accomplish\n\
+                     - Progress: what has been done so far (files read, changes made, tools used)\n\
+                     - Current state: where things stand now\n\
+                     Files read: <comma-separated list>\n\
+                     Files modified: <comma-separated list>\n\n\
+                     {formatted}"
+                )
+            };
             match summarizer.summarize(&prompt).await {
                 Ok(summary) => summary,
-                Err(_) => Self::heuristic_summary(&old_batch),
+                Err(_) => Self::heuristic_summary(&old_batch, prev),
             }
         } else {
-            Self::heuristic_summary(&old_batch)
+            Self::heuristic_summary(&old_batch, prev)
         };
 
         let summary_msg = Message::new(Role::System, summary_text);

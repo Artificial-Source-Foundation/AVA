@@ -6,7 +6,6 @@ import {
   resolveCommand,
 } from './command-resolver'
 
-
 describe('parseSlashCommand', () => {
   it('parses /help', () => {
     expect(parseSlashCommand('/help')).toEqual({ name: 'help', args: '' })

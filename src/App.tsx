@@ -31,7 +31,7 @@ import {
 function App() {
   const [isInitializing, setIsInitializing] = createSignal(true)
   const [initError, setInitError] = createSignal<string | null>(null)
-  const [notTauri, setNotTauri] = createSignal(false)
+  const [isBrowserMode, setIsBrowserMode] = createSignal(false)
   const [splashStatus, setSplashStatus] = createSignal('')
 
   const { projectHubVisible, setProjectHubVisible } = useLayout()
@@ -114,7 +114,7 @@ function App() {
     registerAppShortcuts(setExportDialogOpen, setCheckpointDialogOpen, setProjectHubVisible)
 
     const result = await runAppInit(setSplashStatus, setProjectHubVisible)
-    if (result.notTauri) setNotTauri(true)
+    if (result.notTauri) setIsBrowserMode(true)
     if (result.error) setInitError(result.error)
     setIsInitializing(false)
   })
@@ -133,27 +133,11 @@ function App() {
     }
   }
 
+  // Unused but kept for potential future checks
+  void isBrowserMode
+
   return (
-    <Show
-      when={!notTauri()}
-      fallback={
-        <div class="flex h-screen items-center justify-center bg-[var(--background)]">
-          <div class="text-center max-w-md p-6">
-            <div class="text-[var(--text-muted)] text-6xl mb-4">&#9670;</div>
-            <h1 class="text-xl font-bold text-[var(--text-primary)] mb-2">
-              Tauri Runtime Required
-            </h1>
-            <p class="text-[var(--text-secondary)] mb-4 text-sm leading-relaxed">
-              AVA is a desktop app that requires the Tauri runtime. Run{' '}
-              <code class="px-1.5 py-0.5 bg-[var(--surface-raised)] border border-[var(--border-default)] rounded text-xs font-mono">
-                npm run tauri dev
-              </code>{' '}
-              and use the native window that opens.
-            </p>
-          </div>
-        </div>
-      }
-    >
+    <>
       <SplashScreen visible={isInitializing()} status={splashStatus()} />
       <Show when={!isInitializing()}>
         <Show
@@ -209,7 +193,7 @@ function App() {
           </Show>
         </Show>
       </Show>
-    </Show>
+    </>
   )
 }
 

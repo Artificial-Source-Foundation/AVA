@@ -28,9 +28,15 @@ _onInstructionsLoaded()
 /** Local prompt sections registry (replaces packages/extensions/prompts) */
 const _promptSections = new Map<string, { name: string; priority: number; content: string }>()
 
-function addPromptSection(section: { name: string; priority: number; content: string }): () => void {
+function addPromptSection(section: {
+  name: string
+  priority: number
+  content: string
+}): () => void {
   _promptSections.set(section.name, section)
-  return () => { _promptSections.delete(section.name) }
+  return () => {
+    _promptSections.delete(section.name)
+  }
 }
 
 function buildSystemPrompt(_model?: string): string {

@@ -19,13 +19,17 @@ interface CoreLogEntry {
 }
 
 /** No-op logger configuration (core-v2 logger no longer used) */
-function configureLogger(_opts: { level?: CoreLogLevel; callback?: (entry: CoreLogEntry) => void }): void {
+function configureLogger(_opts: {
+  level?: CoreLogLevel
+  callback?: (entry: CoreLogEntry) => void
+}): void {
   // No-op — logging is handled locally
 }
 
 function formatCoreLogEntry(entry: CoreLogEntry): string {
   return `[${entry.level}] [${entry.source}] ${entry.message}`
 }
+
 import { appDataDir } from '@tauri-apps/api/path'
 import {
   formatLogEntry,

@@ -71,7 +71,10 @@ vi.mock('./use-rust-agent', () => {
         events,
         run,
         cancel,
-        clearError: () => { setError(null); h.clearErrorMock() },
+        clearError: () => {
+          setError(null)
+          h.clearErrorMock()
+        },
         stop: cancel,
         isStreaming: isRunning,
         currentTokens: streamingContent,

@@ -56,23 +56,23 @@ describe('AGENT_ICONS registry', () => {
 describe('resolveAgentIcon', () => {
   it('returns the icon component for a known name', () => {
     const icon = resolveAgentIcon('Crown')
-    expect(icon).toBe(AGENT_ICONS['Crown'])
+    expect(icon).toBe(AGENT_ICONS.Crown)
   })
 
   it('falls back to Code icon for unknown name', () => {
     const icon = resolveAgentIcon('NonexistentIcon')
-    expect(icon).toBe(AGENT_ICONS['Code'])
+    expect(icon).toBe(AGENT_ICONS.Code)
   })
 
   it('falls back to Code icon for undefined', () => {
     const icon = resolveAgentIcon(undefined)
-    expect(icon).toBe(AGENT_ICONS['Code'])
+    expect(icon).toBe(AGENT_ICONS.Code)
   })
 
   it('falls back to Code icon for empty string', () => {
     // Empty string is falsy, so falls back
     const icon = resolveAgentIcon('')
-    expect(icon).toBe(AGENT_ICONS['Code'])
+    expect(icon).toBe(AGENT_ICONS.Code)
   })
 })
 

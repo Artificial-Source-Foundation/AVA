@@ -80,7 +80,9 @@ export function resolveProvider(model: string): LLMProvider {
 export function createClient(_model: string): LLMClient {
   return {
     async chat() {
-      throw new Error('LLM client creation is now handled by the Rust backend. Use Tauri invoke() instead.')
+      throw new Error(
+        'LLM client creation is now handled by the Rust backend. Use Tauri invoke() instead.'
+      )
     },
   }
 }

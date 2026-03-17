@@ -17,7 +17,15 @@ function textOf(content: MessageContent): string {
 }
 
 /** Stub for getContextStrategies (replaces @ava/core-v2/extensions import) */
-function getContextStrategies(): Map<string, { compact: (messages: Array<{ role: string; content: string }>, target: number) => Array<{ role: string; content: MessageContent }> }> {
+function getContextStrategies(): Map<
+  string,
+  {
+    compact: (
+      messages: Array<{ role: string; content: string }>,
+      target: number
+    ) => Array<{ role: string; content: MessageContent }>
+  }
+> {
   return new Map()
 }
 

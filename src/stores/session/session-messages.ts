@@ -23,15 +23,19 @@ import {
 // ============================================================================
 
 export async function loadSessionMessages(sessionId: string): Promise<void> {
-  console.trace('[session-messages] loadSessionMessages called for:', sessionId)
+  console.warn(
+    '[ava-debug][session-messages] loadSessionMessages called for:',
+    sessionId,
+    new Error().stack
+  )
   setIsLoadingMessages(true)
   try {
     const dbMessages = await getMessages(sessionId)
-    console.log('[session-messages] loaded from DB:', dbMessages.length, 'messages')
+    console.warn('[ava-debug][session-messages] loaded from DB:', dbMessages.length, 'messages')
     setMessages(dbMessages)
   } catch (err) {
     logError('Session', 'Failed to load messages', err)
-    console.log('[session-messages] load FAILED, clearing messages')
+    console.warn('[ava-debug][session-messages] load FAILED, clearing messages')
     setMessages([])
   } finally {
     setIsLoadingMessages(false)
@@ -39,7 +43,11 @@ export async function loadSessionMessages(sessionId: string): Promise<void> {
 }
 
 export function addMessage(message: Message): void {
-  console.log('[session-messages] addMessage:', message.role, message.content.slice(0, 50))
+  console.warn(
+    '[ava-debug][session-messages] addMessage:',
+    message.role,
+    message.content.slice(0, 50)
+  )
   setMessages((prev) => [...prev, message])
 
   setSessions((prev) =>

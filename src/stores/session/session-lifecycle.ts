@@ -6,6 +6,7 @@
 
 import { createMemo } from 'solid-js'
 import { DEFAULTS, STORAGE_KEYS } from '../../config/constants'
+import { log } from '../../lib/logger'
 import { notifySessionOpened } from '../../services/core-bridge'
 import {
   archiveSession as dbArchiveSession,
@@ -115,6 +116,7 @@ export async function createNewSession(name?: string): Promise<Session> {
   console.trace('[session-lifecycle] createNewSession: clearing messages')
   setMessages([])
   setAgents([])
+  log.info('session', 'Session created', { id: session.id, name: session.name })
   logInfo('session', 'Session created', {
     id: session.id,
     name: session.name,
@@ -151,6 +153,7 @@ export async function switchSession(id: string): Promise<void> {
       id
     )
     setMessages(dbMessages)
+    log.info('session', 'Session loaded', { id, messageCount: dbMessages.length })
     logInfo('session', 'Session switched', {
       from: fromSessionId ?? 'none',
       to: id,

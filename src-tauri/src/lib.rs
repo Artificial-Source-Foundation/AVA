@@ -56,8 +56,14 @@ pub fn run() {
                 .map_err(|error| format!("failed to initialize app state: {error}"))?;
             app.manage(state);
 
-            // New DesktopBridge — wraps the real AgentStack
-            let bridge = tauri::async_runtime::block_on(DesktopBridge::init(app_data_dir))
+            // New DesktopBridge — wraps the real AgentStack.
+            // Use ~/.ava as the data dir (same as the TUI) so credentials, config,
+            // sessions, and memory are shared between CLI and desktop.
+            let ava_home = std::env::var("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| app_data_dir.clone())
+                .join(".ava");
+            let bridge = tauri::async_runtime::block_on(DesktopBridge::init(ava_home))
                 .map_err(|error| format!("failed to initialize desktop bridge: {error}"))?;
             app.manage(bridge);
 

@@ -8,6 +8,8 @@
 import { isTauri } from '@tauri-apps/api/core'
 import { onCleanup } from 'solid-js'
 import { validateEnv } from '../config/env'
+import { checkApiHealth } from '../lib/api-client'
+import { disposeFrontendLogger, initFrontendLogger, log } from '../lib/logger'
 import { initCoreBridge } from '../services/core-bridge'
 import { initDatabase } from '../services/database'
 import { initDeepLinks } from '../services/deep-link'
@@ -55,9 +57,9 @@ export async function runAppInit(
   // Always capture console output for debugging
   installConsoleCapture()
 
-  // Guard: AVA requires the Tauri runtime
+  // When running outside Tauri (browser mode), use the HTTP API backend.
   if (!isTauri()) {
-    return { error: null, notTauri: true }
+    return runWebInit(setSplashStatus, setProjectHubVisible)
   }
 
   // Show window early so the splash screen is visible during initialization.
@@ -98,15 +100,22 @@ export async function runAppInit(
       extensions: BUILT_IN_EXTENSION_COUNT,
       tools: BUILT_IN_TOOL_COUNT,
     })
+    await initFrontendLogger()
     const logDir = getLogDirectory()
     if (logDir) setLogDirectory(logDir)
     logInfo('App', 'Initializing AVA...')
+    log.info('app', 'App initialization started', {
+      version: 'AVA v2.0.0',
+      platform: navigator.platform,
+      runtime: 'tauri',
+    })
 
     validateEnv()
 
     setSplashStatus('Initializing platform...')
     await initSettingsFS()
     await hydrateSettingsFromFS()
+    log.info('app', 'Settings loaded from disk', { logLevel: settings().logLevel })
     setLogLevel(settings().logLevel)
     setDevConsoleLogLevel(settings().logLevel)
     syncAllApiKeys()
@@ -158,9 +167,11 @@ export async function runAppInit(
 
     setSplashStatus('Loading database...')
     await initDatabase()
+    log.info('app', 'Database initialized')
 
     setSplashStatus('Loading projects...')
     await initializeProjects()
+    log.info('app', 'Projects loaded')
 
     setSplashStatus('Loading plugins...')
     // Plugin loading is now handled by the Rust backend.
@@ -197,11 +208,125 @@ export async function runAppInit(
       setProjectHubVisible(true)
     }
 
+    log.info('app', 'App initialized successfully')
+    onCleanup(() => {
+      void disposeFrontendLogger()
+    })
     return { error: null, notTauri: false }
   } catch (err) {
+    log.error('app', 'Failed to initialize', err instanceof Error ? err.stack : String(err))
     logError('App', 'Failed to initialize', err instanceof Error ? err.stack : String(err))
     const errorMsg = err instanceof Error ? `${err.message}\n\nStack: ${err.stack}` : String(err)
     return { error: errorMsg, notTauri: false }
+  } finally {
+    const elapsed = Date.now() - splashStart
+    const remaining = SPLASH_MIN_MS - elapsed
+    if (remaining > 0) {
+      await new Promise((r) => setTimeout(r, remaining))
+    }
+  }
+}
+
+/**
+ * Web-mode initialization — runs when the frontend is opened in a regular
+ * browser (not inside a Tauri webview). Connects to the HTTP API backend
+ * served by `ava serve`.
+ */
+async function runWebInit(
+  setSplashStatus: (status: string) => void,
+  setProjectHubVisible: (visible: boolean) => void
+): Promise<AppInitResult> {
+  const { settings, updateSettings } = useSettings()
+
+  installConsoleCapture()
+
+  const splashStart = Date.now()
+
+  try {
+    setSplashStatus('Starting logger...')
+    await initFrontendLogger()
+    log.info('app', 'Web mode initialization started')
+
+    setSplashStatus('Checking backend...')
+    const healthy = await checkApiHealth()
+    if (!healthy) {
+      log.error('app', 'Backend health check failed')
+      return {
+        error: 'Cannot reach the AVA backend. Make sure `ava serve` is running.',
+        notTauri: true,
+      }
+    }
+    log.info('app', 'Backend health check passed')
+
+    setSplashStatus('Loading settings...')
+    setLogLevel(settings().logLevel)
+    setDevConsoleLogLevel(settings().logLevel)
+
+    setSplashStatus('Loading models...')
+    // Merge backend models into the settings store
+    try {
+      const backendModels = await rustBackend.listModels()
+      if (backendModels.length > 0) {
+        const currentSettings = settings()
+        const updatedProviders = currentSettings.providers.map((p) => {
+          const matching = backendModels.filter((m) => m.provider === p.id)
+          if (matching.length === 0 || p.models.length >= matching.length) return p
+          const existingIds = new Set(p.models.map((m) => m.id))
+          const newModels = matching
+            .filter((m) => !existingIds.has(m.id))
+            .map((m) => ({
+              id: m.id,
+              name: m.name,
+              contextWindow: m.contextWindow,
+              maxOutput: 0,
+              inputCost: m.costInput,
+              outputCost: m.costOutput,
+              capabilities: [
+                ...(m.toolCall ? ['tool_use' as const] : []),
+                ...(m.vision ? ['vision' as const] : []),
+              ],
+            }))
+          if (newModels.length === 0) return p
+          return { ...p, models: [...p.models, ...newModels] }
+        })
+        updateSettings({ providers: updatedProviders })
+      }
+    } catch {
+      // Non-fatal
+    }
+
+    setSplashStatus('Loading providers...')
+    try {
+      const providers = await rustBackend.listProviders()
+      if (providers.length > 0) {
+        const currentSettings = settings()
+        const updatedProviders = currentSettings.providers.map((p) => {
+          const backendProvider = providers.find((bp) => bp.name === p.id)
+          if (backendProvider) {
+            return { ...p, status: 'connected' as const, enabled: true }
+          }
+          return p
+        })
+        updateSettings({ providers: updatedProviders })
+      }
+    } catch {
+      // Non-fatal
+    }
+
+    setSplashStatus('Ready')
+    log.info('app', 'Web mode initialized successfully')
+    // In web mode, skip project hub and go straight to the shell
+    setProjectHubVisible(false)
+
+    return { error: null, notTauri: true }
+  } catch (err) {
+    log.error(
+      'app',
+      'Web mode initialization failed',
+      err instanceof Error ? err.stack : String(err)
+    )
+    const errorMsg = err instanceof Error ? `${err.message}\n\nStack: ${err.stack}` : String(err)
+    return { error: errorMsg, notTauri: true }
   } finally {
     const elapsed = Date.now() - splashStart
     const remaining = SPLASH_MIN_MS - elapsed

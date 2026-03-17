@@ -22,6 +22,7 @@ import {
   Show,
   ErrorBoundary as SolidErrorBoundary,
 } from 'solid-js'
+import { log } from '../lib/logger'
 import { logFatal } from '../services/logger'
 
 interface ErrorFallbackProps {
@@ -34,6 +35,7 @@ const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
   const [copied, setCopied] = createSignal(false)
 
   // eslint-disable-next-line solid/reactivity -- one-time log at mount
+  log.error('error', `Caught render error: ${props.error.message}`, props.error.stack)
   logFatal('ErrorBoundary', `Caught render error: ${props.error.message}`, props.error.stack)
 
   const copyError = async () => {

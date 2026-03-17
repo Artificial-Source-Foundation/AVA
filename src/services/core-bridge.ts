@@ -14,9 +14,15 @@ export function getCoreBudget(): ContextBudget | null {
 }
 
 // Stubs for code that still references these
-export function getCoreSettings(): null { return null }
-export function getCoreBus(): null { return null }
-export function getCoreSessionManager(): null { return null }
+export function getCoreSettings(): null {
+  return null
+}
+export function getCoreBus(): null {
+  return null
+}
+export function getCoreSessionManager(): null {
+  return null
+}
 
 export interface CoreBridgeOptions {
   contextLimit?: number

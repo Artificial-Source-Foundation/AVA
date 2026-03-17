@@ -19,17 +19,57 @@ import type { ToolActivity } from './agent-types'
 /** Agent event — union of all event types emitted during agent execution */
 export type AgentEvent =
   | { type: 'agent:start'; agentId: string; goal?: string }
-  | { type: 'agent:finish'; agentId: string; result: { success: boolean; error?: string; output?: string; turns: number; tokensUsed: { input: number; output: number }; terminateMode?: string } }
+  | {
+      type: 'agent:finish'
+      agentId: string
+      result: {
+        success: boolean
+        error?: string
+        output?: string
+        turns: number
+        tokensUsed: { input: number; output: number }
+        terminateMode?: string
+      }
+    }
   | { type: 'turn:start'; agentId: string; turn: number }
   | { type: 'turn:end'; agentId: string; turn: number; toolCalls?: ToolCallInfo[] }
   | { type: 'thought'; agentId: string; content: string }
   | { type: 'thinking'; agentId: string; content: string }
   | { type: 'tool:start'; agentId: string; toolName: string; args?: Record<string, unknown> }
-  | { type: 'tool:finish'; agentId: string; toolName: string; success: boolean; output?: string; durationMs?: number }
+  | {
+      type: 'tool:finish'
+      agentId: string
+      toolName: string
+      success: boolean
+      output?: string
+      durationMs?: number
+    }
   | { type: 'tool:progress'; agentId: string; toolName: string; chunk: string }
-  | { type: 'context:compacting'; agentId: string; estimatedTokens: number; contextLimit: number; messagesBefore: number; messagesAfter: number }
-  | { type: 'delegation:start'; agentId: string; childAgentId: string; workerName: string; task: string; tier?: string }
-  | { type: 'delegation:complete'; agentId: string; childAgentId: string; workerName: string; success: boolean; output: string; durationMs?: number }
+  | {
+      type: 'context:compacting'
+      agentId: string
+      estimatedTokens: number
+      contextLimit: number
+      messagesBefore: number
+      messagesAfter: number
+    }
+  | {
+      type: 'delegation:start'
+      agentId: string
+      childAgentId: string
+      workerName: string
+      task: string
+      tier?: string
+    }
+  | {
+      type: 'delegation:complete'
+      agentId: string
+      childAgentId: string
+      workerName: string
+      success: boolean
+      output: string
+      durationMs?: number
+    }
   | { type: 'error'; agentId: string; error: string }
 
 /** Tool call info from turn:end events */

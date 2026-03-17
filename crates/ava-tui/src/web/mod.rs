@@ -13,6 +13,7 @@
 //! | GET    | `/api/sessions`      | List recent sessions              |
 //! | GET    | `/api/models`        | List available models             |
 //! | GET    | `/api/providers`     | List configured providers         |
+//! | POST   | `/api/log`           | Ingest frontend log entry         |
 //! | GET    | `/ws`                | WebSocket for streaming events    |
 
 pub mod api;
@@ -49,6 +50,8 @@ fn build_router(state: WebState) -> Router {
         .route("/api/providers", get(api::list_providers))
         // WebSocket
         .route("/ws", get(ws::ws_handler))
+        // Frontend log ingestion
+        .route("/api/log", post(api::ingest_frontend_log))
         // Health check
         .route("/api/health", get(api::health))
         .layer(cors)
@@ -58,6 +61,10 @@ fn build_router(state: WebState) -> Router {
 /// Start the AVA web server on the given host and port.
 pub async fn run_server(host: &str, port: u16) -> Result<()> {
     let data_dir = dirs::home_dir().unwrap_or_default().join(".ava");
+
+    // Ensure the logs directory exists for frontend log ingestion
+    let logs_dir = data_dir.join("logs");
+    std::fs::create_dir_all(&logs_dir).ok();
 
     let state = WebState::init(data_dir).await?;
 

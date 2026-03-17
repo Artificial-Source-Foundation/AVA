@@ -51,6 +51,7 @@ interface SessionStorage {
   list(): Promise<Array<{ id: string; name?: string; updatedAt: number }>>
   loadAll(): Promise<SessionState[]>
 }
+
 import {
   createSession,
   deleteSession,

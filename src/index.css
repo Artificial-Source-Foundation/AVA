@@ -743,7 +743,7 @@ button {
   padding: 4px;
 }
 .xterm-container .xterm-viewport {
-  overflow-y: auto !important;
+  overflow-y: auto;
 }
 
 /* Approval dock slide-up */

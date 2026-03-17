@@ -6,20 +6,21 @@
  * The TypeScript layer only manages UI state (approval bridge, plan mode, queuing).
  */
 
-import { writeTextFile } from '@tauri-apps/plugin-fs'
+import { isTauri, invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { batch, createEffect, createSignal, on } from 'solid-js'
+import { apiInvoke } from '../lib/api-client'
 
-const DEBUG_LOG = '/tmp/ava-debug/agent.log'
-async function debugLog(msg: string): Promise<void> {
-  const line = `[${new Date().toISOString()}] ${msg}\n`
-  try {
-    await writeTextFile(DEBUG_LOG, line, { append: true })
-  } catch {
-    // fallback: also console.log so we don't lose it
-    console.log('[ava-debug]', msg)
-  }
+function debugLog(msg: string): void {
+  const line = `[${new Date().toISOString()}] ${msg}`
+  console.warn('[ava-debug]', line)
+  // Also write to Rust side which has unrestricted FS access
+  const invoker = isTauri() ? tauriInvoke : apiInvoke
+  invoker('append_log', { path: '/tmp/ava-debug/agent.log', content: `${line}\n` }).catch(() => {
+    /* ignore */
+  })
 }
 
+import { log } from '../lib/logger'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
 import { rustAgent as rustAgentBridge, rustBackend } from '../services/rust-bridge'
 import { useSession } from '../stores/session'
@@ -89,6 +90,9 @@ function createAgentStore() {
     on(rustAgent.events, (allEvents) => {
       for (let i = lastProcessedEventIdx; i < allEvents.length; i++) {
         const event = allEvents[i]!
+        if (event.type === 'tool_call') {
+          log.debug('agent', 'Tool called', { tool: (event as { name?: string }).name })
+        }
         if (event.type === 'approval_request') {
           const approvalEvent = event as ApprovalRequestEvent
           const riskLevel = (
@@ -158,6 +162,7 @@ function createAgentStore() {
     void debugLog(`addMessage done, count=${session.messages().length}, sessionId=${sessionId}`)
 
     try {
+      log.info('agent', 'Agent started', { goal: goal.slice(0, 120), sessionId })
       void debugLog(`calling rustAgent.run("${goal.slice(0, 50)}")`)
       const result = await rustAgent.run(goal, { model: config?.model })
       void debugLog(
@@ -183,7 +188,28 @@ function createAgentStore() {
         session.addMessage(assistantMsg)
       }
 
+      log.info('agent', 'Agent completed', {
+        tokens: rustAgent.tokenUsage().output,
+        cost: rustAgent.tokenUsage().cost,
+      })
       return result
+    } catch (err) {
+      // Agent failed — show error as an assistant message so the user sees it
+      const errorText = rustAgent.error() || (err instanceof Error ? err.message : String(err))
+      log.error('agent', 'Agent failed', { error: errorText })
+      if (errorText) {
+        const errorMsg: Message = {
+          id: `err-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          sessionId,
+          role: 'assistant',
+          content: `**Error:** ${errorText}`,
+          createdAt: Date.now(),
+          error: { type: 'unknown', message: errorText, timestamp: Date.now() },
+        }
+        session.addMessage(errorMsg)
+        void debugLog(`added error message: ${errorText}`)
+      }
+      return null
     } finally {
       batch(() => {
         setStreamingStartedAt(null)

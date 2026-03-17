@@ -1,5 +1,14 @@
-import { invoke } from '@tauri-apps/api/core'
+import { isTauri, invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { apiInvoke, createEventSocket } from '../lib/api-client'
+
+/** Invoke the backend — Tauri IPC or HTTP API depending on runtime. */
+function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (isTauri()) {
+    return args ? tauriInvoke<T>(cmd, args) : tauriInvoke<T>(cmd)
+  }
+  return apiInvoke<T>(cmd, args)
+}
 
 export interface ToolExecutionResult {
   content: string
@@ -48,7 +57,24 @@ export async function listTools(): Promise<ToolInfo[]> {
 export async function listenToAgentEvents(
   onEvent: (event: AgentEvent) => void
 ): Promise<UnlistenFn> {
-  return listen<AgentEvent>('agent-event', (event) => {
-    onEvent(event.payload)
-  })
+  if (isTauri()) {
+    return listen<AgentEvent>('agent-event', (event) => {
+      onEvent(event.payload)
+    })
+  }
+
+  // Browser mode — connect via WebSocket
+  const ws = createEventSocket()
+  ws.onmessage = (evt) => {
+    try {
+      const event = JSON.parse(evt.data as string) as AgentEvent
+      onEvent(event)
+    } catch {
+      // Ignore malformed messages
+    }
+  }
+  // Return an unlisten function that closes the socket
+  return () => {
+    ws.close()
+  }
 }

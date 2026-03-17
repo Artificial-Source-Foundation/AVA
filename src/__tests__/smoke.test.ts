@@ -60,7 +60,20 @@ describe('Session type extensions', () => {
  * Strips stop words, lowercases, kebab-cases.
  */
 function generateSlug(input: string): string {
-  const stopWords = new Set(['the', 'a', 'an', 'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from'])
+  const stopWords = new Set([
+    'the',
+    'a',
+    'an',
+    'to',
+    'of',
+    'in',
+    'for',
+    'on',
+    'with',
+    'at',
+    'by',
+    'from',
+  ])
   return input
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, '')

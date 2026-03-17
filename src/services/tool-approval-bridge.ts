@@ -25,6 +25,7 @@ interface ToolMiddleware {
   priority: number
   before(ctx: ToolMiddlewareContext): Promise<ToolMiddlewareResult | undefined>
 }
+
 import { checkAutoApproval } from '../lib/tool-approval'
 
 // ─── Types ──────────────────────────────────────────────────────────────────

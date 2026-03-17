@@ -14,6 +14,7 @@ function emitEvent(eventName: string, data: unknown): void {
     window.dispatchEvent(new CustomEvent(`ava:${eventName}`, { detail: data }))
   }
 }
+
 import { type Component, createEffect, createMemo, createSignal, For, Show } from 'solid-js'
 import { useExtensionEvent } from '../../hooks/useExtensionEvents'
 import { type EditorInfo, getAvailableEditors } from '../../services/ide-integration'

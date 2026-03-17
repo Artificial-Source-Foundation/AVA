@@ -1,4 +1,5 @@
-import { invoke } from '@tauri-apps/api/core'
+import { isTauri, invoke as tauriInvoke } from '@tauri-apps/api/core'
+import { apiInvoke } from '../lib/api-client'
 import type {
   AgentStatus,
   AgentToolInfo,
@@ -18,11 +19,11 @@ import type {
   McpReloadResult,
   McpServerInfo,
   MessageQueueState,
-  PermissionLevelInfo,
-  PermissionLevelValue,
   ModelInfo,
   NativeExtensionRegistration,
   OAuthCallback,
+  PermissionLevelInfo,
+  PermissionLevelValue,
   PermissionResult,
   PermissionRule,
   PluginStateEntry,
@@ -54,7 +55,10 @@ function toErrorMessage(error: unknown): string {
 
 async function invokeCommand<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   try {
-    return args ? await invoke<T>(command, args) : await invoke<T>(command)
+    if (isTauri()) {
+      return args ? await tauriInvoke<T>(command, args) : await tauriInvoke<T>(command)
+    }
+    return await apiInvoke<T>(command, args)
   } catch (error) {
     throw new Error(`[rust-bridge:${command}] ${toErrorMessage(error)}`)
   }
@@ -118,10 +122,8 @@ export const rustAgent = {
     invokeCommand('submit_goal', { args: { goal } }),
   stream: (goal: string): Promise<SubmitGoalResult> =>
     invokeCommand('submit_goal', { args: { goal } }),
-  cancel: (): Promise<void> =>
-    invokeCommand('cancel_agent'),
-  status: (): Promise<AgentStatus> =>
-    invokeCommand('get_agent_status'),
+  cancel: (): Promise<void> => invokeCommand('cancel_agent'),
+  status: (): Promise<AgentStatus> => invokeCommand('get_agent_status'),
   resolveApproval: (approved: boolean, alwaysAllow: boolean): Promise<void> =>
     invokeCommand('resolve_approval', { args: { approved, alwaysAllow } }),
   resolveQuestion: (answer: string): Promise<void> =>
@@ -224,69 +226,50 @@ export const rustExtensions = {
 export const rustBackend = {
   submitGoal: (args: SubmitGoalArgs): Promise<SubmitGoalResult> =>
     invokeCommand('submit_goal', { args }),
-  cancelAgent: (): Promise<void> =>
-    invokeCommand('cancel_agent'),
-  getAgentStatus: (): Promise<AgentStatus> =>
-    invokeCommand('get_agent_status'),
+  cancelAgent: (): Promise<void> => invokeCommand('cancel_agent'),
+  getAgentStatus: (): Promise<AgentStatus> => invokeCommand('get_agent_status'),
 
   listSessions: (limit?: number): Promise<SessionSummary[]> =>
     invokeCommand('list_sessions', { limit }),
-  loadSession: (id: string): Promise<JsonValue> =>
-    invokeCommand('load_session', { id }),
-  createSession: (): Promise<SessionSummary> =>
-    invokeCommand('create_session'),
-  deleteSession: (id: string): Promise<void> =>
-    invokeCommand('delete_session', { id }),
+  loadSession: (id: string): Promise<JsonValue> => invokeCommand('load_session', { id }),
+  createSession: (): Promise<SessionSummary> => invokeCommand('create_session'),
+  deleteSession: (id: string): Promise<void> => invokeCommand('delete_session', { id }),
 
-  listModels: (): Promise<ModelInfo[]> =>
-    invokeCommand('list_models'),
-  getCurrentModel: (): Promise<CurrentModel> =>
-    invokeCommand('get_current_model'),
+  listModels: (): Promise<ModelInfo[]> => invokeCommand('list_models'),
+  getCurrentModel: (): Promise<CurrentModel> => invokeCommand('get_current_model'),
   switchModel: (provider: string, model: string): Promise<void> =>
     invokeCommand('switch_model', { provider, model }),
 
-  listProviders: (): Promise<ProviderInfo[]> =>
-    invokeCommand('list_providers'),
+  listProviders: (): Promise<ProviderInfo[]> => invokeCommand('list_providers'),
 
-  getConfig: (): Promise<JsonValue> =>
-    invokeCommand('get_config'),
+  getConfig: (): Promise<JsonValue> => invokeCommand('get_config'),
 
-  listAgentTools: (): Promise<AgentToolInfo[]> =>
-    invokeCommand('list_agent_tools'),
+  listAgentTools: (): Promise<AgentToolInfo[]> => invokeCommand('list_agent_tools'),
 
-  listMcpServers: (): Promise<McpServerInfo[]> =>
-    invokeCommand('list_mcp_servers'),
-  reloadMcpServers: (): Promise<McpReloadResult> =>
-    invokeCommand('reload_mcp_servers'),
+  listMcpServers: (): Promise<McpServerInfo[]> => invokeCommand('list_mcp_servers'),
+  reloadMcpServers: (): Promise<McpReloadResult> => invokeCommand('reload_mcp_servers'),
 
-  getPermissionLevel: (): Promise<PermissionLevelInfo> =>
-    invokeCommand('get_permission_level'),
+  getPermissionLevel: (): Promise<PermissionLevelInfo> => invokeCommand('get_permission_level'),
   setPermissionLevel: (level: PermissionLevelValue): Promise<PermissionLevelInfo> =>
     invokeCommand('set_permission_level', { level }),
   togglePermissionLevel: (): Promise<PermissionLevelInfo> =>
     invokeCommand('toggle_permission_level'),
 
   // Mid-stream messaging (3-tier)
-  steerAgent: (message: string): Promise<void> =>
-    invokeCommand('steer_agent', { message }),
-  followUpAgent: (message: string): Promise<void> =>
-    invokeCommand('follow_up_agent', { message }),
+  steerAgent: (message: string): Promise<void> => invokeCommand('steer_agent', { message }),
+  followUpAgent: (message: string): Promise<void> => invokeCommand('follow_up_agent', { message }),
   postCompleteAgent: (message: string, group?: number): Promise<void> =>
     invokeCommand('post_complete_agent', { args: { message, group: group ?? 1 } }),
-  getMessageQueue: (): Promise<MessageQueueState> =>
-    invokeCommand('get_message_queue'),
+  getMessageQueue: (): Promise<MessageQueueState> => invokeCommand('get_message_queue'),
   clearMessageQueue: (target: ClearTarget = 'all'): Promise<void> =>
     invokeCommand('clear_message_queue', { target }),
 
   // Retry / Edit+Resend / Regenerate / Undo
-  retryLastMessage: (): Promise<SubmitGoalResult> =>
-    invokeCommand('retry_last_message'),
+  retryLastMessage: (): Promise<SubmitGoalResult> => invokeCommand('retry_last_message'),
   editAndResend: (args: EditAndResendArgs): Promise<SubmitGoalResult> =>
     invokeCommand('edit_and_resend', { args }),
-  regenerateResponse: (): Promise<SubmitGoalResult> =>
-    invokeCommand('regenerate_response'),
-  undoLastEdit: (): Promise<UndoResult> =>
-    invokeCommand('undo_last_edit'),
+  regenerateResponse: (): Promise<SubmitGoalResult> => invokeCommand('regenerate_response'),
+  undoLastEdit: (): Promise<UndoResult> => invokeCommand('undo_last_edit'),
 
   // Session rename/search
   renameSession: (id: string, title: string): Promise<void> =>
@@ -295,6 +278,14 @@ export const rustBackend = {
     invokeCommand('search_sessions', { query }),
 
   // Context compaction
-  compactContext: (messages: CompactMessage[], focus?: string, contextWindow?: number): Promise<CompactContextResult> =>
-    invokeCommand('compact_context', { messages, focus: focus ?? null, contextWindow: contextWindow ?? null }),
+  compactContext: (
+    messages: CompactMessage[],
+    focus?: string,
+    contextWindow?: number
+  ): Promise<CompactContextResult> =>
+    invokeCommand('compact_context', {
+      messages,
+      focus: focus ?? null,
+      contextWindow: contextWindow ?? null,
+    }),
 }

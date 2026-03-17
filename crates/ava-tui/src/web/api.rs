@@ -261,6 +261,76 @@ pub async fn list_providers(State(state): State<WebState>) -> impl IntoResponse 
 }
 
 // ============================================================================
+// Frontend Log Ingestion
+// ============================================================================
+
+#[derive(Deserialize)]
+pub struct FrontendLogRequest {
+    pub level: String,
+    pub category: String,
+    pub message: String,
+    #[serde(default)]
+    pub data: Option<serde_json::Value>,
+    #[serde(default)]
+    pub timestamp: Option<String>,
+}
+
+/// Receive a frontend log entry and append it to `~/.ava/logs/frontend.log`.
+pub async fn ingest_frontend_log(Json(req): Json<FrontendLogRequest>) -> impl IntoResponse {
+    let timestamp = req
+        .timestamp
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
+    let level = req.level.to_uppercase();
+    let data_str = match &req.data {
+        Some(v) if !v.is_null() => format!(" | {v}"),
+        _ => String::new(),
+    };
+    let line = format!(
+        "[{timestamp}] [{level}] [{}] {}{data_str}\n",
+        req.category, req.message
+    );
+
+    let log_dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".ava")
+        .join("logs");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_path = log_dir.join("frontend.log");
+
+    // Size-based rotation: if over 1 MB, keep last half
+    if let Ok(meta) = std::fs::metadata(&log_path) {
+        if meta.len() > 1_024 * 1_024 {
+            if let Ok(content) = std::fs::read_to_string(&log_path) {
+                let half = content.len() / 2;
+                let truncated = if let Some(nl) = content[half..].find('\n') {
+                    format!(
+                        "--- log truncated at {} ---\n{}",
+                        chrono::Utc::now().to_rfc3339(),
+                        &content[half + nl + 1..]
+                    )
+                } else {
+                    content[half..].to_string()
+                };
+                let _ = std::fs::write(&log_path, truncated);
+            }
+        }
+    }
+
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        Ok(mut file) => {
+            use std::io::Write;
+            let _ = file.write_all(line.as_bytes());
+            StatusCode::OK.into_response()
+        }
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+// ============================================================================
 // Error helpers
 // ============================================================================
 

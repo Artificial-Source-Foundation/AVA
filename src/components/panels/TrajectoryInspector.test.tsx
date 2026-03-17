@@ -5,6 +5,7 @@ interface AgentEvent {
   type: string
   [key: string]: unknown
 }
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { TrajectoryInspector } from './TrajectoryInspector'
 

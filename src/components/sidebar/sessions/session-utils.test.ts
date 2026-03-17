@@ -13,7 +13,7 @@ describe('formatSessionName', () => {
 
   it('truncates names longer than 28 chars', () => {
     const long = 'A'.repeat(30)
-    expect(formatSessionName(long)).toBe('A'.repeat(28) + '...')
+    expect(formatSessionName(long)).toBe(`${'A'.repeat(28)}...`)
   })
 
   it('returns 28-char names unchanged', () => {

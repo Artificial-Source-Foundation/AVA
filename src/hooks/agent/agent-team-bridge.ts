@@ -96,7 +96,11 @@ export function createTeamBridge(
 
         // Map Praxis tier to team role
         const role =
-          event.tier === 'lead' ? 'senior-lead' : event.tier === 'worker' ? 'junior-dev' : 'senior-lead'
+          event.tier === 'lead'
+            ? 'senior-lead'
+            : event.tier === 'worker'
+              ? 'junior-dev'
+              : 'senior-lead'
 
         teamStore.addMember({
           id: event.childAgentId,

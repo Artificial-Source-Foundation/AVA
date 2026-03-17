@@ -6,6 +6,7 @@
 
 import { createMemo, createRoot, createSignal } from 'solid-js'
 import { DEFAULTS } from '../../config/constants'
+import { log } from '../../lib/logger'
 import { getCoreBudget } from '../../services/core-bridge'
 import type {
   Agent,
@@ -66,7 +67,21 @@ export const {
   const [currentSession, setCurrentSession] = createSignal<Session | null>(null)
   const [sessions, setSessions] = createSignal<SessionWithStats[]>([])
   const [isLoadingSessions, setIsLoadingSessions] = createSignal(false)
-  const [messages, setMessages] = createSignal<Message[]>([])
+  const [messages, _setMessagesRaw] = createSignal<Message[]>([])
+  // biome-ignore lint/suspicious/noExplicitAny: signal setter wrapper needs dynamic args
+  const setMessages = ((...args: unknown[]) => {
+    const prev = messages()
+    // biome-ignore lint/suspicious/noExplicitAny: SolidJS signal setter typing
+    const result = (_setMessagesRaw as any)(...args)
+    const next = messages()
+    if (next.length !== prev.length || next.length === 0) {
+      console.warn(
+        `[ava-debug][setMessages] ${prev.length} -> ${next.length}`,
+        new Error().stack?.split('\n').slice(1, 4).join(' <- ')
+      )
+    }
+    return result
+  }) as typeof _setMessagesRaw
   const [isLoadingMessages, setIsLoadingMessages] = createSignal(false)
   const [agents, setAgents] = createSignal<Agent[]>([])
   const [fileOperations, setFileOperations] = createSignal<FileOperation[]>([])
@@ -101,6 +116,7 @@ export const {
   const setSelectedModel = (model: string, providerId?: string): void => {
     _setSelectedModel(model)
     _setSelectedProvider(providerId ?? null)
+    log.info('model', `Model changed to ${model}`, { provider: providerId ?? 'default' })
     try {
       localStorage.setItem(SELECTED_MODEL_KEY, model)
       if (providerId) localStorage.setItem(SELECTED_PROVIDER_KEY, providerId)

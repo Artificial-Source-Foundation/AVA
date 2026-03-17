@@ -67,7 +67,10 @@ export interface ToolMiddleware {
   name: string
   priority: number
   before?: (ctx: { toolName: string; args: Record<string, unknown> }) => Promise<unknown>
-  after?: (ctx: { toolName: string; args: Record<string, unknown> }, result: unknown) => Promise<unknown>
+  after?: (
+    ctx: { toolName: string; args: Record<string, unknown> },
+    result: unknown
+  ) => Promise<unknown>
 }
 
 /**

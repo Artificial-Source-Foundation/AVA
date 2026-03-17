@@ -8,6 +8,7 @@
 
 import { AlertTriangle, RotateCcw } from 'lucide-solid'
 import { type Component, createSignal, ErrorBoundary, type JSX, Show } from 'solid-js'
+import { log } from '../../lib/logger'
 
 interface PanelErrorFallbackProps {
   error: Error
@@ -17,6 +18,8 @@ interface PanelErrorFallbackProps {
 
 const PanelErrorFallback: Component<PanelErrorFallbackProps> = (props) => {
   const [showStack, setShowStack] = createSignal(false)
+  // eslint-disable-next-line solid/reactivity -- one-time log at mount
+  log.error('error', `Panel error in ${props.panelName}: ${props.error.message}`, props.error.stack)
 
   return (
     <div class="flex flex-col items-center justify-center h-full p-6 text-center" role="alert">

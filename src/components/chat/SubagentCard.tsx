@@ -22,6 +22,7 @@ function abortExecutor(_id: string): boolean {
   // Agent abort is now handled by the Rust backend
   return false
 }
+
 import { type Component, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { useTeam } from '../../stores/team'
 import type { ToolCall } from '../../types'

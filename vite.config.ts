@@ -179,6 +179,14 @@ export default defineConfig(async () => ({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/__chatgpt_proxy/, ''),
       },
+      '/api': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'ws://localhost:8080',
+        ws: true,
+      },
     },
     watch: {
       // 3. tell Vite to ignore watching `src-tauri` and reference code

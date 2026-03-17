@@ -3,6 +3,7 @@ import { createMemo, createSignal, For, type JSX, onCleanup, Show } from 'solid-
 
 /** Loose AgentEvent type for trajectory display — accepts both Rust IPC and legacy event shapes */
 type AgentEvent = { type: string; [key: string]: unknown }
+
 import { useAgent } from '../../hooks/useAgent'
 
 interface TrajectoryInspectorProps {
@@ -62,7 +63,9 @@ export function TrajectoryInspector(props: TrajectoryInspectorProps): JSX.Elemen
   const [expanded, setExpanded] = createSignal<Set<string>>(new Set())
   const [scrollTop, setScrollTop] = createSignal(0)
 
-  const timeline = createMemo(() => normalizeEvents(agent.eventTimeline() as unknown as AgentEvent[]))
+  const timeline = createMemo(() =>
+    normalizeEvents(agent.eventTimeline() as unknown as AgentEvent[])
+  )
   const eventTypes = createMemo(() => ['all', ...new Set(timeline().map((e) => e.event.type))])
 
   const filtered = createMemo(() => {

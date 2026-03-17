@@ -28,6 +28,7 @@ ava-permissions = { path = "../ava-permissions" }
 ava-platform = { path = "../ava-platform" }
 ava-session = { path = "../ava-session" }
 ava-mcp = { path = "../ava-mcp" }
+ava-plugin = { path = "../ava-plugin" }
 ava-tools = { path = "../ava-tools" }
 ava-types = { path = "../ava-types" }
 similar = "2"

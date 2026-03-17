@@ -613,3 +613,73 @@ impl LLMProvider for UsageProvider {
         &self.model
     }
 }
+
+#[tokio::test]
+async fn agent_stack_initializes_with_plugin_manager() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        yolo: true,
+        injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    // Plugin manager should be initialized with zero running plugins
+    // (no plugins installed in the temp directory)
+    let pm = stack.plugin_manager.lock().await;
+    assert_eq!(pm.running_count(), 0);
+    assert!(pm.list_plugins().is_empty());
+}
+
+#[tokio::test]
+async fn plugin_hooks_fire_without_crash_on_run() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let provider = Arc::new(MockProvider::new(
+        "test-model",
+        vec![completion_response("done")],
+    ));
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        injected_provider: Some(provider),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    // Run the agent -- plugin hooks (SessionStart, AgentBefore, AgentAfter,
+    // SessionEnd) should fire without error even with no plugins loaded
+    let result = stack
+        .run(
+            "finish task",
+            5,
+            None,
+            CancellationToken::new(),
+            Vec::new(),
+            None,
+            Vec::new(),
+        )
+        .await
+        .expect("run should succeed");
+
+    assert!(result.success);
+}
+
+#[tokio::test]
+async fn plugin_manager_shutdown() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (stack, _question_rx, _approval_rx) = AgentStack::new(AgentStackConfig {
+        data_dir: dir.path().to_path_buf(),
+        yolo: true,
+        injected_provider: Some(Arc::new(MockProvider::new("test", vec![]))),
+        ..Default::default()
+    })
+    .await
+    .expect("stack init should succeed");
+
+    // Shutdown should complete without error even with no plugins
+    stack.shutdown_plugins().await;
+    let pm = stack.plugin_manager.lock().await;
+    assert_eq!(pm.running_count(), 0);
+}

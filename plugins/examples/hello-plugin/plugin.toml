@@ -1,0 +1,11 @@
+[plugin]
+name = "hello-plugin"
+version = "0.1.0"
+description = "Example: logs session lifecycle events"
+
+[runtime]
+command = "node"
+args = ["index.js"]
+
+[hooks]
+subscribe = ["session.start", "session.end"]

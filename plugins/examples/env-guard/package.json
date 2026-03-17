@@ -1,0 +1,16 @@
+{
+  "name": "env-guard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Example AVA plugin: blocks reading sensitive files",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@ava-ai/plugin": "file:../../sdk"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

@@ -269,6 +269,7 @@ dependencies = [
  "ava-memory",
  "ava-permissions",
  "ava-platform",
+ "ava-plugin",
  "ava-praxis",
  "ava-session",
  "ava-tools",
@@ -474,6 +475,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ava-plugin"
+version = "2.1.0"
+dependencies = [
+ "async-trait",
+ "ava-types",
+ "chrono",
+ "dirs",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "ava-praxis"
 version = "2.1.0"
 dependencies = [
@@ -570,6 +588,7 @@ dependencies = [
  "ava-memory",
  "ava-permissions",
  "ava-platform",
+ "ava-plugin",
  "ava-praxis",
  "ava-session",
  "ava-tools",

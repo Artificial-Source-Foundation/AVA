@@ -138,6 +138,10 @@ pub struct LLMResponse {
 /// Implementations handle API communication, token estimation, and cost tracking.
 /// The agent loop calls `generate_with_tools` for native tool-calling models,
 /// falling back to `generate` for text-only completions.
+// TODO: Wire ava_plugin::HookEvent::RequestHeaders hook here to allow plugins
+// to inject custom headers into LLM API requests. This would require passing
+// the PluginManager to providers or adding a header-injection callback.
+
 #[async_trait]
 pub trait LLMProvider: Send + Sync {
     /// Generate a text completion from the given message history.

@@ -46,6 +46,7 @@ ava-context = { path = "../ava-context" }
 ava-types = { path = "../ava-types" }
 ava-db = { path = "../ava-db" }
 ava-codebase = { path = "../ava-codebase" }
+ava-plugin = { path = "../ava-plugin" }
 cpal = { version = "0.15", optional = true }
 hound = { version = "3.5", optional = true }
 whisper-rs = { version = "0.12", optional = true }

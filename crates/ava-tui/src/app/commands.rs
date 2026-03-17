@@ -432,6 +432,7 @@ impl App {
 /commit                  \u{2014} inspect commit readiness and suggest a message
 /export [filename]       \u{2014} export conversation to file (.md or .json)
 /copy [all]              \u{2014} copy last response (picks code block if multiple)
+/plugin                  \u{2014} list installed plugins
 /hooks [list|reload|dry-run <event>] \u{2014} manage lifecycle hooks
 /init                    \u{2014} create example project templates
 /btw [question]          \u{2014} start a side conversation branch
@@ -469,6 +470,16 @@ impl App {
                     self.start_btw_branch(arg.map(|s| s.to_string()));
                     None
                 }
+            }
+            "/plugin" | "/plugins" => {
+                let text = crate::plugin_commands::format_plugin_list_inline();
+                self.state.info_panel = Some(super::InfoPanelState {
+                    title: "Plugins".to_string(),
+                    content: text,
+                    scroll: 0,
+                });
+                self.state.active_modal = Some(super::ModalType::InfoPanel);
+                None
             }
             "/hooks" => self.handle_hooks_command(arg),
             "/tasks" => {

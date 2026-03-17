@@ -1,0 +1,11 @@
+[plugin]
+name = "request-logger"
+version = "0.1.0"
+description = "Logs all tool calls to .ava/tool-log.jsonl"
+
+[runtime]
+command = "node"
+args = ["index.js"]
+
+[hooks]
+subscribe = ["tool.before", "tool.after"]

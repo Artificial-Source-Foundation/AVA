@@ -1,0 +1,25 @@
+{
+  "name": "@ava-ai/plugin",
+  "version": "0.1.0",
+  "description": "SDK for building AVA plugins",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "ava",
+    "plugin",
+    "sdk",
+    "json-rpc"
+  ],
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

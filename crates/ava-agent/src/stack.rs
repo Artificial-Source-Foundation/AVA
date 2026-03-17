@@ -18,6 +18,7 @@ use ava_permissions::policy::PermissionPolicy;
 use ava_permissions::tags::core_tool_profiles;
 use ava_permissions::PermissionSystem;
 use ava_platform::{Platform, StandardPlatform};
+use ava_plugin::PluginManager;
 use ava_session::SessionManager;
 use ava_tools::core::question::QuestionBridge;
 use ava_tools::core::task::{TaskResult, TaskSpawner};
@@ -125,6 +126,8 @@ pub struct AgentStack {
     /// Parent session ID for linking sub-agent sessions back to their parent.
     /// Set by the TUI before calling `run()` so spawned sub-agents record lineage.
     pub parent_session_id: RwLock<Option<String>>,
+    /// Plugin manager for power plugin lifecycle and hook dispatch.
+    pub plugin_manager: Arc<tokio::sync::Mutex<PluginManager>>,
 }
 
 pub struct AgentStackConfig {
@@ -292,6 +295,17 @@ impl AgentStack {
             )
         };
 
+        // Initialize plugin manager and load plugins from default directories.
+        let mut plugin_mgr = PluginManager::new();
+        let plugin_dirs = vec![
+            config.data_dir.join("plugins"),
+            effective_cwd.join(".ava").join("plugins"),
+        ];
+        if let Err(e) = plugin_mgr.load_plugins(&plugin_dirs).await {
+            warn!("Failed to load plugins: {e}");
+        }
+        let plugin_manager = Arc::new(tokio::sync::Mutex::new(plugin_mgr));
+
         let todo_state = TodoState::new();
         let (question_bridge, question_rx) = QuestionBridge::new();
         let (approval_bridge, approval_rx) = ApprovalBridge::new();
@@ -371,6 +385,7 @@ impl AgentStack {
                 shared_tool_sources,
                 agents_config,
                 parent_session_id: RwLock::new(None),
+                plugin_manager,
             },
             question_rx,
             approval_rx,
@@ -734,6 +749,17 @@ impl AgentStack {
         images: Vec<ava_types::ImageContent>,
     ) -> Result<AgentRunResult> {
         let raw_goal = goal.to_string();
+
+        // Fire SessionStart plugin hook
+        {
+            let mut pm = self.plugin_manager.lock().await;
+            pm.trigger_hook(
+                ava_plugin::HookEvent::SessionStart,
+                serde_json::json!({ "goal": raw_goal }),
+            )
+            .await;
+        }
+
         let cfg = self.config.get().await;
         let mut resolved_provider_name = self.current_model().await.0;
         let route_decision = if self.injected_provider.is_none() {
@@ -902,7 +928,8 @@ impl AgentStack {
             context,
             config,
         )
-        .with_history(history);
+        .with_history(history)
+        .with_plugin_manager(Arc::clone(&self.plugin_manager));
 
         // Attach images if provided (multimodal input)
         if !images.is_empty() {
@@ -1101,6 +1128,17 @@ impl AgentStack {
                 Self::attach_route_metadata(&mut session, decision);
             }
             self.learn_project_patterns_from_goal(&raw_goal);
+
+            // Fire SessionEnd plugin hook
+            {
+                let mut pm = self.plugin_manager.lock().await;
+                pm.trigger_hook(
+                    ava_plugin::HookEvent::SessionEnd,
+                    serde_json::json!({ "turns": session.messages.len() }),
+                )
+                .await;
+            }
+
             return Ok(AgentRunResult {
                 success: true,
                 turns: session.messages.len(),
@@ -1119,11 +1157,27 @@ impl AgentStack {
         }
         self.learn_project_patterns_from_goal(&raw_goal);
 
+        // Fire SessionEnd plugin hook
+        {
+            let mut pm = self.plugin_manager.lock().await;
+            pm.trigger_hook(
+                ava_plugin::HookEvent::SessionEnd,
+                serde_json::json!({ "turns": session.messages.len() }),
+            )
+            .await;
+        }
+
         Ok(AgentRunResult {
             success: true,
             turns: session.messages.len(),
             session,
         })
+    }
+
+    /// Gracefully shut down all running plugins.
+    pub async fn shutdown_plugins(&self) {
+        let mut pm = self.plugin_manager.lock().await;
+        pm.shutdown_all().await;
     }
 }
 

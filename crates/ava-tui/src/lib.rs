@@ -23,6 +23,7 @@ pub mod config;
 pub mod event;
 pub mod headless;
 pub mod hooks;
+pub mod plugin_commands;
 pub mod rendering;
 pub mod review;
 pub mod session_summary;

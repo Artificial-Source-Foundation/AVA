@@ -136,6 +136,32 @@ pub enum Command {
         #[command(subcommand)]
         action: AuthCommand,
     },
+    /// Manage power plugins
+    Plugin {
+        #[command(subcommand)]
+        action: PluginCommand,
+    },
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum PluginCommand {
+    /// List installed plugins
+    List,
+    /// Install a plugin from a local path or npm package
+    Add {
+        /// Local path to plugin directory, or npm package name
+        source: String,
+    },
+    /// Remove an installed plugin
+    Remove {
+        /// Plugin name
+        name: String,
+    },
+    /// Show details for an installed plugin
+    Info {
+        /// Plugin name
+        name: String,
+    },
 }
 
 #[derive(Debug, Clone, Subcommand)]

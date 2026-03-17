@@ -7,8 +7,11 @@ use std::hash::{Hash, Hasher};
 use std::pin::Pin;
 use std::time::Instant;
 
+use std::sync::Arc;
+
 use ava_context::ContextManager;
 use ava_llm::ThinkingConfig;
+use ava_plugin::PluginManager;
 use ava_tools::monitor::ToolExecution;
 use ava_tools::registry::ToolRegistry;
 use ava_types::{
@@ -55,6 +58,8 @@ pub struct AgentLoop {
     pub message_queue: Option<MessageQueue>,
     /// Images to attach to the first user (goal) message.
     images: Vec<ImageContent>,
+    /// Optional plugin manager for firing lifecycle hooks.
+    plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -191,7 +196,14 @@ impl AgentLoop {
             history: Vec::new(),
             message_queue: None,
             images: Vec::new(),
+            plugin_manager: None,
         }
+    }
+
+    /// Attach a plugin manager for hook dispatch during the agent loop.
+    pub fn with_plugin_manager(mut self, pm: Arc<tokio::sync::Mutex<PluginManager>>) -> Self {
+        self.plugin_manager = Some(pm);
+        self
     }
 
     /// Set conversation history to inject after the system prompt.
@@ -672,6 +684,16 @@ impl AgentLoop {
             turn += 1;
             Self::emit(&event_tx, AgentEvent::Progress(format!("turn {turn}")));
 
+            // --- Fire AgentBefore plugin hook ---
+            if let Some(ref pm) = self.plugin_manager {
+                let mut pm = pm.lock().await;
+                pm.trigger_hook(
+                    ava_plugin::HookEvent::AgentBefore,
+                    serde_json::json!({ "turn": turn, "model": self.config.model }),
+                )
+                .await;
+            }
+
             // --- Generate LLM response ---
             let (response_text, tool_calls, usage) =
                 match self.generate_turn_response(&event_tx).await {
@@ -681,6 +703,20 @@ impl AgentLoop {
                         return Err(error);
                     }
                 };
+
+            // --- Fire AgentAfter plugin hook ---
+            if let Some(ref pm) = self.plugin_manager {
+                let mut pm = pm.lock().await;
+                pm.trigger_hook(
+                    ava_plugin::HookEvent::AgentAfter,
+                    serde_json::json!({
+                        "turn": turn,
+                        "tool_calls": tool_calls.len(),
+                        "response_len": response_text.len(),
+                    }),
+                )
+                .await;
+            }
 
             Self::merge_usage(&mut total_usage, &usage);
             if let Some(ref usage) = usage {

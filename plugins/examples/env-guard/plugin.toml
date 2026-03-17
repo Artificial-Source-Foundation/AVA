@@ -1,0 +1,11 @@
+[plugin]
+name = "env-guard"
+version = "0.1.0"
+description = "Blocks reading .env, credentials, and secret files"
+
+[runtime]
+command = "node"
+args = ["index.js"]
+
+[hooks]
+subscribe = ["tool.before"]

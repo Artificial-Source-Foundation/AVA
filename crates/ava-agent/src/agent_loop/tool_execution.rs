@@ -75,6 +75,40 @@ impl AgentLoop {
             }
         }
 
+        // --- Fire ToolBefore plugin hook ---
+        if let Some(ref pm) = self.plugin_manager {
+            let mut pm = pm.lock().await;
+            let responses = pm
+                .trigger_hook(
+                    ava_plugin::HookEvent::ToolBefore,
+                    serde_json::json!({
+                        "tool": tool_call.name,
+                        "call_id": tool_call.id,
+                        "args": tool_call.arguments,
+                    }),
+                )
+                .await;
+
+            // Check for blocks — if any plugin returns an error, skip execution
+            for resp in &responses {
+                if let Some(err) = &resp.error {
+                    let result = ToolResult {
+                        call_id: tool_call.id.clone(),
+                        content: format!("Blocked by plugin '{}': {}", resp.plugin_name, err),
+                        is_error: true,
+                    };
+                    let execution = ToolExecution {
+                        tool_name: tool_call.name.clone(),
+                        arguments_hash: hash_arguments(&tool_call.arguments),
+                        success: false,
+                        duration: std::time::Duration::ZERO,
+                        timestamp: Instant::now(),
+                    };
+                    return (result, execution);
+                }
+            }
+        }
+
         let start = Instant::now();
         let mut result = match self.tools.execute(tool_call.clone()).await {
             Ok(result) => result,
@@ -113,6 +147,21 @@ impl AgentLoop {
                     }
                 }
             }
+        }
+
+        // --- Fire ToolAfter plugin hook ---
+        if let Some(ref pm) = self.plugin_manager {
+            let mut pm = pm.lock().await;
+            pm.trigger_hook(
+                ava_plugin::HookEvent::ToolAfter,
+                serde_json::json!({
+                    "tool": tool_call.name,
+                    "call_id": tool_call.id,
+                    "is_error": result.is_error,
+                    "duration_ms": duration.as_millis() as u64,
+                }),
+            )
+            .await;
         }
 
         (result, execution)

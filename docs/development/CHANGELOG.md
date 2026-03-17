@@ -3,6 +3,12 @@
 ## v2.2.0 (2026-03-17)
 
 ### Added
+- **Web browser mode** — `ava serve --port 8080` starts HTTP API + WebSocket server
+  - Session CRUD API endpoints (list, create, get, delete)
+  - Async agent streaming via WebSocket
+  - Mid-stream messaging API endpoints (steering, follow-up, post-complete)
+  - Web DB fallback (routes SQL operations to HTTP API when no local SQLite)
+  - Auto-titling for sessions
 - **Power plugin system** — subprocess-isolated plugins via JSON-RPC
   - `ava-plugin` crate (manifest, discovery, hooks, runtime, manager)
   - 12 hook types (auth, tool.before/after, agent.before/after, session, etc.)
@@ -21,12 +27,18 @@
   - Plugin system documentation (SDKs, hooks, examples, quick reference)
   - Dependency graph and "where to find things" quick reference
   - Index at `docs/codebase/README.md` with navigation table
+- **Frontend wired to HTTP API + WebSocket** — SolidJS frontend connects to web server
+- **Desktop parity**: Ctrl+T thinking toggle, Ctrl+Y copy response, 29 theme presets, `/later` and `/queue` slash commands
 
 ### Removed
 - 30 unwired modules (~10.5K LOC dead code) moved to `docs/ideas/`
 - Architect, build-race, reviewer, scheduler, guardian, and 25 more
 
 ### Changed
+- Default model changed from gpt-4 to gpt-5.3-codex
+- Console noise cleanup (reduced debug logging)
+- Vite file watcher fix (`target/` directory excluded)
+- CI consolidated (11 jobs down to 4)
 - Documentation overhaul (README, crate-map, plugin guide, changelog)
 - Updated CLAUDE.md and AGENTS.md with mandatory doc-update rules
 - Development folder rebuilt (roadmap, backlog, epics, test-matrix)

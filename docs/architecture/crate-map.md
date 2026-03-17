@@ -2,7 +2,9 @@
 
 # AVA Crate Map
 
-21 Rust crates under `crates/`. ~40K LOC, 1,502 tests.
+21 Rust crates under `crates/`. ~40K LOC, 1,513 tests.
+
+> Web mode (`ava serve`) uses the same crate stack with axum (feature-gated `web` in `ava-tui`).
 
 ## Dependency Layers
 

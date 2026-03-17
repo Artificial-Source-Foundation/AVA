@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-16. Run 'just check' to revalidate. -->
+<!-- Last verified: 2026-03-17. Run 'just check' to revalidate. -->
 
 # AVA Architecture & Conventions (v3)
 
@@ -18,6 +18,7 @@ cargo test --workspace
 cargo clippy --workspace
 cargo run --bin ava             # interactive TUI
 cargo run --bin ava -- --help   # see all flags
+cargo run --bin ava -- serve --port 8080  # web browser mode
 
 # Desktop app (SolidJS + Tauri)
 npm run tauri dev
@@ -33,13 +34,14 @@ Release verification: `just check && npm run tauri build`
 AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust.
 
 - **CLI/TUI**: Pure Rust binary (`crates/ava-tui/`) -- Ratatui + Crossterm + Tokio
+- **Web mode**: `ava serve` -- HTTP API + WebSocket server (axum), serves SolidJS frontend
 - **Agent runtime**: Rust (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-praxis/`)
 - **Desktop frontend**: SolidJS + TypeScript (`src/`) -- calls Rust directly via Tauri IPC
 - **Desktop backend**: Rust via Tauri commands (`src-tauri/src/commands/`)
 
 ### Codebase Stats
 
-- **21 Rust crates**, ~40K LOC, 1,502 tests
+- **21 Rust crates**, ~40K LOC, 1,513 tests
 - **8 LLM providers**: Anthropic, OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock
 - **6 default tools**: `read`, `write`, `edit`, `bash`, `glob`, `grep`
 - **8 extended tools**: `apply_patch`, `web_fetch`, `web_search`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `git_read`

@@ -1,10 +1,10 @@
-<!-- Last verified: 2026-03-16. Run 'just check' to revalidate. -->
+<!-- Last verified: 2026-03-17. Run 'just check' to revalidate. -->
 
 # AVA Documentation
 
-AVA is a Rust-first AI coding assistant that runs as a CLI/TUI or Tauri desktop app. It sits between minimalist tools (Pi) and batteries-included IDEs (Cursor) -- lean defaults with opt-in power via MCP servers, TOML custom tools, and multi-agent orchestration.
+AVA is a Rust-first AI coding assistant that runs as a CLI/TUI, web server, or Tauri desktop app. It sits between minimalist tools (Pi) and batteries-included IDEs (Cursor) -- lean defaults with opt-in power via MCP servers, TOML custom tools, and multi-agent orchestration.
 
-**21 Rust crates, ~40K LOC, 1,502 tests, single binary.**
+**21 Rust crates, ~40K LOC, 1,513 tests, single binary.**
 
 ## Quick Start
 
@@ -12,6 +12,7 @@ AVA is a Rust-first AI coding assistant that runs as a CLI/TUI or Tauri desktop 
 # Build and run
 cargo run --bin ava              # interactive TUI
 cargo run --bin ava -- --help    # see all flags
+cargo run --bin ava -- serve --port 8080  # web browser mode
 
 # Or use just (recommended)
 just check                       # fmt + clippy + nextest
@@ -29,12 +30,14 @@ Credentials live at `~/.ava/credentials.json`. See [CLI Testing](#cli-testing) b
 ```
 User
   |
-  +-- CLI/TUI (crates/ava-tui) --+
-  |                               +--> Rust crates (crates/*) --> LLM APIs
-  +-- Desktop (src/ + src-tauri) -+
+  +-- CLI/TUI (crates/ava-tui) -----+
+  |                                   +--> Rust crates (crates/*) --> LLM APIs
+  +-- Web (ava serve, HTTP + WS) ----+
+  |                                   |
+  +-- Desktop (src/ + src-tauri) ----+
 ```
 
-Both interfaces share the same Rust backend. The desktop frontend (SolidJS) calls Rust via Tauri IPC.
+All three interfaces share the same Rust backend. The desktop frontend (SolidJS) calls Rust via Tauri IPC. Web mode uses HTTP API + WebSocket for agent streaming.
 
 ### Crate Map
 
@@ -50,6 +53,7 @@ Both interfaces share the same Rust backend. The desktop frontend (SolidJS) call
 | `ava-context` | Token tracking, context condensation (sliding window, summarization) | 17 | 3,079 |
 | `ava-mcp` | Model Context Protocol client/server, stdio + HTTP transport | 6 | 1,786 |
 | `ava-types` | Shared types: Message, Session, ToolCall, AvaError, ContextAttachment | 7 | 1,755 |
+| `ava-plugin` | Power plugin system (JSON-RPC, subprocess isolation, 12 hook types) | 6 | ~1,400 |
 | `ava-session` | Session persistence (SQLite), bookmarks, conversation tree | 3 | 1,609 |
 | `ava-cli-providers` | External CLI agent integration (Claude Code, etc.) | 9 | 1,510 |
 | `ava-auth` | OAuth (PKCE, device code), Copilot token exchange, API key management | 8 | 1,499 |

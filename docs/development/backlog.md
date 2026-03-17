@@ -7,6 +7,10 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 
 ## Recently Completed
 
+- **Web mode** — `ava serve` with HTTP API + WebSocket, session CRUD, async agent streaming, auto-titling, mid-stream messaging endpoints, web DB fallback
+- **Desktop parity** — Ctrl+T thinking toggle, Ctrl+Y copy response, 29 themes, `/later` and `/queue` slash commands wired
+- **Default model** — changed from gpt-4 to gpt-5.3-codex
+- **CI consolidation** — 11 jobs down to 4
 - **Plugin system Phase 1** — `ava-plugin` crate, AgentStack wiring, TypeScript SDK, 4 examples, CLI commands. Smoke tested e2e.
 - **Dead code cleanup** — 30 unwired modules → `docs/ideas/`, -10.5K LOC
 - **Docs overhaul** — README, crate-map, plugin guide, changelog, CLAUDE.md/AGENTS.md
@@ -21,14 +25,14 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 4. **B79** Evaluation harness — SWE-bench integration.
 5. **B80** Trajectory recording — JSONL decision trees.
 
-### Desktop/Web Frontend Fixes (Critical)
+### Desktop/Web Frontend Fixes (Remaining)
 
-6. **Web mode: + button creates session but UI doesn't update** — session gets created via API but the frontend doesn't transition to chat view. The session lifecycle store may need a web-specific flow that doesn't rely on SQL plugin reactivity.
-7. **Web mode: async agent streaming** — agent submit returns immediately but WebSocket events aren't being consumed by the chat UI components. Need to wire `useRustAgent` WebSocket path to the message store.
-8. **Desktop: Ctrl+T thinking toggle** — keyboard shortcut not bound in desktop (works in TUI).
-9. **Desktop: Ctrl+Y copy last response** — not implemented.
-10. **Desktop: theme picker UI** — no settings tab to switch themes (TUI has 29 themes via `/theme`).
-11. **Desktop: `/later` and `/queue` commands** — mid-stream messaging commands not wired.
+6. ~~**Web mode: + button creates session but UI doesn't update**~~ — DONE (session CRUD API + frontend wired)
+7. ~~**Web mode: async agent streaming**~~ — DONE (WebSocket events consumed by chat UI)
+8. ~~**Desktop: Ctrl+T thinking toggle**~~ — DONE
+9. ~~**Desktop: Ctrl+Y copy last response**~~ — DONE
+10. ~~**Desktop: theme picker UI**~~ — DONE (29 themes via `/theme`)
+11. ~~**Desktop: `/later` and `/queue` commands**~~ — DONE
 12. **Desktop: mid-stream messaging IPC** — steering/follow-up/post-complete Tauri bridge incomplete.
 13. **Web mode: full DB operation parity** — agents, checkpoints, memory queries return empty in web mode. Need HTTP endpoints for full feature set.
 

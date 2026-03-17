@@ -64,13 +64,16 @@ export function useRustAgent() {
         })
         break
       }
-      case 'token_usage':
+      case 'token_usage': {
+        // Rust serializes as snake_case (input_tokens), TS types say camelCase
+        const tu = event as unknown as Record<string, number>
         setTokenUsage({
-          input: event.inputTokens,
-          output: event.outputTokens,
-          cost: event.costUsd,
+          input: tu.input_tokens ?? tu.inputTokens ?? 0,
+          output: tu.output_tokens ?? tu.outputTokens ?? 0,
+          cost: tu.cost_usd ?? tu.costUsd ?? 0,
         })
         break
+      }
       case 'complete':
         batch(() => {
           setIsRunning(false)
@@ -170,7 +173,7 @@ export function useRustAgent() {
 
   const run = async (
     goal: string,
-    opts?: { provider?: string; model?: string; maxTurns?: number }
+    opts?: { provider?: string; model?: string; maxTurns?: number; thinkingLevel?: string }
   ): Promise<SubmitGoalResult | null> => {
     resetState()
     setIsRunning(true)
@@ -182,6 +185,7 @@ export function useRustAgent() {
           maxTurns: opts?.maxTurns ?? 0,
           provider: opts?.provider ?? null,
           model: opts?.model ?? null,
+          thinkingLevel: opts?.thinkingLevel ?? null,
         },
       })
       setLastResult(result)

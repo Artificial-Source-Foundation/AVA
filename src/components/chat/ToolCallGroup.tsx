@@ -132,18 +132,124 @@ interface ToolCallGroupProps {
   isStreaming?: boolean
 }
 
+/** Build a summary like "bash 3, read 2, glob 1" */
+function toolSummary(calls: ToolCall[]): string {
+  const counts = new Map<string, number>()
+  for (const c of calls) counts.set(c.name, (counts.get(c.name) ?? 0) + 1)
+  return Array.from(counts.entries())
+    .map(([name, count]) => (count > 1 ? `${name} ${count}` : name))
+    .join(', ')
+}
+
 export const ToolCallGroup: Component<ToolCallGroupProps> = (props) => {
   const groups = () => groupToolCalls(props.toolCalls)
+  const [expanded, setExpanded] = createSignal(false)
+
+  // Auto-expand while streaming (tools actively running), collapse when done
+  createEffect(() => {
+    const anyRunning = props.toolCalls.some((c) => c.status === 'running' || c.status === 'pending')
+    if (anyRunning) setExpanded(true)
+    else if (
+      !props.isStreaming &&
+      props.toolCalls.length > 0 &&
+      props.toolCalls.every((c) => c.status === 'success' || c.status === 'error')
+    ) {
+      setExpanded(false)
+    }
+  })
+
+  const totalDuration = () => {
+    let total = 0
+    for (const c of props.toolCalls) {
+      if (c.startedAt && c.completedAt) total += c.completedAt - c.startedAt
+    }
+    return total > 0 ? formatDuration(total) : null
+  }
+
+  const anyError = () => props.toolCalls.some((c) => c.status === 'error')
+  const anyRunning = () => props.toolCalls.some((c) => c.status === 'running')
+
+  // For 1-2 tool calls, render inline without the mega-group wrapper
+  const shouldGroup = () => props.toolCalls.length > 2
 
   return (
-    <div class="flex flex-col gap-1.5 my-1">
-      <For each={groups()}>
-        {(group) => (
-          <Show when={group.calls.length > 1} fallback={<ToolCallCard toolCall={group.calls[0]} />}>
-            <GroupHeader group={group} isStreaming={props.isStreaming} />
+    <Show
+      when={shouldGroup()}
+      fallback={
+        <div class="flex flex-col gap-1.5 my-1">
+          <For each={groups()}>
+            {(group) => (
+              <Show
+                when={group.calls.length > 1}
+                fallback={<ToolCallCard toolCall={group.calls[0]} />}
+              >
+                <GroupHeader group={group} isStreaming={props.isStreaming} />
+              </Show>
+            )}
+          </For>
+        </div>
+      }
+    >
+      <div class="my-1 rounded-[var(--radius-md)] border border-[var(--border-subtle)] overflow-hidden">
+        {/* Unified group header */}
+        {/* biome-ignore lint/a11y/useSemanticElements: div+role=button avoids nested button which crashes WebKitGTK */}
+        <div
+          role="button"
+          tabIndex={0}
+          class="flex items-center gap-2.5 px-3 py-2 text-[13px] cursor-pointer select-none hover:bg-[var(--alpha-white-3)] transition-colors"
+          onClick={() => setExpanded((v) => !v)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              setExpanded((v) => !v)
+            }
+          }}
+        >
+          <ToolIcon
+            name={anyRunning() ? 'bash' : 'read'}
+            status={anyRunning() ? 'running' : anyError() ? 'error' : 'success'}
+          />
+
+          <div class="flex flex-col min-w-0 flex-1">
+            <span class="text-[var(--text-secondary)] truncate">
+              {anyRunning()
+                ? `Running tools... (${toolSummary(props.toolCalls)})`
+                : `Used ${props.toolCalls.length} tools (${toolSummary(props.toolCalls)})`}
+            </span>
+          </div>
+
+          <span class="text-[10px] font-medium text-[var(--text-muted)] bg-[var(--alpha-white-5)] px-1.5 py-0.5 rounded-[var(--radius-sm)] tabular-nums">
+            {props.toolCalls.length}
+          </span>
+
+          <Show when={totalDuration()}>
+            <span class="text-[11px] text-[var(--text-muted)] tabular-nums whitespace-nowrap">
+              {totalDuration()}
+            </span>
           </Show>
-        )}
-      </For>
-    </div>
+
+          <ChevronRight
+            class="w-4 h-4 flex-shrink-0 text-[var(--text-muted)] transition-transform duration-[var(--duration-fast)]"
+            classList={{ 'rotate-90': expanded() }}
+          />
+        </div>
+
+        {/* Expanded: show per-type sub-groups */}
+        <Show when={expanded()}>
+          <div class="px-2 pb-2 pt-1 flex flex-col gap-1 border-t border-[var(--border-subtle)]">
+            <For each={groups()}>
+              {(group) => (
+                <Show
+                  when={group.calls.length > 1}
+                  fallback={<ToolCallCard toolCall={group.calls[0]} />}
+                >
+                  <GroupHeader group={group} isStreaming={props.isStreaming} />
+                </Show>
+              )}
+            </For>
+          </div>
+        </Show>
+      </div>
+    </Show>
   )
 }

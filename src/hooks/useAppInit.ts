@@ -23,7 +23,7 @@ import { syncModelsCatalog } from '../services/providers/models-dev-catalog'
 import { rustBackend } from '../services/rust-bridge'
 import { initSettingsFS } from '../services/settings-fs'
 import { type ScheduledWorkflow, startScheduler } from '../services/workflow-scheduler'
-import { useProject } from '../stores/project'
+import { setWebProject, useProject } from '../stores/project'
 import { useSession } from '../stores/session'
 import {
   detectEnvApiKeys,
@@ -238,8 +238,6 @@ async function runWebInit(
 ): Promise<AppInitResult> {
   const { settings, updateSettings } = useSettings()
 
-  installConsoleCapture()
-
   const splashStart = Date.now()
 
   try {
@@ -247,9 +245,16 @@ async function runWebInit(
     await initFrontendLogger()
     log.info('app', 'Web mode initialization started')
 
+    // Initialize settings FS with localStorage fallback and hydrate persisted settings
+    setSplashStatus('Loading settings...')
+    await initSettingsFS()
+    await hydrateSettingsFromFS()
+    setLogLevel(settings().logLevel)
+    setDevConsoleLogLevel(settings().logLevel)
+
     setSplashStatus('Checking backend...')
-    const healthy = await checkApiHealth()
-    if (!healthy) {
+    const health = await checkApiHealth()
+    if (!health) {
       log.error('app', 'Backend health check failed')
       return {
         error: 'Cannot reach the AVA backend. Make sure `ava serve` is running.',
@@ -257,10 +262,6 @@ async function runWebInit(
       }
     }
     log.info('app', 'Backend health check passed')
-
-    setSplashStatus('Loading settings...')
-    setLogLevel(settings().logLevel)
-    setDevConsoleLogLevel(settings().logLevel)
 
     setSplashStatus('Loading models...')
     // Merge backend models into the settings store
@@ -313,9 +314,15 @@ async function runWebInit(
       // Non-fatal
     }
 
+    // In web mode, create a virtual project from the backend's CWD so the
+    // AppShell has directory context without requiring a Tauri file dialog.
+    if (health.cwd) {
+      setWebProject(health.cwd)
+    }
+
     setSplashStatus('Ready')
     log.info('app', 'Web mode initialized successfully')
-    // In web mode, skip project hub and go straight to the shell
+    // In web mode, always skip project hub and go straight to the shell
     setProjectHubVisible(false)
 
     return { error: null, notTauri: true }

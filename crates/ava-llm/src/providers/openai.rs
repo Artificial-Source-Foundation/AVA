@@ -156,8 +156,10 @@ impl OpenAIProvider {
         if model_lower.contains("codex") {
             return model_lower.contains("5.2") || model_lower.contains("5.3");
         }
-        // GPT-5.3+
-        model_lower.contains("gpt-5.3") || model_lower.contains("gpt-5.4")
+        // GPT-5.3+, GPT-5.4+
+        model_lower.contains("gpt-5.3")
+            || model_lower.contains("gpt-5.4")
+            || model_lower.contains("gpt-5.5")
     }
 
     /// Return the maximum reasoning effort string for this model.

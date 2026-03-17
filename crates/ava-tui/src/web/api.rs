@@ -18,7 +18,11 @@ use super::state::WebState;
 // ============================================================================
 
 pub async fn health() -> impl IntoResponse {
-    Json(serde_json::json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION") }))
+    let cwd = std::env::current_dir()
+        .ok()
+        .and_then(|p| p.to_str().map(String::from))
+        .unwrap_or_default();
+    Json(serde_json::json!({ "status": "ok", "version": env!("CARGO_PKG_VERSION"), "cwd": cwd }))
 }
 
 // ============================================================================

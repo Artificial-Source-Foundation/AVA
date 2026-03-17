@@ -29,6 +29,9 @@ pub struct SubmitGoalArgs {
     pub provider: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    /// Thinking/reasoning level: "off", "low", "medium", "high", "xhigh"
+    #[serde(default)]
+    pub thinking_level: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -227,6 +230,18 @@ pub async fn submit_goal(
             .switch_model(provider, model)
             .await
             .map_err(|e| e.to_string())?;
+    }
+
+    // Apply thinking level from frontend
+    if let Some(ref level_str) = args.thinking_level {
+        let level = match level_str.as_str() {
+            "low" => ava_types::ThinkingLevel::Low,
+            "medium" => ava_types::ThinkingLevel::Medium,
+            "high" => ava_types::ThinkingLevel::High,
+            "max" | "xhigh" => ava_types::ThinkingLevel::Max,
+            _ => ava_types::ThinkingLevel::Off,
+        };
+        bridge.stack.set_thinking_level(level).await;
     }
 
     // Load conversation history from the previous session (if any) so the

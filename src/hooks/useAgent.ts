@@ -88,11 +88,13 @@ function createAgentStore() {
         }
         // Sync real token counts to the ContextBudget on each turn
         if (event.type === 'token_usage') {
-          const tu = event as { inputTokens: number; outputTokens: number }
+          // Rust serializes as snake_case (input_tokens, output_tokens)
+          const tu = event as unknown as Record<string, number>
+          const input = tu.input_tokens ?? tu.inputTokens ?? 0
+          const output = tu.output_tokens ?? tu.outputTokens ?? 0
           const bgt = getCoreBudget()
           if (bgt) {
-            // input_tokens from the LLM = full context size for this turn
-            bgt.setUsed(tu.inputTokens + tu.outputTokens)
+            bgt.setUsed(input + output)
             window.dispatchEvent(
               new CustomEvent('ava:core-settings-changed', { detail: { category: 'context' } })
             )
@@ -183,9 +185,14 @@ function createAgentStore() {
       const selectedModelId = config?.model || session.selectedModel()
       const selectedProviderId = config?.provider || session.selectedProvider() || undefined
       const runStartedAt = Date.now()
+      // Get the thinking/reasoning level from frontend settings
+      const reasoningEffort = settingsRef.settings().generation.reasoningEffort
+      const thinkingLevel = reasoningEffort === 'off' ? undefined : reasoningEffort
+
       const result = await rustAgent.run(goal, {
         model: selectedModelId,
         provider: selectedProviderId,
+        thinkingLevel,
       })
       const errorText = rustAgent.error()
 
@@ -215,7 +222,9 @@ function createAgentStore() {
           content,
           createdAt: Date.now(),
           tokensUsed: rustAgent.tokenUsage().output,
-          costUSD: rustAgent.tokenUsage().cost,
+          // Hide cost for subscription providers (OAuth) — Rust returns 0.0 for these,
+          // but use undefined so the UI hides the field entirely
+          costUSD: rustAgent.tokenUsage().cost || undefined,
           model: selectedModelId,
           toolCalls: rustAgent.activeToolCalls(),
           metadata: {

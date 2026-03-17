@@ -558,6 +558,21 @@
   animation: shimmer-text 2s ease-in-out infinite;
 }
 
+/* Subtle pulse for thinking blocks while streaming */
+@keyframes thinking-pulse {
+  0%,
+  100% {
+    opacity: 0.75;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.thinking-shimmer {
+  animation: thinking-pulse 2s ease-in-out infinite;
+}
+
 /* ========================================
    LONG-SESSION RENDERING PERFORMANCE
    ======================================== */

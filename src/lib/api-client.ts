@@ -132,14 +132,22 @@ export function createEventSocket(path = '/ws'): WebSocket {
   return new WebSocket(wsUrl)
 }
 
+export interface HealthResponse {
+  status: string
+  version: string
+  cwd: string
+}
+
 /**
  * Check if the HTTP backend is reachable.
+ * Returns the health response on success, or null if unreachable.
  */
-export async function checkApiHealth(): Promise<boolean> {
+export async function checkApiHealth(): Promise<HealthResponse | null> {
   try {
     const res = await fetch(`${API_BASE}/api/health`, { method: 'GET' })
-    return res.ok
+    if (!res.ok) return null
+    return (await res.json()) as HealthResponse
   } catch {
-    return false
+    return null
   }
 }

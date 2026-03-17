@@ -49,6 +49,23 @@ async function refreshProjectsList(): Promise<void> {
 // Hook
 // ============================================================================
 
+/**
+ * Set a lightweight virtual project for web (non-Tauri) mode.
+ * Bypasses the database and Tauri FS scope — just sets the signal
+ * so the AppShell has a working directory context.
+ */
+export function setWebProject(directory: string): void {
+  const name = directory.split('/').pop() || 'Web Project'
+  setCurrentProject({
+    id: 'web-project' as ProjectId,
+    name,
+    directory,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    lastOpenedAt: Date.now(),
+  })
+}
+
 export function useProject() {
   return {
     // State

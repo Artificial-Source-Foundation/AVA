@@ -4,6 +4,7 @@ import { analyzer } from 'vite-bundle-analyzer'
 import solid from 'vite-plugin-solid'
 
 const host = process.env.TAURI_DEV_HOST
+const isTauriDev = !!process.env.TAURI_DEV_HOST || !!process.env.TAURI_ENV_ARCH
 const analyze = process.env.ANALYZE === 'true'
 
 const STUB_PATH = fileURLToPath(new URL('./src/stubs/node-stub.ts', import.meta.url))
@@ -179,14 +180,20 @@ export default defineConfig(async () => ({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/__chatgpt_proxy/, ''),
       },
-      '/api': {
-        target: 'http://localhost:8080',
-        changeOrigin: true,
-      },
-      '/ws': {
-        target: 'ws://localhost:8080',
-        ws: true,
-      },
+      // Only proxy /api and /ws when running in browser mode (not Tauri dev).
+      // TAURI_DEV_HOST is set by `tauri dev` — if present, skip the proxy.
+      ...(!isTauriDev
+        ? {
+            '/api': {
+              target: 'http://localhost:8080',
+              changeOrigin: true,
+            },
+            '/ws': {
+              target: 'ws://localhost:8080',
+              ws: true,
+            },
+          }
+        : {}),
     },
     watch: {
       // 3. tell Vite to ignore watching `src-tauri` and reference code

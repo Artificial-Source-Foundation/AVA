@@ -19,6 +19,7 @@ members = [
     "crates/ava-auth",
     "crates/ava-mcp",
     "crates/ava-session",
+    "crates/ava-plugin",
     "crates/ava-tui",
 ]
 exclude = ["src-tauri"]

@@ -122,9 +122,33 @@ Plugin directories scanned at startup:
 
 Only plugins with matching `hooks.subscribe` entries are spawned (lazy — no wasted processes).
 
+### Why AVA's Approach Is Better Than OpenCode's
+
+OpenCode runs plugins **in-process** via `import()`. This causes 11 critical flaws:
+
+| OpenCode Flaw | AVA's Solution |
+|---------------|----------------|
+| Plugin crash takes down host | Subprocess — crash kills child only |
+| Shared mutable state corruption | JSON-RPC — no shared memory |
+| No unload lifecycle (leaks) | Kill process = instant cleanup |
+| Auth plugins silently override | Conflict detection — error, not silent |
+| No error handling in hooks | Per-hook try-catch + 5s timeout |
+| Dependency conflicts | Each plugin owns its deps |
+| Startup blocking | Async spawn with timeout |
+| Direct credential mutation | Read-only context, copy-on-write |
+
+### Design Principles
+
+1. **Never run untrusted code in-process** — always subprocess
+2. **Immutable context** — plugins get read-only copies, return modifications
+3. **Mandatory timeouts** — 5s default, configurable
+4. **Explicit lifecycle** — `initialize` → hooks → `shutdown`
+5. **Conflict detection** — two auth plugins for same provider = error
+6. **Graceful degradation** — broken plugin = warning, not crash
+
 ### OpenCode Compatibility (Phase 3)
 
-A bridge script (`ava-opencode-bridge.js`) adapts OpenCode plugins to AVA's JSON-RPC protocol. Configure with `compat = "opencode"` in `plugin.toml`.
+A bridge script (`ava-opencode-bridge.js`) adapts OpenCode plugins to AVA's JSON-RPC protocol, adding the isolation layer that OpenCode lacks. Configure with `compat = "opencode"` in `plugin.toml`.
 
 ## Implementation Plan
 

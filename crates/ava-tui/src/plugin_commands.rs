@@ -270,17 +270,27 @@ fn find_plugin_by_name(name: &str) -> Result<DiscoveredPlugin> {
         .ok_or_else(|| color_eyre::eyre::eyre!("Plugin not found: {name}"))
 }
 
+/// Directories to skip when copying plugin files.
+const SKIP_DIRS: &[&str] = &["node_modules", ".git", "target", "__pycache__", ".tox"];
+
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        let dest_path = dst.join(&name);
         let ty = entry.file_type()?;
-        let dest_path = dst.join(entry.file_name());
+
         if ty.is_dir() {
+            if SKIP_DIRS.iter().any(|s| *s == name_str.as_ref()) {
+                continue;
+            }
             copy_dir_recursive(&entry.path(), &dest_path)?;
-        } else {
+        } else if ty.is_file() {
             std::fs::copy(entry.path(), &dest_path)?;
         }
+        // Skip symlinks and other special file types
     }
     Ok(())
 }

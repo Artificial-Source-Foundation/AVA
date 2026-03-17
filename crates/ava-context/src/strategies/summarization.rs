@@ -277,6 +277,10 @@ impl AsyncCondensationStrategy for SummarizationStrategy {
         "summarization"
     }
 
+    fn set_previous_summary(&mut self, summary: Option<String>) {
+        self.previous_summary = summary;
+    }
+
     async fn condense(&self, messages: &[Message], max_tokens: usize) -> Result<Vec<Message>> {
         let (system_msgs, old_batch, recent) =
             Self::partition_messages(messages, self.batch_size, self.preserve_recent);
@@ -355,7 +359,7 @@ mod tests {
             Message::new(Role::Assistant, "I'll read that file"),
             Message::new(Role::User, "Also check ./tests/test.rs"),
         ];
-        let summary = SummarizationStrategy::heuristic_summary(&messages);
+        let summary = SummarizationStrategy::heuristic_summary(&messages, None);
         assert!(summary.contains("/src/main.rs"));
         assert!(summary.contains("./tests/test.rs"));
     }
@@ -369,7 +373,7 @@ mod tests {
             arguments: serde_json::Value::Null,
         });
         let messages = vec![msg];
-        let summary = SummarizationStrategy::heuristic_summary(&messages);
+        let summary = SummarizationStrategy::heuristic_summary(&messages, None);
         assert!(summary.contains("read"));
     }
 
@@ -382,7 +386,7 @@ mod tests {
             is_error: true,
         });
         let messages = vec![msg];
-        let summary = SummarizationStrategy::heuristic_summary(&messages);
+        let summary = SummarizationStrategy::heuristic_summary(&messages, None);
         assert!(summary.contains("file not found"));
     }
 
@@ -490,5 +494,140 @@ mod tests {
         assert!(result.len() < messages.len());
         // Should use heuristic, not LLM
         assert!(result[1].content.contains("[Summary of"));
+    }
+
+    #[tokio::test]
+    async fn iterative_heuristic_summary_builds_on_previous() {
+        let previous =
+            "Files read: /src/old.rs\nFiles modified: /src/changed.rs\n- Tools used: read";
+        let messages = vec![
+            Message::new(Role::User, "Now read /src/new.rs"),
+            Message::new(Role::Assistant, "reading"),
+        ];
+        let summary = SummarizationStrategy::heuristic_summary(&messages, Some(previous));
+        // Should contain files from both previous and new
+        assert!(
+            summary.contains("/src/old.rs"),
+            "should preserve previous files_read"
+        );
+        assert!(
+            summary.contains("/src/changed.rs"),
+            "should preserve previous files_modified"
+        );
+        assert!(summary.contains("/src/new.rs"), "should include new file");
+        assert!(
+            summary.contains("[Updated summary"),
+            "should indicate incremental update"
+        );
+    }
+
+    #[tokio::test]
+    async fn heuristic_summary_tracks_read_vs_modified() {
+        let mut read_msg = Message::new(Role::Assistant, "reading file");
+        read_msg.tool_calls.push(ToolCall {
+            id: "call_1".to_string(),
+            name: "read".to_string(),
+            arguments: serde_json::json!({"file_path": "/src/lib.rs"}),
+        });
+        let mut write_msg = Message::new(Role::Assistant, "writing file");
+        write_msg.tool_calls.push(ToolCall {
+            id: "call_2".to_string(),
+            name: "edit".to_string(),
+            arguments: serde_json::json!({"file_path": "/src/main.rs"}),
+        });
+        let messages = vec![read_msg, write_msg];
+        let summary = SummarizationStrategy::heuristic_summary(&messages, None);
+        assert!(
+            summary.contains("Files read: /src/lib.rs"),
+            "read file should be in Files read"
+        );
+        assert!(
+            summary.contains("Files modified: /src/main.rs"),
+            "edited file should be in Files modified"
+        );
+    }
+
+    #[tokio::test]
+    async fn partition_never_splits_tool_call_from_result() {
+        let tc = ToolCall {
+            id: "call_1".to_string(),
+            name: "read".to_string(),
+            arguments: serde_json::json!({"path": "/tmp/file"}),
+        };
+        let messages = vec![
+            Message::new(Role::System, "system"),
+            Message::new(Role::User, "msg1"),
+            Message::new(Role::User, "msg2"),
+            Message::new(Role::Assistant, "calling tool").with_tool_calls(vec![tc]),
+            Message::new(Role::Tool, "tool result").with_tool_call_id("call_1"),
+            Message::new(Role::User, "msg5"),
+        ];
+        // batch_size=3 would normally cut at index 3 (non-system), which is the assistant
+        // with tool_calls. The safe cut should include its tool result.
+        let (_system, old, _recent) = SummarizationStrategy::partition_messages(&messages, 3, 1);
+        // The old batch should include the assistant + tool result pair
+        let has_assistant = old.iter().any(|m| m.role == Role::Assistant);
+        let has_tool = old.iter().any(|m| m.role == Role::Tool);
+        assert_eq!(
+            has_assistant, has_tool,
+            "assistant and tool must stay together"
+        );
+    }
+
+    #[tokio::test]
+    async fn partition_does_not_cut_at_orphaned_tool_result() {
+        let tc = ToolCall {
+            id: "call_1".to_string(),
+            name: "read".to_string(),
+            arguments: serde_json::json!({"path": "/tmp/file"}),
+        };
+        let messages = vec![
+            Message::new(Role::System, "system"),
+            Message::new(Role::User, "msg1"),
+            Message::new(Role::Assistant, "calling tool").with_tool_calls(vec![tc]),
+            Message::new(Role::Tool, "tool result").with_tool_call_id("call_1"),
+            Message::new(Role::User, "msg4"),
+            Message::new(Role::User, "msg5"),
+        ];
+        // batch_size=2 in non-system would target index 2, which is a Tool result.
+        // Safe cut should walk back to before the assistant.
+        let (_system, old, _recent) = SummarizationStrategy::partition_messages(&messages, 2, 2);
+        // The tool result should not be orphaned from its assistant
+        let has_assistant = old.iter().any(|m| m.role == Role::Assistant);
+        let has_tool = old.iter().any(|m| m.role == Role::Tool);
+        if has_tool {
+            assert!(
+                has_assistant,
+                "tool result should not be separated from its assistant call"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn iterative_condense_with_previous_summary() {
+        let mut strategy = SummarizationStrategy::new(None, 3, 1);
+        strategy.set_previous_summary(Some(
+            "Files read: /old/file.rs\n- Tools used: read".to_string(),
+        ));
+        let messages = vec![
+            Message::new(Role::System, "system prompt"),
+            Message::new(Role::User, "read /src/lib.rs"),
+            Message::new(Role::Assistant, "done"),
+            Message::new(Role::User, "read /src/main.rs"),
+            Message::new(Role::Assistant, "done"),
+            Message::new(Role::User, "what now?"),
+        ];
+        let result = strategy.condense(&messages, 10_000).await.unwrap();
+        assert!(result.len() < messages.len());
+        // Summary should be an updated summary building on the previous one
+        let summary = &result[1].content;
+        assert!(
+            summary.contains("[Updated summary"),
+            "should be an incremental update"
+        );
+        assert!(
+            summary.contains("/old/file.rs"),
+            "should preserve previous file tracking"
+        );
     }
 }

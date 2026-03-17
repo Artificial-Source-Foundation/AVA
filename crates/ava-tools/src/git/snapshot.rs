@@ -86,6 +86,152 @@ impl GhostSnapshotter {
             object_id,
         }))
     }
+
+    /// List all ghost snapshots in the given repository directory.
+    ///
+    /// Returns snapshot metadata sorted by ref name (which embeds timestamp).
+    pub async fn list_snapshots(
+        &self,
+        repo_path: &Path,
+    ) -> Result<Vec<SnapshotInfo>, GitToolError> {
+        let lookup = resolve_input_path(repo_path)?;
+        let Some(root) = repo_root(&lookup).await? else {
+            return Ok(Vec::new());
+        };
+
+        let output = match run_git(
+            &root,
+            &[
+                "for-each-ref",
+                "--format=%(refname) %(objectname)",
+                GHOST_SNAPSHOT_PREFIX,
+            ],
+        )
+        .await
+        {
+            Ok(stdout) => stdout,
+            Err(GitToolError::CommandFailed { stdout, .. }) if stdout.is_empty() => {
+                return Ok(Vec::new());
+            }
+            Err(e) => return Err(e),
+        };
+
+        let mut snapshots = Vec::new();
+        for line in output.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let mut parts = line.splitn(2, ' ');
+            let ref_name = match parts.next() {
+                Some(r) => r.to_string(),
+                None => continue,
+            };
+            let object_id = parts.next().unwrap_or("").to_string();
+
+            // Extract file hint: everything after the third `-` in the suffix
+            // Ref format: refs/ava/snapshots/{timestamp}-{seq}-{sanitized_path}
+            let suffix = ref_name
+                .strip_prefix(&format!("{GHOST_SNAPSHOT_PREFIX}/"))
+                .unwrap_or(&ref_name);
+            let file_hint = suffix.splitn(3, '-').nth(2).unwrap_or(suffix).to_string();
+
+            snapshots.push(SnapshotInfo {
+                ref_name,
+                file_hint,
+                object_id,
+            });
+        }
+
+        Ok(snapshots)
+    }
+
+    /// Revert a file to the content stored in a ghost snapshot.
+    ///
+    /// `snapshot` must have been produced by `snapshot_file_before_write`.
+    /// The original file path is reconstructed from the repo root and the
+    /// sanitized path embedded in the ref name.
+    pub async fn revert_snapshot(&self, snapshot: &GhostSnapshot) -> Result<(), GitToolError> {
+        // Read the blob content back from git.
+        let content = run_git(
+            &snapshot.repo_root,
+            &["cat-file", "-p", &snapshot.object_id],
+        )
+        .await?;
+
+        // Reconstruct the file path from the ref name.
+        let suffix = snapshot
+            .ref_name
+            .strip_prefix(&format!("{GHOST_SNAPSHOT_PREFIX}/"))
+            .unwrap_or(&snapshot.ref_name);
+        // Format: {timestamp}-{seq}-{sanitized_path}
+        let sanitized = suffix.splitn(3, '-').nth(2).unwrap_or(suffix);
+        // Reverse the sanitization: underscores that were path separators become `/`.
+        let relative = sanitized.replace('_', "/");
+        let file_path = snapshot.repo_root.join(&relative);
+
+        // Ensure parent directories exist.
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| GitToolError::ExecutionFailed {
+                program: "fs::create_dir_all".to_string(),
+                source,
+            })?;
+        }
+
+        std::fs::write(&file_path, content.as_bytes()).map_err(|source| {
+            GitToolError::ExecutionFailed {
+                program: "fs::write".to_string(),
+                source,
+            }
+        })?;
+
+        Ok(())
+    }
+
+    /// Revert a snapshot identified by its ref name, looking up the repo from
+    /// the given working directory.
+    pub async fn revert_by_ref(
+        &self,
+        repo_path: &Path,
+        ref_name: &str,
+    ) -> Result<(), GitToolError> {
+        let lookup = resolve_input_path(repo_path)?;
+        let root = repo_root(&lookup)
+            .await?
+            .ok_or_else(|| GitToolError::ExecutionFailed {
+                program: "git".to_string(),
+                source: std::io::Error::other("not a git repository"),
+            })?;
+
+        // Resolve ref to object ID.
+        let object_id = run_git(&root, &["rev-parse", ref_name]).await?;
+
+        let snapshot = GhostSnapshot {
+            repo_root: root,
+            ref_name: ref_name.to_string(),
+            object_id: object_id.trim().to_string(),
+        };
+
+        self.revert_snapshot(&snapshot).await
+    }
+
+    /// Delete a snapshot ref after a successful revert (cleanup).
+    pub async fn delete_snapshot(
+        &self,
+        repo_path: &Path,
+        ref_name: &str,
+    ) -> Result<(), GitToolError> {
+        let lookup = resolve_input_path(repo_path)?;
+        let root = repo_root(&lookup)
+            .await?
+            .ok_or_else(|| GitToolError::ExecutionFailed {
+                program: "git".to_string(),
+                source: std::io::Error::other("not a git repository"),
+            })?;
+
+        run_git(&root, &["update-ref", "-d", ref_name]).await?;
+        Ok(())
+    }
 }
 
 pub(crate) fn resolve_input_path(path: &Path) -> Result<PathBuf, GitToolError> {

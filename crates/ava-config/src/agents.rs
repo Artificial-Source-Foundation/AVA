@@ -44,6 +44,9 @@ pub struct AgentOverride {
     pub max_turns: Option<usize>,
     /// Custom system prompt for this agent type.
     pub prompt: Option<String>,
+    /// Temperature override for this agent (0.0–1.0).
+    #[serde(default)]
+    pub temperature: Option<f32>,
     /// Provider for this agent. Default uses AVA's native agent loop.
     /// Set to "claude-code" to use Claude Code as the runtime.
     #[serde(default)]
@@ -64,6 +67,8 @@ pub struct ResolvedAgent {
     pub model: Option<String>,
     pub max_turns: Option<usize>,
     pub prompt: Option<String>,
+    /// Temperature for this agent (0.0–1.0). `None` uses the provider default.
+    pub temperature: Option<f32>,
     /// Provider for this agent (e.g. "claude-code"). `None` means native AVA agent loop.
     pub provider: Option<String>,
     /// Allowed tools when using an external provider like claude-code.
@@ -146,6 +151,9 @@ impl AgentsConfig {
             if project_override.prompt.is_some() {
                 entry.prompt = project_override.prompt;
             }
+            if project_override.temperature.is_some() {
+                entry.temperature = project_override.temperature;
+            }
             if project_override.provider.is_some() {
                 entry.provider = project_override.provider;
             }
@@ -162,6 +170,11 @@ impl AgentsConfig {
 
     /// Resolve the effective configuration for a named agent by merging
     /// the defaults with any agent-specific overrides.
+    ///
+    /// Resolution order: explicit agent override > defaults section > predefined template.
+    /// If no override exists and a predefined template matches `name`, the template
+    /// fields are used as a fallback (but `defaults` section values still take priority
+    /// for `model` and `max_turns`).
     pub fn get_agent(&self, name: &str) -> ResolvedAgent {
         match self.agents.get(name) {
             Some(over) => ResolvedAgent {
@@ -169,20 +182,51 @@ impl AgentsConfig {
                 model: over.model.clone().or_else(|| self.defaults.model.clone()),
                 max_turns: over.max_turns.or(self.defaults.max_turns),
                 prompt: over.prompt.clone(),
+                temperature: over.temperature,
                 provider: over.provider.clone(),
                 allowed_tools: over.allowed_tools.clone(),
                 max_budget_usd: over.max_budget_usd,
             },
-            None => ResolvedAgent {
-                enabled: self.defaults.enabled,
-                model: self.defaults.model.clone(),
-                max_turns: self.defaults.max_turns,
-                prompt: None,
-                provider: None,
-                allowed_tools: None,
-                max_budget_usd: None,
-            },
+            None => {
+                // Fall back to predefined template if one exists for this name.
+                let template = default_agents().remove(name);
+                match template {
+                    Some(tmpl) => ResolvedAgent {
+                        enabled: self.defaults.enabled,
+                        model: self.defaults.model.clone().or(tmpl.model),
+                        max_turns: self.defaults.max_turns.or(tmpl.max_turns),
+                        prompt: tmpl.prompt,
+                        temperature: tmpl.temperature,
+                        provider: tmpl.provider,
+                        allowed_tools: tmpl.allowed_tools,
+                        max_budget_usd: tmpl.max_budget_usd,
+                    },
+                    None => ResolvedAgent {
+                        enabled: self.defaults.enabled,
+                        model: self.defaults.model.clone(),
+                        max_turns: self.defaults.max_turns,
+                        prompt: None,
+                        temperature: None,
+                        provider: None,
+                        allowed_tools: None,
+                        max_budget_usd: None,
+                    },
+                }
+            }
         }
+    }
+
+    /// List all available agent names: explicitly configured agents merged
+    /// with predefined template names.
+    pub fn available_agents(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.agents.keys().cloned().collect();
+        for key in default_agents().keys() {
+            if !names.contains(key) {
+                names.push(key.clone());
+            }
+        }
+        names.sort();
+        names
     }
 }
 

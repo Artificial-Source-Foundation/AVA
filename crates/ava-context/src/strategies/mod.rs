@@ -31,6 +31,8 @@ pub trait CondensationStrategy: Send + Sync {
 pub trait AsyncCondensationStrategy: Send + Sync {
     fn name(&self) -> &'static str;
     async fn condense(&self, messages: &[Message], max_tokens: usize) -> Result<Vec<Message>>;
+    /// Set a previous summary for iterative compaction. Default is no-op.
+    fn set_previous_summary(&mut self, _summary: Option<String>) {}
 }
 
 /// Minimal trait for LLM-based summarization.

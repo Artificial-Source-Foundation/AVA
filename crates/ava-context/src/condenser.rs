@@ -95,6 +95,13 @@ impl HybridCondenser {
         }
     }
 
+    /// Forward a previous summary to any summarization strategies for iterative compaction.
+    pub fn set_previous_summary(&mut self, summary: Option<String>) {
+        for strategy in &mut self.async_strategies {
+            strategy.set_previous_summary(summary.clone());
+        }
+    }
+
     pub async fn condense(&mut self, messages: &[Message]) -> Result<CondensationResult> {
         self.tracker.reset();
         self.tracker.add_messages(messages);

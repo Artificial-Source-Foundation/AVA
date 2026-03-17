@@ -4,7 +4,7 @@ use tokio::process::Command;
 
 mod snapshot;
 
-pub use snapshot::{GhostSnapshot, GhostSnapshotter, GHOST_SNAPSHOT_PREFIX};
+pub use snapshot::{GhostSnapshot, GhostSnapshotter, SnapshotInfo, GHOST_SNAPSHOT_PREFIX};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitAction {

@@ -21,6 +21,13 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 4. **B79** Evaluation harness — SWE-bench integration.
 5. **B80** Trajectory recording — JSONL decision trees.
 
+### Platform Verification (Must Do)
+
+6. **Desktop app audit** — verify Tauri desktop app works end-to-end (session CRUD, agent runs, tool execution, model switching). Fix broken IPC commands.
+7. **TUI smoke test suite** — automated smoke tests for TUI mode (session resume, slash commands, theme switching, plugin list, model selector).
+8. **CLI headless regression** — verify all headless flags work (--json, --follow-up, --later, --multi-agent, --workflow).
+9. **Web/browser mode** — explore hosting AVA locally with a web UI on a port (e.g. `ava serve --port 8080`). Could use the existing SolidJS frontend served via HTTP instead of Tauri.
+
 ### Soon (Medium Impact)
 
 6. **B41** Session templates -- P3. Save conversation patterns as reusable templates (system prompt + tool set + follow-up pipeline). Store in `.ava/templates/`.

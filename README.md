@@ -1,222 +1,158 @@
+# AVA
 
-
-# AVA v2.1
-
-> AI coding assistant — Rust CLI/TUI with multi-agent orchestration, code review, and MCP plugins
+> The middle ground between minimalist and bloated AI coding assistants.
 
 **Official domains:**
 [useava.dev](https://useava.dev) | [avacli.dev](https://avacli.dev) | [tryava.dev](https://tryava.dev) | [ava.engineering](https://ava.engineering)
 
-A Rust-first AI coding assistant with an interactive TUI, autonomous agent execution, multi-agent workflows, code review, voice input, and a Tauri desktop app. It ships with 6 built-in tools by default, plus 7 extended opt-in tools, tasking helpers, and dynamic MCP/custom tool support.
+AVA is lean out of the box (6 tools, clean TUI) but infinitely extensible through plugins. Write plugins in TypeScript, Python, or any language — they run as isolated subprocesses so a broken plugin can never crash AVA.
 
-Verified: Core tool tiers, review flow, and runtime modes are tracked in the [test matrix](docs/development/test-matrix.md).
+## Why AVA?
 
-## Installation
-
-```bash
-# Quick install (Linux/macOS)
-curl -fsSL https://raw.githubusercontent.com/ASF-GROUP/AVA/master/install.sh | sh
-```
-
-The installer detects your OS and architecture, downloads the latest release, verifies the SHA256 checksum, and installs `ava` to `~/.ava/bin/`.
-
-The CLI and TUI are a single Rust binary with zero runtime dependencies — no Node.js, no NPM, no Python. This eliminates an entire class of supply chain risks common in JavaScript-based tools.
-
-### Desktop App
-
-Download the desktop app from the [releases page](https://github.com/ASF-GROUP/AVA/releases).
-
-| Platform              | Download                            |
-|-----------------------|-------------------------------------|
-| macOS (Apple Silicon) | `AVA_aarch64-apple-darwin.dmg`      |
-| macOS (Intel)         | `AVA_x86_64-apple-darwin.dmg`       |
-| Windows               | `AVA_x86_64-pc-windows-msvc.exe`    |
-| Linux (x64)           | `.deb`, `.AppImage`, or `.rpm`      |
-
-### Build from Source
-
-If you prefer to audit the code yourself, build from source. This is the recommended path for security-conscious users.
-
-```bash
-git clone https://github.com/ASF-GROUP/AVA.git
-cd AVA
-
-# Review the code, then run the full test suite
-cargo test --workspace
-cargo clippy --workspace
-
-# Build a release binary (~15MB)
-cargo build --release --bin ava
-
-# The binary is at target/release/ava — copy it wherever you like
-cp target/release/ava ~/.local/bin/
-
-# Or just run it directly
-./target/release/ava
-```
-
-**Prerequisites**: [Rust toolchain](https://rustup.rs/) (1.75+). No Node.js required for the CLI.
-
-> Building from source lets you verify every line of code, run the full test suite, and confirm nothing unexpected is compiled in. See [SECURITY.md](SECURITY.md) for our security policy and vulnerability reporting process.
-
-### Desktop App (from source)
-
-```bash
-# Additional prerequisites: Node.js 20+, pnpm 10+
-pnpm install
-npm run tauri dev          # Development
-npm run tauri build        # Production build
-```
+| | Pi | **AVA** | OpenCode |
+|---|---|---|---|
+| Tools | 3 | **6 default + 8 extended** | 15+ |
+| Plugins | DIY | **TypeScript/Python SDK** | npm (in-process, crashy) |
+| Plugin isolation | N/A | **Subprocess (safe)** | In-process (unsafe) |
+| TUI | Basic | **Full featured** | Full featured |
+| Extensibility | High (manual) | **High (easy)** | High (complex) |
 
 ## Quick Start
 
 ```bash
-# Add your API key
+# Install
+curl -fsSL https://raw.githubusercontent.com/ASF-GROUP/AVA/master/install.sh | sh
+
+# Or build from source
+git clone https://github.com/ASF-GROUP/AVA.git && cd AVA
+cargo build --release --bin ava
+cp target/release/ava ~/.local/bin/
+
+# Configure
 mkdir -p ~/.ava
-cat > ~/.ava/credentials.json << 'EOF'
-{
-  "providers": {
-    "openrouter": { "api_key": "YOUR_OPENROUTER_KEY" }
-  }
-}
-EOF
+echo '{"providers":{"openrouter":{"api_key":"YOUR_KEY"}}}' > ~/.ava/credentials.json
 
-# Launch the interactive TUI
-ava
-
-# Headless mode (batch/CI)
-ava "refactor the auth module" --headless --provider openrouter --model anthropic/claude-sonnet-4
-
-# JSON output (scripting)
-ava "list all TODO comments" --headless --json
-
-# Code review
-ava review --staged
-ava review --diff main..HEAD --format markdown
-
-# Multi-agent workflow
-ava "build the new API" --workflow plan-code-review
+# Run
+ava                                          # Interactive TUI
+ava "fix the login bug" --headless           # Headless mode
+ava review --staged                          # Code review
 ```
 
-## CLI Flags & Subcommands
+## Plugin System
 
-```
-ava [GOAL] [OPTIONS]
-  -c, --continue           Resume last session
-      --session <ID>       Resume a specific session
-  -m, --model <MODEL>      LLM model to use
-      --provider <NAME>    LLM provider (anthropic, openai, openrouter, gemini, ollama)
-      --max-turns <N>      Maximum agent turns (default: 20)
-      --yolo               Auto-approve all tool executions
-      --headless           Force headless mode (no TUI)
-      --json               Output NDJSON events (implies headless)
-      --multi-agent        Use Commander multi-agent mode
-      --workflow <NAME>    Run workflow pipeline (plan-code-review, code-review, plan-code)
-      --voice              Enable continuous voice input (requires --features voice)
-      --theme <NAME>       Theme name (default: "default")
+AVA has a two-tier plugin system:
 
-ava review [OPTIONS]
-      --staged             Review staged changes
-      --diff <RANGE>       Review a diff range (e.g. "main..HEAD")
-      --commit <SHA>       Review a specific commit
-      --working            Review unstaged working directory changes
-      --format <FMT>       Output format: text, json, markdown (default: text)
-      --focus <AREA>       Focus area for review (default: all)
-      --fail-on <LEVEL>    Exit 1 on issues at/above: critical, warning, suggestion, any
-      --provider <NAME>    LLM provider
-  -m, --model <MODEL>      LLM model
-      --max-turns <N>      Maximum turns (default: 10)
+### Simple: TOML Tools (any language)
+
+Drop a file in `~/.ava/tools/deploy.toml`:
+
+```toml
+name = "deploy"
+description = "Deploy to environment"
+
+[[params]]
+name = "env"
+type = "string"
+required = true
+
+[execution]
+type = "shell"
+command = "./deploy.sh {{env}}"
 ```
+
+The agent can now call `deploy` like any built-in tool.
+
+### Power: Plugins (TypeScript/Python/any language)
+
+```bash
+ava plugin init my-plugin              # Scaffold a new plugin
+ava plugin add ./my-plugin             # Install it
+ava plugin list                        # See what's installed
+```
+
+Plugins hook into the agent lifecycle via JSON-RPC:
+
+```typescript
+import { createPlugin } from "@ava-ai/plugin";
+
+createPlugin({
+  "tool.before": async (ctx, { tool, args }) => {
+    if (tool === "read" && args.file_path.includes(".env")) {
+      throw new Error("Blocked: don't read .env files");
+    }
+  },
+  "session.start": async (ctx) => {
+    console.error("Session started!");
+  },
+});
+```
+
+12 hook types: `auth`, `auth.refresh`, `request.headers`, `tool.before`, `tool.after`, `agent.before`, `agent.after`, `session.start`, `session.end`, `config`, `event`, `shell.env`.
+
+See [docs/plugins.md](docs/plugins.md) for the full guide.
 
 ## Architecture
 
+21 Rust crates, ~40K LOC, 1,502 tests. Single binary, no runtime dependencies.
+
 ```
-                   ┌──────────────┐
-                   │   ava-tui    │  CLI/TUI binary (Ratatui + Crossterm + Tokio)
-                   └──────┬───────┘
-                          │
-           ┌──────────────┼──────────────┐
-           ▼              ▼              ▼
-     ┌──────────┐  ┌───────────┐  ┌────────────┐
-     │ava-agent │  │ava-tools  │  │ava-session │
-     │(loop +   │  │(6 built-in│  │(SQLite +   │
-     │ reflect) │  │ MCP/custom│  │ FTS5)      │
-     └────┬─────┘  └───────────┘  └────────────┘
-          │
-     ┌────┴─────┐
-     │ ava-llm  │  7 built-in providers + mock test provider
-     └──────────┘
+ava-tui          CLI/TUI binary (Ratatui)
+├── ava-agent    Agent loop + reflection + stuck detection
+│   ├── ava-llm      8 LLM providers (Anthropic, OpenAI, Gemini, etc.)
+│   ├── ava-tools    6 default + 8 extended tools
+│   └── ava-plugin   Power plugin system (JSON-RPC, subprocess isolation)
+├── ava-session  SQLite persistence + FTS5 search
+├── ava-context  Token tracking + condensation
+├── ava-praxis   Multi-agent orchestration
+└── ava-config   Configuration + credentials
 ```
 
-**Rust-first**: All CLI/agent code is Rust (20 crates, ~77K lines of Rust across `crates/`). TypeScript is retained only for the Tauri desktop webview.
+See [docs/architecture/crate-map.md](docs/architecture/crate-map.md) for the full dependency map.
 
-### Key crates
+## CLI Reference
 
-| Crate | Purpose |
-|-------|---------|
-| `ava-tui` | CLI/TUI binary — the primary interface |
-| `ava-agent` | Agent execution loop, reflection, stuck detection |
-| `ava-llm` | LLM providers + connection pooling + circuit breaker |
-| `ava-tools` | Tool trait, registry, 6 built-in tools + 7 extended tools |
-| `ava-praxis` | Multi-agent orchestration (Director pattern), workflow pipelines, code review |
-| `ava-session` | Session persistence (SQLite + FTS5) |
-| `ava-memory` | Persistent memory/recall |
-| `ava-permissions` | Command classification, path safety, risk-based approval |
-| `ava-context` | Context window management + condensation strategies |
-| `ava-codebase` | Code indexing (BM25 + PageRank) |
-| `ava-mcp` | MCP (Model Context Protocol) client + config |
-| `ava-config` | Configuration + credentials management |
-| `ava-sandbox` | Command sandboxing (bwrap/sandbox-exec) |
+```
+ava [GOAL] [OPTIONS]
+  -m, --model <MODEL>      LLM model
+      --provider <NAME>    LLM provider
+      --max-turns <N>      Maximum agent turns (default: 20)
+      --yolo               Auto-approve all tool executions
+      --headless           Non-interactive mode
+      --json               NDJSON output (implies headless)
+      --multi-agent        Multi-agent mode
 
-## Tool Surface
+ava review [OPTIONS]       Code review
+ava plugin [COMMAND]       Plugin management (list/add/remove/info/init)
+```
 
-| Group | Count | Tools |
-|-------|------:|-------|
-| Built-in | 6 | read, write, edit, bash, glob, grep |
-| Extended | 7 | apply_patch, web_fetch, multiedit, test_runner, lint, diagnostics, git |
+## Tools
 
-Additional tools such as `task`, `todo_read`, `todo_write`, and `question` are registered separately when their runtime dependencies are available. Dynamic MCP tools and TOML custom tools are also supported via `~/.ava/tools/` and `.ava/tools/`.
+| Group | Tools |
+|-------|-------|
+| Default (6) | `read`, `write`, `edit`, `bash`, `glob`, `grep` |
+| Extended (8) | `apply_patch`, `web_fetch`, `web_search`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `git_read` |
+| Dynamic | MCP servers + TOML custom tools + plugins |
 
 ## Configuration
 
 ```
 ~/.ava/
-├── config.yaml          # Provider, model, and agent settings
-├── credentials.json     # API keys per provider
-├── mcp.json             # Global MCP server configuration
-└── tools/               # Custom TOML tool definitions
-
-.ava/                    # Project-level overrides
-├── mcp.json             # Project MCP config (overrides global by server name)
-└── tools/               # Project-specific custom tools
+├── config.yaml          # Settings
+├── credentials.json     # API keys
+├── mcp.json             # MCP servers
+├── tools/               # TOML custom tools
+└── plugins/             # Installed plugins
 ```
 
-Provider priority: `--provider/--model` flags > `AVA_PROVIDER`/`AVA_MODEL` env vars > `~/.ava/config.yaml`.
-
-LLM providers (Rust CLI): **Anthropic**, **Copilot**, **Gemini**, **Inception**, **Ollama**, **OpenAI**, and **OpenRouter**, plus a mock provider used in tests.
-
-## Development Commands
+## Development
 
 ```bash
-# Rust (primary)
-cargo test --workspace
-cargo clippy --workspace
-cargo run --bin ava
-
-# Desktop app (TypeScript + Tauri)
-npm run tauri dev
-npm run lint
-npm run format:check
-npx tsc --noEmit
-npm run test:run
+cargo test --workspace           # 1,502 tests
+cargo clippy --workspace         # Zero warnings policy
+cargo run --bin ava              # Run from source
 ```
 
-## Contributing
-
-1. Check [docs/development/roadmap.md](docs/development/roadmap.md) for current phase
-2. Read [CLAUDE.md](CLAUDE.md) for coding conventions
-3. Run `cargo test --workspace && cargo clippy --workspace` before committing
-4. Commits use [Conventional Commits](https://conventionalcommits.org)
+See [CLAUDE.md](CLAUDE.md) for architecture conventions and [docs/development/](docs/development/) for roadmap and backlog.
 
 ## License
 

@@ -19,7 +19,7 @@ pub mod routing;
 pub mod thinking;
 pub mod trust;
 
-pub use agents::AgentsConfig;
+pub use agents::{default_agents, AgentOverride, AgentsConfig, ResolvedAgent};
 pub use ava_auth;
 
 pub(crate) async fn write_file_atomic(path: &Path, content: &str) -> Result<()> {

@@ -230,6 +230,84 @@ impl AgentsConfig {
     }
 }
 
+/// Predefined agent templates that serve as fallbacks when no explicit
+/// configuration exists in `agents.toml`. Users can override any field.
+pub fn default_agents() -> HashMap<String, AgentOverride> {
+    let mut agents = HashMap::new();
+
+    agents.insert(
+        "build".into(),
+        AgentOverride {
+            prompt: Some(
+                "You are a build and test specialist. Focus on running tests, \
+                 fixing compilation errors, and ensuring code quality. \
+                 Prefer targeted fixes over broad refactors."
+                    .into(),
+            ),
+            max_turns: Some(20),
+            ..Default::default()
+        },
+    );
+
+    agents.insert(
+        "plan".into(),
+        AgentOverride {
+            prompt: Some(
+                "You are an architect and planner. Analyze requirements, \
+                 design solutions, and create detailed implementation plans. \
+                 Do not write code — focus on structure and strategy."
+                    .into(),
+            ),
+            max_turns: Some(10),
+            temperature: Some(0.3),
+            ..Default::default()
+        },
+    );
+
+    agents.insert(
+        "explore".into(),
+        AgentOverride {
+            prompt: Some(
+                "You are a fast codebase explorer. Answer questions quickly \
+                 using read, glob, and grep. Be concise and direct."
+                    .into(),
+            ),
+            max_turns: Some(5),
+            ..Default::default()
+        },
+    );
+
+    agents.insert(
+        "review".into(),
+        AgentOverride {
+            prompt: Some(
+                "You are a code review specialist. Examine changes for bugs, \
+                 security issues, performance problems, and style violations. \
+                 Provide actionable feedback with specific line references."
+                    .into(),
+            ),
+            max_turns: Some(15),
+            temperature: Some(0.2),
+            ..Default::default()
+        },
+    );
+
+    agents.insert(
+        "task".into(),
+        AgentOverride {
+            prompt: Some(
+                "You are a focused sub-agent. Complete the assigned task \
+                 efficiently and report results clearly."
+                    .into(),
+            ),
+            max_turns: Some(10),
+            ..Default::default()
+        },
+    );
+
+    agents
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -575,5 +653,152 @@ model = "anthropic/claude-sonnet-4"
         // Global max_turns and prompt preserved
         assert_eq!(review.max_turns, Some(10));
         assert_eq!(review.prompt.as_deref(), Some("Global review prompt."));
+    }
+
+    #[test]
+    fn test_default_agents_templates() {
+        let templates = default_agents();
+        assert!(templates.contains_key("build"));
+        assert!(templates.contains_key("plan"));
+        assert!(templates.contains_key("explore"));
+        assert!(templates.contains_key("review"));
+        assert!(templates.contains_key("task"));
+
+        let plan = &templates["plan"];
+        assert_eq!(plan.max_turns, Some(10));
+        assert_eq!(plan.temperature, Some(0.3));
+        assert!(plan.prompt.is_some());
+
+        let explore = &templates["explore"];
+        assert_eq!(explore.max_turns, Some(5));
+    }
+
+    #[test]
+    fn test_fallback_to_template_when_no_config() {
+        let tmp = TempDir::new().unwrap();
+        let global = tmp.path().join("global.toml");
+        let project = tmp.path().join("project.toml");
+
+        // No config files — should fall back to predefined templates.
+        let config = AgentsConfig::load(&global, &project);
+
+        let build = config.get_agent("build");
+        assert!(build.enabled);
+        assert_eq!(build.max_turns, Some(20));
+        assert!(build.prompt.is_some());
+        assert!(build.prompt.as_deref().unwrap().contains("build"));
+
+        let plan = config.get_agent("plan");
+        assert_eq!(plan.max_turns, Some(10));
+        assert_eq!(plan.temperature, Some(0.3));
+
+        // Unknown agent with no template returns bare defaults.
+        let unknown = config.get_agent("unknown");
+        assert!(unknown.prompt.is_none());
+        assert!(unknown.max_turns.is_none());
+    }
+
+    #[test]
+    fn test_defaults_override_template() {
+        let tmp = TempDir::new().unwrap();
+        let global = write_toml(
+            tmp.path(),
+            "global.toml",
+            r#"
+[defaults]
+model = "anthropic/claude-haiku-4.5"
+max_turns = 50
+"#,
+        );
+        let project = tmp.path().join("project.toml");
+
+        let config = AgentsConfig::load(&global, &project);
+
+        // "build" template has max_turns=20, but defaults section says 50.
+        // Defaults section takes priority over template.
+        let build = config.get_agent("build");
+        assert_eq!(build.max_turns, Some(50));
+        assert_eq!(build.model.as_deref(), Some("anthropic/claude-haiku-4.5"));
+        // Prompt still comes from template.
+        assert!(build.prompt.is_some());
+    }
+
+    #[test]
+    fn test_temperature_in_toml() {
+        let tmp = TempDir::new().unwrap();
+        let global = write_toml(
+            tmp.path(),
+            "global.toml",
+            r#"
+[agents.creative]
+model = "anthropic/claude-sonnet-4"
+temperature = 0.9
+prompt = "Be creative."
+max_turns = 15
+"#,
+        );
+        let project = tmp.path().join("project.toml");
+
+        let config = AgentsConfig::load(&global, &project);
+        let creative = config.get_agent("creative");
+
+        assert_eq!(creative.temperature, Some(0.9));
+        assert_eq!(creative.model.as_deref(), Some("anthropic/claude-sonnet-4"));
+        assert_eq!(creative.prompt.as_deref(), Some("Be creative."));
+    }
+
+    #[test]
+    fn test_temperature_project_override() {
+        let tmp = TempDir::new().unwrap();
+        let global = write_toml(
+            tmp.path(),
+            "global.toml",
+            r#"
+[agents.writer]
+temperature = 0.5
+prompt = "Write well."
+"#,
+        );
+        let project = write_toml(
+            tmp.path(),
+            "project.toml",
+            r#"
+[agents.writer]
+temperature = 0.8
+"#,
+        );
+
+        let config = AgentsConfig::load(&global, &project);
+        let writer = config.get_agent("writer");
+
+        // Project overrides temperature
+        assert_eq!(writer.temperature, Some(0.8));
+        // Prompt preserved from global
+        assert_eq!(writer.prompt.as_deref(), Some("Write well."));
+    }
+
+    #[test]
+    fn test_available_agents() {
+        let tmp = TempDir::new().unwrap();
+        let global = write_toml(
+            tmp.path(),
+            "global.toml",
+            r#"
+[agents.custom-agent]
+max_turns = 5
+"#,
+        );
+        let project = tmp.path().join("project.toml");
+
+        let config = AgentsConfig::load(&global, &project);
+        let agents = config.available_agents();
+
+        // Should include all default templates + the custom agent.
+        assert!(agents.contains(&"build".to_string()));
+        assert!(agents.contains(&"plan".to_string()));
+        assert!(agents.contains(&"explore".to_string()));
+        assert!(agents.contains(&"review".to_string()));
+        assert!(agents.contains(&"task".to_string()));
+        assert!(agents.contains(&"custom-agent".to_string()));
     }
 }

@@ -74,6 +74,17 @@ export function useRustAgent() {
       case 'complete':
         batch(() => {
           setIsRunning(false)
+          // Mark any remaining running tool calls as interrupted
+          setActiveToolCalls((prev) => {
+            const updated = [...prev]
+            for (const tc of updated) {
+              if (tc.status === 'running') {
+                tc.status = 'success'
+                tc.completedAt = Date.now()
+              }
+            }
+            return updated
+          })
         })
         break
       case 'error':
@@ -192,7 +203,21 @@ export function useRustAgent() {
     } catch {
       /* ignore */
     }
-    setIsRunning(false)
+    batch(() => {
+      // Mark any running tool calls as interrupted
+      setActiveToolCalls((prev) => {
+        const updated = [...prev]
+        for (const tc of updated) {
+          if (tc.status === 'running') {
+            tc.status = 'error'
+            tc.output = '[interrupted]'
+            tc.completedAt = Date.now()
+          }
+        }
+        return updated
+      })
+      setIsRunning(false)
+    })
     detachListener()
   }
 

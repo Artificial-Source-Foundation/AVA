@@ -260,12 +260,15 @@ Do NOT let docs drift from code. Every PR-worthy change should include doc updat
 ## Documentation
 
 1. `CLAUDE.md` (this file) -- architecture, conventions, commands
-2. `AGENTS.md` -- AI agent instructions
+2. `AGENTS.md` -- AI agent instructions for working on AVA
 3. `docs/README.md` -- documentation entry point with crate map
-4. `docs/plugins.md` -- TOML custom tools and MCP server guide
-5. `docs/architecture/crate-map.md` -- detailed crate dependency map
-6. `docs/architecture/plugin-system.md` -- power plugin system design
-7. `docs/development/CHANGELOG.md` -- version history
-8. `docs/development/roadmap.md` -- roadmap and sprint history
-9. `docs/development/backlog.md` -- open backlog items
-10. `docs/ideas/` -- archived feature designs (not implemented)
+4. `docs/codebase/` -- **complete codebase reference for all 21 crates, frontend, and plugins**
+5. `docs/plugins.md` -- TOML custom tools and MCP server guide
+6. `docs/architecture/crate-map.md` -- detailed crate dependency map
+7. `docs/architecture/plugin-system.md` -- power plugin system design
+8. `docs/development/CHANGELOG.md` -- version history
+9. `docs/development/roadmap.md` -- roadmap and sprint history
+10. `docs/development/backlog.md` -- open backlog items
+11. `docs/ideas/` -- archived feature designs (not implemented)
+
+**Quick links:** [Codebase docs](docs/codebase/README.md) • [Add a tool](docs/codebase/ava-tools.md) • [Add a provider](docs/codebase/ava-llm.md) • [Tauri commands](docs/codebase/tauri-commands.md) • [Plugins](docs/codebase/plugins.md)

@@ -155,6 +155,15 @@ async fn run_agent_inner(
 
     info!(goal = %goal, "run_agent_inner: starting agent");
 
+    // Debug: write to file so we can trace desktop issues
+    let _ = std::fs::OpenOptions::new()
+        .create(true).append(true)
+        .open("/tmp/ava-debug/rust-agent.log")
+        .and_then(|mut f| {
+            use std::io::Write;
+            writeln!(f, "[{}] run_agent_inner: goal={}, max_turns={}", chrono::Utc::now(), goal, max_turns)
+        });
+
     let result = bridge
         .stack
         .run(
@@ -176,6 +185,18 @@ async fn run_agent_inner(
     // Clean up
     bridge.clear_message_tx().await;
     *bridge.running.write().await = false;
+
+    // Debug log result
+    let _ = std::fs::OpenOptions::new()
+        .create(true).append(true)
+        .open("/tmp/ava-debug/rust-agent.log")
+        .and_then(|mut f| {
+            use std::io::Write;
+            match &result {
+                Ok(r) => writeln!(f, "[{}] run_agent_inner: success={}, turns={}, session={}", chrono::Utc::now(), r.success, r.turns, r.session.id),
+                Err(e) => writeln!(f, "[{}] run_agent_inner: ERROR={}", chrono::Utc::now(), e),
+            }
+        });
 
     match result {
         Ok(run_result) => {
@@ -208,7 +229,22 @@ pub async fn submit_goal(
             .map_err(|e| e.to_string())?;
     }
 
-    run_agent_inner(&args.goal, args.max_turns, vec![], &app, &bridge).await
+    // Load conversation history from the previous session (if any) so the
+    // agent has context from prior turns in this desktop session.
+    let history = if let Some(session_id) = *bridge.last_session_id.read().await {
+        bridge
+            .stack
+            .session_manager
+            .get(session_id)
+            .ok()
+            .flatten()
+            .map(|s| s.messages)
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
+    run_agent_inner(&args.goal, args.max_turns, history, &app, &bridge).await
 }
 
 /// Cancel the currently-running agent.

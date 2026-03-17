@@ -25,6 +25,46 @@ const ERROR_TYPE_LABELS: Record<string, string> = {
   unknown: 'Error',
 }
 
+/** Contextual hints matching the TUI's error guidance */
+const getErrorHint = (error: MessageError): string | null => {
+  const msg = error.message.toLowerCase()
+  const type = error.type
+
+  if (type === 'rate_limit' || msg.includes('rate limit') || msg.includes('429')) {
+    return 'Wait a moment and retry, or switch to a different model with /model.'
+  }
+  if (
+    type === 'auth' ||
+    msg.includes('auth') ||
+    msg.includes('401') ||
+    msg.includes('403') ||
+    msg.includes('credential') ||
+    msg.includes('api key')
+  ) {
+    return 'Check your credentials with /connect or verify your API key.'
+  }
+  if (
+    msg.includes('context') ||
+    msg.includes('token limit') ||
+    msg.includes('too long') ||
+    msg.includes('maximum context')
+  ) {
+    return 'Try /compact to reduce context window usage, or start a new session.'
+  }
+  if (
+    type === 'network' ||
+    msg.includes('timeout') ||
+    msg.includes('connection') ||
+    msg.includes('econnrefused')
+  ) {
+    return 'Check your network connection and try again.'
+  }
+  if (type === 'server' || msg.includes('500') || msg.includes('502') || msg.includes('503')) {
+    return 'The provider is experiencing issues. Try again or switch providers.'
+  }
+  return null
+}
+
 export const ErrorRow: Component<ErrorRowProps> = (props) => {
   const [countdown, setCountdown] = createSignal(0)
 
@@ -89,6 +129,9 @@ export const ErrorRow: Component<ErrorRowProps> = (props) => {
       </div>
       <Show when={countdown() > 0}>
         <p class="text-xs text-[var(--error)] opacity-75 mt-2">Retry available in {countdown()}s</p>
+      </Show>
+      <Show when={getErrorHint(props.error)}>
+        {(hint) => <p class="text-xs text-[var(--text-muted)] mt-2 pl-6 italic">{hint()}</p>}
       </Show>
     </div>
   )

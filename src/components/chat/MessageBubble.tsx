@@ -47,6 +47,15 @@ function formatTimestamp(msg: Message): string {
   return `${h12}:${m} ${ampm}`
 }
 
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  const secs = ms / 1000
+  if (secs < 60) return `${secs.toFixed(1)}s`
+  const mins = Math.floor(secs / 60)
+  const remainSecs = Math.floor(secs % 60)
+  return `${mins}m${remainSecs}s`
+}
+
 interface ToolSegmentProps {
   toolCalls: ToolCall[]
   isStreaming: boolean
@@ -143,6 +152,14 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
             <Show when={!isUser() && props.message.costUSD}>
               {' '}
               &middot; {formatCost(props.message.costUSD!)}
+            </Show>
+            <Show when={!isUser() && (props.message.metadata?.elapsedMs as number | undefined)}>
+              {' '}
+              &middot; {formatElapsed(props.message.metadata!.elapsedMs as number)}
+            </Show>
+            <Show when={!isUser() && props.message.metadata?.mode}>
+              {' '}
+              &middot; {props.message.metadata!.mode as string}
             </Show>
           </div>
         </Show>

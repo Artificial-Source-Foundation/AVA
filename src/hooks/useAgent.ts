@@ -6,22 +6,11 @@
  * The TypeScript layer only manages UI state (approval bridge, plan mode, queuing).
  */
 
-import { isTauri, invoke as tauriInvoke } from '@tauri-apps/api/core'
 import { batch, createEffect, createSignal, on } from 'solid-js'
-import { apiInvoke } from '../lib/api-client'
-
-function debugLog(msg: string): void {
-  const line = `[${new Date().toISOString()}] ${msg}`
-  console.warn('[ava-debug]', line)
-  // Also write to Rust side which has unrestricted FS access
-  const invoker = isTauri() ? tauriInvoke : apiInvoke
-  invoker('append_log', { path: '/tmp/ava-debug/agent.log', content: `${line}\n` }).catch(() => {
-    /* ignore */
-  })
-}
 
 import { log } from '../lib/logger'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
+import { getCoreBudget } from '../services/core-bridge'
 import { rustAgent as rustAgentBridge, rustBackend } from '../services/rust-bridge'
 import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
@@ -93,6 +82,22 @@ function createAgentStore() {
         if (event.type === 'tool_call') {
           log.debug('agent', 'Tool called', { tool: (event as { name?: string }).name })
         }
+        // Sync thinking content to frontend signal
+        if (event.type === 'thinking') {
+          setCurrentThought((prev) => prev + (event as { content: string }).content)
+        }
+        // Sync real token counts to the ContextBudget on each turn
+        if (event.type === 'token_usage') {
+          const tu = event as { inputTokens: number; outputTokens: number }
+          const bgt = getCoreBudget()
+          if (bgt) {
+            // input_tokens from the LLM = full context size for this turn
+            bgt.setUsed(tu.inputTokens + tu.outputTokens)
+            window.dispatchEvent(
+              new CustomEvent('ava:core-settings-changed', { detail: { category: 'context' } })
+            )
+          }
+        }
         if (event.type === 'approval_request') {
           const approvalEvent = event as ApprovalRequestEvent
           const riskLevel = (
@@ -128,7 +133,10 @@ function createAgentStore() {
   // Actions
   // ====================================================================
 
-  async function run(goal: string, config?: { model?: string }): Promise<unknown> {
+  async function run(
+    goal: string,
+    config?: { model?: string; provider?: string }
+  ): Promise<unknown> {
     if (rustAgent.isRunning()) {
       setMessageQueue((prev) => [...prev, { content: goal }])
       return null
@@ -159,22 +167,47 @@ function createAgentStore() {
       createdAt: Date.now(),
     }
     session.addMessage(userMsg)
-    void debugLog(`addMessage done, count=${session.messages().length}, sessionId=${sessionId}`)
+
+    // Feed the context budget so the status bar updates
+    const budget = getCoreBudget()
+    if (budget) {
+      budget.addMessage(userMsg.id, userMsg.content)
+      window.dispatchEvent(
+        new CustomEvent('ava:core-settings-changed', { detail: { category: 'context' } })
+      )
+    }
 
     try {
       log.info('agent', 'Agent started', { goal: goal.slice(0, 120), sessionId })
-      void debugLog(`calling rustAgent.run("${goal.slice(0, 50)}")`)
-      const result = await rustAgent.run(goal, { model: config?.model })
-      void debugLog(
-        `rustAgent.run resolved, result=${JSON.stringify(result)}, error=${rustAgent.error()}`
-      )
-      void debugLog(`messages count after run: ${session.messages().length}`)
-      void debugLog(`streamingContent length: ${rustAgent.streamingContent().length}`)
-      void debugLog(`currentSession: ${session.currentSession()?.id ?? 'NULL'}`)
+      // Resolve the model/provider from the frontend's selection
+      const selectedModelId = config?.model || session.selectedModel()
+      const selectedProviderId = config?.provider || session.selectedProvider() || undefined
+      const runStartedAt = Date.now()
+      const result = await rustAgent.run(goal, {
+        model: selectedModelId,
+        provider: selectedProviderId,
+      })
+      const errorText = rustAgent.error()
+
+      // Check if the agent errored (rustAgent.run catches internally, returns null)
+      if (errorText) {
+        log.error('agent', 'Agent failed', { error: errorText })
+        const errorMsg: Message = {
+          id: `err-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          sessionId,
+          role: 'assistant',
+          content: `**Error:** ${errorText}`,
+          createdAt: Date.now(),
+          error: { type: 'unknown', message: errorText, timestamp: Date.now() },
+        }
+        session.addMessage(errorMsg)
+        return null
+      }
 
       // Add the assistant response from streamed tokens
       const content = rustAgent.streamingContent()
       if (content) {
+        const elapsedMs = Date.now() - runStartedAt
         const assistantMsg: Message = {
           id: `asst-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
           sessionId,
@@ -183,7 +216,14 @@ function createAgentStore() {
           createdAt: Date.now(),
           tokensUsed: rustAgent.tokenUsage().output,
           costUSD: rustAgent.tokenUsage().cost,
+          model: selectedModelId,
           toolCalls: rustAgent.activeToolCalls(),
+          metadata: {
+            provider: selectedProviderId,
+            model: selectedModelId,
+            mode: isPlanMode() ? 'plan' : 'code',
+            elapsedMs,
+          },
         }
         session.addMessage(assistantMsg)
       }
@@ -194,21 +234,18 @@ function createAgentStore() {
       })
       return result
     } catch (err) {
-      // Agent failed — show error as an assistant message so the user sees it
-      const errorText = rustAgent.error() || (err instanceof Error ? err.message : String(err))
-      log.error('agent', 'Agent failed', { error: errorText })
-      if (errorText) {
-        const errorMsg: Message = {
-          id: `err-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-          sessionId,
-          role: 'assistant',
-          content: `**Error:** ${errorText}`,
-          createdAt: Date.now(),
-          error: { type: 'unknown', message: errorText, timestamp: Date.now() },
-        }
-        session.addMessage(errorMsg)
-        void debugLog(`added error message: ${errorText}`)
+      // Unexpected error (not from rustAgent internals)
+      const msg = err instanceof Error ? err.message : String(err)
+      log.error('agent', 'Unexpected agent error', { error: msg })
+      const errorMsg: Message = {
+        id: `err-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        sessionId,
+        role: 'assistant',
+        content: `**Error:** ${msg}`,
+        createdAt: Date.now(),
+        error: { type: 'unknown', message: msg, timestamp: Date.now() },
       }
+      session.addMessage(errorMsg)
       return null
     } finally {
       batch(() => {
@@ -238,12 +275,12 @@ function createAgentStore() {
 
   function followUp(content: string): void {
     void rustAgent.followUp(content)
-    setMessageQueue((prev) => [...prev, { content }])
+    setMessageQueue((prev) => [...prev, { content, tier: 'follow-up' }])
   }
 
   function postComplete(content: string, group?: number): void {
     void rustAgent.postComplete(content, group)
-    setMessageQueue((prev) => [...prev, { content }])
+    setMessageQueue((prev) => [...prev, { content, tier: 'post-complete', group: group ?? 1 }])
   }
 
   function togglePlanMode(): void {

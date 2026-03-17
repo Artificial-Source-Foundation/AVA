@@ -72,11 +72,13 @@ export function useInputState(): InputState {
       .reverse()
   )
   const isProcessing = createMemo(() => chat.isStreaming() || agent.isRunning())
-  const inputDisabled = createMemo(() => isProcessing())
+  // Input is NOT disabled during processing -- mid-stream messaging allows
+  // users to type while the agent runs (Enter = steer, Alt+Enter = follow-up)
+  const inputDisabled = createMemo(() => false)
   const inputHasText = createMemo(() => !!input().trim())
   const placeholder = createMemo(() =>
     isProcessing()
-      ? `Working... (turn ${agent.currentTurn()})`
+      ? 'Steer the agent... (Enter = steer, Alt+Enter = follow-up)'
       : agent.isPlanMode()
         ? 'Plan your approach...'
         : 'Ask anything...'
@@ -162,7 +164,18 @@ export function useInputState(): InputState {
   const handleSubmit = async (e: Event): Promise<void> => {
     e.preventDefault()
     const message = input().trim()
-    if (!message || submitting || isProcessing()) return
+    if (!message || submitting) return
+
+    // Mid-stream messaging: route to steer/follow-up when agent is running
+    if (isProcessing()) {
+      setInput('')
+      setHistoryIndex(-1)
+      if (textareaRef) textareaRef.style.height = 'auto'
+      // Default: steering (Enter). Follow-up handled in handleKeyDown with Alt+Enter.
+      agent.steer(message)
+      return
+    }
+
     submitting = true
     setSendCount((c) => c + 1)
     setInput('')
@@ -235,6 +248,37 @@ export function useInputState(): InputState {
       }
       return
     }
+    // Mid-stream messaging keybinds (while agent is running)
+    if (isProcessing() && e.key === 'Enter') {
+      const message = input().trim()
+      if (!message) return
+
+      if (e.ctrlKey && e.altKey) {
+        // Ctrl+Alt+Enter: post-complete (Tier 3)
+        e.preventDefault()
+        setInput('')
+        if (textareaRef) textareaRef.style.height = 'auto'
+        agent.postComplete(message)
+        return
+      }
+      if (e.altKey) {
+        // Alt+Enter: follow-up (Tier 2)
+        e.preventDefault()
+        setInput('')
+        if (textareaRef) textareaRef.style.height = 'auto'
+        agent.followUp(message)
+        return
+      }
+      if (!e.shiftKey) {
+        // Enter: steer (Tier 1)
+        e.preventDefault()
+        void handleSubmit(e)
+        return
+      }
+      // Shift+Enter: newline (fall through)
+      return
+    }
+
     const sk = settings().behavior.sendKey
     if (sk === 'enter') {
       if (e.key === 'Enter' && !e.shiftKey) {

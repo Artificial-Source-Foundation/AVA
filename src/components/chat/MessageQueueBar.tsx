@@ -10,7 +10,35 @@ import { type Component, createSignal, For, Show } from 'solid-js'
 
 export interface QueuedMessageDisplay {
   content: string
+  tier?: 'steering' | 'follow-up' | 'post-complete'
+  group?: number
   model?: string
+}
+
+function tierBadge(msg: QueuedMessageDisplay): string {
+  switch (msg.tier) {
+    case 'steering':
+      return '[S]'
+    case 'follow-up':
+      return '[F]'
+    case 'post-complete':
+      return `[G${msg.group ?? 1}]`
+    default:
+      return ''
+  }
+}
+
+function tierColor(msg: QueuedMessageDisplay): string {
+  switch (msg.tier) {
+    case 'steering':
+      return 'var(--warning)'
+    case 'follow-up':
+      return 'var(--accent)'
+    case 'post-complete':
+      return 'var(--text-muted)'
+    default:
+      return 'var(--text-muted)'
+  }
 }
 
 interface MessageQueueBarProps {
@@ -57,8 +85,11 @@ export const MessageQueueBar: Component<MessageQueueBarProps> = (props) => {
             <For each={props.messages}>
               {(msg, index) => (
                 <div class="flex items-start gap-2 py-1 px-2 rounded bg-[var(--alpha-white-05)] group">
-                  <span class="text-[10px] text-[var(--text-muted)] font-mono mt-0.5 flex-shrink-0">
-                    #{index() + 1}
+                  <span
+                    class="text-[10px] font-mono font-bold mt-0.5 flex-shrink-0"
+                    style={{ color: tierColor(msg) }}
+                  >
+                    {tierBadge(msg) || `#${index() + 1}`}
                   </span>
                   <span class="text-xs text-[var(--text-secondary)] flex-1 min-w-0 truncate">
                     {msg.content.slice(0, 120)}

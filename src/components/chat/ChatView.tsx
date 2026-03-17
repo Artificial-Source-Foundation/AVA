@@ -22,7 +22,6 @@ import { useProject } from '../../stores/project'
 import { useSettings } from '../../stores/settings'
 import { useTeam } from '../../stores/team'
 import { ApprovalDock } from './ApprovalDock'
-import { GitControlStrip } from './GitControlStrip'
 import { MessageInput } from './MessageInput'
 import { MessageList } from './MessageList'
 import { MessageQueueBar } from './MessageQueueBar'
@@ -142,9 +141,6 @@ export const ChatView: Component = () => {
 
         {/* Team status strip (visible when team is active) */}
         <TeamStatusStrip />
-
-        {/* Git controls + usage entry point */}
-        <GitControlStrip />
 
         {/* Input area */}
         <MessageInput />

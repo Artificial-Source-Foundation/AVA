@@ -14,6 +14,13 @@
   - Plugin stderr inherited for dev visibility
   - Smoke tested end-to-end with gpt-5.3-codex
 - Plugin system design doc with OpenCode 11-flaw analysis
+- **Complete codebase documentation library** (`docs/codebase/`)
+  - Documentation for all 21 Rust crates (public API, module maps, dependencies)
+  - Frontend documentation (SolidJS, hooks, Tauri IPC, state management)
+  - Tauri commands documentation (70+ commands across 29 source files)
+  - Plugin system documentation (SDKs, hooks, examples, quick reference)
+  - Dependency graph and "where to find things" quick reference
+  - Index at `docs/codebase/README.md` with navigation table
 
 ### Removed
 - 30 unwired modules (~10.5K LOC dead code) moved to `docs/ideas/`

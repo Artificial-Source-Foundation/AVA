@@ -22,6 +22,7 @@ import { useSettings } from '../../stores/settings'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { Dialog } from '../ui/Dialog'
 import { FocusChainBar } from './FocusChainBar'
+import { LiveStreamingBlock } from './LiveStreamingBlock'
 import { ModelChangeIndicator } from './ModelChangeIndicator'
 import { MessageRow } from './message-list/message-row'
 import { MessageListEmpty, MessageListLoading, ScrollToBottomButton } from './message-list/sections'
@@ -187,25 +188,10 @@ export const MessageList: Component = () => {
               }}
             </For>
 
-            {/* "ava is working on it..." indicator */}
+            {/* Live streaming block — shows thinking, tool calls, and content in real-time */}
             <div aria-live="polite" aria-atomic="true">
               <Show when={isStreaming() || agent.isRunning()}>
-                <div class="w-full animate-fade-in py-2">
-                  <div class="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-                    <div class="flex items-center gap-[5px]">
-                      <span class="typing-dot" style={{ 'animation-delay': '0ms' }} />
-                      <span class="typing-dot" style={{ 'animation-delay': '160ms' }} />
-                      <span class="typing-dot" style={{ 'animation-delay': '320ms' }} />
-                    </div>
-                    <span class="font-[var(--font-ui-mono)] tracking-wide">
-                      {agent.currentThought()
-                        ? 'ava is working on it...'
-                        : agent.toolActivity().some((t) => t.status === 'running')
-                          ? 'ava is working on it...'
-                          : 'ava is thinking...'}
-                    </span>
-                  </div>
-                </div>
+                <LiveStreamingBlock />
               </Show>
             </div>
           </div>

@@ -146,16 +146,54 @@ cargo run --bin ava -- "goal" --headless \
   --provider openrouter --model anthropic/claude-haiku-4.5
 ```
 
-## Document Index
+## Documentation Index
+
+### Quick Reference
 
 | Document | Purpose |
 |----------|---------|
 | [CLAUDE.md](../CLAUDE.md) | Architecture, conventions, commands -- primary AI agent reference |
 | [AGENTS.md](../AGENTS.md) | AI agent instructions for working on AVA |
+| [codebase/](codebase/) | **Complete codebase reference** -- all 21 crates, frontend, plugins |
+
+### Codebase Reference (codebase/)
+
+Complete documentation for every crate and component:
+
+| Doc | Contents |
+|-----|----------|
+| [codebase/README.md](codebase/README.md) | Entry point, quick navigation, dependency graph |
+| [codebase/frontend.md](codebase/frontend.md) | SolidJS frontend, hooks, stores, Tauri IPC |
+| [codebase/tauri-commands.md](codebase/tauri-commands.md) | 70+ Rust commands exposed to frontend |
+| [codebase/plugins.md](codebase/plugins.md) | Plugin architecture, SDKs, hooks |
+
+**Crate docs:** [ava-agent](codebase/ava-agent.md) • [ava-auth](codebase/ava-auth.md) • [ava-cli-providers](codebase/ava-cli-providers.md) • [ava-codebase](codebase/ava-codebase.md) • [ava-config](codebase/ava-config.md) • [ava-context](codebase/ava-context.md) • [ava-db](codebase/ava-db.md) • [ava-extensions](codebase/ava-extensions.md) • [ava-llm](codebase/ava-llm.md) • [ava-mcp](codebase/ava-mcp.md) • [ava-memory](codebase/ava-memory.md) • [ava-permissions](codebase/ava-permissions.md) • [ava-platform](codebase/ava-platform.md) • [ava-plugin](codebase/ava-plugin.md) • [ava-praxis](codebase/ava-praxis.md) • [ava-sandbox](codebase/ava-sandbox.md) • [ava-session](codebase/ava-session.md) • [ava-tools](codebase/ava-tools.md) • [ava-tui](codebase/ava-tui.md) • [ava-types](codebase/ava-types.md) • [ava-validator](codebase/ava-validator.md)
+
+### Architecture & Design
+
+| Document | Purpose |
+|----------|---------|
 | [architecture/crate-map.md](architecture/crate-map.md) | Detailed crate dependency map with key types |
-| [plugins.md](plugins.md) | TOML custom tools and MCP server guide |
+| [architecture/plugin-system.md](architecture/plugin-system.md) | Power plugin system design |
 | [architecture/](architecture/) | System design, data flow, Praxis multi-agent |
+
+### Plugins & Extensions
+
+| Document | Purpose |
+|----------|---------|
+| [plugins.md](plugins.md) | TOML custom tools and MCP server guide |
+
+### Development
+
+| Document | Purpose |
+|----------|---------|
+| [development/CHANGELOG.md](development/CHANGELOG.md) | Version history |
 | [development/roadmap.md](development/roadmap.md) | Sprint history and status |
 | [development/backlog.md](development/backlog.md) | Open backlog items |
+
+### Reference & Troubleshooting
+
+| Document | Purpose |
+|----------|---------|
 | [reference-code/](reference-code/) | Competitor source code notes (12 projects) |
 | [troubleshooting/](troubleshooting/) | Common issues and fixes |

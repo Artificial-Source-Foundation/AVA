@@ -21,3 +21,8 @@ chrono = { version = "0.4", features = ["serde"] }
 toml = "0.8"
 dirs.workspace = true
 tracing.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt", "time"] }

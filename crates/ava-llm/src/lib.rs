@@ -10,6 +10,7 @@ pub mod credential_test;
 mod dynamic_provider;
 pub mod lead_worker;
 pub mod message_transform;
+pub mod model_classifier;
 pub mod pool;
 pub mod provider;
 pub mod providers;
@@ -20,6 +21,10 @@ pub mod thinking;
 pub use credential_test::{default_model_for_provider, test_provider_credentials};
 pub use lead_worker::LeadWorkerProvider;
 pub use message_transform::{normalize_messages, ProviderKind};
+pub use model_classifier::{
+    ClassifierRouter, ComplexityClassifier, ComplexityTier, FallbackStrategy, OverrideStrategy,
+    RoutingContext, RoutingDecision, RoutingStrategy,
+};
 pub use pool::ConnectionPool;
 pub use provider::{LLMProvider, NormalizingProvider, ProviderCapabilities, ProviderErrorKind};
 pub use router::{ModelRouter, ProviderFactory, RouteDecision, RouteRequirements, RouteSource};

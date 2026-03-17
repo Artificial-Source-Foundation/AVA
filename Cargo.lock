@@ -282,6 +282,7 @@ dependencies = [
  "serde_json",
  "similar",
  "tempfile",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-util",
  "tracing",
@@ -443,11 +444,13 @@ dependencies = [
 name = "ava-permissions"
 version = "2.0.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "dirs",
  "regex",
  "serde",
  "serde_json",
+ "tokio",
  "toml",
  "tracing",
  "tree-sitter",
@@ -462,6 +465,8 @@ dependencies = [
  "ava-types",
  "chrono",
  "futures",
+ "serde",
+ "serde_json",
  "tempfile",
  "tokio",
  "tokio-stream",
@@ -539,6 +544,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shell-words",
+ "similar",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",

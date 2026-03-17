@@ -18,6 +18,7 @@ import {
 } from '../services/dev-console'
 import { getLogDirectory, initLogger, logError, logInfo, setLogLevel } from '../services/logger'
 import { syncModelsCatalog } from '../services/providers/models-dev-catalog'
+import { rustBackend } from '../services/rust-bridge'
 import { initSettingsFS } from '../services/settings-fs'
 import { type ScheduledWorkflow, startScheduler } from '../services/workflow-scheduler'
 import { useProject } from '../stores/project'
@@ -46,7 +47,7 @@ export async function runAppInit(
   setSplashStatus: (status: string) => void,
   setProjectHubVisible: (visible: boolean) => void
 ): Promise<AppInitResult> {
-  const { settings } = useSettings()
+  const { settings, updateSettings } = useSettings()
   const { initializeProjects, currentProject } = useProject()
   const { loadSessionsForCurrentProject, restoreForCurrentProject } = useSession()
   const { loadWorkflows, getScheduledWorkflows, markWorkflowRun, workflows } = useWorkflows()
@@ -112,6 +113,40 @@ export async function runAppInit(
     await detectEnvApiKeys()
     syncModelsCatalog().catch(() => {})
     refreshAllProviderModels()
+
+    // Merge compiled-in Rust backend models into the settings store.
+    // This ensures providers without API keys still show their full model catalog.
+    try {
+      const backendModels = await rustBackend.listModels()
+      if (backendModels.length > 0) {
+        const currentSettings = settings()
+        const updatedProviders = currentSettings.providers.map((p) => {
+          const matching = backendModels.filter((m) => m.provider === p.id)
+          if (matching.length === 0 || p.models.length >= matching.length) return p
+          // Merge: keep existing models, add any from backend that aren't already present
+          const existingIds = new Set(p.models.map((m) => m.id))
+          const newModels = matching
+            .filter((m) => !existingIds.has(m.id))
+            .map((m) => ({
+              id: m.id,
+              name: m.name,
+              contextWindow: m.contextWindow,
+              maxOutput: 0,
+              inputCost: m.costInput,
+              outputCost: m.costOutput,
+              capabilities: [
+                ...(m.toolCall ? ['tool_use' as const] : []),
+                ...(m.vision ? ['vision' as const] : []),
+              ],
+            }))
+          if (newModels.length === 0) return p
+          return { ...p, models: [...p.models, ...newModels] }
+        })
+        updateSettings({ providers: updatedProviders })
+      }
+    } catch {
+      // Non-fatal — fall back to whatever models are already in settings
+    }
 
     setSplashStatus('Initializing core engine...')
     const cleanupCore = await initCoreBridge({

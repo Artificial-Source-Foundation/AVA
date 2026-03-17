@@ -9,7 +9,9 @@
 import { batch, createEffect, createSignal, on } from 'solid-js'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
 import { rustAgent as rustAgentBridge, rustBackend } from '../services/rust-bridge'
+import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
+import type { Message } from '../types'
 import type { StreamError } from '../types/llm'
 import type { ApprovalRequestEvent } from '../types/rust-ipc'
 import type { AgentState, ApprovalRequest, ToolActivity } from './agent'
@@ -46,6 +48,7 @@ export function _resetAgentSingleton(): void {
 function createAgentStore() {
   const rustAgent = useRustAgent()
   const settingsRef = useSettings()
+  const session = useSession()
 
   // ── Frontend-only signals ───────────────────────────────────────────
   const [isPlanMode, setIsPlanMode] = createSignal(false)
@@ -75,16 +78,19 @@ function createAgentStore() {
         const event = allEvents[i]!
         if (event.type === 'approval_request') {
           const approvalEvent = event as ApprovalRequestEvent
-          const riskLevel = (['low', 'medium', 'high', 'critical'].includes(approvalEvent.risk_level)
-            ? approvalEvent.risk_level
-            : 'medium') as 'low' | 'medium' | 'high' | 'critical'
+          const riskLevel = (
+            ['low', 'medium', 'high', 'critical'].includes(approvalEvent.risk_level)
+              ? approvalEvent.risk_level
+              : 'medium'
+          ) as 'low' | 'medium' | 'high' | 'critical'
 
           const toolName = approvalEvent.tool_name
-          const toolType = toolName === 'bash'
-            ? 'command' as const
-            : toolName.startsWith('mcp_')
-              ? 'mcp' as const
-              : 'file' as const
+          const toolType =
+            toolName === 'bash'
+              ? ('command' as const)
+              : toolName.startsWith('mcp_')
+                ? ('mcp' as const)
+                : ('file' as const)
 
           setPendingApproval({
             id: approvalEvent.id,
@@ -119,8 +125,43 @@ function createAgentStore() {
       setStreamingStartedAt(Date.now())
     })
 
+    // Ensure a session exists before adding messages
+    let currentSess = session.currentSession()
+    if (!currentSess) {
+      await session.createNewSession()
+      currentSess = session.currentSession()
+    }
+    const sessionId = currentSess?.id ?? ''
+
+    // Add user message to the session store so it's visible immediately
+    const userMsg: Message = {
+      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      sessionId,
+      role: 'user',
+      content: goal,
+      createdAt: Date.now(),
+    }
+    session.addMessage(userMsg)
+
     try {
       const result = await rustAgent.run(goal, { model: config?.model })
+
+      // Add the assistant response from streamed tokens
+      const content = rustAgent.streamingContent()
+      if (content) {
+        const assistantMsg: Message = {
+          id: `asst-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          sessionId,
+          role: 'assistant',
+          content,
+          createdAt: Date.now(),
+          tokensUsed: rustAgent.tokenUsage().output,
+          costUSD: rustAgent.tokenUsage().cost,
+          toolCalls: rustAgent.activeToolCalls(),
+        }
+        session.addMessage(assistantMsg)
+      }
+
       return result
     } finally {
       batch(() => {

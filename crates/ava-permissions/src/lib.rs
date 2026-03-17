@@ -10,6 +10,7 @@ use std::path::{Component, Path, PathBuf};
 
 pub mod audit;
 pub mod classifier;
+pub mod guardian;
 pub mod inspector;
 pub mod path_safety;
 pub mod persistent;

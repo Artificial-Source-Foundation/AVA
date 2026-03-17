@@ -8,6 +8,7 @@ use std::path::Path;
 
 pub mod fs;
 pub mod shell;
+pub mod shell_snapshot;
 
 pub use fs::FileSystem;
 pub use shell::{CommandOutput, ExecuteOptions, Shell};

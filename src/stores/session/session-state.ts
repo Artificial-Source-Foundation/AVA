@@ -67,21 +67,7 @@ export const {
   const [currentSession, setCurrentSession] = createSignal<Session | null>(null)
   const [sessions, setSessions] = createSignal<SessionWithStats[]>([])
   const [isLoadingSessions, setIsLoadingSessions] = createSignal(false)
-  const [messages, _setMessagesRaw] = createSignal<Message[]>([])
-  // biome-ignore lint/suspicious/noExplicitAny: signal setter wrapper needs dynamic args
-  const setMessages = ((...args: unknown[]) => {
-    const prev = messages()
-    // biome-ignore lint/suspicious/noExplicitAny: SolidJS signal setter typing
-    const result = (_setMessagesRaw as any)(...args)
-    const next = messages()
-    if (next.length !== prev.length || next.length === 0) {
-      console.warn(
-        `[ava-debug][setMessages] ${prev.length} -> ${next.length}`,
-        new Error().stack?.split('\n').slice(1, 4).join(' <- ')
-      )
-    }
-    return result
-  }) as typeof _setMessagesRaw
+  const [messages, setMessages] = createSignal<Message[]>([])
   const [isLoadingMessages, setIsLoadingMessages] = createSignal(false)
   const [agents, setAgents] = createSignal<Agent[]>([])
   const [fileOperations, setFileOperations] = createSignal<FileOperation[]>([])

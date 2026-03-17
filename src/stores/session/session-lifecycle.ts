@@ -113,7 +113,6 @@ export async function createNewSession(name?: string): Promise<Session> {
 
   setSessions((prev) => [sessionWithStats, ...prev])
   setCurrentSession(session)
-  console.trace('[session-lifecycle] createNewSession: clearing messages')
   setMessages([])
   setAgents([])
   log.info('session', 'Session created', { id: session.id, name: session.name })

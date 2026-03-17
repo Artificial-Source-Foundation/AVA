@@ -102,6 +102,9 @@ export async function apiInvoke<T>(cmd: string, args?: Record<string, unknown>):
     const fullUrl = qs ? `${url}${separator}${qs}` : url
     const res = await fetch(fullUrl, { method, headers })
     if (!res.ok) {
+      if (res.status === 404 && !mapping) {
+        return undefined as T
+      }
       const text = await res.text().catch(() => '')
       throw new Error(`API error ${res.status}: ${text || res.statusText}`)
     }
@@ -110,6 +113,10 @@ export async function apiInvoke<T>(cmd: string, args?: Record<string, unknown>):
 
   const res = await fetch(url, { method, headers, body })
   if (!res.ok) {
+    // For unmapped commands that 404, return undefined instead of throwing
+    if (res.status === 404 && !mapping) {
+      return undefined as T
+    }
     const text = await res.text().catch(() => '')
     throw new Error(`API error ${res.status}: ${text || res.statusText}`)
   }

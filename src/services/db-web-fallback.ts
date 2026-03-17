@@ -45,7 +45,7 @@ export function createWebDatabase(): WebDatabase {
           // also handle `name` vs `title` variations.
           return (Array.isArray(sessions) ? sessions : []).map((s: Record<string, unknown>) => ({
             id: s.id,
-            name: s.title ?? s.name ?? 'Untitled',
+            name: s.title || s.name || 'Untitled',
             project_id: s.project_id ?? null,
             parent_session_id: s.parent_session_id ?? null,
             slug: s.slug ?? null,
@@ -119,8 +119,20 @@ export function createWebDatabase(): WebDatabase {
         return [] as unknown as T
       }
 
+      // Non-critical session-related tables — return empty silently
+      if (
+        q.includes('from agents') ||
+        q.includes('from file_operations') ||
+        q.includes('from terminal_executions') ||
+        q.includes('from memory_items')
+      ) {
+        return [] as unknown as T
+      }
+
       // Default: return empty array for any other select
-      console.warn('[db-web] Unhandled SELECT query (returning []):', q.slice(0, 80))
+      if (import.meta.env.DEV) {
+        console.warn('[db-web] Unhandled SELECT query (returning []):', q.slice(0, 80))
+      }
       return [] as unknown as T
     },
 
@@ -221,7 +233,9 @@ export function createWebDatabase(): WebDatabase {
       }
 
       // Default: no-op
-      console.warn('[db-web] Unhandled EXECUTE query (no-op):', q.slice(0, 80))
+      if (import.meta.env.DEV) {
+        console.warn('[db-web] Unhandled EXECUTE query (no-op):', q.slice(0, 80))
+      }
       return { rowsAffected: 0 }
     },
   }

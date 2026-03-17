@@ -197,7 +197,7 @@ export default defineConfig(async () => ({
     },
     watch: {
       // 3. tell Vite to ignore watching `src-tauri` and reference code
-      ignored: ['**/src-tauri/**', '**/docs/reference-code/**'],
+      ignored: ['**/src-tauri/**', '**/target/**', '**/docs/reference-code/**', '**/node_modules/**', '**/.git/**'],
     },
     fs: {
       // Deny access to reference code directory

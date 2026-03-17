@@ -32,6 +32,9 @@ pub struct ProviderCapabilities {
     pub max_context_window: usize,
     /// Whether the provider supports prompt caching.
     pub supports_prompt_caching: bool,
+    /// Whether usage is included in a subscription (e.g. Copilot, ChatGPT Plus/Pro).
+    /// When true, per-token cost display should be suppressed.
+    pub is_subscription: bool,
 }
 
 impl Default for ProviderCapabilities {
@@ -44,6 +47,7 @@ impl Default for ProviderCapabilities {
             supports_images: false,
             max_context_window: 0,
             supports_prompt_caching: false,
+            is_subscription: false,
         }
     }
 }

@@ -94,6 +94,7 @@ impl LLMProvider for InceptionProvider {
             supports_images: false,
             max_context_window: 32_000,
             supports_prompt_caching: false,
+            is_subscription: false,
         }
     }
 

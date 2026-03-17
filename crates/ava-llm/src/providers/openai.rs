@@ -458,6 +458,10 @@ impl LLMProvider for OpenAIProvider {
     }
 
     fn estimate_cost(&self, input_tokens: usize, output_tokens: usize) -> f64 {
+        // ChatGPT OAuth (Responses API) is subscription-billed — no per-token cost.
+        if self.use_responses_api {
+            return 0.0;
+        }
         let (in_rate, out_rate) = common::model_pricing_usd_per_million(&self.model);
         common::estimate_cost_usd(input_tokens, output_tokens, in_rate, out_rate)
     }
@@ -475,6 +479,7 @@ impl LLMProvider for OpenAIProvider {
             supports_images: true,
             max_context_window: 128_000,
             supports_prompt_caching: false,
+            is_subscription: self.use_responses_api,
         }
     }
 

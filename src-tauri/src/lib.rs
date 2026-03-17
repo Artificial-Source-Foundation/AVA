@@ -17,14 +17,18 @@ use commands::{
     read_latest_logs, reflection_reflect_and_fix, sandbox_apply_landlock, set_plugin_enabled,
     set_plugins_state, uninstall_plugin, validation_validate_edit, validation_validate_with_retry,
     // New bridge commands
-    submit_goal, cancel_agent, get_agent_status, resolve_approval, resolve_question,
-    list_sessions, load_session, create_session, delete_session,
+    submit_goal, cancel_agent, get_agent_status,
+    resolve_approval, resolve_question,
+    steer_agent, follow_up_agent, post_complete_agent, get_message_queue, clear_message_queue,
+    retry_last_message, edit_and_resend, regenerate_response, undo_last_edit,
+    list_sessions, load_session, create_session, delete_session, rename_session, search_sessions,
     list_models, get_current_model, switch_model,
     list_providers,
     get_config,
     list_agent_tools,
     list_mcp_servers, reload_mcp_servers,
     get_permission_level, set_permission_level, toggle_permission_level,
+    compact_context,
 };
 use pty::PtyManager;
 use tauri::Manager;
@@ -106,10 +110,21 @@ pub fn run() {
             get_agent_status,
             resolve_approval,
             resolve_question,
+            steer_agent,
+            follow_up_agent,
+            post_complete_agent,
+            get_message_queue,
+            clear_message_queue,
+            retry_last_message,
+            edit_and_resend,
+            regenerate_response,
+            undo_last_edit,
             list_sessions,
             load_session,
             create_session,
             delete_session,
+            rename_session,
+            search_sessions,
             list_models,
             get_current_model,
             switch_model,
@@ -121,6 +136,7 @@ pub fn run() {
             get_permission_level,
             set_permission_level,
             toggle_permission_level,
+            compact_context,
         ])
         .run(context)
         .expect("error while running tauri application");

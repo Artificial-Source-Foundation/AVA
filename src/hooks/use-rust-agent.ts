@@ -126,12 +126,49 @@ export function useRustAgent() {
 
   const clearError = (): void => { setError(null) }
 
+  // ── Mid-stream messaging (3-tier) ─────────────────────────────────
+
+  /** Inject a steering message (Tier 1). Agent processes it after current tool. */
+  const steer = async (message: string): Promise<void> => {
+    if (!isRunning()) return
+    try {
+      await invoke('steer_agent', { message })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg)
+    }
+  }
+
+  /** Queue a follow-up message (Tier 2). Runs after agent completes current task. */
+  const followUp = async (message: string): Promise<void> => {
+    if (!isRunning()) return
+    try {
+      await invoke('follow_up_agent', { message })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg)
+    }
+  }
+
+  /** Queue a post-complete message (Tier 3). Runs in grouped pipeline after agent stops. */
+  const postComplete = async (message: string, group?: number): Promise<void> => {
+    if (!isRunning()) return
+    try {
+      await invoke('post_complete_agent', { args: { message, group: group ?? 1 } })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(msg)
+    }
+  }
+
   onCleanup(() => { detachListener() })
 
   return {
     isRunning, streamingContent, thinkingContent, activeToolCalls,
     error, lastResult, tokenUsage, events,
     run, cancel, clearError,
+    // Mid-stream messaging
+    steer, followUp, postComplete,
     // Aliases for compatibility
     stop: cancel,
     isStreaming: isRunning,

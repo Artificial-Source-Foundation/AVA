@@ -114,6 +114,23 @@ export interface BudgetWarningEvent {
   maxBudgetUsd: number
 }
 
+export interface ApprovalRequestEvent {
+  type: 'approval_request'
+  id: string
+  tool_name: string
+  args: Record<string, JsonValue>
+  risk_level: string
+  reason: string
+  warnings: string[]
+}
+
+export interface QuestionRequestEvent {
+  type: 'question_request'
+  id: string
+  question: string
+  options: string[]
+}
+
 export type AgentEvent =
   | TokenEvent
   | ToolCallEvent
@@ -124,6 +141,8 @@ export type AgentEvent =
   | ThinkingEvent
   | TokenUsageEvent
   | BudgetWarningEvent
+  | ApprovalRequestEvent
+  | QuestionRequestEvent
 
 export interface ComputeGrepMatch {
   file: string
@@ -298,4 +317,52 @@ export type PermissionLevelValue = 'standard' | 'autoApprove'
 
 export interface PermissionLevelInfo {
   level: PermissionLevelValue
+}
+
+// Mid-stream messaging types (3-tier)
+
+export interface PostCompleteArgs {
+  message: string
+  group?: number
+}
+
+export interface MessageQueueState {
+  active: boolean
+}
+
+export type ClearTarget = 'all' | 'steering' | 'followUp' | 'postComplete'
+
+// Retry / Edit+Resend / Undo types
+
+export interface EditAndResendArgs {
+  messageId: string
+  newContent: string
+}
+
+export interface UndoResult {
+  success: boolean
+  message: string
+  filePath: string | null
+}
+
+// Context compaction types
+
+export interface CompactMessage {
+  role: string
+  content: string
+}
+
+export interface CompactMessageOut {
+  role: string
+  content: string
+}
+
+export interface CompactContextResult {
+  messages: CompactMessageOut[]
+  tokensBefore: number
+  tokensAfter: number
+  tokensSaved: number
+  messagesBefore: number
+  messagesAfter: number
+  summary: string
 }

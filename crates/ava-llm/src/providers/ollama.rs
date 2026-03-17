@@ -169,6 +169,7 @@ impl LLMProvider for OllamaProvider {
             supports_images: false,
             max_context_window: 0, // model-dependent
             supports_prompt_caching: false,
+            is_subscription: false,
         }
     }
 

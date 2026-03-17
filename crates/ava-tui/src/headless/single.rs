@@ -187,7 +187,7 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 "type": "complete",
                 "success": result.success,
                 "turns": result.turns,
-                "cost": cost_summary.as_ref().map(|s| s.total_usd),
+                "cost": cost_summary.as_ref().and_then(|s| if s.total_usd == 0.0 { None } else { Some(s.total_usd) }),
                 "input_tokens": cost_summary.as_ref().map(|s| s.input_tokens),
                 "output_tokens": cost_summary.as_ref().map(|s| s.output_tokens),
                 "routing": route_summary,
@@ -198,17 +198,23 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
         if let Some(ref route) = route_summary {
             eprintln!("[routing: {route}]");
         }
-        let spend = cost_summary.map(|summary| match summary.budget_usd {
-            Some(budget) if budget > 0.0 => {
-                format!(
-                    " cost=${:.2}/${budget:.2} tokens={}/{} in/out",
-                    summary.total_usd, summary.input_tokens, summary.output_tokens
-                )
+        let spend = cost_summary.map(|summary| {
+            let token_part = format!(
+                "tokens={}/{} in/out",
+                summary.input_tokens, summary.output_tokens
+            );
+            if summary.total_usd == 0.0 {
+                // Subscription provider (Copilot, ChatGPT) — no per-token cost
+                format!(" {token_part}")
+            } else if let Some(budget) = summary.budget_usd {
+                if budget > 0.0 {
+                    format!(" cost=${:.2}/{budget:.2} {token_part}", summary.total_usd)
+                } else {
+                    format!(" cost=${:.2} {token_part}", summary.total_usd)
+                }
+            } else {
+                format!(" cost=${:.2} {token_part}", summary.total_usd)
             }
-            _ => format!(
-                " cost=${:.2} tokens={}/{} in/out",
-                summary.total_usd, summary.input_tokens, summary.output_tokens
-            ),
         });
         eprintln!(
             "[Done] success={}, turns={}{}",

@@ -3,16 +3,21 @@ import type {
   AgentStatus,
   AgentToolInfo,
   BrowserToolResult,
+  ClearTarget,
+  CompactContextResult,
+  CompactMessage,
   ComputeGrepResult,
   CopilotDeviceCodeResponse,
   CopilotDevicePollResponse,
   CurrentModel,
+  EditAndResendArgs,
   ExtensionRegistrationResult,
   FuzzyReplaceResult,
   GitToolResult,
   JsonValue,
   McpReloadResult,
   McpServerInfo,
+  MessageQueueState,
   PermissionLevelInfo,
   PermissionLevelValue,
   ModelInfo,
@@ -37,6 +42,7 @@ import type {
   SubmitGoalArgs,
   SubmitGoalResult,
   ToolResult,
+  UndoResult,
   WasmExtensionRegistration,
 } from '../types/rust-ipc'
 
@@ -116,6 +122,10 @@ export const rustAgent = {
     invokeCommand('cancel_agent'),
   status: (): Promise<AgentStatus> =>
     invokeCommand('get_agent_status'),
+  resolveApproval: (approved: boolean, alwaysAllow: boolean): Promise<void> =>
+    invokeCommand('resolve_approval', { args: { approved, alwaysAllow } }),
+  resolveQuestion: (answer: string): Promise<void> =>
+    invokeCommand('resolve_question', { args: { answer } }),
 }
 
 export const rustCompute = {
@@ -255,4 +265,36 @@ export const rustBackend = {
     invokeCommand('set_permission_level', { level }),
   togglePermissionLevel: (): Promise<PermissionLevelInfo> =>
     invokeCommand('toggle_permission_level'),
+
+  // Mid-stream messaging (3-tier)
+  steerAgent: (message: string): Promise<void> =>
+    invokeCommand('steer_agent', { message }),
+  followUpAgent: (message: string): Promise<void> =>
+    invokeCommand('follow_up_agent', { message }),
+  postCompleteAgent: (message: string, group?: number): Promise<void> =>
+    invokeCommand('post_complete_agent', { args: { message, group: group ?? 1 } }),
+  getMessageQueue: (): Promise<MessageQueueState> =>
+    invokeCommand('get_message_queue'),
+  clearMessageQueue: (target: ClearTarget = 'all'): Promise<void> =>
+    invokeCommand('clear_message_queue', { target }),
+
+  // Retry / Edit+Resend / Regenerate / Undo
+  retryLastMessage: (): Promise<SubmitGoalResult> =>
+    invokeCommand('retry_last_message'),
+  editAndResend: (args: EditAndResendArgs): Promise<SubmitGoalResult> =>
+    invokeCommand('edit_and_resend', { args }),
+  regenerateResponse: (): Promise<SubmitGoalResult> =>
+    invokeCommand('regenerate_response'),
+  undoLastEdit: (): Promise<UndoResult> =>
+    invokeCommand('undo_last_edit'),
+
+  // Session rename/search
+  renameSession: (id: string, title: string): Promise<void> =>
+    invokeCommand('rename_session', { id, title }),
+  searchSessions: (query: string): Promise<SessionSummary[]> =>
+    invokeCommand('search_sessions', { query }),
+
+  // Context compaction
+  compactContext: (messages: CompactMessage[], focus?: string, contextWindow?: number): Promise<CompactContextResult> =>
+    invokeCommand('compact_context', { messages, focus: focus ?? null, contextWindow: contextWindow ?? null }),
 }

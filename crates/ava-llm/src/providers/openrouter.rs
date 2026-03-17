@@ -146,6 +146,7 @@ impl LLMProvider for OpenRouterProvider {
             supports_images: true,
             max_context_window: 0, // model-dependent, routed through inner provider
             supports_prompt_caching: false,
+            is_subscription: false,
         }
     }
 

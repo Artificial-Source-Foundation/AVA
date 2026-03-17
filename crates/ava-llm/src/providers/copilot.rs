@@ -292,6 +292,7 @@ impl LLMProvider for CopilotProvider {
             supports_images: true,
             max_context_window: 0, // subscription-dependent
             supports_prompt_caching: false,
+            is_subscription: true,
         }
     }
 

@@ -236,6 +236,7 @@ impl LLMProvider for GeminiProvider {
             supports_images: true,
             max_context_window: 1_000_000,
             supports_prompt_caching: false,
+            is_subscription: false,
         }
     }
 

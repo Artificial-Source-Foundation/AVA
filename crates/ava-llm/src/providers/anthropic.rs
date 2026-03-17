@@ -301,6 +301,7 @@ impl LLMProvider for AnthropicProvider {
             supports_images: true,
             max_context_window: 200_000,
             supports_prompt_caching: !self.third_party,
+            is_subscription: false,
         }
     }
 

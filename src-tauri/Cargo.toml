@@ -53,7 +53,9 @@ ava-auth = { path = "../crates/ava-auth" }
 ava-config = { path = "../crates/ava-config" }
 ava-types = { path = "../crates/ava-types" }
 ava-platform = { path = "../crates/ava-platform" }
+ava-context = { path = "../crates/ava-context" }
 tokio-util = "0.7"
+chrono = "0.4"
 
 [profile.release]
 lto = true

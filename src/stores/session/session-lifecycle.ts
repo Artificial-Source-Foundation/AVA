@@ -112,6 +112,7 @@ export async function createNewSession(name?: string): Promise<Session> {
 
   setSessions((prev) => [sessionWithStats, ...prev])
   setCurrentSession(session)
+  console.trace('[session-lifecycle] createNewSession: clearing messages')
   setMessages([])
   setAgents([])
   logInfo('session', 'Session created', {
@@ -143,6 +144,12 @@ export async function switchSession(id: string): Promise<void> {
   setIsLoadingMessages(true)
   try {
     const dbMessages = await getMessages(id)
+    console.log(
+      '[session-lifecycle] switchSession: loaded',
+      dbMessages.length,
+      'messages from DB for',
+      id
+    )
     setMessages(dbMessages)
     logInfo('session', 'Session switched', {
       from: fromSessionId ?? 'none',

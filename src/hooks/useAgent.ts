@@ -6,7 +6,20 @@
  * The TypeScript layer only manages UI state (approval bridge, plan mode, queuing).
  */
 
+import { writeTextFile } from '@tauri-apps/plugin-fs'
 import { batch, createEffect, createSignal, on } from 'solid-js'
+
+const DEBUG_LOG = '/tmp/ava-debug/agent.log'
+async function debugLog(msg: string): Promise<void> {
+  const line = `[${new Date().toISOString()}] ${msg}\n`
+  try {
+    await writeTextFile(DEBUG_LOG, line, { append: true })
+  } catch {
+    // fallback: also console.log so we don't lose it
+    console.log('[ava-debug]', msg)
+  }
+}
+
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
 import { rustAgent as rustAgentBridge, rustBackend } from '../services/rust-bridge'
 import { useSession } from '../stores/session'
@@ -142,9 +155,17 @@ function createAgentStore() {
       createdAt: Date.now(),
     }
     session.addMessage(userMsg)
+    void debugLog(`addMessage done, count=${session.messages().length}, sessionId=${sessionId}`)
 
     try {
+      void debugLog(`calling rustAgent.run("${goal.slice(0, 50)}")`)
       const result = await rustAgent.run(goal, { model: config?.model })
+      void debugLog(
+        `rustAgent.run resolved, result=${JSON.stringify(result)}, error=${rustAgent.error()}`
+      )
+      void debugLog(`messages count after run: ${session.messages().length}`)
+      void debugLog(`streamingContent length: ${rustAgent.streamingContent().length}`)
+      void debugLog(`currentSession: ${session.currentSession()?.id ?? 'NULL'}`)
 
       // Add the assistant response from streamed tokens
       const content = rustAgent.streamingContent()

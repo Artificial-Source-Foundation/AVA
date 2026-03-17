@@ -141,6 +141,15 @@ pub enum Command {
         #[command(subcommand)]
         action: PluginCommand,
     },
+    /// Start the AVA web server (HTTP API + WebSocket for agent events)
+    Serve {
+        /// Port to listen on
+        #[arg(long, default_value_t = 8080)]
+        port: u16,
+        /// Host/IP to bind to
+        #[arg(long, default_value = "0.0.0.0")]
+        host: String,
+    },
 }
 
 #[derive(Debug, Clone, Subcommand)]

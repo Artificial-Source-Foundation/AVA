@@ -31,11 +31,13 @@ pub type PendingQuestionReply = Arc<Mutex<Option<oneshot::Sender<String>>>>;
 pub struct FileEditRecord {
     pub file_path: String,
     pub previous_content: String,
+    #[allow(dead_code)] // retained for future undo-history UI
     pub timestamp: chrono::DateTime<chrono::Utc>,
 }
 
 /// Maximum number of file edit records to keep in the undo stack.
-const MAX_EDIT_HISTORY: usize = 100;
+/// Used in `agent_commands.rs` forwarder task.
+pub(crate) const MAX_EDIT_HISTORY: usize = 100;
 
 /// Shared state managed by Tauri. Provides access to the `AgentStack` and
 /// the cancellation token for the currently-running agent task.
@@ -136,6 +138,8 @@ impl DesktopBridge {
     }
 
     /// Record a file edit for undo support.
+    /// Called from `agent_commands.rs` forwarder task via `bridge.edit_history`.
+    #[allow(dead_code)]
     pub async fn record_edit(&self, file_path: String, previous_content: String) {
         let mut history = self.edit_history.write().await;
         if history.len() >= MAX_EDIT_HISTORY {

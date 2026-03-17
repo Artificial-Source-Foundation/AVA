@@ -32,4 +32,6 @@ pub mod text_utils;
 #[cfg(feature = "voice")]
 pub mod transcribe;
 pub mod ui;
+#[cfg(feature = "web")]
+pub mod web;
 pub mod widgets;

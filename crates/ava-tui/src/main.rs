@@ -44,6 +44,16 @@ async fn main() -> Result<()> {
         Some(Command::Review(args)) => return run_review(args).await,
         Some(Command::Auth { action }) => return run_auth(action).await,
         Some(Command::Plugin { action }) => return run_plugin(action).await,
+        #[cfg(feature = "web")]
+        Some(Command::Serve { port, host }) => {
+            return ava_tui::web::run_server(&host, port).await;
+        }
+        #[cfg(not(feature = "web"))]
+        Some(Command::Serve { .. }) => {
+            eprintln!("Web server requires the 'web' feature. Rebuild with:");
+            eprintln!("  cargo build -p ava-tui --features web");
+            std::process::exit(1);
+        }
         None => {}
     }
 

@@ -39,8 +39,8 @@ pub async fn oauth_listen(port: u16) -> Result<OAuthCallback, String> {
 
 #[tauri::command]
 pub async fn oauth_copilot_device_start(
-    client_id: String,
-    scope: String,
+    _client_id: String,
+    _scope: String,
 ) -> Result<CopilotDeviceCodeResponse, String> {
     let config = ava_auth::config::oauth_config("copilot")
         .ok_or_else(|| "No OAuth config for copilot".to_string())?;
@@ -60,7 +60,7 @@ pub async fn oauth_copilot_device_start(
 
 #[tauri::command]
 pub async fn oauth_copilot_device_poll(
-    client_id: String,
+    _client_id: String,
     device_code: String,
 ) -> Result<CopilotDevicePollResponse, String> {
     let config = ava_auth::config::oauth_config("copilot")

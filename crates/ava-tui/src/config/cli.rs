@@ -328,13 +328,13 @@ pub async fn resolve_provider_model(
             } else {
                 None
             };
-            let model = if config.llm.model != "gpt-4" {
+            let model = if config.llm.model != "gpt-5.3-codex" {
                 debug!(model = %config.llm.model, "Loaded model from config file");
                 Some(config.llm.model)
             } else if let Ok(value) = serde_yaml::from_str::<serde_json::Value>(&content) {
                 let has_model = value.get("llm").and_then(|l| l.get("model")).is_some();
                 if has_model {
-                    debug!("Loaded model 'gpt-4' from config file");
+                    debug!("Loaded model 'gpt-5.3-codex' from config file");
                     Some(config.llm.model)
                 } else {
                     None

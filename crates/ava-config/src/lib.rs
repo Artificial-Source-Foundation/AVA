@@ -102,7 +102,7 @@ impl Default for LlmConfig {
     fn default() -> Self {
         Self {
             provider: "openai".to_string(),
-            model: "gpt-4".to_string(),
+            model: "gpt-5.3-codex".to_string(),
             api_key: None,
             max_tokens: 4096,
             temperature: 0.7,

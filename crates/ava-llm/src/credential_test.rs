@@ -12,7 +12,7 @@ const DEFAULT_TIMEOUT_SECS: u64 = 20;
 pub fn default_model_for_provider(provider: &str) -> Option<&'static str> {
     match provider {
         "anthropic" => Some("claude-sonnet-4-20250514"),
-        "openai" => Some("gpt-4o-mini"),
+        "openai" => Some("gpt-5.3-codex"),
         "openrouter" => Some("openai/gpt-4o-mini"),
         "gemini" => Some("gemini-1.5-flash"),
         "ollama" => Some("llama3.1"),

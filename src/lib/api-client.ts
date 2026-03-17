@@ -88,7 +88,15 @@ export async function apiInvoke<T>(cmd: string, args?: Record<string, unknown>):
 
   if (method === 'POST' && args) {
     headers['Content-Type'] = 'application/json'
-    body = JSON.stringify(args)
+    // Tauri invoke wraps params in { args: { ... } } — unwrap for HTTP API.
+    // Also convert camelCase keys to snake_case for the Rust backend.
+    const payload =
+      args.args && typeof args.args === 'object' ? (args.args as Record<string, unknown>) : args
+    const snaked: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(payload)) {
+      snaked[k.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)] = v
+    }
+    body = JSON.stringify(snaked)
   } else if (method === 'GET' && args) {
     // For GET requests with args, append as query parameters
     const params = new URLSearchParams()

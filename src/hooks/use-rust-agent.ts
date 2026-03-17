@@ -27,6 +27,10 @@ export function useRustAgent() {
   let unlisten: UnlistenFn | null = null
   let eventSocket: WebSocket | null = null
 
+  // In web mode, the HTTP submit returns immediately while the agent runs async.
+  // We use this resolver to make run() wait for the complete/error WebSocket event.
+  let completionResolve: ((result: SubmitGoalResult | null) => void) | null = null
+
   /** Shared event handler — used by both Tauri listen() and WebSocket. */
   const handleAgentEvent = (event: AgentEvent): void => {
     setEvents((prev) => [...prev, event])
@@ -89,6 +93,16 @@ export function useRustAgent() {
             return updated
           })
         })
+        // Resolve the web-mode completion promise so run() can finalize
+        if (completionResolve) {
+          const completeEvent = event as import('../types/rust-ipc').CompleteEvent
+          completionResolve({
+            success: true,
+            turns: 0,
+            sessionId: completeEvent.session?.id ?? '',
+          })
+          completionResolve = null
+        }
         break
       case 'error':
         log.error('agent', 'Agent event error', { message: event.message })
@@ -96,6 +110,11 @@ export function useRustAgent() {
           setError(event.message)
           setIsRunning(false)
         })
+        // Resolve the web-mode completion promise on error too
+        if (completionResolve) {
+          completionResolve(null)
+          completionResolve = null
+        }
         break
     }
   }
@@ -127,6 +146,10 @@ export function useRustAgent() {
           setError('WebSocket connection error')
           setIsRunning(false)
         })
+        if (completionResolve) {
+          completionResolve(null)
+          completionResolve = null
+        }
       }
       ws.onclose = () => {
         log.warn('ws', 'WebSocket disconnected')
@@ -136,6 +159,10 @@ export function useRustAgent() {
             setError('WebSocket connection closed unexpectedly')
             setIsRunning(false)
           })
+        }
+        if (completionResolve) {
+          completionResolve(null)
+          completionResolve = null
         }
       }
       // Wait for the connection to open before returning
@@ -173,28 +200,60 @@ export function useRustAgent() {
 
   const run = async (
     goal: string,
-    opts?: { provider?: string; model?: string; maxTurns?: number; thinkingLevel?: string }
+    opts?: {
+      provider?: string
+      model?: string
+      maxTurns?: number
+      thinkingLevel?: string
+      sessionId?: string
+    }
   ): Promise<SubmitGoalResult | null> => {
     resetState()
     setIsRunning(true)
     try {
       await attachListener()
-      const result = await invoke<SubmitGoalResult>('submit_goal', {
+      const submitArgs = {
         args: {
           goal,
           maxTurns: opts?.maxTurns ?? 0,
           provider: opts?.provider ?? null,
           model: opts?.model ?? null,
           thinkingLevel: opts?.thinkingLevel ?? null,
+          sessionId: opts?.sessionId ?? null,
         },
+      }
+
+      if (isTauri()) {
+        // Tauri mode: invoke blocks until the agent finishes
+        const result = await invoke<SubmitGoalResult>('submit_goal', submitArgs)
+        setLastResult(result)
+        setIsRunning(false)
+        return result
+      }
+
+      // Web mode: the HTTP call returns immediately while the agent runs async.
+      // We need to wait for the complete/error event via WebSocket.
+      const completionPromise = new Promise<SubmitGoalResult | null>((resolve) => {
+        completionResolve = resolve
       })
-      setLastResult(result)
-      setIsRunning(false)
-      return result
+
+      // Fire the HTTP request (returns immediately with session ID)
+      const submitResult = await invoke<SubmitGoalResult>('submit_goal', submitArgs)
+
+      // Now wait for the WebSocket to deliver complete or error
+      const result = await completionPromise
+
+      // Merge session ID from the HTTP response if the WS event didn't provide one
+      const finalResult: SubmitGoalResult = result
+        ? { ...result, sessionId: result.sessionId || submitResult.sessionId }
+        : { success: false, turns: 0, sessionId: submitResult.sessionId }
+      setLastResult(finalResult)
+      return finalResult
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       setError(message)
       setIsRunning(false)
+      completionResolve = null
       return null
     } finally {
       detachListener()
@@ -222,6 +281,11 @@ export function useRustAgent() {
       })
       setIsRunning(false)
     })
+    // Resolve the web-mode completion promise so run() can return
+    if (completionResolve) {
+      completionResolve(null)
+      completionResolve = null
+    }
     detachListener()
   }
 

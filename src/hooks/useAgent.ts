@@ -210,6 +210,7 @@ function createAgentStore() {
         model: selectedModelId,
         provider: selectedProviderId,
         thinkingLevel,
+        sessionId,
       })
       const errorText = rustAgent.error()
 

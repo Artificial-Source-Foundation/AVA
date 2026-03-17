@@ -10,8 +10,9 @@ import {
   type LLMProviderConfig,
   type ProviderModel,
 } from '../../config/defaults/provider-defaults'
-import { logWarn } from '../../services/logger'
+import { logInfo, logWarn } from '../../services/logger'
 import { enrichWithCatalog, fetchModels } from '../../services/providers/model-fetcher'
+import { getModelsDevModels } from '../../services/providers/models-dev-catalog'
 import type { LLMProvider } from '../../types/llm'
 import { applyAppearanceToDOM } from './settings-appearance'
 import { saveSettings, syncProviderCredentials } from './settings-persistence'
@@ -126,6 +127,65 @@ export function refreshAllProviderModels(): void {
       autoFetchModels(provider.id)
     }
   }
+}
+
+/**
+ * Populate provider model lists from the models.dev catalog.
+ * Called after syncModelsCatalog() on startup. For each provider, merges
+ * models.dev models into the existing list (adds missing, doesn't remove existing).
+ * Returns the number of providers that received new models.
+ */
+export function populateModelsFromCatalog(): number {
+  const currentProviders = settings().providers
+  let enrichedCount = 0
+
+  const updatedProviders = currentProviders.map((p) => {
+    const catalogModels = getModelsDevModels(p.id as LLMProvider)
+    if (catalogModels.length === 0) return p
+
+    // Build set of existing model IDs
+    const existingIds = new Set(p.models.map((m) => m.id))
+    const newModels = catalogModels.filter((m) => !existingIds.has(m.id))
+
+    // Also enrich existing models that lack capabilities or pricing
+    const enrichedExisting = p.models.map((existing) => {
+      const catalogMatch = catalogModels.find((cm) => cm.id === existing.id)
+      if (!catalogMatch) return existing
+      const patched = { ...existing }
+      if (!patched.capabilities?.length && catalogMatch.capabilities?.length) {
+        patched.capabilities = catalogMatch.capabilities
+      }
+      if (!patched.pricing && catalogMatch.pricing) {
+        patched.pricing = catalogMatch.pricing
+      }
+      if (patched.contextWindow <= 4096 && catalogMatch.contextWindow > 4096) {
+        patched.contextWindow = catalogMatch.contextWindow
+      }
+      return patched
+    })
+
+    if (newModels.length === 0 && enrichedExisting === p.models) return p
+
+    enrichedCount++
+    const mergedModels = [...enrichedExisting, ...newModels]
+
+    // Preserve default model selection
+    const keepDefault = p.defaultModel && mergedModels.some((m) => m.id === p.defaultModel)
+    const defaults = defaultProviders.find((dp) => dp.id === p.id)
+    const defaultModelId = keepDefault
+      ? p.defaultModel
+      : (defaults?.defaultModel ?? mergedModels[0]?.id)
+    for (const m of mergedModels) m.isDefault = m.id === defaultModelId
+
+    return { ...p, models: mergedModels, defaultModel: defaultModelId }
+  })
+
+  if (enrichedCount > 0) {
+    updateSettings({ providers: updatedProviders })
+    logInfo('settings', `Populated models from models.dev for ${enrichedCount} providers`)
+  }
+
+  return enrichedCount
 }
 
 // ── Agents ───────────────────────────────────────────────────────────────────

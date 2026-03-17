@@ -42,7 +42,7 @@ import { setSettingsRaw, settings, updateSettings } from './settings-signal'
 import type { AppSettings } from './settings-types'
 
 export { resolveMode } from './settings-appearance'
-export { refreshAllProviderModels } from './settings-mutators'
+export { populateModelsFromCatalog, refreshAllProviderModels } from './settings-mutators'
 export { syncProviderCredentials } from './settings-persistence'
 // Re-exports — keep existing import paths stable
 export type {

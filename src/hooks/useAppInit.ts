@@ -28,6 +28,7 @@ import { useSession } from '../stores/session'
 import {
   detectEnvApiKeys,
   hydrateSettingsFromFS,
+  populateModelsFromCatalog,
   pushSettingsToCore,
   refreshAllProviderModels,
   syncAllApiKeys,
@@ -120,42 +121,51 @@ export async function runAppInit(
     setDevConsoleLogLevel(settings().logLevel)
     syncAllApiKeys()
     await detectEnvApiKeys()
-    syncModelsCatalog().catch(() => {})
-    refreshAllProviderModels()
 
-    // Merge compiled-in Rust backend models into the settings store.
-    // This ensures providers without API keys still show their full model catalog.
-    try {
-      const backendModels = await rustBackend.listModels()
-      if (backendModels.length > 0) {
-        const currentSettings = settings()
-        const updatedProviders = currentSettings.providers.map((p) => {
-          const matching = backendModels.filter((m) => m.provider === p.id)
-          if (matching.length === 0) return p
-          // Merge: keep existing models, add any from backend that aren't already present
-          const existingIds = new Set(p.models.map((m) => m.id))
-          const newModels = matching
-            .filter((m) => !existingIds.has(m.id))
-            .map((m) => ({
-              id: m.id,
-              name: m.name,
-              contextWindow: m.contextWindow,
-              maxOutput: 0,
-              inputCost: m.costInput,
-              outputCost: m.costOutput,
-              capabilities: [
-                ...(m.toolCall ? ['tool_use' as const] : []),
-                ...(m.vision ? ['vision' as const] : []),
-              ],
-            }))
-          if (newModels.length === 0) return p
-          return { ...p, models: [...p.models, ...newModels] }
-        })
-        updateSettings({ providers: updatedProviders })
+    // Models.dev is the PRIMARY source for model metadata (pricing, context
+    // windows, capabilities). The compiled-in Rust registry is a fallback
+    // only used when the catalog fetch fails or returns nothing.
+    const catalog = await syncModelsCatalog().catch(() => null)
+    const catalogPopulated = catalog ? populateModelsFromCatalog() : 0
+
+    // Fall back to compiled-in Rust backend models only if models.dev
+    // returned nothing (network failure with empty cache).
+    if (catalogPopulated === 0) {
+      try {
+        const backendModels = await rustBackend.listModels()
+        if (backendModels.length > 0) {
+          const currentSettings = settings()
+          const updatedProviders = currentSettings.providers.map((p) => {
+            const matching = backendModels.filter((m) => m.provider === p.id)
+            if (matching.length === 0) return p
+            const existingIds = new Set(p.models.map((m) => m.id))
+            const newModels = matching
+              .filter((m) => !existingIds.has(m.id))
+              .map((m) => ({
+                id: m.id,
+                name: m.name,
+                contextWindow: m.contextWindow,
+                maxOutput: 0,
+                inputCost: m.costInput,
+                outputCost: m.costOutput,
+                capabilities: [
+                  ...(m.toolCall ? ['tool_use' as const] : []),
+                  ...(m.vision ? ['vision' as const] : []),
+                ],
+              }))
+            if (newModels.length === 0) return p
+            return { ...p, models: [...p.models, ...newModels] }
+          })
+          updateSettings({ providers: updatedProviders })
+        }
+      } catch {
+        // Non-fatal — fall back to whatever models are already in settings
       }
-    } catch {
-      // Non-fatal — fall back to whatever models are already in settings
     }
+
+    // For providers with API keys, also fetch from the provider API
+    // (merges live model lists + enriches with catalog data)
+    refreshAllProviderModels()
 
     setSplashStatus('Initializing core engine...')
     const cleanupCore = await initCoreBridge({
@@ -264,36 +274,41 @@ async function runWebInit(
     log.info('app', 'Backend health check passed')
 
     setSplashStatus('Loading models...')
-    // Merge backend models into the settings store
-    try {
-      const backendModels = await rustBackend.listModels()
-      if (backendModels.length > 0) {
-        const currentSettings = settings()
-        const updatedProviders = currentSettings.providers.map((p) => {
-          const matching = backendModels.filter((m) => m.provider === p.id)
-          if (matching.length === 0 || p.models.length >= matching.length) return p
-          const existingIds = new Set(p.models.map((m) => m.id))
-          const newModels = matching
-            .filter((m) => !existingIds.has(m.id))
-            .map((m) => ({
-              id: m.id,
-              name: m.name,
-              contextWindow: m.contextWindow,
-              maxOutput: 0,
-              inputCost: m.costInput,
-              outputCost: m.costOutput,
-              capabilities: [
-                ...(m.toolCall ? ['tool_use' as const] : []),
-                ...(m.vision ? ['vision' as const] : []),
-              ],
-            }))
-          if (newModels.length === 0) return p
-          return { ...p, models: [...p.models, ...newModels] }
-        })
-        updateSettings({ providers: updatedProviders })
+    // Models.dev is primary source; compiled-in registry is fallback
+    const catalog = await syncModelsCatalog().catch(() => null)
+    const catalogPopulated = catalog ? populateModelsFromCatalog() : 0
+
+    if (catalogPopulated === 0) {
+      try {
+        const backendModels = await rustBackend.listModels()
+        if (backendModels.length > 0) {
+          const currentSettings = settings()
+          const updatedProviders = currentSettings.providers.map((p) => {
+            const matching = backendModels.filter((m) => m.provider === p.id)
+            if (matching.length === 0 || p.models.length >= matching.length) return p
+            const existingIds = new Set(p.models.map((m) => m.id))
+            const newModels = matching
+              .filter((m) => !existingIds.has(m.id))
+              .map((m) => ({
+                id: m.id,
+                name: m.name,
+                contextWindow: m.contextWindow,
+                maxOutput: 0,
+                inputCost: m.costInput,
+                outputCost: m.costOutput,
+                capabilities: [
+                  ...(m.toolCall ? ['tool_use' as const] : []),
+                  ...(m.vision ? ['vision' as const] : []),
+                ],
+              }))
+            if (newModels.length === 0) return p
+            return { ...p, models: [...p.models, ...newModels] }
+          })
+          updateSettings({ providers: updatedProviders })
+        }
+      } catch {
+        // Non-fatal
       }
-    } catch {
-      // Non-fatal
     }
 
     setSplashStatus('Loading providers...')

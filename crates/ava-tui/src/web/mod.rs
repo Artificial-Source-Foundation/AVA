@@ -6,15 +6,21 @@
 //!
 //! # Endpoints
 //!
-//! | Method | Path                 | Description                       |
-//! |--------|----------------------|-----------------------------------|
-//! | POST   | `/api/agent/submit`  | Start the agent with a goal       |
-//! | POST   | `/api/agent/cancel`  | Cancel the running agent          |
-//! | GET    | `/api/sessions`      | List recent sessions              |
-//! | GET    | `/api/models`        | List available models             |
-//! | GET    | `/api/providers`     | List configured providers         |
-//! | POST   | `/api/log`           | Ingest frontend log entry         |
-//! | GET    | `/ws`                | WebSocket for streaming events    |
+//! | Method | Path                          | Description                              |
+//! |--------|-------------------------------|------------------------------------------|
+//! | POST   | `/api/agent/submit`           | Start the agent (async, streams via WS)  |
+//! | POST   | `/api/agent/cancel`           | Cancel the running agent                 |
+//! | GET    | `/api/agent/status`           | Get agent running status                 |
+//! | GET    | `/api/sessions`               | List recent sessions                     |
+//! | POST   | `/api/sessions/create`        | Create a new session                     |
+//! | GET    | `/api/sessions/{id}`          | Get session with messages                |
+//! | POST   | `/api/sessions/{id}/rename`   | Rename a session                         |
+//! | DELETE | `/api/sessions/{id}`          | Delete a session                         |
+//! | POST   | `/api/sessions/{id}/message`  | Add a message to a session               |
+//! | GET    | `/api/models`                 | List available models                    |
+//! | GET    | `/api/providers`              | List configured providers                |
+//! | POST   | `/api/log`                    | Ingest frontend log entry                |
+//! | GET    | `/ws`                         | WebSocket for streaming events           |
 
 pub mod api;
 pub mod state;
@@ -35,7 +41,7 @@ use self::state::WebState;
 fn build_router(state: WebState) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
         .allow_headers(Any);
 
     Router::new()
@@ -43,8 +49,20 @@ fn build_router(state: WebState) -> Router {
         .route("/api/agent/submit", post(api::submit_goal))
         .route("/api/agent/cancel", post(api::cancel_agent))
         .route("/api/agent/status", get(api::agent_status))
-        // Session endpoints
+        // Session CRUD endpoints
         .route("/api/sessions", get(api::list_sessions))
+        .route("/api/sessions/create", post(api::create_session))
+        .route(
+            "/api/sessions/{id}",
+            get(api::get_session).delete(api::delete_session),
+        )
+        .route("/api/sessions/{id}/rename", post(api::rename_session))
+        // Message endpoint
+        .route("/api/sessions/{id}/message", post(api::add_message))
+        // Body-based session operations (for frontend apiInvoke compatibility)
+        .route("/api/sessions/delete", post(api::delete_session_body))
+        .route("/api/sessions/rename", post(api::rename_session_body))
+        .route("/api/sessions/load", post(api::load_session_body))
         // Model/provider endpoints
         .route("/api/models", get(api::list_models))
         .route("/api/providers", get(api::list_providers))

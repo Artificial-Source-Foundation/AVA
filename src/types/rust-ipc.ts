@@ -281,6 +281,7 @@ export interface ModelInfo {
   name: string
   toolCall: boolean
   vision: boolean
+  reasoning: boolean
   contextWindow: number
   costInput: number
   costOutput: number

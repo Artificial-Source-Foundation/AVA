@@ -3,7 +3,7 @@
 //! Each handler maps to a Tauri command equivalent, operating on the shared
 //! `WebState` instead of `tauri::State<DesktopBridge>`.
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
@@ -38,16 +38,22 @@ pub struct SubmitGoalRequest {
     pub provider: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    /// Optional session ID to continue an existing session.
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct SubmitGoalResponse {
-    pub success: bool,
-    pub turns: usize,
     pub session_id: String,
+    pub status: String,
 }
 
-/// Start the agent with a goal. Events stream over the WebSocket channel.
+/// Start the agent with a goal asynchronously.
+///
+/// Returns immediately with the session ID and `"running"` status.
+/// Agent events stream over the WebSocket broadcast channel as the agent runs.
+/// When the agent finishes, a `Complete` or `Error` event is sent.
 pub async fn submit_goal(
     State(state): State<WebState>,
     Json(req): Json<SubmitGoalRequest>,
@@ -74,57 +80,75 @@ pub async fn submit_goal(
             .map_err(|e| error_response(StatusCode::BAD_REQUEST, &e.to_string()))?;
     }
 
+    // If a session_id was provided, load that session's messages as history
+    let (session_id_str, history) =
+        if let Some(ref sid) = req.session_id {
+            let uuid = uuid::Uuid::parse_str(sid).map_err(|e| {
+                error_response(StatusCode::BAD_REQUEST, &format!("Invalid session_id: {e}"))
+            })?;
+            let session =
+                state.inner.stack.session_manager.get(uuid).map_err(|e| {
+                    error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string())
+                })?;
+            let msgs = session.map(|s| s.messages).unwrap_or_default();
+            (sid.clone(), msgs)
+        } else {
+            (uuid::Uuid::new_v4().to_string(), vec![])
+        };
+
     let cancel = state.new_cancel_token().await;
-    let event_broadcast = state.inner.event_tx.clone();
+    let inner = state.inner.clone();
+    let stack = inner.stack.clone();
 
-    // Create an mpsc channel for the agent to send events into,
-    // then forward those events to the broadcast channel.
-    let (tx, mut rx) = mpsc::unbounded_channel();
+    let max_turns = if req.max_turns > 0 { req.max_turns } else { 0 };
+    let goal = req.goal.clone();
 
-    let forwarder = tokio::spawn(async move {
-        while let Some(event) = rx.recv().await {
-            // Best-effort broadcast; if no subscribers are listening, that is fine.
-            let _ = event_broadcast.send(event);
+    info!(goal = %goal, max_turns, "Web: starting agent (async)");
+
+    // Spawn the agent run in a background task
+    tokio::spawn(async move {
+        // Create an mpsc channel for the agent to send events into,
+        // then forward those events to the broadcast channel.
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let event_broadcast = inner.event_tx.clone();
+
+        let forwarder = tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                let _ = event_broadcast.send(event);
+            }
+        });
+
+        let result = stack
+            .run(
+                &goal,
+                max_turns,
+                Some(tx),
+                cancel,
+                history,
+                None,   // no message queue for now
+                vec![], // no images
+            )
+            .await;
+
+        // Wait for the forwarder to drain
+        let _ = forwarder.await;
+
+        *inner.running.write().await = false;
+
+        match result {
+            Ok(run_result) => {
+                let _ = stack.session_manager.save(&run_result.session);
+            }
+            Err(e) => {
+                tracing::error!("Agent run failed: {e}");
+            }
         }
     });
 
-    let max_turns = if req.max_turns > 0 { req.max_turns } else { 0 };
-
-    info!(goal = %req.goal, max_turns, "Web: starting agent");
-
-    let result = state
-        .inner
-        .stack
-        .run(
-            &req.goal,
-            max_turns,
-            Some(tx),
-            cancel,
-            vec![], // no history for now
-            None,   // no message queue for now
-            vec![], // no images
-        )
-        .await;
-
-    // Wait for the forwarder to drain
-    let _ = forwarder.await;
-
-    *state.inner.running.write().await = false;
-
-    match result {
-        Ok(run_result) => {
-            let _ = state.inner.stack.session_manager.save(&run_result.session);
-            Ok(Json(SubmitGoalResponse {
-                success: run_result.success,
-                turns: run_result.turns,
-                session_id: run_result.session.id.to_string(),
-            }))
-        }
-        Err(e) => Err(error_response(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            &e.to_string(),
-        )),
-    }
+    Ok(Json(SubmitGoalResponse {
+        session_id: session_id_str,
+        status: "running".to_string(),
+    }))
 }
 
 /// Cancel the currently-running agent.
@@ -207,6 +231,313 @@ pub async fn list_sessions(
         .collect();
 
     Ok(Json(summaries))
+}
+
+// ── Session CRUD ─────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct CreateSessionRequest {
+    #[serde(default = "default_session_name")]
+    pub name: String,
+    /// Optional client-generated session ID. If provided, the server uses this ID.
+    #[serde(default)]
+    pub id: Option<String>,
+}
+
+fn default_session_name() -> String {
+    "New Session".to_string()
+}
+
+#[derive(Serialize)]
+pub struct SessionDetail {
+    pub id: String,
+    pub title: String,
+    pub message_count: usize,
+    pub created_at: String,
+    pub updated_at: String,
+    pub messages: Vec<MessageSummary>,
+}
+
+#[derive(Serialize)]
+pub struct MessageSummary {
+    pub id: String,
+    pub role: String,
+    pub content: String,
+    pub timestamp: String,
+}
+
+/// Create a new session.
+pub async fn create_session(
+    State(state): State<WebState>,
+    Json(req): Json<CreateSessionRequest>,
+) -> Result<Json<SessionSummary>, (StatusCode, Json<ErrorResponse>)> {
+    let mut session = state
+        .inner
+        .stack
+        .session_manager
+        .create()
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    // If client provided an ID, use it (web mode sends the client-generated UUID)
+    if let Some(ref id_str) = req.id {
+        if let Ok(id) = uuid::Uuid::parse_str(id_str) {
+            session.id = id;
+        }
+    }
+
+    // Set the title in metadata
+    if let Some(map) = session.metadata.as_object_mut() {
+        map.insert(
+            "title".to_string(),
+            serde_json::Value::String(req.name.clone()),
+        );
+    }
+
+    state
+        .inner
+        .stack
+        .session_manager
+        .save(&session)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    Ok(Json(SessionSummary {
+        id: session.id.to_string(),
+        title: req.name,
+        message_count: 0,
+        created_at: session.created_at.to_rfc3339(),
+        updated_at: session.updated_at.to_rfc3339(),
+    }))
+}
+
+/// Get a session by ID, including its messages.
+pub async fn get_session(
+    State(state): State<WebState>,
+    Path(id): Path<String>,
+) -> Result<Json<SessionDetail>, (StatusCode, Json<ErrorResponse>)> {
+    let uuid = uuid::Uuid::parse_str(&id).map_err(|e| {
+        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
+    })?;
+
+    let session = state
+        .inner
+        .stack
+        .session_manager
+        .get(uuid)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
+
+    let title = session
+        .metadata
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_else(|| {
+            session
+                .messages
+                .first()
+                .map(|m| {
+                    let c = &m.content;
+                    if c.len() > 80 {
+                        format!("{}...", &c[..77])
+                    } else {
+                        c.clone()
+                    }
+                })
+                .unwrap_or_else(|| "New session".to_string())
+        });
+
+    let messages: Vec<MessageSummary> = session
+        .messages
+        .iter()
+        .map(|m| MessageSummary {
+            id: m.id.to_string(),
+            role: format!("{:?}", m.role).to_lowercase(),
+            content: m.content.clone(),
+            timestamp: m.timestamp.to_rfc3339(),
+        })
+        .collect();
+
+    Ok(Json(SessionDetail {
+        id: session.id.to_string(),
+        title,
+        message_count: session.messages.len(),
+        created_at: session.created_at.to_rfc3339(),
+        updated_at: session.updated_at.to_rfc3339(),
+        messages,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct RenameSessionRequest {
+    pub name: String,
+}
+
+/// Rename a session.
+pub async fn rename_session(
+    State(state): State<WebState>,
+    Path(id): Path<String>,
+    Json(req): Json<RenameSessionRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let uuid = uuid::Uuid::parse_str(&id).map_err(|e| {
+        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
+    })?;
+
+    state
+        .inner
+        .stack
+        .session_manager
+        .rename(uuid, &req.name)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Delete a session.
+pub async fn delete_session(
+    State(state): State<WebState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let uuid = uuid::Uuid::parse_str(&id).map_err(|e| {
+        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
+    })?;
+
+    state
+        .inner
+        .stack
+        .session_manager
+        .delete(uuid)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Body-based session operations (for apiInvoke compatibility) ──────────────
+
+#[derive(Deserialize)]
+pub struct DeleteSessionBody {
+    pub id: String,
+}
+
+/// Delete a session (body-based, for frontend apiInvoke compatibility).
+pub async fn delete_session_body(
+    State(state): State<WebState>,
+    Json(req): Json<DeleteSessionBody>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let uuid = uuid::Uuid::parse_str(&req.id).map_err(|e| {
+        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
+    })?;
+
+    state
+        .inner
+        .stack
+        .session_manager
+        .delete(uuid)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct RenameSessionBody {
+    pub id: String,
+    pub title: String,
+}
+
+/// Rename a session (body-based, for frontend apiInvoke compatibility).
+pub async fn rename_session_body(
+    State(state): State<WebState>,
+    Json(req): Json<RenameSessionBody>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let uuid = uuid::Uuid::parse_str(&req.id).map_err(|e| {
+        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
+    })?;
+
+    state
+        .inner
+        .stack
+        .session_manager
+        .rename(uuid, &req.title)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct LoadSessionBody {
+    pub id: String,
+}
+
+/// Load a session by ID (body-based, for frontend apiInvoke compatibility).
+pub async fn load_session_body(
+    State(state): State<WebState>,
+    Json(req): Json<LoadSessionBody>,
+) -> Result<Json<SessionDetail>, (StatusCode, Json<ErrorResponse>)> {
+    get_session(State(state), Path(req.id)).await
+}
+
+// ── Messages ─────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct AddMessageRequest {
+    pub content: String,
+    #[serde(default = "default_role")]
+    pub role: String,
+}
+
+fn default_role() -> String {
+    "user".to_string()
+}
+
+/// Add a message to a session (typically a user message before submitting to the agent).
+pub async fn add_message(
+    State(state): State<WebState>,
+    Path(id): Path<String>,
+    Json(req): Json<AddMessageRequest>,
+) -> Result<Json<MessageSummary>, (StatusCode, Json<ErrorResponse>)> {
+    let uuid = uuid::Uuid::parse_str(&id).map_err(|e| {
+        error_response(StatusCode::BAD_REQUEST, &format!("Invalid session ID: {e}"))
+    })?;
+
+    let role = match req.role.as_str() {
+        "user" => ava_types::Role::User,
+        "assistant" => ava_types::Role::Assistant,
+        "system" => ava_types::Role::System,
+        other => {
+            return Err(error_response(
+                StatusCode::BAD_REQUEST,
+                &format!("Invalid role: {other}. Expected user, assistant, or system."),
+            ));
+        }
+    };
+
+    // Load the session, append the message, and save
+    let mut session = state
+        .inner
+        .stack
+        .session_manager
+        .get(uuid)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?
+        .ok_or_else(|| error_response(StatusCode::NOT_FOUND, "Session not found"))?;
+
+    let message = ava_types::Message::new(role, &req.content);
+    let summary = MessageSummary {
+        id: message.id.to_string(),
+        role: req.role.clone(),
+        content: message.content.clone(),
+        timestamp: message.timestamp.to_rfc3339(),
+    };
+
+    session.messages.push(message);
+    session.updated_at = chrono::Utc::now();
+
+    state
+        .inner
+        .stack
+        .session_manager
+        .save(&session)
+        .map_err(|e| error_response(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+
+    Ok(Json(summary))
 }
 
 // ============================================================================

@@ -37,8 +37,8 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
   list_sessions: { path: '/api/sessions', method: 'GET' },
   load_session: { path: '/api/sessions/load', method: 'POST' },
   create_session: { path: '/api/sessions/create', method: 'POST' },
-  delete_session: { path: '/api/sessions/delete', method: 'POST' },
-  rename_session: { path: '/api/sessions/rename', method: 'POST' },
+  delete_session: { path: '/api/sessions/delete', method: 'POST' }, // handled specially below
+  rename_session: { path: '/api/sessions/rename', method: 'POST' }, // handled specially below
   search_sessions: { path: '/api/sessions/search', method: 'POST' },
 
   // Models

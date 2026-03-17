@@ -131,7 +131,7 @@ export async function runAppInit(
         const currentSettings = settings()
         const updatedProviders = currentSettings.providers.map((p) => {
           const matching = backendModels.filter((m) => m.provider === p.id)
-          if (matching.length === 0 || p.models.length >= matching.length) return p
+          if (matching.length === 0) return p
           // Merge: keep existing models, add any from backend that aren't already present
           const existingIds = new Set(p.models.map((m) => m.id))
           const newModels = matching

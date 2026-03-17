@@ -9,10 +9,14 @@ use regex::Regex;
 use std::path::{Component, Path, PathBuf};
 
 pub mod audit;
+pub mod canonicalize;
+pub mod checker_registry;
 pub mod classifier;
 pub mod guardian;
+pub mod injection;
 pub mod inspector;
 pub mod path_safety;
+pub mod patterns;
 pub mod persistent;
 pub mod policy;
 pub mod tags;

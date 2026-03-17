@@ -2,8 +2,11 @@
 
 pub mod condenser;
 pub mod error;
+pub mod focus;
+pub mod history_processor;
 pub mod manager;
 pub mod pruner;
+pub mod remote_compaction;
 pub mod strategies;
 pub mod token_tracker;
 pub mod types;
@@ -13,6 +16,7 @@ pub use condenser::{
     HybridCondenser,
 };
 pub use error::{ContextError, Result};
+pub use focus::{AccessKind, FocusChain, FocusEntry};
 pub use manager::ContextManager;
 pub use pruner::prune_old_tool_outputs;
 pub use strategies::{

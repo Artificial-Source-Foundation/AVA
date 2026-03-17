@@ -9,6 +9,7 @@ pub mod git_read;
 pub mod glob;
 pub mod grep;
 pub mod hashline;
+pub mod issue_resolver;
 pub mod lsp_ops;
 pub mod multiedit;
 pub mod output_fallback;

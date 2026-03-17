@@ -142,6 +142,32 @@ fn truncate_tail_with_path_notice(content: &str, max_size: usize, path: Option<&
     format!("{notice}{truncated}")
 }
 
+/// Default inline size limit for tool outputs (chars).
+/// Outputs exceeding this are saved to disk with a pointer.
+pub const DEFAULT_MAX_INLINE_SIZE: usize = 50_000;
+
+/// Large response threshold (200K chars, inspired by Goose).
+/// Used for very large tool outputs that should always spill to disk.
+pub const LARGE_RESPONSE_THRESHOLD: usize = 200_000;
+
+/// Check if a tool response is "large" and should be spilled to disk
+/// even without explicit truncation. Returns the spillover path if saved.
+pub fn spill_large_response(tool_name: &str, content: &str) -> Option<PathBuf> {
+    if content.len() <= LARGE_RESPONSE_THRESHOLD {
+        return None;
+    }
+
+    let output_dir = dirs::home_dir()?.join(".ava/tool-output");
+    std::fs::create_dir_all(&output_dir).ok()?;
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d-%H%M%S%.3f");
+    let filename = format!("{tool_name}-large-{timestamp}.txt");
+    let path = output_dir.join(&filename);
+
+    std::fs::write(&path, content).ok()?;
+    Some(path)
+}
+
 /// Return the tool-output directory path.
 pub fn output_dir() -> Option<PathBuf> {
     dirs::home_dir().map(|h| h.join(".ava/tool-output"))

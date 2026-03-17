@@ -4,7 +4,9 @@
 //! - Provider abstraction for multiple LLM services
 //! - Connection pooling and retry logic
 //! - Circuit breaker pattern for resilience
+//! - Model availability tracking with fallback chains
 
+pub mod availability;
 pub mod circuit_breaker;
 pub mod credential_test;
 mod dynamic_provider;
@@ -18,6 +20,7 @@ pub mod retry;
 pub mod router;
 pub mod thinking;
 
+pub use availability::{FallbackChain, ModelAvailability, ModelStatus};
 pub use credential_test::{default_model_for_provider, test_provider_credentials};
 pub use lead_worker::LeadWorkerProvider;
 pub use message_transform::{normalize_messages, ProviderKind};

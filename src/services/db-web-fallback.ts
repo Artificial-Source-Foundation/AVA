@@ -35,26 +35,42 @@ export function createWebDatabase(): WebDatabase {
         // getSessionsWithStats / getArchivedSessions
         try {
           const res = await fetch(`${API_BASE}/api/sessions`)
-          if (!res.ok) return [] as unknown as T
+          if (!res.ok) {
+            console.warn('[db-web] Failed to list sessions:', res.status, res.statusText)
+            return [] as unknown as T
+          }
           const sessions = await res.json()
-          // Map API response to the row format expected by mapSessionRow
-          return sessions.map((s: Record<string, unknown>) => ({
+          // Map API response to the row format expected by mapSessionRow.
+          // The backend may return fields as either snake_case or camelCase;
+          // also handle `name` vs `title` variations.
+          return (Array.isArray(sessions) ? sessions : []).map((s: Record<string, unknown>) => ({
             id: s.id,
-            name: s.title,
-            project_id: null,
-            parent_session_id: null,
-            slug: null,
-            busy_since: null,
-            created_at: new Date(s.created_at as string).getTime(),
-            updated_at: new Date(s.updated_at as string).getTime(),
-            status: 'active',
-            metadata: null,
+            name: s.title ?? s.name ?? 'Untitled',
+            project_id: s.project_id ?? null,
+            parent_session_id: s.parent_session_id ?? null,
+            slug: s.slug ?? null,
+            busy_since: s.busy_since ?? null,
+            created_at:
+              typeof s.created_at === 'number'
+                ? s.created_at
+                : typeof s.created_at === 'string'
+                  ? new Date(s.created_at).getTime()
+                  : Date.now(),
+            updated_at:
+              typeof s.updated_at === 'number'
+                ? s.updated_at
+                : typeof s.updated_at === 'string'
+                  ? new Date(s.updated_at).getTime()
+                  : Date.now(),
+            status: s.status ?? 'active',
+            metadata: s.metadata ?? null,
             message_count: s.message_count ?? 0,
-            total_tokens: 0,
-            total_cost: 0,
-            last_preview: null,
+            total_tokens: s.total_tokens ?? 0,
+            total_cost: s.total_cost ?? 0,
+            last_preview: s.last_preview ?? null,
           })) as unknown as T
-        } catch {
+        } catch (e) {
+          console.warn('[db-web] Failed to list sessions:', e)
           return [] as unknown as T
         }
       }
@@ -66,22 +82,34 @@ export function createWebDatabase(): WebDatabase {
         if (!sessionId) return [] as unknown as T
         try {
           const res = await fetch(`${API_BASE}/api/sessions/${sessionId}`)
-          if (!res.ok) return [] as unknown as T
+          if (!res.ok) {
+            console.warn('[db-web] Failed to load session messages:', res.status, sessionId)
+            return [] as unknown as T
+          }
           const detail = await res.json()
-          // Map to db row format expected by mapDbMessages
+          // Map to db row format expected by mapDbMessages.
+          // Handle both `timestamp` and `created_at` field names.
           return (detail.messages ?? []).map((m: Record<string, unknown>) => ({
             id: m.id,
             session_id: sessionId,
             role: m.role,
             content: m.content,
-            agent_id: null,
-            created_at: new Date(m.timestamp as string).getTime(),
-            tokens_used: 0,
-            cost_usd: null,
-            model: null,
-            metadata: '{}',
+            agent_id: m.agent_id ?? null,
+            created_at:
+              typeof m.created_at === 'number'
+                ? m.created_at
+                : typeof m.timestamp === 'string'
+                  ? new Date(m.timestamp).getTime()
+                  : typeof m.created_at === 'string'
+                    ? new Date(m.created_at).getTime()
+                    : Date.now(),
+            tokens_used: m.tokens_used ?? 0,
+            cost_usd: m.cost_usd ?? null,
+            model: m.model ?? null,
+            metadata: m.metadata ?? '{}',
           })) as unknown as T
-        } catch {
+        } catch (e) {
+          console.warn('[db-web] Failed to load session messages:', e)
           return [] as unknown as T
         }
       }
@@ -92,6 +120,7 @@ export function createWebDatabase(): WebDatabase {
       }
 
       // Default: return empty array for any other select
+      console.warn('[db-web] Unhandled SELECT query (returning []):', q.slice(0, 80))
       return [] as unknown as T
     },
 
@@ -120,16 +149,13 @@ export function createWebDatabase(): WebDatabase {
 
       // Update session (rename, status change, etc.)
       if (q.includes('update sessions set')) {
-        // The last param is the session ID
+        // The last param is the session ID (WHERE id = ?)
         const id = params?.[params.length - 1] as string
         if (id && q.includes('name =')) {
-          // Find the name param - it's the one after 'updated_at'
-          // updateSession sets: updated_at, then optional name, status, metadata, slug, busy_since
-          // First value is always Date.now() (updated_at), id is last
-          const nameIdx = params?.findIndex(
-            (p, i) => i > 0 && i < (params?.length ?? 0) - 1 && typeof p === 'string' && p !== id
-          )
-          const name = nameIdx !== undefined && nameIdx >= 0 ? (params?.[nameIdx] as string) : null
+          // Parse the name from params by matching the SQL SET clause order.
+          // updateSession builds: SET updated_at = ?, [name = ?,] [status = ?,] ... WHERE id = ?
+          // The name value is at index 1 (after updated_at which is at index 0).
+          const name = params && params.length >= 3 ? (params[1] as string) : null
           if (name) {
             try {
               await fetch(`${API_BASE}/api/sessions/${id}/rename`, {
@@ -142,6 +168,7 @@ export function createWebDatabase(): WebDatabase {
             }
           }
         }
+        // For status changes, updated_at-only (touchSession), etc. — no HTTP call needed
         return { rowsAffected: 1 }
       }
 
@@ -194,6 +221,7 @@ export function createWebDatabase(): WebDatabase {
       }
 
       // Default: no-op
+      console.warn('[db-web] Unhandled EXECUTE query (no-op):', q.slice(0, 80))
       return { rowsAffected: 0 }
     },
   }

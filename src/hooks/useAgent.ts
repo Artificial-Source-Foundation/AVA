@@ -8,7 +8,9 @@
 
 import { batch, createEffect, createSignal, on } from 'solid-js'
 
+import { DEFAULTS } from '../config/constants'
 import { log } from '../lib/logger'
+import { deriveSessionTitle } from '../lib/title-utils'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
 import { getCoreBudget } from '../services/core-bridge'
 import { rustAgent as rustAgentBridge, rustBackend } from '../services/rust-bridge'
@@ -169,6 +171,21 @@ function createAgentStore() {
       createdAt: Date.now(),
     }
     session.addMessage(userMsg)
+
+    // Auto-title the session from the first user message
+    // (runs before the agent call so the sidebar updates immediately)
+    if (settingsRef.settings().behavior.sessionAutoTitle && currentSess) {
+      const isDefaultName = currentSess.name === DEFAULTS.SESSION_NAME
+      const isFirstMessage = session.messages().length <= 1
+      if (isDefaultName && isFirstMessage) {
+        const title = deriveSessionTitle(goal)
+        if (title) {
+          void session.renameSession(sessionId, title).catch((err) => {
+            log.warn('agent', 'Failed to auto-title session', { error: String(err) })
+          })
+        }
+      }
+    }
 
     // Feed the context budget so the status bar updates
     const budget = getCoreBudget()

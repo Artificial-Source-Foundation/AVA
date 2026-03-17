@@ -335,6 +335,18 @@ async function runWebInit(
       setWebProject(health.cwd)
     }
 
+    // Initialize the web-mode database adapter so session operations work.
+    setSplashStatus('Loading database...')
+    await initDatabase()
+    log.info('app', 'Web database initialized')
+
+    // Load and restore sessions so the chat view is usable immediately.
+    setSplashStatus('Restoring session...')
+    const { loadSessionsForCurrentProject, restoreForCurrentProject } = useSession()
+    await loadSessionsForCurrentProject()
+    await restoreForCurrentProject()
+    log.info('app', 'Web sessions restored')
+
     setSplashStatus('Ready')
     log.info('app', 'Web mode initialized successfully')
     // In web mode, always skip project hub and go straight to the shell

@@ -8,6 +8,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::sync::mpsc;
 use tracing::info;
 
@@ -45,8 +46,11 @@ pub struct SubmitGoalRequest {
 
 #[derive(Serialize)]
 pub struct SubmitGoalResponse {
+    /// Matches the frontend's `SubmitGoalResult` interface.
+    pub success: bool,
+    pub turns: usize,
+    #[serde(rename = "sessionId")]
     pub session_id: String,
-    pub status: String,
 }
 
 /// Start the agent with a goal asynchronously.
@@ -105,6 +109,10 @@ pub async fn submit_goal(
 
     info!(goal = %goal, max_turns, "Web: starting agent (async)");
 
+    // Create message queue for mid-stream messaging (3-tier)
+    let (msg_queue, msg_queue_tx) = stack.create_message_queue();
+    *state.inner.message_queue.write().await = Some(msg_queue_tx);
+
     // Spawn the agent run in a background task
     tokio::spawn(async move {
         // Create an mpsc channel for the agent to send events into,
@@ -125,7 +133,7 @@ pub async fn submit_goal(
                 Some(tx),
                 cancel,
                 history,
-                None,   // no message queue for now
+                Some(msg_queue),
                 vec![], // no images
             )
             .await;
@@ -133,6 +141,8 @@ pub async fn submit_goal(
         // Wait for the forwarder to drain
         let _ = forwarder.await;
 
+        // Clear the message queue sender and mark as not running
+        *inner.message_queue.write().await = None;
         *inner.running.write().await = false;
 
         match result {
@@ -146,8 +156,9 @@ pub async fn submit_goal(
     });
 
     Ok(Json(SubmitGoalResponse {
+        success: true,
+        turns: 0,
         session_id: session_id_str,
-        status: "running".to_string(),
     }))
 }
 
@@ -662,6 +673,203 @@ pub async fn ingest_frontend_log(Json(req): Json<FrontendLogRequest>) -> impl In
             StatusCode::OK.into_response()
         }
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+// ============================================================================
+// Mid-stream Messaging (3-tier)
+// ============================================================================
+
+#[derive(Deserialize)]
+pub struct SteerRequest {
+    pub message: String,
+}
+
+/// Inject a steering message (Tier 1) into the running agent.
+pub async fn steer_agent(
+    State(state): State<WebState>,
+    Json(req): Json<SteerRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let running = *state.inner.running.read().await;
+    if !running {
+        return Err(error_response(StatusCode::CONFLICT, "Agent is not running"));
+    }
+    if let Some(ref tx) = *state.inner.message_queue.read().await {
+        let _ = tx.send(ava_types::QueuedMessage {
+            text: req.message,
+            tier: ava_types::MessageTier::Steering,
+        });
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct FollowUpRequest {
+    pub message: String,
+}
+
+/// Queue a follow-up message (Tier 2) for after the current task.
+pub async fn follow_up_agent(
+    State(state): State<WebState>,
+    Json(req): Json<FollowUpRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let running = *state.inner.running.read().await;
+    if !running {
+        return Err(error_response(StatusCode::CONFLICT, "Agent is not running"));
+    }
+    if let Some(ref tx) = *state.inner.message_queue.read().await {
+        let _ = tx.send(ava_types::QueuedMessage {
+            text: req.message,
+            tier: ava_types::MessageTier::FollowUp,
+        });
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct PostCompleteRequest {
+    pub message: String,
+    #[serde(default = "default_group")]
+    pub group: u32,
+}
+
+fn default_group() -> u32 {
+    1
+}
+
+/// Queue a post-complete message (Tier 3) for after the agent stops.
+pub async fn post_complete_agent(
+    State(state): State<WebState>,
+    Json(req): Json<PostCompleteRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    let running = *state.inner.running.read().await;
+    if !running {
+        return Err(error_response(StatusCode::CONFLICT, "Agent is not running"));
+    }
+    if let Some(ref tx) = *state.inner.message_queue.read().await {
+        let _ = tx.send(ava_types::QueuedMessage {
+            text: req.message,
+            tier: ava_types::MessageTier::PostComplete { group: req.group },
+        });
+    }
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// Get current message queue state.
+pub async fn get_message_queue(State(state): State<WebState>) -> impl IntoResponse {
+    let has_queue = state.inner.message_queue.read().await.is_some();
+    let running = *state.inner.running.read().await;
+    Json(serde_json::json!({ "active": running && has_queue }))
+}
+
+/// Clear the message queue.
+pub async fn clear_message_queue(State(_state): State<WebState>) -> impl IntoResponse {
+    // The message queue is internal to the agent loop; clearing it from the
+    // outside requires draining the mpsc channel, which isn't safe.
+    // For now, return OK — the queue will be dropped when the agent finishes.
+    Json(serde_json::json!({ "ok": true }))
+}
+
+// ============================================================================
+// WebAgentEvent — frontend-compatible serialization
+// ============================================================================
+
+/// Agent events serialized in the format the SolidJS frontend expects.
+///
+/// The frontend expects `{ "type": "token", "content": "..." }` (tagged enum),
+/// while the backend `ava_agent::AgentEvent` serializes as Rust default
+/// `{ "Token": "hello" }`. This type mirrors `src-tauri/src/events.rs`.
+#[derive(Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum WebAgentEvent {
+    #[serde(rename = "token")]
+    Token { content: String },
+    #[serde(rename = "thinking")]
+    Thinking { content: String },
+    #[serde(rename = "tool_call")]
+    ToolCall { name: String, args: Value },
+    #[serde(rename = "tool_result")]
+    ToolResult { content: String, is_error: bool },
+    #[serde(rename = "progress")]
+    Progress { message: String },
+    #[serde(rename = "complete")]
+    Complete { session: Value },
+    #[serde(rename = "error")]
+    Error { message: String },
+    #[serde(rename = "token_usage")]
+    TokenUsage {
+        input_tokens: usize,
+        output_tokens: usize,
+        cost_usd: f64,
+    },
+    #[serde(rename = "budget_warning")]
+    BudgetWarning {
+        threshold_percent: u8,
+        current_cost_usd: f64,
+        max_budget_usd: f64,
+    },
+    #[serde(rename = "approval_request")]
+    ApprovalRequest {
+        id: String,
+        tool_name: String,
+        args: Value,
+        risk_level: String,
+        reason: String,
+        warnings: Vec<String>,
+    },
+}
+
+/// Convert a backend `AgentEvent` to a frontend-compatible `WebAgentEvent`.
+/// Returns `None` for events that have no direct frontend representation.
+pub fn convert_agent_event(event: &ava_agent::agent_loop::AgentEvent) -> Option<WebAgentEvent> {
+    use ava_agent::agent_loop::AgentEvent as BE;
+    match event {
+        BE::Token(content) => Some(WebAgentEvent::Token {
+            content: content.clone(),
+        }),
+        BE::Thinking(content) => Some(WebAgentEvent::Thinking {
+            content: content.clone(),
+        }),
+        BE::ToolCall(tc) => Some(WebAgentEvent::ToolCall {
+            name: tc.name.clone(),
+            args: tc.arguments.clone(),
+        }),
+        BE::ToolResult(tr) => Some(WebAgentEvent::ToolResult {
+            content: tr.content.clone(),
+            is_error: tr.is_error,
+        }),
+        BE::Progress(msg) => Some(WebAgentEvent::Progress {
+            message: msg.clone(),
+        }),
+        BE::Complete(session) => {
+            let session_json = serde_json::to_value(session).unwrap_or_default();
+            Some(WebAgentEvent::Complete {
+                session: session_json,
+            })
+        }
+        BE::Error(msg) => Some(WebAgentEvent::Error {
+            message: msg.clone(),
+        }),
+        BE::TokenUsage {
+            input_tokens,
+            output_tokens,
+            cost_usd,
+        } => Some(WebAgentEvent::TokenUsage {
+            input_tokens: *input_tokens,
+            output_tokens: *output_tokens,
+            cost_usd: *cost_usd,
+        }),
+        BE::BudgetWarning {
+            threshold_percent,
+            current_cost_usd,
+            max_budget_usd,
+        } => Some(WebAgentEvent::BudgetWarning {
+            threshold_percent: *threshold_percent,
+            current_cost_usd: *current_cost_usd,
+            max_budget_usd: *max_budget_usd,
+        }),
+        // ToolStats and SubAgentComplete have no direct frontend representation.
+        _ => None,
     }
 }
 

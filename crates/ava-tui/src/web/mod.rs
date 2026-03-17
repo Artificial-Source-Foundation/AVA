@@ -49,6 +49,12 @@ fn build_router(state: WebState) -> Router {
         .route("/api/agent/submit", post(api::submit_goal))
         .route("/api/agent/cancel", post(api::cancel_agent))
         .route("/api/agent/status", get(api::agent_status))
+        // Mid-stream messaging (3-tier)
+        .route("/api/agent/steer", post(api::steer_agent))
+        .route("/api/agent/follow-up", post(api::follow_up_agent))
+        .route("/api/agent/post-complete", post(api::post_complete_agent))
+        .route("/api/agent/queue", get(api::get_message_queue))
+        .route("/api/agent/queue/clear", post(api::clear_message_queue))
         // Session CRUD endpoints
         .route("/api/sessions", get(api::list_sessions))
         .route("/api/sessions/create", post(api::create_session))

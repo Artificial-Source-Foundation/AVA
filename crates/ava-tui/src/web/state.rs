@@ -11,6 +11,7 @@ use ava_agent::agent_loop::AgentEvent;
 use ava_agent::stack::{AgentStack, AgentStackConfig};
 use ava_tools::core::question::QuestionRequest;
 use ava_tools::permission_middleware::ApprovalRequest;
+use ava_types::QueuedMessage;
 use color_eyre::Result;
 use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
@@ -35,6 +36,9 @@ pub struct WebStateInner {
     /// Approval receiver (auto-approve for now in web mode).
     #[allow(dead_code)]
     pub approval_rx: tokio::sync::Mutex<mpsc::UnboundedReceiver<ApprovalRequest>>,
+    /// Message queue sender for mid-stream messaging (3-tier).
+    /// `None` when no agent is running; set before each run.
+    pub message_queue: RwLock<Option<mpsc::UnboundedSender<QueuedMessage>>>,
 }
 
 impl WebState {
@@ -64,6 +68,7 @@ impl WebState {
                 event_tx,
                 question_rx: tokio::sync::Mutex::new(question_rx),
                 approval_rx: tokio::sync::Mutex::new(approval_rx),
+                message_queue: RwLock::new(None),
             }),
         })
     }

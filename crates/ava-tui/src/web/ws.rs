@@ -6,11 +6,11 @@
 //!
 //! Message format (server -> client):
 //! ```json
-//! {"Token":"hello"}
-//! {"ToolCall":{"id":"...","name":"read","arguments":{...}}}
-//! {"ToolResult":{"tool_use_id":"...","content":"..."}}
-//! {"Complete":{...session...}}
-//! {"Error":"something went wrong"}
+//! {"type":"token","content":"hello"}
+//! {"type":"tool_call","name":"read","args":{...}}
+//! {"type":"tool_result","content":"...","is_error":false}
+//! {"type":"complete","session":{...}}
+//! {"type":"error","message":"something went wrong"}
 //! ```
 
 use axum::extract::ws::{Message, WebSocket};
@@ -19,6 +19,7 @@ use axum::response::IntoResponse;
 use futures::{SinkExt, StreamExt};
 use tracing::{debug, warn};
 
+use super::api::convert_agent_event;
 use super::state::WebState;
 
 /// Axum handler that upgrades the HTTP connection to a WebSocket.
@@ -29,8 +30,8 @@ pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<WebState>) -> 
 /// Handle a single WebSocket connection.
 ///
 /// Subscribes to the broadcast channel and forwards all agent events as JSON
-/// text frames. Also listens for incoming messages from the client (currently
-/// used for ping/pong keep-alive; future: mid-stream steering).
+/// text frames. Events are converted from the backend `AgentEvent` enum to the
+/// frontend-compatible `WebAgentEvent` format (with `"type"` tag).
 async fn handle_socket(socket: WebSocket, state: WebState) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
@@ -42,7 +43,12 @@ async fn handle_socket(socket: WebSocket, state: WebState) {
     // Spawn a task that forwards broadcast events to the WebSocket
     let send_task = tokio::spawn(async move {
         while let Ok(event) = event_rx.recv().await {
-            let json = match serde_json::to_string(&event) {
+            // Convert backend event to frontend-compatible format
+            let web_event = match convert_agent_event(&event) {
+                Some(e) => e,
+                None => continue, // Skip events without frontend representation
+            };
+            let json = match serde_json::to_string(&web_event) {
                 Ok(j) => j,
                 Err(e) => {
                     warn!("Failed to serialize agent event: {e}");
@@ -56,13 +62,12 @@ async fn handle_socket(socket: WebSocket, state: WebState) {
         }
     });
 
-    // Listen for incoming messages (ping/pong, future: steering commands)
+    // Listen for incoming messages (ping/pong keep-alive)
     let recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = ws_rx.next().await {
             match msg {
                 Message::Text(text) => {
                     debug!("WebSocket received text: {}", text);
-                    // Future: parse steering/follow-up/post-complete commands
                 }
                 Message::Close(_) => break,
                 _ => {}

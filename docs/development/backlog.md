@@ -21,12 +21,21 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 4. **B79** Evaluation harness — SWE-bench integration.
 5. **B80** Trajectory recording — JSONL decision trees.
 
-### Platform Verification (Must Do)
+### Desktop/Web Frontend Fixes (Critical)
 
-6. **Desktop app audit** — verify Tauri desktop app works end-to-end (session CRUD, agent runs, tool execution, model switching). Fix broken IPC commands.
-7. **TUI smoke test suite** — automated smoke tests for TUI mode (session resume, slash commands, theme switching, plugin list, model selector).
-8. **CLI headless regression** — verify all headless flags work (--json, --follow-up, --later, --multi-agent, --workflow).
-9. **Web/browser mode** — explore hosting AVA locally with a web UI on a port (e.g. `ava serve --port 8080`). Could use the existing SolidJS frontend served via HTTP instead of Tauri.
+6. **Web mode: + button creates session but UI doesn't update** — session gets created via API but the frontend doesn't transition to chat view. The session lifecycle store may need a web-specific flow that doesn't rely on SQL plugin reactivity.
+7. **Web mode: async agent streaming** — agent submit returns immediately but WebSocket events aren't being consumed by the chat UI components. Need to wire `useRustAgent` WebSocket path to the message store.
+8. **Desktop: Ctrl+T thinking toggle** — keyboard shortcut not bound in desktop (works in TUI).
+9. **Desktop: Ctrl+Y copy last response** — not implemented.
+10. **Desktop: theme picker UI** — no settings tab to switch themes (TUI has 29 themes via `/theme`).
+11. **Desktop: `/later` and `/queue` commands** — mid-stream messaging commands not wired.
+12. **Desktop: mid-stream messaging IPC** — steering/follow-up/post-complete Tauri bridge incomplete.
+13. **Web mode: full DB operation parity** — agents, checkpoints, memory queries return empty in web mode. Need HTTP endpoints for full feature set.
+
+### Platform Verification
+
+14. **TUI smoke test suite** — automated smoke tests for TUI mode.
+15. **CLI headless regression** — verify all headless flags work.
 
 ### Soon (Medium Impact)
 

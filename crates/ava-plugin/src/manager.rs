@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use tracing::{debug, info, warn};
 
 use crate::discovery::discover_plugins;
-use crate::hooks::{HookDispatcher, HookEvent, HookResponse};
+use crate::hooks::{AuthCredentials, AuthMethodsResponse, HookDispatcher, HookEvent, HookResponse};
 use crate::runtime::PluginProcess;
 
 /// Status of a managed plugin.
@@ -127,6 +127,141 @@ impl PluginManager {
             .await
     }
 
+    // -----------------------------------------------------------------------
+    // Auth sub-protocol
+    // -----------------------------------------------------------------------
+
+    /// Query all subscribed plugins for auth methods they can provide for `provider`.
+    ///
+    /// Each subscribed plugin receives a `hook/auth.methods` request with
+    /// `{"provider": "<name>"}` and is expected to return an [`AuthMethodsResponse`].
+    /// Plugins that error or time out are logged and skipped.
+    pub async fn get_auth_methods(&mut self, provider: &str) -> Vec<AuthMethodsResponse> {
+        let params = serde_json::json!({ "provider": provider });
+        let responses = self
+            .dispatcher
+            .dispatch(&HookEvent::AuthMethods, &params, &mut self.processes)
+            .await;
+
+        let mut results = Vec::new();
+        for resp in responses {
+            if resp.error.is_some() {
+                warn!(
+                    plugin = resp.plugin_name,
+                    provider,
+                    error = ?resp.error,
+                    "plugin failed to provide auth methods"
+                );
+                continue;
+            }
+            match serde_json::from_value::<AuthMethodsResponse>(resp.result) {
+                Ok(auth_resp) => results.push(auth_resp),
+                Err(e) => {
+                    warn!(
+                        plugin = resp.plugin_name,
+                        provider,
+                        error = %e,
+                        "plugin returned invalid auth methods response"
+                    );
+                }
+            }
+        }
+        results
+    }
+
+    /// Execute an auth flow via a plugin for the given `provider`.
+    ///
+    /// `method_index` selects which [`AuthMethod`](crate::hooks::AuthMethod) from
+    /// the plugin's `get_auth_methods` response to use. `user_input` carries
+    /// user-provided data (e.g. a pasted API key, an OAuth callback code).
+    ///
+    /// Sends `hook/auth.authorize` to subscribed plugins and returns the first
+    /// successful [`AuthCredentials`].
+    pub async fn authorize(
+        &mut self,
+        provider: &str,
+        method_index: usize,
+        user_input: Option<&str>,
+    ) -> Option<AuthCredentials> {
+        let params = serde_json::json!({
+            "provider": provider,
+            "method_index": method_index,
+            "user_input": user_input,
+        });
+        let responses = self
+            .dispatcher
+            .dispatch(&HookEvent::AuthAuthorize, &params, &mut self.processes)
+            .await;
+
+        for resp in responses {
+            if resp.error.is_some() {
+                warn!(
+                    plugin = resp.plugin_name,
+                    provider,
+                    error = ?resp.error,
+                    "plugin auth authorize failed"
+                );
+                continue;
+            }
+            match serde_json::from_value::<AuthCredentials>(resp.result) {
+                Ok(creds) => return Some(creds),
+                Err(e) => {
+                    warn!(
+                        plugin = resp.plugin_name,
+                        provider,
+                        error = %e,
+                        "plugin returned invalid auth credentials"
+                    );
+                }
+            }
+        }
+        None
+    }
+
+    /// Refresh expired credentials via a plugin.
+    ///
+    /// Sends `hook/auth.refresh` with the provider name and refresh token.
+    /// Returns the first successful [`AuthCredentials`] or `None` if no plugin
+    /// can refresh.
+    pub async fn refresh_auth(
+        &mut self,
+        provider: &str,
+        refresh_token: &str,
+    ) -> Option<AuthCredentials> {
+        let params = serde_json::json!({
+            "provider": provider,
+            "refresh_token": refresh_token,
+        });
+        let responses = self
+            .dispatcher
+            .dispatch(&HookEvent::AuthRefresh, &params, &mut self.processes)
+            .await;
+
+        for resp in responses {
+            if resp.error.is_some() {
+                warn!(
+                    plugin = resp.plugin_name,
+                    provider,
+                    error = ?resp.error,
+                    "plugin auth refresh failed"
+                );
+                continue;
+            }
+            match serde_json::from_value::<AuthCredentials>(resp.result) {
+                Ok(creds) => return Some(creds),
+                Err(e) => {
+                    warn!(
+                        plugin = resp.plugin_name,
+                        provider,
+                        error = %e,
+                        "plugin returned invalid refresh credentials"
+                    );
+                }
+            }
+        }
+        None
+    }
+
     /// Gracefully shut down all running plugin processes.
     pub async fn shutdown_all(&mut self) {
         info!(count = self.processes.len(), "shutting down all plugins");
@@ -208,6 +343,27 @@ mod tests {
         let mut manager = PluginManager::new();
         manager.shutdown_all().await;
         assert_eq!(manager.running_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn get_auth_methods_no_plugins() {
+        let mut manager = PluginManager::new();
+        let methods = manager.get_auth_methods("copilot").await;
+        assert!(methods.is_empty(), "no plugins = no auth methods");
+    }
+
+    #[tokio::test]
+    async fn authorize_no_plugins() {
+        let mut manager = PluginManager::new();
+        let creds = manager.authorize("copilot", 0, None).await;
+        assert!(creds.is_none(), "no plugins = no credentials");
+    }
+
+    #[tokio::test]
+    async fn refresh_auth_no_plugins() {
+        let mut manager = PluginManager::new();
+        let creds = manager.refresh_auth("copilot", "old-token").await;
+        assert!(creds.is_none(), "no plugins = no refresh");
     }
 
     #[test]

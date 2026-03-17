@@ -1,0 +1,11 @@
+[plugin]
+name = "hello-python"
+version = "0.1.0"
+description = "Example Python plugin that logs session and tool events"
+
+[runtime]
+command = "python3"
+args = ["plugin.py"]
+
+[hooks]
+subscribe = ["session.start", "session.end", "tool.before", "tool.after"]

@@ -52,6 +52,31 @@ pub fn base_url_for_provider(provider_name: &str) -> Option<&'static str> {
 ///
 /// For CLI agent providers (e.g., `cli:claude-code`), use a `ProviderFactory`
 /// registered on the `ModelRouter` instead — this function only handles API providers.
+///
+/// # Plugin auth hook point
+///
+/// Before falling through to the credential store, callers should check whether any
+/// plugin provides auth for this provider via the plugin manager:
+///
+/// ```rust,ignore
+/// // TODO: Wire this into AgentStack or the provider creation call site.
+/// // The PluginManager is async and lives on the AgentStack, so the hook
+/// // needs to run before this synchronous function is called.
+/// //
+/// //   let plugin_methods = plugin_manager.get_auth_methods(provider_name).await;
+/// //   if !plugin_methods.is_empty() {
+/// //       // Let the user pick a method, then:
+/// //       let creds = plugin_manager.authorize(provider_name, method_index, user_input).await;
+/// //       // Inject creds into the CredentialStore before calling create_provider().
+/// //   }
+/// //
+/// // For token refresh, before each LLM call check expiry:
+/// //   if credential.is_oauth_expired() {
+/// //       if let Some(refreshed) = plugin_manager.refresh_auth(provider_name, refresh_token).await {
+/// //           credential_store.update_from_plugin_creds(refreshed);
+/// //       }
+/// //   }
+/// ```
 pub fn create_provider(
     provider_name: &str,
     model: &str,

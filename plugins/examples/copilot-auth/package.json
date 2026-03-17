@@ -1,0 +1,7 @@
+{
+  "name": "copilot-auth",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GitHub Copilot authentication plugin for AVA (no npm deps needed)",
+  "main": "index.js"
+}

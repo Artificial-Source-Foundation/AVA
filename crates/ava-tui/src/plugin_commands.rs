@@ -13,6 +13,7 @@ pub async fn run_plugin(cmd: PluginCommand) -> Result<()> {
         PluginCommand::Add { source } => plugin_add(&source).await,
         PluginCommand::Remove { name } => plugin_remove(&name),
         PluginCommand::Info { name } => plugin_info(&name),
+        PluginCommand::Init { name, lang } => plugin_init(&name, &lang),
     }
 }
 
@@ -275,6 +276,386 @@ pub fn format_plugin_list_inline() -> String {
         ));
     }
     format!("Plugins ({}):\n{}", plugins.len(), lines.join("\n"))
+}
+
+/// Scaffold a new plugin project.
+fn plugin_init(name: &str, lang: &str) -> Result<()> {
+    let dir = PathBuf::from(name);
+    if dir.exists() {
+        return Err(color_eyre::eyre::eyre!("Directory already exists: {name}"));
+    }
+
+    // Validate plugin name (alphanumeric, hyphens, underscores)
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(color_eyre::eyre::eyre!(
+            "Invalid plugin name: {name}\nUse only alphanumeric characters, hyphens, and underscores."
+        ));
+    }
+
+    std::fs::create_dir_all(&dir)?;
+
+    match lang {
+        "typescript" | "ts" => scaffold_typescript(&dir, name)?,
+        "python" | "py" => scaffold_python(&dir, name)?,
+        "shell" | "sh" | "bash" => scaffold_shell(&dir, name)?,
+        _ => {
+            // Clean up created dir on error
+            let _ = std::fs::remove_dir(&dir);
+            return Err(color_eyre::eyre::eyre!(
+                "Unsupported language: {lang}\nSupported: typescript, python, shell"
+            ));
+        }
+    }
+
+    println!("Created plugin: {name}/");
+    println!();
+    println!("Next steps:");
+    println!("  cd {name}");
+    match lang {
+        "typescript" | "ts" => {
+            println!("  npm install");
+            println!("  npx tsc");
+        }
+        "python" | "py" => {
+            println!("  pip install -r requirements.txt  # (no deps needed)");
+        }
+        "shell" | "sh" | "bash" => {
+            println!("  chmod +x plugin.sh");
+        }
+        _ => {}
+    }
+    println!("  ava plugin add .");
+    println!("  ava plugin list");
+
+    Ok(())
+}
+
+fn scaffold_typescript(dir: &Path, name: &str) -> Result<()> {
+    std::fs::write(
+        dir.join("plugin.toml"),
+        format!(
+            r#"[plugin]
+name = "{name}"
+version = "0.1.0"
+description = ""
+author = ""
+
+[runtime]
+command = "node"
+args = ["dist/index.js"]
+
+[hooks]
+subscribe = ["session.start", "session.end"]
+"#
+        ),
+    )?;
+
+    std::fs::write(
+        dir.join("index.ts"),
+        r#"import * as fs from "node:fs";
+
+const hooks = ["session.start", "session.end"];
+
+interface JsonRpcMessage {
+  jsonrpc: string;
+  id?: number;
+  method?: string;
+  params?: Record<string, unknown>;
+}
+
+function sendMessage(msg: object): void {
+  const json = JSON.stringify(msg);
+  const header = `Content-Length: ${Buffer.byteLength(json)}\r\n\r\n`;
+  fs.writeSync(1, header + json);
+}
+
+function handleMessage(msg: JsonRpcMessage): void {
+  if (msg.method === "initialize") {
+    process.stderr.write(`[plugin] Initialized\n`);
+    sendMessage({ jsonrpc: "2.0", id: msg.id, result: { hooks } });
+    return;
+  }
+
+  if (msg.method === "shutdown") {
+    process.exit(0);
+  }
+
+  if (msg.method === "hook/session.start") {
+    process.stderr.write(`[plugin] Session started\n`);
+    if (msg.id != null) sendMessage({ jsonrpc: "2.0", id: msg.id, result: {} });
+    return;
+  }
+
+  if (msg.method === "hook/session.end") {
+    process.stderr.write(`[plugin] Session ended\n`);
+    if (msg.id != null) sendMessage({ jsonrpc: "2.0", id: msg.id, result: {} });
+    return;
+  }
+
+  // Unknown method — respond OK
+  if (msg.id != null) sendMessage({ jsonrpc: "2.0", id: msg.id, result: {} });
+}
+
+let buffer = "";
+process.stdin.setEncoding("utf-8");
+process.stdin.on("data", (chunk: string) => {
+  buffer += chunk;
+  while (true) {
+    const headerEnd = buffer.indexOf("\r\n\r\n");
+    if (headerEnd === -1) break;
+    const header = buffer.substring(0, headerEnd);
+    const match = header.match(/Content-Length:\s*(\d+)/);
+    if (!match) {
+      buffer = buffer.substring(headerEnd + 4);
+      continue;
+    }
+    const len = parseInt(match[1], 10);
+    const bodyStart = headerEnd + 4;
+    if (buffer.length < bodyStart + len) break;
+    const body = buffer.substring(bodyStart, bodyStart + len);
+    buffer = buffer.substring(bodyStart + len);
+    try {
+      handleMessage(JSON.parse(body));
+    } catch (e) {
+      process.stderr.write(`[plugin] Error: ${e}\n`);
+    }
+  }
+});
+"#,
+    )?;
+
+    std::fs::write(
+        dir.join("package.json"),
+        format!(
+            r#"{{
+  "name": "{name}",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "scripts": {{
+    "build": "tsc",
+    "watch": "tsc --watch"
+  }},
+  "devDependencies": {{
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0"
+  }}
+}}
+"#
+        ),
+    )?;
+
+    std::fs::write(
+        dir.join("tsconfig.json"),
+        r#"{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "outDir": "dist",
+    "rootDir": ".",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["*.ts"],
+  "exclude": ["node_modules", "dist"]
+}
+"#,
+    )?;
+
+    std::fs::write(dir.join(".gitignore"), "node_modules/\ndist/\n")?;
+
+    Ok(())
+}
+
+fn scaffold_python(dir: &Path, name: &str) -> Result<()> {
+    std::fs::write(
+        dir.join("plugin.toml"),
+        format!(
+            r#"[plugin]
+name = "{name}"
+version = "0.1.0"
+description = ""
+author = ""
+
+[runtime]
+command = "python3"
+args = ["plugin.py"]
+
+[hooks]
+subscribe = ["session.start", "session.end"]
+"#
+        ),
+    )?;
+
+    std::fs::write(
+        dir.join("plugin.py"),
+        r#"#!/usr/bin/env python3
+"""AVA plugin — JSON-RPC over stdin/stdout with Content-Length framing."""
+
+import json
+import sys
+
+HOOKS = ["session.start", "session.end"]
+
+
+def send_message(msg: dict) -> None:
+    body = json.dumps(msg)
+    header = f"Content-Length: {len(body.encode())}\r\n\r\n"
+    sys.stdout.write(header + body)
+    sys.stdout.flush()
+
+
+def handle_message(msg: dict) -> None:
+    method = msg.get("method", "")
+    msg_id = msg.get("id")
+
+    if method == "initialize":
+        print("[plugin] Initialized", file=sys.stderr)
+        send_message({"jsonrpc": "2.0", "id": msg_id, "result": {"hooks": HOOKS}})
+        return
+
+    if method == "shutdown":
+        sys.exit(0)
+
+    if method == "hook/session.start":
+        print("[plugin] Session started", file=sys.stderr)
+        if msg_id is not None:
+            send_message({"jsonrpc": "2.0", "id": msg_id, "result": {}})
+        return
+
+    if method == "hook/session.end":
+        print("[plugin] Session ended", file=sys.stderr)
+        if msg_id is not None:
+            send_message({"jsonrpc": "2.0", "id": msg_id, "result": {}})
+        return
+
+    # Unknown method — respond OK
+    if msg_id is not None:
+        send_message({"jsonrpc": "2.0", "id": msg_id, "result": {}})
+
+
+def main() -> None:
+    buffer = ""
+    while True:
+        chunk = sys.stdin.read(1)
+        if not chunk:
+            break
+        buffer += chunk
+
+        while "\r\n\r\n" in buffer:
+            header_end = buffer.index("\r\n\r\n")
+            header = buffer[:header_end]
+            length_line = [
+                line for line in header.split("\r\n")
+                if line.startswith("Content-Length:")
+            ]
+            if not length_line:
+                buffer = buffer[header_end + 4:]
+                continue
+
+            content_length = int(length_line[0].split(":")[1].strip())
+            body_start = header_end + 4
+            if len(buffer) < body_start + content_length:
+                break
+
+            body = buffer[body_start:body_start + content_length]
+            buffer = buffer[body_start + content_length:]
+
+            try:
+                handle_message(json.loads(body))
+            except Exception as e:
+                print(f"[plugin] Error: {e}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()
+"#,
+    )?;
+
+    std::fs::write(dir.join("requirements.txt"), "# No dependencies needed\n")?;
+
+    Ok(())
+}
+
+fn scaffold_shell(dir: &Path, name: &str) -> Result<()> {
+    std::fs::write(
+        dir.join("plugin.toml"),
+        format!(
+            r#"[plugin]
+name = "{name}"
+version = "0.1.0"
+description = ""
+author = ""
+
+[runtime]
+command = "bash"
+args = ["plugin.sh"]
+
+[hooks]
+subscribe = ["session.start", "session.end"]
+"#
+        ),
+    )?;
+
+    std::fs::write(
+        dir.join("plugin.sh"),
+        r#"#!/usr/bin/env bash
+# AVA plugin — JSON-RPC over stdin/stdout with Content-Length framing.
+set -euo pipefail
+
+send_response() {
+  local body="$1"
+  local len=${#body}
+  printf "Content-Length: %d\r\n\r\n%s" "$len" "$body"
+}
+
+handle_message() {
+  local msg="$1"
+  local method id
+
+  method=$(echo "$msg" | jq -r '.method // empty')
+  id=$(echo "$msg" | jq -r '.id // empty')
+
+  case "$method" in
+    initialize)
+      echo "[plugin] Initialized" >&2
+      send_response "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"hooks\":[\"session.start\",\"session.end\"]}}"
+      ;;
+    shutdown)
+      exit 0
+      ;;
+    hook/session.start)
+      echo "[plugin] Session started" >&2
+      [ -n "$id" ] && send_response "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{}}"
+      ;;
+    hook/session.end)
+      echo "[plugin] Session ended" >&2
+      [ -n "$id" ] && send_response "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{}}"
+      ;;
+    *)
+      [ -n "$id" ] && send_response "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{}}"
+      ;;
+  esac
+}
+
+# Read Content-Length framed messages from stdin
+while IFS= read -r line; do
+  if [[ "$line" =~ Content-Length:\ ([0-9]+) ]]; then
+    content_length="${BASH_REMATCH[1]}"
+    read -r _blank  # consume \r\n
+    body=$(dd bs=1 count="$content_length" 2>/dev/null)
+    handle_message "$body"
+  fi
+done
+"#,
+    )?;
+
+    Ok(())
 }
 
 // -- helpers --

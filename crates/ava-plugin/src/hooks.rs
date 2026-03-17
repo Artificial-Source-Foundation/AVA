@@ -8,12 +8,80 @@ use tracing::{debug, warn};
 
 use crate::runtime::PluginProcess;
 
+// ---------------------------------------------------------------------------
+// Auth sub-protocol types
+// ---------------------------------------------------------------------------
+
+/// An authentication method that a plugin can offer for a provider.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AuthMethod {
+    /// Prompt the user for an API key.
+    ApiKey {
+        /// Human-readable prompt to display (e.g. "Enter your Acme API key").
+        prompt: String,
+    },
+    /// Browser-based OAuth with a local redirect.
+    OAuth {
+        /// The authorization URL to open in the user's browser.
+        auth_url: String,
+        /// Port for the local callback server.
+        callback_port: u16,
+    },
+    /// Device-code flow (e.g. GitHub Copilot).
+    DeviceCode {
+        /// URL where the user enters the code.
+        verification_url: String,
+        /// Code to display to the user.
+        user_code: String,
+    },
+}
+
+/// Response from a plugin listing its supported auth methods for a provider.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuthMethodsResponse {
+    /// Provider name this auth applies to (e.g. "copilot", "acme").
+    pub provider: String,
+    /// Available authentication methods, ordered by preference.
+    pub methods: Vec<AuthMethod>,
+}
+
+/// Credentials returned by a plugin after a successful auth or refresh flow.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AuthCredentials {
+    /// Provider name (must match the request).
+    pub provider: String,
+    /// API key, if the flow produces one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// OAuth access token.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth_token: Option<String>,
+    /// OAuth refresh token for later renewal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    /// Unix timestamp (seconds) when the token expires.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<i64>,
+    /// Extra headers to inject into LLM requests (e.g. `x-custom-auth`).
+    #[serde(default)]
+    pub headers: HashMap<String, String>,
+}
+
+// ---------------------------------------------------------------------------
+// Hook events
+// ---------------------------------------------------------------------------
+
 /// Hook events that plugins can subscribe to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HookEvent {
     /// Provide credentials for a provider.
     Auth,
+    /// Query available auth methods for a provider.
+    AuthMethods,
+    /// Execute an auth flow and return credentials.
+    AuthAuthorize,
     /// Refresh expired tokens.
     AuthRefresh,
     /// Inject headers into LLM API calls.
@@ -43,6 +111,8 @@ impl HookEvent {
     pub fn wire_name(&self) -> &'static str {
         match self {
             Self::Auth => "auth",
+            Self::AuthMethods => "auth.methods",
+            Self::AuthAuthorize => "auth.authorize",
             Self::AuthRefresh => "auth.refresh",
             Self::RequestHeaders => "request.headers",
             Self::ToolBefore => "tool.before",
@@ -61,6 +131,8 @@ impl HookEvent {
     pub fn from_wire_name(name: &str) -> Option<Self> {
         match name {
             "auth" => Some(Self::Auth),
+            "auth.methods" => Some(Self::AuthMethods),
+            "auth.authorize" => Some(Self::AuthAuthorize),
             "auth.refresh" => Some(Self::AuthRefresh),
             "request.headers" => Some(Self::RequestHeaders),
             "tool.before" => Some(Self::ToolBefore),
@@ -268,6 +340,8 @@ mod tests {
     fn hook_event_wire_name_roundtrip() {
         let events = vec![
             HookEvent::Auth,
+            HookEvent::AuthMethods,
+            HookEvent::AuthAuthorize,
             HookEvent::AuthRefresh,
             HookEvent::RequestHeaders,
             HookEvent::ToolBefore,
@@ -346,6 +420,102 @@ mod tests {
             .dispatch(&HookEvent::Auth, &Value::Null, &mut plugins)
             .await;
         assert!(responses.is_empty());
+    }
+
+    #[test]
+    fn auth_method_serialization_roundtrip() {
+        let methods = vec![
+            AuthMethod::ApiKey {
+                prompt: "Enter your API key".to_string(),
+            },
+            AuthMethod::OAuth {
+                auth_url: "https://example.com/auth".to_string(),
+                callback_port: 8080,
+            },
+            AuthMethod::DeviceCode {
+                verification_url: "https://example.com/device".to_string(),
+                user_code: "ABCD-1234".to_string(),
+            },
+        ];
+        for method in &methods {
+            let json = serde_json::to_string(method).unwrap();
+            let parsed: AuthMethod = serde_json::from_str(&json).unwrap();
+            assert_eq!(&parsed, method);
+        }
+    }
+
+    #[test]
+    fn auth_method_tagged_serialization() {
+        let method = AuthMethod::ApiKey {
+            prompt: "key please".to_string(),
+        };
+        let json = serde_json::to_string(&method).unwrap();
+        assert!(json.contains("\"type\":\"api_key\""));
+        assert!(json.contains("\"prompt\":\"key please\""));
+
+        let method = AuthMethod::OAuth {
+            auth_url: "https://x.com/auth".to_string(),
+            callback_port: 9999,
+        };
+        let json = serde_json::to_string(&method).unwrap();
+        assert!(json.contains("\"type\":\"o_auth\""));
+
+        let method = AuthMethod::DeviceCode {
+            verification_url: "https://x.com/device".to_string(),
+            user_code: "XYZ".to_string(),
+        };
+        let json = serde_json::to_string(&method).unwrap();
+        assert!(json.contains("\"type\":\"device_code\""));
+    }
+
+    #[test]
+    fn auth_methods_response_serialization() {
+        let response = AuthMethodsResponse {
+            provider: "acme".to_string(),
+            methods: vec![AuthMethod::ApiKey {
+                prompt: "Enter key".to_string(),
+            }],
+        };
+        let json = serde_json::to_string(&response).unwrap();
+        let parsed: AuthMethodsResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.provider, "acme");
+        assert_eq!(parsed.methods.len(), 1);
+    }
+
+    #[test]
+    fn auth_credentials_serialization() {
+        let creds = AuthCredentials {
+            provider: "copilot".to_string(),
+            api_key: None,
+            oauth_token: Some("gho_abc123".to_string()),
+            refresh_token: Some("ghr_xyz789".to_string()),
+            expires_at: Some(1700000000),
+            headers: {
+                let mut h = HashMap::new();
+                h.insert("x-custom".to_string(), "value".to_string());
+                h
+            },
+        };
+        let json = serde_json::to_string(&creds).unwrap();
+        let parsed: AuthCredentials = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.provider, "copilot");
+        assert_eq!(parsed.oauth_token.as_deref(), Some("gho_abc123"));
+        assert_eq!(parsed.refresh_token.as_deref(), Some("ghr_xyz789"));
+        assert_eq!(parsed.expires_at, Some(1700000000));
+        assert_eq!(parsed.headers.get("x-custom").unwrap(), "value");
+        // api_key was None, so it should be skipped in JSON
+        assert!(!json.contains("\"api_key\""));
+    }
+
+    #[test]
+    fn auth_credentials_minimal() {
+        // Minimal credentials with just an API key
+        let json = r#"{"provider":"test","api_key":"sk-123"}"#;
+        let parsed: AuthCredentials = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.provider, "test");
+        assert_eq!(parsed.api_key.as_deref(), Some("sk-123"));
+        assert!(parsed.oauth_token.is_none());
+        assert!(parsed.headers.is_empty());
     }
 
     #[tokio::test]

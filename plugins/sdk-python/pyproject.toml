@@ -1,0 +1,11 @@
+[project]
+name = "ava-plugin"
+version = "0.1.0"
+description = "SDK for building AVA plugins in Python"
+requires-python = ">=3.8"
+dependencies = []
+license = {text = "MIT"}
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.backends._legacy:_Backend"

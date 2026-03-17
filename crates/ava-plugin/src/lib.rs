@@ -18,7 +18,10 @@ pub mod manifest;
 pub mod runtime;
 
 pub use discovery::{discover_plugins, DiscoveredPlugin};
-pub use hooks::{HookDispatcher, HookEvent, HookRequest, HookResponse};
+pub use hooks::{
+    AuthCredentials, AuthMethod, AuthMethodsResponse, HookDispatcher, HookEvent, HookRequest,
+    HookResponse,
+};
 pub use manager::{PluginInfo, PluginManager, PluginStatus};
 pub use manifest::{HookSubscriptions, PluginManifest, RuntimeConfig};
 pub use runtime::PluginProcess;

@@ -162,6 +162,14 @@ pub enum PluginCommand {
         /// Plugin name
         name: String,
     },
+    /// Scaffold a new plugin project
+    Init {
+        /// Plugin name
+        name: String,
+        /// Language: typescript, python, or shell
+        #[arg(long, default_value = "typescript")]
+        lang: String,
+    },
 }
 
 #[derive(Debug, Clone, Subcommand)]

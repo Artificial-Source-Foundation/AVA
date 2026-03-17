@@ -1,0 +1,11 @@
+[plugin]
+name = "copilot-auth"
+version = "0.1.0"
+description = "GitHub Copilot authentication via device code flow"
+
+[runtime]
+command = "node"
+args = ["index.js"]
+
+[hooks]
+subscribe = ["auth", "auth.authorize", "auth.refresh", "session.start"]

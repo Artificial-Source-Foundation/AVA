@@ -1,5 +1,28 @@
 # Changelog
 
+## v2.2.0 (2026-03-17)
+
+### Added
+- **Power plugin system** — subprocess-isolated plugins via JSON-RPC
+  - `ava-plugin` crate (manifest, discovery, hooks, runtime, manager)
+  - 12 hook types (auth, tool.before/after, agent.before/after, session, etc.)
+  - Plugin wired into AgentStack (hooks fire at all lifecycle points)
+  - `@ava-ai/plugin` TypeScript SDK (zero dependencies)
+  - 3 example plugins (hello-plugin, env-guard, request-logger)
+  - CLI: `ava plugin list/add/remove/info`
+  - TUI: `/plugin` slash command
+- Plugin system design doc with OpenCode flaw analysis
+
+### Removed
+- 30 unwired modules (~10.5K LOC dead code) moved to `docs/ideas/`
+- Architect, build-race, reviewer, scheduler, guardian, and 25 more
+
+### Changed
+- Documentation overhaul (README, crate-map, plugin guide, changelog)
+- Updated CLAUDE.md and AGENTS.md with mandatory doc-update rules
+- Development folder rebuilt (roadmap, backlog, epics, test-matrix)
+- Codebase reduced from ~50K to ~40K LOC (20% leaner)
+
 ## v2.1.1 (2026-03-16)
 
 ### Added

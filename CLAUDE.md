@@ -39,7 +39,7 @@ AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust
 
 ### Codebase Stats
 
-- **20 Rust crates**, 358 source files, ~104K LOC, 1,798 tests
+- **21 Rust crates**, 358 source files, ~104K LOC, 1,798 tests
 - **8 LLM providers**: Anthropic, OpenAI-compatible, Gemini, Ollama, OpenRouter, Copilot, Inception, Mock
 - **6 default tools**: `read`, `write`, `edit`, `bash`, `glob`, `grep`
 - **8 extended tools**: `apply_patch`, `web_fetch`, `web_search`, `multiedit`, `ast_ops`, `lsp_ops`, `code_search`, `git_read`
@@ -61,7 +61,7 @@ Commands: `/later` (add post-complete message), `/queue` (view/manage pending me
 
 ```text
 AVA/
-+-- crates/                   # 20 Rust crates (agent stack + TUI + services)
++-- crates/                   # 21 Rust crates (agent stack + TUI + services)
 |   +-- ava-tui/              # CLI/TUI binary (Ratatui) -- THE primary interface
 |   +-- ava-agent/            # Agent execution loop + reflection
 |   +-- ava-llm/              # LLM providers (8 built-in)

@@ -10,6 +10,7 @@ import { onCleanup } from 'solid-js'
 import { validateEnv } from '../config/env'
 import { checkApiHealth } from '../lib/api-client'
 import { disposeFrontendLogger, initFrontendLogger, log } from '../lib/logger'
+import { registerBuiltInCommands } from '../services/command-resolver'
 import { initCoreBridge } from '../services/core-bridge'
 import { initDatabase } from '../services/database'
 import { initDeepLinks } from '../services/deep-link'
@@ -112,6 +113,7 @@ export async function runAppInit(
     })
 
     validateEnv()
+    registerBuiltInCommands()
 
     setSplashStatus('Initializing platform...')
     await initSettingsFS()
@@ -254,6 +256,7 @@ async function runWebInit(
     setSplashStatus('Starting logger...')
     await initFrontendLogger()
     log.info('app', 'Web mode initialization started')
+    registerBuiltInCommands()
 
     // Initialize settings FS with localStorage fallback and hydrate persisted settings
     setSplashStatus('Loading settings...')

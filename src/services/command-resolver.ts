@@ -39,6 +39,8 @@ const BUILT_IN_NAMES = new Set([
   'status',
   'export',
   'init',
+  'later',
+  'queue',
 ])
 
 export interface ParsedCommand {
@@ -94,4 +96,14 @@ export function getAvailableCommands(): CommandEntry[] {
     entries.push({ name, description: cmd.description, isBuiltIn: BUILT_IN_NAMES.has(name) })
   }
   return entries.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+/** Register the built-in /later and /queue commands */
+export function registerBuiltInCommands(): void {
+  registerCommand('later', {
+    description: 'Queue a post-complete message for after the agent finishes',
+  })
+  registerCommand('queue', {
+    description: 'Show the current message queue',
+  })
 }

@@ -1,6 +1,7 @@
 import { type Accessor, createEffect, createMemo, createSignal, on, onCleanup } from 'solid-js'
 import { useAgent } from '../../../hooks/useAgent'
 import { useChat } from '../../../hooks/useChat'
+import { parseSlashCommand } from '../../../services/command-resolver'
 import type { SearchableFile } from '../../../services/file-search'
 import { openInExternalEditor } from '../../../services/ide-integration'
 import { getStash, popStash, pushStash } from '../../../services/prompt-stash'
@@ -165,6 +166,45 @@ export function useInputState(): InputState {
     e.preventDefault()
     const message = input().trim()
     if (!message || submitting) return
+
+    // Handle /later and /queue slash commands locally
+    const parsed = parseSlashCommand(message)
+    if (parsed) {
+      if (parsed.name === 'later') {
+        const laterMsg = parsed.args.trim()
+        if (laterMsg) {
+          agent.postComplete(laterMsg)
+        }
+        setInput('')
+        setHistoryIndex(-1)
+        if (textareaRef) textareaRef.style.height = 'auto'
+        return
+      }
+      if (parsed.name === 'queue') {
+        const queue = chat.messageQueue()
+        const sessionId = sessionStore.currentSession()?.id ?? ''
+        const queueText =
+          queue.length === 0
+            ? 'No messages in queue.'
+            : queue
+                .map(
+                  (q, i) =>
+                    `${i + 1}. **[${(q as { tier?: string }).tier ?? 'pending'}]** ${q.content.slice(0, 120)}`
+                )
+                .join('\n')
+        sessionStore.addMessage({
+          id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          sessionId,
+          role: 'system',
+          content: `**Message Queue** (${queue.length} item${queue.length === 1 ? '' : 's'})\n\n${queueText}`,
+          createdAt: Date.now(),
+        })
+        setInput('')
+        setHistoryIndex(-1)
+        if (textareaRef) textareaRef.style.height = 'auto'
+        return
+      }
+    }
 
     // Mid-stream messaging: route to steer/follow-up when agent is running
     if (isProcessing()) {

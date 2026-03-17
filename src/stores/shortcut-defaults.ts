@@ -140,4 +140,18 @@ export const DEFAULT_SHORTCUTS: ShortcutDef[] = [
     description: 'Create a named checkpoint of the current conversation',
     category: 'Session',
   },
+  {
+    id: 'cycle-thinking',
+    keys: ['ctrl', 't'],
+    label: 'Cycle Thinking Level',
+    description: 'Cycle reasoning effort: Off → Low → Medium → High → Max → Off',
+    category: 'Chat',
+  },
+  {
+    id: 'copy-last-response',
+    keys: ['ctrl', 'y'],
+    label: 'Copy Last Response',
+    description: 'Copy the last assistant response to clipboard',
+    category: 'Chat',
+  },
 ]

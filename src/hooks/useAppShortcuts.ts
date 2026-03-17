@@ -6,10 +6,12 @@
  */
 
 import { onCleanup } from 'solid-js'
+import { cycleReasoningEffort } from '../components/chat/message-input/toolbar-buttons'
 import { useNotification } from '../contexts/notification'
 import { useLayout } from '../stores/layout'
 import { useProject } from '../stores/project'
 import { useSession } from '../stores/session'
+import { useSettings } from '../stores/settings'
 import { useShortcuts } from '../stores/shortcuts'
 
 export function registerAppShortcuts(
@@ -33,6 +35,7 @@ export function registerAppShortcuts(
   const { currentProject } = useProject()
   const { messages, undoFileChange, redoFileChange, createNewSession } = useSession()
   const { registerAction, setupShortcutListener } = useShortcuts()
+  const { settings, updateSettings } = useSettings()
   const { info } = useNotification()
 
   registerAction('toggle-sidebar', toggleSidebar)
@@ -86,6 +89,26 @@ export function registerAppShortcuts(
     }
     await createNewSession()
     setProjectHubVisible(false)
+  })
+  registerAction('cycle-thinking', () => {
+    const current = settings().generation.reasoningEffort
+    const next = cycleReasoningEffort(current)
+    updateSettings({
+      generation: {
+        ...settings().generation,
+        reasoningEffort: next,
+        thinkingEnabled: next !== 'off',
+      },
+    })
+    info('Thinking', next === 'off' ? 'Reasoning off' : `Reasoning: ${next}`)
+  })
+  registerAction('copy-last-response', () => {
+    const msgs = messages()
+    const lastAssistant = [...msgs].reverse().find((m) => m.role === 'assistant')
+    if (!lastAssistant) return
+    void navigator.clipboard.writeText(lastAssistant.content).then(() => {
+      info('Copied', 'Response copied')
+    })
   })
 
   const cleanupShortcuts = setupShortcutListener()

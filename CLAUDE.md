@@ -244,6 +244,18 @@ cargo run --bin ava -- "goal" --headless --follow-up "also run tests" --provider
 cargo run --bin ava -- "goal" --headless --later "commit when done" --provider openrouter --model anthropic/claude-haiku-4.5
 ```
 
+## After Making Changes
+
+When you complete a significant feature, bug fix, or refactor:
+
+1. **Update `docs/development/CHANGELOG.md`** — add entry under current version
+2. **Update `docs/development/backlog.md`** — mark completed items, add new ones
+3. **Update this file (`CLAUDE.md`)** if architecture, crate count, tool count, or conventions changed
+4. **Update `docs/architecture/crate-map.md`** if crates were added/removed
+5. **Run `just check`** (or `cargo test --workspace && cargo clippy --workspace`) before committing
+
+Do NOT let docs drift from code. Every PR-worthy change should include doc updates.
+
 ## Documentation
 
 1. `CLAUDE.md` (this file) -- architecture, conventions, commands
@@ -251,5 +263,8 @@ cargo run --bin ava -- "goal" --headless --later "commit when done" --provider o
 3. `docs/README.md` -- documentation entry point with crate map
 4. `docs/plugins.md` -- TOML custom tools and MCP server guide
 5. `docs/architecture/crate-map.md` -- detailed crate dependency map
-6. `docs/development/roadmap.md` -- sprint history
-7. `docs/development/backlog.md` -- open backlog items
+6. `docs/architecture/plugin-system.md` -- power plugin system design
+7. `docs/development/CHANGELOG.md` -- version history
+8. `docs/development/roadmap.md` -- roadmap and sprint history
+9. `docs/development/backlog.md` -- open backlog items
+10. `docs/ideas/` -- archived feature designs (not implemented)

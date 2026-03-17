@@ -4,7 +4,7 @@
 
 AVA is a Rust-first AI coding assistant that runs as a CLI/TUI or Tauri desktop app. It sits between minimalist tools (Pi) and batteries-included IDEs (Cursor) -- lean defaults with opt-in power via MCP servers, TOML custom tools, and multi-agent orchestration.
 
-**20 Rust crates, ~104K LOC, 1,798 tests, single binary.**
+**21 Rust crates, ~40K LOC, 1,502 tests, single binary.**
 
 ## Quick Start
 

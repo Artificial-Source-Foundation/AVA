@@ -93,7 +93,7 @@ impl PluginProcess {
             .current_dir(plugin_dir)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
             .kill_on_drop(true);
 
         // Strip sensitive env vars from inherited environment

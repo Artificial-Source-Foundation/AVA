@@ -1,0 +1,11 @@
+[plugin]
+name = "tool-timer"
+version = "0.1.0"
+description = "Tracks tool execution times and blocks dangerous commands"
+
+[runtime]
+command = "node"
+args = ["index.js"]
+
+[hooks]
+subscribe = ["session.start", "session.end", "tool.before", "tool.after"]

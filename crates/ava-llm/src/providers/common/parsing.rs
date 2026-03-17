@@ -595,6 +595,35 @@ pub fn parse_openai_tool_calls(payload: &Value) -> Vec<ToolCall> {
 /// Parse tool use blocks from an Anthropic completion response payload.
 /// Convert AVA tool definitions to the OpenAI Responses API format.
 ///
+/// Recursively make a JSON Schema strict for the OpenAI Responses API:
+/// - Add `additionalProperties: false` to every object
+/// - Add ALL property keys to `required`
+/// - Recurse into nested objects and array items
+fn make_strict_schema(schema: &mut Value) {
+    if let Some(obj) = schema.as_object_mut() {
+        // If this is an object type with properties, make it strict
+        if obj.get("type").and_then(|t| t.as_str()) == Some("object") {
+            obj.entry("additionalProperties".to_string())
+                .or_insert(Value::Bool(false));
+            // All properties must be in required
+            if let Some(props) = obj.get("properties").and_then(|p| p.as_object()) {
+                let all_keys: Vec<Value> = props.keys().map(|k| Value::String(k.clone())).collect();
+                obj.insert("required".to_string(), Value::Array(all_keys));
+            }
+        }
+        // Recurse into properties
+        if let Some(Value::Object(props)) = obj.get_mut("properties") {
+            for prop_schema in props.values_mut() {
+                make_strict_schema(prop_schema);
+            }
+        }
+        // Recurse into array items
+        if let Some(items) = obj.get_mut("items") {
+            make_strict_schema(items);
+        }
+    }
+}
+
 /// The Responses API uses a flat tool schema:
 /// `{ "type": "function", "name": "...", "description": "...", "parameters": {...} }`
 /// instead of the Chat Completions nested `{ "type": "function", "function": {...} }` format.
@@ -602,13 +631,11 @@ pub fn tools_to_responses_api_format(tools: &[Tool]) -> Vec<Value> {
     tools
         .iter()
         .map(|tool| {
-            // The Responses API with strict:true requires additionalProperties:false
-            // in the parameters schema. Inject it if missing.
+            // The Responses API with strict:true requires (recursively):
+            // 1. additionalProperties: false on every object schema
+            // 2. ALL properties listed in "required" array
             let mut params = tool.parameters.clone();
-            if let Some(obj) = params.as_object_mut() {
-                obj.entry("additionalProperties")
-                    .or_insert(Value::Bool(false));
-            }
+            make_strict_schema(&mut params);
             json!({
                 "type": "function",
                 "name": tool.name,

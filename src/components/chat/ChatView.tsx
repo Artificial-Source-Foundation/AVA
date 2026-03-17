@@ -112,7 +112,7 @@ export const ChatView: Component = () => {
     if (chat.pendingApproval()) {
       chat.resolveApproval(approved)
     } else {
-      agent.resolveApproval(approved)
+      agent.resolveApproval(approved, alwaysAllow)
     }
   }
 

@@ -1,6 +1,6 @@
+import * as fs from 'node:fs'
+import * as path from 'node:path'
 import { createPlugin } from '@ava-ai/plugin'
-import * as fs from 'fs'
-import * as path from 'path'
 
 function getLogPath(projectDir: string): string {
   const dir = path.join(projectDir || '.', '.ava')

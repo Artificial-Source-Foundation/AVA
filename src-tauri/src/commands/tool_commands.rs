@@ -1,0 +1,31 @@
+//! Tauri commands for querying registered tools.
+
+use serde::Serialize;
+use tauri::State;
+
+use crate::bridge::DesktopBridge;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentToolInfo {
+    pub name: String,
+    pub description: String,
+    pub source: String,
+}
+
+/// List all tools currently registered in the agent's tool registry.
+#[tauri::command]
+pub async fn list_agent_tools(
+    bridge: State<'_, DesktopBridge>,
+) -> Result<Vec<AgentToolInfo>, String> {
+    let registry = bridge.stack.tools.read().await;
+    let tools = registry.list_tools_with_source();
+    Ok(tools
+        .into_iter()
+        .map(|(def, source)| AgentToolInfo {
+            name: def.name,
+            description: def.description,
+            source: format!("{:?}", source),
+        })
+        .collect())
+}

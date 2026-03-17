@@ -100,6 +100,34 @@ fn install_from_local(source: &Path) -> Result<()> {
 
     copy_dir_recursive(source, &dest)?;
 
+    // If the plugin has a package.json, run npm install to resolve dependencies.
+    // We use --install-strategy=nested to avoid symlinks that break when moved.
+    let pkg_json = dest.join("package.json");
+    if pkg_json.exists() {
+        println!("Installing dependencies...");
+        let npm_result = std::process::Command::new("npm")
+            .args([
+                "install",
+                "--production",
+                "--no-audit",
+                "--no-fund",
+                "--install-strategy=nested",
+            ])
+            .current_dir(&dest)
+            .output();
+
+        match npm_result {
+            Ok(output) if output.status.success() => {}
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                eprintln!("Warning: npm install had issues: {stderr}");
+            }
+            Err(e) => {
+                eprintln!("Warning: could not run npm install: {e}");
+            }
+        }
+    }
+
     println!(
         "Installed plugin: {} v{} -> {}",
         manifest.plugin.name,

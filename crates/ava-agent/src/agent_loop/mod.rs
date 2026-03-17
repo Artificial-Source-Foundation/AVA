@@ -1,3 +1,4 @@
+mod repetition;
 mod response;
 mod tool_execution;
 
@@ -22,6 +23,8 @@ use crate::llm_trait::LLMProvider;
 use crate::message_queue::MessageQueue;
 use crate::stuck::{StuckAction, StuckDetector};
 use crate::system_prompt::build_system_prompt;
+
+use repetition::RepetitionDetector;
 
 use response::parse_tool_calls;
 use tool_execution::has_validation_failure;
@@ -467,13 +470,14 @@ impl AgentLoop {
 
     /// Execute tool calls with steering support and event emission.
     ///
-    /// Returns (tool_results, steering_triggered).
+    /// Returns (tool_results, steering_triggered, repetition_warning).
     async fn execute_tools_unified(
         &mut self,
         tool_calls: &[ToolCall],
         detector: &mut StuckDetector,
+        repetition_detector: &mut RepetitionDetector,
         event_tx: &Option<mpsc::UnboundedSender<AgentEvent>>,
-    ) -> (Vec<ToolResult>, bool) {
+    ) -> (Vec<ToolResult>, bool, Option<String>) {
         let mut steering_triggered = false;
 
         // Guard against runaway tool invocations from a single LLM response
@@ -574,13 +578,23 @@ impl AgentLoop {
         // Sort by original index and collect results
         indexed_results.sort_by_key(|(i, _, _)| *i);
         let mut tool_results = Vec::new();
-        for (_, result, execution) in indexed_results {
-            detector.tool_monitor_mut().record(execution);
+        let mut repetition_warning = None;
+        for (idx, result, execution) in &indexed_results {
+            detector.tool_monitor_mut().record(execution.clone());
             tool_results.push(result.clone());
-            Self::emit(event_tx, AgentEvent::ToolResult(result));
+            Self::emit(event_tx, AgentEvent::ToolResult(result.clone()));
+
+            // Record each tool call in the repetition detector.
+            // We match back to the original ToolCall by index.
+            if let Some(tc) = capped_calls.get(*idx) {
+                if let Some(warning) = repetition_detector.record(tc) {
+                    warn!("{warning}");
+                    repetition_warning = Some(warning);
+                }
+            }
         }
 
-        (tool_results, steering_triggered)
+        (tool_results, steering_triggered, repetition_warning)
     }
 
     /// Unified agent execution engine. Both `run()` (headless) and `run_streaming()`
@@ -594,6 +608,7 @@ impl AgentLoop {
     ) -> ava_types::Result<Session> {
         let mut session = Session::new();
         let mut detector = StuckDetector::new();
+        let mut repetition_detector = RepetitionDetector::default();
         let mut total_usage = TokenUsage::default();
         let mut total_cost_usd = 0.0;
 
@@ -682,9 +697,28 @@ impl AgentLoop {
             }
 
             // --- Execute tools ---
-            let (tool_results, steering_triggered) = self
-                .execute_tools_unified(&tool_calls, &mut detector, &event_tx)
+            let (tool_results, steering_triggered, repetition_warning) = self
+                .execute_tools_unified(
+                    &tool_calls,
+                    &mut detector,
+                    &mut repetition_detector,
+                    &event_tx,
+                )
                 .await;
+
+            // --- Repetition detection ---
+            if let Some(ref warning) = repetition_warning {
+                let assistant_message = Message::new(Role::Assistant, response_text.clone())
+                    .with_tool_calls(tool_calls.clone());
+                self.context.add_message(assistant_message.clone());
+                session.add_message(assistant_message);
+                self.add_tool_results(&tool_calls, &tool_results, &mut session);
+                Self::emit(&event_tx, AgentEvent::Progress(warning.clone()));
+                let nudge = Message::new(Role::User, warning.clone());
+                self.context.add_message(nudge.clone());
+                session.add_message(nudge);
+                continue;
+            }
 
             // --- Stuck detection ---
             debug!(

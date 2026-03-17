@@ -15,6 +15,7 @@ pub mod output_fallback;
 pub mod path_guard;
 pub mod question;
 pub mod read;
+pub mod secret_redaction;
 pub mod task;
 pub mod todo;
 pub mod web_fetch;

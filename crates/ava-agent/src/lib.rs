@@ -13,11 +13,13 @@ pub mod llm_trait;
 pub(crate) mod memory_enrichment;
 pub mod message_queue;
 pub mod reflection;
+pub mod reviewer;
 pub mod routing;
 pub mod stack;
 pub mod stuck;
 pub mod system_prompt;
 pub mod trace;
+pub mod turn_diff;
 
 pub use instructions::{
     contextual_instructions_for_file, load_project_instructions, trim_instructions_to_budget,

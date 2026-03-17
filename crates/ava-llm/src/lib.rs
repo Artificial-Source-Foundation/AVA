@@ -8,6 +8,7 @@
 pub mod circuit_breaker;
 pub mod credential_test;
 mod dynamic_provider;
+pub mod lead_worker;
 pub mod message_transform;
 pub mod pool;
 pub mod provider;
@@ -17,6 +18,7 @@ pub mod router;
 pub mod thinking;
 
 pub use credential_test::{default_model_for_provider, test_provider_credentials};
+pub use lead_worker::LeadWorkerProvider;
 pub use message_transform::{normalize_messages, ProviderKind};
 pub use pool::ConnectionPool;
 pub use provider::{LLMProvider, NormalizingProvider, ProviderCapabilities, ProviderErrorKind};

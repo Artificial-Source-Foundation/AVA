@@ -9,6 +9,7 @@ pub mod browser;
 pub mod core;
 pub mod edit;
 pub mod git;
+pub mod lint_middleware;
 pub mod mcp_bridge;
 pub mod monitor;
 pub mod permission_middleware;

@@ -3,11 +3,15 @@ use ava_types::Message;
 
 use crate::error::Result;
 
+pub mod amortized_forgetting;
+pub mod observation_masking;
 pub mod relevance;
 mod sliding_window;
 pub mod summarization;
 mod tool_truncation;
 
+pub use amortized_forgetting::AmortizedForgettingStrategy;
+pub use observation_masking::ObservationMaskingStrategy;
 pub use relevance::RelevanceStrategy;
 pub use sliding_window::SlidingWindowStrategy;
 pub use summarization::SummarizationStrategy;

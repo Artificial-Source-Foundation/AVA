@@ -103,6 +103,7 @@ impl Tool for BashTool {
                 &rendered,
                 MAX_OUTPUT_BYTES,
             );
+            let rendered = super::secret_redaction::redact_secrets(&rendered);
 
             return Ok(ToolResult {
                 call_id: String::new(),
@@ -133,6 +134,7 @@ impl Tool for BashTool {
             &rendered,
             MAX_OUTPUT_BYTES,
         );
+        let rendered = super::secret_redaction::redact_secrets(&rendered);
 
         Ok(ToolResult {
             call_id: String::new(),

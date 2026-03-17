@@ -4,8 +4,9 @@ use ava_types::Message;
 
 use crate::error::{ContextError, Result};
 use crate::strategies::{
-    AsyncCondensationStrategy, CondensationStrategy, RelevanceStrategy, SlidingWindowStrategy,
-    SummarizationStrategy, Summarizer, ToolTruncationStrategy,
+    AmortizedForgettingStrategy, AsyncCondensationStrategy, CondensationStrategy,
+    ObservationMaskingStrategy, RelevanceStrategy, SlidingWindowStrategy, SummarizationStrategy,
+    Summarizer, ToolTruncationStrategy,
 };
 use crate::token_tracker::TokenTracker;
 use crate::types::{CondensationResult, CondenserConfig};
@@ -210,9 +211,13 @@ pub fn create_hybrid_condenser_with_relevance(
     summarizer: Option<Arc<dyn Summarizer>>,
     relevance_scores: Option<std::collections::HashMap<String, f64>>,
 ) -> HybridCondenser {
-    let mut sync_strategies: Vec<Box<dyn CondensationStrategy>> = vec![Box::new(
-        ToolTruncationStrategy::new(config.max_tool_content_chars),
-    )];
+    // Stage 1 sync pipeline: observation masking → tool truncation → relevance
+    let mut sync_strategies: Vec<Box<dyn CondensationStrategy>> = vec![
+        Box::new(ObservationMaskingStrategy::new(
+            config.preserve_recent_messages,
+        )),
+        Box::new(ToolTruncationStrategy::new(config.max_tool_content_chars)),
+    ];
 
     if let Some(scores) = relevance_scores {
         sync_strategies.push(Box::new(RelevanceStrategy::new(
@@ -221,6 +226,7 @@ pub fn create_hybrid_condenser_with_relevance(
         )));
     }
 
+    // Stage 2 async: LLM summarization
     let async_strategies: Vec<Box<dyn AsyncCondensationStrategy>> = if config.enable_summarization {
         vec![Box::new(SummarizationStrategy::new(
             summarizer,
@@ -231,8 +237,11 @@ pub fn create_hybrid_condenser_with_relevance(
         vec![]
     };
 
-    let fallback_strategies: Vec<Box<dyn CondensationStrategy>> =
-        vec![Box::new(SlidingWindowStrategy)];
+    // Stage 3 fallback: amortized forgetting → sliding window
+    let fallback_strategies: Vec<Box<dyn CondensationStrategy>> = vec![
+        Box::new(AmortizedForgettingStrategy::default()),
+        Box::new(SlidingWindowStrategy),
+    ];
 
     HybridCondenser::new(
         config,

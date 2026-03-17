@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // hello-plugin — standalone AVA plugin (no npm dependencies)
-const fs = require('fs')
+const fs = require('node:fs')
 
-let context = null
+let _context = null
 const hooks = ['session.start', 'session.end']
 
 function sendMessage(msg) {
@@ -13,13 +13,13 @@ function sendMessage(msg) {
 
 function handleMessage(msg) {
   if (msg.method === 'initialize') {
-    context = msg.params || {}
+    _context = msg.params || {}
     sendMessage({ jsonrpc: '2.0', id: msg.id, result: { hooks } })
   } else if (msg.method === 'shutdown') {
     process.exit(0)
   } else if (msg.method === 'hook/session.start') {
-    const goal = (msg.params && msg.params.goal) || 'unknown'
-    process.stderr.write('[hello-plugin] Session started: ' + goal + '\n')
+    const goal = msg.params?.goal || 'unknown'
+    process.stderr.write(`[hello-plugin] Session started: ${goal}\n`)
     if (msg.id != null) sendMessage({ jsonrpc: '2.0', id: msg.id, result: {} })
   } else if (msg.method === 'hook/session.end') {
     process.stderr.write('[hello-plugin] Session ended\n')
@@ -50,7 +50,7 @@ process.stdin.on('data', (chunk) => {
     try {
       handleMessage(JSON.parse(body))
     } catch (e) {
-      process.stderr.write('[hello-plugin] Parse error: ' + e + '\n')
+      process.stderr.write(`[hello-plugin] Parse error: ${e}\n`)
     }
   }
 })

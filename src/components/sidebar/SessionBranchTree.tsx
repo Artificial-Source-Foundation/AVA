@@ -47,7 +47,7 @@ const TreeNode: Component<{
               e.stopPropagation()
               setExpanded((v) => !v)
             }}
-            class="p-0.5 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-05)] transition-transform"
+            class="p-0.5 rounded-[var(--radius-sm)] hover:bg-[var(--alpha-white-5)] transition-transform"
           >
             <ChevronRight
               class="w-3 h-3 text-[var(--text-muted)] transition-transform"

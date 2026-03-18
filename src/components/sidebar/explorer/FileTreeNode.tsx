@@ -65,7 +65,7 @@ export const FileTreeNode: Component<{
         class="
           w-full flex items-center gap-1.5 py-0.5 pr-2
           text-xs text-[var(--text-secondary)]
-          hover:bg-[var(--alpha-white-05)]
+          hover:bg-[var(--alpha-white-5)]
           rounded-sm transition-colors cursor-pointer
           text-left
         "

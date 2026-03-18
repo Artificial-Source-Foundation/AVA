@@ -198,7 +198,7 @@ export const SidebarOrderSection: Component = () => {
                   type="button"
                   onClick={() => moveItem(index(), -1)}
                   disabled={index() === 0}
-                  class="p-0.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-05)] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                  class="p-0.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-5)] disabled:opacity-30 disabled:pointer-events-none transition-colors"
                   title="Move up"
                 >
                   <ChevronUp class="w-3.5 h-3.5" />
@@ -207,7 +207,7 @@ export const SidebarOrderSection: Component = () => {
                   type="button"
                   onClick={() => moveItem(index(), 1)}
                   disabled={index() === order().length - 1}
-                  class="p-0.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-05)] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                  class="p-0.5 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-5)] disabled:opacity-30 disabled:pointer-events-none transition-colors"
                   title="Move down"
                 >
                   <ChevronDown class="w-3.5 h-3.5" />

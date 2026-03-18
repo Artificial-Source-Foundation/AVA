@@ -159,7 +159,7 @@ export const SidebarExplorer: Component = () => {
           <button
             type="button"
             onClick={() => handleOpenProjectIn(editors()[0]!.command)}
-            class="p-1 rounded hover:bg-[var(--alpha-white-05)] transition-colors cursor-pointer"
+            class="p-1 rounded hover:bg-[var(--alpha-white-5)] transition-colors cursor-pointer"
             title={`Open project in ${editors()[0]!.name}`}
           >
             <ExternalLink class="w-3.5 h-3.5 text-[var(--text-muted)]" />

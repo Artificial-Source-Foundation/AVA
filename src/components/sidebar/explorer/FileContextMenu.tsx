@@ -52,7 +52,7 @@ export const FileContextMenu: Component<{
                   props.onToggleReadOnly(state().path)
                   props.onClose()
                 }}
-                class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--alpha-white-05)] cursor-pointer text-left"
+                class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--alpha-white-5)] cursor-pointer text-left"
               >
                 <Lock class="w-3 h-3 flex-shrink-0" />
                 {props.isReadOnly(state().path) ? 'Remove read-only' : 'Mark as read-only'}
@@ -83,7 +83,7 @@ export const FileContextMenu: Component<{
                       props.onOpenIn(editor.command, state().path)
                       props.onClose()
                     }}
-                    class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--alpha-white-05)] cursor-pointer text-left"
+                    class="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--alpha-white-5)] cursor-pointer text-left"
                   >
                     <ExternalLink class="w-3 h-3 flex-shrink-0" />
                     {editor.name}

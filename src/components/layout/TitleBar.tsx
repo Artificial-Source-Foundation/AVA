@@ -133,7 +133,7 @@ export const TitleBar: Component = () => {
           <button
             type="button"
             onClick={handlePickDirectory}
-            class="flex items-center gap-1 px-1.5 py-0.5 rounded-[var(--radius-sm)] text-[9px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-05)] transition-colors"
+            class="flex items-center gap-1 px-1.5 py-0.5 rounded-[var(--radius-sm)] text-[9px] text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-5)] transition-colors"
             title={currentProject()?.directory || 'Change working directory'}
           >
             <FolderOpen class="w-3 h-3" />

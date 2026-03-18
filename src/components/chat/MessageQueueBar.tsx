@@ -73,7 +73,7 @@ export const MessageQueueBar: Component<MessageQueueBarProps> = (props) => {
           <button
             type="button"
             onClick={props.onClear}
-            class="text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-[var(--alpha-white-05)]"
+            class="text-[10px] text-[var(--text-muted)] hover:text-[var(--error)] transition-colors cursor-pointer px-1.5 py-0.5 rounded hover:bg-[var(--alpha-white-5)]"
           >
             Clear all
           </button>
@@ -84,7 +84,7 @@ export const MessageQueueBar: Component<MessageQueueBarProps> = (props) => {
           <div class="px-3 pb-2 space-y-1 max-h-40 overflow-y-auto scrollbar-none">
             <For each={props.messages}>
               {(msg, index) => (
-                <div class="flex items-start gap-2 py-1 px-2 rounded bg-[var(--alpha-white-05)] group">
+                <div class="flex items-start gap-2 py-1 px-2 rounded bg-[var(--alpha-white-5)] group">
                   <span
                     class="text-[10px] font-mono font-bold mt-0.5 flex-shrink-0"
                     style={{ color: tierColor(msg) }}
@@ -96,7 +96,7 @@ export const MessageQueueBar: Component<MessageQueueBarProps> = (props) => {
                     {msg.content.length > 120 ? '...' : ''}
                   </span>
                   <Show when={msg.model}>
-                    <span class="text-[9px] text-[var(--text-muted)] bg-[var(--alpha-white-05)] px-1 rounded flex-shrink-0">
+                    <span class="text-[9px] text-[var(--text-muted)] bg-[var(--alpha-white-5)] px-1 rounded flex-shrink-0">
                       {msg.model}
                     </span>
                   </Show>

@@ -53,7 +53,7 @@ export const ModelAliasesSection: Component = () => {
                   delete aliases[alias]
                   updateSettings({ modelAliases: aliases })
                 }}
-                class="px-1.5 py-1 text-[10px] text-[var(--error)] hover:bg-[var(--alpha-white-05)] rounded-[var(--radius-sm)] transition-colors"
+                class="px-1.5 py-1 text-[10px] text-[var(--error)] hover:bg-[var(--alpha-white-5)] rounded-[var(--radius-sm)] transition-colors"
                 title="Remove alias"
               >
                 x

@@ -71,7 +71,7 @@ export const FileChangeRow: Component<FileChangeRowProps> = (props) => {
                 e.stopPropagation()
                 void openInEditor(props.editors[0]!.command, props.op.filePath)
               }}
-              class="p-0.5 rounded hover:bg-[var(--alpha-white-05)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors cursor-pointer"
+              class="p-0.5 rounded hover:bg-[var(--alpha-white-5)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors cursor-pointer"
               title={`Open in ${props.editors[0]!.name}`}
             >
               <ExternalLink class="w-3 h-3" />

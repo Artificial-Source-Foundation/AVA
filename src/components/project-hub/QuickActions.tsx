@@ -25,7 +25,7 @@ export const QuickActions: Component<QuickActionsProps> = (props) => {
         class="
           inline-flex items-center gap-2
           rounded-xl px-5 py-2.5
-          bg-[#A78BFA] hover:bg-[#B49BFF]
+          bg-[var(--accent)] hover:bg-[var(--accent-hover)]
           text-white text-[13px] font-semibold
           transition-colors duration-150
           cursor-pointer
@@ -42,9 +42,9 @@ export const QuickActions: Component<QuickActionsProps> = (props) => {
         class="
           inline-flex items-center gap-2
           rounded-xl px-5 py-2.5
-          bg-[#18181B] hover:bg-[#1f1f23]
-          text-[#A1A1AA] text-[13px] font-medium
-          border border-[#27272A]
+          bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)]
+          text-[var(--gray-9)] text-[13px] font-medium
+          border border-[var(--gray-5)]
           transition-colors duration-150
           cursor-pointer
         "
@@ -61,9 +61,9 @@ export const QuickActions: Component<QuickActionsProps> = (props) => {
         class="
           inline-flex items-center gap-2
           rounded-xl px-5 py-2.5
-          bg-[#18181B] hover:bg-[#1f1f23]
-          text-[#A1A1AA] text-[13px] font-medium
-          border border-[#27272A]
+          bg-[var(--surface-raised)] hover:bg-[var(--surface-overlay)]
+          text-[var(--gray-9)] text-[13px] font-medium
+          border border-[var(--gray-5)]
           transition-colors duration-150
           cursor-pointer
           disabled:opacity-40 disabled:cursor-not-allowed

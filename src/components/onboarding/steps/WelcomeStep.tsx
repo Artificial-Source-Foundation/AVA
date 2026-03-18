@@ -20,16 +20,16 @@ export const WelcomeStep: Component<WelcomeStepProps> = (props) => (
         background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(139, 92, 246, 0.10))',
       }}
     >
-      <span class="text-[#A78BFA] text-4xl font-bold select-none">A</span>
+      <span class="text-[var(--accent)] text-4xl font-bold select-none">A</span>
     </div>
 
     {/* Title */}
-    <h1 class="text-[32px] font-bold text-[#FAFAFA] leading-tight tracking-tight mb-3">
+    <h1 class="text-[32px] font-bold text-[var(--text-primary)] leading-tight tracking-tight mb-3">
       Welcome to AVA
     </h1>
 
     {/* Subtitle */}
-    <p class="text-base text-[#71717A] mb-10 max-w-sm">
+    <p class="text-base text-[var(--text-muted)] mb-10 max-w-sm">
       Your AI dev team — lean by default, infinitely extensible
     </p>
 
@@ -37,7 +37,7 @@ export const WelcomeStep: Component<WelcomeStepProps> = (props) => (
     <button
       type="button"
       onClick={props.onNext}
-      class="px-10 py-3 bg-[#A78BFA] hover:bg-[#8B5CF6] text-white text-sm font-semibold rounded-xl transition-colors"
+      class="px-10 py-3 bg-[var(--accent)] hover:bg-[var(--violet-8)] text-white text-sm font-semibold rounded-xl transition-colors"
     >
       Get Started
     </button>
@@ -46,7 +46,7 @@ export const WelcomeStep: Component<WelcomeStepProps> = (props) => (
     <button
       type="button"
       onClick={() => props.onImport?.()}
-      class="mt-6 text-sm text-[#52525B] hover:text-[#71717A] transition-colors"
+      class="mt-6 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-muted)] transition-colors"
     >
       Already have config? Import .ava/ folder &rarr;
     </button>

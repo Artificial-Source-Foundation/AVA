@@ -118,13 +118,13 @@ export const ProjectHub: Component = () => {
   // ── Render ─────────────────────────────────────────────────────
 
   return (
-    <div class="h-screen w-full flex flex-col bg-[#09090B] overflow-hidden">
+    <div class="h-screen w-full flex flex-col bg-[var(--background)] overflow-hidden">
       {/* ── Top Bar (56px) ──────────────────────────────────── */}
-      <div class="flex items-center justify-between h-14 px-5 flex-shrink-0 border-b border-[#27272A]">
+      <div class="flex items-center justify-between h-14 px-5 flex-shrink-0 border-b border-[var(--gray-5)]">
         {/* Left: logo + app name */}
         <div class="flex items-center gap-3">
-          <div class="w-8 h-8 rounded-lg bg-[#251538] flex items-center justify-center">
-            <span class="text-[14px] font-bold text-[#A78BFA]">A</span>
+          <div class="w-8 h-8 rounded-lg bg-[var(--violet-2)] flex items-center justify-center">
+            <span class="text-[14px] font-bold text-[var(--accent)]">A</span>
           </div>
           <span class="text-[16px] font-bold text-white tracking-tight">AVA</span>
         </div>
@@ -133,7 +133,7 @@ export const ProjectHub: Component = () => {
         <button
           type="button"
           onClick={handleSettingsClick}
-          class="p-2 rounded-lg text-[#52525B] hover:text-[#A1A1AA] hover:bg-[#18181B] transition-colors"
+          class="p-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--gray-9)] hover:bg-[var(--surface-raised)] transition-colors"
           title="Settings"
           aria-label="Settings"
         >
@@ -146,7 +146,7 @@ export const ProjectHub: Component = () => {
         {/* Welcome Section */}
         <div class="mb-8">
           <h1 class="text-2xl font-bold text-white">{getGreeting()}</h1>
-          <p class="mt-1.5 text-sm text-[#71717A]">
+          <p class="mt-1.5 text-sm text-[var(--text-muted)]">
             Pick up where you left off, or start something new
           </p>
         </div>
@@ -165,7 +165,7 @@ export const ProjectHub: Component = () => {
         <Show when={orderedProjects().length > 0}>
           <div>
             <h2
-              class="text-[10px] font-semibold text-[#3F3F46] uppercase mb-4"
+              class="text-[10px] font-semibold text-[var(--gray-6)] uppercase mb-4"
               style={{ 'letter-spacing': '0.8px' }}
             >
               Recent Projects

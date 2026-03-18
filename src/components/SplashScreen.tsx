@@ -75,14 +75,14 @@ export function SplashScreen(props: SplashScreenProps) {
             style={{
               width: '72px',
               height: '72px',
-              background: '#A78BFA15',
+              background: 'var(--accent-subtle)',
             }}
           >
             <span
               class="font-bold select-none"
               style={{
                 'font-size': '32px',
-                color: '#A78BFA',
+                color: 'var(--accent)',
                 'line-height': '1',
               }}
             >
@@ -100,7 +100,7 @@ export function SplashScreen(props: SplashScreenProps) {
         </h1>
 
         {/* Tagline */}
-        <p class="text-xs mb-8" style={{ color: '#52525B' }}>
+        <p class="text-xs mb-8" style={{ color: 'var(--text-tertiary)' }}>
           Your AI Dev Team
         </p>
 
@@ -110,25 +110,28 @@ export function SplashScreen(props: SplashScreenProps) {
           style={{
             width: '200px',
             height: '3px',
-            background: '#18181B',
+            background: 'var(--surface-raised)',
           }}
         >
           <div
             class="h-full rounded-full transition-[width] duration-500 ease-out"
             style={{
               width: `${progressPct()}%`,
-              background: '#A78BFA',
+              background: 'var(--accent)',
             }}
           />
         </div>
 
         {/* Status text */}
-        <p class="text-xs h-4 transition-opacity duration-200" style={{ color: '#3F3F46' }}>
+        <p class="text-xs h-4 transition-opacity duration-200" style={{ color: 'var(--gray-6)' }}>
           {props.status ?? ''}
         </p>
 
         {/* Version — pinned to bottom */}
-        <span class="absolute bottom-5 text-[10px] tracking-wide" style={{ color: '#27272A' }}>
+        <span
+          class="absolute bottom-5 text-[10px] tracking-wide"
+          style={{ color: 'var(--gray-5)' }}
+        >
           v2.1.0
         </span>
       </div>

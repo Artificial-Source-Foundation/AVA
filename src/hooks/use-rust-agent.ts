@@ -23,6 +23,12 @@ export function useRustAgent() {
   const [lastResult, setLastResult] = createSignal<SubmitGoalResult | null>(null)
   const [tokenUsage, setTokenUsage] = createSignal({ input: 0, output: 0, cost: 0 })
   const [events, setEvents] = createSignal<AgentEvent[]>([])
+  const [progressMessage, setProgressMessage] = createSignal<string | null>(null)
+  const [budgetWarning, setBudgetWarning] = createSignal<{
+    thresholdPercent: number
+    currentCostUsd: number
+    maxBudgetUsd: number
+  } | null>(null)
 
   let unlisten: UnlistenFn | null = null
   let eventSocket: WebSocket | null = null
@@ -66,6 +72,18 @@ export function useRustAgent() {
             first.completedAt = Date.now()
           }
           return updated
+        })
+        break
+      }
+      case 'progress':
+        setProgressMessage(event.message)
+        break
+      case 'budget_warning': {
+        const bw = event as import('../types/rust-ipc').BudgetWarningEvent
+        setBudgetWarning({
+          thresholdPercent: bw.thresholdPercent,
+          currentCostUsd: bw.currentCostUsd,
+          maxBudgetUsd: bw.maxBudgetUsd,
         })
         break
       }
@@ -196,6 +214,8 @@ export function useRustAgent() {
       setError(null)
       setLastResult(null)
       setTokenUsage({ input: 0, output: 0, cost: 0 })
+      setProgressMessage(null)
+      setBudgetWarning(null)
     })
   }
 
@@ -352,6 +372,8 @@ export function useRustAgent() {
     lastResult,
     tokenUsage,
     events,
+    progressMessage,
+    budgetWarning,
     run,
     cancel,
     clearError,

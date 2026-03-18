@@ -110,11 +110,16 @@ export const AppShell: Component = () => {
             >
               <div class="flex flex-col h-full bg-[var(--gray-1)]">
                 {/* Tab header */}
-                <div class="flex items-center h-8 flex-shrink-0 border-b border-[var(--border-subtle)]">
+                <div
+                  role="tablist"
+                  class="flex items-center h-8 flex-shrink-0 border-b border-[var(--border-subtle)]"
+                >
                   <For each={panelTabs}>
                     {(tab) => (
                       <button
                         type="button"
+                        role="tab"
+                        aria-selected={bottomPanelTab() === tab.id}
                         onClick={() => switchBottomPanelTab(tab.id)}
                         class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
                         classList={{

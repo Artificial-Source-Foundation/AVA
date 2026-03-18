@@ -69,8 +69,10 @@ export interface WorkspaceStepProps {
 export const WorkspaceStep: Component<WorkspaceStepProps> = (props) => (
   <div class="flex flex-col items-center">
     {/* Header */}
-    <h2 class="text-2xl font-bold text-[#FAFAFA] tracking-tight mb-2">Set Up Your Workspace</h2>
-    <p class="text-sm text-[#71717A] mb-8">Choose how to handle your project folder</p>
+    <h2 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-2">
+      Set Up Your Workspace
+    </h2>
+    <p class="text-sm text-[var(--text-muted)] mb-8">Choose how to handle your project folder</p>
 
     {/* Option cards */}
     <div class="w-full max-w-[520px] flex flex-col gap-3 mb-10">
@@ -79,10 +81,10 @@ export const WorkspaceStep: Component<WorkspaceStepProps> = (props) => (
           <button
             type="button"
             onClick={() => props.onSelect(option.id)}
-            class="bg-[#18181B] border rounded-xl p-4 text-left transition-all hover:border-[#3F3F46] flex items-start gap-3"
+            class="bg-[var(--surface-raised)] border rounded-xl p-4 text-left transition-all hover:border-[var(--gray-6)] flex items-start gap-3"
             classList={{
-              'border-[#A78BFA]': props.selected === option.id,
-              'border-[#27272A]': props.selected !== option.id,
+              'border-[var(--accent)]': props.selected === option.id,
+              'border-[var(--gray-5)]': props.selected !== option.id,
             }}
           >
             {/* Icon */}
@@ -95,8 +97,8 @@ export const WorkspaceStep: Component<WorkspaceStepProps> = (props) => (
 
             {/* Text */}
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-[#FAFAFA]">{option.title}</p>
-              <p class="text-xs text-[#71717A] mt-0.5">
+              <p class="text-sm font-medium text-[var(--text-primary)]">{option.title}</p>
+              <p class="text-xs text-[var(--text-muted)] mt-0.5">
                 {option.id === 'trust' ? props.currentPath : option.description}
               </p>
             </div>
@@ -110,14 +112,14 @@ export const WorkspaceStep: Component<WorkspaceStepProps> = (props) => (
       <button
         type="button"
         onClick={props.onPrev}
-        class="text-sm text-[#71717A] hover:text-[#FAFAFA] transition-colors"
+        class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
       >
         Back
       </button>
       <button
         type="button"
         onClick={props.onNext}
-        class="px-6 py-2.5 bg-[#A78BFA] hover:bg-[#8B5CF6] text-white text-sm font-medium rounded-xl transition-colors"
+        class="px-6 py-2.5 bg-[var(--accent)] hover:bg-[var(--violet-8)] text-white text-sm font-medium rounded-xl transition-colors"
       >
         Continue
       </button>

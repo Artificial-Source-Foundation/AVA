@@ -24,6 +24,8 @@ export interface OnboardingThemePreset {
   barColors: [string, string, string]
 }
 
+// NOTE: Theme preset cards intentionally use hardcoded colors since they
+// represent specific theme previews, not the active theme.
 const THEME_PRESETS: OnboardingThemePreset[] = [
   {
     id: 'soft-zinc',
@@ -71,6 +73,8 @@ const THEME_PRESETS: OnboardingThemePreset[] = [
 // Accent swatches
 // ---------------------------------------------------------------------------
 
+// NOTE: Accent swatches use hardcoded colors since they represent
+// specific color options the user is choosing between.
 const ACCENT_SWATCHES: { id: AccentColor; color: string }[] = [
   { id: 'violet', color: '#8B5CF6' },
   { id: 'blue', color: '#3B82F6' },
@@ -100,11 +104,11 @@ export interface ThemeStepProps {
 export const ThemeStep: Component<ThemeStepProps> = (props) => (
   <div class="flex flex-col items-center">
     {/* Header */}
-    <h2 class="text-2xl font-bold text-[#FAFAFA] tracking-tight mb-2">Make it Yours</h2>
-    <p class="text-sm text-[#71717A] mb-6">Choose a look that fits your style</p>
+    <h2 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-2">Make it Yours</h2>
+    <p class="text-sm text-[var(--text-muted)] mb-6">Choose a look that fits your style</p>
 
     {/* Theme Presets label */}
-    <p class="text-xs font-medium text-[#71717A] uppercase tracking-wider mb-3 self-start max-w-[640px] w-full mx-auto">
+    <p class="text-xs font-medium text-[var(--text-muted)] uppercase tracking-wider mb-3 self-start max-w-[640px] w-full mx-auto">
       Theme Presets
     </p>
 
@@ -115,10 +119,10 @@ export const ThemeStep: Component<ThemeStepProps> = (props) => (
           <button
             type="button"
             onClick={() => props.onSelectPreset(preset)}
-            class="bg-[#18181B] border rounded-xl p-4 text-left transition-all hover:border-[#3F3F46]"
+            class="bg-[var(--surface-raised)] border rounded-xl p-4 text-left transition-all hover:border-[var(--gray-6)]"
             classList={{
-              'border-[#A78BFA]': props.selectedPreset === preset.id,
-              'border-[#27272A]': props.selectedPreset !== preset.id,
+              'border-[var(--accent)]': props.selectedPreset === preset.id,
+              'border-[var(--gray-5)]': props.selectedPreset !== preset.id,
             }}
           >
             {/* Dot + name */}
@@ -127,11 +131,11 @@ export const ThemeStep: Component<ThemeStepProps> = (props) => (
                 class="w-3 h-3 rounded-full flex-shrink-0"
                 style={{ background: preset.dotColor }}
               />
-              <span class="text-sm font-medium text-[#FAFAFA]">{preset.name}</span>
+              <span class="text-sm font-medium text-[var(--text-primary)]">{preset.name}</span>
             </div>
 
             {/* Description */}
-            <p class="text-xs text-[#71717A] mb-3">{preset.description}</p>
+            <p class="text-xs text-[var(--text-muted)] mb-3">{preset.description}</p>
 
             {/* Mini color bar preview */}
             <div class="flex gap-1 h-2 rounded-full overflow-hidden">
@@ -145,7 +149,7 @@ export const ThemeStep: Component<ThemeStepProps> = (props) => (
     </div>
 
     {/* Accent color swatches */}
-    <p class="text-xs text-[#71717A] mb-3 self-start max-w-[640px] w-full mx-auto">
+    <p class="text-xs text-[var(--text-muted)] mb-3 self-start max-w-[640px] w-full mx-auto">
       Or pick an accent color
     </p>
     <div class="flex gap-3 mb-10 max-w-[640px] w-full">
@@ -156,7 +160,7 @@ export const ThemeStep: Component<ThemeStepProps> = (props) => (
             onClick={() => props.onSelectAccent(swatch.id)}
             class="w-8 h-8 rounded-full transition-all"
             classList={{
-              'ring-2 ring-white ring-offset-2 ring-offset-[#09090B]':
+              'ring-2 ring-white ring-offset-2 ring-offset-[var(--background)]':
                 props.selectedAccent === swatch.id,
             }}
             style={{ background: swatch.color }}
@@ -171,14 +175,14 @@ export const ThemeStep: Component<ThemeStepProps> = (props) => (
       <button
         type="button"
         onClick={props.onPrev}
-        class="text-sm text-[#71717A] hover:text-[#FAFAFA] transition-colors"
+        class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
       >
         Back
       </button>
       <button
         type="button"
         onClick={props.onNext}
-        class="px-6 py-2.5 bg-[#A78BFA] hover:bg-[#8B5CF6] text-white text-sm font-medium rounded-xl transition-colors"
+        class="px-6 py-2.5 bg-[var(--accent)] hover:bg-[var(--violet-8)] text-white text-sm font-medium rounded-xl transition-colors"
       >
         Continue
       </button>

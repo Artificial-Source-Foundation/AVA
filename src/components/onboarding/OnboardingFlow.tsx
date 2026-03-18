@@ -102,7 +102,7 @@ export const OnboardingFlow: Component<OnboardingFlowProps> = (props) => {
   }
 
   return (
-    <div class="fixed inset-0 bg-[#09090B] flex flex-col items-center justify-center overflow-y-auto">
+    <div class="fixed inset-0 bg-[var(--background)] flex flex-col items-center justify-center overflow-y-auto">
       {/* Step content */}
       <div class="flex-1 flex items-center justify-center w-full px-6 py-12">
         <Show when={step() === 0}>

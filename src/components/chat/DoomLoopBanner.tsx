@@ -30,7 +30,7 @@ export const DoomLoopBanner: Component<DoomLoopBannerProps> = (props) => (
       <button
         type="button"
         onClick={props.onRetry}
-        class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors"
+        class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors"
       >
         <RotateCcw class="w-3 h-3" />
         Retry
@@ -38,7 +38,7 @@ export const DoomLoopBanner: Component<DoomLoopBannerProps> = (props) => (
       <button
         type="button"
         onClick={props.onSwitchModel}
-        class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--surface-hover)] transition-colors"
+        class="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-colors"
       >
         <RefreshCw class="w-3 h-3" />
         Switch Model

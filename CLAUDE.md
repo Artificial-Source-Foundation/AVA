@@ -37,6 +37,9 @@ AVA uses a **Rust-first architecture**. All agent, CLI, and backend code is Rust
 - **Web mode**: `ava serve` -- HTTP API + WebSocket server (axum), serves SolidJS frontend
 - **Agent runtime**: Rust (`crates/ava-agent/`, `ava-llm/`, `ava-tools/`, `ava-praxis/`)
 - **Desktop frontend**: SolidJS + TypeScript (`src/`) -- calls Rust directly via Tauri IPC
+  - Key components: `TitleBar`, `AppShell`, `ActivityBar`, `MainArea`, `SidebarPanel`, `RightPanel`
+  - Chat components: `ApprovalDock`, `QuestionDock`, `ToolListDialog`
+  - Screens: `ProjectHub` (`project-hub/`), `OnboardingFlow` (`onboarding/`)
 - **Desktop backend**: Rust via Tauri commands (`src-tauri/src/commands/`)
 
 ### Codebase Stats
@@ -214,22 +217,33 @@ Lower number = earlier execution. Register via `ToolRegistry::add_middleware()`.
 | `/init` | Create project templates |
 | `/rewind` | Conversation checkpoint history |
 
-## Keyboard Shortcuts
+## Keyboard Shortcuts (Desktop App)
+
+> **Note:** Desktop app shortcuts (below) differ from the TUI in some cases. TUI shortcuts are defined in `crates/ava-tui/`.
 
 | Shortcut | Action |
 |----------|--------|
 | `Ctrl+/` or `Ctrl+K` | Command palette |
-| `Ctrl+N` | New session |
-| `Ctrl+L` | Session list |
-| `Ctrl+M` | Model switcher |
+| `Ctrl+N` | New chat |
+| `Ctrl+L` | Session switcher |
+| `Ctrl+M` | Quick model picker |
+| `Ctrl+Shift+M` | Model browser |
 | `Ctrl+S` | Toggle sidebar |
-| `Ctrl+T` | Toggle thinking visibility |
-| `Ctrl+C` | Cancel current operation |
-| `Ctrl+V` | Paste image |
-| `Ctrl+Y` | Copy last response |
-| `Ctrl+B` | Background agent |
+| `Ctrl+T` | Cycle thinking level |
+| `Ctrl+J` | Toggle bottom panel |
+| `Ctrl+,` | Open settings |
 | `Ctrl+R` | Voice toggle |
-| `Ctrl+E` | Expand/collapse thinking blocks |
+| `Ctrl+E` | Expanded editor |
+| `Ctrl+F` | Search chat |
+| `Ctrl+Y` | Copy last response |
+| `Ctrl+\`` | Toggle terminal |
+| `Ctrl+Shift+E` | Export chat |
+| `Ctrl+Shift+Z` | Undo file change |
+| `Ctrl+Shift+Y` | Redo file change |
+| `Ctrl+Shift+S` | Stash prompt |
+| `Ctrl+Shift+R` | Restore prompt |
+| `Ctrl+Shift+C` | Save checkpoint |
+| `Tab` / `Shift+Tab` | Cycle Plan/Act mode (when composer not focused) |
 | `Alt+Enter` | Submit follow-up (Tier 2) |
 | `Ctrl+Alt+Enter` | Submit post-complete (Tier 3) |
 

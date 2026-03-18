@@ -9,6 +9,7 @@ import { BehaviorTab } from './tabs/BehaviorTab'
 import { CommandsTab } from './tabs/CommandsTab'
 import { DeveloperTab } from './tabs/DeveloperTab'
 import { type Keybinding, KeybindingsTab } from './tabs/KeybindingsTab'
+import { LLMTab } from './tabs/LLMTab'
 import { type MCPServer, MCPServersTab } from './tabs/MCPServersTab'
 import { PermissionsTab } from './tabs/PermissionsTab'
 import { PluginsTab } from './tabs/PluginsTab'
@@ -92,6 +93,10 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
 
       <Show when={props.activeTab() === 'agents'}>
         <AgentsTab />
+      </Show>
+
+      <Show when={props.activeTab() === 'llm'}>
+        <LLMTab />
       </Show>
 
       <Show when={props.activeTab() === 'mcp'}>

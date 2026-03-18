@@ -2,6 +2,7 @@ import {
   Bot,
   Brain,
   Code2,
+  Cpu,
   FolderLock,
   Info,
   Keyboard,
@@ -28,6 +29,7 @@ export type SettingsTab =
   | 'plugins'
   | 'skills'
   | 'commands'
+  | 'llm'
   | 'trusted-folders'
   | 'developer'
   | 'about'
@@ -100,6 +102,25 @@ export const tabGroups: TabGroup[] = [
         label: 'Agents',
         icon: Bot,
         keywords: ['agent', 'team', 'worker', 'preset', 'capability'],
+      },
+      {
+        id: 'llm',
+        label: 'Generation',
+        icon: Cpu,
+        keywords: [
+          'llm',
+          'generation',
+          'temperature',
+          'tokens',
+          'top-p',
+          'reasoning',
+          'compaction',
+          'weak',
+          'editor',
+          'model',
+          'limits',
+          'instructions',
+        ],
       },
     ],
   },

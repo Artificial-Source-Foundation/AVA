@@ -105,6 +105,9 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
   return (
     <Show when={props.request}>
       <div
+        role="dialog"
+        aria-label="Agent question"
+        aria-labelledby="question-dock-text"
         class="border-t border-b border-[var(--border-subtle)] bg-[var(--surface-raised)]"
         style={{ animation: 'approvalSlideUp 150ms ease-out' }}
       >
@@ -138,7 +141,10 @@ export const QuestionDock: Component<QuestionDockProps> = (props) => {
 
         {/* Question text */}
         <div class="px-4 pb-3">
-          <p class="text-sm text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap">
+          <p
+            id="question-dock-text"
+            class="text-sm text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap"
+          >
             {props.request!.question}
           </p>
         </div>

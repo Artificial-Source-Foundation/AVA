@@ -79,6 +79,9 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
   return (
     <Show when={props.request}>
       <div
+        role="dialog"
+        aria-label="Tool approval request"
+        aria-labelledby="approval-dock-title"
         class="border-t border-b border-[var(--border-subtle)] bg-[var(--surface-raised)] approval-dock-enter"
         style={{ animation: 'approvalSlideUp 150ms ease-out' }}
       >
@@ -99,7 +102,10 @@ export const ApprovalDock: Component<ApprovalDockProps> = (props) => {
           </div>
 
           {/* Tool name */}
-          <span class="text-sm font-medium text-[var(--text-primary)] truncate">
+          <span
+            id="approval-dock-title"
+            class="text-sm font-medium text-[var(--text-primary)] truncate"
+          >
             {props.request!.toolName}
           </span>
 

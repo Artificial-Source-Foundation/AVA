@@ -108,14 +108,16 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
   return (
     <div class="flex flex-col items-center">
       {/* Header */}
-      <h2 class="text-2xl font-bold text-[#FAFAFA] tracking-tight mb-2">Connect a Provider</h2>
-      <p class="text-sm text-[#71717A] mb-8">Add an LLM provider to start chatting</p>
+      <h2 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-2">
+        Connect a Provider
+      </h2>
+      <p class="text-sm text-[var(--text-muted)] mb-8">Add an LLM provider to start chatting</p>
 
       {/* Provider cards */}
       <div class="w-full max-w-[560px] flex flex-col gap-3 mb-8">
         <For each={PROVIDERS}>
           {(provider) => (
-            <div class="bg-[#18181B] border border-[#27272A] rounded-xl p-4 transition-colors">
+            <div class="bg-[var(--surface-raised)] border border-[var(--gray-5)] rounded-xl p-4 transition-colors">
               <div class="flex items-center gap-3">
                 {/* Logo square */}
                 <div
@@ -135,8 +137,8 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
 
                 {/* Name + description */}
                 <div class="flex-1 min-w-0">
-                  <p class="text-sm font-medium text-[#FAFAFA]">{provider.name}</p>
-                  <p class="text-xs text-[#71717A]">{provider.description}</p>
+                  <p class="text-sm font-medium text-[var(--text-primary)]">{provider.name}</p>
+                  <p class="text-xs text-[var(--text-muted)]">{provider.description}</p>
                 </div>
 
                 {/* Auth buttons */}
@@ -148,8 +150,9 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
                         onClick={() => handleAuth(provider, opt.type)}
                         class="px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
                         classList={{
-                          'bg-[#A78BFA] text-white hover:bg-[#8B5CF6]': opt.type === 'oauth',
-                          'bg-[#27272A] text-[#FAFAFA] hover:bg-[#3F3F46]':
+                          'bg-[var(--accent)] text-white hover:bg-[var(--violet-8)]':
+                            opt.type === 'oauth',
+                          'bg-[var(--gray-5)] text-[var(--text-primary)] hover:bg-[var(--gray-6)]':
                             opt.type === 'apikey' || opt.type === 'configure',
                         }}
                       >
@@ -162,19 +165,19 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
 
               {/* Expanded API key input */}
               <Show when={expandedProvider() === provider.id}>
-                <div class="mt-3 pt-3 border-t border-[#27272A]">
+                <div class="mt-3 pt-3 border-t border-[var(--gray-5)]">
                   <div class="relative">
                     <input
                       type={showKey()[provider.id] ? 'text' : 'password'}
                       value={props.providerKeys[provider.id] ?? ''}
                       onInput={(e) => props.onSetProviderKey(provider.id, e.currentTarget.value)}
                       placeholder={`Enter ${provider.name} API key...`}
-                      class="w-full px-3 py-2 pr-10 bg-[#09090B] text-[#FAFAFA] placeholder-[#52525B] border border-[#27272A] rounded-lg text-sm outline-none focus:border-[#A78BFA] transition-colors"
+                      class="w-full px-3 py-2 pr-10 bg-[var(--background)] text-[var(--text-primary)] placeholder-[var(--text-tertiary)] border border-[var(--gray-5)] rounded-lg text-sm outline-none focus:border-[var(--accent)] transition-colors"
                     />
                     <button
                       type="button"
                       onClick={() => toggleShowKey(provider.id)}
-                      class="absolute right-3 top-1/2 -translate-y-1/2 text-[#52525B] hover:text-[#FAFAFA] transition-colors"
+                      class="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
                     >
                       <Show when={showKey()[provider.id]} fallback={<Eye class="w-4 h-4" />}>
                         <EyeOff class="w-4 h-4" />
@@ -193,7 +196,7 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
         <button
           type="button"
           onClick={props.onPrev}
-          class="text-sm text-[#71717A] hover:text-[#FAFAFA] transition-colors"
+          class="text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
         >
           Back
         </button>
@@ -201,14 +204,14 @@ export const ProviderStep: Component<ProviderStepProps> = (props) => {
           <button
             type="button"
             onClick={props.onSkip}
-            class="text-sm text-[#52525B] hover:text-[#71717A] transition-colors"
+            class="text-sm text-[var(--text-tertiary)] hover:text-[var(--text-muted)] transition-colors"
           >
             Skip for now
           </button>
           <button
             type="button"
             onClick={props.onNext}
-            class="px-6 py-2.5 bg-[#A78BFA] hover:bg-[#8B5CF6] text-white text-sm font-medium rounded-xl transition-colors"
+            class="px-6 py-2.5 bg-[var(--accent)] hover:bg-[var(--violet-8)] text-white text-sm font-medium rounded-xl transition-colors"
           >
             Continue
           </button>

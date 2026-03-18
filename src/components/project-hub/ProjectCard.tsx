@@ -42,15 +42,15 @@ export const ProjectCard: Component<ProjectCardProps> = (props) => {
       class="
         flex flex-col gap-3
         rounded-[14px] p-5
-        bg-[#18181B]
+        bg-[var(--surface-raised)]
         border transition-all duration-150
         text-left cursor-pointer
-        hover:bg-[#1c1c1f]
+        hover:bg-[var(--gray-4)]
         min-w-[220px] max-w-[320px] flex-1
       "
       classList={{
-        'border-[#A78BFA]/[0.19] hover:border-[#A78BFA]/30': props.isActive,
-        'border-[#27272A] hover:border-[#3f3f46]': !props.isActive,
+        'border-[var(--accent)]/[0.19] hover:border-[var(--accent)]/30': props.isActive,
+        'border-[var(--gray-5)] hover:border-[var(--gray-6)]': !props.isActive,
       }}
     >
       {/* Top: icon + name */}
@@ -58,8 +58,8 @@ export const ProjectCard: Component<ProjectCardProps> = (props) => {
         <Folder
           class="w-4 h-4 flex-shrink-0"
           classList={{
-            'text-[#A78BFA]': props.isActive,
-            'text-[#52525B]': !props.isActive,
+            'text-[var(--accent)]': props.isActive,
+            'text-[var(--text-tertiary)]': !props.isActive,
           }}
         />
         <span class="text-[15px] font-semibold text-white truncate">{props.project.name}</span>
@@ -67,14 +67,14 @@ export const ProjectCard: Component<ProjectCardProps> = (props) => {
 
       {/* Path */}
       <span
-        class="text-[11px] text-[#52525B] truncate"
+        class="text-[11px] text-[var(--text-tertiary)] truncate"
         style={{ 'font-family': "'JetBrains Mono', monospace" }}
       >
         {shortenPath(props.project.directory)}
       </span>
 
       {/* Meta row */}
-      <div class="flex items-center gap-4 text-[11px] text-[#71717A]">
+      <div class="flex items-center gap-4 text-[11px] text-[var(--text-muted)]">
         <Show when={props.project.git?.branch}>
           <span class="flex items-center gap-1">
             <GitBranch class="w-3 h-3" />

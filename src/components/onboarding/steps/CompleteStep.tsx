@@ -36,25 +36,27 @@ export const CompleteStep: Component<CompleteStepProps> = (props) => (
     {/* Green checkmark */}
     <div
       class="w-16 h-16 rounded-full flex items-center justify-center mb-6"
-      style={{ background: 'rgba(34, 197, 94, 0.15)' }}
+      style={{ background: 'var(--success-subtle)' }}
     >
-      <Check class="w-8 h-8 text-[#22C55E]" />
+      <Check class="w-8 h-8 text-[var(--success)]" />
     </div>
 
     {/* Title */}
-    <h2 class="text-2xl font-bold text-[#FAFAFA] tracking-tight mb-8">You're All Set</h2>
+    <h2 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-8">
+      You're All Set
+    </h2>
 
     {/* Shortcuts */}
     <div class="w-full max-w-[400px] flex flex-col gap-2 mb-10">
       <For each={SHORTCUTS}>
         {(shortcut) => (
           <div class="flex items-center justify-between py-1.5">
-            <span class="text-sm text-[#FAFAFA]">{shortcut.label}</span>
+            <span class="text-sm text-[var(--text-primary)]">{shortcut.label}</span>
             <kbd
               class="px-2 py-1 text-xs rounded-md"
               style={{
-                background: '#18181B',
-                color: '#71717A',
+                background: 'var(--surface-raised)',
+                color: 'var(--text-muted)',
                 'font-family': '"JetBrains Mono", monospace',
               }}
             >
@@ -69,7 +71,7 @@ export const CompleteStep: Component<CompleteStepProps> = (props) => (
     <button
       type="button"
       onClick={props.onComplete}
-      class="px-10 py-3 bg-[#A78BFA] hover:bg-[#8B5CF6] text-white text-sm font-semibold rounded-xl transition-colors"
+      class="px-10 py-3 bg-[var(--accent)] hover:bg-[var(--violet-8)] text-white text-sm font-semibold rounded-xl transition-colors"
     >
       Start Coding
     </button>

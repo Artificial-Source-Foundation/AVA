@@ -48,7 +48,7 @@ const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
   return (
     <div
       class="fixed inset-0 z-50 flex flex-col items-center justify-center"
-      style={{ background: '#09090B' }}
+      style={{ background: 'var(--background)' }}
     >
       {/* Error icon */}
       <div
@@ -57,17 +57,17 @@ const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
           width: '72px',
           height: '72px',
           'border-radius': '18px',
-          background: 'rgba(239,68,68,0.1)',
+          background: 'var(--error-subtle)',
         }}
       >
-        <AlertTriangle class="w-9 h-9" style={{ color: '#EF4444' }} />
+        <AlertTriangle class="w-9 h-9" style={{ color: 'var(--error)' }} />
       </div>
 
       {/* Title */}
-      <h1 class="text-xl font-bold tracking-tight mb-2" style={{ color: '#FAFAFA' }}>
+      <h1 class="text-xl font-bold tracking-tight mb-2" style={{ color: 'var(--text-primary)' }}>
         Something went wrong
       </h1>
-      <p class="text-sm mb-6" style={{ color: '#71717A' }}>
+      <p class="text-sm mb-6" style={{ color: 'var(--text-muted)' }}>
         AVA encountered an unexpected error
       </p>
 
@@ -75,13 +75,13 @@ const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
       <div
         class="w-full max-w-lg mb-8 text-left"
         style={{
-          background: '#18181B',
-          border: '1px solid #27272A',
+          background: 'var(--surface-raised)',
+          border: '1px solid var(--gray-5)',
           'border-radius': '12px',
           padding: '14px 18px',
         }}
       >
-        <p class="text-sm font-mono break-all leading-relaxed" style={{ color: '#EF4444' }}>
+        <p class="text-sm font-mono break-all leading-relaxed" style={{ color: 'var(--error)' }}>
           {props.error.message || 'An unexpected error occurred'}
         </p>
       </div>
@@ -92,7 +92,7 @@ const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
           type="button"
           onClick={() => props.reset()}
           class="inline-flex items-center gap-2 px-7 py-3 text-sm font-semibold text-white transition-colors"
-          style={{ background: '#A78BFA', 'border-radius': '12px' }}
+          style={{ background: 'var(--accent)', 'border-radius': '12px' }}
         >
           <RotateCcw class="w-4 h-4" />
           Try Again
@@ -102,10 +102,10 @@ const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
           onClick={() => window.location.reload()}
           class="inline-flex items-center gap-2 px-7 py-3 text-sm font-medium transition-colors"
           style={{
-            background: '#18181B',
-            border: '1px solid #27272A',
+            background: 'var(--surface-raised)',
+            border: '1px solid var(--gray-5)',
             'border-radius': '12px',
-            color: '#A1A1AA',
+            color: 'var(--gray-9)',
           }}
         >
           <RefreshCw class="w-4 h-4" />
@@ -118,7 +118,7 @@ const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
         type="button"
         onClick={() => setShowDetails(!showDetails())}
         class="flex items-center gap-1.5 text-xs transition-colors"
-        style={{ color: '#52525B' }}
+        style={{ color: 'var(--text-tertiary)' }}
       >
         <Bug class="w-3.5 h-3.5" />
         Technical details
@@ -129,21 +129,25 @@ const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
         <div
           class="mt-4 w-full max-w-lg text-left"
           style={{
-            background: '#18181B',
-            border: '1px solid #27272A',
+            background: 'var(--surface-raised)',
+            border: '1px solid var(--gray-5)',
             'border-radius': '12px',
             padding: '16px',
           }}
         >
           <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-mono" style={{ color: '#52525B' }}>
+            <span class="text-xs font-mono" style={{ color: 'var(--text-tertiary)' }}>
               Stack Trace
             </span>
             <button
               type="button"
               onClick={copyError}
               class="inline-flex items-center gap-1 px-2 py-1 text-xs transition-colors"
-              style={{ color: '#71717A', background: '#27272A', 'border-radius': '6px' }}
+              style={{
+                color: 'var(--text-muted)',
+                background: 'var(--gray-5)',
+                'border-radius': '6px',
+              }}
             >
               <Copy class="w-3 h-3" />
               {copied() ? 'Copied' : 'Copy'}
@@ -151,7 +155,7 @@ const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
           </div>
           <pre
             class="text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-48 overflow-y-auto leading-relaxed"
-            style={{ color: '#71717A' }}
+            style={{ color: 'var(--text-muted)' }}
           >
             {props.error.stack || 'No stack trace available'}
           </pre>
@@ -165,7 +169,7 @@ const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
           target="_blank"
           rel="noopener noreferrer"
           class="inline-flex items-center gap-1.5 text-xs transition-colors"
-          style={{ color: '#52525B' }}
+          style={{ color: 'var(--text-tertiary)' }}
         >
           Report this issue
           <ExternalLink class="w-3.5 h-3.5" />

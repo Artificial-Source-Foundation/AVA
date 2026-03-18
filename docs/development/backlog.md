@@ -23,6 +23,12 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 3. **Fuzzy matching upgrade** — exact → line-trimmed → block-anchor cascade. Fewer failed edits.
 4. **StreamingDiff** — apply edits as tokens stream. Users see changes instantly instead of waiting.
 
+### Desktop App Bugs (from testing)
+
+5. **Duplicated response text** — assistant messages show content twice in the chat. Likely the streaming content + final message both render.
+6. **Cost showing for OAuth** — $0.04 displayed for ChatGPT subscription users. Backend returns 0 but frontend may use registry pricing.
+7. **Thinking content not displayed** — thinking badge shows "Med" but thinking blocks don't render as collapsible sections like TUI. Content may be concatenated with response.
+
 ### After That
 
 5. **Plugin Phase 2** — `@ava-ai/plugin` npm publish, auth hook sub-protocol.

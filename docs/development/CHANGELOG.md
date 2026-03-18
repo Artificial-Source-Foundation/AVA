@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.2.1 (2026-03-18)
+
+### Added
+- **Praxis UI design finalized** — Director Chat, Team Panel, Lead Chat screens designed in ava-ui.pen
+- **Praxis design decisions documented** — naming convention (professional leads, fun worker names), tiered error handling, worktree-per-lead strategy, Solo/Team mode switching, budget delegation chain, session persistence
+
 ## v2.2.0 (2026-03-17)
 
 ### Added

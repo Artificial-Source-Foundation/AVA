@@ -17,10 +17,12 @@ import { getCoreBudget } from '../services/core-bridge'
 import { rustAgent as rustAgentBridge, rustBackend } from '../services/rust-bridge'
 import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
+import { useTeam } from '../stores/team'
 import type { Message } from '../types'
 import type { StreamError } from '../types/llm'
 import type { ApprovalRequestEvent, QuestionRequestEvent } from '../types/rust-ipc'
 import type { AgentState, ApprovalRequest, ToolActivity } from './agent'
+import { createTeamBridge } from './agent/agent-team-bridge'
 import type { QueuedMessage } from './chat/types'
 import { useRustAgent } from './use-rust-agent'
 
@@ -62,6 +64,11 @@ function createAgentStore() {
   const rustAgent = useRustAgent()
   const settingsRef = useSettings()
   const session = useSession()
+  const teamStore = useTeam()
+
+  // ── Team bridge ─────────────────────────────────────────────────────
+  const isTeamMode = () => settingsRef.settings().generation.delegationEnabled
+  const teamBridge = createTeamBridge(teamStore, isTeamMode)
 
   // ── Frontend-only signals ───────────────────────────────────────────
   const [isPlanMode, setIsPlanMode] = createSignal(false)
@@ -82,6 +89,22 @@ function createAgentStore() {
     const msg = rustAgent.error()
     return msg ? { type: 'unknown', message: msg } : null
   }
+
+  // ── Forward agent events to team bridge ──────────────────────────────
+  let lastTeamBridgeIdx = 0
+
+  createEffect(
+    on(rustAgent.events, (allEvents) => {
+      if (allEvents.length < lastTeamBridgeIdx) {
+        lastTeamBridgeIdx = 0
+      }
+      for (let i = lastTeamBridgeIdx; i < allEvents.length; i++) {
+        const event = allEvents[i]!
+        teamBridge.bridgeToTeam(event as import('./agent/agent-events').AgentEvent)
+      }
+      lastTeamBridgeIdx = allEvents.length
+    })
+  )
 
   // ── Watch for approval_request / question_request events from Rust ──
   let lastProcessedEventIdx = 0
@@ -504,7 +527,8 @@ function createAgentStore() {
     resolveQuestion,
     clearError,
     getState,
-    stopAgent: (_memberId: string) => false,
-    sendTeamMessage: (_memberId: string, _message: string) => {},
+    stopAgent: (memberId: string) => teamBridge.stopAgent(memberId),
+    sendTeamMessage: (memberId: string, message: string) =>
+      teamBridge.sendMessage(memberId, message),
   }
 }

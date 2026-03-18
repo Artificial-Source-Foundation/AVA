@@ -107,7 +107,7 @@ export { expandedEditorOpen, setExpandedEditorOpen }
 // Right Panel Tab
 // ============================================================================
 
-export type RightPanelTab = 'activity' | 'files' | 'review' | 'trajectory'
+export type RightPanelTab = 'activity' | 'files' | 'review' | 'trajectory' | 'team'
 
 const [rightPanelTab, setRightPanelTabRaw] = createSignal<RightPanelTab>(
   loadString('ava-right-panel-tab', 'activity') as RightPanelTab

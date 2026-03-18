@@ -1,6 +1,6 @@
 # AVA Backlog
 
-> Last updated: 2026-03-17
+> Last updated: 2026-03-18
 > Related: [roadmap.md](roadmap.md), [epics.md](epics.md)
 > SOTA gap research: [sota-gap-analysis.md](sota-gap-analysis.md) (60 items from 12 codebases — reference only, not a todo list)
 
@@ -39,6 +39,26 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 
 8. **TUI smoke test suite** — automated smoke tests for TUI mode.
 9. **CLI headless regression** — verify all headless flags work.
+
+### Praxis Frontend Wiring
+
+**Sprint D: Tauri IPC + Team Mode Activation**
+
+15. **Wire Tauri IPC commands for Praxis** — `start_delegation`, `get_praxis_status`, `cancel_praxis` commands in `src-tauri/src/commands/`.
+16. **Connect Team button to team mode activation** — status bar Team button triggers `start_delegation`, switches UI to team layout.
+17. **Wire TeamPanel to team store** — currently stub; connect to live PraxisEvent stream via agent-team-bridge.
+18. **Wire TeamMetrics/DelegationLog/WorkerDetail into right panel** — populate metrics footer (tokens, files, cost, success rate) and worker detail views.
+
+**Sprint E: Agent Communication + Controls**
+
+19. **Lead question relay through Director chat** — leads surface questions as colored border cards in Director chat; user answers relay back.
+20. **Stop button per lead/worker** — individual stop buttons trigger Director "what went wrong?" flow and replan.
+21. **Solo/Team mode switching** — full lifecycle: Solo → Team (plan + spawn), Team → Solo (stop all + collapse), Resume Team (review + replan).
+
+**Sprint F: Worktrees + Budget**
+
+22. **Worktree per lead + Merge Worker** — git worktree creation/cleanup per lead, Merge Worker for integration, conflict resolution UI.
+23. **Budget delegation chain** — Director → Leads → Workers proportional budget splitting, warnings, and escalation when exhausted.
 
 ### Later (when users ask for it)
 

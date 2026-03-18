@@ -1,12 +1,16 @@
-import { Bot, FolderOpen, GitCompareArrows, Route, X } from 'lucide-solid'
+import { Bot, FolderOpen, GitCompareArrows, Route, Users, X } from 'lucide-solid'
 import { Show } from 'solid-js'
+import { useAgent } from '../../hooks/useAgent'
 import { useLayout } from '../../stores/layout'
 import { useSession } from '../../stores/session'
 import { useSettings } from '../../stores/settings'
+import { useTeam } from '../../stores/team'
 import { AgentActivityPanel } from '../panels/AgentActivityPanel'
 import { DiffReviewPanel } from '../panels/DiffReviewPanel'
 import { FileOperationsPanel } from '../panels/FileOperationsPanel'
+import { TeamPanel } from '../panels/TeamPanel'
 import { TrajectoryInspector } from '../panels/TrajectoryInspector'
+import { WorkerDetail } from '../panels/team/WorkerDetail'
 import { PanelErrorBoundary } from '../ui/PanelErrorBoundary'
 
 interface RightPanelProps {
@@ -16,6 +20,8 @@ interface RightPanelProps {
 export function RightPanel(props: RightPanelProps) {
   const { settings } = useSettings()
   const { currentSession } = useSession()
+  const agent = useAgent()
+  const team = useTeam()
   const {
     rightPanelVisible,
     rightPanelWidth,
@@ -23,6 +29,15 @@ export function RightPanel(props: RightPanelProps) {
     switchRightPanelTab,
     setRightPanelVisible,
   } = useLayout()
+
+  /** Stop all working team members */
+  const handleStopAll = (): void => {
+    for (const member of team.allMembers()) {
+      if (member.status === 'working') {
+        agent.stopAgent(member.id)
+      }
+    }
+  }
 
   return (
     <Show when={settings().ui.showAgentActivity && rightPanelVisible()}>
@@ -97,6 +112,22 @@ export function RightPanel(props: RightPanelProps) {
               <Route class="w-3 h-3" />
               Trajectory
             </button>
+            <Show when={settings().generation.delegationEnabled || team.hierarchy() !== null}>
+              <button
+                type="button"
+                onClick={() => switchRightPanelTab('team')}
+                class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
+                classList={{
+                  'text-[var(--accent)] border-b border-[var(--accent)]':
+                    rightPanelTab() === 'team',
+                  'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
+                    rightPanelTab() !== 'team',
+                }}
+              >
+                <Users class="w-3 h-3" />
+                Team
+              </button>
+            </Show>
             <div class="flex-1" />
             <button
               type="button"
@@ -127,6 +158,16 @@ export function RightPanel(props: RightPanelProps) {
             <Show when={rightPanelTab() === 'trajectory'}>
               <PanelErrorBoundary panelName="Trajectory Inspector">
                 <TrajectoryInspector sessionId={currentSession()?.id ?? 'unknown'} />
+              </PanelErrorBoundary>
+            </Show>
+            <Show when={rightPanelTab() === 'team'}>
+              <PanelErrorBoundary panelName="Team">
+                <Show
+                  when={!team.selectedMember() || team.selectedMember()?.role === 'team-lead'}
+                  fallback={<WorkerDetail member={team.selectedMember()!} />}
+                >
+                  <TeamPanel onStopAgent={(id) => agent.stopAgent(id)} onStopAll={handleStopAll} />
+                </Show>
               </PanelErrorBoundary>
             </Show>
           </div>

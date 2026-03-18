@@ -134,6 +134,58 @@ Trust a project: `ava --trust`. Global config (`~/.ava/`) always loads.
 - Desktop commands: `src-tauri/src/commands/`
 - Configuration: `crates/ava-config/`
 
+## Praxis (Multi-Agent Orchestration)
+
+Praxis is AVA's multi-agent system in `crates/ava-praxis/`. It uses a **Director → Leads → Workers** hierarchy.
+
+### Hierarchy
+
+- **Director**: IS the main chat. Crown icon, amber color. Orchestrates leads, relays user steering, shows plan inline.
+- **Leads**: Domain-specific agents -- Backend, Frontend, QA, Research, Debug, DevOps, Fullstack. Professional role names ("Backend Lead", "QA Lead"). Split tasks across workers, review output before reporting.
+- **Workers**: Jr. agents with fun first names -- Pedro, Sofia, Luna, Kai, Mira, Rio, Ash, Nico, Ivy, Juno, Zara, Leo. Named as "Pedro (Jr. Backend)", etc.
+
+### Team Mode
+
+- Activated via **Team button** in status bar.
+- **Solo → Team**: Director creates plan, spawns leads and workers.
+- **Team → Solo**: Only when all agents are stopped. "Stop All" → Director asks "What's on your mind?" → user switches.
+- **Resume Team**: Director reviews progress, asks "Continue or replan?"
+- Mode switches preserved in session history.
+
+### Worktree Strategy
+
+- Each Lead gets its own **git worktree** (workers share their lead's worktree).
+- Leads assign specific files to workers to avoid intra-lead conflicts.
+- When all leads finish → Director spawns a **Merge Worker**.
+- Clean merge: automatic. Minor conflicts: Merge Worker resolves. Hard conflicts: Director shows user diffs.
+
+### Error Handling (Tiered)
+
+1. Tool error → Worker retries (auto, up to 2x)
+2. LLM error → Lead switches to fallback model
+3. Logic error → Lead reviews, spawns fix worker
+4. Worker budget exhausted → Lead asks Director → Director asks user
+5. Catastrophic → Director asks user
+
+### Frontend Components
+
+- `TeamPanel` — right sidebar: Director → Leads → Workers hierarchy with status, progress, stop buttons
+- `TeamChatView` — read-only lead chat (workers, tool calls, review actions)
+- `TeamStatusStrip` — status bar integration for team mode
+- `SubagentCard` — individual agent status card
+- `agent-team-bridge` — Rust PraxisEvent → Tauri → useAgent → team store → UI
+
+### Key Tauri Commands (Planned)
+
+- `start_delegation` — activate team mode, begin Praxis orchestration
+- `get_praxis_status` — current hierarchy state, progress, budgets
+- `cancel_praxis` — stop all agents, return to solo mode
+- `steer_lead` — relay user input to a specific lead via Director
+
+### Session Persistence
+
+Artifacts saved to `.ava/praxis/{session-id}/{lead-name}/`. Sessions are resumable if interrupted.
+
 ## Middleware Priority
 
 Lower number = earlier execution. Register via `ToolRegistry::add_middleware()`.

@@ -135,6 +135,31 @@ export function useRustAgent() {
           completionResolve = null
         }
         break
+
+      // Praxis events — pass through to events signal for team bridge consumption
+      case 'praxis_worker_started':
+      case 'praxis_worker_progress':
+      case 'praxis_worker_token':
+      case 'praxis_worker_completed':
+      case 'praxis_worker_failed':
+      case 'praxis_all_complete':
+      case 'praxis_summary':
+      case 'praxis_phase_started':
+      case 'praxis_phase_completed':
+      case 'praxis_spec_created':
+      case 'praxis_artifact_created':
+      case 'praxis_conflict_detected':
+        // These are already added to events() signal above — the team bridge
+        // in useAgent picks them up via the createEffect on rustAgent.events.
+        // Additional state updates for Praxis completion:
+        if (event.type === 'praxis_all_complete') {
+          setIsRunning(false)
+          if (completionResolve) {
+            completionResolve({ success: true, turns: 0, sessionId: '' })
+            completionResolve = null
+          }
+        }
+        break
     }
   }
 

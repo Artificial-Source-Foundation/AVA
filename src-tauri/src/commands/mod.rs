@@ -59,6 +59,7 @@ pub use agent_commands::{
     resolve_approval, resolve_question,
     steer_agent, follow_up_agent, post_complete_agent, get_message_queue, clear_message_queue,
     retry_last_message, edit_and_resend, regenerate_response, undo_last_edit,
+    start_praxis, get_praxis_status, cancel_praxis, steer_lead,
 };
 pub use session_commands::{list_sessions, load_session, create_session, delete_session, rename_session, search_sessions};
 pub use model_commands::{list_models, get_current_model, switch_model};

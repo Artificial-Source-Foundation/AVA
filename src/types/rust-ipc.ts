@@ -131,6 +131,106 @@ export interface QuestionRequestEvent {
   options: string[]
 }
 
+// ── Praxis multi-agent events ──────────────────────────────────────
+
+export interface PraxisWorkerStartedEvent {
+  type: 'praxis_worker_started'
+  worker_id: string
+  lead: string
+  task: string
+}
+
+export interface PraxisWorkerProgressEvent {
+  type: 'praxis_worker_progress'
+  worker_id: string
+  turn: number
+  max_turns: number
+}
+
+export interface PraxisWorkerTokenEvent {
+  type: 'praxis_worker_token'
+  worker_id: string
+  token: string
+}
+
+export interface PraxisWorkerCompletedEvent {
+  type: 'praxis_worker_completed'
+  worker_id: string
+  success: boolean
+  turns: number
+}
+
+export interface PraxisWorkerFailedEvent {
+  type: 'praxis_worker_failed'
+  worker_id: string
+  error: string
+}
+
+export interface PraxisAllCompleteEvent {
+  type: 'praxis_all_complete'
+  total_workers: number
+  succeeded: number
+  failed: number
+}
+
+export interface PraxisSummaryEvent {
+  type: 'praxis_summary'
+  total_workers: number
+  succeeded: number
+  failed: number
+  total_turns: number
+}
+
+export interface PraxisPhaseStartedEvent {
+  type: 'praxis_phase_started'
+  phase_index: number
+  phase_count: number
+  phase_name: string
+  role: string
+}
+
+export interface PraxisPhaseCompletedEvent {
+  type: 'praxis_phase_completed'
+  phase_index: number
+  phase_name: string
+  turns: number
+  output_preview: string
+}
+
+export interface PraxisSpecCreatedEvent {
+  type: 'praxis_spec_created'
+  spec_id: string
+  title: string
+}
+
+export interface PraxisArtifactCreatedEvent {
+  type: 'praxis_artifact_created'
+  artifact_id: string
+  kind: string
+  producer: string
+  title: string
+}
+
+export interface PraxisConflictDetectedEvent {
+  type: 'praxis_conflict_detected'
+  workers: [string, string]
+  overlapping_files: string[]
+}
+
+export type PraxisEvent =
+  | PraxisWorkerStartedEvent
+  | PraxisWorkerProgressEvent
+  | PraxisWorkerTokenEvent
+  | PraxisWorkerCompletedEvent
+  | PraxisWorkerFailedEvent
+  | PraxisAllCompleteEvent
+  | PraxisSummaryEvent
+  | PraxisPhaseStartedEvent
+  | PraxisPhaseCompletedEvent
+  | PraxisSpecCreatedEvent
+  | PraxisArtifactCreatedEvent
+  | PraxisConflictDetectedEvent
+
 export type AgentEvent =
   | TokenEvent
   | ToolCallEvent
@@ -143,6 +243,7 @@ export type AgentEvent =
   | BudgetWarningEvent
   | ApprovalRequestEvent
   | QuestionRequestEvent
+  | PraxisEvent
 
 export interface ComputeGrepMatch {
   file: string
@@ -366,4 +467,18 @@ export interface CompactContextResult {
   messagesBefore: number
   messagesAfter: number
   summary: string
+}
+
+// Praxis multi-agent IPC types
+
+export interface StartPraxisArgs {
+  goal: string
+  domain?: string
+}
+
+export interface PraxisStatusResult {
+  running: boolean
+  totalWorkers: number
+  succeeded: number
+  failed: number
 }

@@ -46,6 +46,80 @@ pub enum AgentEvent {
         question: String,
         options: Vec<String>,
     },
+
+    // ── Praxis multi-agent events ──────────────────────────────────────
+    #[serde(rename = "praxis_worker_started")]
+    PraxisWorkerStarted {
+        worker_id: String,
+        lead: String,
+        task: String,
+    },
+    #[serde(rename = "praxis_worker_progress")]
+    PraxisWorkerProgress {
+        worker_id: String,
+        turn: usize,
+        max_turns: usize,
+    },
+    #[serde(rename = "praxis_worker_token")]
+    PraxisWorkerToken {
+        worker_id: String,
+        token: String,
+    },
+    #[serde(rename = "praxis_worker_completed")]
+    PraxisWorkerCompleted {
+        worker_id: String,
+        success: bool,
+        turns: usize,
+    },
+    #[serde(rename = "praxis_worker_failed")]
+    PraxisWorkerFailed {
+        worker_id: String,
+        error: String,
+    },
+    #[serde(rename = "praxis_all_complete")]
+    PraxisAllComplete {
+        total_workers: usize,
+        succeeded: usize,
+        failed: usize,
+    },
+    #[serde(rename = "praxis_summary")]
+    PraxisSummary {
+        total_workers: usize,
+        succeeded: usize,
+        failed: usize,
+        total_turns: usize,
+    },
+    #[serde(rename = "praxis_phase_started")]
+    PraxisPhaseStarted {
+        phase_index: usize,
+        phase_count: usize,
+        phase_name: String,
+        role: String,
+    },
+    #[serde(rename = "praxis_phase_completed")]
+    PraxisPhaseCompleted {
+        phase_index: usize,
+        phase_name: String,
+        turns: usize,
+        output_preview: String,
+    },
+    #[serde(rename = "praxis_spec_created")]
+    PraxisSpecCreated {
+        spec_id: String,
+        title: String,
+    },
+    #[serde(rename = "praxis_artifact_created")]
+    PraxisArtifactCreated {
+        artifact_id: String,
+        kind: String,
+        producer: String,
+        title: String,
+    },
+    #[serde(rename = "praxis_conflict_detected")]
+    PraxisConflictDetected {
+        workers: (String, String),
+        overlapping_files: Vec<String>,
+    },
 }
 
 pub struct EventEmitter {
@@ -184,6 +258,125 @@ pub fn emit_backend_event<R: tauri::Runtime>(
     event: &ava_agent::agent_loop::AgentEvent,
 ) {
     if let Some(payload) = from_backend_event(event) {
+        let _ = handle.emit("agent-event", payload);
+    }
+}
+
+/// Convert a `PraxisEvent` to a Tauri `AgentEvent` payload.
+pub fn from_praxis_event(event: &ava_praxis::PraxisEvent) -> Option<AgentEvent> {
+    use ava_praxis::PraxisEvent as PE;
+    match event {
+        PE::WorkerStarted {
+            worker_id,
+            lead,
+            task_description,
+        } => Some(AgentEvent::PraxisWorkerStarted {
+            worker_id: worker_id.to_string(),
+            lead: lead.clone(),
+            task: task_description.clone(),
+        }),
+        PE::WorkerProgress {
+            worker_id,
+            turn,
+            max_turns,
+        } => Some(AgentEvent::PraxisWorkerProgress {
+            worker_id: worker_id.to_string(),
+            turn: *turn,
+            max_turns: *max_turns,
+        }),
+        PE::WorkerToken { worker_id, token } => Some(AgentEvent::PraxisWorkerToken {
+            worker_id: worker_id.to_string(),
+            token: token.clone(),
+        }),
+        PE::WorkerCompleted {
+            worker_id,
+            success,
+            turns,
+        } => Some(AgentEvent::PraxisWorkerCompleted {
+            worker_id: worker_id.to_string(),
+            success: *success,
+            turns: *turns,
+        }),
+        PE::WorkerFailed { worker_id, error } => Some(AgentEvent::PraxisWorkerFailed {
+            worker_id: worker_id.to_string(),
+            error: error.clone(),
+        }),
+        PE::AllComplete {
+            total_workers,
+            succeeded,
+            failed,
+        } => Some(AgentEvent::PraxisAllComplete {
+            total_workers: *total_workers,
+            succeeded: *succeeded,
+            failed: *failed,
+        }),
+        PE::Summary {
+            total_workers,
+            succeeded,
+            failed,
+            total_turns,
+        } => Some(AgentEvent::PraxisSummary {
+            total_workers: *total_workers,
+            succeeded: *succeeded,
+            failed: *failed,
+            total_turns: *total_turns,
+        }),
+        PE::PhaseStarted {
+            phase_index,
+            phase_count,
+            phase_name,
+            role,
+        } => Some(AgentEvent::PraxisPhaseStarted {
+            phase_index: *phase_index,
+            phase_count: *phase_count,
+            phase_name: phase_name.clone(),
+            role: role.clone(),
+        }),
+        PE::PhaseCompleted {
+            phase_index,
+            phase_name,
+            turns,
+            output_preview,
+        } => Some(AgentEvent::PraxisPhaseCompleted {
+            phase_index: *phase_index,
+            phase_name: phase_name.clone(),
+            turns: *turns,
+            output_preview: output_preview.clone(),
+        }),
+        PE::SpecCreated { spec_id, title } => Some(AgentEvent::PraxisSpecCreated {
+            spec_id: spec_id.to_string(),
+            title: title.clone(),
+        }),
+        PE::ArtifactCreated {
+            artifact_id,
+            kind,
+            producer,
+            title,
+        } => Some(AgentEvent::PraxisArtifactCreated {
+            artifact_id: artifact_id.to_string(),
+            kind: kind.clone(),
+            producer: producer.clone(),
+            title: title.clone(),
+        }),
+        PE::ConflictDetected {
+            workers,
+            overlapping_files,
+        } => Some(AgentEvent::PraxisConflictDetected {
+            workers: (workers.0.to_string(), workers.1.to_string()),
+            overlapping_files: overlapping_files.clone(),
+        }),
+        // IterationStarted, WorkflowComplete, SpecStatusChanged, SpecWorkflowStarted,
+        // SpecWorkflowCompleted, PeerMessageSent, AcpRequestHandled — no direct UI representation yet
+        _ => None,
+    }
+}
+
+/// Emit a `PraxisEvent` to all Tauri windows via the app handle.
+pub fn emit_praxis_event<R: tauri::Runtime>(
+    handle: &tauri::AppHandle<R>,
+    event: &ava_praxis::PraxisEvent,
+) {
+    if let Some(payload) = from_praxis_event(event) {
         let _ = handle.emit("agent-event", payload);
     }
 }

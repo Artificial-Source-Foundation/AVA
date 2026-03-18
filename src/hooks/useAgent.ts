@@ -93,6 +93,71 @@ function createAgentStore() {
   // ── Forward agent events to team bridge ──────────────────────────────
   let lastTeamBridgeIdx = 0
 
+  /**
+   * Map Praxis IPC events (from Rust) to the team bridge's AgentEvent format.
+   * Returns null for events that have no team bridge mapping.
+   */
+  function mapPraxisToTeamEvent(
+    event: import('../types/rust-ipc').AgentEvent
+  ): import('./agent/agent-events').AgentEvent | null {
+    switch (event.type) {
+      case 'praxis_worker_started':
+        return {
+          type: 'delegation:start',
+          agentId: 'praxis-director',
+          childAgentId: event.worker_id,
+          workerName: event.lead,
+          task: event.task,
+          tier: 'worker',
+        }
+      case 'praxis_worker_completed':
+        return {
+          type: 'delegation:complete',
+          agentId: 'praxis-director',
+          childAgentId: event.worker_id,
+          workerName: '',
+          success: event.success,
+          output: `Completed in ${event.turns} turns`,
+          durationMs: 0,
+        }
+      case 'praxis_worker_failed':
+        return {
+          type: 'delegation:complete',
+          agentId: 'praxis-director',
+          childAgentId: event.worker_id,
+          workerName: '',
+          success: false,
+          output: event.error,
+          durationMs: 0,
+        }
+      case 'praxis_worker_token':
+        return {
+          type: 'thought',
+          agentId: event.worker_id,
+          content: event.token,
+        }
+      case 'praxis_worker_progress':
+        return {
+          type: 'turn:start',
+          agentId: event.worker_id,
+          turn: event.turn,
+        }
+      case 'praxis_all_complete':
+        return {
+          type: 'agent:finish',
+          agentId: 'praxis-director',
+          result: {
+            success: event.failed === 0,
+            turns: 0,
+            tokensUsed: { input: 0, output: 0 },
+            output: `${event.succeeded}/${event.total_workers} workers succeeded`,
+          },
+        }
+      default:
+        return null
+    }
+  }
+
   createEffect(
     on(rustAgent.events, (allEvents) => {
       if (allEvents.length < lastTeamBridgeIdx) {
@@ -100,7 +165,24 @@ function createAgentStore() {
       }
       for (let i = lastTeamBridgeIdx; i < allEvents.length; i++) {
         const event = allEvents[i]!
-        teamBridge.bridgeToTeam(event as import('./agent/agent-events').AgentEvent)
+        // Try to map Praxis events to team bridge events
+        const praxisMapped = mapPraxisToTeamEvent(event)
+        if (praxisMapped) {
+          // Ensure the director agent exists before forwarding child events
+          if (
+            praxisMapped.type === 'delegation:start' &&
+            !teamStore.teamMembers().has('praxis-director')
+          ) {
+            teamBridge.bridgeToTeam({
+              type: 'agent:start',
+              agentId: 'praxis-director',
+              goal: 'Multi-agent coordination',
+            })
+          }
+          teamBridge.bridgeToTeam(praxisMapped)
+        } else {
+          teamBridge.bridgeToTeam(event as import('./agent/agent-events').AgentEvent)
+        }
       }
       lastTeamBridgeIdx = allEvents.length
     })

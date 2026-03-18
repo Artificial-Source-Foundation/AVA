@@ -277,6 +277,15 @@ export const rustBackend = {
   searchSessions: (query: string): Promise<SessionSummary[]> =>
     invokeCommand('search_sessions', { query }),
 
+  // Praxis multi-agent
+  startPraxis: (goal: string, domain?: string): Promise<void> =>
+    invokeCommand('start_praxis', { args: { goal, domain: domain ?? null } }),
+  getPraxisStatus: (): Promise<import('../types/rust-ipc').PraxisStatusResult> =>
+    invokeCommand('get_praxis_status'),
+  cancelPraxis: (): Promise<void> => invokeCommand('cancel_praxis'),
+  steerLead: (leadId: string, message: string): Promise<void> =>
+    invokeCommand('steer_lead', { leadId, message }),
+
   // Context compaction
   compactContext: (
     messages: CompactMessage[],

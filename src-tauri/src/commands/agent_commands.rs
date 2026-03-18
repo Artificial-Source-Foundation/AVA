@@ -11,7 +11,7 @@
 use ava_types::MessageTier;
 use ava_tools::permission_middleware::ToolApproval;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::mpsc;
 use tracing::info;
 use uuid::Uuid;
@@ -613,6 +613,164 @@ pub async fn undo_last_edit(
             file_path: None,
         }),
     }
+}
+
+// ============================================================================
+// Praxis multi-agent commands
+// ============================================================================
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartPraxisArgs {
+    pub goal: String,
+    /// Domain hint for task routing (auto-detected if None). Reserved for future use.
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub domain: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PraxisStatus {
+    pub running: bool,
+    pub total_workers: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+}
+
+/// Start a Praxis multi-agent task. Spawns a Director that delegates to
+/// domain-specific leads and streams PraxisEvents to the frontend.
+#[tauri::command]
+pub async fn start_praxis(
+    args: StartPraxisArgs,
+    app: AppHandle,
+    bridge: State<'_, DesktopBridge>,
+) -> Result<(), String> {
+    // Prevent concurrent runs (shares the running flag with single-agent)
+    {
+        let running = bridge.running.read().await;
+        if *running {
+            return Err("Agent is already running. Cancel first.".to_string());
+        }
+    }
+    *bridge.running.write().await = true;
+
+    let cancel = bridge.new_cancel_token().await;
+    let stack = bridge.stack.clone();
+
+    // Resolve the current provider
+    let (provider_name, model_name) = stack.current_model().await;
+    let provider = stack
+        .router
+        .route_required(&provider_name, &model_name)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let platform = std::sync::Arc::new(ava_platform::StandardPlatform);
+
+    // Clone the app handle so we can access bridge state from the spawned task
+    let app_handle = app.clone();
+
+    tokio::spawn(async move {
+        let mut director = ava_praxis::Director::new(ava_praxis::DirectorConfig {
+            budget: ava_praxis::Budget::interactive(200, 10.0),
+            default_provider: provider,
+            domain_providers: std::collections::HashMap::new(),
+            platform: Some(platform),
+        });
+
+        let worker = match director.delegate(ava_praxis::Task {
+            description: args.goal.clone(),
+            task_type: ava_praxis::TaskType::Simple,
+            files: vec![],
+        }) {
+            Ok(worker) => worker,
+            Err(err) => {
+                let _ = app_handle.emit(
+                    "agent-event",
+                    crate::events::AgentEvent::Error {
+                        message: format!("Praxis delegation failed: {err}"),
+                    },
+                );
+                let bridge_ref = app_handle.state::<DesktopBridge>();
+                *bridge_ref.running.write().await = false;
+                return;
+            }
+        };
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        // Spawn a forwarder that converts PraxisEvents to Tauri events
+        let app_fwd = app_handle.clone();
+        let forwarder = tokio::spawn(async move {
+            while let Some(event) = rx.recv().await {
+                crate::events::emit_praxis_event(&app_fwd, &event);
+            }
+        });
+
+        let result = director.coordinate(vec![worker], cancel, tx).await;
+        let _ = forwarder.await;
+
+        match &result {
+            Ok(_session) => {
+                info!(goal = %args.goal, "Praxis task completed successfully");
+            }
+            Err(e) => {
+                let _ = app_handle.emit(
+                    "agent-event",
+                    crate::events::AgentEvent::Error {
+                        message: format!("Praxis coordination failed: {e}"),
+                    },
+                );
+            }
+        }
+
+        let bridge_ref = app_handle.state::<DesktopBridge>();
+        *bridge_ref.running.write().await = false;
+    });
+
+    Ok(())
+}
+
+/// Get the current Praxis status (running state).
+#[tauri::command]
+pub async fn get_praxis_status(
+    bridge: State<'_, DesktopBridge>,
+) -> Result<PraxisStatus, String> {
+    let running = *bridge.running.read().await;
+    Ok(PraxisStatus {
+        running,
+        total_workers: 0,
+        succeeded: 0,
+        failed: 0,
+    })
+}
+
+/// Cancel a running Praxis task (uses the same cancel token as single-agent).
+#[tauri::command]
+pub async fn cancel_praxis(
+    bridge: State<'_, DesktopBridge>,
+) -> Result<(), String> {
+    bridge.cancel().await;
+    Ok(())
+}
+
+/// Send a steering message to a specific Praxis lead (currently forwards to
+/// the shared message queue — individual lead steering requires tracking
+/// per-lead channels which will be added when the Director supports it).
+#[tauri::command]
+pub async fn steer_lead(
+    lead_id: String,
+    message: String,
+    bridge: State<'_, DesktopBridge>,
+) -> Result<(), String> {
+    if message.is_empty() {
+        return Err("Steering message must not be empty.".to_string());
+    }
+    info!(lead_id = %lead_id, message = %message, "steer_lead: forwarding as steering message");
+    bridge
+        .send_message(message, MessageTier::Steering)
+        .await
 }
 
 fn collect_history_before_last_user(messages: &[ava_types::Message]) -> Vec<ava_types::Message> {

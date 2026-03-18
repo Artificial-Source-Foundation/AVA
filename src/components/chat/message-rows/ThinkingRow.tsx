@@ -1,48 +1,40 @@
 /**
  * Thinking Row
  *
- * Collapsible reasoning display matching the TUI style:
- * - Grey/dimmed italic text
- * - "* Thinking ▶" (collapsed) / "* Thinking ▼" (expanded) header
- * - Collapsed: first 2 lines preview + "▶ ... (N more lines)" hint
+ * Minimal reasoning display inspired by OpenCode/Goose:
+ * - Collapsed: "💭 Thought for Xs" clickable badge
+ * - Expanded: dimmed italic content with left border
  * - Auto-expands during streaming, auto-collapses when complete
- * - Shimmer pulse effect while streaming
+ * - No copy button (thinking is internal, not for copying)
+ * - Shimmer animation while streaming
  */
 
-import { Check, Copy } from 'lucide-solid'
-import { type Component, createEffect, createMemo, createSignal, For, Show } from 'solid-js'
-import { useNotification } from '../../../contexts/notification'
+import { type Component, createEffect, createMemo, createSignal, Show } from 'solid-js'
 import { useSettings } from '../../../stores/settings'
 
 interface ThinkingRowProps {
   thinking: string
   isStreaming: boolean
+  /** Duration of thinking in seconds (optional) */
+  thinkingDuration?: number
 }
-
-const MAX_COLLAPSED_LINES = 2
 
 export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
   const { settings } = useSettings()
   const hidden = () => settings().ui.hideThinking
   const [expanded, setExpanded] = createSignal(false)
-  const [copied, setCopied] = createSignal(false)
   const [wasStreaming, setWasStreaming] = createSignal(false)
-  const { success } = useNotification()
+  const [startTime] = createSignal(Date.now())
 
-  const lines = createMemo(() => {
-    const text = props.thinking || ''
-    return text.split('\n')
+  const lineCount = createMemo(() => (props.thinking || '').split('\n').filter(Boolean).length)
+
+  const duration = createMemo(() => {
+    if (props.thinkingDuration) return props.thinkingDuration
+    if (!props.isStreaming) return (Date.now() - startTime()) / 1000
+    return 0
   })
 
-  const totalLines = createMemo(() => lines().length)
-  const isCollapsible = createMemo(() => totalLines() > MAX_COLLAPSED_LINES)
-
-  const previewLines = createMemo(() => {
-    if (expanded() || !isCollapsible()) return lines()
-    return lines().slice(0, MAX_COLLAPSED_LINES)
-  })
-
-  // Auto-expand while streaming, auto-collapse when streaming ends
+  // Auto-expand while streaming, auto-collapse when done
   createEffect(() => {
     if (props.isStreaming && props.thinking) {
       setExpanded(true)
@@ -57,101 +49,59 @@ export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
     }
   })
 
-  const handleCopy = async (e: MouseEvent): Promise<void> => {
-    e.stopPropagation()
-    try {
-      await navigator.clipboard.writeText(props.thinking)
-      setCopied(true)
-      success('Copied')
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // Clipboard API may fail
-    }
-  }
-
-  const headerLabel = createMemo(() => {
+  const badgeText = createMemo(() => {
     if (props.isStreaming && !props.thinking) return 'Thinking...'
-    if (!isCollapsible()) return 'Thinking'
-    return expanded() ? 'Thinking \u25BC' : 'Thinking \u25B6'
+    if (props.isStreaming) return 'Thinking...'
+    const d = duration()
+    const lines = lineCount()
+    if (d > 0.5) return `Thought for ${d.toFixed(1)}s`
+    if (lines > 0) return `Thought (${lines} line${lines !== 1 ? 's' : ''})`
+    return 'Thought'
   })
 
   return (
     <Show when={!hidden()}>
-      <div class="mb-2 animate-fade-in group/thinking">
-        {/* Header row: bullet + label + copy button */}
-        <div class="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            aria-expanded={expanded()}
-            class="flex items-center gap-1.5 text-xs transition-colors"
-            style={{
-              color: 'var(--text-muted)',
-              'font-style': 'italic',
-            }}
+      <div class="mb-2 animate-fade-in">
+        {/* Collapsed: minimal badge */}
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded()}
+          class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] transition-all cursor-pointer select-none"
+          style={{
+            background: expanded() ? 'var(--alpha-white-5)' : 'transparent',
+            color: 'var(--text-muted)',
+            border: 'none',
+            font: 'inherit',
+          }}
+        >
+          <span style={{ 'font-size': '12px', opacity: '0.7' }}>
+            {props.isStreaming ? '✦' : '💭'}
+          </span>
+          <span
+            style={{ 'font-style': 'italic' }}
+            class={props.isStreaming ? 'thinking-shimmer' : ''}
           >
-            <span
-              style={{
-                color: 'var(--accent)',
-                'font-style': 'normal',
-                'font-size': '0.7em',
-              }}
-            >
-              {'\u25CF'}
-            </span>
-            <span>{headerLabel()}</span>
-          </button>
-          <Show when={props.thinking && !props.isStreaming}>
-            <button
-              type="button"
-              onClick={handleCopy}
-              class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-8)] transition-all opacity-0 group-hover/thinking:opacity-100"
-              title="Copy thinking"
-              aria-label="Copy thinking content"
-            >
-              <Show when={copied()} fallback={<Copy class="w-3 h-3" />}>
-                <Check class="w-3 h-3 text-[var(--success)]" />
-              </Show>
-            </button>
+            {badgeText()}
+          </span>
+          <Show when={!props.isStreaming && props.thinking}>
+            <span style={{ opacity: '0.4', 'font-size': '10px' }}>{expanded() ? '▾' : '▸'}</span>
           </Show>
-        </div>
+        </button>
 
-        {/* Content: preview lines when collapsed, all lines when expanded */}
-        <Show when={props.thinking}>
+        {/* Expanded: thinking content */}
+        <Show when={expanded() && props.thinking}>
           <div
-            class={`mt-1 pl-3 border-l-2 border-[var(--border-subtle)] whitespace-pre-wrap leading-relaxed max-h-[400px] overflow-y-auto scrollbar-thin ${props.isStreaming ? 'thinking-shimmer' : ''}`}
+            class={`mt-1.5 ml-2 pl-3 border-l-2 border-[var(--border-subtle)] whitespace-pre-wrap leading-relaxed max-h-[300px] overflow-y-auto scrollbar-thin ${props.isStreaming ? 'thinking-shimmer' : ''}`}
             style={{
               color: 'var(--text-muted)',
               'font-style': 'italic',
-              'font-size': 'calc(var(--chat-font-size, 14px) * 0.92)',
-              opacity: '0.75',
+              'font-size': '12px',
+              opacity: '0.6',
+              'line-height': '1.5',
             }}
           >
-            <For each={previewLines()}>
-              {(line) => <div style={{ 'min-height': '1.4em' }}>{line || '\u00A0'}</div>}
-            </For>
-            {/* Collapsed hint */}
-            <Show when={!expanded() && isCollapsible()}>
-              <button
-                type="button"
-                style={{
-                  color: 'var(--text-muted)',
-                  'font-style': 'italic',
-                  opacity: '0.6',
-                  cursor: 'pointer',
-                  'margin-top': '2px',
-                  background: 'none',
-                  border: 'none',
-                  padding: '0',
-                  font: 'inherit',
-                  'text-align': 'left',
-                }}
-                onClick={() => setExpanded(true)}
-              >
-                {`\u25B6 ... (${totalLines() - MAX_COLLAPSED_LINES} more lines)`}
-              </button>
-            </Show>
-            {/* Streaming cursor */}
+            {props.thinking}
             <Show when={props.isStreaming}>
               <span class="streaming-cursor">{'\u2589'}</span>
             </Show>

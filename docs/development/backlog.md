@@ -49,11 +49,17 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 17. **Wire TeamPanel to team store** — currently stub; connect to live PraxisEvent stream via agent-team-bridge.
 18. **Wire TeamMetrics/DelegationLog/WorkerDetail into right panel** — populate metrics footer (tokens, files, cost, success rate) and worker detail views.
 
-**Sprint E: Agent Communication + Controls**
+**Sprint E: Tauri Bridge + Agent Communication**
 
-19. **Lead question relay through Director chat** — leads surface questions as colored border cards in Director chat; user answers relay back.
-20. **Stop button per lead/worker** — individual stop buttons trigger Director "what went wrong?" flow and replan.
-21. **Solo/Team mode switching** — full lifecycle: Solo → Team (plan + spawn), Team → Solo (stop all + collapse), Resume Team (review + replan).
+19. **Add Tauri IPC commands for Praxis** — `start_delegation`, `get_praxis_status`, `cancel_praxis`, `steer_lead` in `src-tauri/src/commands/`.
+20. **Add PraxisEvent types to `src-tauri/src/events.rs`** — bridge 19 event types from Rust to frontend.
+21. **Add frontend PraxisEvent types to `src/types/rust-ipc.ts`** — TypeScript counterparts for all Praxis events.
+22. **Handle 12 currently-dropped Praxis events in TUI** — workflow, spec, artifact, conflict, ACP events.
+23. **Wire worktree creation per lead** — git worktree lifecycle management during team mode.
+24. **Implement Merge Worker** — integration worker that merges lead worktrees, resolves conflicts.
+25. **Lead question relay through Director chat** — leads surface questions as colored border cards in Director chat; user answers relay back.
+26. **Stop button per lead/worker** — individual stop buttons trigger Director "what went wrong?" flow and replan.
+27. **Solo/Team mode switching** — full lifecycle: Solo → Team (plan + spawn), Team → Solo (stop all + collapse), Resume Team (review + replan).
 
 **Sprint F: Worktrees + Budget**
 

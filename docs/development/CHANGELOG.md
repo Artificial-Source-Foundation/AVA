@@ -3,8 +3,44 @@
 ## v2.2.1 (2026-03-18)
 
 ### Added
+
+#### Desktop UI
+- **Soft Zinc design system** — 12 reusable components (Toggle, Select, Badge, Card, etc.), CSS token alignment across all screens
+- **5-step onboarding flow** — Welcome → Connect → Theme → Workspace → Ready
+- **Project Hub** — time-based greeting, project cards with recent activity
+- **Settings consolidation** — reduced from 15 → 11 tabs, full-screen layout with grouped sidebar
+- **Welcome screen** with suggestion cards for new users
+- **Loading screen** and **error screen** redesigned
+- **Model browser** redesigned as grouped list (by provider)
+- **Question dock** for agent questions during execution
+- **Tool list dialog** accessible via command palette
+- **Checkpoint save + restore dialog**
+- **ThinkingDisplay setting** — Bubble/Preview/Hidden modes
+- **LLM/Generation settings tab** wired to config
+- **Progress + budget_warning events** handled in frontend
+
+#### TUI Parity
+- Keyboard shortcuts aligned with TUI (Ctrl+S/L/M/R, Tab mode cycle)
+- Mid-stream messaging UI (queue badges, send during processing)
+- Question modal for agent questions
+
+#### Praxis Multi-Agent
 - **Praxis UI design finalized** — Director Chat, Team Panel, Lead Chat screens designed in ava-ui.pen
 - **Praxis design decisions documented** — naming convention (professional leads, fun worker names), tiered error handling, worktree-per-lead strategy, Solo/Team mode switching, budget delegation chain, session persistence
+- TeamPanel wired to team store with stop buttons + metrics
+- Worker naming pool (Pedro, Sofia, Luna, Kai, Mira, Rio, Ash, Nico, Ivy, Juno, Zara, Leo)
+- Domain colors as constants, Team tab in RightPanel
+- Agent-team-bridge event forwarding
+- **Note**: Tauri bridge for Praxis events still needed (Sprint E)
+
+### Changed
+- Deduplicated 4 inline Toggles → shared a11y component
+- Extracted format-time, ids, elapsed timer utilities (-800 LOC)
+- Fixed CSS variable typo (`--alpha-white-05` → `--alpha-white-5`)
+- Fixed tool call error indicators (findIndex ordering)
+- Fixed thinking display (lastProcessedEventIdx reset)
+- 38 Playwright e2e tests
+- 0 TypeScript errors, 0 `as any` casts
 
 ## v2.2.0 (2026-03-17)
 

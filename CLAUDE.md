@@ -1,4 +1,4 @@
-<!-- Last verified: 2026-03-17. Run 'just check' to revalidate. -->
+<!-- Last verified: 2026-03-18. Run 'just check' to revalidate. -->
 
 # AVA Architecture & Conventions (v3)
 
@@ -185,6 +185,8 @@ Praxis is AVA's multi-agent system in `crates/ava-praxis/`. It uses a **Director
 ### Session Persistence
 
 Artifacts saved to `.ava/praxis/{session-id}/{lead-name}/`. Sessions are resumable if interrupted.
+
+> **Note:** Tauri bridge for Praxis events is not yet implemented. Desktop Team UI is wired to the store but Rust events don't flow to it yet. Use TUI `--multi-agent` for Praxis testing.
 
 ## Middleware Priority
 

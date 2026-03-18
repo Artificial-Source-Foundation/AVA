@@ -332,6 +332,29 @@ function createAgentStore() {
       const reasoningEffort = settingsRef.settings().generation.reasoningEffort
       const thinkingLevel = reasoningEffort === 'off' ? undefined : reasoningEffort
 
+      // Team mode: route to Praxis Director instead of solo agent
+      if (isTeamMode()) {
+        log.info('agent', 'Team mode — routing to Praxis Director', {
+          goal: goal.slice(0, 120),
+        })
+        try {
+          await rustBackend.startPraxis(goal)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          log.error('agent', 'Praxis failed', { error: msg })
+          const errorMsg: Message = {
+            id: generateMessageId('err'),
+            sessionId,
+            role: 'assistant',
+            content: `**Team Error:** ${msg}`,
+            createdAt: Date.now(),
+            error: { type: 'unknown', message: msg, timestamp: Date.now() },
+          }
+          session.addMessage(errorMsg)
+        }
+        return null
+      }
+
       const result = await rustAgent.run(goal, {
         model: selectedModelId,
         provider: selectedProviderId,

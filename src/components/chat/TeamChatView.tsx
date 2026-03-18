@@ -1,24 +1,20 @@
 /**
- * Team Chat View
+ * Team Chat View — Lead Chat (Read + Steer)
  *
- * Full-screen replacement for the main chat when viewing a team member's
- * conversation. Shows breadcrumb navigation, message history, tool call
- * timeline, status, stop button, and input for follow-up messages.
+ * Matches Pencil design "PRAXIS — Lead Chat (Read+Steer)":
+ * - Header: back arrow + domain dot + lead name + worker/turn badge + Stop button
+ * - Lead message about task delegation
+ * - WORKERS section with worker cards
+ * - LEAD REVIEW section with review message + warning badge
+ * - Steer input at bottom
  */
 
-import { CheckCircle, Loader2, Octagon, Users, XCircle } from 'lucide-solid'
+import { ArrowLeft, CircleCheck, Loader, Square, TriangleAlert, Users, XCircle } from 'lucide-solid'
 import { type Component, createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { useTeam } from '../../stores/team'
-import type { ToolCall } from '../../types'
-import {
-  TEAM_DOMAINS,
-  type TeamMember,
-  type TeamMessage,
-  type TeamToolCall,
-} from '../../types/team'
-import { TeamChatBreadcrumb } from './TeamChatBreadcrumb'
+import { DOMAIN_COLORS } from '../../stores/team-helpers'
+import type { TeamMember } from '../../types/team'
 import { TeamChatInput } from './TeamChatInput'
-import { ToolCallCard } from './ToolCallCard'
 import { formatElapsed } from './tool-call-utils'
 
 interface TeamChatViewProps {
@@ -26,33 +22,14 @@ interface TeamChatViewProps {
   onSendMessage: (memberId: string, message: string) => void
 }
 
-/** Convert TeamToolCall to the ToolCall shape that ToolCallCard expects. */
-function asToolCall(tc: TeamToolCall): ToolCall {
-  return {
-    id: tc.id,
-    name: tc.name,
-    args: tc.args ?? {},
-    status: tc.status === 'running' ? 'running' : tc.status,
-    output: tc.output,
-    error: tc.error,
-    startedAt: tc.startedAt,
-    completedAt: tc.completedAt,
-  }
-}
-
 export const TeamChatView: Component<TeamChatViewProps> = (props) => {
   const team = useTeam()
-  const [elapsed, setElapsed] = createSignal('')
+  const [_elapsed, setElapsed] = createSignal('')
 
   const member = (): TeamMember | null => team.selectedMember()
   const isWorking = () => member()?.status === 'working'
-  const isDone = () => member()?.status === 'done'
-  const isError = () => member()?.status === 'error'
 
-  const domainConfig = createMemo(() => {
-    const m = member()
-    return m ? TEAM_DOMAINS[m.domain] : TEAM_DOMAINS.general
-  })
+  const domainColor = () => DOMAIN_COLORS[member()?.domain ?? 'general']
 
   /** Children of the selected member (for leads). */
   const children = createMemo((): TeamMember[] => {
@@ -60,26 +37,23 @@ export const TeamChatView: Component<TeamChatViewProps> = (props) => {
     return m ? team.getChildren(m.id) : []
   })
 
-  /** Interleaved timeline: messages + tool calls, sorted by timestamp. */
-  const timeline = createMemo(() => {
+  /** Get messages from the lead (assistant role = lead thinking). */
+  const leadMessages = createMemo(() => {
     const m = member()
-    if (!m) return []
+    return m ? m.messages.filter((msg) => msg.role === 'assistant') : []
+  })
 
-    type TimelineItem =
-      | { kind: 'message'; data: TeamMessage }
-      | { kind: 'tool'; data: TeamToolCall }
-
-    const items: TimelineItem[] = [
-      ...m.messages.map((msg) => ({ kind: 'message' as const, data: msg })),
-      ...m.toolCalls.map((tc) => ({ kind: 'tool' as const, data: tc })),
-    ]
-
-    items.sort((a, b) => {
-      const tsA = a.kind === 'message' ? a.data.timestamp : a.data.startedAt
-      const tsB = b.kind === 'message' ? b.data.timestamp : b.data.startedAt
-      return tsA - tsB
-    })
-    return items
+  /** Worker count + turn summary for header badge */
+  const headerBadge = createMemo(() => {
+    const m = member()
+    if (!m) return ''
+    const workerCount = children().length
+    const doneCalls = m.toolCalls.filter((tc) => tc.status === 'success').length
+    const totalCalls = m.toolCalls.length
+    if (workerCount > 0) {
+      return `${workerCount} worker${workerCount !== 1 ? 's' : ''} \u00B7 ${doneCalls}/${totalCalls}`
+    }
+    return `${doneCalls}/${totalCalls}`
   })
 
   // Live elapsed timer
@@ -93,61 +67,48 @@ export const TeamChatView: Component<TeamChatViewProps> = (props) => {
   onCleanup(() => clearInterval(timer))
 
   return (
-    <div class="flex flex-col h-full min-h-0 bg-[var(--surface)]">
-      {/* Breadcrumb navigation */}
-      <TeamChatBreadcrumb />
-
-      {/* Header: member info + status + stop button */}
+    <div class="flex flex-col h-full min-h-0" style={{ background: '#09090B' }}>
+      {/* Header: back arrow + domain dot + name + badge + Stop */}
       <Show when={member()}>
         {(m) => (
-          <div class="flex items-center gap-3 px-4 py-3 border-b border-[var(--border-subtle)]">
-            {/* Domain badge */}
-            <div
-              class="flex items-center justify-center w-8 h-8 rounded-full text-[14px] font-semibold"
-              style={{ background: domainConfig().colorSubtle, color: domainConfig().color }}
-            >
-              {domainConfig().short}
+          <div
+            class="flex items-center justify-between h-11 px-4"
+            style={{ 'border-bottom': '1px solid #27272A' }}
+          >
+            {/* Left: back + dot + name + badge */}
+            <div class="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => team.navigateBack()}
+                class="text-[#52525B] hover:text-[#A1A1AA] transition-colors"
+              >
+                <ArrowLeft class="w-4 h-4" />
+              </button>
+              <span
+                class="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                style={{ background: domainColor() }}
+              />
+              <span class="text-[13px] font-semibold text-[#FAFAFA]">{m().name}</span>
+              <Show when={headerBadge()}>
+                <span
+                  class="text-[9px] font-medium px-1.5 py-0.5 rounded"
+                  style={{ color: domainColor(), background: `${domainColor()}20` }}
+                >
+                  {headerBadge()}
+                </span>
+              </Show>
             </div>
 
-            {/* Name + role */}
-            <div class="flex-1 min-w-0">
-              <div class="text-[14px] font-medium text-[var(--text-primary)] truncate">
-                {m().name}
-              </div>
-              <div class="text-[11px] text-[var(--text-muted)] truncate">
-                {m().task ?? 'No task assigned'}
-              </div>
-            </div>
-
-            {/* Status badge */}
-            <Show when={isWorking()}>
-              <span class="flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-full bg-[var(--accent)]/10 text-[var(--accent-text)]">
-                <Loader2 class="w-3 h-3 animate-spin" />
-                Working {elapsed() && <span class="tabular-nums">{elapsed()}</span>}
-              </span>
-            </Show>
-            <Show when={isDone()}>
-              <span class="flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-full bg-[var(--success)]/10 text-[var(--success)]">
-                <CheckCircle class="w-3 h-3" />
-                Done
-              </span>
-            </Show>
-            <Show when={isError()}>
-              <span class="flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-full bg-[var(--error)]/10 text-[var(--error)]">
-                <XCircle class="w-3 h-3" />
-                Error
-              </span>
-            </Show>
-
-            {/* Stop button */}
+            {/* Right: Stop button */}
             <Show when={isWorking()}>
               <button
                 type="button"
                 onClick={() => props.onStopAgent(m().id)}
-                class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-[var(--radius-md)] text-[12px] text-[var(--error)] bg-[var(--error)]/10 hover:bg-[var(--error)]/20 transition-colors duration-[var(--duration-fast)]"
+                class="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium text-[var(--error)] transition-colors"
+                style={{ background: '#EF444420' }}
                 title="Stop this agent"
               >
-                <Octagon class="w-3.5 h-3.5" />
+                <Square class="w-2.5 h-2.5" />
                 Stop
               </button>
             </Show>
@@ -155,39 +116,10 @@ export const TeamChatView: Component<TeamChatViewProps> = (props) => {
         )}
       </Show>
 
-      {/* Children (sub-delegations) */}
-      <Show when={children().length > 0}>
-        <div class="px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-subtle)]/50">
-          <div class="text-[11px] text-[var(--text-muted)] mb-1.5">Sub-delegations</div>
-          <div class="flex flex-wrap gap-1.5">
-            <For each={children()}>
-              {(child) => (
-                <button
-                  type="button"
-                  onClick={() => team.setSelectedMemberId(child.id)}
-                  class="flex items-center gap-1.5 px-2 py-1 rounded-full text-[11px] border border-[var(--border-subtle)] hover:bg-[var(--alpha-white-3)] transition-colors duration-[var(--duration-fast)] cursor-pointer"
-                >
-                  <span
-                    class="w-1.5 h-1.5 rounded-full"
-                    classList={{
-                      'bg-[var(--accent)] animate-pulse-subtle': child.status === 'working',
-                      'bg-[var(--success)]': child.status === 'done',
-                      'bg-[var(--error)]': child.status === 'error',
-                      'bg-[var(--text-muted)]': child.status === 'idle',
-                    }}
-                  />
-                  <span class="text-[var(--text-secondary)]">{child.name}</span>
-                </button>
-              )}
-            </For>
-          </div>
-        </div>
-      </Show>
-
-      {/* Timeline: messages + tool calls */}
-      <div class="flex-1 overflow-y-auto scrollbar-thin px-4 py-3 space-y-2">
+      {/* Main scrollable content — justified to bottom */}
+      <div class="flex-1 overflow-y-auto scrollbar-thin flex flex-col justify-end px-5 py-4 gap-3">
         <Show
-          when={timeline().length > 0}
+          when={member()}
           fallback={
             <div class="flex flex-col items-center justify-center h-full text-[var(--text-muted)] text-[13px]">
               <Users class="w-8 h-8 mb-2 opacity-40" />
@@ -195,66 +127,164 @@ export const TeamChatView: Component<TeamChatViewProps> = (props) => {
             </div>
           }
         >
-          <For each={timeline()}>
-            {(item) => (
-              <Show
-                when={item.kind === 'message'}
-                fallback={<ToolCallCard toolCall={asToolCall(item.data as TeamToolCall)} />}
-              >
-                <MessageItem data={item.data as TeamMessage} />
-              </Show>
-            )}
+          {/* Lead messages */}
+          <For each={leadMessages()}>
+            {(msg) => <p class="text-[13px] text-[#D4D4D8] leading-relaxed">{msg.content}</p>}
           </For>
-        </Show>
 
-        {/* Result/Error at the bottom */}
-        <Show when={member()?.result}>
-          <div class="mt-3 p-3 rounded-[var(--radius-md)] bg-[var(--success)]/5 border border-[var(--success)]/20">
-            <div class="text-[11px] text-[var(--success)] font-medium mb-1">Result</div>
-            <pre class="text-[12px] text-[var(--text-secondary)] whitespace-pre-wrap break-words font-mono leading-relaxed max-h-48 overflow-y-auto scrollbar-none">
-              {member()!.result}
-            </pre>
-          </div>
-        </Show>
-        <Show when={member()?.error}>
-          <div class="mt-3 p-3 rounded-[var(--radius-md)] bg-[var(--error)]/5 border border-[var(--error)]/20">
-            <div class="text-[11px] text-[var(--error)] font-medium mb-1">Error</div>
-            <pre class="text-[12px] text-[var(--text-secondary)] whitespace-pre-wrap break-words font-mono leading-relaxed">
-              {member()!.error}
-            </pre>
-          </div>
+          {/* WORKERS section */}
+          <Show when={children().length > 0}>
+            <div
+              class="text-[9px] font-semibold mt-2"
+              style={{ color: '#3F3F46', 'letter-spacing': '0.8px' }}
+            >
+              WORKERS
+            </div>
+
+            <div class="space-y-3">
+              <For each={children()}>
+                {(child) => (
+                  <WorkerChatCard
+                    worker={child}
+                    onNavigate={(id) => team.setSelectedMemberId(id)}
+                  />
+                )}
+              </For>
+            </div>
+          </Show>
+
+          {/* LEAD REVIEW section */}
+          <Show when={member()?.result}>
+            <div class="w-full h-px" style={{ background: '#27272A' }} />
+            <div
+              class="text-[9px] font-semibold"
+              style={{ color: '#3F3F46', 'letter-spacing': '0.8px' }}
+            >
+              LEAD REVIEW
+            </div>
+            <p class="text-[13px] text-[#D4D4D8] leading-relaxed">{member()!.result}</p>
+          </Show>
+
+          {/* Error state */}
+          <Show when={member()?.error}>
+            <div
+              class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg"
+              style={{ background: '#F59E0B20' }}
+            >
+              <TriangleAlert class="w-3 h-3" style={{ color: '#F59E0B' }} />
+              <span class="text-[11px]" style={{ color: '#F59E0B' }}>
+                {member()!.error}
+              </span>
+            </div>
+          </Show>
         </Show>
       </div>
 
-      {/* Input bar */}
+      {/* Steer input */}
       <TeamChatInput onSendMessage={props.onSendMessage} />
     </div>
   )
 }
 
-// --- Timeline Sub-Components ---
+// ============================================================================
+// Worker Chat Card — matches Pencil design
+// ============================================================================
 
-const MessageItem: Component<{ data: TeamMessage }> = (props) => {
-  const isAssistant = () => props.data.role === 'assistant'
+const WorkerChatCard: Component<{
+  worker: TeamMember
+  onNavigate: (id: string) => void
+}> = (props) => {
+  const domainColor = () => DOMAIN_COLORS[props.worker.domain]
+
+  const statusBadge = (): { text: string; color: string } => {
+    const done = props.worker.toolCalls.filter((tc) => tc.status === 'success').length
+    const total = props.worker.toolCalls.length
+    const turnInfo = total > 0 ? ` \u00B7 ${done}/${total}` : ''
+
+    switch (props.worker.status) {
+      case 'working':
+        return { text: `working${turnInfo}`, color: domainColor() }
+      case 'done':
+        return { text: `done${turnInfo}`, color: 'var(--success)' }
+      case 'error':
+        return { text: `error${turnInfo}`, color: 'var(--error)' }
+      default:
+        return { text: props.worker.status, color: 'var(--text-muted)' }
+    }
+  }
+
   return (
     <div
-      class="rounded-[var(--radius-md)] px-3 py-2 text-[13px] leading-relaxed"
-      classList={{
-        'bg-[var(--alpha-white-3)] text-[var(--text-secondary)]': isAssistant(),
-        'bg-[var(--accent)]/10 text-[var(--text-primary)]': !isAssistant(),
-      }}
+      class="rounded-xl p-3 flex flex-col gap-2"
+      style={{ background: '#18181B', border: '1px solid #27272A' }}
     >
-      <div class="text-[10px] text-[var(--text-muted)] mb-0.5">
-        {isAssistant() ? 'thinking' : 'user'}
-        <span class="ml-2 tabular-nums">
-          {new Date(props.data.timestamp).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-          })}
+      {/* Header: dot + name + status badge */}
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full flex-shrink-0" style={{ background: domainColor() }} />
+          <span class="text-[12px] font-medium text-[#FAFAFA]">{props.worker.name}</span>
+        </div>
+        <span
+          class="text-[9px] font-medium px-1.5 py-0.5 rounded"
+          style={{
+            color: statusBadge().color,
+            background: `${statusBadge().color}20`,
+          }}
+        >
+          {statusBadge().text}
         </span>
       </div>
-      <div class="whitespace-pre-wrap break-words">{props.data.content}</div>
+
+      {/* Task */}
+      <Show when={props.worker.task}>
+        <p class="text-[11px] text-[#71717A]">{props.worker.task}</p>
+      </Show>
+
+      {/* Tool calls */}
+      <Show when={props.worker.toolCalls.length > 0}>
+        <div class="flex flex-col gap-1">
+          <For each={props.worker.toolCalls}>
+            {(tc) => (
+              <div class="flex items-center gap-1.5">
+                <Show
+                  when={tc.status === 'success'}
+                  fallback={
+                    <Show
+                      when={tc.status === 'running'}
+                      fallback={<XCircle class="w-3 h-3 text-[var(--error)]" />}
+                    >
+                      <Loader class="w-3 h-3" style={{ color: '#A78BFA' }} />
+                    </Show>
+                  }
+                >
+                  <CircleCheck class="w-3 h-3 text-[var(--success)]" />
+                </Show>
+                <span
+                  class="text-[10px] font-['JetBrains_Mono',monospace]"
+                  style={{
+                    color: tc.status === 'running' ? '#A78BFA' : '#52525B',
+                  }}
+                >
+                  {tc.name}
+                  {tc.args && typeof tc.args === 'object' && 'path' in tc.args
+                    ? ` ${String(tc.args.path).split('/').pop()}`
+                    : ''}
+                </span>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
+
+      {/* View chat link */}
+      <button
+        type="button"
+        onClick={() => props.onNavigate(props.worker.id)}
+        class="text-left text-[10px] font-medium hover:underline transition-colors"
+        style={{ color: '#A78BFA' }}
+      >
+        View {props.worker.name.split(' ')[0]}'s chat &rarr;
+      </button>
     </div>
   )
 }

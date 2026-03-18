@@ -12,6 +12,40 @@ import {
   type TeamStatus,
 } from '../types/team'
 
+// ============================================================================
+// Constants
+// ============================================================================
+
+/** Fun worker name pool — assigned round-robin per domain */
+export const WORKER_NAMES = [
+  'Pedro',
+  'Sofia',
+  'Luna',
+  'Kai',
+  'Mira',
+  'Rio',
+  'Ash',
+  'Nico',
+  'Ivy',
+  'Juno',
+  'Zara',
+  'Leo',
+] as const
+
+/** Domain accent colors — hardcoded because they are domain-specific, not theme-dependent */
+export const DOMAIN_COLORS: Record<TeamDomain, string> = {
+  frontend: '#A78BFA', // violet
+  backend: '#3B82F6', // blue
+  fullstack: '#6366F1', // indigo
+  testing: '#22C55E', // green
+  devops: '#F97316', // orange
+  docs: '#3B82F6', // blue
+  design: '#EC4899', // pink
+  data: '#06B6D4', // cyan
+  security: '#EF4444', // red
+  general: '#71717A', // gray
+}
+
 /** Map internal agent type to team role */
 export function agentTypeToRole(type: string): TeamRole {
   switch (type) {
@@ -65,14 +99,16 @@ export function inferDomain(task?: string, files?: string[]): TeamDomain {
 /** Generate display name from role and domain */
 export function generateName(role: TeamRole, domain: TeamDomain, index?: number): string {
   const config = TEAM_DOMAINS[domain]
+  const domainLabel = config.label.replace(' Team', '')
   switch (role) {
     case 'team-lead':
       return 'Team Lead'
     case 'senior-lead':
-      return `Senior ${config.label.replace(' Team', '')} Lead`
+      return `${domainLabel} Lead`
     case 'junior-dev': {
-      const base = `${config.label.replace(' Team', '')} Dev`
-      return index !== undefined ? `${base} #${index + 1}` : base
+      const nameIdx = index ?? 0
+      const workerName = WORKER_NAMES[nameIdx % WORKER_NAMES.length]
+      return `${workerName} (Jr. ${domainLabel})`
     }
   }
 }

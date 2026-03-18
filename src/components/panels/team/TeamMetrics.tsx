@@ -1,8 +1,9 @@
 /**
  * Team Metrics Footer
  *
- * Aggregate summary for the entire dev team:
- * total tokens, files changed, tool calls, and delegation success ratio.
+ * Aggregate summary: Tokens, Files, Cost, Success rate.
+ * Matches Pencil design: TEAM METRICS header (9px, #3F3F46),
+ * 4-column grid with JetBrains Mono values.
  */
 
 import { type Component, createMemo } from 'solid-js'
@@ -16,6 +17,13 @@ function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return String(n)
+}
+
+function formatCost(tokens: number): string {
+  // Rough estimate: $3/M input, $15/M output — average ~$9/M
+  const cost = (tokens / 1_000_000) * 9
+  if (cost < 0.01) return '$0.00'
+  return `$${cost.toFixed(2)}`
 }
 
 // ============================================================================
@@ -48,14 +56,6 @@ export const TeamMetrics: Component<{
     return files.size
   })
 
-  const totalToolCalls = createMemo(() => {
-    let count = 0
-    for (const m of props.members) {
-      count += m.toolCalls.length
-    }
-    return count
-  })
-
   const successRatio = createMemo(() => {
     const total = props.delegations.length
     if (total === 0) return null
@@ -64,46 +64,58 @@ export const TeamMetrics: Component<{
   })
 
   return (
-    <div class="border-t border-[var(--border-subtle)] px-3 py-1.5">
-      <div class="grid grid-cols-4 gap-2">
-        {/* Total tokens */}
-        <div class="text-center">
-          <div class="font-[var(--font-ui-mono)] text-[11px] font-semibold text-[var(--text-primary)]">
-            {formatTokens(totalTokens().total)}
-          </div>
-          <div class="font-[var(--font-ui-mono)] text-[8px] text-[var(--text-muted)] uppercase tracking-wider">
+    <div class="px-4 py-3" style={{ 'border-top': '1px solid #27272A' }}>
+      {/* Section header */}
+      <div
+        class="text-[9px] font-semibold mb-2"
+        style={{ color: '#3F3F46', 'letter-spacing': '0.8px' }}
+      >
+        TEAM METRICS
+      </div>
+
+      {/* 4-column grid */}
+      <div class="flex gap-4">
+        {/* Tokens */}
+        <div class="flex flex-col gap-0.5">
+          <span class="text-[9px]" style={{ color: '#52525B' }}>
             Tokens
-          </div>
+          </span>
+          <span class="text-[12px] font-semibold text-[#FAFAFA] font-['JetBrains_Mono',monospace]">
+            {formatTokens(totalTokens().total)}
+          </span>
         </div>
 
-        {/* Files changed */}
-        <div class="text-center">
-          <div class="font-[var(--font-ui-mono)] text-[11px] font-semibold text-[var(--text-primary)]">
-            {totalFiles()}
-          </div>
-          <div class="font-[var(--font-ui-mono)] text-[8px] text-[var(--text-muted)] uppercase tracking-wider">
+        {/* Files */}
+        <div class="flex flex-col gap-0.5">
+          <span class="text-[9px]" style={{ color: '#52525B' }}>
             Files
-          </div>
+          </span>
+          <span class="text-[12px] font-semibold text-[#FAFAFA] font-['JetBrains_Mono',monospace]">
+            {totalFiles()}
+          </span>
         </div>
 
-        {/* Tool calls */}
-        <div class="text-center">
-          <div class="font-[var(--font-ui-mono)] text-[11px] font-semibold text-[var(--text-primary)]">
-            {totalToolCalls()}
-          </div>
-          <div class="font-[var(--font-ui-mono)] text-[8px] text-[var(--text-muted)] uppercase tracking-wider">
-            Tools
-          </div>
+        {/* Cost */}
+        <div class="flex flex-col gap-0.5">
+          <span class="text-[9px]" style={{ color: '#52525B' }}>
+            Cost
+          </span>
+          <span class="text-[12px] font-semibold text-[#FAFAFA] font-['JetBrains_Mono',monospace]">
+            {formatCost(totalTokens().total)}
+          </span>
         </div>
 
-        {/* Success ratio */}
-        <div class="text-center">
-          <div
-            class="font-[var(--font-ui-mono)] text-[11px] font-semibold"
+        {/* Success */}
+        <div class="flex flex-col gap-0.5">
+          <span class="text-[9px]" style={{ color: '#52525B' }}>
+            Success
+          </span>
+          <span
+            class="text-[12px] font-semibold font-['JetBrains_Mono',monospace]"
             style={{
               color:
                 successRatio() === null
-                  ? 'var(--text-muted)'
+                  ? '#52525B'
                   : successRatio()! >= 80
                     ? 'var(--success)'
                     : successRatio()! >= 50
@@ -112,10 +124,7 @@ export const TeamMetrics: Component<{
             }}
           >
             {successRatio() === null ? '--' : `${successRatio()}%`}
-          </div>
-          <div class="font-[var(--font-ui-mono)] text-[8px] text-[var(--text-muted)] uppercase tracking-wider">
-            Success
-          </div>
+          </span>
         </div>
       </div>
     </div>

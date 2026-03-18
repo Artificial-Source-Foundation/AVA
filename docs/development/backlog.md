@@ -33,8 +33,8 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 9. ~~**Desktop: Ctrl+Y copy last response**~~ — DONE
 10. ~~**Desktop: theme picker UI**~~ — DONE (29 themes via `/theme`)
 11. ~~**Desktop: `/later` and `/queue` commands**~~ — DONE
-12. **Desktop: mid-stream messaging IPC** — steering/follow-up/post-complete Tauri bridge incomplete.
-13. **Web mode: full DB operation parity** — agents, checkpoints, memory queries return empty in web mode. Need HTTP endpoints for full feature set.
+12. ~~**Desktop: mid-stream messaging IPC**~~ — DONE (was already fully wired: Enter/Alt+Enter/Ctrl+Alt+Enter + queue UI)
+13. ~~**Web mode: full DB operation parity**~~ — DONE (stub endpoints for agents/files/terminal/memory/checkpoints)
 
 ### Platform Verification
 

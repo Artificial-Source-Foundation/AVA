@@ -207,7 +207,7 @@ test.describe('Settings Modal', () => {
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 3000 })
   })
 
-  test('has sidebar with DESKTOP, AI, EXTENSIONS, ADVANCED tab groups', async ({ page }) => {
+  test('has sidebar with DESKTOP, AI, EXTENSIONS, SECURITY tab groups', async ({ page }) => {
     await page.locator('button[aria-label="Settings"]').click()
     await expect(page.locator('button:has-text("Back to Chat")')).toBeVisible({ timeout: 3000 })
 
@@ -215,7 +215,7 @@ test.describe('Settings Modal', () => {
     await expect(sidebar.locator('text=DESKTOP')).toBeVisible()
     await expect(sidebar.locator('text=AI')).toBeVisible()
     await expect(sidebar.locator('text=EXTENSIONS')).toBeVisible()
-    await expect(sidebar.locator('text=ADVANCED')).toBeVisible()
+    await expect(sidebar.locator('text=SECURITY')).toBeVisible()
   })
 
   test('General tab is visible in sidebar', async ({ page }) => {
@@ -299,8 +299,6 @@ test.describe('Settings Modal', () => {
     await expect(nav.locator('button:has-text("Appearance")')).toBeVisible()
     await expect(nav.locator('button:has-text("Behavior")')).toBeVisible()
     await expect(nav.locator('button:has-text("Shortcuts")')).toBeVisible()
-    await expect(nav.locator('button:has-text("Permissions")')).toBeVisible()
-    await expect(nav.locator('button:has-text("Trusted Folders")')).toBeVisible()
   })
 })
 

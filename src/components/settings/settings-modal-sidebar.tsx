@@ -1,5 +1,6 @@
 import { ArrowLeft } from 'lucide-solid'
 import { type Accessor, type Component, createEffect, createMemo, For, Show } from 'solid-js'
+import { useSettings } from '../../stores/settings'
 import { type SettingsTab, type TabGroup, tabGroups } from './settings-modal-config'
 
 interface SettingsModalSidebarProps {
@@ -10,11 +11,24 @@ interface SettingsModalSidebarProps {
 }
 
 export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props) => {
+  const { settings } = useSettings()
+
   const filteredGroups = createMemo((): TabGroup[] => {
     const q = props.search().toLowerCase().trim()
-    if (!q) return tabGroups
+    const devMode = settings().devMode ?? false
 
-    return tabGroups
+    // Filter tabs: hide Developer when devMode is off
+    const base = tabGroups.map((group) => ({
+      ...group,
+      tabs: group.tabs.filter((tab) => {
+        if (tab.id === 'developer' && !devMode) return false
+        return true
+      }),
+    }))
+
+    if (!q) return base.filter((group) => group.tabs.length > 0)
+
+    return base
       .map((group) => ({
         ...group,
         tabs: group.tabs.filter(
@@ -36,9 +50,9 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
     }
   })
 
-  /** Separate the "About" group (empty label) from named groups */
+  /** Separate the footer group (empty label) from named groups */
   const namedGroups = createMemo(() => filteredGroups().filter((g) => g.label !== ''))
-  const aboutGroup = createMemo(() => filteredGroups().find((g) => g.label === ''))
+  const footerGroup = createMemo(() => filteredGroups().find((g) => g.label === ''))
 
   return (
     <nav
@@ -111,10 +125,10 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
         </Show>
       </div>
 
-      {/* About tab — pinned to bottom */}
-      <Show when={aboutGroup()}>
+      {/* Footer tabs (Developer + About) — pinned to bottom */}
+      <Show when={footerGroup()}>
         <div class="mt-auto border-t border-[var(--gray-5)] px-3 py-2">
-          <For each={aboutGroup()!.tabs}>
+          <For each={footerGroup()!.tabs}>
             {(tab) => {
               const Icon = tab.icon
               const isActive = (): boolean => props.activeTab() === tab.id

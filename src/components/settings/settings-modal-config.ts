@@ -3,7 +3,6 @@ import {
   Brain,
   Code2,
   Cpu,
-  FolderLock,
   Info,
   Keyboard,
   Monitor,
@@ -11,9 +10,8 @@ import {
   Puzzle,
   Server,
   type Settings,
-  Shield,
+  ShieldCheck,
   Sliders,
-  Terminal,
   Zap,
 } from 'lucide-solid'
 
@@ -24,13 +22,11 @@ export type SettingsTab =
   | 'shortcuts'
   | 'providers'
   | 'agents'
-  | 'permissions'
+  | 'permissions-trust'
   | 'mcp'
   | 'plugins'
-  | 'skills'
-  | 'commands'
+  | 'skills-commands'
   | 'llm'
-  | 'trusted-folders'
   | 'developer'
   | 'about'
 
@@ -73,18 +69,6 @@ export const tabGroups: TabGroup[] = [
         label: 'Shortcuts',
         icon: Keyboard,
         keywords: ['keyboard', 'hotkey', 'keybinding', 'keys', 'shortcut'],
-      },
-      {
-        id: 'permissions',
-        label: 'Permissions',
-        icon: Shield,
-        keywords: ['permission', 'approve', 'deny', 'allow', 'tool', 'rules', 'safety'],
-      },
-      {
-        id: 'trusted-folders',
-        label: 'Trusted Folders',
-        icon: FolderLock,
-        keywords: ['folder', 'directory', 'trust', 'allow', 'deny', 'path', 'boundary'],
       },
     ],
   },
@@ -140,8 +124,8 @@ export const tabGroups: TabGroup[] = [
         keywords: ['extension', 'install', 'community', 'marketplace'],
       },
       {
-        id: 'skills',
-        label: 'Skills & Rules',
+        id: 'skills-commands',
+        label: 'Skills & Commands',
         icon: Brain,
         keywords: [
           'skill',
@@ -155,18 +139,40 @@ export const tabGroups: TabGroup[] = [
           'always',
           'auto',
           'activation',
+          'command',
+          'slash',
+          'custom',
+          'toml',
         ],
-      },
-      {
-        id: 'commands',
-        label: 'Commands',
-        icon: Terminal,
-        keywords: ['command', 'slash', 'custom', 'toml'],
       },
     ],
   },
   {
-    label: 'Advanced',
+    label: 'Security',
+    tabs: [
+      {
+        id: 'permissions-trust',
+        label: 'Permissions & Trust',
+        icon: ShieldCheck,
+        keywords: [
+          'permission',
+          'approve',
+          'deny',
+          'allow',
+          'tool',
+          'rules',
+          'safety',
+          'folder',
+          'directory',
+          'trust',
+          'path',
+          'boundary',
+        ],
+      },
+    ],
+  },
+  {
+    label: '',
     tabs: [
       {
         id: 'developer',
@@ -174,11 +180,6 @@ export const tabGroups: TabGroup[] = [
         icon: Code2,
         keywords: ['debug', 'logs', 'devtools', 'advanced'],
       },
-    ],
-  },
-  {
-    label: '',
-    tabs: [
       { id: 'about', label: 'About', icon: Info, keywords: ['version', 'license', 'credits'] },
     ],
   },

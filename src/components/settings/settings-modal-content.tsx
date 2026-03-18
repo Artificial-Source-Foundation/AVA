@@ -6,16 +6,14 @@ import type { SettingsTab } from './settings-modal-config'
 import { AgentsTab } from './tabs/AgentsTab'
 import { AppearanceTab } from './tabs/AppearanceTab'
 import { BehaviorTab } from './tabs/BehaviorTab'
-import { CommandsTab } from './tabs/CommandsTab'
 import { DeveloperTab } from './tabs/DeveloperTab'
 import { type Keybinding, KeybindingsTab } from './tabs/KeybindingsTab'
 import { LLMTab } from './tabs/LLMTab'
 import { type MCPServer, MCPServersTab } from './tabs/MCPServersTab'
-import { PermissionsTab } from './tabs/PermissionsTab'
+import { PermissionsAndTrustTab } from './tabs/PermissionsAndTrustTab'
 import { PluginsTab } from './tabs/PluginsTab'
 import { ProvidersTab } from './tabs/providers/providers-tab'
-import { SkillsTab } from './tabs/SkillsTab'
-import { TrustedFoldersTab } from './tabs/TrustedFoldersTab'
+import { SkillsAndCommandsTab } from './tabs/SkillsAndCommandsTab'
 
 interface SettingsModalContentProps {
   activeTab: () => SettingsTab
@@ -87,8 +85,8 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
         />
       </Show>
 
-      <Show when={props.activeTab() === 'permissions'}>
-        <PermissionsTab />
+      <Show when={props.activeTab() === 'permissions-trust'}>
+        <PermissionsAndTrustTab />
       </Show>
 
       <Show when={props.activeTab() === 'agents'}>
@@ -111,16 +109,8 @@ export const SettingsModalContent: Component<SettingsModalContentProps> = (props
         <PluginsTab />
       </Show>
 
-      <Show when={props.activeTab() === 'skills'}>
-        <SkillsTab />
-      </Show>
-
-      <Show when={props.activeTab() === 'commands'}>
-        <CommandsTab />
-      </Show>
-
-      <Show when={props.activeTab() === 'trusted-folders'}>
-        <TrustedFoldersTab />
+      <Show when={props.activeTab() === 'skills-commands'}>
+        <SkillsAndCommandsTab />
       </Show>
 
       <Show when={props.activeTab() === 'developer'}>

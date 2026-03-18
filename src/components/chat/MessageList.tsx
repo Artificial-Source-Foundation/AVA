@@ -103,7 +103,7 @@ export const MessageList: Component = () => {
 
       <div
         ref={scroll.setContainerRef}
-        class="flex-1 overflow-y-auto density-section-px density-section-py"
+        class="flex-1 overflow-y-auto px-12 py-7"
         style={{ 'overflow-anchor': 'none' }}
       >
         <Show when={isLoadingMessages()}>

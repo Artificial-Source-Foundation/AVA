@@ -65,13 +65,17 @@ export const ActivityBar: Component = () => {
     <div
       class="
         flex flex-col items-center
-        w-12 h-full flex-shrink-0
-        bg-[var(--gray-1)]
-        border-r border-[var(--border-subtle)]
+        h-full flex-shrink-0
+        bg-[var(--sidebar-background)]
+        border-r border-[var(--sidebar-border)]
       "
+      style={{ width: 'var(--icon-rail-width)' }}
     >
       {/* Logo */}
-      <div class="flex items-center justify-center w-12 h-12 flex-shrink-0">
+      <div
+        class="flex items-center justify-center h-12 flex-shrink-0"
+        style={{ width: 'var(--icon-rail-width)' }}
+      >
         <div class="w-6 h-6 rounded-md bg-[var(--accent)] flex items-center justify-center">
           <Sparkles class="w-3.5 h-3.5 text-white" />
         </div>
@@ -90,7 +94,7 @@ export const ActivityBar: Component = () => {
                 onClick={() => handleActivityClick(item.id)}
                 class={`
                   relative flex items-center justify-center
-                  w-12 h-10
+                  w-[var(--icon-rail-width)] h-10
                   transition-colors duration-[var(--duration-fast)]
                   ${
                     active()

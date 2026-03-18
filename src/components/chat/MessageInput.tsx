@@ -27,7 +27,7 @@ export const MessageInput: Component = () => {
   const { openModelBrowser } = useLayout()
 
   return (
-    <div class="density-section-px density-section-py border-t border-[var(--border-subtle)]">
+    <div class="px-7 py-4 border-t border-[var(--gray-5)]">
       <Show when={state.agent.doomLoopDetected()}>
         <DoomLoopBanner
           onStop={() => state.agent.cancel()}

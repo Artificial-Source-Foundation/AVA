@@ -100,47 +100,39 @@ export const SettingsModal: Component = () => {
 
   return (
     <Show when={settingsOpen()}>
-      <div class="fixed inset-0 bg-[#000000e6] flex items-center justify-center z-50">
-        <button
-          type="button"
-          aria-label="Close settings"
-          onClick={closeSettings}
-          class="absolute inset-0"
+      <div class="fixed inset-0 z-50 flex flex-col bg-[var(--gray-0)]">
+        {/* Title bar */}
+        <SettingsModalHeader
+          activeTab={activeTab}
+          onClose={closeSettings}
+          search={settingsSearch}
+          onSearchChange={setSettingsSearch}
         />
-        <div
-          class="relative z-10 bg-[var(--surface-overlay)] border border-[var(--border-default)] rounded-[var(--radius-xl)] w-full max-w-3xl flex overflow-hidden"
-          style={{ height: 'min(85vh, 640px)' }}
-        >
+
+        {/* Body: sidebar + content */}
+        <div class="flex flex-1 min-h-0">
           <SettingsModalSidebar
             activeTab={activeTab}
             onSelectTab={setActiveTab}
+            onBack={closeSettings}
             search={settingsSearch}
           />
 
-          <div class="flex-1 flex flex-col min-w-0">
-            <SettingsModalHeader
+          <div class="flex-1 overflow-y-auto">
+            <SettingsModalContent
               activeTab={activeTab}
-              onClose={closeSettings}
-              search={settingsSearch}
-              onSearchChange={setSettingsSearch}
+              settings={settings}
+              keybindings={keybindings}
+              mcpServers={mcpServers}
+              onEditKeybinding={handleEditKeybinding}
+              onResetKeybinding={resetShortcut}
+              onResetAllKeybindings={resetAllShortcuts}
+              onUpdateProvider={updateProvider}
+              onUpdateAgent={updateAgent}
+              onTestProvider={handleTestProvider}
+              onRemoveMcpServer={removeMcpServer}
+              onAddMcpServer={() => setAddMcpDialogOpen(true)}
             />
-
-            <div class="flex-1 overflow-y-auto">
-              <SettingsModalContent
-                activeTab={activeTab}
-                settings={settings}
-                keybindings={keybindings}
-                mcpServers={mcpServers}
-                onEditKeybinding={handleEditKeybinding}
-                onResetKeybinding={resetShortcut}
-                onResetAllKeybindings={resetAllShortcuts}
-                onUpdateProvider={updateProvider}
-                onUpdateAgent={updateAgent}
-                onTestProvider={handleTestProvider}
-                onRemoveMcpServer={removeMcpServer}
-                onAddMcpServer={() => setAddMcpDialogOpen(true)}
-              />
-            </div>
           </div>
         </div>
 

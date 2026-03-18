@@ -5,7 +5,7 @@
  * plan/act slider, permission badge, sandbox toggle, voice button, and more.
  */
 
-import { ExternalLink, Eye, EyeOff, Layers, Shield } from 'lucide-solid'
+import { ExternalLink, Layers, Shield } from 'lucide-solid'
 import { type Accessor, type Component, Show } from 'solid-js'
 import type { useAgent } from '../../../hooks/useAgent'
 import type { useChat } from '../../../hooks/useChat'
@@ -61,7 +61,7 @@ export interface ToolbarStripProps {
 // ---------------------------------------------------------------------------
 
 export const ToolbarStrip: Component<ToolbarStripProps> = (props) => {
-  const { settings, cyclePermissionMode, updateSettings } = useSettings()
+  const { settings, cyclePermissionMode } = useSettings()
   const { openModelBrowser } = useLayout()
   const sandbox = useSandbox()
 
@@ -79,26 +79,6 @@ export const ToolbarStrip: Component<ToolbarStripProps> = (props) => {
           onCycle={props.handleCycleReasoning}
           available={props.modelSupportsReasoning}
         />
-
-        {/* Thinking visibility toggle */}
-        <Show when={settings().generation.reasoningEffort !== 'off'}>
-          <button
-            type="button"
-            onClick={() =>
-              updateSettings({
-                ui: { ...settings().ui, hideThinking: !settings().ui.hideThinking },
-              })
-            }
-            class={`p-1 rounded-[var(--radius-md)] transition-colors ${
-              settings().ui.hideThinking
-                ? 'text-[var(--text-muted)] bg-transparent hover:bg-[var(--surface-raised)]'
-                : 'text-[var(--accent)] bg-[var(--accent-subtle)]'
-            }`}
-            title={settings().ui.hideThinking ? 'Show thinking blocks' : 'Hide thinking blocks'}
-          >
-            {settings().ui.hideThinking ? <EyeOff class="w-3 h-3" /> : <Eye class="w-3 h-3" />}
-          </button>
-        </Show>
 
         <StripDivider />
 

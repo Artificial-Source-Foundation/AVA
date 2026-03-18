@@ -8,6 +8,7 @@
 import {
   Accessibility,
   Code2,
+  Lightbulb,
   Maximize2,
   Moon,
   Palette,
@@ -19,6 +20,7 @@ import {
 import type { Component } from 'solid-js'
 import type { ThemePreset } from '../../../config/theme-presets'
 import { useSettings } from '../../../stores/settings'
+import type { ThinkingDisplay } from '../../../stores/settings/settings-types'
 import { SettingsCard } from '../SettingsCard'
 import {
   AccentSection,
@@ -30,11 +32,12 @@ import {
   FontSection,
   InterfaceScaleSection,
   SidebarOrderSection,
+  segmentedBtn,
   ThemePresetsGrid,
 } from './appearance-tab'
 
 export const AppearanceTab: Component = () => {
-  const { updateSettings, updateAppearance } = useSettings()
+  const { settings, updateSettings, updateAppearance } = useSettings()
 
   const applyPreset = (preset: ThemePreset): void => {
     updateSettings({ mode: preset.mode })
@@ -52,8 +55,14 @@ export const AppearanceTab: Component = () => {
     updateAppearance(appearance)
   }
 
+  const thinkingOptions: { value: ThinkingDisplay; label: string }[] = [
+    { value: 'bubble', label: 'Bubble' },
+    { value: 'preview', label: 'Preview' },
+    { value: 'hidden', label: 'Hidden' },
+  ]
+
   return (
-    <div class="grid grid-cols-1 gap-4">
+    <div class="grid grid-cols-1" style={{ gap: '28px' }}>
       <SettingsCard icon={Moon} title="Color Mode" description="Theme and dark style variant">
         <ColorModeSection />
       </SettingsCard>
@@ -72,6 +81,34 @@ export const AppearanceTab: Component = () => {
         description="Primary accent color throughout the UI"
       >
         <AccentSection />
+      </SettingsCard>
+
+      <SettingsCard
+        icon={Lightbulb}
+        title="Thinking Display"
+        description="How AI thinking/reasoning blocks appear in chat"
+      >
+        <div class="flex items-center justify-between py-2">
+          <span class="text-[14px] text-[var(--text-secondary)]">Display mode</span>
+          <div class="flex gap-1">
+            {thinkingOptions.map((opt) => (
+              <button
+                type="button"
+                onClick={() => updateAppearance({ thinkingDisplay: opt.value })}
+                class={segmentedBtn(settings().appearance.thinkingDisplay === opt.value)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <p class="text-[13px] text-[var(--gray-8)]">
+          {settings().appearance.thinkingDisplay === 'bubble'
+            ? 'Show thinking in a collapsible bubble'
+            : settings().appearance.thinkingDisplay === 'preview'
+              ? 'Show a short preview of the thinking content inline'
+              : 'Hide thinking blocks entirely'}
+        </p>
       </SettingsCard>
 
       <SettingsCard

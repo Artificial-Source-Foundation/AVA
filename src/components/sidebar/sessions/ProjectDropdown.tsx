@@ -98,12 +98,13 @@ export const ProjectDropdown: Component = () => {
         onClick={() => setDropdownOpen(!dropdownOpen())}
         class={`
           inline-flex items-center gap-1 max-w-[120px]
-          rounded-[var(--radius-sm)] px-1.5 py-1
-          text-[10px] font-medium transition-colors
+          rounded-[var(--radius-md)] px-2.5 py-1
+          text-[11px] font-medium transition-colors
+          bg-[var(--gray-3)]
           ${
             dropdownOpen()
-              ? 'text-[var(--text-primary)] bg-[var(--alpha-white-8)]'
-              : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--alpha-white-5)]'
+              ? 'text-[var(--text-primary)]'
+              : 'text-[var(--gray-9)] hover:text-[var(--text-primary)]'
           }
         `}
         title="Switch project"

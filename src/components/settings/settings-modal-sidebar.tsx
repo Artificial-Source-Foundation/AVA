@@ -1,9 +1,11 @@
+import { ArrowLeft } from 'lucide-solid'
 import { type Accessor, type Component, createEffect, createMemo, For, Show } from 'solid-js'
 import { type SettingsTab, type TabGroup, tabGroups } from './settings-modal-config'
 
 interface SettingsModalSidebarProps {
   activeTab: () => SettingsTab
   onSelectTab: (tab: SettingsTab) => void
+  onBack: () => void
   search: Accessor<string>
 }
 
@@ -34,32 +36,66 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
     }
   })
 
-  return (
-    <nav class="w-44 flex-shrink-0 border-r border-[var(--border-subtle)] bg-[var(--gray-1)] flex flex-col py-3">
-      <div class="px-4 mb-3">
-        <h2 class="text-sm font-semibold text-[var(--text-primary)]">Settings</h2>
-      </div>
+  /** Separate the "About" group (empty label) from named groups */
+  const namedGroups = createMemo(() => filteredGroups().filter((g) => g.label !== ''))
+  const aboutGroup = createMemo(() => filteredGroups().find((g) => g.label === ''))
 
-      <div class="flex-1 overflow-y-auto space-y-3 px-2">
-        <For each={filteredGroups()}>
+  return (
+    <nav
+      class="flex-shrink-0 flex flex-col border-r border-[var(--gray-5)]"
+      style={{ width: '220px', background: '#0F0F12' }}
+    >
+      {/* Back link */}
+      <button
+        type="button"
+        onClick={props.onBack}
+        class="flex items-center gap-2 px-4 py-3 text-[12px] text-[var(--gray-7)] hover:text-[var(--gray-9)] transition-colors"
+      >
+        <ArrowLeft class="w-3.5 h-3.5" />
+        Back to Chat
+      </button>
+
+      {/* Tab groups */}
+      <div class="flex-1 overflow-y-auto px-3 pb-3 space-y-4">
+        <For each={namedGroups()}>
           {(group) => (
             <div>
-              <Show when={group.label}>
-                <p class="px-2 mb-1 text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-                  {group.label}
-                </p>
-              </Show>
+              <p
+                class="px-2.5 mb-1.5 uppercase"
+                style={{
+                  'font-size': '10px',
+                  'font-weight': '600',
+                  color: 'var(--gray-6)',
+                  'letter-spacing': '0.8px',
+                }}
+              >
+                {group.label}
+              </p>
               <div class="space-y-0.5">
                 <For each={group.tabs}>
                   {(tab) => {
                     const Icon = tab.icon
+                    const isActive = (): boolean => props.activeTab() === tab.id
                     return (
                       <button
                         type="button"
                         onClick={() => props.onSelectTab(tab.id)}
-                        class={`w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-[var(--radius-md)] transition-colors duration-[var(--duration-fast)] ${props.activeTab() === tab.id ? 'text-[var(--text-primary)] bg-[var(--alpha-white-8)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--alpha-white-5)]'}`}
+                        class="w-full flex items-center rounded-[10px] transition-colors duration-[var(--duration-fast)]"
+                        style={{
+                          gap: '10px',
+                          padding: '10px 14px',
+                          background: isActive() ? 'var(--gray-3)' : 'transparent',
+                          color: isActive() ? 'var(--text-primary)' : 'var(--gray-9)',
+                          'font-weight': isActive() ? '500' : '400',
+                          'font-size': '13px',
+                        }}
                       >
-                        <Icon class="w-3.5 h-3.5" />
+                        <Icon
+                          class="w-4 h-4 flex-shrink-0"
+                          style={{
+                            color: isActive() ? 'var(--accent-hover)' : 'var(--gray-7)',
+                          }}
+                        />
                         {tab.label}
                       </button>
                     )
@@ -71,9 +107,44 @@ export const SettingsModalSidebar: Component<SettingsModalSidebarProps> = (props
         </For>
 
         <Show when={filteredGroups().length === 0}>
-          <p class="px-2 py-4 text-xs text-[var(--text-muted)] text-center">No matching settings</p>
+          <p class="px-2.5 py-4 text-xs text-[var(--gray-8)] text-center">No matching settings</p>
         </Show>
       </div>
+
+      {/* About tab — pinned to bottom */}
+      <Show when={aboutGroup()}>
+        <div class="mt-auto border-t border-[var(--gray-5)] px-3 py-2">
+          <For each={aboutGroup()!.tabs}>
+            {(tab) => {
+              const Icon = tab.icon
+              const isActive = (): boolean => props.activeTab() === tab.id
+              return (
+                <button
+                  type="button"
+                  onClick={() => props.onSelectTab(tab.id)}
+                  class="w-full flex items-center rounded-[10px] transition-colors duration-[var(--duration-fast)]"
+                  style={{
+                    gap: '10px',
+                    padding: '10px 14px',
+                    background: isActive() ? 'var(--gray-3)' : 'transparent',
+                    color: isActive() ? 'var(--text-primary)' : 'var(--gray-9)',
+                    'font-weight': isActive() ? '500' : '400',
+                    'font-size': '13px',
+                  }}
+                >
+                  <Icon
+                    class="w-4 h-4 flex-shrink-0"
+                    style={{
+                      color: isActive() ? 'var(--accent-hover)' : 'var(--gray-7)',
+                    }}
+                  />
+                  {tab.label}
+                </button>
+              )
+            }}
+          </For>
+        </div>
+      </Show>
     </nav>
   )
 }

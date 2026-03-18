@@ -2,8 +2,8 @@
  * Submit Button
  *
  * Send / Cancel button cluster rendered inside the textarea area.
- * Displays streaming elapsed time, a cancel button when processing,
- * and a send button.
+ * Send button is a purple circle with arrow-up icon.
+ * Displays streaming elapsed time and a cancel button when processing.
  */
 
 import { ArrowUp, Square } from 'lucide-solid'
@@ -26,7 +26,7 @@ export interface SubmitButtonProps {
 // ---------------------------------------------------------------------------
 
 export const SubmitButton: Component<SubmitButtonProps> = (props) => (
-  <div class="absolute right-2 top-0 bottom-0 flex items-center gap-1.5">
+  <div class="absolute right-2.5 top-0 bottom-0 flex items-center gap-1.5">
     {/* Streaming elapsed time */}
     <Show when={props.isStreaming()}>
       <span class="flex items-center gap-1 text-[10px] text-[var(--text-tertiary)] tabular-nums">
@@ -40,25 +40,33 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => (
       <button
         type="button"
         onClick={props.onCancel}
-        class="p-1.5 bg-[var(--error)] hover:brightness-110 text-white rounded-[var(--radius-md)] transition-colors"
+        class="
+          flex items-center justify-center
+          w-7 h-7
+          bg-[var(--error)] hover:brightness-110
+          text-white rounded-full
+          transition-colors
+        "
         title="Cancel"
       >
-        <Square class="w-3.5 h-3.5" />
+        <Square class="w-3 h-3" />
       </button>
     </Show>
 
-    {/* Send button */}
+    {/* Send button — purple circle with arrow-up */}
     <button
       type="submit"
       disabled={!props.inputHasText() || props.isProcessing()}
       class="
-        p-1.5 rounded-[var(--radius-md)] transition-colors
+        flex items-center justify-center
+        w-8 h-8 rounded-full
+        transition-all
         disabled:opacity-30 disabled:cursor-not-allowed
-        bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white
+        bg-[var(--violet-8)] hover:bg-[var(--accent)] text-white
       "
       title="Send message"
     >
-      <ArrowUp class="w-3.5 h-3.5" />
+      <ArrowUp class="w-4 h-4" />
     </button>
   </div>
 )

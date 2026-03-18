@@ -43,8 +43,8 @@ export const ShortcutHint: Component<{ sendCount: number }> = (props) => {
   return (
     <Show when={visible()}>
       <div
-        class="text-[10px] text-[var(--text-muted)] transition-opacity duration-300"
-        style={{ opacity: fading() ? '0' : '0.7' }}
+        class="text-[10px] text-[var(--gray-6)] transition-opacity duration-300"
+        style={{ opacity: fading() ? '0' : '1' }}
       >
         <kbd class="px-1 py-0.5 bg-[var(--surface-raised)] border border-[var(--border-subtle)] rounded text-[9px] font-mono">
           {settings().behavior.sendKey === 'enter' ? 'Shift+Enter' : 'Enter'}

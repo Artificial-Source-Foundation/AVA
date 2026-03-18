@@ -109,7 +109,7 @@ export const SidebarSessions: Component = () => {
             <For each={groupedSessions()}>
               {(group, groupIdx) => (
                 <div class={groupIdx() > 0 ? 'mt-3' : ''}>
-                  <p class="text-[10px] font-semibold tracking-wider text-[var(--text-muted)] uppercase mb-1 px-2 font-mono">
+                  <p class="text-[11px] font-semibold tracking-wider text-[var(--gray-7)] uppercase mb-1 px-2 font-mono">
                     {group.label}
                   </p>
                   <div class="space-y-0.5">

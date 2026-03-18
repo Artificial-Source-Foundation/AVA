@@ -46,99 +46,130 @@ const ErrorFallback: Component<ErrorFallbackProps> = (props) => {
   }
 
   return (
-    <div class="fixed inset-0 z-50 flex items-center justify-center bg-[var(--background)]">
-      <div class="onboarding-card w-full max-w-md mx-4 p-8">
-        <div class="step-enter flex flex-col items-center text-center">
-          {/* Error icon with pulse */}
-          <div class="stagger-child w-20 h-20 mb-6 rounded-2xl bg-[var(--error-subtle)] flex items-center justify-center">
-            <AlertTriangle class="w-10 h-10 text-[var(--error)]" />
-          </div>
+    <div
+      class="fixed inset-0 z-50 flex flex-col items-center justify-center"
+      style={{ background: '#09090B' }}
+    >
+      {/* Error icon */}
+      <div
+        class="flex items-center justify-center mb-6"
+        style={{
+          width: '72px',
+          height: '72px',
+          'border-radius': '18px',
+          background: 'rgba(239,68,68,0.1)',
+        }}
+      >
+        <AlertTriangle class="w-9 h-9" style={{ color: '#EF4444' }} />
+      </div>
 
-          {/* Title */}
-          <div class="stagger-child">
-            <h1 class="text-2xl font-bold text-[var(--text-primary)] tracking-tight mb-2">
-              Something went wrong
-            </h1>
-          </div>
+      {/* Title */}
+      <h1 class="text-xl font-bold tracking-tight mb-2" style={{ color: '#FAFAFA' }}>
+        Something went wrong
+      </h1>
+      <p class="text-sm mb-6" style={{ color: '#71717A' }}>
+        AVA encountered an unexpected error
+      </p>
 
-          {/* Error message */}
-          <div class="stagger-child w-full mb-6">
-            <div class="px-4 py-3 bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-xl text-left">
-              <p class="text-sm font-mono text-[var(--error)] break-all leading-relaxed">
-                {props.error.message || 'An unexpected error occurred'}
-              </p>
-            </div>
-          </div>
+      {/* Error message */}
+      <div
+        class="w-full max-w-lg mb-8 text-left"
+        style={{
+          background: '#18181B',
+          border: '1px solid #27272A',
+          'border-radius': '12px',
+          padding: '14px 18px',
+        }}
+      >
+        <p class="text-sm font-mono break-all leading-relaxed" style={{ color: '#EF4444' }}>
+          {props.error.message || 'An unexpected error occurred'}
+        </p>
+      </div>
 
-          {/* Action buttons */}
-          <div class="stagger-child flex items-center gap-3 mb-6">
+      {/* Action buttons */}
+      <div class="flex items-center gap-3 mb-8">
+        <button
+          type="button"
+          onClick={() => props.reset()}
+          class="inline-flex items-center gap-2 px-7 py-3 text-sm font-semibold text-white transition-colors"
+          style={{ background: '#A78BFA', 'border-radius': '12px' }}
+        >
+          <RotateCcw class="w-4 h-4" />
+          Try Again
+        </button>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          class="inline-flex items-center gap-2 px-7 py-3 text-sm font-medium transition-colors"
+          style={{
+            background: '#18181B',
+            border: '1px solid #27272A',
+            'border-radius': '12px',
+            color: '#A1A1AA',
+          }}
+        >
+          <RefreshCw class="w-4 h-4" />
+          Reload
+        </button>
+      </div>
+
+      {/* Expandable details */}
+      <button
+        type="button"
+        onClick={() => setShowDetails(!showDetails())}
+        class="flex items-center gap-1.5 text-xs transition-colors"
+        style={{ color: '#52525B' }}
+      >
+        <Bug class="w-3.5 h-3.5" />
+        Technical details
+        {showDetails() ? <ChevronUp class="w-3.5 h-3.5" /> : <ChevronDown class="w-3.5 h-3.5" />}
+      </button>
+
+      <Show when={showDetails()}>
+        <div
+          class="mt-4 w-full max-w-lg text-left"
+          style={{
+            background: '#18181B',
+            border: '1px solid #27272A',
+            'border-radius': '12px',
+            padding: '16px',
+          }}
+        >
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-mono" style={{ color: '#52525B' }}>
+              Stack Trace
+            </span>
             <button
               type="button"
-              onClick={() => props.reset()}
-              class="onboarding-btn-primary inline-flex items-center gap-2 px-6 py-2.5 bg-[var(--accent)] text-white font-medium rounded-xl text-sm"
+              onClick={copyError}
+              class="inline-flex items-center gap-1 px-2 py-1 text-xs transition-colors"
+              style={{ color: '#71717A', background: '#27272A', 'border-radius': '6px' }}
             >
-              <RotateCcw class="w-4 h-4" />
-              Try Again
-            </button>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              class="inline-flex items-center gap-2 px-6 py-2.5 border border-[var(--border-default)] text-[var(--text-secondary)] font-medium rounded-xl text-sm hover:bg-[var(--surface-raised)] transition-colors"
-            >
-              <RefreshCw class="w-4 h-4" />
-              Reload
+              <Copy class="w-3 h-3" />
+              {copied() ? 'Copied' : 'Copy'}
             </button>
           </div>
-
-          {/* Expandable details */}
-          <div class="stagger-child w-full">
-            <button
-              type="button"
-              onClick={() => setShowDetails(!showDetails())}
-              class="flex items-center gap-1.5 mx-auto text-sm text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-            >
-              <Bug class="w-3.5 h-3.5" />
-              Technical details
-              {showDetails() ? (
-                <ChevronUp class="w-3.5 h-3.5" />
-              ) : (
-                <ChevronDown class="w-3.5 h-3.5" />
-              )}
-            </button>
-
-            <Show when={showDetails()}>
-              <div class="mt-4 p-4 bg-[var(--surface-sunken)] border border-[var(--border-subtle)] rounded-xl text-left">
-                <div class="flex items-center justify-between mb-2">
-                  <span class="text-xs font-mono text-[var(--text-muted)]">Stack Trace</span>
-                  <button
-                    type="button"
-                    onClick={copyError}
-                    class="inline-flex items-center gap-1 px-2 py-1 text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] bg-[var(--surface-raised)] rounded-md transition-colors"
-                  >
-                    <Copy class="w-3 h-3" />
-                    {copied() ? 'Copied' : 'Copy'}
-                  </button>
-                </div>
-                <pre class="text-xs font-mono text-[var(--text-tertiary)] whitespace-pre-wrap overflow-x-auto max-h-40 overflow-y-auto leading-relaxed">
-                  {props.error.stack || 'No stack trace available'}
-                </pre>
-              </div>
-            </Show>
-          </div>
-
-          {/* Report link */}
-          <div class="stagger-child mt-6">
-            <a
-              href="https://github.com/g0dxn4/AVA/issues/new"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="inline-flex items-center gap-1.5 text-sm text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
-            >
-              Report this issue
-              <ExternalLink class="w-3.5 h-3.5" />
-            </a>
-          </div>
+          <pre
+            class="text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-48 overflow-y-auto leading-relaxed"
+            style={{ color: '#71717A' }}
+          >
+            {props.error.stack || 'No stack trace available'}
+          </pre>
         </div>
+      </Show>
+
+      {/* Report link */}
+      <div class="mt-6">
+        <a
+          href="https://github.com/g0dxn4/AVA/issues/new"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="inline-flex items-center gap-1.5 text-xs transition-colors"
+          style={{ color: '#52525B' }}
+        >
+          Report this issue
+          <ExternalLink class="w-3.5 h-3.5" />
+        </a>
       </div>
     </div>
   )

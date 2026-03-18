@@ -1,7 +1,8 @@
 /**
  * Model Selector Button
  *
- * Button that opens the Model Browser dialog.
+ * Pill-shaped button that opens the Model Browser dialog.
+ * Shows "Provider | Model" with chevron-down icon.
  */
 
 import { ChevronDown } from 'lucide-solid'
@@ -25,12 +26,12 @@ export const ModelSelector: Component<ModelSelectorProps> = (props) => (
     type="button"
     onClick={props.onToggle}
     class="
-      flex items-center gap-1 px-2 py-1
-      text-[11px] text-[var(--text-secondary)]
-      bg-[var(--surface-raised)]
-      border border-[var(--border-subtle)]
-      rounded-[var(--radius-md)]
-      hover:border-[var(--accent-muted)]
+      flex items-center gap-1 px-2.5 py-1
+      text-[11px] text-[var(--gray-9)]
+      bg-[var(--gray-3)]
+      border border-[var(--gray-5)]
+      rounded-[var(--radius-full)]
+      hover:border-[var(--violet-8)]
       transition-colors
     "
   >

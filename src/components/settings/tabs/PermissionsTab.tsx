@@ -58,14 +58,14 @@ export const PermissionsTab: Component = () => {
   }
 
   return (
-    <div class="space-y-5">
+    <div class="space-y-6">
       {/* Global Mode */}
       <div>
         <SectionHeader title="Global Mode" />
-        <div class="flex items-center justify-between py-1.5">
+        <div class="flex items-center justify-between py-2">
           <div>
-            <span class="text-xs text-[var(--text-secondary)]">Permission mode</span>
-            <p class="text-[10px] text-[var(--text-muted)]">
+            <span class="text-[14px] text-[var(--text-secondary)]">Permission mode</span>
+            <p class="text-[13px] text-[var(--text-muted)]">
               Controls how tool executions are approved
             </p>
           </div>
@@ -84,24 +84,24 @@ export const PermissionsTab: Component = () => {
           </div>
         </div>
 
-        <div class="mt-2 flex items-center gap-1.5">
+        <div class="mt-3 flex items-center gap-2">
           <button
             type="button"
-            class="px-2 py-1 text-[10px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--warning)]"
+            class="px-3 py-1.5 text-[13px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--warning)]"
             onClick={() => applyPreset('strict')}
           >
             Strict
           </button>
           <button
             type="button"
-            class="px-2 py-1 text-[10px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--accent)]"
+            class="px-3 py-1.5 text-[13px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--accent)]"
             onClick={() => applyPreset('balanced')}
           >
             Balanced
           </button>
           <button
             type="button"
-            class="px-2 py-1 text-[10px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--error)]"
+            class="px-3 py-1.5 text-[13px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-subtle)] hover:border-[var(--error)]"
             onClick={() => applyPreset('yolo')}
           >
             YOLO

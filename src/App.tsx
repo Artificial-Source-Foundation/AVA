@@ -12,7 +12,7 @@ import { shouldShowChangelog } from './components/dialogs/ChangelogDialog'
 import type { OnboardingData } from './components/dialogs/OnboardingDialog'
 import { OnboardingScreen } from './components/dialogs/OnboardingDialog'
 import { AppShell } from './components/layout'
-import { ProjectHub } from './components/projects'
+import { ProjectHub } from './components/project-hub/ProjectHub'
 import { SplashScreen } from './components/SplashScreen'
 import { useNotification } from './contexts/notification'
 import { runAppInit } from './hooks/useAppInit'
@@ -35,7 +35,7 @@ function App() {
   const [splashStatus, setSplashStatus] = createSignal('')
 
   const { projectHubVisible, setProjectHubVisible } = useLayout()
-  const { settings, updateSettings, updateProvider } = useSettings()
+  const { settings, updateSettings, updateProvider, updateAppearance } = useSettings()
   const { info } = useNotification()
 
   const [workflowDialogOpen, setWorkflowDialogOpen] = createSignal(false)
@@ -121,6 +121,26 @@ function App() {
 
   const handleOnboardingComplete = (data: OnboardingData) => {
     updateSettings({ onboardingComplete: true, theme: data.theme, mode: data.mode })
+
+    // Apply appearance choices from the new onboarding flow
+    if (data.accentColor || data.darkStyle || data.borderRadius) {
+      const patch: Record<string, string> = {}
+      if (data.accentColor) patch.accentColor = data.accentColor
+      if (data.darkStyle) patch.darkStyle = data.darkStyle
+      if (data.borderRadius) patch.borderRadius = data.borderRadius
+      updateAppearance(patch)
+    }
+
+    // Connect providers with API keys
+    if (data.providerKeys) {
+      for (const [id, key] of Object.entries(data.providerKeys)) {
+        if (key) {
+          updateProvider(id, { apiKey: key, status: 'connected', enabled: true })
+        }
+      }
+    }
+
+    // Legacy key support
     if (data.anthropicKey) {
       updateProvider('anthropic', { apiKey: data.anthropicKey, status: 'connected', enabled: true })
     }

@@ -21,7 +21,8 @@ interface ThinkingRowProps {
 
 export const ThinkingRow: Component<ThinkingRowProps> = (props) => {
   const { settings } = useSettings()
-  const hidden = () => settings().ui.hideThinking
+  // Only use the appearance setting (Settings → Appearance → Thinking Display)
+  const hidden = () => settings().appearance.thinkingDisplay === 'hidden'
   const [expanded, setExpanded] = createSignal(false)
   const [wasStreaming, setWasStreaming] = createSignal(false)
   const [startTime] = createSignal(Date.now())

@@ -84,12 +84,12 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
       disabled={props.disabled()}
       rows={1}
       class="
-        w-full density-section-px density-section-py pr-[110px]
-        bg-[var(--input-background)] text-[var(--text-primary)]
-        placeholder-[var(--input-placeholder)]
-        border border-[var(--input-border)] rounded-lg
+        w-full px-[18px] py-3.5 pr-[110px]
+        bg-[var(--gray-3)] text-[var(--text-primary)]
+        placeholder-[var(--gray-7)]
+        border border-[var(--gray-5)] rounded-[var(--radius-2xl)]
         resize-none transition-colors
-        focus:outline-none focus:border-[var(--input-border-focus)]
+        focus:outline-none focus:border-[var(--accent)]
         disabled:opacity-50
       "
       style={{ 'min-height': '44px', 'max-height': '200px', 'font-size': 'var(--chat-font-size)' }}

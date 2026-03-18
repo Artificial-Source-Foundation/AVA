@@ -14,7 +14,7 @@ import { MenuBar } from './MenuBar'
 
 let windowCounter = 0
 
-export const StatusBar: Component = () => {
+export const TitleBar: Component = () => {
   const { currentProject, setCurrentDirectory } = useProject()
   const sessionStore = useSession()
 

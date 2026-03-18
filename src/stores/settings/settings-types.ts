@@ -50,6 +50,7 @@ export type CodeTheme =
   | 'solarized-dark'
   | 'catppuccin'
 export type DarkStyle = 'dark' | 'midnight' | 'charcoal'
+export type ThinkingDisplay = 'bubble' | 'preview' | 'hidden'
 
 export interface AppearanceSettings {
   uiScale: number // 0.85 – 1.2, default 1.0 (maps to html font-size: 16px * scale)
@@ -63,6 +64,7 @@ export interface AppearanceSettings {
   density: UIDensity
   codeTheme: CodeTheme
   darkStyle: DarkStyle
+  thinkingDisplay: ThinkingDisplay
   highContrast: boolean
   reduceMotion: boolean
 }

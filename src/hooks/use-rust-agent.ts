@@ -57,12 +57,13 @@ export function useRustAgent() {
       case 'tool_result': {
         setActiveToolCalls((prev) => {
           const updated = [...prev]
-          const lastIdx = updated.map((tc) => tc.status).lastIndexOf('running')
-          const last = lastIdx >= 0 ? updated[lastIdx] : undefined
-          if (last) {
-            last.status = event.is_error ? 'error' : 'success'
-            last.output = event.content
-            last.completedAt = Date.now()
+          // Use indexOf (first running) — results arrive in the same order as tool_call events
+          const firstIdx = updated.findIndex((tc) => tc.status === 'running')
+          const first = firstIdx >= 0 ? updated[firstIdx] : undefined
+          if (first) {
+            first.status = event.is_error ? 'error' : 'success'
+            first.output = event.content
+            first.completedAt = Date.now()
           }
           return updated
         })

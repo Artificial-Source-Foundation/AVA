@@ -33,7 +33,15 @@ interface SettingsModalContentProps {
 
 export const SettingsModalContent: Component<SettingsModalContentProps> = (props) => {
   return (
-    <div class={`mx-auto px-6 py-6 ${props.activeTab() === 'agents' ? 'max-w-full' : 'max-w-2xl'}`}>
+    <div
+      class="max-w-full overflow-y-auto"
+      style={{
+        'padding-top': '32px',
+        'padding-left': '40px',
+        'padding-right': '40px',
+        'padding-bottom': '32px',
+      }}
+    >
       <Show when={props.activeTab() === 'general'}>
         <GeneralSection />
       </Show>

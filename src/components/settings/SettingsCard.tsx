@@ -17,17 +17,17 @@ interface SettingsCardProps {
 }
 
 export const SettingsCard: Component<SettingsCardProps> = (props) => (
-  <div class="rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4 space-y-3">
-    <div class="flex items-start gap-2.5">
+  <div class="rounded-[var(--radius-xl)] border border-[var(--gray-5)] bg-[var(--gray-3)] p-6 space-y-4">
+    <div class="flex items-start gap-3">
       <Show when={props.icon}>
-        <div class="p-1.5 rounded-[var(--radius-md)] bg-[var(--accent-subtle)] text-[var(--accent)] flex-shrink-0">
-          <Dynamic component={props.icon!} class="w-4 h-4" />
+        <div class="p-2 rounded-[var(--radius-md)] bg-[var(--accent-subtle)] text-[var(--accent)] flex-shrink-0">
+          <Dynamic component={props.icon!} class="w-5 h-5" />
         </div>
       </Show>
       <div class="min-w-0">
-        <h3 class="text-[13px] font-semibold text-[var(--text-primary)]">{props.title}</h3>
+        <h3 class="text-[16px] font-semibold text-[var(--text-primary)]">{props.title}</h3>
         <Show when={props.description}>
-          <p class="text-[11px] text-[var(--text-muted)] mt-0.5">{props.description}</p>
+          <p class="text-[13px] text-[var(--gray-8)] mt-0.5">{props.description}</p>
         </Show>
       </div>
     </div>

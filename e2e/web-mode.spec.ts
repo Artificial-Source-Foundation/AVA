@@ -92,13 +92,14 @@ test.describe('AVA Web Mode', () => {
   })
 
   test('chat composer is interactive', async ({ page }) => {
-    // Set onboarding as complete
+    // Set onboarding as complete + suppress changelog dialog
     await page.goto('/')
     await page.evaluate(() => {
       const existing = localStorage.getItem('ava_settings')
       const settings = existing ? JSON.parse(existing) : {}
       settings.onboardingComplete = true
       localStorage.setItem('ava_settings', JSON.stringify(settings))
+      localStorage.setItem('ava-last-seen-version', '0.1.0')
     })
     await page.reload()
     await page.waitForTimeout(3000)
@@ -107,6 +108,13 @@ test.describe('AVA Web Mode', () => {
     if (await errorScreen.isVisible({ timeout: 1000 }).catch(() => false)) {
       test.skip(true, 'Backend not running — cannot test composer')
       return
+    }
+
+    // Dismiss changelog dialog if it still appears
+    const gotIt = page.locator('button:has-text("Got It"), button:has-text("Got it")')
+    if (await gotIt.isVisible({ timeout: 1000 }).catch(() => false)) {
+      await gotIt.click()
+      await page.waitForTimeout(300)
     }
 
     // Find and interact with the composer

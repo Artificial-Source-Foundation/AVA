@@ -41,8 +41,8 @@ export const ColorModeSection: Component = () => {
   return (
     <div>
       <SectionHeader title="Color Mode" />
-      <div class="flex items-center justify-between py-1.5">
-        <span class="text-xs text-[var(--text-secondary)]">Theme</span>
+      <div class="flex items-center justify-between py-2">
+        <span class="text-[14px] text-[var(--text-secondary)]">Theme</span>
         <div class="flex gap-1">
           <button
             type="button"
@@ -68,8 +68,8 @@ export const ColorModeSection: Component = () => {
         </div>
       </div>
       <Show when={showDarkStyle()}>
-        <div class="flex items-center justify-between py-1.5 mt-1">
-          <span class="text-xs text-[var(--text-secondary)]">Dark style</span>
+        <div class="flex items-center justify-between py-2 mt-1">
+          <span class="text-[14px] text-[var(--text-secondary)]">Dark style</span>
           <div class="flex gap-1">
             <For each={DARK_STYLE_OPTIONS}>
               {(opt) => (
@@ -107,8 +107,8 @@ export const AccentSection: Component = () => {
   return (
     <div>
       <SectionHeader title="Accent Color" />
-      <div class="flex items-center justify-between py-1.5">
-        <span class="text-xs text-[var(--text-secondary)]">Color</span>
+      <div class="flex items-center justify-between py-2">
+        <span class="text-[14px] text-[var(--text-secondary)]">Color</span>
         <div class="flex gap-2 items-center">
           <For each={ACCENT_PRESETS}>
             {(preset) => (
@@ -119,7 +119,7 @@ export const AccentSection: Component = () => {
                 onMouseLeave={restoreAppearance}
                 title={preset.label}
                 class={`
-                  w-5 h-5 rounded-full transition-[transform,opacity] duration-150
+                  w-6 h-6 rounded-full transition-[transform,opacity] duration-150
                   ${
                     settings().appearance.accentColor === preset.id
                       ? 'scale-110'
@@ -142,7 +142,7 @@ export const AccentSection: Component = () => {
             onClick={() => updateAppearance({ accentColor: 'custom' })}
             title="Custom color"
             class={`
-              w-5 h-5 rounded-full transition-[transform,opacity] duration-150
+              w-6 h-6 rounded-full transition-[transform,opacity] duration-150
               ${isCustom() ? 'scale-110' : 'hover:scale-110 opacity-70 hover:opacity-100'}
             `}
             style={{
@@ -173,12 +173,12 @@ export const AccentSection: Component = () => {
                 updateAppearance({ customAccentColor: val })
               }
             }}
-            class="w-20 px-2 py-1 text-[11px] font-mono bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-default)] rounded-[var(--radius-md)] outline-none focus:border-[var(--accent)]"
+            class="w-24 px-3 py-2 text-[13px] font-mono bg-[var(--surface-raised)] text-[var(--text-secondary)] border border-[var(--border-default)] rounded-[var(--radius-md)] outline-none focus:border-[var(--accent)]"
             placeholder="#8b5cf6"
           />
         </div>
       </Show>
-      <p class="text-[10px] text-[var(--text-muted)] mt-1">{accentLabel()}</p>
+      <p class="text-[13px] text-[var(--text-muted)] mt-1.5">{accentLabel()}</p>
     </div>
   )
 }
@@ -192,24 +192,24 @@ export interface ThemePresetsGridProps {
 }
 
 export const ThemePresetsGrid: Component<ThemePresetsGridProps> = (props) => (
-  <div class="grid grid-cols-3 gap-1.5">
+  <div class="grid grid-cols-3 gap-2">
     <For each={THEME_PRESETS}>
       {(preset) => (
         <button
           type="button"
           onClick={() => props.onApply(preset)}
-          class="flex items-center gap-2 px-2 py-1.5 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-base)] hover:border-[var(--accent-muted)] transition-colors text-left"
+          class="flex items-center gap-2.5 px-3 py-2.5 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-base)] hover:border-[var(--accent-muted)] transition-colors text-left"
           title={`${preset.name} (${preset.mode})`}
         >
           <div
-            class="w-5 h-5 rounded-full flex-shrink-0 border border-[var(--border-subtle)] flex items-center justify-center"
+            class="w-6 h-6 rounded-full flex-shrink-0 border border-[var(--border-subtle)] flex items-center justify-center"
             style={{ background: preset.swatchAlt }}
           >
-            <div class="w-2.5 h-2.5 rounded-full" style={{ background: preset.swatch }} />
+            <div class="w-3 h-3 rounded-full" style={{ background: preset.swatch }} />
           </div>
           <div class="min-w-0">
-            <p class="text-[10px] font-medium text-[var(--text-primary)] truncate">{preset.name}</p>
-            <p class="text-[9px] text-[var(--text-muted)]">{preset.mode}</p>
+            <p class="text-[12px] font-medium text-[var(--text-primary)] truncate">{preset.name}</p>
+            <p class="text-[11px] text-[var(--text-muted)]">{preset.mode}</p>
           </div>
         </button>
       )}

@@ -45,7 +45,7 @@ export const ToolRulesSection: Component<ToolRulesSectionProps> = (props) => {
       <Show
         when={props.rules.length > 0}
         fallback={
-          <p class="text-[10px] text-[var(--text-muted)] py-2">
+          <p class="text-[13px] text-[var(--text-muted)] py-2">
             No custom rules. Add rules to override per-tool behavior.
           </p>
         }
@@ -54,11 +54,11 @@ export const ToolRulesSection: Component<ToolRulesSectionProps> = (props) => {
           <For each={props.rules}>
             {(rule, index) => (
               <div class="flex items-center gap-2 py-1 group">
-                <span class="text-xs text-[var(--text-secondary)] font-mono flex-1 truncate">
+                <span class="text-[14px] text-[var(--text-secondary)] font-mono flex-1 truncate">
                   {rule.tool}
                 </span>
                 <span
-                  class="text-[10px] px-1.5 py-0.5 rounded"
+                  class="text-[12px] px-2 py-0.5 rounded"
                   classList={{
                     'bg-[color-mix(in_srgb,var(--success)_15%,transparent)] text-[var(--success)]':
                       rule.action === 'allow',
@@ -113,12 +113,12 @@ export const ToolRulesSection: Component<ToolRulesSectionProps> = (props) => {
             if (e.key === 'Enter') addRule()
           }}
           placeholder="Tool name or glob (e.g. bash, write_*)"
-          class="flex-1 px-2 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
+          class="flex-1 px-3 py-2 text-[14px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none"
         />
         <select
           value={newAction()}
           onChange={(e) => setNewAction(e.currentTarget.value as 'allow' | 'ask' | 'deny')}
-          class="px-2 py-1 text-[11px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] outline-none"
+          class="px-3 py-2 text-[14px] rounded-[var(--radius-md)] bg-[var(--surface-raised)] text-[var(--text-primary)] border border-[var(--border-subtle)] outline-none"
         >
           <option value="allow">Allow</option>
           <option value="ask">Ask</option>
@@ -130,7 +130,7 @@ export const ToolRulesSection: Component<ToolRulesSectionProps> = (props) => {
           disabled={!newTool().trim()}
           class="p-1 text-[var(--accent)] hover:bg-[var(--accent-subtle)] rounded-[var(--radius-md)] disabled:opacity-50"
         >
-          <Plus class="w-3.5 h-3.5" />
+          <Plus class="w-4 h-4" />
         </button>
       </div>
     </div>

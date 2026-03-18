@@ -46,8 +46,8 @@ export const FontSection: Component = () => {
     <div>
       <SectionHeader title="Font" />
       {/* Sans / UI font */}
-      <div class="flex items-center justify-between py-1.5">
-        <span class="text-xs text-[var(--text-secondary)]">UI Font</span>
+      <div class="flex items-center justify-between py-2">
+        <span class="text-[14px] text-[var(--text-secondary)]">UI Font</span>
         <div class="flex gap-1">
           <For each={SANS_FONT_OPTIONS}>
             {(font) => (
@@ -63,8 +63,8 @@ export const FontSection: Component = () => {
         </div>
       </div>
       {/* Monospace font */}
-      <div class="flex items-center justify-between py-1.5">
-        <span class="text-xs text-[var(--text-secondary)]">Monospace</span>
+      <div class="flex items-center justify-between py-2">
+        <span class="text-[14px] text-[var(--text-secondary)]">Monospace</span>
         <div class="flex gap-1">
           <For each={MONO_FONT_OPTIONS}>
             {(font) => (
@@ -87,10 +87,10 @@ export const FontSection: Component = () => {
         {'const hello = "Preview text in mono font";'}
       </p>
       {/* Ligatures */}
-      <div class="flex items-center justify-between py-1.5 mt-1">
+      <div class="flex items-center justify-between py-2 mt-1">
         <div>
-          <span class="text-xs text-[var(--text-secondary)]">Ligatures</span>
-          <p class="text-[10px] text-[var(--text-muted)] mt-0.5">
+          <span class="text-[14px] text-[var(--text-secondary)]">Ligatures</span>
+          <p class="text-[13px] text-[var(--text-muted)] mt-0.5">
             {'Enables => and !== style ligatures (Fira Code, JetBrains Mono)'}
           </p>
         </div>
@@ -100,14 +100,14 @@ export const FontSection: Component = () => {
         />
       </div>
       {/* Chat font size */}
-      <div class="flex items-center justify-between py-1.5 mt-1">
-        <span class="text-xs text-[var(--text-secondary)]">Chat font size</span>
-        <span class="text-xs font-mono text-[var(--text-primary)]">
+      <div class="flex items-center justify-between py-2 mt-1">
+        <span class="text-[14px] text-[var(--text-secondary)]">Chat font size</span>
+        <span class="text-[14px] font-mono text-[var(--text-primary)]">
           {settings().appearance.chatFontSize}px
         </span>
       </div>
       <div class="flex items-center gap-2 py-1">
-        <span class="text-[10px] text-[var(--text-muted)] w-6">11</span>
+        <span class="text-[13px] text-[var(--text-muted)] w-6">11</span>
         <input
           type="range"
           min="11"
@@ -119,7 +119,7 @@ export const FontSection: Component = () => {
           }
           class="flex-1 h-1 appearance-none bg-[var(--border-default)] rounded-full cursor-pointer accent-[var(--accent)]"
         />
-        <span class="text-[10px] text-[var(--text-muted)] w-6 text-right">20</span>
+        <span class="text-[13px] text-[var(--text-muted)] w-6 text-right">20</span>
       </div>
     </div>
   )
@@ -135,7 +135,7 @@ export const CodeThemeSection: Component = () => {
   return (
     <div>
       <SectionHeader title="Code Theme" />
-      <div class="flex flex-wrap gap-1 py-1.5">
+      <div class="flex flex-wrap gap-1 py-2">
         <For each={CODE_THEME_OPTIONS}>
           {(theme) => (
             <button

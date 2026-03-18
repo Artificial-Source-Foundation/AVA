@@ -122,13 +122,13 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
         onContextMenu={(e) => props.onContextMenu(e, props.session.id)}
         class={`
           group flex items-center w-full
-          density-px density-py density-gap
-          rounded-[var(--radius-md)]
+          px-3 py-2.5 gap-2.5
+          rounded-[var(--radius-xl)]
           text-left transition-colors cursor-pointer
           ${
             props.isActive
-              ? 'bg-[var(--sidebar-item-active)] text-[var(--text-primary)]'
-              : 'text-[var(--text-secondary)] hover:bg-[var(--sidebar-item-hover)] hover:text-[var(--text-primary)]'
+              ? 'bg-[var(--gray-3)] text-[var(--gray-12)]'
+              : 'text-[var(--gray-9)] hover:bg-[var(--alpha-white-5)] hover:text-[var(--text-primary)]'
           }
         `}
       >
@@ -142,16 +142,18 @@ export const SessionItem: Component<SessionItemProps> = (props) => {
         >
           <Loader2 class="w-3.5 h-3.5 flex-shrink-0 text-[var(--accent)] animate-spin" />
         </Show>
-        <div class="flex-1 min-w-0">
-          <div class="text-xs truncate">{formatSessionName(props.session.name)}</div>
-          <div class="text-[10px] text-[var(--text-muted)] truncate flex items-center gap-1.5">
+        <div class="flex-1 min-w-0 flex flex-col gap-[3px]">
+          <div class="text-[13px] font-medium truncate">
+            {formatSessionName(props.session.name)}
+          </div>
+          <div class="text-[11px] text-[var(--gray-8)] truncate flex items-center gap-1.5">
             <Show when={props.session.slug}>
-              <span class="text-[var(--text-muted)] opacity-70">{props.session.slug}</span>
-              <span class="text-[var(--text-muted)] opacity-30">|</span>
+              <span class="opacity-70">{props.session.slug}</span>
+              <span class="opacity-30">|</span>
             </Show>
             <span>{formatDate(props.session.updatedAt)}</span>
             <Show when={props.session.messageCount > 0}>
-              <span class="text-[var(--text-muted)]">
+              <span>
                 {props.session.messageCount} msg{props.session.messageCount !== 1 ? 's' : ''}
               </span>
             </Show>

@@ -81,8 +81,8 @@ export function useInputState(): InputState {
     isProcessing()
       ? 'Steer the agent... (Enter = steer, Alt+Enter = follow-up)'
       : agent.isPlanMode()
-        ? 'Plan your approach...'
-        : 'Ask anything...'
+        ? 'Plan your approach... (Ctrl+/ for commands)'
+        : 'Ask anything... (Ctrl+/ for commands)'
   )
 
   // Auto-resize textarea

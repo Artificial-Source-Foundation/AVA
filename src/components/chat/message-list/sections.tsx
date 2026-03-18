@@ -1,30 +1,29 @@
-import { Bug, Download, FlaskConical, Play, Search, Sparkles, Upload, Wand2 } from 'lucide-solid'
-import { type Component, For, Show } from 'solid-js'
-import { useWorkflows } from '../../../stores/workflows'
+import { Bug, Code, FlaskConical, Wand2 } from 'lucide-solid'
+import { type Component, For } from 'solid-js'
 
-const STARTER_TEMPLATES = [
+const SUGGESTION_CARDS = [
   {
-    icon: Search,
-    title: 'Explore Codebase',
+    icon: Code,
+    label: 'Explain this codebase',
     prompt:
       'Give me a high-level overview of this project. What are the key files, architecture patterns, and how does everything fit together?',
   },
   {
     icon: Bug,
-    title: 'Find Bugs',
-    prompt:
-      'Review the codebase for potential bugs, security issues, and error handling gaps. Prioritize by severity.',
+    label: 'Fix a bug',
+    prompt: 'Help me find and fix a bug. Let me describe the issue: ',
   },
   {
     icon: FlaskConical,
-    title: 'Write Tests',
+    label: 'Write tests',
     prompt:
       'Generate comprehensive tests for the most critical functions. Focus on edge cases, error handling, and boundary conditions.',
   },
   {
     icon: Wand2,
-    title: 'Add Feature',
-    prompt: 'Help me plan and implement a new feature. I want to add ',
+    label: 'Refactor code',
+    prompt:
+      'Help me refactor code to improve readability, maintainability, and performance. Let me describe what needs refactoring: ',
   },
 ]
 
@@ -36,128 +35,88 @@ export const MessageListLoading: Component = () => (
   </div>
 )
 
-const WorkflowCards: Component = () => {
-  const { workflows, applyWorkflow, importFromFile, exportAll } = useWorkflows()
-  const topWorkflows = () => workflows().slice(0, 4)
+export const MessageListEmpty: Component = () => {
+  const insertSuggestion = (prompt: string): void => {
+    window.dispatchEvent(new CustomEvent('ava:set-input', { detail: { text: prompt } }))
+  }
 
   return (
-    <Show when={topWorkflows().length > 0}>
-      <div class="mt-4 max-w-md w-full">
-        <div class="flex items-center justify-between mb-2">
-          <div class="text-[10px] font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-            Workflows
-          </div>
-          <div class="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => importFromFile()}
-              title="Import workflows"
-              class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--alpha-white-5)] transition-colors"
-            >
-              <Upload class="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => exportAll()}
-              title="Export all workflows"
-              class="p-1 rounded-[var(--radius-sm)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--alpha-white-5)] transition-colors"
-            >
-              <Download class="w-3.5 h-3.5" />
-            </button>
-          </div>
-        </div>
-        <div class="grid grid-cols-2 gap-2">
-          <For each={topWorkflows()}>
-            {(workflow) => (
-              <button
-                type="button"
-                onClick={() => applyWorkflow(workflow)}
-                class="
-                  flex items-start gap-2.5 p-3 text-left
-                  rounded-[var(--radius-lg)]
-                  border border-[var(--border-subtle)]
-                  bg-[var(--surface-raised)]
-                  hover:border-[var(--accent-muted)] hover:bg-[var(--alpha-white-3)]
-                  transition-colors
-                  group
-                "
-              >
-                <Play class="w-4 h-4 mt-0.5 flex-shrink-0 text-[var(--text-muted)] group-hover:text-[var(--accent)]" />
-                <div class="min-w-0 flex-1">
-                  <div class="text-xs text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] truncate">
-                    {workflow.name}
-                  </div>
-                  <Show when={workflow.description}>
-                    <div class="text-[10px] text-[var(--text-muted)] truncate">
-                      {workflow.description}
-                    </div>
-                  </Show>
-                </div>
-                <Show when={workflow.usageCount > 0}>
-                  <span class="text-[9px] text-[var(--text-muted)] tabular-nums shrink-0">
-                    {workflow.usageCount}x
-                  </span>
-                </Show>
-              </button>
-            )}
-          </For>
-        </div>
+    <div class="flex flex-col items-center justify-center h-full select-none">
+      {/* Logo */}
+      <div
+        class="w-16 h-16 mb-5 rounded-2xl flex items-center justify-center"
+        style={{ background: '#A78BFA15' }}
+      >
+        <span class="text-2xl font-bold" style={{ color: '#A78BFA' }}>
+          A
+        </span>
       </div>
-    </Show>
+
+      {/* Heading */}
+      <h2 class="font-semibold" style={{ 'font-size': '20px', color: '#FAFAFA' }}>
+        How can I help?
+      </h2>
+
+      {/* Subtitle */}
+      <p class="mt-2 text-center max-w-sm" style={{ 'font-size': '13px', color: '#71717A' }}>
+        Ask anything about your codebase, or try one of these:
+      </p>
+
+      {/* Suggestion cards — 2x2 grid */}
+      <div class="mt-5 grid grid-cols-2 gap-2.5 w-full" style={{ 'max-width': '500px' }}>
+        <For each={SUGGESTION_CARDS}>
+          {(card) => (
+            <button
+              type="button"
+              onClick={() => insertSuggestion(card.prompt)}
+              class="
+                flex items-center gap-3 text-left
+                rounded-xl
+                transition-colors
+                group
+              "
+              style={{
+                background: '#18181B',
+                border: '1px solid #27272A',
+                padding: '12px 16px',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#3f3f46'
+                e.currentTarget.style.background = '#1c1c1f'
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#27272A'
+                e.currentTarget.style.background = '#18181B'
+              }}
+            >
+              <card.icon class="w-4 h-4 flex-shrink-0" style={{ color: '#52525B' }} />
+              <span style={{ 'font-size': '13px', color: '#A1A1AA' }}>{card.label}</span>
+            </button>
+          )}
+        </For>
+      </div>
+
+      {/* Keyboard shortcut hints */}
+      <div class="mt-6 flex items-center gap-1" style={{ 'font-size': '11px', color: '#3F3F46' }}>
+        <span>
+          <kbd class="font-mono">Ctrl+/</kbd> commands
+        </span>
+        <span aria-hidden="true" class="mx-1.5">
+          &middot;
+        </span>
+        <span>
+          <kbd class="font-mono">Ctrl+M</kbd> model
+        </span>
+        <span aria-hidden="true" class="mx-1.5">
+          &middot;
+        </span>
+        <span>
+          <kbd class="font-mono">Ctrl+T</kbd> thinking
+        </span>
+      </div>
+    </div>
   )
 }
-
-export const MessageListEmpty: Component = () => (
-  <div class="flex flex-col items-center justify-center h-full">
-    <div
-      class="
-        w-16 h-16 mb-6
-        rounded-[var(--radius-xl)]
-        bg-[var(--accent-subtle)]
-        flex items-center justify-center
-      "
-    >
-      <Sparkles class="w-8 h-8 text-[var(--accent)]" />
-    </div>
-    <h2 class="text-xl font-semibold text-[var(--text-primary)] font-display">Welcome to AVA</h2>
-    <p class="text-sm text-[var(--text-tertiary)] mt-2 max-w-sm text-center">
-      Your AI coding assistant is ready. Start a conversation or try a template.
-    </p>
-
-    {/* Starter templates */}
-    <div class="mt-6 grid grid-cols-2 gap-2 max-w-md w-full">
-      <For each={STARTER_TEMPLATES}>
-        {(template) => (
-          <button
-            type="button"
-            onClick={() => {
-              window.dispatchEvent(
-                new CustomEvent('ava:set-input', { detail: { text: template.prompt } })
-              )
-            }}
-            class="
-              flex items-start gap-2.5 p-3 text-left
-              rounded-[var(--radius-lg)]
-              border border-[var(--border-subtle)]
-              bg-[var(--surface-raised)]
-              hover:border-[var(--accent-muted)] hover:bg-[var(--alpha-white-3)]
-              transition-colors
-              group
-            "
-          >
-            <template.icon class="w-4 h-4 mt-0.5 flex-shrink-0 text-[var(--text-muted)] group-hover:text-[var(--accent)]" />
-            <span class="text-xs text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]">
-              {template.title}
-            </span>
-          </button>
-        )}
-      </For>
-    </div>
-
-    {/* Workflow cards */}
-    <WorkflowCards />
-  </div>
-)
 
 interface ScrollToBottomButtonProps {
   onClick: () => void

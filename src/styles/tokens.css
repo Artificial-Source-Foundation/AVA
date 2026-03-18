@@ -257,10 +257,10 @@
      ======================================== */
 
   /* Sidebar */
-  --sidebar-background: var(--glass-bg-strong);
-  --sidebar-border: var(--glass-border);
+  --sidebar-background: #0f0f12;
+  --sidebar-border: var(--gray-5);
   --sidebar-item-hover: var(--alpha-white-5);
-  --sidebar-item-active: var(--accent-subtle);
+  --sidebar-item-active: var(--gray-3);
 
   /* Input */
   --input-background: var(--surface-glass);
@@ -294,11 +294,11 @@
   --card-shadow: var(--shadow-sm);
 
   /* Chat */
-  --chat-user-bg: var(--accent);
+  --chat-user-bg: var(--violet-8);
   --chat-user-text: white;
-  --chat-assistant-bg: var(--surface-raised);
-  --chat-assistant-text: var(--text-primary);
-  --chat-assistant-border: var(--border-subtle);
+  --chat-assistant-bg: transparent;
+  --chat-assistant-text: var(--gray-10);
+  --chat-assistant-border: none;
 
   /* Code */
   --code-background: var(--surface-raised);
@@ -361,10 +361,13 @@
 
   --radius-sm: 3px;
   --radius-md: 5px;
-  --radius-lg: 6px;
+  --radius-lg: 8px;
   --radius-xl: 10px;
   --radius-2xl: 14px;
   --radius-full: 9999px;
+
+  /* Icon Rail / Activity Bar */
+  --icon-rail-width: 52px;
 
   /* ========================================
      MOTION

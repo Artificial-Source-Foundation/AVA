@@ -40,6 +40,7 @@ export const DEFAULT_APPEARANCE: AppearanceSettings = {
   density: 'default',
   codeTheme: 'default',
   darkStyle: 'dark',
+  thinkingDisplay: 'bubble',
   highContrast: false,
   reduceMotion: false,
 }

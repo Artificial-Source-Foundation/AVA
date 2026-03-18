@@ -44,14 +44,14 @@ export const InterfaceScaleSection: Component = () => {
   return (
     <div>
       <SectionHeader title="Scale" />
-      <div class="flex items-center justify-between py-1.5">
-        <span class="text-xs text-[var(--text-secondary)]">Scale</span>
-        <span class="text-xs font-mono text-[var(--text-primary)]">
+      <div class="flex items-center justify-between py-2">
+        <span class="text-[14px] text-[var(--text-secondary)]">Scale</span>
+        <span class="text-[14px] font-mono text-[var(--text-primary)]">
           {Math.round(settings().appearance.uiScale * 100)}%
         </span>
       </div>
       <div class="flex items-center gap-2 py-1">
-        <span class="text-[10px] text-[var(--text-muted)] w-8">85%</span>
+        <span class="text-[13px] text-[var(--text-muted)] w-8">85%</span>
         <input
           type="range"
           min="0"
@@ -71,7 +71,7 @@ export const InterfaceScaleSection: Component = () => {
           }}
           class="flex-1 h-1 appearance-none bg-[var(--border-default)] rounded-full cursor-pointer accent-[var(--accent)]"
         />
-        <span class="text-[10px] text-[var(--text-muted)] w-8 text-right">120%</span>
+        <span class="text-[13px] text-[var(--text-muted)] w-8 text-right">120%</span>
       </div>
       <div class="flex gap-1 mt-1.5">
         <For each={SCALE_STEPS}>
@@ -80,7 +80,7 @@ export const InterfaceScaleSection: Component = () => {
               type="button"
               onClick={() => updateAppearance({ uiScale: step })}
               class={`
-                px-1.5 py-0.5 text-[10px] rounded-[var(--radius-sm)] transition-colors
+                px-2 py-1 text-[12px] rounded-[var(--radius-sm)] transition-colors
                 ${
                   Math.abs(settings().appearance.uiScale - step) < 0.01
                     ? 'bg-[var(--accent)] text-white'
@@ -106,8 +106,8 @@ export const BorderRadiusSection: Component = () => {
 
   return (
     <>
-      <div class="flex items-center justify-between py-1.5">
-        <span class="text-xs text-[var(--text-secondary)]">Corners</span>
+      <div class="flex items-center justify-between py-2">
+        <span class="text-[14px] text-[var(--text-secondary)]">Corners</span>
         <div class="flex gap-1">
           <For each={RADIUS_OPTIONS}>
             {(opt) => (
@@ -142,8 +142,8 @@ export const DensitySection: Component = () => {
   const { settings, updateAppearance, previewAppearance, restoreAppearance } = useSettings()
 
   return (
-    <div class="flex items-center justify-between py-1.5">
-      <span class="text-xs text-[var(--text-secondary)]">Spacing</span>
+    <div class="flex items-center justify-between py-2">
+      <span class="text-[14px] text-[var(--text-secondary)]">Spacing</span>
       <div class="flex gap-1">
         <For each={DENSITY_OPTIONS}>
           {(opt) => (
@@ -190,7 +190,9 @@ export const SidebarOrderSection: Component = () => {
         <For each={order()}>
           {(id, index) => (
             <div class="flex items-center justify-between py-1 px-2 rounded-[var(--radius-md)] bg-[var(--surface-raised)]">
-              <span class="text-xs text-[var(--text-secondary)]">{SIDEBAR_LABELS[id] ?? id}</span>
+              <span class="text-[14px] text-[var(--text-secondary)]">
+                {SIDEBAR_LABELS[id] ?? id}
+              </span>
               <div class="flex gap-0.5">
                 <button
                   type="button"
@@ -230,10 +232,10 @@ export const AccessibilitySection: Component = () => {
     <div>
       <SectionHeader title="Accessibility" />
       {/* High contrast */}
-      <div class="flex items-center justify-between py-1.5">
+      <div class="flex items-center justify-between py-2">
         <div>
-          <span class="text-xs text-[var(--text-secondary)]">High contrast</span>
-          <p class="text-[10px] text-[var(--text-muted)] mt-0.5">Stronger text and borders</p>
+          <span class="text-[14px] text-[var(--text-secondary)]">High contrast</span>
+          <p class="text-[13px] text-[var(--text-muted)] mt-0.5">Stronger text and borders</p>
         </div>
         <Toggle
           checked={settings().appearance.highContrast}
@@ -241,10 +243,10 @@ export const AccessibilitySection: Component = () => {
         />
       </div>
       {/* Reduce motion */}
-      <div class="flex items-center justify-between py-1.5">
+      <div class="flex items-center justify-between py-2">
         <div>
-          <span class="text-xs text-[var(--text-secondary)]">Reduce motion</span>
-          <p class="text-[10px] text-[var(--text-muted)] mt-0.5">
+          <span class="text-[14px] text-[var(--text-secondary)]">Reduce motion</span>
+          <p class="text-[13px] text-[var(--text-muted)] mt-0.5">
             Disables all animations and transitions
           </p>
         </div>

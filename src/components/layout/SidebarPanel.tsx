@@ -16,7 +16,7 @@ export const SidebarPanel: Component = () => {
   const { activeActivity } = useLayout()
 
   return (
-    <aside class="flex flex-col h-full w-full glass-strong overflow-hidden">
+    <aside class="flex flex-col h-full w-full overflow-hidden bg-[var(--sidebar-background)] border-r border-[var(--sidebar-border)]">
       <Switch>
         <Match when={activeActivity() === 'sessions'}>
           <PanelErrorBoundary panelName="Sessions">

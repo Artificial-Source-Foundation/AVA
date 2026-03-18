@@ -10,7 +10,7 @@ import { ActivityBar } from './ActivityBar'
 import { MainArea } from './MainArea'
 import { RightPanel } from './RightPanel'
 import { SidebarPanel } from './SidebarPanel'
-import { StatusBar } from './StatusBar'
+import { TitleBar } from './TitleBar'
 import { createResizeHandlers } from './useResizeHandlers'
 
 const XTerminal = lazy(() => import('../panels/XTerminal').then((m) => ({ default: m.XTerminal })))
@@ -42,7 +42,7 @@ export const AppShell: Component = () => {
 
   return (
     <div class="h-screen flex flex-col text-[var(--text-primary)] overflow-hidden">
-      <StatusBar />
+      <TitleBar />
 
       <div class="flex-1 flex overflow-hidden">
         <ActivityBar />

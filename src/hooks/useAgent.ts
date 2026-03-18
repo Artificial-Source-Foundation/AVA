@@ -79,6 +79,10 @@ function createAgentStore() {
 
   createEffect(
     on(rustAgent.events, (allEvents) => {
+      // Reset index when events array is cleared (new run started)
+      if (allEvents.length < lastProcessedEventIdx) {
+        lastProcessedEventIdx = 0
+      }
       for (let i = lastProcessedEventIdx; i < allEvents.length; i++) {
         const event = allEvents[i]!
         if (event.type === 'tool_call') {

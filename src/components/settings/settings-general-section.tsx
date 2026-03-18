@@ -2,39 +2,9 @@ import { Bot, Download, Eye, GitBranch, Monitor, Trash2, Upload } from 'lucide-s
 import { type Component, createSignal, For, Show } from 'solid-js'
 import type { UISettings } from '../../stores/settings'
 import { useSettings } from '../../stores/settings'
+import { Toggle } from '../ui/Toggle'
+import { ToggleRow } from '../ui/ToggleRow'
 import { SettingsCard } from './SettingsCard'
-
-const Toggle: Component<{ checked: boolean; onChange: (v: boolean) => void }> = (props) => (
-  <button
-    type="button"
-    onClick={() => props.onChange(!props.checked)}
-    class={`relative w-11 h-6 rounded-full transition-colors ${
-      props.checked ? 'bg-[var(--accent)]' : 'bg-[var(--gray-6)]'
-    }`}
-  >
-    <span
-      class="absolute top-[2px] left-[2px] w-5 h-5 rounded-full bg-white transition-transform"
-      style={{ transform: props.checked ? 'translateX(20px)' : 'translateX(0)' }}
-    />
-  </button>
-)
-
-const ToggleRow: Component<{
-  label: string
-  description?: string
-  checked: boolean
-  onChange: (v: boolean) => void
-}> = (props) => (
-  <div class="flex items-center justify-between py-2">
-    <div>
-      <span class="text-[14px] text-[var(--text-secondary)]">{props.label}</span>
-      <Show when={props.description}>
-        <p class="text-[13px] text-[var(--gray-8)]">{props.description}</p>
-      </Show>
-    </div>
-    <Toggle checked={props.checked} onChange={props.onChange} />
-  </div>
-)
 
 export const GeneralSection: Component = () => {
   const {

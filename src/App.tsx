@@ -31,7 +31,6 @@ import {
 function App() {
   const [isInitializing, setIsInitializing] = createSignal(true)
   const [initError, setInitError] = createSignal<string | null>(null)
-  const [isBrowserMode, setIsBrowserMode] = createSignal(false)
   const [splashStatus, setSplashStatus] = createSignal('')
 
   const { projectHubVisible, setProjectHubVisible } = useLayout()
@@ -115,7 +114,6 @@ function App() {
     registerAppShortcuts(setExportDialogOpen, setCheckpointDialogOpen, setProjectHubVisible)
 
     const result = await runAppInit(setSplashStatus, setProjectHubVisible)
-    if (result.notTauri) setIsBrowserMode(true)
     if (result.error) setInitError(result.error)
     setIsInitializing(false)
   })
@@ -153,9 +151,6 @@ function App() {
       })
     }
   }
-
-  // Unused but kept for potential future checks
-  void isBrowserMode
 
   return (
     <>

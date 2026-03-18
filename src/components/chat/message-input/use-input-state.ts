@@ -1,6 +1,8 @@
 import { type Accessor, createEffect, createMemo, createSignal, on, onCleanup } from 'solid-js'
 import { useAgent } from '../../../hooks/useAgent'
 import { useChat } from '../../../hooks/useChat'
+import { useElapsedTimer } from '../../../hooks/useElapsedTimer'
+import { generateMessageId } from '../../../lib/ids'
 import { parseSlashCommand } from '../../../services/command-resolver'
 import type { SearchableFile } from '../../../services/file-search'
 import { openInExternalEditor } from '../../../services/ide-integration'
@@ -43,7 +45,6 @@ export interface InputState extends ModelState {
 export function useInputState(): InputState {
   const [input, setInput] = createSignal('')
   const [sendCount, setSendCount] = createSignal(0)
-  const [elapsedSeconds, setElapsedSeconds] = createSignal(0)
   const [historyIndex, setHistoryIndex] = createSignal(-1)
   const [savedDraft, setSavedDraft] = createSignal('')
   const [stashSize, setStashSize] = createSignal(getStash().length)
@@ -98,22 +99,7 @@ export function useInputState(): InputState {
   }
 
   // Elapsed timer during streaming
-  createEffect(
-    on(
-      () => chat.streamingStartedAt(),
-      (startedAt) => {
-        if (!startedAt) {
-          setElapsedSeconds(0)
-          return
-        }
-        setElapsedSeconds(0)
-        const interval = setInterval(() => {
-          setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000))
-        }, 1000)
-        onCleanup(() => clearInterval(interval))
-      }
-    )
-  )
+  const elapsedSecondsFromTimer = useElapsedTimer(() => chat.streamingStartedAt())
 
   // Clear queue on session change
   createEffect(
@@ -193,7 +179,7 @@ export function useInputState(): InputState {
                 )
                 .join('\n')
         sessionStore.addMessage({
-          id: `sys-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id: generateMessageId('sys'),
           sessionId,
           role: 'system',
           content: `**Message Queue** (${queue.length} item${queue.length === 1 ? '' : 's'})\n\n${queueText}`,
@@ -214,7 +200,7 @@ export function useInputState(): InputState {
       // Add the steering message to chat so the user sees what they sent
       const sessionId = sessionStore.currentSession()?.id ?? ''
       sessionStore.addMessage({
-        id: `steer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id: generateMessageId('steer'),
         sessionId,
         role: 'user',
         content: message,
@@ -310,7 +296,7 @@ export function useInputState(): InputState {
         if (textareaRef) textareaRef.style.height = 'auto'
         const sessionId = sessionStore.currentSession()?.id ?? ''
         sessionStore.addMessage({
-          id: `post-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id: generateMessageId('post'),
           sessionId,
           role: 'user',
           content: message,
@@ -327,7 +313,7 @@ export function useInputState(): InputState {
         if (textareaRef) textareaRef.style.height = 'auto'
         const sessionId = sessionStore.currentSession()?.id ?? ''
         sessionStore.addMessage({
-          id: `follow-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id: generateMessageId('follow'),
           sessionId,
           role: 'user',
           content: message,
@@ -382,7 +368,7 @@ export function useInputState(): InputState {
     input,
     setInput,
     sendCount,
-    elapsedSeconds,
+    elapsedSeconds: elapsedSecondsFromTimer,
     stashSize,
     attachments,
     isProcessing,

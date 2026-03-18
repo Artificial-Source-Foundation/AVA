@@ -9,54 +9,9 @@ import { Bell, Code2, Keyboard, MessageCircle } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
 import type { SendKey } from '../../../stores/settings'
 import { useSettings } from '../../../stores/settings'
+import { segmentedBtnClass } from '../../ui/SegmentedControl'
+import { ToggleRow } from '../../ui/ToggleRow'
 import { SettingsCard } from '../SettingsCard'
-
-// ============================================================================
-// Shared helpers (same patterns as AppearanceTab)
-// ============================================================================
-
-function segmentedBtn(active: boolean): string {
-  return `px-4 py-2 text-[13px] rounded-[var(--radius-md)] transition-colors ${
-    active
-      ? 'bg-[var(--accent)] text-white'
-      : 'bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)]'
-  }`
-}
-
-const Toggle: Component<{ checked: boolean; onChange: (v: boolean) => void }> = (props) => (
-  <button
-    type="button"
-    onClick={() => props.onChange(!props.checked)}
-    class={`
-      relative w-11 h-6 rounded-full transition-colors
-      ${props.checked ? 'bg-[var(--accent)]' : 'bg-[var(--border-strong)]'}
-    `}
-  >
-    <span
-      class="absolute top-[2px] left-[2px] w-5 h-5 rounded-full bg-white transition-transform"
-      style={{
-        transform: props.checked ? 'translateX(20px)' : 'translateX(0)',
-      }}
-    />
-  </button>
-)
-
-const ToggleRow: Component<{
-  label: string
-  description?: string
-  checked: boolean
-  onChange: (v: boolean) => void
-}> = (props) => (
-  <div class="flex items-center justify-between py-2">
-    <div>
-      <span class="text-[14px] text-[var(--text-secondary)]">{props.label}</span>
-      <Show when={props.description}>
-        <p class="text-[13px] text-[var(--text-muted)]">{props.description}</p>
-      </Show>
-    </div>
-    <Toggle checked={props.checked} onChange={props.onChange} />
-  </div>
-)
 
 // ============================================================================
 // Main Tab
@@ -81,14 +36,14 @@ export const BehaviorTab: Component = () => {
             <button
               type="button"
               onClick={() => updateBehavior({ sendKey: 'enter' as SendKey })}
-              class={segmentedBtn(settings().behavior.sendKey === 'enter')}
+              class={segmentedBtnClass(settings().behavior.sendKey === 'enter')}
             >
               Enter
             </button>
             <button
               type="button"
               onClick={() => updateBehavior({ sendKey: 'ctrl+enter' as SendKey })}
-              class={segmentedBtn(settings().behavior.sendKey === 'ctrl+enter')}
+              class={segmentedBtnClass(settings().behavior.sendKey === 'ctrl+enter')}
             >
               Ctrl+Enter
             </button>

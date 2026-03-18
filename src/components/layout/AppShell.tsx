@@ -1,5 +1,6 @@
+import type { LucideProps } from 'lucide-solid'
 import { Brain, ScrollText, Terminal, X } from 'lucide-solid'
-import { type Component, lazy, Show } from 'solid-js'
+import { type Component, For, type JSX, lazy, Show } from 'solid-js'
 import { useLayout } from '../../stores/layout'
 import { useSettings } from '../../stores/settings'
 import { TerminalPanel } from '../panels/TerminalPanel'
@@ -14,6 +15,18 @@ import { TitleBar } from './TitleBar'
 import { createResizeHandlers } from './useResizeHandlers'
 
 const XTerminal = lazy(() => import('../panels/XTerminal').then((m) => ({ default: m.XTerminal })))
+
+type BottomPanelTab = 'memory' | 'terminal' | 'output'
+
+const panelTabs: readonly {
+  id: BottomPanelTab
+  icon: (props: LucideProps) => JSX.Element
+  label: string
+}[] = [
+  { id: 'memory', icon: Brain, label: 'Memory' },
+  { id: 'terminal', icon: Terminal, label: 'Terminal' },
+  { id: 'output', icon: ScrollText, label: 'Output' },
+]
 
 export const AppShell: Component = () => {
   const {
@@ -98,48 +111,24 @@ export const AppShell: Component = () => {
               <div class="flex flex-col h-full bg-[var(--gray-1)]">
                 {/* Tab header */}
                 <div class="flex items-center h-8 flex-shrink-0 border-b border-[var(--border-subtle)]">
-                  <button
-                    type="button"
-                    onClick={() => switchBottomPanelTab('memory')}
-                    class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
-                    classList={{
-                      'text-[var(--accent)] border-b border-[var(--accent)]':
-                        bottomPanelTab() === 'memory',
-                      'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
-                        bottomPanelTab() !== 'memory',
-                    }}
-                  >
-                    <Brain class="w-3 h-3" />
-                    Memory
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => switchBottomPanelTab('terminal')}
-                    class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
-                    classList={{
-                      'text-[var(--accent)] border-b border-[var(--accent)]':
-                        bottomPanelTab() === 'terminal',
-                      'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
-                        bottomPanelTab() !== 'terminal',
-                    }}
-                  >
-                    <Terminal class="w-3 h-3" />
-                    Terminal
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => switchBottomPanelTab('output')}
-                    class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
-                    classList={{
-                      'text-[var(--accent)] border-b border-[var(--accent)]':
-                        bottomPanelTab() === 'output',
-                      'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
-                        bottomPanelTab() !== 'output',
-                    }}
-                  >
-                    <ScrollText class="w-3 h-3" />
-                    Output
-                  </button>
+                  <For each={panelTabs}>
+                    {(tab) => (
+                      <button
+                        type="button"
+                        onClick={() => switchBottomPanelTab(tab.id)}
+                        class="flex items-center gap-1.5 px-3 h-full text-[10px] font-semibold uppercase tracking-wider transition-colors"
+                        classList={{
+                          'text-[var(--accent)] border-b border-[var(--accent)]':
+                            bottomPanelTab() === tab.id,
+                          'text-[var(--text-muted)] hover:text-[var(--text-secondary)]':
+                            bottomPanelTab() !== tab.id,
+                        }}
+                      >
+                        {tab.icon({ class: 'w-3 h-3' })}
+                        {tab.label}
+                      </button>
+                    )}
+                  </For>
                   <div class="flex-1" />
                   <button
                     type="button"

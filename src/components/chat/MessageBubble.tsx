@@ -1,5 +1,6 @@
 import { type Accessor, type Component, createMemo, For, Match, Show, Switch } from 'solid-js'
 import { formatCost } from '../../lib/cost'
+import { formatMs } from '../../lib/format-time'
 import type { Message, ToolCall } from '../../types'
 import { EditForm } from './EditForm'
 import { MarkdownContent } from './MarkdownContent'
@@ -45,15 +46,6 @@ function formatTimestamp(msg: Message): string {
   const ampm = h >= 12 ? 'PM' : 'AM'
   const h12 = h % 12 || 12
   return `${h12}:${m} ${ampm}`
-}
-
-function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  const secs = ms / 1000
-  if (secs < 60) return `${secs.toFixed(1)}s`
-  const mins = Math.floor(secs / 60)
-  const remainSecs = Math.floor(secs % 60)
-  return `${mins}m${remainSecs}s`
 }
 
 interface ToolSegmentProps {
@@ -155,7 +147,7 @@ export const MessageBubble: Component<MessageBubbleProps> = (props) => {
             </Show>
             <Show when={!isUser() && (props.message.metadata?.elapsedMs as number | undefined)}>
               {' '}
-              &middot; {formatElapsed(props.message.metadata!.elapsedMs as number)}
+              &middot; {formatMs(props.message.metadata!.elapsedMs as number)}
             </Show>
             <Show when={!isUser() && props.message.metadata?.mode}>
               {' '}

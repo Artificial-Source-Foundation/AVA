@@ -1,32 +1,13 @@
 /**
  * Developer Tab — helpers and shared components
  *
- * Toggle component, log formatting helpers, and color/label maps.
+ * Log formatting helpers, and color/label maps.
+ * Toggle is imported from the shared ui component.
  */
 
 import type { Component } from 'solid-js'
 
-// ============================================================================
-// Toggle
-// ============================================================================
-
-export const Toggle: Component<{ checked: boolean; onChange: (v: boolean) => void }> = (props) => (
-  <button
-    type="button"
-    onClick={() => props.onChange(!props.checked)}
-    class={`
-      relative w-8 h-[18px] rounded-full transition-colors
-      ${props.checked ? 'bg-[var(--accent)]' : 'bg-[var(--border-strong)]'}
-    `}
-  >
-    <span
-      class="absolute top-[2px] left-[2px] w-[14px] h-[14px] rounded-full bg-white transition-transform"
-      style={{
-        transform: props.checked ? 'translateX(14px)' : 'translateX(0)',
-      }}
-    />
-  </button>
-)
+export { Toggle } from '../../../ui/Toggle'
 
 // ============================================================================
 // Section Header

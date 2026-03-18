@@ -5,6 +5,7 @@
  * No JSX — shared by ToolCallCard, ToolCallGroup, and ActiveToolIndicator.
  */
 
+import { formatElapsedSince } from '../../lib/format-time'
 import type { ToolCall, ToolCallStatus } from '../../types'
 
 // ============================================================================
@@ -216,12 +217,8 @@ export function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`
 }
 
-/** Format live elapsed from a start timestamp */
-export function formatElapsed(startedAt: number): string {
-  const elapsed = Date.now() - startedAt
-  if (elapsed < 1000) return '<1s'
-  return `${(elapsed / 1000).toFixed(1)}s`
-}
+/** @deprecated Use `formatElapsedSince` from `../../lib/format-time` */
+export const formatElapsed = formatElapsedSince
 
 // ============================================================================
 // Language detection for syntax highlighting

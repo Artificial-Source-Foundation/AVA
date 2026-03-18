@@ -6,6 +6,7 @@
  * Draggable for window movement via startDragging() API.
  */
 
+import type { Window } from '@tauri-apps/api/window'
 import { AppWindow, FolderOpen, Layers, Minus, Square, X } from 'lucide-solid'
 import { type Component, Show } from 'solid-js'
 import { useProject } from '../../stores/project'
@@ -13,6 +14,16 @@ import { useSession } from '../../stores/session'
 import { MenuBar } from './MenuBar'
 
 let windowCounter = 0
+
+/** Execute a window action, silently ignoring failures in non-Tauri environments. */
+async function tauriWindowAction(fn: (win: Window) => Promise<void>): Promise<void> {
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    await fn(getCurrentWindow())
+  } catch {
+    /* non-Tauri environment */
+  }
+}
 
 export const TitleBar: Component = () => {
   const { currentProject, setCurrentDirectory } = useProject()
@@ -47,31 +58,12 @@ export const TitleBar: Component = () => {
   const startDrag = async (e: MouseEvent) => {
     if (e.button !== 0) return
     if ((e.target as HTMLElement).closest('button, [data-menubar]')) return
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      await getCurrentWindow().startDragging()
-    } catch {
-      /* ignore in non-Tauri */
-    }
+    await tauriWindowAction((win) => win.startDragging())
   }
 
-  const handleMinimize = async () => {
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      await getCurrentWindow().minimize()
-    } catch {
-      /* ignore in non-Tauri */
-    }
-  }
+  const handleMinimize = () => tauriWindowAction((win) => win.minimize())
 
-  const handleMaximize = async () => {
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      await getCurrentWindow().toggleMaximize()
-    } catch {
-      /* ignore in non-Tauri */
-    }
-  }
+  const handleMaximize = () => tauriWindowAction((win) => win.toggleMaximize())
 
   const handleNewWindow = async () => {
     try {
@@ -91,14 +83,7 @@ export const TitleBar: Component = () => {
     }
   }
 
-  const handleClose = async () => {
-    try {
-      const { getCurrentWindow } = await import('@tauri-apps/api/window')
-      await getCurrentWindow().close()
-    } catch {
-      /* ignore in non-Tauri */
-    }
-  }
+  const handleClose = () => tauriWindowAction((win) => win.close())
 
   return (
     <div

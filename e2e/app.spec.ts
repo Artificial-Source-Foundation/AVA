@@ -322,7 +322,7 @@ test.describe('Onboarding', () => {
 
     await expect(page.locator('h1:has-text("Welcome to AVA")')).toBeVisible({ timeout: 15000 })
     await expect(page.locator('button:has-text("Get Started")')).toBeVisible()
-    await expect(page.locator('text=Your AI dev team')).toBeVisible()
+    await expect(page.getByText('Your AI dev team — lean by default')).toBeVisible()
   })
 
   test('shows step dots indicator with 5 steps', async ({ page }) => {

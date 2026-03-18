@@ -9,6 +9,7 @@
 import { batch, createEffect, createSignal, on } from 'solid-js'
 
 import { DEFAULTS } from '../config/constants'
+import { generateMessageId } from '../lib/ids'
 import { log } from '../lib/logger'
 import { deriveSessionTitle } from '../lib/title-utils'
 import { checkAutoApproval as sharedCheckAutoApproval } from '../lib/tool-approval'
@@ -184,7 +185,7 @@ function createAgentStore() {
 
     // Add user message to the session store so it's visible immediately
     const userMsg: Message = {
-      id: `user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      id: generateMessageId('user'),
       sessionId,
       role: 'user',
       content: goal,
@@ -238,7 +239,7 @@ function createAgentStore() {
       if (errorText) {
         log.error('agent', 'Agent failed', { error: errorText })
         const errorMsg: Message = {
-          id: `err-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id: generateMessageId('err'),
           sessionId,
           role: 'assistant',
           content: `**Error:** ${errorText}`,
@@ -255,7 +256,7 @@ function createAgentStore() {
         const elapsedMs = Date.now() - runStartedAt
         const thinking = rustAgent.thinkingContent()
         const assistantMsg: Message = {
-          id: `asst-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          id: generateMessageId('asst'),
           sessionId,
           role: 'assistant',
           content,
@@ -287,7 +288,7 @@ function createAgentStore() {
       const msg = err instanceof Error ? err.message : String(err)
       log.error('agent', 'Unexpected agent error', { error: msg })
       const errorMsg: Message = {
-        id: `err-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        id: generateMessageId('err'),
         sessionId,
         role: 'assistant',
         content: `**Error:** ${msg}`,

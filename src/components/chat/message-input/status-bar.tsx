@@ -7,18 +7,11 @@
  */
 
 import { Activity, AlertCircle, AlertTriangle, Archive, Loader2, MessageSquare } from 'lucide-solid'
-import {
-  type Accessor,
-  type Component,
-  createEffect,
-  createMemo,
-  createSignal,
-  on,
-  onCleanup,
-  Show,
-} from 'solid-js'
+import { type Accessor, type Component, createMemo, Show } from 'solid-js'
 import { useAgent } from '../../../hooks/useAgent'
+import { useElapsedTimer } from '../../../hooks/useElapsedTimer'
 import { formatCost } from '../../../lib/cost'
+import { formatSeconds } from '../../../lib/format-time'
 import { getCoreBudget } from '../../../services/core-bridge'
 import { useDiagnostics } from '../../../stores/diagnostics'
 import { useSession } from '../../../stores/session'
@@ -30,13 +23,6 @@ import { summarizeAction } from '../tool-call-utils'
 // ---------------------------------------------------------------------------
 
 const fmt = (n: number): string => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n))
-
-function formatElapsedSeconds(sec: number): string {
-  if (sec < 60) return `${sec}s`
-  const m = Math.floor(sec / 60)
-  const s = sec % 60
-  return `${m}m${s > 0 ? ` ${s}s` : ''}`
-}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -61,23 +47,7 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
   const { contextUsage, sessionTokenStats, messages } = sessionStore
 
   // Elapsed time during streaming
-  const [elapsedSec, setElapsedSec] = createSignal(0)
-  createEffect(
-    on(
-      () => agent.streamingStartedAt(),
-      (startedAt) => {
-        if (!startedAt) {
-          setElapsedSec(0)
-          return
-        }
-        setElapsedSec(0)
-        const interval = setInterval(() => {
-          setElapsedSec(Math.floor((Date.now() - startedAt) / 1000))
-        }, 1000)
-        onCleanup(() => clearInterval(interval))
-      }
-    )
-  )
+  const elapsedSec = useElapsedTimer(() => agent.streamingStartedAt())
 
   // Current active tool name
   const activeToolLabel = createMemo((): string | null => {
@@ -125,7 +95,7 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
       <Show when={agent.isRunning()}>
         <span class="inline-flex items-center gap-1 text-[var(--accent)]">
           <Loader2 class="w-2.5 h-2.5 animate-spin" />
-          <span class="tabular-nums">{formatElapsedSeconds(elapsedSec())}</span>
+          <span class="tabular-nums">{formatSeconds(elapsedSec())}</span>
         </span>
         <Show when={agent.currentTurn() > 0}>
           <span class="text-[var(--text-muted)]">&middot;</span>

@@ -7,6 +7,15 @@
 
 import { type Component, For } from 'solid-js'
 
+/** Segmented button class builder (active/inactive states) */
+export function segmentedBtnClass(active: boolean): string {
+  return `px-4 py-2 text-[13px] rounded-[var(--radius-md)] transition-colors ${
+    active
+      ? 'bg-[var(--accent)] text-white'
+      : 'bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:bg-[var(--alpha-white-8)]'
+  }`
+}
+
 export interface SegmentedControlOption {
   id: string
   label: string

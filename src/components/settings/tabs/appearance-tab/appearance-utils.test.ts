@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { segmentedBtn } from './appearance-utils'
+import { segmentedBtnClass as segmentedBtn } from '../../../ui/SegmentedControl'
 
 // ============================================================================
 // segmentedBtn
@@ -20,8 +20,8 @@ describe('segmentedBtn', () => {
   })
 
   it('always includes shared base classes', () => {
-    expect(segmentedBtn(true)).toContain('px-2.5')
-    expect(segmentedBtn(false)).toContain('px-2.5')
+    expect(segmentedBtn(true)).toContain('px-4')
+    expect(segmentedBtn(false)).toContain('px-4')
     expect(segmentedBtn(true)).toContain('transition-colors')
     expect(segmentedBtn(false)).toContain('transition-colors')
   })

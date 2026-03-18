@@ -17,13 +17,27 @@ Tool surface policy: default tools stay capped at 6 (`read`, `write`, `edit`, `b
 
 ## Execution Order
 
+### SOTA Critical (must ship for competitive parity)
+
+1. **Agent tree branching** — build/plan/explore/general agent roles with routing. Each agent type has its own system prompt, tool subset, and behavior. OpenCode's killer feature.
+2. **Wildcard permission patterns** — `*.env` → ask, `src/**/*.rs` → allow. Glob-based rules instead of literal paths. OpenCode has this.
+3. **Per-agent model override** — each agent can use a different provider/model. Plan agent uses cheap model, code agent uses frontier. Pi has this.
+4. **Message file attachments** — embed files in conversation messages (not just text). OpenCode's Message V2 system.
+
+### SOTA Important (differentiation)
+
+5. **Message revert system** — undo/revert specific tool call results. Roll back file changes from a single tool.
+6. **Session todo tracking** — persistent todos scoped to sessions. Track what's done and pending.
+7. **Thinking budget enforcement** — per-agent thinking token budgets. Control reasoning depth.
+8. **Plugin hot-reload** — live code updates without restart.
+
 ### Next (High Impact)
 
-1. **Plugin Phase 2** — `@ava-ai/plugin` npm publish, Python SDK, auth hook sub-protocol.
-2. **Plugin Phase 3** — OpenCode compatibility bridge, plugin marketplace.
-3. **B26** Praxis in chat composer — deeper worker/task inspection.
-4. **B79** Evaluation harness — SWE-bench integration.
-5. **B80** Trajectory recording — JSONL decision trees.
+9. **Plugin Phase 2** — `@ava-ai/plugin` npm publish, auth hook sub-protocol.
+10. **Plugin Phase 3** — OpenCode compatibility bridge, plugin marketplace.
+11. **B26** Praxis in chat composer — deeper worker/task inspection.
+12. **B79** Evaluation harness — SWE-bench integration.
+13. **B80** Trajectory recording — JSONL decision trees.
 
 ### Desktop/Web Frontend Fixes (Remaining)
 

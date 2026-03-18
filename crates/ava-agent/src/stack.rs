@@ -85,7 +85,7 @@ pub struct MCPServerInfo {
 }
 
 pub struct AgentStack {
-    pub router: ModelRouter,
+    pub router: Arc<ModelRouter>,
     pub tools: Arc<RwLock<ToolRegistry>>,
     pub session_manager: Arc<SessionManager>,
     pub memory: Arc<MemorySystem>,
@@ -193,7 +193,7 @@ impl AgentStack {
         let config_mgr = ConfigManager::load_from_paths(config_path, credentials_path).await?;
         let cfg = config_mgr.get().await;
         let credentials = config_mgr.credentials().await;
-        let router = ModelRouter::new(credentials);
+        let router = Arc::new(ModelRouter::new(credentials));
 
         let session_manager = Arc::new(SessionManager::new(&db_path)?);
         let memory = Arc::new(
@@ -318,6 +318,7 @@ impl AgentStack {
                 &effective_cwd,
             ),
             tool_source: None, // Set per-tool-call by middleware
+            glob_rules: ava_permissions::glob_rules::GlobRuleset::load_merged(&effective_cwd),
         }));
         let permission_inspector: Arc<dyn PermissionInspector> = Arc::new(DefaultInspector::new(
             PermissionSystem::load(effective_cwd.clone(), vec![]),
@@ -889,6 +890,7 @@ impl AgentStack {
             model_name: provider.model_name().to_string(),
             max_turns: turns_limit,
             agents_config: self.agents_config.clone(),
+            router: self.router.clone(),
             event_tx: event_tx.clone(),
             session_manager: Some(self.session_manager.clone()),
             parent_session_id: {
@@ -1191,6 +1193,8 @@ struct AgentTaskSpawner {
     model_name: String,
     max_turns: usize,
     agents_config: AgentsConfig,
+    /// Router for resolving per-agent model overrides from agents.toml.
+    router: Arc<ModelRouter>,
     /// Optional event sender to emit `SubAgentComplete` events for TUI consumption.
     event_tx: Option<mpsc::UnboundedSender<AgentEvent>>,
     /// Session manager for persisting sub-agent sessions.
@@ -1204,22 +1208,55 @@ struct AgentTaskSpawner {
 #[async_trait]
 impl TaskSpawner for AgentTaskSpawner {
     async fn spawn(&self, prompt: &str) -> Result<TaskResult> {
+        self.spawn_named("task", prompt).await
+    }
+
+    async fn spawn_named(&self, agent_type: &str, prompt: &str) -> Result<TaskResult> {
         if self.depth >= MAX_AGENT_DEPTH {
             return Err(AvaError::ToolError(format!(
                 "Maximum sub-agent depth reached ({MAX_AGENT_DEPTH}). Cannot spawn deeper."
             )));
         }
 
-        let resolved = self.agents_config.get_agent("task");
+        let resolved = self.agents_config.get_agent(agent_type);
 
         if !resolved.enabled {
-            return Err(AvaError::ToolError(
-                "Sub-agent 'task' is disabled in agents.toml".to_string(),
-            ));
+            return Err(AvaError::ToolError(format!(
+                "Sub-agent '{agent_type}' is disabled in agents.toml"
+            )));
         }
+
+        // Resolve per-agent model override. If the agent has a model configured
+        // in agents.toml (e.g. `model = "openrouter/google/gemini-flash-1.5"`),
+        // create a provider for that model. Otherwise, use the parent's provider.
+        let (provider, effective_model) = if let Some(ref model_spec) = resolved.model {
+            match self.resolve_agent_provider(model_spec).await {
+                Ok((p, m)) => {
+                    info!(
+                        agent_type,
+                        model = %m,
+                        "sub-agent using per-agent model override"
+                    );
+                    (p, m)
+                }
+                Err(e) => {
+                    warn!(
+                        agent_type,
+                        model_spec,
+                        error = %e,
+                        "failed to resolve per-agent model override, falling back to parent model"
+                    );
+                    (self.provider.clone(), self.model_name.clone())
+                }
+            }
+        } else {
+            (self.provider.clone(), self.model_name.clone())
+        };
 
         info!(
             prompt_len = prompt.len(),
+            agent_type,
+            model = %effective_model,
             "spawning sub-agent for task tool"
         );
         let mut registry = ToolRegistry::new();
@@ -1241,28 +1278,25 @@ impl TaskSpawner for AgentTaskSpawner {
             .prompt
             .unwrap_or_else(build_sub_agent_system_prompt);
 
-        // TODO: support model override from resolved.model — requires routing
-        // through ModelRouter which the spawner doesn't currently have access to.
-
         let config = AgentConfig {
             max_turns: sub_max_turns,
             max_budget_usd: 0.0, // sub-agents don't get CLI budget
             token_limit: 128_000,
-            model: self.model_name.clone(),
+            model: effective_model.clone(),
             max_cost_usd: 5.0,
             loop_detection: true,
             custom_system_prompt: Some(system_prompt),
             thinking_level: ThinkingLevel::Off,
             thinking_budget_tokens: None,
             system_prompt_suffix: crate::instruction_resolver::build_sub_agent_instructions(
-                &self.model_name,
+                &effective_model,
             ),
             extended_tools: true, // sub-agents get full tool access
             plan_mode: false,
             post_edit_validation: None,
         };
         let mut agent = AgentLoop::new(
-            Box::new(SharedProvider::new(self.provider.clone())),
+            Box::new(SharedProvider::new(provider)),
             registry,
             context,
             config,
@@ -1271,6 +1305,7 @@ impl TaskSpawner for AgentTaskSpawner {
 
         // Set parent_id metadata so the session can be linked to the parent.
         session.metadata["is_sub_agent"] = serde_json::Value::Bool(true);
+        session.metadata["agent_type"] = serde_json::Value::String(agent_type.to_string());
         if let Some(ref parent_id) = self.parent_session_id {
             session.metadata["parent_id"] = serde_json::Value::String(parent_id.clone());
         }
@@ -1292,13 +1327,13 @@ impl TaskSpawner for AgentTaskSpawner {
 
         let session_id = session.id.to_string();
         let messages = session.messages.clone();
-        let description = prompt.to_string();
+        let description = format!("[{agent_type}] {prompt}");
 
         // Extract accumulated token usage from the sub-agent's session and compute cost.
         let sub_input_tokens = session.token_usage.input_tokens;
         let sub_output_tokens = session.token_usage.output_tokens;
         let (in_rate, out_rate) =
-            ava_llm::providers::common::model_pricing_usd_per_million(&self.model_name);
+            ava_llm::providers::common::model_pricing_usd_per_million(&effective_model);
         let sub_cost_usd = ava_llm::providers::common::estimate_cost_usd(
             sub_input_tokens,
             sub_output_tokens,
@@ -1310,6 +1345,8 @@ impl TaskSpawner for AgentTaskSpawner {
             result_len = text.len(),
             session_id = %session_id,
             message_count = messages.len(),
+            agent_type,
+            model = %effective_model,
             sub_input_tokens,
             sub_output_tokens,
             sub_cost_usd,
@@ -1337,6 +1374,51 @@ impl TaskSpawner for AgentTaskSpawner {
             messages,
         })
     }
+}
+
+impl AgentTaskSpawner {
+    /// Resolve a model spec from agents.toml into a provider and model name.
+    ///
+    /// The model spec can be in the form `provider/model` (e.g.
+    /// `openrouter/google/gemini-flash-1.5`) or just `model` (uses the parent's
+    /// provider). For `openrouter` style specs where the model itself contains
+    /// slashes, the first segment is the provider and the rest is the model.
+    async fn resolve_agent_provider(
+        &self,
+        model_spec: &str,
+    ) -> Result<(Arc<dyn LLMProvider>, String)> {
+        let (provider_name, model_name) = parse_model_spec(model_spec);
+        let provider = self
+            .router
+            .route_required(&provider_name, &model_name)
+            .await?;
+        Ok((provider, model_name))
+    }
+}
+
+/// Parse a model spec string into (provider, model).
+///
+/// Supports formats:
+/// - `provider/model` -> ("provider", "model")
+/// - `provider/org/model` -> ("provider", "org/model") (for OpenRouter-style specs)
+/// - `model` (no slash) -> uses model catalog to infer provider, or defaults to "openrouter"
+fn parse_model_spec(spec: &str) -> (String, String) {
+    if let Some(idx) = spec.find('/') {
+        let provider = &spec[..idx];
+        let model = &spec[idx + 1..];
+        // Verify the first segment looks like a known provider name
+        if ava_llm::providers::base_url_for_provider(provider).is_some()
+            || provider.starts_with("cli:")
+        {
+            return (provider.to_string(), model.to_string());
+        }
+    }
+    // No slash or first segment is not a known provider — try the model catalog
+    if let Some(entry) = ava_config::model_catalog::registry::registry().find(spec) {
+        return (entry.provider.clone(), entry.id.clone());
+    }
+    // Last resort: treat the whole string as an OpenRouter model path
+    ("openrouter".to_string(), spec.to_string())
 }
 
 fn build_sub_agent_system_prompt() -> String {
@@ -1514,5 +1596,124 @@ mod tests {
         assert!(roots.contains(&cwd));
         assert!(roots.contains(&temp.path().to_path_buf()));
         assert!(!roots.contains(&missing));
+    }
+
+    #[test]
+    fn parse_model_spec_provider_slash_model() {
+        let (provider, model) = parse_model_spec("anthropic/claude-sonnet-4");
+        assert_eq!(provider, "anthropic");
+        assert_eq!(model, "claude-sonnet-4");
+    }
+
+    #[test]
+    fn parse_model_spec_openrouter_with_org() {
+        // OpenRouter models have org/model format after the provider prefix
+        let (provider, model) = parse_model_spec("openrouter/google/gemini-flash-1.5");
+        assert_eq!(provider, "openrouter");
+        assert_eq!(model, "google/gemini-flash-1.5");
+    }
+
+    #[test]
+    fn parse_model_spec_bare_model_in_registry() {
+        // A bare model name that exists in the registry should resolve to
+        // the correct provider and canonical ID.
+        let (provider, model) = parse_model_spec("claude-sonnet-4");
+        assert_eq!(provider, "anthropic");
+        // The registry resolves aliases to canonical IDs
+        assert!(model.starts_with("claude-sonnet-4"));
+    }
+
+    #[test]
+    fn parse_model_spec_bare_model_unknown() {
+        // A model name not in the registry falls back to openrouter
+        let (provider, model) = parse_model_spec("some-unknown-model-xyz");
+        assert_eq!(provider, "openrouter");
+        assert_eq!(model, "some-unknown-model-xyz");
+    }
+
+    #[test]
+    fn parse_model_spec_gemini_provider() {
+        let (provider, model) = parse_model_spec("gemini/gemini-2.5-pro");
+        assert_eq!(provider, "gemini");
+        assert_eq!(model, "gemini-2.5-pro");
+    }
+
+    #[test]
+    fn parse_model_spec_ollama() {
+        let (provider, model) = parse_model_spec("ollama/llama3.3");
+        assert_eq!(provider, "ollama");
+        assert_eq!(model, "llama3.3");
+    }
+
+    #[test]
+    fn parse_model_spec_cli_provider() {
+        let (provider, model) = parse_model_spec("cli:claude-code/sonnet");
+        assert_eq!(provider, "cli:claude-code");
+        assert_eq!(model, "sonnet");
+    }
+
+    #[test]
+    fn parse_model_spec_alias_lookup() {
+        // "sonnet" is an alias for claude-sonnet-4 in the registry
+        let (provider, model) = parse_model_spec("sonnet");
+        assert_eq!(provider, "anthropic");
+        // Should resolve to the canonical model ID
+        assert!(model.contains("sonnet"));
+    }
+
+    #[test]
+    fn agents_config_model_override_resolves() {
+        // Test that AgentsConfig properly returns model overrides
+        let tmp = tempfile::TempDir::new().unwrap();
+        let global = tmp.path().join("global.toml");
+        std::fs::write(
+            &global,
+            r#"
+[defaults]
+model = "anthropic/claude-haiku-4.5"
+
+[agents.plan]
+model = "anthropic/claude-sonnet-4"
+
+[agents.explore]
+model = "openrouter/google/gemini-flash-1.5"
+
+[agents.task]
+max_turns = 10
+"#,
+        )
+        .unwrap();
+        let project = tmp.path().join("project.toml");
+
+        let config = AgentsConfig::load(&global, &project);
+
+        // Plan agent should have its own model
+        let plan = config.get_agent("plan");
+        assert_eq!(plan.model.as_deref(), Some("anthropic/claude-sonnet-4"));
+        let (prov, mdl) = parse_model_spec(plan.model.as_deref().unwrap());
+        assert_eq!(prov, "anthropic");
+        assert_eq!(mdl, "claude-sonnet-4");
+
+        // Explore agent should have its own model
+        let explore = config.get_agent("explore");
+        assert_eq!(
+            explore.model.as_deref(),
+            Some("openrouter/google/gemini-flash-1.5")
+        );
+        let (prov, mdl) = parse_model_spec(explore.model.as_deref().unwrap());
+        assert_eq!(prov, "openrouter");
+        assert_eq!(mdl, "google/gemini-flash-1.5");
+
+        // Task agent should inherit default model
+        let task = config.get_agent("task");
+        assert_eq!(task.model.as_deref(), Some("anthropic/claude-haiku-4.5"));
+        let (prov, mdl) = parse_model_spec(task.model.as_deref().unwrap());
+        assert_eq!(prov, "anthropic");
+        assert_eq!(mdl, "claude-haiku-4.5");
+
+        // Agent without model override and no defaults.model -> None
+        let config_empty = AgentsConfig::default();
+        let unknown = config_empty.get_agent("unknown");
+        assert!(unknown.model.is_none());
     }
 }

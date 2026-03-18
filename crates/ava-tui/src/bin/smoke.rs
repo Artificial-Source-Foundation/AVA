@@ -61,7 +61,8 @@ async fn main() -> Result<()> {
             | AgentEvent::BudgetWarning { .. }
             | AgentEvent::ToolStats(_)
             | AgentEvent::TokenUsage { .. }
-            | AgentEvent::SubAgentComplete { .. } => {}
+            | AgentEvent::SubAgentComplete { .. }
+            | AgentEvent::DiffPreview { .. } => {}
             AgentEvent::Error(e) => {
                 eprintln!("[error: {e}]");
                 break;

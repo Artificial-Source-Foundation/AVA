@@ -241,6 +241,7 @@ mod tests {
             persistent_rules: ava_permissions::persistent::PersistentRules::default(),
             safety_profiles: std::collections::HashMap::new(),
             tool_source: None,
+            glob_rules: ava_permissions::glob_rules::GlobRuleset::empty(),
         }))
     }
 

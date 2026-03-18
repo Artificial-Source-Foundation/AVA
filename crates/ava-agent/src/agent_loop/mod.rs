@@ -60,6 +60,8 @@ pub struct AgentLoop {
     images: Vec<ImageContent>,
     /// Optional plugin manager for firing lifecycle hooks.
     plugin_manager: Option<Arc<tokio::sync::Mutex<PluginManager>>>,
+    /// Tracks file diffs for write/edit tool calls.
+    diff_tracker: crate::streaming_diff::StreamingDiffTracker,
 }
 
 /// Configuration for a single agent loop run — turn limits, cost caps, and model identity.
@@ -159,6 +161,13 @@ pub enum AgentEvent {
         current_cost_usd: f64,
         max_budget_usd: f64,
     },
+    /// A file edit has completed. Contains the unified diff for UI display.
+    DiffPreview {
+        file: std::path::PathBuf,
+        diff_text: String,
+        additions: usize,
+        deletions: usize,
+    },
     /// A sub-agent has completed its run. Contains the full conversation for
     /// display/storage by the TUI.
     SubAgentComplete {
@@ -197,6 +206,7 @@ impl AgentLoop {
             message_queue: None,
             images: Vec::new(),
             plugin_manager: None,
+            diff_tracker: crate::streaming_diff::StreamingDiffTracker::new(),
         }
     }
 
@@ -550,7 +560,41 @@ impl AgentLoop {
         // Write tools sequentially — check steering between each
         if !steering_triggered {
             for (i, tc) in &write_calls {
+                // Snapshot file before write/edit tools for diff tracking
+                let diff_path =
+                    if crate::streaming_diff::StreamingDiffTracker::is_tracked_tool(&tc.name) {
+                        extract_tool_path(tc).inspect(|p| {
+                            self.diff_tracker.snapshot_before_edit(p);
+                        })
+                    } else {
+                        None
+                    };
+
                 let (result, execution) = self.execute_tool_call_timed(tc).await;
+
+                // Record diff after successful write/edit
+                if !result.is_error {
+                    if let Some(ref path) = diff_path {
+                        if let Some(crate::streaming_diff::DiffEvent::EditComplete {
+                            ref file,
+                            ref diff_text,
+                            additions,
+                            deletions,
+                        }) = self.diff_tracker.record_edit_complete(path)
+                        {
+                            Self::emit(
+                                event_tx,
+                                AgentEvent::DiffPreview {
+                                    file: file.clone(),
+                                    diff_text: diff_text.clone(),
+                                    additions,
+                                    deletions,
+                                },
+                            );
+                        }
+                    }
+                }
+
                 indexed_results.push((*i, result, execution));
 
                 // Poll for steering after each write tool
@@ -982,6 +1026,24 @@ fn correction_hint_parts(result: &ToolResult) -> (&'static str, &str) {
                 .find(|line| line.starts_with("- "))
                 .unwrap_or("validation failed"),
         )
+    }
+}
+
+/// Extract the target file path from a tool call's arguments.
+///
+/// Looks for `path` or `file_path` string fields. Returns the path as a
+/// `PathBuf`, resolving relative paths against the current directory.
+fn extract_tool_path(tc: &ToolCall) -> Option<std::path::PathBuf> {
+    let path_str = tc
+        .arguments
+        .get("path")
+        .or_else(|| tc.arguments.get("file_path"))
+        .and_then(|v| v.as_str())?;
+    let path = std::path::PathBuf::from(path_str);
+    if path.is_absolute() {
+        Some(path)
+    } else {
+        std::env::current_dir().ok().map(|cwd| cwd.join(path))
     }
 }
 

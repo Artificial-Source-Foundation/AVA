@@ -15,6 +15,7 @@ pub mod message_queue;
 pub mod reflection;
 pub mod routing;
 pub mod stack;
+pub mod streaming_diff;
 pub mod stuck;
 pub mod system_prompt;
 pub mod trace;

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use serde_json::Value;
 
 use crate::classifier::classify_bash_command;
+use crate::glob_rules::{GlobAction, GlobRuleset};
 use crate::path_safety::analyze_path;
 use crate::persistent::PersistentRules;
 use crate::policy::PermissionPolicy;
@@ -39,6 +40,8 @@ pub struct InspectionContext {
     pub safety_profiles: HashMap<String, ToolSafetyProfile>,
     /// Source of the tool being inspected (None if unknown).
     pub tool_source: Option<ToolSource>,
+    /// Glob-based path permission rules loaded from `permissions.toml`.
+    pub glob_rules: GlobRuleset,
 }
 
 /// Safe .ava/ subdirectories that can be auto-approved for writes.
@@ -157,6 +160,77 @@ impl PermissionInspector for DefaultInspector {
                 "Tool '{tool_name}' has an internal tool name but source is {:?} — not auto-approving",
                 context.tool_source
             );
+        }
+
+        // 0b. Glob-based path rules: check file-accessing tools against path patterns.
+        //     Deny actions are enforced even in auto-approve mode.
+        //     Allow/Ask actions short-circuit before risk assessment.
+        if !context.glob_rules.is_empty() {
+            let glob_tools = [
+                "read",
+                "write",
+                "edit",
+                "multiedit",
+                "apply_patch",
+                "glob",
+                "grep",
+            ];
+            if glob_tools.contains(&tool_name) {
+                let paths = extract_paths(tool_name, arguments);
+                for path in &paths {
+                    if let Some(action) = context.glob_rules.check(path) {
+                        match action {
+                            GlobAction::Deny => {
+                                tracing::info!(
+                                    "Glob rule denied access to '{path}' for tool '{tool_name}'"
+                                );
+                                return InspectionResult {
+                                    action: Action::Deny,
+                                    reason: format!("path '{path}' denied by glob permission rule"),
+                                    risk_level: RiskLevel::High,
+                                    tags: vec![],
+                                    warnings: vec![format!(
+                                        "Access to '{path}' blocked by permission rule"
+                                    )],
+                                };
+                            }
+                            GlobAction::Ask => {
+                                tracing::debug!(
+                                    "Glob rule requires approval for '{path}' (tool '{tool_name}')"
+                                );
+                                return InspectionResult {
+                                    action: Action::Ask,
+                                    reason: format!(
+                                        "path '{path}' requires approval per glob permission rule"
+                                    ),
+                                    risk_level: RiskLevel::Medium,
+                                    tags: vec![],
+                                    warnings: vec![],
+                                };
+                            }
+                            GlobAction::Allow => {
+                                // Allow: continue checking other paths, but if all
+                                // paths match Allow rules, we'll let it through below.
+                            }
+                        }
+                    }
+                }
+                // If ALL paths matched Allow rules, auto-approve this tool call
+                if !paths.is_empty()
+                    && paths
+                        .iter()
+                        .all(|p| context.glob_rules.check(p) == Some(GlobAction::Allow))
+                {
+                    tracing::debug!("All paths allowed by glob rules for tool '{tool_name}'");
+                    return InspectionResult {
+                        action: Action::Allow,
+                        reason: "all paths allowed by glob permission rules".to_string(),
+                        risk_level: RiskLevel::Safe,
+                        tags: vec![],
+                        warnings: vec![],
+                    };
+                }
+            }
         }
 
         // 1. For bash: run classifier FIRST, before auto-approve check
@@ -496,6 +570,7 @@ mod tests {
             persistent_rules: PersistentRules::default(),
             safety_profiles: core_tool_profiles(),
             tool_source: Some(ToolSource::BuiltIn),
+            glob_rules: GlobRuleset::empty(),
         }
     }
 
@@ -937,5 +1012,150 @@ mod tests {
         );
         assert_eq!(result.action, Action::Deny);
         assert_eq!(result.risk_level, RiskLevel::Critical);
+    }
+
+    // === Glob path rules ===
+
+    use crate::glob_rules::{GlobAction, GlobRule};
+
+    fn test_context_with_glob_rules(rules: Vec<GlobRule>) -> InspectionContext {
+        InspectionContext {
+            workspace_root: PathBuf::from("/workspace"),
+            auto_approve: false,
+            session_approved: HashSet::new(),
+            persistent_rules: PersistentRules::default(),
+            safety_profiles: core_tool_profiles(),
+            tool_source: Some(ToolSource::BuiltIn),
+            glob_rules: GlobRuleset::new(rules),
+        }
+    }
+
+    #[test]
+    fn glob_rule_denies_env_file_read() {
+        let inspector = default_inspector();
+        let ctx = test_context_with_glob_rules(vec![GlobRule {
+            pattern: "*.env".to_string(),
+            action: GlobAction::Deny,
+        }]);
+        let result =
+            inspector.inspect("read", &serde_json::json!({"path": "production.env"}), &ctx);
+        assert_eq!(result.action, Action::Deny);
+        assert!(result.reason.contains("glob permission rule"));
+    }
+
+    #[test]
+    fn glob_rule_denies_env_file_write() {
+        let inspector = default_inspector();
+        let ctx = test_context_with_glob_rules(vec![GlobRule {
+            pattern: "**/*.env".to_string(),
+            action: GlobAction::Deny,
+        }]);
+        let result = inspector.inspect(
+            "write",
+            &serde_json::json!({"path": "config/prod.env", "content": "SECRET=x"}),
+            &ctx,
+        );
+        assert_eq!(result.action, Action::Deny);
+    }
+
+    #[test]
+    fn glob_rule_allows_rust_source() {
+        let inspector = default_inspector();
+        let ctx = test_context_with_glob_rules(vec![GlobRule {
+            pattern: "src/**/*.rs".to_string(),
+            action: GlobAction::Allow,
+        }]);
+        let result = inspector.inspect(
+            "edit",
+            &serde_json::json!({"file_path": "src/main.rs", "old": "a", "new": "b"}),
+            &ctx,
+        );
+        assert_eq!(result.action, Action::Allow);
+        assert!(result.reason.contains("glob permission rules"));
+    }
+
+    #[test]
+    fn glob_rule_asks_for_config() {
+        let inspector = default_inspector();
+        let ctx = test_context_with_glob_rules(vec![GlobRule {
+            pattern: "*.toml".to_string(),
+            action: GlobAction::Ask,
+        }]);
+        let result = inspector.inspect(
+            "write",
+            &serde_json::json!({"path": "Cargo.toml", "content": "x"}),
+            &ctx,
+        );
+        assert_eq!(result.action, Action::Ask);
+        assert!(result.reason.contains("requires approval"));
+    }
+
+    #[test]
+    fn glob_rule_no_match_falls_through() {
+        let inspector = default_inspector();
+        let ctx = test_context_with_glob_rules(vec![GlobRule {
+            pattern: "*.env".to_string(),
+            action: GlobAction::Deny,
+        }]);
+        // README.md does not match *.env, falls through to normal inspection
+        let result = inspector.inspect("read", &serde_json::json!({"path": "README.md"}), &ctx);
+        // Should not be denied — falls through to normal logic
+        assert_ne!(result.action, Action::Deny);
+    }
+
+    #[test]
+    fn glob_rules_first_match_wins_in_inspector() {
+        let inspector = default_inspector();
+        let ctx = test_context_with_glob_rules(vec![
+            GlobRule {
+                pattern: "*.secret".to_string(),
+                action: GlobAction::Deny,
+            },
+            GlobRule {
+                pattern: "*.secret".to_string(),
+                action: GlobAction::Allow,
+            },
+        ]);
+        let result = inspector.inspect("read", &serde_json::json!({"path": "db.secret"}), &ctx);
+        assert_eq!(result.action, Action::Deny);
+    }
+
+    #[test]
+    fn glob_rules_deny_overrides_auto_approve() {
+        let inspector = default_inspector();
+        let mut ctx = test_context_with_glob_rules(vec![GlobRule {
+            pattern: "*.env".to_string(),
+            action: GlobAction::Deny,
+        }]);
+        ctx.auto_approve = true;
+        let result = inspector.inspect("read", &serde_json::json!({"path": "secrets.env"}), &ctx);
+        // Glob deny fires BEFORE auto-approve check
+        assert_eq!(result.action, Action::Deny);
+    }
+
+    #[test]
+    fn glob_rules_not_applied_to_bash() {
+        let inspector = default_inspector();
+        let ctx = test_context_with_glob_rules(vec![GlobRule {
+            pattern: "*.env".to_string(),
+            action: GlobAction::Deny,
+        }]);
+        // bash is not a file tool — glob rules should not apply
+        let result = inspector.inspect("bash", &serde_json::json!({"command": "cat .env"}), &ctx);
+        // Should NOT be denied by glob rule (bash goes through classifier)
+        assert_ne!(
+            result.reason.as_str(),
+            "path '.env' denied by glob permission rule"
+        );
+    }
+
+    #[test]
+    fn empty_glob_rules_skip_check() {
+        let inspector = default_inspector();
+        let ctx = test_context(false);
+        // With empty glob rules, should behave exactly as before
+        let result = inspector.inspect("read", &serde_json::json!({"path": "secrets.env"}), &ctx);
+        // No glob denial — falls through to normal logic
+        assert_ne!(result.action, Action::Deny);
     }
 }

@@ -129,9 +129,16 @@ impl Tool for EditTool {
         self.platform.write_file(&file_path, &updated).await?;
 
         let change_lines = line_diff_count(&original, &updated);
+        let diff_text = compute_unified_diff(&original, &updated, path);
+        let mut content =
+            format!("Applied {strategy}; changed {change_lines} lines{snapshot_note}");
+        if !diff_text.is_empty() {
+            content.push_str("\n\n");
+            content.push_str(&diff_text);
+        }
         Ok(ToolResult {
             call_id: String::new(),
-            content: format!("Applied {strategy}; changed {change_lines} lines{snapshot_note}"),
+            content,
             is_error: false,
         })
     }
@@ -173,6 +180,16 @@ impl EditTool {
             ))),
         }
     }
+}
+
+/// Compute a unified diff between old and new content for display.
+fn compute_unified_diff(old: &str, new: &str, path: &str) -> String {
+    use similar::TextDiff;
+    let diff = TextDiff::from_lines(old, new);
+    diff.unified_diff()
+        .context_radius(3)
+        .header(&format!("a/{path}"), &format!("b/{path}"))
+        .to_string()
 }
 
 fn line_diff_count(before: &str, after: &str) -> usize {

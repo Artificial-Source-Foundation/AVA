@@ -28,6 +28,16 @@ pub trait TaskSpawner: Send + Sync {
     /// Spawn a sub-agent with the given prompt and return a [`TaskResult`]
     /// containing the final response text plus the full conversation.
     async fn spawn(&self, prompt: &str) -> ava_types::Result<TaskResult>;
+
+    /// Spawn a named sub-agent with the given prompt. The `agent_type` is
+    /// looked up in `agents.toml` to resolve model overrides, custom prompts,
+    /// and max turns. Falls back to `spawn()` if the agent type has no special
+    /// configuration.
+    async fn spawn_named(&self, agent_type: &str, prompt: &str) -> ava_types::Result<TaskResult> {
+        // Default implementation delegates to `spawn()` for backward compatibility.
+        let _ = agent_type;
+        self.spawn(prompt).await
+    }
 }
 
 /// Tool that spawns a sub-agent to work on a task autonomously.
@@ -56,7 +66,10 @@ impl Tool for TaskTool {
          conversation context and access to core tools (read, write, edit, bash, glob, \
          grep, apply_patch). Use this when a task can be cleanly delegated — for example, \
          writing a module, running a test suite, or researching a codebase question. \
-         The sub-agent cannot ask the user questions or spawn further sub-agents."
+         The sub-agent cannot ask the user questions or spawn further sub-agents. \
+         Optionally specify an agent type (e.g. 'build', 'review', 'explore', 'plan') \
+         to use a specialized sub-agent with its own model, prompt, and turn limits \
+         configured in agents.toml."
     }
 
     fn parameters(&self) -> Value {
@@ -67,6 +80,10 @@ impl Tool for TaskTool {
                 "prompt": {
                     "type": "string",
                     "description": "The task description for the sub-agent. Be specific and provide enough context for the sub-agent to complete the work independently."
+                },
+                "agent": {
+                    "type": "string",
+                    "description": "Optional agent type to use (e.g. 'build', 'review', 'explore', 'plan'). Each agent type can have its own model, system prompt, and turn limits configured in agents.toml. Defaults to 'task'."
                 }
             }
         })
@@ -85,7 +102,9 @@ impl Tool for TaskTool {
             ));
         }
 
-        let task_result = self.spawner.spawn(prompt).await?;
+        let agent_type = args.get("agent").and_then(Value::as_str).unwrap_or("task");
+
+        let task_result = self.spawner.spawn_named(agent_type, prompt).await?;
 
         Ok(ToolResult {
             call_id: String::new(),

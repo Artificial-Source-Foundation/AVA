@@ -7,6 +7,16 @@ use serde_json::{json, Value};
 
 use crate::registry::Tool;
 
+/// Compute a unified diff between old and new content for display.
+fn compute_unified_diff(old: &str, new: &str, path: &str) -> String {
+    use similar::TextDiff;
+    let diff = TextDiff::from_lines(old, new);
+    diff.unified_diff()
+        .context_radius(3)
+        .header(&format!("a/{path}"), &format!("b/{path}"))
+        .to_string()
+}
+
 pub struct WriteTool {
     platform: Arc<dyn Platform>,
 }
@@ -55,14 +65,29 @@ impl Tool for WriteTool {
             self.platform.create_dir_all(parent).await?;
         }
 
-        // B66 currently snapshots edit-heavy replacement flows (`edit`/`multiedit`).
-        // Plain `write` stays unsnapshotted in this conservative slice until we
-        // settle broader snapshot coverage and cleanup behavior.
+        // Snapshot existing content for diff (empty if new file)
+        let old_content = self
+            .platform
+            .read_file(&file_path)
+            .await
+            .unwrap_or_default();
+
         self.platform.write_file(&file_path, content).await?;
+
+        let mut result_content = format!("Wrote {} bytes to {path}", content.len());
+
+        // Include unified diff when overwriting an existing file
+        if !old_content.is_empty() && old_content != content {
+            let diff = compute_unified_diff(&old_content, content, path);
+            if !diff.is_empty() {
+                result_content.push_str("\n\n");
+                result_content.push_str(&diff);
+            }
+        }
 
         Ok(ToolResult {
             call_id: String::new(),
-            content: format!("Wrote {} bytes to {path}", content.len()),
+            content: result_content,
             is_error: false,
         })
     }

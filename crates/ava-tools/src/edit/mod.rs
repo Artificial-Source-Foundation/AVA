@@ -1,10 +1,15 @@
 pub mod error;
+pub mod fuzzy;
 pub mod fuzzy_match;
 pub mod recovery;
 pub mod request;
 pub mod strategies;
 
 pub use error::EditError;
+pub use fuzzy::{
+    try_anchor_match, try_exact_match, try_trimmed_match, AutoBlockAnchorStrategy,
+    LineTrimmedStrategy,
+};
 pub use fuzzy_match::{FuzzyMatchStrategy, StreamMatch, StreamingMatcher};
 pub use recovery::{RecoveryPipeline, RecoveryResult, SelfCorrector};
 pub use request::EditRequest;
@@ -29,6 +34,8 @@ impl Default for EditEngine {
         Self {
             strategies: vec![
                 Box::new(ExactMatchStrategy),
+                Box::new(LineTrimmedStrategy),
+                Box::new(AutoBlockAnchorStrategy),
                 Box::new(FlexibleMatchStrategy),
                 Box::new(RelativeIndentStrategy),
                 Box::new(BlockAnchorStrategy),
@@ -70,9 +77,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn engine_has_ten_strategies() {
+    fn engine_has_twelve_strategies() {
         let engine = EditEngine::new();
-        assert_eq!(engine.strategy_count(), 10);
+        assert_eq!(engine.strategy_count(), 12);
     }
 
     #[test]

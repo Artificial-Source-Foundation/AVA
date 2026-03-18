@@ -442,6 +442,30 @@ impl App {
                 }
             }
             ava_agent::AgentEvent::ToolStats(_) => {}
+            ava_agent::AgentEvent::DiffPreview {
+                file,
+                diff_text,
+                additions,
+                deletions,
+            } => {
+                debug!(
+                    file = %file.display(),
+                    additions,
+                    deletions,
+                    "TUI received DiffPreview"
+                );
+                // Store the diff info for potential UI display (e.g., file change panel)
+                let summary = format!(
+                    "{}  +{} -{}\n{}",
+                    file.display(),
+                    additions,
+                    deletions,
+                    diff_text
+                );
+                self.state
+                    .messages
+                    .push(UiMessage::new(MessageKind::ToolResult, summary));
+            }
             ava_agent::AgentEvent::Error(err) => {
                 info!(error = %err, "TUI received AgentEvent::Error");
                 self.finalize_assistant_stream();

@@ -108,6 +108,14 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 } => {
                     serde_json::json!({"type": "sub_agent_complete", "session_id": session_id, "description": description, "message_count": messages.len()})
                 }
+                AgentEvent::DiffPreview {
+                    file,
+                    diff_text,
+                    additions,
+                    deletions,
+                } => {
+                    serde_json::json!({"type": "diff_preview", "file": file.display().to_string(), "diff": diff_text, "additions": additions, "deletions": deletions})
+                }
             };
             println!("{json}");
         }
@@ -161,6 +169,23 @@ pub(super) async fn run_single_agent(cli: CliArgs, goal: &str) -> Result<()> {
                 AgentEvent::ToolStats(_)
                 | AgentEvent::TokenUsage { .. }
                 | AgentEvent::SubAgentComplete { .. } => {}
+                AgentEvent::DiffPreview {
+                    file,
+                    additions,
+                    deletions,
+                    ..
+                } => {
+                    if in_text {
+                        println!();
+                        in_text = false;
+                    }
+                    eprintln!(
+                        "[diff: {} +{} -{}]",
+                        file.display(),
+                        additions,
+                        deletions
+                    );
+                }
                 AgentEvent::Error(e) => {
                     if in_text {
                         println!();

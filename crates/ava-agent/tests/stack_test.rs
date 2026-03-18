@@ -211,7 +211,7 @@ async fn agent_stack_resolve_model_route_prefers_cheap_model_when_enabled() {
 
     assert_eq!(decision.source, RouteSource::PolicyAuto);
     assert_eq!(decision.provider, "openai");
-    assert_eq!(decision.display_model, "gpt-5-mini");
+    assert_eq!(decision.display_model, "gpt-5.4-nano");
 }
 
 #[tokio::test]

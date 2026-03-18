@@ -41,6 +41,8 @@ export interface InputTextAreaProps {
   elapsedSeconds: Accessor<number>
   onCancel: () => void
   inputHasText: Accessor<boolean>
+  // Mid-stream messaging
+  queuedCount?: Accessor<number>
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +104,7 @@ export const InputTextArea: Component<InputTextAreaProps> = (props) => (
       elapsedSeconds={props.elapsedSeconds}
       onCancel={props.onCancel}
       inputHasText={props.inputHasText}
+      queuedCount={props.queuedCount}
     />
   </div>
 )

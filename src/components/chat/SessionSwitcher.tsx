@@ -1,7 +1,7 @@
 /**
  * Quick Session Switcher
  *
- * Keyboard-driven overlay (Ctrl+J) with fuzzy search for fast session switching.
+ * Keyboard-driven overlay (Ctrl+L) with fuzzy search for fast session switching.
  */
 
 import { Dialog } from '@kobalte/core/dialog'

@@ -4,6 +4,10 @@
  * Send / Cancel button cluster rendered inside the textarea area.
  * Send button is a purple circle with arrow-up icon.
  * Displays streaming elapsed time and a cancel button when processing.
+ *
+ * When the agent is running the send button stays enabled so users can
+ * submit steering messages (Enter), follow-ups (Alt+Enter), or
+ * post-complete messages (Ctrl+Alt+Enter).
  */
 
 import { ArrowUp, Square } from 'lucide-solid'
@@ -19,6 +23,7 @@ export interface SubmitButtonProps {
   elapsedSeconds: Accessor<number>
   onCancel: () => void
   inputHasText: Accessor<boolean>
+  queuedCount?: Accessor<number>
 }
 
 // ---------------------------------------------------------------------------
@@ -27,6 +32,22 @@ export interface SubmitButtonProps {
 
 export const SubmitButton: Component<SubmitButtonProps> = (props) => (
   <div class="absolute right-2.5 top-0 bottom-0 flex items-center gap-1.5">
+    {/* Queued message count badge */}
+    <Show when={props.queuedCount && props.queuedCount() > 0}>
+      <span
+        class="
+          flex items-center justify-center
+          min-w-[18px] h-[18px] px-1
+          text-[9px] font-semibold tabular-nums
+          bg-[var(--accent)] text-white
+          rounded-full
+        "
+        title={`${props.queuedCount!()} queued message(s)`}
+      >
+        {props.queuedCount!()}
+      </span>
+    </Show>
+
     {/* Streaming elapsed time */}
     <Show when={props.isStreaming()}>
       <span class="flex items-center gap-1 text-[10px] text-[var(--text-tertiary)] tabular-nums">
@@ -53,10 +74,11 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => (
       </button>
     </Show>
 
-    {/* Send button — purple circle with arrow-up */}
+    {/* Send button — purple circle with arrow-up.
+        Stays enabled during processing so users can steer the agent. */}
     <button
       type="submit"
-      disabled={!props.inputHasText() || props.isProcessing()}
+      disabled={!props.inputHasText()}
       class="
         flex items-center justify-center
         w-8 h-8 rounded-full
@@ -64,7 +86,11 @@ export const SubmitButton: Component<SubmitButtonProps> = (props) => (
         disabled:opacity-30 disabled:cursor-not-allowed
         bg-[var(--violet-8)] hover:bg-[var(--accent)] text-white
       "
-      title="Send message"
+      title={
+        props.isProcessing()
+          ? 'Send steering message (Enter), follow-up (Alt+Enter), or post-complete (Ctrl+Alt+Enter)'
+          : 'Send message'
+      }
     >
       <ArrowUp class="w-4 h-4" />
     </button>

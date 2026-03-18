@@ -143,7 +143,7 @@ export const ActivityBar: Component = () => {
             transition-colors duration-[var(--duration-fast)]
             text-[var(--text-muted)] hover:text-[var(--text-secondary)]
           "
-          title="Toggle Sidebar (Ctrl+B)"
+          title="Toggle Sidebar (Ctrl+S)"
           aria-label="Toggle Sidebar"
         >
           <span class="flex items-center justify-center w-8 h-8 rounded-[var(--radius-md)] hover:bg-[var(--alpha-white-5)] transition-colors">

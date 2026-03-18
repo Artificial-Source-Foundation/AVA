@@ -42,6 +42,7 @@ function App() {
   const [checkpointDialogOpen, setCheckpointDialogOpen] = createSignal(false)
   const [exportDialogOpen, setExportDialogOpen] = createSignal(false)
   const [updateDialogOpen, setUpdateDialogOpen] = createSignal(false)
+  const [toolListDialogOpen, setToolListDialogOpen] = createSignal(false)
   const [updateInfo, setUpdateInfo] = createSignal<UpdateInfo | null>(null)
   const [changelogOpen, setChangelogOpen] = createSignal(false)
 
@@ -205,6 +206,8 @@ function App() {
                 setChangelogOpen={setChangelogOpen}
                 updateDialogOpen={updateDialogOpen()}
                 setUpdateDialogOpen={setUpdateDialogOpen}
+                toolListDialogOpen={toolListDialogOpen()}
+                setToolListDialogOpen={setToolListDialogOpen}
                 updateInfo={updateInfo()}
                 onInstallUpdate={downloadAndInstallUpdate}
                 setProjectHubVisible={setProjectHubVisible}

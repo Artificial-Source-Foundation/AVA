@@ -129,6 +129,7 @@ function resetAllShortcuts(): void {
 /** IDs of shortcuts allowed in input fields */
 const INPUT_ALLOWED_IDS = new Set([
   'command-palette',
+  'command-palette-slash',
   'search-chat',
   'expanded-editor',
   'stash-prompt',

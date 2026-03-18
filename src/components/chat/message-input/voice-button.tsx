@@ -95,10 +95,17 @@ export const VoiceButton: Component<VoiceButtonProps> = (props) => {
     })
   )
 
+  // Listen for global voice toggle event (Ctrl+R shortcut)
+  const handleVoiceToggle = () => {
+    if (dictation) dictation.toggle()
+  }
+  window.addEventListener('ava:voice-toggle', handleVoiceToggle)
+
   onCleanup(() => {
     dictation?.stop()
     if (waveformRaf !== undefined) cancelAnimationFrame(waveformRaf)
     analyserHandle?.stop()
+    window.removeEventListener('ava:voice-toggle', handleVoiceToggle)
   })
 
   return (

@@ -13,6 +13,7 @@ import { useProject } from '../stores/project'
 import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
 import { useShortcuts } from '../stores/shortcuts'
+import { useAgent } from './useAgent'
 
 export function registerAppShortcuts(
   setExportDialogOpen: (v: boolean) => void,
@@ -37,6 +38,7 @@ export function registerAppShortcuts(
   const { registerAction, setupShortcutListener } = useShortcuts()
   const { settings, updateSettings } = useSettings()
   const { info } = useNotification()
+  const agent = useAgent()
 
   registerAction('toggle-sidebar', toggleSidebar)
   registerAction('toggle-settings', toggleSettings)
@@ -109,6 +111,21 @@ export function registerAppShortcuts(
     void navigator.clipboard.writeText(lastAssistant.content).then(() => {
       info('Copied', 'Response copied')
     })
+  })
+  registerAction('command-palette-slash', () => {
+    // Dispatch Ctrl+K to open command palette (alias for Ctrl+/)
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))
+  })
+  registerAction('voice-toggle', () => {
+    window.dispatchEvent(new CustomEvent('ava:voice-toggle'))
+  })
+  registerAction('mode-cycle', () => {
+    agent.togglePlanMode()
+    info('Mode', agent.isPlanMode() ? 'Plan mode' : 'Act mode')
+  })
+  registerAction('mode-cycle-reverse', () => {
+    agent.togglePlanMode()
+    info('Mode', agent.isPlanMode() ? 'Plan mode' : 'Act mode')
   })
 
   const cleanupShortcuts = setupShortcutListener()

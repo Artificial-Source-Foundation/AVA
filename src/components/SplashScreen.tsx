@@ -1,26 +1,62 @@
 /**
  * Splash screen shown during app initialization.
- * Displays logo, app name, tagline, loading status, and version.
+ * Displays AVA logo (rounded with purple accent), app name, tagline,
+ * slim progress bar, status text, and version at bottom.
  * Fades out when `visible` becomes false, then unmounts.
  */
 
-import { createSignal, Show } from 'solid-js'
+import { createMemo, createSignal, Show } from 'solid-js'
+
+/** Known init steps in approximate order — used to estimate progress */
+const INIT_STEPS = [
+  'Starting logger',
+  'Initializing platform',
+  'Loading settings',
+  'Checking backend',
+  'Loading models',
+  'Loading providers',
+  'Initializing core',
+  'Loading database',
+  'Loading projects',
+  'Loading plugins',
+  'Restoring',
+  'Ready',
+] as const
+
+function estimateProgress(status: string | undefined): number {
+  if (!status) return 0
+  const lower = status.toLowerCase()
+  for (let i = INIT_STEPS.length - 1; i >= 0; i--) {
+    if (lower.includes(INIT_STEPS[i].toLowerCase())) {
+      // Map to 5%–95% range so it never looks "done" until we fade out
+      return Math.round(5 + ((i + 1) / INIT_STEPS.length) * 90)
+    }
+  }
+  return 5
+}
 
 interface SplashScreenProps {
   /** When false, triggers the fade-out animation then unmounts */
   visible: boolean
   /** Current initialization step, e.g. "Loading database..." */
   status?: string
+  /** Optional explicit progress 0-100 */
+  progress?: number
 }
 
 export function SplashScreen(props: SplashScreenProps) {
   const [shouldRender, setShouldRender] = createSignal(true)
 
-  const onTransitionEnd = () => {
+  const onTransitionEnd = (): void => {
     if (!props.visible) {
       setShouldRender(false)
     }
   }
+
+  const progressPct = createMemo(() => {
+    if (props.progress != null) return props.progress
+    return estimateProgress(props.status)
+  })
 
   return (
     <Show when={shouldRender()}>
@@ -29,69 +65,71 @@ export function SplashScreen(props: SplashScreenProps) {
         classList={{ 'splash-fade-out': !props.visible }}
         onTransitionEnd={onTransitionEnd}
       >
-        {/* Mesh gradient background — CSS only, GPU composited */}
+        {/* Mesh gradient background */}
         <div class="splash-mesh" />
 
-        {/* Logo placeholder — swap with real logo later */}
+        {/* Logo — 72x72 rounded with purple accent background */}
         <div class="splash-logo mb-5">
-          <svg
-            width="72"
-            height="72"
-            viewBox="0 0 64 64"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            aria-hidden="true"
+          <div
+            class="flex items-center justify-center rounded-[18px]"
+            style={{
+              width: '72px',
+              height: '72px',
+              background: '#A78BFA15',
+            }}
           >
-            <path
-              d="M32 4L58 32L32 60L6 32L32 4Z"
-              stroke="var(--accent)"
-              stroke-width="2.5"
-              fill="none"
-              opacity="0.3"
-            />
-            <path
-              d="M32 12L50 32L32 52L14 32L32 12Z"
-              stroke="var(--accent)"
-              stroke-width="2"
-              fill="var(--accent)"
-              opacity="0.15"
-            />
-            <path d="M32 20L42 32L32 44L22 32L32 20Z" fill="var(--accent)" opacity="0.6" />
-          </svg>
+            <span
+              class="font-bold select-none"
+              style={{
+                'font-size': '32px',
+                color: '#A78BFA',
+                'line-height': '1',
+              }}
+            >
+              A
+            </span>
+          </div>
         </div>
 
         {/* App name */}
-        <h1 class="text-2xl font-semibold tracking-[0.25em] uppercase text-[var(--text-primary)] mb-1.5">
+        <h1
+          class="font-bold tracking-[0.15em] text-[var(--text-primary)] mb-1"
+          style={{ 'font-size': '20px' }}
+        >
           AVA
         </h1>
 
         {/* Tagline */}
-        <p class="text-xs text-[var(--text-muted)] tracking-wide mb-10">AI Coding Companion</p>
+        <p class="text-xs mb-8" style={{ color: '#52525B' }}>
+          Your AI Dev Team
+        </p>
 
-        {/* Loading dots */}
-        <div class="flex gap-1.5 mb-4">
-          <span
-            class="splash-dot w-1.5 h-1.5 rounded-full bg-[var(--accent)]"
-            style="animation-delay: 0ms"
-          />
-          <span
-            class="splash-dot w-1.5 h-1.5 rounded-full bg-[var(--accent)]"
-            style="animation-delay: 150ms"
-          />
-          <span
-            class="splash-dot w-1.5 h-1.5 rounded-full bg-[var(--accent)]"
-            style="animation-delay: 300ms"
+        {/* Slim progress bar */}
+        <div
+          class="rounded-full overflow-hidden mb-4"
+          style={{
+            width: '200px',
+            height: '3px',
+            background: '#18181B',
+          }}
+        >
+          <div
+            class="h-full rounded-full transition-[width] duration-500 ease-out"
+            style={{
+              width: `${progressPct()}%`,
+              background: '#A78BFA',
+            }}
           />
         </div>
 
         {/* Status text */}
-        <p class="text-xs text-[var(--text-muted)] h-4 transition-opacity duration-200">
+        <p class="text-xs h-4 transition-opacity duration-200" style={{ color: '#3F3F46' }}>
           {props.status ?? ''}
         </p>
 
         {/* Version — pinned to bottom */}
-        <span class="absolute bottom-5 text-[10px] text-[var(--text-muted)] opacity-40 tracking-wide">
-          v0.1.0
+        <span class="absolute bottom-5 text-[10px] tracking-wide" style={{ color: '#27272A' }}>
+          v2.1.0
         </span>
       </div>
     </Show>

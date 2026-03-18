@@ -84,8 +84,8 @@ export const MenuBar: Component = () => {
       { label: 'Close Window', action: handleCloseWindow },
     ],
     view: [
-      { label: 'Toggle Sidebar', shortcut: 'Ctrl+B', action: toggleSidebar },
-      { label: 'Toggle Memory', shortcut: 'Ctrl+M', action: toggleBottomPanel },
+      { label: 'Toggle Sidebar', shortcut: 'Ctrl+S', action: toggleSidebar },
+      { label: 'Toggle Memory', shortcut: 'Ctrl+J', action: toggleBottomPanel },
       { label: 'Toggle Activity', action: toggleRightPanel },
       { separator: true, label: '' },
       { label: 'Command Palette', shortcut: 'Ctrl+K', action: openCommandPalette },

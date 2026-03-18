@@ -25,6 +25,7 @@ import { ApprovalDock } from './ApprovalDock'
 import { MessageInput } from './MessageInput'
 import { MessageList } from './MessageList'
 import { MessageQueueBar } from './MessageQueueBar'
+import { QuestionDock } from './QuestionDock'
 import { TeamChatView } from './TeamChatView'
 import { TeamStatusStrip } from './TeamStatusStrip'
 
@@ -94,6 +95,18 @@ export const ChatView: Component = () => {
   // Merge approval from both agent and chat modes
   const activeApproval = createMemo(() => chat.pendingApproval() || agent.pendingApproval())
 
+  // Handle question resolution
+  const handleQuestionResolve = (answer: string) => {
+    const request = agent.pendingQuestion()
+    if (request) {
+      logInfo('question', 'Agent question answered', {
+        questionId: request.id,
+        hasAnswer: !!answer,
+      })
+    }
+    agent.resolveQuestion(answer)
+  }
+
   // Handle tool approval resolution
   const handleApprovalResolve = (approved: boolean, alwaysAllow?: boolean) => {
     const request = activeApproval()
@@ -131,6 +144,9 @@ export const ChatView: Component = () => {
 
         {/* Inline tool approval dock */}
         <ApprovalDock request={activeApproval()} onResolve={handleApprovalResolve} />
+
+        {/* Inline agent question dock */}
+        <QuestionDock request={agent.pendingQuestion()} onResolve={handleQuestionResolve} />
 
         {/* Queued messages indicator */}
         <MessageQueueBar

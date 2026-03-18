@@ -70,8 +70,8 @@ export const CommandPalette: Component<CommandPaletteProps> = (props) => {
 
   // Keyboard shortcuts
   const handleGlobalKeyDown = (e: KeyboardEvent) => {
-    // Open with Cmd+K or Ctrl+K
-    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    // Open with Cmd+K or Ctrl+K or Ctrl+/
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === '/')) {
       e.preventDefault()
       setOpen(true)
     }

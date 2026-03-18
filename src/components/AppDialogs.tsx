@@ -19,6 +19,7 @@ import { SessionSwitcher } from './chat/SessionSwitcher'
 import { ChangelogDialog, markChangelogSeen } from './dialogs/ChangelogDialog'
 import { CheckpointDialog } from './dialogs/CheckpointDialog'
 import { ExportOptionsDialog } from './dialogs/ExportOptionsDialog'
+import { ToolListDialog } from './dialogs/ToolListDialog'
 import { UpdateDialog } from './dialogs/UpdateDialog'
 import { WorkflowDialog } from './dialogs/WorkflowDialog'
 
@@ -33,6 +34,8 @@ export interface AppDialogsProps {
   setChangelogOpen: (v: boolean) => void
   updateDialogOpen: boolean
   setUpdateDialogOpen: (v: boolean) => void
+  toolListDialogOpen: boolean
+  setToolListDialogOpen: (v: boolean) => void
   updateInfo: UpdateInfo | null
   onInstallUpdate: () => Promise<void>
   setProjectHubVisible: (v: boolean) => void
@@ -116,6 +119,9 @@ export const AppDialogs: Component<AppDialogsProps> = (props) => {
             if (messages().length === 0) return
             props.setCheckpointDialogOpen(true)
           },
+          browseTools: () => {
+            props.setToolListDialogOpen(true)
+          },
         })}
       />
       <WorkflowDialog
@@ -149,6 +155,10 @@ export const AppDialogs: Component<AppDialogsProps> = (props) => {
         updateInfo={props.updateInfo}
         onClose={() => props.setUpdateDialogOpen(false)}
         onInstall={props.onInstallUpdate}
+      />
+      <ToolListDialog
+        open={props.toolListDialogOpen}
+        onClose={() => props.setToolListDialogOpen(false)}
       />
     </>
   )

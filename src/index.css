@@ -1182,7 +1182,35 @@ button {
   }
 }
 
-/* Loading dots — staggered pulse */
+/* Progress bar shimmer effect */
+.splash-progress-bar {
+  position: relative;
+  overflow: hidden;
+}
+
+.splash-progress-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.15) 50%,
+    transparent 100%
+  );
+  animation: splash-shimmer 1.8s ease-in-out infinite;
+}
+
+@keyframes splash-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Loading dots — staggered pulse (kept for backwards compat) */
 .splash-dot {
   opacity: 0.3;
   animation: splash-dot-pulse 1.2s ease-in-out infinite;
@@ -1217,6 +1245,7 @@ button {
   .splash-mesh,
   .splash-logo,
   .splash-dot,
+  .splash-progress-bar::after,
   .animate-tool-card-in,
   .animate-message-in {
     animation: none;

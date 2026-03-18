@@ -23,7 +23,7 @@ export interface ShortcutDef {
 export const DEFAULT_SHORTCUTS: ShortcutDef[] = [
   {
     id: 'toggle-sidebar',
-    keys: ['ctrl', 'b'],
+    keys: ['ctrl', 's'],
     label: 'Toggle Sidebar',
     description: 'Show or hide the sidebar',
     category: 'General',
@@ -37,7 +37,7 @@ export const DEFAULT_SHORTCUTS: ShortcutDef[] = [
   },
   {
     id: 'toggle-bottom-panel',
-    keys: ['ctrl', 'm'],
+    keys: ['ctrl', 'j'],
     label: 'Toggle Memory Panel',
     description: 'Show or hide the bottom panel',
     category: 'General',
@@ -57,6 +57,13 @@ export const DEFAULT_SHORTCUTS: ShortcutDef[] = [
     category: 'General',
   },
   {
+    id: 'command-palette-slash',
+    keys: ['ctrl', '/'],
+    label: 'Command Palette',
+    description: 'Quick access to all commands (alias)',
+    category: 'General',
+  },
+  {
     id: 'model-browser',
     keys: ['ctrl', 'shift', 'm'],
     label: 'Model Browser',
@@ -65,17 +72,38 @@ export const DEFAULT_SHORTCUTS: ShortcutDef[] = [
   },
   {
     id: 'quick-model-picker',
-    keys: ['ctrl', 'o'],
+    keys: ['ctrl', 'm'],
     label: 'Quick Model Picker',
     description: 'Quick model selection with search',
     category: 'Chat',
   },
   {
     id: 'session-switcher',
-    keys: ['ctrl', 'j'],
+    keys: ['ctrl', 'l'],
     label: 'Switch Session',
     description: 'Quick session switcher with fuzzy search',
     category: 'Chat',
+  },
+  {
+    id: 'voice-toggle',
+    keys: ['ctrl', 'r'],
+    label: 'Voice Toggle',
+    description: 'Toggle voice dictation on or off',
+    category: 'Chat',
+  },
+  {
+    id: 'mode-cycle',
+    keys: ['tab'],
+    label: 'Cycle Mode',
+    description: 'Cycle between Plan and Act mode (when composer not focused)',
+    category: 'General',
+  },
+  {
+    id: 'mode-cycle-reverse',
+    keys: ['shift', 'tab'],
+    label: 'Cycle Mode (Reverse)',
+    description: 'Cycle mode in reverse (when composer not focused)',
+    category: 'General',
   },
   {
     id: 'export-chat',

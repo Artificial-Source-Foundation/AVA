@@ -18,7 +18,7 @@ import { useSession } from '../stores/session'
 import { useSettings } from '../stores/settings'
 import type { Message } from '../types'
 import type { StreamError } from '../types/llm'
-import type { ApprovalRequestEvent } from '../types/rust-ipc'
+import type { ApprovalRequestEvent, QuestionRequestEvent } from '../types/rust-ipc'
 import type { AgentState, ApprovalRequest, ToolActivity } from './agent'
 import type { QueuedMessage } from './chat/types'
 import { useRustAgent } from './use-rust-agent'
@@ -26,6 +26,13 @@ import { useRustAgent } from './use-rust-agent'
 // Re-export types so existing consumers continue working
 export type { AgentState, ApprovalRequest, ToolActivity }
 export type { QueuedMessage }
+
+/** A question the agent is asking the user */
+export interface QuestionRequest {
+  id: string
+  question: string
+  options: string[]
+}
 
 // ============================================================================
 // Singleton
@@ -62,6 +69,7 @@ function createAgentStore() {
   const [currentThought, setCurrentThought] = createSignal('')
   const [toolActivity, setToolActivity] = createSignal<ToolActivity[]>([])
   const [pendingApproval, setPendingApproval] = createSignal<ApprovalRequest | null>(null)
+  const [pendingQuestion, setPendingQuestion] = createSignal<QuestionRequest | null>(null)
   const [doomLoopDetected, setDoomLoopDetected] = createSignal(false)
   const [currentAgentId, _setCurrentAgentId] = createSignal<string | null>(null)
   const [streamingTokenEstimate, setStreamingTokenEstimate] = createSignal(0)
@@ -130,6 +138,14 @@ function createAgentStore() {
             description: approvalEvent.reason,
             riskLevel,
             resolve: () => {}, // not used — resolution goes through IPC
+          })
+        }
+        if (event.type === 'question_request') {
+          const questionEvent = event as QuestionRequestEvent
+          setPendingQuestion({
+            id: questionEvent.id,
+            question: questionEvent.question,
+            options: questionEvent.options,
           })
         }
       }
@@ -347,6 +363,13 @@ function createAgentStore() {
     })
   }
 
+  function resolveQuestion(answer: string): void {
+    setPendingQuestion(null)
+    void rustAgentBridge.resolveQuestion(answer).catch((err) => {
+      console.error('Failed to resolve question:', err)
+    })
+  }
+
   function clearError(): void {
     batch(() => {
       rustAgent.clearError()
@@ -442,6 +465,7 @@ function createAgentStore() {
     currentThought,
     toolActivity,
     pendingApproval,
+    pendingQuestion,
     doomLoopDetected,
     lastError: rustAgent.error,
     currentAgentId,
@@ -476,6 +500,7 @@ function createAgentStore() {
     togglePlanMode,
     checkAutoApproval,
     resolveApproval,
+    resolveQuestion,
     clearError,
     getState,
     stopAgent: (_memberId: string) => false,

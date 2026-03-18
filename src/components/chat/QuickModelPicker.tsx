@@ -1,7 +1,7 @@
 /**
  * Quick Model Picker
  *
- * Lightweight Ctrl+O overlay for fast model switching.
+ * Lightweight Ctrl+M overlay for fast model switching.
  * Shows models grouped by provider with fuzzy search.
  */
 

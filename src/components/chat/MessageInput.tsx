@@ -69,6 +69,7 @@ export const MessageInput: Component = () => {
           elapsedSeconds={state.elapsedSeconds}
           onCancel={state.handleCancel}
           inputHasText={state.inputHasText}
+          queuedCount={state.agent.queuedCount}
         />
         <ShortcutHint sendCount={state.sendCount()} />
 

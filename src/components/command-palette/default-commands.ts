@@ -20,6 +20,7 @@ import {
   Sparkles,
   Terminal,
   Upload,
+  Wrench,
 } from 'lucide-solid'
 import type { CommandItem } from './types'
 
@@ -36,6 +37,7 @@ export const createDefaultCommands = (handlers: {
   exportWorkflows?: () => void
   openProjectStats?: () => void
   saveCheckpoint?: () => void
+  browseTools?: () => void
 }): CommandItem[] => [
   {
     id: 'new-chat',
@@ -160,6 +162,14 @@ export const createDefaultCommands = (handlers: {
     category: 'Session',
     shortcut: '\u2318\u21E7C',
     action: handlers.saveCheckpoint || (() => {}),
+  },
+  {
+    id: 'browse-tools',
+    label: 'Browse Tools',
+    description: 'View all registered tools (built-in, MCP, custom)',
+    icon: Wrench,
+    category: 'Session',
+    action: handlers.browseTools || (() => {}),
   },
   {
     id: 'whats-new',

@@ -137,6 +137,16 @@ export const StatusBar: Component<StatusBarProps> = (props) => {
             {activeToolLabel()}
           </span>
         </Show>
+        <Show when={agent.queuedCount() > 0}>
+          <span class="text-[var(--text-muted)]">&middot;</span>
+          <span
+            class="inline-flex items-center gap-0.5 text-[var(--accent)]"
+            title={`${agent.queuedCount()} queued message(s) — /queue to view`}
+          >
+            <MessageSquare class="w-2.5 h-2.5" />
+            <span class="tabular-nums">{agent.queuedCount()} queued</span>
+          </span>
+        </Show>
         <span class="text-[var(--text-muted)]">&middot;</span>
       </Show>
 

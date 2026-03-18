@@ -211,6 +211,16 @@ export function useInputState(): InputState {
       setInput('')
       setHistoryIndex(-1)
       if (textareaRef) textareaRef.style.height = 'auto'
+      // Add the steering message to chat so the user sees what they sent
+      const sessionId = sessionStore.currentSession()?.id ?? ''
+      sessionStore.addMessage({
+        id: `steer-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        sessionId,
+        role: 'user',
+        content: message,
+        createdAt: Date.now(),
+        metadata: { tier: 'steering' },
+      })
       // Default: steering (Enter). Follow-up handled in handleKeyDown with Alt+Enter.
       agent.steer(message)
       return
@@ -298,6 +308,15 @@ export function useInputState(): InputState {
         e.preventDefault()
         setInput('')
         if (textareaRef) textareaRef.style.height = 'auto'
+        const sessionId = sessionStore.currentSession()?.id ?? ''
+        sessionStore.addMessage({
+          id: `post-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          sessionId,
+          role: 'user',
+          content: message,
+          createdAt: Date.now(),
+          metadata: { tier: 'post-complete' },
+        })
         agent.postComplete(message)
         return
       }
@@ -306,6 +325,15 @@ export function useInputState(): InputState {
         e.preventDefault()
         setInput('')
         if (textareaRef) textareaRef.style.height = 'auto'
+        const sessionId = sessionStore.currentSession()?.id ?? ''
+        sessionStore.addMessage({
+          id: `follow-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          sessionId,
+          role: 'user',
+          content: message,
+          createdAt: Date.now(),
+          metadata: { tier: 'follow-up' },
+        })
         agent.followUp(message)
         return
       }

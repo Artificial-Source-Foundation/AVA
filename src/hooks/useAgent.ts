@@ -301,13 +301,26 @@ function createAgentStore() {
   }
 
   function followUp(content: string): void {
-    void rustAgent.followUp(content)
-    setMessageQueue((prev) => [...prev, { content, tier: 'follow-up' }])
+    // Only add to local queue if the backend accepts the message
+    void rustAgent.followUp(content).then(
+      () => setMessageQueue((prev) => [...prev, { content, tier: 'follow-up' }]),
+      () => {
+        // Backend rejected (agent not running or channel closed) — don't queue locally
+        log.warn('agent', 'Follow-up rejected by backend', { content: content.slice(0, 80) })
+      }
+    )
   }
 
   function postComplete(content: string, group?: number): void {
-    void rustAgent.postComplete(content, group)
-    setMessageQueue((prev) => [...prev, { content, tier: 'post-complete', group: group ?? 1 }])
+    // Only add to local queue if the backend accepts the message
+    void rustAgent.postComplete(content, group).then(
+      () =>
+        setMessageQueue((prev) => [...prev, { content, tier: 'post-complete', group: group ?? 1 }]),
+      () => {
+        // Backend rejected (agent not running or channel closed) — don't queue locally
+        log.warn('agent', 'Post-complete rejected by backend', { content: content.slice(0, 80) })
+      }
+    )
   }
 
   function togglePlanMode(): void {

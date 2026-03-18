@@ -308,23 +308,33 @@ export function useRustAgent() {
 
   /** Queue a follow-up message (Tier 2). Runs after agent completes current task. */
   const followUp = async (message: string): Promise<void> => {
-    if (!isRunning()) return
+    if (!isRunning()) {
+      log.warn('agent', 'Cannot queue follow-up: agent is not running')
+      return
+    }
     try {
       await invoke('follow_up_agent', { message })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      log.error('agent', 'Failed to queue follow-up', { error: msg })
       setError(msg)
+      throw err
     }
   }
 
   /** Queue a post-complete message (Tier 3). Runs in grouped pipeline after agent stops. */
   const postComplete = async (message: string, group?: number): Promise<void> => {
-    if (!isRunning()) return
+    if (!isRunning()) {
+      log.warn('agent', 'Cannot queue post-complete: agent is not running')
+      return
+    }
     try {
       await invoke('post_complete_agent', { args: { message, group: group ?? 1 } })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      log.error('agent', 'Failed to queue post-complete', { error: msg })
       setError(msg)
+      throw err
     }
   }
 

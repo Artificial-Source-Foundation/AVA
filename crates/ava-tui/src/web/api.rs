@@ -771,6 +771,35 @@ pub async fn clear_message_queue(State(_state): State<WebState>) -> impl IntoRes
 }
 
 // ============================================================================
+// Session Detail Sub-resources (stubs for web DB parity)
+// ============================================================================
+
+/// List agents for a session (stub — returns empty array).
+pub async fn list_session_agents(Path(_id): Path<String>) -> impl IntoResponse {
+    Json(serde_json::json!([]))
+}
+
+/// List file operations for a session (stub — returns empty array).
+pub async fn list_session_files(Path(_id): Path<String>) -> impl IntoResponse {
+    Json(serde_json::json!([]))
+}
+
+/// List terminal executions for a session (stub — returns empty array).
+pub async fn list_session_terminal(Path(_id): Path<String>) -> impl IntoResponse {
+    Json(serde_json::json!([]))
+}
+
+/// List memory items for a session (stub — returns empty array).
+pub async fn list_session_memory(Path(_id): Path<String>) -> impl IntoResponse {
+    Json(serde_json::json!([]))
+}
+
+/// List checkpoints for a session (stub — returns empty array).
+pub async fn list_session_checkpoints(Path(_id): Path<String>) -> impl IntoResponse {
+    Json(serde_json::json!([]))
+}
+
+// ============================================================================
 // WebAgentEvent — frontend-compatible serialization
 // ============================================================================
 

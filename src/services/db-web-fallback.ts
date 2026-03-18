@@ -119,7 +119,63 @@ export function createWebDatabase(): WebDatabase {
         return [] as unknown as T
       }
 
-      // Non-critical session-related tables — return empty silently
+      // Session sub-resource tables — route through HTTP API stubs
+      if (q.includes('from agents') && q.includes('session_id')) {
+        const sessionId = (_params ?? [])[0] as string
+        if (sessionId) {
+          try {
+            const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/agents`)
+            if (res.ok) return (await res.json()) as T
+          } catch {
+            /* fall through */
+          }
+        }
+        return [] as unknown as T
+      }
+
+      if (q.includes('from file_operations') && q.includes('session_id')) {
+        const sessionId = (_params ?? [])[0] as string
+        if (sessionId) {
+          try {
+            const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/files`)
+            if (res.ok) return (await res.json()) as T
+          } catch {
+            /* fall through */
+          }
+        }
+        return [] as unknown as T
+      }
+
+      if (q.includes('from terminal_executions') && q.includes('session_id')) {
+        const sessionId = (_params ?? [])[0] as string
+        if (sessionId) {
+          try {
+            const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/terminal`)
+            if (res.ok) return (await res.json()) as T
+          } catch {
+            /* fall through */
+          }
+        }
+        return [] as unknown as T
+      }
+
+      if (q.includes('from memory_items') && q.includes('session_id')) {
+        const sessionId = (_params ?? [])[0] as string
+        if (sessionId) {
+          // Checkpoints are memory_items with type='checkpoint'
+          const isCheckpoint = q.includes("type = 'checkpoint'") || q.includes('type = ?')
+          const endpoint = isCheckpoint ? 'checkpoints' : 'memory'
+          try {
+            const res = await fetch(`${API_BASE}/api/sessions/${sessionId}/${endpoint}`)
+            if (res.ok) return (await res.json()) as T
+          } catch {
+            /* fall through */
+          }
+        }
+        return [] as unknown as T
+      }
+
+      // Non-critical tables without session_id context — return empty silently
       if (
         q.includes('from agents') ||
         q.includes('from file_operations') ||

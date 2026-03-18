@@ -35,6 +35,11 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
 
   // Sessions
   list_sessions: { path: '/api/sessions', method: 'GET' },
+  list_session_agents: { path: '/api/sessions/{id}/agents', method: 'GET' },
+  list_session_files: { path: '/api/sessions/{id}/files', method: 'GET' },
+  list_session_terminal: { path: '/api/sessions/{id}/terminal', method: 'GET' },
+  list_session_memory: { path: '/api/sessions/{id}/memory', method: 'GET' },
+  list_session_checkpoints: { path: '/api/sessions/{id}/checkpoints', method: 'GET' },
   load_session: { path: '/api/sessions/load', method: 'POST' },
   create_session: { path: '/api/sessions/create', method: 'POST' },
   delete_session: { path: '/api/sessions/delete', method: 'POST' }, // handled specially below
@@ -79,8 +84,19 @@ const COMMAND_TO_ENDPOINT: Record<string, { path: string; method: 'GET' | 'POST'
  */
 export async function apiInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const mapping = COMMAND_TO_ENDPOINT[cmd]
-  const path = mapping ? mapping.path : `/api/${cmd}`
+  let path = mapping ? mapping.path : `/api/${cmd}`
   const method = mapping ? mapping.method : args ? 'POST' : 'GET'
+
+  // Substitute path parameters like {id} from args
+  if (args) {
+    path = path.replace(/\{(\w+)\}/g, (_, key) => {
+      const val = args[key]
+      if (val !== undefined && val !== null) {
+        return encodeURIComponent(String(val))
+      }
+      return `{${key}}`
+    })
+  }
 
   const url = `${API_BASE}${path}`
   const headers: Record<string, string> = {}

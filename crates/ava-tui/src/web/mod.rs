@@ -17,6 +17,11 @@
 //! | POST   | `/api/sessions/{id}/rename`   | Rename a session                         |
 //! | DELETE | `/api/sessions/{id}`          | Delete a session                         |
 //! | POST   | `/api/sessions/{id}/message`  | Add a message to a session               |
+//! | GET    | `/api/sessions/{id}/agents`   | List agents for a session (stub)         |
+//! | GET    | `/api/sessions/{id}/files`    | List file operations (stub)              |
+//! | GET    | `/api/sessions/{id}/terminal` | List terminal executions (stub)          |
+//! | GET    | `/api/sessions/{id}/memory`   | List memory items (stub)                 |
+//! | GET    | `/api/sessions/{id}/checkpoints` | List checkpoints (stub)               |
 //! | GET    | `/api/models`                 | List available models                    |
 //! | GET    | `/api/providers`              | List configured providers                |
 //! | POST   | `/api/log`                    | Ingest frontend log entry                |
@@ -65,6 +70,18 @@ fn build_router(state: WebState) -> Router {
         .route("/api/sessions/{id}/rename", post(api::rename_session))
         // Message endpoint
         .route("/api/sessions/{id}/message", post(api::add_message))
+        // Session sub-resource stubs (web DB parity)
+        .route("/api/sessions/{id}/agents", get(api::list_session_agents))
+        .route("/api/sessions/{id}/files", get(api::list_session_files))
+        .route(
+            "/api/sessions/{id}/terminal",
+            get(api::list_session_terminal),
+        )
+        .route("/api/sessions/{id}/memory", get(api::list_session_memory))
+        .route(
+            "/api/sessions/{id}/checkpoints",
+            get(api::list_session_checkpoints),
+        )
         // Body-based session operations (for frontend apiInvoke compatibility)
         .route("/api/sessions/delete", post(api::delete_session_body))
         .route("/api/sessions/rename", post(api::rename_session_body))

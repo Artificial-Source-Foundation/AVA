@@ -665,12 +665,24 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
             Some(StreamChunk::text(delta))
         }
 
-        // Reasoning/thinking deltas
+        // Reasoning/thinking deltas — covers multiple event names used by
+        // the Responses API across different model families and API versions.
         "response.reasoning.delta"
         | "response.reasoning_text.delta"
         | "response.reasoning_summary.delta"
-        | "response.reasoning_summary_text.delta" => {
-            let delta = payload.get("delta").and_then(Value::as_str)?;
+        | "response.reasoning_summary_text.delta"
+        | "response.reasoning_summary_part.delta" => {
+            // The delta text may be at top-level "delta" or nested under "part.text"
+            let delta = payload
+                .get("delta")
+                .and_then(Value::as_str)
+                .or_else(|| {
+                    payload
+                        .get("part")
+                        .and_then(|p| p.get("text"))
+                        .and_then(Value::as_str)
+                })
+                .or_else(|| payload.get("text").and_then(Value::as_str))?;
             if delta.is_empty() {
                 return None;
             }
@@ -710,29 +722,17 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
             })
         }
 
-        // Output item events — capture tool call identity and completed calls
+        // Output item events — only handle tool calls here.
+        // Text and reasoning content is already emitted via delta events
+        // (response.output_text.delta, response.reasoning_summary_text.delta, etc.)
+        // so re-emitting from output_item.done would duplicate content.
         "response.output_item.added" | "response.output_item.done" => {
             let item = payload.get("item")?;
             let item_type = item.get("type").and_then(Value::as_str)?;
 
             match item_type {
-                "text" | "output_text" => {
-                    let text = item.get("text").and_then(Value::as_str)?;
-                    if text.is_empty() {
-                        return None;
-                    }
-                    Some(StreamChunk::text(text))
-                }
-                "reasoning" => {
-                    let text = item.get("text").and_then(Value::as_str)?;
-                    if text.is_empty() {
-                        return None;
-                    }
-                    Some(StreamChunk {
-                        thinking: Some(text.to_string()),
-                        ..Default::default()
-                    })
-                }
+                // Skip text/reasoning/message — already streamed via delta events.
+                "text" | "output_text" | "reasoning" | "message" => None,
                 "function_call" | "tool_call" if event_type == "response.output_item.done" => {
                     let call_id = item
                         .get("call_id")
@@ -765,23 +765,6 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
                         }),
                         ..Default::default()
                     })
-                }
-                "message" => {
-                    // Extract text from message content blocks
-                    let content = item.get("content").and_then(Value::as_array)?;
-                    let text: String = content
-                        .iter()
-                        .filter(|c| {
-                            let t = c.get("type").and_then(Value::as_str).unwrap_or("");
-                            t == "text" || t == "output_text"
-                        })
-                        .filter_map(|c| c.get("text").and_then(Value::as_str))
-                        .collect::<Vec<_>>()
-                        .join("");
-                    if text.is_empty() {
-                        return None;
-                    }
-                    Some(StreamChunk::text(&text))
                 }
                 _ => None,
             }
@@ -825,6 +808,51 @@ pub fn parse_responses_api_stream_chunk(payload: &Value) -> Option<StreamChunk> 
             }
             Some(StreamChunk::finished())
         }
+
+        // Content part delta — used by some Responses API versions for
+        // streaming both text and reasoning summary content parts.
+        "response.content_part.delta" => {
+            let part_type = payload
+                .get("part")
+                .and_then(|p| p.get("type"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let delta = payload.get("delta").and_then(Value::as_str)?;
+            if delta.is_empty() {
+                return None;
+            }
+            if part_type == "reasoning_summary_text" || part_type == "reasoning" {
+                Some(StreamChunk {
+                    thinking: Some(delta.to_string()),
+                    ..Default::default()
+                })
+            } else {
+                Some(StreamChunk::text(delta))
+            }
+        }
+
+        // Reasoning summary part added — may contain initial text
+        "response.reasoning_summary_part.added" => {
+            let text = payload
+                .get("part")
+                .and_then(|p| p.get("text"))
+                .and_then(Value::as_str)?;
+            if text.is_empty() {
+                return None;
+            }
+            Some(StreamChunk {
+                thinking: Some(text.to_string()),
+                ..Default::default()
+            })
+        }
+
+        // Done events for text/reasoning — contain the full completed text.
+        // Skip these to avoid duplicating content already streamed via deltas.
+        "response.output_text.done"
+        | "response.text.done"
+        | "response.reasoning_summary_text.done"
+        | "response.reasoning_summary_part.done"
+        | "response.content_part.done" => None,
 
         // Refusal
         "response.refusal.delta" => {

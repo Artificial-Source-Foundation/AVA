@@ -81,19 +81,11 @@ const FALLBACK_PRICING: Record<string, ModelPricing> = {
   'command-a': { input: 2.5, output: 10 },
 }
 
-const FALLBACK_REASONING = new Set([
+const FALLBACK_REASONING_EXACT = new Set([
   'o3',
   'o3-pro',
   'o4-mini',
   'o3-mini',
-  'gpt-5.2',
-  'gpt-5.1',
-  'gpt-5',
-  'gpt-5-mini',
-  'gpt-5-nano',
-  'gpt-5.3-codex',
-  'gpt-5.2-codex',
-  'gpt-5.1-codex',
   'claude-opus-4-6',
   'claude-sonnet-4-6',
   'claude-haiku-4-5-20251001',
@@ -105,6 +97,23 @@ const FALLBACK_REASONING = new Set([
   'magistral-medium-latest',
   'magistral-small-latest',
 ])
+
+/** Prefix patterns — any model starting with these supports reasoning */
+const FALLBACK_REASONING_PREFIXES = [
+  'gpt-5', // covers gpt-5, gpt-5.1, gpt-5.2, gpt-5.3, gpt-5.4, gpt-5.x-codex, etc.
+  'o3', // covers o3, o3-pro, o3-mini
+  'o4', // covers o4-mini
+  'claude-opus',
+  'claude-sonnet',
+]
+
+const FALLBACK_REASONING = {
+  has(id: string): boolean {
+    if (FALLBACK_REASONING_EXACT.has(id)) return true
+    const lower = id.toLowerCase()
+    return FALLBACK_REASONING_PREFIXES.some((prefix) => lower.startsWith(prefix))
+  },
+}
 
 const FALLBACK_VISION = new Set([
   'gpt-5.2',
